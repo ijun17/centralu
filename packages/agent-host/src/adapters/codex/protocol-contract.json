@@ -74,6 +74,8 @@
       "send": [
         "threadId",
         "config",
+        "approvalPolicy",
+        "sandbox",
         "excludeTurns"
       ]
     },
@@ -101,6 +103,12 @@
     "`userAgent` carries the app-server's version (#297); without it no Codex session is ever moved to a newer CLI."
   ],
   "responseFields": {
+    "ThreadStartResponse": [
+      "sandbox"
+    ],
+    "ThreadResumeResponse": [
+      "sandbox"
+    ],
     "InitializeResponse": [
       "userAgent"
     ],

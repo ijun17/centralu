@@ -158,9 +158,9 @@ export type AskProjectResult =
  *   deleted   agent_session delete put a merged, clean worktree child in the trash and removed its worktree and branch
  */
 export type ChildRunResult =
-  | ({ ok: true; sessionId: string; sessionName: string; tool: string } & (
+  | ({ ok: true; sessionId: string; sessionName: string; tool: string; notice?: string } & (
       | { state: 'done'; answer: string; readable: string[]; outside: string[] }
-      | { state: 'working'; notice?: string; reported: boolean }
+      | { state: 'working'; reported: boolean }
       | { state: 'at_rest'; answer: string; sessionState: string }
       | { state: 'stopped' }
       | { state: 'deleted'; branch: string; proof: string }
@@ -683,6 +683,8 @@ export type EventSink = (event: NormalizedEvent) => void
 export interface SessionHandle {
   readonly sessionId: string
   readonly externalId: string | null
+  /** Limits the parent should know before delegating more work; decided by the adapter's effective settings. */
+  delegationNotice?(): string | undefined
   send(text: string): void
   /** The matcher is computed by core and passed along by the UI (boundary rule: the host does not know core) */
   /**

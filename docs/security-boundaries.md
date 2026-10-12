@@ -35,6 +35,29 @@ same files under the same or a lower preset), but they multiply what runs, so:
   the caller's deletion. Its task is recorded as sent by the caller (`from`), not by the person.
 - **Not from an untrusted project** (#382's rule).
 
+Worktree children (#582) keep the same preset as their parent. In the Codex adapter, every linked-worktree
+session adds its repository's canonical git common directory to workspace-write's writable roots, on start
+and resume. Existing extra roots are retained. This deliberately permits changes to shared git metadata
+(objects, refs, worktree indexes and locks), so commits work; it does not grant writes to the main checkout's
+source files. Git metadata is shared between branches, so a worktree is not isolation from changes to refs
+or repository configuration. No guessed git path is granted when discovery fails.
+
+Codex workspace-write network access is explicitly off under `safe` and `normal`, and on under `auto`.
+`normal` still follows the person's sandbox mode: their full-access mode remains unrestricted. The effective
+thread sandbox, rather than the CLI name in the manager, determines the notice in `start_agent`'s answer:
+"this child cannot reach the network under <preset>" when blocked. This controls commands in Codex's
+sandbox, not host-run MCP app servers. Claude children receive no Centralu SDK sandbox override, just like
+ordinary Claude sessions; the person's own loaded sandbox settings may still restrict them. This comparison
+was checked against adapter/SDK configuration, not a live Claude model turn.
+
+JS dependencies are copied into new worktrees before the agent starts when the root lockfiles and package
+manifests match the project checkout. APFS clones fall back to ordinary copies, never a shared top-level
+`node_modules` symlink. Workspace package folders are included, existing targets are not overwritten, source
+and destination paths use the project path guards, and dependency links outside the worktree are removed.
+This avoids automatic registry access and install scripts in the host. It does not validate dependency code:
+running tests still executes the project's installed dependencies. Missing or incompatible source dependencies
+need the project's explicit setup command or an install by the child under its preset.
+
 ### Asking another project (#371 part B)
 
 `ask_project` is the one way an ordinary session acts outside its own project, so it is a new

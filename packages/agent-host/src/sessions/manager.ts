@@ -125,6 +125,7 @@ import {
   resolveExisting,
 } from '../dev-services/fs.js'
 import { isMissingPathError } from '../dev-services/path-guard.js'
+import { prepareWorktreeDependencies } from '../dev-services/worktree-dependencies.js'
 import { DirWatchers } from '../dev-services/watch.js'
 import { invalidateFileIndex } from '../dev-services/file-search.js'
 import { attachmentBytes, saveAttachment, clearAttachments, sweepAttachments } from '../dev-services/attachments.js'
@@ -3908,7 +3909,7 @@ export class SessionManager {
   }
 
   /**
-   * Sets up a new worktree's workspace (#69): copy gitignored files -> run the setup command.
+   * Sets up a new worktree's workspace (#69): copy configured files, reuse JS dependencies, run setup.
    *
    * A fresh worktree is an empty workspace with only tracked files — no node_modules, no .env — so
    * the session's first turn starts not with real work but with "command not found". The agent cannot
@@ -3926,8 +3927,7 @@ export class SessionManager {
    * existing disappears.
    */
   private async provisionWorktree(projectCwd: string, worktree: Worktree, projectId: string): Promise<void> {
-    const setup = this.store.worktreeSetup(projectId)
-    if (!setup) return
+    const setup = this.store.worktreeSetup(projectId) ?? { copyFiles: [], command: '' }
 
     for (const f of setup.copyFiles) {
       /*
@@ -3987,6 +3987,10 @@ export class SessionManager {
         console.error(`[worktree] link dropped (points outside the worktree): ${gone}`)
       }
     }
+
+    await prepareWorktreeDependencies(projectCwd, worktree.path).catch((err: Error) => {
+      console.error(`[worktree] dependencies skipped (${worktree.branch}): ${err.message}`)
+    })
 
     if (!setup.command) return
     /*
@@ -5491,8 +5495,9 @@ export class SessionManager {
       if (this.agentRuns.get(child.id) === d.wait) this.agentRuns.delete(child.id)
       return { ok: false, error: `Could not give the task to the new session: ${(e as Error).message}` }
     }
-    if (opts.wait === false) return this.agentWorking(d)
-    return this.awaitAgent(key, d, signal)
+    const notice = this.handles.get(child.id)?.delegationNotice?.()
+    const result = opts.wait === false ? this.agentWorking(d) : await this.awaitAgent(key, d, signal)
+    return result.ok && notice ? { ...result, notice: [result.notice, notice].filter(Boolean).join('; ') } : result
   }
 
   /**

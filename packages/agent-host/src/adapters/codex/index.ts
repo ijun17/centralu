@@ -45,6 +45,7 @@ import {
 } from './normalize.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
+import { sandboxConfig } from './sandbox.js'
 
 const exec = promisify(execFile)
 
@@ -59,8 +60,8 @@ const exec = promisify(execFile)
  * Permission preset to Codex permission options.
  *
  * **Same principle** as the Claude side: for normal, we do not decide anything and defer to
- * the tool's own settings (`~/.codex/config.toml`). So we set no key at all — codex fills in
- * whatever is missing from its own settings.
+ * the tool's own settings (`~/.codex/config.toml`) for approval and sandbox mode. Workspace-write
+ * details follow the preset separately (sandboxConfig): only auto enables network (#582).
  *
  * It matters that there were two things being overridden. Not just approvalPolicy — **sandbox
  * was also pinned** to 'workspace-write'. That meant even if the user had written
@@ -448,12 +449,14 @@ class CodexSession implements SessionHandle {
       if (!adopted || !/already initialized/i.test((err as Error).message)) throw err
     }
 
+    const workspaceConfig = await sandboxConfig(this.opts.cwd, this.opts.permissionPreset, () => this.personsConfig())
     if (this.opts.resumeExternalId) {
       // Resume (FR-10). If it fails, the session manager guides the person through the fallback
       let res: Record<string, unknown>
       try {
         res = await this.client.request<Record<string, unknown>>('thread/resume', {
           threadId: this.opts.resumeExternalId,
+          ...permissionOptionsFor(this.opts.permissionPreset),
           /*
            * Metadata only, not the whole history (#342). Nothing here reads the history the resume used to return
            * except the running turn's id, and that has its own one-turn query below. Measured (codex-cli 0.160.0,
@@ -493,6 +496,7 @@ class CodexSession implements SessionHandle {
             ...(await this.mcpConfig()),
             // Files in the repository only reach this thread in a trusted project — resume follows the same rule (#92)
             ...repoFilesConfig(this.opts),
+            ...workspaceConfig,
           },
         })
       } catch (err) {
@@ -526,6 +530,7 @@ class CodexSession implements SessionHandle {
       this.threadId = threadIdOf(res) ?? this.opts.resumeExternalId
       this.threadSettings = threadSettingsOf(res)
       this.checkAppMode(res)
+      this.readNetworkAccess(res)
       // An adopted thread may be mid-turn: Stop needs that turn's id (#313)
       if (adopted) this.takeStartedTurn(runningTurnOf(res) ?? (await this.latestRunningTurn(res)))
       /*
@@ -577,15 +582,32 @@ class CodexSession implements SessionHandle {
           ...(await this.mcpConfig()),
           // Files in the repository (.codex/ settings, hooks, rules, AGENTS.md) only in a trusted project (#92, repoFilesConfig)
           ...repoFilesConfig(this.opts),
+          ...workspaceConfig,
         },
       })
       this.threadId = threadIdOf(res)
       this.threadSettings = threadSettingsOf(res)
       this.checkAppMode(res)
+      this.readNetworkAccess(res)
       // No rollout yet: the thread is named at its first turn (see externalId)
       return
     }
     this.externalId = this.threadId
+  }
+
+  private networkAccess: boolean | undefined
+
+  private readNetworkAccess(res: Record<string, unknown>): void {
+    const sandbox = res.sandbox as { type?: string; networkAccess?: boolean | string } | undefined
+    this.networkAccess = sandbox?.type === 'dangerFullAccess' || sandbox?.networkAccess === 'enabled'
+      ? true
+      : typeof sandbox?.networkAccess === 'boolean' ? sandbox.networkAccess : undefined
+  }
+
+  delegationNotice(): string | undefined {
+    return this.networkAccess === false
+      ? `this child cannot reach the network under ${this.opts.permissionPreset}`
+      : undefined
   }
 
   /**
@@ -650,12 +672,16 @@ class CodexSession implements SessionHandle {
    * `writes`.
    */
   private async personsApprovalPolicy(): Promise<unknown> {
+    return (await this.personsConfig()).approval_policy ?? null
+  }
+
+  private async personsConfig(): Promise<Record<string, unknown>> {
     const projectFiles = Object.keys(repoFilesConfig(this.opts)).length === 0
     try {
-      const res = await this.client.request<{ config?: { approval_policy?: unknown } }>('config/read', projectFiles ? { cwd: this.opts.cwd } : {})
-      return res?.config?.approval_policy ?? null
+      const res = await this.client.request<{ config?: Record<string, unknown> }>('config/read', projectFiles ? { cwd: this.opts.cwd } : {})
+      return res?.config ?? {}
     } catch {
-      return null
+      return {}
     }
   }
 

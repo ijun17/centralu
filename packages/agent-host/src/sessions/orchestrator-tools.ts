@@ -546,6 +546,7 @@ function agentRunText(r: ChildRunResult): ToolOutput {
       }
     case 'done': {
       const lines = [`${who} answered, as JSON:`, trustedJsonText(r.answer || '(no final text)')]
+      if (r.notice) lines.push(r.notice)
       if (r.readable.length) lines.push(`You can read these now: ${r.readable.join(', ')}`)
       if (r.outside.length) lines.push(`Named outside its folder (not opened for you): ${r.outside.join(', ')}`)
       lines.push(`agent_session(sessionId="${r.sessionId}", action="send", text=…) continues with it.`)

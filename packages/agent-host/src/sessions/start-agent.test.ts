@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PermissionPreset } from '@cc/protocol'
@@ -136,6 +136,23 @@ describe('starting another agent in the same project', () => {
     expect(handleOf(c)?.sent ?? []).toHaveLength(1)
   })
 
+  it.each([false, true])('wait=%s: includes the adapter\'s network restriction in start_agent\'s answer', async (wait) => {
+    allowProject()
+    const adapter = w.adapters.get('codex')!
+    const create = adapter.createSession.bind(adapter)
+    vi.spyOn(adapter, 'createSession').mockImplementation(async (opts, emit) => {
+      const h = await create(opts, emit)
+      return Object.assign(h, { delegationNotice: () => `this child cannot reach the network under ${opts.permissionPreset}` })
+    })
+    const s = await session('safe')
+    const pending = w.mgr.startAgent(s, { task: 'check the code', tool: 'codex', wait })
+    if (wait) {
+      await w.until(() => !!childrenOf(s)[0] && !!handleOf(childrenOf(s)[0]!.id)?.sent.length)
+      handleOf(childrenOf(s)[0]!.id)!.answer('done')
+    }
+    expect(await pending).toMatchObject({ ok: true, state: wait ? 'done' : 'working', notice: 'this child cannot reach the network under safe' })
+  })
+
   it('depth one: a child cannot start agents or ask another project', async () => {
     allowProject()
     const s = await session()
@@ -247,6 +264,26 @@ describe('starting another agent in the same project', () => {
       git(w.caller.path, 'add', '.')
       git(w.caller.path, 'commit', '-qm', 'init')
     }
+
+    it('prepares installed JS dependencies before the child starts, without a configured setup command', async () => {
+      repo()
+      writeFileSync(join(w.caller.path, 'package.json'), '{}')
+      writeFileSync(join(w.caller.path, 'package-lock.json'), '{}')
+      writeFileSync(join(w.caller.path, '.gitignore'), 'node_modules/\n')
+      git(w.caller.path, 'add', '.')
+      git(w.caller.path, 'commit', '-qm', 'JS project')
+      mkdirSync(join(w.caller.path, 'node_modules', 'dep'), { recursive: true })
+      writeFileSync(join(w.caller.path, 'node_modules', 'dep', 'index.js'), 'installed dependency')
+      const adapter = w.adapters.get('codex')!
+      const create = adapter.createSession.bind(adapter)
+      vi.spyOn(adapter, 'createSession').mockImplementation(async (opts, emit) => {
+        expect(readFileSync(join(opts.cwd, 'node_modules', 'dep', 'index.js'), 'utf8')).toBe('installed dependency')
+        return create(opts, emit)
+      })
+      allowProject()
+      const s = await session()
+      expect(await w.mgr.startAgent(s, { task: 'test it', tool: 'codex', worktree: true, wait: false })).toMatchObject({ ok: true })
+    })
 
     it('opens the child in a worktree on a branch named from its job, said on the card, linked to its parent', async () => {
       repo()

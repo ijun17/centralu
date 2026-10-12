@@ -240,6 +240,18 @@ describe('ask_project', () => {
 
 /** start_agent and agent_session (#561): the reader's, rendered so the model finds the next call */
 describe('the agent set', () => {
+  it.each(['working', 'done'] as const)('%s: tells the parent when the child cannot reach the network', async (state) => {
+    const tools = toolsWith({
+      startAgent: async () => ({
+        ok: true, state, sessionId: 'c', sessionName: 'Check', tool: 'codex',
+        notice: 'this child cannot reach the network under normal',
+        reported: true, answer: 'checked', readable: [], outside: [],
+      }),
+    })
+    const result = await runOrchestratorTool(tools, 'start_agent', { task: 'check' }, { sessionId: 's', profile: 'reader' })
+    expect(result.text).toContain('this child cannot reach the network under normal')
+  })
+
   it(`stays within ${AGENT_BUDGET_CHARS} characters`, () => {
     expect(sentChars(AGENT_TOOLS)).toBeLessThanOrEqual(AGENT_BUDGET_CHARS)
   })

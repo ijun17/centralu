@@ -289,6 +289,34 @@ either alone says what is meant. A worktree child hangs under the session that s
 as a same-folder child does: the sidebar groups by who started a session (`askedBy`, `orderAsTree` in
 `ui/features/sidebar/tree.ts`), and `parentSessionId` still places a former worktree manager's sessions.
 
+**A usable worktree** (#582). Provisioning reuses installed JS dependencies automatically, even without a
+configured setup command. With an unchanged root lockfile (`pnpm-lock.yaml`, `package-lock.json`,
+`npm-shrinkwrap.json`, `yarn.lock`, `bun.lock` or `bun.lockb`), missing `node_modules` folders are cloned from the
+project checkout, including workspace packages whose `package.json` is unchanged. Existing folders and links
+are left alone. The existing APFS clone / ordinary-copy fallback gives the child independent files: a symlink
+to the project's dependencies would let it change the original checkout. Internal dependency links stay;
+links escaping the new worktree are removed after all package copies finish. No install or lifecycle script
+runs automatically. If dependencies are absent in the project, differ from the child's lockfile/manifests,
+or cannot be copied, the configured setup command or the child must install them; creation still continues.
+
+**Codex sandbox** (#582). Every Codex session whose cwd is a linked git worktree (including a cwd below its
+root) adds the canonical `git rev-parse --git-common-dir` to the workspace-write roots, retaining configured
+extra roots. This gives git access to its index locks, objects and refs without making the main checkout's
+files writable. On codex-cli 0.160.0, `thread/start` and `thread/resume` accept `sandbox` as a mode; the details
+ride in `config` as `sandbox_workspace_write.writable_roots` and `sandbox_workspace_write.network_access`.
+`safe` maps to `untrusted` approval and workspace-write, `auto` to `never` approval and workspace-write;
+`normal` keeps the person's approval and sandbox mode. Workspace-write network access is enabled only for
+`auto`, and explicitly disabled for `safe` and `normal`. A person's `normal` full-access sandbox remains
+full-access. The adapter reads the effective sandbox from the thread response: when it blocks network,
+`start_agent`'s answer (both `working` and `done`) says "this child cannot reach the network under <preset>".
+The manager carries an optional adapter notice; no CLI-name test decides this outside adapters.
+
+**Claude comparison** (#582). Centralu supplies no Claude SDK `sandbox` override, for children or ordinary
+sessions. Both use the same permission mapping (`safe`: `default`, `auto`: `bypassPermissions`, `normal`:
+the person's settings) and project-trust settings sources. There is no Centralu-imposed child-only git-root
+or network gap. A sandbox in the person's own Claude settings can still restrict commands; Centralu does
+not widen it here. Dependency preparation above applies to both adapters.
+
 `agent_session` acts only on a session whose `askedBy` is the caller, in its project. `send` is refused while a turn
 the caller gave it runs, while it works on something else (the person may be using it), and when the person has
 since raised its preset above the caller's (`presetWithin`). `stop` ends the turn the caller gave it; a turn the
