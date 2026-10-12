@@ -24,6 +24,9 @@ import {
 } from './orchestrator-tools.js'
 import { TOOL_PROFILES, definitionChars, residentCost, servedDefinitions } from './tool-cost.js'
 
+const DEFERRED_SERVER = { toolDeferral: true, instructionChannel: 'server' as const }
+const EAGER_DEVELOPER = { toolDeferral: false, instructionChannel: 'developer' as const }
+
 /**
  * Text a worker wrote arrives at the orchestrator as a **tool result** (#121).
  *
@@ -129,11 +132,11 @@ describe('the reader set', () => {
 
   it('defers the rare guide and update definitions on Claude and offers both on Codex', () => {
     for (const name of ['app_guide', 'update_centralu']) {
-      expect(servedDefinitions('reader', 'claude').find((t) => t.name.endsWith(`__${name}`))?.resident, name).toBe(false)
-      expect(servedDefinitions('reader', 'codex').find((t) => t.name.endsWith(`__${name}`))?.resident, name).toBe(true)
+      expect(servedDefinitions('reader', DEFERRED_SERVER).find((t) => t.name.endsWith(`__${name}`))?.resident, name).toBe(false)
+      expect(servedDefinitions('reader', EAGER_DEVELOPER).find((t) => t.name.endsWith(`__${name}`))?.resident, name).toBe(true)
     }
     // #581 adds only its pointer to Claude's every-request cost; the definition must stay deferred.
-    const claude = residentCost('reader', 'claude')
+    const claude = residentCost('reader', DEFERRED_SERVER)
     expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2300)
   })
 
@@ -315,17 +318,17 @@ describe('the agent set', () => {
  */
 describe('the resident cost of each profile', () => {
   for (const profile of TOOL_PROFILES) {
-    for (const cli of ['claude', 'codex'] as const) {
-      it(`keeps ${profile} on ${cli} within ${RESIDENT_BUDGET_CHARS[profile]} characters`, () => {
-        const c = residentCost(profile, cli)
+    for (const [name, capabilities] of [['server instructions', DEFERRED_SERVER], ['developer instructions', EAGER_DEVELOPER]] as const) {
+      it(`keeps ${profile} with ${name} within ${RESIDENT_BUDGET_CHARS[profile]} characters`, () => {
+        const c = residentCost(profile, capabilities)
         expect(c.residentChars + c.instructionsChars).toBeLessThanOrEqual(RESIDENT_BUDGET_CHARS[profile])
       })
     }
   }
 
   it('counts the reader seat on Codex as exactly its four counted sets, and on Claude only the ones not deferred', () => {
-    expect(residentCost('reader', 'codex').residentChars).toBe(sentChars(READER_TOOLS) + sentChars(DELEGATE_TOOLS) + sentChars(AGENT_TOOLS) + sentChars(APP_ACCESS_TOOLS))
+    expect(residentCost('reader', EAGER_DEVELOPER).residentChars).toBe(sentChars(READER_TOOLS) + sentChars(DELEGATE_TOOLS) + sentChars(AGENT_TOOLS) + sentChars(APP_ACCESS_TOOLS))
     const loaded = [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].filter((t) => !('deferred' in t && t.deferred))
-    expect(residentCost('reader', 'claude').residentChars).toBe(sentChars(loaded))
+    expect(residentCost('reader', DEFERRED_SERVER).residentChars).toBe(sentChars(loaded))
   })
 })

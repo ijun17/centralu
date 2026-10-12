@@ -1,4 +1,4 @@
-import { HostReadSessionResult, HostRecallHit, HostSessionRow, SessionId } from '@cc/protocol'
+import { HostReadSessionResult, HostRecallHit, HostSessionRow, SessionId, ToolName } from '@cc/protocol'
 import type { SessionInfo } from '@cc/protocol'
 import type { LinkedProject, LinkedSessions, OrchestratedSession, RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
@@ -86,11 +86,13 @@ export function linkedSessions(
   const projectOf = (m: RoutedMachine, raw: unknown): LinkedProject | null => {
     const p = m.q.project(raw)
     if (!isObj(p) || typeof p.id !== 'string' || typeof p.path !== 'string' || !SessionId.safeParse(p.id).success) return null
+    const tool = ToolName.nullable().safeParse(p.defaultTool ?? null)
+    if (!tool.success) return null
     return {
       id: p.id,
       name: oneLine(p.name),
       path: oneLine(p.path, 4096),
-      defaultTool: p.defaultTool === 'codex' ? 'codex' : 'claude',
+      defaultTool: tool.data,
       machine: m.name,
     }
   }
@@ -180,11 +182,13 @@ export function linkedSessions(
     async createSession(project, opts) {
       const m = owner(project.id)
       if (!m) return { ok: false, error: `Not a project of a linked machine: ${project.id}` }
+      const tool = opts.tool ?? project.defaultTool
+      if (!tool) return { ok: false, error: `No agent tool is available on ${m.name}. Install and configure an agent CLI before creating a session.` }
       return attempt(m, async () => {
         const info = (await route('agents.createSession', {
           projectId: project.id,
           cwd: project.path,
-          tool: opts.tool ?? project.defaultTool,
+          tool,
           permissionPreset: 'normal',
         })) as { id: string; name: string }
         if (opts.name) await route('sessions.rename', { sessionId: info.id, name: opts.name })

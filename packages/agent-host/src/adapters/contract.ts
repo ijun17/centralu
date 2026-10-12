@@ -77,7 +77,7 @@ export type RecallHit = {
 }
 
 /** A project on a linked machine, as the hub's orchestrator names it (#82 phase 4) */
-export type LinkedProject = { id: string; name: string; path: string; defaultTool: ToolName; machine: string }
+export type LinkedProject = { id: string; name: string; path: string; defaultTool: ToolName | null; machine: string }
 
 /** Failed with a sentence the model reads, or done */
 type Outcome<T = object> = ({ ok: true } & T) | { ok: false; error: string }
@@ -656,6 +656,18 @@ export type CreateSessionOpts = {
   orchestratorBridge?: { url: string; token: string }
 }
 
+/**
+ * The stable, session-specific inputs an adapter may use to describe what it launches.
+ *
+ * The host persists the adapter's fingerprint across a keeper handoff. It deliberately does
+ * not include a process source, bridge credential, callbacks or session id: those are transport
+ * details that change on every host, not settings a kept CLI can retain.
+ */
+export type LaunchSettings = Pick<
+  CreateSessionOpts,
+  'cwd' | 'model' | 'effort' | 'verbosity' | 'serviceTier' | 'permissionPreset' | 'projectTrusted' | 'noSettingFiles' | 'toolProfile' | 'systemPromptAppend'
+>
+
 /** A single previous session kept by the tool (a tool's own type never reaches this far) */
 export type ExternalSessionSummary = {
   externalId: string
@@ -756,8 +768,6 @@ export interface SessionHandle {
 export interface AgentAdapter {
   readonly tool: ToolName
   readonly capabilities: AdapterCapabilities
-  /** Host-only serving format for Centralu's tool prefix; never part of the wire capabilities. */
-  readonly toolDefinitions?: 'claude' | 'codex'
   /**
    * Who this tool is, for the screens that draw a row per tool.
    *
@@ -767,6 +777,15 @@ export interface AgentAdapter {
    * introduce itself is not really a plug-in point.
    */
   readonly descriptor: ToolDescriptor
+
+  /**
+   * A versioned fingerprint of the launch settings this adapter derives for one session (#589).
+   *
+   * A keeper can retain a process across a host swap. When this changes, the manager restarts an
+   * idle retained process (or waits for its turn) so it receives the new adapter settings.
+   * Adapters without a fingerprint remain compatible; they simply cannot opt into that check.
+   */
+  launchSettingsFingerprint?(settings: LaunchSettings): string
 
   detect(): Promise<DetectResult>
   /**

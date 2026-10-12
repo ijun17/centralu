@@ -633,7 +633,7 @@ export class MockPlatform implements Platform {
         else {
           // The mock has no disk: the folder is always there, so the project is registered again under its id
           const p: ProjectInfo = {
-            id: t.project.id, path: t.project.path, name: t.project.name, defaultTool: 'claude', defaultModels: {},
+            id: t.project.id, path: t.project.path, name: t.project.name, defaultTool: this.firstDetectedTool(), defaultModels: {},
             commands: [], worktreeSetup: null, worktreeManager: null, trusted: false,
             git: { branch: 'main', changedFiles: 0, isRepo: true },
           }
@@ -1026,7 +1026,7 @@ export class MockPlatform implements Platform {
         throw new Error('Centralu does not give a builder to an app in a project it does not trust — trust the project, and the app can start and be tested')
       }
       const project = projectId ? this.projectsList.find((p) => p.id === projectId) : undefined
-      const chosen = tool ?? (project ? project.defaultTool : this.orchestratorTool) ?? 'claude'
+      const chosen = tool ?? (project ? project.defaultTool : this.orchestratorTool) ?? this.firstDetectedTool()
       const detected = this.detected.find((t) => t.name === chosen)
       if (!detected?.installed || !detected.loggedIn) {
         throw new Error(`Could not start ${chosen} session: ${detected?.detail ?? `${chosen} is not installed`}`)
@@ -1475,6 +1475,35 @@ export class MockPlatform implements Platform {
     },
   ]
 
+  /** The mock's adapter catalogue follows the same data shape as the host registry, not branches in its ports. */
+  private readonly mockToolProfiles = new Map<ToolName, {
+    models: { id: string; label: string; efforts: string[]; defaultEffort: string | null; tiers: { id: string; name: string; description: string }[] }[]
+    capabilities: Pick<AdapterCapabilities, 'verbosities' | 'exclusiveWriter' | 'toolDeferral' | 'instructionChannel' | 'processModel' | 'builtInSubagents' | 'peerMessaging'>
+  }>([
+    ['claude', {
+      models: [
+        { id: 'sonnet', label: 'Sonnet', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: null, tiers: [] },
+        { id: 'opus', label: 'Opus', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: null, tiers: [] },
+        { id: 'fable', label: 'Fable', efforts: ['low', 'medium', 'high', 'xhigh', 'max'], defaultEffort: null, tiers: [] },
+        { id: 'haiku', label: 'Haiku', efforts: [], defaultEffort: null, tiers: [] },
+      ],
+      capabilities: { verbosities: [], exclusiveWriter: false, toolDeferral: true, instructionChannel: 'server', processModel: 'per-session', builtInSubagents: true, peerMessaging: true },
+    }],
+    ['codex', {
+      models: [
+        { id: 'gpt-5.6-terra', label: 'gpt-5.6-terra', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', tiers: [{ id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }] },
+        { id: 'gpt-5.6-terra-mini', label: 'gpt-5.6-terra-mini', efforts: [], defaultEffort: null, tiers: [] },
+      ],
+      capabilities: { verbosities: ['low', 'medium', 'high'], exclusiveWriter: true, toolDeferral: false, instructionChannel: 'developer', processModel: 'per-session', builtInSubagents: true, peerMessaging: false },
+    }],
+  ])
+
+  private firstDetectedTool(): ToolName {
+    const first = this.detected.find((tool) => tool.installed)?.name ?? this.detected[0]?.name
+    if (!first) throw new Error('no mock agent is registered')
+    return first
+  }
+
   /**
    * The "leftover process" list a test plants — the real thing finds these with ps and lsof,
    * but the mock only fakes that spot (what is being verified is the shutdown flow, not
@@ -1907,52 +1936,7 @@ export class MockPlatform implements Platform {
       })
       return [...this.gridPanels]
     },
-    models: async (tool: ToolName) => ({
-      supported: true,
-      models:
-        tool === 'codex'
-          ? [
-              // Exactly the measured shape: tiers exist only on the big model (priority = Fast, 1.5x)
-              {
-                id: 'gpt-5.6-terra',
-                label: 'gpt-5.6-terra',
-                efforts: ['low', 'medium', 'high'],
-                defaultEffort: 'medium',
-                tiers: [{ id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }],
-              },
-              {
-                id: 'gpt-5.6-terra-mini',
-                label: 'gpt-5.6-terra-mini',
-                efforts: [],
-                defaultEffort: null,
-                tiers: [],
-              },
-            ]
-          : [
-              {
-                id: 'sonnet',
-                label: 'Sonnet',
-                efforts: ['low', 'medium', 'high', 'xhigh'],
-                defaultEffort: null,
-                tiers: [],
-              },
-              {
-                id: 'opus',
-                label: 'Opus',
-                efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-                defaultEffort: null,
-                tiers: [],
-              },
-              {
-                id: 'fable',
-                label: 'Fable',
-                efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-                defaultEffort: null,
-                tiers: [],
-              },
-              { id: 'haiku', label: 'Haiku', efforts: [], defaultEffort: null, tiers: [] },
-            ],
-    }),
+    models: async (tool: ToolName) => ({ supported: true, models: this.mockToolProfiles.get(tool)?.models ?? [] }),
     /*
      * Like a real tool (#290, measured): an interrupt ends the background tasks that stop with the turn, as stopped,
      * and leaves the rest running.
@@ -2163,11 +2147,10 @@ export class MockPlatform implements Platform {
       resume: true,
       autoTitle: true,
       attachments: ['image', 'file'],
-      // The same shape as the real thing: only codex has a response-length knob (#54) — the UI draws its row from this array
-      verbosities: tool === 'codex' ? ['low', 'medium', 'high'] : [],
-      // The same shape as the real thing: only codex has a writer lock (the UI does not read this yet, but the shape follows the real thing)
-      exclusiveWriter: tool === 'codex',
+      verbosities: [],
+      exclusiveWriter: false,
       backgroundTasks: true,
+      ...this.mockToolProfiles.get(tool)?.capabilities,
     }),
     /** A linked machine answers `machineDetected[machine]` when a test set one (#82), else what this computer has */
     detect: async (machine?: MachineRef) => (machine && this.machineDetected[machine]) || this.detected,
@@ -2275,7 +2258,7 @@ export class MockPlatform implements Platform {
         ...(machine ? { machine } : {}),
         path,
         name: osPathBaseName(path) || path,
-        defaultTool: 'claude',
+        defaultTool: this.firstDetectedTool(),
         // Default model and strength per tool (#107) — empty for a new project that has never had anything chosen
         defaultModels: {},
         commands: [],

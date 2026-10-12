@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/client'
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { serveBroker, type BrokerHandler } from './broker.js'
 import { ExternalApps, resultText, type AgentRunRequest, type AppRef, type BrokerHost } from './runtime.js'
 import { appTemplateDir, scaffoldApp } from './scaffold.js'
@@ -284,6 +284,17 @@ describe('centralu.agent (D-1)', () => {
     expect(out.status).toBe('error')
     expect(resultText(out.result!)).toContain("centralu.agent() failed: run_agent: the agent's answer does not match the schema")
     expect(resultText(out.result!)).toContain('The answer was: {"summary":42}')
+  })
+
+  it('refuses a default-agent request clearly when the host serves apps without adapters', async () => {
+    asker('any', { agent: true })
+    const r = runtime()
+    const runAgent = vi.fn()
+    r.attachBrokerHost(fakeBrokerHost({ defaultAgentTool: () => null, runAgent }))
+    const out = await r.call(ref('any'), 'summarize', { text: 'x' }, { kind: 'session', sessionId: 's1' })
+    expect(out.status).toBe('error')
+    expect(resultText(out.result!)).toContain('No agent adapter is available. Install and configure an agent CLI')
+    expect(runAgent).not.toHaveBeenCalled()
   })
 
   it('only tools the declaration allows — true allows only the default agent, a list allows only what it names', async () => {

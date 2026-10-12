@@ -26,6 +26,8 @@ import { residentCost } from './tool-cost.js'
 
 const PROFILES: ToolProfile[] = ['orchestrator', 'scoped', 'builder', 'reader']
 const RARE = RARE_COMMANDS.orchestrator ?? []
+const DEFERRED_SERVER = { toolDeferral: true, instructionChannel: 'server' as const }
+const EAGER_DEVELOPER = { toolDeferral: false, instructionChannel: 'developer' as const }
 
 function fakeTools() {
   return {
@@ -73,9 +75,9 @@ describe('the commands tier', () => {
     expect(names).toEqual(expect.arrayContaining(['centralu_commands', 'centralu_help', 'centralu_run', 'send_to_session', 'read_session', 'recall', 'create_session', 'app_guide']))
     expect(instructionsFor('orchestrator')).toBe(`${ORCHESTRATOR_INSTRUCTIONS}\n${COMMANDS_INSTRUCTION}`)
     // Smaller in every request: the point of the tier
-    const commands = residentCost('orchestrator', 'claude')
+    const commands = residentCost('orchestrator', DEFERRED_SERVER)
     setRareTier('resident')
-    const resident = residentCost('orchestrator', 'claude')
+    const resident = residentCost('orchestrator', DEFERRED_SERVER)
     expect(commands.residentChars + commands.instructionsChars).toBeLessThan(resident.residentChars + resident.instructionsChars - 2_000)
   })
 
@@ -172,10 +174,10 @@ describe('the deferred tier', () => {
     const defs = toolDefsFor('orchestrator')
     expect(defs.filter((t) => 'deferred' in t && t.deferred).map((t) => t.name)).toEqual(ORCHESTRATOR_TOOLS.filter((t) => RARE.includes(t.name)).map((t) => t.name))
     expect(defs.map((t) => t.name)).toEqual(toolDefsFor('orchestrator', 'resident').map((t) => t.name))
-    const cost = residentCost('orchestrator', 'claude')
+    const cost = residentCost('orchestrator', DEFERRED_SERVER)
     expect(cost.deferredChars).toBeGreaterThan(3_500)
     // Codex has no deferral of ours: all of it counts
-    expect(residentCost('orchestrator', 'codex').deferredChars).toBe(0)
-    for (const p of ['scoped', 'builder'] as const) expect(residentCost(p, 'claude').deferredChars, p).toBe(0)
+    expect(residentCost('orchestrator', EAGER_DEVELOPER).deferredChars).toBe(0)
+    for (const p of ['scoped', 'builder'] as const) expect(residentCost(p, DEFERRED_SERVER).deferredChars, p).toBe(0)
   })
 })

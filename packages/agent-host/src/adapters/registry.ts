@@ -20,3 +20,13 @@ export function createAdapters(): Map<ToolName, AgentAdapter> {
   const all: AgentAdapter[] = [new ClaudeAdapter(), new CodexAdapter()]
   return new Map(all.map((a) => [a.tool, a]))
 }
+
+/**
+ * The registry is the only fallback for a tool choice. A saved name wins only while this build
+ * still ships its adapter; otherwise the first registered adapter is the compatible default.
+ * An empty registry has no default: a host can serve projects and apps without any agent adapters.
+ */
+export function registeredTool(adapters: ReadonlyMap<ToolName, AgentAdapter>, preferred?: ToolName | null): ToolName | null {
+  if (preferred && adapters.has(preferred)) return preferred
+  return adapters.keys().next().value ?? null
+}

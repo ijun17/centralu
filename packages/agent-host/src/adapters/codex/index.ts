@@ -1649,7 +1649,6 @@ void _allVerbositiesListed
 
 export class CodexAdapter implements AgentAdapter {
   readonly tool = 'codex' as const
-  readonly toolDefinitions = 'codex' as const
 
   readonly descriptor: ToolDescriptor = {
     name: 'codex',
@@ -1672,12 +1671,23 @@ export class CodexAdapter implements AgentAdapter {
     exclusiveWriter: true,
     // Child agents, from their threads' status and turns (#290, CodexChildTracker)
     backgroundTasks: true,
+    toolDeferral: false,
+    instructionChannel: 'developer',
+    processModel: 'per-session',
+    builtInSubagents: true,
+    peerMessaging: false,
     /*
      * Not put to sleep (#568). Waking a large thread measured 7-13 s (`thread/resume` scales with the rollout, ~13.5 s for
      * 550 MB), and its cache on resume is unmeasured. The memory is better won by one shared app-server per account
      * (#561 E3: 379 MB vs 2,584 MB for ten threads), decided separately.
      */
     sleep: false,
+  }
+
+  launchSettingsFingerprint(settings: import('../contract.js').LaunchSettings): string {
+    // The working directory participates in the sandbox roots. Bump the version when the
+    // adapter derives a different sandbox, network or bridge launch policy from these settings.
+    return JSON.stringify({ v: 1, cwd: settings.cwd, permission: settings.permissionPreset, trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles })
   }
 
   /** The installed Codex CLI (#297), from npm's `package.json` where it came from npm, else `codex --version` */

@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
+import type { AdapterCapabilities } from '@cc/protocol'
 import { z } from 'zod'
 import type { ToolProfile } from '../apps/contract.js'
-import { ORCHESTRATOR_MCP_NAME, codexToolInstructionsFor, instructionsFor, toolDefsFor } from './orchestrator-tools.js'
+import { ORCHESTRATOR_MCP_NAME, toolInstructionsFor, toolDefsFor } from './orchestrator-tools.js'
 
 /**
  * What a session's Centralu tools cost before a word is said (#513): the definitions as each CLI
@@ -11,10 +12,8 @@ import { ORCHESTRATOR_MCP_NAME, codexToolInstructionsFor, instructionsFor, toolD
  * number a test pins and the number a baseline records are the same number.
  */
 
-export type AgentCli = 'claude' | 'codex'
-
-/** Older adapters and test doubles predate the declaration; their historical serving form was Claude's. */
-export const DEFAULT_AGENT_CLI: AgentCli = 'claude'
+/** The adapter properties that decide how Centralu's definitions are served. */
+export type ToolServingCapabilities = Pick<AdapterCapabilities, 'toolDeferral' | 'instructionChannel'>
 
 /** Every profile, in the order tables list them */
 export const TOOL_PROFILES = ['orchestrator', 'scoped', 'builder', 'reader'] as const satisfies readonly ToolProfile[]
@@ -40,12 +39,12 @@ export function definitionChars(name: string, description: string, inputSchema: 
   return JSON.stringify({ name, description, input_schema: inputSchema }).length
 }
 
-export function servedDefinitions(profile: ToolProfile, cli: AgentCli): ServedDefinition[] {
+export function servedDefinitions(profile: ToolProfile, capabilities: ToolServingCapabilities): ServedDefinition[] {
   return toolDefsFor(profile).map((t) => {
     const name = `mcp__${ORCHESTRATOR_MCP_NAME}__${t.name}`
     const inputSchema = z.toJSONSchema(t.schema)
     // The same rule as orchestratorMcp: a set with no deferred tool is alwaysLoad, any other is loaded tool by tool
-    const deferred = cli === 'claude' && 'deferred' in t && t.deferred === true
+    const deferred = capabilities.toolDeferral === true && 'deferred' in t && t.deferred === true
     return { name, description: t.description, inputSchema, resident: !deferred, chars: definitionChars(name, t.description, inputSchema) }
   })
 }
@@ -57,13 +56,13 @@ export function servedDefinitions(profile: ToolProfile, cli: AgentCli): ServedDe
  * (#525), so a Codex thread gets the same text in its developer instructions, under a header
  * (`codexToolInstructionsFor`), next to its role where it has one; they ride in every request too.
  */
-export function servedInstructions(profile: ToolProfile, cli: AgentCli): string {
-  return (cli === 'claude' ? instructionsFor(profile) : codexToolInstructionsFor(profile)) ?? ''
+export function servedInstructions(profile: ToolProfile, capabilities: ToolServingCapabilities): string {
+  return toolInstructionsFor(profile, capabilities.instructionChannel ?? 'server') ?? ''
 }
 
 export type ResidentCost = {
   profile: ToolProfile
-  cli: AgentCli
+  instructionChannel: NonNullable<ToolServingCapabilities['instructionChannel']>
   tools: number
   residentTools: number
   /** Characters of the resident definitions */
@@ -75,13 +74,13 @@ export type ResidentCost = {
   prefixHash: string
 }
 
-export function residentCost(profile: ToolProfile, cli: AgentCli): ResidentCost {
-  const defs = servedDefinitions(profile, cli)
+export function residentCost(profile: ToolProfile, capabilities: ToolServingCapabilities): ResidentCost {
+  const defs = servedDefinitions(profile, capabilities)
   const resident = defs.filter((d) => d.resident)
-  const instructions = servedInstructions(profile, cli)
+  const instructions = servedInstructions(profile, capabilities)
   return {
     profile,
-    cli,
+    instructionChannel: capabilities.instructionChannel ?? 'server',
     tools: defs.length,
     residentTools: resident.length,
     residentChars: resident.reduce((n, d) => n + d.chars, 0),

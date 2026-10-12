@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { DEFAULT_AGENT_CLI, residentCost } from './tool-cost.js'
+import { residentCost } from './tool-cost.js'
 import { orchestratorHome, orchestratorRole } from './orchestrator-home.js'
 import { dedupeNearbyHits, takeInTurns, windowAround } from './snippet.js'
 import { profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
@@ -74,6 +74,8 @@ import {
   withoutToolRecord,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, ChildRunResult, AgentSessionOpts, AskProjectResult, StartAgentOpts, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, HistoryMessage, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { LaunchSettings } from '../adapters/contract.js'
+import { registeredTool } from '../adapters/registry.js'
 
 /**
  * Where agent processes live when not with this host (#280 step 2 — the keeper). `spawn` starts a
@@ -433,6 +435,8 @@ export class SessionManager {
   private restartAfterTurn = new Set<string>()
   /** A new host served a different Centralu tool prefix; replace the old agent at its safe boundary. */
   private definitionsRestartAfterTurn = new Set<string>()
+  /** A kept process was started with adapter settings from an older host build (#589). */
+  private launchSettingsRestartAfterTurn = new Set<string>()
   private updates: UpdateService | null = null
   /** Sessions allowed to update once per host; an "always" answer adds this session only. */
   private updateConsents = new Set<string>()
@@ -886,7 +890,7 @@ export class SessionManager {
     const git = await gitSummary(path, { trusted: row?.trusted ?? false })
     const stored = row?.defaultTool
     return {
-      id, path, name: basename(path), defaultTool: stored === 'codex' ? 'codex' : 'claude',
+      id, path, name: basename(path), defaultTool: this.firstTool(stored),
       // Trust (M4, decision 3) — reads the same column as the app runtime. The trust toggle on screen shows
       // this value
       trusted: row?.trusted ?? false,
@@ -1259,8 +1263,10 @@ export class SessionManager {
    * null — the only place that can create a session with no project is `orchestrator()` below.
    */
   async createSession(
-    params: Omit<CreateSessionParams, 'projectId'> & {
+    params: Omit<CreateSessionParams, 'projectId' | 'tool'> & {
       projectId: string | null
+      /** Internal default resolution can find no tool; reject that only when creating a session. */
+      tool: ToolName | null
       /**
        * Role (#13). Not in the RPC contract — an outside caller can never "create" an orchestrator
        * (orchestrator() is the only path), and this field exists so orchestrator() has something to
@@ -1292,6 +1298,9 @@ export class SessionManager {
       askedBy?: string
     },
   ): Promise<SessionInfo> {
+    if (!params.tool) {
+      throw Object.assign(new Error('No agent adapter is available. Install and configure an agent CLI before creating a session.'), { code: 'tool_not_installed' })
+    }
     const adapter = this.adapters.get(params.tool)
     if (!adapter) throw Object.assign(new Error(`Unknown tool: ${params.tool}`), { code: 'tool_not_installed' })
 
@@ -1525,6 +1534,7 @@ export class SessionManager {
     this.meta.set(id, info)
     this.store.upsertSession(info)
     this.rememberToolPrefix(id)
+    this.rememberLaunchSettings(info, cwd)
     this.store.setSessionCwd(id, cwd)
     /*
      * Lets the UI learn about this session **through an event too** (#69).
@@ -2183,7 +2193,10 @@ export class SessionManager {
         return { session: m, resumed: false, reason: leaving }
       }
       this.handles.set(sessionId, handle)
-      if (!adopt) this.rememberToolPrefix(sessionId)
+      if (!adopt) {
+        this.rememberToolPrefix(sessionId)
+        this.rememberLaunchSettings(m, cwd)
+      }
       // Every window learns it is awake, not only the one that asked (#568)
       this.emit({ type: 'session_live', sessionId, live: true })
       // Why the process came up again, if a restart said so; a wake, a revive or a manual restart otherwise (§6.1)
@@ -2909,8 +2922,9 @@ export class SessionManager {
       // An app attached or detached in this turn (#371 part A) is a reason of its own, settings or not
       const apps = this.appsRestartAfterTurn.delete(e.sessionId)
       const definitions = this.definitionsRestartAfterTurn.delete(e.sessionId)
-      if ((apps || definitions || this.settingsDrifted(e.sessionId)) && this.handles.has(e.sessionId)) {
-        void this.restartSession(e.sessionId, apps ? 'thread_restart' : definitions ? 'instructions' : this.restartCause(e.sessionId)).catch(() => {})
+      const launchSettings = this.launchSettingsRestartAfterTurn.delete(e.sessionId)
+      if ((apps || definitions || launchSettings || this.settingsDrifted(e.sessionId)) && this.handles.has(e.sessionId)) {
+        void this.restartSession(e.sessionId, apps ? 'thread_restart' : (definitions || launchSettings) ? 'instructions' : this.restartCause(e.sessionId)).catch(() => {})
       }
     }
   }
@@ -4478,6 +4492,7 @@ export class SessionManager {
     this.restartAfterTurn.delete(sessionId)
     this.appsRestartAfterTurn.delete(sessionId)
     this.definitionsRestartAfterTurn.delete(sessionId)
+    this.launchSettingsRestartAfterTurn.delete(sessionId)
     const h = this.handles.get(sessionId)
     if (h) {
       await h.dispose().catch(() => {})
@@ -4508,12 +4523,41 @@ export class SessionManager {
     if (!profile || !m) return null
     const adapter = this.adapters.get(m.tool)
     if (!adapter) return null
-    return residentCost(profile, adapter.toolDefinitions ?? DEFAULT_AGENT_CLI).prefixHash
+    return residentCost(profile, adapter.capabilities).prefixHash
   }
 
   private rememberToolPrefix(sessionId: string): void {
     const hash = this.toolPrefixHash(sessionId)
     if (hash) this.store.setAppSetting(this.toolPrefixKey(sessionId), hash)
+  }
+
+  /** The stable inputs an adapter may use for its keeper-swap launch fingerprint. */
+  private launchSettingsFor(session: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId' | 'model' | 'effort' | 'verbosity' | 'serviceTier' | 'permissionPreset' | 'roleAppend'>, cwd: string): LaunchSettings {
+    return {
+      cwd,
+      model: session.model ?? undefined,
+      effort: session.effort ?? undefined,
+      verbosity: session.verbosity ?? undefined,
+      serviceTier: session.serviceTier ?? undefined,
+      permissionPreset: session.permissionPreset,
+      ...this.settingFilesFor(session),
+      toolProfile: this.toolProfileOf(session.id) ?? undefined,
+      systemPromptAppend: session.roleAppend ?? undefined,
+    }
+  }
+
+  private launchSettingsKey(sessionId: string): string {
+    return `launch_settings:${sessionId}`
+  }
+
+  private launchSettingsFingerprint(session: SessionInfo, cwd: string): string | null {
+    const adapter = this.adapters.get(session.tool)
+    return adapter?.launchSettingsFingerprint?.(this.launchSettingsFor(session, cwd)) ?? null
+  }
+
+  private rememberLaunchSettings(session: SessionInfo, cwd: string): void {
+    const fingerprint = this.launchSettingsFingerprint(session, cwd)
+    if (fingerprint) this.store.setAppSetting(this.launchSettingsKey(session.id), fingerprint)
   }
 
   /**
@@ -4533,6 +4577,31 @@ export class SessionManager {
       if (inTurn(session.state)) {
         this.restartAfterTurn.add(session.id)
         this.definitionsRestartAfterTurn.add(session.id)
+        continue
+      }
+      await this.restartSession(session.id, 'instructions').catch(() => {})
+    }
+    await this.refreshLaunchSettings()
+  }
+
+  /**
+   * A kept CLI also retains settings derived at launch (sandbox roots, network policy, adapter
+   * environment). The adapter owns the fingerprint; the host only gives it the same safe
+   * boundary behaviour as changed tool definitions.
+   */
+  private async refreshLaunchSettings(): Promise<void> {
+    for (const session of this.meta.values()) {
+      const cwd = this.store.sessionCwd(session.id)
+      if (!cwd) continue
+      const next = this.launchSettingsFingerprint(session, cwd)
+      if (!next || this.store.appSetting(this.launchSettingsKey(session.id)) === next) continue
+      if (!this.handles.has(session.id)) {
+        this.store.setAppSetting(this.launchSettingsKey(session.id), next)
+        continue
+      }
+      if (inTurn(session.state)) {
+        this.restartAfterTurn.add(session.id)
+        this.launchSettingsRestartAfterTurn.add(session.id)
         continue
       }
       await this.restartSession(session.id, 'instructions').catch(() => {})
@@ -4731,7 +4800,7 @@ export class SessionManager {
           const info = await this.createSession({
             projectId: project.id,
             cwd: project.path,
-            tool: opts.tool ?? project.defaultTool ?? this.firstTool(),
+            tool: opts.tool ?? this.firstTool(project.defaultTool),
             permissionPreset: 'normal',
           })
           if (opts.name) this.rename(info.id, opts.name)
@@ -5119,12 +5188,12 @@ export class SessionManager {
    * orchestrator's own tool if there is no project (a user-folder app). A builder session (C-2) and an
    * agent an app asked for (D-1) both use this same rule.
    */
-  private defaultToolFor(projectId: string | null): ToolName {
+  private defaultToolFor(projectId: string | null): ToolName | null {
     if (projectId !== null) {
       const project = this.store.listProjects().find((p) => p.id === projectId)
-      return project?.defaultTool ?? this.firstTool()
+      return this.firstTool(project?.defaultTool)
     }
-    return this.store.appSetting('orchestrator_tool') === 'codex' && this.adapters.has('codex') ? 'codex' : this.firstTool()
+    return this.firstTool(this.store.appSetting('orchestrator_tool'))
   }
 
   /** The session's share of the broker's body (M4 D) — called only after the runtime's gate has verified the
@@ -5328,7 +5397,8 @@ export class SessionManager {
     if (reuse) {
       delegatedId = reuse.id
     } else {
-      const tool = target.defaultTool && this.adapters.has(target.defaultTool) ? target.defaultTool : this.firstTool()
+      const tool = this.firstTool(target.defaultTool)
+      if (!tool) return { ok: false, error: `Could not open a session in ${target.name}: no agent adapter is available. Install and configure an agent CLI first.` }
       const adapter = this.adapters.get(tool)!
       const found = await adapter.detect()
       if (!found.installed || !found.loggedIn) {
@@ -5480,7 +5550,8 @@ export class SessionManager {
     if (project.trusted !== true) {
       return { ok: false, error: "This session's project is not trusted, so it cannot start agents — the person can trust it from the project menu." }
     }
-    const tool = opts.tool ?? (project.defaultTool && this.adapters.has(project.defaultTool) ? project.defaultTool : this.firstTool())
+    const tool = opts.tool ?? this.firstTool(project.defaultTool)
+    if (!tool) return { ok: false, error: 'No agent adapter is available. Install and configure an agent CLI before starting an agent.' }
     const adapter = this.adapters.get(tool)
     if (!adapter) return { ok: false, error: `No agent named "${tool}" here. The agents are: ${[...this.adapters.keys()].join(', ')}.` }
     const full = this.agentCeilingError(project.id)
@@ -6606,16 +6677,14 @@ export class SessionManager {
    * session's own settings takes over — this value is never read again after that.
    */
   /**
-   * The tool to use when nothing has chosen one — the first adapter this build registered.
+   * The tool to use when nothing has chosen one — the first registered adapter, or none.
    *
    * A project's `defaultTool` is nullable because only the host knows which tools exist, so
    * a project created before any tool was picked has none. Falling back to a literal
    * `'claude'` here would put a vendor name back into code that is meant not to know any.
    */
-  private firstTool(): ToolName {
-    const first = [...this.adapters.keys()][0]
-    if (!first) throw new Error('no agent adapter is registered')
-    return first
+  private firstTool(preferred?: ToolName | null): ToolName | null {
+    return registeredTool(this.adapters, preferred)
   }
 
   /** A tool's display name, from whichever adapter owns it — falls back to the bare id. */
@@ -6648,7 +6717,7 @@ export class SessionManager {
       // marker at all
       kind: 'orchestrator',
       cwd: orchestratorHome(),
-      tool: configured === 'codex' ? 'codex' : 'claude',
+      tool: this.firstTool(configured),
       permissionPreset: 'normal',
     })
     // Kept as a name the person set, so the auto-name (FR-18) never overwrites it with the first prompt

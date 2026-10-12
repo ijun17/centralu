@@ -131,7 +131,7 @@ export type CapabilityQuestion = {
 /** The part of the broker's body the host's core fills in */
 export type BrokerHost = {
   /** The default agent tool for this scope — the project's default tool for a project app, the orchestrator's tool for a user-folder app */
-  defaultAgentTool(projectId: string | null): string
+  defaultAgentTool(projectId: string | null): string | null
   /**
    * Sends the request to a new session and waits for the turn to end. If the signal fires, stops the
    * session (an interrupt). If the tool is unavailable (not installed, not logged in), throws with a
@@ -360,8 +360,9 @@ class BrokerRow {
  * default tool — if the default is not in the list, it resolves to the list's first tool instead (it
  * never resolves outside the declaration).
  */
-export function pickAgentTool(declared: boolean | string[] | undefined, requested: string | undefined, fallback: string): { tool: string } | { error: string } {
+export function pickAgentTool(declared: boolean | string[] | undefined, requested: string | undefined, fallback: string | null): { tool: string } | { error: string } {
   if (declared === true) {
+    if (!fallback) return { error: 'No agent adapter is available. Install and configure an agent CLI before running an agent.' }
     if (requested !== undefined && requested !== fallback) {
       return {
         error:
@@ -376,7 +377,7 @@ export function pickAgentTool(declared: boolean | string[] | undefined, requeste
   if (requested !== undefined) {
     return list.includes(requested) ? { tool: requested } : { error: `${requested} is not in this app's "uses.agent" (${list.join(', ')})` }
   }
-  return { tool: list.includes(fallback) ? fallback : list[0]! }
+  return { tool: fallback && list.includes(fallback) ? fallback : list[0]! }
 }
 
 export class BrokerDesk {

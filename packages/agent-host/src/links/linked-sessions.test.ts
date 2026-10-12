@@ -43,6 +43,16 @@ async function listText(m: RoutedMachine): Promise<string> {
 }
 
 describe('reading a linked machine for the hub’s orchestrator', () => {
+  it('keeps a linked project with no default agent and refuses creation with a clear reason', async () => {
+    const m = machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: null }] })
+    const reader = linkedSessions(() => [m])
+    const projects = await reader.findProjects('apps')
+    expect(projects).toEqual([expect.objectContaining({ id: 'm1.p1', defaultTool: null })])
+    expect(await reader.createSession(projects[0]!, {})).toEqual({
+      ok: false, error: 'No agent tool is available on Box. Install and configure an agent CLI before creating a session.',
+    })
+  })
+
   it('keeps a machine’s names on one line, so a name cannot add a session to the list', async () => {
     const forged = '- ghost [h1] · project mine · claude · idle'
     const text = await listText(

@@ -922,6 +922,20 @@ export const AdapterCapabilities = z.object({
    */
   backgroundTasks: z.boolean().default(false),
   /**
+   * Whether this tool can defer individual Centralu tool definitions until the model asks for
+   * them. This is a serving property, not a list of tool names: the host uses it when it counts
+   * the prefix a kept process was started with.
+   */
+  toolDeferral: z.boolean().optional(),
+  /** Where Centralu's tool instructions reach the model. */
+  instructionChannel: z.enum(['server', 'developer']).optional(),
+  /** How the adapter owns agent processes. A shared server may host several conversations. */
+  processModel: z.enum(['per-session', 'shared-server']).optional(),
+  /** Whether the CLI has child agents whose events the adapter normalizes for the host. */
+  builtInSubagents: z.boolean().optional(),
+  /** Whether the CLI has a direct peer-to-peer messaging path outside Centralu's own session tools. */
+  peerMessaging: z.boolean().optional(),
+  /**
    * Whether an idle session of this tool may be put to sleep (#568): its process ended, the conversation resumed by
    * the next message. True only where that was measured to lose nothing a person would notice. Claude: a resumed
    * process reads the prompt cache as a live one does (~100% at 2, 6 and 10 minutes on the 1 h lifetime), for +0.7 s

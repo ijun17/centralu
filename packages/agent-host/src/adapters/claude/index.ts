@@ -1432,7 +1432,6 @@ const WINDOWS_START_GAP_MS = 1500
 
 export class ClaudeAdapter implements AgentAdapter {
   readonly tool = 'claude' as const
-  readonly toolDefinitions = 'claude' as const
   private readonly launch: ClaudeLaunch
 
   constructor(options: ClaudeAdapterOptions = {}) {
@@ -1506,6 +1505,11 @@ export class ClaudeAdapter implements AgentAdapter {
     exclusiveWriter: false,
     // background_tasks_changed and the task messages (#290, ClaudeBackgroundTracker)
     backgroundTasks: true,
+    toolDeferral: true,
+    instructionChannel: 'server',
+    processModel: 'per-session',
+    builtInSubagents: true,
+    peerMessaging: true,
     /*
      * An idle session may be put to sleep (#568): a resumed process read the prompt cache as the live one did (~100% at
      * 2, 6 and 10 min on the 1 h lifetime, CLI 2.1.29x with haiku, #561) for +0.7 s (p50) / +1.8 s (p95) before the first
@@ -1513,6 +1517,12 @@ export class ClaudeAdapter implements AgentAdapter {
      * `scripts/probe-resume-cache.mts` re-measures it on a CLI update.
      */
     sleep: true,
+  }
+
+  launchSettingsFingerprint(settings: import('../contract.js').LaunchSettings): string {
+    // Keep this alongside the query option construction. Bump the version when a setting the
+    // adapter derives (including cross-session controls) changes without changing these inputs.
+    return JSON.stringify({ v: 1, cwd: settings.cwd, permission: settings.permissionPreset, trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles })
   }
 
   async detect(): Promise<DetectResult> {

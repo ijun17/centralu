@@ -492,6 +492,11 @@ interface AdapterCapabilities {
   verbosities: string[]         // response-length steps; empty = the tool has no such knob (#54)
   exclusiveWriter: boolean      // nobody else can write the conversation while we hold it
   backgroundTasks: boolean      // reports its background work as `background_tasks` (#290)
+  toolDeferral: boolean         // can individual Centralu definitions wait behind tool search
+  instructionChannel: 'server' | 'developer' // where Centralu's tool instructions reach the model (#525)
+  processModel: 'per-session' | 'shared-server' // whether one CLI process owns one or several conversations
+  builtInSubagents: boolean     // child-agent events are normalized by this adapter
+  peerMessaging: boolean        // the CLI has a direct session-to-session path (#575)
   sleep?: boolean               // #568: an idle session may be put to sleep (resume measured to keep the cache); §4.6.1
 }
 ```
@@ -1156,16 +1161,33 @@ its background work.
 | The conversation gets one line from Centralu, "Claude Code restarted on 2.1.290 (was 2.1.282). The conversation continues." | A process restarted by itself is never silent |
 | The installed versions last seen are kept (`agents.versionsSeen`) | An update made while the app was closed still counts as a change |
 
+**Default tool resolution (#573).**
+
+The registry resolves a saved tool only when its adapter is registered, otherwise the first registered adapter.
+An empty registry returns no tool (`null`): project listing and serving apps still work on a host with no agents.
+Creating a session without a tool fails with `tool_not_installed` and asks the person to install and configure an
+agent CLI. Linked projects keep a missing default too; creating a session there requires an available tool.
+
 **Tool definitions after a host switch (#581).**
 
 The keeper can preserve an agent process across a Centralu update, but that process also preserves the Centralu MCP
 definitions it was started with. `SessionManager.refreshToolDefinitions()` compares the profile's served definitions
 and instructions using `residentCost(...).prefixHash`; the adapter declares the serving form in
-the host-only `AgentAdapter.toolDefinitions`, rather than in protocol capabilities or the manager naming a CLI.
+the adapter capabilities (`toolDeferral` and `instructionChannel`), rather than the manager naming a CLI.
 The hash is kept in an app setting per session.
 On a changed hash, a live idle session restarts through the same resume path as #297; a working or approval-waiting
 session restarts after its turn; a sleeping session has no process and records the new hash for its next wake. Thus the
 conversation continues while the next process sees the new tools.
+
+**Launch settings after a host switch (#589).**
+
+The same keeper handoff can retain a process that was started with an older adapter policy: Codex sandbox roots and
+network settings, or Claude launch options and environment controls. Each adapter may report a versioned
+`launchSettingsFingerprint(settings)` for the stable, session-specific launch inputs. The manager keeps that value in
+an app setting per session and compares it after adopting keeper children. A mismatch restarts an idle process through
+the ordinary resume path, waits for a working or approval-waiting process to finish its turn, and is simply recorded
+for an asleep session with no process. The host never names a CLI or interprets the fingerprint; changing an adapter's
+derived launch policy means changing its own fingerprint.
 
 **The capability check seam** (#270). On every change of an installed CLI's version the service calls
 `capabilityCheck({ tool, from, to })`. #270 proposes re-running the probes for what a tool could not do when its version

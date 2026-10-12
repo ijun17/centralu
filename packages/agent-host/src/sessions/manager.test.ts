@@ -111,9 +111,13 @@ class FakeHandle implements SessionHandle {
 
 class FakeAdapter implements AgentAdapter {
   tool: ToolName = 'claude'
-  descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'npm i -g x', login: 'x login' }
+  descriptor: AgentAdapter['descriptor'] = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'npm i -g x', login: 'x login' }
   readonly capabilities: AdapterCapabilities = {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: ['image'], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
+  }
+  launchFingerprint = 'v1'
+  launchSettingsFingerprint(settings: import('../adapters/contract.js').LaunchSettings) {
+    return `${this.launchFingerprint}:${settings.cwd}:${settings.permissionPreset}:${settings.projectTrusted ? 'trusted' : 'untrusted'}`
   }
   last: FakeHandle | null = null
   /** Tools that come only to the orchestrator — the test checks whether they are attached or not. */
@@ -225,6 +229,82 @@ describe('tool definitions after a host switch (#581)', () => {
     expect(old.disposed).toBe(true)
     expect(adapter.lastOpts?.resumeExternalId).toBe('ext-1')
     expect(restart).toHaveBeenCalledWith(session.id, 'instructions')
+  })
+})
+
+describe('adapter launch settings after a host switch (#589)', () => {
+  it('restarts a kept idle process when its adapter launch fingerprint changed', async () => {
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const old = adapter.handleOf(session.id)!
+    adapter.launchFingerprint = 'v2'
+
+    await mgr.refreshToolDefinitions()
+
+    expect(old.disposed).toBe(true)
+    expect(adapter.handleOf(session.id)).not.toBe(old)
+    expect(store.appSetting(`launch_settings:${session.id}`)).toContain('v2')
+  })
+
+  it('keeps a retained process when its adapter launch fingerprint is unchanged', async () => {
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const old = adapter.handleOf(session.id)!
+
+    await mgr.refreshToolDefinitions()
+
+    expect(old.disposed).toBe(false)
+    expect(adapter.handleOf(session.id)).toBe(old)
+  })
+
+  it('waits for a working retained process before applying changed adapter launch settings', async () => {
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const old = adapter.handleOf(session.id)!
+    await rpc('agents.send', { sessionId: session.id, text: 'work' })
+    adapter.launchFingerprint = 'v2'
+
+    await mgr.refreshToolDefinitions()
+    expect(old.disposed).toBe(false)
+
+    old.finishTurn()
+    await vi.waitFor(() => expect(adapter.handleOf(session.id)).not.toBe(old))
+    expect(old.disposed).toBe(true)
+  })
+})
+
+describe('registry defaults', () => {
+  it('serves projects with no adapters and rejects session creation only when requested', async () => {
+    const adapters = new Map<ToolName, AgentAdapter>()
+    const emptyManager = new SessionManager(store, adapters, (e) => events.push(e))
+    const emptyRpc = createRpcHandler(emptyManager, adapters)
+    const project = (await emptyRpc('projects.add', { path: tmpdir() })) as { id: string; path: string }
+
+    // A stale saved choice cannot turn an empty registry into a usable agent.
+    store.setProjectDefaultTool(project.id, 'claude')
+    expect(await emptyRpc('projects.list', {})).toEqual([expect.objectContaining({ id: project.id, defaultTool: null })])
+    expect(await emptyRpc('agents.detect', {})).toEqual([])
+    await expect(emptyRpc('orchestrator.get', {})).rejects.toMatchObject({
+      code: 'tool_not_installed', message: expect.stringContaining('No agent adapter is available'),
+    })
+    await expect(emptyManager.createSession({ projectId: project.id, cwd: project.path, tool: null, permissionPreset: 'normal' })).rejects.toMatchObject({
+      code: 'tool_not_installed', message: expect.stringContaining('Install and configure an agent CLI'),
+    })
+    expect(emptyManager.listSessions()).toEqual([])
+  })
+
+  it('runs with a third adapter without changing manager code', async () => {
+    const third = new FakeAdapter()
+    third.tool = 'fixture-agent'
+    third.descriptor = { ...third.descriptor, name: third.tool, label: 'Fixture agent' }
+    const adapters = new Map<ToolName, AgentAdapter>([[third.tool, third]])
+    const thirdManager = new SessionManager(store, adapters, (e) => events.push(e))
+    const thirdRpc = createRpcHandler(thirdManager, adapters)
+    const project = (await thirdRpc('projects.add', { path: tmpdir() })) as { id: string; path: string }
+
+    expect(((await thirdRpc('projects.list', {})) as { id: string; defaultTool: string }[]).find((p) => p.id === project.id)?.defaultTool).toBe('fixture-agent')
+    await thirdManager.orchestrator()
+    expect(third.lastOpts?.sessionId).toBeTruthy()
   })
 })
 

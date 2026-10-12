@@ -131,8 +131,13 @@ const commit = (() => {
   }
 })()
 
+const toolServing = (cli: Cli) =>
+  cli === 'claude'
+    ? { toolDeferral: true, instructionChannel: 'server' as const }
+    : { toolDeferral: false, instructionChannel: 'developer' as const }
+
 const definitions = Object.fromEntries(
-  (['claude', 'codex'] as const).map((cli) => [cli, Object.fromEntries(TOOL_PROFILES.map((p) => [p, residentCost(p, cli)]))]),
+  (['claude', 'codex'] as const).map((cli) => [cli, Object.fromEntries(TOOL_PROFILES.map((p) => [p, residentCost(p, toolServing(cli))]))]),
 ) as Record<Cli, Record<string, ResidentCost>>
 const summary: Summary = { definitions }
 const raw: { claudeRequests: RecordedRequest[]; approvals: unknown[]; models: Json } = { claudeRequests: [], approvals: [], models: {} }

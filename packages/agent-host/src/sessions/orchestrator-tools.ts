@@ -1191,6 +1191,15 @@ export function codexToolInstructionsFor(profile: ToolProfile, tier: RareTier = 
   return text ? `# How to use the ${ORCHESTRATOR_MCP_NAME} tools (mcp__${ORCHESTRATOR_MCP_NAME}__*)\n\n${text}` : undefined
 }
 
+/** The adapter decides the channel; this module only owns the shared wording. */
+export function toolInstructionsFor(
+  profile: ToolProfile,
+  channel: 'server' | 'developer',
+  tier: RareTier = rareTier,
+): string | undefined {
+  return channel === 'developer' ? codexToolInstructionsFor(profile, tier) : instructionsFor(profile, tier)
+}
+
 /**
  * The tools this profile can call **right now** — the same decision as the exposure logic
  * (orchestratorToolSchemas). The guide uses this when it states what each seat can do (M4 P-4):
