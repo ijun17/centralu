@@ -63,6 +63,8 @@ export default defineConfig({
   // Stops CI from being fooled into "all passed" if a `test.only` was left in and pushed locally
   forbidOnly: !!process.env.CI,
   reporter: [['list']],
+  // The engine's first page on a machine is slow (WebKit builds its caches): opened here, not in a test (warm-engine.ts)
+  globalSetup: './warm-engine.ts',
   use: { baseURL: 'http://127.0.0.1:5174', trace: 'off', browserName: BROWSER },
   projects: [
     { name: 'app', testIgnore: [STARTUP_SPEC, RECOVERY_SPEC, LINKED_SPEC, ...leftOut] },

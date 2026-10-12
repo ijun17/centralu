@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import type { ApprovalDetail } from '@cc/protocol'
-import { findMatchingRule, matchesRule, previewMatches, projectAccessQuestion, suggestMatcher } from './approval.js'
+import { findMatchingRule, matchesRule, previewMatches, projectAccessQuestion, projectCreateQuestion, suggestMatcher } from './approval.js'
+
+describe('the new-project question (#515)', () => {
+  it('names the linked machine whose disk the path is on, and no machine for this computer (#82 phase 4)', () => {
+    const d = { kind: 'project_create' as const, name: 'api', path: '/home/me/Centralu/api' }
+    expect(projectCreateQuestion(d)).toBe('Make the empty folder /home/me/Centralu/api and add it as the project api?')
+    expect(projectCreateQuestion({ ...d, machine: 'Ubuntu box' })).toBe('Make the empty folder /home/me/Centralu/api on Ubuntu box and add it as the project api?')
+    expect(projectCreateQuestion({ ...d, machine: 'Ubuntu box', source: { git: 'https://x/api.git' } })).toBe(
+      'Clone https://x/api.git into /home/me/Centralu/api on Ubuntu box and add it as the project api?',
+    )
+  })
+})
 
 describe('the cross-project consent question (#371)', () => {
   const base = { kind: 'project_access' as const, from: { id: 'a', name: 'Consumer' }, to: { id: 'b', name: 'Toolkit' } }

@@ -46,7 +46,7 @@ centralu/
 │  │     ├─ unread/             # read rules (FR-16)
 │  │     ├─ approval/           # always-allow rule matching, in-place approval policy
 │  │     ├─ machines/           # linked machines: away rows, link errors in words, the version prompt
-│  │     └─ usage/              # weekly aggregation (the calculation, not the parser)
+│  │     └─ usage/              # prompt cache arithmetic: hit rate, a window's name (agent-host.md §6.1)
 │  │
 │  ├─ platform/                 # the firewall for C1/C2
 │  │  └─ src/

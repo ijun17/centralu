@@ -487,6 +487,25 @@ uxTask({
 })
 
 uxTask({
+  id: 'view-cache.mouse',
+  task: 'See how much of the input came from the prompt cache, and which session rebuilt it',
+  path: 'mouse',
+  access: 'discoverable',
+  notes: [
+    "The donut's tooltip says the hit rate on hover (no click, not counted); the click opens the breakdown and the sessions that wrote most",
+  ],
+  start: demo,
+  run: async (u, page) => {
+    await u.click(page.getByTestId('usage-donut-claude'))
+  },
+  goal: async (page) => {
+    await expect(page.getByTestId('usage-cache-rate')).toBeVisible()
+    await expect(page.getByTestId('usage-cache-sessions')).toBeVisible()
+  },
+  budget: { operators: 5, M: 1, seconds: 3.3 },
+})
+
+uxTask({
   id: 'change-theme.mouse',
   task: 'Switch to the light theme',
   path: 'mouse',

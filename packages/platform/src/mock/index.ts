@@ -33,6 +33,7 @@ import type {
   StoredMessage,
   MessageImage,
   UsageSnapshot,
+  CacheStats,
   ToolName,
   ToolStatus,
   QuestionAnswer,
@@ -768,6 +769,11 @@ export class MockPlatform implements Platform {
   machineDetected: Record<string, ToolStatus[]> = {}
   /** For tests: every usage question, and which machine it went to (null: this computer) */
   usageCalls: { tool: ToolName; machine: string | null }[] = []
+  /**
+   * For tests: the prompt cache figures a host would count, keyed like the gauge's donuts: `<tool>` for this computer,
+   * `<machine>.<tool>` for a linked machine. None: the answer carries no `cache`, as an older host's does
+   */
+  cacheStats: Record<string, CacheStats> = {}
 
   /** For tests: the slash command list (ready=false also reproduces "the tool is not ready yet") */
   commandState: { ready: boolean; commands: { name: string; description: string; argumentHint: string }[] } =
@@ -2193,7 +2199,8 @@ export class MockPlatform implements Platform {
     commands: async (_sessionId: string) => ({ ...this.commandState }),
     usage: async (tool: ToolName, machine?: MachineRef) => {
       this.usageCalls.push({ tool, machine: machine ?? null })
-      return { ...((machine && this.machineUsage[machine]) || this.usageState) }
+      const cache = this.cacheStats[machine ? `${machine}.${tool}` : tool]
+      return { ...((machine && this.machineUsage[machine]) || this.usageState), ...(cache ? { cache } : {}) }
     },
     capabilities: async (tool: ToolName): Promise<AdapterCapabilities> => ({
       approvals: true,

@@ -4,7 +4,9 @@ import type {
   UsageSnapshot,
   ApprovalDecision,
   ApprovalScope,
+  GitSource,
   NormalizedEvent,
+  SessionInfo,
   PermissionPreset,
   QuestionAnswer,
   SessionGoal,
@@ -47,12 +49,77 @@ export type OrchestratedSession = {
   /** Whether the worktree branch has landed on trunk (#69) — how the manager decides "finished" on its own */
   merged?: boolean
   /** The PR for this branch (#76 stage 3) — measured via gh. Distinguishes "waiting on review" from "just in progress" */
-  pr?: { number: number; state: 'open' | 'merged' | 'closed' }
-  tool: ToolName
+  pr?: { number: number; state: string }
+  /** A `ToolName` for the hub's own sessions; a linked machine's is whatever that build calls its tool */
+  tool: ToolName | (string & {})
   /** One line describing what last happened */
   preview: string
   /** When it last moved — decides which session is the "current conversation" */
   lastActive?: string
+  /** The linked machine it runs on, by the name the person gave it (#82 phase 4); absent for this computer's own */
+  machine?: string
+  /** Why that machine could not be asked just now, so the row is what the hub last knew of it */
+  away?: string
+}
+
+/** One `recall` hit: where it was said, and the seq that opens it with read_session */
+export type RecallHit = {
+  sessionId: string
+  session: string
+  project: string
+  snippet: string
+  /** Pass this as read_session's around to jump straight to that passage */
+  seq: number
+  at?: string
+  /** The linked machine it was said on (#82 phase 4); absent for this computer's own */
+  machine?: string
+}
+
+/** A project on a linked machine, as the hub's orchestrator names it (#82 phase 4) */
+export type LinkedProject = { id: string; name: string; path: string; defaultTool: ToolName; machine: string }
+
+/** Failed with a sentence the model reads, or done */
+type Outcome<T = object> = ({ ok: true } & T) | { ok: false; error: string }
+
+/**
+ * The sessions of the machines this host links to, for its orchestrator (#82, docs/plans/remote-hub.md §12;
+ * links/linked-sessions.ts). Every id it gives and takes is machine-qualified (`<machine>.<id>`). Only the hub's
+ * central orchestrator reaches through it: a manager, a lead and an ordinary session keep their own machine's view
+ */
+export type LinkedSessions = {
+  /** An instruction to a machine's session, recorded there as sent by `fromName` (`host.send`) */
+  send(sessionId: string, text: string, fromName: string): Promise<Outcome>
+  /** A machine's session's model, effort or verbosity (`agents.updateSettings` there); the answer in the hub's terms */
+  updateSettings(
+    sessionId: string,
+    s: { model?: string | null; effort?: string | null; verbosity?: string | null },
+  ): Promise<Outcome<{ info: SessionInfo & { applied?: string } }>>
+  /** The reachable machines' projects whose name or qualified id is `ref` */
+  findProjects(ref: string): Promise<LinkedProject[]>
+  /** A new session in a machine's project, under `normal`, named if a name is given */
+  createSession(project: LinkedProject, opts: { tool?: ToolName; name?: string }): Promise<Outcome<{ sessionId: string; name: string }>>
+  /** A linked machine by its id or the name the person gave it, case aside */
+  machineNamed(ref: string): { id: string; name: string } | null
+  /** Where `projects.create` would make the folder on that machine, or why it would refuse */
+  previewProject(machineId: string, spec: { name: string; parent?: string; source?: GitSource }): Promise<Outcome<{ name: string; path: string }>>
+  createProject(machineId: string, spec: { name: string; parent?: string; source?: GitSource }): Promise<Outcome<{ projectId: string; name: string; path: string }>>
+  /** A machine's session as the hub last knew it (the headers mirror): its name and its project's */
+  describe(sessionId: string): { name: string; project: string } | null
+  /** The last thing a machine's session said, for a report; empty when it cannot be read */
+  lastWords(sessionId: string, maxChars: number): Promise<string>
+  /** Every linked machine's sessions, the hub's view of each (its orchestrator and coordinators left out) */
+  list(): Promise<OrchestratedSession[]>
+  /** Every linked machine's sessions, the hub's view of each (its orchestrator and coordinators left out) */
+  list(): Promise<OrchestratedSession[]>
+  /** The name of the linked machine a qualified id names, or null for an id of this host */
+  machineOf(sessionId: string): string | null
+  read(
+    sessionId: string,
+    limit?: number,
+    opts?: { around?: number; tools?: boolean },
+  ): Promise<{ ok: boolean; error?: string; lines?: string[]; state?: string }>
+  /** Each machine's hits in its own rank order, one list per machine, and the machines that could not be searched, as `<name> (<why>)` */
+  recall(query: string, limit: number): Promise<{ hits: RecallHit[][]; notSearched: string[] }>
 }
 
 /** What one ask_project call comes back with (#371 part B) — rendered for the model by runOrchestratorTool */
@@ -173,15 +240,9 @@ export type OrchestratorTools = {
     query: string,
     limit?: number,
   ): Promise<{
-    hits: {
-      sessionId: string
-      session: string
-      project: string
-      snippet: string
-      /** Pass this as read_session's around to jump straight to that passage */
-      seq: number
-      at?: string
-    }[]
+    hits: RecallHit[]
+    /** Linked machines that could not be searched just now, each with why (#82: one that is off says so instead of finding nothing) */
+    notSearched?: string[]
   }>
   /**
    * **Proposes to the person** that an MCP server be installed (a dogfooding request — wanting to
@@ -212,9 +273,10 @@ export type OrchestratorTools = {
    * call's: aborted, the card is withdrawn and nothing is made.
    */
   createProject(
-    spec: { name: string; parent?: string; source?: { git: string; branch?: string } },
+    /** `machine`: a linked machine by name or id (#82 phase 4); this computer when absent */
+    spec: { name: string; parent?: string; source?: { git: string; branch?: string }; machine?: string },
     signal?: AbortSignal,
-  ): Promise<{ ok: true; projectId: string; name: string; path: string } | { ok: false; error: string }>
+  ): Promise<{ ok: true; projectId: string; name: string; path: string; machine?: string } | { ok: false; error: string }>
   /**
    * Checks its own app (M4 C-3) — for a session that creates an app only. Which app is decided by
    * the calling session itself (the app it is creating): it takes no name, so there is no way to

@@ -1,4 +1,4 @@
-import type { ApprovalDetail, BackgroundTask, NormalizedEvent, SessionActivity, SessionGoal, ToolSummary } from '@cc/protocol'
+import type { ApprovalDetail, BackgroundTask, NormalizedEvent, RequestInput, SessionActivity, SessionGoal, TokenUsage, ToolSummary } from '@cc/protocol'
 import { UnmappedTypes } from '../unmapped.js'
 
 /** The settings a Claude process was launched with — the snapshot a `settings_changed` the tool made carries (#304). */
@@ -962,6 +962,26 @@ const CLAUDE_KNOWN_TYPES: ReadonlySet<string> = new Set([
  *     the preview both read by row. To keep an event the parent did not emit from cutting the
  *     parent's own text, this is sent after the assistant message that closes that chunk instead.
  */
+/**
+ * How long what a request wrote stays cached, from the API's split of its writes (`cache_creation`:
+ * `ephemeral_1h_input_tokens`, `ephemeral_5m_input_tokens`). Claude Code decides the lifetime per request (CLI 2.1.289:
+ * one hour for a subscriber's main conversation and SDK calls when not on overage, five minutes for subagents, API
+ * keys and overage, with `FORCE_PROMPT_CACHING_5M`, `CLAUDE_CODE_PROMPT_CACHE_TTL` and the `promptCacheTtl` setting
+ * over it), and that decision is not visible from outside; what the API reports it wrote is.
+ */
+function ttlOf(split: unknown): { cacheTtl?: '5m' | '1h' } {
+  const c = (split ?? {}) as Json
+  if (Number(c.ephemeral_1h_input_tokens ?? 0) > 0) return { cacheTtl: '1h' }
+  if (Number(c.ephemeral_5m_input_tokens ?? 0) > 0) return { cacheTtl: '5m' }
+  return {}
+}
+
+/** The tokens of the `usage_update` among some events, if there is one */
+function readingOf(events: readonly NormalizedEvent[]): TokenUsage | undefined {
+  for (const e of events) if (e.type === 'usage_update') return e.tokens
+  return undefined
+}
+
 export class ClaudeStreamNormalizer {
   private textStreamed = false
   /** Readable thinking of the current assistant message already went out as deltas (see normalizeMessage's opts) */
@@ -982,6 +1002,15 @@ export class ClaudeStreamNormalizer {
   private deferred: NormalizedEvent[] = []
   /** The id of the model call whose chunks are streaming now (`message_start`). */
   private streamMessageId: string | undefined
+  /**
+   * The model requests whose input already went out as a `request` (prompt cache accounting, docs/agent-host.md
+   * §6.1). The CLI can send one response as several assistant messages (one per content block), each carrying the
+   * same usage under the same message id; counting each would multiply that request. Bounded: a subagent's messages
+   * interleave with the parent's, so this holds a few recent ids, not just the last one.
+   */
+  private readonly requestsSeen: string[] = []
+  /** The parent's last `usage_update` reading, which a subagent's request repeats (see `withRequest`) */
+  private lastTokens: TokenUsage | null = null
   /** The session's /goal, read off the stream (see `ClaudeGoalTracker`). */
   readonly goal: ClaudeGoalTracker
   /** Message types this session received that nothing maps or ignores on purpose, said once each in host.log (#58) */
@@ -1054,6 +1083,39 @@ export class ClaudeStreamNormalizer {
       { type: 'notice', sessionId: this.sessionId, level: 'warning', text, from: 'Claude Code', label: 'model switch' },
       { type: 'settings_changed', sessionId: this.sessionId, ...this.settings(), model: to, by: 'tool' },
     ]
+  }
+
+  /**
+   * Marks an assistant message's usage as one model request's input, the first time its message id is seen (see
+   * `requestsSeen`).
+   *
+   * A subagent's requests count too: they read and write the same account's cache, and its first request writes its
+   * whole prompt. Its usage is dropped from the parent's events (a subagent's tokens used to overwrite the parent's
+   * figures, see `normalizeMessage`), so its request rides on a `usage_update` that repeats the parent's last reading:
+   * every reader of `tokens` takes the last value, so the repeat changes nothing there. A parent always has a reading
+   * by then, since it launched the subagent from a message of its own.
+   */
+  private withRequest(m: Json, events: NormalizedEvent[], subagent: boolean): NormalizedEvent[] {
+    if (!subagent) {
+      this.lastTokens = readingOf(events) ?? this.lastTokens
+    }
+    const message = (m.message ?? {}) as Json
+    const id = str(message.id)
+    const usage = message.usage as Json | undefined
+    if (!id || !usage || this.requestsSeen.includes(id)) return events
+    this.requestsSeen.push(id)
+    if (this.requestsSeen.length > 32) this.requestsSeen.shift()
+    const request: RequestInput = {
+      inputTokens: Number(usage.input_tokens ?? 0),
+      cacheReadTokens: Number(usage.cache_read_input_tokens ?? 0),
+      cacheCreationTokens: Number(usage.cache_creation_input_tokens ?? 0),
+      ...(subagent ? { agent: str(m.parent_tool_use_id) } : {}),
+      ...ttlOf(usage.cache_creation),
+    }
+    if (subagent) {
+      return this.lastTokens ? [...events, { type: 'usage_update', sessionId: this.sessionId, tokens: this.lastTokens, request }] : events
+    }
+    return events.map((e) => (e.type === 'usage_update' ? { ...e, request } : e))
   }
 
   /** The adapter interrupted the turn (see `stopping` above). */
@@ -1135,6 +1197,9 @@ export class ClaudeStreamNormalizer {
         reasoningStreamed: this.reasoningStreamed,
       }),
     ]
+    if (type === 'assistant') events = this.withRequest(m, events, subagent)
+    // The turn's result is a running reading too: a subagent's request repeats whichever came last
+    else if (type === 'result' && !subagent) this.lastTokens = readingOf(events) ?? this.lastTokens
     if (subagent) return events
     events = this.followRetry(type, events)
     if (type === 'result' && this.refusal !== null) {

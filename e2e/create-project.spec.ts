@@ -57,6 +57,29 @@ test('New folder: another location is a full path, typed or chosen with the pick
   expect(await page.evaluate(() => (window as any).__mock.createProjectCalls)).toEqual([{ name: 'site', parent: '/Users/you/code' }])
 })
 
+/**
+ * The location comes from the host a moment after the dialog opens (the preview waits 150 ms for typing to pause).
+ * Change used to follow that text, so it jumped when the text arrived: a click on it as the dialog opened went down
+ * on the button and came up beside it, and the location stayed as it was (a WebKit CI run of the test above). The
+ * page's clock is held here, so the press starts before the text arrives and ends after it.
+ */
+test('New folder: a click on Change as the dialog opens still opens the location, though the location arrives mid-click', async ({ page }) => {
+  await page.clock.install()
+  await start(page)
+  await page.clock.pauseAt((await page.evaluate(() => Date.now())) + 1_000)
+  await page.getByTestId('create-project').click()
+  const dialog = page.getByTestId('create-project-dialog')
+  await expect(dialog.getByTestId('create-project-parent-shown')).toHaveText('…')
+  const box = (await dialog.getByTestId('create-project-change-parent').boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.clock.runFor(200)
+  await expect(dialog.getByTestId('create-project-parent-shown')).toHaveText('/Users/you/Centralu')
+  await page.mouse.up()
+  await expect(dialog.getByTestId('create-project-parent')).toHaveValue('/Users/you/Centralu')
+  await expect(dialog.getByTestId('create-project-pick-parent')).toBeVisible()
+})
+
 test("a linked Windows machine: Create a new folder is made by that machine's host, in its own ~/Centralu, in its own path terms", async ({ page }) => {
   await start(page)
   await page.evaluate(() => (window as any).__mock.machines.add({ name: 'Win', sshTarget: 'me@win', shell: 'powershell' }))
@@ -166,6 +189,25 @@ test('New folder: clone a repository — named after it, refused addresses said 
     name: '',
     source: { git: 'https://github.com/me/game.git', branch: 'dev' },
   })
+})
+
+test('create_project on a linked machine: the card names the machine whose disk the path is on (#82 phase 4)', async ({ page }) => {
+  await start(page)
+  await page.getByTestId('suggest-create-project').click()
+  await expect(page.getByTestId('msg-user').first()).toBeVisible()
+  const orc = await page.evaluate(() => (window as any).__store.getState().orchestratorId as string)
+  await page.evaluate(
+    (sid) =>
+      (window as any).__mock.requestApproval(sid, { kind: 'project_create', name: 'api', path: '/home/me/Centralu/api', machine: 'Ubuntu box' }, 'mk-4'),
+    orc,
+  )
+  const card = page.getByTestId('approval-card')
+  await expect(card.getByTestId('approval-detail')).toHaveText('Make a new project api on Ubuntu box?')
+  await expect(card.getByTestId('approval-machine')).toHaveText('Ubuntu box')
+  await expect(card.getByTestId('approval-path')).toHaveText('/home/me/Centralu/api')
+  // The conversation keeps the question with the machine in it, after the card is answered
+  await card.getByTestId('approve-deny').click()
+  await expect(page.getByText('Make the empty folder /home/me/Centralu/api on Ubuntu box and add it as the project api?')).toBeVisible()
 })
 
 test('create_project with git: the card names the repository, its branch and where it goes', async ({ page }) => {

@@ -72,7 +72,7 @@ type NormalizedEvent =
   // 세션 상태와 계기판
   | { type: 'turn_complete';    sessionId }
   | { type: 'state_change';     sessionId, state: SessionState, reason? }
-  | { type: 'usage_update';     sessionId, tokens: TokenUsage }
+  | { type: 'usage_update';     sessionId, tokens: TokenUsage, request?: RequestInput }  // request: 모델 요청 하나의 입력, 프롬프트 캐시용 (agent-host.ko.md §6.1)
   | { type: 'context_update';   sessionId, used, window, exactness: 'exact'|'estimate' }
   | { type: 'limit_reached';    sessionId, resumeAt?, usedPercent?, windowMins? }
   | { type: 'session_title';    sessionId, title, auto }        // auto=false: 사람이 지은 이름 — 자동 이름이 덮지 않는다
@@ -205,7 +205,7 @@ type ApprovalDetail =
 | git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | prod에서는 같은 계약을 Tauri invoke로 |
 | fs (dev) | `fs.listDir, fs.readFile, fs.watchProject` | 〃 |
 | store (dev) | `store.loadWorkspace, store.saveWorkspace, store.appendMessages, …` | 〃 |
-| usage | `agents.usage` | 계정의 한도 창, 도구 자신에게 묻는다 ([agent-host.ko.md](agent-host.ko.md) §6) |
+| usage | `agents.usage` | 계정의 한도 창, 도구 자신에게 묻는다. 호스트가 센 최근 몇 시간의 프롬프트 캐시도 함께 (`cache`, [agent-host.ko.md](agent-host.ko.md) §6, §6.1) |
 
 git/fs/store RPC의 요청·응답 타입은 **포트 인터페이스와 1:1**이다. 의도된 중복이다 — 포트가 원본 계약이고, RPC와 Tauri invoke는 그 계약을 실어 나르는 두 운반체일 뿐이다.
 

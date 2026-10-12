@@ -27,8 +27,10 @@ export type ImportMark = {
   /** Where it came from — exactly as shown to the person (a path or an https address) */
   source: string
   importedAt: number
-  /** The inode of the imported folder — the mark applies only while this is that folder */
+  /** Kept as a Number for older hosts during swaps and rollbacks (add first, remove later). */
   ino: number
+  /** Exact decimal file id; absent in records written by older hosts. */
+  inoExact?: string
   /** The record of the person enabling it — the server and uses seen at that time, and their key. Null if never enabled */
   confirmed: { key: string; at: number; server: AppManifest['server']; uses: AppManifest['uses'] } | null
 }
@@ -55,12 +57,12 @@ export class ImportBook {
     this.doc = this.read()
   }
 
-  /** The mark on this folder — null if it is not an imported app, or a different folder under the same id */
+  /** The mark on this folder — an uncertain legacy identity loses its confirmation, not its import mark. */
   get(appId: string, dir: string): ImportMark | null {
     const m = this.doc[appId]
     if (!m) return null
     try {
-      return statSync(dir).ino === m.ino ? m : null
+      return this.matchingMark(m, statSync(dir, { bigint: true }).ino.toString())
     } catch {
       return null
     }
@@ -68,15 +70,27 @@ export class ImportBook {
 
   /** Records that this was imported — recorded as disabled */
   mark(appId: string, dir: string, source: string, at = Date.now()): void {
-    this.doc[appId] = { source, importedAt: at, ino: statSync(dir).ino, confirmed: null }
+    const ino = statSync(dir, { bigint: true }).ino
+    // Keep the legacy number: the previous host compares statSync(dir).ino === m.ino.
+    // Replacing it with a string would drop the import mark and bypass that host's gate.
+    this.doc[appId] = { source, importedAt: at, ino: Number(ino), inoExact: ino.toString(), confirmed: null }
     this.write()
   }
 
   /** Records that the person enabled it — the declaration seen at that time, together with its key */
-  confirm(appId: string, manifest: Pick<AppManifest, 'server' | 'uses'>, at = Date.now()): void {
+  confirm(appId: string, dir: string, manifest: Pick<AppManifest, 'server' | 'uses'>, at = Date.now()): void {
     const m = this.doc[appId]
     if (!m) return
-    m.confirmed = { key: reviewKey(manifest), at, server: manifest.server, uses: manifest.uses }
+    const ino = statSync(dir, { bigint: true }).ino
+    if (!this.matchingMark(m, ino.toString())) throw new Error('This app folder changed since it was imported')
+    // Confirmation is an explicit write path: upgrade a legacy record only after a fresh
+    // review, without binding an uncertain identity or changing stored state during get().
+    this.doc[appId] = {
+      ...m,
+      ino: Number(ino),
+      inoExact: ino.toString(),
+      confirmed: { key: reviewKey(manifest), at, server: manifest.server, uses: manifest.uses },
+    }
     this.write()
   }
 
@@ -84,6 +98,15 @@ export class ImportBook {
     if (!(appId in this.doc)) return
     delete this.doc[appId]
     this.write()
+  }
+
+  private matchingMark(m: ImportMark, ino: string): ImportMark | null {
+    if (m.inoExact !== undefined) return ino === m.inoExact ? m : null
+    if (Number.isSafeInteger(m.ino)) return ino === m.ino.toString() ? m : null
+    // A rounded legacy id cannot prove this is the confirmed folder. Returning null
+    // would make AppHandover.gate trust it as a user-folder app. Preserve the import
+    // mark and require review; the stored record stays untouched until an explicit write.
+    return { ...m, confirmed: null }
   }
 
   private read(): Doc {

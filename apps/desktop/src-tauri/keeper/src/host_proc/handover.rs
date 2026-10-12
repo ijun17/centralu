@@ -196,6 +196,14 @@ impl LineGate {
         self.cv.notify_all();
     }
 
+    /// What the reader holds and whether a freeze has been asked for, so a test can wait for a
+    /// state instead of sleeping until it has probably been reached.
+    #[cfg(test)]
+    pub fn peek(&self) -> (Vec<u8>, bool) {
+        let st = self.st.lock().unwrap();
+        (st.buf.clone(), st.frozen)
+    }
+
     pub fn fd(&self) -> std::os::fd::BorrowedFd<'_> {
         use std::os::fd::AsFd;
         self.fd.as_fd()

@@ -121,10 +121,13 @@ describe('remote-install.mjs: the pointer files (plan §10.1, S11)', () => {
     dir = mkdtempSync(join(tmpdir(), 'cc-ptr-'))
     const file = join(dir, 'current')
     writeFileSync(file, '1.0.0 24.21.0\n')
-    const before = statSync(file).ino
+    const ino = () => statSync(file, { bigint: true }).ino
+    const before = ino()
     mod.writeAtomic(file, '1.0.1 24.21.0\n')
-    // A new inode: the reader had the old file whole, or has the new one whole
-    expect(statSync(file).ino).not.toBe(before)
+    // A new inode: the reader had the old file whole, or has the new one whole. Compared as
+    // bigints: an NTFS file id is above 2^53, and as Numbers the old file's id and the next one
+    // came out equal on Windows (#368, path-guard.ts)
+    expect(ino()).not.toBe(before)
     expect(readFileSync(file, 'utf8')).toBe('1.0.1 24.21.0\n')
     expect(readdirSync(dir)).toEqual(['current'])
   })

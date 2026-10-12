@@ -2,7 +2,7 @@ import { takeLaunchEnv } from './lifecycle/launch-env.js'
 import { StartSequence, refuse } from './lifecycle/start.js'
 import { parseArgs } from 'node:util'
 import { randomBytes } from 'node:crypto'
-import { homedir } from 'node:os'
+import { homedir, hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdirSync, writeSync } from 'node:fs'
 import { APP_VERSION, DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY, PROTOCOL_VERSION, RESERVED_APP_IDS, type NormalizedEvent } from '@cc/protocol'
@@ -42,6 +42,7 @@ import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
 import { bridgeAddress, ControlChannel, KEEPS_AGENTS_ACROSS_SWAP, onDrain, standby, viewPort } from './swap-control.js'
 import { installScript, remoteRuntime } from './links/install.js'
 import { Links } from './links/links.js'
+import { linkedSessions } from './links/linked-sessions.js'
 import { linkedViews } from './links/linked-views.js'
 import { Router } from './links/router.js'
 import { SshTunnel } from './links/tunnel.js'
@@ -429,9 +430,15 @@ const stopFromRequest = () => {
  * terminal there; every other call reaches the handler as before. With no machine linked it passes
  * everything through. The links start after listen (below), so a slow ssh never holds up the window.
  */
+/** This computer's name as a linked machine shows who sent its session an instruction (`MacBook-Pro`, not `.local`) */
+const hubName = (): string => hostname().replace(/\.local$/i, '') || 'a linked computer'
 const links = new Links({
   hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: BUILD === 'dev' },
-  broadcast: events.push,
+  // The orchestrator also hears a machine's events: a report it asked for waits on a turn there (#82 phase 4)
+  broadcast: (e) => {
+    events.push(e)
+    mgr.observeLinked(e)
+  },
   terminal: screens.push,
   mirror: storeMirror(store),
   registry: storeRegistry(store),
@@ -442,6 +449,8 @@ const links = new Links({
 mgr.useLinkedSessions((id) => links.knowsSession(id))
 // Grid panels of a linked machine's apps are kept while that machine, and a project app's project, are known (#82)
 mgr.useLinkedApps({ linked: (id) => links.linked(id), projectMachine: (id) => links.projectMachine(id) })
+// The orchestrator reaches every linked machine's sessions too, each through its own machine (#82 phase 4)
+mgr.useLinkedReader(linkedSessions(() => links.all(), (method, params) => router.handle(method, params), hubName()))
 /**
  * What is running right now, for the one idle rule (`hostBusy`, idle.ts). The keeper's idle exit,
  * the switch's question and applying an update when idle (#352) all read it through the activity

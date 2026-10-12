@@ -46,3 +46,23 @@ export function dedupeNearbyHits<T extends { sessionId: string; seq: number }>(h
   }
   return kept
 }
+
+/**
+ * Several ranked lists as one, taken one from each in turn, up to `limit` (#82 phase 4: the hub's own hits and each
+ * linked machine's). Ranks from two stores do not compare, so none is put above another; and appending would let the
+ * first list fill the limit before the others are heard.
+ */
+export function takeInTurns<T>(lists: readonly (readonly T[])[], limit: number): T[] {
+  const out: T[] = []
+  for (let i = 0; out.length < limit; i++) {
+    let any = false
+    for (const list of lists) {
+      if (i >= list.length) continue
+      any = true
+      out.push(list[i]!)
+      if (out.length >= limit) break
+    }
+    if (!any) break
+  }
+  return out
+}

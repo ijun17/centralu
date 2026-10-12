@@ -128,12 +128,20 @@ pub fn hide_console(cmd: &mut Command) {
 /// `kill(pid, 0)` alone succeeds on a zombie. A host handed over by the previous keeper is that
 /// keeper's child, not ours: when it died before that keeper reaped it, signal 0 kept saying it
 /// ran, so it was never seen as exited (no restart) and `Foreign::wait` sat out its 10 s.
+///
+/// The state is read before `kill` asks whether the pid exists, never after (#546). The other
+/// order took a zombie reaped between the two calls for a running process: `kill` found the
+/// zombie, then its state could no longer be read, so it was not a zombie. Once a process has
+/// ended, its state reads as a zombie or not at all, and a pid whose state is gone is gone for
+/// `kill` too, so the answer cannot turn from "ended" back to "alive".
 pub fn pid_alive(pid: u32) -> bool {
     let Some(target) = i32::try_from(pid).ok().filter(|&p| p > 0) else { return false };
+    if super::this_unix::is_zombie(pid) {
+        return false;
+    }
     // SAFETY: signal 0 only checks.
     let rc = unsafe { libc::kill(target, 0) };
-    let exists = rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
-    exists && !super::this_unix::is_zombie(pid)
+    rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 /// Whether the group a host led may still be signalled once the host itself has ended.
@@ -383,5 +391,44 @@ mod tests {
         let _ = child.wait();
         assert_eq!(sid, pid, "the child leads its own session");
         assert_ne!(sid, ours);
+    }
+
+    /// A process that has ended is never alive again, also while it is being reaped (#546). Here
+    /// a zombie is reaped while `pid_alive` asks about it, at a different moment each round. When
+    /// `kill(pid, 0)` came before the state, a zombie reaped between the two read as running: 1103
+    /// of 3000 rounds on macOS, and on Linux the member of a reaped host's group read as gone,
+    /// then as running, in `host_proc`'s test.
+    #[test]
+    fn a_zombie_reaped_while_it_is_checked_is_not_alive() {
+        use std::sync::{Arc, Barrier};
+        use std::time::{Duration, Instant};
+        let rounds = 300;
+        let mut alive_after_exit = 0;
+        for round in 0..rounds {
+            let mut child = Command::new("/bin/sh").args(["-c", "exit 0"]).spawn().unwrap();
+            let pid = child.id();
+            // SAFETY: info is a valid out-pointer; WNOWAIT leaves the zombie for the reaper below.
+            let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+            let rc = unsafe { libc::waitid(libc::P_PID, pid, &mut info, libc::WEXITED | libc::WNOWAIT) };
+            assert_eq!(rc, 0, "waitid: {}", io::Error::last_os_error());
+            let start = Arc::new(Barrier::new(2));
+            let reaper = {
+                let start = start.clone();
+                // Spread the reaping over the checks below: 0 to 49 µs after they begin.
+                let delay = Duration::from_micros(round % 50);
+                std::thread::spawn(move || {
+                    start.wait();
+                    let from = Instant::now();
+                    while from.elapsed() < delay {}
+                    child.wait().unwrap();
+                })
+            };
+            start.wait();
+            if (0..40).any(|_| pid_alive(pid)) {
+                alive_after_exit += 1;
+            }
+            reaper.join().unwrap();
+        }
+        assert_eq!(alive_after_exit, 0, "an ended process read as alive in {alive_after_exit} of {rounds} rounds");
     }
 }

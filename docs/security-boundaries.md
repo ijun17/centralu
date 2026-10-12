@@ -794,8 +794,13 @@ else's code that will run as the user. It gets its own confirmation, separate fr
   E-3)").
 - **The confirmation is held by the host and bound to what was seen.** It lives in
   `app-imports.json` (0600) in the data folder, not in the app folder, so neither the app's code nor
-  an archive can supply it. It is bound to the folder's inode and records a hash of the manifest's
-  `server` and `uses`. Enabling sends back the key of the review the person saw, and the host
+  an archive can supply it. It is bound to the folder's exact file id (bigint stat, persisted as
+  the decimal string `inoExact`). Numeric `ino` is kept for older hosts during swaps and rollbacks
+  until a later release can remove it ("add first, remove later"). The new host compares `inoExact`
+  when present. Legacy numeric ids below 2^53 still match exactly; unsafe numeric ids keep their
+  import mark but require fresh review. Lookups are read-only; importing or confirming explicitly
+  writes both fields. The mark records a hash of the manifest's `server` and `uses`. Enabling sends
+  back the key of the review the person saw, and the host
   compares it with the manifest at that moment, so what was reviewed is what is enabled. A later
   change to `server` or `uses` (an editor, the builder, a restored version) asks again
   (`import-book.ts`, `handover.ts`; "a changed command blocks calls, and the confirmation dialog

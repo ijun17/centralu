@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { ORCHESTRATOR_ROLE, orchestratorHome } from './orchestrator-home.js'
-import { dedupeNearbyHits, windowAround } from './snippet.js'
+import { dedupeNearbyHits, takeInTurns, windowAround } from './snippet.js'
 import { profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
@@ -9,6 +9,7 @@ import { SessionAppsHub } from './session-apps.js'
 import { AppAccess, writeShared } from './app-access.js'
 import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, BrokerHost, CapabilityQuestion, ExternalApps, HostCapability } from '../apps/external/runtime.js'
 import { AgentRunWait, finalAnswer } from './app-agents.js'
+import { CacheLedger } from './cache-ledger.js'
 import { ASK_WAIT_MS, askFrame, clipAnswer, pathsIn, readableGrants, taskLine, underGrant } from './ask-project.js'
 import { builderRole } from './app-builder.js'
 import { remember } from './folder-cache.js'
@@ -20,6 +21,8 @@ import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { existsSync, rmSync, statSync } from 'node:fs'
 import { exec } from 'node:child_process'
 import type {
+  CacheStats,
+  RebuildCause,
   AppQuestion,
   AppReach,
   ApprovalDetail,
@@ -68,7 +71,7 @@ import {
   sessionLiveDefaults,
   withoutToolRecord,
 } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, AgentSpawnSpec, AskProjectResult, CreateSessionOpts, EventSink, OrchestratorTools, HistoryMessage, ProcessSource, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, AskProjectResult, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, HistoryMessage, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
 
 /**
  * Where agent processes live when not with this host (#280 step 2 — the keeper). `spawn` starts a
@@ -293,6 +296,20 @@ const inTurn = (state: SessionState): boolean => state === 'working' || state ==
  * mean the list was truncated (externalGone) */
 const EXTERNAL_LIST_LIMIT = 200
 
+/**
+ * The most a hub's orchestrator reads of this host in one call (`hostReader`, #82 phase 4): lines of one conversation
+ * and hits of one search. Five times the tools' defaults (40 and 12), so no read a model makes is cut, while one call
+ * cannot ask for a whole store over the link
+ */
+const HOST_READ_MAX_LINES = 200
+const HOST_RECALL_MAX_HITS = 50
+
+/**
+ * The sender a hub's orchestrator's instruction is recorded under (`sendFromHub`). Not a session of this host: no id
+ * this host makes starts with `_`. The window shows only the sender's name; the id is what the injection gate reads
+ */
+const HUB_SENDER = '_hub-orchestrator'
+
 /** Key for the builder-session directory (APP_BUILDERS_KEY) — an app is identified by (project, id) */
 const builderKey = (ref: AppRef): string => `${ref.projectId ?? '_user'}/${ref.appId}`
 
@@ -378,6 +395,10 @@ export class SessionManager {
   private externalIndex = new Map<string, { ids: Map<string, number>; complete: boolean; at: number }>()
   /** Usage cache — do not spin up the tool every time the modal opens and closes */
   private usageCache = new Map<ToolName, { snapshot: UsageSnapshot; at: number }>()
+  /** Every model request's cache figures over the last day, per tool (docs/agent-host.md §6.1); read by `usageFor` */
+  private readonly cacheLedger = new CacheLedger()
+  /** Why a session's process is being restarted, for the cache's rebuild cause; taken when the new process comes up */
+  private readonly restartReasons = new Map<string, RebuildCause>()
   /** Session asked to be reported on completion -> orchestrator to notify (removed once notified) */
   private awaitingReport = new Map<string, string>()
   /**
@@ -881,6 +902,34 @@ export class SessionManager {
   }
 
   /**
+   * The orchestrator's create_project on a linked machine (#82 phase 4): the same card as here, naming the machine,
+   * with the path that machine would make (`projects.createPreview` there, in its own path terms); on Create, the
+   * machine makes and registers it (`projects.create` there). Nothing is made on either machine before the answer.
+   */
+  private async createProjectOnMachine(
+    sessionId: string,
+    reader: LinkedSessions,
+    machine: { id: string; name: string },
+    spec: { name: string; parent?: string; source?: GitSource },
+    signal?: AbortSignal,
+  ): Promise<{ ok: true; projectId: string; name: string; path: string; machine: string } | { ok: false; error: string }> {
+    const preview = await reader.previewProject(machine.id, spec)
+    if (!preview.ok) return preview
+    const decision = await this.askHost(
+      sessionId,
+      { kind: 'project_create', name: preview.name, path: preview.path, ...(spec.source ? { source: spec.source } : {}), machine: machine.name },
+      signal,
+    )
+    if (decision === 'deny') return { ok: false, error: 'The person did not approve it. Do not ask again unless they tell you to.' }
+    if (decision === null) return { ok: false, error: 'The card was withdrawn before the person answered, so nothing was made.' }
+    if (spec.source) {
+      this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'cloning', text: `Cloning ${spec.source.git} into ${preview.path} on ${machine.name}…` })
+    }
+    const made = await reader.createProject(machine.id, spec)
+    return made.ok ? { ...made, machine: machine.name } : made
+  }
+
+  /**
    * Deletes a project (this is a **delete**, not an unregister).
    *
    * Files are left untouched — removing a folder only ever happens through the OS trash, and that
@@ -1168,6 +1217,88 @@ export class SessionManager {
 
   useLinkedApps(lookup: { linked(machine: string): boolean; projectMachine(projectId: string): string | null }): void {
     this.linkedApps = lookup
+  }
+
+  /** The linked machines' sessions, for the central orchestrator's reading tools (#82 phase 4). None without links */
+  private linkedReader: LinkedSessions | null = null
+
+  useLinkedReader(reader: LinkedSessions): void {
+    this.linkedReader = reader
+  }
+
+  /**
+   * A linked machine's sessions whose turn the orchestrator asked to hear about (`reportBack`, #82 phase 4), by
+   * qualified id. `busy` is whether that turn was seen working yet, so a state the machine reports before the turn
+   * starts (the session waking) is not taken for its end.
+   */
+  private linkedReports = new Map<string, { orchestratorId: string; busy: boolean }>()
+
+  /**
+   * A linked machine's event, as the hub relays it to its windows (qualified, links.ts). The end of a turn the
+   * orchestrator is waiting on becomes its report, as `reportBackIfAwaited` does for this host's sessions: on
+   * however the turn ended (#166), once, and then the watch is cleared.
+   */
+  observeLinked(e: { type: string; sessionId?: unknown; state?: unknown; error?: { message?: string } }): void {
+    if (typeof e.sessionId !== 'string') return
+    const wait = this.linkedReports.get(e.sessionId)
+    if (!wait) return
+    const busy = e.state === 'working' || e.state === 'waiting_approval'
+    if (e.type === 'message_delta' || e.type === 'tool_call' || e.type === 'approval_request' || (e.type === 'state_change' && busy)) {
+      wait.busy = true
+      return
+    }
+    const ended =
+      e.type === 'turn_complete' || e.type === 'error' || e.type === 'limit_reached' || (e.type === 'state_change' && wait.busy && !busy)
+    if (!ended) return
+    this.linkedReports.delete(e.sessionId)
+    void this.reportLinked(e.sessionId, wait.orchestratorId, e)
+  }
+
+  private async reportLinked(sessionId: string, orchestratorId: string, ending: { type: string; error?: { message?: string } }): Promise<void> {
+    const reader = this.linkedReader
+    if (!reader || !this.meta.has(orchestratorId)) return
+    const about = reader.describe(sessionId) ?? { name: sessionId, project: '(unknown)' }
+    const preview = await reader.lastWords(sessionId, 600).catch(() => '')
+    await this.deliverReport(orchestratorId, sessionId, about.name, about.project, preview, ending as Pick<NormalizedEvent, 'type'>)
+  }
+
+  /**
+   * What this host answers a hub's orchestrator about its own sessions (`host.sessions`, `host.readSession`,
+   * `host.recall`; docs/plans/remote-hub.md §12). The orchestrator's own code, over the view a hub's window has of this
+   * host: no calling session, and this host's orchestrator and coordinators left out (§3.4), so the hub's orchestrator
+   * reads what the hub shows and no more. Bounded per call, since the caller is another machine.
+   */
+  /**
+   * A hub's orchestrator's instruction to one of this host's sessions (`host.send`, #82 phase 4 step 2). Delivered as
+   * `send_to_session` delivers one here, recorded as sent by `fromName`, to a session a hub is shown and no other.
+   *
+   * It stays an instruction, not someone else's words (#120): the hub holds this host's token, so it could send the
+   * same text as the person; marking it as a relay would only hide the words from a manager it was meant for.
+   */
+  async sendFromHub(sessionId: string, text: string, fromName: string): Promise<void> {
+    const target = this.meta.get(sessionId)
+    if (!target || target.kind === 'orchestrator' || target.kind === 'coordinator') {
+      throw Object.assign(new Error(`Not a session this machine shares: ${sessionId}`), { code: 'session_not_found' })
+    }
+    const name = fromName.replace(/\s+/g, ' ').trim().slice(0, 120) || 'Orchestrator on a linked computer'
+    await this.send(sessionId, text, undefined, { sessionId: HUB_SENDER, name })
+  }
+
+  hostReader(): {
+    sessions(): Promise<OrchestratedSession[]>
+    read(sessionId: string, limit?: number, opts?: { around?: number; tools?: boolean }): Promise<{ state: string; lines: string[] }>
+    recall(query: string, limit?: number): Promise<RecallHit[]>
+  } {
+    const view = this.orchestratorToolsFor('', undefined, undefined, undefined, true)
+    return {
+      sessions: () => view.listSessions(),
+      read: async (sessionId, limit, opts) => {
+        const r = await view.readSession(sessionId, Math.min(limit ?? 40, HOST_READ_MAX_LINES), opts)
+        if (!r.ok) throw Object.assign(new Error(r.error ?? 'Could not read it'), { code: 'internal' })
+        return { state: r.state ?? 'idle', lines: r.lines ?? [] }
+      },
+      recall: async (query, limit) => (await view.recall(query, Math.min(limit ?? 12, HOST_RECALL_MAX_HITS))).hits,
+    }
   }
 
   async listProjects(): Promise<ProjectInfo[]> {
@@ -1587,6 +1718,8 @@ export class SessionManager {
       }
     }
     this.handles.set(id, handle)
+    // The cache's first request (§6.1): a new conversation, or one taken over from outside in a new process
+    this.cacheLedger.note(id, params.resumeExternalId ? 'new_process' : 'cold_start')
     this.running.set(id, {
       model: info.model,
       effort: info.effort,
@@ -2214,6 +2347,9 @@ export class SessionManager {
         return { session: m, resumed: false, reason: leaving }
       }
       this.handles.set(sessionId, handle)
+      // Why the process came up again, if a restart said so; a wake, a revive or a manual restart otherwise (§6.1)
+      this.cacheLedger.note(sessionId, this.restartReasons.get(sessionId) ?? 'new_process')
+      this.restartReasons.delete(sessionId)
       this.running.set(sessionId, launched)
       handle.applyRules?.(this.rulesFor(sessionId, m.projectId))
       // The identifier may only now be available — record it for the next resume
@@ -2696,6 +2832,13 @@ export class SessionManager {
    * Changes model or permissions (FR-7). If the adapter supports it, it applies starting next turn;
    * if not, only the metadata is updated — it comes up with the new configuration on resume.
    */
+  /** A settings restart is a model change when the model is what drifted (§6.1); otherwise a plain new process */
+  private restartCause(sessionId: string): RebuildCause | undefined {
+    const live = this.running.get(sessionId)
+    const m = this.meta.get(sessionId)
+    return live && m && live.model !== m.model ? 'model_change' : undefined
+  }
+
   async updateSettings(
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
@@ -2703,6 +2846,8 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
+    // Another model reads none of this one's cache (§6.1), whether it applies live or through a restart
+    if (s.model !== undefined && s.model !== m.model) this.cacheLedger.note(sessionId, 'model_change')
     if (s.model !== undefined) m.model = s.model
     if (s.effort !== undefined) m.effort = s.effort
     if (s.verbosity !== undefined) m.verbosity = s.verbosity
@@ -2766,7 +2911,7 @@ export class SessionManager {
         this.restartAfterTurn.add(sessionId)
         applied = 'after_turn'
       } else {
-        applied = (await this.restartSession(sessionId)).resumed ? 'restarted' : 'saved'
+        applied = (await this.restartSession(sessionId, this.restartCause(sessionId))).resumed ? 'restarted' : 'saved'
       }
     }
 
@@ -2939,7 +3084,9 @@ export class SessionManager {
     if (endedTurn && e.sessionId && this.restartAfterTurn.delete(e.sessionId)) {
       // An app attached or detached in this turn (#371 part A) is a reason of its own, settings or not
       const apps = this.appsRestartAfterTurn.delete(e.sessionId)
-      if ((apps || this.settingsDrifted(e.sessionId)) && this.handles.has(e.sessionId)) void this.restartSession(e.sessionId).catch(() => {})
+      if ((apps || this.settingsDrifted(e.sessionId)) && this.handles.has(e.sessionId)) {
+        void this.restartSession(e.sessionId, apps ? 'thread_restart' : this.restartCause(e.sessionId)).catch(() => {})
+      }
     }
   }
 
@@ -2972,7 +3119,18 @@ export class SessionManager {
     const project = target.projectId
       ? (this.store.listProjects().find((p) => p.id === target.projectId)?.name ?? '(project no longer exists)')
       : '(none)'
-    const preview = previewOf(this.store, sessionId, 600)
+    await this.deliverReport(orchestratorId, sessionId, target.name, project, previewOf(this.store, sessionId, 600), ending)
+  }
+
+  /** Reports the end of a turn the orchestrator asked to hear about, as one message in its session (#166) */
+  private async deliverReport(
+    orchestratorId: string,
+    sessionId: string,
+    name: string,
+    project: string,
+    preview: string,
+    ending: Pick<NormalizedEvent, 'type'> & { error?: { message?: string } },
+  ): Promise<void> {
     /*
      * How it ended is stated on the first line (#166) — writing a failed run as "it finished" makes
      * both the person and the orchestrator read it as a success. On failure, the error message is
@@ -2983,12 +3141,12 @@ export class SessionManager {
       : ending.type === 'limit_reached' ? `[Centralu] The assigned work stopped after hitting a usage limit.\n`
       : ending.type === 'turn_complete' ? `[Centralu] The assigned work finished.\n`
       : `[Centralu] The assigned work stopped before finishing.\n`
-    const failure = ending.type === 'error' ? `Error: ${ending.error.message.slice(0, 600)}\n\n` : ''
+    const failure = ending.type === 'error' ? `Error: ${String(ending.error?.message ?? '').slice(0, 600)}\n\n` : ''
     try {
       await this.deliver(
         orchestratorId,
         outcome +
-          `Session: ${frameField(target.name)}\n` +
+          `Session: ${frameField(name)}\n` +
           `id: ${sessionId}\n` +
           `Project: ${frameField(project)}\n\n` +
           failure +
@@ -2997,7 +3155,7 @@ export class SessionManager {
         undefined,
         // A report is not the person's own words either (FR-11) — the reporting session is tagged as its
         // source
-        { sessionId, name: target.name },
+        { sessionId, name },
         true,
       )
     } catch {
@@ -3073,6 +3231,7 @@ export class SessionManager {
         break
       case 'usage_update':
         m.usage = e.tokens
+        if (e.request) this.cacheLedger.record(m.tool, m.id, e.request)
         break
       case 'context_update':
         m.context = { used: e.used, window: e.window, exactness: e.exactness }
@@ -3080,6 +3239,11 @@ export class SessionManager {
       case 'conversation_reset':
         // The old conversation's reading no longer describes anything (#304); the tool reports the new one when the turn ends
         m.context = null
+        this.cacheLedger.note(m.id, 'compaction')
+        break
+      case 'compaction':
+        // The conversation the next request sends begins with a summary the cache has never seen (§6.1)
+        this.cacheLedger.note(m.id, 'compaction')
         break
       case 'goal':
         // The goal (2026-09-07) is a live field too — after a restart, the tool tells us again (codex fetches
@@ -3219,6 +3383,8 @@ export class SessionManager {
     const m = this.meta.get(e.sessionId)
     if (!m) return
     const live = this.running.get(e.sessionId)
+    // The tool switched models by itself (a refusal's fallback, #304): the next request reads none of the cache
+    if (e.model !== undefined && e.model !== (live ?? m).model) this.cacheLedger.note(e.sessionId, 'model_change')
     let changed = false
     for (const k of ['model', 'effort', 'verbosity', 'serviceTier'] as const) {
       const v = e[k]
@@ -3483,7 +3649,8 @@ export class SessionManager {
      */
     const adapterText =
       fromApp ? appMessageFrame(fromApp, text, fromAppVia)
-      : from && (relayed || (this.directs(sessionId) && !this.directs(from.sessionId)))
+      // A hub's orchestrator directs as this host's own does (`sendFromHub`)
+      : from && (relayed || (this.directs(sessionId) && !this.directs(from.sessionId) && from.sessionId !== HUB_SENDER))
         ? untrustedSourceSessionNotification(from.sessionId)
         : attachments?.length
           ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
@@ -3806,19 +3973,26 @@ export class SessionManager {
    * Cached briefly — spinning up a codex app-server every time the modal opens and closes would be
    * slow. Never throws on failure: failing to see usage is no reason to block the conversation.
    */
-  async usageFor(tool: ToolName): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null }> {
+  async usageFor(
+    tool: ToolName,
+  ): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null; cache: CacheStats }> {
+    /*
+     * The cache figures are summed now, on the question, from what this host counted: a sum over a day's requests at
+     * most, cheap next to the tool call below, and nothing is kept up to date while nobody asks.
+     */
+    const cache = this.cacheLedger.stats(tool, (id) => this.meta.get(id)?.name)
     const adapter = this.adapters.get(tool)
-    if (!adapter?.listUsage) return { supported: false, reason: `${tool} does not support usage queries`, usage: null }
+    if (!adapter?.listUsage) return { supported: false, reason: `${tool} does not support usage queries`, usage: null, cache }
 
     const hit = this.usageCache.get(tool)
-    if (hit && Date.now() - hit.at < 60_000) return { supported: true, usage: hit.snapshot }
+    if (hit && Date.now() - hit.at < 60_000) return { supported: true, usage: hit.snapshot, cache }
 
     try {
       const snapshot = await withTimeout(adapter.listUsage(), 15_000)
       this.usageCache.set(tool, { snapshot, at: Date.now() })
-      return { supported: true, usage: snapshot }
+      return { supported: true, usage: snapshot, cache }
     } catch (err) {
-      return { supported: false, reason: (err as Error).message, usage: hit?.snapshot ?? null }
+      return { supported: false, reason: (err as Error).message, usage: hit?.snapshot ?? null, cache }
     }
   }
 
@@ -4412,7 +4586,12 @@ export class SessionManager {
    * Creating a new session when a tool has become unresponsive breaks the conversation — this swaps only the
    * process.
    */
-  async restartSession(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
+  async restartSession(
+    sessionId: string,
+    /** What made the restart, for the cache's rebuild cause (§6.1); a plain new process when absent */
+    cause?: RebuildCause,
+  ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
+    if (cause) this.restartReasons.set(sessionId, cause)
     // Applying a deferred settings change (#164) is also done by this same restart, and so is an app set's (#371)
     this.restartAfterTurn.delete(sessionId)
     this.appsRestartAfterTurn.delete(sessionId)
@@ -4484,8 +4663,27 @@ export class SessionManager {
    * files, or a project directory — not because a blocking rule was written for it, but because that
    * is the entire extent of what it can see.
    */
-  private orchestratorToolsFor(orchestratorId: string, childrenOf?: string, scopeIds?: string[], ownProject?: boolean): OrchestratorTools {
+  private orchestratorToolsFor(
+    orchestratorId: string,
+    childrenOf?: string,
+    scopeIds?: string[],
+    ownProject?: boolean,
+    /** A hub's view of this host (`hostReader`, #82 phase 4): what its window shows, with no calling session */
+    hubView?: boolean,
+  ): OrchestratorTools {
     const projects = () => new Map(this.store.listProjects().map((p) => [p.id, p.name]))
+    /*
+     * The central orchestrator alone reads the linked machines too (#82 phase 4): a manager, a lead and an ordinary
+     * session each have a view inside one machine. Asked when the call runs, as the links are wired after a session
+     * may already have started.
+     */
+    const central = childrenOf === undefined && scopeIds === undefined && !ownProject && !hubView
+    const linked = () => (central ? this.linkedReader : null)
+    /** The links, when this id names a linked machine's session and this seat reaches the machines */
+    const remoteOf = (id: string) => {
+      const reader = linked()
+      return reader?.machineOf(id) ? reader : null
+    }
     /**
      * There are only two possible views. The **central orchestrator** sees everything, and a
      * **worktree manager** (#69) sees only its own children. The set of children is evaluated at
@@ -4505,17 +4703,20 @@ export class SessionManager {
       // Coordinator session (#80, #81): the allow list is its entire view
       : scopeIds !== undefined ? scopeIds.includes(s.id)
       : ownProject ? (ownProjectId() !== null && s.projectId === ownProjectId())
+      // What a hub's window shows of this host: never its orchestrator or coordinators (remote-hub.md §3.4)
+      : hubView ? s.kind !== 'orchestrator' && s.kind !== 'coordinator'
       : true
     const scopeError = (id: string) =>
       childrenOf !== undefined ? `Not a worktree session of this manager: ${id}`
       : scopeIds !== undefined ? `Not a member of this coordinating session: ${id}`
       : ownProject ? `Not a session in this project: ${id}`
+      : hubView ? `Not a session this machine shares: ${id}`
       : `Not a session this app manages: ${id}`
 
     return {
       listSessions: async () => {
         const byId = projects()
-        return [...this.meta.values()]
+        const mine: OrchestratedSession[] = [...this.meta.values()]
           // Excludes itself — instructing itself would create a loop
           .filter((s) => s.id !== orchestratorId && inScope(s))
           .map((s) => ({
@@ -4531,6 +4732,8 @@ export class SessionManager {
             preview: previewOf(this.store, s.id),
             lastActive: lastActiveOf(this.store, s.id),
           }))
+        const reader = linked()
+        return reader ? [...mine, ...(await reader.list())] : mine
       },
 
       updateSessionSettings: async (sessionId, s) => {
@@ -4538,6 +4741,14 @@ export class SessionManager {
           // Changing its own settings restarts its own process — that would be suicide in the middle of a
           // tool call
           return { ok: false, error: 'The person changes its own settings' }
+        }
+        const remote = remoteOf(sessionId)
+        if (remote) {
+          // Changed there, through the router, as the window's own call would (#82 phase 4); the trace is the same
+          const r = await remote.updateSettings(sessionId, s)
+          if (!r.ok) return r
+          this.emit({ type: 'settings_changed', sessionId, model: r.info.model, effort: r.info.effort, verbosity: r.info.verbosity, serviceTier: r.info.serviceTier })
+          return { ok: true, ...(r.info.applied === 'after_turn' ? { deferred: true } : {}) }
         }
         const target = this.meta.get(sessionId)
         if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
@@ -4571,7 +4782,28 @@ export class SessionManager {
 
       createSession: async (opts) => {
         const all = this.store.listProjects()
-        const project = all.find((p) => p.id === opts.project || p.name === opts.project)
+        const local = all.filter((p) => p.id === opts.project || p.name === opts.project)
+        // A linked machine's project, by its name or qualified id (#82 phase 4). Asked only when links exist
+        const reader = linked()
+        const remote = reader && opts.project ? await reader.findProjects(opts.project) : []
+        if (local.length + remote.length > 1) {
+          // One name on two machines: guessing would start the work on the wrong disk
+          const named = [
+            ...local.map((p) => `${p.name} [${p.id}] on this computer`),
+            ...remote.map((p) => `${p.name} [${p.id}] on ${p.machine}`),
+          ]
+          return { ok: false, error: `More than one project is called that; give its id: ${named.join('; ')}` }
+        }
+        if (reader && remote[0]) {
+          const r = await reader.createSession(remote[0], { tool: opts.tool, name: opts.name })
+          if (!r.ok) return r
+          if (opts.firstMessage) {
+            const sent = await reader.send(r.sessionId, opts.firstMessage, this.meta.get(orchestratorId)?.name ?? 'Orchestrator')
+            if (!sent.ok) return { ok: false, error: `Created ${r.sessionId} on ${remote[0].machine}, but the first instruction did not go: ${sent.error}` }
+          }
+          return { ok: true, sessionId: r.sessionId, name: r.name }
+        }
+        const project = local[0]
         if (!project) {
           return {
             ok: false,
@@ -4604,14 +4836,9 @@ export class SessionManager {
           // an echo
           return s && s.id !== orchestratorId && inScope(s)
         })
-        const out: {
-          sessionId: string
-          session: string
-          project: string
-          snippet: string
-          seq: number
-          at?: string
-        }[] = []
+        const out: RecallHit[] = []
+        // Asked at once, while this host's own search runs: each machine is a round trip
+        const remote = linked()?.recall(query, limit)
         for (const h of dedupeNearbyHits(mine)) {
           const s = this.meta.get(h.sessionId)!
           out.push({
@@ -4626,12 +4853,21 @@ export class SessionManager {
           })
           if (out.length >= limit) break
         }
-        return { hits: out }
+        if (!remote) return { hits: out }
+        /*
+         * Each machine's hits in its own rank, taken in turns with this host's (#82 phase 4): ranks from two stores
+         * do not compare, and appending would let the first source fill the limit before another is heard
+         */
+        const { hits, notSearched } = await remote
+        return { hits: takeInTurns([out, ...hits], limit), ...(notSearched.length ? { notSearched } : {}) }
       },
 
       readSession: async (sessionId, limit = 40, opts) => {
         // The scope check follows the same rule as sendToSession — only a session within its own scope
         if (sessionId === orchestratorId) return { ok: false, error: 'Does not read itself' }
+        // A linked machine's session is read there, by the machine that holds it (#82 phase 4)
+        const reader = linked()
+        if (reader?.machineOf(sessionId)) return reader.read(sessionId, limit, opts)
         const target = this.meta.get(sessionId)
         if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
 
@@ -4717,6 +4953,25 @@ export class SessionManager {
          */
         if (sessionId === orchestratorId) {
           return { ok: false, error: 'Cannot send to itself' }
+        }
+        const remote = remoteOf(sessionId)
+        if (remote) {
+          /*
+           * A linked machine's session (#82 phase 4): delivered there as an instruction from this orchestrator, under
+           * that session's own approval settings. The report is watched for before the send, since the machine's first
+           * events can reach this hub before its answer does.
+           */
+          const earlier = this.linkedReports.get(sessionId)
+          if (reportBack) this.linkedReports.set(sessionId, { orchestratorId, busy: false })
+          const r = await remote.send(sessionId, text, this.meta.get(orchestratorId)?.name ?? 'Orchestrator')
+          if (!r.ok) {
+            if (earlier) this.linkedReports.set(sessionId, earlier)
+            else this.linkedReports.delete(sessionId)
+            return r
+          }
+          // As here (#166): a new instruction without a report replaces this orchestrator's earlier request
+          if (!reportBack && earlier?.orchestratorId === orchestratorId) this.linkedReports.delete(sessionId)
+          return { ok: true }
         }
         const target = this.meta.get(sessionId)
         if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
@@ -4829,7 +5084,17 @@ export class SessionManager {
       proposeSkill: async (spec) => this.proposals.proposeSkill(spec),
 
       // A new project (#515) — made only once the person approves the card this raises in the orchestrator's own slot
-      createProject: async (spec, signal) => this.createProjectAsked(orchestratorId, { name: spec.name, parent: spec.parent, source: spec.source }, signal),
+      createProject: async (spec, signal) => {
+        const reader = linked()
+        if (spec.machine && reader) {
+          const machine = reader.machineNamed(spec.machine)
+          if (machine) return this.createProjectOnMachine(orchestratorId, reader, machine, { name: spec.name, parent: spec.parent, source: spec.source }, signal)
+          if (!/^this computer$/i.test(spec.machine.trim())) return { ok: false, error: `No linked machine is called ${spec.machine}; leave machine out for this computer` }
+        } else if (spec.machine && !/^this computer$/i.test(spec.machine.trim())) {
+          return { ok: false, error: 'No machine is linked to this computer; leave machine out' }
+        }
+        return this.createProjectAsked(orchestratorId, { name: spec.name, parent: spec.parent, source: spec.source }, signal)
+      },
 
       // Checks its own app (C-3) — which app it is is decided by the calling session. Refused if it is not a
       // builder session (the directory has changed)
@@ -5674,7 +5939,7 @@ export class SessionManager {
    * immediately */
   private async restartOrchestrator(): Promise<void> {
     const orch = [...this.meta.values()].find((m) => m.kind === 'orchestrator')
-    if (orch) await this.restartSession(orch.id).catch(() => {})
+    if (orch) await this.restartSession(orch.id, 'instructions').catch(() => {})
   }
 
   /** The person's answer to an MCP server proposal — if approved, it becomes a user-folder app and the
@@ -5852,13 +6117,17 @@ export class SessionManager {
     this.appsHub?.sessionAppsChanged(sessionId)
     const handle = this.handles.get(sessionId)
     if (!handle) return 'next_turn'
-    if (!handle.appAttachment) return 'now'
+    // Claude takes the new tools at once, and a changed tool list is a changed prompt (§6.1)
+    if (!handle.appAttachment) {
+      this.cacheLedger.note(sessionId, 'instructions')
+      return 'now'
+    }
     const m = this.meta.get(sessionId)
     if (m && inTurn(m.state)) {
       this.restartAfterTurn.add(sessionId)
       this.appsRestartAfterTurn.add(sessionId)
     } else {
-      void this.restartSession(sessionId).catch(() => {})
+      void this.restartSession(sessionId, 'thread_restart').catch(() => {})
     }
     return 'next_turn'
   }

@@ -1,15 +1,31 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AppReview, ExternalAppInfo } from '@cc/protocol'
 import { MANIFEST_FILE, MANIFEST_VERSION } from './manifest.js'
 import { ExternalApps, type AppRef } from './runtime.js'
 import { STAGING_REL, type HandoverOptions } from './handover.js'
-import { IMPORTS_FILE } from './import-book.js'
+import { IMPORTS_FILE, ImportBook, reviewKey } from './import-book.js'
 import { until } from './test-helpers.js'
 import { makeZip } from './zip.test-helpers.js'
+
+const fileIds = vi.hoisted(() => new Map<string, bigint>())
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return {
+    ...actual,
+    statSync: (path: string, options?: { bigint?: boolean }) => {
+      const st = actual.statSync(path, options as never)
+      const id = fileIds.get(path)
+      // Simulate Node's rounded Number and exact bigint views of a Windows file id.
+      if (id !== undefined) (st as { ino: number | bigint }).ino = options?.bigint ? id : Number(id)
+      return st
+    },
+  }
+})
 
 /**
  * Importing (M4 E-3) — a real folder, a real zip, a real app process (env-app.mjs). Only the download
@@ -88,8 +104,122 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  fileIds.clear()
   await rt?.dispose()
   rmSync(root, { recursive: true, force: true })
+})
+
+describe('the import book keeps exact folder identities', () => {
+  const declaration = { server: { command: 'node', args: ['server.mjs'] }, uses: {} }
+
+  it('persists a file id above 2^53 as a decimal string and reloads its confirmation', () => {
+    const dir = plantSource('notes-src', 'notes')
+    const id = (1n << 60n) + 1n
+    fileIds.set(dir, id)
+    const book = new ImportBook(dataRoot)
+    book.mark('notes', dir, dir, 10)
+    book.confirm('notes', dir, declaration, 20)
+
+    expect(JSON.parse(readFileSync(join(dataRoot, IMPORTS_FILE), 'utf8')).notes).toMatchObject({
+      ino: Number(id), inoExact: id.toString(),
+    })
+    expect(new ImportBook(dataRoot).get('notes', dir)).toMatchObject({
+      ino: Number(id), inoExact: id.toString(),
+      confirmed: { key: reviewKey(declaration), at: 20 },
+    })
+  })
+
+  it('a different folder cannot inherit confirmation when both file ids round to the same Number', () => {
+    const dir = plantSource('notes-src', 'notes')
+    const replacement = plantSource('replacement', 'notes')
+    const id = (1n << 60n) + 1n
+    const replacementId = id + 1n
+    expect(Number(id)).toBe(Number(replacementId))
+    fileIds.set(dir, id)
+    fileIds.set(replacement, replacementId)
+    const book = new ImportBook(dataRoot)
+    book.mark('notes', dir, dir)
+    book.confirm('notes', dir, declaration)
+
+    const reloaded = new ImportBook(dataRoot)
+    expect(reloaded.get('notes', dir)?.confirmed?.key).toBe(reviewKey(declaration))
+    expect(reloaded.get('notes', replacement)).toBeNull()
+    expect(() => reloaded.confirm('notes', replacement, declaration)).toThrow('folder changed')
+  })
+
+  it('legacy numeric file ids keep confirmation only below 2^53 and can be reviewed again otherwise', () => {
+    const dir = plantSource('notes-src', 'notes')
+    const boundary = 1n << 53n
+    const confirmed = { key: reviewKey(declaration), at: 20, ...declaration }
+    const other = plantSource('other-src', 'other')
+    for (const id of [0n, 1n, boundary - 2n, boundary - 1n, boundary, boundary + 1n, boundary + 2n, (1n << 60n) + 1n]) {
+      fileIds.set(dir, id)
+      const legacy = { source: dir, importedAt: 10, ino: Number(id), confirmed }
+      const path = join(dataRoot, IMPORTS_FILE)
+      writeFileSync(path, JSON.stringify({ notes: legacy }))
+      const book = new ImportBook(dataRoot)
+      expect(book.get('notes', dir)?.confirmed, `legacy id ${id}`).toEqual(id < boundary ? confirmed : null)
+      expect(book.get('notes', dir)?.confirmed, `second lookup of ${id}`).toEqual(id < boundary ? confirmed : null)
+      fileIds.set(dir, id + 1n)
+      expect(book.get('notes', dir), `different folder before upgrade of ${id}`).toEqual(
+        id < boundary ? null : { ...legacy, confirmed: null },
+      )
+      fileIds.set(dir, id)
+      // An unrelated write exposes any mutation of the stored mark during get().
+      book.mark('other', other, other)
+      expect(JSON.parse(readFileSync(path, 'utf8')).notes, `unchanged legacy record ${id}`).toEqual(legacy)
+      book.confirm('notes', dir, declaration, 30)
+      expect(JSON.parse(readFileSync(path, 'utf8')).notes).toMatchObject({
+        ino: Number(id), inoExact: id.toString(), confirmed: { at: 30 },
+      })
+      expect(new ImportBook(dataRoot).get('notes', dir)?.confirmed?.at).toBe(30)
+      if (id < boundary) {
+        fileIds.set(dir, id + 1n)
+        expect(book.get('notes', dir), `different folder for legacy id ${id}`).toBeNull()
+      }
+    }
+  })
+
+  it('an unsafe legacy file id leaves the app unconfirmed and refuses calls until reviewed again', async () => {
+    make()
+    await importApp(plantSource('notes-src', 'notes'), true)
+    await rt.dispose()
+    const dir = join(dataRoot, 'apps', 'notes')
+    const id = (1n << 60n) + 1n
+    fileIds.set(dir, id)
+    const path = join(dataRoot, IMPORTS_FILE)
+    const doc = JSON.parse(readFileSync(path, 'utf8'))
+    doc.notes.ino = Number(id)
+    delete doc.notes.inoExact
+    writeFileSync(path, JSON.stringify(doc))
+
+    make()
+    expect(info('notes')).toMatchObject({ status: 'unconfirmed', imported: { confirmedAt: null } })
+    expect((await rt.call(userRef('notes'), 'env', {}, { kind: 'view' })).status).toBe('rejected')
+    expect(existsSync(join(dataRoot, 'app-logs', '_user', 'notes.log'))).toBe(false)
+    const review = rt.reviewApp(userRef('notes'))
+    expect(rt.enableApp(userRef('notes'), review.reviewKey).status).toBe('stopped')
+  })
+
+  it('new records preserve the old numeric comparison for unconfirmed and confirmed imports', () => {
+    const dir = plantSource('notes-src', 'notes')
+    for (const id of [7n, (1n << 53n) + 1n, (1n << 60n) + 1n]) {
+      fileIds.set(dir, id)
+      const book = new ImportBook(dataRoot)
+      book.mark('notes', dir, dir, 10)
+      const readOldMark = () => {
+        const m = JSON.parse(readFileSync(join(dataRoot, IMPORTS_FILE), 'utf8')).notes
+        return statSync(dir).ino === m.ino ? m : null
+      }
+      expect(readOldMark(), `old host sees disabled import ${id}`).toMatchObject({
+        source: dir, ino: Number(id), inoExact: id.toString(), confirmed: null,
+      })
+      book.confirm('notes', dir, declaration, 20)
+      expect(readOldMark(), `old host sees enabled import ${id}`).toMatchObject({
+        ino: Number(id), inoExact: id.toString(), confirmed: { key: reviewKey(declaration), at: 20 },
+      })
+    }
+  })
 })
 
 describe('what a person reviews before bringing it in', () => {

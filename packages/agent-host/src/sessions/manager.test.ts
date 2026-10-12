@@ -2511,6 +2511,67 @@ describe('while-alive facts are carried in the list', () => {
     expect(m.limit).toBeNull()
   })
 
+  it('counts each model request into the prompt cache figures agents.usage answers with (docs/agent-host.md §6.1)', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    const h = adapter.handleOf(s.id)!
+    const emit = (e: NormalizedEvent) => (h as unknown as { emit: (e: NormalizedEvent) => void }).emit(e)
+    const tokens = { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 }
+
+    emit({ type: 'usage_update', sessionId: s.id, tokens, request: { inputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 30_000 } })
+    emit({ type: 'usage_update', sessionId: s.id, tokens, request: { inputTokens: 5, cacheReadTokens: 30_000, cacheCreationTokens: 500 } })
+    // A running reading without a request is not a request
+    emit({ type: 'usage_update', sessionId: s.id, tokens })
+    await listed(s.id)
+
+    const r = (await rpc('agents.usage', { tool: 'claude' })) as { cache?: { writes: boolean; windows: { id: string; requests: number; cacheReadTokens: number; cacheCreationTokens: number; rebuilds: number; sessions: { sessionId: string; name: string }[] }[] } }
+    expect(r.cache?.writes).toBe(true)
+    const five = r.cache!.windows.find((w) => w.id === '5h')!
+    expect(five).toMatchObject({ requests: 2, cacheReadTokens: 30_000, cacheCreationTokens: 30_500, rebuilds: 1 })
+    expect(five.sessions).toMatchObject([{ sessionId: s.id, name: 'New session' }])
+  })
+
+  it('names why each rebuild happened from what the host saw in that session (docs/agent-host.md §6.1)', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
+    const tokens = { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 0 }
+    const rebuild = async () => {
+      const h = adapter.handleOf(s.id)!
+      ;(h as unknown as { emit: (e: NormalizedEvent) => void }).emit({
+        type: 'usage_update',
+        sessionId: s.id,
+        tokens,
+        request: { inputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 30_000 },
+      })
+      await listed(s.id)
+    }
+    const causes = async () => {
+      const r = (await rpc('agents.usage', { tool: 'claude' })) as { cache: { windows: { rebuildCauses?: Record<string, number> }[] } }
+      return r.cache.windows[0]!.rebuildCauses
+    }
+
+    await rebuild()
+    expect(await causes()).toEqual({ cold_start: 1 })
+
+    await rpc('agents.updateSettings', { sessionId: s.id, model: 'some-other-model' })
+    await rebuild()
+    expect(await causes()).toEqual({ cold_start: 1, model_change: 1 })
+
+    const h = adapter.handleOf(s.id)!
+    ;(h as unknown as { emit: (e: NormalizedEvent) => void }).emit({ type: 'compaction', sessionId: s.id, failed: false })
+    await rebuild()
+    expect(await causes()).toEqual({ cold_start: 1, model_change: 1, compaction: 1 })
+
+    await rpc('agents.restartSession', { sessionId: s.id })
+    await rebuild()
+    expect(await causes()).toEqual({ cold_start: 1, model_change: 1, compaction: 1, new_process: 1 })
+
+    // A restart that says why (a Codex thread restarted for its apps) is named by that reason, not as a new process
+    await mgr.restartSession(s.id, 'thread_restart')
+    await rebuild()
+    expect(await causes()).toEqual({ cold_start: 1, model_change: 1, compaction: 1, new_process: 1, thread_restart: 1 })
+  })
+
   it('clears approvals and questions for dead requestIds when an error arrives', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }

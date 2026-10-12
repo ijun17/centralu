@@ -1,4 +1,4 @@
-import type { ApprovalDetail, BackgroundTask, NormalizedEvent, SessionGoal, SubagentStep } from '@cc/protocol'
+import type { ApprovalDetail, BackgroundTask, NormalizedEvent, RequestInput, SessionGoal, SubagentStep } from '@cc/protocol'
 import { noticeWords } from './notices.js'
 
 /**
@@ -359,6 +359,33 @@ export class CompactionMarks {
     // A CLI that sends only one kind leaves every turn open; the partner of an old turn is not coming
     if (this.open.size > 32) this.open.delete(this.open.keys().next().value!)
     return true
+  }
+}
+
+/**
+ * The model request a `thread/tokenUsage/updated` closes, for prompt cache accounting (docs/agent-host.md §6.1).
+ *
+ * `last` is the most recent request (`ThreadTokenUsage`, generated/v2), and `total` grows with every request. A
+ * notification whose `total` has not moved since the previous one repeats a request already counted (Codex sends the
+ * token count again with other updates), so it gives nothing. Codex counts cached input inside `inputTokens`, as in
+ * the `usage_update` beside it, and says nothing of writing to the cache: `cacheCreationTokens` stays absent rather
+ * than 0. (codex-cli 0.160's breakdown has a `cacheWriteInputTokens` field; whether it is ever non-zero for OpenAI
+ * models, and whether `inputTokens` includes it, is not measured, so it is not read.)
+ */
+export class CodexRequestInputs {
+  private lastTotal: string | null = null
+
+  take(params: unknown): RequestInput | undefined {
+    const usage = obj(obj(params).tokenUsage)
+    const total = obj(usage.total)
+    const at = [total.totalTokens, total.inputTokens, total.cachedInputTokens, total.outputTokens].map((v) => num(v) ?? 0).join(',')
+    if (at === this.lastTotal) return undefined
+    this.lastTotal = at
+    const last = obj(usage.last)
+    const input = num(last.inputTokens) ?? 0
+    const cached = Math.min(num(last.cachedInputTokens) ?? 0, input)
+    if (input <= 0) return undefined
+    return { inputTokens: input - cached, cacheReadTokens: cached }
   }
 }
 

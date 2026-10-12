@@ -250,14 +250,28 @@ fn a_frozen_host_reader_hands_over_what_it_read_and_stops_between_lines() {
             }
         }
     });
-    let t = Duration::from_secs(2);
+    let t = Duration::from_secs(10);
+    let until = |what: &str, done: fn(&[u8], bool) -> bool| {
+        let end = Instant::now() + t;
+        while !matches!(gate.peek(), (buf, frozen) if done(&buf, frozen)) {
+            assert!(Instant::now() < end, "{what}: {:?}", gate.peek());
+            thread::sleep(Duration::from_millis(5));
+        }
+    };
     assert_eq!(rx.recv_timeout(t).unwrap(), "one");
-    // The reader now holds "two" for the sink. The freeze is asked for, and lands once the
-    // sink takes it and the reader comes back for the next line.
-    let freezer = thread::spawn(move || (gate.freeze(Duration::from_secs(2)), gate));
-    thread::sleep(Duration::from_millis(100));
+    // The reader takes "two" and waits for the sink to take it. Waited for, not slept on: a freeze
+    // asked for before the reader took "two" parks it with "two" still held, and the sink never
+    // gets it (#368: the 100 ms sleep this replaces failed under load on Linux).
+    until("the reader took \"two\"", |buf, _| buf == b"four-five\nthr");
+    // The freeze is asked for while the reader is in the sink, and lands once the sink takes the
+    // line and the reader comes back for the next one.
+    let freezer = {
+        let gate = gate.clone();
+        thread::spawn(move || gate.freeze(t))
+    };
+    until("the freeze was asked for", |_, frozen| frozen);
     assert_eq!(rx.recv_timeout(t).unwrap(), "two");
-    let (held, gate) = freezer.join().unwrap();
+    let held = freezer.join().unwrap();
     assert_eq!(held.unwrap(), b"four-five\nthr", "what the next keeper starts with: a whole line and a half one");
     w.write_all(b"ee\n").unwrap();
     assert!(rx.recv_timeout(Duration::from_millis(200)).is_err(), "nothing is delivered while frozen");

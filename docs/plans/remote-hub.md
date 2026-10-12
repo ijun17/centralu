@@ -4,7 +4,8 @@
 > (decision 1 on #82) with linked hosts, after the owner asked on 2026-10-05 why the UI should
 > hold several hosts at all. Phase 3 (installing and updating remotes) and probe 4 are designed in §10 (2026-10-08);
 > the owner decided its open questions the same day (§10.9). Phase 2's app views through the hub are designed and built
-> in §11 (2026-10-11); the owner decided its questions the same day (§11.7).
+> in §11 (2026-10-11); the owner decided its questions the same day (§11.7). Phase 4 (the orchestrator and Centralu
+> tools across machines) is planned in §12 (2026-10-12); its step 4 waits on the owner (§12.5).
 
 ## 1. The shape
 
@@ -141,7 +142,7 @@ wakes sessions that were live. So the hub must:
 | App views | Off for remote projects | **Built (§11):** the hub serves them from its own door with the machine's document, and its apps stand on the grid (§11.8) |
 | Attachments | Work: saved and read on the same machine as the session | Upload through the hub |
 | Usage gauges | Hub machine only | Done (phase 2): the top bar shows this computer's donuts, then each linked machine's behind its name (`agents.usage {machine}`, `agents.detect {machine}`). A machine that is not connected shows its state and is not asked; it is asked when its link comes back, and every connected machine on the 5-minute refresh |
-| Orchestrator and Centralu tools (`list_sessions`, `read_session`, `recall`, `ask_project`) | Local only, documented | Through the router; `ask_project` across machines also has to handle the paths it hands back |
+| Orchestrator and Centralu tools (`list_sessions`, `read_session`, `recall`, `ask_project`) | Local only, documented | Phase 4 (§12): the orchestrator's `list_sessions`, `read_session` and `recall` reach every machine (built, §12.3), and it directs them (`send_to_session` with `reportBack`, `update_session_settings`, `create_session`, `create_project` with a machine; built, §12.4); `ask_project` across machines is next |
 | Attaching a hub app to a remote session | No | The app process and the session are on different machines |
 
 ## 7. Phases
@@ -156,7 +157,7 @@ wakes sessions that were live. So the hub must:
    or sudo), update and rollback (needed by §4), supervision without a session (keeper on Linux,
    after #350), uninstall. Designed in §10.
 4. **Hosts across machines.** Orchestrator and Centralu tools through the router, `ask_project`
-   across machines, the reverse direction with consent.
+   across machines, the reverse direction with consent. Planned in §12.
 
 ## 8. Probes before building
 
@@ -834,3 +835,122 @@ Tested: `links/router.test.ts` (removed on the named machine only, the hub's own
 refused), `store.test.ts` (the window passes the machine), and the linked-hosts e2e in Chromium and WebKit: with both
 `notes` on the grid and in pinned views, removing the machine's from Settings moves that machine's folder away and leaves
 this computer's folder, row, pinned view and grid panel as they were, while the machine's row, view and panel go.
+
+## 12. Phase 4: the orchestrator and Centralu tools across machines (plan, 2026-10-12)
+
+> **Status: planned; steps 1 and 2 built (§12.3, §12.4).** Steps 1 to 3 follow from decisions already made (§9: the hub's one
+> orchestrator, consent on the connecting side). Step 4, the reverse direction, waits on the owner's answers in §12.5.
+
+Phase 1 left the orchestrator and the Centralu tools local (§6): the hub's orchestrator lists, reads, searches and
+directs only the hub's own sessions, and an ordinary session's `ask_project` reaches only the hub's projects. Phase 4
+takes them across the links.
+
+### 12.1 What holds throughout
+
+- **One orchestrator** (§3.4, decision 2): a linked machine's orchestrator and coordinators stay hidden, from the hub's
+  window and from the hub's orchestrator alike. A machine never shows another its orchestrator's conversation.
+- **The hub asks, the machine answers** (§3.2, decision 3). The hub's orchestrator acting on a linked machine is the
+  connecting side controlling the other, consented to when the link was added. Nothing in steps 1 to 3 lets a machine
+  call the hub; that is step 4.
+- **A host answers only about itself** (§3.1): a machine never relays another machine's sessions, so a hub with
+  several links asks each one, and nothing loops.
+- **What a machine says is someone else's words.** A worker's text already reaches the orchestrator fenced (#121): a
+  preview or a snippet is JSON-quoted on one line, so it cannot pose as a line of ours. A machine is one step further
+  away (a compromised server must not reach the Mac, §3.2), so the hub fences everything a machine hands its
+  orchestrator: names on one line, ids of the id shape, each line of a conversation one line.
+- **The orchestrator's tools keep their words.** Their descriptions ride in every orchestrator request (11,798 of the
+  12,000 characters `RESIDENT_BUDGET_CHARS` allows, #513); the results name the machine, and the descriptions stay.
+  Step 2 added one optional parameter, `create_project`'s `machine` (11,862 on Claude, 11,914 on Codex).
+
+### 12.2 Steps
+
+| Step | What | Needs from the owner |
+|---|---|---|
+| 1 | **Read.** The hub's orchestrator's `list_sessions`, `read_session` and `recall` include every linked machine. Each machine answers for its own sessions through three host-to-host calls (additive): `host.sessions`, `host.readSession`, `host.recall`, made by the orchestrator's own code there, over the same view the hub's window has (everything but its orchestrator and coordinators). The hub qualifies the ids, names the machine on each row and hit, lists an unreachable machine's sessions from the headers mirror marked as not reachable, and says which machines it could not search (decided on #82, 2026-10-03: a host that is off says so instead of returning nothing). `send_to_session` and the other acting tools refuse a linked machine's session with a reason, until step 2. **Built** (§12.3) | Nothing |
+| 2 | **Direct.** `send_to_session`, `update_session_settings` and `create_session` reach a linked machine's sessions and projects through the router, and `create_project` takes a machine. `reportBack` across machines: the hub already relays the machine's events into its own log, qualified; the manager watches those for the end of the turn it waits on. The instruction is recorded on the machine as sent by the hub's orchestrator (`agents.send` gains an optional `from`, additive), so the machine's conversation says who sent it. The machine's session keeps its own approval settings, and its cards reach the hub's window as every remote card does. **Built** (§12.4) | Nothing (decision 3) |
+| 3 | **`ask_project` to a linked machine's project.** An ordinary session on the hub asks a project on another machine: the consent card for the pair names the machine; the delegated session runs on that machine, its own logins and folder, under `normal`, as an ordinary visible session there; the answer comes back fenced as today. Paths in the answer name that machine's files, so none is opened to the asking session: they are listed as the machine's, and the person reaches them through the file tree or "Open in VS Code" (phase 2). A session on a machine asking a project on that same machine already works there, its card routed to the hub's window | Nothing new, unless the owner wants a cross-machine ask to need more than the pair's card (§12.5, question 4) |
+| 4 | **The reverse direction** (decision 3: off by default, only the connecting side turns it on). A machine's sessions reach the hub: what they may do is §12.5. Mechanically: a per-link switch on the hub (Settings → Machines, stored in the hub's registry, additive), the hub's end of the link answering an allowlist of requests from the machine (today `RemoteClient` never answers one), and the machine naming the hub to its sessions | The answers in §12.5 |
+
+Not in phase 4: attaching one machine's app to a session on another (§6: the app process and the session would live on
+two hosts), and `delete_worktree_session` across machines (a worktree manager is a seat on its own project's machine,
+and its tools stay there).
+
+### 12.3 Step 1, as built (2026-10-12)
+
+- **On the machine.** `SessionManager.hostReader()` is the orchestrator's `listSessions`, `readSession` and `recall`
+  over the hub's view: no calling session (nothing to leave out as "itself"), and orchestrator and coordinator
+  sessions out of scope, so `host.readSession` refuses one by id as "not a session this machine shares". A read is
+  capped at 200 lines and a search at 50 hits per call, five times the tools' defaults, so one call cannot ask a
+  machine for its whole store.
+- **On the hub** (`links/linked-sessions.ts`, wired in `main.ts` as `useLinkedReader`). One call per machine, in
+  parallel, each bounded by the link's call timeout. A machine that is away contributes its mirrored sessions with
+  "not reachable right now" (list) or its name under "Not searched" (recall), and is not asked; one that predates step
+  1 answers "Unknown method" and is named as needing Centralu updated there. Only the central orchestrator reads
+  through it: a manager, a lead and an ordinary session keep their own machine's view.
+- **Hits from several machines** are taken in turns, one from each machine's own ranked list (`takeInTurns`): ranks
+  from two stores do not compare, and appending would let the first list fill the limit before the others are heard.
+- **Text.** A row is `- <name> [m1.<id>] · project <project> on <machine> · <tool> · <state>`, with `· <why>` when the
+  row is only what the hub last knew; a hit's heading is `[<project> on <machine>]`. The hub drops a row or hit whose
+  id is not id-shaped, puts every name on one line, and JSON-quotes any conversation line that is not already one
+  line. `trustedJsonText` now also escapes U+2028 and U+2029, which `JSON.stringify` leaves as they are.
+- **Acting is refused with a reason**: `send_to_session`, `update_session_settings` and `delete_worktree_session` on a
+  machine's session say it is on that machine and can be read, not directed, until step 2 (§12.4 sends the first two there; `delete_worktree_session` is a manager's, and a manager sees only its own machine).
+- **No tool's words changed**, so the orchestrator's resident cost (#513) is as it was.
+
+Tested: `links/links.test.ts` (two real hosts linked: list, read at the end and around a recall hit, the machine's
+orchestrator and coordinator neither listed, found nor read, sending refused, the caps swept across 200 lines and 50
+hits, the machine away), `links/linked-sessions.test.ts` (a machine answering forged names, ids and lines, an older
+machine, `takeInTurns` at every limit). No live model read through it, and no real ssh link.
+
+### 12.4 Step 2, as built (2026-10-12)
+
+- **`send_to_session`** to a machine's session goes to that machine as `host.send { sessionId, text, from: { name } }`
+  (additive): the machine delivers it as its own orchestrator's instruction, recorded as sent by `<orchestrator> on <this
+  computer's host name>`, to a session a hub is shown and no other (its orchestrator and coordinators refuse). It
+  stays an instruction, not someone else's words (#120): the hub holds the machine's token and could send the same
+  text as the person, so marking it a relay would only hide the words from a worktree manager it was meant for. The
+  machine records the sender as `_hub-orchestrator`, an id no host makes; the windows show only its name.
+- **`reportBack`** across machines: the hub's links already relay the machine's events, qualified, to its windows;
+  `main.ts` also hands them to `SessionManager.observeLinked`, which watches the sessions the orchestrator asked about.
+  The watch starts before the send (the machine's first events can reach the hub before its answer) and is put back
+  if the send fails. A turn ends as it does here (#166): `turn_complete`, `error`, `limit_reached`, or a state out of
+  work once the turn was seen working, so the session waking before its turn is not its end. The report is the same
+  message as for this computer's sessions (`deliverReport`), its project named with the machine (`api on Ubuntu box`,
+  from the headers mirror) and its last words read with `host.readSession`.
+- **`update_session_settings`** goes through the router as the window's own `agents.updateSettings` does, and the hub
+  sends `settings_changed` with the qualified id, so no change happens without a trace (#30).
+- **`create_session`** finds a project on the machines by its name or qualified id (`projects.list` of each reachable
+  machine) and creates the session there through the router (`agents.createSession`, `normal`, the project's default
+  tool, then `sessions.rename`); the first instruction goes as `send_to_session` does. One name on more than one
+  machine, this computer included, is refused with each project's id and machine rather than guessed.
+- **`create_project`** takes `machine` (a linked machine's name or id; this computer when absent). The card is the same
+  card, raised in the orchestrator's session on this computer, with the path that machine would make
+  (`projects.createPreview` there) and the machine named: `ApprovalDetail` `project_create` gains `machine`
+  (additive), and the card and its question say "on <machine>". On Create, that machine makes and registers it
+  (`projects.create` there); nothing is made on either computer before the answer.
+
+Tested: `links/links.test.ts` (two real hosts: sending with and without a report, the report once and after the turn,
+the sender's name there, a worktree manager there getting the words as an instruction, settings and their event,
+creating a session by id and by name and the refusal of a shared name, creating a project after the card, an unknown
+machine), `links/linked-sessions.test.ts` (the report's rules against a stand-in machine: waking is not an end, an
+error says so, one report, none unasked, none after a failed send), `core/approval/approval.test.ts` and
+`e2e/create-project.spec.ts` (the card and its question naming the machine). No live model, no real ssh link.
+
+### 12.5 Open for the owner (step 4, and one question on step 3)
+
+1. **What may a machine's sessions do on the hub once the switch is on?** (a) only `ask_project` into the hub's
+   projects, each pair behind the hub's consent card, which stands in the hub's window; (b) (a) plus reading the hub's
+   sessions (`read_session`, `recall` over the hub's projects); (c) everything the hub's orchestrator may do there,
+   in reverse. Recommendation: **(a)**. It serves the case that needs the reverse (a session on a server asking the
+   laptop's project for something only the laptop has), and the person approves each pair where they are looking. (b)
+   hands the hub's conversations to a machine the plan already treats as the less trusted side; (c) makes the
+   server a second orchestrator, which decision 2 rules out.
+2. **Where the switch lives and what turning it on says.** Recommendation: a per-machine switch in Settings →
+   Machines, off by default, its question naming what it allows ("Sessions on <machine> may ask this computer's
+   projects to do work; each pair asks you first") and stored with the machine, so removing the machine removes it.
+3. **Several hubs linked to one machine** (decision 4: any device can be the hub). A machine's session would see each
+   hub that turned the switch on. Recommendation: each such hub appears to the machine's sessions by the hub's own
+   name, and a hub whose link is down is "not reachable" there, as a machine is here.
+4. **A cross-machine `ask_project` (step 3): is the pair's card enough?** Recommendation: **yes**, with the machine
+   named on the card. The work then runs on that machine under its own logins and credits; the card is where the
+   person sees that.

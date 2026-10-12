@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react'
-import type { ToolName, UsageSnapshot, UsageWindow } from '@cc/protocol'
+import type { CacheStats, ToolName, UsageSnapshot, UsageWindow } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Tooltip } from '../../components/primitives.jsx'
+import { useStore } from '../../store/store.js'
+import { useToolMeta } from '../../store/selectors.js'
+import { CacheSection } from './CacheSection.jsx'
+import { formatTokens } from './format.js'
 
 /**
  * Usage (FR-9).
@@ -18,14 +22,26 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
     loading: boolean
     reason?: string
     usage: UsageSnapshot | null
+    cache?: CacheStats
   }>({ loading: true, usage: null })
+  const meta = useToolMeta(tool)
+  /*
+   * A session the cache section names opens like a sidebar row, and the dropdown closes: the person asked "which
+   * session", and the answer is that session on screen.
+   */
+  const focusSession = useStore((s) => s.focusSession)
+  const toggleUsage = useStore((s) => s.toggleUsage)
+  const openSession = (id: string) => {
+    toggleUsage(false)
+    focusSession(id)
+  }
 
   useEffect(() => {
     let alive = true
     setState({ loading: true, usage: null })
     void platform.agents
       .usage(tool, machine ?? undefined)
-      .then((r) => alive && setState({ loading: false, usage: r.usage, reason: r.supported ? undefined : r.reason }))
+      .then((r) => alive && setState({ loading: false, usage: r.usage, reason: r.supported ? undefined : r.reason, cache: r.cache }))
       .catch((e: Error) => alive && setState({ loading: false, usage: null, reason: e.message }))
     return () => {
       alive = false
@@ -40,13 +56,21 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
     )
   }
 
+  // What the host counted stands apart from the limits: a limit the tool would not tell does not hide it
+  const cache = state.cache && (
+    <CacheSection cache={state.cache} toolLabel={meta.label} canOpen={(id) => id in useStore.getState().sessions} onOpen={openSession} />
+  )
+
   // Failing to read it and there being none are different — the reason is shown as is
   if (!state.usage || state.usage.windows.length === 0) {
     return (
-      <p className="px-4 py-6 text-center text-sm leading-body text-ink-muted" data-testid="usage-unavailable">
-        Usage unavailable
-        {state.reason && <span className="mt-1 block text-xs text-ink-faint">{state.reason}</span>}
-      </p>
+      <>
+        <p className="px-4 py-6 text-center text-sm leading-body text-ink-muted" data-testid="usage-unavailable">
+          Usage unavailable
+          {state.reason && <span className="mt-1 block text-xs text-ink-faint">{state.reason}</span>}
+        </p>
+        {cache && <div className="px-4 pb-4 [&>section]:mt-0">{cache}</div>}
+      </>
     )
   }
 
@@ -68,6 +92,7 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
 
       {/* Only some tools provide daily tokens (Codex does; Claude has no such window at all) */}
       {daily.length > 0 && <DailyTokens daily={daily} />}
+      {cache}
     </div>
   )
 }
@@ -179,9 +204,3 @@ function DailyTokens({ daily }: { daily: { date: string; tokens: number }[] }) {
   )
 }
 
-export function formatTokens(n: number): string {
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
-  if (n >= 1e3) return `${(n / 1e3).toFixed(0)}k`
-  return String(n)
-}
