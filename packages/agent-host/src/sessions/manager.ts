@@ -5692,8 +5692,8 @@ export class SessionManager {
           }
         }
         const from = { sessionId: callerId, name: labelOf(this.store, caller) }
-        const text = agentNoteFrame(from.name, opts.text ?? '')
         if (d && !d.settled) {
+          const text = agentNoteFrame(from.name, opts.text ?? '')
           if (!this.adapters.get(child.tool)?.capabilities.midTurnInput || !this.handles.get(child.id)?.sendTracked) {
             return { ok: false, error: `"${child.name}" cannot take messages while working. Wait for it (action "wait") or stop it first.` }
           }
@@ -5721,7 +5721,7 @@ export class SessionManager {
         const cwd = this.store.sessionCwd(child.id) ?? child.worktree?.path ?? project?.path ?? ''
         const next = this.startDelegation(key, callerId, child.id, { id: child.projectId ?? '', name: project?.name ?? '', path: cwd }, true)
         try {
-          await this.deliver(child.id, text, undefined, from, false)
+          await this.deliver(child.id, agentFrame(from.name, opts.text ?? ''), undefined, from, false)
         } catch (e) {
           this.delegations.delete(key)
           if (this.agentRuns.get(child.id) === next.wait) this.agentRuns.delete(child.id)

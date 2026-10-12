@@ -339,10 +339,15 @@ their existing queue), and Claude queues a user message for the query's streamin
 binds a receipt through the input's `clientUserMessageId` / `userMessage.clientId` and the `turn/start` response's
 turn id, even if that response follows its completion notification;
 notes during compact/review can share a later turn. Claude stamps input UUIDs and uses the result's
-`user_message_uuid` / `user_message_uuids` to identify consumed notes, including folded batches. A result without
-correlation fails the note explicitly rather than handing back an earlier answer. Stop cancels pending notes too
+`user_message_uuids` to identify consumed notes, including folded batches. At initialization, the adapter
+requires the verified CLI protocol (2.1.289 or newer) and its `interrupt_receipt_v1` and
+`interrupt_cancel_queued_v1` capabilities before exposing `sendTracked`. Older or unknown producers keep the
+mid-turn refusal: the single `user_message_uuid` names the turn's first input and cannot confirm a folded note.
+Results without input IDs belong to synthetic turns (including background-task notifications) and neither
+complete nor cancel a pending note. Stop cancels pending notes too
 (Claude's SDK `cancelQueued` / control-request `cancel_queued`; Codex removes queued notes and interrupts a turn
-named by an in-flight response after Stop).
+named by an in-flight response after Stop). Claude reports person messages dropped from its local queue or
+listed as cancelled in the SDK interrupt receipt as **not delivered**, asking the person to resend them.
 
 The existing `wait` and report marker follow the whole delegation, so an intermediate turn cannot deliver an
 answer or detach the queued note from its parent. Each completed turn's answer is captured separately: queued
@@ -351,6 +356,7 @@ The adapters notify the host synchronously **after recording the matched complet
 same event batch cannot overwrite that answer. Pending notes also make the child non-idle between turns, so the
 sleeper and CLI replacement cannot discard queued work. A follow-up is framed as a **note about ongoing work**
 (`agentNoteFrame`), without the initial task/answer frame, and stored and shown with `from`.
+A `send` after the child finishes starts a new delegation and uses the task/return-answer frame (`agentFrame`).
 It is refused on an adapter without this capability, while the child works on something else
 (the person may be using it), or when the person has since raised its preset above the caller's (`presetWithin`).
 `stop` ends the turn the caller gave it; a turn the person started there is theirs.

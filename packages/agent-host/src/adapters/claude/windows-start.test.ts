@@ -17,15 +17,16 @@ type Started = {
   end(): void
   closed: boolean
   interrupts: unknown[]
+  cancelled: string[]
   /** What close() does to the stream: by default nothing, as a process mid-turn */
   onClose: () => void
 }
 
-const sdk = vi.hoisted(() => ({ started: [] as Started[] }))
+const sdk = vi.hoisted(() => ({ started: [] as Started[], version: '2.1.289', capabilities: ['interrupt_receipt_v1', 'interrupt_cancel_queued_v1'] }))
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: ({ prompt, options }: { prompt: AsyncIterable<never>; options: Record<string, unknown> }) => {
-    const inbox: unknown[] = []
+    const inbox: unknown[] = [{ type: 'system', subtype: 'init', claude_code_version: sdk.version, capabilities: sdk.capabilities }]
     let wake: (() => void) | null = null
     let done = false
     const s: Started = {
@@ -44,6 +45,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
       },
       closed: false,
       interrupts: [],
+      cancelled: [],
       onClose: () => {},
     }
     sdk.started.push(s)
@@ -56,7 +58,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
     }
     return {
       [Symbol.asyncIterator]: () => stream(),
-      interrupt: async (options?: unknown) => { s.interrupts.push(options) },
+      interrupt: async (options?: unknown) => { s.interrupts.push(options); return { cancelled: s.cancelled, still_queued: [] } },
       close: () => {
         s.closed = true
         s.onClose()
@@ -76,6 +78,8 @@ let exe: string
 
 beforeEach(() => {
   sdk.started.length = 0
+  sdk.version = '2.1.289'
+  sdk.capabilities = ['interrupt_receipt_v1', 'interrupt_cancel_queued_v1']
   dir = mkdtempSync(join(tmpdir(), 'cc-353-'))
   const pkg = join(dir, 'npm', 'node_modules', '@anthropic-ai', 'claude-code')
   mkdirSync(join(pkg, 'bin'), { recursive: true })
@@ -109,10 +113,10 @@ describe('where a Windows Claude session starts from (#353)', () => {
     let done = false
     const note = handle.sendTracked!('parent note').then(() => { done = true })
     const input = (await cli.input.next()).value!
-    cli.push({ type: 'result', subtype: 'success', user_message_uuid: original.uuid })
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: original.uuid, user_message_uuids: [original.uuid] })
     await tick()
     expect(done).toBe(false)
-    cli.push({ type: 'result', subtype: 'success', user_message_uuid: input.uuid })
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: original.uuid, user_message_uuids: [original.uuid, input.uuid] })
     await note
     expect(done).toBe(true)
     cli.end()
@@ -127,7 +131,7 @@ describe('where a Windows Claude session starts from (#353)', () => {
       fail: () => {},
     })
     const id = (await cli.input.next()).value!.uuid
-    cli.push({ type: 'result', subtype: 'success', user_message_uuid: id })
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: id, user_message_uuids: [id] })
     cli.push({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'next turn' } } })
     await note
     expect(observed).toEqual(['complete'])
@@ -167,14 +171,14 @@ describe('where a Windows Claude session starts from (#353)', () => {
     const original = (await cli.input.next()).value!.uuid
     const note = handle.sendTracked!('next turn')
     const id = (await cli.input.next()).value!.uuid
-    cli.push({ type: 'result', subtype: 'success', user_message_uuid: original })
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: original, user_message_uuids: [original] })
     await tick()
     cli.push({ type: 'stream_event', parent_tool_use_id: null, user_message_uuid: id, event: { type: 'message_start', message: { id: 'note-reply' } } })
     await tick()
     expect(events.at(-1)).toMatchObject({ type: 'state_change', state: 'working' })
     const rejected = expect(note).rejects.toThrow('stopped')
     handle.interrupt()
-    cli.push({ type: 'result', subtype: 'error_during_execution', is_error: true, user_message_uuid: id })
+    cli.push({ type: 'result', subtype: 'error_during_execution', is_error: true, user_message_uuid: id, user_message_uuids: [id] })
     await rejected
     await tick()
     expect(events.filter((e) => e.type === 'error')).toEqual([])
@@ -204,14 +208,74 @@ describe('where a Windows Claude session starts from (#353)', () => {
     await expect(note).rejects.toThrow('closed')
   })
 
-  it('a result without input correlation fails explicitly and cancels pending notes', async () => {
-    const { handle, cli } = await session(adapter())
-    const note = handle.sendTracked!('cannot identify this note')
-    await cli.input.next()
-    const rejected = expect(note).rejects.toThrow('did not identify the input')
+  it('an ID-less background task result between turns neither cancels nor completes a parent note', async () => {
+    const { handle, cli, events } = await session(adapter())
+    handle.send('start a background shell')
+    const original = (await cli.input.next()).value!.uuid
+    let done = false
+    const note = handle.sendTracked!('parent note').then(() => { done = true })
+    const id = (await cli.input.next()).value!.uuid
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: original, user_message_uuids: [original] })
+    cli.push({ type: 'system', subtype: 'task_notification', task_id: 'shell-1', status: 'completed', summary: 'shell finished' })
     cli.push({ type: 'result', subtype: 'success' })
+    await tick()
+    expect(done).toBe(false)
+    expect(cli.interrupts).toEqual([])
+    expect(events.filter((e) => e.type === 'error')).toEqual([])
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: id, user_message_uuids: [id] })
+    await note
+    expect(done).toBe(true)
+    cli.end()
+    await handle.dispose()
+  })
+
+  it.each(['2.1.288', 'unknown'])('refuses tracked notes on a single-UUID CLI (%s) from startup, while ordinary sends still work', async (version) => {
+    sdk.version = version
+    const { handle, cli } = await session(adapter())
+    expect(handle.sendTracked).toBeUndefined()
+    handle.send('original')
+    const original = (await cli.input.next()).value!.uuid
+    cli.push({ type: 'stream_event', user_message_uuid: original, event: { type: 'message_start', message: { id: 'old-reply' } } })
+    handle.send('person follow-up')
+    await cli.input.next()
+    // An old result only echoes the original input; it cannot confirm a folded parent note.
+    cli.push({ type: 'result', subtype: 'success', user_message_uuid: original })
+    cli.push({ type: 'system', subtype: 'init', claude_code_version: '2.1.289', capabilities: sdk.capabilities })
+    await tick()
+    expect(handle.sendTracked).toBeUndefined()
+    expect(cli.interrupts).toEqual([])
+    cli.end()
+    await handle.dispose()
+  })
+
+  it('does not offer tracked notes without the startup cancellation-receipt protocol', async () => {
+    sdk.capabilities = []
+    const { handle, cli } = await session(adapter())
+    expect(handle.sendTracked).toBeUndefined()
+    cli.end()
+    await handle.dispose()
+  })
+
+  it.each(['local', 'SDK'] as const)('stop reports a person message cancelled alongside a parent note in the %s queue', async (queue) => {
+    const { handle, cli, events } = await session(adapter())
+    handle.send('original')
+    await cli.input.next()
+    handle.send('person message already shown in chat')
+    let person: string | undefined
+    if (queue === 'SDK') person = (await cli.input.next()).value!.uuid
+    const note = handle.sendTracked!('parent note')
+    if (queue === 'SDK') {
+      const id = (await cli.input.next()).value!.uuid
+      cli.cancelled = [person!, id]
+    }
+    const rejected = expect(note).rejects.toThrow('stopped')
+    handle.interrupt()
     await rejected
+    await tick()
     expect(cli.interrupts).toEqual([{ cancelQueued: true }])
+    expect(events.filter((e) => e.type === 'error')).toEqual([
+      expect.objectContaining({ error: expect.objectContaining({ message: '1 message(s) were still queued when the turn stopped and were not delivered — please resend' }) }),
+    ])
     cli.end()
     await handle.dispose()
   })

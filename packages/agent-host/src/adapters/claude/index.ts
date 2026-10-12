@@ -1,10 +1,10 @@
 import { query, resolveSettings, type McpServerConfig, type PermissionMode } from '@anthropic-ai/claude-agent-sdk'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { InputReceipts } from '../input-receipts.js'
+import { InputReceipts, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
 
-type ClaudeInput = { text: string; uuid: ReturnType<typeof randomUUID> }
+type ClaudeInput = { text: string; uuid: ReturnType<typeof randomUUID>; parentNote: boolean }
 
 /**
  * Only the part of the SDK Query that we use.
@@ -342,6 +342,11 @@ class ClaudeSession implements SessionHandle {
   externalId: string | null = null
   private queue: ClaudeInput[] = []
   private inputReceipts = new InputReceipts()
+  /** Person messages already handed to the SDK, so an interrupt receipt can report cancellations. */
+  private personInputs = new Set<string>()
+  private trackedInputKnown = false
+  /** Installed only after the initial CLI metadata confirms the protocol we have verified. */
+  sendTracked?: (text: string, observer?: InputObserver) => Promise<void>
   /** The CLI version this process last reported (#297) */
   private reportedVersion: string | null = null
   private notify: (() => void) | null = null
@@ -475,6 +480,7 @@ class ClaudeSession implements SessionHandle {
         const next = self.queue.shift()
         if (next !== undefined) {
           self.inTurn.push(next)
+          if (!next.parentNote) self.personInputs.add(next.uuid)
           yield {
             type: 'user' as const,
             parent_tool_use_id: null,
@@ -742,12 +748,29 @@ class ClaudeSession implements SessionHandle {
            * own record.
            */
           if (this.closed) break
-          const m = msg as { type?: string; session_id?: string; subtype?: string; slash_commands?: unknown; claude_code_version?: unknown; user_message_uuid?: string; parent_tool_use_id?: string | null }
+          const m = msg as { type?: string; session_id?: string; subtype?: string; slash_commands?: unknown; claude_code_version?: unknown; capabilities?: unknown; user_message_uuid?: string; parent_tool_use_id?: string | null }
           if (!this.turnOpen && m.user_message_uuid && !m.parent_tool_use_id && (m.type === 'assistant' || m.type === 'stream_event')) {
             this.turnOpen = true
             if (!this.pending.size && !this.questions.size) this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'working' })
           }
           if (m.type === 'system' && m.subtype === 'init' && m.session_id) this.externalId = m.session_id
+          if (m.type === 'system' && m.subtype === 'init' && !this.trackedInputKnown) {
+            this.trackedInputKnown = true
+            // 2.1.289's result UUID array includes inputs folded between tool rounds (verified in
+            // the installed CLI and pinned SDK schema). The single UUID only names the first input.
+            // Refuse older/unknown protocols before a note is recorded, rather than guessing from
+            // results: background task notifications legitimately produce results without IDs.
+            const version = typeof m.claude_code_version === 'string' ? /^(\d+)\.(\d+)\.(\d+)$/.exec(m.claude_code_version) : null
+            const supported = version && (Number(version[1]) > 2 || (Number(version[1]) === 2 &&
+              (Number(version[2]) > 1 || (Number(version[2]) === 1 && Number(version[3]) >= 289))))
+            if (supported && Array.isArray(m.capabilities) && m.capabilities.includes('interrupt_receipt_v1') && m.capabilities.includes('interrupt_cancel_queued_v1')) {
+              this.sendTracked = (text, observer) => {
+                const receipt = this.inputReceipts.create(observer)
+                this.sendInput(text, receipt.id, receipt)
+                return receipt.done
+              }
+            }
+          }
           // The CLI's own version, for moving the session to a newer install (#297). Once per process: init repeats per query
           if (m.type === 'system' && m.subtype === 'init' && typeof m.claude_code_version === 'string' && m.claude_code_version !== this.reportedVersion) {
             this.reportedVersion = m.claude_code_version
@@ -765,11 +788,15 @@ class ClaudeSession implements SessionHandle {
           let completedInputs: string[] | undefined
           if (m.type === 'result' && !retrying && this.inputReceipts.size && events.some((e) => e.type === 'turn_complete' || e.type === 'error')) {
             const result = msg as { user_message_uuid?: string; user_message_uuids?: string[] }
-            const ids = result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : [])
+            const ids = result.user_message_uuids ?? []
             const failure = events.find((e) => e.type === 'error')
-            if (failure?.type === 'error') this.interrupt(true, new Error(failure.error.message))
+            if (ids.length && failure?.type === 'error') this.interrupt(true, new Error(failure.error.message))
             else if (ids.length) completedInputs = ids
-            else this.interrupt(true, new Error('Claude Code did not identify the input its result answered; cannot confirm completion of the parent note. Update Claude Code.'))
+            // ID-less results belong to synthetic/task-notification turns, not a parent note.
+          }
+          if (m.type === 'result' && !retrying) {
+            const result = msg as { user_message_uuid?: string; user_message_uuids?: string[] }
+            for (const id of result.user_message_uuids ?? (result.user_message_uuid ? [result.user_message_uuid] : [])) this.personInputs.delete(id)
           }
           // The turn goes again instead of failing: its error marker would end the turn on screen
           if (retrying) events = events.filter((e) => e.type !== 'error')
@@ -972,15 +999,9 @@ class ClaudeSession implements SessionHandle {
     }
   }
 
-  sendTracked(text: string, observer?: InputObserver): Promise<void> {
-    const receipt = this.inputReceipts.create(observer)
-    this.sendInput(text, receipt.id)
-    return receipt.done
-  }
-
   send(text: string): void { this.sendInput(text) }
 
-  private sendInput(text: string, uuid = randomUUID()): void {
+  private sendInput(text: string, uuid = randomUUID(), note?: InputReceipt): void {
     /*
      * `/goal` goes to the CLI when the CLI offers it (2026-10-03). On 2026-09-07 (SDK 0.3.231 and
      * 0.3.263, the CLI of that day) the headless path had no goal at all: sent as text, the model
@@ -999,12 +1020,13 @@ class ClaudeSession implements SessionHandle {
      */
     const goal = isGoalCommand(text)
     if (!this.sendGate && !(goal && this.goalCommand === undefined)) {
-      this.deliver(text, uuid)
+      this.deliver(text, uuid, !!note)
       return
     }
     const gate = (this.sendGate = (this.sendGate ?? this.goalKnown).then(() => {
+      if (note?.cancelled) return
       if (!this.closed) {
-        this.deliver(text, uuid)
+        this.deliver(text, uuid, !!note)
         return
       }
       // Closed while it waited: the same rule as dispose's queue — a message is never dropped silently
@@ -1023,7 +1045,7 @@ class ClaudeSession implements SessionHandle {
     })
   }
 
-  private deliver(text: string, uuid: ReturnType<typeof randomUUID>): void {
+  private deliver(text: string, uuid: ReturnType<typeof randomUUID>, parentNote: boolean): void {
     if (isGoalCommand(text)) {
       if (this.goalCommand !== true) {
         /*
@@ -1046,7 +1068,7 @@ class ClaudeSession implements SessionHandle {
       this.stream.goal.commandSent()
     }
     const starting = !this.turnOpen
-    this.queue.push({ text, uuid })
+    this.queue.push({ text, uuid, parentNote })
     this.turnOpen = true
     this.notify?.()
     this.notify = null
@@ -1209,7 +1231,10 @@ class ClaudeSession implements SessionHandle {
   interrupt(cancelQueued = this.inputReceipts.size > 0, reason = new Error('The parent note was stopped before it finished')): void {
     // The SDK's plain interrupt leaves queued commands alive; cancelQueued maps to control-request cancel_queued.
     this.inputReceipts.failAll(reason)
+    const held = (cancelQueued ? this.queue.filter((input) => !input.parentNote).length : 0) +
+      (this.retry?.texts.filter((input) => !input.parentNote).length ?? 0)
     if (cancelQueued) this.queue.length = 0
+    this.reportUndelivered(held)
     /*
      * This also stops any app calls this session made (M4 A-5). The SDK makes no promise about
      * whether the CLI sends a cancellation to a tool call when it interrupts a turn — we cut it
@@ -1233,7 +1258,15 @@ class ClaudeSession implements SessionHandle {
      */
     if (this.turnOpen) this.stream.stopped()
 
-    void this.query?.interrupt(cancelQueued ? { cancelQueued: true } : undefined).catch((err: Error) => {
+    void this.query?.interrupt(cancelQueued ? { cancelQueued: true } : undefined).then((response) => {
+      // cancel_queued sweeps SDK-held messages too, including the person's. The CLI's receipt
+      // identifies exactly which did not run; do not silently discard their already-visible rows.
+      const cancelled = (response as { cancelled?: unknown } | undefined)?.cancelled
+      if (!Array.isArray(cancelled)) return
+      let count = 0
+      for (const id of cancelled) if (typeof id === 'string' && this.personInputs.delete(id)) count++
+      this.reportUndelivered(count)
+    }).catch((err: Error) => {
       // If we could not actually stop it, say so. Letting the person believe it stopped and wait is the worst outcome.
       this.emit({
         type: 'error',
@@ -1243,6 +1276,14 @@ class ClaudeSession implements SessionHandle {
     })
 
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
+  }
+
+  private reportUndelivered(count: number): void {
+    if (!count) return
+    this.emit({
+      type: 'error', sessionId: this.sessionId,
+      error: { code: 'internal', message: `${count} message(s) were still queued when the turn stopped and were not delivered — please resend`, retryable: false },
+    })
   }
 
   /**
