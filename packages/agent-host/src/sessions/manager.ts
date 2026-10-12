@@ -5637,8 +5637,8 @@ export class SessionManager {
    *
    *   status  where it stands, without waiting (the answer, once the turn the caller gave it has ended)
    *   wait    waits on that turn up to the bound, as start_agent does
-   *   send    gives it more: refused while a turn the caller gave it runs, while it works on the person's own
-   *           message, or when the person has since raised its preset above the caller's
+   *   send    gives it more, including during the caller's turn on adapters that accept mid-turn input; refused
+   *           while it works on the person's own message or has a higher preset than the caller
    *   stop    stops the turn the caller gave it; a turn the person started there is theirs
    *   delete  cleans up a child's merged, clean worktree (`cleanUpWorktreeChild`, #76's hard gate, part 3)
    */
@@ -5673,27 +5673,38 @@ export class SessionManager {
         return { ok: true, state: 'deleted', sessionId: child.id, sessionName: child.name, tool: child.tool, branch: r.branch, proof: r.proof }
       }
       case 'send': {
-        if (d && !d.settled) {
-          return { ok: false, error: `"${child.name}" is still working on what you gave it. Wait for it (action "wait") or stop it first.` }
-        }
-        // An answer the caller never came back for gives way to the new message
-        if (d) this.delegations.delete(key)
-        if (child.state === 'working' || child.state === 'waiting_approval' || this.agentRuns.has(child.id)) {
-          return { ok: false, error: `"${child.name}" is busy with something else (the person may be using it). Try again later.` }
-        }
         if (!presetWithin(child.permissionPreset, caller.permissionPreset)) {
           return {
             ok: false,
             error: `"${child.name}" now has more permissions (${child.permissionPreset}) than this session (${caller.permissionPreset}), so this session cannot give it work. Tell the person.`,
           }
         }
+        const from = { sessionId: callerId, name: labelOf(this.store, caller) }
+        const text = agentFrame(from.name, opts.text ?? '')
+        if (d && !d.settled) {
+          if (!this.adapters.get(child.tool)?.capabilities.midTurnInput) {
+            return { ok: false, error: `"${child.name}" cannot take messages while working. Wait for it (action "wait") or stop it first.` }
+          }
+          try {
+            await this.deliver(child.id, text, undefined, from, false)
+          } catch (e) {
+            return { ok: false, error: `Could not send it: ${(e as Error).message}` }
+          }
+          // Keep the same outcome and any active wait. A send must not re-arm a report on top of that wait.
+          return this.agentWorking(d, false)
+        }
+        if (child.state === 'working' || child.state === 'waiting_approval' || this.agentRuns.has(child.id)) {
+          return { ok: false, error: `"${child.name}" is busy with something else (the person may be using it). Try again later.` }
+        }
+        // An answer the caller never came back for gives way to the new message
+        if (d) this.delegations.delete(key)
         const full = this.agentCeilingError(child.projectId ?? '')
         if (full) return { ok: false, error: full }
         const project = this.store.listProjects().find((p) => p.id === child.projectId)
         const cwd = this.store.sessionCwd(child.id) ?? child.worktree?.path ?? project?.path ?? ''
         const next = this.startDelegation(key, callerId, child.id, { id: child.projectId ?? '', name: project?.name ?? '', path: cwd }, true)
         try {
-          await this.deliver(child.id, opts.text ?? '', undefined, { sessionId: callerId, name: labelOf(this.store, caller) }, false)
+          await this.deliver(child.id, text, undefined, from, false)
         } catch (e) {
           this.delegations.delete(key)
           if (this.agentRuns.get(child.id) === next.wait) this.agentRuns.delete(child.id)

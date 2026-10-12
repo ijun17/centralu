@@ -6508,6 +6508,28 @@ test('A message inserted by someone else also appears in the conversation', asyn
  * with a `from` field carries an origin label (msg-user-from), and that label must survive the
  * restore path a restart walks too.
  */
+test('A parent\'s mid-turn message appears once in the working child with its origin, and survives a restore', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'long job')
+  await emitEvent(page, 0, { type: 'state_change', state: 'working' })
+  await emitEvent(page, 0, {
+    type: 'user_message', seq: 991, text: 'Use Chromium while you keep working.',
+    from: { sessionId: 'parent-session', name: 'parent session' },
+  })
+  await expect(page.getByTestId('msg-user-from')).toHaveCount(1)
+  await expect(page.getByTestId('msg-user-from')).toContainText('parent session')
+  await expect(page.getByText('Use Chromium while you keep working.', { exact: true })).toHaveCount(1)
+  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
+  await page.evaluate((sid: string) => {
+    const store = (window as never as { __store: any }).__store
+    store.setState({ chat: { ...store.getState().chat, [sid]: undefined } })
+    return store.getState().loadHistory(sid)
+  }, id)
+  await expect(page.getByTestId('msg-user-from')).toHaveCount(1)
+  await expect(page.getByTestId('msg-user-from')).toContainText('parent session')
+  await expect(page.getByText('Use Chromium while you keep working.', { exact: true })).toHaveCount(1)
+})
+
 test('A message instructed by the orchestrator carries an origin label, and it survives a restore', async ({
   page,
 }) => {

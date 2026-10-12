@@ -33,6 +33,9 @@ same files under the same or a lower preset), but they multiply what runs, so:
 - **A ceiling**: at most 4 children running at once per project, over all its sessions (`AGENT_CEILING`).
 - **Visible**: each child is an ordinary session in the sidebar with its own approval cards and Stop, and outlives
   the caller's deletion. Its task is recorded as sent by the caller (`from`), not by the person.
+  Mid-turn follow-ups keep that provenance and are framed as the parent's words, through the same message path
+  the person uses. They do not interrupt the child or replace the turn an existing wait follows; only a turn
+  delegated by this parent accepts them, and the preset check still applies on every send (#592).
 - **Not from an untrusted project** (#382's rule).
 
 Worktree children (#582) keep the same preset as their parent. **Every Codex session under `auto` runs

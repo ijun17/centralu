@@ -100,6 +100,23 @@ const text = (m: IteratorResult<{ message: { content: { text: string }[] } }>) =
 const tick = () => new Promise((r) => setTimeout(r, 5))
 
 describe('where a Windows Claude session starts from (#353)', () => {
+  it('accepts another user message through the prompt iterator during a turn, without ending or interrupting it', async () => {
+    const a = adapter()
+    expect(a.capabilities.midTurnInput).toBe(true)
+    const { handle, cli, events } = await session(a)
+    handle.send('long job')
+    expect(text(await cli.input.next())).toBe('long job')
+    cli.push({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Working.' } } })
+    await tick()
+    const next = cli.input.next()
+    handle.send('Another session says: use Chromium.')
+    expect(text(await next)).toBe('Another session says: use Chromium.')
+    expect(cli.closed).toBe(false)
+    expect(events.some((e) => e.type === 'turn_complete')).toBe(false)
+    cli.end()
+    await handle.dispose()
+  })
+
   it("starts the hard link in the data folder, not npm's claude.exe", async () => {
     const { handle, cli } = await session(adapter())
     const path = cli.options.pathToClaudeCodeExecutable as string

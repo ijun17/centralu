@@ -71,6 +71,25 @@ async function session(emit: (e: unknown) => void = () => {}) {
 }
 
 describe('codex /compact — runs as a function', () => {
+  it('mid-turn input uses the same turn/start steering path as the person\'s messages, without interrupting or completing the turn', async () => {
+    const events: unknown[] = []
+    expect(new CodexAdapter().capabilities.midTurnInput).toBe(true)
+    const h = await session((e) => events.push(e))
+    h.send('long job')
+    await tick()
+    state.handlers!.onNotification({ method: 'turn/started', params: { threadId: 't1', turn: { id: 'turn-1' } } })
+    const before = events.length
+    h.send('Another session says: use Chromium.')
+    await tick()
+    expect(state.requests.filter((r) => r.method === 'turn/start').map((r) => r.params?.input)).toEqual([
+      [{ type: 'text', text: 'long job' }],
+      [{ type: 'text', text: 'Another session says: use Chromium.' }],
+    ])
+    expect(methods()).not.toContain('turn/interrupt')
+    expect(events.slice(before)).toEqual([])
+    await h.dispose()
+  })
+
   it('/compact goes to thread/compact/start, not turn/start', async () => {
     const h = await session()
     h.send('/compact')

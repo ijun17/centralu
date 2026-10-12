@@ -47,7 +47,7 @@ export class CrossAdapter implements AgentAdapter {
   constructor(readonly tool: ToolName = 'claude') {
     this.descriptor = { name: tool, label: tool === 'claude' ? 'Claude Code' : 'Codex', mark: 'C', install: 'x', login: 'x' }
   }
-  capabilities = { approvals: true, contextUsage: 'exact' as const, resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false }
+  capabilities = { approvals: true, contextUsage: 'exact' as const, resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false, midTurnInput: true }
   handles = new Map<string, CrossHandle>()
   async detect() {
     return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }

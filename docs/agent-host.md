@@ -330,10 +330,15 @@ the person's settings) and project-trust settings sources. There is no Centralu-
 or network gap. A sandbox in the person's own Claude settings can still restrict commands; Centralu does
 not widen it here. Dependency preparation above applies to both adapters.
 
-`agent_session` acts only on a session whose `askedBy` is the caller, in its project. `send` is refused while a turn
-the caller gave it runs, while it works on something else (the person may be using it), and when the person has
-since raised its preset above the caller's (`presetWithin`). `stop` ends the turn the caller gave it; a turn the
-person started there is theirs.
+`agent_session` acts only on a session whose `askedBy` is the caller, in its project. `send` during the caller's turn
+uses the adapter's ordinary message path when it declares `capabilities.midTurnInput`: Codex 0.160 `turn/start`
+steers an already-active regular turn (confirmed by `TurnStartParams.turnTrigger`; compact/review messages keep
+their existing queue), and Claude queues a user message for the query's streaming prompt iterator. It returns
+`working` immediately, keeps the original delegation and any `wait` in progress, and does not re-arm a report that
+would duplicate that wait's answer. Every follow-up is framed as the parent's words (`agentFrame`) and stored and
+shown with `from`. It is refused on an adapter without this capability, while the child works on something else
+(the person may be using it), or when the person has since raised its preset above the caller's (`presetWithin`).
+`stop` ends the turn the caller gave it; a turn the person started there is theirs.
 
 **Stop and delete.** The caller's call cancelled (Claude's MCP signal), or Stop on the caller while a call waits on
 a child, stops that child's turn. A child left running (`wait: false`, or past the bound) is its own session: the
@@ -507,6 +512,7 @@ interface AdapterCapabilities {
   processModel: 'per-session' | 'shared-server' // whether one CLI process owns one or several conversations
   builtInSubagents: boolean     // child-agent events are normalized by this adapter
   peerMessaging: boolean        // the CLI has a direct session-to-session path (#575)
+  midTurnInput?: boolean         // send accepts a message during a running turn without interrupting it (#592)
   sleep?: boolean               // #568: an idle session may be put to sleep (resume measured to keep the cache); §4.6.1
 }
 ```

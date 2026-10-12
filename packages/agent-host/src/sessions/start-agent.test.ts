@@ -225,14 +225,66 @@ describe('starting another agent in the same project', () => {
     const c = childrenOf(s)[0]!.id
     await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
     expect(await first).toMatchObject({ ok: true, state: 'working', sessionId: c, reported: true })
-    // More work while it runs is refused, naming the way to wait
+    // A note joins the same turn and keeps the report already promised at the bound.
     const busy = await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'also this' })
-    expect(!busy.ok && busy.error).toContain('still working')
+    expect(busy).toMatchObject({ ok: true, state: 'working', sessionId: c, reported: true })
+    expect(handleOf(c)!.sent.at(-1)).toContain('also this')
     vi.useRealTimers()
     handleOf(c)!.answer('long job done')
     // The parent hears about it through the report path, as another session's message
     await w.until(() => (handleOf(s)?.sent ?? []).some((t) => t.includes(`sourceSessionId: ${c}`)))
+    expect(handleOf(s)!.sent.filter((t) => t.includes(`sourceSessionId: ${c}`))).toHaveLength(1)
     expect(await w.mgr.agentSession(s, { sessionId: c, action: 'wait' })).toMatchObject({ ok: true, state: 'done', answer: 'long job done' })
+  })
+
+  it.each(['claude', 'codex'] as const)('a mid-turn note to %s is framed, stored and visible as the parent\'s, while an active wait takes the same answer once', async (tool) => {
+    allowProject()
+    const s = await session()
+    const started = await w.mgr.startAgent(s, { task: 'long job', tool, wait: false })
+    const c = started.ok ? started.sessionId : ''
+    const h = handleOf(c)!
+    h.event({ type: 'message_delta', sessionId: c, role: 'assistant', text: 'Working on it.' })
+    const waiting = w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
+    const result = await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'Use Chromium for e2e.' })
+    expect(result).toMatchObject({ ok: true, state: 'working', sessionId: c, reported: false })
+    expect(h.sent).toHaveLength(2)
+    expect(h.sent[1]).toContain('Another session in this project')
+    expect(h.sent[1]).toContain('Use Chromium for e2e.')
+    expect(h.interrupted).toBe(0)
+    const message = w.store.loadMessages(c, 10).filter((m) => m.role === 'user').at(-1)!
+    expect(message.payload).toMatchObject({ text: h.sent[1], from: { sessionId: s } })
+    expect(w.events).toContainEqual(expect.objectContaining({ type: 'user_message', sessionId: c, text: h.sent[1], from: expect.objectContaining({ sessionId: s }) }))
+    h.answer('Done with Chromium.')
+    expect(await waiting).toMatchObject({ ok: true, state: 'done', answer: 'Done with Chromium.' })
+    expect(handleOf(s)?.sent ?? []).toEqual([])
+  })
+
+  it('mid-turn send preserves the permission gate and requires adapter support, without stopping or losing the wait', async () => {
+    allowProject()
+    const s = await session('normal')
+    const c = await startRunning(s)
+    const h = handleOf(c)!
+    w.adapters.get('claude')!.capabilities.midTurnInput = false
+    expect(await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('cannot take messages while working') })
+    w.adapters.get('claude')!.capabilities.midTurnInput = true
+    await w.mgr.updateSettings(c, { permissionPreset: 'auto' })
+    expect(await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('more permissions') })
+    expect(h.sent).toHaveLength(1)
+    expect(h.interrupted).toBe(0)
+    h.answer('done')
+    expect(await w.mgr.agentSession(s, { sessionId: c, action: 'wait' })).toMatchObject({ ok: true, state: 'done', answer: 'done' })
+  })
+
+  it('a turn the person started remains theirs, even on an adapter that supports mid-turn input', async () => {
+    allowProject()
+    const s = await session()
+    const c = await startRunning(s)
+    handleOf(c)!.answer('first done')
+    await w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
+    await w.mgr.send(c, 'the person\'s task')
+    expect(await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('busy with something else') })
+    expect(handleOf(c)!.sent).toHaveLength(2)
+    expect(handleOf(c)!.interrupted).toBe(0)
   })
 
   it('a wait in progress takes the answer, with no report on top of it', async () => {

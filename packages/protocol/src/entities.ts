@@ -923,6 +923,8 @@ export const AdapterCapabilities = z.object({
    * The idle check (#297) needs that difference — a session whose background work is invisible is never called idle.
    */
   backgroundTasks: z.boolean().default(false),
+  /** Whether send accepts input during a running turn without interrupting it (#592). Absent is unsupported. */
+  midTurnInput: z.boolean().optional(),
   /**
    * Whether this tool can defer individual Centralu tool definitions until the model asks for
    * them. This is a serving property, not a list of tool names: the host uses it when it counts

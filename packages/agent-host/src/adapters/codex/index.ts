@@ -1677,6 +1677,8 @@ export class CodexAdapter implements AgentAdapter {
     processModel: 'per-session',
     builtInSubagents: true,
     peerMessaging: false,
+    // 0.160 TurnStartParams: turn/start steers an already-active regular turn; compact/review input is queued.
+    midTurnInput: true,
     /*
      * Not put to sleep (#568). Waking a large thread measured 7-13 s (`thread/resume` scales with the rollout, ~13.5 s for
      * 550 MB), and its cache on resume is unmeasured. The memory is better won by one shared app-server per account
