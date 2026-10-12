@@ -28,6 +28,9 @@
         --edge-strong: var(--color-border-secondary, #353535);
         --ring: var(--color-ring-primary, #909090);
         --beacon: var(--centralu-signal, var(--color-text-warning, #ffffff));
+        --danger: var(--color-text-danger, #ffa198);
+        /* Behind the reader: the floor, mostly opaque, so the board recedes without a colour of its own */
+        --scrim: color-mix(in srgb, var(--bg) 78%, transparent);
         /* Type: what a person reads, the controls around it, and the board's one heading */
         --sans: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif);
         --mono: var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace);
@@ -158,6 +161,148 @@
       .p-Medium { color: var(--ink-2); }
       .p-Low { color: var(--ink-3); }
       .move { margin-left: auto; padding: 1px 4px; color: var(--ink-2); max-width: 118px; }
+      .num { text-decoration: none; }
+      a.num:hover { color: var(--ink); text-decoration: underline; text-decoration-color: var(--ink-3); }
+
+      /* Board or "Needs decision": two pressed-or-not buttons in the header */
+      .modes { display: flex; gap: 4px; }
+      .modes button { background: transparent; border-color: transparent; color: var(--ink-2); }
+      .modes button:hover { border-color: var(--edge); color: var(--ink); }
+      .modes button[aria-pressed='true'] { color: var(--ink); background: var(--surface); border-color: var(--edge-strong); font-weight: var(--semibold); }
+      .modes button.decision, .modes button.decision[aria-pressed='true'] { color: var(--beacon); }
+      .tag.decision { color: var(--beacon); border-color: var(--edge-strong); }
+      .modes .count { color: var(--ink-3); font-weight: var(--regular); font-variant-numeric: tabular-nums; margin-left: 4px; }
+
+      /*
+       * The "Needs decision" view: one card per item waiting on the owner, with what its latest
+       * summary comment asks and recommends, so most can be answered from here.
+       */
+      .decisions { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 10px; }
+      .decisions[hidden], .board[hidden], .tabs[hidden] { display: none; }
+      .dcard {
+        max-width: 760px;
+        border: var(--border) solid var(--edge-strong);
+        border-radius: var(--radius-lg);
+        background: var(--surface);
+        padding: 10px 12px;
+      }
+      .dcard .title { color: var(--ink); text-decoration: none; font-weight: var(--semibold); overflow-wrap: anywhere; }
+      .dcard .title:hover { text-decoration: underline; text-decoration-color: var(--ink-3); }
+      .dcard dl { margin: 8px 0 0; display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; }
+      .dcard dt { color: var(--ink-2); }
+      .dcard dd { margin: 0; overflow-wrap: anywhere; }
+      .dcard .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+      .dcard .quiet, .quiet { color: var(--ink-3); }
+      .answered { color: var(--ink-2); }
+      @media (max-width: 520px) {
+        .decisions { padding: 10px 12px 12px; }
+        .dcard dl { grid-template-columns: 1fr; gap: 0; }
+        .dcard dd { margin-bottom: 4px; }
+      }
+
+      /*
+       * The reader: an issue or pull request read in place, over the board. A modal dialog, so the
+       * board behind it takes no keys; Esc closes it and the keyboard goes back to where it was.
+       */
+      dialog.reader {
+        width: min(780px, calc(100vw - 24px));
+        max-width: none;
+        height: calc(100vh - 24px);
+        max-height: none;
+        margin: 12px auto;
+        padding: 0;
+        color: var(--ink);
+        background: var(--bg);
+        border: var(--border) solid var(--edge-strong);
+        border-radius: var(--radius-lg);
+      }
+      dialog.reader[open] { display: flex; flex-direction: column; }
+      dialog.reader::backdrop { background: var(--scrim); }
+      .r-head { display: flex; align-items: flex-start; gap: 8px; padding: 12px 14px 10px; border-bottom: var(--border) solid var(--edge); }
+      .r-head .r-titles { flex: 1; min-width: 0; }
+      .r-kicker { color: var(--ink-2); font-size: var(--text-sm); }
+      .r-kicker .num { margin-right: 6px; }
+      .r-head h2 { font-size: var(--heading); line-height: var(--leading-tight); font-weight: var(--semibold); margin: 2px 0 0; overflow-wrap: anywhere; }
+      .r-close { flex: none; padding: 2px 8px; }
+      .r-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 14px 16px; }
+      .r-scroll:focus-visible { outline-offset: -2px; }
+      .r-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--ink-2); font-size: var(--text-sm); }
+      .r-meta .spacer { flex: 1; }
+      .r-meta a { color: var(--ink-2); }
+      .r-status { color: var(--ink-2); margin: 10px 0 0; }
+      .r-status.error { color: var(--danger); white-space: pre-wrap; }
+      .r-summary { margin-top: 12px; padding: 8px 10px; border: var(--border) solid var(--edge-strong); border-radius: var(--radius-md); background: var(--surface); }
+      .r-summary .label { color: var(--beacon); font-weight: var(--semibold); }
+      .r-summary dl { margin: 6px 0 0; display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; }
+      .r-summary dt { color: var(--ink-2); }
+      .r-summary dd { margin: 0; overflow-wrap: anywhere; }
+      .post { margin-top: 12px; border: var(--border) solid var(--edge); border-radius: var(--radius-md); }
+      .post:focus-visible { outline: var(--border) solid var(--ring); }
+      .post.posted { border-color: var(--ink-3); }
+      .post-head { display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; padding: 6px 10px; border-bottom: var(--border) solid var(--edge); background: var(--surface); color: var(--ink-2); font-size: var(--text-sm); border-radius: var(--radius-md) var(--radius-md) 0 0; }
+      .post-head .who { color: var(--ink); font-weight: var(--semibold); }
+      .post-head a { color: var(--ink-2); }
+      .post > .md { padding: 8px 10px; }
+      .earlier { margin-top: 12px; }
+      .thread { list-style: none; margin: 0; padding: 0; }
+
+      .answer { margin-top: 16px; padding-top: 12px; border-top: var(--border) solid var(--edge); }
+      .answer label { display: block; font-weight: var(--semibold); color: var(--beacon); }
+      .answer .hint { color: var(--ink-2); font-size: var(--text-sm); margin: 2px 0 6px; }
+      .answer textarea {
+        display: block;
+        width: 100%;
+        min-height: 7em;
+        resize: vertical;
+        font: inherit;
+        font-family: var(--mono);
+        line-height: var(--leading);
+        color: var(--ink);
+        background: var(--surface);
+        border: var(--border) solid var(--edge);
+        border-radius: var(--radius-md);
+        padding: 6px 8px;
+      }
+      .answer textarea:focus-visible { outline: var(--border) solid var(--ring); }
+      .answer .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+      .answer .error { color: var(--danger); white-space: pre-wrap; margin-top: 6px; }
+      .answer .error:empty { display: none; }
+      .answer .preview { margin: 8px 0; border: var(--border) solid var(--edge-strong); border-radius: var(--radius-md); padding: 8px 10px; }
+      button.primary { border-color: var(--ink-3); font-weight: var(--semibold); }
+
+      @media (max-width: 520px) {
+        dialog.reader { width: 100vw; height: 100vh; margin: 0; border: none; border-radius: 0; }
+        .r-head { padding: 10px 12px 8px; }
+        .r-scroll { padding: 8px 12px 14px; }
+        .r-summary dl { grid-template-columns: 1fr; gap: 0; }
+      }
+
+      /* Markdown as GitHub shows it, in Centralu's type and colours */
+      .md { overflow-wrap: anywhere; }
+      .md > :first-child { margin-top: 0; }
+      .md > :last-child { margin-bottom: 0; }
+      .md p, .md ul, .md ol, .md blockquote, .md pre, .md table, .md details { margin: 0 0 8px; }
+      .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { font-size: var(--heading); line-height: var(--leading-tight); font-weight: var(--semibold); margin: 12px 0 6px; }
+      .md h1, .md h2 { padding-bottom: 4px; border-bottom: var(--border) solid var(--edge); }
+      .md ul, .md ol { padding-left: 22px; }
+      .md ul.tasks { list-style: none; padding-left: 4px; }
+      .md li.task-item input { margin: 0 4px 0 0; vertical-align: middle; }
+      .md a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--ink-3); }
+      .md a.ref, .md a.mention { text-decoration: none; font-weight: var(--semibold); }
+      .md a.ref:hover, .md a.mention:hover { text-decoration: underline; }
+      .md code { font-family: var(--mono); font-size: 0.92em; background: var(--surface); border: var(--border) solid var(--edge); border-radius: var(--radius-sm); padding: 0 3px; }
+      .md pre { background: var(--surface); border: var(--border) solid var(--edge); border-radius: var(--radius-md); padding: 8px 10px; overflow-x: auto; }
+      .md pre code { background: none; border: none; padding: 0; font-size: var(--text-sm); white-space: pre; }
+      .md blockquote { padding: 0 0 0 10px; border-left: 3px solid var(--edge-strong); color: var(--ink-2); }
+      .md table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+      .md th, .md td { border: var(--border) solid var(--edge); padding: 3px 8px; vertical-align: top; }
+      .md th { font-weight: var(--semibold); background: var(--surface); }
+      .md .align-center { text-align: center; }
+      .md .align-right { text-align: right; }
+      .md img { max-width: 100%; height: auto; border-radius: var(--radius-sm); }
+      .md hr { border: none; border-top: var(--border) solid var(--edge); margin: 12px 0; }
+      .md kbd { font-family: var(--mono); font-size: var(--text-sm); border: var(--border) solid var(--edge-strong); border-radius: var(--radius-sm); padding: 0 4px; }
+      .md summary { cursor: pointer; color: var(--ink-2); }
 
       /*
        * The status tabs: only in the narrow layout below, where the columns stack and the board is
@@ -230,6 +375,10 @@
     <header>
       <h1><a id="title" href="#">Project board</a></h1>
       <span class="sub" id="sub"></span>
+      <div class="modes" aria-label="Show">
+        <button id="mode-board" type="button" tabindex="0" aria-pressed="true">Board</button>
+        <button id="mode-decisions" class="decision" type="button" tabindex="0" aria-pressed="false"><span id="decision-label">Needs decision</span><span class="count" id="decision-count"></span></button>
+      </div>
       <span class="spacer"></span>
       <select id="area" aria-label="Filter by Area"><option value="">All areas</option></select>
       <select id="priority" aria-label="Filter by Priority"><option value="">All priorities</option></select>
@@ -239,6 +388,44 @@
     <div id="notice" hidden></div>
     <nav class="tabs" id="tabs" aria-label="Statuses"></nav>
     <main class="board" id="board" aria-live="polite"></main>
+    <main class="decisions" id="decisions" hidden aria-label="Items that need a decision"></main>
+
+    <!-- The reader: an item read in place. Filled by openReader; its answer box is kept across re-reads. -->
+    <dialog class="reader" id="reader" aria-labelledby="reader-title">
+      <div class="r-head">
+        <div class="r-titles">
+          <div class="r-kicker" id="reader-kicker"></div>
+          <h2 id="reader-title"></h2>
+        </div>
+        <button class="r-close" id="reader-close" type="button" tabindex="0" aria-label="Close">Close</button>
+      </div>
+      <div class="r-scroll" id="reader-scroll" tabindex="0" aria-labelledby="reader-title">
+        <div class="r-meta" id="reader-meta"></div>
+        <p class="r-status" id="reader-status" role="status"></p>
+        <div id="reader-summary"></div>
+        <div id="reader-thread"></div>
+        <form class="answer" id="answer" hidden>
+          <div id="answer-edit">
+            <label for="answer-text">Answer this decision</label>
+            <p class="hint" id="answer-hint"></p>
+            <textarea id="answer-text" rows="6" spellcheck="true"></textarea>
+            <div class="row">
+              <button type="submit" id="answer-review" tabindex="0">Review answer</button>
+              <span class="quiet">⌘↩ or Ctrl+↩</span>
+            </div>
+          </div>
+          <div id="answer-confirm" hidden role="group" aria-labelledby="answer-confirm-title">
+            <p id="answer-confirm-title"></p>
+            <div class="md preview" id="answer-preview"></div>
+            <div class="row">
+              <button type="button" class="primary" id="answer-post" tabindex="0">Post comment</button>
+              <button type="button" id="answer-back" tabindex="0">Keep editing</button>
+            </div>
+          </div>
+          <div class="error" id="answer-error" role="alert"></div>
+        </form>
+      </div>
+    </dialog>
 
     <!-- Centralu replaces this tag with the MCP App bridge (runtime/mcp-app.js). Keep it. -->
     <script src="centralu:mcp-app.js"></script>
@@ -301,8 +488,15 @@
         const board = $('board')
         if (!state || !state.ok) {
           board.replaceChildren()
+          $('decisions').replaceChildren()
           return
         }
+        const decisionItems = state.items.filter((i) => i.status === state.decisionStatus)
+        $('decision-label').textContent = state.decisionStatus
+        $('decision-count').textContent = String(decisionItems.length)
+        board.hidden = mode !== 'board'
+        $('tabs').hidden = mode !== 'board'
+        $('decisions').hidden = mode !== 'decisions'
         $('title').textContent = state.project.title
         $('title').href = state.project.url
         $('sub').textContent = `GitHub Project #${state.project.number} of ${state.project.owner}`
@@ -322,6 +516,7 @@
         }))
         board.replaceChildren(...groups.map((g) => column(g.status, g.items)))
         renderTabs(groups)
+        renderDecisions()
       }
 
       /*
@@ -442,6 +637,20 @@
         return col
       }
 
+      /** `owner/repo#8` for an item the reader can open, else null (a draft, or an item this login cannot see) */
+      const itemKey = (item) => (item.number != null && item.repository ? `${item.repository}#${item.number}` : null)
+
+      /**
+       * A click on an item's title or number reads it here. With a modifier key, or for an item the
+       * reader cannot open, it goes to GitHub as before.
+       */
+      function openFromLink(e, item) {
+        e.preventDefault()
+        const key = itemKey(item)
+        if (!key || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return open(item.url)
+        openReader(key, e.currentTarget)
+      }
+
       function card(item) {
         const ref = item.number == null ? 'Draft' : `#${item.number}`
         const kind = item.type === 'pull' ? (item.draft ? 'Draft PR' : 'PR') : null
@@ -453,16 +662,23 @@
         )
         if (!item.status) select.prepend(el('option', { value: '', selected: true }, 'No status'))
         select.addEventListener('change', () => move(item, select.value))
+        const key = itemKey(item)
         const node = el(
           'article',
-          { class: `card${saving.has(item.itemId) ? ' saving' : ''}`, draggable: movable || item.url ? 'true' : 'false', 'data-number': item.number ?? '' },
+          {
+            class: `card${saving.has(item.itemId) ? ' saving' : ''}`,
+            draggable: movable || item.url ? 'true' : 'false',
+            'data-number': item.number ?? '',
+            'data-ref': key ?? undefined,
+          },
           item.url
-            ? el('a', { class: 'title', href: item.url, onclick: (e) => (e.preventDefault(), open(item.url)) }, item.title)
+            ? el('a', { class: 'title', href: item.url, tabindex: '0', title: key ? 'Read it here (with ⌘ or Ctrl: on GitHub)' : undefined, onclick: (e) => openFromLink(e, item) }, item.title)
             : el('span', { class: 'title' }, item.title),
           el(
             'div',
             { class: 'meta' },
-            el('span', { class: 'num' }, ref),
+            // The number reads the item too, by mouse; the title is its one stop for the keyboard
+            item.url ? el('a', { class: 'num', href: item.url, tabindex: '-1', onclick: (e) => openFromLink(e, item) }, ref) : el('span', { class: 'num' }, ref),
             kind ? el('span', { class: 'tag' }, kind) : null,
             item.priority ? el('span', { class: `tag p-${item.priority}` }, item.priority) : null,
             item.area ? el('span', { class: 'tag' }, item.area) : null,
@@ -496,6 +712,436 @@
         }
         await load(false)
       }
+
+      // --- What the server rendered --------------------------------------------------------------
+      // The server writes Markdown as HTML from a short list of tags (markdown.mjs). It goes in through
+      // an inert <template>, and anything outside that list is removed before it reaches the page,
+      // so even a renderer bug cannot run a script or load from elsewhere: the view's CSP allows
+      // inline script (docs/apps.md §6.4), so this is the second line, not the CSP.
+      const TAGS = {
+        P: [], BR: [], HR: [], H1: [], H2: [], H3: [], H4: [], H5: [], H6: [], STRONG: [], EM: [], DEL: [], CODE: ['class'], PRE: [],
+        BLOCKQUOTE: [], UL: ['class'], OL: ['start'], LI: ['class'], INPUT: ['type', 'disabled', 'checked'], TABLE: [], THEAD: [], TBODY: [],
+        TR: [], TH: ['class'], TD: ['class'], A: ['href', 'title', 'class', 'data-item'], IMG: ['src', 'alt', 'title', 'width', 'height', 'loading', 'referrerpolicy'],
+        DETAILS: ['open'], SUMMARY: [], SUB: [], SUP: [], KBD: [], B: [], I: [], S: [], INS: [], MARK: [], SMALL: [], U: [],
+      }
+      // Elements whose text is code or markup, not words: removed whole rather than shown as text
+      const DROP = new Set(['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT', 'IFRAME', 'OBJECT', 'EMBED', 'SVG', 'MATH'])
+      function clean(root) {
+        for (const node of [...root.querySelectorAll('*')]) {
+          if (!root.contains(node)) continue // inside something already removed
+          const allowed = TAGS[node.tagName]
+          if (!allowed) {
+            if (DROP.has(node.tagName.toUpperCase())) node.remove()
+            else node.replaceWith(document.createTextNode(node.textContent ?? ''))
+            continue
+          }
+          for (const a of [...node.attributes]) if (!allowed.includes(a.name)) node.removeAttribute(a.name)
+          if (node.tagName === 'A' && node.hasAttribute('href') && !/^(https?:|mailto:)/i.test(node.getAttribute('href'))) node.removeAttribute('href')
+          if (node.tagName === 'IMG' && !/^https:\/\//i.test(node.getAttribute('src') ?? '')) node.remove()
+          if (node.tagName === 'INPUT') {
+            node.setAttribute('type', 'checkbox')
+            node.setAttribute('disabled', '')
+          }
+        }
+      }
+      function htmlNode(tag, html, props = {}) {
+        const t = document.createElement('template')
+        t.innerHTML = html ?? ''
+        clean(t.content)
+        const n = el(tag, props)
+        n.append(t.content)
+        return n
+      }
+
+      const pad = (n) => String(n).padStart(2, '0')
+      const dayOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      const when = (iso) => {
+        if (!iso) return ''
+        const d = new Date(iso)
+        return Number.isNaN(d.getTime()) ? String(iso) : `${dayOf(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+      }
+      /** `#8` in the board's own repository, `owner/repo#8` elsewhere */
+      const shortRef = (key) => {
+        const at = key.lastIndexOf('#')
+        return state?.repository && key.slice(0, at).toLowerCase() === state.repository.toLowerCase() ? key.slice(at) : key
+      }
+      const KIND = { issue: 'Issue', pull: 'Pull request' }
+      const STATE = { OPEN: 'Open', CLOSED: 'Closed', MERGED: 'Merged' }
+      const rank = (p) => Object.fromEntries((state?.options?.priority ?? []).map((x, n) => [x, n]))[p] ?? 99
+
+      // --- "Needs decision": what each item asks, from its latest summary comment ----------------------
+      let mode = 'board' // or 'decisions'
+      let decisionData = null // the last decision_summaries answer
+      let decisionError = null
+      let decisionLoading = false
+      let decisionSeq = 0
+
+      function setMode(m) {
+        mode = m
+        $('mode-board').setAttribute('aria-pressed', String(m === 'board'))
+        $('mode-decisions').setAttribute('aria-pressed', String(m === 'decisions'))
+        render()
+        if (m === 'decisions') loadDecisions(false)
+      }
+
+      async function loadDecisions(refresh) {
+        const seq = ++decisionSeq
+        decisionLoading = true
+        renderDecisions()
+        let r
+        try {
+          r = await app.callServerTool({ name: 'decision_summaries', arguments: refresh ? { refresh: true } : {} })
+        } catch (e) {
+          r = { content: [{ type: 'text', text: String(e?.message ?? e) }] }
+        }
+        if (seq !== decisionSeq) return
+        decisionLoading = false
+        const sc = r?.structuredContent
+        if (sc?.ok) {
+          decisionData = sc
+          decisionError = null
+        } else decisionError = sc?.error?.message ?? (textOf(r) || 'The app gave no answer.')
+        renderDecisions()
+      }
+
+      function renderDecisions() {
+        const box = $('decisions')
+        if (mode !== 'decisions' || !state?.ok) return
+        const area = $('area').value
+        const priority = $('priority').value
+        // The board says which items wait; the summaries arrive after it
+        const items = state.items
+          .filter((i) => i.status === state.decisionStatus && itemKey(i) && (!area || i.area === area) && (!priority || i.priority === priority))
+          .sort((a, b) => rank(a.priority) - rank(b.priority) || (b.number ?? 0) - (a.number ?? 0))
+        const read = new Map((decisionData?.items ?? []).map((d) => [`${d.repository}#${d.number}`.toLowerCase(), d]))
+        const cards = items.map((i) => decisionCard(i, read.get(itemKey(i).toLowerCase())))
+        box.replaceChildren(
+          ...(decisionError ? [el('p', { class: 'r-status error' }, `What each decision asks could not be read: ${decisionError}`)] : []),
+          ...(cards.length ? cards : [el('p', { class: 'empty' }, `Nothing has the Status ${state.decisionStatus}.`)]),
+        )
+      }
+
+      function decisionCard(item, read) {
+        const key = itemKey(item)
+        const s = read?.decision
+        const fields = s ? [['Question', s.question], ['Recommendation', s.recommendation]].filter(([, v]) => v) : []
+        let body
+        if (read?.error) body = el('p', { class: 'quiet' }, `Could not read it: ${read.error}`)
+        else if (fields.length) body = el('dl', {}, ...fields.flatMap(([k, v]) => [el('dt', {}, k), htmlNode('dd', v, { class: 'md' })]))
+        else if (read) body = el('p', { class: 'quiet' }, 'No "Decision needed (summary, …)" comment yet.')
+        else body = el('p', { class: 'quiet' }, decisionLoading ? 'Reading what it asks…' : '')
+        return el(
+          'article',
+          { class: 'dcard', 'data-ref': key },
+          el('a', { class: 'title', href: item.url, tabindex: '0', onclick: (e) => openFromLink(e, item) }, `${shortRef(key)} ${item.title}`),
+          el(
+            'div',
+            { class: 'meta' },
+            item.type === 'pull' ? el('span', { class: 'tag' }, 'PR') : null,
+            item.priority ? el('span', { class: `tag p-${item.priority}` }, item.priority) : null,
+            item.area ? el('span', { class: 'tag' }, item.area) : null,
+            s?.date ? el('span', { class: 'quiet' }, `Summary of ${s.date}`) : null,
+            s?.answered ? el('span', { class: 'answered' }, typeof s.answered === 'string' ? `Answered ${when(s.answered)}` : 'Answered') : null,
+          ),
+          body,
+          el(
+            'div',
+            { class: 'actions' },
+            el('button', { type: 'button', tabindex: '0', onclick: (e) => openReader(key, e.currentTarget, { focusAnswer: true }) }, s?.answered ? 'Read and answer again' : 'Read and answer'),
+          ),
+        )
+      }
+
+      // --- The reader -----------------------------------------------------------------------------
+      // One item at a time, over the board. The screen keeps only what is on screen and the drafts in
+      // memory; the item is read from the server every time it opens (the server caches it briefly).
+      const dlg = $('reader')
+      const reader = {
+        key: null, // owner/repo#8 shown
+        opener: null, // the element the keyboard returns to
+        openerKey: null, // and its item, to find it again if the board re-rendered meanwhile
+        data: null, // the last read_item answer
+        limit: null, // how many comments were asked for
+        seq: 0,
+        drafts: new Map(), // key → text not posted yet
+        posted: new Map(), // key → comments posted from here, until a read shows them
+        confirming: false,
+        posting: false,
+      }
+      const answerPrefill = () => `**Decision (owner, ${dayOf(new Date())}):** `
+
+      function setReaderStatus(text, error = false) {
+        const s = $('reader-status')
+        s.textContent = text
+        s.className = `r-status${error ? ' error' : ''}`
+        s.hidden = !text
+      }
+
+      function saveDraft() {
+        if (!reader.key || $('answer').hidden) return
+        const text = $('answer-text').value
+        if (text.trim() && text !== answerPrefill()) reader.drafts.set(reader.key, text)
+        else reader.drafts.delete(reader.key)
+      }
+
+      async function openReader(key, opener, { focusAnswer = false } = {}) {
+        if (!dlg.open) {
+          reader.opener = opener ?? document.activeElement
+          reader.openerKey = opener?.closest?.('[data-ref]')?.dataset.ref ?? key
+        }
+        saveDraft()
+        reader.key = key
+        reader.data = null
+        reader.limit = null
+        showEdit()
+        const known = state?.items?.find((i) => itemKey(i)?.toLowerCase() === key.toLowerCase())
+        $('reader-kicker').replaceChildren(el('span', { class: 'num' }, shortRef(key)))
+        $('reader-title').textContent = known?.title ?? shortRef(key)
+        $('reader-meta').replaceChildren()
+        $('reader-summary').replaceChildren()
+        $('reader-thread').replaceChildren()
+        $('answer').hidden = true
+        setReaderStatus(`Reading ${shortRef(key)} from GitHub…`)
+        if (!dlg.open) dlg.showModal()
+        $('reader-scroll').scrollTop = 0
+        $('reader-scroll').focus({ preventScroll: true })
+        await loadReader({ focusAnswer })
+      }
+
+      async function loadReader({ refresh = false, comments, focusAnswer = false, quiet = false } = {}) {
+        const key = reader.key
+        if (!key) return
+        const seq = ++reader.seq
+        if (comments) reader.limit = comments
+        if (refresh) setReaderStatus(`Reading ${shortRef(key)} from GitHub…`)
+        let r
+        try {
+          r = await app.callServerTool({ name: 'read_item', arguments: { item: key, ...(refresh ? { refresh: true } : {}), ...(reader.limit ? { comments: reader.limit } : {}) } })
+        } catch (e) {
+          r = { content: [{ type: 'text', text: String(e?.message ?? e) }] }
+        }
+        if (seq !== reader.seq || reader.key !== key || !dlg.open) return
+        const sc = r?.structuredContent
+        if (!sc?.ok) {
+          if (!quiet || !reader.data) setReaderStatus(`${shortRef(key)} could not be read: ${sc?.error?.message ?? (textOf(r) || 'the app gave no answer.')}`, true)
+          return
+        }
+        reader.data = sc
+        renderReader()
+        if (focusAnswer && sc.needsDecision) {
+          $('answer').scrollIntoView({ block: 'nearest' })
+          $('answer-text').focus()
+        }
+      }
+
+      function post(c, { verb, posted = false } = {}) {
+        return el(
+          'article',
+          { class: `post${posted ? ' posted' : ''}`, 'data-id': c.id ?? '', tabindex: '-1', 'aria-label': `${c.author} ${verb} ${when(c.createdAt)}` },
+          el(
+            'div',
+            { class: 'post-head' },
+            el('span', { class: 'who' }, c.author),
+            el('span', {}, verb),
+            c.url ? el('a', { href: c.url, tabindex: '0', title: 'Open on GitHub' }, when(c.createdAt)) : el('span', {}, when(c.createdAt)),
+            posted ? el('span', { class: 'answered' }, '· posted from here') : null,
+          ),
+          htmlNode('div', c.html || '<p>No description.</p>', { class: 'md' }),
+        )
+      }
+
+      function renderReader() {
+        const d = reader.data
+        const it = d.item
+        const kind = it.type === 'pull' ? (it.draft ? 'Draft pull request' : 'Pull request') : KIND[it.type] ?? 'Item'
+        $('reader-kicker').replaceChildren(el('span', { class: 'num' }, shortRef(reader.key)), `${kind} · ${STATE[it.state] ?? it.state}`)
+        $('reader-title').textContent = it.title
+        $('reader-meta').replaceChildren(
+          ...it.labels.map((l) => el('span', { class: 'tag' }, l)),
+          ...(it.inProject
+            ? [it.status ? el('span', { class: `tag${it.status === d.decisionStatus ? ' decision' : ''}` }, it.status) : el('span', { class: 'quiet' }, 'No status'), it.priority ? el('span', { class: `tag p-${it.priority}` }, it.priority) : null, it.area ? el('span', { class: 'tag' }, it.area) : null]
+            : [el('span', { class: 'quiet' }, 'Not in the project')]),
+          el('span', { class: 'spacer' }),
+          el('button', { type: 'button', tabindex: '0', onclick: () => loadReader({ refresh: true, quiet: true }) }, 'Refresh'),
+          el('a', { href: it.url, tabindex: '0', class: 'secondary' }, 'Open on GitHub'),
+        )
+        const shownCount = d.comments.length
+        setReaderStatus(d.totalComments > d.loadedComments ? `The ${d.loadedComments} latest of ${d.totalComments} comments can be read here; the rest are on GitHub.` : '')
+        const s = d.decision
+        $('reader-summary').replaceChildren(
+          ...(s && d.needsDecision
+            ? [
+                el(
+                  'section',
+                  { class: 'r-summary', 'aria-label': 'Decision needed' },
+                  el('span', { class: 'label' }, `Decision needed${s.date ? ` (summary of ${s.date})` : ''}`),
+                  s.answered ? el('span', { class: 'answered' }, ` · answered ${typeof s.answered === 'string' ? when(s.answered) : ''}`) : null,
+                  el('dl', {}, ...[['Question', s.question], ['Options', s.options], ['Recommendation', s.recommendation]].filter(([, v]) => v).flatMap(([k, v]) => [el('dt', {}, k), htmlNode('dd', v, { class: 'md' })])),
+                ),
+              ]
+            : []),
+        )
+        const seen = new Set(d.comments.map((c) => c.id))
+        const mine = (reader.posted.get(reader.key) ?? []).filter((c) => !seen.has(c.id))
+        const postedIds = new Set((reader.posted.get(reader.key) ?? []).map((c) => c.id))
+        const hidden = d.totalComments - shownCount
+        $('reader-thread').replaceChildren(
+          post({ author: it.author, createdAt: it.createdAt, url: it.url, html: it.html }, { verb: 'opened' }),
+          ...(hidden > 0 && shownCount < d.loadedComments
+            ? [el('button', { type: 'button', class: 'earlier', tabindex: '0', onclick: showEarlier }, `Show ${d.loadedComments - shownCount} earlier comment${d.loadedComments - shownCount === 1 ? '' : 's'}`)]
+            : []),
+          el('ol', { class: 'thread', 'aria-label': 'Comments' }, ...[...d.comments, ...mine].map((c) => el('li', {}, post(c, { verb: 'commented', posted: postedIds.has(c.id) })))),
+        )
+        const answerable = d.needsDecision
+        if (answerable && $('answer').hidden) {
+          $('answer').hidden = false
+          $('answer-text').value = reader.drafts.get(reader.key) ?? answerPrefill()
+          $('answer-error').textContent = ''
+        } else if (!answerable) $('answer').hidden = true
+        $('answer-hint').textContent = `Posted as a comment on ${shortRef(reader.key)} from your GitHub login, after you confirm. Whoever coordinates the decision reads it there.`
+      }
+
+      async function showEarlier(e) {
+        const d = reader.data
+        const before = d.comments.length
+        await loadReader({ comments: d.loadedComments })
+        // The keyboard goes to the first comment that was not there before
+        const first = $('reader-thread').querySelectorAll('.thread .post')[0]
+        if (reader.data && reader.data.comments.length > before) first?.focus()
+        else e?.currentTarget?.focus?.()
+      }
+
+      // The answer: write, review what will be posted, confirm, and see it in the thread
+      function showEdit() {
+        reader.confirming = false
+        $('answer-edit').hidden = false
+        $('answer-confirm').hidden = true
+        $('answer-post').disabled = false
+        $('answer-back').disabled = false
+        $('answer-post').textContent = 'Post comment'
+      }
+
+      async function review() {
+        if (reader.posting || reader.confirming) return
+        const key = reader.key
+        const body = $('answer-text').value
+        $('answer-error').textContent = ''
+        if (!body.trim() || body.trim() === answerPrefill().trim()) {
+          $('answer-error').textContent = 'Write the answer first.'
+          return
+        }
+        $('answer-review').disabled = true
+        let r
+        try {
+          r = await app.callServerTool({ name: 'preview_comment', arguments: { item: key, body } })
+        } catch (e) {
+          r = { content: [{ type: 'text', text: String(e?.message ?? e) }] }
+        } finally {
+          $('answer-review').disabled = false
+        }
+        if (reader.key !== key || !dlg.open) return
+        const sc = r?.structuredContent
+        if (!sc?.ok) {
+          $('answer-error').textContent = sc?.problems?.length ? sc.problems.join('\n') : `It could not be checked: ${sc?.error?.message ?? (textOf(r) || 'the app gave no answer.')}`
+          return
+        }
+        reader.confirming = true
+        $('answer-confirm-title').replaceChildren(el('strong', {}, `Post this comment on ${shortRef(key)}?`), ' It goes to GitHub as it reads below, under your login.')
+        $('answer-preview').replaceChildren(htmlNode('div', sc.html, { class: 'md' }))
+        $('answer-edit').hidden = true
+        $('answer-confirm').hidden = false
+        $('answer-post').focus()
+      }
+
+      function backToEdit() {
+        if (reader.posting) return
+        showEdit()
+        $('answer-text').focus()
+      }
+
+      async function postAnswer() {
+        if (reader.posting) return
+        const key = reader.key
+        const body = $('answer-text').value
+        reader.posting = true
+        $('answer-post').disabled = true
+        $('answer-back').disabled = true
+        $('answer-post').textContent = 'Posting…'
+        $('answer-error').textContent = ''
+        let r
+        try {
+          r = await app.callServerTool({ name: 'comment', arguments: { item: key, body } })
+        } catch (e) {
+          r = { isError: true, content: [{ type: 'text', text: String(e?.message ?? e) }] }
+        } finally {
+          reader.posting = false
+        }
+        const sc = r?.structuredContent
+        if (r?.isError || !sc?.comment) {
+          $('answer-post').disabled = false
+          $('answer-back').disabled = false
+          $('answer-post').textContent = 'Post comment'
+          $('answer-error').textContent = `Not posted: ${sc?.error?.message ?? (textOf(r) || 'the app gave no answer.')}`
+          return
+        }
+        reader.posted.set(key, [...(reader.posted.get(key) ?? []), sc.comment])
+        reader.drafts.delete(key)
+        if (mode === 'decisions') loadDecisions(false)
+        if (reader.key !== key || !dlg.open) return
+        showEdit()
+        $('answer-text').value = answerPrefill()
+        renderReader()
+        setReaderStatus('Posted to GitHub.')
+        const mineNode = $('reader-thread').querySelector(`.post[data-id="${CSS.escape(sc.comment.id)}"]`)
+        mineNode?.scrollIntoView({ block: 'nearest' })
+        mineNode?.focus()
+      }
+
+      $('answer').addEventListener('submit', (e) => (e.preventDefault(), review()))
+      $('answer-text').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) (e.preventDefault(), review())
+      })
+      $('answer-text').addEventListener('input', saveDraft)
+      $('answer-post').addEventListener('click', postAnswer)
+      $('answer-back').addEventListener('click', backToEdit)
+      $('reader-close').addEventListener('click', () => dlg.close())
+
+      // Esc steps back out of a confirmation first, then closes the reader
+      dlg.addEventListener('cancel', (e) => {
+        if (reader.confirming) {
+          e.preventDefault()
+          backToEdit()
+        }
+      })
+      dlg.addEventListener('close', () => {
+        saveDraft()
+        reader.seq++
+        reader.key = null
+        reader.confirming = false
+        const visible = (n) => n && n.isConnected && n.getClientRects().length > 0
+        let back = visible(reader.opener) ? reader.opener : null
+        if (!back && reader.openerKey) back = [...document.querySelectorAll(`[data-ref="${CSS.escape(reader.openerKey)}"] .title`)].find(visible) ?? null
+        back?.focus()
+      })
+      dlg.addEventListener('click', (e) => {
+        // A click on the backdrop (the dialog box itself, outside its content) closes it
+        if (e.target === dlg) return dlg.close()
+        const a = e.target.closest?.('a')
+        if (!a || !dlg.contains(a)) return
+        e.preventDefault()
+        if (a.dataset.item && !(e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return openReader(a.dataset.item)
+        if (a.href) open(a.href)
+      })
+      // An image GitHub will not hand this view (a private repository's upload) becomes its link
+      dlg.addEventListener(
+        'error',
+        (e) => {
+          const img = e.target
+          if (img?.tagName !== 'IMG') return
+          img.replaceWith(el('a', { href: img.src, class: 'image-link' }, `Image${img.alt ? `: ${img.alt}` : ''} (opens on GitHub)`))
+        },
+        true,
+      )
 
       function show(result) {
         const sc = result?.structuredContent
@@ -541,11 +1187,15 @@
       app.ontoolresult = (params) => show(params)
       // Centralu's own notification (not part of the MCP Apps standard): the app's state changed.
       app.fallbackNotificationHandler = async (n) => {
-        if (n.method === 'centralu/notifications/changed') await load(false)
+        if (n.method !== 'centralu/notifications/changed') return
+        // Someone moved an item or commented: the board, the decisions and an open item read again
+        await Promise.all([load(false), mode === 'decisions' ? loadDecisions(false) : null, dlg.open ? loadReader({ quiet: true }) : null])
       }
-      $('refresh').onclick = () => load(true)
+      $('refresh').onclick = () => (load(true), mode === 'decisions' ? loadDecisions(true) : null)
       $('area').onchange = render
       $('priority').onchange = render
+      $('mode-board').onclick = () => setMode('board')
+      $('mode-decisions').onclick = () => setMode('decisions')
       app.connect().then(() => {
         applyTheme()
         if (!state) return load(false)

@@ -44,10 +44,13 @@ export function classify(text) {
   return new GitHubError('github', `GitHub answered with an error: ${first.replace(/^gh:\s*/, '') || 'no message'}`)
 }
 
-/** Runs `gh` with arguments (never a shell), and returns its stdout. */
-export function runGh(args, { timeoutMs = GH_TIMEOUT_MS, cwd } = {}) {
+/**
+ * Runs `gh` with arguments (never a shell), and returns its stdout. `input` goes to its stdin (with
+ * `--input -`), so a long text never rides on the command line.
+ */
+export function runGh(args, { timeoutMs = GH_TIMEOUT_MS, cwd, input } = {}) {
   return new Promise((resolve, reject) => {
-    execFile(
+    const child = execFile(
       'gh',
       args,
       {
@@ -71,6 +74,11 @@ export function runGh(args, { timeoutMs = GH_TIMEOUT_MS, cwd } = {}) {
         reject(err)
       },
     )
+    if (input !== undefined) {
+      // gh may exit before reading it all (a bad flag); that is its answer, not a crash here
+      child.stdin.on('error', () => {})
+      child.stdin.end(input)
+    }
   })
 }
 
@@ -473,4 +481,95 @@ export async function deleteBranch(repo, branch) {
   } catch (e) {
     return firstLine(e)
   }
+}
+
+// --- Reading an item and answering it (the reader in the view) --------------------------------------
+// One GraphQL query for the item and a page of its comments, newest page first: a thread longer than
+// the limit keeps its latest comments, which are the ones a decision turns on.
+
+const THREAD_PAGE = 100
+export const THREAD_MAX_COMMENTS = 1000
+
+const COMMENTS = `comments(last: ${THREAD_PAGE}, before: $before) {
+  totalCount
+  pageInfo { hasPreviousPage startCursor }
+  nodes { id url body createdAt author { login } }
+}`
+const THREAD_QUERY = `query($owner: String!, $name: String!, $number: Int!, $before: String) {
+  repository(owner: $owner, name: $name) {
+    issueOrPullRequest(number: $number) {
+      __typename
+      ... on Issue { number title url state stateReason body createdAt author { login } labels(first: 50) { nodes { name } } ${COMMENTS} }
+      ... on PullRequest { number title url state isDraft merged body createdAt author { login } labels(first: 50) { nodes { name } } ${COMMENTS} }
+    }
+  }
+}`
+
+/**
+ * An issue or pull request with its comments, oldest first, at most `max` of them (the latest).
+ * Returns null when there is no such item this login can see.
+ */
+export async function readThread(repo, number, { max = THREAD_MAX_COMMENTS } = {}) {
+  checkRepo(repo)
+  const [owner, name] = repo.split('/')
+  let item = null
+  let before
+  const pages = []
+  let total = 0
+  for (let fetched = 0; fetched < max; ) {
+    let data
+    try {
+      data = await graphql(THREAD_QUERY, { owner, name, number, before })
+    } catch (e) {
+      if (e instanceof GitHubError && e.kind === 'not-found') return null
+      throw e
+    }
+    const c = data?.repository?.issueOrPullRequest
+    if (!c) return null
+    item ??= c
+    const page = c.comments?.nodes ?? []
+    total = c.comments?.totalCount ?? total
+    pages.unshift(page)
+    fetched += page.length
+    if (!c.comments?.pageInfo?.hasPreviousPage || page.length === 0) break
+    before = c.comments.pageInfo.startCursor
+  }
+  const comments = pages
+    .flat()
+    .slice(-max)
+    .map((n) => ({ id: n.id, url: n.url ?? null, author: n.author?.login ?? 'ghost', createdAt: n.createdAt ?? null, body: n.body ?? '' }))
+  return {
+    type: item.__typename === 'PullRequest' ? 'pull' : 'issue',
+    repository: repo,
+    number: item.number,
+    title: item.title,
+    url: item.url,
+    state: item.merged ? 'MERGED' : item.state,
+    stateReason: item.stateReason ?? null,
+    draft: item.isDraft === true,
+    author: item.author?.login ?? 'ghost',
+    createdAt: item.createdAt ?? null,
+    body: item.body ?? '',
+    labels: (item.labels?.nodes ?? []).map((l) => l?.name).filter(Boolean),
+    comments,
+    totalComments: Math.max(total, comments.length),
+  }
+}
+
+/** Posts a comment on an issue or pull request; answers it as GitHub stored it. */
+export async function postComment(repo, number, body) {
+  checkRepo(repo)
+  let out
+  try {
+    out = await runGh(['api', '-X', 'POST', `repos/${repo}/issues/${number}/comments`, '--input', '-'], { input: JSON.stringify({ body }) })
+  } catch (e) {
+    // Cut off while waiting, GitHub may have stored it all the same: say so rather than invite a second copy
+    if (e instanceof GitHubError && e.kind === 'network') throw new GitHubError('network', `${e.message} The comment may have been posted anyway: read the item again before posting it a second time.`)
+    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+    if (httpStatus(e) === 404) throw new GitHubError('not-found', `${repo}#${number} is not an issue or pull request this GitHub login can see. Nothing was posted.`)
+    throw new GitHubError('github', `GitHub refused the comment on ${repo}#${number}: ${firstLine(e)}. Nothing was posted.`)
+  }
+  const c = parseJson(out)
+  if (!c?.id) throw new GitHubError('github', 'GitHub answered the comment with something that is not one. Look at the item on GitHub before posting again.')
+  return { id: c.node_id ?? String(c.id), url: c.html_url ?? null, author: c.user?.login ?? 'ghost', createdAt: c.created_at ?? null, body: c.body ?? body }
 }

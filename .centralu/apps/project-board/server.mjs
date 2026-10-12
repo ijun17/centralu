@@ -14,7 +14,9 @@ import {
   deleteBranch,
   findContent,
   mergePr,
+  THREAD_MAX_COMMENTS,
   parseItemRef,
+  postComment,
   readBoard,
   readChecks,
   readIssueText,
@@ -22,14 +24,25 @@ import {
   readPr,
   readRepo,
   readRequired,
+  readThread,
   resolveOption,
   resolveRef,
   sameRepo,
   setOption,
 } from './github.mjs'
 import { NO_PERMISSION, canMerge, clip, decideMerge, evaluateChecks, firstFailure, matchKnownFailure, squashMessage, workflowCheckNames } from './ci.mjs'
+import { decisionSummary, renderInline, renderMarkdown } from './markdown.mjs'
 
 const UI = 'ui://project-board/index.html'
+
+/**
+ * What the view may load from outside: images on GitHub's own hosts, nothing else (no network, no
+ * frames). `github.com/user-attachments/…` (an image pasted into an issue) redirects to
+ * `private-user-images.githubusercontent.com`, and avatars and older uploads live on other
+ * `githubusercontent.com` hosts. markdown.mjs writes an <img> only for these hosts; any other image
+ * stays a link. Centralu reads this from the resource's contents (docs/apps.md §6.4).
+ */
+const VIEW_CSP = { resourceDomains: ['https://github.com', 'https://*.githubusercontent.com'] }
 
 const config = await readFile(new URL('./project.json', import.meta.url), 'utf8')
   .then((t) => JSON.parse(t))
@@ -701,10 +714,208 @@ async function doMerge(repo, what, p, body, del, ci) {
   return ciAnswer(summary, ci, { outcome: 'merged', merged: true, commit, subject: msg.subject })
 }
 
+// --- The reader: an item's thread, read in the view -------------------------------------------------
+// The view shows an issue or pull request (body, comments, labels, board fields) without the browser,
+// and answers a "Needs decision" item with a comment. Threads are cached like the board: in memory,
+// for CACHE_MS, at most THREADS_MAX of them; a comment posted forgets its thread, and a read that
+// started before the post never refills it.
+
+const THREADS_MAX = 40
+const threads = new Map() // key → { at, thread }, oldest first
+const threadReads = new Map() // key → { version, promise }
+const threadVersions = new Map() // key → how many comments this server posted there
+const threadKey = (repo, number) => `${String(repo).toLowerCase()}#${number}`
+
+async function thread(repo, number, { fresh = false } = {}) {
+  const key = threadKey(repo, number)
+  const hit = threads.get(key)
+  if (!fresh && hit && Date.now() - hit.at < CACHE_MS) return hit.thread
+  const version = threadVersions.get(key) ?? 0
+  const pending = threadReads.get(key)
+  if (pending && pending.version === version) return pending.promise
+  const promise = readThread(repo, number).then((t) => {
+    if (t && (threadVersions.get(key) ?? 0) === version) {
+      threads.delete(key)
+      threads.set(key, { at: Date.now(), thread: t })
+      while (threads.size > THREADS_MAX) threads.delete(threads.keys().next().value)
+    }
+    return t
+  })
+  threadReads.set(key, { version, promise })
+  promise
+    .finally(() => {
+      if (threadReads.get(key)?.promise === promise) threadReads.delete(key)
+    })
+    .catch(() => {})
+  return promise
+}
+function forgetThread(repo, number) {
+  const key = threadKey(repo, number)
+  threads.delete(key)
+  threadVersions.set(key, (threadVersions.get(key) ?? 0) + 1)
+}
+
+// Rendered once per body: the same thread read again from the cache is not rendered again
+const rendered = new WeakMap()
+function html(holder, text, opts) {
+  let h = rendered.get(holder)
+  if (h === undefined) {
+    h = renderMarkdown(text, opts)
+    rendered.set(holder, h)
+  }
+  return h
+}
+const renderOpts = (t) => ({ repo: t.repository, base: t.url })
+
+/** A decision summary's fields as inline HTML, for the view's "Needs decision" list and the reader. */
+function summaryView(s, opts) {
+  if (!s) return null
+  const inline = (v) => (v ? renderInline(v, { ...opts, breaks: true }) : null)
+  return { date: s.date, question: inline(s.question), options: inline(s.options), recommendation: inline(s.recommendation), url: s.url, answered: s.answered }
+}
+
+const DEFAULT_COMMENTS = 50
+const fieldsOf = (item) => ({ status: item?.status ?? null, priority: item?.priority ?? null, area: item?.area ?? null })
+
+/** Failures the view shows in place of the item: as data, like `show`, so it can say why. */
+function viewFailure(e) {
+  const f = failure(e)
+  return { content: f.content, structuredContent: { ok: false, ...f.structuredContent } }
+}
+
+async function readItem({ item, refresh, comments }) {
+  const want = parseItemRef(item, config.repository)
+  const [t, b] = await Promise.all([thread(want.repo, want.number, { fresh: refresh === true }), board().catch(() => null)])
+  const ref = refOf(want.repo, want.number)
+  if (!t) throw new GitHubError('not-found', `${ref} is not an issue or pull request this GitHub login can see.`)
+  const onBoard = b?.items.find(matches(want)) ?? null
+  const limit = Math.min(THREAD_MAX_COMMENTS, Math.max(1, Math.floor(comments ?? DEFAULT_COMMENTS)))
+  const opts = renderOpts(t)
+  const shown = t.comments.slice(-limit)
+  const decision = onBoard?.status != null && onBoard.status.toLowerCase() === String(config.decisionStatus).toLowerCase()
+  const kind = t.type === 'pull' ? 'pull request' : 'issue'
+  const summary = `${ref} ${t.title} (${kind}, ${t.state.toLowerCase()}): ${t.totalComments} comment${t.totalComments === 1 ? '' : 's'}, ${shown.length} shown.`
+  return answer(summary, {
+    ok: true,
+    item: {
+      ref,
+      type: t.type,
+      repository: t.repository,
+      number: t.number,
+      title: t.title,
+      url: t.url,
+      state: t.state,
+      stateReason: t.stateReason,
+      draft: t.draft,
+      author: t.author,
+      createdAt: t.createdAt,
+      labels: t.labels,
+      inProject: onBoard !== null,
+      ...fieldsOf(onBoard),
+      html: html(t, t.body, opts),
+    },
+    comments: shown.map((c) => ({ id: c.id, url: c.url, author: c.author, createdAt: c.createdAt, html: html(c, c.body, opts) })),
+    totalComments: t.totalComments,
+    loadedComments: t.comments.length,
+    needsDecision: decision,
+    decisionStatus: config.decisionStatus,
+    decision: summaryView(decisionSummary(t.comments), opts),
+  })
+}
+
+/** Runs `fn` over `list` with at most `n` at a time, answers in order. */
+async function mapLimit(list, n, fn) {
+  const out = new Array(list.length)
+  let next = 0
+  await Promise.all(
+    Array.from({ length: Math.min(n, list.length) }, async () => {
+      while (next < list.length) {
+        const i = next++
+        out[i] = await fn(list[i], i)
+      }
+    }),
+  )
+  return out
+}
+
+async function decisionSummaries({ refresh }) {
+  const b = await board({ fresh: refresh === true })
+  const decision = resolveOption(b.fields.status, config.decisionStatus).name
+  const items = b.items.filter((i) => i.status === decision && i.number != null && i.repository).sort(byPriority)
+  const rows = await mapLimit(items, 4, async (i) => {
+    const row = { ref: refOf(i.repository, i.number), repository: i.repository, number: i.number, title: i.title, url: i.url, type: i.type, ...fieldsOf(i) }
+    try {
+      const t = await thread(i.repository, i.number, { fresh: refresh === true })
+      return { ...row, comments: t?.totalComments ?? 0, decision: t ? summaryView(decisionSummary(t.comments), renderOpts(t)) : null }
+    } catch (e) {
+      return { ...row, error: reason(e) }
+    }
+  })
+  const without = rows.filter((r) => !r.error && !r.decision).length
+  const summary = `${rows.length} item${rows.length === 1 ? '' : 's'} with Status ${decision}${without ? `, ${without} without a summary comment` : ''}.`
+  return answer(summary, { ok: true, decisionStatus: decision, items: rows, fetchedAt: b.fetchedAt })
+}
+
+/** Checks a comment before it goes out. Answers the problems, in words for the person; none: it may go. */
+function commentProblems(body) {
+  const problems = []
+  if (!String(body ?? '').trim()) problems.push('The comment is empty.')
+  return problems
+}
+
+async function previewComment({ item, body }) {
+  const want = parseItemRef(item, config.repository)
+  const problems = commentProblems(body)
+  const ref = refOf(want.repo, want.number)
+  const base = `https://github.com/${want.repo}/issues/${want.number}`
+  return answer(problems.length ? `Not ready to post on ${ref}: ${problems.join(' ')}` : `Ready to post on ${ref}.`, {
+    ok: problems.length === 0,
+    ref,
+    problems,
+    html: renderMarkdown(body, { repo: want.repo, base }),
+  })
+}
+
+async function postItemComment({ item, body }) {
+  const want = parseItemRef(item, config.repository)
+  const ref = refOf(want.repo, want.number)
+  const problems = commentProblems(body)
+  if (problems.length) throw new GitHubError('input', `Not posted on ${ref}: ${problems.join(' ')}`)
+  let c
+  try {
+    c = await postComment(want.repo, want.number, body)
+  } finally {
+    // Whether or not it went through, the cached thread can no longer be trusted
+    forgetThread(want.repo, want.number)
+  }
+  const base = `https://github.com/${want.repo}/issues/${want.number}`
+  return answer(`Posted a comment on ${ref}${c.url ? `: ${c.url}` : ''}.`, {
+    ok: true,
+    ref,
+    comment: { id: c.id, url: c.url, author: c.author, createdAt: c.createdAt, html: renderMarkdown(c.body, { repo: want.repo, base }) },
+  })
+}
+
+/**
+ * The runtime's `uiResource`, with `_meta` on the resource and on its contents: Centralu reads a
+ * view's CSP from the contents (the standard's place, docs/apps.md §6.4), and the runtime's helper
+ * puts nothing there.
+ */
+function viewResource(server, name, uri, file, meta) {
+  const withMeta = {
+    registerResource: (n, u, cfg, read) =>
+      server.registerResource(n, u, { ...cfg, _meta: meta }, async (...a) => {
+        const r = await read(...a)
+        return { ...r, contents: r.contents.map((c) => ({ ...c, _meta: { ...c._meta, ...meta } })) }
+      }),
+  }
+  return centralu.uiResource(withMeta, name, uri, file)
+}
+
 serveStdio(() => {
   const server = new McpServer({ name: 'project-board', version: '0.3.0' }, { capabilities: { tools: {}, resources: {} } })
 
-  centralu.uiResource(server, 'board', UI, new URL('./ui/index.html', import.meta.url))
+  viewResource(server, 'board', UI, new URL('./ui/index.html', import.meta.url), { ui: { csp: VIEW_CSP } })
 
   // The home tool: the screen's whole state, read from GitHub. It answers a failure as data rather
   // than isError, so the screen states the reason (GitHub unreachable, gh missing, scope missing)
@@ -725,6 +936,7 @@ serveStdio(() => {
         return answer(`${b.items.length} items. ${where(b)}.`, {
           ok: true,
           project: b.project,
+          repository: config.repository,
           columns: columns(b),
           decisionStatus: config.decisionStatus,
           options: { status: b.fields.status.options.map((o) => o.name), priority: b.fields.priority.options.map((o) => o.name), area: b.fields.area.options.map((o) => o.name) },
@@ -732,10 +944,94 @@ serveStdio(() => {
           fetchedAt: b.fetchedAt,
         })
       } catch (e) {
-        const f = failure(e)
-        return { content: f.content, structuredContent: { ok: false, ...f.structuredContent } }
+        return viewFailure(e)
       }
     },
+  )
+
+  // The reader. Screen-only: an agent has `gh` and the board's own tools; these answer the view with
+  // rendered HTML. Failures come back as data (`ok: false`), so the view says why in place.
+  centralu.tool(
+    server,
+    'read_item',
+    {
+      title: 'Read an issue or pull request',
+      description: 'An issue or pull request with its labels, Status/Priority/Area, body and latest comments, rendered for the view.',
+      inputSchema: z.object({
+        item: itemRef.describe(`The issue or pull request: ${REF_HELP}`),
+        refresh: z.boolean().optional().describe('Skip the short cache and ask GitHub now'),
+        comments: z.number().int().positive().max(THREAD_MAX_COMMENTS).optional().describe(`How many of the latest comments; default ${DEFAULT_COMMENTS}`),
+      }),
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: { ui: { visibility: ['app'] } },
+    },
+    async (args) => {
+      try {
+        return await readItem(args)
+      } catch (e) {
+        return viewFailure(e)
+      }
+    },
+  )
+
+  centralu.tool(
+    server,
+    'decision_summaries',
+    {
+      title: 'What each decision asks',
+      description: `The items whose Status is "${config.decisionStatus}", each with the question, options and recommendation of its latest "Decision needed (summary, …)" comment, and whether the owner answered after it.`,
+      inputSchema: z.object({ refresh: z.boolean().optional().describe('Skip the short cache and ask GitHub now') }),
+      annotations: { readOnlyHint: true, openWorldHint: true },
+      _meta: { ui: { visibility: ['app'] } },
+    },
+    async (args) => {
+      try {
+        return await decisionSummaries(args)
+      } catch (e) {
+        return viewFailure(e)
+      }
+    },
+  )
+
+  centralu.tool(
+    server,
+    'preview_comment',
+    {
+      title: 'Preview a comment',
+      description: 'A comment as it will read on GitHub, and what would stop it from being posted. Posts nothing.',
+      inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`), body: z.string().max(65536) }),
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { visibility: ['app'] } },
+    },
+    async (args) => {
+      try {
+        return await previewComment(args)
+      } catch (e) {
+        return viewFailure(e)
+      }
+    },
+  )
+
+  centralu.tool(
+    server,
+    'comment',
+    {
+      title: 'Comment on an issue or pull request',
+      description: 'Post a comment on an issue or pull request on GitHub, as the gh login. Answers the comment as GitHub stored it.',
+      // GitHub's own limit for a comment body
+      inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`), body: z.string().max(65536).describe('The comment, in Markdown') }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      _meta: { ui: { visibility: ['app'] } },
+    },
+    // One at a time, like the board's writes: a double press posts in order, never interleaved
+    (args) =>
+      oneAtATime(async () => {
+        try {
+          return await postItemComment(args)
+        } catch (e) {
+          return failure(e)
+        }
+      }),
   )
 
   centralu.tool(
