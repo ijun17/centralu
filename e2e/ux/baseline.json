@@ -30,7 +30,7 @@
         "R": 3
       },
       "seconds": 17.71,
-      "waitMs": 325,
+      "waitMs": 355,
       "travelPx": 2161,
       "steps": [
         {
@@ -49,7 +49,7 @@
           "label": "settings",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 315
+          "waitMs": 331
         },
         {
           "kind": "click",
@@ -67,7 +67,7 @@
           "label": "the form",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 5
+          "waitMs": 10
         },
         {
           "kind": "type",
@@ -108,7 +108,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 5
+          "waitMs": 14
         }
       ],
       "notes": [
@@ -131,7 +131,7 @@
         "R": 4
       },
       "seconds": 11.05,
-      "waitMs": 365,
+      "waitMs": 406,
       "travelPx": 2240,
       "steps": [
         {
@@ -150,7 +150,7 @@
           "label": "settings",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 319
+          "waitMs": 382
         },
         {
           "kind": "click",
@@ -168,7 +168,7 @@
           "label": "the hosts",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 31
+          "waitMs": 6
         },
         {
           "kind": "click",
@@ -209,7 +209,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 5
+          "waitMs": 8
         }
       ],
       "notes": [
@@ -233,7 +233,7 @@
         "R": 1
       },
       "seconds": 2.99,
-      "waitMs": 4,
+      "waitMs": 23,
       "travelPx": 567,
       "steps": [
         {
@@ -252,7 +252,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 23
         }
       ],
       "notes": [
@@ -275,7 +275,7 @@
         "R": 2
       },
       "seconds": 9.98,
-      "waitMs": 15,
+      "waitMs": 17,
       "travelPx": 996,
       "steps": [
         {
@@ -294,7 +294,7 @@
           "label": "the dialog",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 5
         },
         {
           "kind": "type",
@@ -318,7 +318,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 7
+          "waitMs": 12
         }
       ],
       "notes": [
@@ -341,7 +341,7 @@
         "R": 2
       },
       "seconds": 8.04,
-      "waitMs": 7,
+      "waitMs": 8,
       "travelPx": 1332,
       "steps": [
         {
@@ -394,11 +394,90 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 3
+          "waitMs": 4
         }
       ],
       "notes": [
         "question-option: a choice among 2 (Hick–Hyman 0.24 s, not added)"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "approve-while-typing.keyboard",
+      "task": "Answer an approval while typing a message in its session",
+      "path": "keyboard",
+      "access": "shortcut",
+      "operators": "M 3K",
+      "counts": {
+        "K": 3,
+        "P": 0,
+        "B": 0,
+        "H": 0,
+        "M": 1,
+        "R": 1
+      },
+      "seconds": 2.19,
+      "waitMs": 24,
+      "travelPx": 0,
+      "steps": [
+        {
+          "kind": "press",
+          "label": "Mod+Shift+y",
+          "operators": "M 3K",
+          "seconds": 2.19
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 24
+        }
+      ],
+      "notes": [
+        "mod+⇧Y from the composer, where a bare y would be typed into the message"
+      ],
+      "breaches": []
+    },
+    {
+      "id": "approve-while-typing.mouse",
+      "task": "Answer an approval while typing a message in its session",
+      "path": "mouse",
+      "access": "discoverable",
+      "operators": "H M P B B",
+      "counts": {
+        "K": 0,
+        "P": 1,
+        "B": 2,
+        "H": 1,
+        "M": 1,
+        "R": 1
+      },
+      "seconds": 3.01,
+      "waitMs": 52,
+      "travelPx": 357,
+      "steps": [
+        {
+          "kind": "click",
+          "label": "approve-allow",
+          "operators": "H M P B B",
+          "seconds": 3.01,
+          "pointer": {
+            "D": 357,
+            "W": 72,
+            "ID": 2.57
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "goal",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 52
+        }
+      ],
+      "notes": [
+        "The hand starts on the keyboard, mid-message; the draft stays in the composer"
       ],
       "breaches": []
     },
@@ -417,7 +496,7 @@
         "R": 2
       },
       "seconds": 3.82,
-      "waitMs": 242,
+      "waitMs": 68,
       "travelPx": 0,
       "steps": [
         {
@@ -431,7 +510,7 @@
           "label": "the approval card",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 234
+          "waitMs": 57
         },
         {
           "kind": "press",
@@ -444,7 +523,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 11
         }
       ],
       "notes": [],
@@ -465,7 +544,7 @@
         "R": 2
       },
       "seconds": 5.56,
-      "waitMs": 25,
+      "waitMs": 32,
       "travelPx": 741,
       "steps": [
         {
@@ -484,7 +563,7 @@
           "label": "the approval card",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 3
+          "waitMs": 6
         },
         {
           "kind": "click",
@@ -502,7 +581,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 22
+          "waitMs": 27
         }
       ],
       "notes": [],
@@ -523,7 +602,7 @@
         "R": 3
       },
       "seconds": 8.35,
-      "waitMs": 33,
+      "waitMs": 109,
       "travelPx": 1049,
       "steps": [
         {
@@ -542,17 +621,17 @@
           "label": "the waiting list",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 16
+          "waitMs": 17
         },
         {
           "kind": "click",
           "label": "waiting-list row \"Clean up leftover processes\"",
           "operators": "M P B B",
-          "seconds": 2.51,
+          "seconds": 2.5,
           "pointer": {
             "D": 230,
             "W": 119,
-            "ID": 1.56
+            "ID": 1.55
           },
           "choice": {
             "n": 3,
@@ -565,7 +644,7 @@
           "label": "the approval card",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 66
         },
         {
           "kind": "click",
@@ -573,7 +652,7 @@
           "operators": "M P B B",
           "seconds": 2.65,
           "pointer": {
-            "D": 241,
+            "D": 242,
             "W": 34,
             "ID": 3.01
           }
@@ -583,7 +662,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 12
+          "waitMs": 25
         }
       ],
       "notes": [
@@ -607,7 +686,7 @@
         "R": 1
       },
       "seconds": 3.16,
-      "waitMs": 79,
+      "waitMs": 95,
       "travelPx": 426,
       "steps": [
         {
@@ -626,7 +705,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 79
+          "waitMs": 95
         }
       ],
       "notes": [
@@ -649,8 +728,8 @@
         "R": 2
       },
       "seconds": 5.83,
-      "waitMs": 14,
-      "travelPx": 707,
+      "waitMs": 57,
+      "travelPx": 708,
       "steps": [
         {
           "kind": "click",
@@ -691,7 +770,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 7
+          "waitMs": 50
         }
       ],
       "notes": [
@@ -715,7 +794,7 @@
         "R": 3
       },
       "seconds": 8.44,
-      "waitMs": 367,
+      "waitMs": 364,
       "travelPx": 1791,
       "steps": [
         {
@@ -734,7 +813,7 @@
           "label": "settings",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 346
+          "waitMs": 351
         },
         {
           "kind": "click",
@@ -757,7 +836,7 @@
           "label": "appearance",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 16
+          "waitMs": 6
         },
         {
           "kind": "click",
@@ -775,7 +854,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 7
         }
       ],
       "notes": [
@@ -799,7 +878,7 @@
         "R": 2
       },
       "seconds": 16.33,
-      "waitMs": 11,
+      "waitMs": 26,
       "travelPx": 1398,
       "steps": [
         {
@@ -818,7 +897,7 @@
           "label": "staged",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 3
+          "waitMs": 10
         },
         {
           "kind": "click",
@@ -853,7 +932,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 16
         }
       ],
       "notes": [
@@ -876,7 +955,7 @@
         "R": 3
       },
       "seconds": 7.55,
-      "waitMs": 340,
+      "waitMs": 199,
       "travelPx": 1048,
       "steps": [
         {
@@ -895,7 +974,7 @@
           "label": "the create-project dialog",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 13
         },
         {
           "kind": "type",
@@ -908,7 +987,7 @@
           "label": "the folder it will make",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 311
+          "waitMs": 157
         },
         {
           "kind": "click",
@@ -926,7 +1005,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 26
+          "waitMs": 29
         }
       ],
       "notes": [
@@ -949,7 +1028,7 @@
         "R": 3
       },
       "seconds": 9.17,
-      "waitMs": 23,
+      "waitMs": 36,
       "travelPx": 1401,
       "steps": [
         {
@@ -1002,7 +1081,7 @@
           "label": "the confirmation",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 5
+          "waitMs": 17
         },
         {
           "kind": "click",
@@ -1043,7 +1122,7 @@
         "R": 3
       },
       "seconds": 4.66,
-      "waitMs": 201,
+      "waitMs": 266,
       "travelPx": 0,
       "steps": [
         {
@@ -1057,7 +1136,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 17
+          "waitMs": 8
         },
         {
           "kind": "type",
@@ -1070,7 +1149,7 @@
           "label": "the conversation hits",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 165
+          "waitMs": 251
         },
         {
           "kind": "press",
@@ -1088,7 +1167,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 18
+          "waitMs": 7
         }
       ],
       "notes": [
@@ -1111,7 +1190,7 @@
         "R": 3
       },
       "seconds": 6.26,
-      "waitMs": 202,
+      "waitMs": 275,
       "travelPx": 633,
       "steps": [
         {
@@ -1130,7 +1209,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 21
+          "waitMs": 6
         },
         {
           "kind": "type",
@@ -1143,7 +1222,7 @@
           "label": "the conversation hits",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 155
+          "waitMs": 261
         },
         {
           "kind": "press",
@@ -1161,7 +1240,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 27
+          "waitMs": 7
         }
       ],
       "notes": [
@@ -1185,7 +1264,7 @@
         "R": 2
       },
       "seconds": 6.63,
-      "waitMs": 15,
+      "waitMs": 27,
       "travelPx": 1524,
       "steps": [
         {
@@ -1204,7 +1283,7 @@
           "label": "the grid",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 7
+          "waitMs": 20
         },
         {
           "kind": "drag",
@@ -1222,7 +1301,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 7
         }
       ],
       "notes": [
@@ -1245,7 +1324,7 @@
         "R": 2
       },
       "seconds": 6.59,
-      "waitMs": 17,
+      "waitMs": 21,
       "travelPx": 1452,
       "steps": [
         {
@@ -1264,7 +1343,7 @@
           "label": "the grid",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 6
+          "waitMs": 7
         },
         {
           "kind": "drag",
@@ -1282,7 +1361,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 11
+          "waitMs": 15
         }
       ],
       "notes": [],
@@ -1303,7 +1382,7 @@
         "R": 3
       },
       "seconds": 11.66,
-      "waitMs": 2407,
+      "waitMs": 2440,
       "travelPx": 1436,
       "steps": [
         {
@@ -1333,7 +1412,7 @@
           "label": "the menu",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 6
+          "waitMs": 4
         },
         {
           "kind": "click",
@@ -1356,7 +1435,7 @@
           "label": "the hand-off dialog",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 6
         },
         {
           "kind": "click",
@@ -1390,7 +1469,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 2396
+          "waitMs": 2430
         }
       ],
       "notes": [
@@ -1414,7 +1493,7 @@
         "R": 3
       },
       "seconds": 12.98,
-      "waitMs": 26,
+      "waitMs": 42,
       "travelPx": 1198,
       "steps": [
         {
@@ -1433,7 +1512,7 @@
           "label": "the new-session dialog",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 7
+          "waitMs": 6
         },
         {
           "kind": "click",
@@ -1451,7 +1530,7 @@
           "label": "the new session",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 12
+          "waitMs": 25
         },
         {
           "kind": "type",
@@ -1470,7 +1549,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 11
         }
       ],
       "notes": [
@@ -1493,7 +1572,7 @@
         "R": 4
       },
       "seconds": 11.89,
-      "waitMs": 32,
+      "waitMs": 24,
       "travelPx": 0,
       "steps": [
         {
@@ -1507,7 +1586,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 6
         },
         {
           "kind": "type",
@@ -1531,7 +1610,7 @@
           "label": "the new-session dialog",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 7
+          "waitMs": 4
         },
         {
           "kind": "press",
@@ -1544,7 +1623,7 @@
           "label": "the new session",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 9
+          "waitMs": 5
         },
         {
           "kind": "type",
@@ -1563,7 +1642,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 9
         }
       ],
       "notes": [
@@ -1587,7 +1666,7 @@
         "R": 1
       },
       "seconds": 3.1,
-      "waitMs": 327,
+      "waitMs": 413,
       "travelPx": 546,
       "steps": [
         {
@@ -1606,7 +1685,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 327
+          "waitMs": 413
         }
       ],
       "notes": [
@@ -1629,7 +1708,7 @@
         "R": 1
       },
       "seconds": 3.08,
-      "waitMs": 337,
+      "waitMs": 320,
       "travelPx": 211,
       "steps": [
         {
@@ -1648,7 +1727,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 337
+          "waitMs": 320
         }
       ],
       "notes": [
@@ -1671,7 +1750,7 @@
         "R": 6
       },
       "seconds": 15.83,
-      "waitMs": 465,
+      "waitMs": 339,
       "travelPx": 890,
       "steps": [
         {
@@ -1690,7 +1769,7 @@
           "label": "the folder packages",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 7
+          "waitMs": 5
         },
         {
           "kind": "click",
@@ -1713,7 +1792,7 @@
           "label": "the folder packages/ui",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 3
+          "waitMs": 7
         },
         {
           "kind": "click",
@@ -1736,7 +1815,7 @@
           "label": "the folder packages/ui/src",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 18
+          "waitMs": 7
         },
         {
           "kind": "click",
@@ -1759,7 +1838,7 @@
           "label": "the folder packages/ui/src/styles",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 3
+          "waitMs": 7
         },
         {
           "kind": "click",
@@ -1782,7 +1861,7 @@
           "label": "the file",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 9
         },
         {
           "kind": "click",
@@ -1800,7 +1879,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 429
+          "waitMs": 303
         }
       ],
       "notes": [
@@ -1827,7 +1906,7 @@
         "R": 1
       },
       "seconds": 3.01,
-      "waitMs": 48,
+      "waitMs": 46,
       "travelPx": 544,
       "steps": [
         {
@@ -1846,7 +1925,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 48
+          "waitMs": 46
         }
       ],
       "notes": [],
@@ -1867,7 +1946,7 @@
         "R": 3
       },
       "seconds": 4.94,
-      "waitMs": 116,
+      "waitMs": 121,
       "travelPx": 0,
       "steps": [
         {
@@ -1881,7 +1960,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 4
         },
         {
           "kind": "type",
@@ -1894,7 +1973,7 @@
           "label": "the app",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 9
+          "waitMs": 14
         },
         {
           "kind": "press",
@@ -1912,7 +1991,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 99
+          "waitMs": 102
         }
       ],
       "notes": [
@@ -1936,7 +2015,7 @@
         "R": 1
       },
       "seconds": 3.15,
-      "waitMs": 490,
+      "waitMs": 514,
       "travelPx": 584,
       "steps": [
         {
@@ -1955,7 +2034,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 490
+          "waitMs": 514
         }
       ],
       "notes": [],
@@ -1976,7 +2055,7 @@
         "R": 3
       },
       "seconds": 14.06,
-      "waitMs": 42,
+      "waitMs": 14,
       "travelPx": 714,
       "steps": [
         {
@@ -2006,7 +2085,7 @@
           "label": "the menu",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 5
+          "waitMs": 3
         },
         {
           "kind": "click",
@@ -2029,7 +2108,7 @@
           "label": "the name field",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 9
+          "waitMs": 6
         },
         {
           "kind": "type",
@@ -2048,7 +2127,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 28
+          "waitMs": 5
         }
       ],
       "notes": [
@@ -2072,7 +2151,7 @@
         "R": 1
       },
       "seconds": 3.98,
-      "waitMs": 9,
+      "waitMs": 7,
       "travelPx": 724,
       "steps": [
         {
@@ -2091,7 +2170,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 9
+          "waitMs": 7
         }
       ],
       "notes": [
@@ -2114,7 +2193,7 @@
         "R": 3
       },
       "seconds": 8.47,
-      "waitMs": 423,
+      "waitMs": 436,
       "travelPx": 1789,
       "steps": [
         {
@@ -2133,7 +2212,7 @@
           "label": "settings",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 379
+          "waitMs": 423
         },
         {
           "kind": "click",
@@ -2151,7 +2230,7 @@
           "label": "the trash",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 37
+          "waitMs": 6
         },
         {
           "kind": "click",
@@ -2169,7 +2248,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 6
+          "waitMs": 8
         }
       ],
       "notes": [
@@ -2192,8 +2271,8 @@
         "R": 2
       },
       "seconds": 8.25,
-      "waitMs": 355,
-      "travelPx": 964,
+      "waitMs": 315,
+      "travelPx": 965,
       "steps": [
         {
           "kind": "click",
@@ -2211,17 +2290,17 @@
           "label": "the commands",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 350
+          "waitMs": 311
         },
         {
           "kind": "click",
           "label": "run-command-0",
           "operators": "M P B B",
-          "seconds": 2.49,
+          "seconds": 2.48,
           "pointer": {
-            "D": 279,
-            "W": 177,
-            "ID": 1.36
+            "D": 278,
+            "W": 185,
+            "ID": 1.33
           },
           "choice": {
             "n": 2,
@@ -2235,9 +2314,9 @@
           "operators": "M P B B",
           "seconds": 2.61,
           "pointer": {
-            "D": 247,
-            "W": 49,
-            "ID": 2.59
+            "D": 249,
+            "W": 48,
+            "ID": 2.62
           }
         },
         {
@@ -2245,7 +2324,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 5
+          "waitMs": 4
         }
       ],
       "notes": [
@@ -2269,7 +2348,7 @@
         "R": 3
       },
       "seconds": 13.57,
-      "waitMs": 61,
+      "waitMs": 36,
       "travelPx": 0,
       "steps": [
         {
@@ -2283,7 +2362,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 49
+          "waitMs": 20
         },
         {
           "kind": "type",
@@ -2307,7 +2386,7 @@
           "label": "the session",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 3
+          "waitMs": 7
         },
         {
           "kind": "type",
@@ -2349,7 +2428,7 @@
         "R": 2
       },
       "seconds": 13.39,
-      "waitMs": 44,
+      "waitMs": 25,
       "travelPx": 1141,
       "steps": [
         {
@@ -2368,7 +2447,7 @@
           "label": "the session",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 3
+          "waitMs": 12
         },
         {
           "kind": "click",
@@ -2398,7 +2477,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 40
+          "waitMs": 13
         }
       ],
       "notes": [],
@@ -2419,7 +2498,7 @@
         "R": 1
       },
       "seconds": 3.12,
-      "waitMs": 8,
+      "waitMs": 5,
       "travelPx": 384,
       "steps": [
         {
@@ -2438,7 +2517,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 5
         }
       ],
       "notes": [
@@ -2496,7 +2575,7 @@
         "R": 2
       },
       "seconds": 4.94,
-      "waitMs": 13,
+      "waitMs": 21,
       "travelPx": 0,
       "steps": [
         {
@@ -2510,7 +2589,7 @@
           "label": "the palette",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 6
+          "waitMs": 8
         },
         {
           "kind": "type",
@@ -2534,7 +2613,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 7
+          "waitMs": 13
         }
       ],
       "notes": [
@@ -2557,7 +2636,7 @@
         "R": 1
       },
       "seconds": 2.92,
-      "waitMs": 4,
+      "waitMs": 7,
       "travelPx": 525,
       "steps": [
         {
@@ -2576,7 +2655,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 7
         }
       ],
       "notes": [],
@@ -2597,7 +2676,7 @@
         "R": 1
       },
       "seconds": 3.21,
-      "waitMs": 4,
+      "waitMs": 8,
       "travelPx": 663,
       "steps": [
         {
@@ -2616,7 +2695,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 8
         }
       ],
       "notes": [
@@ -2639,7 +2718,7 @@
         "R": 2
       },
       "seconds": 4.75,
-      "waitMs": 18,
+      "waitMs": 23,
       "travelPx": 589,
       "steps": [
         {
@@ -2671,7 +2750,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 8
+          "waitMs": 14
         }
       ],
       "notes": [
@@ -2694,7 +2773,7 @@
         "R": 1
       },
       "seconds": 3.18,
-      "waitMs": 4,
+      "waitMs": 13,
       "travelPx": 647,
       "steps": [
         {
@@ -2713,7 +2792,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 4
+          "waitMs": 13
         }
       ],
       "notes": [
@@ -2736,7 +2815,7 @@
         "R": 3
       },
       "seconds": 8.5,
-      "waitMs": 33,
+      "waitMs": 20,
       "travelPx": 1364,
       "steps": [
         {
@@ -2755,7 +2834,7 @@
           "label": "the new-session dialog",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 12
+          "waitMs": 5
         },
         {
           "kind": "click",
@@ -2773,7 +2852,7 @@
           "label": "the worktree options",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 13
+          "waitMs": 7
         },
         {
           "kind": "click",
