@@ -4,7 +4,8 @@
 > (decision 1 on #82) with linked hosts, after the owner asked on 2026-10-05 why the UI should
 > hold several hosts at all. Phase 3 (installing and updating remotes) and probe 4 are designed in §10 (2026-10-08);
 > the owner decided its open questions the same day (§10.9). Phase 2's app views through the hub are designed and built
-> in §11 (2026-10-11); the owner decided its questions the same day (§11.7).
+> in §11 (2026-10-11); the owner decided its questions the same day (§11.7). Phase 4 (the orchestrator and Centralu
+> tools across machines) is planned in §12 (2026-10-12); its step 4 waits on the owner (§12.3).
 
 ## 1. The shape
 
@@ -156,7 +157,7 @@ wakes sessions that were live. So the hub must:
    or sudo), update and rollback (needed by §4), supervision without a session (keeper on Linux,
    after #350), uninstall. Designed in §10.
 4. **Hosts across machines.** Orchestrator and Centralu tools through the router, `ask_project`
-   across machines, the reverse direction with consent.
+   across machines, the reverse direction with consent. Planned in §12.
 
 ## 8. Probes before building
 
@@ -834,3 +835,60 @@ Tested: `links/router.test.ts` (removed on the named machine only, the hub's own
 refused), `store.test.ts` (the window passes the machine), and the linked-hosts e2e in Chromium and WebKit: with both
 `notes` on the grid and in pinned views, removing the machine's from Settings moves that machine's folder away and leaves
 this computer's folder, row, pinned view and grid panel as they were, while the machine's row, view and panel go.
+
+## 12. Phase 4: the orchestrator and Centralu tools across machines (plan, 2026-10-12)
+
+> **Status: planned.** Steps 1 to 3 follow from decisions already made (§9: the hub's one
+> orchestrator, consent on the connecting side). Step 4, the reverse direction, waits on the owner's answers in §12.3.
+
+Phase 1 left the orchestrator and the Centralu tools local (§6): the hub's orchestrator lists, reads, searches and
+directs only the hub's own sessions, and an ordinary session's `ask_project` reaches only the hub's projects. Phase 4
+takes them across the links.
+
+### 12.1 What holds throughout
+
+- **One orchestrator** (§3.4, decision 2): a linked machine's orchestrator and coordinators stay hidden, from the hub's
+  window and from the hub's orchestrator alike. A machine never shows another its orchestrator's conversation.
+- **The hub asks, the machine answers** (§3.2, decision 3). The hub's orchestrator acting on a linked machine is the
+  connecting side controlling the other, consented to when the link was added. Nothing in steps 1 to 3 lets a machine
+  call the hub; that is step 4.
+- **A host answers only about itself** (§3.1): a machine never relays another machine's sessions, so a hub with
+  several links asks each one, and nothing loops.
+- **What a machine says is someone else's words.** A worker's text already reaches the orchestrator fenced (#121): a
+  preview or a snippet is JSON-quoted on one line, so it cannot pose as a line of ours. A machine is one step further
+  away (a compromised server must not reach the Mac, §3.2), so the hub fences everything a machine hands its
+  orchestrator: names on one line, ids of the id shape, each line of a conversation one line.
+- **The orchestrator's tools keep their words.** Their descriptions ride in every orchestrator request (11,798 of the
+  12,000 characters `RESIDENT_BUDGET_CHARS` allows, #513); the results name the machine, and the descriptions stay.
+
+### 12.2 Steps
+
+| Step | What | Needs from the owner |
+|---|---|---|
+| 1 | **Read.** The hub's orchestrator's `list_sessions`, `read_session` and `recall` include every linked machine. Each machine answers for its own sessions through three host-to-host calls (additive): `host.sessions`, `host.readSession`, `host.recall`, made by the orchestrator's own code there, over the same view the hub's window has (everything but its orchestrator and coordinators). The hub qualifies the ids, names the machine on each row and hit, lists an unreachable machine's sessions from the headers mirror marked as not reachable, and says which machines it could not search (decided on #82, 2026-10-03: a host that is off says so instead of returning nothing). `send_to_session` and the other acting tools refuse a linked machine's session with a reason, until step 2 | Nothing |
+| 2 | **Direct.** `send_to_session`, `update_session_settings` and `create_session` reach a linked machine's sessions and projects through the router, and `create_project` takes a machine. `reportBack` across machines: the hub already relays the machine's events into its own log, qualified; the manager watches those for the end of the turn it waits on. The instruction is recorded on the machine as sent by the hub's orchestrator (`agents.send` gains an optional `from`, additive), so the machine's conversation says who sent it. The machine's session keeps its own approval settings, and its cards reach the hub's window as every remote card does | Nothing (decision 3) |
+| 3 | **`ask_project` to a linked machine's project.** An ordinary session on the hub asks a project on another machine: the consent card for the pair names the machine; the delegated session runs on that machine, its own logins and folder, under `normal`, as an ordinary visible session there; the answer comes back fenced as today. Paths in the answer name that machine's files, so none is opened to the asking session: they are listed as the machine's, and the person reaches them through the file tree or "Open in VS Code" (phase 2). A session on a machine asking a project on that same machine already works there, its card routed to the hub's window | Nothing new, unless the owner wants a cross-machine ask to need more than the pair's card (§12.3, question 4) |
+| 4 | **The reverse direction** (decision 3: off by default, only the connecting side turns it on). A machine's sessions reach the hub: what they may do is §12.3. Mechanically: a per-link switch on the hub (Settings → Machines, stored in the hub's registry, additive), the hub's end of the link answering an allowlist of requests from the machine (today `RemoteClient` never answers one), and the machine naming the hub to its sessions | The answers in §12.3 |
+
+Not in phase 4: attaching one machine's app to a session on another (§6: the app process and the session would live on
+two hosts), and `delete_worktree_session` across machines (a worktree manager is a seat on its own project's machine,
+and its tools stay there).
+
+### 12.3 Open for the owner (step 4, and one question on step 3)
+
+1. **What may a machine's sessions do on the hub once the switch is on?** (a) only `ask_project` into the hub's
+   projects, each pair behind the hub's consent card, which stands in the hub's window; (b) (a) plus reading the hub's
+   sessions (`read_session`, `recall` over the hub's projects); (c) everything the hub's orchestrator may do there,
+   in reverse. Recommendation: **(a)**. It serves the case that needs the reverse (a session on a server asking the
+   laptop's project for something only the laptop has), and the person approves each pair where they are looking. (b)
+   hands the hub's conversations to a machine the plan already treats as the less trusted side; (c) makes the
+   server a second orchestrator, which decision 2 rules out.
+2. **Where the switch lives and what turning it on says.** Recommendation: a per-machine switch in Settings →
+   Machines, off by default, its question naming what it allows ("Sessions on <machine> may ask this computer's
+   projects to do work; each pair asks you first") and stored with the machine, so removing the machine removes it.
+3. **Several hubs linked to one machine** (decision 4: any device can be the hub). A machine's session would see each
+   hub that turned the switch on. Recommendation: each such hub appears to the machine's sessions by the hub's own
+   name, and a hub whose link is down is "not reachable" there, as a machine is here.
+4. **A cross-machine `ask_project` (step 3): is the pair's card enough?** Recommendation: **yes**, with the machine
+   named on the card. The work then runs on that machine under its own logins and credits; the card is where the
+   person sees that.
