@@ -102,8 +102,8 @@ MCP server. A person uses it through its screen, and agents call the same tools.
   approvals: `# Approvals and permissions
 Every session has a permission preset: Safe (ask for everything), Normal (ask when risky), Auto
 (never ask).
-- Normal follows the tool's own settings. Auto skips the permission check in Claude, and in Codex
-  it does not ask but runs inside the working folder's sandbox.
+- Normal follows the tool's own settings. Auto runs Codex with no sandbox and no permission prompts,
+  like Claude's bypass permissions.
 - When an agent wants to do something risky, an approval card appears — y (allow) / n (deny) /
   a (always allow in this session), ⌥a (always allow in this project).
 - "Always allow" is saved as a rule and can be cleared from Settings → Permissions.
