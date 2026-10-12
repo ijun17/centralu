@@ -186,25 +186,45 @@ test('the composer rises smoothly rather than snapping up', async ({ page }) => 
   const panel = page.getByTestId(`grid-panel-${a}`)
   await expect(panel.getByTestId('composer-shell')).not.toHaveAttribute('data-up', 'true')
 
-  // First attach a recorder that logs the card's position every frame
+  /*
+   * The positions are read off the rise itself, not off the frames that happen to be drawn during
+   * it. This used to record the card's top once a frame for 700ms; in CI WebKit the page drew no
+   * frame for 200-300ms right as the card started (the grid opened just before was still being
+   * laid out and painted), so the whole 300ms rise fell between two frames and read as a snap
+   * (#526: 2 positions, 1 run in 8). So the moment the card is told to rise, everything animating
+   * on it is paused and stepped through its duration, and the card's top is read at each step. A
+   * card that snaps has nothing moving it (the original bug: a transition on `transform` while
+   * `translate` changed), so every step reads the same top.
+   */
   await page.evaluate(() => {
-    const shell = document.querySelector('[data-testid="composer-shell"]')!
-    const seen: number[] = []
-    ;(window as never as { __tops: number[] }).__tops = seen
-    const tick = () => {
-      seen.push(Math.round(shell.getBoundingClientRect().top))
-      if (seen.length < 60) requestAnimationFrame(tick)
-    }
-    tick()
+    const shell = document.querySelector('[data-testid="composer-shell"]') as HTMLElement
+    const w = window as never as { __rise: Promise<number[]> }
+    w.__rise = new Promise((resolve) => {
+      const watch = new MutationObserver(() => {
+        if (shell.dataset.up !== 'true') return
+        watch.disconnect()
+        // Resolving the style now starts the transitions the change sets off
+        void getComputedStyle(shell).translate
+        const running = shell.getAnimations()
+        for (const a of running) a.pause()
+        const tops: number[] = []
+        for (let step = 0; step <= 10; step++) {
+          for (const a of running) a.currentTime = (Number(a.effect?.getComputedTiming().duration) * step) / 10
+          tops.push(Math.round(shell.getBoundingClientRect().top))
+        }
+        for (const a of running) a.finish()
+        resolve(tops)
+      })
+      watch.observe(shell, { attributes: true, attributeFilter: ['data-up'] })
+    })
   })
 
   const box = (await panel.boundingBox())!
   await page.mouse.move(box.x + box.width / 2, box.y + box.height - 20)
-  await page.waitForTimeout(700)
 
-  const tops = await page.evaluate(() => (window as never as { __tops: number[] }).__tops)
-  // If it snaps in one frame, there are only two positions (collapsed, risen)
-  expect(new Set(tops).size).toBeGreaterThan(5)
+  const tops = await page.evaluate(() => (window as never as { __rise: Promise<number[]> }).__rise)
+  // If it snaps, every step reads one position (risen)
+  expect(new Set(tops).size, `tops ${tops.join(', ')}`).toBeGreaterThan(5)
 })
 
 /**

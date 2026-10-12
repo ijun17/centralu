@@ -406,19 +406,20 @@ export function appThemeTests() {
     await expect.poll(current).toBe('On hold')
 
     // Scrolling by hand takes the mark back from the tab, and the mark follows the section in view.
-    // The wheel is sent again until it lands: Playwright's WebKit can drop a wheel (in CI it once
-    // left the mark where it was), and to the top is the same place however many arrive.
-    await v.locator('.board').hover()
-    await expect
-      .poll(async () => {
-        await page.mouse.wheel(0, -100000)
-        return current()
-      })
-      .toBe('Needs decision')
-    // Then the board is moved by an exact amount, which a wheel that may arrive twice is not: what
-    // is checked here is the mark following the scroll, and the wheel has already shown it unpins
+    // WebKitGTK animates a wheel's scroll: in CI the board went 753 → 101 → 65 → 43 → 23 → 8 → 0
+    // over several frames (#526). The mark already reads "Needs decision" partway there, so the
+    // board is first left to come to rest at the top, where a wheel this long ends. Measured and
+    // moved before then, the scroll still running carried the board on past the move below, and
+    // the mark stayed where it was (what #507 took for a dropped wheel).
+    const board = v.locator('.board')
+    await board.hover()
+    await page.mouse.wheel(0, -100000)
+    await expect.poll(() => board.evaluate((b) => b.scrollTop)).toBe(0)
+    await expect.poll(current).toBe('Needs decision')
+    // Then the board is moved by an exact amount, which a wheel is not: what is checked here is the
+    // mark following the scroll, and the wheel has already shown it unpins
     const inProgress = await offset('In progress')
-    await v.locator('.board').evaluate((board, by) => board.scrollBy(0, by), inProgress + 4)
+    await board.evaluate((b, by) => b.scrollBy(0, by), inProgress + 4)
     await expect.poll(current).toBe('In progress')
 
     // The wide layout has no tabs
