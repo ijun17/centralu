@@ -402,7 +402,9 @@ included, which run on the CLI's default model; see round 2's spend) and about 4
 | Codex, first request (Δ none) | 18,553 (+681) | = A | 18,590 (+716) |
 
 The three fixed tools cost about 1,000 characters (~280 tokens), which is why C saves less than B. Codex's first
-request carries no MCP definitions (§6.2), so C only adds its instruction line there (+37 tokens). With
+request carries no MCP definitions (§6.2), so C only adds its instruction line there (+37 tokens). Since these runs, #556 gave
+`create_project` a `machine` argument: +102 characters of resident definitions in every arm (11,862 / 8,158 / 9,317),
+the differences between the arms unchanged. With
 `propose_worktree_session` in the tier too (the first run), B was 2,034 and C 2,326.
 
 ### Selection (Claude; both runs, 6 per prompt)
