@@ -282,9 +282,11 @@ class CodexSession implements SessionHandle {
   /**
    * The changes of each file-change item still open, by item id (#169). The approval request for that item
    * names it and carries nothing else (measured — see approvalDetailFrom), so the card's path and diff come
-   * from here. Forgotten when the item completes.
+   * from here. Forgotten when the item completes, or when its thread's turn ends without completing it (an
+   * interrupted or failed turn: Codex sends no `item/completed` for what it cut off, #392). `thread` is the
+   * thread the item belongs to (the parent's or a child's), null when the notification named none.
    */
-  private fileChanges = new Map<string, { path: string; diff: string }[]>()
+  private fileChanges = new Map<string, { thread: string | null; changes: { path: string; diff: string }[] }>()
   /**
    * Messages that arrived while a compact/review turn was running (measured while dogfooding,
    * 2026-09-02, MGH session).
@@ -929,17 +931,28 @@ class CodexSession implements SessionHandle {
     }
   }
 
-  /** Keeps a file-change item's changes until it completes — see `fileChanges` */
+  /** Keeps a file-change item's changes until it completes or its turn ends — see `fileChanges` */
   private noteFileChange(n: { method: string; params?: unknown }): void {
-    const p = (n.params ?? {}) as { item?: Record<string, unknown>; itemId?: unknown; changes?: unknown }
+    const p = (n.params ?? {}) as { item?: Record<string, unknown>; itemId?: unknown; changes?: unknown; threadId?: unknown }
+    const thread = typeof p.threadId === 'string' ? p.threadId : null
+    /*
+     * A turn that ends takes its open items with it: their approval requests end with it too (`noteRequestEnded`), so
+     * nothing reads them again. A thread runs one turn at a time, so every open item of that thread is that turn's. An
+     * item whose notification named no thread is let go with the parent's turn.
+     */
+    if (n.method === 'turn/completed' || n.method === 'turn/failed') {
+      const ended = thread ?? this.threadId
+      for (const [id, c] of this.fileChanges) if (c.thread === ended || (c.thread === null && ended === this.threadId)) this.fileChanges.delete(id)
+      return
+    }
     // The patch can be revised before it is approved (generated/v2/FileChangePatchUpdatedNotification.ts) — not measured
     if (n.method === 'item/fileChange/patchUpdated' && typeof p.itemId === 'string') {
-      this.fileChanges.set(p.itemId, fileChangesOf(p))
+      this.fileChanges.set(p.itemId, { thread, changes: fileChangesOf(p) })
       return
     }
     const item = p.item
     if (!item || item.type !== 'fileChange' || typeof item.id !== 'string') return
-    if (n.method === 'item/started') this.fileChanges.set(item.id, fileChangesOf(item))
+    if (n.method === 'item/started') this.fileChanges.set(item.id, { thread, changes: fileChangesOf(item) })
     else if (n.method === 'item/completed') this.fileChanges.delete(item.id)
   }
 
@@ -1044,7 +1057,7 @@ class CodexSession implements SessionHandle {
     >
 
     const itemId = typeof params.itemId === 'string' ? params.itemId : ''
-    const detail = approvalDetailFrom(r.method, params, this.fileChanges.get(itemId))
+    const detail = approvalDetailFrom(r.method, params, this.fileChanges.get(itemId)?.changes)
 
     // Does not ask if it matches a saved "always allow" rule (the same rule as C-2)
     const key = alwaysAllowKey(detail)

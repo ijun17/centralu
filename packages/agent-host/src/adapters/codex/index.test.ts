@@ -191,6 +191,28 @@ describe('codex approval requests', () => {
     )
   })
 
+  it("a file-change item its turn ended without completing is forgotten with that turn, a child's with the child's (#392)", async () => {
+    const { handle, events, client } = await createLiveSession()
+    const kept = () => (handle as unknown as { fileChanges: Map<string, unknown> }).fileChanges
+    const turn = measuredRequest.params.turnId
+    const childItem = { ...measuredItem('inProgress'), id: 'child-fc' }
+
+    // An interrupted turn: the item started, and Codex never completed it
+    client.notifyFrom({ method: 'item/started', params: { item: measuredItem('inProgress'), threadId: 'thread-1', turnId: turn } })
+    client.notifyFrom({ method: 'item/started', params: { item: childItem, threadId: 'child-1', turnId: 'child-turn' } })
+    expect(kept().size).toBe(2)
+    client.notifyFrom({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: turn, status: 'interrupted' } } })
+    // The child keeps running after the parent's turn (#290), and its open item with it
+    expect([...kept().keys()]).toEqual(['child-fc'])
+    client.trigger(measuredRequest)
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'approval_request', detail: expect.objectContaining({ path: '(no path)', diffPreview: '' }) }),
+    )
+
+    client.notifyFrom({ method: 'turn/completed', params: { threadId: 'child-1', turn: { id: 'child-turn', status: 'failed' } } })
+    expect(kept().size).toBe(0)
+  })
+
   it('a permissions request is refused in its own response shape, not answered with a decision (#169)', async () => {
     const { events, client } = await createLiveSession()
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
