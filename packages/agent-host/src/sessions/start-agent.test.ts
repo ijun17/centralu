@@ -325,25 +325,66 @@ describe('starting another agent in the same project', () => {
     expect(await waiting).toMatchObject({ ok: true, answer: 'the note answer' })
   })
 
-  it('a deferred model restart keeps queued notes alive and applies at the next turn end without held inputs', async () => {
+  it.each(['claude', 'codex'] as const)('%s: the last note applies deferred settings before the next task, including while disposal is pending', async (tool) => {
+    allowProject()
+    const s = await session()
+    const started = await w.mgr.startAgent(s, { task: 'original task', tool, wait: false })
+    const c = started.ok ? started.sessionId : ''
+    const h = handleOf(c)!
+    h.externalId = 'fixture-thread'
+    let finishDisposal!: () => void
+    const disposal = new Promise<void>((resolve) => { finishDisposal = resolve })
+    vi.spyOn(h, 'dispose').mockImplementation(() => disposal)
+    const restart = vi.spyOn(w.mgr, 'restartSession')
+    expect(await w.mgr.updateSettings(c, { model: 'new-model' })).toMatchObject({ applied: 'after_turn' })
+    const waiting = w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
+    await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'queued note' })
+    await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'last note' })
+    h.answer('original answer', false)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(restart).not.toHaveBeenCalled()
+    expect(handleOf(c)).toBe(h)
+    h.answer('first note answer', false)
+    h.receipts.shift()!.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(restart).not.toHaveBeenCalled()
+    h.answer('note answer')
+    expect(await waiting).toMatchObject({ ok: true, answer: 'note answer' })
+    try {
+      expect(restart).toHaveBeenCalledTimes(1)
+      const next = w.mgr.send(c, 'next task')
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(h.sent).toHaveLength(3) // Neither the note's answer nor asynchronous close lets work reach old settings.
+      finishDisposal()
+      await next
+      expect(handleOf(c)).not.toBe(h)
+      expect(handleOf(c)!.opts.model).toBe('new-model')
+      expect(handleOf(c)!.sent).toEqual(['next task'])
+      expect(restart).toHaveBeenCalledTimes(1)
+    } finally {
+      finishDisposal()
+    }
+  })
+
+  it('a receipt released while another turn is active keeps the restart deferred until that turn ends', async () => {
     allowProject()
     const s = await session()
     const c = await startRunning(s)
     const h = handleOf(c)!
     h.externalId = 'fixture-thread'
     const restart = vi.spyOn(w.mgr, 'restartSession')
-    expect(await w.mgr.updateSettings(c, { model: 'new-model' })).toMatchObject({ applied: 'after_turn' })
+    await w.mgr.updateSettings(c, { model: 'new-model' })
     const waiting = w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
     await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'queued note' })
-    h.answer('original answer', false)
+    h.answer('note result', false)
+    h.event({ type: 'state_change', sessionId: c, state: 'working' })
+    h.receipts.shift()!.resolve()
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(restart).not.toHaveBeenCalled()
-    expect(handleOf(c)).toBe(h)
-    h.answer('note answer')
-    expect(await waiting).toMatchObject({ ok: true, answer: 'note answer' })
-    await w.mgr.send(c, 'next task')
-    h.answer('next task finished')
-    await w.until(() => restart.mock.calls.length === 1 && handleOf(c) !== h)
+    h.answer('active turn finished')
+    await waiting
+    await w.until(() => handleOf(c) !== h)
+    expect(restart).toHaveBeenCalledTimes(1)
     expect(handleOf(c)!.opts.model).toBe('new-model')
   })
 

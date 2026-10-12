@@ -360,7 +360,9 @@ input was already stored before the earlier answer, so those turns need not have
 The adapters notify the host synchronously **after recording the matched completion**, so later frames in the
 same event batch cannot overwrite that answer. Pending notes also make the child non-idle between turns, so the
 sleeper, CLI replacement and deferred settings/instructions restart cannot discard queued work. Deferred
-restart markers remain set while input is held and apply at a later turn end with no held input. The person's
+restart markers remain set while input is held. Since adapters complete receipts after emitting `turn_complete`,
+the last receipt re-checks the restart when the session is not mid-turn. New input waits for disposal and resume,
+so the next task uses the updated settings, app set and launch policy. The person's
 Stop is marked before calling the adapter, including adapters that reject receipts synchronously. A follow-up is framed as a **note about ongoing work**
 (`agentNoteFrame`), without the initial task/answer frame, and stored and shown with `from`.
 A `send` after the child finishes starts a new delegation and uses the task/return-answer frame (`agentFrame`).

@@ -433,6 +433,8 @@ export class SessionManager {
    * app-server), even though the screen said "starting next turn".
    */
   private restartAfterTurn = new Set<string>()
+  /** Input arriving after a note completes waits for its deferred process replacement, including disposal. */
+  private deferredRestarts = new Map<string, Promise<void>>()
   /** A new host served a different Centralu tool prefix; replace the old agent at its safe boundary. */
   private definitionsRestartAfterTurn = new Set<string>()
   /** A kept process was started with adapter settings from an older host build (#589). */
@@ -2918,15 +2920,25 @@ export class SessionManager {
     // so nothing happens
     // A commit call still unanswered when its turn ends never will be: interrupted, or its process gone (#392)
     if (endedTurn && e.sessionId) this.forgetCommits(e.sessionId)
-    if (endedTurn && e.sessionId && !this.agentRuns.get(e.sessionId)?.waitingForInputs && this.restartAfterTurn.delete(e.sessionId)) {
-      // An app attached or detached in this turn (#371 part A) is a reason of its own, settings or not
-      const apps = this.appsRestartAfterTurn.delete(e.sessionId)
-      const definitions = this.definitionsRestartAfterTurn.delete(e.sessionId)
-      const launchSettings = this.launchSettingsRestartAfterTurn.delete(e.sessionId)
-      if ((apps || definitions || launchSettings || this.settingsDrifted(e.sessionId)) && this.handles.has(e.sessionId)) {
-        void this.restartSession(e.sessionId, launchSettings ? 'launch_settings' : apps ? 'thread_restart' : definitions ? 'instructions' : this.restartCause(e.sessionId)).catch(() => {})
-      }
-    }
+    if (endedTurn && e.sessionId) this.applyDeferredRestart(e.sessionId)
+  }
+
+  /** A note receipt follows turn_complete: re-check the same deferred change when the last hold is released. */
+  private applyDeferredRestart(sessionId: string): void {
+    const session = this.meta.get(sessionId)
+    if (!session || inTurn(session.state) || this.deferredRestarts.has(sessionId) || this.agentRuns.get(sessionId)?.waitingForInputs || !this.restartAfterTurn.delete(sessionId)) return
+    // An app attached or detached in this turn (#371 part A) is a reason of its own, settings or not.
+    const apps = this.appsRestartAfterTurn.delete(sessionId)
+    const definitions = this.definitionsRestartAfterTurn.delete(sessionId)
+    const launchSettings = this.launchSettingsRestartAfterTurn.delete(sessionId)
+    if (!(apps || definitions || launchSettings || this.settingsDrifted(sessionId)) || !this.handles.has(sessionId)) return
+    const cause = launchSettings ? 'launch_settings' : apps ? 'thread_restart' : definitions ? 'instructions' : this.restartCause(sessionId)
+    // Publish the barrier before dispose can emit events or the completed wait can hand the parent its answer.
+    const restarting = Promise.resolve().then(() => this.restartSession(sessionId, cause)).then(() => {}).finally(() => {
+      if (this.deferredRestarts.get(sessionId) === restarting) this.deferredRestarts.delete(sessionId)
+    })
+    this.deferredRestarts.set(sessionId, restarting)
+    void restarting.catch(() => {})
   }
 
   /**
@@ -3422,6 +3434,8 @@ export class SessionManager {
     fromAppVia: AppMessageVia = 'inline',
     sendInput?: (handle: SessionHandle, text: string) => void,
   ): Promise<void> {
+    const restarting = this.deferredRestarts.get(sessionId)
+    if (restarting) await restarting
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
@@ -4446,7 +4460,7 @@ export class SessionManager {
    */
   async sleepSession(sessionId: string): Promise<boolean> {
     const h = this.handles.get(sessionId)
-    if (!h || this.resuming.has(sessionId) || this.sleeping.has(sessionId) || this.leaving.has(sessionId)) return false
+    if (!h || this.resuming.has(sessionId) || this.deferredRestarts.has(sessionId) || this.sleeping.has(sessionId) || this.leaving.has(sessionId)) return false
     if (!this.sessionIdle(sessionId).idle || this.waitsOn(sessionId).length > 0) return false
     this.handles.delete(sessionId)
     this.running.delete(sessionId)
@@ -5697,7 +5711,11 @@ export class SessionManager {
           if (!this.adapters.get(child.tool)?.capabilities.midTurnInput || !this.handles.get(child.id)?.sendTracked) {
             return { ok: false, error: `"${child.name}" cannot take messages while working. Wait for it (action "wait") or stop it first.` }
           }
-          const release = d.wait.holdInput()
+          const releaseHold = d.wait.holdInput()
+          const release = () => {
+            releaseHold()
+            this.applyDeferredRestart(child.id)
+          }
           try {
             await this.deliver(child.id, text, undefined, from, false, undefined, 'inline', (h, input) => {
               const fail = (e: Error) => { d.wait.fail(e); release() }
