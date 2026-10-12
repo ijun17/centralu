@@ -235,6 +235,18 @@ describe("a removed app's origin server goes with it (#392)", () => {
     await views.frame({ app: ref(appId), instanceId, hostOrigin: HOST_ORIGIN })
     return { instanceId, port: book!.assigned[`p1/${appId}`]! }
   }
+  /**
+   * Removes a project app's folder the way it can be removed on Windows: its process stopped first. An app runs in its
+   * own folder, and Windows refuses to delete a folder a process has as its working directory (EBUSY), as the host's
+   * own `removeUserApp` knows (#14). `restart` stops it without starting it again; the open view does not either.
+   */
+  const removeApp = async (appId: string) => {
+    const pid = await servingPid(appId)
+    await rt.restart(ref(appId))
+    await until(() => alive(pid), (a) => a === false, 5_000)
+    rmSync(join(appsDir(), appId), { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    rt.refresh()
+  }
 
   it('closes once the app is removed and its last view is closed; another app keeps its own, and the port stays assigned', async () => {
     plant('mapper', { view: { origin: 'app' } })
@@ -245,8 +257,7 @@ describe("a removed app's origin server goes with it (#392)", () => {
     expect(await listening(mapper.port)).toBe(true)
 
     // Removed while its view is open: that view is still served from its origin until the window closes it
-    rmSync(join(appsDir(), 'mapper'), { recursive: true, force: true })
-    rt.refresh()
+    await removeApp('mapper')
     await until(() => rt.exists(ref('mapper')), (e) => e === false)
     await new Promise((r) => setTimeout(r, 50))
     expect(await listening(mapper.port)).toBe(true)
@@ -255,7 +266,7 @@ describe("a removed app's origin server goes with it (#392)", () => {
     await expect.poll(() => listening(mapper.port), { timeout: 3_000 }).toBe(false)
     expect(await listening(atlas.port)).toBe(true)
     expect(book!.assigned['p1/mapper']).toBe(mapper.port)
-  })
+  }, 20_000)
 
   it('closes when the app is removed with no view open, and an app put back is served on its own port again', async () => {
     plant('mapper', { view: { origin: 'app' } })
@@ -264,8 +275,7 @@ describe("a removed app's origin server goes with it (#392)", () => {
     views.close(first.instanceId)
     expect(await listening(first.port)).toBe(true)
 
-    rmSync(join(appsDir(), 'mapper'), { recursive: true, force: true })
-    rt.refresh()
+    await removeApp('mapper')
     await expect.poll(() => listening(first.port), { timeout: 3_000 }).toBe(false)
 
     plant('mapper', { view: { origin: 'app' } })
@@ -273,5 +283,5 @@ describe("a removed app's origin server goes with it (#392)", () => {
     const again = await originPort('mapper')
     expect(again.port).toBe(first.port)
     expect(await listening(again.port)).toBe(true)
-  })
+  }, 20_000)
 })
