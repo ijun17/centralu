@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ApprovalDetail } from '@cc/protocol'
-import { projectAccessQuestion, projectCreateQuestion } from '@cc/core'
+import { agentStartQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { composingKey, letterOf } from '../../app/keys.js'
@@ -67,6 +67,19 @@ export function ApprovalCard({
         busy={busy}
         keys={keys}
         onAnswer={(decision) => void respond(sessionId, requestId, decision)}
+      />
+    )
+  }
+
+  if (detail.kind === 'agent_start') {
+    return (
+      <AgentStartCard
+        detail={detail}
+        busy={busy}
+        keys={keys}
+        projectHint={sc('alt')}
+        showProjectKey={!inComposer}
+        onAnswer={(decision, scope) => void respond(sessionId, requestId, decision, scope)}
       />
     )
   }
@@ -230,6 +243,76 @@ function ProjectAccessCard({
         <ActionKey k={keys.allow} label="Allow once" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
         <ActionKey k={keys.always} label="Always for this pair" onClick={() => onAnswer('always')} testId="approve-always" disabled={busy} />
         <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A session asks to start another agent in its project (#561, start_agent). Four answers, the approval card's own
+ * keys: once (y), always for this session (a), always for the whole project (⌥a, or ⌥ with a click; stored and
+ * revoked in Settings), deny (n). The new session's permissions are said on the card, since that is the line the
+ * person is agreeing to: the caller's own preset, never more.
+ */
+function AgentStartCard({
+  detail,
+  busy,
+  keys,
+  projectHint,
+  showProjectKey,
+  onAnswer,
+}: {
+  detail: Extract<ApprovalDetail, { kind: 'agent_start' }>
+  busy: boolean
+  keys: AnswerKeys
+  /** The modifier's name for the "whole project" hint (⌥ or Alt) */
+  projectHint: string
+  /** ⌥a is a letter, so the hint shows only while the keyboard is outside the composer */
+  showProjectKey: boolean
+  onAnswer: (decision: 'allow' | 'deny' | 'always', scope?: 'session' | 'project') => void
+}) {
+  return (
+    <div
+      className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
+      data-testid="approval-card"
+      data-kind="agent_start"
+      data-keys={keys === BARE_KEYS ? 'bare' : 'composer'}
+    >
+      <div className="flex items-center gap-2 px-3 pt-2.5">
+        <span className="signal text-2xs font-medium">Awaiting approval</span>
+        <span className="text-xs text-ink-faint">This session wants to start another agent, and waits</span>
+      </div>
+      <p className="mt-2 px-3 text-md leading-body text-ink" data-testid="approval-detail">
+        {agentStartQuestion(detail)}
+      </p>
+      <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
+        It opens as its own session in this project, linked to this one, with its own approvals and Stop; its answer
+        comes back here. Always for the project is remembered; revoke it in Settings.
+      </p>
+      <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
+        <ActionKey k={keys.allow} label="Allow once" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
+        <ActionKey
+          k={keys.always}
+          label="Always for this session"
+          title={`Hold ${projectHint} and click for the whole project`}
+          onClick={(alt) => onAnswer('always', alt ? 'project' : 'session')}
+          testId="approve-always"
+          disabled={busy}
+        />
+        <button
+          className="rounded-md px-1.5 py-1 text-sm text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-50"
+          onClick={() => onAnswer('always', 'project')}
+          disabled={busy}
+          data-testid="approve-always-project"
+        >
+          Always for this project
+        </button>
+        <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
+        {showProjectKey && (
+          <span className="ml-auto text-2xs text-ink-faint">
+            <Kbd alt /> <Kbd>a</Kbd> whole project
+          </span>
+        )}
       </div>
     </div>
   )
@@ -473,6 +556,7 @@ export function detailText(d: ApprovalDetail): string {
   if (d.kind === 'capability') return `${d.app.name} wants to ${d.text}`
   if (d.kind === 'project_access') return projectAccessQuestion(d)
   if (d.kind === 'project_create') return projectCreateQuestion(d)
+  if (d.kind === 'agent_start') return agentStartQuestion(d)
   return d.raw
 }
 

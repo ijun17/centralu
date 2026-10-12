@@ -40,6 +40,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Builder | `<<role>>` The session building one app. A session carrying `appId` **and** named by that app in the builder map (`apps.builders`) | `builderRefOf`, `manager.ts`; `packages/agent-host/src/sessions/app-builder.ts` | |
 | App-agent session | `<<role>>` A session an app started through `run_agent`: carries `appId`, is not the builder, runs under `safe`, gets no apps and no reader tools, and its answer goes back to the app | `isAppAgentSession`, `runAppAgent`, `manager.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
 | Delegated ("asked by") session | `<<role>>` A session another project's session started or reused through `ask_project`; marked with `askedBy` | `SessionInfo.askedBy`; `packages/agent-host/src/sessions/ask-project.ts`; [agent-host.md](agent-host.md) §1.2 | delegate |
+| Started agent (child) | `<<role>>` A session another session of the same project started with `start_agent` (#561), in that session's folder and under its preset; marked with `askedBy`, and the only sessions that one may work with through `agent_session`. Like a delegated session it cannot start agents or ask a project | `SessionInfo.askedBy`; `startAgent`, `agentSession`, `manager.ts`; `packages/agent-host/src/sessions/start-agent.ts`; [agent-host.md](agent-host.md) §1.2.1 | child, worker |
 | Tool profile | Which bundle of Centralu's own tools (`centralu` MCP server) a session gets: `orchestrator`, `manager`, `scoped`, `builder`, `reader`, or none | `toolProfileOf`, `manager.ts`; [agent-host.md](agent-host.md) §1.1 | |
 | Permission preset | How much the agent may do without asking: `safe`, `normal`, `auto` | `PermissionPreset`, `entities.ts` | mode |
 | Live | Whether the session has a process now. A session that is not live is resumed when addressed | `SessionInfo.live` | archived (FR-20 was retired) |
@@ -63,7 +64,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Approval detail | What is being asked: `command`, `file_edit`, `other` (from an adapter), `capability` and `project_access` (raised by the host) | `ApprovalDetail`, `entities.ts` | |
 | Approval rule | A remembered "always allow" for commands, matched by a pattern with `*`, scoped to a session or a project. Only allows are stored; the adapter checks them before it asks | `ApprovalRule`, `packages/core/src/approval/approval.ts`; `rulesFor`, `manager.ts` | allowlist |
 | Question | A choice the agent asks the person to make (AskUserQuestion), answered with `agents.answerQuestion`. Any number may wait | `Question`, `pendingQuestions`, `entities.ts` | prompt |
-| Project consent | A remembered "always" letting one project reach another: `delegate` (`ask_project`) or `apps` (attach its shared apps) | `ProjectConsent`, `entities.ts`; `project_consents` (store v44) | |
+| Project consent | A remembered "always" letting one project reach another: `delegate` (`ask_project`) or `apps` (attach its shared apps); or, from a project to itself, `agents` (its sessions may start agents, #561) | `ProjectConsent`, `entities.ts`; `project_consents` (store v44) | |
 | Read grant | A path inside the target project that a delegated answer named, readable by the caller while this host runs | `readGrants`, `ask-project.ts` | |
 | Unread | Whether there is content past what the person last saw (`lastReadSeq`). Independent of state | `SessionInfo.lastReadSeq` | |
 
@@ -179,6 +180,9 @@ classDiagram
   class DelegatedSession {
     <<role>>
   }
+  class StartedAgent {
+    <<role>>
+  }
   Project "0..1" o-- "*" Session : runs
   Project "1" --> "0..1" Session : manager slot
   Session "1" --> "0..1" Worktree : works in
@@ -188,6 +192,8 @@ classDiagram
   Session <|-- DelegatedSession : askedBy set
   WorktreeManager "1" --> "*" Session : parentSessionId
   DelegatedSession "*" --> "1" Session : askedBy, in another project
+  Session <|-- StartedAgent : askedBy set, same project
+  StartedAgent "*" --> "1" Session : askedBy, start_agent
   Coordinator "*" --> "*" Session : may see
 ```
 
@@ -197,7 +203,8 @@ classDiagram
   "Orchestrator".
 - `kind` is all a session is created as. Every other role is read off a relationship each time: a manager has
   children or is named in the project's manager slot; a builder is named in the builder map; an app-agent session
-  carries an `appId` the builder map does not point back to; a delegated session has `askedBy`. Moving a role into a
+  carries an `appId` the builder map does not point back to; a delegated session has `askedBy` naming a session of
+  another project, a started agent `askedBy` naming one of its own. Moving a role into a
   stored flag was avoided on purpose, so the flag cannot drift from the relationship (#13, #80).
 - The tool profile follows from these, first match wins: orchestrator, coordinator (`scoped`), builder, manager,
   ordinary session in a project (`reader`, unless Settings turns it off), none (`toolProfileOf`).

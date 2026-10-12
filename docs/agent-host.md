@@ -50,7 +50,7 @@ the Codex bridge.
 | `manager` | a session with worktree children, or the project's manager slot (#69, #76) | its own worktree children | list, read, send, propose and delete a worktree session | worktree rules |
 | `scoped` | a coordinator (#80): made only by the control app's tasks, which were removed in #372 with the RPC that created one; the ones in a store still wake with this profile | its members | list, read, send | its boundary |
 | `builder` | an app's building session (M4 C-3) | its own app | `check` | build-and-check |
-| `reader` | every other session in a project (#320) | its own project, read at call time | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | none |
+| `reader` | every other session in a project (#320) | its own project, read at call time | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); `start_agent`, `agent_session` (#561, §1.2.1); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | none |
 
 The instructions reach the model on both CLIs, by different doors. Claude gets them as the in-process
 server's `instructions`. codex-cli 0.160.0 shows a server's instructions to no model (#525, measured with
@@ -210,6 +210,58 @@ control rail's tasks (#372). Two other wordings did no better (0 and 3 in 5).
 `scripts/smoke-ask-project.mts` runs it end to end on a temp store and data folder: a haiku session
 in one scratch project has the other write a file with a number only it knows and reads it back
 (`CALLER`/`CALLEE` = `claude` or `codex`).
+
+### 1.2.1 Starting other agents in the same project (`start_agent`, `agent_session`, #561)
+
+An ordinary session can start another agent, Claude or Codex, in its own project and work with it: a Claude session
+hands implementation to Codex and reviews the result, without a shell `codex exec` the app does not show. Built on
+ask_project's machinery (`Delegation`, `AgentRunWait`, `ASK_WAIT_MS`, `finalAnswer`), in the reader set with its
+own budget (`AGENT_TOOLS`, `AGENT_BUDGET_CHARS`).
+
+| Tool | Arguments → what comes back |
+|---|---|
+| `start_agent` | `{ task, tool?: claude\|codex, model?, effort?, wait? }` → the child's id and name, and its answer (`done`) or `working` |
+| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop, text? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer) and `stopped` |
+
+What one `start_agent` call does (`SessionManager.startAgent`):
+
+1. **Who may.** An ordinary session (`reader` profile) of a trusted project (#382's rule), not one marked `askedBy`:
+   depth one, so a child cannot start agents, and neither can a session ask_project opened (the same mark makes
+   `askProject` refuse both).
+2. **How many.** At most `AGENT_CEILING` (4) children run at once per project, counted over all its sessions: a
+   child counts while a turn its parent gave it runs. Checked before the card and again after it.
+3. **Choice.** `tool` defaults to the project's tool; `model` and `effort` to that tool's remembered choice for the
+   project (#107). A model or effort the tool's list does not have is refused with the list (`agentChoiceError`;
+   an alias the ids or labels contain passes, and a tool that cannot list passes all).
+4. **Consent** (`ensureAgentConsent`). A card in the caller's approval slot, detail `agent_start` (the tool, model,
+   preset and task): allow once, always for this session (`always`, kept in memory while this host serves the
+   session), always for this project (`always` with scope `project`, the card's ⌥; stored as the project's
+   `project_consents` row of kind `agents`, from and to the same project, listed and revoked in Settings →
+   Permissions), deny.
+5. **The child.** A visible session in the caller's own folder (a worktree session's worktree), named from the task,
+   marked `askedBy` the caller (its header links back: "Started by …"), under **the caller's permission preset**:
+   never more, and no argument or tool of the caller changes it. The task goes in a frame (`agentFrame`: who asks,
+   and that the final message is the answer) recorded as sent by the caller (`from`).
+6. **The answer.** Waited for like ask_project's, up to 240 s; past it, or with `wait: false` at once, the answer is
+   `working` and the caller is told when the turn ends through the report the orchestrator's `reportBack` uses
+   (`awaitingReport` → `deliverReport`, which reaches the model as an untrusted-source notice it reads with
+   `read_session`). A call waiting at that moment takes the answer instead, so it does not arrive twice. Paths the
+   answer names inside the child's folder become readable to the caller, as ask_project's do.
+
+`agent_session` acts only on a session whose `askedBy` is the caller, in its project. `send` is refused while a turn
+the caller gave it runs, while it works on something else (the person may be using it), and when the person has
+since raised its preset above the caller's (`presetWithin`). `stop` ends the turn the caller gave it; a turn the
+person started there is theirs.
+
+**Stop and delete.** The caller's call cancelled (Claude's MCP signal), or Stop on the caller while a call waits on
+a child, stops that child's turn. A child left running (`wait: false`, or past the bound) is its own session: the
+caller's Stop does not reach it, it has its own Stop. Deleting the caller drops its waits and its session consent;
+the children keep their turns and their link.
+
+**Size.** The two definitions are 918 characters (`AGENT_BUDGET_CHARS` 950). Claude loads `start_agent` (a request
+made in words, like ask_project's, which deferred was not found) and defers `agent_session`, which every
+`start_agent` answer names; Codex reaches both through its `exec` tool. Measured in tool-cost.md §10: +170 tokens per ordinary Claude request (412 → 582); "Have Codex …" reached `start_agent` 3 of 3 on Claude, "another agent" went to each CLI's own sub-agents. No `name` argument: the child
+is named from its task and the person renames it.
 
 **stdout is reserved.** `main.ts` prints exactly one line to it: the handshake the Tauri
 supervisor parses for the port and auth token. Everything else goes to stderr, because that

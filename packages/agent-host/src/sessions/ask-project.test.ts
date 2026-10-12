@@ -259,7 +259,7 @@ describe('asking another project', () => {
     const d = delegatedIn(s)[0]!.id
     w.store.setProjectConsent(w.target.id, w.caller.id, 'delegate')
     const back = await w.mgr.askProject(d, { project: w.caller.name, task: 'do it for me' })
-    expect(!back.ok && back.error).toContain('cannot ask a third')
+    expect(!back.ok && back.error).toContain('cannot ask a project')
     handleOf(d)!.answer('done')
     await p
   })

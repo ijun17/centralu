@@ -94,6 +94,14 @@ export function projectAccessQuestion(d: Extract<ApprovalDetail, { kind: 'projec
 }
 
 /**
+ * The question a start-agent card asks (#561) — the same sentence on the card, in the conversation row and in a
+ * notification: which agent, on what, and with which permissions (the caller's own, which is the most it can have).
+ */
+export function agentStartQuestion(d: Extract<ApprovalDetail, { kind: 'agent_start' }>): string {
+  return `Start ${d.tool}${d.model ? ` (${d.model})` : ''} in ${d.project.name}, with ${d.preset} permissions, to ${d.text}?`
+}
+
+/**
  * The question a new-project card asks (#515) — the full path is the whole of what is being agreed to, so it is in
  * the sentence wherever the question stands: the card, the conversation row, a notification.
  */

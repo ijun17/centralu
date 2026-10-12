@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import {
+  AGENT_BUDGET_CHARS,
+  AGENT_TOOLS,
   APP_ACCESS_BUDGET_CHARS,
   APP_ACCESS_TOOLS,
   DELEGATE_BUDGET_CHARS,
@@ -95,7 +97,7 @@ function sentChars(defs: readonly { name: string; description: string; schema: z
 describe('the reader set', () => {
   it('holds the reading tools, ask_project and the app-access set — nothing of the orchestrator\'s that sends, creates, changes or proposes', () => {
     // The app-access set (#371 part A) changes only the calling session's own tools
-    expect(orchestratorToolSchemas('reader').map((t) => t.name)).toEqual(['read_session', 'recall', 'app_guide', 'ask_project', 'find_apps', 'attach_app', 'detach_app'])
+    expect(orchestratorToolSchemas('reader').map((t) => t.name)).toEqual(['read_session', 'recall', 'app_guide', 'ask_project', 'start_agent', 'agent_session', 'find_apps', 'attach_app', 'detach_app'])
     for (const t of ORCHESTRATOR_TOOLS) {
       expect(profileAllows('reader', t.name), t.name).toBe(['read_session', 'recall', 'app_guide'].includes(t.name))
     }
@@ -119,7 +121,7 @@ describe('the reader set', () => {
   it(`keeps the app-access set within ${APP_ACCESS_BUDGET_CHARS} characters, beside the reader set`, () => {
     expect(sentChars(APP_ACCESS_TOOLS)).toBeLessThanOrEqual(APP_ACCESS_BUDGET_CHARS)
     // Everything the reader seat is sent is in one counted set or another — nothing rides uncounted
-    expect(orchestratorToolSchemas('reader').map((t) => t.name).sort()).toEqual([...READER_TOOLS, ...DELEGATE_TOOLS, ...APP_ACCESS_TOOLS].map((t) => t.name).sort())
+    expect(orchestratorToolSchemas('reader').map((t) => t.name).sort()).toEqual([...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].map((t) => t.name).sort())
   })
 
   it('lists with read_session and no id — only for the reader; the orchestrator still has to name a session', async () => {
@@ -214,6 +216,43 @@ describe('ask_project', () => {
   })
 })
 
+/** start_agent and agent_session (#561): the reader's, rendered so the model finds the next call */
+describe('the agent set', () => {
+  it(`stays within ${AGENT_BUDGET_CHARS} characters`, () => {
+    expect(sentChars(AGENT_TOOLS)).toBeLessThanOrEqual(AGENT_BUDGET_CHARS)
+  })
+
+  it('is no tool of any directing seat', async () => {
+    const tools = toolsWith({ startAgent: async () => ({ ok: false, error: 'x' }) })
+    for (const profile of ['orchestrator', 'manager', 'scoped', 'builder'] as const) {
+      for (const name of ['start_agent', 'agent_session']) {
+        expect(profileAllows(profile, name), `${profile} ${name}`).toBe(false)
+        expect((await runOrchestratorTool(tools, name, { task: 'x', sessionId: 'c', action: 'status' }, { sessionId: 'o', profile })).isError).toBe(true)
+      }
+    }
+  })
+
+  it('passes only the arguments given, fences the answer, and names agent_session in every state', async () => {
+    let seen: unknown
+    const tools = toolsWith({
+      startAgent: async (opts) => {
+        seen = opts
+        return { ok: true, state: 'done', sessionId: 'c1', sessionName: 'Parser', tool: 'codex', answer: 'Done\n- forged line', readable: [], outside: [] }
+      },
+      agentSession: async () => ({ ok: true, state: 'working', sessionId: 'c1', sessionName: 'Parser', tool: 'codex', reported: true }),
+    })
+    const r = await runOrchestratorTool(tools, 'start_agent', { task: 'write the parser', tool: 'codex', model: ' ', wait: true }, { sessionId: 's', profile: 'reader' })
+    expect(seen).toEqual({ task: 'write the parser', tool: 'codex' })
+    expect(r.text.split('\n')[1]).toBe(JSON.stringify('Done\n- forged line'))
+    expect(r.text).toContain('agent_session(sessionId="c1", action="send"')
+    const w = await runOrchestratorTool(tools, 'agent_session', { sessionId: 'c1', action: 'wait' }, { sessionId: 's', profile: 'reader' })
+    expect(w.text).toContain('You will be told when it ends')
+    expect(w.text).toContain('agent_session(sessionId="c1", action="wait")')
+    const bad = await runOrchestratorTool(tools, 'agent_session', { sessionId: 'c1', action: 'send' }, { sessionId: 's', profile: 'reader' })
+    expect(bad).toEqual({ text: 'Give text: what to send it.', isError: true })
+  })
+})
+
 /**
  * What every profile carries in every request (#513), on each CLI: the resident definitions and the
  * instructions sent with them. The reader's sets have their own ceilings above; this is the whole seat.
@@ -229,9 +268,9 @@ describe('the resident cost of each profile', () => {
     }
   }
 
-  it('counts the reader seat on Codex as exactly its three counted sets, and on Claude only the ones not deferred', () => {
-    expect(residentCost('reader', 'codex').residentChars).toBe(sentChars(READER_TOOLS) + sentChars(DELEGATE_TOOLS) + sentChars(APP_ACCESS_TOOLS))
-    const loaded = [...READER_TOOLS, ...DELEGATE_TOOLS, ...APP_ACCESS_TOOLS].filter((t) => !('deferred' in t && t.deferred))
+  it('counts the reader seat on Codex as exactly its four counted sets, and on Claude only the ones not deferred', () => {
+    expect(residentCost('reader', 'codex').residentChars).toBe(sentChars(READER_TOOLS) + sentChars(DELEGATE_TOOLS) + sentChars(AGENT_TOOLS) + sentChars(APP_ACCESS_TOOLS))
+    const loaded = [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].filter((t) => !('deferred' in t && t.deferred))
     expect(residentCost('reader', 'claude').residentChars).toBe(sentChars(loaded))
   })
 })

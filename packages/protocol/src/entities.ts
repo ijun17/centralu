@@ -563,8 +563,12 @@ export type PermissionPreset = z.infer<typeof PermissionPreset>
 export const ApprovalDecision = z.enum(['allow', 'deny', 'always'])
 export type ApprovalDecision = z.infer<typeof ApprovalDecision>
 
-/** How one project may reach another (#371): 'delegate' is ask_project (part B), 'apps' another project's app tools (part A) */
-export const ProjectConsentKind = z.enum(['delegate', 'apps'])
+/**
+ * How one project may reach another (#371): 'delegate' is ask_project (part B), 'apps' another project's app tools (part A).
+ * 'agents' (#561) is a project's sessions starting other agents in that same project (start_agent): its row names the
+ * project on both sides.
+ */
+export const ProjectConsentKind = z.enum(['delegate', 'apps', 'agents'])
 export type ProjectConsentKind = z.infer<typeof ProjectConsentKind>
 
 /**
@@ -630,6 +634,23 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
     /** One line for a person to read: what the caller wants done there (the task, cut short; or the app's use) */
     text: z.string(),
     app: z.object({ appId: z.string(), name: z.string() }).optional(),
+  }),
+  /**
+   * A session asks to start another agent in its own project (#561, start_agent) — raised by **the host** in the
+   * calling session, the first time it starts one. Four answers: allow once (this call only), always for this
+   * session (`always` with scope `session`, kept while this host serves the session), always for this project
+   * (`always` with scope `project`, remembered as the project's 'agents' consent and revoked in Settings), deny.
+   */
+  z.object({
+    kind: z.literal('agent_start'),
+    project: z.object({ id: z.string(), name: z.string() }),
+    /** The agent CLI the new session runs, and its model when the caller named one */
+    tool: z.string(),
+    model: z.string().optional(),
+    /** The permission preset the new session gets: the caller's own, never more */
+    preset: PermissionPreset,
+    /** One line for a person to read: the task, cut short */
+    text: z.string(),
   }),
   /**
    * The orchestrator asks to make a new project (#515, create_project) — raised by **the host** in the orchestrator's

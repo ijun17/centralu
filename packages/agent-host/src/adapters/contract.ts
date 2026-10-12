@@ -148,6 +148,29 @@ export type AskProjectResult =
     }
   | { ok: false; error: string }
 
+/**
+ * What start_agent and agent_session come back with (#561) — rendered for the model by runOrchestratorTool.
+ *
+ *   done      the turn the caller gave it ended; `answer` is its final text, cut in the middle when long
+ *   working   still running past the wait's bound (or not waited on); `reported` says the caller will be told when it ends
+ *   at_rest   nothing the caller gave it is running (agent_session status/wait); `answer` is its last final text
+ *   stopped   agent_session stop ended the turn
+ */
+export type ChildRunResult =
+  | ({ ok: true; sessionId: string; sessionName: string; tool: string } & (
+      | { state: 'done'; answer: string; readable: string[]; outside: string[] }
+      | { state: 'working'; notice?: string; reported: boolean }
+      | { state: 'at_rest'; answer: string; sessionState: string }
+      | { state: 'stopped' }
+    ))
+  | { ok: false; error: string }
+
+/** start_agent's arguments (#561): the task, and the tool, model and effort when the caller picks them */
+export type StartAgentOpts = { task: string; tool?: string; model?: string; effort?: string; wait?: boolean }
+
+/** agent_session's arguments (#561) */
+export type AgentSessionOpts = { sessionId: string; action: 'status' | 'send' | 'wait' | 'stop'; text?: string }
+
 export type OrchestratorTools = {
   /** Sessions this app currently manages (excludes the orchestrator itself and archived sessions) */
   listSessions(): Promise<OrchestratedSession[]>
@@ -236,6 +259,14 @@ export type OrchestratorTools = {
    * `signal` is the caller's tool call: aborted, the delegated turn is stopped too.
    */
   askProject(opts: { project: string; task?: string }, signal?: AbortSignal): Promise<AskProjectResult>
+  /**
+   * Starts another agent in the caller's own project (#561, start_agent): a visible session marked `askedBy` the
+   * caller, under the caller's permission preset, behind the person's consent. Waits like askProject unless
+   * `wait` is false; `signal` is the caller's tool call, and aborted it stops the turn being waited on.
+   */
+  startAgent(opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult>
+  /** Works with a session the caller started (#561, agent_session): status, send more, wait, stop */
+  agentSession(opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
   recall(
     query: string,
     limit?: number,

@@ -1,0 +1,30 @@
+{
+  "comment": "#561: does an ordinary session reach start_agent when the person asks for another agent in words, and does adding it cost ask_project or read_session their prompts? Placeholders as in prompts.json. Selection turns decline the consent card, so no child is started.",
+  "seed": "Note for later, no action needed: for the database backup we decided on pg_dump, nightly at 03:00. Reply with the single word OK.",
+  "selection": [
+    {
+      "id": "start-codex",
+      "profile": "reader",
+      "prompt": "Have Codex write a one-line shell command that counts the files in this folder, then tell me what it wrote.",
+      "expect": ["start_agent"]
+    },
+    {
+      "id": "start-agent",
+      "profile": "reader",
+      "prompt": "Hand this to another agent and tell me what it says: summarize what this folder contains in one sentence.",
+      "expect": ["start_agent"]
+    },
+    {
+      "id": "ask-project",
+      "profile": "reader",
+      "prompt": "Have the {other} project list the files in its top folder, then tell me what it found.",
+      "expect": ["ask_project"]
+    },
+    {
+      "id": "other-sessions",
+      "profile": "reader",
+      "prompt": "What are the other sessions in this project working on right now?",
+      "expect": ["read_session"]
+    }
+  ]
+}

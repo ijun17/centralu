@@ -139,7 +139,7 @@ export class Qualifier {
     return out
   }
 
-  /** `ApprovalDetail`: the two kinds that name a project */
+  /** `ApprovalDetail`: the kinds that name a project */
   approvalDetail(d: unknown): unknown {
     if (!isObj(d)) return d
     if (d.kind === 'capability' && isObj(d.app)) return { ...d, app: { ...d.app, projectId: this.maybeId(d.app.projectId) } }
@@ -147,6 +147,8 @@ export class Qualifier {
       const side = (x: unknown) => (isObj(x) ? { ...x, id: this.maybeId(x.id) } : x)
       return { ...d, from: side(d.from), to: side(d.to) }
     }
+    // Starting an agent (#561) names the caller's own project
+    if (d.kind === 'agent_start' && isObj(d.project)) return { ...d, project: { ...d.project, id: this.maybeId(d.project.id) } }
     return d
   }
 

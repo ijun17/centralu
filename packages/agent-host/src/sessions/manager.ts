@@ -11,6 +11,7 @@ import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, BrokerHos
 import { AgentRunWait, finalAnswer } from './app-agents.js'
 import { CacheLedger } from './cache-ledger.js'
 import { ASK_WAIT_MS, askFrame, clipAnswer, pathsIn, readableGrants, taskLine, underGrant } from './ask-project.js'
+import { AGENT_CEILING, agentFrame, agentName, presetWithin } from './start-agent.js'
 import { builderRole } from './app-builder.js'
 import { remember } from './folder-cache.js'
 import { makeProjectFolder, projectFolderTarget, type ProjectFolderTarget } from '../dev-services/project-folder.js'
@@ -71,7 +72,7 @@ import {
   sessionLiveDefaults,
   withoutToolRecord,
 } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, AgentSpawnSpec, AskProjectResult, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, HistoryMessage, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, ChildRunResult, AgentSessionOpts, AskProjectResult, StartAgentOpts, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, HistoryMessage, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
 
 /**
  * Where agent processes live when not with this host (#280 step 2 — the keeper). `spawn` starts a
@@ -467,6 +468,11 @@ export class SessionManager {
    * on this one. Removed once the caller has read the outcome; an outcome nobody comes back for goes with the caller.
    */
   private delegations = new Map<string, Delegation>()
+  /**
+   * Sessions the person allowed to start agents "always for this session" (#561, `ensureAgentConsent`). Live only, like
+   * `readGrants`: a restart asks again. The project-wide always is a stored consent instead.
+   */
+  private agentConsents = new Set<string>()
   /**
    * What a session may read beyond its folder because another project handed it back (#371 part B) — session id ->
    * resolved paths (files, or output folders). Live only: the grant lasts while this host serves the session, and a
@@ -2549,6 +2555,7 @@ export class SessionManager {
       if (this.agentRuns.get(d.sessionId) === d.wait) this.agentRuns.delete(d.sessionId)
     }
     this.readGrants.delete(sessionId)
+    this.agentConsents.delete(sessionId)
     // A capability question raised on this session has nowhere left to be answered (D-4) — it is ended with
     // no answer (the window does not remember it, just declines)
     for (const ask of [...this.hostAsks.values()]) {
@@ -3769,9 +3776,11 @@ export class SessionManager {
     if (ask && ask.sessionId === sessionId) {
       this.hostAsks.delete(requestId)
       // A new project (#515) has nothing to remember either: "always" makes this one, as allow does
-      const answer = ask.detail.kind !== 'project_access' && decision === 'always' ? 'allow' : decision
+      const keepsAlways = ask.detail.kind === 'project_access' || ask.detail.kind === 'agent_start'
+      const answer = !keepsAlways && decision === 'always' ? 'allow' : decision
       this.onEvent({ type: 'approval_resolved', sessionId, requestId, decision: answer })
-      ask.resolve(answer)
+      // Starting agents (#561) has two always: this session (the card's default) or the whole project (⌥)
+      ask.resolve(ask.detail.kind === 'agent_start' && answer === 'always' && scope === 'project' ? 'always_project' : answer)
       // The agent is still inside that tool call — if there are no other pending questions, it is working
       // again
       const after = this.meta.get(sessionId)
@@ -4574,7 +4583,11 @@ export class SessionManager {
   interrupt(sessionId: string): void {
     this.requireHandle(sessionId).interrupt()
     // Stop on a caller stops what it asked another project to do (#371): the call it is waiting in ends with it
-    for (const d of this.delegations.values()) if (d.callerId === sessionId) d.stop('the person stopped the session that asked')
+    // A child start_agent started (#561) stops only while the caller is waiting on it: one left running with
+    // `wait: false` (or past the bound) is its own session now, with its own Stop
+    for (const d of this.delegations.values()) {
+      if (d.callerId === sessionId && (!d.agent || (d.waiters ?? 0) > 0)) d.stop('the person stopped the session that asked')
+    }
     // The person stopped an agent an app had asked for (M4 D-1) — this turn's ending is not an answer. The
     // app is told it was stopped
     const run = this.agentRuns.get(sessionId)
@@ -4639,6 +4652,9 @@ export class SessionManager {
       recall: async (...a) => (off() ? { hits: [] } : view.recall(...a)),
       // The one reach outside its project (#371 part B) — behind the person's consent for the pair, inside askProject
       askProject: async (opts, signal) => (off() ? { ok: false, error: offError } : this.askProject(sessionId, opts, signal)),
+      // Other agents in its own project (#561) — behind the person's consent, never above this session's preset
+      startAgent: async (opts, signal) => (off() ? { ok: false, error: offError } : this.startAgent(sessionId, opts, signal)),
+      agentSession: async (opts, signal) => (off() ? { ok: false, error: offError } : this.agentSession(sessionId, opts, signal)),
       sendToSession: refuse,
       deleteWorktreeSession: refuse,
       createSession: refuse,
@@ -4944,6 +4960,9 @@ export class SessionManager {
       // Only an ordinary session asks another project (#371): the orchestrator, managers and coordinators already
       // direct sessions with send_to_session, inside their own view
       askProject: async () => ({ ok: false, error: 'Only an ordinary project session can ask another project' }),
+      // The same for starting agents (#561): these seats create and direct sessions with their own tools
+      startAgent: async () => ({ ok: false, error: 'Only an ordinary project session can start agents this way' }),
+      agentSession: async () => ({ ok: false, error: 'Only an ordinary project session can start agents this way' }),
 
       sendToSession: async (sessionId, text, reportBack) => {
         /*
@@ -5370,7 +5389,7 @@ export class SessionManager {
   private askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal): Promise<HostAskAnswer> {
     return new Promise<HostAskAnswer>((resolve) => {
       if (signal?.aborted) return resolve(null)
-      const requestId = `${detail.kind === 'project_access' ? 'xp' : 'mk'}-${randomUUID()}`
+      const requestId = `${detail.kind === 'project_access' ? 'xp' : detail.kind === 'agent_start' ? 'ag' : 'mk'}-${randomUUID()}`
       this.hostAsks.set(requestId, { requestId, sessionId, detail, shown: false, resolve })
       signal?.addEventListener('abort', () => {
         if (!this.hostAsks.delete(requestId)) return
@@ -5429,7 +5448,8 @@ export class SessionManager {
     const caller = this.meta.get(callerId)
     if (!caller?.projectId) return { ok: false, error: 'This session belongs to no project, so it cannot ask another one' }
     if (caller.askedBy) {
-      return { ok: false, error: 'This session was itself asked by another project, so it cannot ask a third — say in your answer what is needed instead.' }
+      // `askedBy` marks a child of start_agent too (#561): depth one for both reaches
+      return { ok: false, error: 'This session was itself started or asked by another session, so it cannot ask a project — say in your answer what is needed instead.' }
     }
     const projects = this.store.listProjects()
     /*
@@ -5521,7 +5541,7 @@ export class SessionManager {
   }
 
   /** Registers the wait on the delegated session's turn (the same watcher an app's agent uses, `AgentRunWait`) */
-  private startDelegation(key: string, callerId: string, sessionId: string, target: { id: string; name: string; path: string }): Delegation {
+  private startDelegation(key: string, callerId: string, sessionId: string, target: { id: string; name: string; path: string }, agent = false): Delegation {
     let notice: string | undefined
     const wait = new AgentRunWait((message) => (notice = message), () => this.meta.get(sessionId)?.name ?? 'the session')
     const d: Delegation = {
@@ -5544,6 +5564,7 @@ export class SessionManager {
         }
         wait.fail(new Error(`${why}, so the delegated turn was stopped`))
       },
+      ...(agent ? { agent: true } : {}),
     }
     void d.outcome.then(() => {
       d.settled = true
@@ -5608,6 +5629,296 @@ export class SessionManager {
     }
   }
 
+  /**
+   * start_agent (#561): an ordinary session starts another agent (Claude or Codex) in its own project on a task.
+   *
+   *   1. Who may: an ordinary session of a trusted project (the rule ask_project and attach_app follow, #382), and
+   *      not one that was itself started or asked by another session (`askedBy`): depth one.
+   *   2. How many: at most `AGENT_CEILING` children run at once in a project, over all its sessions.
+   *   3. The person's consent (`ensureAgentConsent`): once, always for this session, or always for this project.
+   *   4. The child: a visible session in the caller's folder, marked `askedBy` the caller, on the tool, model and
+   *      effort asked for (or the project's own, as a session the person opens there), under **the caller's own
+   *      permission preset**: never more than the caller has, and nothing the caller can change afterwards.
+   *   5. The task goes in a frame (`agentFrame`) recorded as sent by the caller, and the call waits on the turn the
+   *      way ask_project does (`AgentRunWait`, `ASK_WAIT_MS`). With `wait: false`, or past the bound, it answers
+   *      "working" and the caller is told when the turn ends (the reportBack path); agent_session waits again.
+   */
+  async startAgent(callerId: string, opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult> {
+    const caller = this.meta.get(callerId)
+    if (!caller?.projectId) return { ok: false, error: 'This session belongs to no project, so it cannot start agents.' }
+    if (caller.askedBy) {
+      return { ok: false, error: 'This session was itself started or asked by another session, so it cannot start agents — say in your answer what is needed instead.' }
+    }
+    const project = this.store.listProjects().find((p) => p.id === caller.projectId)
+    if (!project) return { ok: false, error: 'This session\'s project is no longer registered.' }
+    if (project.trusted !== true) {
+      return { ok: false, error: "This session's project is not trusted, so it cannot start agents — the person can trust it from the project menu." }
+    }
+    const tool = opts.tool ?? (project.defaultTool && this.adapters.has(project.defaultTool) ? project.defaultTool : this.firstTool())
+    const adapter = this.adapters.get(tool)
+    if (!adapter) return { ok: false, error: `No agent named "${tool}" here. The agents are: ${[...this.adapters.keys()].join(', ')}.` }
+    const full = this.agentCeilingError(project.id)
+    if (full) return { ok: false, error: full }
+    // The project's remembered choice for that tool (#107), as a session the person opens there gets. A remembered
+    // effort belongs to the remembered model: with another model named, that model's default effort is used
+    const remembered = this.store.projectToolDefaults(project.id)[tool]
+    const model = opts.model ?? remembered?.model ?? undefined
+    const effort = opts.effort ?? (!opts.model || opts.model === remembered?.model ? (remembered?.effort ?? undefined) : undefined)
+    const wrong = await this.agentChoiceError(tool, opts.model, opts.effort, model)
+    if (wrong) return { ok: false, error: wrong }
+    const found = await adapter.detect()
+    if (!found.installed || !found.loggedIn) return { ok: false, error: `${adapter.descriptor.label} cannot take the task: ${found.detail}` }
+
+    const consent = await this.ensureAgentConsent(
+      callerId,
+      {
+        kind: 'agent_start',
+        project: { id: project.id, name: project.name },
+        tool: adapter.descriptor.label,
+        ...(model ? { model } : {}),
+        preset: caller.permissionPreset,
+        text: taskLine(opts.task),
+      },
+      signal,
+    )
+    if (!consent.ok) return consent
+    // The card may have stood a while: counted again
+    const fullNow = this.agentCeilingError(project.id)
+    if (fullNow) return { ok: false, error: fullNow }
+
+    // The caller's own folder (a worktree session's is its worktree), so the two work on the same files
+    const cwd = this.store.sessionCwd(callerId) ?? caller.worktree?.path ?? project.path
+    let child: SessionInfo
+    try {
+      child = await this.createSession({
+        projectId: project.id,
+        cwd,
+        tool,
+        ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
+        // Never above the caller (#561): the caller's own preset, which the caller cannot change for it afterwards
+        permissionPreset: caller.permissionPreset,
+        askedBy: callerId,
+      })
+    } catch (e) {
+      return { ok: false, error: `Could not start the session: ${(e as Error).message}` }
+    }
+    this.rename(child.id, agentName(opts.task))
+    const key = `${callerId}>${child.id}`
+    const d = this.startDelegation(key, callerId, child.id, { id: project.id, name: project.name, path: cwd }, true)
+    try {
+      await this.deliver(child.id, agentFrame(labelOf(this.store, caller), opts.task), undefined, { sessionId: callerId, name: labelOf(this.store, caller) }, false)
+    } catch (e) {
+      this.delegations.delete(key)
+      if (this.agentRuns.get(child.id) === d.wait) this.agentRuns.delete(child.id)
+      return { ok: false, error: `Could not give the task to the new session: ${(e as Error).message}` }
+    }
+    if (opts.wait === false) return this.agentWorking(d)
+    return this.awaitAgent(key, d, signal)
+  }
+
+  /**
+   * agent_session (#561): the caller works with a session it started — and only those: one whose `askedBy` is the
+   * caller, in the caller's project.
+   *
+   *   status  where it stands, without waiting (the answer, once the turn the caller gave it has ended)
+   *   wait    waits on that turn up to the bound, as start_agent does
+   *   send    gives it more: refused while a turn the caller gave it runs, while it works on the person's own
+   *           message, or when the person has since raised its preset above the caller's
+   *   stop    stops the turn the caller gave it; a turn the person started there is theirs
+   */
+  async agentSession(callerId: string, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult> {
+    const caller = this.meta.get(callerId)
+    const child = this.meta.get(opts.sessionId)
+    if (!caller?.projectId || !child || child.askedBy !== callerId || child.projectId !== caller.projectId) {
+      return { ok: false, error: `${opts.sessionId} is not a session this session started. agent_session works only on sessions start_agent started here.` }
+    }
+    const key = `${callerId}>${child.id}`
+    const d = this.delegations.get(key)
+    switch (opts.action) {
+      case 'status':
+        if (d && !d.settled) return this.agentWorking(d, false)
+        return d ? this.awaitAgent(key, d, signal) : this.agentAtRest(child)
+      case 'wait':
+        return d ? this.awaitAgent(key, d, signal) : this.agentAtRest(child)
+      case 'stop': {
+        if (!d || d.settled) return { ok: false, error: `Nothing you gave "${child.name}" is running.` }
+        if (this.awaitingReport.get(child.id) === callerId) this.awaitingReport.delete(child.id)
+        d.stop('the session that started it stopped it')
+        await d.outcome
+        this.delegations.delete(key)
+        return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool }
+      }
+      case 'send': {
+        if (d && !d.settled) {
+          return { ok: false, error: `"${child.name}" is still working on what you gave it. Wait for it (action "wait") or stop it first.` }
+        }
+        // An answer the caller never came back for gives way to the new message
+        if (d) this.delegations.delete(key)
+        if (child.state === 'working' || child.state === 'waiting_approval' || this.agentRuns.has(child.id)) {
+          return { ok: false, error: `"${child.name}" is busy with something else (the person may be using it). Try again later.` }
+        }
+        if (!presetWithin(child.permissionPreset, caller.permissionPreset)) {
+          return {
+            ok: false,
+            error: `"${child.name}" now has more permissions (${child.permissionPreset}) than this session (${caller.permissionPreset}), so this session cannot give it work. Tell the person.`,
+          }
+        }
+        const full = this.agentCeilingError(child.projectId ?? '')
+        if (full) return { ok: false, error: full }
+        const project = this.store.listProjects().find((p) => p.id === child.projectId)
+        const cwd = this.store.sessionCwd(child.id) ?? child.worktree?.path ?? project?.path ?? ''
+        const next = this.startDelegation(key, callerId, child.id, { id: child.projectId ?? '', name: project?.name ?? '', path: cwd }, true)
+        try {
+          await this.deliver(child.id, opts.text ?? '', undefined, { sessionId: callerId, name: labelOf(this.store, caller) }, false)
+        } catch (e) {
+          this.delegations.delete(key)
+          if (this.agentRuns.get(child.id) === next.wait) this.agentRuns.delete(child.id)
+          return { ok: false, error: `Could not send it: ${(e as Error).message}` }
+        }
+        return this.awaitAgent(key, next, signal)
+      }
+    }
+  }
+
+  /** Refuses a start when the project's children already running reach `AGENT_CEILING` (#561) */
+  private agentCeilingError(projectId: string): string | null {
+    const running = [...this.delegations.values()].filter((d) => d.agent && !d.settled && this.meta.get(d.sessionId)?.projectId === projectId).length
+    if (running < AGENT_CEILING) return null
+    return `${running} agents started by this project's sessions are already working, the most at once. Wait for one (agent_session, action "wait") or stop one, then try again.`
+  }
+
+  /**
+   * A model or effort the caller named that the tool does not offer, as a refusal listing what it does (#561), so a
+   * wrong name costs one call rather than a child whose first turn fails. Lenient where the list is: a name the
+   * list's ids or labels contain (an alias such as "sonnet") passes, and a tool that cannot list its models passes all.
+   */
+  private async agentChoiceError(tool: string, askedModel: string | undefined, askedEffort: string | undefined, model: string | undefined): Promise<string | null> {
+    if (!askedModel && !askedEffort) return null
+    const { supported, models } = await this.listModels(tool)
+    if (!supported || models.length === 0) return null
+    const find = (name: string) => {
+      const n = name.toLowerCase()
+      return models.find((m) => m.id.toLowerCase() === n) ?? models.find((m) => m.id.toLowerCase().includes(n) || m.label.toLowerCase().includes(n))
+    }
+    if (askedModel && !find(askedModel)) return `${tool} has no model "${askedModel}". Its models: ${models.map((m) => m.id).join(', ')}.`
+    if (askedEffort) {
+      const m = model ? find(model) : models[0]
+      if (m && m.efforts.length > 0 && !m.efforts.includes(askedEffort)) return `${m.id} has no effort "${askedEffort}". Its efforts: ${m.efforts.join(', ')}.`
+    }
+    return null
+  }
+
+  /**
+   * The person's consent for a session to start agents (#561), the first time it does: a card in the caller's approval
+   * slot. "Always" is kept for this session while this host serves it; with ⌥ (scope `project`) it is remembered as the
+   * project's 'agents' consent, listed in Settings → Permissions with ask_project's pairs and revoked there.
+   */
+  private async ensureAgentConsent(
+    callerId: string,
+    detail: Extract<ApprovalDetail, { kind: 'agent_start' }>,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (this.agentConsents.has(callerId)) return { ok: true }
+    if (this.store.getProjectConsent(detail.project.id, detail.project.id, 'agents')) return { ok: true }
+    const decision = await this.askHost(callerId, detail, signal)
+    if (decision === 'always_project') {
+      this.store.setProjectConsent(detail.project.id, detail.project.id, 'agents')
+      this.emit({ type: 'project_consents_changed' })
+      return { ok: true }
+    }
+    if (decision === 'always') {
+      this.agentConsents.add(callerId)
+      return { ok: true }
+    }
+    if (decision === 'allow') return { ok: true }
+    if (decision === 'deny') return { ok: false, error: 'The person did not allow this session to start another agent. Do not start one again unless they tell you to.' }
+    return { ok: false, error: 'The question to the person was withdrawn before they answered, so no agent was started.' }
+  }
+
+  /**
+   * "Working": the caller is told when the turn ends (#561), through the report the orchestrator's reportBack uses, unless
+   * a call is waiting on it by then (`awaitAgent` takes the marker down while it waits)
+   */
+  private agentWorking(d: Delegation, arm = true): ChildRunResult {
+    if (arm) this.awaitingReport.set(d.sessionId, d.callerId)
+    const notice = d.notice()
+    return {
+      ok: true,
+      state: 'working',
+      sessionId: d.sessionId,
+      sessionName: this.meta.get(d.sessionId)?.name ?? d.sessionId,
+      tool: this.meta.get(d.sessionId)?.tool ?? '',
+      reported: this.awaitingReport.get(d.sessionId) === d.callerId,
+      ...(notice ? { notice } : {}),
+    }
+  }
+
+  /** A child with nothing of the caller's running: its last final answer (#561) */
+  private agentAtRest(child: SessionInfo): ChildRunResult {
+    return {
+      ok: true,
+      state: 'at_rest',
+      sessionId: child.id,
+      sessionName: child.name,
+      tool: child.tool,
+      answer: clipAnswer(finalAnswer(this.store.loadMessages(child.id, 50)), child.name),
+      sessionState: child.state,
+    }
+  }
+
+  /** Waits on a child's turn up to the bound (#561), like `awaitDelegation`, and reads its outcome for the caller */
+  private async awaitAgent(key: string, d: Delegation, signal?: AbortSignal): Promise<ChildRunResult> {
+    // Whoever waits reads the answer here: a report of the same ending would hand it over twice
+    if (this.awaitingReport.get(d.sessionId) === d.callerId) this.awaitingReport.delete(d.sessionId)
+    const name = () => this.meta.get(d.sessionId)?.name ?? d.sessionId
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let onAbort: (() => void) | undefined
+    const bound = new Promise<'bound'>((resolve) => (timer = setTimeout(() => resolve('bound'), ASK_WAIT_MS)))
+    const aborted = new Promise<'aborted'>((resolve) => {
+      if (!signal) return
+      onAbort = () => resolve('aborted')
+      if (signal.aborted) onAbort()
+      else signal.addEventListener('abort', onAbort, { once: true })
+    })
+    d.waiters = (d.waiters ?? 0) + 1
+    try {
+      const r = await Promise.race([d.outcome, bound, aborted])
+      d.waiters--
+      if (r === 'aborted') {
+        d.stop('the call that started it was cancelled')
+        await d.outcome
+        this.delegations.delete(key)
+        return { ok: false, error: `The call was cancelled, so "${name()}" was stopped.` }
+      }
+      if (r === 'bound') return this.agentWorking(d)
+      if (this.delegations.get(key) === d) this.delegations.delete(key)
+      if (!r.ok) return { ok: false, error: `"${name()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or give it a clearer task.` }
+      const answer = finalAnswer(this.store.loadMessages(d.sessionId, 50))
+      // Paths it names in its folder become readable to the caller, as ask_project's do: a child in another
+      // folder (a worktree, #561 part 2) is outside the caller's own
+      const { granted, outside } = readableGrants(pathsIn(answer), d.target.path)
+      if (granted.length) {
+        const set = this.readGrants.get(d.callerId) ?? new Set<string>()
+        for (const g of granted) set.add(g)
+        this.readGrants.set(d.callerId, set)
+      }
+      return {
+        ok: true,
+        state: 'done',
+        sessionId: d.sessionId,
+        sessionName: name(),
+        tool: this.meta.get(d.sessionId)?.tool ?? '',
+        answer: clipAnswer(answer, name()),
+        readable: granted,
+        outside,
+      }
+    } finally {
+      clearTimeout(timer)
+      if (onAbort) signal?.removeEventListener('abort', onAbort)
+    }
+  }
+
   private askCapability(q: CapabilityQuestion, signal: AbortSignal): Promise<'allow' | 'deny' | null> {
     return new Promise((resolve) => {
       if (signal.aborted) return resolve(null)
@@ -5619,7 +5930,7 @@ export class SessionManager {
           sessionId: q.origin.sessionId,
           detail: { kind: 'capability' as const, app, capability: q.capability, text: q.text },
           shown: false,
-          resolve: (d) => resolve(d === 'always' ? 'allow' : d),
+          resolve: (d) => resolve(d === 'always' || d === 'always_project' ? 'allow' : d),
         }
         this.hostAsks.set(requestId, ask)
         signal.addEventListener('abort', () => {
@@ -6617,14 +6928,17 @@ function truncate(s: string, max = 40): string {
   return oneLine.length > max ? oneLine.slice(0, max) + '…' : oneLine
 }
 
-/** The answer to a card the host raised: the three of an approval, or null when it was withdrawn unanswered */
-type HostAskAnswer = 'allow' | 'always' | 'deny' | null
+/**
+ * The answer to a card the host raised: the three of an approval, or null when it was withdrawn unanswered.
+ * 'always_project' is agent_start's always with the project scope (#561); every other card has one always.
+ */
+type HostAskAnswer = 'allow' | 'always' | 'always_project' | 'deny' | null
 
 /** A card the host raised in a session's approval slot (M4 D-4, #371) — see `SessionManager.hostAsks` */
 type HostAsk = {
   requestId: string
   sessionId: string
-  detail: Extract<ApprovalDetail, { kind: 'capability' | 'project_access' | 'project_create' }>
+  detail: Extract<ApprovalDetail, { kind: 'capability' | 'project_access' | 'project_create' | 'agent_start' }>
   shown: boolean
   resolve: (d: HostAskAnswer) => void
 }
@@ -6643,4 +6957,8 @@ type Delegation = {
   notice(): string | undefined
   /** Stops the delegated turn and ends the wait with the reason */
   stop(why: string): void
+  /** A child start_agent started in the caller's own project (#561), rather than ask_project's delegated session */
+  agent?: boolean
+  /** How many of the caller's calls are waiting on it right now (#561, `awaitAgent`) */
+  waiters?: number
 }

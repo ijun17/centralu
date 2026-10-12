@@ -42,6 +42,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 빌더 | `<<role>>` 앱 하나를 만드는 세션. `appId`를 달고 **그리고** 빌더 지도(`apps.builders`)에서 그 앱이 가리키는 세션 | `builderRefOf`, `manager.ts`; `packages/agent-host/src/sessions/app-builder.ts` | |
 | 앱 에이전트 세션 | `<<role>>` 앱이 `run_agent`로 세운 세션. `appId`를 달지만 빌더가 아니고, `safe`로 돌며, 앱도 reader 도구도 받지 않고, 답은 앱에게 돌아간다 | `isAppAgentSession`, `runAppAgent`, `manager.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
 | 위임된("부탁받은") 세션 | `<<role>>` 다른 프로젝트의 세션이 `ask_project`로 세우거나 다시 쓴 세션. `askedBy`로 표시한다 | `SessionInfo.askedBy`; `packages/agent-host/src/sessions/ask-project.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2 | 델리게이트 |
+| 띄운 에이전트(자식) | `<<role>>` 같은 프로젝트의 다른 세션이 `start_agent`로 띄운 세션(#561). 그 세션의 폴더에서 그 세션의 프리셋으로 돈다. `askedBy`로 표시하며, 띄운 세션이 `agent_session`으로 다룰 수 있는 건 이 세션들뿐이다. 위임된 세션처럼 에이전트를 띄우거나 프로젝트에 부탁하지 못한다 | `SessionInfo.askedBy`; `manager.ts`의 `startAgent`, `agentSession`; `packages/agent-host/src/sessions/start-agent.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2.1 | 자식, 워커 |
 | 도구 프로필 | 세션이 받는 Centralu 자체 도구(`centralu` MCP 서버) 묶음: `orchestrator`, `manager`, `scoped`, `builder`, `reader`, 또는 없음 | `toolProfileOf`, `manager.ts`; [agent-host.ko.md](agent-host.ko.md) §1.1 | |
 | 권한 프리셋 | 에이전트가 묻지 않고 해도 되는 범위: `safe`, `normal`, `auto` | `PermissionPreset`, `entities.ts` | 모드 |
 | 살아 있음 | 세션에 지금 프로세스가 있는가. 살아 있지 않은 세션은 말을 걸면 이어 띄운다 | `SessionInfo.live` | 보관(FR-20은 폐지) |
@@ -65,7 +66,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 승인 내용 | 무엇을 묻는가: `command`, `file_edit`, `other`(어댑터가 올린다), `capability`와 `project_access`(호스트가 올린다) | `ApprovalDetail`, `entities.ts` | |
 | 승인 규칙 | 명령에 대해 기억해 둔 "항상 허용". `*`가 든 패턴으로 맞추고, 세션이나 프로젝트 범위를 가진다. 허용만 저장하고, 어댑터가 묻기 전에 확인한다 | `ApprovalRule`, `packages/core/src/approval/approval.ts`; `rulesFor`, `manager.ts` | 허용 목록 |
 | 질문 | 에이전트가 사람에게 고르라고 내놓는 선택지(AskUserQuestion). `agents.answerQuestion`으로 답한다. 몇 개든 기다릴 수 있다 | `Question`, `pendingQuestions`, `entities.ts` | 프롬프트 |
-| 프로젝트 동의 | 한 프로젝트가 다른 프로젝트에 닿도록 기억해 둔 "항상": `delegate`(`ask_project`) 또는 `apps`(공유된 앱 붙이기) | `ProjectConsent`, `entities.ts`; `project_consents`(스토어 v44) | |
+| 프로젝트 동의 | 한 프로젝트가 다른 프로젝트에 닿도록 기억해 둔 "항상": `delegate`(`ask_project`) 또는 `apps`(공유된 앱 붙이기). 또는 자기 자신에게 `agents`(그 프로젝트의 세션이 에이전트를 띄워도 됨, #561) | `ProjectConsent`, `entities.ts`; `project_consents`(스토어 v44) | |
 | 읽기 허락 | 위임된 세션의 답이 이름을 댄, 대상 프로젝트 안의 경로. 이 호스트가 도는 동안 호출한 쪽이 읽을 수 있다 | `readGrants`, `ask-project.ts` | |
 | 안 읽음 | 사람이 마지막으로 본 곳(`lastReadSeq`) 너머에 내용이 있는가. 상태와는 따로다 | `SessionInfo.lastReadSeq` | |
 
@@ -181,6 +182,9 @@ classDiagram
   class DelegatedSession {
     <<role>>
   }
+  class StartedAgent {
+    <<role>>
+  }
   Project "0..1" o-- "*" Session : runs
   Project "1" --> "0..1" Session : manager slot
   Session "1" --> "0..1" Worktree : works in
@@ -190,6 +194,8 @@ classDiagram
   Session <|-- DelegatedSession : askedBy set
   WorktreeManager "1" --> "*" Session : parentSessionId
   DelegatedSession "*" --> "1" Session : askedBy, in another project
+  Session <|-- StartedAgent : askedBy set, same project
+  StartedAgent "*" --> "1" Session : askedBy, start_agent
   Coordinator "*" --> "*" Session : may see
 ```
 
@@ -198,7 +204,8 @@ classDiagram
   남는다). 인박스와 팔레트는 프로젝트가 없는 세션을 모두 "Orchestrator"라고 적는다.
 - 세션이 만들어질 때 정해지는 것은 `kind`뿐이다. 다른 역할은 모두 그때그때 관계에서 읽어 낸다: 매니저는 자식이
   있거나 프로젝트의 매니저 자리에 이름이 있고, 빌더는 빌더 지도에 이름이 있고, 앱 에이전트 세션은 빌더 지도가
-  되가리키지 않는 `appId`를 달고, 위임된 세션은 `askedBy`를 가진다. 역할을 저장된 깃발로 옮기지 않은 것은
+  되가리키지 않는 `appId`를 달고, 위임된 세션은 다른 프로젝트의 세션을, 띄운 에이전트는 같은 프로젝트의 세션을
+  가리키는 `askedBy`를 가진다. 역할을 저장된 깃발로 옮기지 않은 것은
   일부러다. 깃발은 관계와 어긋날 수 있기 때문이다(#13, #80).
 - 도구 프로필은 여기서 따라 나온다. 처음 맞는 것이 이긴다: 오케스트레이터, 코디네이터(`scoped`), 빌더, 매니저,
   프로젝트 안의 평범한 세션(`reader`, 설정에서 끄지 않았다면), 없음(`toolProfileOf`).

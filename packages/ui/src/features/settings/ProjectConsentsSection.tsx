@@ -6,6 +6,8 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 const KIND_LABEL: Record<ProjectConsent['kind'], string> = {
   delegate: 'may ask',
   apps: 'may use the apps of',
+  // Its sessions starting agents in itself (#561): the row names the project once
+  agents: 'sessions may start agents',
 }
 
 /**
@@ -58,7 +60,8 @@ export function ProjectConsentsSection() {
             return (
               <li key={key} className="flex items-center gap-2 px-2.5 py-1.5" data-testid={`project-consent-${key}`}>
                 <span className="min-w-0 truncate text-sm text-ink">
-                  {c.fromName} <span className="text-ink-faint">{KIND_LABEL[c.kind]}</span> {c.toName}
+                  {c.fromName} <span className="text-ink-faint">{KIND_LABEL[c.kind]}</span>
+                  {c.kind === 'agents' ? null : ` ${c.toName}`}
                 </span>
                 <span className="readout ml-auto shrink-0 text-2xs text-ink-faint">
                   {new Date(c.decidedAt).toLocaleDateString('en-US')}

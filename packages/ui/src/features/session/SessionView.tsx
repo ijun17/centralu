@@ -368,7 +368,7 @@ export function SessionPane({
       <SessionMachineTag sessionId={session.id} testId="session-machine" />
 
       {/* Another project's session asked for this one (#371) — the way back to it */}
-      {session.askedBy && <AskedByBadge callerId={session.askedBy} />}
+      {session.askedBy && <AskedByBadge callerId={session.askedBy} projectId={session.projectId ?? null} />}
 
       {session.limit && (
         <span className="readout text-xs text-ink-muted" data-testid="limit-badge">
@@ -3237,7 +3237,7 @@ function AskProjectRow({ item, sessionId }: { item: Extract<ChatItem, { kind: 't
  * may since have been deleted; the mark then says so rather than disappearing, since the session still did that
  * project's work.
  */
-function AskedByBadge({ callerId }: { callerId: string }) {
+function AskedByBadge({ callerId, projectId }: { callerId: string; projectId: string | null }) {
   const caller = useStore((s) => s.sessions[callerId])
   const projectName = useStore((s) => (caller?.projectId ? s.projects[caller.projectId]?.name : undefined))
   const focus = useStore((s) => s.focusSession)
@@ -3246,6 +3246,20 @@ function AskedByBadge({ callerId }: { callerId: string }) {
       <span className="shrink-0 text-2xs text-ink-faint" data-testid="asked-by-badge">
         Asked by a session no longer here
       </span>
+    )
+  }
+  // A session of the same project started this one with start_agent (#561): the session, not the project, is named
+  if (caller.projectId && caller.projectId === projectId) {
+    return (
+      <button
+        type="button"
+        className="min-w-0 shrink truncate rounded-md border border-line px-1.5 text-2xs text-ink-muted hover:text-ink"
+        onClick={() => focus(callerId)}
+        data-testid="asked-by-badge"
+        title={`Go back to ${caller.name}`}
+      >
+        ↩ Started by {caller.name}
+      </button>
     )
   }
   return (

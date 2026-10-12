@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ApprovalDetail } from '@cc/protocol'
-import { findMatchingRule, matchesRule, previewMatches, projectAccessQuestion, projectCreateQuestion, suggestMatcher } from './approval.js'
+import { agentStartQuestion, findMatchingRule, matchesRule, previewMatches, projectAccessQuestion, projectCreateQuestion, suggestMatcher } from './approval.js'
 
 describe('the new-project question (#515)', () => {
   it('names the linked machine whose disk the path is on, and no machine for this computer (#82 phase 4)', () => {
@@ -10,6 +10,14 @@ describe('the new-project question (#515)', () => {
     expect(projectCreateQuestion({ ...d, machine: 'Ubuntu box', source: { git: 'https://x/api.git' } })).toBe(
       'Clone https://x/api.git into /home/me/Centralu/api on Ubuntu box and add it as the project api?',
     )
+  })
+})
+
+describe('the start-agent question (#561)', () => {
+  it('says which agent, where, with which permissions and on what', () => {
+    const d = { kind: 'agent_start' as const, project: { id: 'p', name: 'website' }, tool: 'Codex', preset: 'safe' as const, text: 'write the parser' }
+    expect(agentStartQuestion(d)).toBe('Start Codex in website, with safe permissions, to write the parser?')
+    expect(agentStartQuestion({ ...d, model: 'gpt-6.1-sol' })).toBe('Start Codex (gpt-6.1-sol) in website, with safe permissions, to write the parser?')
   })
 })
 

@@ -1387,6 +1387,8 @@ export class MockPlatform implements Platform {
   }
   /** An answer given on an approval card — tests check which card got which click */
   readonly approvalAnswers: { sessionId: string; requestId: string; decision: ApprovalDecision }[] = []
+  /** The scope each of those answers carried, in the same order (null for none): the start-agent card's two always (#561) */
+  readonly approvalScopes: (ApprovalScope | null)[] = []
   /** Apps asked to restart — tests check whether the Restart button reached the host */
   readonly restarts: { appId: string; projectId: string | null }[] = []
   /**
@@ -1835,9 +1837,10 @@ export class MockPlatform implements Platform {
       sessionId: string,
       requestId: string,
       decision: ApprovalDecision,
-      _scope?: ApprovalScope,
+      scope?: ApprovalScope,
     ) => {
       this.approvalAnswers.push({ sessionId, requestId, decision })
+      this.approvalScopes.push(scope ?? null)
       this.emit({ type: 'approval_resolved', sessionId, requestId, decision })
       /*
        * A capability-question card (M4 D-4, set up by the host with a `cap-` prefix) is not an

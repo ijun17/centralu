@@ -45,7 +45,7 @@ claude는 인프로세스, codex는 stdio 다리.
 | `manager` | 워크트리 자식이 있거나 프로젝트의 매니저 자리인 세션 (#69, #76) | 자기 워크트리 자식 | 목록, 읽기, 보내기, 워크트리 세션 제안·삭제 | 워크트리 규칙 |
 | `scoped` | 코디네이터(#80). 관제 앱의 작업만 만들었고, 그것은 만들던 RPC와 함께 #372에서 걷어냈다. 저장소에 있는 것은 이 프로필로 깨어난다 | 자기 멤버 | 목록, 읽기, 보내기 | 자기 경계 |
 | `builder` | 앱을 만드는 세션 (M4 C-3) | 자기 앱 | `check` | 만들고 검사하기 |
-| `reader` | 프로젝트에 속한 그 밖의 모든 세션 (#320) | 자기 프로젝트, 호출할 때 읽음 | `read_session`(id 없으면 목록), `recall`, `app_guide`; `ask_project`(#371, §1.2). 그리고 `find_apps`, `attach_app`, `detach_app`(#371 A, apps.md §9.4) | 없음 |
+| `reader` | 프로젝트에 속한 그 밖의 모든 세션 (#320) | 자기 프로젝트, 호출할 때 읽음 | `read_session`(id 없으면 목록), `recall`, `app_guide`; `ask_project`(#371, §1.2); `start_agent`, `agent_session`(#561, §1.2.1). 그리고 `find_apps`, `attach_app`, `detach_app`(#371 A, apps.md §9.4) | 없음 |
 
 지침은 두 CLI 모두에서 모델에 닿지만, 들어가는 문이 다르다. Claude는 프로세스 안 서버의 `instructions`로
 받는다. codex-cli 0.160.0은 서버의 지침을 어떤 모델에게도 보여 주지 않으므로(#525,
@@ -179,6 +179,48 @@ project export the sprites again, then tell me where the files are"에 로드하
 
 `scripts/smoke-ask-project.mts`가 임시 스토어와 데이터 폴더에서 처음부터 끝까지 돌린다: 한 임시 프로젝트의 haiku 세션이 다른
 프로젝트에 자기만 아는 숫자를 쓴 파일을 만들게 하고 그 파일을 읽어 온다(`CALLER`/`CALLEE` = `claude` 또는 `codex`).
+
+### 1.2.1 같은 프로젝트에서 다른 에이전트 띄우기 (`start_agent`, `agent_session`, #561)
+
+평범한 세션이 자기 프로젝트 안에서 다른 에이전트(Claude나 Codex)를 띄워 일을 맡길 수 있다. Claude 세션이 구현을
+Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는 셸의 `codex exec` 대신이다. ask_project의 기계
+(`Delegation`, `AgentRunWait`, `ASK_WAIT_MS`, `finalAnswer`) 위에 지었고, reader 묶음 안에 자기 예산을 가진다
+(`AGENT_TOOLS`, `AGENT_BUDGET_CHARS`).
+
+| 도구 | 인자 → 돌아오는 것 |
+|---|---|
+| `start_agent` | `{ task, tool?: claude\|codex, model?, effort?, wait? }` → 자식의 id와 이름, 그리고 답(`done`) 또는 `working` |
+| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop, text? }` → 같은 상태들, 더해서 `at_rest`(부른 세션이 준 일이 돌지 않음, 마지막 답)와 `stopped` |
+
+`start_agent` 한 번(`SessionManager.startAgent`):
+
+1. **누가.** 믿는 프로젝트(#382 규칙)의 평범한 세션(`reader`)이고, `askedBy`가 붙지 않은 세션. 깊이 하나: 자식은
+   에이전트를 띄우지 못하고, ask_project가 연 세션도 못 띄운다(같은 표시로 `askProject`도 둘 다 거절한다).
+2. **몇 개.** 한 프로젝트에서 동시에 도는 자식은 `AGENT_CEILING`(4)까지, 그 프로젝트의 모든 세션을 합쳐 센다.
+   부모가 준 턴이 도는 동안 센다. 카드 전과 후에 두 번 본다.
+3. **고르기.** `tool`은 프로젝트의 도구, `model`과 `effort`는 그 도구에 대해 프로젝트가 기억한 선택(#107)이
+   기본이다. 도구의 목록에 없는 모델이나 effort는 목록과 함께 거절한다(`agentChoiceError`).
+4. **동의**(`ensureAgentConsent`). 부르는 세션의 승인 자리에 카드(`agent_start`: 도구, 모델, 프리셋, 할 일):
+   한 번 허용, 이 세션은 항상(이 호스트가 그 세션을 맡는 동안 메모리에), 이 프로젝트는 항상(카드의 ⌥; 같은
+   프로젝트를 양쪽에 둔 `project_consents`의 `agents` 줄, 설정 → 권한에서 보고 거둔다), 거부.
+5. **자식.** 부르는 세션의 폴더(작업 트리 세션이면 그 작업 트리)에서, 할 일에서 딴 이름으로, `askedBy`를 붙여
+   (머리에 "Started by …" 되돌아가기 링크), **부르는 세션의 권한 프리셋**으로 연다. 그보다 위는 없고, 부르는
+   세션의 어떤 인자나 도구로도 바꾸지 못한다. 할 일은 틀(`agentFrame`)에 넣어 부르는 세션이 보낸 것(`from`)으로
+   기록한다.
+6. **답.** ask_project처럼 240초까지 기다린다. 넘기거나 `wait: false`면 곧바로 `working`이고, 턴이 끝나면
+   오케스트레이터의 `reportBack`이 쓰는 보고 길로 알린다. 그때 기다리는 호출이 있으면 그 호출이 답을 가져가고
+   보고는 가지 않는다.
+
+`agent_session`은 `askedBy`가 부르는 세션인, 같은 프로젝트의 세션에만 듣는다. `send`는 준 일이 아직 돌 때, 다른
+일(사람의 것일 수 있다)로 바쁠 때, 사람이 그 자식의 프리셋을 부르는 세션보다 올렸을 때 거절한다(`presetWithin`).
+`stop`은 부르는 세션이 준 턴만 멈춘다.
+
+**멈춤과 삭제.** 호출이 취소되거나(Claude의 MCP 신호), 호출이 자식을 기다리는 중에 부르는 세션을 멈추면 그 자식의
+턴도 멈춘다. 계속 돌게 둔 자식(`wait: false`, 또는 한도를 넘긴 것)은 자기 세션이라 부모의 멈춤이 닿지 않고 자기
+멈춤 버튼이 있다. 부르는 세션을 지우면 기다림과 세션 동의는 사라지고, 자식은 턴과 링크를 지킨다.
+
+**크기.** 두 정의는 918자(`AGENT_BUDGET_CHARS` 950). Claude는 `start_agent`를 올려 두고 `agent_session`을 미룬다
+(`start_agent`의 모든 답이 그 이름을 댄다). 잰 값은 tool-cost.md에 있다.
 
 **stdout은 예약되어 있다.** `main.ts`가 딱 한 줄을 찍는다: Tauri 수퍼바이저가 포트와 인증
 토큰을 읽어 가는 핸드셰이크다. 나머지는 전부 stderr로 간다. `log-file.ts`가 파일로 흘리는

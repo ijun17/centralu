@@ -30,6 +30,9 @@ describe('the Claude in-process server', () => {
         recall: 'loaded',
         app_guide: 'deferred',
         ask_project: 'loaded',
+        // Other agents here (#561): starting one is asked for in words, so loaded; its answer names agent_session
+        start_agent: 'loaded',
+        agent_session: 'deferred',
         // Another project's apps (#371 part A): find_apps loaded, since deferred it lost to ask_project (#522); its result names the next
         find_apps: 'loaded',
         attach_app: 'deferred',

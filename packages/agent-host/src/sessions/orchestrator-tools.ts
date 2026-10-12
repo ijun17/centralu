@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { ToolName } from '@cc/protocol'
-import type { AskProjectResult, OrchestratorTools } from '../adapters/contract.js'
+import type { ChildRunResult, AskProjectResult, OrchestratorTools } from '../adapters/contract.js'
 import { ORCHESTRATOR_MCP_NAME, type ToolCaller, type ToolOutput, type ToolProfile } from '../apps/contract.js'
 import { appGuide, APP_GUIDE_TOPICS, type GuideSeats, type GuideTool } from './app-guide.js'
 
@@ -334,6 +334,39 @@ export const DELEGATE_TOOLS = [
 export const DELEGATE_BUDGET_CHARS = 400
 
 /**
+ * Other agents in the same project (#561) — an ordinary session starts a Claude or Codex session on a task and works
+ * with it. Its own set with its own budget, like ask_project's, because it acts: the consent card, the caller's
+ * preset as the child's ceiling, depth one and the per-project count are the manager's (`startAgent`), not words here.
+ *
+ * Two tools, as the issue proposed: starting is the request a person makes in words ("have Codex write it"), so it is
+ * loaded; working with a child already started is reached from start_agent's own answer, which names agent_session,
+ * so on Claude it waits behind tool search (the attach_app pattern, #522). No `name` argument: the child is named from
+ * its task, and the person renames it; each argument rides in every request.
+ */
+export const AGENT_TOOLS = [
+  {
+    name: 'start_agent',
+    description: 'Has a new Claude or Codex session in this project do a job; returns its answer.',
+    schema: z.object({
+      task: z.string(),
+      tool: z.enum(['claude', 'codex']).optional(),
+      model: z.string().optional(),
+      effort: z.string().optional(),
+      wait: z.boolean().optional().describe('false: do not wait; you are told when it ends.'),
+    }),
+  },
+  {
+    name: 'agent_session',
+    description: 'Checks, messages, waits for or stops a session start_agent started.',
+    schema: z.object({ sessionId: z.string(), action: z.enum(['status', 'send', 'wait', 'stop']), text: z.string().optional() }),
+    deferred: true,
+  },
+] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
+
+/** The ceiling for AGENT_TOOLS, counted like READER_BUDGET_CHARS (both tools, since Codex loads them). Measured in docs/tool-cost.md */
+export const AGENT_BUDGET_CHARS = 950
+
+/**
  * Another project's app tools, on demand (#371 part A) — rides with the reader set, so a project's
  * ordinary session has it, and is counted against its own ceiling below (READER_TOOLS keeps #320's).
  *
@@ -398,7 +431,7 @@ export const READER_BUDGET_CHARS = 1000
  * 2026-10-12 on Claude: orchestrator 11,862 (10,029 + 1,833, with create_project's `machine`, #82), manager 6,264 (3,479 + 2,785), scoped 2,267,
  * builder 1,432; the tokens they cost are in docs/tool-cost.md. Codex carries the same plus the 52-character
  * header its developer instructions put over them (#525, codexToolInstructionsFor), which is what moved scoped
- * from 2,300 and builder from 1,450. The reader is the sum of its three sets' ceilings, since Codex loads all of
+ * from 2,300 and builder from 1,450. The reader is the sum of its four sets' ceilings (#561 added the agent set), since Codex loads all of
  * them. Like READER_BUDGET_CHARS, raising one is a decision about that seat's every request.
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
@@ -406,7 +439,7 @@ export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
   manager: 6_400,
   scoped: 2_350,
   builder: 1_500,
-  reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS,
+  reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + AGENT_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS,
 }
 
 /** The building session's MCP guide — the role (the app's place and rules) is applied by roleAppend */
@@ -536,6 +569,40 @@ function askProjectText(r: AskProjectResult): ToolOutput {
 }
 
 /**
+ * What the model reads back from start_agent and agent_session (#561). The child's answer is fenced like ask_project's
+ * (JSON-quoted, one line): it is another session's words. Each state names the next call, which is how a model that
+ * has only start_agent loaded finds agent_session.
+ */
+function agentRunText(r: ChildRunResult): ToolOutput {
+  if (!r.ok) return { text: r.error, isError: true }
+  const who = `the ${r.tool} session "${r.sessionName}" [${r.sessionId}]`
+  switch (r.state) {
+    case 'working':
+      return {
+        text:
+          `${who} is working on it${r.notice ? ` — ${r.notice}` : ''}. ` +
+          (r.reported ? 'You will be told when it ends; ' : '') +
+          `agent_session(sessionId="${r.sessionId}", action="wait") waits for its answer, action="stop" stops it.`,
+      }
+    case 'stopped':
+      return { text: `Stopped ${who}.` }
+    case 'at_rest':
+      return {
+        text:
+          `${who} is not working on anything you gave it (${r.sessionState}). Its last answer, as JSON:\n${trustedJsonText(r.answer || '(no final text)')}\n` +
+          `agent_session(sessionId="${r.sessionId}", action="send", text=…) gives it more.`,
+      }
+    case 'done': {
+      const lines = [`${who} answered, as JSON:`, trustedJsonText(r.answer || '(no final text)')]
+      if (r.readable.length) lines.push(`You can read these now: ${r.readable.join(', ')}`)
+      if (r.outside.length) lines.push(`Named outside its folder (not opened for you): ${r.outside.join(', ')}`)
+      lines.push(`agent_session(sessionId="${r.sessionId}", action="send", text=…) continues with it.`)
+      return { text: lines.join('\n') }
+    }
+  }
+}
+
+/**
  * Runs one tool and turns the result into **text for the model to read**.
  *
  * Why rendering happens here too: if each of the two paths composed its own sentence, the same
@@ -561,6 +628,31 @@ export async function runOrchestratorTool(
     if (!project) return { text: 'Give a project — the name of another Centralu project.', isError: true }
     const task = typeof args.task === 'string' && args.task.trim() ? args.task : undefined
     return askProjectText(await tools.askProject({ project, ...(task ? { task } : {}) }, signal))
+  }
+
+  if (name === 'start_agent' || name === 'agent_session') {
+    // A reader's alone (profileAllows), checked here too since this runner is shared by every seat
+    if (caller.profile !== 'reader') return { text: `Not a tool of this session: ${name}`, isError: true }
+    const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
+    if (name === 'start_agent') {
+      const task = typeof args.task === 'string' && args.task.trim() ? args.task : undefined
+      if (!task) return { text: 'Give a task: what the new session should do.', isError: true }
+      const tool = str(args.tool)
+      const model = str(args.model)
+      const effort = str(args.effort)
+      return agentRunText(
+        await tools.startAgent({ task, ...(tool ? { tool } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}), ...(args.wait === false ? { wait: false } : {}) }, signal),
+      )
+    }
+    const sessionId = str(args.sessionId)
+    const action = args.action
+    if (!sessionId) return { text: 'Give the sessionId start_agent returned.', isError: true }
+    if (action !== 'status' && action !== 'send' && action !== 'wait' && action !== 'stop') {
+      return { text: 'Give an action: status, send, wait or stop.', isError: true }
+    }
+    const text = typeof args.text === 'string' && args.text.trim() ? args.text : undefined
+    if (action === 'send' && !text) return { text: 'Give text: what to send it.', isError: true }
+    return agentRunText(await tools.agentSession({ sessionId, action, ...(text ? { text } : {}) }, signal))
   }
 
   if (name === 'recall') {
@@ -1070,10 +1162,16 @@ export function profileAllows(profile: ToolProfile, name: string, tier: RareTier
 /** The profile rule itself, whatever the tier: who may use which of Centralu's commands */
 function baseAllows(profile: ToolProfile, name: string): boolean {
   if (profile === 'reader') {
-    return READER_TOOLS.some((t) => t.name === name) || DELEGATE_TOOLS.some((t) => t.name === name) || APP_ACCESS_TOOLS.some((t) => t.name === name)
+    return (
+      READER_TOOLS.some((t) => t.name === name) ||
+      DELEGATE_TOOLS.some((t) => t.name === name) ||
+      AGENT_TOOLS.some((t) => t.name === name) ||
+      APP_ACCESS_TOOLS.some((t) => t.name === name)
+    )
   }
-  // ask_project and the app-access tools (#371) are a reader's alone: every directing seat already works inside its own view
-  if (DELEGATE_TOOLS.some((t) => t.name === name) || APP_ACCESS_TOOLS.some((t) => t.name === name)) return false
+  // ask_project, start_agent and the app-access tools (#371, #561) are a reader's alone: every directing seat already
+  // works inside its own view
+  if (DELEGATE_TOOLS.some((t) => t.name === name) || AGENT_TOOLS.some((t) => t.name === name) || APP_ACCESS_TOOLS.some((t) => t.name === name)) return false
   if (profile === 'orchestrator') {
     return !(MANAGER_ONLY_TOOL_NAMES as readonly string[]).includes(name) && !(BUILDER_TOOL_NAMES as readonly string[]).includes(name)
   }
@@ -1091,7 +1189,7 @@ export function toolDefsFor(
   profile: ToolProfile,
   tier: RareTier = rareTier,
 ): readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[] {
-  if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS, ...APP_ACCESS_TOOLS]
+  if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS]
   const deferred = deferredFor(profile, tier)
   return [
     ...ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name, tier)).map((t) => (deferred.includes(t.name) ? { ...t, deferred: true } : t)),

@@ -5059,10 +5059,16 @@ export const useStore = create<AppState>((set, get) => ({
        */
       if (decision === 'always') {
         const access = pending?.detail.kind === 'project_access' ? pending.detail : null
+        const agents = pending?.detail.kind === 'agent_start' ? pending.detail : null
         set({
           toast: access
             ? // A cross-project consent is remembered by the host for the pair, not by a matcher (#371)
               `Always allowed: ${access.from.name} → ${access.to.name}. Revoke it in Settings.`
+            : agents
+              ? // Starting agents (#561): this session while the app runs, or the whole project (stored, revocable)
+                scope === 'project'
+                ? `Sessions in ${agents.project.name} may start agents. Revoke it in Settings.`
+                : 'This session may start agents until Centralu restarts.'
             : matcher
               ? `Always allow in ${scope === 'project' ? 'this project' : 'this session'}: ${matcher}`
               : 'Allowed once — this kind of request cannot be always-allowed yet',

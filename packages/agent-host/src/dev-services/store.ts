@@ -3602,8 +3602,11 @@ const LINK_SLOT_KEY = 'links.slotHighWater'
 /** Marks that a machine's list was mirrored at least once, so an empty mirror reads as empty rather than unknown */
 const MIRRORED_KEY = 'links.mirrored.'
 
-/** What a remembered cross-project consent allows (#371): 'delegate' is part B's ask_project, 'apps' part A's app tools */
-export type ProjectConsentKind = 'delegate' | 'apps'
+/**
+ * What a remembered consent allows (#371): 'delegate' is part B's ask_project, 'apps' part A's app tools, 'agents' a
+ * project's sessions starting agents in that same project (#561, start_agent; the row names the project twice)
+ */
+export type ProjectConsentKind = 'delegate' | 'apps' | 'agents'
 
 /** One remembered "always" from one project to another (#371, migration v44) */
 export type ProjectConsent = { fromProjectId: string; toProjectId: string; kind: ProjectConsentKind; decidedAt: number }

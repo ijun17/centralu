@@ -145,4 +145,72 @@ export function askProjectTests(): void {
       expect(await page.evaluate(() => (window as any).__mock.consentsList)).toEqual([])
     })
   })
+
+  /*
+   * start_agent (#561): a session starts another agent in its own project. The card says the agent, the
+   * permissions and the job; "a" allows it for this session, ⌥a (or the button) for the whole project.
+   */
+  test.describe('starting another agent in the same project (#561)', () => {
+    const agentCard = (page: Page, caller: string, consumer: string, requestId: string) =>
+      emit(page, caller, {
+        type: 'approval_request',
+        requestId,
+        detail: { kind: 'agent_start', project: { id: consumer, name: 'consumer' }, tool: 'Codex', preset: 'normal', text: 'write the parser' },
+      })
+
+    test('the card asks in words; "a" is always for this session, ⌥a and the button for the project', async ({ page }) => {
+      const { caller, consumer } = await start(page)
+      await emit(page, caller, { type: 'state_change', state: 'working' })
+      await agentCard(page, caller, consumer, 'ag-1')
+      const card = page.locator('[data-testid="approval-card"][data-kind="agent_start"]')
+      await expect(card.getByTestId('approval-detail')).toHaveText('Start Codex in consumer, with normal permissions, to write the parser?')
+      await expect(card.getByTestId('approve-allow')).toContainText('Allow once')
+      await expect(card.getByTestId('approve-always')).toContainText('Always for this session')
+      await expect(card.getByTestId('approve-always-project')).toContainText('Always for this project')
+      await page.keyboard.press('a')
+      await expect(card).toHaveCount(0)
+      await expect(page.getByText('This session may start agents until Centralu restarts.')).toBeVisible()
+
+      await agentCard(page, caller, consumer, 'ag-2')
+      await page.keyboard.press('Alt+a')
+      await expect(card).toHaveCount(0)
+      await agentCard(page, caller, consumer, 'ag-3')
+      await card.getByTestId('approve-always-project').click()
+      await expect(card).toHaveCount(0)
+      await expect(page.getByText('Sessions in consumer may start agents. Revoke it in Settings.')).toBeVisible()
+      expect(await page.evaluate(() => (window as any).__mock.approvalAnswers.map((a: { decision: string }) => a.decision))).toEqual(['always', 'always', 'always'])
+      expect(await page.evaluate(() => (window as any).__mock.approvalScopes)).toEqual(['session', 'project', 'project'])
+    })
+
+    test('the child links back to the session that started it, by name', async ({ page }) => {
+      const { caller, consumer } = await start(page)
+      await page.evaluate(
+        ([d, p, c]) =>
+          (window as any).__mock.emit({
+            type: 'session_created',
+            sessionId: d,
+            session: { id: d, projectId: p, tool: 'codex', externalId: null, name: 'write the parser', autoNamed: false, state: 'working', createdAt: Date.now(), askedBy: c },
+          }),
+        ['child-1', consumer, caller] as const,
+      )
+      await page.evaluate(() => (window as any).__store.getState().focusSession('child-1'))
+      const back = page.getByTestId('asked-by-badge')
+      await expect(back).toContainText('Started by')
+      await back.click()
+      await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(caller)
+    })
+
+    test('Settings lists a project whose sessions may start agents, and revokes it', async ({ page }) => {
+      const { consumer } = await start(page)
+      await page.evaluate((c) => {
+        ;(window as any).__mock.consentsList = [{ fromProjectId: c, fromName: 'consumer', toProjectId: c, toName: 'consumer', kind: 'agents', decidedAt: Date.now() }]
+      }, consumer)
+      await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+      await page.getByTestId('settings-tab-permissions').click()
+      const row = page.getByTestId(`project-consent-${consumer}>${consumer}>agents`)
+      await expect(row).toHaveText(/^consumer sessions may start agents/)
+      await page.getByTestId(`revoke-consent-${consumer}>${consumer}>agents`).click()
+      await expect(row).toHaveCount(0)
+    })
+  })
 }

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import type { ToolProfile } from '../apps/contract.js'
-import { APP_ACCESS_TOOLS, DELEGATE_TOOLS, ORCHESTRATOR_TOOLS, READER_TOOLS, profileAllows, toolDefsFor } from './orchestrator-tools.js'
+import { AGENT_TOOLS, APP_ACCESS_TOOLS, DELEGATE_TOOLS, ORCHESTRATOR_TOOLS, READER_TOOLS, profileAllows, toolDefsFor } from './orchestrator-tools.js'
 
 /**
  * The profile × tool matrix in docs/security-boundaries.md (#382) is the code's, not a copy that drifts: every
@@ -22,7 +22,7 @@ function matrix(): { profiles: string[]; rows: Map<string, string[]> } {
 }
 
 const PROFILES: ToolProfile[] = ['orchestrator', 'manager', 'scoped', 'builder', 'reader']
-const ALL_TOOLS = [...new Set([...ORCHESTRATOR_TOOLS, ...READER_TOOLS, ...DELEGATE_TOOLS, ...APP_ACCESS_TOOLS].map((t) => t.name))]
+const ALL_TOOLS = [...new Set([...ORCHESTRATOR_TOOLS, ...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].map((t) => t.name))]
 
 describe('the tool matrix in docs/security-boundaries.md (#382)', () => {
   const { profiles, rows } = matrix()

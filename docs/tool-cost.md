@@ -202,7 +202,7 @@ Over the scripted session Claude's request grew from 16,467 to 19,094 tokens, Co
 
 - `sessions/orchestrator-tools.test.ts`, *the resident cost of each profile*: each profile's resident
   definitions plus instructions stay within `RESIDENT_BUDGET_CHARS` on both CLIs (the reader's is the sum
-  of its three sets' ceilings). It reuses the reader set's own budget tests rather than repeating them.
+  of its four sets' ceilings). It reuses the reader set's own budget tests rather than repeating them.
 - `adapters/claude/tool-prefix.test.ts`: the resident tool prefix of a Claude session, read the way the
   CLI reads it (`tools/list` on every server, the tools marked `anthropic/alwaysLoad`), is byte-identical
   before and after an app is attached and detached, even an app that declares `anthropic/alwaysLoad`
@@ -574,3 +574,38 @@ reached 6 of 6 deferred on haiku), with `propose_skill` loaded; the switches sta
 Codex in round 2; a command used late in a long orchestrator conversation; app tools behind `app_tools`/`app_call`
 (#512's app tier); B with `propose_skill` loaded; the proposal cards on screen in the real app (the unit tests cover
 the events the screen reacts to); Windows and the packaged app.
+
+## 10. Starting other agents in the same project (#561, 2026-10-12)
+
+`start_agent` and `agent_session` joined the reader set ([agent-host.md](agent-host.md) §1.2.1). Measured with
+`pnpm measure:tools --live --kinds none,reader --phases resident,selection --prompts
+packages/agent-host/scripts/measure-tools/prompts-561.json --reps 3` (Claude Code on haiku, codex-cli 0.160.0 on the
+account's default model, gpt-6.1-sol). Selection turns decline the consent card, so no child was started; the
+start itself is covered by `scripts/smoke-start-agent.mts`.
+
+**Size.** The two definitions are 918 characters (`AGENT_BUDGET_CHARS` 950): `start_agent` 506, `agent_session` 412. The
+reader seat is 3,167 characters on Codex (all loaded; `RESIDENT_BUDGET_CHARS.reader` 3,250) and 1,810 resident on
+Claude, where `start_agent` is loaded and `agent_session` deferred.
+
+| | Claude: Centralu's own tokens, first request | Codex: Δ against no tools |
+|---|---|---|
+| before (#522, §8) | 412 | +0 |
+| with the agent set | **582 (+170)** | +0 (Codex reaches MCP tools through its `exec` tool, §6) |
+
+**Selection** (3 runs each):
+
+| Prompt | Claude | Codex |
+|---|---|---|
+| "Have Codex write a one-line shell command …" | `start_agent` 3/3, one step | 0/3: did it itself (`Bash`, or answered) |
+| "Hand this to another agent and tell me what it says: …" | 0/3: no Centralu call (its own sub-agent) | 0/3: its own sub-agents (`subAgentActivity`) |
+| `ask-project` (regression) | 3/3 | 3/3 |
+| `other-sessions` (regression) | 3/3 | 3/3 |
+
+Naming the tool ("Have Codex …") reaches `start_agent` on Claude every time; "another agent" in general goes to each
+CLI's own sub-agents, which the app does not show as sessions, and Codex never chose `start_agent` without being told.
+The descriptions do not say "use this instead of your own sub-agents": Centralu offers the tool and does not direct the
+person's sessions (product-spec.md §1.2). The reader-set instructions #564 adds (Centralu's features first) are where
+that line belongs; this section is the before.
+
+**Not measured.** Opus and Sonnet as the parent; Korean prompts; a Codex parent starting a child live (the bridge
+serves it like every reader tool); the cost of a running child's reports to its parent over a long session.

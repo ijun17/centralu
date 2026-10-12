@@ -16,6 +16,25 @@ privileged conversation memory. Read-session, preview and recall text is framed 
 untrusted data, not human authorization — that now includes what one ordinary session reads of
 another in the same project; the reader set reads no other project and cannot send.
 
+### Starting other agents in the same project (#561)
+
+`start_agent` and `agent_session` let an ordinary session start a Claude or Codex session in its own project and
+work with it ([agent-host.md](agent-host.md) §1.2.1). They add no reach the caller lacked (the child works on the
+same files under the same or a lower preset), but they multiply what runs, so:
+
+- **The person's consent**, a card in the caller's session the first time it starts one: once, always for this
+  session (kept while the host serves it), always for this project (stored as the project's `agents` consent,
+  revoked in Settings → Permissions). Injected text can at most raise a card.
+- **Never above the caller**: the child gets the caller's preset; a child the person raised above it takes no
+  more work from the caller.
+- **Depth one**: a session marked `askedBy` (started by `start_agent` or opened by `ask_project`) can neither
+  start agents nor ask a project.
+- **Ownership**: `agent_session` acts only on a session whose `askedBy` is the caller, in its project.
+- **A ceiling**: at most 4 children running at once per project, over all its sessions (`AGENT_CEILING`).
+- **Visible**: each child is an ordinary session in the sidebar with its own approval cards and Stop, and outlives
+  the caller's deletion. Its task is recorded as sent by the caller (`from`), not by the person.
+- **Not from an untrusted project** (#382's rule).
+
 ### Asking another project (#371 part B)
 
 `ask_project` is the one way an ordinary session acts outside its own project, so it is a new
@@ -102,6 +121,8 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `check` | — | — | — | yes | — | — |
 | `create_app` | yes | — | — | — | — | — |
 | `ask_project` | — | — | — | — | yes | — |
+| `start_agent` | — | — | — | — | yes | — |
+| `agent_session` | — | — | — | — | yes | — |
 | `find_apps` | — | — | — | — | yes | — |
 | `attach_app` | — | — | — | — | yes | — |
 | `detach_app` | — | — | — | — | yes | — |
@@ -145,6 +166,12 @@ without asking. "Bypass" is the person's own global setting (`defaultMode: "bypa
 | `ask_project` from a session that was itself asked | refused | refused | refused | refused | refused | refused | refused | refused | `askProject` (depth one) |
 | `ask_project` from an untrusted project | refused | refused | refused | refused | refused | refused | refused | refused | `askProject` (the caller's project trust, #382) |
 | `ask_project` into an untrusted project, first time for the pair | asks (the card says it is not trusted) | asks | asks | asks | asks | asks | asks | asks | `ensureProjectAccess` (`to.trusted`), `projectAccessQuestion` |
+| `start_agent`, first time for a session | asks (consent card: once, always for this session, always for this project) | asks | asks | asks | asks | asks | asks | asks | `ensureAgentConsent` in `SessionManager.startAgent`; "always for this session" lives while the host serves it, "always for this project" is kept in `project_consents` (kind `agents`) |
+| `start_agent` from a session that was itself started or asked (`askedBy`) | refused | refused | refused | refused | refused | refused | refused | refused | `startAgent` (depth one; `askProject` refuses the same sessions) |
+| `start_agent` from an untrusted project | refused | refused | refused | refused | refused | refused | refused | refused | `startAgent` (the project's trust, #382) |
+| `start_agent` past 4 running children in the project | refused | refused | refused | refused | refused | refused | refused | refused | `agentCeilingError` (`AGENT_CEILING`) |
+| `agent_session` on a session the caller did not start | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (`askedBy` is the caller, same project) |
+| `agent_session` send, to a child the person raised above the caller's preset | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (`presetWithin`) |
 | `create_project` (the orchestrator makes a new project, empty or a clone) | asks (a card with the full path and, for a clone, the repository, every time) | asks | asks | asks | asks | asks | asks | asks | `SessionManager.createProjectAsked` → `askHost`; the folder is made only after "Create", and never over anything already there (`projectFolderTarget`, `makeProjectFolder`); by default in `~/Centralu`, a folder of the home that macOS does not protect, so making one raises no OS permission prompt (the Desktop did); a clone takes https, ssh and scp-like addresses only, never `ext::`, `file://` or a local path (`gitSourceError`), clones no submodules and never asks for a sign-in (`project-clone.ts`) |
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | asks | asks | asks | asks | asks | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
 | `attach_app`, a user-folder app | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `AppAccess.attach` (no card: the person's own folder) |
@@ -169,6 +196,12 @@ Rows that differ by session:
   trust (`askProject`), like a session the person opens there; under the person's bypass it runs
   freely. It holds the reader set, so it can attach apps (with its own consent card) but cannot ask a
   third project.
+- **A session `start_agent` started** (#561) runs in the caller's own folder under **the caller's
+  preset**, so it never has more than the session that asked for it: `safe` stays `safe`, `normal` reads
+  the person's own settings as the caller does, `auto` stays `auto`. No argument sets it and no tool of
+  the caller changes it afterwards; the person may, and a child raised above the caller no longer takes
+  work from it. Its approvals stand as cards in its own session. It holds the reader set but cannot start
+  agents or ask a project (depth one).
 - **A builder's `check`** starts its app and runs the app's code without a card, under every preset,
   like any Centralu tool. This is intended (owner decision 2026-10-11, #382): the builder is the
   session writing that code, so a card for running it would ask the person about the builder's own
