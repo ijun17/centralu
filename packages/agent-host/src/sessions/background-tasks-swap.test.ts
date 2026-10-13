@@ -250,24 +250,30 @@ describe('background work across a host swap (#648)', () => {
 
   it.each([
     ['a permission change', { permissionPreset: 'safe' as const }],
-    ['a definitions change', null],
+    ['a definitions change', 'definitions' as const],
+    // The #643 path: a host whose launch fingerprint differs from the one the kept process started with
+    ['a launch-settings change', 'launch' as const],
   ])('%s made mid-turn applies at the end of the turn, while a shell runs', async (_what, settings) => {
     const a = host()
     const id = await sessionWithShell(a)
     const b = host(new Set([id]))
     const old = await adopt(b, id)
     old.emit({ type: 'state_change', sessionId: id, state: 'working' })
-    if (settings) expect((await b.mgr.updateSettings(id, settings)).applied).toBe('after_turn')
+    const restart = vi.spyOn(b.mgr, 'restartSession')
+    if (typeof settings === 'object') expect((await b.mgr.updateSettings(id, settings)).applied).toBe('after_turn')
     else {
-      store.setAppSetting(`tool_prefix:${id}`, 'old-prefix')
+      if (settings === 'definitions') store.setAppSetting(`tool_prefix:${id}`, 'old-prefix')
+      else b.claude.fingerprint = 'v2'
       await b.mgr.refreshToolDefinitions()
     }
     expect(old.disposed).toBe(false)
+    if (settings === 'launch') expect(restart).not.toHaveBeenCalled()
 
     old.emit({ type: 'turn_complete', sessionId: id })
     await vi.waitFor(() => expect(old.disposed).toBe(true))
     expect(b.claude.last).not.toBe(old)
-    if (settings) expect(b.claude.last.opts.permissionPreset).toBe('safe')
+    if (typeof settings === 'object') expect(b.claude.last.opts.permissionPreset).toBe('safe')
+    if (settings === 'launch') expect(restart).toHaveBeenCalledWith(id, 'launch_settings')
     expect(notices(id)).toEqual([expect.stringContaining('npm run dev')])
   })
 
@@ -278,15 +284,15 @@ describe('background work across a host swap (#648)', () => {
     const old = await adopt(b, id)
     old.emit({ type: 'state_change', sessionId: id, state: 'working' })
     expect((await b.mgr.updateSettings(id, { model: 'opus' })).applied).toBe('after_turn')
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
       old.emit({ type: 'turn_complete', sessionId: id })
-      await Promise.resolve()
+      await vi.advanceTimersByTimeAsync(0)
       expect(old.disposed).toBe(false)
-      vi.advanceTimersByTime(59 * 60_000)
+      await vi.advanceTimersByTimeAsync(59 * 60_000)
       expect(old.disposed).toBe(false)
-      vi.advanceTimersByTime(60_000)
+      await vi.advanceTimersByTimeAsync(60_000)
     } finally {
       vi.useRealTimers()
     }
@@ -294,6 +300,69 @@ describe('background work across a host swap (#648)', () => {
     log.mockRestore()
     expect(b.claude.last.opts.model).toBe('opus')
     expect(notices(id)).toEqual([expect.stringContaining('npm run dev')])
+  })
+
+  it('the hour counts from when the wait began: a bound that runs out mid-turn applies at that turn\'s end', async () => {
+    const a = host()
+    const id = await sessionWithShell(a)
+    const b = host(new Set([id]))
+    const old = await adopt(b, id)
+    old.emit({ type: 'state_change', sessionId: id, state: 'working' })
+    await b.mgr.updateSettings(id, { model: 'opus' })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      // The wait begins at the end of this turn
+      old.emit({ type: 'turn_complete', sessionId: id })
+      await vi.advanceTimersByTimeAsync(50 * 60_000)
+      // The next turn is running when the hour runs out
+      old.emit({ type: 'state_change', sessionId: id, state: 'working' })
+      await vi.advanceTimersByTimeAsync(20 * 60_000)
+      expect(old.disposed).toBe(false)
+      // Seventy minutes in: its end applies the restart, rather than starting another hour
+      old.emit({ type: 'turn_complete', sessionId: id })
+      await vi.advanceTimersByTimeAsync(0)
+    } finally {
+      vi.useRealTimers()
+    }
+    await vi.waitFor(() => expect(old.disposed).toBe(true))
+    log.mockRestore()
+    expect(b.claude.last.opts.model).toBe('opus')
+  })
+
+  it('a restart ends the wait: a later wait gets its own full hour', async () => {
+    const a = host()
+    const id = await sessionWithShell(a)
+    const b = host(new Set([id]))
+    const old = await adopt(b, id)
+    old.emit({ type: 'state_change', sessionId: id, state: 'working' })
+    await b.mgr.updateSettings(id, { model: 'opus' })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      old.emit({ type: 'turn_complete', sessionId: id })
+      await vi.advanceTimersByTimeAsync(30 * 60_000)
+      // "Restart agent": the held change goes with it
+      await b.mgr.restartSession(id)
+      const next = b.claude.last
+      expect(next).not.toBe(old)
+      // The new process starts a dev server, and another model change waits for it from the end of this turn
+      next.emit({ type: 'background_tasks', sessionId: id, live: [shell], snapshot: true })
+      next.emit({ type: 'state_change', sessionId: id, state: 'working' })
+      await b.mgr.updateSettings(id, { model: 'sonnet' })
+      await vi.advanceTimersByTimeAsync(10 * 60_000)
+      next.emit({ type: 'turn_complete', sessionId: id })
+      // Seventy minutes after the first wait began, forty after this one did
+      await vi.advanceTimersByTimeAsync(30 * 60_000)
+      expect(next.disposed).toBe(false)
+      expect(b.claude.last).toBe(next)
+      // An hour after this wait began
+      await vi.advanceTimersByTimeAsync(30 * 60_000)
+    } finally {
+      vi.useRealTimers()
+    }
+    await vi.waitFor(() => expect(b.claude.last.opts.model).toBe('sonnet'))
+    log.mockRestore()
   })
 
   it('a model change held for a shell applies as soon as the shell ends', async () => {

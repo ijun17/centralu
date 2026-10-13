@@ -482,9 +482,11 @@ export class SessionManager {
   private backgroundUnknown = new Map<string, number>()
   /**
    * A deferred restart that changes nothing about safety, waiting for the session's background work to end (#648) ->
-   * the timer that applies it anyway after `BACKGROUND_HOLD_MAX_MS`.
+   * when the wait began, and the timer that applies it anyway `BACKGROUND_HOLD_MAX_MS` later. The entry outlives its
+   * timer until the restart is applied: a timer that fires mid-turn finds the turn running, and the turn's end applies
+   * the restart then, counting from `since` rather than starting a new hour.
    */
-  private backgroundHolds = new Map<string, ReturnType<typeof setTimeout>>()
+  private backgroundHolds = new Map<string, { since: number; timer: ReturnType<typeof setTimeout> }>()
   private updates: UpdateService | null = null
   /** Sessions allowed to update once per host; an "always" answer adds this session only. */
   private updateConsents = new Set<string>()
@@ -2018,9 +2020,7 @@ export class SessionManager {
   /** The session's process is gone for good (deleted): nothing of its background work is kept (#648) */
   private forgetBackground(sessionId: string): void {
     this.backgroundUnknown.delete(sessionId)
-    const hold = this.backgroundHolds.get(sessionId)
-    if (hold) clearTimeout(hold)
-    this.backgroundHolds.delete(sessionId)
+    this.clearBackgroundHold(sessionId)
     this.store.deleteAppSetting(this.backgroundTasksKey(sessionId))
   }
 
@@ -2361,11 +2361,8 @@ export class SessionManager {
          * the tool first speaks, rather than read as idle and put to sleep over a running dev server.
          */
         if (kept === null) this.backgroundUnknown.set(sessionId, Date.now())
-        else {
-          if (kept.length > 0) this.onEvent({ type: 'background_tasks', sessionId, live: kept })
-          // Kept on as this host's own record, for the host after it
-          this.rememberBackgroundTasks(m)
-        }
+        // Listed through onEvent, which also keeps the record for the host after this one
+        else if (kept.length > 0) this.onEvent({ type: 'background_tasks', sessionId, live: kept })
       } else {
         m.state = 'idle'
         m.waitingSince = null
@@ -3146,17 +3143,17 @@ export class SessionManager {
    * other change (a model, an app set) waits while work the tool listed is running, as a sleep does, and is applied
    * anyway after `BACKGROUND_HOLD_MAX_MS`.
    */
-  private applyDeferredRestart(sessionId: string, holdExpired = false): void {
+  private applyDeferredRestart(sessionId: string): void {
     const session = this.meta.get(sessionId)
     if (!session || inTurn(session.state) || this.deferredRestarts.has(sessionId) || this.agentRuns.get(sessionId)?.waitingForInputs || !this.restartAfterTurn.has(sessionId)) return
+    const hold = this.backgroundHolds.get(sessionId)
+    const holdExpired = !!hold && Date.now() - hold.since >= BACKGROUND_HOLD_MAX_MS
     if (!holdExpired && !this.safetyRestartPending(sessionId) && this.backgroundRunning(sessionId)) {
       this.holdForBackground(sessionId)
       return
     }
     this.restartAfterTurn.delete(sessionId)
-    const hold = this.backgroundHolds.get(sessionId)
-    if (hold) clearTimeout(hold)
-    this.backgroundHolds.delete(sessionId)
+    this.clearBackgroundHold(sessionId)
     // An app attached or detached in this turn (#371 part A) is a reason of its own, settings or not.
     const apps = this.appsRestartAfterTurn.delete(sessionId)
     const definitions = this.definitionsRestartAfterTurn.delete(sessionId)
@@ -3186,12 +3183,18 @@ export class SessionManager {
   private holdForBackground(sessionId: string): void {
     if (this.backgroundHolds.has(sessionId)) return
     const timer = setTimeout(() => {
-      this.backgroundHolds.delete(sessionId)
-      console.error(`[sessions] ${sessionId.slice(0, 8)}: a restart waited ${Math.round(BACKGROUND_HOLD_MAX_MS / 60_000)} min for background work; applying it now`)
-      this.applyDeferredRestart(sessionId, true)
+      console.error(`[sessions] ${sessionId.slice(0, 8)}: a restart waited ${Math.round(BACKGROUND_HOLD_MAX_MS / 60_000)} min for background work; applying it at the next quiet moment`)
+      this.applyDeferredRestart(sessionId)
     }, BACKGROUND_HOLD_MAX_MS)
     timer.unref?.()
-    this.backgroundHolds.set(sessionId, timer)
+    this.backgroundHolds.set(sessionId, { since: Date.now(), timer })
+  }
+
+  /** The wait is over: the restart was applied, or the session is gone (#648) */
+  private clearBackgroundHold(sessionId: string): void {
+    const hold = this.backgroundHolds.get(sessionId)
+    if (hold) clearTimeout(hold.timer)
+    this.backgroundHolds.delete(sessionId)
   }
 
   /**
@@ -4779,6 +4782,8 @@ export class SessionManager {
     this.appsRestartAfterTurn.delete(sessionId)
     this.definitionsRestartAfterTurn.delete(sessionId)
     this.launchSettingsRestartAfterTurn.delete(sessionId)
+    // A restart for any reason ends a wait for background work: whatever it was holding is applied now (#648)
+    this.clearBackgroundHold(sessionId)
     const h = this.handles.get(sessionId)
     if (h) {
       this.noticeBackgroundStopped(sessionId, cause)
