@@ -99,21 +99,35 @@ next step waits for CI when neither source qualifies.
 
 Release CI reads only GitHub Actions check suites belonging to the configured CI
 workflow files, matching their run's commit and event: push-to-main for main, and
-pull-request runs for the PR head. Release/rehearsal checks with the same job names
+pull-request runs for the PR head. PR evidence must match its number, base branch,
+head branch and commit; when GitHub drops a merged PR from the run, a unique matching
+commit-to-PR association is required. Release/rehearsal checks with the same job names
 cannot replace build checks; check names alone are not evidence of their source.
 
 Tagging does not authorize publication. Before every `npm-publish` approval (platform
-jobs and the later shim job), `approve` requires main's **own** CI to be green, with
-no PR fallback. If main moved, the tagged commit's own CI must also be green: newer
-main checks cannot hide a failure on the code about to ship. Pending, absent or failed
+jobs and the later shim job), `approve` requires the tagged commit's **own** CI green, with
+no PR fallback, using only the tagged commit. Unrelated later commits on main do not
+gate platform or shim approval and cannot strand a partially published release. Pending, absent or failed
 CI refuses approval, and tagged `release_status` explains this gate before suggesting
 approval. Direct approval in GitHub's UI is outside this tool's enforcement.
+
+Generated `chore(release):` bump commits on main use a concurrency group per commit
+in `build.yml`; ordinary main pushes keep cancelling superseded ordinary builds,
+but cannot cancel a bump's build. Already-cancelled builds and other cancellations
+still refuse approval with the tagged SHA and a recovery command:
+`gh run rerun <run-id> --repo ijun17/centralu`. The tag stays on that commit. Once the
+new attempt succeeds, approval accepts it; an older cancelled attempt cannot override
+the newer success. Tagged status shows the same recovery instructions.
+
+`ci_status` with a ref also filters checks to the configured build workflows, so
+newer passing release checks cannot hide a failed build. PR merge checks retain their
+existing behavior.
 
 Workflow event audit (2026-10-13):
 
 | Workflow and jobs | Event-dependent behavior | Required for this CI gate? |
 | --- | --- | --- |
-| `build.yml`: `bundle`, `verify`, `content-verify`, `windows-tests`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux` | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency uses the ref but does not change test behavior. | Yes: the configured CI workflow, unless branch protection specifies the set. |
+| `build.yml`: `bundle`, `verify`, `content-verify`, `windows-tests`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux` | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps without changing test behavior. | Yes: the configured CI workflow, unless branch protection specifies the set. |
 | `release.yml`: `guard`, `platform`, `shim` | Tag push or manual dispatch; `guard` validates the tag on push and dry-run controls publishing. Neither main push nor PR runs it. | No; rehearsal remains a separate tag prerequisite. |
 | `shell-release.yml`: `guard`, `build`, `publish` | Manual dispatch only. | No. |
 | `local-content-sign.yml`: `validate`, `sign` | Manual dispatch only; real signing requires main. | No. |
@@ -124,8 +138,8 @@ Before reusing PR evidence, the tool audits the configured `ci.workflows` files 
 main's fetched commit against the required check names. A required job with event/branch
 context (including inline shell scripts), one outside a shared push/PR workflow, or a required name it cannot
 map to an audited job requires main's own run and says why. This is conservative:
-unsupported workflow shapes do not grant an exemption. No workflow conditions are
-changed by this optimization.
+unsupported workflow shapes do not grant an exemption. Required job conditions are unchanged; the release-bump concurrency exception above
+protects builds that may be tagged while pending.
 
 The automated event audit does not follow scripts called by workflow steps, package
 scripts, imported modules, local actions, or reusable workflows. Those need manual

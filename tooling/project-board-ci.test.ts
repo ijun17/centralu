@@ -1,3 +1,4 @@
+import { runInNewContext } from 'node:vm'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -728,4 +729,19 @@ it('documents that called scripts need manual event review in both release guide
     expect(doc).toContain('The automated event audit does not follow scripts called by workflow steps')
     expect(doc).toContain('Those need manual\nreview for event-dependent behavior')
   }
+})
+
+
+it('keeps release bump builds out of the concurrency group cancelled by ordinary main pushes', () => {
+  const workflow = readFileSync(join(REPO_ROOT, '.github/workflows/build.yml'), 'utf8')
+  const template = /^ {2}group: (.+)$/m.exec(workflow)![1]!
+  const group = (message: string, sha: string, event = 'push', ref = 'refs/heads/main') => template.replace(/\$\{\{(.*?)\}\}/g, (_, expression: string) => String(runInNewContext(expression, {
+    github: { ref, sha, event_name: event, event: { head_commit: { message } } },
+    startsWith: (text: string, prefix: string) => text.startsWith(prefix),
+    format: (text: string, value: string) => text.replace('{0}', value),
+  })))
+  expect(group('fix(ui): one', 'a')).toBe(group('fix(ui): two', 'b'))
+  expect(group('chore(release): next (#900)', 'a')).not.toBe(group('fix(ui): two', 'b'))
+  expect(group('chore(release): next (#900)', 'a')).not.toBe(group('chore(release): later (#901)', 'b'))
+  expect(group('chore(release): next', 'a', 'pull_request', 'refs/pull/900/merge')).toBe(group('chore(release): next', 'b', 'pull_request', 'refs/pull/900/merge'))
 })

@@ -165,22 +165,18 @@ async function releaseCi(s, cfg, gh, ci) {
   if (!required.length || unknown.length) reasons.push(`required jobs could not be audited${unknown.length ? `: ${unknown.join(', ')}` : ''}`)
   if (reasons.length) return refuse(`Main CI is required because ${reasons.join('; ')}.`)
 
-  const tested = await ci(prHead, { pr: true })
+  const tested = await ci(prHead, { pr })
   if (tested.verdict !== 'green') return refuse(`PR #${pr.number}'s head checks are not all green: ${tested.summary}.`)
   return { problems: [], lines: [`CI: PR #${pr.number}'s run on the same tree (${short(prHead)}); ${s.main} at ${short(s.tip)} is ${main.verdict}.`] }
 }
 
-/** Publication cannot rely on a PR while main CI is still able to fail (#633 review). */
+/** Every publication approval judges the bytes under the immutable tag, not a later merge. */
 async function approvalCi(s, tagSha, ci) {
-  const problems = []
-  const lines = []
-  for (const sha of new Set([s.tip, tagSha])) {
-    const r = await ci(sha)
-    const label = sha === s.tip ? "Main's own CI" : "The tagged commit's own CI"
-    lines.push(`${label} at ${short(sha)}: ${r.verdict}.`)
-    if (r.verdict !== 'green') problems.push(`${label} at ${short(sha)} must be green before npm-publish approval: ${r.summary}. PR evidence cannot authorize publication.`)
-  }
-  return { problems, lines }
+  const r = await ci(tagSha)
+  const lines = [`The tagged commit's own CI at ${short(tagSha)}: ${r.verdict}.`]
+  const cancelled = (r.cancelledRuns ?? []).map((run) => `The build for ${tagSha} was cancelled${tagSha !== s.tip ? ' by a newer push' : ''}; re-run it: gh run rerun ${run.id} --repo ${s.repo}`)
+  const problems = cancelled.length ? cancelled : r.verdict === 'green' ? [] : [`The tagged commit's own CI at ${short(tagSha)} must be green before npm-publish approval: ${r.summary}. PR evidence cannot authorize publication.`]
+  return { problems, lines: [...lines, ...cancelled] }
 }
 
 /** The version files main carries, the bumped text of each, and every problem with them. */

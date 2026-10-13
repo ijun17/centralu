@@ -407,37 +407,52 @@ export async function readRequired(repo, base, workflows, workflowCheckNames, he
   return { names: [...new Set(found)], unresolved, added, source: `${read.join(', ')} on ${base}${plus}` }
 }
 
-/** Every check reported on a commit: check runs (GitHub Actions jobs among them) and commit statuses. */
-export async function readChecks(repo, sha, { workflows, event, branch } = {}) {
+/** CI runs carry workflow identity; job names alone can collide with release jobs. */
+export async function readWorkflowChecks(repo, sha, { workflows, event, branch, pr } = {}) {
   checkRepo(repo)
-  // A release rehearsal reports the same platform names as build CI. Match suite identity
-  // before latestByName sees the checks, or a newer rehearsal can hide a failed build.
-  let suites = null
-  if (workflows) {
-    suites = new Set()
-    for (const path of workflows) {
-      const file = path.split('/').pop()
-      if (!WORKFLOW.test(file)) throw new GitHubError('input', `"${path}" is not a workflow file name.`)
-      const q = new URLSearchParams({ head_sha: sha, per_page: '100', ...(event ? { event } : {}), ...(branch ? { branch } : {}) })
-      const pages = parseJson(await runGh(['api', '--paginate', '--slurp', `repos/${repo}/actions/workflows/${file}/runs?${q}`]))
-      for (const page of pages ?? []) for (const run of page.workflow_runs ?? []) {
-        if (run.head_sha === sha && (!event || run.event === event) && (!branch || run.head_branch === branch) && run.check_suite_id) suites.add(run.check_suite_id)
+  const runs = new Map()
+  let associated = null
+  for (const path of workflows ?? []) {
+    const file = path.split('/').pop()
+    if (!WORKFLOW.test(file)) throw new GitHubError('input', `"${path}" is not a workflow file name.`)
+    const q = new URLSearchParams({ head_sha: sha, per_page: '100', ...(event ? { event } : {}), ...(branch ? { branch } : {}) })
+    const pages = parseJson(await runGh(['api', '--paginate', '--slurp', `repos/${repo}/actions/workflows/${file}/runs?${q}`]))
+    for (const page of pages ?? []) for (const run of page.workflow_runs ?? []) {
+      if (run.head_sha !== sha || (event && run.event !== event) || (branch && run.head_branch !== branch)) continue
+      if (pr) {
+        if (run.head_branch !== pr.headRefName || run.head_repository?.full_name !== repo) continue
+        let prs = run.pull_requests ?? []
+        // GitHub removes merged PRs from a run's pull_requests (#624, verified 2026-10-13).
+        // Only an unambiguous commit association can recover that identity; never guess by title.
+        if (!prs.length) {
+          associated ??= await restJson(`repos/${repo}/commits/${sha}/pulls?per_page=100`)
+          if (associated?.length !== 1) continue
+          prs = associated
+        }
+        if (!prs.some((p) => p.number === pr.number && p.base?.ref === pr.baseRefName && p.head?.sha === sha && p.head?.ref === pr.headRefName)) continue
       }
+      const old = runs.get(run.id)
+      if (!old || (run.run_attempt ?? 1) >= (old.run_attempt ?? 1)) runs.set(run.id, run)
     }
   }
+  const suites = new Set([...runs.values()].map((r) => r.check_suite_id).filter(Boolean))
+  const reported = (await readChecks(repo, sha)).filter((c) => c.kind === 'run' && c.appSlug === 'github-actions' && suites.has(c.suiteId))
+  return { reported, runs: [...runs.values()] }
+}
+
+/** Every check reported on a commit: check runs (GitHub Actions jobs among them) and commit statuses. */
+export async function readChecks(repo, sha) {
+  checkRepo(repo)
   const out = []
   for (let page = 1; page <= 10; page++) {
     const r = await restJson(`repos/${repo}/commits/${sha}/check-runs?per_page=100&page=${page}`)
     const runs = r?.check_runs ?? []
     for (const c of runs) {
-      if (suites && (c.app?.slug !== 'github-actions' || !suites.has(c.check_suite?.id))) continue
       const job = /\/job\/(\d+)/.exec(c.html_url ?? '')?.[1] ?? (c.app?.slug === 'github-actions' ? String(c.id) : null)
-      out.push({ kind: 'run', name: c.name, status: c.status, conclusion: c.conclusion, id: c.id, jobId: job, url: c.html_url ?? null, at: c.started_at ?? c.completed_at ?? null })
+      out.push({ kind: 'run', appSlug: c.app?.slug, suiteId: c.check_suite?.id, name: c.name, status: c.status, conclusion: c.conclusion, id: c.id, jobId: job, url: c.html_url ?? null, at: c.started_at ?? c.completed_at ?? null })
     }
     if (runs.length < 100) break
   }
-  // A commit status has no workflow identity and cannot stand in for a release CI job.
-  if (suites) return out
   const s = await restJson(`repos/${repo}/commits/${sha}/status`)
   for (const st of s?.statuses ?? []) out.push({ kind: 'status', name: st.context, state: st.state, id: st.id, jobId: null, url: st.target_url ?? null, at: st.updated_at ?? null })
   return out

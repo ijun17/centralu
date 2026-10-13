@@ -220,7 +220,9 @@ step shows on the screen.
 - **Release CI sources (#633 review):** match GitHub Actions check-suite ids to runs of the
   configured CI workflow files and exact commit/event (main push or PR). Release/rehearsal checks
   can have the same job names and never replace CI checks. Before every npm-publish approval,
-  require main's own green CI, and the tagged commit's own CI too if main moved; no PR fallback.
+  require only the tagged commit's own green CI; no PR fallback and no gate on later main commits.
+  Cancelled builds name their run id and rerun command; a successful new attempt replaces the old
+  cancellation. Generated release bumps have their own build concurrency group per commit.
   Status reports this publication gate. The inline event scan does not follow called scripts or
   actions; review those manually as described in docs/releasing.md.
 - **CI evidence for rehearse and tag (#629):** main green is used directly and main failure always
