@@ -14,7 +14,7 @@ vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: vi.fn() }))
 vi.mock('@tauri-apps/plugin-notification', () => ({ isPermissionGranted: vi.fn(), requestPermission: vi.fn(), sendNotification: vi.fn() }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 
-const { createTauriPlatform, listenForQuit, autoSwitch } = await import('./index.js')
+const { createTauriPlatform, listenForQuit } = await import('./index.js')
 
 /**
  * The desktop at the moment the host fails to come up (#184). Checks only the seam with the
@@ -99,7 +99,7 @@ describe('background mode (#280)', () => {
 
 
 describe('a relaunched window whose automatic swap fails', () => {
-  it('creates a working platform on the attached host and carries the attempt/error into the build bar', async () => {
+  it('creates a working platform on the attached host and records the startup attempt and error', async () => {
     const build = {
       mode: 'keeper', relaunched: true, sameBuild: false, keeperSameBuild: false, busy: false, keepsAgents: true,
       app: { version: `0.1.0-beta.${20}`, commit: 'new' },
@@ -118,10 +118,7 @@ describe('a relaunched window whose automatic swap fails', () => {
       const platform = await createTauriPlatform()
       try {
         expect(platform.background).toBeDefined()
-        const next = autoSwitch({ build, tried: platform.relaunchSwap.tried, autoApply: false, dismissed: false })
-        if (next === 'switch') await invoke('switch_host_build').catch(() => {})
         expect(invoke.mock.calls.filter(([cmd]) => cmd === 'switch_host_build')).toHaveLength(1)
-        expect(next).toBe('none')
         expect(platform.relaunchSwap).toEqual({ tried: true, error: 'Keeper refused the handoff' })
         expect(unlistened).toContain('host-build')
       } finally { await platform.dispose() }

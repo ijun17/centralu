@@ -183,7 +183,8 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
   const [askSwitch, setAskSwitch] = useState(false)
   const [askRestart, setAskRestart] = useState(false)
   const [restarting, setRestarting] = useState(false)
-  const [switchError, setSwitchError] = useState<string | null>(platform.relaunchSwap.error ?? null)
+  const [switchError, setSwitchError] = useState<string | null>(null)
+  const [relaunchError, setRelaunchError] = useState<string | null>(platform.relaunchSwap.error ?? null)
   const [dismissed, setDismissed] = useState(false)
   // A failed swap stays on the bar until dismissed; this remembers which one was
   const [dismissedSwap, setDismissedSwap] = useState<number | null>(null)
@@ -202,10 +203,19 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
       }
     })
   }, [])
+  useEffect(() => {
+    // Startup can time out while the old host still serves. A final report supersedes that
+    // startup error; a failed report already carries its reason in the bar. Keep errors from
+    // later button presses separate so another build report cannot erase a real failure.
+    if (build?.sameBuild || build?.swap?.phase === 'done' || build?.swap?.phase === 'failed') {
+      setRelaunchError(null)
+    }
+  }, [build])
   const bar = build ? buildBar({ build, dismissed, dismissedSwap, dismissedShell }) : ({ kind: 'none' } as const)
   const plan = build ? switchPlan(build) : null
   const startSwitch = () => {
     setSwitchError(null)
+    setRelaunchError(null)
     void switchHostBuild().catch((e: Error) => setSwitchError(e.message))
   }
   /*
@@ -284,7 +294,7 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
       <BuildBarView
         build={build}
         bar={bar}
-        error={switchError}
+        error={switchError ?? relaunchError}
         restarting={restarting}
         onSwitch={() => {
           setSwitchError(null)
