@@ -513,6 +513,11 @@ export class SessionManager {
    * so no report goes out and the marks stay in the store for the host that sees those turns end (#646).
    */
   private handingOver = false
+  /**
+   * An auto observer's own mid-turn note (#646), `<observer>><session>` -> the reader its receipt is held on. The
+   * observer's `status` and `wait` read this, never the owner's delegation, until a read takes its settled outcome.
+   */
+  private observerNotes = new Map<string, { run: Delegation; waiters: number; told: boolean }>()
   private markReport(sessionId: string, callerId: string): void {
     this.awaitingReport.set(sessionId, callerId)
     this.store.setReportMark(sessionId, callerId)
@@ -718,14 +723,23 @@ export class SessionManager {
       }
     }
     /*
-     * "You will be told when it ends" survives a host swap (#646): the keeper kept the child's process, so its turn
-     * ends under this host, and the report it owes goes out from here. A mark whose session has no process any more
-     * is about a turn that died with the old host; it is dropped rather than left to name an unrelated later turn.
+     * "You will be told when it ends" survives a host swap (#646): the keeper kept the child's process and its turn is
+     * still running, so it ends under this host, and the report it owes goes out from here. Any other mark is dropped
+     * rather than left to name an unrelated later turn as "the assigned work finished" (#166): a session with no
+     * process lost its turn with the old host, and a kept session already at rest finished its turn while the old host
+     * was letting go (`handingOver` held that report back); its answer stays readable through agent_session.
      */
     for (const mark of store.listReportMarks()) {
-      const alive = keeperOpts.keptSessions?.has(mark.sessionId) && this.meta.has(mark.sessionId) && this.meta.has(mark.callerSessionId)
-      if (alive) this.awaitingReport.set(mark.sessionId, mark.callerSessionId)
-      else store.clearReportMark(mark.sessionId)
+      const child = this.meta.get(mark.sessionId)
+      const running = keeperOpts.keptSessions?.has(mark.sessionId) && !!child && inTurn(child.state) && this.meta.has(mark.callerSessionId)
+      if (running) {
+        this.awaitingReport.set(mark.sessionId, mark.callerSessionId)
+        continue
+      }
+      if (child && keeperOpts.keptSessions?.has(mark.sessionId)) {
+        console.error(`[agent-host] report mark dropped: ${mark.sessionId.slice(0, 8)} ended its turn during the swap`)
+      }
+      store.clearReportMark(mark.sessionId)
     }
     /*
      * Sweeps orphaned handoff notes (#106). **Why startup is a safe moment for this**: no handoff is
@@ -2705,6 +2719,7 @@ export class SessionManager {
     this.clearReport(sessionId)
     // Nobody is left to tell: the reports its children owed it go too
     for (const [child, caller] of [...this.awaitingReport]) if (caller === sessionId) this.clearReport(child)
+    for (const key of [...this.observerNotes.keys()]) if (key.startsWith(`${sessionId}>`) || key.endsWith(`>${sessionId}`)) this.observerNotes.delete(key)
     this.forgetCommits(sessionId)
     this.meta.delete(sessionId)
     await this.store.trashSession(sessionId, {
@@ -6023,8 +6038,15 @@ export class SessionManager {
   private observeTurn(child: SessionInfo, subscribe: boolean, own = false): { run: Delegation; release(): void } {
     const active = own ? undefined : this.agentRuns.get(child.id)
     const shared = active && !active.finished ? active : undefined
-    const wait = shared ?? new AgentRunWait(() => {}, () => child.name, undefined,
-      () => finalAnswer(this.store.loadMessages(child.id, 50)))
+    // A note's reader reads each turn's answer on its own, as a delegation does: queued turns have no user row between them
+    let answerAfter = this.meta.get(child.id)?.lastSeq ?? 0
+    const wait = shared ?? new AgentRunWait(() => {}, () => child.name, undefined, own
+      ? () => {
+          const answer = finalAnswer(this.store.loadMessages(child.id, 50).filter((m) => m.seq > answerAfter))
+          answerAfter = this.meta.get(child.id)?.lastSeq ?? answerAfter
+          return answer
+        }
+      : () => finalAnswer(this.store.loadMessages(child.id, 50)))
     const project = this.store.listProjects().find((p) => p.id === child.projectId)
     const target = { id: child.projectId ?? '', name: project?.name ?? '', path: this.store.sessionCwd(child.id) ?? project?.path ?? '' }
     if (!shared && subscribe) {
@@ -6304,6 +6326,9 @@ export class SessionManager {
     }
     if (opts.sessionId === callerId) return this.agentAtRest(child)
     const key = `${callerId}>${child.id}`
+    // An observer that sent a note reads its own note's reader, never the owner's delegation (#646)
+    const note = this.delegations.has(key) ? undefined : this.observerNotes.get(key)
+    if (note && (opts.action === 'status' || opts.action === 'wait')) return this.readObserverNote(key, note, opts.action === 'wait', signal)
     let d = this.delegations.get(key)
     let releaseObservation: (() => void) | undefined
     if (!d && this.autoBoundaryOpen(callerId)) {
@@ -6370,6 +6395,8 @@ export class SessionManager {
              */
             const own = observing ? this.observeTurn(child, true, true) : undefined
             if (own) void own.run.wait.done.then(own.release, own.release)
+            const record = own ? { run: own.run, waiters: 0, told: false } : undefined
+            if (record) this.observerNotes.set(key, record)
             const wait = own?.run.wait ?? d.wait
             const releaseHold = wait.holdInput()
             const release = () => {
@@ -6378,11 +6405,26 @@ export class SessionManager {
             }
             try {
               await this.deliver(child.id, text, undefined, from, false, undefined, 'inline', (h, input) => {
-                const fail = (e: Error) => { wait.fail(e); release() }
+                const fail = (e: Error) => {
+                  if (!record) {
+                    wait.fail(e)
+                    return release()
+                  }
+                  wait.fail(new Error(`your note was not delivered: ${e.message}`))
+                  release()
+                  // A wait on the note reads the refusal itself; otherwise the observer is told, once
+                  if (!record.told && !record.waiters && this.observerNotes.get(key) === record) {
+                    record.told = true
+                    void this.tellNoteRefused(callerId, child.id, e.message)
+                  }
+                }
                 void h.sendTracked!(input, { complete: release, fail }).then(release, fail)
               })
             } catch (e) {
-              if (own) wait.fail(e as Error)
+              if (record) {
+                wait.fail(e as Error)
+                if (this.observerNotes.get(key) === record) this.observerNotes.delete(key)
+              }
               release()
               return { ok: false, error: `Could not send it: ${(e as Error).message}` }
             }
@@ -6639,6 +6681,44 @@ export class SessionManager {
       tool: this.meta.get(d.sessionId)?.tool ?? '',
       reported: !observing && this.awaitingReport.get(d.sessionId) === d.callerId,
       ...(notice ? { notice } : {}),
+    }
+  }
+
+  /** An observer's `status` / `wait` on the note it sent (#646): its own reader's outcome, taken once it has settled */
+  private async readObserverNote(key: string, note: { run: Delegation; waiters: number; told: boolean }, wait: boolean, signal?: AbortSignal): Promise<ChildRunResult> {
+    if (!wait && !note.run.settled) return this.agentWorking(note.run, false, true)
+    note.waiters++
+    let r: ChildRunResult
+    try {
+      r = await this.awaitAgent(key, note.run, signal, true)
+    } finally {
+      note.waiters--
+    }
+    if (note.run.settled) {
+      note.told = true
+      if (this.observerNotes.get(key) === note) this.observerNotes.delete(key)
+    }
+    return r
+  }
+
+  /** The observer's note was refused after its send returned (#646): said in the observer's session, as a report is */
+  private async tellNoteRefused(observerId: string, sessionId: string, why: string): Promise<void> {
+    if (this.handingOver || !this.meta.has(observerId)) return
+    const name = this.meta.get(sessionId)?.name ?? sessionId
+    try {
+      await this.deliver(
+        observerId,
+        `[Centralu] Your note to another session was not delivered.\n` +
+          `Session: ${frameField(name)}\n` +
+          `id: ${sessionId}\n\n` +
+          `Reason: ${why.slice(0, 600)}\n\n` +
+          `Send it again with agent_session, or read that session's recent conversation with read_session.`,
+        undefined,
+        { sessionId, name },
+        true,
+      )
+    } catch {
+      // The observer may be asleep or deleted — a notice must not destabilize the host
     }
   }
 

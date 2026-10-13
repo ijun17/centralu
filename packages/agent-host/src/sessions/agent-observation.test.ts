@@ -256,8 +256,38 @@ describe("auto observes another caller's delegation without consuming it", () =>
     handle(child).answer('owner answer')
     expect(await asking).toMatchObject({ ok: true, state: 'done', answer: 'owner answer' })
     expect(handle(child).interrupted).toBe(0)
-    expect(handle(observer).sent).toEqual([])
     expect(handle(owner).sent).toEqual([])
+    // The observer is told, once, in its own session: its send had already returned "working"
+    expect(reports(observer, child)).toHaveLength(1)
+    const notice = w.store.loadMessages(observer, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('was not delivered'))
+    expect(notice).toHaveLength(1)
+    expect(notice[0]).toContain('the note was refused')
+    expect(await w.mgr.agentSession(observer, { sessionId: child, action: 'status' })).toMatchObject({ ok: false, error: expect.stringContaining('not delivered') })
+    expect(reports(observer, child)).toHaveLength(1)
+  })
+
+  it("an observer waiting on its note reads the refusal from its wait, and is not told twice", async () => {
+    const { observer, child, asking } = await askedFromOtherProject()
+    const waiting = w.mgr.agentSession(observer, { sessionId: child, action: 'wait' })
+    await new Promise((r) => setTimeout(r, 10))
+    for (const receipt of handle(child).receipts.splice(0)) receipt.reject(new Error('the note was refused'))
+    expect(await waiting).toMatchObject({ ok: false, error: expect.stringContaining('not delivered: the note was refused') })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(handle(observer).sent).toEqual([])
+    handle(child).answer('owner answer')
+    expect(await asking).toMatchObject({ ok: true, answer: 'owner answer' })
+  })
+
+  it.each(['wait', 'status'] as const)("an observer's %s after its note reads the reply to the note, never the owner's answer", async (action) => {
+    const { observer, child, asking } = await askedFromOtherProject()
+    const waiting = action === 'wait' ? w.mgr.agentSession(observer, { sessionId: child, action: 'wait' }) : undefined
+    handle(child).answer('owner answer', false)
+    expect(await asking).toMatchObject({ ok: true, answer: 'owner answer' })
+    if (action === 'status') expect(await w.mgr.agentSession(observer, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, state: 'working', reported: false })
+    handle(child).answer('reply to the note')
+    const read = waiting ? await waiting : await w.mgr.agentSession(observer, { sessionId: child, action: 'status' })
+    expect(read).toMatchObject({ ok: true, state: 'done', answer: 'reply to the note', readable: [] })
+    expect(handle(observer).sent).toEqual([])
   })
 
   it.each(['safe', 'normal', 'auto'] as const)(

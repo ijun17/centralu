@@ -50,7 +50,11 @@ class Handle implements SessionHandle {
   }
   interrupt() {}
   async dispose() {}
-  async detach() {}
+  /** Set by a test: the turn ends while the leaving host lets the process go */
+  endOnDetach?: string
+  async detach() {
+    if (this.endOnDetach) this.answer(this.endOnDetach)
+  }
 }
 
 class Adapter implements AgentAdapter {
@@ -153,6 +157,27 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     b.claude.handles.get(child)!.answer('a later, unrelated turn')
     await new Promise((r) => setTimeout(r, 20))
     expect(reports(b.claude.handles.get(parent), child)).toHaveLength(1)
+  })
+
+  it('is dropped when the kept child finished its turn while the old host let go, so a later turn of the person is not reported (#166)', async () => {
+    const a = host()
+    const { parent, child } = await parentAndChild(a)
+    a.claude.handles.get(child)!.endOnDetach = 'finished during the swap'
+    await a.mgr.detachAll()
+    expect(store.listSessions().find((s) => s.id === child)!.state).toBe('waiting_input')
+
+    const b = host(new Set([child]))
+    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
+    expect(store.listReportMarks()).toEqual([])
+    expect(b.mgr.waitsOn(parent)).not.toContain(child)
+    // The answer it finished with is there for the parent to read
+    expect(await b.mgr.agentSession(parent, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, state: 'at_rest', answer: 'finished during the swap' })
+    // The person's own turn in the child afterwards is the child's, not the assigned work
+    await b.mgr.send(child, 'person work')
+    b.claude.handles.get(child)!.answer('person answer')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(reports(b.claude.handles.get(parent), child)).toEqual([])
+    expect(stored(parent)).toEqual([])
   })
 
   it('is dropped by a host that finds no process for the child: that turn died with the old host', async () => {

@@ -276,7 +276,9 @@ or read grants. A stop leaves the owner's failure report and result available, i
 cross-project `ask_project` delegations. An observer's mid-turn note rides on a reader of its
 own (#646): its receipt is held, and its failure recorded, there and never on the owner's wait,
 so the owner still reads its own answer, not the reply to the note, and a refused note does
-not fail the owner's delegation. Self wait, stop, delete and send are refused in
+not fail the owner's delegation. The observer's later `status` and `wait` read that reader (the
+reply to its note, or the refusal), never the owner's delegation; a refusal no wait is reading is
+said once in the observer's session, as a report is. Self wait, stop, delete and send are refused in
 all presets; self status does not create a delegation. A person's own turn or an app request
 without a delegation is also observed without registering ownership: the app's existing
 completion watcher is reused, or a temporary event reader watches the person's turn and
@@ -321,8 +323,10 @@ below retained for `safe` and `normal`:
    `read_session`). A call waiting at that moment takes the answer instead, so it does not arrive twice. The marker
    is written to `report_marks` (store v49, #646) as well as kept in memory, so a host swap (#280) does not lose
    it: the leaving host's `detachAll` fails its waits without reporting (`handingOver`), the next host restores
-   the marks of the sessions the keeper kept, whose turns end under it, and drops a mark whose session has no
-   process any more, since that turn died with the old host. Paths the
+   the marks of the sessions the keeper kept that are still in their turn, which ends under it. It drops a
+   mark whose session has no process any more (that turn died with the old host) and one whose kept session
+   already finished its turn during the swap, so a later turn the person starts there is never reported as the
+   assigned work (#166); that answer stays readable through `agent_session`. Paths the
    answer names inside the child's folder become readable to the caller, as ask_project's do.
 
 **In a new worktree** (part 2). `worktree: true`, or a `branch`, opens the child in a new git worktree of the
