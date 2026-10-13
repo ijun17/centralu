@@ -20,7 +20,8 @@ test('a sleeping session says so quietly, is not woken by selecting it, and wake
 
   // The sidebar's mark fades and its tooltip names it; the second session is untouched
   const mark = page.getByTestId(`session-row-${first}`).locator('[data-asleep]')
-  await expect(mark).toHaveAttribute('title', /asleep/)
+  await mark.hover()
+  await expect(page.getByTestId('tool-mark-tip-claude')).toContainText('asleep')
   await expect(page.getByTestId(`session-row-${second}`).locator('[data-asleep]')).toHaveCount(0)
 
   // Selecting it shows it, asleep, and starts nothing

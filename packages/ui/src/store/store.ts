@@ -31,6 +31,7 @@ import type {
 import {
   allDoneNotification,
   applyEvent,
+  nextStateFor,
   badgeCount,
   countWaiting,
   notificationFor,
@@ -1819,7 +1820,7 @@ function withAnswered(machines: Record<string, MachineInfo>, m: MachineInfo): Re
 /**
  * One session's summary from a fresh `sessions.list` row, merged over what the store already holds (`cur`).
  *
- * Shared by the reconnect recovery and a machine's recovery (#82), which build the same summary from the same list:
+ * Shared by initial attach, reconnect recovery and a machine's recovery (#82):
  * two places that construct one thing have to ask for one set (#37). Only the facts the host knows are overwritten;
  * local derived state (preview, `touchedPaths`, …) belongs to the reducer and is kept.
  */
@@ -1829,6 +1830,9 @@ function mergeListed(cur: SessionSummary | undefined, f: SessionInfo): SessionSu
         ...cur,
         projectId: f.projectId,
         kind: f.kind,
+        appId: f.appId,
+        askedBy: f.askedBy ?? null,
+        goal: f.goal,
         tool: f.tool,
         name: f.name,
         autoNamed: f.autoNamed,
@@ -1841,6 +1845,7 @@ function mergeListed(cur: SessionSummary | undefined, f: SessionInfo): SessionSu
         model: f.model,
         effort: f.effort,
         verbosity: f.verbosity,
+        serviceTier: f.serviceTier,
         permissionPreset: f.permissionPreset,
         worktree: f.worktree,
         parentSessionId: f.parentSessionId,
@@ -1853,10 +1858,14 @@ function mergeListed(cur: SessionSummary | undefined, f: SessionInfo): SessionSu
           id: f.id,
           projectId: f.projectId,
           kind: f.kind,
+          appId: f.appId,
+          askedBy: f.askedBy ?? null,
+          goal: f.goal,
           name: f.name,
           tool: f.tool,
           effort: f.effort,
           verbosity: f.verbosity,
+          serviceTier: f.serviceTier,
           model: f.model,
           permissionPreset: f.permissionPreset,
           worktree: f.worktree,
@@ -1875,14 +1884,15 @@ function mergeListed(cur: SessionSummary | undefined, f: SessionInfo): SessionSu
 }
 
 /**
- * The sessions live events named while a `sessions.list` was out, one set per read in flight
+ * The sessions and fields live events named while a `sessions.list` was out, one map per read in flight
  * (`watchLiveEvents`). Empty whenever no recovery is reading, so it never holds anything for long.
  */
-const liveEventWatchers = new Set<Set<string>>()
+type LiveEventFields = Map<string, Set<keyof SessionSummary>>
+const liveEventWatchers = new Set<LiveEventFields>()
 
-/** Starts noting which sessions live events touch; the returned set fills until `stop` */
-function watchLiveEvents(): { touched: Set<string>; stop: () => void } {
-  const touched = new Set<string>()
+/** Starts noting which sessions and fields live events touch until `stop` */
+function watchLiveEvents(): { touched: LiveEventFields; stop: () => void } {
+  const touched: LiveEventFields = new Map()
   liveEventWatchers.add(touched)
   return { touched, stop: () => liveEventWatchers.delete(touched) }
 }
@@ -1908,7 +1918,7 @@ function mergeListedSince(
   asked: Record<string, SessionSummary>,
   now: Record<string, SessionSummary>,
   fresh: Iterable<SessionInfo>,
-  touched: ReadonlySet<string>,
+  touched: ReadonlyMap<string, ReadonlySet<keyof SessionSummary>>,
   include: (s: SessionSummary) => boolean = () => true,
 ): { sessions: Record<string, SessionSummary>; gone: Set<string> } {
   const listed = new Map<string, SessionInfo>()
@@ -1917,7 +1927,7 @@ function mergeListedSince(
   const gone = new Set<string>()
   for (const [id, cur] of Object.entries(now)) {
     if (!include(cur)) sessions[id] = cur
-    else if (listed.has(id)) sessions[id] = keepChangedSince(asked[id], cur, mergeListed(cur, listed.get(id)!))
+    else if (listed.has(id)) sessions[id] = keepChangedSince(asked[id], cur, mergeListed(cur, listed.get(id)!), touched.get(id))
     else if (!asked[id] || touched.has(id)) sessions[id] = cur
     else gone.add(id)
   }
@@ -1926,13 +1936,16 @@ function mergeListedSince(
 }
 
 /** `merged`, with every field of `cur` that differs from `asked` put back: the store learned those after the list was asked for */
-function keepChangedSince(asked: SessionSummary | undefined, cur: SessionSummary, merged: SessionSummary): SessionSummary {
-  if (cur === asked) return merged
+function keepChangedSince(asked: SessionSummary | undefined, cur: SessionSummary, merged: SessionSummary, reported?: ReadonlySet<keyof SessionSummary>): SessionSummary {
+  if (cur === asked && !reported?.size) return merged
   // Arrived since: everything the store holds is newer than the request
   if (!asked) return cur
   const out = { ...merged } as Record<string, unknown>
   const was = asked as Record<string, unknown>
   for (const [k, v] of Object.entries(cur)) if (v !== was[k]) out[k] = v
+  // Re-attachment can reaffirm working/live without changing either pre-swap value (#640).
+  // Those reports still supersede a list captured during the replacement host's startup reset.
+  for (const k of reported ?? []) out[k] = cur[k]
   return out as SessionSummary
 }
 
@@ -2866,6 +2879,8 @@ export const useStore = create<AppState>((set, get) => ({
       }),
     )
 
+    const asked = get().sessions
+    const watch = watchLiveEvents()
     const [projects, sessions, gridPanels, tools, prefs, externalApps, themeFiles, machines] = await Promise.all([
       platform.projects.list(),
       platform.agents.listSessions(),
@@ -2895,70 +2910,26 @@ export const useStore = create<AppState>((set, get) => ({
       platform.themes.list().catch(() => [] as ThemeFileEntry[]),
       // The linked machines (#82) name the sidebar's groups, so they come with the lists they group. A host from before them has none
       platform.machines.list().catch(() => [] as MachineInfo[]),
-    ])
-    const known: Record<string, SessionSummary> = Object.fromEntries(
-      sessions.map((s) => [
-        s.id,
-        {
-          /*
-           * Take every stored setting the host hands back, not just one of them (issue #37).
-           *
-           * This asked for `effort` and stopped there, so a cold start rebuilt each session
-           * with `model: null`, `permissionPreset: 'normal'` and `worktree: null` — the
-           * defaults from initialSession — while the database still held what the user had
-           * picked. Nothing was ever lost on the way down; the screen read back its own
-           * defaults and presented them as the session, so every restart looked like the
-           * settings had been thrown away (and the worktree badge vanished with them).
-           * The reconnect merge builds the same summary from the same list and already names
-           * all of these — two places that construct one thing have to ask for one set.
-           */
-          ...initialSession({
-            id: s.id,
-            projectId: s.projectId,
-            kind: s.kind,
-            appId: s.appId,
-            askedBy: s.askedBy ?? null,
-            name: s.name,
-            tool: s.tool,
-            model: s.model,
-            effort: s.effort,
-            verbosity: s.verbosity,
-            serviceTier: s.serviceTier,
-            permissionPreset: s.permissionPreset,
-            worktree: s.worktree,
-            parentSessionId: s.parentSessionId,
-            merged: s.worktreeMerged,
-            pr: s.worktreePr,
-            goal: s.goal,
-          }),
-          autoNamed: s.autoNamed,
-          state: s.state,
-          live: s.live,
-          lastSeq: s.lastSeq,
-          lastReadSeq: s.lastReadSeq,
-          waitingSince: s.waitingSince,
-          // The while-alive facts also come from the host — without them, a session could sit at
-          // state=waiting_approval with no payload to draw the card, and the approval request would
-          // never appear on screen (measured after a restart)
-          ...liveFactsOf(s),
-        },
-      ]),
-    )
-    set((st) => ({
-      projects: Object.fromEntries(projects.map((p) => [p.id, p])),
-      sessions: known,
-      // A session can already be mid-turn when we arrive; stamp it now so the elapsed
-      // line has an instant to count from instead of its own mount (issue #23)
-      workingSince: trackWorkingSince(st.workingSince, known, Date.now()),
-      gridPanels,
-      tools,
-      prefs,
-      externalApps,
-      themeFiles,
-      lastGoodThemes: goodThemes(st.lastGoodThemes, themeFiles),
-      machines: Object.fromEntries(machines.map((m) => [m.id, m])),
-      connection: 'connected',
-    }))
+    ]).finally(watch.stop)
+    set((st) => {
+      // Recovery or re-attachment may have updated the window while startup reads were pending (#640).
+      const { sessions: known } = mergeListedSince(asked, st.sessions, sessions, watch.touched)
+      return {
+        projects: Object.fromEntries(projects.map((p) => [p.id, p])),
+        sessions: known,
+        // A session can already be mid-turn when we arrive; stamp it now so the elapsed
+        // line has an instant to count from instead of its own mount (issue #23)
+        workingSince: trackWorkingSince(st.workingSince, known, Date.now()),
+        gridPanels,
+        tools,
+        prefs,
+        externalApps,
+        themeFiles,
+        lastGoodThemes: goodThemes(st.lastGoodThemes, themeFiles),
+        machines: Object.fromEntries(machines.map((m) => [m.id, m])),
+        connection: 'connected',
+      }
+    })
 
     // Replay events that arrived before the list was registered — the first output of a session that
     // was already running before the app was even opened is held here
@@ -3325,7 +3296,7 @@ export const useStore = create<AppState>((set, get) => ({
     const sessionId = e.sessionId
     if (!sessionId) return
     // A recovery reading the session list keeps what this event says over an older row (`mergeListedSince`)
-    for (const touched of liveEventWatchers) touched.add(sessionId)
+    for (const touched of liveEventWatchers) if (!touched.has(sessionId)) touched.set(sessionId, new Set())
 
     /*
      * The host caught up on a conversation continued from outside (through the tool's own
@@ -3555,6 +3526,16 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     const next = applyEvent(cur, e, Date.now())
+    for (const touched of liveEventWatchers) {
+      const fields = touched.get(sessionId)!
+      // Keep changes even if a later event returns them to their pre-request value.
+      for (const k of Object.keys(next) as (keyof SessionSummary)[]) if (next[k] !== cur[k]) fields.add(k)
+      if (nextStateFor(e) === next.state) {
+        fields.add('state')
+        fields.add('waitingSince')
+      }
+      if (e.type === 'session_live') fields.add('live')
+    }
     /*
      * `chat[id]` being **absent** means "history has not been read yet" — focusing reads that and
      * calls for history. But a non-conversation event (a state change, context usage, and so on)

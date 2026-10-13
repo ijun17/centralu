@@ -2268,42 +2268,43 @@ function ToolMark({ tool, state, asleep = false }: { tool: ToolName; state: Sess
   useOrbitSync(state === 'working')
 
   return (
-    <span
-      className={`shrink-0 rounded-md p-[1.5px] ${state === 'working' ? 'cc-orbit' : ''}`}
-      style={state === 'working' ? undefined : { background: RING[state] }}
-      title={label}
-      aria-label={label}
-      data-testid={`tool-mark-${tool}`}
-      data-state={state}
-      data-asleep={asleep || undefined}
-    >
+    <Tooltip content={label} testId={`tool-mark-tip-${tool}`}>
       <span
-        /*
-         * A dark letter on a bright chip — grabs the eye in the list at a glance, but pure white
-         * (ink-signal) is not used. That belongs to "something is waiting for me," and using it here
-         * would bury the real signal. One step down, ink, is used instead. The letter is set in
-         * the terminal font (monospace) — a single-character glyph needs a fixed width, or the row
-         * would jitter.
-         */
-        /*
-          A bright letter on a dark background. With a bright chip, the spinning orbit ring got
-          buried in that brightness, and 'working' itself became invisible — the mark doubles as
-          the state indicator, and if the state cannot be seen, moving the mark here loses its
-          point.
-
-          The sidebar background (surface-side) and the chip background (surface-floor) differ by only a few steps, so
-          a single border does not separate them well. Instead of raising the border brightness
-          further, **the same treatment as a keycap** (cc-chip) is used: a 1px highlight on top and
-          a shadow underneath. It reads as a separate object without spending more brightness, and
-          brightness is the resource this app uses to state urgency, so spending it on decoration
-          would cut into that signal by the same amount.
-        */
-        className={`readout cc-chip flex size-[14px] items-center justify-center rounded-sm border border-line-strong bg-surface-floor text-2xs font-semibold leading-none text-ink ${
-          asleep ? 'opacity-40' : stalled ? 'opacity-50' : ''
-        }`}
+        className={`shrink-0 rounded-md p-[1.5px] ${state === 'working' ? 'cc-orbit' : ''}`}
+        style={state === 'working' ? undefined : { background: RING[state] }}
+        aria-label={label}
+        data-testid={`tool-mark-${tool}`}
+        data-state={state}
+        data-asleep={asleep || undefined}
       >
-        {meta.mark}
+        <span
+          /*
+           * A dark letter on a bright chip — grabs the eye in the list at a glance, but pure white
+           * (ink-signal) is not used. That belongs to "something is waiting for me," and using it here
+           * would bury the real signal. One step down, ink, is used instead. The letter is set in
+           * the terminal font (monospace) — a single-character glyph needs a fixed width, or the row
+           * would jitter.
+           */
+          /*
+            A bright letter on a dark background. With a bright chip, the spinning orbit ring got
+            buried in that brightness, and 'working' itself became invisible — the mark doubles as
+            the state indicator, and if the state cannot be seen, moving the mark here loses its
+            point.
+
+            The sidebar background (surface-side) and the chip background (surface-floor) differ by only a few steps, so
+            a single border does not separate them well. Instead of raising the border brightness
+            further, **the same treatment as a keycap** (cc-chip) is used: a 1px highlight on top and
+            a shadow underneath. It reads as a separate object without spending more brightness, and
+            brightness is the resource this app uses to state urgency, so spending it on decoration
+            would cut into that signal by the same amount.
+          */
+          className={`readout cc-chip flex size-[14px] items-center justify-center rounded-sm border border-line-strong bg-surface-floor text-2xs font-semibold leading-none text-ink ${
+            asleep ? 'opacity-40' : stalled ? 'opacity-50' : ''
+          }`}
+        >
+          {meta.mark}
+        </span>
       </span>
-    </span>
+    </Tooltip>
   )
 }

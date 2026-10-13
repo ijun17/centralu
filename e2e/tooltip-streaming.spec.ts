@@ -120,7 +120,7 @@ test('the gauge updates its usage and cache content in place while hovered and s
 })
 
 // All custom hover explanations use Tooltip, either directly at these call sites or through IconButton.
-// ToolMark, goal/worktree/context/machine/background-task header badges use native title and are unaffected.
+// Goal/worktree/context/machine/background-task header badges use native title and are unaffected.
 const surfaces = [
   'usage-donut-claude',
   'usage-donut-codex',

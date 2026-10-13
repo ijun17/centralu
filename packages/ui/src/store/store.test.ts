@@ -618,6 +618,49 @@ function holdList(mock: MockPlatform): { asked: Promise<void>; release: () => vo
 const settle = () => new Promise((r) => setTimeout(r, 0))
 
 describe('reconnect recovery against live events', () => {
+  it('a relaunched window keeps re-attachment events when recovery overtakes its initial list (#640)', async () => {
+    const mock = new MockPlatform()
+    const id = 'swap-relaunched'
+    mock.sessions.set(id, sessionInfo(id, { tool: 'codex', state: 'idle', live: false }))
+    const list = holdList(mock)
+    const attaching = useStore.getState().attach(mock)
+    await list.asked
+    // A connection recovery registers the row while attach is still waiting for its startup reads.
+    await useStore.getState().recoverAfterReconnect(true)
+    mock.sessions.get(id)!.state = 'working'
+    mock.emit({ type: 'session_live', sessionId: id, live: true })
+    mock.emit({ type: 'state_change', sessionId: id, state: 'working', reason: 'reattached' })
+    list.release()
+    await attaching
+    expect(useStore.getState().sessions[id]).toMatchObject({ state: 'working', live: true })
+  })
+
+  it.each(['reattached', 'streaming'] as const)('keeps a mid-turn Codex session %s during a host swap over the stale startup list (#640)', async (signal) => {
+    const mock = new MockPlatform()
+    const id = `swap-${signal}`
+    mock.sessions.set(id, sessionInfo(id, { tool: 'codex', projectId: 'background', state: 'working', live: true }))
+    await useStore.getState().attach(mock)
+    useStore.setState({ focusedProjectId: 'another-project' })
+    mock.setConnectionState('disconnected')
+    // The replacement host resets a session before its process has re-attached.
+    mock.sessions.set(id, sessionInfo(id, { tool: 'codex', projectId: 'background', state: 'idle', live: false, name: 'renamed during swap' }))
+    const list = holdList(mock)
+    const recovery = useStore.getState().recoverAfterReconnect(true)
+    await list.asked
+    // These reaffirm the pre-swap values: a value comparison alone cannot see that they are newer.
+    mock.sessions.get(id)!.state = 'working'
+    mock.emit({ type: 'session_live', sessionId: id, live: true })
+    mock.emit(signal === 'reattached'
+      ? { type: 'state_change', sessionId: id, state: 'working', reason: 'reattached' }
+      : delta(id, 'still running'))
+    expect(useStore.getState().sessions[id]).toMatchObject({ state: 'working', live: true })
+    list.release()
+    await recovery
+    expect(useStore.getState().sessions[id]).toMatchObject({ state: 'working', live: true, name: 'renamed during swap' })
+    expect(useStore.getState().workingSince[id]).toBeDefined()
+    expect(mock.resumeCalls).toEqual([])
+  })
+
   const rows = (id: string, from: number, to: number) =>
     Array.from({ length: to - from + 1 }, (_, i) => ({
       sessionId: id, seq: from + i, role: 'user' as const, kind: 'text' as const, payload: { text: `L${from + i}` }, ts: from + i,
