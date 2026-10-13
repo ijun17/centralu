@@ -409,8 +409,11 @@ tool's conversation remains. The answer reports the uncommitted file and commit 
 needed setting aside. A saved notice also offers the recovery directory in the trashed conversation. Counts
 count the union of HEAD and the stored branch against the configured local trunk (project HEAD if unset),
 not a GitHub merge badge; squash/rebase commits may therefore be kept conservatively. An unreadable trunk
-keeps all reachable commits. Submodules count local HEAD/branch commits absent from their remote refs,
-even when the child superproject already records those commits.
+keeps all reachable commits. Submodules count local HEAD/branch commits and gitlink targets from the
+index and every unmerged superproject commit against their remote refs. This includes intermediate
+commits and the stored branch even after the submodule HEAD moves away. Gitlink-only targets get
+temporary named refs in the bundle so they remain fetchable after the private module repository is removed;
+the temporary refs are removed from the live repository after bundling.
 
 The trash's optional `recovery` JSON field remembers the snapshot id, tip and counts; this is additive and
 needs no schema migration. Files live at `<data>/worktree-recovery/<session id>/<snapshot id>/`:
@@ -427,10 +430,14 @@ or bundle. Trash byte totals include recovery files.
 
 Restore recreates the root branch/worktree at its saved tip and attempts both patches before making the
 session live (its CLI remains stopped). If the original branch name is occupied, it uses `recovered/<session id>`.
+If HEAD and the bundled stored branch differ, restore also creates `recovered/<session id>-stored-branch`
+at the stored tip and names it in the notice. An occupied recovery name gets a numeric suffix; a retry
+reuses a branch already at that tip. Existing branches are never overwritten.
 A notice offers the recovery paths and `git apply` / `git fetch <bundle> <ref>:<branch>` (`git bundle list-heads` lists saved refs) instructions; patches
 that cannot be applied and all submodule recovery remain available for manual recovery. A restore interrupted
-after creating the worktree does not reapply patches on retry. Each later deletion uses a new snapshot so
-earlier files are retained. Deleting for good, including empty trash, removes the entire session recovery
+after creating the worktree does not reapply patches on retry, to preserve possible edits since the interruption.
+When patches exist, the notice explicitly says they were not applied on this retry and may need manual
+recovery. Each later deletion uses a new snapshot so earlier files are retained. Deleting for good, including empty trash, removes the entire session recovery
 directory; cleanup failure leaves the trash entry retryable. No automatic trash expiry is implemented; expiry
 must use `purgeSession` if added. Writes by other programs during capture are outside this session's lock.
 
