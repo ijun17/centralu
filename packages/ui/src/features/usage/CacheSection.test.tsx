@@ -43,7 +43,7 @@ describe('CacheSection', () => {
 
   it('shows the hit rate, what the input was made of, the rebuilds and the sessions that wrote most', () => {
     const { html, text } = render({ writes: true, countingSince: LONG_AGO, windows: [win(), win({ id: 'today', label: 'today' })] })
-    expect(text).toContain('94% cache hit · last 5 h')
+    expect(text).toContain('94.1% cache hit · last 5 h')
     expect(text).toContain('Read from cache 31.2M')
     expect(text).toContain('Written to cache 1.9M')
     expect(text).toContain('Uncached input 18k')
@@ -73,7 +73,7 @@ describe('CacheSection', () => {
       sessions: [{ sessionId: 'here', name: 'Optimize images', requests: 3, inputTokens: 260_000, cacheReadTokens: 1, cacheCreationTokens: 0, rebuilds: 0 }],
     })
     const { text } = render({ writes: false, countingSince: LONG_AGO, windows: [codex] }, 'Codex')
-    expect(text).toContain('90% cache hit')
+    expect(text).toContain('90.5% cache hit')
     expect(text).toContain('Written to cache not reported')
     expect(text).toContain('Codex reports cache reads only, not writes: the hit rate is cached input over all input.')
     expect(text).toContain('Most uncached input')

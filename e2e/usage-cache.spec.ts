@@ -35,7 +35,7 @@ async function newSession(page: Page, prompt: string): Promise<string> {
   return page.evaluate(() => (window as unknown as MockWindow).__store.getState().focusedSessionId)
 }
 
-/** The answer a host gives: Claude mostly hits (94%) with six rebuilds, Codex reports reads only (90%) */
+/** The answer a host gives: Claude mostly hits (94.1%) with six rebuilds, Codex reports reads only (90.5%) */
 function figures(here: string) {
   const now = Date.now()
   const since = new Date(now - 5 * HOUR).toISOString()
@@ -80,7 +80,7 @@ function figures(here: string) {
         },
       ],
     },
-    // A linked machine counts its own: 71%, a session of its own (the hub qualifies the id)
+    // A linked machine counts its own: 71.0%, a session of its own (the hub qualifies the id)
     'box.claude': {
       writes: true,
       countingSince,
@@ -126,14 +126,14 @@ test('the gauge says the cache hit rate on hover, and its dropdown breaks it dow
 
   await test.step('hover: one short line', async () => {
     await page.getByTestId('usage-donut-claude').hover()
-    await expect(page.getByTestId('usage-donut-cache-claude')).toHaveText('Cache hit 94% · last 5 h')
+    await expect(page.getByTestId('usage-donut-cache-claude')).toHaveText('Cache hit 94.1% · last 5 h')
   })
 
   await test.step('click: the breakdown for the last 5 hours', async () => {
     await page.getByTestId('usage-donut-claude').click()
     const cache = page.getByTestId('usage-cache')
     await expect(cache).toHaveAttribute('data-window', '5h')
-    await expect(page.getByTestId('usage-cache-rate')).toHaveText('94%')
+    await expect(page.getByTestId('usage-cache-rate')).toHaveText('94.1%')
     await expect(page.getByTestId('usage-cache-read')).toContainText('31.2M')
     await expect(page.getByTestId('usage-cache-written')).toContainText('1.9M')
     await expect(page.getByTestId('usage-cache-uncached')).toContainText('18k')
@@ -149,7 +149,7 @@ test('the gauge says the cache hit rate on hover, and its dropdown breaks it dow
   await test.step('the switch shows today', async () => {
     await page.getByTestId('usage-cache-window-today').click()
     await expect(page.getByTestId('usage-cache')).toHaveAttribute('data-window', 'today')
-    await expect(page.getByTestId('usage-cache-rate')).toHaveText('72%')
+    await expect(page.getByTestId('usage-cache-rate')).toHaveText('71.9%')
     await expect(page.getByTestId('usage-cache-rebuilds')).toContainText('9 of 412 requests')
     await expect(page.getByTestId('usage-cache-causes')).toHaveText('9 rebuilds: 6 cache expired (idle 64 min) · 3 model change')
   })
@@ -170,9 +170,9 @@ test('Codex is said to report cache reads only', async ({ page }) => {
   await setup(page)
   await answer(page, figures('none'))
   await page.getByTestId('usage-donut-codex').hover()
-  await expect(page.getByTestId('usage-donut-cache-codex')).toHaveText('Cache hit 90% · last 5 h')
+  await expect(page.getByTestId('usage-donut-cache-codex')).toHaveText('Cache hit 90.5% · last 5 h')
   await page.getByTestId('usage-donut-codex').click()
-  await expect(page.getByTestId('usage-cache-rate')).toHaveText('90%')
+  await expect(page.getByTestId('usage-cache-rate')).toHaveText('90.5%')
   await expect(page.getByTestId('usage-cache-written')).toContainText('not reported')
   await expect(page.getByTestId('usage-cache-reads-only')).toHaveText(
     'Codex reports cache reads only, not writes: the hit rate is cached input over all input.',
@@ -188,10 +188,10 @@ test("a linked machine's donut shows that machine's own cache figures", async ({
   await answer(page, figures('none'))
   await expect(page.getByTestId('usage-donut-box.claude')).toBeVisible()
   await page.getByTestId('usage-donut-box.claude').hover()
-  await expect(page.getByTestId('usage-donut-cache-box.claude')).toHaveText('Cache hit 71% · last 5 h')
+  await expect(page.getByTestId('usage-donut-cache-box.claude')).toHaveText('Cache hit 71.0% · last 5 h')
   await page.getByTestId('usage-donut-box.claude').click()
   await expect(page.getByTestId('usage-drop')).toHaveAttribute('data-machine', 'box')
-  await expect(page.getByTestId('usage-cache-rate')).toHaveText('71%')
+  await expect(page.getByTestId('usage-cache-rate')).toHaveText('71.0%')
   await expect(page.getByTestId('usage-cache-session-box.s9')).toContainText('Remote work')
 })
 
