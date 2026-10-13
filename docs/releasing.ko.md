@@ -95,12 +95,28 @@ probes once and warns without waiting.
 Before rehearsing, run `node .centralu/apps/project-board/bin/wait-checks.mjs --ref main`;
 `--ref <sha>` also works.
 The ref is resolved once; output includes its pinned SHA, such as `repo@main (abc1234)`.
-It waits for at least one workflow run for that SHA and for every workflow run to complete
-before reading checks, including jobs that register late.
+It allows workflow runs to register and waits for active runs to complete before deciding
+on checks, including jobs that register late.
 The `<pr|owner/repo#pr>` form still waits for a pull request.
-Exit 0 means all reported checks passed, 1 means settled failures, and 2 means an argument
-or GitHub error. Absent or pending checks keep it waiting. Release tools still enforce the
-required-check set.
+The default deadline is 90 minutes; use `--timeout-minutes <minutes>` with either form to
+change it. Waiting for approval (`waiting` or `action_required`) ends immediately with an
+action-needed message. No workflow runs and no checks for two minutes means "nothing to wait
+for". Cancelled runs have their own outcome; "superseded by a newer push (cancelled)" is shown
+only when a newer run on the same workflow, branch, event, and repository has a different SHA.
+A failed `gh` request gets three retries after 1, 2, and 4 seconds. Polling, retries, and `gh`
+subprocesses all share the overall deadline.
+
+| Exit | Meaning |
+|---|---|
+| 0 | Checks passed |
+| 1 | Checks failed |
+| 2 | Invalid arguments or GitHub error after retries |
+| 3 | Approval or other action required |
+| 4 | Nothing to wait for after the registration grace period |
+| 5 | Cancelled, with supersession reported when confirmed |
+| 6 | Overall timeout |
+
+Release tools still enforce the required-check set.
 
 ### 수동 배포
 

@@ -28,6 +28,7 @@ const log = process.env.FAKE_GH_LOG
 const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse) : []
 fs.appendFileSync(log, JSON.stringify(a) + '\n')
 const scenario = process.env.FAKE_SCENARIO
+if (scenario === 'hung') setInterval(() => {}, 1_000)
 const workflowPolls = calls.filter(c => c[1].includes('/actions/runs?')).length
 if (a[0] === 'pr') process.stdout.write(JSON.stringify({ headRefOid: process.env.FAKE_SHA }))
 else if (a[1].includes('/actions/runs?')) {
@@ -123,13 +124,27 @@ describe.skipIf(process.platform === 'win32')('wait-checks', { timeout: 30_000 }
     expect(r.calls().filter((a) => a[1]?.includes('/actions/runs?'))).toHaveLength(2)
   })
 
+  it.each([
+    ['--ref', 'main', '--timeout-minutes', '1'],
+    ['--timeout-minutes', '1', '77'],
+  ])('accepts a deadline with ref and pull request arguments: %j', (...args) => {
+    expect(run(args).status).toBe(0)
+  })
+
+  it('enforces the CLI deadline even when a gh subprocess never exits', () => {
+    const r = run(['--ref', 'main', '--timeout-minutes', '0.01'], 'success', false, false, 'hung')
+    expect(r.error).toBeUndefined()
+    expect(r.status).toBe(6)
+    expect(r.stdout).toContain('timed out after 0.01 minutes')
+  })
+
   it('returns failure for a settled failed ref', () => {
     const r = run(['--ref', 'main'], 'failure')
     expect(r.status).toBe(1)
     expect(r.stdout).toContain('0/2 checks passed; 2 failed.')
   })
 
-  it.each([[], ['--ref'], ['--ref', ''], ['--ref', '--bad'], ['77', '--ref', 'main'], ['--ref', 'main', 'extra']].map((args) => ({ args })))('rejects invalid arguments $args', ({ args }) => {
+  it.each([[], ['--ref'], ['--ref', ''], ['--ref', '--bad'], ['77', '--ref', 'main'], ['--ref', 'main', 'extra'], ['77', '--timeout-minutes'], ['77', '--timeout-minutes', '0'], ['77', '--timeout-minutes', '-1'], ['77', '--timeout-minutes', 'NaN'], ['77', '--timeout-minutes', 'Infinity'], ['77', '--timeout-minutes', '1', '--timeout-minutes', '2']].map((args) => ({ args })))('rejects invalid arguments $args', ({ args }) => {
     const r = run(args)
     expect(r.status).toBe(2)
     expect(r.stderr).toContain('Usage:')

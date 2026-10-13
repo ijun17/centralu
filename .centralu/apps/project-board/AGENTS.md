@@ -135,10 +135,15 @@ intermittent failures (#368), and how long a merge may wait.
 Start `node .centralu/apps/project-board/bin/wait-checks.mjs <pr>` in the background instead of
 holding an MCP call open (or give `owner/repo#pr`). Use `--ref <branch|sha>` instead to wait for
 a branch or commit in the configured repository; the ref is resolved once and its pinned SHA is printed with the label.
-It waits for workflow runs on that SHA to appear and all complete before reading checks, so
-a workflow whose jobs register late cannot be missed.
-It polls until checks settle, prints one line,
-and exits 0 when green or 1 when a check failed. `PROJECT_BOARD_WAIT_POLL_MS` changes its 30-second
+It allows two minutes for workflow registration and waits for active workflows before deciding
+on checks. `--timeout-minutes <minutes>` sets the overall deadline (default 90 minutes), including
+polling, retries, and hung `gh` subprocesses. Failed `gh` calls retry three times, after 1/2/4 seconds.
+Exit codes: 0 passed, 1 failed, 2 argument/GitHub error, 3 approval/action required, 4 no workflows
+or checks after the grace period, 5 cancelled (supersession named only when confirmed by a newer
+run on the same workflow/branch/event/repository), 6 timed out. `waiting`/`action_required` stop
+with an action-needed message. The policy is in `wait-checks.mjs`, tested with a simulated clock
+in `tooling/project-board-wait-policy.test.ts`; the executable CLI and fake `gh` are tested in
+`tooling/project-board-wait-checks.test.ts`. `PROJECT_BOARD_WAIT_POLL_MS` changes the 30-second
 poll only for tests.
 
 ## Public text, pull requests, commits and stacks (#386 step 2)
