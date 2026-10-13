@@ -271,7 +271,12 @@ including another parent's child or the person's turn; adapter mid-turn support 
 child's own preset still apply. Observing an app agent reuses its completion watcher, so
 `run_agent` still receives its answer and the agent keeps its `safe` preset. Cleanup removes the worktree and branch even with dirty
 files or an unproven tip, logs the tip, and keeps the conversation in the trash. `run_agent`
-app agents stay `safe`, and no session gets a preset above its caller.
+app agents stay `safe`, and no session gets a preset above its caller. When auto observes another
+caller's unfinished delegation, its wait has its own bound and cancellation and returns
+`reported: false` while working. It does not consume the owner's report, key, waiter count
+or read grants. A stop leaves the owner's failure report and result available, including
+cross-project `ask_project` delegations. Self wait, stop, delete and send are refused in
+all presets; self status does not create a delegation.
 
 What one `start_agent` call does (`SessionManager.startAgent`), with the refusal/card rules
 below retained for `safe` and `normal`:

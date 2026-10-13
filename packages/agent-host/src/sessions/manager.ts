@@ -5675,34 +5675,39 @@ export class SessionManager {
    *   delete  cleans up a child's merged, clean worktree (`cleanUpWorktreeChild`, #76's hard gate, part 3)
    */
   async agentSession(callerId: string, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult> {
+    if (opts.sessionId === callerId && opts.action !== 'status') {
+      return { ok: false, error: 'agent_session cannot wait on, stop, delete or send to its own calling session.' }
+    }
     const caller = this.meta.get(callerId)
     const child = this.meta.get(opts.sessionId)
     if (!caller?.projectId || !child || (child.askedBy !== callerId && !this.autoBoundaryOpen(callerId, 'session ownership')) || child.projectId !== caller.projectId) {
       return { ok: false, error: `${opts.sessionId} is not a session this session started. agent_session works only on sessions start_agent started here.` }
     }
-    let key = `${callerId}>${child.id}`
+    if (opts.sessionId === callerId) return this.agentAtRest(child)
+    const key = `${callerId}>${child.id}`
     let d = this.delegations.get(key)
     if (!d && this.autoBoundaryOpen(callerId)) {
-      const existing = [...this.delegations.entries()].find(([, run]) => run.sessionId === child.id && !run.settled)
-      if (existing) [key, d] = existing
+      const existing = [...this.delegations.values()].find((run) => run.sessionId === child.id && !run.settled)
+      if (existing) d = existing
       else if (opts.action !== 'delete' && (child.state === 'working' || child.state === 'waiting_approval')) {
         const project = this.store.listProjects().find((p) => p.id === child.projectId)
         // Preserve an app request's completion watcher; observing a turn does not start a child.
         d = this.startDelegation(key, callerId, child.id, { id: caller.projectId, name: project?.name ?? '', path: this.store.sessionCwd(child.id) ?? project?.path ?? '' }, false, this.agentRuns.get(child.id))
       }
     }
+    const observing = !!d && d.callerId !== callerId
     switch (opts.action) {
       case 'status':
-        if (d && !d.settled) return this.agentWorking(d, false)
-        return d ? this.awaitAgent(key, d, signal) : this.agentAtRest(child)
+        if (d && !d.settled) return this.agentWorking(d, false, observing)
+        return d ? this.awaitAgent(key, d, signal, observing) : this.agentAtRest(child)
       case 'wait':
-        return d ? this.awaitAgent(key, d, signal) : this.agentAtRest(child)
+        return d ? this.awaitAgent(key, d, signal, observing) : this.agentAtRest(child)
       case 'stop': {
         if (!d || d.settled) return { ok: false, error: `Nothing you gave "${child.name}" is running.` }
-        if (this.awaitingReport.get(child.id) === callerId) this.awaitingReport.delete(child.id)
+        if (!observing && this.awaitingReport.get(child.id) === callerId) this.awaitingReport.delete(child.id)
         d.stop('the session that started it stopped it')
         await d.outcome
-        this.delegations.delete(key)
+        if (!observing) this.delegations.delete(key)
         return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool }
       }
       case 'delete': {
@@ -5741,7 +5746,7 @@ export class SessionManager {
             return { ok: false, error: `Could not send it: ${(e as Error).message}` }
           }
           // Keep the same outcome and any active wait. A send must not re-arm a report on top of that wait.
-          return this.agentWorking(d, false)
+          return this.agentWorking(d, false, observing)
         }
         if (child.state === 'working' || child.state === 'waiting_approval' || (this.agentRuns.has(child.id) && !this.agentRuns.get(child.id)!.finished)) {
           return { ok: false, error: `"${child.name}" is busy with something else (the person may be using it). Try again later.` }
@@ -5912,8 +5917,8 @@ export class SessionManager {
    * "Working": the caller is told when the turn ends (#561), through the report the orchestrator's reportBack uses, unless
    * a call is waiting on it by then (`awaitAgent` takes the marker down while it waits)
    */
-  private agentWorking(d: Delegation, arm = true): ChildRunResult {
-    if (arm) this.awaitingReport.set(d.sessionId, d.callerId)
+  private agentWorking(d: Delegation, arm = true, observing = false): ChildRunResult {
+    if (arm && !observing) this.awaitingReport.set(d.sessionId, d.callerId)
     const notice = d.notice()
     return {
       ok: true,
@@ -5921,7 +5926,7 @@ export class SessionManager {
       sessionId: d.sessionId,
       sessionName: this.meta.get(d.sessionId)?.name ?? d.sessionId,
       tool: this.meta.get(d.sessionId)?.tool ?? '',
-      reported: this.awaitingReport.get(d.sessionId) === d.callerId,
+      reported: !observing && this.awaitingReport.get(d.sessionId) === d.callerId,
       ...(notice ? { notice } : {}),
     }
   }
@@ -5940,9 +5945,9 @@ export class SessionManager {
   }
 
   /** Waits on a child's turn up to the bound (#561), like `awaitDelegation`, and reads its outcome for the caller */
-  private async awaitAgent(key: string, d: Delegation, signal?: AbortSignal): Promise<ChildRunResult> {
-    // Whoever waits reads the answer here: a report of the same ending would hand it over twice
-    if (this.awaitingReport.get(d.sessionId) === d.callerId) this.awaitingReport.delete(d.sessionId)
+  private async awaitAgent(key: string, d: Delegation, signal?: AbortSignal, observing = false): Promise<ChildRunResult> {
+    // Only the owner consumes its report/key/grants. Auto observers have their own bound and cancellation.
+    if (!observing && this.awaitingReport.get(d.sessionId) === d.callerId) this.awaitingReport.delete(d.sessionId)
     const name = () => this.meta.get(d.sessionId)?.name ?? d.sessionId
     let timer: ReturnType<typeof setTimeout> | undefined
     let onAbort: (() => void) | undefined
@@ -5953,20 +5958,25 @@ export class SessionManager {
       if (signal.aborted) onAbort()
       else signal.addEventListener('abort', onAbort, { once: true })
     })
-    d.waiters = (d.waiters ?? 0) + 1
+    if (!observing) d.waiters = (d.waiters ?? 0) + 1
     try {
       const r = await Promise.race([d.outcome, bound, aborted])
-      d.waiters--
+      if (!observing) d.waiters = (d.waiters ?? 1) - 1
       if (r === 'aborted') {
+        if (observing) return { ok: false, error: `The observation was cancelled; "${name()}" was left running.` }
         d.stop('the call that started it was cancelled')
         await d.outcome
         this.delegations.delete(key)
         return { ok: false, error: `The call was cancelled, so "${name()}" was stopped.` }
       }
-      if (r === 'bound') return this.agentWorking(d)
-      if (this.delegations.get(key) === d) this.delegations.delete(key)
+      if (r === 'bound') return this.agentWorking(d, !observing, observing)
+      if (!observing && this.delegations.get(key) === d) this.delegations.delete(key)
       if (!r.ok) return { ok: false, error: `"${name()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or give it a clearer task.` }
       const answer = r.answer ?? finalAnswer(this.store.loadMessages(d.sessionId, 50))
+      if (observing) return {
+        ok: true, state: 'done', sessionId: d.sessionId, sessionName: name(),
+        tool: this.meta.get(d.sessionId)?.tool ?? '', answer: clipAnswer(answer, name()), readable: [], outside: [],
+      }
       // Paths it names in its folder become readable to the caller, as ask_project's do: a child in another
       // folder (a worktree, #561 part 2) is outside the caller's own
       const { granted, outside } = readableGrants(pathsIn(answer), d.target.path)
