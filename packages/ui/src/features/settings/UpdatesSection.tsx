@@ -21,7 +21,9 @@ export function UpdatesSection() {
   const reportedUpdate = useStore((s) => s.update)
   const checkUpdate = useStore((s) => s.checkUpdate)
   useEffect(() => {
-    const phase = useStore.getState().update?.phase
+    const status = useStore.getState().update
+    if (!status?.auto) return
+    const phase = status.phase
     if (phase === 'checking' || phase === 'updating' || phase === 'waiting_for_npm' || phase === 'restart_required') return
     void checkUpdate(true)
   }, [checkUpdate])
@@ -106,7 +108,8 @@ export function UpdatesSection() {
       */}
       <p className="mt-1 text-xs leading-body text-ink-faint">
         At startup, every six hours, and on focus if the last check is over an hour old.
-        Opening Updates or installing also checks again. It asks the public npm
+        Opening Updates checks when automatic checking is on. Installing reuses a check
+        from the last minute or checks again. It asks the public npm
         registry for one version number and nothing else; if it cannot reach it, nothing
         happens and nothing interrupts you.
       </p>

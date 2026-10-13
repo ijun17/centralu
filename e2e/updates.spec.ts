@@ -17,11 +17,10 @@ async function focus(page: Page) {
   })
 }
 
-test('opening Updates refreshes the registry each time, including with automatic checks off (#635)', async ({ page }) => {
+test('opening Updates refreshes the registry each time with automatic checks on (#635)', async ({ page }) => {
   await start(page)
   await page.evaluate(async () => {
     const m = (window as any).__mock
-    await (window as any).__store.getState().setUpdateAuto(false)
     m.registryVersion = '9.9.1'
   })
   await page.getByTestId('open-settings').click()
@@ -33,6 +32,44 @@ test('opening Updates refreshes the registry each time, including with automatic
   await page.getByTestId('settings-tab-updates').click()
   await expect(page.getByTestId('update-state')).toHaveText('9.9.2 is available')
   expect(await checks(page)).toEqual([true, true])
+})
+
+test('opening Updates with automatic checks off only checks after Check now (#636 review)', async ({ page }) => {
+  await start(page)
+  await page.evaluate(async () => {
+    await (window as any).__store.getState().setUpdateAuto(false)
+    ;(window as any).__mock.registryVersion = '9.9.2'
+  })
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('settings-tab-updates').click()
+  await expect(page.getByTestId('update-check-now')).toBeVisible()
+  expect(await checks(page)).toEqual([])
+  await focus(page)
+  expect(await checks(page)).toEqual([])
+  await page.getByTestId('update-check-now').click()
+  await expect(page.getByTestId('update-state')).toHaveText('9.9.2 is available')
+  expect(await checks(page)).toEqual([true])
+})
+
+test('opening Updates and returning to the window preserve a failed install (#636 review)', async ({ page }) => {
+  await start(page)
+  await page.evaluate(async () => {
+    const m = (window as any).__mock
+    m.offerUpdate('9.9.1')
+    m.updateFails = 'EACCES: install denied'
+    await (window as any).__store.getState().applyUpdate()
+  })
+  await expect(page.getByTestId('update-line')).toHaveText('Update failed')
+  await page.evaluate(() => { (window as any).__mock.registryVersion = '9.9.2' })
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('settings-tab-updates').click()
+  await expect(page.getByTestId('update-state')).toHaveText('Update failed: EACCES: install denied')
+  await page.clock.setFixedTime(Date.now() + 3600_001)
+  await focus(page)
+  await expect(page.getByTestId('update-state')).toHaveText('Update failed: EACCES: install denied')
+  await page.evaluate(() => { (window as any).__mock.updateFails = null })
+  await page.getByTestId('update-apply').click()
+  await expect(page.getByTestId('update-state')).toContainText('Installed 9.9.2')
 })
 
 test('focus checks sweep the one-hour boundary and throttle failures and paired visibility events (#635)', async ({ page }) => {
@@ -112,6 +149,7 @@ test('one install and apply reaches the newest release after the banner became s
     m.offerUpdate('9.9.1')
     m.registryVersion = '9.9.2'
   })
+  await page.clock.setFixedTime(Date.now() + 60_001)
   await expect(page.getByTestId('update-line')).toHaveText('Update to 9.9.1')
   await page.getByTestId('update-line').click()
   await expect(page.getByTestId('update-line')).toContainText('9.9.2 installed')

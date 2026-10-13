@@ -1169,21 +1169,23 @@ door, the host's switch to the new copy, and the old version's folder removed on
 The design is in [architecture.md](architecture.md) §4.5. The host's part is the install and one rule.
 
 **Checking (#635).** Startup and the six-hour background interval remain unchanged. Opening Settings → Updates
-forces a check, even with automatic checking off. With automatic checking on, focus/visibility restoration also
-checks when the last successful check is more than an hour old; attempts are throttled for an hour, including
-failures and paired focus/visibility events. Checks leave an active install or pending apply alone.
+forces a check only with automatic checking on; with it off, use Check now. Focus/visibility restoration also
+checks only with automatic checking on, when the last successful check is more than an hour old; attempts are
+throttled for an hour, including failures and paired focus/visibility events. Checks leave an active install or pending apply alone. A failed install
+keeps its phase and error throughout later checks, until the next install attempt.
 
 **The install** (`updates.ts`). Before installing, `updates.apply` refreshes the registry with the forced eight-second
-deadline, including automatic installs. It pins the version returned now, not an hours-old `latest`. If the refresh
-fails, it installs the stored version and keeps a fallback notice in the status during and after installation. A tag
-that is no newer than the running build cancels the install. Lookup, npm retries and bundle replacement are one busy
-operation; concurrent checks/clicks cannot replace its target or start a second install. It runs `npm i -g --prefer-online centralu@<v>` and, when the installed app exists,
+deadline unless a successful check is less than one minute old, avoiding a second request when a check starts
+auto-apply. It pins the higher of the stored and freshly returned versions, always newer than the running build:
+an old registry edge cannot undo a newer release already seen. Regular checks preserve that highest version too.
+If the refresh fails, it installs the stored version and keeps a fallback notice during and after installation.
+Lookup, npm retries and bundle replacement are one busy operation; concurrent checks/clicks cannot replace its target or start a second install. It runs `npm i -g --prefer-online centralu@<v>` and, when the installed app exists,
 `centralu install`, then reports `restart_required`; it never restarts anything. With `autoApply` on ("Apply updates
 automatically when idle", `updates.setAutoApply`, saved as `updates.autoApply` in the store's app settings, off by
 default) a check that finds a newer version starts the same install by itself, and turning the setting on with a newer
 version already known starts it at once. Not over an install under way or one already finished: a check after it leaves
-`restart_required` alone, so it installs once. A failed install is retried by the next check that finds the version
-again (normally six hours later, or through a requested/focus check).
+`restart_required` alone, so it installs once. A failed install stays visible until another install attempt;
+a background or requested check does not retry it or erase its error.
 
 On host shutdown, pending lookups and npm waits cannot start another command or publish stale completion. A command
 already launched is not undone. After reconnect or a host swap, the window re-reads status without replaying the

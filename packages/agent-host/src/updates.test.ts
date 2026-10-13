@@ -30,6 +30,7 @@ function make(
   const saved: boolean[] = []
   let registry = opts.registry ?? null
   let fetches = 0
+  let now = 1000
   const svc = new UpdateService((s) => published.push(s), {
     fetchLatest: async (timeoutMs): Promise<LatestResult> => {
       fetches++
@@ -44,13 +45,14 @@ function make(
     readAutoApply: () => opts.autoApply ?? false,
     writeAutoApply: (enabled) => saved.push(enabled),
     wait: opts.wait,
-    now: opts.now,
+    now: opts.now ?? (() => now),
   })
   return {
     svc,
     published,
     calls,
     saved,
+    elapse: (ms: number) => { now += ms },
     get fetches() {
       return fetches
     },
@@ -76,6 +78,7 @@ describe('UpdateService', () => {
     it.each([false, true])('installs the newest of two releases in one pass (auto-apply=%s)', async (automatic) => {
       const h = make({ registry: '9999.0.1' })
       await h.svc.check(true)
+      h.elapse(60_000)
       h.offer('9999.0.2')
       if (automatic) h.svc.setAutoApply(true)
       else h.svc.apply()
@@ -88,15 +91,23 @@ describe('UpdateService', () => {
       expect(h.calls).toHaveLength(1)
     })
 
-    it('refreshes with the forced deadline even when a background check starts auto-apply', async () => {
-      const fetchLatest = vi.fn()
-        .mockResolvedValueOnce({ ok: true, version: '9999.0.1' })
-        .mockResolvedValue({ ok: true, version: '9999.0.2' })
+    it('reuses the successful check that just triggered auto-apply (#636 review)', async () => {
+      const fetchLatest = vi.fn().mockResolvedValue({ ok: true, version: '9999.0.2' })
       const h = make({ autoApply: true, fetchLatest })
       await h.svc.check(false)
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
-      expect(fetchLatest.mock.calls).toEqual([[3000], [8000]])
+      expect(fetchLatest.mock.calls).toEqual([[3000]])
       expect(h.calls[0]?.[1]).toContain('centralu@9999.0.2')
+    })
+
+    it.each([0, 1, 30_000, 59_999, 60_000, 60_001, 120_000])('refreshes only when the successful check is at least one minute old: %s ms (#636 review)', async (age) => {
+      const fetchLatest = vi.fn().mockResolvedValue({ ok: true, version: '9999.0.2' })
+      const h = make({ fetchLatest })
+      await h.svc.check(false)
+      h.elapse(age)
+      h.svc.apply()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+      expect(fetchLatest.mock.calls).toEqual(age < 60_000 ? [[3000]] : [[3000], [8000]])
     })
 
     it('falls back visibly to the stored version when the refresh fails, including after npm retries', async () => {
@@ -105,6 +116,7 @@ describe('UpdateService', () => {
         if (++attempts === 1) throw new Error('ETARGET')
       }, wait: async () => {} })
       await h.svc.check(true)
+      h.elapse(60_000)
       h.offer(null)
       h.svc.apply()
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
@@ -115,14 +127,46 @@ describe('UpdateService', () => {
       expect(h.published).toContainEqual(expect.objectContaining({ phase: 'updating', error: notice }))
     })
 
-    it('does not install a withdrawn release when the fresh tag is no newer than the running build', async () => {
+    it.each(['9999.0.0', APP_VERSION, '0.0.1'])('keeps the stored newer release when a stale edge returns %s (#636 review)', async (fresh) => {
+      const h = make({ registry: '9999.0.1' })
+      await h.svc.check(true)
+      h.elapse(60_000)
+      h.offer(fresh)
+      h.svc.apply()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+      expect(h.calls).toEqual([['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.1']]])
+      expect(h.svc.current()).toMatchObject({ latest: '9999.0.1', newer: true })
+    })
+
+    it('a Settings check cannot discard the newer release before an install (#636 review)', async () => {
       const h = make({ registry: '9999.0.1' })
       await h.svc.check(true)
       h.offer(APP_VERSION)
+      await h.svc.check(true)
+      expect(h.svc.current()).toMatchObject({ latest: '9999.0.1', newer: true })
       h.svc.apply()
-      await vi.waitFor(() => expect(h.svc.current().phase).toBe('idle'))
-      expect(h.svc.current()).toMatchObject({ latest: APP_VERSION, newer: false })
-      expect(h.calls).toEqual([])
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+      expect(h.calls[0]?.[1]).toContain('centralu@9999.0.1')
+    })
+
+    it.each(['9999.0.2', null])('keeps install errors through a forced check answering %s until another install (#636 review)', async (registry) => {
+      let fails = true
+      const h = make({ registry: '9999.0.1', run: async () => {
+        if (fails) throw new Error('EACCES: install denied')
+      } })
+      await h.svc.check(true)
+      h.svc.apply()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('failed'))
+      // Every status, including the in-flight one, must keep the failure visible.
+      h.offer(registry)
+      const original = h.svc.current()
+      const before = h.published.length
+      await h.svc.check(true)
+      expect(h.published.slice(before).every((s) => s.phase === 'failed' && s.error === original.error)).toBe(true)
+      expect(h.svc.current()).toMatchObject({ phase: 'failed', error: original.error })
+      fails = false
+      expect(h.svc.apply()).toMatchObject({ phase: 'updating', error: null })
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
     })
 
     it('serializes an older check, a fresh lookup and duplicate clicks without changing an active target', async () => {
@@ -134,6 +178,7 @@ describe('UpdateService', () => {
         .mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise)
       const h = make({ fetchLatest, run: () => npm.promise })
       await h.svc.check(true)
+      h.elapse(60_000)
       const checking = h.svc.check(true)
       h.svc.apply()
       h.svc.apply()
@@ -165,6 +210,7 @@ describe('UpdateService', () => {
         if (stage === 'retry' && ++commands === 1) throw new Error('ETARGET')
       }, wait: () => gate.promise })
       await h.svc.check(true)
+      h.elapse(60_000)
       h.svc.apply()
       await vi.waitFor(() => {
         if (stage === 'lookup') expect(fetching).toBe(2)
@@ -193,6 +239,7 @@ describe('UpdateService', () => {
       now++
       await h.svc.check(false)
       expect(h.fetches).toBe(2)
+      now += 60_000
       h.offer('9999.0.2')
       h.svc.apply()
       await h.svc.setAuto(false)

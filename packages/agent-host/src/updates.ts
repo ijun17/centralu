@@ -45,6 +45,8 @@ const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000
  */
 const SCHEDULED_TIMEOUT_MS = 3_000
 const FORCED_TIMEOUT_MS = 8_000
+/** Reuse a check that just found the release, especially when it starts auto-apply. */
+const INSTALL_CHECK_MAX_AGE_MS = 60_000
 
 /** `npm i -g` on a cold cache is slow, but not this slow — past here something is stuck */
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000
@@ -331,9 +333,11 @@ export class UpdateService {
      */
     if (this.status.phase === 'updating' || this.status.phase === 'waiting_for_npm' || this.status.phase === 'restart_required') return this.current()
 
-    this.status = { ...this.status, phase: 'checking' }
+    // Refreshing version metadata must not dismiss an install failure (including while fetching).
+    const failure = this.status.phase === 'failed' ? { error: this.status.error } : null
+    if (!failure) this.status = { ...this.status, phase: 'checking' }
     this.emit()
-    this.inFlight = this.runCheck(force)
+    this.inFlight = this.runCheck(force, failure)
     try {
       return await this.inFlight
     } finally {
@@ -341,7 +345,7 @@ export class UpdateService {
     }
   }
 
-  private async runCheck(force: boolean): Promise<UpdateStatus> {
+  private async runCheck(force: boolean, failure: Pick<UpdateStatus, 'error'> | null): Promise<UpdateStatus> {
     const res = await this.deps.fetchLatest(force ? FORCED_TIMEOUT_MS : SCHEDULED_TIMEOUT_MS)
     // An install may have started while this older check was waiting. Its fresh lookup owns the target.
     if (this.stopped || this.installing) return this.current()
@@ -353,16 +357,17 @@ export class UpdateService {
        * it had just been told it was up to date — the check would erase its own finding
        * every time the network blinked.
        */
-      this.status = { ...this.status, phase: 'idle', error: res.reason }
+      this.status = { ...this.status, phase: failure ? 'failed' : 'idle', error: failure ? failure.error : res.reason }
       this.emit()
       return this.current()
     }
+    const latest = this.newestSeen(res.version)
     this.status = {
       ...this.status,
-      latest: res.version,
-      newer: isNewerVersion(res.version, this.status.current),
-      phase: 'idle',
-      error: null,
+      latest,
+      newer: isNewerVersion(latest, this.status.current),
+      phase: failure ? 'failed' : 'idle',
+      error: failure?.error ?? null,
       checkedAt: this.deps.now(),
     }
     this.emit()
@@ -404,17 +409,16 @@ export class UpdateService {
       // Keep the install busy throughout: checks and another click must not replace its target.
       await this.inFlight
       if (this.stopped) return
-      const fresh = await this.deps.fetchLatest(FORCED_TIMEOUT_MS)
-      if (this.stopped) return
-      if (fresh.ok) {
-        version = fresh.version
-        this.status = { ...this.status, latest: version, newer: isNewerVersion(version, this.status.current), checkedAt: this.deps.now() }
-        if (!this.status.newer) {
-          this.status = { ...this.status, phase: 'idle', error: null }
-          return
+      const age = this.status.checkedAt === null ? Infinity : this.deps.now() - this.status.checkedAt
+      if (age < 0 || age >= INSTALL_CHECK_MAX_AGE_MS) {
+        const fresh = await this.deps.fetchLatest(FORCED_TIMEOUT_MS)
+        if (this.stopped) return
+        if (fresh.ok) {
+          version = this.newestSeen(fresh.version)
+          this.status = { ...this.status, latest: version, newer: isNewerVersion(version, this.status.current), checkedAt: this.deps.now() }
+        } else {
+          this.status = { ...this.status, error: `Could not refresh latest (${fresh.reason}); using previously checked ${version}.` }
         }
-      } else {
-        this.status = { ...this.status, error: `Could not refresh latest (${fresh.reason}); using previously checked ${version}.` }
       }
       this.emit()
       /*
@@ -499,6 +503,12 @@ export class UpdateService {
         this.emit()
       }
     }
+  }
+
+  /** A stale registry edge must not undo a newer release already seen by this host. */
+  private newestSeen(version: string): string {
+    const stored = this.status.latest
+    return stored && isNewerVersion(stored, version) ? stored : version
   }
 
   /** The scheduled check is due; a `force: false` caller in between reuses the last answer */

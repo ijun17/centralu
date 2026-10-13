@@ -2807,13 +2807,14 @@ export class MockPlatform implements Platform {
       return { ...this.updateStatus }
     }
     // Same target refresh as UpdateService, without a network or an npm command.
-    const fresh = this.registryVersion
-    const error = fresh === null ? `Could not refresh latest; using previously checked ${latest}.` : null
-    if (fresh !== null) {
-      this.setUpdateStatus({ latest: fresh, newer: isNewerVersion(fresh, this.updateStatus.current), checkedAt: this.now() })
-      if (!this.updateStatus.newer) {
-        this.setUpdateStatus({ phase: 'idle', error: null })
-        return { ...this.updateStatus }
+    const age = this.updateStatus.checkedAt === null ? Infinity : this.now() - this.updateStatus.checkedAt
+    let error: string | null = null
+    if (age < 0 || age >= 60_000) {
+      const fresh = this.registryVersion
+      if (fresh === null) error = `Could not refresh latest; using previously checked ${latest}.`
+      else {
+        const target = isNewerVersion(latest, fresh) ? latest : fresh
+        this.setUpdateStatus({ latest: target, newer: isNewerVersion(target, this.updateStatus.current), checkedAt: this.now() })
       }
     }
     this.setUpdateStatus({ phase: 'updating', error })
@@ -2861,16 +2862,19 @@ export class MockPlatform implements Platform {
   }
 
   private runUpdateCheck(): UpdateStatus {
+    const failure = this.updateStatus.phase === 'failed' ? { error: this.updateStatus.error } : null
     if (this.registryVersion === null) {
       // Could not reach it — leaves what was found out last time untouched (the same rule as the real thing)
-      this.setUpdateStatus({ phase: 'idle', error: 'Could not reach the registry — check the network' })
+      this.setUpdateStatus({ phase: failure ? 'failed' : 'idle', error: failure ? failure.error : 'Could not reach the registry — check the network' })
       return { ...this.updateStatus }
     }
+    const stored = this.updateStatus.latest
+    const latest = stored && isNewerVersion(stored, this.registryVersion) ? stored : this.registryVersion
     this.setUpdateStatus({
-      latest: this.registryVersion,
-      newer: isNewerVersion(this.registryVersion, this.updateStatus.current),
-      phase: 'idle',
-      error: null,
+      latest,
+      newer: isNewerVersion(latest, this.updateStatus.current),
+      phase: failure ? 'failed' : 'idle',
+      error: failure?.error ?? null,
       checkedAt: this.now(),
     })
     this.installIfAutomatic()
