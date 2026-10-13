@@ -5,6 +5,7 @@
  * the assignment table and rebuilding the allocator from scratch.
  */
 import { afterEach, describe, expect, it } from 'vitest'
+import { randomInt } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { OriginPorts, type PortBook, type PortBookStore } from './origin-ports.js'
@@ -27,16 +28,38 @@ function diskStore(): PortBookStore & { raw: string | null } {
   }
 }
 
-/** n ports that are currently free. Gets them from the OS and releases them immediately */
+// Below the normal Linux/macOS/Windows ephemeral ranges and the production origin range.
+// listen(0) elsewhere must not claim a candidate between its probe and the test's bind.
+const CANDIDATE_RANGE = [10000, 19999] as const
+
+/** Probe distinct candidates, holding them until the whole set has been collected. */
 async function freePorts(n: number): Promise<number[]> {
   const out: number[] = []
-  for (let i = 0; i < n; i++) {
-    const s = createServer()
-    await new Promise<void>((r) => s.listen(0, '127.0.0.1', () => r()))
-    out.push((s.address() as AddressInfo).port)
-    await new Promise<void>((r) => s.close(() => r()))
+  const held: Server[] = []
+  const [lo, hi] = CANDIDATE_RANGE
+  const size = hi - lo + 1
+  const start = randomInt(size)
+  try {
+    for (let i = 0; i < size && out.length < n; i++) {
+      const port = lo + ((start + i) % size)
+      const s = createServer()
+      try {
+        await new Promise<void>((resolve, reject) => {
+          s.once('error', reject)
+          s.listen(port, '127.0.0.1', () => resolve())
+        })
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'EADDRINUSE') continue
+        throw e
+      }
+      held.push(s)
+      out.push(port)
+    }
+    if (out.length !== n) throw new Error(`Could not find ${n} free test ports in ${lo}-${hi}`)
+    return out
+  } finally {
+    await Promise.all(held.map(stop))
   }
-  return out
 }
 
 /** Hands out candidates in a fixed order. Once exhausted, gives an out-of-range value so it fails */
@@ -59,6 +82,17 @@ async function stop(server: Server) {
 }
 
 describe('OriginPorts', () => {
+  it('uses distinct candidate ports outside the ephemeral range that can all be rebound', async () => {
+    const candidates = await freePorts(3)
+    expect(new Set(candidates).size).toBe(3)
+    const ports = new OriginPorts(diskStore(), { range: RANGE, pick: sequence(candidates), log: noop })
+    for (const port of candidates) {
+      expect(port).toBeGreaterThanOrEqual(CANDIDATE_RANGE[0])
+      expect(port).toBeLessThanOrEqual(CANDIDATE_RANGE[1])
+      expect((await serve(ports, `app-${port}`)).port).toBe(port)
+    }
+  })
+
   it('the same key gets the same port even after a restart, and a free port belonging to someone else is not taken', async () => {
     const [pA, pB, pC] = await freePorts(3)
     const disk = diskStore()
