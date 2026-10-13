@@ -42,12 +42,16 @@ export async function waitForChecks({ repo, ref, number, timeoutMs = DEFAULT_TIM
       }
     }
   }
-  const runsAt = async (query) => (await request(['api', `repos/${repo}/actions/runs?${query}&per_page=100`, '--paginate', '--slurp']))
+  const runsForHead = async (sha) => (await request(['api', `repos/${repo}/actions/runs?head_sha=${sha}&per_page=100`, '--paginate', '--slurp']))
     .flatMap((page) => page.workflow_runs ?? [])
   const cancellation = async (workflows, sha) => {
     for (const run of workflows.filter(cancelled)) {
       if (!run.head_branch || !run.workflow_id || !run.run_number) continue
-      const newer = await runsAt(`branch=${encodeURIComponent(run.head_branch)}`)
+      // Runs are newest first; supersession needs only the recent runs of this workflow,
+      // not every run ever made on a long-lived branch such as main.
+      const { workflow_runs: newer = [] } = await request([
+        'api', `repos/${repo}/actions/workflows/${run.workflow_id}/runs?branch=${encodeURIComponent(run.head_branch)}&per_page=20`,
+      ])
       if (newer.some((candidate) => candidate.workflow_id === run.workflow_id
         && candidate.event === run.event && candidate.head_branch === run.head_branch
         && candidate.head_repository?.id === run.head_repository?.id
@@ -70,7 +74,7 @@ export async function waitForChecks({ repo, ref, number, timeoutMs = DEFAULT_TIM
         registrationSha = sha
         registrationStarted = now()
       }
-      const workflows = await runsAt(`head_sha=${sha}`)
+      const workflows = await runsForHead(sha)
       const blocked = workflows.find(needsAction)
       if (blocked) return finish(3, `approval/action required: ${blocked.name ?? 'workflow'} (${blocked.status === 'completed' ? blocked.conclusion : blocked.status})${blocked.html_url ? ` — ${blocked.html_url}` : ''}.`)
       // Read checks only after workflows settle, except when no workflow has registered yet.

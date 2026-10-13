@@ -111,9 +111,27 @@ describe('wait-checks terminal states and deadline', () => {
 })
 
 describe('cancelled workflow runs', () => {
+  it('looks up supersession with one unpaginated page of the workflow, even on a branch with thousands of runs', async () => {
+    const r = await run(({ args }) => {
+      if (workflows(args)) return [{ workflow_runs: [CANCELLED] }]
+      if (args[1]?.includes('/runs?branch=')) {
+        const page = { total_count: 10_000, workflow_runs: [{ ...CANCELLED, run_number: 2, head_sha: 'def5678' }] }
+        return args.includes('--slurp') ? [page] : page
+      }
+    })
+    expect(r.calls.filter((c) => c.args[1]?.includes('branch='))).toEqual([
+      expect.objectContaining({ args: ['api', 'repos/o/r/actions/workflows/44/runs?branch=fix%2Fx&per_page=20'] }),
+    ])
+    expect(r.code).toBe(5)
+    expect(r.message).toContain('superseded by a newer push (cancelled)')
+    expect(r.calls.filter((c) => workflows(c.args))).toEqual([
+      expect.objectContaining({ args: ['api', `repos/o/r/actions/runs?head_sha=${SHA}&per_page=100`, '--paginate', '--slurp'] }),
+    ])
+  })
+
   it.each([true, false])('distinguishes a newer push from an unconfirmed cancellation (newer: %s)', async (newer) => {
     const r = await run(({ args }) => workflows(args) ? [{ workflow_runs: [CANCELLED] }]
-      : args[1]?.includes('/actions/runs?branch=') ? [{ workflow_runs: newer ? [{ ...CANCELLED, run_number: 2, head_sha: 'def5678' }] : [] }]
+      : args[1]?.includes('/actions/workflows/44/runs?branch=') ? { workflow_runs: newer ? [{ ...CANCELLED, run_number: 2, head_sha: 'def5678' }] : [] }
         : checks(args) ? { check_runs: [{ status: 'completed', conclusion: 'cancelled' }] } : undefined)
     expect(r.code).toBe(5)
     expect(r.message).toContain(newer ? 'superseded by a newer push (cancelled)' : 'cancelled (no newer push confirmed)')
@@ -123,7 +141,7 @@ describe('cancelled workflow runs', () => {
 
   it('detects a cancelled workflow even if its only registered check passed', async () => {
     const r = await run(({ args }) => workflows(args) ? [{ workflow_runs: [CANCELLED] }]
-      : args[1]?.includes('/actions/runs?branch=') ? [{ workflow_runs: [{ ...CANCELLED, run_number: 2, head_sha: 'def5678' }] }] : undefined)
+      : args[1]?.includes('/actions/workflows/44/runs?branch=') ? { workflow_runs: [{ ...CANCELLED, run_number: 2, head_sha: 'def5678' }] } : undefined)
     expect(r.code).toBe(5)
     expect(r.message).toContain('superseded by a newer push (cancelled)')
   })
@@ -133,7 +151,7 @@ describe('cancelled workflow runs', () => {
     { workflow_id: 45 }, { head_branch: 'other' }, { head_repository: { id: 2 } },
   ])('does not infer supersession from an unrelated run: %j', async (different) => {
     const r = await run(({ args }) => workflows(args) ? [{ workflow_runs: [CANCELLED] }]
-      : args[1]?.includes('/actions/runs?branch=') ? [{ workflow_runs: [{ ...CANCELLED, run_number: 2, head_sha: 'def5678', ...different }] }] : undefined)
+      : args[1]?.includes('/actions/workflows/44/runs?branch=') ? { workflow_runs: [{ ...CANCELLED, run_number: 2, head_sha: 'def5678', ...different }] } : undefined)
     expect(r.code).toBe(5)
     expect(r.message).not.toContain('superseded')
   })
