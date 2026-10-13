@@ -62,6 +62,8 @@ The layer rules are enforced by lint (`docs/architecture.md` §2). Where things 
 
 ## How work is done
 
+Before opening a PR, use the [self-check in CONTRIBUTING.md](CONTRIBUTING.md#before-opening-a-pull-request).
+
 [CONTRIBUTING.md](CONTRIBUTING.md) has the rest: tests that must fail without their fix,
 commits ([docs/commit-conventions.md](docs/commit-conventions.md)), the pull request template
 and its **Not exercised** field, and updating documents in the same pull request. When your

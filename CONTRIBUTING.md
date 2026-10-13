@@ -226,6 +226,25 @@ pnpm exec tsx scripts/keeper-content-integration.mts   # a keeper from verified 
 PATH, bundling or native modules, run `pnpm app` and check the real `.app` — dev mode
 inherits PATH from your terminal, so it will never reproduce that class of bug.
 
+## Before opening a pull request
+
+Ask these against your change. Put anything you could not check in **Not exercised**.
+
+- **What earlier state could still be there?** The keeper could still report a stale swap
+  ([#621](https://github.com/ijun17/centralu/pull/621)).
+- **What runs at the same time?** A parent's note raced with a child's turn
+  ([#594](https://github.com/ijun17/centralu/pull/594)).
+- **What does it do on Windows, and with the person's own config?** Worktree checks had to
+  account for Windows short paths and git's `log.diffMerges`
+  ([#620](https://github.com/ijun17/centralu/pull/620)).
+- **What literal will go stale (versions, dates, ports)?** A hard-coded test version broke
+  a release bump ([#625](https://github.com/ijun17/centralu/pull/625)).
+- **Can it wait forever?** A script waited on workflows that might never run
+  ([#622](https://github.com/ijun17/centralu/pull/622)).
+- **Does the test fail for the right reason without the fix?** A helper-only test did not
+  support that claim ([#619](https://github.com/ijun17/centralu/pull/619)); use the
+  [test guidance above](#what-has-to-pass-before-you-send-it).
+
 ## Commits and pull requests
 
 - Commit messages follow [docs/commit-conventions.md](docs/commit-conventions.md):

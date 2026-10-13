@@ -28,6 +28,7 @@
 ## Not exercised
 
 <!--
+  Use the self-check in CONTRIBUTING.md#before-opening-a-pull-request to find gaps.
   Surfaces this change touches that you did not actually run. The packaged .app,
   Windows or Linux, live model sessions, a second physical machine, the release
   workflow, a cold install.
