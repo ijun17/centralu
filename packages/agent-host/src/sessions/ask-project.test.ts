@@ -144,6 +144,21 @@ describe('asking another project', () => {
     expect(await call).toMatchObject({ ok: true, sessionId: targetSession })
   })
 
+  it("never names the person's blank session after the incoming task; the person's own first words still do (#646)", async () => {
+    const caller = await w.callerSession()
+    const blank = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })
+    expect(blank).toMatchObject({ name: 'New session', autoNamed: true })
+    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    const call = w.mgr.askProject(caller, { project: w.target.id, session: blank.id, task: 'export the sprites' })
+    await w.until(() => handleOf(blank.id)!.sent.length === 1)
+    expect(w.mgr.listSessions().find((s) => s.id === blank.id)).toMatchObject({ name: 'New session', autoNamed: true })
+    expect(w.events.filter((e) => e.type === 'session_title' && e.sessionId === blank.id)).toEqual([])
+    handleOf(blank.id)!.answer('exported')
+    expect(await call).toMatchObject({ ok: true, answer: 'exported' })
+    await w.mgr.send(blank.id, 'now the tiles')
+    expect(w.mgr.listSessions().find((s) => s.id === blank.id)!.name).toBe('now the tiles')
+  })
+
   it.each(['claude', 'codex'] as const)('%s delivers a busy session a visible mid-turn note and waits for its receipt', async (tool) => {
     await w.mgr.switchTool(targetSession, tool)
     const caller = await w.callerSession()

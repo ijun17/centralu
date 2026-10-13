@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 48, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 49, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -155,6 +155,11 @@ erDiagram
     TEXT worktree_setup
     TEXT worktree_manager
     INTEGER trusted
+  }
+  report_marks {
+    TEXT session_id PK
+    TEXT caller_session_id
+    INTEGER marked_at
   }
   sessions {
     TEXT id PK
@@ -426,6 +431,16 @@ Added in schema.sql.
 | `worktree_setup` | TEXT | yes |  |  | v23 |
 | `worktree_manager` | TEXT | yes |  |  | v27 |
 | `trusted` | INTEGER | no | `0` |  | v33 |
+
+### `report_marks`
+
+Added in v49.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `session_id` | TEXT | yes |  | PK | v49 |
+| `caller_session_id` | TEXT | no |  |  | v49 |
+| `marked_at` | INTEGER | no |  |  | v49 |
 
 ### `sessions`
 

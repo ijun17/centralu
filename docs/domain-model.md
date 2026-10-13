@@ -66,6 +66,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Question | A choice the agent asks the person to make (AskUserQuestion), answered with `agents.answerQuestion`. Any number may wait | `Question`, `pendingQuestions`, `entities.ts` | prompt |
 | Project consent | A remembered "always" letting one project reach another: `delegate` (`ask_project`) or `apps` (attach its shared apps); or, from a project to itself, `agents` (its sessions may start agents, #561) | `ProjectConsent`, `entities.ts`; `project_consents` (store v44) | |
 | Read grant | A path inside the target project that a delegated answer named, readable by the caller while this host runs | `readGrants`, `ask-project.ts` | |
+| Report mark | "You will be told when it ends": a session that owes a report of its turn's end to the session that gave it work (`start_agent` past its wait, `send_to_session` with `reportBack`). Cleared once reported; survives a host swap (#646) | `awaitingReport`, `manager.ts`; `report_marks` (store v49) | |
 | Unread | Whether there is content past what the person last saw (`lastReadSeq`). Independent of state | `SessionInfo.lastReadSeq` | |
 
 ### 1.3 Apps
@@ -271,6 +272,7 @@ Where it is stored:
 - `subagent_messages`: subagent steps, keyed by the tool call that launched them.
 - `approval_rules`: "always allow" command rules.
 - `project_consents`: one project's remembered consent to reach another.
+- `report_marks`: the report a session owes the session that gave it work, until it is delivered.
 
 ### 2.3 Apps
 

@@ -211,6 +211,55 @@ describe("auto observes another caller's delegation without consuming it", () =>
     },
   )
 
+  /**
+   * An auto session's mid-turn note to a session another project is asking (#646). The note rides on a reader of its
+   * own: the asking session still reads its own answer, not the reply to the note, and a refused note fails nothing
+   * of the asking session's.
+   */
+  const askedFromOtherProject = async () => {
+    w.mgr.setProjectTrusted(w.target.id, true)
+    const owner = await session('normal', w.target)
+    const observer = await session('auto')
+    w.store.setProjectConsent(w.target.id, w.caller.id, 'delegate')
+    const child = await session('normal')
+    const asking = w.mgr.askProject(owner, { project: w.caller.id, session: child, task: 'other project work' })
+    await w.until(() => !!handle(child)?.sent.length)
+    const noting = await w.mgr.agentSession(observer, { sessionId: child, action: 'send', text: 'observer note' })
+    expect(noting).toMatchObject({ ok: true, state: 'working', reported: false })
+    expect(handle(child).sent).toHaveLength(2)
+    expect(handle(child).receipts).toHaveLength(1)
+    return { owner, observer, child, asking }
+  }
+
+  it("an observer's note never holds the owner's answer back behind the reply to the note", async () => {
+    const { owner, observer, child, asking } = await askedFromOtherProject()
+    let answered = false
+    void asking.then(() => { answered = true })
+    // The owner's turn ends; the note's receipt is still open
+    handle(child).answer('owner answer', false)
+    expect(await asking).toMatchObject({ ok: true, state: 'done', answer: 'owner answer' })
+    expect(answered).toBe(true)
+    expect(handle(child).receipts).toHaveLength(1)
+    handle(child).answer('reply to the note')
+    expect(handle(child).receipts).toEqual([])
+    expect(handle(observer).sent).toEqual([])
+    expect(handle(owner).sent).toEqual([])
+  })
+
+  it("a refused note fails neither the owner's delegation nor its wait", async () => {
+    const { owner, observer, child, asking } = await askedFromOtherProject()
+    let settled = false
+    void asking.then(() => { settled = true })
+    for (const receipt of handle(child).receipts.splice(0)) receipt.reject(new Error('the note was refused'))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(settled).toBe(false)
+    handle(child).answer('owner answer')
+    expect(await asking).toMatchObject({ ok: true, state: 'done', answer: 'owner answer' })
+    expect(handle(child).interrupted).toBe(0)
+    expect(handle(observer).sent).toEqual([])
+    expect(handle(owner).sent).toEqual([])
+  })
+
   it.each(['safe', 'normal', 'auto'] as const)(
     '%s refuses self wait/stop/delete/send before changing the session',
     async (preset) => {

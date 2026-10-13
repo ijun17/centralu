@@ -502,8 +502,25 @@ export class SessionManager {
   private readonly cacheLedger = new CacheLedger()
   /** Why a session's process is being restarted, for the cache's rebuild cause; taken when the new process comes up */
   private readonly restartReasons = new Map<string, RebuildCause>()
-  /** Session asked to be reported on completion -> orchestrator to notify (removed once notified) */
+  /**
+   * Session asked to be reported on completion -> orchestrator to notify (removed once notified). Mirrored in the
+   * store's `report_marks` (v49, #646) through `markReport` / `clearReport`, so a host swap (#280) does not lose
+   * "you will be told when it ends": the constructor reads the marks back for the sessions the keeper kept.
+   */
   private awaitingReport = new Map<string, string>()
+  /**
+   * `detachAll` is handing the sessions to the next host (#280): the waits it fails are not the end of their turns,
+   * so no report goes out and the marks stay in the store for the host that sees those turns end (#646).
+   */
+  private handingOver = false
+  private markReport(sessionId: string, callerId: string): void {
+    this.awaitingReport.set(sessionId, callerId)
+    this.store.setReportMark(sessionId, callerId)
+  }
+  private clearReport(sessionId: string): void {
+    if (!this.awaitingReport.delete(sessionId)) return
+    this.store.clearReportMark(sessionId)
+  }
   /**
    * Session currently being resumed -> its promise.
    *
@@ -699,6 +716,16 @@ export class SessionManager {
         console.error(`[agent-host] stale state reset: ${s.id.slice(0, 8)} ${s.state} -> idle`)
         store.upsertSession(fixed)
       }
+    }
+    /*
+     * "You will be told when it ends" survives a host swap (#646): the keeper kept the child's process, so its turn
+     * ends under this host, and the report it owes goes out from here. A mark whose session has no process any more
+     * is about a turn that died with the old host; it is dropped rather than left to name an unrelated later turn.
+     */
+    for (const mark of store.listReportMarks()) {
+      const alive = keeperOpts.keptSessions?.has(mark.sessionId) && this.meta.has(mark.sessionId) && this.meta.has(mark.callerSessionId)
+      if (alive) this.awaitingReport.set(mark.sessionId, mark.callerSessionId)
+      else store.clearReportMark(mark.sessionId)
     }
     /*
      * Sweeps orphaned handoff notes (#106). **Why startup is a safe moment for this**: no handoff is
@@ -2675,7 +2702,9 @@ export class SessionManager {
     this.prCheckedAt.delete(sessionId)
     // Kept until its turn ends, which a deleted session's never does (#392)
     this.appsRestartAfterTurn.delete(sessionId)
-    this.awaitingReport.delete(sessionId)
+    this.clearReport(sessionId)
+    // Nobody is left to tell: the reports its children owed it go too
+    for (const [child, caller] of [...this.awaitingReport]) if (caller === sessionId) this.clearReport(child)
     this.forgetCommits(sessionId)
     this.meta.delete(sessionId)
     await this.store.trashSession(sessionId, {
@@ -3237,6 +3266,13 @@ export class SessionManager {
     if (e.type === 'background_tasks' && e.sessionId) this.applyDeferredRestart(e.sessionId)
   }
 
+  /** A queued note not yet taken, on the delegation's wait or an observer's own reader (#646): the session is not between turns */
+  private inputsHeld(sessionId: string): boolean {
+    if (this.agentRuns.get(sessionId)?.waitingForInputs) return true
+    for (const observer of this.turnObservers.get(sessionId) ?? []) if (observer.waitingForInputs) return true
+    return false
+  }
+
   /**
    * A note receipt follows turn_complete: re-check the same deferred change when the last hold is released.
    *
@@ -3248,7 +3284,7 @@ export class SessionManager {
    */
   private applyDeferredRestart(sessionId: string): void {
     const session = this.meta.get(sessionId)
-    if (!session || inTurn(session.state) || this.deferredRestarts.has(sessionId) || this.agentRuns.get(sessionId)?.waitingForInputs || !this.restartAfterTurn.has(sessionId)) return
+    if (!session || inTurn(session.state) || this.deferredRestarts.has(sessionId) || this.inputsHeld(sessionId) || !this.restartAfterTurn.has(sessionId)) return
     const hold = this.backgroundHolds.get(sessionId)
     const holdExpired = !!hold && Date.now() - hold.since >= BACKGROUND_HOLD_MAX_MS
     if (!holdExpired && !this.safetyRestartPending(sessionId) && this.backgroundRunning(sessionId)) {
@@ -3314,8 +3350,8 @@ export class SessionManager {
    */
   private async reportBackIfAwaited(sessionId: string, ending: NormalizedEvent, answer?: string): Promise<void> {
     const orchestratorId = this.awaitingReport.get(sessionId)
-    if (!orchestratorId) return
-    this.awaitingReport.delete(sessionId)
+    if (!orchestratorId || this.handingOver) return
+    this.clearReport(sessionId)
 
     const target = this.meta.get(sessionId)
     if (!target || !this.meta.has(orchestratorId)) return
@@ -3835,9 +3871,9 @@ export class SessionManager {
     ])
     m.lastSeq = seq
     m.lastReadSeq = seq // Something we sent counts as read
-    // A session's name is never coined from a message an app sent — the name always comes from the person's
-    // own words
-    if (m.autoNamed && m.name === 'New session' && !fromApp) {
+    // A session's name is never coined from a message an app or another session sent (ask_project's task, a
+    // parent's note, an orchestrator's instruction, #646) — the name always comes from the person's own words
+    if (m.autoNamed && m.name === 'New session' && !fromApp && !from) {
       m.name = truncate(text)
       this.emit({ type: 'session_title', sessionId, title: m.name, auto: true })
     }
@@ -4855,7 +4891,7 @@ export class SessionManager {
     if (this.worktreeCleanupBlocks(sessionId)) return { idle: false, reason: 'turn' }
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
-    if (this.agentRuns.get(sessionId)?.waitingForInputs) return { idle: false, reason: 'turn' }
+    if (this.inputsHeld(sessionId)) return { idle: false, reason: 'turn' }
     return sessionIdle(m, {
       running: this.handles.has(sessionId),
       // An adopted process whose work the previous host did not record is as silent as a tool that cannot report (#648)
@@ -5446,10 +5482,10 @@ export class SessionManager {
             name: orch?.name ?? 'Orchestrator',
           })
           // Only comes back when asked for — silent by default
-          if (reportBack) this.awaitingReport.set(sessionId, orchestratorId)
+          if (reportBack) this.markReport(sessionId, orchestratorId)
           // Instructing again without asking for a report clears this orchestrator's earlier request — the
           // new instruction replaces it (#166)
-          else if (this.awaitingReport.get(sessionId) === orchestratorId) this.awaitingReport.delete(sessionId)
+          else if (this.awaitingReport.get(sessionId) === orchestratorId) this.clearReport(sessionId)
           return { ok: true }
         } catch (e) {
           return { ok: false, error: (e as Error).message }
@@ -5980,9 +6016,12 @@ export class SessionManager {
     return d
   }
 
-  /** Read an existing turn without claiming it in delegations, agentRuns or the caller's sleep graph. */
-  private observeTurn(child: SessionInfo, subscribe: boolean): { run: Delegation; release(): void } {
-    const active = this.agentRuns.get(child.id)
+  /**
+   * Read an existing turn without claiming it in delegations, agentRuns or the caller's sleep graph. With `own`, a
+   * fresh reader even while another caller's wait is active: a note's receipt is held on it, never on that wait (#646).
+   */
+  private observeTurn(child: SessionInfo, subscribe: boolean, own = false): { run: Delegation; release(): void } {
+    const active = own ? undefined : this.agentRuns.get(child.id)
     const shared = active && !active.finished ? active : undefined
     const wait = shared ?? new AgentRunWait(() => {}, () => child.name, undefined,
       () => finalAnswer(this.store.loadMessages(child.id, 50)))
@@ -6286,7 +6325,7 @@ export class SessionManager {
           return d ? await this.awaitAgent(key, d, signal, observing) : this.agentAtRest(child)
         case 'stop': {
           if (!d || d.settled) return { ok: false, error: `Nothing you gave "${child.name}" is running.` }
-          if (!observing && this.awaitingReport.get(child.id) === callerId) this.awaitingReport.delete(child.id)
+          if (!observing && this.awaitingReport.get(child.id) === callerId) this.clearReport(child.id)
           d.stop('the session that started it stopped it', observing)
           await d.outcome
           if (!observing) this.delegations.delete(key)
@@ -6324,17 +6363,26 @@ export class SessionManager {
             if (!this.adapters.get(child.tool)?.capabilities.midTurnInput || !this.handles.get(child.id)?.sendTracked) {
               return { ok: false, error: `"${child.name}" cannot take messages while working. Wait for it (action "wait") or stop it first.` }
             }
-            const releaseHold = d.wait.holdInput()
+            /*
+             * An observer's note rides on a wait of its own (#646). Holding, resolving or failing the owner's wait
+             * would hand the owner the reply to this note instead of its answer, or fail its whole delegation when
+             * the note is refused; the owner's wait is never touched from here.
+             */
+            const own = observing ? this.observeTurn(child, true, true) : undefined
+            if (own) void own.run.wait.done.then(own.release, own.release)
+            const wait = own?.run.wait ?? d.wait
+            const releaseHold = wait.holdInput()
             const release = () => {
               releaseHold()
               this.applyDeferredRestart(child.id)
             }
             try {
               await this.deliver(child.id, text, undefined, from, false, undefined, 'inline', (h, input) => {
-                const fail = (e: Error) => { d.wait.fail(e); release() }
+                const fail = (e: Error) => { wait.fail(e); release() }
                 void h.sendTracked!(input, { complete: release, fail }).then(release, fail)
               })
             } catch (e) {
+              if (own) wait.fail(e as Error)
               release()
               return { ok: false, error: `Could not send it: ${(e as Error).message}` }
             }
@@ -6581,7 +6629,7 @@ export class SessionManager {
    * a call is waiting on it by then (`awaitAgent` takes the marker down while it waits)
    */
   private agentWorking(d: Delegation, arm = true, observing = false): ChildRunResult {
-    if (arm && !observing) this.awaitingReport.set(d.sessionId, d.callerId)
+    if (arm && !observing) this.markReport(d.sessionId, d.callerId)
     const notice = d.notice()
     return {
       ok: true,
@@ -6610,7 +6658,7 @@ export class SessionManager {
   /** Waits on a child's turn up to the bound (#561), like `awaitDelegation`, and reads its outcome for the caller */
   private async awaitAgent(key: string, d: Delegation, signal?: AbortSignal, observing = false, boundMs = ASK_WAIT_MS): Promise<ChildRunResult> {
     // Only the owner consumes its report/key/grants. Auto observers have their own bound and cancellation.
-    if (!observing && this.awaitingReport.get(d.sessionId) === d.callerId) this.awaitingReport.delete(d.sessionId)
+    if (!observing && this.awaitingReport.get(d.sessionId) === d.callerId) this.clearReport(d.sessionId)
     const name = () => this.meta.get(d.sessionId)?.name ?? d.sessionId
     let timer: ReturnType<typeof setTimeout> | undefined
     let onAbort: (() => void) | undefined
@@ -7617,6 +7665,8 @@ export class SessionManager {
   async detachAll(): Promise<void> {
     this.watchers.close()
     this.appsHub?.rt.attachBrokerHost(null)
+    // The kept turns go on under the next host, which owes their reports (#646); failing the waits here must not report
+    this.handingOver = true
     for (const run of [...this.agentRuns.values()]) run.fail(new Error('Centralu is restarting'))
     for (const readers of this.turnObservers.values()) for (const observer of readers) observer.fail(new Error('Centralu is restarting'))
     for (const ask of [...this.hostAsks.values()]) ask.resolve(null)

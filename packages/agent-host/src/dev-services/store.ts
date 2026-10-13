@@ -1797,6 +1797,37 @@ export class Store {
           `)
         },
       },
+      {
+        to: 49,
+        breaksOlderReaders: false,
+        /**
+         * "You will be told when it ends" (#646) — `report_marks`, one row per session that owes a report to the session
+         * that gave it work (`start_agent` with `wait: false` or past the bound, `send_to_session` with `reportBack`).
+         *
+         *   session_id         the session whose turn end is reported
+         *   caller_session_id  the session told about it
+         *   marked_at          when the report was asked for
+         *
+         * The mark used to live in the host's memory alone (`SessionManager.awaitingReport`), so a host swap (#280) lost
+         * it: the keeper kept the child's process, it finished under the new host, and the parent was never woken. The
+         * new host reads the rows at startup and keeps the marks of the sessions the keeper kept; a mark whose session
+         * has no process any more is dropped, since the turn it was about died with the old host.
+         *
+         * Not foreign keys: a caller in the trash still has its mark cleared by the manager, and purging either session
+         * deletes the row (`purgeSession`).
+         *
+         * **Expand only (#292's rule).** A new table; an older host never reads it.
+         */
+        run: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS report_marks (
+              session_id        TEXT PRIMARY KEY,
+              caller_session_id TEXT NOT NULL,
+              marked_at         INTEGER NOT NULL
+            )
+          `)
+        },
+      },
     ]
   }
 
@@ -2747,6 +2778,7 @@ export class Store {
         .prepare(`DELETE FROM app_run_failures WHERE run_id IN (SELECT id FROM app_runs WHERE session_id = ? OR caller_session_id = ?)`)
         .run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM app_runs WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
+      this.db.prepare(`DELETE FROM report_marks WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM sessions WHERE id = ? AND deleted_at IS NOT NULL`).run(sessionId)
       return true
     })
@@ -3516,6 +3548,27 @@ export class Store {
       )
       .all() as ProjectConsent[]
     return rows.filter((r) => ProjectConsentKindSchema.safeParse(r.kind).success)
+  }
+
+  // ── Sessions that owe a report to the session that gave them work (#646) — see migration v49 ──
+
+  listReportMarks(): { sessionId: string; callerSessionId: string }[] {
+    return this.db
+      .prepare(`SELECT session_id as sessionId, caller_session_id as callerSessionId FROM report_marks ORDER BY marked_at`)
+      .all() as { sessionId: string; callerSessionId: string }[]
+  }
+
+  setReportMark(sessionId: string, callerSessionId: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO report_marks (session_id, caller_session_id, marked_at) VALUES (?, ?, ?)
+           ON CONFLICT(session_id) DO UPDATE SET caller_session_id = excluded.caller_session_id, marked_at = excluded.marked_at`,
+      )
+      .run(sessionId, callerSessionId, Date.now())
+  }
+
+  clearReportMark(sessionId: string): void {
+    this.db.prepare(`DELETE FROM report_marks WHERE session_id = ?`).run(sessionId)
   }
 
   // ── Linked machines (#82, v46) ─────────────────────────────────────────────────────────────

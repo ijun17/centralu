@@ -68,6 +68,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 질문 | 에이전트가 사람에게 고르라고 내놓는 선택지(AskUserQuestion). `agents.answerQuestion`으로 답한다. 몇 개든 기다릴 수 있다 | `Question`, `pendingQuestions`, `entities.ts` | 프롬프트 |
 | 프로젝트 동의 | 한 프로젝트가 다른 프로젝트에 닿도록 기억해 둔 "항상": `delegate`(`ask_project`) 또는 `apps`(공유된 앱 붙이기). 또는 자기 자신에게 `agents`(그 프로젝트의 세션이 에이전트를 띄워도 됨, #561) | `ProjectConsent`, `entities.ts`; `project_consents`(스토어 v44) | |
 | 읽기 허락 | 위임된 세션의 답이 이름을 댄, 대상 프로젝트 안의 경로. 이 호스트가 도는 동안 호출한 쪽이 읽을 수 있다 | `readGrants`, `ask-project.ts` | |
+| 보고 표지 | "끝나면 알려 준다": 일을 준 세션에게 턴이 끝났다는 보고를 빚진 세션(`start_agent`가 기다림을 넘겼을 때, `reportBack`을 켠 `send_to_session`). 보고하면 지우고, 호스트 교체를 넘겨 살아남는다(#646) | `awaitingReport`, `manager.ts`; `report_marks`(스토어 v49) | |
 | 안 읽음 | 사람이 마지막으로 본 곳(`lastReadSeq`) 너머에 내용이 있는가. 상태와는 따로다 | `SessionInfo.lastReadSeq` | |
 
 ### 1.3 앱
@@ -270,6 +271,7 @@ classDiagram
 - `subagent_messages`: 서브에이전트 단계. 그것을 띄운 도구 호출을 키로 한다.
 - `approval_rules`: 명령의 "항상 허용" 규칙.
 - `project_consents`: 한 프로젝트가 다른 프로젝트에 닿도록 기억해 둔 동의.
+- `report_marks`: 세션이 일을 준 세션에게 빚진 보고. 전해질 때까지 남는다.
 
 ### 2.3 앱
 

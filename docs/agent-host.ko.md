@@ -170,9 +170,10 @@ What one call does (`SessionManager.askProject`):
    app agents are excluded. Without it, exactly one ordinary session is selected; otherwise the call
    lists the candidates with id, name, state and last activity and asks the caller to name one.
    Duplicate names require an id. No ordinary session means a refusal telling the person to open
-   one there. Selection never creates, renames or takes ownership of a session. Old
-   `Asked by <project> · HH:MM` sessions remain ordinary sessions; startup removes their former
-   cross-project `askedBy` mark, retaining their name and history.
+   one there. Selection never creates, renames or takes ownership of a session, and the task's
+   text never auto-names a "New session" (#646): only the person's own words do, as with an app's
+   message. Old `Asked by <project> · HH:MM` sessions remain ordinary sessions; startup removes
+   their former cross-project `askedBy` mark, retaining their name and history.
 3. **Consent.** `ensureProjectAccess` (`delegate`) raises a card in the caller's session naming
    `<caller project> asks <project> / <session>` and the task. Allow once, always for this project
    pair, or deny; only always is stored in `project_consents` and revoked in Settings → Permissions.
@@ -260,7 +261,10 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
    기록한다.
 6. **답.** ask_project처럼 240초까지 기다린다. 넘기거나 `wait: false`면 곧바로 `working`이고, 턴이 끝나면
    오케스트레이터의 `reportBack`이 쓰는 보고 길로 알린다. 그때 기다리는 호출이 있으면 그 호출이 답을 가져가고
-   보고는 가지 않는다.
+   보고는 가지 않는다. 이 표지는 메모리와 함께 `report_marks`(스토어 v49, #646)에도 적어 두므로 호스트 교체(#280)에
+   잃지 않는다: 떠나는 호스트의 `detachAll`은 기다림을 끝내되 보고하지 않고(`handingOver`), 다음 호스트는 키퍼가
+   지켜 둔 세션의 표지를 되살리고(그 턴은 다음 호스트 밑에서 끝난다), 프로세스가 없는 세션의 표지는 이전 호스트와
+   함께 죽은 턴의 것이므로 버린다.
 
 `agent_session`은 `askedBy`가 부르는 세션인, 같은 프로젝트의 세션에만 듣는다. `send`는 준 일이 아직 돌 때, 다른
 일(사람의 것일 수 있다)로 바쁠 때, 사람이 그 자식의 프리셋을 부르는 세션보다 올렸을 때 거절한다(`presetWithin`).
@@ -1334,7 +1338,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 | 단계 | 하는 일 | 옛 빌드 |
 |---|---|---|
 | 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43 | 열 추가 | 읽는다 (39: 휴지통의 세션을 살아 있는 세션으로 보여 준다; 43: 이전 host의 `grid.set`은 크기를 쓰지 않으므로 앱 패널이 기본값으로 돌아간다, #306) |
-| 3, 6, 9, 16, 19, 34, 36, 41, 42 | 테이블 추가 (3은 색인도 채운다: 무거움; 42는 그리드의 세션 줄을 `grid_layout`에 한 번 옮겨 적고 `grid_panels`는 그대로 둔다, #288) | 읽는다 (42: 이전 host는 그리드를 `grid_panels`에 두므로, 두 빌드의 그리드가 달라질 수 있다) |
+| 3, 6, 9, 16, 19, 34, 36, 41, 42, 49 | 테이블 추가 (3은 색인도 채운다: 무거움; 42는 그리드의 세션 줄을 `grid_layout`에 한 번 옮겨 적고 `grid_panels`는 그대로 둔다, #288; 49는 세션이 일을 준 세션에게 빚진 보고를 적는 `report_marks`를 더한다, #646) | 읽는다 (42: 이전 host는 그리드를 `grid_panels`에 두므로, 두 빌드의 그리드가 달라질 수 있다) |
 | 10, 11, 40 | 같은 모양으로 다시 짓기 (10: `project_id`를 nullable로 한 `sessions`; 11과 40: 색인 후 `VACUUM`: 무거움) | 읽는다 |
 | 21, 26, 29, 35, 48 | 한 방향 데이터 고쳐 쓰기 (21은 모든 메시지를 고쳐 쓴다: 무거움. 48은 예전 워크트리 매니저의 워크트리 세션에 `askedBy`를 준다, #561) | 읽는다, 되돌릴 수 없다 |
 | **13, 28, 32** | **테이블이나 열 삭제** | **깨진다: `min_reader_version`을 올린다** |

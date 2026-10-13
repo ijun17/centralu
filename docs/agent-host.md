@@ -190,9 +190,10 @@ What one call does (`SessionManager.askProject`):
    app agents are excluded. Without it, exactly one ordinary session is selected; otherwise the call
    lists the candidates with id, name, state and last activity and asks the caller to name one.
    Duplicate names require an id. No ordinary session means a refusal telling the person to open
-   one there. Selection never creates, renames or takes ownership of a session. Old
-   `Asked by <project> · HH:MM` sessions remain ordinary sessions; startup removes their former
-   cross-project `askedBy` mark, retaining their name and history.
+   one there. Selection never creates, renames or takes ownership of a session, and the task's
+   text never auto-names a "New session" (#646): only the person's own words do, as with an app's
+   message. Old `Asked by <project> · HH:MM` sessions remain ordinary sessions; startup removes
+   their former cross-project `askedBy` mark, retaining their name and history.
 3. **Consent.** `ensureProjectAccess` (`delegate`) raises a card in the caller's session naming
    `<caller project> asks <project> / <session>` and the task. Allow once, always for this project
    pair, or deny; only always is stored in `project_consents` and revoked in Settings → Permissions.
@@ -272,7 +273,10 @@ app agents stay `safe`, and no session gets a preset above its caller. When auto
 caller's unfinished delegation, its wait has its own bound and cancellation and returns
 `reported: false` while working. It does not consume the owner's report, key, waiter count
 or read grants. A stop leaves the owner's failure report and result available, including
-cross-project `ask_project` delegations. Self wait, stop, delete and send are refused in
+cross-project `ask_project` delegations. An observer's mid-turn note rides on a reader of its
+own (#646): its receipt is held, and its failure recorded, there and never on the owner's wait,
+so the owner still reads its own answer, not the reply to the note, and a refused note does
+not fail the owner's delegation. Self wait, stop, delete and send are refused in
 all presets; self status does not create a delegation. A person's own turn or an app request
 without a delegation is also observed without registering ownership: the app's existing
 completion watcher is reused, or a temporary event reader watches the person's turn and
@@ -314,7 +318,11 @@ below retained for `safe` and `normal`:
 6. **The answer.** Waited for like ask_project's, up to 240 s; past it, or with `wait: false` at once, the answer is
    `working` and the caller is told when the turn ends through the report the orchestrator's `reportBack` uses
    (`awaitingReport` → `deliverReport`, which reaches the model as an untrusted-source notice it reads with
-   `read_session`). A call waiting at that moment takes the answer instead, so it does not arrive twice. Paths the
+   `read_session`). A call waiting at that moment takes the answer instead, so it does not arrive twice. The marker
+   is written to `report_marks` (store v49, #646) as well as kept in memory, so a host swap (#280) does not lose
+   it: the leaving host's `detachAll` fails its waits without reporting (`handingOver`), the next host restores
+   the marks of the sessions the keeper kept, whose turns end under it, and drops a mark whose session has no
+   process any more, since that turn died with the old host. Paths the
    answer names inside the child's folder become readable to the caller, as ask_project's do.
 
 **In a new worktree** (part 2). `worktree: true`, or a `branch`, opens the child in a new git worktree of the
@@ -1991,7 +1999,7 @@ step against:
 | Steps | What they do | Older build |
 |---|---|---|
 | 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43 | add a column | reads it (39: shows sessions in the trash as live ones; 43: an older host's `grid.set` writes no span, so app panels fall back to their defaults, #306) |
-| 3, 6, 9, 16, 19, 34, 36, 41, 42 | add a table (3 also backfills the index: heavy; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ) |
+| 3, 6, 9, 16, 19, 34, 36, 41, 42, 49 | add a table (3 also backfills the index: heavy; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ) |
 | 10, 11, 40 | rebuild with the same shape (10: `sessions` with `project_id` nullable; 11 and 40: the index, then `VACUUM`: heavy) | reads it |
 | 21, 26, 29, 35, 48 | rewrite data one way (21 rewrites every message: heavy; 48 gives a former worktree manager's worktree sessions `askedBy`, #561) | reads it, cannot be undone |
 | **13, 28, 32** | **drop a table or a column** | **breaks: raises `min_reader_version`** |
