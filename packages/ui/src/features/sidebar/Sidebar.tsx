@@ -2268,7 +2268,7 @@ function ToolMark({ tool, state, asleep = false }: { tool: ToolName; state: Sess
   useOrbitSync(state === 'working')
 
   return (
-    <Tooltip content={label} testId={`tool-mark-tip-${tool}`}>
+    <Tooltip content={label} testId={`tool-mark-tip-${tool}`} className="shrink-0">
       <span
         className={`shrink-0 rounded-md p-[1.5px] ${state === 'working' ? 'cc-orbit' : ''}`}
         style={state === 'working' ? undefined : { background: RING[state] }}

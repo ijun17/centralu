@@ -66,3 +66,22 @@ test('the tool mark explains working and asleep states with a rendered tooltip',
   await page.getByTestId('project-header-beta').hover()
   await expect(tip).toBeHidden()
 })
+
+test('a long session name leaves the tool mark and its hover area unobstructed', async ({ page }) => {
+  const id = await workingCodex(page)
+  const row = page.getByTestId(`session-row-${id}`)
+  const mark = row.getByTestId('tool-mark-codex')
+  for (const length of [40, 200, 2000]) {
+    const name = 'Long session name '.repeat(Math.ceil(length / 18)).slice(0, length)
+    await page.evaluate(({ sessionId, name }) => (window as any).__store.getState().rename(sessionId, name), { sessionId: id, name })
+    const label = row.getByText(name, { exact: true })
+    await expect(label).toBeVisible()
+    const markBox = (await mark.boundingBox())!
+    const labelBox = (await label.boundingBox())!
+    expect(labelBox.x, `name length ${length}`).toBeGreaterThanOrEqual(markBox.x + markBox.width)
+    // The right edge was covered by the name when the tooltip's flex item shrank.
+    await page.mouse.move(markBox.x + markBox.width - 1, markBox.y + markBox.height / 2)
+    await expect(page.getByTestId('tool-mark-tip-codex')).toBeVisible()
+    await page.getByTestId('project-header-beta').hover()
+  }
+})

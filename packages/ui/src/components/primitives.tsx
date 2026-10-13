@@ -98,12 +98,15 @@ export function Tooltip({
   children,
   content,
   testId,
+  className = '',
   placement = 'bottom',
   align = 'left',
 }: {
   children: ReactNode
   content: ReactNode
   testId?: string
+  /** Layout of the anchor wrapper, which is the flex item when the tooltip stands in a row. */
+  className?: string
   /** An element near the bottom of the screen floats the tooltip upward — floating it downward would push it off the window */
   placement?: 'bottom' | 'top'
   /** An element at the right edge aligns the tooltip to the right — left alignment would push the tooltip off the window */
@@ -172,7 +175,7 @@ export function Tooltip({
   return (
     <span
       ref={anchorRef}
-      className="relative inline-flex min-w-0"
+      className={`relative inline-flex min-w-0 ${className}`}
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
       onFocusCapture={() => setOpen(true)}
