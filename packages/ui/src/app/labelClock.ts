@@ -64,11 +64,25 @@ export const MINUTE = 60_000
 export const HOUR = 60 * MINUTE
 export const DAY = 24 * HOUR
 
-/** Align labels to one wall-clock boundary per granularity, rather than one wake-up per timestamp. */
+/** A label changes at whole steps from its timestamp, regardless of the wall-clock phase. */
 export function nextAgeTick(when: number, now: number): number {
   const elapsed = Math.max(0, now - when)
   const step = elapsed < HOUR ? MINUTE : HOUR
-  return step - ((now % step + step) % step)
+  return step - elapsed % step
+}
+
+export function nextWaitingTick(since: number, now: number): number {
+  const elapsed = Math.max(0, now - since)
+  const step = elapsed < MINUTE ? 1000 : elapsed < DAY ? MINUTE : HOUR
+  return step - elapsed % step
+}
+
+export function nextResetTick(at: number, now: number): number | null {
+  if (!Number.isFinite(at) || at <= now) return null
+  const step = at - now > DAY ? HOUR : MINUTE
+  const remaining = at - now
+  // A floor-based countdown drops immediately after an exact boundary.
+  return Math.min(remaining % step || 1, remaining)
 }
 
 export function formatAgo(when: number, now: number): string {
@@ -81,19 +95,16 @@ export function formatAgo(when: number, now: number): string {
   return day < 30 ? `${day}d ago` : `${Math.floor(day / 30)}mo ago`
 }
 
-/** Both signals are required: a visible document may still belong to an unfocused app. */
+/** Visible windows keep advancing even when another app has focus (for example, on a second monitor). */
 export function watchLabelVisibility(
   clock: LabelClock,
   doc: Pick<Document, 'visibilityState' | 'addEventListener' | 'removeEventListener'>,
-  focus: { current: () => boolean; subscribe: (changed: () => void) => () => void },
 ): () => void {
-  const refresh = () => clock.setVisible(doc.visibilityState === 'visible' && focus.current())
+  const refresh = () => clock.setVisible(doc.visibilityState === 'visible')
   doc.addEventListener('visibilitychange', refresh)
-  const unsubscribe = focus.subscribe(refresh)
   refresh()
   return () => {
     doc.removeEventListener('visibilitychange', refresh)
-    unsubscribe()
     clock.setVisible(false)
   }
 }

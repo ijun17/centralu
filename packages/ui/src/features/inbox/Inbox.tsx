@@ -1,5 +1,5 @@
 import { useLabelNow } from '../../app/useLabelNow.js'
-import { DAY, HOUR, MINUTE } from '../../app/labelClock.js'
+import { nextWaitingTick } from '../../app/labelClock.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { useInbox } from '../../store/selectors.js'
@@ -139,12 +139,7 @@ export function Inbox() {
 }
 
 function WaitingTime({ since }: { since: number | null }) {
-  const next = useCallback((now: number) => {
-    if (since === null) return null
-    const elapsed = Math.max(0, now - since)
-    const step = elapsed < MINUTE ? 1000 : elapsed < DAY ? MINUTE : HOUR
-    return step - now % step
-  }, [since])
+  const next = useCallback((now: number) => since === null ? null : nextWaitingTick(since, now), [since])
   const now = useLabelNow(since === null ? null : next)
   const elapsed = since === null ? 0 : Math.max(0, now - since)
   return <span className={`readout w-16 text-right text-xs ${waitingTone(elapsed)}`}>

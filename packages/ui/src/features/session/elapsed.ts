@@ -19,7 +19,7 @@ import { useLabelNow } from '../../app/useLabelNow.js'
  * never a number that has stopped while looking precise. That the turn is alive is said by the pulsing dot, which
  * costs no repaint.
  *
- * And the shared clock does not run while the window is hidden or unfocused, and moves at most by the minute while
+ * And the shared clock does not run while the window is hidden, and moves at most by the minute while
  * the row is scrolled out of view. Coming back shows the current value at once.
  */
 
@@ -47,11 +47,12 @@ export function formatElapsed(seconds: number): string {
   return `${Math.floor(seconds / 86400)}d ${Math.floor(seconds / 3600) % 24}h`
 }
 
-/** Shared wall-clock boundaries keep simultaneous activity rows on one cadence. */
+/** Re-read at the next displayed step from the turn's own start instant. */
 export function nextElapsedTick(startedAt: number, now: number, coarse = false): number {
-  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000))
+  const elapsed = Math.max(0, now - startedAt)
+  const seconds = Math.floor(elapsed / 1000)
   const step = Math.max(coarse ? 60 : 0, elapsedStep(seconds)) * 1000
-  return step - ((now % step + step) % step)
+  return step - elapsed % step
 }
 
 /** The activity row shares the label clock, retaining its measured short-turn cadence. */

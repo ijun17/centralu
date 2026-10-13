@@ -1,20 +1,14 @@
 import { useEffect, useState } from 'react'
-import { useStore } from '../store/store.js'
 import { LabelClock, watchLabelVisibility, type NextLabelTick } from './labelClock.js'
 
 const clock = new LabelClock()
 let mounted = 0
 let disconnect: (() => void) | null = null
 
-/** Listen only while a time label is mounted; the store carries the app's focus/visibility signal. */
+/** Listen to document visibility only while a changing time label is mounted. */
 function connect(): () => void {
   if (mounted++ === 0) {
-    disconnect = watchLabelVisibility(clock, document, {
-      current: () => useStore.getState().appFocused,
-      subscribe: (refresh) => useStore.subscribe((state, previous) => {
-        if (state.appFocused !== previous.appFocused) refresh()
-      }),
-    })
+    disconnect = watchLabelVisibility(clock, document)
   }
   return () => {
     if (--mounted === 0) {

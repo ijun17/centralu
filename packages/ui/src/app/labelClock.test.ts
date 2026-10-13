@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DAY, HOUR, LabelClock, MINUTE, formatAgo, nextAgeTick, watchLabelVisibility } from './labelClock.js'
+import { DAY, HOUR, LabelClock, MINUTE, formatAgo, nextAgeTick, nextWaitingTick, nextResetTick, watchLabelVisibility } from './labelClock.js'
 import { formatElapsed, nextElapsedTick } from '../features/session/elapsed.js'
 import { formatWaiting } from '../components/primitives.jsx'
 
@@ -65,39 +65,78 @@ describe('shared label clock (#615)', () => {
     expect(vi.getTimerCount()).toBe(1)
   })
 
-  it('stops for either document visibility or app focus, including labels mounted while hidden', () => {
+  it('stops while the document is hidden, including labels mounted while hidden, and removes its listener', () => {
     const doc = Object.assign(new EventTarget(), { visibilityState: 'hidden' as DocumentVisibilityState })
-    let focused = true
-    let focusChanged = () => {}
-    const unsubscribe = vi.fn()
-    const disconnect = watchLabelVisibility(clock, doc, {
-      current: () => focused,
-      subscribe: (changed) => { focusChanged = changed; return unsubscribe },
-    })
+    const disconnect = watchLabelVisibility(clock, doc)
     const tick = vi.fn()
     remove.push(clock.subscribe((now) => nextAgeTick(0, now), tick))
     expect(vi.getTimerCount()).toBe(0)
     doc.visibilityState = 'visible'
     doc.dispatchEvent(new Event('visibilitychange'))
     expect(vi.getTimerCount()).toBe(1)
-    focused = false
-    focusChanged()
-    expect(vi.getTimerCount()).toBe(0)
-    doc.dispatchEvent(new Event('visibilitychange'))
-    expect(vi.getTimerCount()).toBe(0)
-    vi.advanceTimersByTime(2 * MINUTE)
-    focused = true
-    focusChanged()
-    expect(tick).toHaveBeenLastCalledWith(2 * MINUTE)
     doc.visibilityState = 'hidden'
     doc.dispatchEvent(new Event('visibilitychange'))
-    focusChanged()
     expect(vi.getTimerCount()).toBe(0)
-    disconnect()
-    expect(unsubscribe).toHaveBeenCalledOnce()
+    tick.mockClear()
+    vi.advanceTimersByTime(2 * MINUTE)
+    expect(tick).not.toHaveBeenCalled()
     doc.visibilityState = 'visible'
     doc.dispatchEvent(new Event('visibilitychange'))
+    expect(tick).toHaveBeenCalledExactlyOnceWith(2 * MINUTE)
+    disconnect()
     expect(vi.getTimerCount()).toBe(0)
+    doc.dispatchEvent(new Event('visibilitychange'))
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('continues ticking while the document stays visible', () => {
+    const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' as DocumentVisibilityState })
+    const disconnect = watchLabelVisibility(clock, doc)
+    remove.push(disconnect)
+    let label = ''
+    remove.push(clock.subscribe((now) => nextAgeTick(-3 * MINUTE, now), (now) => { label = formatAgo(-3 * MINUTE, now) }))
+    vi.advanceTimersByTime(MINUTE + 5)
+    expect(label).toBe('4m ago')
+  })
+
+  it.each([
+    ['last active', -30_000, nextAgeTick, (elapsed: number) => formatAgo(0, elapsed), 'just now', '1m ago'],
+    ['hour age', -(2 * HOUR - 30_000), nextAgeTick, (elapsed: number) => formatAgo(0, elapsed), '1h ago', '2h ago'],
+    ['response', -(10 * MINUTE + 30_000), nextElapsedTick, (elapsed: number) => formatElapsed(elapsed / 1000), '10m', '11m'],
+    ['approval', -(3 * MINUTE + 30_000), nextWaitingTick, formatWaiting, '3m', '4m'],
+    ['day response', -(DAY + HOUR - 30_000), nextElapsedTick, (elapsed: number) => formatElapsed(elapsed / 1000), '1d 0h', '1d 1h'],
+    ['day approval', -(DAY + HOUR - 30_000), nextWaitingTick, formatWaiting, '1d 0h', '1d 1h'],
+  ] as const)('advances an unaligned %s at its own timestamp boundary', (_name, since, next, format, before, after) => {
+    let label = ''
+    remove.push(clock.subscribe((now) => next(since, now), (now) => { label = format(now - since) }))
+    expect(label).toBe(before)
+    vi.advanceTimersByTime(30_004)
+    expect(label).toBe(before)
+    vi.advanceTimersByTime(1)
+    expect(label).toBe(after)
+  })
+
+  it.each([3 * MINUTE + 30_000, DAY + HOUR + 30_000])('updates an unaligned reset countdown at its remaining-time boundary (%i)', (at) => {
+    const step = at > DAY ? HOUR : MINUTE
+    let count = -1
+    remove.push(clock.subscribe((now) => nextResetTick(at, now), (now) => { count = Math.floor((at - now) / step) }))
+    const before = count
+    vi.advanceTimersByTime(30_004)
+    expect(count).toBe(before)
+    vi.advanceTimersByTime(1)
+    expect(count).toBe(before - 1)
+  })
+
+  it('drops an exact-boundary countdown promptly and stops at the reset time', () => {
+    let count = -1
+    remove.push(clock.subscribe((now) => nextResetTick(MINUTE, now), (now) => { count = Math.floor((MINUTE - now) / MINUTE) }))
+    expect(count).toBe(1)
+    vi.advanceTimersByTime(6)
+    expect(count).toBe(0)
+    vi.advanceTimersByTime(MINUTE)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(nextResetTick(NaN, 0)).toBeNull()
+    expect(nextResetTick(0, 0)).toBeNull()
   })
 
   it('never repaints minute labels at the activity row\'s second cadence', () => {
@@ -112,7 +151,7 @@ describe('shared label clock (#615)', () => {
     expect(vi.getTimerCount()).toBe(1)
   })
 
-  it('aligns a thousand differently timestamped ages to one minute wake-up', () => {
+  it('uses one timer for a thousand differently timestamped ages', () => {
     const tick = vi.fn()
     for (let i = 0; i < 1000; i++) {
       remove.push(clock.subscribe((now) => nextAgeTick(-i * 17, now), tick))

@@ -64,10 +64,11 @@ Selectors are implemented as memoised wrappers around pure functions in `core`. 
 
 Time labels derive their text from stored timestamps and the current wall clock. `app/labelClock.ts`
 owns one shared timeout; `app/useLabelNow.ts` subscribes only while a changing label is mounted.
-It stops unless both `document.visibilityState` is visible and the store's `appFocused` signal is true,
-then catches up immediately on return. Visibility and store listeners are detached with the last label.
-Minute/hour deadlines align across labels so a list does not create a separate wake-up for each timestamp;
-only due labels repaint. Minute-bearing waits advance every minute, and waits beyond a day show days/hours
+It stops while `document.visibilityState` is hidden, then catches up immediately on return. A visible
+window continues advancing when another app has focus, including on a second monitor. The visibility listener
+is detached with the last label. Each deadline follows the label's own timestamp, so unaligned minute/hour
+counts change without waiting for a wall-clock boundary. One timeout serves the earliest deadline; only due
+labels repaint. Minute-bearing waits advance every minute, and waits beyond a day show days/hours
 and advance hourly. Short activity waits retain their measured second/five-second/ten-second cadence;
 short inbox waits show seconds. Activity rows scrolled out of view advance at most once a minute.
 

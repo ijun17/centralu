@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useLabelNow } from '../../app/useLabelNow.js'
-import { DAY, HOUR, MINUTE } from '../../app/labelClock.js'
+import { nextResetTick } from '../../app/labelClock.js'
 import type { CacheStats, ToolName, UsageSnapshot, UsageWindow } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Tooltip } from '../../components/primitives.jsx'
@@ -163,11 +163,7 @@ function Donut({ window: w }: { window: UsageWindow }) {
 
 function ResetTime({ resetsAt }: { resetsAt: string | null }) {
   const at = resetsAt ? Date.parse(resetsAt) : NaN
-  const next = useCallback((now: number) => {
-    if (!Number.isFinite(at) || at <= now) return null
-    const step = at - now > DAY ? HOUR : MINUTE
-    return Math.min(step - now % step, at - now)
-  }, [at])
+  const next = useCallback((now: number) => nextResetTick(at, now), [at])
   const now = useLabelNow(Number.isFinite(at) ? next : null)
   return <>{resetText(resetsAt, now)}</>
 }

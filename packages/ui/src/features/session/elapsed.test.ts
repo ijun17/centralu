@@ -33,7 +33,7 @@ describe('formatElapsed', () => {
 })
 
 describe('when the count next changes', () => {
-  it('aligns simultaneous turns to a shared wall-clock step', () => {
+  it("reads at the next whole step from the turn's start", () => {
     expect(nextElapsedTick(1_000, 1_000)).toBe(1_000)
     expect(nextElapsedTick(1_000, 1_400)).toBe(600)
     expect(nextElapsedTick(0, 12_000)).toBe(3_000)
