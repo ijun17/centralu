@@ -76,7 +76,7 @@ type NormalizedEvent =
   | { type: 'context_update';   sessionId, used, window, exactness: 'exact'|'estimate' }
   | { type: 'limit_reached';    sessionId, resumeAt?, usedPercent?, windowMins? }
   | { type: 'session_title';    sessionId, title, auto }        // auto=false: human-given, never overwritten
-  | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier?, by? }  // #30: a non-human hand changed settings; by 'tool': the agent tool switched by itself (#304)
+  | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier?, permissionPreset?, by? }  // #30: a non-human hand changed settings; by 'tool': the agent tool switched by itself (#304); by 'person': a client called agents.updateSettings (#659)
   | { type: 'files_touched';    sessionId, paths: string[] }    // FR-2 conflict detection, FR-5 highlighting
   | { type: 'goal';             sessionId, goal: SessionGoal|null }  // the badge; codex announces it, claude's is read from the CLI's /goal replies and Stop hook feedback
   | { type: 'background_tasks'; sessionId, live: BackgroundTask[], ended?: BackgroundTask[], clearEnded? }  // #290: the live set (REPLACE) and what just ended
@@ -140,6 +140,10 @@ reached nobody. Three shapes carry them:
   #342, or one the host cannot place, is drawn from `text` alone. An unknown `audience` word reads as absent.
 - `settings_changed` with `by: 'tool'` is a switch the tool made by itself — Claude Code's refusal fallback, another
   Codex client changing the thread. A notice in the conversation says what and why; the event updates the model shown.
+- Every saved `agents.updateSettings` is broadcast as `settings_changed` with the full snapshot, `permissionPreset` included (#659). The
+  caller gets the answer too, but every other window, linked machine and the person's own window (when an agent made the call)
+  learns the new values only from this event. `by: 'person'` updates the values shown without the "Orchestrator changed" toast;
+  the orchestrator's own change (no `by`, or `orchestrator`) still raises it.
 
 | Decision | Why |
 |---|---|

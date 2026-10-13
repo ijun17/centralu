@@ -2725,6 +2725,7 @@ export class SessionManager {
   async updateSettings(
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
+    by: 'person' | 'orchestrator' = 'person',
   ): Promise<SessionInfo & { applied: SettingsApplied }> {
     if (this.worktreeCleanup.has(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const m = this.meta.get(sessionId)
@@ -2754,6 +2755,23 @@ export class SessionManager {
     if ((s.model !== undefined || s.effort !== undefined) && m.projectId) {
       this.store.setProjectToolDefaults(m.projectId, m.tool, { model: m.model, effort: m.effort })
     }
+    /*
+     * **Every client hears about a saved change** (#659). The caller gets the answer, but another window, a linked
+     * machine, or the person's own window when an agent made the call only learned the new values from a re-list.
+     * The permission preset is among them, and it is shown on screen as a safety fact. Sent as soon as the change is
+     * saved, with the full snapshot, before the wait below: whether the process takes it now, after the turn or on
+     * the next wake does not change what the session is set to.
+     */
+    this.emit({
+      type: 'settings_changed',
+      sessionId,
+      model: m.model,
+      effort: m.effort,
+      verbosity: m.verbosity,
+      serviceTier: m.serviceTier,
+      permissionPreset: m.permissionPreset,
+      by,
+    })
 
     /*
      * **If a wake is in progress, this waits for it before comparing** (#162). While that wait is in
@@ -4818,21 +4836,12 @@ export class SessionManager {
          * follows the same rule as the person's own path.
          */
         try {
-          const info = await this.updateSettings(sessionId, s)
           /*
-           * **A settings change must never happen without a trace** (#30). When the person changes it
-           * from the screen, the RPC response itself returns to the screen, but this path is a
-           * non-person hand acting on it — without a broadcast, the screen would go on showing the
-           * stale value, which to the person's eyes looks identical to the value quietly changing on its own.
+           * **A settings change must never happen without a trace** (#30). `updateSettings` broadcasts it, marked as
+           * this hand's: the screen toasts it, since to the person's eyes a value changed by a hand other than their
+           * own is identical to a value quietly changing on its own.
            */
-          this.emit({
-            type: 'settings_changed',
-            sessionId,
-            model: info.model,
-            effort: info.effort,
-            verbosity: info.verbosity,
-            serviceTier: info.serviceTier,
-          })
+          const info = await this.updateSettings(sessionId, s, 'orchestrator')
           return { ok: true, ...(info.applied === 'after_turn' ? { deferred: true } : {}) }
         } catch (e) {
           return { ok: false, error: (e as Error).message }

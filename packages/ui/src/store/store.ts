@@ -3323,6 +3323,7 @@ export const useStore = create<AppState>((set, get) => ({
         e.effort !== cur0.effort ? `effort ${e.effort ?? 'default'}` : null,
         e.verbosity !== cur0.verbosity ? `verbosity ${e.verbosity ?? 'default'}` : null,
         (e.serviceTier ?? null) !== cur0.serviceTier ? `speed ${e.serviceTier ?? 'default'}` : null,
+        e.permissionPreset && e.permissionPreset !== cur0.permissionPreset ? `permissions ${e.permissionPreset}` : null,
       ]
         .filter(Boolean)
         .join(' · ')
@@ -3335,15 +3336,26 @@ export const useStore = create<AppState>((set, get) => ({
             effort: e.effort,
             verbosity: e.verbosity,
             serviceTier: e.serviceTier ?? null,
+            // Absent on a tool's own switch and on frames from before #659: the value held stays
+            permissionPreset: e.permissionPreset ?? s.sessions[sessionId]!.permissionPreset,
           },
         },
         /*
          * A switch the agent tool made by itself (#304) updates the model shown without a toast: the tool's notice in
          * the conversation already says what changed and why, and a toast would interrupt for something that needs
-         * nothing from the person.
+         * nothing from the person. The same for a change a client made through `agents.updateSettings` (#659): the
+         * caller's own toast says what it did, and the values here are the ones it chose.
          */
-        ...(what && e.by !== 'tool' ? { toast: `Orchestrator changed ${cur0.name}: ${what}` } : {}),
+        ...(what && e.by !== 'tool' && e.by !== 'person' ? { toast: `Orchestrator changed ${cur0.name}: ${what}` } : {}),
       }))
+      /*
+       * Fields a list that is still out must not write back over (#642): the merge keeps a value that differs from the
+       * one it asked with, but a change that lands back on that value would otherwise read as no change at all.
+       */
+      for (const touched of liveEventWatchers) {
+        const fields = touched.get(sessionId)
+        if (fields) for (const k of ['model', 'effort', 'verbosity', 'serviceTier', 'permissionPreset'] as const) fields.add(k)
+      }
       return
     }
 

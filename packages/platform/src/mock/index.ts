@@ -376,15 +376,16 @@ export class MockPlatform implements Platform {
         // The same rule as the real thing (#568): a session put to sleep lists as not live until it is woken
         if (event.type === 'session_live') s.live = event.live
         /*
-         * A switch the agent tool made (#304) — like the host, recorded on the session so the list a reconnect reads
+         * A switch the agent tool made (#304, #659) — like the host, recorded on the session so the list a reconnect reads
          * shows it too. (The host applies only what differs from what the process was launched with; the mock has no
          * process, so the snapshot is taken as it is.)
          */
-        if (event.type === 'settings_changed' && event.by === 'tool') {
+        if (event.type === 'settings_changed') {
           s.model = event.model
           s.effort = event.effort
           s.verbosity = event.verbosity
           s.serviceTier = event.serviceTier ?? null
+          if (event.permissionPreset) s.permissionPreset = event.permissionPreset
         }
         /*
          * The same rule as the real thing (the host): an event that stays in the record gets a
@@ -2066,6 +2067,17 @@ export class MockPlatform implements Platform {
       if (s.verbosity !== undefined) sess.verbosity = s.verbosity
       if (s.serviceTier !== undefined) sess.serviceTier = s.serviceTier
       if (s.permissionPreset) sess.permissionPreset = s.permissionPreset
+      // The same rule as the real thing (#659): every client hears about a saved change, the caller included
+      this.emit({
+        type: 'settings_changed',
+        sessionId,
+        model: sess.model,
+        effort: sess.effort,
+        verbosity: sess.verbosity,
+        serviceTier: sess.serviceTier,
+        permissionPreset: sess.permissionPreset,
+        by: 'person',
+      })
       return { ...sess }
     },
     restartSession: async (sessionId: string) => {

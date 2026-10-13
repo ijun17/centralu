@@ -4453,6 +4453,41 @@ describe('resets, notices and switches the tool made (#304)', () => {
     mock.emit({ type: 'settings_changed', sessionId: 'n-3', model: 'haiku', effort: null, verbosity: null, serviceTier: null })
     expect(useStore.getState().toast).toMatch(/Orchestrator changed/)
   })
+
+  /*
+   * #659: a window other than the caller (or the person's own window when an agent made the change) only learned the new
+   * model and permission preset from a re-list. The mock emits what the host emits for `agents.updateSettings`.
+   */
+  it('a settings change another client made shows the new model and permission preset, without the orchestrator toast (#659)', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('n-4', sessionInfo('n-4', { model: 'fable', permissionPreset: 'normal' }))
+    await useStore.getState().attach(mock)
+    useStore.setState({ toast: null })
+
+    await mock.agents.updateSettings('n-4', { model: 'opus', permissionPreset: 'auto' })
+
+    expect(useStore.getState().sessions['n-4']).toMatchObject({ model: 'opus', permissionPreset: 'auto' })
+    expect(useStore.getState().toast).toBeNull()
+  })
+
+  it('a settings change that lands back on the value a pending list was asked with is kept over the list (#642, #659)', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('n-5', sessionInfo('n-5', { model: 'fable', permissionPreset: 'normal' }))
+    await useStore.getState().attach(mock)
+    mock.setConnectionState('disconnected')
+    // The list is read with this row; the settings events below are newer than it
+    mock.sessions.get('n-5')!.permissionPreset = 'safe'
+    const list = holdList(mock)
+    const recovery = useStore.getState().recoverAfterReconnect(true)
+    await list.asked
+    const set = (model: string, permissionPreset: 'safe' | 'normal' | 'auto') =>
+      mock.emit({ type: 'settings_changed', sessionId: 'n-5', model, effort: null, verbosity: null, serviceTier: null, permissionPreset, by: 'person' })
+    set('opus', 'auto')
+    set('fable', 'normal')
+    list.release()
+    await recovery
+    expect(useStore.getState().sessions['n-5']).toMatchObject({ model: 'fable', permissionPreset: 'normal' })
+  })
 })
 
 /*
