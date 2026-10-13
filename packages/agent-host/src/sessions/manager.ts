@@ -638,13 +638,18 @@ export class SessionManager {
     )
   }
 
-  async addProject(path: string): Promise<ProjectInfo> {
+  /**
+   * `trusted` is the trust a project new to this host starts with (#655); registering a folder that is already a
+   * project never changes its trust. Registering an existing folder from the screen leaves it untrusted, as the
+   * person decides; only `createProject` passes it, for a folder it made empty itself.
+   */
+  async addProject(path: string, opts: { trusted?: boolean } = {}): Promise<ProjectInfo> {
     if (!existsSync(path) || !statSync(path).isDirectory()) {
       throw Object.assign(new Error(`Directory not found: ${path}`), { code: 'internal' })
     }
     const existing = this.store.findProjectByPath(path)
     const id = existing?.id ?? randomUUID()
-    this.store.addProject({ id, path, name: basename(path) })
+    this.store.addProject({ id, path, name: basename(path), ...(opts.trusted ? { trusted: true } : {}) })
     return this.projectInfo(id, path)
   }
 
@@ -694,7 +699,7 @@ export class SessionManager {
   /**
    * Makes a new project (#515): a folder named `name` in `parent` (this machine's `~/Centralu` when absent), empty, or a
    * clone of `source` made with this machine's git and saved sign-ins, then registers it. Never reuses anything
-   * already there (`projectFolderTarget`). A clone that fails leaves nothing behind: the folder this made is removed
+   * already there (`projectFolderTarget`). An empty folder is registered trusted, a clone untrusted (#655). A clone that fails leaves nothing behind: the folder this made is removed
    * and no project is registered.
    */
   async createProject(name: string, parent?: string, source?: GitSource): Promise<ProjectInfo> {
@@ -712,7 +717,9 @@ export class SessionManager {
       }
     }
     console.error(`[projects] made ${target.path}`)
-    const info = await this.addProject(target.path)
+    // A folder made empty here holds only what Centralu and the person write, so it starts trusted (#655). A clone
+    // holds what a stranger's repository put there (an agent can ask for any URL), so the person decides, as today.
+    const info = await this.addProject(target.path, { trusted: !source })
     // Every window learns of it, the one that asked included: the orchestrator's card answers no list (#515)
     this.emit({ type: 'projects_changed' })
     return info

@@ -527,7 +527,9 @@ What this closed was measured with the real CLI (#152, `scripts/probe-project-tr
 card off even under `safe`.
 
 How projects get trust: a project registered now starts untrusted, and the sidebar asks once when
-it is added. The `trusted` column arrived untrusted by default (store v33); v35 then marked every
+it is added. The exception is a new empty folder Centralu made itself (`projects.create` or `create_project`
+without a Git source, here or on a linked machine, #655): only the person and Centralu wrote there, so it starts
+trusted. A clone stays untrusted, because an agent can ask for any URL and the contents come from outside. The `trusted` column arrived untrusted by default (store v33); v35 then marked every
 project that existed at that moment as trusted, once, so an update did not silently start ignoring
 the `.claude/` settings of folders the user had chosen and worked in. v35 does not run again, so
 trust turned off later stays off.

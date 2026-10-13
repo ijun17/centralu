@@ -560,7 +560,8 @@ writes nothing but the ready line.
 
 A project used to need a folder that already existed (`projects.add` refuses one that does not). Now
 the host can make one: `projects.create { name, parent?, machine? }` makes an **empty** folder (no
-`git init`, no template) and registers it as `projects.add` does. `projects.createPreview` answers
+`git init`, no template) and registers it as `projects.add` does, but trusted (#655): nothing in it came from outside. A clone (`source`) is
+registered untrusted, and registering a path that is already a project never changes its trust. `projects.createPreview` answers
 where it would go and why it would be refused, without making anything; the dialog asks it as the
 person types. Both route by `machine` like `projects.add` (remote-hub.md §5), so the folder is made
 by the host of the machine the project lives on, with that machine's own path rules.

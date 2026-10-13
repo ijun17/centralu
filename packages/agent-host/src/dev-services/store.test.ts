@@ -1546,6 +1546,21 @@ describe('v32 migration — the default model is per tool (#107)', () => {
  * project settings). An update must not silently start ignoring that setting. A project
  * registered after this still starts at "no."
  */
+describe('addProject trust (#655)', () => {
+  it('starts untrusted unless asked, and a second registration of the path keeps whatever trust the row has', () => {
+    const s = new Store()
+    s.addProject({ id: 'a', path: '/tmp/a', name: 'a' })
+    s.addProject({ id: 'b', path: '/tmp/b', name: 'b', trusted: true })
+    expect(s.projectRoots().map((p) => [p.id, p.trusted])).toEqual([['a', false], ['b', true]])
+    // Neither direction flips: a second call renames the row and leaves trust alone
+    s.addProject({ id: 'a2', path: '/tmp/a', name: 'a-renamed', trusted: true })
+    s.addProject({ id: 'b2', path: '/tmp/b', name: 'b-renamed' })
+    expect(s.projectRoots().map((p) => [p.id, p.trusted])).toEqual([['a', false], ['b', true]])
+    expect(s.listProjects().map((p) => p.name)).toEqual(['a-renamed', 'b-renamed'])
+    s.close()
+  })
+})
+
 describe('v33/v35 migration — the trust column, and only projects that existed at migration time are trusted', () => {
   const oldProjects = (file: string, version: number, cols = '', rows: string[] = ["('p1','/tmp/p1','p1',1)"]) => {
     const old = new Database(file)

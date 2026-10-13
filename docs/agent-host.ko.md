@@ -322,7 +322,7 @@ Node 래퍼다. codex-cli 0.160(macOS arm64)에서 측정: 래퍼로 띄운 유�
 
 예전에는 프로젝트를 만들려면 폴더가 이미 있어야 했다(`projects.add`는 없는 폴더를 거절한다). 이제 호스트가
 폴더를 만든다: `projects.create { name, parent?, machine? }`는 **빈** 폴더를 만들고(`git init`도 템플릿도
-없다) `projects.add`처럼 등록한다. `projects.createPreview`는 아무것도 만들지 않고 어디에 생길지, 왜 거절될지를
+없다) `projects.add`처럼 등록하되 신뢰한 채로 둔다(#655, 밖에서 온 내용이 없다). 복제(`source`)는 신뢰하지 않은 채로 등록하고, 이미 프로젝트인 경로를 다시 등록해도 신뢰는 바뀌지 않는다. `projects.createPreview`는 아무것도 만들지 않고 어디에 생길지, 왜 거절될지를
 답한다. 대화상자가 사람이 입력하는 동안 이것을 묻는다. 둘 다 `projects.add`처럼 `machine`으로 라우팅되므로
 (remote-hub.md §5) 폴더는 프로젝트가 사는 머신의 호스트가 그 머신의 경로 규칙으로 만든다.
 

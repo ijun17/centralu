@@ -27,7 +27,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Term | Meaning | Defined in | Avoid |
 |---|---|---|---|
 | Project | A folder registered with Centralu. Sessions, rules, consents, apps, saved commands and commit attribution hang off it. It need not be a git repository | `ProjectInfo`, `packages/protocol/src/commands.ts` | workspace, repo |
-| Trusted project | A project the person said yes to. Trust lets its apps run and its repository settings (`.claude/`) apply; a new project starts untrusted | `projects.trusted`; [apps.md](apps.md) §3 | |
+| Trusted project | A project the person said yes to. Trust lets its apps run and its repository settings (`.claude/`) apply; a new project starts untrusted, except an empty folder Centralu made itself | `projects.trusted`; [apps.md](apps.md) §3 | |
 | Session | One conversation with one agent tool: its own process (when live), state, model and permission preset | `SessionInfo`, `packages/protocol/src/commands.ts` | chat, thread, agent |
 | Agent tool | The CLI a session runs: Claude Code or Codex. A string so a third can be added | `ToolName`, `packages/protocol/src/entities.ts`; adapters in `packages/agent-host/src/adapters/` | model, provider |
 | Adapter | The module that wraps one agent tool in the common contract and turns its output into normalized events | `AgentAdapter`, `packages/agent-host/src/adapters/contract.ts` | driver |

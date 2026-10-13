@@ -2049,13 +2049,18 @@ export class Store {
     this.db.close()
   }
 
-  addProject(p: { id: string; path: string; name: string }): void {
+  /**
+   * `trusted` is the trust a NEW row starts with (#655); absent means untrusted, as before. It is an insert-only
+   * value: registering a path that already has a row renames it and leaves its trust alone, so neither an earlier
+   * "no" nor a later "yes" is overwritten by a second registration.
+   */
+  addProject(p: { id: string; path: string; name: string; trusted?: boolean }): void {
     this.db
       .prepare(
-        `INSERT INTO projects (id, path, name, created_at) VALUES (?, ?, ?, ?)
+        `INSERT INTO projects (id, path, name, created_at, trusted) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(path) DO UPDATE SET name = excluded.name`,
       )
-      .run(p.id, p.path, p.name, Date.now())
+      .run(p.id, p.path, p.name, Date.now(), p.trusted ? 1 : 0)
   }
 
   /**

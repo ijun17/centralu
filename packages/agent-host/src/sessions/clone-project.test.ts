@@ -132,6 +132,12 @@ describe('projects.create with a git source', () => {
     expect(events.some((e) => e.type === 'projects_changed')).toBe(true)
   }, 30_000)
 
+  it('registers a clone as untrusted: its contents come from outside, so the person decides (#655)', async () => {
+    const info = (await rpc('projects.create', { name: '', source: { git: `${base}/game.git` } })) as { id: string; trusted: boolean }
+    expect(info.trusted).toBe(false)
+    expect(((await rpc('projects.list', {})) as { id: string; trusted: boolean }[]).find((p) => p.id === info.id)?.trusted).toBe(false)
+  }, 30_000)
+
   it('checks out the branch asked for, under the name given', async () => {
     const info = (await rpc('projects.create', { name: 'game-dev', source: { git: `${base}/game.git`, branch: 'dev' } })) as { path: string }
     expect(info.path).toBe(join(centralu, 'game-dev'))

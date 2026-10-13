@@ -19,6 +19,7 @@ let root: string
 let home: string
 let centralu: string
 let store: Store
+let claude: CrossAdapter
 let events: NormalizedEvent[]
 let mgr: SessionManager
 let rpc: (method: string, params: unknown) => Promise<unknown>
@@ -31,7 +32,8 @@ beforeEach(() => {
   centralu = join(home, 'Centralu')
   store = new Store()
   events = []
-  const adapters = new Map<ToolName, CrossAdapter>([['claude', new CrossAdapter('claude')]])
+  claude = new CrossAdapter('claude')
+  const adapters = new Map<ToolName, CrossAdapter>([['claude', claude]])
   const agents = adapters as unknown as Map<ToolName, AgentAdapter>
   mgr = new SessionManager(store, agents, (e) => events.push(e))
   mgr.useProjectsHome(() => projectsHome(process.platform, home, { USERPROFILE: home }))
@@ -68,6 +70,26 @@ describe('projects.create', () => {
     expect(existsSync(join(info.path, '.git'))).toBe(false)
     expect(((await rpc('projects.list', {})) as { id: string }[]).map((p) => p.id)).toEqual([info.id])
     expect(events.some((e) => e.type === 'projects_changed')).toBe(true)
+  })
+
+  it('registers an empty folder as trusted, so its first session reads the project settings (#655)', async () => {
+    const info = (await rpc('projects.create', { name: 'game' })) as { id: string; path: string; trusted: boolean }
+    expect(info.trusted).toBe(true)
+    expect(store.projectRoots().find((p) => p.id === info.id)?.trusted).toBe(true)
+    const s = (await rpc('agents.createSession', { projectId: info.id, cwd: info.path, tool: 'claude' })) as { id: string }
+    // `projectTrusted: true` is what makes the Claude adapter leave `settingSources` unset (project and local files read)
+    expect(claude.handles.get(s.id)?.opts.projectTrusted).toBe(true)
+  })
+
+  it('registering a folder already in the list leaves its trust as it was (#655)', async () => {
+    const dir = join(root, 'existing')
+    mkdirSync(dir)
+    const added = (await rpc('projects.add', { path: dir })) as { id: string; trusted: boolean }
+    expect(added.trusted).toBe(false)
+    await rpc('projects.setTrusted', { projectId: added.id, trusted: true })
+    expect(((await rpc('projects.add', { path: dir })) as { trusted: boolean }).trusted).toBe(true)
+    await rpc('projects.setTrusted', { projectId: added.id, trusted: false })
+    expect(((await rpc('projects.add', { path: dir })) as { trusted: boolean }).trusted).toBe(false)
   })
 
   it('makes it in a parent given as a full path, which has to be a folder already', async () => {

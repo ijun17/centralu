@@ -106,15 +106,19 @@ either to act.
 | Apps | Start when needed; attached to the project's sessions | Listed as `untrusted`; never started, never attached, every call refused. No app is created there (`create_app`, `apps.create`) and no builder session is made |
 | Repository settings | Apply as before | Do not apply: see security-boundaries.md, "Repository configuration and project trust" |
 
-- **Asking**: a newly registered project starts untrusted, and the sidebar asks once with a card
+- **Asking**: a newly registered project starts untrusted, except one Centralu made itself as a new empty
+  folder (below, #655), and the sidebar asks once with a card
   (*Trust this project? Trusting lets this project's apps run and its settings apply.*), not a modal
   dialog. It can be changed later from the project menu, or with "Trust this project" on an
   untrusted app.
 - **Migration**: the `trusted` column arrived untrusted by default (store v33); then v35 marked
   **every project that existed at that moment** as trusted, once. Those were folders the person had
   chosen and worked in for weeks, and an update must not silently start ignoring their `.claude/`
-  settings. Projects registered afterwards start untrusted. v35 never runs again, so trust turned
-  off later stays off.
+  settings. Projects registered afterwards start untrusted, except a new empty folder Centralu made (#655:
+  `projects.create` / `create_project` without a Git source, on this machine or a linked one), which starts
+  trusted: only the person and Centralu wrote there. A clone starts untrusted, since an agent can ask for any
+  URL; registering an existing folder is unchanged, and registering a path that is already a project never
+  changes its trust. v35 never runs again, so trust turned off later stays off.
 - **When a change takes effect**: turning trust off stops the project's running apps at once and
   detaches them from sessions. Claude sessions lose the tools without a restart; Codex threads keep
   the names until their next thread, but every call is checked again and refused. Repository
