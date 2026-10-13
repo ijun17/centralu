@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { APP_NAME, APP_SLUG, APP_VERSION, isNewerVersion, type UpdateStatus } from '@cc/protocol'
-import { installedCopyPath } from './os.js'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { APP_NAME, APP_SLUG, APP_VERSION, isNewerVersion, keepsInstalledCopy, type UpdateStatus } from '@cc/protocol'
+import { HOST_PLATFORM, installedCopyPath, installedCopyVersionSource, type Platform } from './os.js'
 import { resolveCommand, type ToolLaunch } from './tool-launch.js'
 
 /**
@@ -50,6 +51,17 @@ const INSTALL_CHECK_MAX_AGE_MS = 60_000
 /** A recent observation may outpace an npm edge; older tags must yield to a rollback. */
 const STORED_RELEASE_MAX_AGE_MS = 60 * 60 * 1000
 
+/**
+ * How long "Apply updates automatically when idle" waits before trying a failed install again (#645).
+ *
+ * A network blip or an npm edge that has not caught up should not switch automatic installs off for
+ * the host's life, which is what "retry at the next check" meant once checks stopped erasing a
+ * failure (#636). Soon the first time, then a step back, then the check interval: a persistent cause
+ * (EACCES, a full disk) costs one `npm i -g` per six hours, not one per focus. In memory only, like
+ * the rest of this status — a new host starts over, which is also what fixes most causes.
+ */
+const AUTO_RETRY_DELAYS_MS = [10 * 60 * 1000, 60 * 60 * 1000, 6 * 60 * 60 * 1000]
+
 /** `npm i -g` on a cold cache is slow, but not this slow — past here something is stuck */
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000
 
@@ -77,7 +89,11 @@ export type UpdateDeps = {
   run?: (file: string, args: string[]) => Promise<void>
   /** The copy `centralu install` made, when there is one (`installedCopyPath`) */
   installedCopy?: () => string | null
+  /** The version that copy carries, when it can be read (`readInstalledCopyVersion`) */
+  installedCopyVersion?: (copy: string) => string | null
   now?: () => number
+  /** Test seam for the automatic retry timer: runs `fn` after `ms`, returns how to cancel it */
+  schedule?: (fn: () => void, ms: number) => () => void
   /** Where the persisted "check automatically" answer lives across restarts */
   readAuto?: () => boolean
   writeAuto?: (enabled: boolean) => void
@@ -94,6 +110,27 @@ export { installedCopyPath }
 function existingInstalledCopy(): string | null {
   const path = installedCopyPath()
   return existsSync(path) ? path : null
+}
+
+/**
+ * The version the installed copy carries, or null when there is none to read (#645).
+ *
+ * Which file and how it is written is the platform's answer (`installedCopyVersionSource`, `os.ts`).
+ * The plist is read as text the way the shell does (`bundle_version` in `src-tauri/src/sidecar.rs`):
+ * Tauri writes an XML plist, and this is only for a comparison, so an unreadable one is simply
+ * unknown. The path is joined by this host's rules, since the read happens here.
+ */
+export function readInstalledCopyVersion(copy: string, platform: Platform = HOST_PLATFORM): string | null {
+  const source = installedCopyVersionSource(platform)
+  if (!source) return null
+  try {
+    const text = readFileSync(join(copy, ...source.path), 'utf8')
+    const v = (source.format === 'plist' ? /<key>CFBundleShortVersionString<\/key>\s*<string>([^<]*)<\/string>/.exec(text)?.[1] ?? '' : text).trim()
+    return v && v.length <= 64 ? v : null
+  } catch {
+    // Missing or unreadable: unknown, and unknown never keeps a copy from being refreshed
+    return null
+  }
 }
 
 /**
@@ -178,6 +215,10 @@ export class UpdateService {
   private readonly deps: Required<UpdateDeps>
   /** One check at a time — the timer and the button can land together */
   private inFlight: Promise<UpdateStatus> | null = null
+  /** The last failed install: which version, how many times in a row, and when (#645) */
+  private retry: { version: string; failures: number; at: number } | null = null
+  /** Cancels the automatic retry timer, while one is pending */
+  private retryTimer: (() => void) | null = null
 
   constructor(
     private publish: (status: UpdateStatus) => void,
@@ -187,7 +228,16 @@ export class UpdateService {
       fetchLatest: deps.fetchLatest ?? fetchLatestFromRegistry,
       run: deps.run ?? runCommand,
       installedCopy: deps.installedCopy ?? existingInstalledCopy,
+      installedCopyVersion: deps.installedCopyVersion ?? ((copy) => readInstalledCopyVersion(copy)),
       now: deps.now ?? Date.now,
+      schedule:
+        deps.schedule ??
+        ((fn, ms) => {
+          const t = setTimeout(fn, ms)
+          // A pending retry must not hold the process open, no more than the check timer does
+          t.unref?.()
+          return () => clearTimeout(t)
+        }),
       // If no place to persist it is given, treat auto-update as on — the same default that main.ts
       // passes in.
       readAuto: deps.readAuto ?? (() => true),
@@ -240,6 +290,7 @@ export class UpdateService {
   stop(): void {
     this.stopped = true
     this.stopTimer()
+    this.cancelRetry()
   }
 
   private stopTimer(): void {
@@ -289,14 +340,51 @@ export class UpdateService {
     this.deps.writeAutoApply(enabled)
     this.emit()
     if (enabled) this.installIfAutomatic()
+    else this.cancelRetry()
     return this.current()
   }
 
-  /** With `autoApply` on and a newer version known, install it — once, not over an install or a finished one */
+  /**
+   * With `autoApply` on and a newer version known, install it — once, not over an install or a
+   * finished one. A failed install is tried again, but only on the backoff (#645): a check that
+   * lands right after the failure does not start another `npm i -g`, and one after the delay does,
+   * whether the retry timer or a person's Check now brought it.
+   */
   private installIfAutomatic(): void {
     if (!this.status.autoApply || !this.status.newer || !this.status.latest) return
-    if (this.status.phase !== 'idle') return
-    this.apply()
+    if (this.status.phase === 'idle') {
+      void this.apply()
+      return
+    }
+    if (this.status.phase !== 'failed') return
+    if (this.retryDue()) void this.apply()
+    else if (!this.retryTimer) this.scheduleRetry()
+  }
+
+  /**
+   * A failed install may be retried once its backoff has passed — or at once for a release that
+   * is not the one that failed: a new version is a new situation, and one attempt at it is cheap.
+   */
+  private retryDue(): boolean {
+    if (!this.retry || this.retry.version !== this.status.latest) return true
+    return this.deps.now() - this.retry.at >= retryDelay(this.retry.failures)
+  }
+
+  private scheduleRetry(): void {
+    this.cancelRetry()
+    if (this.stopped || !this.retry || !this.status.autoApply || this.status.phase !== 'failed') return
+    const delay = Math.max(0, retryDelay(this.retry.failures) - (this.deps.now() - this.retry.at))
+    this.retryTimer = this.deps.schedule(() => {
+      this.retryTimer = null
+      // The timer is the backoff; by the time it fires, the attempt is due
+      if (this.stopped || !this.status.autoApply || this.status.phase !== 'failed' || !this.status.newer || !this.status.latest) return
+      void this.apply()
+    }, delay)
+  }
+
+  private cancelRetry(): void {
+    this.retryTimer?.()
+    this.retryTimer = null
   }
 
   /**
@@ -382,29 +470,38 @@ export class UpdateService {
    * Install the newer version, then say so. **Does not restart the app** — that is the
    * window's step (#352).
    *
-   * Returns the moment the work starts. `npm i -g` regularly takes longer than the RPC
-   * deadline, and a caller that has already given up cannot be told how it went; the
-   * rest of the story arrives as `update_status` events.
+   * Answers once the target is settled: after the fresh lookup (at most the forced deadline, plus
+   * an older check it waits for), when `npm i -g` is about to start, or when the registry shows
+   * nothing newer. Not when the install is done — `npm i -g` regularly takes longer than the RPC
+   * deadline, and a caller that has already given up cannot be told how it went; the rest of the
+   * story arrives as `update_status` events.
+   *
+   * With nothing newer known it refreshes first rather than refusing (#645): the stored answer
+   * may be hours old, or there may be none at all with automatic checks off. "Up to date" is then
+   * a result (`idle`, no error), never `failed` — a refusal recorded as a failure stayed on the
+   * line through every later check.
    */
-  apply(): UpdateStatus {
-    if (this.stopped || this.installing || this.status.phase === 'restart_required') return this.current()
-    const latest = this.status.latest
-    if (!this.status.newer || !latest) {
-      // Refusing out loud rather than shrugging: this can only be reached from a button
-      // that should not have been on screen, and a silent no-op hides that it was.
-      this.status = { ...this.status, phase: 'failed', error: 'There is no newer version to install' }
-      this.emit()
-      return this.current()
-    }
+  apply(): Promise<UpdateStatus> {
+    if (this.stopped || this.installing || this.status.phase === 'restart_required') return Promise.resolve(this.current())
     this.installing = true
-    this.status = { ...this.status, phase: 'updating', error: null }
+    // A person's click or the timer: either way this is the attempt, so no second timer waits behind it
+    this.cancelRetry()
+    const known = this.status.newer && this.status.latest ? this.status.latest : null
+    // Nothing known yet: the line says "Checking…", not "Installing…", until the lookup answers
+    this.status = { ...this.status, phase: known ? 'updating' : 'checking', error: null }
     this.emit()
-    void this.runApply(latest)
-    return this.current()
+    return new Promise((settled) => void this.runApply(known, settled))
   }
 
-  private async runApply(version: string): Promise<void> {
+  private async runApply(known: string | null, settled: (status: UpdateStatus) => void): Promise<void> {
+    let version = known
     let packageInstalled = false
+    let answered = false
+    const answer = () => {
+      if (answered) return
+      answered = true
+      settled(this.current())
+    }
     const copy = this.deps.installedCopy()
     try {
       // Finish an older check before asking again, including when auto-apply started inside it.
@@ -412,25 +509,33 @@ export class UpdateService {
       await this.inFlight
       if (this.stopped) return
       const age = this.status.checkedAt === null ? Infinity : this.deps.now() - this.status.checkedAt
-      if (age < 0 || age >= INSTALL_CHECK_MAX_AGE_MS) {
+      if (version === null || age < 0 || age >= INSTALL_CHECK_MAX_AGE_MS) {
         const fresh = await this.deps.fetchLatest(FORCED_TIMEOUT_MS)
         if (this.stopped) return
         if (fresh.ok) {
           const now = this.deps.now()
           const storedAge = this.status.checkedAt === null ? Infinity : now - this.status.checkedAt
-          const keepStored = storedAge >= 0 && storedAge < STORED_RELEASE_MAX_AGE_MS && isNewerVersion(version, fresh.version)
-          if (!keepStored) version = fresh.version
+          const keepStored = version !== null && storedAge >= 0 && storedAge < STORED_RELEASE_MAX_AGE_MS && isNewerVersion(version, fresh.version)
+          const target: string = keepStored && version !== null ? version : fresh.version
+          version = target
           // Keeping an earlier observation must not renew it indefinitely across failed installs.
-          this.status = { ...this.status, latest: version, newer: isNewerVersion(version, this.status.current), checkedAt: keepStored ? this.status.checkedAt : now }
+          this.status = { ...this.status, latest: target, newer: isNewerVersion(target, this.status.current), checkedAt: keepStored ? this.status.checkedAt : now }
           if (!this.status.newer) {
             this.status = { ...this.status, phase: 'idle', error: null }
             return
           }
+        } else if (version === null) {
+          // Nothing stored to fall back on: the same answer as a failed check, and as little lasting
+          this.status = { ...this.status, phase: 'idle', error: fresh.reason }
+          return
         } else {
           this.status = { ...this.status, error: `Could not refresh latest (${fresh.reason}); using previously checked ${version}.` }
         }
       }
+      if (version === null) return // unreachable: a null target either refreshed above or returned
+      this.status = { ...this.status, phase: 'updating' }
       this.emit()
+      answer()
       /*
        * **Pin the exact version instead of asking for `@latest`.**
        *
@@ -448,7 +553,13 @@ export class UpdateService {
        * Only if one exists: on macOS `centralu install` *creates* `/Applications/…`, and
        * putting an app there is not something to do to someone who never asked. By this
        * point the launcher on disk is the new one, so running it is safe — its `install`
-       * has no version comparison in it at all.
+       * keeps a copy at or above the version it carries (#645), the same rule as here.
+       *
+       * And only if the copy is older than what npm just installed (#645): a local build
+       * (`pnpm local-update`) waiting in /Applications for "Apply now" outranks the release it
+       * was cut from, and replacing it would be a downgrade of the one copy people click. The
+       * package is still updated — the launcher and `centralu serve` come from it — and the
+       * notice says what was kept; the window's own bundle check offers to apply the copy.
        *
        * `centralu` resolves through PATH, which the host augments from the login shell at
        * startup (`env-path.ts`) precisely because a GUI app does not inherit one.
@@ -467,9 +578,18 @@ export class UpdateService {
        * it has open; the next start runs the new folder. The old one cannot be deleted while
        * it runs and is left for the next install to sweep.
        */
-      if (copy) await this.deps.run(APP_SLUG, ['install'])
+      if (copy) {
+        const copyVersion = this.deps.installedCopyVersion(copy)
+        if (keepsInstalledCopy(version, copyVersion)) {
+          const notice = `The copy at ${copy} is ${copyVersion}, not older than ${version}, and was kept.`
+          this.status = { ...this.status, error: this.status.error ? `${this.status.error} ${notice}` : notice }
+        } else {
+          await this.deps.run(APP_SLUG, ['install'])
+        }
+      }
       if (this.stopped) return
       this.status = { ...this.status, phase: 'restart_required' }
+      this.retry = null
     } catch (e) {
       /*
        * Say which half failed. "npm i -g worked but the installed copy did not get
@@ -482,9 +602,17 @@ export class UpdateService {
         ? `npm installed ${version}, but the copy at ${copy} was not replaced (${reason}). Quit ${APP_NAME}, then run "${APP_SLUG} install" in a terminal.`
         : reason
       this.status = { ...this.status, phase: 'failed', error }
+      // Counted per target: a release that is not the one that failed starts its own count
+      const target = version ?? this.status.latest ?? ''
+      this.retry = { version: target, failures: this.retry?.version === target ? this.retry.failures + 1 : 1, at: this.deps.now() }
     } finally {
       this.installing = false
-      if (!this.stopped) this.emit()
+      if (!this.stopped) {
+        this.emit()
+        // Asked for in advance (#352): a failure is tried again on the backoff, not left for good (#645)
+        if (this.status.phase === 'failed') this.installIfAutomatic()
+      }
+      answer()
     }
   }
 
@@ -527,4 +655,9 @@ export class UpdateService {
 
 function npmHasNotServedVersion(err: unknown): boolean {
   return /(?:\bETARGET\b|\bnotarget\b)/i.test(err instanceof Error ? err.message : String(err))
+}
+
+/** The wait before the n-th retry of a failed automatic install: the ladder, then its last step forever */
+function retryDelay(failures: number): number {
+  return AUTO_RETRY_DELAYS_MS[Math.min(Math.max(failures, 1), AUTO_RETRY_DELAYS_MS.length) - 1]!
 }

@@ -89,3 +89,18 @@ export function installedCopyPath(
   }
   return posix.join(home, '.local/share/applications', `${APP_SLUG}.desktop`)
 }
+
+/**
+ * Where the copy `centralu install` made records its version, relative to the copy, and how it is
+ * written (#645): the bundle's XML `Info.plist` on macOS (`CFBundleShortVersionString`), the
+ * `centralu-version.txt` the launcher writes beside the copy on Windows (the exe's version resource
+ * drops the prerelease tag). Nothing on Linux: its menu entry points back into the npm package, so
+ * there is no second copy to compare.
+ */
+export function installedCopyVersionSource(
+  platform: Platform = HOST_PLATFORM,
+): { format: 'plist'; path: string[] } | { format: 'text'; path: string[] } | null {
+  if (platform === 'darwin') return { format: 'plist', path: ['Contents', 'Info.plist'] }
+  if (platform === 'win32') return { format: 'text', path: ['centralu-version.txt'] }
+  return null
+}

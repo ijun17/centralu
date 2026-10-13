@@ -74,3 +74,20 @@ function split(raw: string): [number[], string | null] {
   const pre = dash === -1 ? null : v.slice(dash + 1)
   return [core, pre]
 }
+
+/**
+ * Whether the copy `centralu install` made is at or above `target`, so replacing it with `target`
+ * would be a downgrade (#645).
+ *
+ * The case this exists for: a local build (`0.2.0-beta.21.local.1`, `pnpm local-update`) sits in
+ * /Applications waiting for "Apply now" while the running host is still beta.20, and auto-apply
+ * installs npm's beta.21. Without this, `centralu install` would put beta.21 over the newer local
+ * build. Equal counts too: re-copying the same version changes nothing and costs a bundle swap.
+ * Unknown (no copy, or a version that could not be read) never keeps a copy from being refreshed.
+ *
+ * Mirrored in the launcher (`keepsInstalledCopy` in `packaging/npm/centralu/bin/semver.mjs`), where
+ * `centralu install` applies the same rule by itself, and pinned to it by `tooling/launcher-semver.test.ts`.
+ */
+export function keepsInstalledCopy(target: string, copyVersion: string | null | undefined): boolean {
+  return typeof copyVersion === 'string' && copyVersion.trim() !== '' && !isNewerVersion(target, copyVersion)
+}

@@ -4,7 +4,7 @@ import { join, win32 } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
 import { resolveCommand } from './tool-launch.js'
-import { UpdateService, commandFor, failureDetail, installedCopyPath, runCommand, type LatestResult } from './updates.js'
+import { UpdateService, commandFor, failureDetail, installedCopyPath, readInstalledCopyVersion, runCommand, type LatestResult } from './updates.js'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { installedPaths } from '../../../packaging/npm/centralu/bin/platform.mjs'
 
@@ -21,8 +21,10 @@ function make(
     run?: (file: string, args: string[]) => Promise<void>
     autoApply?: boolean
     installedCopy?: string | null
+    installedCopyVersion?: (copy: string) => string | null
     wait?: (ms: number) => Promise<void>
     now?: () => number
+    schedule?: (fn: () => void, ms: number) => () => void
   } = {},
 ) {
   const published: UpdateStatus[] = []
@@ -42,10 +44,12 @@ function make(
       await (opts.run?.(file, args) ?? Promise.resolve())
     },
     installedCopy: () => opts.installedCopy ?? null,
+    installedCopyVersion: opts.installedCopyVersion ?? (() => null),
     readAutoApply: () => opts.autoApply ?? false,
     writeAutoApply: (enabled) => saved.push(enabled),
     wait: opts.wait,
     now: opts.now ?? (() => now),
+    schedule: opts.schedule ?? (() => () => {}),
   })
   return {
     svc,
@@ -206,7 +210,7 @@ describe('UpdateService', () => {
       expect(h.published.slice(before).every((s) => s.phase === 'failed' && s.error === original.error)).toBe(true)
       expect(h.svc.current()).toMatchObject({ phase: 'failed', error: original.error })
       fails = false
-      expect(h.svc.apply()).toMatchObject({ phase: 'updating', error: null })
+      await expect(h.svc.apply()).resolves.toMatchObject({ phase: 'updating', error: null })
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
     })
 
@@ -361,7 +365,7 @@ describe('UpdateService', () => {
   it("names the exact version found and installs it (does not go through the runner's own judgment)", async () => {
     const h = make({ registry: '9999.0.0' })
     await h.svc.check(true)
-    expect(h.svc.apply().phase).toBe('updating')
+    expect((await h.svc.apply()).phase).toBe('updating')
     await settle()
     expect(h.calls[0]).toEqual(['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.0']])
     expect(h.svc.current().phase).toBe('restart_required')
@@ -413,11 +417,108 @@ describe('UpdateService', () => {
     expect(s.error).toContain('"centralu install"')
   })
 
-  it('says so when called with nothing to update (instead of doing nothing silently)', async () => {
-    const h = make({ registry: null })
-    const s = h.svc.apply()
-    expect(s.phase).toBe('failed')
-    expect(h.calls).toEqual([])
+  /**
+   * An install with nothing newer known refreshes before it refuses (#645). The stored answer may be
+   * hours old, or absent with automatic checks off; and "up to date" is a result, never `failed` —
+   * recorded as a failure it stayed on the line through every later check.
+   */
+  describe('install with nothing newer known (#645)', () => {
+    it.each([true, false])('refreshes first and answers up to date as a result, not a failure (automatic checks=%s)', async (auto) => {
+      const h = make({ registry: APP_VERSION })
+      if (!auto) await h.svc.setAuto(false)
+      const before = h.published.length
+      const s = await h.svc.apply()
+      expect(s).toMatchObject({ phase: 'idle', latest: APP_VERSION, newer: false, error: null })
+      expect(h.fetches).toBe(1)
+      expect(h.calls).toEqual([])
+      // "Checking…" while it looks, never "Installing…" or "Update failed"
+      expect(h.published.slice(before).map((p) => p.phase)).toEqual(['checking', 'idle'])
+    })
+
+    it('installs what the refresh finds when the stored answer said up to date', async () => {
+      const h = make({ registry: APP_VERSION })
+      await h.svc.check(true)
+      h.elapse(3600_000)
+      h.offer('9999.0.1')
+      expect(await h.svc.apply()).toMatchObject({ phase: 'updating', latest: '9999.0.1', newer: true, error: null })
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+      expect(h.calls).toEqual([['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.1']]])
+    })
+
+    it('an unreachable registry answers like a failed check, and the answer does not stick', async () => {
+      const h = make({ registry: null })
+      const s = await h.svc.apply()
+      expect(s).toMatchObject({ phase: 'idle', latest: null, newer: false, error: 'Could not reach the registry' })
+      expect(h.calls).toEqual([])
+      h.offer('9999.0.1')
+      expect(await h.svc.check(true)).toMatchObject({ phase: 'idle', latest: '9999.0.1', newer: true, error: null })
+    })
+
+    it('answers once the target is settled, before npm finishes', async () => {
+      const npm = deferred<void>()
+      const h = make({ registry: '9999.0.1', run: () => npm.promise })
+      await h.svc.check(true)
+      h.elapse(60_000)
+      h.offer('9999.0.2')
+      expect(await h.svc.apply()).toMatchObject({ phase: 'updating', latest: '9999.0.2' })
+      expect(h.calls).toEqual([['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.2']]])
+      npm.resolve()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+    })
+  })
+
+  /**
+   * A local build (`pnpm local-update`) waiting in /Applications for "Apply now" outranks the release
+   * it was cut from. An npm install must not put that release over it (#645): the package is still
+   * updated, the copy is kept, and the notice says so.
+   */
+  describe('an installed copy at or above the target (#645)', () => {
+    const copy = '/Applications/Centralu.app'
+
+    it.each(['9999.0.1.local.1', '9999.0.1', '9999.0.2'])('carrying %s is kept: npm updates the package, the copy is not replaced', async (copyVersion) => {
+      const h = make({ registry: '9999.0.1', installedCopy: copy, installedCopyVersion: () => copyVersion })
+      await h.svc.check(true)
+      await h.svc.apply()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+      expect(h.calls).toEqual([['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.1']]])
+      expect(h.svc.current().error).toBe(`The copy at ${copy} is ${copyVersion}, not older than 9999.0.1, and was kept.`)
+    })
+
+    it.each(['9999.0.0', '9999.0.1-beta.1', '', null])('carrying %s is replaced as before', async (copyVersion) => {
+      const h = make({ registry: '9999.0.1', installedCopy: copy, installedCopyVersion: () => copyVersion })
+      await h.svc.check(true)
+      await h.svc.apply()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+      expect(h.calls.map(([file]) => file)).toEqual(['npm', 'centralu'])
+      expect(h.svc.current().error).toBeNull()
+    })
+
+    it('reads the version from the bundle on macOS, the version file on Windows, and nothing on Linux', () => {
+      const dir = mkdtempSync(join(tmpdir(), 'cc-installed-copy-'))
+      try {
+        expect(readInstalledCopyVersion(dir, 'darwin')).toBeNull()
+        mkdirSync(join(dir, 'Contents'))
+        writeFileSync(join(dir, 'Contents', 'Info.plist'), [
+          '<?xml version="1.0" encoding="UTF-8"?>',
+          '<plist version="1.0">',
+          '<dict>',
+          '\t<key>CFBundleName</key>',
+          '\t<string>Centralu</string>',
+          '\t<key>CFBundleShortVersionString</key>',
+          '\t<string>0.2.0-beta.21.local.1</string>',
+          '</dict>',
+          '</plist>',
+          '',
+        ].join('\n'))
+        expect(readInstalledCopyVersion(dir, 'darwin')).toBe('0.2.0-beta.21.local.1')
+        expect(readInstalledCopyVersion(dir, 'win32')).toBeNull()
+        writeFileSync(join(dir, 'centralu-version.txt'), '0.2.0-beta.21\n')
+        expect(readInstalledCopyVersion(dir, 'win32')).toBe('0.2.0-beta.21')
+        expect(readInstalledCopyVersion(dir, 'linux')).toBeNull()
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    })
   })
 
   it('waits for npm to serve a just-published version, then installs that exact version', async () => {
@@ -539,6 +640,136 @@ describe('UpdateService', () => {
       await h.svc.check(true)
       await settle()
       expect(h.calls).toEqual([])
+    })
+
+    /**
+     * One failed install must not switch automatic installs off for the host's life (#645). Since
+     * checks stopped erasing a failure (#636), "retry at the next check" retried nothing; now a
+     * failure is tried again on a backoff, and the error stays on the line until the next attempt.
+     */
+    describe('after a failed install (#645)', () => {
+      function timers() {
+        const pending: { fn: () => void; ms: number }[] = []
+        return {
+          pending,
+          schedule: (fn: () => void, ms: number) => {
+            const t = { fn, ms }
+            pending.push(t)
+            return () => {
+              const i = pending.indexOf(t)
+              if (i >= 0) pending.splice(i, 1)
+            }
+          },
+        }
+      }
+
+      it('retries on a backoff — 10 min, 1 h, then every 6 h — and keeps the error until the next attempt starts', async () => {
+        let fails = true
+        const t = timers()
+        const h = make({ registry: '9999.0.1', autoApply: true, schedule: t.schedule, run: async () => {
+          if (fails) throw new Error('EACCES: install denied')
+        } })
+        await h.svc.check(true)
+        await vi.waitFor(() => expect(h.svc.current().phase).toBe('failed'))
+        expect(h.calls).toHaveLength(1)
+        expect(t.pending.map((p) => p.ms)).toEqual([600_000])
+        // A check that lands before the delay does not start another npm, and the failure stays visible
+        h.elapse(300_000)
+        await h.svc.check(true)
+        await settle()
+        expect(h.calls).toHaveLength(1)
+        expect(h.svc.current()).toMatchObject({ phase: 'failed', error: 'EACCES: install denied' })
+        for (const next of [3600_000, 6 * 3600_000, 6 * 3600_000]) {
+          const due = t.pending.shift()!
+          h.elapse(due.ms)
+          due.fn()
+          await vi.waitFor(() => expect(t.pending).toHaveLength(1))
+          expect(h.svc.current()).toMatchObject({ phase: 'failed', error: 'EACCES: install denied' })
+          expect(t.pending[0]?.ms).toBe(next)
+        }
+        expect(h.calls).toHaveLength(4)
+        // Each attempt is announced as an install, with the earlier failure cleared for its duration
+        expect(h.published.filter((p) => p.phase === 'updating').every((p) => p.error === null)).toBe(true)
+        fails = false
+        const due = t.pending.shift()!
+        h.elapse(due.ms)
+        due.fn()
+        await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+        expect(h.calls).toHaveLength(5)
+        expect(h.svc.current().error).toBeNull()
+        expect(t.pending).toEqual([])
+      })
+
+      it('a check after the delay retries too, and a release that is not the one that failed is tried at once', async () => {
+        let fails = true
+        const h = make({ registry: '9999.0.1', autoApply: true, run: async () => {
+          if (fails) throw new Error('ENOTFOUND registry.npmjs.org')
+        } })
+        await h.svc.check(true)
+        await vi.waitFor(() => expect(h.svc.current().phase).toBe('failed'))
+        h.elapse(600_000)
+        await h.svc.check(true)
+        await vi.waitFor(() => expect(h.calls).toHaveLength(2))
+        await vi.waitFor(() => expect(h.svc.current().phase).toBe('failed'))
+        // The second failure of 9999.0.1 waits an hour; 9999.0.2 has not failed yet
+        h.offer('9999.0.2')
+        await h.svc.check(true)
+        await vi.waitFor(() => expect(h.calls).toHaveLength(3))
+        expect(h.calls[2]?.[1]).toContain('centralu@9999.0.2')
+        await vi.waitFor(() => expect(h.svc.current().phase).toBe('failed'))
+        fails = false
+        await h.svc.check(true)
+        await settle()
+        expect(h.calls).toHaveLength(3)
+      })
+
+      it('turning automatic apply off cancels the retry, on schedules it, and shutdown cancels it', async () => {
+        const t = timers()
+        const h = make({ registry: '9999.0.1', schedule: t.schedule, run: async () => {
+          throw new Error('EACCES')
+        } })
+        await h.svc.check(true)
+        await h.svc.apply()
+        await vi.waitFor(() => expect(h.svc.current().phase).toBe('failed'))
+        // A failure without the setting is left for the person (#636)
+        expect(t.pending).toEqual([])
+        h.elapse(100_000)
+        h.svc.setAutoApply(true)
+        expect(t.pending.map((p) => p.ms)).toEqual([500_000])
+        h.svc.setAutoApply(false)
+        expect(t.pending).toEqual([])
+        h.svc.setAutoApply(true)
+        expect(t.pending.map((p) => p.ms)).toEqual([500_000])
+        h.svc.stop()
+        expect(t.pending).toEqual([])
+        t.schedule(() => {}, 0)
+        h.svc.setAutoApply(false)
+        h.svc.setAutoApply(true)
+        expect(h.calls).toHaveLength(1)
+      })
+
+      it('a retry that fires during a manual install does not start a second one', async () => {
+        let fails = true
+        const npm = deferred<void>()
+        const t = timers()
+        const h = make({ registry: '9999.0.1', autoApply: true, schedule: t.schedule, run: async () => {
+          if (fails) throw new Error('EACCES')
+          await npm.promise
+        } })
+        await h.svc.check(true)
+        await vi.waitFor(() => expect(h.svc.current().phase).toBe('failed'))
+        fails = false
+        const due = t.pending[0]!
+        await h.svc.apply()
+        // The click is the attempt: the pending retry went with it
+        expect(t.pending).toEqual([])
+        due.fn()
+        await settle()
+        expect(h.calls).toHaveLength(2)
+        npm.resolve()
+        await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+        expect(h.calls).toHaveLength(2)
+      })
     })
   })
 })

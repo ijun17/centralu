@@ -503,6 +503,22 @@ describe.each([
   })
 
   /**
+   * An install asked for with nothing newer known — the agent's `update_centralu install`, or a line
+   * left from an old answer — refreshes first and answers "up to date" as a result (#645). Recorded
+   * as `failed`, the refusal stayed on the line through every later check.
+   */
+  it('an install with nothing newer known refreshes first and answers up to date, not failed (#645)', async () => {
+    const fresh = await make()
+    try {
+      fresh.offerUpdate(APP_VERSION)
+      const s = await fresh.platform.updates.apply()
+      expect(s).toMatchObject({ phase: 'idle', latest: APP_VERSION, newer: false, error: null })
+    } finally {
+      await fresh.cleanup()
+    }
+  })
+
+  /**
    * Moving idle sessions to a newly installed agent CLI (#297) starts on — the owner's decision — and the switch sticks.
    * With nothing installed newer, the app-wide action restarts nothing.
    */

@@ -598,7 +598,13 @@ export async function runOrchestratorTool(
     const s = r.status
     if (!s) return { text: 'Centralu update is unavailable.', isError: true }
     if (action === 'check') return { text: s.newer && s.latest ? `Centralu ${s.latest} is available.` : s.error ?? 'Centralu is up to date.' }
-    return { text: s.phase === 'failed' ? `Centralu update failed: ${s.error}` : `Installing Centralu ${s.latest ?? ''}. The person applies the installed build from Centralu; their automatic-update setting was not changed.` }
+    // The install answers once its target is settled (#645): up to date is a result here, not a failure
+    const applies = 'The person applies the installed build from Centralu; their automatic-update setting was not changed.'
+    if (s.phase === 'failed') return { text: `Centralu update failed: ${s.error}` }
+    if (s.phase === 'restart_required') return { text: `Centralu ${s.latest ?? ''} is installed. ${applies}` }
+    if (s.phase === 'updating' || s.phase === 'waiting_for_npm') return { text: `Installing Centralu ${s.latest ?? ''}. ${applies}` }
+    if (s.newer && s.latest) return { text: `Centralu ${s.latest} is available, but the install did not start.`, isError: true }
+    return { text: s.error ?? 'Centralu is up to date.' }
   }
   if (name === 'list_sessions') return listSessionsText(tools, caller)
 

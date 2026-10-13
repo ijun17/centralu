@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
-import { copyDiffers, isNewer } from '../packaging/npm/centralu/bin/semver.mjs'
-import { isNewerVersion } from '../packages/protocol/src/semver.js'
+import { copyDiffers, isNewer, keepsInstalledCopy as launcherKeepsInstalledCopy } from '../packaging/npm/centralu/bin/semver.mjs'
+import { isNewerVersion, keepsInstalledCopy } from '../packages/protocol/src/semver.js'
 
 /**
  * Regression: `centralu update` on 0.1.0-beta.1 said "Already up to date" while
@@ -133,5 +133,30 @@ describe('launcher /Applications copy check', () => {
   /** Either direction. A copy newer than the package means an update went backwards. */
   it('speaks up when the copy is ahead too', () => {
     expect(copyDiffers('0.1.0-beta.1', '0.1.0-beta.3')).toBe(true)
+  })
+})
+
+/**
+ * `centralu install` keeps a copy at or above the version it carries (#645), and the in-app update
+ * keeps the same copy for the same reason: a local build (`0.2.0-beta.21.local.1`) waiting in
+ * /Applications for "Apply now" must not be replaced by npm's beta.21. Both sides decide with this
+ * function; the pairs are compared answer to answer like `isNewer` above.
+ */
+describe('keeping an installed copy that is not older (#645)', () => {
+  const CASES: [string, string | null | undefined, boolean][] = [
+    ['0.2.0-beta.21', '0.2.0-beta.21.local.1', true],
+    ['0.2.0-beta.21', '0.2.0-beta.21', true],
+    ['0.2.0-beta.21', '0.2.0-beta.22', true],
+    ['0.2.0-beta.21', '0.2.0-beta.20.local.9', false],
+    ['0.2.0-beta.21', '0.2.0-beta.20', false],
+    ['0.2.0', '0.2.0-beta.21.local.1', false],
+    ['0.2.0-beta.21', null, false],
+    ['0.2.0-beta.21', undefined, false],
+    ['0.2.0-beta.21', '', false],
+    ['0.2.0-beta.21', ' ', false],
+  ]
+  it.each(CASES)('target %s over a copy at %s: kept=%s', (target, copy, kept) => {
+    expect(launcherKeepsInstalledCopy(target, copy)).toBe(kept)
+    expect(keepsInstalledCopy(target, copy)).toBe(kept)
   })
 })

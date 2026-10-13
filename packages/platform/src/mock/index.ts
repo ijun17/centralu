@@ -2766,6 +2766,9 @@ export class MockPlatform implements Platform {
    * two would be invisible), and installing responds **before it finishes** and sends the rest
    * as events. It is also part of the contract here that `npm i -g` is not merely faked but
    * never actually run at all — a test must never touch the machine.
+   *
+   * Not mirrored: the host's backoff retry of a failed automatic install (#645). A test that sets
+   * `updateFails` wants that failure to stay on screen, not to be tried again behind its back.
    */
   readonly updates: UpdatePort = {
     status: async (force = false) => {
@@ -2801,20 +2804,23 @@ export class MockPlatform implements Platform {
 
   private installUpdate(): UpdateStatus {
     if (this.updateStatus.phase === 'updating' || this.updateStatus.phase === 'waiting_for_npm' || this.updateStatus.phase === 'restart_required') return { ...this.updateStatus }
-    const latest = this.updateStatus.latest
-    if (!this.updateStatus.newer || !latest) {
-      this.setUpdateStatus({ phase: 'failed', error: 'There is no newer version to install' })
-      return { ...this.updateStatus }
-    }
+    // Nothing newer known: refresh before refusing (#645), as the host does. Up to date is a result, not a failure.
+    const known = this.updateStatus.newer && this.updateStatus.latest ? this.updateStatus.latest : null
     // Same target refresh as UpdateService, without a network or an npm command.
     const age = this.updateStatus.checkedAt === null ? Infinity : this.now() - this.updateStatus.checkedAt
     let error: string | null = null
-    if (age < 0 || age >= 60_000) {
+    let target = known
+    if (known === null || age < 0 || age >= 60_000) {
       const fresh = this.registryVersion
-      if (fresh === null) error = `Could not refresh latest; using previously checked ${latest}.`
-      else {
-        const keepStored = age >= 0 && age < 3600_000 && isNewerVersion(latest, fresh)
-        const target = keepStored ? latest : fresh
+      if (fresh === null) {
+        if (known === null) {
+          this.setUpdateStatus({ phase: 'idle', error: 'Could not reach the registry — check the network' })
+          return { ...this.updateStatus }
+        }
+        error = `Could not refresh latest; using previously checked ${known}.`
+      } else {
+        const keepStored = known !== null && age >= 0 && age < 3600_000 && isNewerVersion(known, fresh)
+        target = keepStored ? known : fresh
         this.setUpdateStatus({ latest: target, newer: isNewerVersion(target, this.updateStatus.current), checkedAt: keepStored ? this.updateStatus.checkedAt : this.now() })
         if (!this.updateStatus.newer) {
           this.setUpdateStatus({ phase: 'idle', error: null })
@@ -2822,6 +2828,7 @@ export class MockPlatform implements Platform {
         }
       }
     }
+    if (target === null) return { ...this.updateStatus } // unreachable: a null target refreshed or returned above
     this.setUpdateStatus({ phase: 'updating', error })
     /*
      * The end is announced **after** the response is given. Installing routinely exceeds

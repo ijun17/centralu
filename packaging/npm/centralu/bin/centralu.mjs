@@ -23,7 +23,7 @@
  * being first exercised on someone's laptop.
  */
 import { execFileSync, spawn } from 'node:child_process'
-import { copyDiffers, isNewer } from './semver.mjs'
+import { copyDiffers, isNewer, keepsInstalledCopy } from './semver.mjs'
 import {
   asideCopies,
   busyMessage,
@@ -275,9 +275,21 @@ function queryRegistry(key) {
  * **Never done quietly through postinstall.** Writing silently into someone's `/Applications`
  * erodes trust, and pnpm blocks postinstall by default anyway. This is only run when the
  * person explicitly asks for it.
+ *
+ * **Never over a copy that is not older** (#645), unless `--force`. The in-app update runs this
+ * after `npm i -g` with the same rule (`keepsInstalledCopy`): a local build (`0.2.0-beta.21.local.1`)
+ * installed by hand and waiting for "Apply now" would otherwise be replaced by npm's beta.21 — a
+ * downgrade of the one copy people click, done by an update. `--force` is for going back on purpose.
  */
-function install() {
+function install(force) {
   const app = requireApp()
+  const copy = installedCopyVersion()
+  if (!force && keepsInstalledCopy(pkg.version, copy)) {
+    const where = PLATFORM === 'win32' ? WIN.dir : INSTALLED
+    console.log(`${where} holds ${copy}, which is not older than this package (${pkg.version}), and was left as it is.`)
+    console.log('To replace it anyway: centralu install --force')
+    return
+  }
   if (PLATFORM === 'win32') return installWindows(app)
   if (PLATFORM !== 'darwin') return installDesktopEntry(app)
   if (existsSync(INSTALLED)) console.log(`Replacing the existing ${INSTALLED} with the new version.`)
@@ -561,7 +573,8 @@ const HELP = `${APP_NAME} ${pkg.version}
 
   centralu              Launches the app
   centralu install      Registers it in the app list (macOS: /Applications, Linux: a menu entry,
-                        Windows: %LOCALAPPDATA%\\Programs\\Centralu and a Start menu shortcut)
+                        Windows: %LOCALAPPDATA%\\Programs\\Centralu and a Start menu shortcut).
+                        A copy that is not older is kept; --force replaces it anyway
   centralu uninstall    Removes that registration (conversation history is kept)
   centralu update       Upgrades if a new version is available
   centralu serve        Runs the host alone on this machine, for the app on another computer
@@ -573,7 +586,7 @@ Requires: Node 22+, and the claude or codex CLI (the app's first screen reports 
 const [cmd, ...rest] = process.argv.slice(2)
 switch (cmd) {
   case 'install':
-    install()
+    install(rest.includes('--force'))
     break
   case 'uninstall':
     uninstall()

@@ -6010,7 +6010,7 @@ export class SessionManager {
       if (decision === 'always') this.updateConsents.add(sessionId)
       else if (decision !== 'allow') return { ok: false, error: 'The person did not allow this Centralu update. Do not ask again unless they tell you to.' }
     }
-    return { ok: true, status: action === 'check' ? await updates.check(true) : updates.apply() }
+    return { ok: true, status: action === 'check' ? await updates.check(true) : await updates.apply() }
   }
 
   /**

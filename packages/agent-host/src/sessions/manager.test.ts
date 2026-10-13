@@ -348,7 +348,7 @@ describe('ordinary session update consent (#581)', () => {
   it.each(['auto', 'safe', 'normal'] as const)('%s: update_centralu opens only for auto, without remembering consent or changing update preferences', async (preset) => {
     const updates = new UpdateService(() => {}, { fetchLatest: async () => ({ ok: true as const, version: '9999.0.0' }), run: async () => {}, installedCopy: () => null })
     const check = vi.spyOn(updates, 'check')
-    const apply = vi.spyOn(updates, 'apply').mockImplementation(() => updates.current())
+    const apply = vi.spyOn(updates, 'apply').mockImplementation(async () => ({ ...updates.current(), phase: 'updating' as const }))
     const autoApply = vi.spyOn(updates, 'setAutoApply')
     mgr.useUpdates(updates)
     const project = await addProject()

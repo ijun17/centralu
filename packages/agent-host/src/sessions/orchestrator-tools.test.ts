@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
+import type { UpdateStatus } from '@cc/protocol'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import {
   AGENT_BUDGET_CHARS,
@@ -98,7 +99,18 @@ describe('Centralu update tool', () => {
     const check = await runOrchestratorTool(toolsWith({ updateCentralu }), 'update_centralu', { action: 'check' }, { sessionId: 's', profile: 'reader' })
     const install = await runOrchestratorTool(toolsWith({ updateCentralu }), 'update_centralu', { action: 'install' }, { sessionId: 's', profile: 'reader' })
     expect(check.text).toContain('0.1.1')
+    expect(install.text).toContain('Installing Centralu 0.1.1')
     expect(install.text).toContain('automatic-update setting was not changed')
+    // The install answers once its target is settled (#645): up to date and already installed are results, not failures
+    const settled = (status: Partial<UpdateStatus>) => async () => ({ ok: true, status: { current: '0.1.0', latest: '0.1.0', newer: false, auto: true, autoApply: false, phase: 'idle' as const, error: null, checkedAt: null, ...status } })
+    const upToDate = await runOrchestratorTool(toolsWith({ updateCentralu: settled({}) }), 'update_centralu', { action: 'install' }, { sessionId: 's', profile: 'reader' })
+    expect(upToDate).toEqual({ text: 'Centralu is up to date.' })
+    const unreachable = await runOrchestratorTool(toolsWith({ updateCentralu: settled({ latest: null, error: 'Could not reach the registry' }) }), 'update_centralu', { action: 'install' }, { sessionId: 's', profile: 'reader' })
+    expect(unreachable).toEqual({ text: 'Could not reach the registry' })
+    const installed = await runOrchestratorTool(toolsWith({ updateCentralu: settled({ latest: '0.1.1', newer: true, phase: 'restart_required' }) }), 'update_centralu', { action: 'install' }, { sessionId: 's', profile: 'reader' })
+    expect(installed.text).toContain('Centralu 0.1.1 is installed')
+    const failed = await runOrchestratorTool(toolsWith({ updateCentralu: settled({ latest: '0.1.1', newer: true, phase: 'failed', error: 'EACCES' }) }), 'update_centralu', { action: 'install' }, { sessionId: 's', profile: 'reader' })
+    expect(failed.text).toBe('Centralu update failed: EACCES')
     expect((await runOrchestratorTool(toolsWith({ updateCentralu }), 'update_centralu', { action: 'auto' }, { sessionId: 's', profile: 'reader' })).isError).toBe(true)
   })
 })

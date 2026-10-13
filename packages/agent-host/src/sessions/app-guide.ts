@@ -131,11 +131,15 @@ Ordinary checks follow npm, including dist-tag rollbacks. Installing reuses a su
 from the last minute or checks again. Only while installing can a higher stored version seen less
 than an hour ago win over the fresh tag. Older observations yield to npm. If the check fails, it
 uses the stored version and says so. Checks preserve install errors until the next install attempt.
+An install asked for with nothing newer known checks first; nothing newer is then "Up to date", not
+a failure. An installed copy that is not older than the target (a local build waiting to be applied)
+is kept, and the line says so.
 Once installed, the desktop app offers "Apply now": it relaunches into the new version, and running
 agents, terminals and commands keep going. "Apply updates automatically when idle" (off by default)
 installs a new version without a click and applies it once no session is working or waiting, no
-terminal or command is running, and the person is not typing.
-From the terminal: \`centralu update\`.`,
+terminal or command is running, and the person is not typing. With it on, a failed install is tried
+again after 10 minutes, then 1 hour, then every 6 hours; the error stays until the next attempt.
+From the terminal: \`centralu update\`. \`centralu install --force\` replaces a copy that is not older.`,
 }
 
 /**
