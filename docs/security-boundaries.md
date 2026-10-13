@@ -112,7 +112,10 @@ and `normal` it has these controls ([agent-host.md](agent-host.md) §1.2):
   sessions remain ordinary sessions without cross-project ownership. A busy session accepts tracked
   mid-turn input only if its adapter supports it; otherwise it returns busy and its state. Another
   delegation's watcher cannot be overwritten. Delivered input is visible in conversation with the
-  asking session's `from`; waiting and Stop follow its completion receipt, including queued turns.
+  asking session's `from`; waits follow its completion receipt, including queued turns. Caller Stop
+  reaches a target only during an active wait. If the task joined the person's running turn, caller
+  Stop/cancellation ends only that caller's wait, leaving the turn, receipts and other observers
+  running. A bounded call that already returned does not confer a right to stop the target.
 - **The answer is someone else's words**, JSON-quoted for the caller like a worker's preview.
 - **Files come back by name, and only from inside the target project.** A named path is granted
   to the caller only if it exists inside the target project's folder after resolving symlinks, and

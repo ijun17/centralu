@@ -216,11 +216,14 @@ bridge wait of 280 s. It then answers still working, naming the session and how 
 to continue waiting, even if another session was opened meanwhile. Multiple outstanding tasks need
 an explicit session. A new task cannot replace unfinished work in the same session.
 
-**Stop.** Stop on the caller or cancellation of the call stops the assigned turn and ends its wait.
-Stopping the target, a failed turn or deleting it returns an error naming the session. Deleting the
-caller drops the wait and grants while the target keeps its turn. Existing report-back observers,
-approval notices and sleep dependencies follow the same watcher; tracked notes cannot report an
-intermediate turn's completion.
+**Stop.** Stop on the caller reaches delegated work only while that caller is actually waiting
+(`waiters > 0`), as for `start_agent`; after a bounded call returns still working, the target keeps
+running. If the task joined an already-running turn, Stop or call cancellation ends only the caller's
+wait and never interrupts the person's turn. Its receipt watcher, other observers and report-back
+continue until the input finishes. A task assigned to an idle target can still be interrupted while
+the caller waits. An explicit Stop on the target remains available. A failed turn or deleting the
+target returns an error naming the session. Deleting the caller drops the wait and grants while the
+target keeps its turn. Tracked notes cannot report an intermediate turn's completion.
 
 **Size.** Historical baseline before the optional session selector (#614). Measured like the reader set (haiku, `scripts/probe-reader-tools.mts`): `ask_project`
 is 350 characters (`DELEGATE_BUDGET_CHARS` 400) and costs **+103 tokens** loaded (the set: +192 →

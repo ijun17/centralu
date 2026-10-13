@@ -4503,11 +4503,10 @@ export class SessionManager {
     if (run) run.stoppedByPerson = true
     for (const observer of this.turnObservers.get(sessionId) ?? []) observer.stoppedByPerson = true
     handle.interrupt()
-    // Stop on a caller stops what it asked another project to do (#371): the call it is waiting in ends with it
-    // A child start_agent started (#561) stops only while the caller is waiting on it: one left running with
-    // `wait: false` (or past the bound) is its own session now, with its own Stop
+    // Stop reaches delegated work only while the caller waits. A note that joined the person's turn
+    // only ends that caller's wait; work left running past the bound has its own Stop.
     for (const d of this.delegations.values()) {
-      if (d.callerId === sessionId && (!d.agent || (d.waiters ?? 0) > 0)) d.stop('the person stopped the session that asked')
+      if (d.callerId === sessionId && (d.waiters ?? 0) > 0) d.stop('the person stopped the session that asked')
     }
   }
 
@@ -5383,7 +5382,7 @@ export class SessionManager {
    *      to the caller (`readableGrants`).
    *
    * Stop on the caller, the call's own signal, or the person deleting either session ends the wait; the first two
-   * stop the delegated turn as well.
+   * stop an assigned idle target only while waiting; a task that joined the person's turn only ends the wait.
    */
   async askProject(callerId: string, opts: { project: string; session?: string; task?: string }, signal?: AbortSignal): Promise<AskProjectResult> {
     const caller = this.meta.get(callerId)
@@ -5469,7 +5468,7 @@ export class SessionManager {
     const delegatedId = chosen.id
     const midTurn = inTurn(this.meta.get(delegatedId)!.state)
     let releaseInput: (() => void) | undefined
-    const d = this.startDelegation(key, callerId, delegatedId, target)
+    const d = this.startDelegation(key, callerId, delegatedId, target, false, midTurn)
     const callerProject = projects.find((p) => p.id === caller.projectId)?.name ?? 'another project'
     try {
       const from = { sessionId: callerId, name: labelOf(this.store, caller) }
@@ -5495,7 +5494,7 @@ export class SessionManager {
   }
 
   /** Registers the wait on the delegated session's turn (the same watcher an app's agent uses, `AgentRunWait`) */
-  private startDelegation(key: string, callerId: string, sessionId: string, target: { id: string; name: string; path: string }, agent = false): Delegation {
+  private startDelegation(key: string, callerId: string, sessionId: string, target: { id: string; name: string; path: string }, agent = false, joinedTurn = false): Delegation {
     let notice: string | undefined
     let answerAfter = this.meta.get(sessionId)?.lastSeq ?? 0
     const wait = new AgentRunWait((message) => (notice = message), () => this.meta.get(sessionId)?.name ?? 'the session', undefined, () => {
@@ -5504,7 +5503,12 @@ export class SessionManager {
       answerAfter = this.meta.get(sessionId)?.lastSeq ?? answerAfter
       return answer
     })
+    // Detach the caller without failing the target's receipt watcher or other observers.
+    let cancelWait!: (result: { ok: false; error: string }) => void
+    const waitCancelled = new Promise<{ ok: false; error: string }>((resolve) => { cancelWait = resolve })
     const d: Delegation = {
+      joinedTurn,
+      waitCancelled,
       callerId,
       sessionId,
       target,
@@ -5515,8 +5519,12 @@ export class SessionManager {
         (r) => ({ ok: true as const, answer: r.answer }),
         (e: Error) => ({ ok: false as const, error: e.message }),
       ),
-      stop: (why) => {
+      stop: (why, targetStop = false) => {
         if (d.settled) return
+        if (joinedTurn && !targetStop) {
+          cancelWait({ ok: false, error: `${why}; the caller stopped waiting and the target session was left running` })
+          return
+        }
         wait.fail(new Error(`${why}, so the delegated turn was stopped`))
         try {
           this.handles.get(sessionId)?.interrupt()
@@ -5587,13 +5595,16 @@ export class SessionManager {
       if (signal.aborted) onAbort()
       else signal.addEventListener('abort', onAbort, { once: true })
     })
+    d.waiters = (d.waiters ?? 0) + 1
     try {
-      const r = await Promise.race([d.outcome, bound, aborted])
+      const r = await Promise.race([d.outcome, ...(d.waitCancelled ? [d.waitCancelled] : []), bound, aborted])
       if (r === 'aborted') {
         d.stop('the call that asked was cancelled')
-        await d.outcome
-        this.delegations.delete(key)
-        return { ok: false, error: `The call was cancelled, so ${d.target.name}'s session "${sessionName()}" was stopped.` }
+        if (!d.joinedTurn) await d.outcome
+        if (this.delegations.get(key) === d) this.delegations.delete(key)
+        return { ok: false, error: d.joinedTurn
+          ? `The call was cancelled; ${d.target.name}'s session "${sessionName()}" was left running.`
+          : `The call was cancelled, so ${d.target.name}'s session "${sessionName()}" was stopped.` }
       }
       if (r === 'bound') {
         const notice = d.notice()
@@ -5603,7 +5614,9 @@ export class SessionManager {
       if (!r.ok) {
         return {
           ok: false,
-          error: `${d.target.name}'s session "${sessionName()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or ask again with a clearer task.`,
+          error: d.joinedTurn
+            ? `The wait for ${d.target.name}'s session "${sessionName()}" [${d.sessionId}] ended: ${r.error}.`
+            : `${d.target.name}'s session "${sessionName()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or ask again with a clearer task.`,
         }
       }
       const answer = r.answer ?? finalAnswer(this.store.loadMessages(d.sessionId, 50))
@@ -5624,6 +5637,7 @@ export class SessionManager {
         outside,
       }
     } finally {
+      d.waiters = (d.waiters ?? 1) - 1
       clearTimeout(timer)
       if (onAbort) signal?.removeEventListener('abort', onAbort)
     }
@@ -5773,7 +5787,7 @@ export class SessionManager {
         case 'stop': {
           if (!d || d.settled) return { ok: false, error: `Nothing you gave "${child.name}" is running.` }
           if (!observing && this.awaitingReport.get(child.id) === callerId) this.awaitingReport.delete(child.id)
-          d.stop('the session that started it stopped it')
+          d.stop('the session that started it stopped it', observing)
           await d.outcome
           if (!observing) this.delegations.delete(key)
           return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool }
@@ -7110,10 +7124,14 @@ type Delegation = {
   readonly settled: boolean
   /** What the delegated session waits on, when it waits on the person */
   notice(): string | undefined
-  /** Stops the delegated turn and ends the wait with the reason */
-  stop(why: string): void
+  /** A task that joined the person's running turn: caller cancellation must leave that turn alone. */
+  joinedTurn?: boolean
+  /** Ends only the caller's wait, keeping the target's receipt watcher and observers alive. */
+  waitCancelled?: Promise<{ ok: false; error: string }>
+  /** Ends the wait; interrupts only an assigned turn or an explicit stop of the target itself. */
+  stop(why: string, targetStop?: boolean): void
   /** A child start_agent started in the caller's own project (#561), rather than ask_project's delegated session */
   agent?: boolean
-  /** How many of the caller's calls are waiting on it right now (#561, `awaitAgent`) */
+  /** How many of the caller's calls are waiting on it right now (`awaitAgent`, `awaitDelegation`) */
   waiters?: number
 }

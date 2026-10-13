@@ -342,6 +342,85 @@ describe('asking another project', () => {
     expect(!r.ok && r.error).toContain('cancelled')
   })
 
+  it.each([
+    ['claude', 'stop'], ['claude', 'cancel'], ['codex', 'stop'], ['codex', 'cancel'],
+  ] as const)("%s: caller %s ends its wait without interrupting the person's running turn", async (tool, action) => {
+    await w.mgr.switchTool(targetSession, tool)
+    const caller = await w.callerSession()
+    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    await w.mgr.send(targetSession, 'person work')
+    const h = handleOf(targetSession)!
+    const ac = new AbortController()
+    const asking = w.mgr.askProject(caller, { project: w.target.id, task: 'export' }, ac.signal)
+    await w.until(() => h.sent.length === 2)
+    const observer = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool, permissionPreset: 'auto' })
+    const observing = w.mgr.agentSession(observer.id, { sessionId: targetSession, action: 'wait' })
+    if (action === 'stop') w.mgr.interrupt(caller)
+    else ac.abort()
+    const result = await asking
+    expect(h.interrupted).toBe(0)
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining('left running') })
+    expect(h.receipts).toHaveLength(1)
+    expect(w.mgr.listSessions().find((s) => s.id === targetSession)?.state).toBe('working')
+    // Ending this caller's wait must not end another session's observation or the note receipt.
+    h.answer('person turn answer', false)
+    let observed = false
+    void observing.then(() => { observed = true })
+    await Promise.resolve()
+    expect(observed).toBe(false)
+    h.answer('note answer')
+    expect(await observing).toMatchObject({ ok: true, answer: 'note answer' })
+  })
+
+  it('an explicit stop of the target still interrupts a task that joined its running turn', async () => {
+    const caller = await w.callerSession()
+    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    await w.mgr.send(targetSession, 'person work')
+    const h = handleOf(targetSession)!
+    const asking = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
+    await w.until(() => h.sent.length === 2)
+    const observer = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'codex', permissionPreset: 'auto' })
+    expect(await w.mgr.agentSession(observer.id, { sessionId: targetSession, action: 'stop' })).toMatchObject({ ok: true, state: 'stopped' })
+    expect(h.interrupted).toBe(1)
+    expect(await asking).toMatchObject({ ok: false, error: expect.stringContaining('stopped') })
+  })
+
+  it.each([false, true])('Stop after an ask bound leaves the target running (joined turn: %s)', async (joinedTurn) => {
+    const caller = await w.callerSession()
+    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    if (joinedTurn) await w.mgr.send(targetSession, 'person work')
+    const h = handleOf(targetSession)!
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const asking = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
+    for (let n = 0; n < 50 && h.sent.length < (joinedTurn ? 2 : 1); n++) await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
+    expect(await asking).toMatchObject({ ok: true, state: 'working' })
+    vi.useRealTimers()
+    w.mgr.interrupt(caller)
+    expect(h.interrupted).toBe(0)
+    expect(w.mgr.listSessions().find((s) => s.id === targetSession)?.state).toBe('working')
+    h.answer('finished after the bound')
+    expect(await w.mgr.askProject(caller, { project: w.target.id })).toMatchObject({ ok: true, state: 'done', answer: 'finished after the bound' })
+  })
+
+  it('Stop reaches an assigned idle target again while the caller waits after the bound', async () => {
+    const caller = await w.callerSession()
+    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    const h = handleOf(targetSession)!
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const asking = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
+    for (let n = 0; n < 50 && !h.sent.length; n++) await vi.advanceTimersByTimeAsync(0)
+    await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
+    expect(await asking).toMatchObject({ ok: true, state: 'working' })
+    vi.useRealTimers()
+    w.mgr.interrupt(caller)
+    expect(h.interrupted).toBe(0)
+    const waitingAgain = w.mgr.askProject(caller, { project: w.target.id })
+    w.mgr.interrupt(caller)
+    expect(await waitingAgain).toMatchObject({ ok: false, error: expect.stringContaining('the person stopped') })
+    expect(h.interrupted).toBe(1)
+  })
+
   it('a failed delegated turn comes back as an error naming the session and what to do', async () => {
     const s = await w.callerSession()
     w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
