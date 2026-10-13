@@ -49,7 +49,9 @@ async function freePorts(n: number): Promise<number[]> {
           s.listen(port, '127.0.0.1', () => resolve())
         })
       } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === 'EADDRINUSE') continue
+        const code = (e as NodeJS.ErrnoException).code
+        // Windows reports EACCES for ports reserved by Hyper-V or WSL.
+        if (code === 'EADDRINUSE' || code === 'EACCES') continue
         throw e
       }
       held.push(s)
