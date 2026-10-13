@@ -31,7 +31,9 @@ boundaries (#603), with a log line instead of a card or refusal:
   more work from the caller.
 - **Depth one**: a session marked `askedBy` (started by `start_agent`), or handling an active `ask_project` task, can neither
   start agents nor ask a project.
-- **Ownership**: `agent_session` acts only on a session whose `askedBy` is the caller, in its project. Under
+- **Ownership**: `agent_session` normally acts only on a session whose `askedBy` is the caller, in its project.
+  Deletion without a worktree accepts either `askedBy` or `parentSessionId` equal to the caller, and requires
+  that link in every preset (#637); it stops the child and uses the same trash path as the sidebar. Under
   `auto`, another caller's delegation can be observed without consuming its report or result;
   observer waits never grant files or stop work on cancellation. A person's turn or app request
   with no delegation stays unowned by its observer, does not pin that caller awake, and
@@ -293,7 +295,8 @@ without asking. "Bypass" is the person's own global setting (`defaultMode: "bypa
 | `start_agent` from a session that was itself started or asked (`askedBy`) | refused | refused | refused | open | refused | refused | refused | open | `startAgent` (depth one; `askProject` refuses the same sessions) |
 | `start_agent` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `startAgent` (the project's trust, #382) |
 | `start_agent` past 4 running children in the project, default setting | refused | refused | refused | open | refused | refused | refused | open | `agentCeilingError` (`prefs.agentCeiling`; empty: auto unlimited, otherwise `AGENT_CEILING`; 0: unlimited) |
-| `agent_session` on a session the caller did not start | refused | refused | refused | open | refused | refused | refused | open | `agentSession` (same project in every preset; ownership opens under auto) |
+| `agent_session` on a session the caller did not start (except delete without a worktree) | refused | refused | refused | open | refused | refused | refused | open | `agentSession` (same project in every preset; ownership opens under auto) |
+| `agent_session` delete without a worktree, a session the caller did not start | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (#637): requires `askedBy` or `parentSessionId` equal to the caller in the same project. An owned child is stopped and moved to the sidebar trash, including mid-turn. |
 | `agent_session` delete, an idle worktree child with uncommitted changes or commits absent from the trunk | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `cleanUpWorktreeChild` (#608): the parent decides; patches and bundles follow the session into the trash before the worktree and branch are removed. Working children are refused; an idle process must be disposed successfully first. |
 | `agent_session` send, to a child the person raised above the caller's preset | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (`presetWithin`) |
 | `create_project` (the orchestrator makes a new project, empty or a clone) | asks (a card with the full path and, for a clone, the repository, every time) | asks | asks | open | asks | asks | asks | open | `SessionManager.createProjectAsked` → `askHost`; the folder is made only after "Create", and never over anything already there (`projectFolderTarget`, `makeProjectFolder`); by default in `~/Centralu`, a folder of the home that macOS does not protect, so making one raises no OS permission prompt (the Desktop did); a clone takes https, ssh and scp-like addresses only, never `ext::`, `file://` or a local path (`gitSourceError`), clones no submodules and never asks for a sign-in (`project-clone.ts`) |

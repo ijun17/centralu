@@ -156,7 +156,7 @@ export type AskProjectResult =
  *   working   still running past the wait's bound (or not waited on); `reported` says the caller will be told when it ends
  *   at_rest   nothing the caller gave it is running (agent_session status/wait); `answer` is its last final text
  *   stopped   agent_session stop ended the turn
- *   deleted   agent_session delete put a worktree child in the trash and removed its worktree and branch
+ *   deleted   agent_session delete put a child in the trash; worktree children also report branch cleanup
  */
 export type ChildRunResult =
   | ({ ok: true; sessionId: string; sessionName: string; tool: string; notice?: string } & (
@@ -164,6 +164,7 @@ export type ChildRunResult =
       | { state: 'working'; reported: boolean }
       | { state: 'at_rest'; answer: string; sessionState: string }
       | { state: 'stopped' }
+      | { state: 'deleted'; branch?: undefined; setAside?: undefined; warning?: undefined }
       | { state: 'deleted'; branch: string; warning?: string; setAside: { changedFiles: number; commits: number } }
     ))
   | { ok: false; error: string }

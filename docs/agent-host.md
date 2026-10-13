@@ -250,7 +250,7 @@ own budget (`AGENT_TOOLS`, `AGENT_BUDGET_CHARS`).
 | Tool | Arguments → what comes back |
 |---|---|
 | `start_agent` | `{ task, tool?: string, model?, effort?, wait?, worktree?, branch? }` → the child's id and name, and its answer (`done`) or `working` |
-| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete, text? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `stopped` and `deleted` (an idle worktree child removed, local work kept in the trash, #608) |
+| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete, text? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `stopped` and `deleted` (a child moved to the trash; worktree cleanup also preserves local work, #608/#637) |
 
 The optional `tool` is a registry name, accepted as a string by the schema and checked against the
 current registry at call time. An unknown name returns an error listing the installed tools; adding
@@ -262,7 +262,8 @@ in the trash under every preset (#608).
 `agent_session` can status, wait, send or stop any session in the same project, and delete
 any worktree session there,
 including another parent's child or the person's turn; adapter mid-turn support and the
-child's own preset still apply. Observing an app agent reuses its completion watcher, so
+child's own preset still apply. Deleting a session without a worktree still requires the caller to have started it
+(`askedBy` or `parentSessionId` equals the caller), even under `auto` (#637). Observing an app agent reuses its completion watcher, so
 `run_agent` still receives its answer and the agent keeps its `safe` preset. Cleanup removes an idle worktree and branch even with dirty files or an unproven tip, after setting aside
 local work with the conversation in the trash (#608). `run_agent`
 app agents stay `safe`, and no session gets a preset above its caller. When auto observes another
@@ -318,6 +319,14 @@ either alone says what is meant. A worktree child hangs under the session that s
 as a same-folder child does: the sidebar groups by who started a session (`askedBy`, `orderAsTree` in
 `ui/features/sidebar/tree.ts`), and `parentSessionId` still places a former worktree manager's sessions.
 
+**Creator and worktree ancestry** (#637). `askedBy` records who started an agent, regardless of its folder.
+`parentSessionId` records worktree ancestry (including former manager children); `start_agent` sets it only
+when creating a worktree. Same-folder children keep `parentSessionId: null`. The sidebar uses a present
+`parentSessionId` first, then `askedBy`. Keep these fields distinct: changing ancestry for same-folder sessions
+would also change worktree consumers. No migration or backfill is needed; deletion without a worktree accepts
+either existing creator/parent link, including records reloaded after a host swap. Stored session and trash
+shapes stay unchanged, so the previous host can continue reading them during a swap.
+
 **A usable worktree** (#582). Provisioning reuses installed JS dependencies automatically, even without a
 configured setup command. With an unchanged root lockfile (`pnpm-lock.yaml`, `package-lock.json`,
 `npm-shrinkwrap.json`, `yarn.lock`, `bun.lock` or `bun.lockb`), missing `node_modules` folders are cloned from the
@@ -352,7 +361,8 @@ the person's settings) and project-trust settings sources. There is no Centralu-
 or network gap. A sandbox in the person's own Claude settings can still restrict commands; Centralu does
 not widen it here. Dependency preparation above applies to both adapters.
 
-`agent_session` acts only on a session whose `askedBy` is the caller, in its project. `send` during the caller's turn
+`agent_session` normally acts on a session whose `askedBy` is the caller, in its project (the `auto` exception is above).
+Deleting a child without a worktree also accepts `parentSessionId` as its ownership link. `send` during the caller's turn
 uses the adapter's ordinary message path when it declares `capabilities.midTurnInput` and provides `sendTracked`:
 Codex 0.160 `turn/start`
 steers an already-active regular turn (confirmed by `TurnStartParams.turnTrigger`; compact/review messages keep
@@ -396,6 +406,14 @@ It is refused on an adapter without this capability, while the child works on so
 a child, stops that child's turn. A child left running (`wait: false`, or past the bound) is its own session: the
 caller's Stop does not reach it, it has its own Stop. Deleting the caller drops its waits and its session consent;
 the children keep their turns and their link.
+
+**Deleting a child without a worktree** (#637). In every preset, the caller may delete only a session it started
+in the same project (`askedBy` or `parentSessionId` equals the caller). The host uses the sidebar's
+`trashSession` path: withdraw a pending wake, settle waits, dispose the child process if present, flush streamed
+messages, then move the session to the trash and emit `session_deleted`. This works mid-turn, including while
+the parent is working; it does not stop the parent's turn. History and the tool's conversation remain restorable.
+The result is `deleted` without worktree/branch recovery fields. A session belonging to another caller, an
+unowned session, a session in another project, and self-deletion are refused.
 
 **Deleting a worktree child** (#608, decision owner 2026-10-13). In every preset the parent decides whether
 to remove its child: neither uncommitted files nor an unproven merge refuses deletion. A working child must

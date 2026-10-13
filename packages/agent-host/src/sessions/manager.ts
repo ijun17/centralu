@@ -5772,7 +5772,7 @@ export class SessionManager {
    *   send    gives it more, including during the caller's turn on adapters that accept mid-turn input; refused
    *           while it works on the person's own message or has a higher preset than the caller
    *   stop    stops the turn the caller gave it; a turn the person started there is theirs
-   *   delete  sets aside local work in the trash, then removes an idle child's worktree and branch (#608)
+   *   delete  trashes a child without a worktree, stopping it first; worktree cleanup requires an idle child (#608)
    */
   async agentSession(callerId: string, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult> {
     if (opts.sessionId === callerId && opts.action !== 'status') {
@@ -5780,7 +5780,9 @@ export class SessionManager {
     }
     const caller = this.meta.get(callerId)
     const child = this.meta.get(opts.sessionId)
-    if (!caller?.projectId || !child || (child.askedBy !== callerId && !this.autoBoundaryOpen(callerId, 'session ownership')) || child.projectId !== caller.projectId) {
+    const deletingWithoutWorktree = opts.action === 'delete' && !child?.worktree
+    const startedHere = child?.askedBy === callerId || (deletingWithoutWorktree && child?.parentSessionId === callerId)
+    if (!caller?.projectId || !child || (!startedHere && (deletingWithoutWorktree || !this.autoBoundaryOpen(callerId, 'session ownership'))) || child.projectId !== caller.projectId) {
       return { ok: false, error: `${opts.sessionId} is not a session this session started. agent_session works only on sessions start_agent started here.` }
     }
     if (opts.sessionId === callerId) return this.agentAtRest(child)
@@ -5813,6 +5815,12 @@ export class SessionManager {
           return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool }
         }
         case 'delete': {
+          if (!child.worktree) {
+            // Use the sidebar's stop/flush/trash path, including pending waits and wake withdrawal.
+            await this.trashSession(child.id)
+            if (d) this.delegations.delete(key)
+            return { ok: true, state: 'deleted', sessionId: child.id, sessionName: child.name, tool: child.tool }
+          }
           if (d && !d.settled) return { ok: false, error: `"${child.name}" is still working on what you gave it — stop it or wait first.` }
           const r = await this.cleanUpWorktreeChild(child)
           if (!r.ok) return r

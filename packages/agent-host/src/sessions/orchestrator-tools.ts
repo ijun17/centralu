@@ -549,6 +549,7 @@ function agentRunText(r: ChildRunResult): ToolOutput {
     case 'stopped':
       return { text: `Stopped ${who}.` }
     case 'deleted':
+      if (r.branch === undefined) return { text: `Moved ${who} to the trash. Tell the person in one line.` }
       return {
         text:
           (r.warning ? `Moved ${who} to the trash. Warning: ${r.warning} ` : `Cleaned up ${who}: its worktree and branch "${r.branch}" were removed and the session went to the trash. `) +
