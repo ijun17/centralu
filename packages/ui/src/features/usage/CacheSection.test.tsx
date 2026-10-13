@@ -35,6 +35,12 @@ const render = (cache: CacheStats, toolLabel = 'Claude Code') => {
 }
 
 describe('CacheSection', () => {
+  it('shows 99.8 percent rather than a perfect hit rate in the dropdown (#587)', () => {
+    const { text } = render({ writes: false, countingSince: LONG_AGO, windows: [win({ inputTokens: 70_689, cacheReadTokens: 35_617_437, cacheCreationTokens: 0 })] })
+    expect(text).toContain('99.8% cache hit')
+    expect(text).not.toContain('100%')
+  })
+
   it('shows the hit rate, what the input was made of, the rebuilds and the sessions that wrote most', () => {
     const { html, text } = render({ writes: true, countingSince: LONG_AGO, windows: [win(), win({ id: 'today', label: 'today' })] })
     expect(text).toContain('94% cache hit · last 5 h')

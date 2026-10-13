@@ -75,11 +75,25 @@ describe('cacheHitRate', () => {
 })
 
 describe('percentOf', () => {
+  it.each([
+    [0.00001, '<0.1'], [0.00049, '<0.1'], [0.0005, '0.1'], [0.008, '0.8'],
+    [0.0099, '1.0'], [0.01, '1'], [0.9899, '99'], [0.99, '99.0'],
+    [35_617_437 / 35_688_126, '99.8'], [0.99949, '99.9'], [0.9995, '>99.9'], [0.99999, '>99.9'],
+  ])('keeps the boundary rate %s distinguishable as %s', (rate, expected) => {
+    expect(percentOf(rate)).toBe(expected)
+  })
+
+  it('never labels a partial cache hit as zero or perfect across the range', () => {
+    for (let n = 1; n < 10_000; n++) {
+      expect(percentOf(n / 10_000)).not.toMatch(/^(?:0|100)(?:\.0)?$/)
+    }
+  })
+
   it('rounds to a whole percent', () => {
-    expect(percentOf(0.9412)).toBe(94)
-    expect(percentOf(0.945)).toBe(95)
-    expect(percentOf(1)).toBe(100)
-    expect(percentOf(0)).toBe(0)
+    expect(percentOf(0.9412)).toBe('94')
+    expect(percentOf(0.945)).toBe('95')
+    expect(percentOf(1)).toBe('100')
+    expect(percentOf(0)).toBe('0')
   })
 })
 
@@ -97,6 +111,12 @@ describe('cacheWindowName', () => {
 })
 
 describe('cacheTooltipLine', () => {
+  it('shows the recorded 99.8 percent hit rate in the tooltip (#587)', () => {
+    expect(cacheTooltipLine(stats(win({ inputTokens: 70_689, cacheReadTokens: 35_617_437, cacheCreationTokens: 0 })))).toBe(
+      'Cache hit 99.8% · last 5 h',
+    )
+  })
+
   it('is one short line: the hit rate and its window', () => {
     expect(cacheTooltipLine(stats(win({ inputTokens: 100, cacheReadTokens: 9_400, cacheCreationTokens: 500 })))).toBe(
       'Cache hit 94% · last 5 h',

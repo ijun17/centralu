@@ -15,9 +15,13 @@ export function cacheHitRate(w: Input): number | null {
   return total > 0 ? w.cacheReadTokens / total : null
 }
 
-/** A rate as a whole percent, for reading at a glance */
-export function percentOf(rate: number): number {
-  return Math.round(rate * 100)
+/** Keep one decimal near the ends, without presenting a rounded rate as zero or perfect. */
+export function percentOf(rate: number): string {
+  if (rate === 0 || rate === 1) return String(rate * 100)
+  const percent = rate * 100
+  if (percent < 0.05) return '<0.1'
+  if (percent >= 99.95) return '>99.9'
+  return percent >= 99 || percent < 1 ? percent.toFixed(1) : String(Math.round(percent))
 }
 
 /**

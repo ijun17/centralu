@@ -205,3 +205,15 @@ test('a host that predates the figures leaves the tooltip and the dropdown as th
   await expect(page.getByTestId('usage-panel')).toBeVisible()
   await expect(page.getByTestId('usage-cache')).toHaveCount(0)
 })
+
+
+test('a near-perfect cache rate stays distinct in the tooltip and dropdown (#587)', async ({ page }) => {
+  await setup(page)
+  const cache = figures('none')
+  Object.assign(cache.codex.windows[0]!, { inputTokens: 70_689, cacheReadTokens: 35_617_437 })
+  await answer(page, cache)
+  await page.getByTestId('usage-donut-codex').hover()
+  await expect(page.getByTestId('usage-donut-cache-codex')).toHaveText('Cache hit 99.8% · last 5 h')
+  await page.getByTestId('usage-donut-codex').click()
+  await expect(page.getByTestId('usage-cache-rate')).toHaveText('99.8%')
+})
