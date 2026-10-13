@@ -3793,6 +3793,44 @@ test('Typing a slash shows skills, and @ shows files', async ({ page }) => {
   await expect(page.getByTestId('prompt-input')).toHaveValue('take a look at this @src/SessionView.tsx ')
 })
 
+for (const trigger of ['/rev', '@Session']) {
+  test(`Replacing text after picking ${trigger} keeps the person's selection`, async ({ page }) => {
+    await setup(page, { projects: ['/tmp/alpha'] })
+    await page.evaluate(() => {
+      const m = (window as any).__mock
+      m.commandState = { ready: true, commands: [{ name: 'review', description: '', argumentHint: '' }] }
+      m.fsState.entries[''] = [
+        { name: 'SessionView.tsx', path: 'src/SessionView.tsx', isDir: false, ignored: false },
+      ]
+    })
+    await newSession(page, 'alpha', 'task')
+    const input = page.getByTestId('prompt-input')
+    await input.fill(trigger)
+    await expect(page.getByTestId('autocomplete-item-0')).toContainText(trigger === '/rev' ? '/review' : 'SessionView.tsx')
+
+    // Hold the pick's next-frame caret move until after the person selects the replacement.
+    // This is the interleaving behind #368; fill() also selects before inserting its text.
+    await page.evaluate(() => {
+      const frame = window.requestAnimationFrame
+      const held: FrameRequestCallback[] = []
+      window.requestAnimationFrame = (callback) => (held.push(callback), 0)
+      ;(window as any).__releaseComposerFrames = () => {
+        window.requestAnimationFrame = frame
+        for (const callback of held) callback(performance.now())
+      }
+    })
+    await page.keyboard.press('Enter')
+    await expect(input).toHaveValue(trigger === '/rev' ? '/review ' : '@src/SessionView.tsx ')
+    await page.keyboard.press('ControlOrMeta+A')
+    await page.evaluate(() => (window as any).__releaseComposerFrames())
+    await page.keyboard.insertText('take a look at this @Session')
+    await expect(input).toHaveValue('take a look at this @Session')
+    await expect(page.getByTestId('autocomplete-item-0')).toContainText('SessionView.tsx')
+    await page.keyboard.press('Enter')
+    await expect(input).toHaveValue('take a look at this @src/SessionView.tsx ')
+  })
+}
+
 test('When skills have not loaded yet, it does not claim there are none', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await page.evaluate(() => {

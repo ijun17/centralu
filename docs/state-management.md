@@ -60,6 +60,15 @@ The do-not-store list — the following **must not exist as fields** and must be
 
 Selectors are implemented as memoised wrappers around pure functions in `core`. Because the ordering and urgency rules live in core, the unit tests run without React.
 
+### Composer text and selection
+
+An unsent draft belongs to its session in the UI store; typing and autocomplete picks update it
+synchronously. Recalled history is edited separately, leaving that draft intact. An autocomplete
+pick applies its caret in the same React commit as its text, in a layout effect. Deferring that
+selection until the next animation frame can collapse a selection the person made in the meantime,
+so replacement text appends to the old draft instead (#368). File-search and command-list replies
+only update suggestions; they never restore the composer's text.
+
 ## 4. Message windowing (how the §7.1 memory target is met)
 
 - We do not hold every message of a session in memory. **Focused session**: everything loaded so far, read a page at a time from StorePort when scrolling up. **Unfocused sessions**: a window of the most recent 50 rows (`WINDOW_SIZE`) beside the summary (last line, seq, state); opening one reads the rest back.

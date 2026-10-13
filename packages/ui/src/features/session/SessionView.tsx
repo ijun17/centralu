@@ -909,6 +909,7 @@ const Composer = memo(function Composer({
    */
   const [composing, setComposing] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const selectionAfterPick = useRef<{ text: string; caret: number } | null>(null)
   /** The person pressed the composer, so the focus that follows is theirs (#590) */
   const pressed = useRef(false)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -969,6 +970,17 @@ const Composer = memo(function Composer({
     el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_H)}px`
   }, [text])
 
+  // Apply the pick's caret with its value, before another input event. A next-frame move
+  // can collapse a newer selection (#368), making replacement text append to the old draft.
+  useLayoutEffect(() => {
+    const next = selectionAfterPick.current
+    selectionAfterPick.current = null
+    const el = inputRef.current
+    if (!next || !el || el.value !== next.text) return
+    el.focus()
+    el.setSelectionRange(next.caret, next.caret)
+  }, [text, caret, sessionId])
+
   /*
    * A switch to a different session undoes any recall in progress (#38).
    *
@@ -1027,15 +1039,9 @@ const Composer = memo(function Composer({
       return
     }
     const next = ac.apply(item)
+    selectionAfterPick.current = next
     setText(next.text)
     setCaret(next.caret)
-    // The caret has to move after the value is applied (once React has rendered it)
-    requestAnimationFrame(() => {
-      const el = inputRef.current
-      if (!el) return
-      el.focus()
-      el.setSelectionRange(next.caret, next.caret)
-    })
   }
 
   /**
