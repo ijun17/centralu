@@ -1,5 +1,6 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { copied, pressCopy, watchCopies } from './fixtures/clipboard.js'
+import { APP_VERSION } from '@cc/protocol'
 
 /**
  * Meets the M1 Phase 5 completion criteria. Drives the UI with the mock platform (?mock).
@@ -9343,20 +9344,22 @@ test('Nothing sends while an attachment is uploading, and it goes out with the t
 })
 
 test('A locally replaced bundle offers Apply now without an npm install event (#610)', async ({ page }) => {
+  // Derived from the build's version: a release bump must not turn this local build into a downgrade.
+  const local = `${APP_VERSION}.local.1`
   await setup(page, { projects: ['/tmp/alpha'] })
   await expect(page.getByTestId('update-line')).toBeHidden()
-  await page.evaluate(() => {
+  await page.evaluate((version) => {
     const w = window as any
-    w.__mock.relaunchCheck = { ready: true, version: '0.1.0-beta.20.local.1' }
+    w.__mock.relaunchCheck = { ready: true, version }
     // Returning from the local-build terminal discovers the external install.
     window.dispatchEvent(new Event('focus'))
-  })
+  }, local)
   await expect(page.getByTestId('update-apply-now')).toBeVisible()
-  await expect(page.getByTestId('update-line')).toContainText('0.1.0-beta.20.local.1 installed')
+  await expect(page.getByTestId('update-line')).toContainText(`${local} installed`)
   expect(await page.evaluate(() => (window as any).__mock.relaunches)).toBe(0)
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
   await page.getByTestId('settings-tab-updates').click()
-  await expect(page.getByTestId('update-state')).toContainText('Installed 0.1.0-beta.20.local.1')
+  await expect(page.getByTestId('update-state')).toContainText(`Installed ${local}`)
   await expect(page.getByTestId('update-apply')).toBeHidden()
   await page.getByTestId('update-apply-now-settings').click()
   await expect.poll(() => page.evaluate(() => (window as any).__mock.relaunches)).toBe(1)
