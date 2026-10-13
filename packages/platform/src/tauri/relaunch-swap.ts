@@ -20,6 +20,7 @@ export async function finishRelaunchSwap(
     autoSwitch({ build, autoApply: false, tried: false, dismissed: false }) !== 'switch'
   )
     return { tried: false }
+  const previousSwapStartedAt = build.swap?.startedAt
   let finish!: (error?: Error) => void
   const outcome = new Promise<Error | undefined>((resolve) => {
     finish = resolve
@@ -29,8 +30,10 @@ export async function finishRelaunchSwap(
   try {
     // Tauri's listener registration is asynchronous; wait for it before asking for the swap.
     stop = await watch((next) => {
-      if (next.swap?.phase === 'failed') finish(new Error(next.swap.message ?? 'The host update failed'))
-      else if (next.sameBuild) finish()
+      // Activity reports repeat the keeper's last swap, even before this attempt starts one.
+      if (next.swap?.phase === 'failed' && next.swap.startedAt !== previousSwapStartedAt) {
+        finish(new Error(next.swap.message ?? 'The host update failed'))
+      } else if (next.sameBuild) finish()
     })
     void switchBuild().catch((e: unknown) => finish(e instanceof Error ? e : new Error(String(e))))
     const error = await outcome

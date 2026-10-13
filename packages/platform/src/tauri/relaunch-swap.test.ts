@@ -76,6 +76,63 @@ describe('Apply now before the new window opens its panels', () => {
     expect(request).toHaveBeenCalledTimes(1)
   })
 
+  it.each(['rejection', 'new failure', 'success', 'timeout'] as const)(
+    'ignores the attached failed swap on busy broadcasts and waits for the current %s',
+    async (ending) => {
+      vi.useFakeTimers()
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const attached: Build = {
+        ...oldHost, busy: true,
+        swap: { phase: 'failed', startedAt: 0, target: oldHost.host!, message: 'Previous swap failed' },
+      }
+      let notify!: (b: Build) => void
+      let rejectRequest!: (error: Error) => void
+      let resolveRequest!: () => void
+      const pendingRequest = new Promise<void>((resolve, reject) => {
+        resolveRequest = resolve
+        rejectRequest = reject
+      })
+      const request = vi.fn(() => pendingRequest)
+      const stop = vi.fn()
+      let settled = false
+      const ready = finishRelaunchSwap(attached, (cb) => {
+        notify = cb
+        return stop
+      }, request).then((result) => {
+        settled = true
+        return result
+      })
+      try {
+        await vi.advanceTimersByTimeAsync(0)
+        expect(request).toHaveBeenCalledTimes(1)
+        // Activity broadcasts repeat the old failure before this request's first swap report.
+        for (const busy of [false, true]) {
+          notify({ ...attached, busy })
+          await vi.advanceTimersByTimeAsync(0)
+          expect(settled, 'an old failure must not release the window onto the old host').toBe(false)
+          expect(stop).not.toHaveBeenCalled()
+        }
+        if (ending === 'rejection') rejectRequest(new Error('Current handoff refused'))
+        else if (ending === 'new failure') {
+          notify({ ...attached, swap: { phase: 'failed', startedAt: 1,
+            target: oldHost.app!, message: 'Current swap failed' } })
+        } else if (ending === 'success') {
+          notify({ ...attached, sameBuild: true, keeperSameBuild: true })
+        } else await vi.advanceTimersByTimeAsync(120_000)
+        const error = ending === 'rejection' ? 'Current handoff refused'
+          : ending === 'new failure' ? 'Current swap failed'
+          : ending === 'timeout' ? 'The host update did not finish in time' : undefined
+        expect(await ready).toEqual({ tried: true, ...(error ? { error } : {}) })
+        expect(stop).toHaveBeenCalledTimes(1)
+      } finally {
+        resolveRequest()
+        vi.clearAllTimers()
+        vi.useRealTimers()
+        warn.mockRestore()
+      }
+    },
+  )
+
   it('a rejected switch continues on the attached host and cannot auto-switch again', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const stop = vi.fn()
