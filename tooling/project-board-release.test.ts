@@ -84,6 +84,55 @@ describe('the version rules', () => {
     })
   })
 
+  it.each(['1.0.0', '1.0.0-beta.21'])('matches %s itself and local/build extensions, not another prerelease', (version) => {
+    for (const value of [version, `v${version}`, `${version}.local.1`, `${version}+build`, `${version}+build.123`, version + '.local.${n}']) {
+      expect(versionLines(`const value = \`${value}\``, version), value).toEqual([1])
+    }
+    for (const suffix of ['-beta.21', '-rc', '-local.1', '+other', '+builder', '.1', '.local.0', '.local.01', '0', 'a']) {
+      expect(versionLines(`"${version}${suffix}"`, version), suffix).toEqual([])
+    }
+    expect(versionLines(`Released ${version}.\n`, version)).toEqual([1])
+  })
+
+  it.each(['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'])('ignores ranges only in package.json %s values', (field) => {
+    const ranges = { a: '^1.0.0', b: '~1.0.0', c: '>= 1.0.0', d: 'workspace:^1.0.0' }
+    for (const space of [undefined, 2]) {
+      const text = JSON.stringify({ [field]: ranges }, null, space)
+      expect(versionLines(text, '1.0.0', 'nested/package.json')).toEqual([])
+      expect(versionLines(text, '1.0.0', 'nested/config.json').length).toBeGreaterThan(0)
+    }
+    expect(versionLines(JSON.stringify({ [field]: { ...ranges, pinned: '1.0.0' } }), '1.0.0', 'package.json')).toEqual([1])
+    expect(versionLines(JSON.stringify({ [field]: ranges, version: '1.0.0' }), '1.0.0', 'package.json')).toEqual([1])
+    expect(versionLines(JSON.stringify({ scripts: { check: '^1.0.0' }, [field]: ranges }), '1.0.0', 'package.json')).toEqual([1])
+    expect(versionLines(JSON.stringify({ nested: { [field]: ranges } }), '1.0.0', 'package.json')).toEqual([1])
+    const multiline = JSON.stringify({ [field]: ranges, version: '1.0.0' }, null, 2)
+    expect(versionLines(multiline, '1.0.0', 'package.json')).toEqual([8])
+    expect(versionLines('{"dependencies":{"a":"^1.0.0"}', '1.0.0', 'package.json')).toEqual([1])
+    expect(versionLines('{"dependencies":{"escaped":"\\u005e1.0.0","braces":"^1.0.0 {range}"}}', '1.0.0', 'package.json')).toEqual([])
+  })
+
+  it.each([
+    ['docs/releasing.md', 'The steps by hand:'],
+    ['docs/releasing.ko.md', '손으로 하는 단계:'],
+  ])('keeps the release guide lead-in attached to step one in %s', (path, lead) => {
+    expect(readFileSync(join(REPO_ROOT, path!), 'utf8')).toContain(`${lead}\n\n1. `)
+  })
+
+  it('keeps the Korean release explanation in Korean', () => {
+    const korean = readFileSync(join(REPO_ROOT, 'docs/releasing.ko.md'), 'utf8')
+    const section = korean.split('## 버전 릴리스하기')[1]!.split('\n1. ')[0]!
+    for (const paragraph of section.trim().split(/\n\s*\n/)) {
+      expect(paragraph.replace(/`[^`]*`/g, ''), paragraph).toMatch(/[가-힣]/)
+    }
+  })
+
+  it('requires every listed repository version file to carry the current quoted version', () => {
+    expect(CARRIERS.length).toBeGreaterThan(0)
+    for (const path of CARRIERS) {
+      expect(bumpText(readFileSync(join(REPO_ROOT, path), 'utf8'), APP_VERSION, NEXT).count, path).toBeGreaterThan(0)
+    }
+  })
+
   it('names files with * inside a folder and ** across folders', () => {
     expect(pathMatches('packaging/npm/*/package.json', 'packaging/npm/host-linux-x64/package.json')).toBe(true)
     expect(pathMatches('packaging/npm/*/package.json', 'packaging/npm/a/b/package.json')).toBe(false)
@@ -109,7 +158,7 @@ describe('the version rules', () => {
     const unlisted = TRACKED.filter((p) => !CARRIERS.includes(p) && !filesNamed(RELEASE.ignore, [p]).length)
     const hits = unlisted.flatMap((p) => {
       const text = readFileSync(join(REPO_ROOT, p), 'utf8')
-      return text.includes('\0') ? [] : versionLines(text, APP_VERSION).map((line: number) => `${p}:${line}`)
+      return text.includes('\0') ? [] : versionLines(text, APP_VERSION, p).map((line: number) => `${p}:${line}`)
     })
     expect(hits).toEqual([])
     expect(CARRIERS).toEqual(
@@ -295,7 +344,7 @@ type Repo = { work: string; origin: string; released: string; tip: string }
  *
  * - `bumped`: the bump to NEXT is merged too, untagged (the state before tag)
  */
-function repo({ bumped = false }: { bumped?: boolean } = {}): Repo {
+function repo({ bumped = false, version = APP_VERSION }: { bumped?: boolean; version?: string } = {}): Repo {
   const origin = join(root, 'origin.git')
   const work = join(root, 'work')
   g(root, 'init', '-q', '--bare', '-b', 'main', origin)
@@ -306,19 +355,19 @@ function repo({ bumped = false }: { bumped?: boolean } = {}): Repo {
   g(work, 'remote', 'add', 'origin', 'https://github.com/ijun17/centralu.git')
   g(work, 'config', `url.${origin}.insteadOf`, 'https://github.com/ijun17/centralu.git')
   g(work, 'config', 'remote.origin.pushurl', origin)
-  for (const f of CARRIERS) write(work, f, readFileSync(join(REPO_ROOT, f), 'utf8'))
-  write(work, 'docs/releasing.md', `Released ${APP_VERSION} on a Monday.\n`)
-  const released = commitAll(work, `chore(release): ${APP_VERSION} (#541)`)
-  g(work, 'tag', `v${APP_VERSION}`)
+  for (const f of CARRIERS) write(work, f, bumpText(readFileSync(join(REPO_ROOT, f), 'utf8'), APP_VERSION, version).text)
+  write(work, 'docs/releasing.md', `Released ${version} on a Monday.\n`)
+  const released = commitAll(work, `chore(release): ${version} (#541)`)
+  g(work, 'tag', `v${version}`)
   write(work, 'a.txt', 'one\n')
   commitAll(work, 'feat(ui): one (#10)')
   write(work, 'b.txt', 'two\n')
   let tip = commitAll(work, 'fix: two (#11)')
   if (bumped) {
-    for (const f of CARRIERS) write(work, f, bumpText(readFileSync(join(work, f), 'utf8'), APP_VERSION, NEXT).text)
+    for (const f of CARRIERS) write(work, f, bumpText(readFileSync(join(work, f), 'utf8'), version, NEXT).text)
     tip = commitAll(work, `chore(release): ${NEXT} (#900)`)
   }
-  g(work, 'push', '-q', 'origin', 'main', `v${APP_VERSION}`)
+  g(work, 'push', '-q', 'origin', 'main', `v${version}`)
   g(work, 'branch', '-q', '--set-upstream-to=origin/main')
   patchState((s) => (s.dispatchSha = tip))
   return { work, origin, released, tip }
@@ -425,11 +474,41 @@ describe.skipIf(process.platform === 'win32')('release', { timeout: 60_000 }, ()
     expect(checkout(s.work)).toEqual(before)
   })
 
+  it('dry-bumps a stable release past old prereleases and dependency ranges but refuses stable pins', async () => {
+    const s = repo({ version: '1.0.0' })
+    // This regression suite intentionally pins stable versions; its exact path is allowlisted.
+    write(s.work, 'tooling/project-board-release.test.ts', "const stableFixture = '1.0.0'\n")
+    write(s.work, 'old-prereleases', '1.0.0-beta.21\n1.0.0-rc\n1.0.0+other\n')
+    write(s.work, 'other/package.json', JSON.stringify({
+      dependencies: { a: '^1.0.0' }, devDependencies: { a: '~1.0.0' },
+      peerDependencies: { a: '>=1.0.0' }, optionalDependencies: { a: 'workspace:1.0.0' },
+    }))
+    commitAll(s.work, 'test: stable release dependencies')
+    g(s.work, 'push', '-q', 'origin', 'main')
+    runtime()
+    const plan = await call('release', { step: 'bump', bump: 'patch', path: s.work })
+    expect(plan.isError, plan.text).toBe(false)
+    expect(plan.data.next).toBe('1.0.1')
+    expect(plan.data.pushed).toBe(false)
+
+    write(s.work, 'e2e/stable.ts', "'1.0.0'\n'1.0.0.local.1'\n`1.0.0+build`\n")
+    write(s.work, 'other/package.json', '{"dependencies":{"a":"^1.0.0"},\n"version":"1.0.0"}\n')
+    commitAll(s.work, 'test: stable release pins')
+    g(s.work, 'push', '-q', 'origin', 'main')
+    const blocked = await call('release', { step: 'bump', bump: 'patch', path: s.work })
+    expect(blocked.isError).toBe(true)
+    expect(blocked.data.problems.map((p: string) => p.split(' carries ')[0])).toEqual([
+      'e2e/stable.ts:1', 'e2e/stable.ts:2', 'e2e/stable.ts:3', 'other/package.json:2',
+    ])
+    expect(ghWrites()).toEqual([])
+    expect(remoteHas(s.origin, 'refs/heads/chore/release-1.0.1')).toBeNull()
+  })
+
   it('reports every embedded version by file and line in tracked text of any type', async () => {
     const s = repo()
     const pins: Record<string, string> = {
       'e2e/control-loop.spec.ts': `// local update\nconst local = '${APP_VERSION}.local.1'\n`,
-      'src/candidate.ts': `const candidate = "${APP_VERSION}-rc"\n`,
+      'src/candidate.ts': `const candidate = "${APP_VERSION}.local.3"\n`,
       'src/build.ts': `const build = '${APP_VERSION}+build'\n`,
       'src/template.ts': 'const template = `release v' + APP_VERSION + '.local.${n}`\n',
       'scripts/check.sh': `#!/bin/sh\nversion=${APP_VERSION}\n`,
@@ -437,7 +516,7 @@ describe.skipIf(process.platform === 'win32')('release', { timeout: 60_000 }, ()
       'custom/pin.unusual': `version: ${APP_VERSION}\n`,
       'fixtures/unlisted.json': `"${APP_VERSION}"\n`,
       'custom/spaces and:colon\nnewline': `header\n${APP_VERSION}.local.2\n`,
-      'src/multiple.ts': `// one\r\n'${APP_VERSION}' + '${APP_VERSION}+build'\r\n// two\r\n'${APP_VERSION}-rc'\r\n`,
+      'src/multiple.ts': `// one\r\n'${APP_VERSION}' + '${APP_VERSION}+build'\r\n// two\r\n'${APP_VERSION}.local.4'\r\n`,
     }
     for (const [path, text] of Object.entries(pins)) write(s.work, path, text)
     commitAll(s.work, 'test: embedded versions')

@@ -150,7 +150,7 @@ async function versionFiles(s, cfg, from, to) {
   // A file that carries the version and is not listed would keep the old one after the bump
   const holding = await filesHolding(s.root, s.tip, [from])
   for (const p of holding.filter((p) => !named.includes(p) && !filesNamed(cfg.ignore, [p]).length)) {
-    for (const line of versionLines(await showFile(s.root, s.tip, p), from))
+    for (const line of versionLines(await showFile(s.root, s.tip, p), from, p))
       problems.push(`${p}:${line} carries "${from}" but is not in project.json release.versionFiles; derive it from the version source, or add it to release.ignore if it intentionally pins a version.`)
   }
   return { named, files, counts, problems }

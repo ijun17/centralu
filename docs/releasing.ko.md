@@ -50,27 +50,15 @@ Linux 패키지는 번들 호스트를 한 번 더, 풀린 채로 AppImage 옆�
 
 ## 버전 릴리스하기
 
-프로젝트 보드 앱(`.centralu/apps/project-board`)이 이 단계들을 도구로 갖고 있다(#386): `release_status`는 릴리스가 어디까지 왔고 다음이 무엇인지 말하고, `release`는 `step`으로 `bump`, `rehearse`, `tag`, `approve`를 받는다. 각 단계는 maintain이나 admin 권한이 있는 로그인만 쓸 수 있고, 먼저 모든 것을 확인하며(GitHub의 main과 같은 main에 있는 깨끗한 체크아웃, main의 CI green, 태그가 없는 버전, 태그 전에 성공한 리허설) 이유를 모두 들어 거부하고, `confirm: true` 없이는 아무것도 하지 않는다. 보드의 "Release" 대화상자가 같은 상태를 보여 준다. 손으로 하는 단계:
+프로젝트 보드 앱(`.centralu/apps/project-board`)이 이 단계들을 도구로 갖고 있다(#386): `release_status`는 릴리스가 어디까지 왔고 다음이 무엇인지 말하고, `release`는 `step`으로 `bump`, `rehearse`, `tag`, `approve`를 받는다. 각 단계는 maintain이나 admin 권한이 있는 로그인만 쓸 수 있고, 먼저 모든 것을 확인하며(GitHub의 main과 같은 main에 있는 깨끗한 체크아웃, main의 CI green, 태그가 없는 버전, 태그 전에 성공한 리허설) 이유를 모두 들어 거부하고, `confirm: true` 없이는 아무것도 하지 않는다. 보드의 "Release" 대화상자가 같은 상태를 보여 준다.
 
-The bump scans every tracked text file on remote main, with no extension or e2e exclusion.
-It reports each unexpected reference as `file:line`, including versions followed by `.local.N`,
-`-rc` or `+build`, inside template strings, and in unquoted text. A different numeric or
-alphanumeric continuation (for example, `beta.210` when checking `beta.21`) is not a hit.
-Automatic replacement still changes only whole single- or double-quoted versions in
-`release.versionFiles`; derive embedded runtime/test values from `APP_VERSION`.
+bump는 원격 main에서 git이 추적하는 모든 텍스트 파일을 검사한다. 확장자로 거르지 않고 e2e도 포함한다. 목록에 없는 버전 참조는 `파일:줄`로 보고한다. 정확한 현재 버전뿐 아니라 뒤에 `.local.N`이나 `+build`(점으로 구분한 빌드 식별자도 가능)가 붙은 값, 템플릿 문자열 안의 값, 따옴표 없는 값도 찾는다. 다른 프리릴리스나 메타데이터는 같은 버전으로 보지 않는다: `1.0.0-beta.21`, `1.0.0-rc`, `1.0.0+other`는 `1.0.0`을 고정한 참조가 아니다. 숫자나 영문자가 이어진 다른 버전(`beta.21`을 검사할 때의 `beta.210`)도 제외한다. `package.json`에서는 최상위 `dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies` 필드의 값이 `^`, `~`, `>=`, `workspace:`로 시작할 때만 의존성 범위로 보고 제외한다. 정확한 버전 핀, 패키지 자신의 `version`, 스크립트와 그 밖의 필드는 원래 줄 번호를 유지해 검사한다. 자동 치환은 여전히 `release.versionFiles`에 선언된 작은따옴표나 큰따옴표로 감싼 버전 전체만 바꾼다. 실행 코드와 테스트에서 조합하는 값은 `APP_VERSION`에서 유도한다.
 
-Historical references and intentional pins belong in `release.ignore` in
-`.centralu/apps/project-board/project.json`. This explicit path allowlist uses the same patterns
-as `versionFiles`: `*` matches within a path segment and `**` matches zero or more folders.
-The repository allows `docs/**/*.md`, `**/CHANGELOG*`, `**/release-notes/**/*.md`,
-`**/pnpm-lock.yaml`, `**/package-lock.json`, `**/npm-shrinkwrap.json` and `**/*.lock`.
-These files are scanned only when they are declared in `versionFiles`: that list always wins,
-so the app's own versions in `Cargo.lock` must still be current and are bumped.
-For a fixture that deliberately pins a historical version, add its exact path, for example
-`"fixtures/pinned-version.json"`, to `release.ignore` and explain the pin in the fixture or its
-test. Fixtures and tests are not exempt by default. Keep exemptions narrow; they skip the whole
-file. `release` with `step: "bump"` and no `confirm` runs these checks without pushing or opening
-a release PR (and still reports other readiness problems, such as not being on main).
+과거 기록과 의도적으로 고정한 버전은 `.centralu/apps/project-board/project.json`의 `release.ignore`에 명시한다. 이 경로 허용 목록은 `versionFiles`와 같은 패턴을 쓴다: `*`는 경로 한 구간 안에서, `**`는 폴더 0개 이상에 걸쳐 일치한다. 이 저장소는 `docs/**/*.md`, `**/CHANGELOG*`, `**/release-notes/**/*.md`, `**/pnpm-lock.yaml`, `**/package-lock.json`, `**/npm-shrinkwrap.json`, `**/*.lock`을 허용한다. 이 파일들은 `versionFiles`에도 선언되어 있을 때만 검사한다. `versionFiles`가 우선이므로 `Cargo.lock`에 있는 앱 자신의 버전은 여전히 현재 버전이어야 하고 bump 때 함께 바뀐다.
+
+과거 버전을 의도적으로 고정한 fixture는 `"fixtures/pinned-version.json"`처럼 정확한 경로를 `release.ignore`에 넣고, fixture나 테스트에서 고정한 이유를 설명한다. `tooling/project-board-release.test.ts`는 회귀 테스트에서 안정 버전과 프리릴리스 버전을 의도적으로 고정하므로 명시적으로 허용한다. 그 밖의 fixture와 테스트는 기본적으로 제외하지 않는다. 파일 전체를 건너뛰므로 예외는 좁게 둔다. `release`에 `step: "bump"`를 주고 `confirm`을 생략하면 push하거나 릴리스 PR을 열지 않고 이 검사를 실행한다. main 브랜치가 아닌 경우처럼 다른 릴리스 준비 조건에 걸린 이유도 함께 보고한다.
+
+손으로 하는 단계:
 
 1. `packages/protocol/src/brand.ts`의 `APP_VERSION`을 올리고, 같은 버전을 `.centralu/apps/project-board/project.json`의 `release.versionFiles`에 있는 모든 파일에 반영한다: `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml`(과 `Cargo.lock`), `apps/desktop/package.json`, 그리고 모든 `packaging/npm/*/package.json`(shim의 핀 포함). 하나라도 어긋나면 `tooling/brand.test.ts`가 실패하고, 버전을 가진 파일이 그 목록에 없으면 `tooling/project-board-release.test.ts`가 실패한다. 커밋하고 push한다 — 릴리스 스크립트는 더러운 트리에서는 실행을 거부하므로, 배포되는 것과 git에 있는 것이 서로 다를 수 없다.
 

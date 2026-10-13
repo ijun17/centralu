@@ -32,7 +32,8 @@
       "**/pnpm-lock.yaml",
       "**/package-lock.json",
       "**/npm-shrinkwrap.json",
-      "**/*.lock"
+      "**/*.lock",
+      "tooling/project-board-release.test.ts"
     ],
     "tagPrefix": "v",
     "branchPrefix": "chore/release-",

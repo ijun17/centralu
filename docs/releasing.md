@@ -121,12 +121,15 @@ subprocesses all share the overall deadline.
 
 Release tools still enforce the required-check set.
 
-The steps by hand:
-
 The bump scans every tracked text file on remote main, with no extension or e2e exclusion.
-It reports each unexpected reference as `file:line`, including versions followed by `.local.N`,
-`-rc` or `+build`, inside template strings, and in unquoted text. A different numeric or
-alphanumeric continuation (for example, `beta.210` when checking `beta.21`) is not a hit.
+It reports each unexpected reference as `file:line`, including the exact version followed by
+`.local.N` or `+build` (optionally with dot-separated build identifiers), inside template strings,
+and in unquoted text. Different prereleases and metadata are not hits: `1.0.0-beta.21`,
+`1.0.0-rc` and `1.0.0+other` do not pin `1.0.0`. Nor does a different numeric or alphanumeric
+continuation (`beta.210` when checking `beta.21`). In `package.json`, dependency values starting
+with `^`, `~`, `>=` or `workspace:` are exempt only under the top-level `dependencies`,
+`devDependencies`, `peerDependencies` and `optionalDependencies` fields. Exact pins, the package's
+own `version`, scripts and other fields are still checked, with their original line numbers.
 Automatic replacement still changes only whole single- or double-quoted versions in
 `release.versionFiles`; derive embedded runtime/test values from `APP_VERSION`.
 
@@ -139,9 +142,12 @@ These files are scanned only when they are declared in `versionFiles`: that list
 so the app's own versions in `Cargo.lock` must still be current and are bumped.
 For a fixture that deliberately pins a historical version, add its exact path, for example
 `"fixtures/pinned-version.json"`, to `release.ignore` and explain the pin in the fixture or its
-test. Fixtures and tests are not exempt by default. Keep exemptions narrow; they skip the whole
-file. `release` with `step: "bump"` and no `confirm` runs these checks without pushing or opening
+test. `tooling/project-board-release.test.ts` is explicitly allowed because its regression cases
+intentionally pin stable and prerelease versions. Other fixtures and tests are not exempt by
+default. Keep exemptions narrow; they skip the whole file. `release` with `step: "bump"` and no `confirm` runs these checks without pushing or opening
 a release PR (and still reports other readiness problems, such as not being on main).
+
+The steps by hand:
 
 1. Bump `APP_VERSION` in `packages/protocol/src/brand.ts`, and the same version in every
    file listed under `release.versionFiles` in `.centralu/apps/project-board/project.json`:

@@ -78,14 +78,46 @@ export const carries = (text, version) => versionPattern(version).test(String(te
 
 /**
  * Detection is broader than replacement: suffixes, templates and unquoted text can all pin a
- * release. Numeric/alphanumeric continuations (beta.210 versus beta.21) are different versions.
+ * release. Only local/build suffixes extend this version; other prereleases are different versions.
  * Return each matching line once, even when it holds several references.
  */
-export function versionLines(text, version) {
-  const pattern = new RegExp(`(?<![0-9.])${escape(version)}(?![0-9A-Za-z])`)
-  return String(text ?? '')
+export function versionLines(text, version, path = '') {
+  const pattern = new RegExp(`(?<![0-9.])${escape(version)}(?:\\.local\\.(?:[1-9]\\d*|\\$\\{[^}\\r\\n]+\\})|\\+build(?:\\.[0-9A-Za-z-]+)*)?(?![0-9A-Za-z+-]|\\.[0-9A-Za-z])`)
+  const source = String(text ?? '')
+  return (/(?:^|\/)package\.json$/.test(path) ? withoutDependencyRanges(source) : source)
     .split('\n')
     .flatMap((line, i) => (pattern.test(line) ? [i + 1] : []))
+}
+
+const DEPENDENCY_FIELDS = new Set(['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'])
+
+/** Mask only dependency specifier values, preserving lines and other values on the same line. */
+function withoutDependencyRanges(text) {
+  try {
+    JSON.parse(text)
+  } catch {
+    return text // Invalid JSON must not hide a release reference.
+  }
+  const stack = []
+  return text.replace(/"(?:\\.|[^"\\])*"|[{}[\],:]/g, (token) => {
+    const parent = stack.at(-1)
+    if (token === '{' || token === '[') {
+      stack.push({ object: token === '{', key: null, expectsKey: token === '{', dependencies: token === '{' && stack.length === 1 && DEPENDENCY_FIELDS.has(parent?.key) })
+    } else if (token === '}' || token === ']') {
+      stack.pop()
+    } else if (token === ',') {
+      if (parent?.object) parent.expectsKey = true
+    } else if (token.startsWith('"')) {
+      const value = JSON.parse(token)
+      if (parent?.expectsKey) {
+        parent.key = value
+        parent.expectsKey = false
+      } else if (parent?.dependencies && /^(?:\^|~|>=|workspace:)/.test(value.trim())) {
+        return ' '.repeat(token.length)
+      }
+    }
+    return token
+  })
 }
 
 /** `text` with every quoted `from` turned into `to`, and how many there were. */
