@@ -1,4 +1,4 @@
-import { query, resolveSettings, type McpServerConfig, type PermissionMode } from '@anthropic-ai/claude-agent-sdk'
+import { query, resolveSettings, filterEscalatingDefaultMode, type McpServerConfig, type PermissionMode } from '@anthropic-ai/claude-agent-sdk'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
@@ -172,52 +172,26 @@ function readTarget(toolName: string, input: Record<string, unknown>): string | 
 }
 
 /**
- * Preset to SDK permission options.
- *
- * **Normal sends no permission mode.** This app loads the user's settings, hooks and CLAUDE.md in
- * full (settingSources left unspecified), but was silently overriding permissions on top of that.
- * That was exactly the place where we broke our own principle of not forcing a workflow.
- *
- * On the pinned SDK (0.3.263) **it cannot simply be omitted.** Measured (the probe older comments
- * call probe-perm2 is packages/agent-host/scripts/probe-permission-mode.mts — no file by the other
- * name was ever committed):
- *
- *   permissionMode:'default'                our callback is called    (settings ignored)
- *   permissionMode:'bypassPermissions'      not called
- *   sending nothing at all                   our callback is called    ← settings still ignored!
- *   sending nothing + resolvePermissionModeInCli   not called          ← settings finally apply
- *
- * Up to 0.3.285 the SDK fixes an omitted mode to 'default' and passes `--permission-mode
- * default`; only the untyped `resolvePermissionModeInCli` makes it pass no flag, so the CLI
- * resolves the mode from the settings. 0.3.286 removed that option and made its behaviour the
- * default: an omitted mode passes no flag, and the option is an unknown key it ignores.
- * Re-measured (#275, CLI 2.1.282, haiku, `defaultMode: 'acceptEdits'` planted in a throwaway
- * repo's settings.local.json, a Write call, 2026-10-04):
- *
- *   SDK      option     flag the CLI got           init permissionMode   our callback
- *   0.3.263  sent       none                       acceptEdits           not called
- *   0.3.263  omitted    --permission-mode default  default               called
- *   0.3.289  sent       none                       acceptEdits           not called
- *   0.3.289  omitted    none                       acceptEdits           not called
- *
- * So normal keeps sending it **while the workspace pin is below 0.3.286** — without it, normal is
- * silently safe. When the pin reaches 0.3.286 or later, delete the key below (normal returns `{}`)
- * and drop it from the stand-ins in project-trust.test.ts and setting-files.test.ts. Until then it
- * is harmless on newer SDKs, which is what lets the drift check (`pnpm drift:claude`, step 4) stop
- * requiring the name and guard the behaviour instead: an omitted mode must still reach the CLI as
- * no flag.
- *
- * With this value, the meaning of the three presets differs from each other for the first time —
- * before this, safe and normal were literally identical in behavior.
- *
- * **Whose settings count as "my settings" is not decided here** — that is decided by which files
- * get read (`settingSourcesFor`). In an untrusted project, normal follows only the user's own
- * settings (#92, see the table below).
+ * Normal follows the selected settings, with manual approvals when no mode was chosen.
+ * Since SDK 0.3.286, omitting permissionMode can select the CLI's automatic classifier
+ * instead. Resolve with the SDK's own merge engine and trust filter, then pass the mode
+ * explicitly on start and resume. In particular, a committed project file cannot turn
+ * normal into bypassPermissions; only a trusted settings choice can (#92, #578).
  */
-function permissionOptionsFor(preset: 'safe' | 'normal' | 'auto'): Record<string, unknown> {
-  if (preset === 'auto') return { permissionMode: 'bypassPermissions' } // Unconditionally allowed.
-  if (preset === 'safe') return { permissionMode: 'default' } // Always asks, regardless of the person's own settings.
-  return { resolvePermissionModeInCli: true } // Follows the person's own settings — the key matters only below SDK 0.3.286, see above.
+async function permissionOptionsFor(opts: CreateSessionOpts): Promise<{ permissionMode: PermissionMode }> {
+  if (opts.permissionPreset === 'auto') return { permissionMode: 'bypassPermissions' }
+  if (opts.permissionPreset === 'safe') return { permissionMode: 'default' }
+  if (opts.noSettingFiles) return { permissionMode: (await personsDefaultMode()) ?? 'default' }
+  try {
+    const resolved = await resolveSettings({ cwd: opts.cwd, ...settingSourcesFor(opts) })
+    const mode = filterEscalatingDefaultMode(resolved).permissions?.defaultMode
+    if (typeof mode === 'string' && (PERMISSION_MODES as readonly string[]).includes(mode)) {
+      return { permissionMode: mode as PermissionMode }
+    }
+  } catch {
+    // A settings read failure must not silently select the CLI's automatic mode.
+  }
+  return { permissionMode: 'default' }
 }
 
 const PERMISSION_MODES: readonly PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'dontAsk', 'auto']
@@ -234,7 +208,7 @@ const PERMISSION_MODES: readonly PermissionMode[] = ['default', 'acceptEdits', '
  *
  * Read with the SDK's own merge engine (`resolveSettings`, "the same engine as the CLI") from the user tier only,
  * which honours `CLAUDE_CONFIG_DIR` and the managed policy tier the way the CLI does. A mode the SDK does not know,
- * or a read that fails, leaves the old behaviour (the CLI's own default, which asks).
+ * or a read that fails, falls back to explicit manual approvals.
  */
 export async function personsDefaultMode(): Promise<PermissionMode | null> {
   try {
@@ -281,7 +255,7 @@ export async function personsDefaultMode(): Promise<PermissionMode | null> {
  * settings.local.json (usually excluded from git, but it can still be committed) and hooks, and
  * both disabled the card **even in safe**. A hook is itself an arbitrary command as well.
  *
- * Why normal still sends `resolvePermissionModeInCli` as-is in an untrusted project: decision 3
+ * Why normal still follows the person's settings in an untrusted project: decision 3
  * disables files from the repo, not the person's own choice. If the user set bypass in their own
  * ~/.claude, that wins (see the last row of the table) — that is the person's own decision, made
  * to apply everywhere. Overriding even the user's own `defaultMode` to force 'default' and always
@@ -466,8 +440,7 @@ class ClaudeSession implements SessionHandle {
       this.orchestratorServer = orchestratorMcp(this.opts.orchestratorTools, this.opts.toolProfile, this.opts.sessionId)
     }
     const servers = this.mcpServers()
-    // Normal in a session that reads no settings files still follows the person's own mode (#382, personsDefaultMode)
-    const personsMode = preset === 'normal' && this.opts.noSettingFiles ? await personsDefaultMode() : null
+    const permissionOptions = await permissionOptionsFor(this.opts)
 
     /*
      * Spaced out on Windows, so processes started together (the orchestrator waking its sessions, a
@@ -573,7 +546,7 @@ class ClaudeSession implements SessionHandle {
                 : {}),
             }
           : {}),
-        ...(personsMode ? { permissionMode: personsMode } : permissionOptionsFor(preset)),
+        ...permissionOptions,
         /*
          * The agent an app hands a schema and asks for output (M4 D-1). It is a per-query option,
          * so it can only be given when the session starts. Measured (SDK 0.3.263, CLI 2.1.282,

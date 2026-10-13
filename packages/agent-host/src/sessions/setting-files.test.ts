@@ -236,7 +236,8 @@ async function appAgent(tool: ToolName, appProjectId: string | null, appId: stri
 }
 
 const PRESETS: PermissionPreset[] = ['safe', 'normal', 'auto']
-const CLAUDE_PERMISSION: Record<PermissionPreset, string> = { safe: 'default', normal: 'from-settings', auto: 'bypassPermissions' }
+// No defaultMode is configured in these fixtures: normal must request manual approvals explicitly (#578).
+const CLAUDE_PERMISSION: Record<PermissionPreset, string> = { safe: 'default', normal: 'default', auto: 'bypassPermissions' }
 const CODEX_PERMISSION: Record<PermissionPreset, string> = { safe: 'untrusted/workspace-write', normal: 'from-settings', auto: 'never/workspace-write' }
 /** Codex does not turn off the user's ~/.codex per thread — only the store layer can be turned off, so none and user share the same value */
 const CODEX_FILES: Record<Files, string> = { none: 'repo-off', user: 'repo-off', all: 'all' }
@@ -262,7 +263,7 @@ function launched(tool: ToolName, sessionId: string, preset: PermissionPreset): 
     expect(o.disallowedTools).not.toContain('SendMessage')
     const sources = JSON.stringify(o.settingSources)
     const files = !('settingSources' in o) ? 'all' : sources === '[]' ? 'none' : sources === '["user"]' ? 'user' : sources
-    const permission = o.resolvePermissionModeInCli ? 'from-settings' : String(o.permissionMode)
+    const permission = String(o.permissionMode)
     return `${head}: ${o.resume ? 'resume' : 'new'} files=${files} permission=${permission}`
   }
   const { method, params } = state.codex.filter((r) => r.method === 'thread/start' || r.method === 'thread/resume').at(-1)!

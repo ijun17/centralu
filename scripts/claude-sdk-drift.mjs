@@ -20,17 +20,9 @@
  *   2. Imports it and asserts the module exports the adapter imports.
  *   3. Scans the shipped .d.ts for every typed name the adapter reads — methods on
  *      the Query handle, option keys it sends, response fields it picks out.
- *   4. Scans the shipped runtime for the one behaviour the `normal` permission preset
- *      rests on and the types do not state: **an omitted `permissionMode` must reach
- *      the CLI as no `--permission-mode` flag at all**, so the CLI resolves the mode
- *      from the user's own settings. Up to 0.3.285 the SDK pinned an omitted mode to
- *      'default' unless the untyped option `resolvePermissionModeInCli` was sent
- *      (measured, packages/agent-host/scripts/probe-permission-mode.mts, a.k.a. probe-perm2);
- *      0.3.286 dropped that option and made its behaviour the default (measured live
- *      on 0.3.289, #275). So the check is no longer "is the name there" but "is the
- *      pin gone": the flag must be pushed only when a mode is set, and no
- *      `?? "default"` fallback may sit between the option and that flag. If an SDK
- *      brings the pin back, the preset silently becomes 'safe' — no error anywhere.
+ *   4. Runs query's option builder with each explicit permission mode the adapter
+ *      sends, intercepting spawn before any CLI runs. Both --flag value and
+ *      --flag=value are valid; a dropped, rewritten, or bypassed mode is not.
  *   5. Asserts every contract name still appears in adapters/claude source — the
  *      reverse direction, so this list cannot outlive the code it describes.
  *
@@ -44,6 +36,7 @@
  * files is evidence. `cwd`, `model`, `name` would match anything and prove nothing,
  * so they are deliberately absent even though the adapter uses them.
  */
+import { permissionModeFindings } from './claude-permission-probe.mjs'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -58,6 +51,8 @@ const PKG = '@anthropic-ai/claude-agent-sdk'
 /** Module exports the adapter imports. Checked on the real module, not the types. */
 const EXPORTS = [
   'query', // index.ts — the session itself
+  'resolveSettings', // normal resolves the selected settings before explicitly passing its mode
+  'filterEscalatingDefaultMode', // committed project settings cannot escalate the mode
   'createSdkMcpServer', // orchestrator-mcp.ts — in-process orchestrator tools (FR-11)
   'tool', // orchestrator-mcp.ts
   'listSessions', // history.ts — feature-detected there; this makes its loss loud instead
@@ -89,6 +84,7 @@ const TYPED = [
   'resume',
   'canUseTool', // approvals AND AskUserQuestion both ride on this one callback
   'permissionMode',
+  'spawnClaudeCodeProcess', // the adapter and the no-CLI permission probe intercept launch here
   'bypassPermissions', // the 'auto' preset is this literal
   // listSessions options and row fields (history.ts)
   'includeProgrammatic',
@@ -134,41 +130,6 @@ const TYPED = [
   'delaySeconds',
   'humanSchedule',
 ]
-
-/**
- * Step 4: does an omitted `permissionMode` still leave the mode to the CLI? Read off the
- * minified sdk.mjs, so it matches shapes, not names (identifiers change every build):
- *
- *   flag     `if(m)a.push("--permission-mode",m)` — the flag only when a mode is set.
- *   pin      `x=y??(…"default")` where both x and y are bound as `permissionMode:` — the
- *            0.3.285 shape, `zL=Pne??(e?.resolvePermissionModeInCli?void 0:"default")`.
- *   inline   `permissionMode:y??…` or `permissionMode:y="default"` — the same pin
- *            written into the object or the destructuring instead.
- *
- * A pattern check, stated honestly: it proves the shape we measured is still there and
- * the shape we measured against is absent, not that the CLI honours settings. The live
- * answer is the probe. A false red here (the SDK rewrote the code another way) costs one
- * re-measure; a false green would need the SDK to reinstate the pin in a new shape.
- * `mode ?? "default"` passed as a call argument (an SDK-internal plugin-delivery check
- * in both 0.3.285 and 0.3.289) is not a pin and is deliberately not matched.
- */
-function permissionModeFindings(src) {
-  const findings = []
-  if (!/if\(([\w$]+)\)[\w$]+\.push\("--permission-mode",\1\)/.test(src)) {
-    findings.push('runtime: `--permission-mode` is no longer pushed only when a mode is set — an omitted mode may now reach the CLI as a flag')
-  }
-  const bound = [...new Set([...src.matchAll(/\bpermissionMode:([\w$]+)/g)].map((m) => m[1]))]
-  if (bound.length > 0) {
-    const alt = bound.map((v) => v.replace(/\$/g, '\\$')).join('|')
-    const pin = src.match(new RegExp(`(?<![\\w$])(?:${alt})=(?:${alt})\\?\\?[^;]{0,160}?"default"`))
-    if (pin) findings.push(`runtime: an omitted permissionMode is pinned to 'default' again — ${pin[0]}`)
-  } else {
-    findings.push('runtime: no `permissionMode:` binding in sdk.mjs — the pin check has nothing to look at')
-  }
-  const inline = src.match(/\bpermissionMode:[\w$]+(?:\?\?|="default")[^,;}]{0,80}/)
-  if (inline) findings.push(`runtime: an omitted permissionMode is given a fallback — ${inline[0]}`)
-  return findings
-}
 
 const words = (text) => text.match(/[A-Za-z_$][A-Za-z0-9_$]*/g) ?? []
 
@@ -247,8 +208,8 @@ try {
     if (!typed.has(name)) missing.push(`typed surface: ${name}`)
   }
 
-  // 4 — the permission-mode handoff, in the runtime query() actually runs.
-  missing.push(...permissionModeFindings(readFileSync(join(sdkDir, 'sdk.mjs'), 'utf8')))
+  // 4 — run the real option builder, but stop before any CLI process can start.
+  if (typeof mod.query === 'function') missing.push(...permissionModeFindings(mod.query, tmp))
 
   if (missing.length > 0) {
     console.error(
@@ -260,7 +221,7 @@ try {
   }
 
   console.log(
-    `[claude-sdk] contract holds (${version}) — ${EXPORTS.length} exports, ${TYPED.length} typed names present; an omitted permissionMode still reaches the CLI as no flag`,
+    `[claude-sdk] contract holds (${version}) — ${EXPORTS.length} exports, ${TYPED.length} typed names present; explicit permission modes reach the CLI unchanged (no CLI started)`,
   )
 } finally {
   rmSync(tmp, { recursive: true, force: true })

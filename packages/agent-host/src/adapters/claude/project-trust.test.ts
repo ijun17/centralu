@@ -21,11 +21,9 @@ import type { OrchestratorTools } from '../contract.js'
  *   3. If an allow rule matches the command, it does not ask — the CLI did not honor rules from
  *      the committed settings.json (the project layer) (measured). It did honor rules from
  *      settings.local.json and from the user's own settings.
- *   4. The mode is `permissionMode` if it was given; otherwise, if `resolvePermissionModeInCli` is
- *      set, it is the settings' `defaultMode` (filtered by the CLI if the repo tried to escalate
- *      it — `filterEscalatingDefaultMode`); with neither, the SDK fixes it to 'default'. With
- *      bypassPermissions, it never asks. (That is the pinned SDK 0.3.263; from 0.3.286 an omitted
- *      mode is left to the CLI with or without the option — see permissionOptionsFor, #275.)
+ *   4. The adapter sends an explicit mode (#578); bypassPermissions never asks. Tests
+ *      below assert the real query options too: the CLI's new automatic default on
+ *      omission must not be hidden by a stand-in that happens to ask.
  *
  * The user's own settings live under `CLAUDE_CONFIG_DIR` pointed at a temp folder — so this
  * machine's own ~/.claude (bypass) never mixes in.
@@ -34,6 +32,7 @@ const state = vi.hoisted(() => ({
   options: [] as Record<string, unknown>[],
   /** What the stand-in CLI decided — whether it asked, and which path it took. */
   verdicts: [] as string[],
+  decisions: [] as unknown[],
   actual: null as null | typeof import('@anthropic-ai/claude-agent-sdk'),
 }))
 
@@ -87,13 +86,11 @@ async function tryBash(options: Record<string, unknown>): Promise<void> {
     return void state.verdicts.push('rule-allowed')
   }
   // Step 4. Mode.
-  const mode =
-    (options.permissionMode as string | undefined) ??
-    (options.resolvePermissionModeInCli ? (sdk.filterEscalatingDefaultMode(resolved).permissions?.defaultMode ?? 'default') : 'default')
+  const mode = options.permissionMode
   const canUseTool = options.canUseTool as ((n: string, i: Record<string, unknown>) => Promise<unknown>) | undefined
   if (mode === 'bypassPermissions' || !canUseTool) return void state.verdicts.push('mode-allowed')
   state.verdicts.push('ask')
-  void canUseTool('Bash', { command: COMMAND })
+  void canUseTool('Bash', { command: COMMAND }).then((decision) => state.decisions.push(decision))
 }
 
 const { ClaudeAdapter } = await import('./index.js')
@@ -105,6 +102,7 @@ const savedConfigDir = process.env.CLAUDE_CONFIG_DIR
 beforeEach(() => {
   state.options.length = 0
   state.verdicts.length = 0
+  state.decisions.length = 0
   root = mkdtempSync(join(tmpdir(), 'cc-trust-test-'))
   userDir = join(root, 'user')
   mkdirSync(userDir, { recursive: true })
@@ -165,9 +163,51 @@ async function askedIn(
 }
 
 describe('settings files and permissions the adapter passes to the CLI (#92)', () => {
+  for (const noSettingFiles of [false, true]) {
+    for (const resumeExternalId of [undefined, 'existing-session']) {
+      it(`normal explicitly keeps manual approvals without a configured mode (no files: ${noSettingFiles}, resume: ${!!resumeExternalId})`, async () => {
+        const events: NormalizedEvent[] = []
+        const handle = await new ClaudeAdapter().createSession(
+          { sessionId: 'manual', cwd: root, permissionPreset: 'normal', noSettingFiles, resumeExternalId },
+          (e) => events.push(e),
+        )
+        try {
+          // Omission now lets the CLI choose its automatic classifier (#578). Checking the
+          // real query options prevents a stand-in's old default from hiding that regression.
+          expect(state.options[0]?.permissionMode).toBe('default')
+          handle.send('touch it')
+          await vi.waitFor(() => expect(events.some((e) => e.type === 'approval_request')).toBe(true))
+          expect(state.verdicts).toEqual(['ask'])
+          expect(state.decisions).toEqual([])
+          const request = events.find((e) => e.type === 'approval_request')!
+          expect(handle.respondApproval(request.requestId, 'deny')).toBe(true)
+          await vi.waitFor(() => expect(state.decisions).toEqual([expect.objectContaining({ behavior: 'deny' })]))
+        } finally {
+          await handle.dispose()
+        }
+      })
+    }
+  }
+
+  it('normal filters escalating modes from committed settings before passing an explicit mode', async () => {
+    for (const defaultMode of ['bypassPermissions', 'auto', 'acceptEdits']) {
+      const dir = repo({ settings: { permissions: { defaultMode } } })
+      expect(await askedIn(dir, 'normal', true)).toBe(true)
+      expect(state.options.at(-1)?.permissionMode).toBe('default')
+    }
+  })
+
+  it('normal preserves a trusted local edit mode and ignores it in an untrusted project', async () => {
+    const dir = repo({ local: { permissions: { defaultMode: 'acceptEdits' } } })
+    await askedIn(dir, 'normal', true)
+    expect(state.options.at(-1)?.permissionMode).toBe('acceptEdits')
+    await askedIn(dir, 'normal', false)
+    expect(state.options.at(-1)?.permissionMode).toBe('default')
+  })
+
   const PERMISSION: Record<PermissionPreset, Record<string, unknown>> = {
     safe: { permissionMode: 'default' },
-    normal: { resolvePermissionModeInCli: true },
+    normal: { permissionMode: 'default' },
     auto: { permissionMode: 'bypassPermissions' },
   }
 
@@ -321,7 +361,7 @@ describe("the orchestrator and coordinators follow the person's own mode under n
     writeFileSync(join(userDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'not-a-mode' } }))
     expect(await askedIn(root, 'normal', false, orchestrator)).toBe(true)
     expect(state.verdicts).toEqual(['ask', 'mode-allowed', 'ask'])
-    expect(state.options.map((o) => o.permissionMode)).toEqual(['default', 'bypassPermissions', undefined])
+    expect(state.options.map((o) => o.permissionMode)).toEqual(['default', 'bypassPermissions', 'default'])
   })
 
   it("a bypass planted in the orchestrator's own folder does not count: only the person's own settings do", async () => {
@@ -329,11 +369,10 @@ describe("the orchestrator and coordinators follow the person's own mode under n
     expect(await askedIn(dir, 'normal', true, orchestrator)).toBe(true)
   })
 
-  it("a project's ordinary session is unchanged: the CLI resolves its mode from the files it reads", async () => {
+  it("a project's ordinary session follows the same trusted settings mode explicitly", async () => {
     writeFileSync(join(userDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'bypassPermissions' } }))
     await (await new ClaudeAdapter().createSession({ sessionId: 'w', cwd: root, permissionPreset: 'normal', projectTrusted: true }, () => {})).dispose()
-    expect(state.options[0]).toMatchObject({ resolvePermissionModeInCli: true })
-    expect('permissionMode' in state.options[0]!).toBe(false)
+    expect(state.options[0]).toMatchObject({ permissionMode: 'bypassPermissions' })
   })
 })
 

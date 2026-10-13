@@ -357,7 +357,7 @@ no CLI-name test decides this outside adapters.
 
 **Claude comparison** (#582). Centralu supplies no Claude SDK `sandbox` override, for children or ordinary
 sessions. Both use the same permission mapping (`safe`: `default`, `auto`: `bypassPermissions`, `normal`:
-the person's settings) and project-trust settings sources. There is no Centralu-imposed child-only git-root
+the person's settings, falling back to explicit `default`) and project-trust settings sources. There is no Centralu-imposed child-only git-root
 or network gap. A sandbox in the person's own Claude settings can still restrict commands; Centralu does
 not widen it here. Dependency preparation above applies to both adapters.
 
@@ -813,10 +813,23 @@ explicit list of every vendor name it touches, and a script that re-verifies the
 | Tool | Contract | Check | What it catches |
 |---|---|---|---|
 | Codex | `adapters/codex/protocol-contract.json` — every RPC method and notification we send or read, plus approval enum values | `pnpm codex:bindings --check` (regenerates bindings from the installed CLI, greps for our names) | a method/notification leaving the protocol (change axis C4) |
-| Claude | name lists inside `scripts/claude-sdk-drift.mjs` — SDK exports, option keys, response fields — plus one runtime shape check: an omitted `permissionMode` must reach the CLI as no `--permission-mode` flag (the `normal` preset rests on it, #275) | `pnpm drift:claude [version]` (installs `@latest`, or the given version, into a temp dir, never the workspace) | a name leaving the `.d.ts`, or the SDK pinning an omitted mode to `default` again, **before** an upgrade lands it on us |
+| Claude | name lists inside `scripts/claude-sdk-drift.mjs` — SDK exports, option keys, response fields — plus a runtime argument probe: every explicit `permissionMode` must reach the CLI unchanged, accepting both `--permission-mode value` and `--permission-mode=value`; spawn is intercepted so no CLI runs (#578) | `pnpm drift:claude [version]` (installs `@latest`, or the given version, into a temp dir, never the workspace) | a name leaving the `.d.ts`, or the SDK dropping, rewriting or bypassing an explicit mode, **before** an upgrade lands it on us |
 | Claude (resume) | that a resumed process reads the prompt cache as a live one (#568, §4.6.1): what makes putting idle sessions to sleep free | `pnpm exec tsx packages/agent-host/scripts/probe-resume-cache.mts` (live, haiku, a temporary data folder; exits 1 when the woken turn reads under 90% from cache) | a CLI whose resume rebuilds the request differently: sessions would still wake, only slower and dearer, and nothing else would say so |
 
-Both are name checks (Claude's one shape check aside), run in both directions: the vendor must still carry every name
+Claude's `normal` preset resolves `permissions.defaultMode` with the SDK's `resolveSettings` and
+`filterEscalatingDefaultMode`, using the same settings sources as the session, then sends it explicitly.
+With no valid mode, or a failed read, it sends `default` so tool calls needing permission still reach
+`canUseTool`. A session reading no settings files carries only the person's user-tier mode (#382).
+A configured bypass still bypasses the callback; neither an absent mode nor an escalating mode in a
+committed project file selects bypass. Existing adopted CLI processes keep their startup mode until restarted.
+
+The [SDK changelog](https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/CHANGELOG.md)
+records two separate changes: 0.3.286 leaves an omitted mode to the CLI, which can choose its automatic
+classifier without a configured mode; 0.3.295 encodes named options as `--flag=value`. The latter broke
+our old minified-source regex in 0.3.296. Both 0.3.263 (the lockfile pin) and 0.3.296 preserve explicit
+modes in the spawn probe. This verifies argument building, not live CLI approval decisions.
+
+Both are name checks (Claude's argument probe aside), run in both directions: the vendor must still carry every name
 we use, and our source must still use every name listed (so the contract cannot
 outlive the code). They cannot catch a field that still exists but changed meaning —
 that class is guarded by runtime plausibility checks in the adapters (the

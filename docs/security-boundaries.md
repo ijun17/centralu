@@ -296,6 +296,12 @@ without asking. "Bypass" is the person's own global setting (`defaultMode: "bypa
 `~/.claude/settings.json`; `approval_policy = "never"` in `~/.codex/config.toml`), which only the
 `normal` preset reads.
 
+For Claude, `normal` passes the trusted settings mode explicitly, falling back to `default` when no
+valid mode is configured or settings cannot be read (#578). Omitting the SDK mode can now select
+Claude's automatic classifier, so omission is not a manual-approval guarantee. The SDK's trust filter
+rejects escalating modes from committed project settings before the adapter uses them. An explicit
+personal bypass remains intentional: it auto-approves before `canUseTool`, as the table below records.
+
 | Call | Claude `safe` | Claude `normal` | Claude `normal` + bypass | Claude `auto` | Codex `safe` | Codex `normal` | Codex `normal` + bypass | Codex `auto` | Enforced in |
 |---|---|---|---|---|---|---|---|---|---|
 | A Centralu tool the profile has | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `isOrchestratorTool` and only when the session was given the server, checked before auto's refusal (`adapters/claude/index.ts`). Codex: `default_tools_approval_mode: 'approve'` on the bridge, and an elicitation for it accepted only on a thread that has it (`adapters/codex/index.ts`, `mcpConfig`, `onServerRequest`) |
