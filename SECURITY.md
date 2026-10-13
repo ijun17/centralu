@@ -17,9 +17,6 @@ If you would rather report privately now, that works too:
    maintainer can read the report.
 2. If you cannot use GitHub for this, email [ijun17@naver.com](mailto:ijun17@naver.com).
 
-Please keep it private if the problem lets someone run code on, or read files from, another
-person's machine without any action from them; report that one privately even during the beta.
-
 A useful report says:
 
 - what the problem is and what an attacker could do with it
@@ -63,5 +60,3 @@ Out of scope:
 **Report a vulnerability**로 알려 주세요
 ([바로 가기](https://github.com/ijun17/centralu/security/advisories/new)). 관리자만 볼 수 있습니다.
 GitHub를 쓸 수 없으면 [ijun17@naver.com](mailto:ijun17@naver.com)으로 보내 주세요.
-다만 다른 사람의 컴퓨터에서 아무 동작 없이 코드를 실행하거나 파일을 읽을 수 있는 문제는 베타 기간에도
-비공개로 알려 주세요.
