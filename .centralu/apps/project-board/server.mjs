@@ -45,7 +45,7 @@ import {
   viewerLogin,
   cancelWorkflowRun,
 } from './github.mjs'
-import { NO_PERMISSION, canMerge, cleanLog, clip, decideMerge, evaluateChecks, firstFailure, matchKnownFailure, squashMessage, workflowCheckNames } from './ci.mjs'
+import { NO_PERMISSION, canMerge, cleanLog, clip, decideMerge, evaluateChecks, failureLineIndex, firstFailure, matchKnownFailure, squashMessage, workflowCheckNames } from './ci.mjs'
 import { decisionSummary, renderInline, renderMarkdown } from './markdown.mjs'
 import { DEFAULT_CONVENTIONS, commitProblems, englishProblems, fillTemplate, foreignBareIssueWarnings, normalizeWords, parseConventions, publicTextProblems, subjectProblems } from './rules.mjs'
 import { answerFor, answerKey, commentIdOf, deleteAnswer, markRecorded, saveAnswer, unrecorded } from './answers.mjs'
@@ -887,7 +887,7 @@ async function readFailedJob({ job, repo }) {
   const r = repoOf(repo)
   const log = await readJobLog(r, job)
   const lines = cleanLog(log).map((line) => line.replace(/[ \t]+/g, ' '))
-  const at = lines.findIndex((line) => /\b(?:FAIL(?:ED)?|ERROR|Error:|AssertionError|##\[error\])/i.test(line))
+  const at = failureLineIndex(lines)
   const start = Math.max(0, (at < 0 ? 0 : at) - 8)
   const excerpt = lines.slice(start, Math.min(lines.length, start + 40))
   const summary = `Job ${job}: ${at < 0 ? 'no failure marker found' : `failure near line ${at + 1}`}; ${excerpt.length} log lines shown.`

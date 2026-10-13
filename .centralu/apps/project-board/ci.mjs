@@ -343,6 +343,15 @@ const FAILS = [
 ]
 const ERROR = /^\s*(?:→\s+\S|(?:[A-Z]\w*)?Error\b:?|AssertionError|thread '.*' panicked|panicked at|Caused by:|expected\b)/
 
+/** Prefer a runner's failure summary over setup warnings and its earlier progress output. */
+export function failureLineIndex(lines) {
+  for (const re of [...FAILS, ERROR, /^\s*##\[error\]/]) {
+    const at = lines.findIndex((line) => re.test(line))
+    if (at >= 0) return at
+  }
+  return -1
+}
+
 /**
  * The first failing test line in a job log and the error that follows it. A log with no test
  * failure (a build or install step failed) gives its first `##[error]` line instead.
