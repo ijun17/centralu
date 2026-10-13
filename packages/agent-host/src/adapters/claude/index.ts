@@ -714,7 +714,7 @@ class ClaudeSession implements SessionHandle {
             self.releaseOnCancel(requestId, options?.signal)
           })
         },
-      }),
+      }, preset),
     }))
     ClaudeAdapter.liveQueries.add(q)
     ClaudeAdapter.querySessions.set(q, this.sessionId)
@@ -1629,7 +1629,7 @@ export class ClaudeAdapter implements AgentAdapter {
   launchSettingsFingerprint(settings: import('../contract.js').LaunchSettings): string {
     // Keep this alongside the query option construction. Bump the version when a setting the
     // adapter derives (including cross-session controls) changes without changing these inputs.
-    return JSON.stringify({ v: 1, cwd: settings.cwd, permission: settings.permissionPreset, trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles })
+    return JSON.stringify({ v: settings.permissionPreset === 'auto' ? 2 : 1, cwd: settings.cwd, permission: settings.permissionPreset, trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles })
   }
 
   async detect(): Promise<DetectResult> {

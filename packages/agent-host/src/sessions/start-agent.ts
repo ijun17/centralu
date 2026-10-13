@@ -10,6 +10,7 @@ import { APP_SLUG, type PermissionPreset } from '@cc/protocol'
  */
 
 /**
+ * The default ceiling under safe/normal (auto has none; prefs.agentCeiling overrides either).
  * How many children started with start_agent may run at once in one project, counted over every session of the
  * project. A child counts while a turn the parent gave it is running; one the person took over, or one at rest, does
  * not. Four: enough for a parent to fan work out to Claude and Codex side by side, few enough that one runaway

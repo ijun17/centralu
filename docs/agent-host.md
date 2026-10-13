@@ -49,7 +49,7 @@ the Codex bridge.
 | `orchestrator` | the one orchestrator | every session | all but the builder's | role and usage |
 | `scoped` | a coordinator (#80): made only by the control app's tasks, which were removed in #372 with the RPC that created one; the ones in a store still wake with this profile | its members | list, read, send | its boundary |
 | `builder` | an app's building session (M4 C-3) | its own app | `check` | build-and-check |
-| `reader` | every other session in a project (#320), a former worktree manager included | its own project, read at call time; acts on the agents it started | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); `start_agent`, `agent_session` (#561, §1.2.1); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | Centralu's tools first unless the person says otherwise (#564) |
+| `reader` | every other session in a project (#320), a former worktree manager included | its own project, read at call time; acts on the agents it started (auto: any session in that project) | `read_session` (no id: lists), `recall`, `app_guide`; `ask_project` (#371, §1.2); `start_agent`, `agent_session` (#561, §1.2.1); and `find_apps`, `attach_app`, `detach_app` (#371 part A, apps.md §9.4) | Centralu's tools first unless the person says otherwise (#564) |
 
 The instructions reach the model on both CLIs, by different doors. Claude gets them as the in-process
 server's `instructions`. codex-cli 0.160.0 shows a server's instructions to no model (#525, measured with
@@ -72,8 +72,8 @@ orchestrator reaches that session with `send_to_session`. Existing data: store v
 sessions `askedBy` = their parent, so it owns them as the agents it started; `worktrees.createManager` is refused with
 the reason (the protocol keeps it for an older window), and the slot's column stays until a later contract step.
 
-The reader's session access is read-only: its tools object refuses directing other sessions and changing
-settings outright, not only by name. Its update tool requires consent (§4.5). It is never given to an agent
+The reader's read tools stay inside its project, and its tools object refuses changing
+settings outright, not only by name. Its agent tools follow §1.2.1, including auto's ownership opening. Its update tool requires consent outside auto (§4.5). It is never given to an agent
 session an app stood up (M4 D-1), whose answer goes
 back to the app. Settings → Orchestrator turns it off (`sessionTools`, on by default): a new session
 then gets no bundle, and a live one's calls are refused at once. For provenance (#90) a reader is
@@ -178,6 +178,12 @@ subagent's result comes back. It rides with the reader set (same profile, same S
 is its own set, `DELEGATE_TOOLS`, with its own budget, because it acts. The orchestrator, managers
 and leads do not get it: they already direct sessions with `send_to_session`, inside their view.
 
+Under `auto` (#603), `autoBoundaryOpen` reads the calling session's own preset at each host
+boundary. The consent card is allowed and logged without storing a consent, and depth and
+untrusted-caller refusals open. Children inherit the caller's preset and can delegate again.
+The following consent and refusal rules describe `safe`/`normal`. Trust still decides which
+repository instruction and settings files a delegated session reads.
+
 What one call does (`SessionManager.askProject`):
 
 1. **The target.** Another registered project, by name or id. Its own project is refused ("do the
@@ -197,7 +203,7 @@ What one call does (`SessionManager.askProject`):
 3. **The delegated session.** The idle (or finished) session this caller asked in that project
    before, so a second ask builds on the first; otherwise a new one with that project's folder, its
    instructions (its trust, as for any session), its default tool and that tool's remembered model and
-   effort, under the `normal` preset — what a session the person opens there gets, so its approvals
+   effort, under the caller's preset (including `safe` and `auto`); reuse requires the same preset, so its approvals
    stand as cards in that session where the person sees them. It is an ordinary visible session,
    named `Asked by <project> · HH:MM` and marked `askedBy` (store v45) with the caller; its header
    links back, and the caller's conversation shows a compact card linking to it.
@@ -257,13 +263,27 @@ The optional `tool` is a registry name, accepted as a string by the schema and c
 current registry at call time. An unknown name returns an error listing the installed tools; adding
 an adapter does not require changing this schema.
 
-What one `start_agent` call does (`SessionManager.startAgent`):
+Under `auto` (#603), the host's shared `autoBoundaryOpen` decision opens consent, depth,
+project trust, same-project ownership and worktree losslessness gates, with allowances logged.
+`agent_session` can status, wait, send or stop any session in the same project, and delete
+any worktree session there,
+including another parent's child or the person's turn; adapter mid-turn support and the
+child's own preset still apply. Observing an app agent reuses its completion watcher, so
+`run_agent` still receives its answer and the agent keeps its `safe` preset. Cleanup removes the worktree and branch even with dirty
+files or an unproven tip, logs the tip, and keeps the conversation in the trash. `run_agent`
+app agents stay `safe`, and no session gets a preset above its caller.
+
+What one `start_agent` call does (`SessionManager.startAgent`), with the refusal/card rules
+below retained for `safe` and `normal`:
 
 1. **Who may.** An ordinary session (`reader` profile) of a trusted project (#382's rule), not one marked `askedBy`:
    depth one, so a child cannot start agents, and neither can a session ask_project opened (the same mark makes
    `askProject` refuse both).
-2. **How many.** At most `AGENT_CEILING` (4) children run at once per project, counted over all its sessions: a
-   child counts while a turn its parent gave it runs. Checked before the card and again after it.
+2. **How many.** Settings → Orchestrator → Running agents per project persists `prefs.agentCeiling`,
+   read at call time. Empty/null means no ceiling under `auto`, `AGENT_CEILING` (4) otherwise;
+   zero is unlimited, and a positive integer sets a ceiling per project over all its sessions.
+   A child counts while a delegated turn runs. Checked before the card and again after it,
+   and for a new `agent_session send` turn.
 3. **Choice.** `tool` defaults to the project's tool; `model` and `effort` to that tool's remembered choice for the
    project (#107). A model or effort the tool's list does not have is refused with the list (`agentChoiceError`;
    an alias the ids or labels contain passes, and a tool that cannot list passes all).
@@ -285,8 +305,8 @@ What one `start_agent` call does (`SessionManager.startAgent`):
 
 **In a new worktree** (part 2). `worktree: true`, or a `branch`, opens the child in a new git worktree of the
 project's repository instead of the caller's folder, through the same path as the new-session window's worktree
-option (`createSession`'s `worktree`, `worktreeBranch`, `worktreeBase`: the copy-and-setup step, trusted projects
-only). The branch is the one asked for (git's own rule checks it) or one named from the job (`agentBranch`:
+option (`createSession`'s `worktree`, `worktreeBranch`, `worktreeBase`: the copy-and-setup step;
+`auto` delegation may also create a worktree in an untrusted project). The branch is the one asked for (git's own rule checks it) or one named from the job (`agentBranch`:
 `centralu/write-the-parser-1a2b`), settled before the card, which names it. It forks from the caller's own branch
 when the caller is itself a worktree session, so the child starts from the caller's work; otherwise from the
 project's trunk. A project that is no git repository is refused before the card. The child shows as every worktree
@@ -644,7 +664,9 @@ orchestrators, coordinators, worktree managers, builders, app agents and `start_
 Its `spawnClaudeCodeProcess` callback sends the SDK's flags and environment to either the local
 spawn or the keeper; a fresh keeper replacement therefore receives the same options.
 
-`withoutCrossSessionMessaging` wraps the existing options. It merges inline SDK flag settings
+`withoutCrossSessionMessaging` wraps the existing options and takes the session's preset
+in the Claude adapter. Under `auto` (#603) it leaves peer messaging, discovery and the
+environment gate alone; the CLI's own configuration still applies. Under `safe`/`normal`, it merges inline SDK flag settings
 with `crossSessionInbound: 'refuse'`, appends discovery denies `ListAgents` and `ListPeers`,
 and merges `process.env` and any explicit environment with `CLAUDE_CODE_HARBOR_KITE: '0'` last.
 The adapter previously selected settings files only through `settingSources`; inline `settings`
@@ -656,7 +678,8 @@ inspected CLI versions 2.1.263–2.1.289. It is undocumented and version-sensiti
 documented refusal and discovery denies stay as additional controls. They do not alone block
 every outbound send to a known peer if the gate changes. A keeper adoption attaches to an
 already-running process and cannot apply new startup controls; restart processes created by
-an older host to pick up this fix. See [security-boundaries.md](security-boundaries.md).
+an older host to pick up this fix. The auto launch fingerprint is versioned so a retained
+auto process with the old controls restarts through the normal launch-settings handover path. See [security-boundaries.md](security-boundaries.md).
 
 The regression matrix in `sessions/setting-files.test.ts` checks the options for each kind on
 start and resume across trust and permission presets; adapter tests check merging and the keeper

@@ -343,6 +343,34 @@ describe('registry defaults', () => {
 })
 
 describe('ordinary session update consent (#581)', () => {
+  it.each(['auto', 'safe', 'normal'] as const)('%s: update_centralu opens only for auto, without remembering consent or changing update preferences', async (preset) => {
+    const updates = new UpdateService(() => {}, { fetchLatest: async () => ({ ok: true as const, version: '9999.0.0' }), run: async () => {}, installedCopy: () => null })
+    const check = vi.spyOn(updates, 'check')
+    const apply = vi.spyOn(updates, 'apply').mockImplementation(() => updates.current())
+    const autoApply = vi.spyOn(updates, 'setAutoApply')
+    mgr.useUpdates(updates)
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: preset })
+    for (const action of ['check', 'install'] as const) {
+      const call = mgr.runOrchestratorTool(session.id, 'update_centralu', { action })
+      if (preset !== 'auto') {
+        await vi.waitFor(() => expect(mgr.listSessions().find((s) => s.id === session.id)?.pendingApproval?.detail.kind).toBe('centralu_update'))
+        mgr.respondApproval(session.id, mgr.listSessions().find((s) => s.id === session.id)!.pendingApproval!.requestId, 'deny')
+      }
+      expect((await call).isError === true).toBe(preset !== 'auto')
+    }
+    expect(check).toHaveBeenCalledTimes(preset === 'auto' ? 1 : 0)
+    expect(apply).toHaveBeenCalledTimes(preset === 'auto' ? 1 : 0)
+    expect(autoApply).not.toHaveBeenCalled()
+    if (preset === 'auto') {
+      await mgr.updateSettings(session.id, { permissionPreset: 'normal' })
+      const call = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'check' })
+      await vi.waitFor(() => expect(mgr.listSessions().find((s) => s.id === session.id)?.pendingApproval).toBeTruthy())
+      mgr.respondApproval(session.id, mgr.listSessions().find((s) => s.id === session.id)!.pendingApproval!.requestId, 'deny')
+      expect((await call).isError).toBe(true)
+    }
+  })
+
   it('blocks denial, asks again after allow once, and keeps always within the calling session', async () => {
     const fetchLatest = vi.fn(async () => ({ ok: true as const, version: '9999.0.0' }))
     const updates = new UpdateService(() => {}, { fetchLatest, run: async () => {}, installedCopy: () => null })

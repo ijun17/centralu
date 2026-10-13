@@ -1979,6 +1979,27 @@ test("Settings: the sessions' read-only tools start on, and turning them off is 
   await expect(page.getByTestId('settings-session-tools')).not.toBeChecked()
 })
 
+test('Settings: running agents per project supports preset defaults and a remembered ceiling', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const open = async () => {
+    await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+    await page.getByTestId('settings-tab-orchestrator').click()
+  }
+  await open()
+  const input = page.getByTestId('settings-agent-ceiling')
+  await expect(input).toHaveValue('')
+  await expect(page.getByText('Leave empty for the preset default:', { exact: false })).toBeVisible()
+  await input.fill('8')
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().prefs.agentCeiling)).toBe(8)
+  await page.reload()
+  await open()
+  await expect(input).toHaveValue('8')
+  await input.fill('0')
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().prefs.agentCeiling)).toBe(0)
+  await input.fill('')
+  await expect.poll(() => page.evaluate(() => (window as any).__store.getState().prefs.agentCeiling)).toBe(null)
+})
+
 /*
  * The relationship between text size (zoom) and vh (dogfooding finding: "when I bump up the text
  * size, the session's composer disappears"). vh is not affected by zoom, so zooming in made the

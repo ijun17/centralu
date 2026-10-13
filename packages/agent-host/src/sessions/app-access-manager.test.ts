@@ -129,6 +129,53 @@ const create = async (projectId: string, t: ToolName) =>
   (await rpc('agents.createSession', { projectId, cwd: join(root, projectId === alpha ? 'alpha' : 'beta'), tool: t })) as SessionInfo
 
 describe('sharing an app (apps.setShared)', () => {
+  it.each(['claude', 'codex'] as const)('%s: auto attaches and calls an untrusted target from an untrusted caller, without a card or stored consent', async (cli) => {
+    const s = await mgr.createSession({ projectId: alpha, cwd: join(root, 'alpha'), tool: cli, permissionPreset: 'auto' })
+    await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
+    await rpc('projects.setTrusted', { projectId: alpha, trusted: false })
+    await rpc('projects.setTrusted', { projectId: beta, trusted: false })
+    rt.refresh()
+    expect(rt.list().find((a) => a.appId === 'board')?.status).toBe('untrusted')
+    expect((await tool(s.id, 'find_apps')).text).toContain('beta/board')
+    const result = await mgr.runOrchestratorTool(s.id, 'attach_app', { app: 'beta/board' })
+    expect(result.isError).toBeFalsy()
+    expect(result.text).toContain('peek')
+    expect(card(s.id)).toBeUndefined()
+    expect(mgr.projectConsents()).toEqual([])
+    const adapter = cli === 'claude' ? claude : codex
+    const apps = adapter.last().apps!
+    expect((await apps.call('app-board', 'peek', {})).isError).toBe(false)
+    // The auto-started server is still untrusted for other callers and screens.
+    expect((await rt.call({ projectId: beta, appId: 'board' }, 'peek', {}, { kind: 'session', sessionId: 'missing' })).status).toBe('rejected')
+    await mgr.updateSettings(s.id, { permissionPreset: 'normal' })
+    expect((await tool(s.id, 'attach_app', { app: 'beta/board' })).isError).toBe(true)
+    expect((await apps.call('app-board', 'peek', {})).isError).toBe(true)
+  })
+
+  it('auto keeps an existing attachment after remembered consent is revoked, until its own preset changes', async () => {
+    const s = await create(alpha, 'claude')
+    allowedBefore()
+    await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
+    expect((await tool(s.id, 'attach_app', { app: 'beta/board' })).isError).toBeFalsy()
+    await mgr.updateSettings(s.id, { permissionPreset: 'auto' })
+    mgr.revokeProjectConsent(alpha, beta, 'apps')
+    expect(servers(claude.last())).toContain('app-board')
+    expect((await claude.last().apps!.call('app-board', 'peek', {})).isError).toBe(false)
+    await mgr.updateSettings(s.id, { permissionPreset: 'normal' })
+    expect(servers(claude.last())).not.toContain('app-board')
+  })
+
+  it.each(['safe', 'normal'] as const)('%s still refuses untrusted callers and target apps', async (preset) => {
+    const s = await mgr.createSession({ projectId: alpha, cwd: join(root, 'alpha'), tool: 'claude', permissionPreset: preset })
+    await rpc('apps.setShared', { appId: 'board', projectId: beta, shared: true })
+    await rpc('projects.setTrusted', { projectId: beta, trusted: false })
+    rt.refresh()
+    expect((await tool(s.id, 'attach_app', { app: 'beta/board' })).isError).toBe(true)
+    await rpc('projects.setTrusted', { projectId: alpha, trusted: false })
+    expect((await tool(s.id, 'find_apps')).isError).toBe(true)
+    expect(card(s.id)).toBeUndefined()
+  })
+
   it('is off by default, shows in the app list when on, and is refused for an app that does not exist', async () => {
     const board = () => (rt.list() as ExternalAppInfo[]).find((x) => x.appId === 'board')!
     expect(board().shared).toBeUndefined()

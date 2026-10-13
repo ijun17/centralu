@@ -81,6 +81,25 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     expect(events.filter((e) => e.sessionId === agent!.id && e.type === 'state_change').at(-1)).toMatchObject({ state: 'idle', reason: 'app_agent_finished' })
   })
 
+  it("auto session control observes an app agent without replacing the app request's completion watcher or raising safe", async () => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude', permissionPreset: 'auto' })) as SessionInfo
+    claude.onSend = (h) => h.emit({ type: 'state_change', sessionId: h.sessionId, state: 'working' })
+    const request = callFromSession(caller, 'app-notes', { args: { prompt: 'Summarize.' } })
+    await until(() => agentSessions(), (sessions) => sessions.some((s) => s.state === 'working'))
+    const child = agentSessions()[0]!
+    expect(child.permissionPreset).toBe('safe')
+    expect(await mgr.agentSession(caller.id, { sessionId: child.id, action: 'status' })).toMatchObject({ ok: true, state: 'working' })
+    const watching = mgr.agentSession(caller.id, { sessionId: child.id, action: 'wait' })
+    const h = claude.handles.get(child.id)!
+    h.say('The app still gets its answer.')
+    h.done()
+    expect(await watching).toMatchObject({ ok: true, state: 'done', answer: 'The app still gets its answer.' })
+    expect(brokerSaid(await request)).toMatchObject({ isError: false, text: 'The app still gets its answer.' })
+    expect(h.opts.permissionPreset).toBe('safe')
+  })
+
   it('given a schema, Claude receives it as the query\'s outputFormat, and the answer is taken from the turn\'s outcome and validated', async () => {
     plant('project', 'notes', { agent: true })
     rt.refresh()

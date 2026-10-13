@@ -118,6 +118,23 @@ describe('projects.create', () => {
 })
 
 describe('create_project (the orchestrator)', () => {
+  it.each(['auto', 'safe', 'normal'] as const)('%s: create_project follows the caller preset on every call', async (preset) => {
+    const orc = await mgr.orchestrator()
+    await mgr.updateSettings(orc.id, { permissionPreset: preset })
+    for (const name of ['first', 'second']) {
+      const call = mgr.runOrchestratorTool(orc.id, 'create_project', { name })
+      if (preset !== 'auto') {
+        await until(() => !!card(orc.id))
+        expect(existsSync(join(centralu, name))).toBe(false)
+        mgr.respondApproval(orc.id, card(orc.id)!.requestId, 'deny')
+      }
+      const result = await call
+      expect(result.isError === true).toBe(preset !== 'auto')
+      expect(existsSync(join(centralu, name))).toBe(preset === 'auto')
+      expect(card(orc.id)).toBeUndefined()
+    }
+  })
+
   it('raises a card with the full path, makes nothing until the person approves, then makes and registers it', async () => {
     const orc = await mgr.orchestrator()
     const call = mgr.runOrchestratorTool(orc.id, 'create_project', { name: 'shop' })

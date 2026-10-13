@@ -1,7 +1,18 @@
+import type { PermissionPreset } from '@cc/protocol'
 import type { Options, Settings } from '@anthropic-ai/claude-agent-sdk'
 
 /** Inline SDK flag settings are separate from the files selected by settingSources. */
-export function withoutCrossSessionMessaging<T extends Omit<Options, 'settings'> & { settings?: Settings }>(options: T) {
+export function withoutCrossSessionMessaging<T extends Omit<Options, 'settings'> & { settings?: Settings }>(
+  options: T,
+  preset: PermissionPreset = 'normal',
+) {
+  if (preset === 'auto')
+    return {
+      ...options,
+      settings: options.settings ?? {},
+      disallowedTools: options.disallowedTools ?? [],
+      env: { ...process.env, ...options.env },
+    }
   const env: NonNullable<Options['env']> = {
     ...process.env,
     ...options.env,

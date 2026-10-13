@@ -1349,6 +1349,8 @@ export const UiPreferences = z.object({
    * it when a session starts and on each call.
    */
   sessionTools: z.boolean(),
+  /** Running children per project: null uses preset defaults (auto unlimited, otherwise 4); 0 is unlimited. */
+  agentCeiling: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
 })
 export type UiPreferences = z.infer<typeof UiPreferences>
 

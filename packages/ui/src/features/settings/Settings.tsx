@@ -858,6 +858,7 @@ function OrchestratorSettings() {
  */
 function SessionToolsSwitch() {
   const on = useStore((s) => s.prefs.sessionTools)
+  const ceiling = useStore((s) => s.prefs.agentCeiling)
   const setPrefs = useStore((s) => s.setPrefs)
   return (
     <div className="mt-6 border-t border-line pt-4">
@@ -874,9 +875,27 @@ function SessionToolsSwitch() {
       <p className="mt-1 text-xs leading-body text-ink-faint">
         Every session can read the other sessions in its project, search that project&apos;s past
         conversations, and read Centralu&apos;s guide. With your consent it can also ask another
-        project to do a task and attach apps other projects share. It cannot send to or create
-        sessions in its own project — that stays with the orchestrator. Turning this off stops those tools at once,
+        project to do a task and attach apps other projects share. It can start agents in its own project under its own permission preset. Auto opens these boundaries without asking. Turning this off stops those tools at once,
         apps it attached included; turning it on reaches a session the next time it starts.
+      </p>
+      <label className="mt-4 flex items-center gap-2 text-sm text-ink-muted">
+        Running agents per project
+        <input
+          type="number"
+          min={0}
+          step={1}
+          className="w-20 rounded border border-line bg-surface-floor px-2 py-1"
+          data-testid="settings-agent-ceiling"
+          value={ceiling ?? ''}
+          placeholder="Default"
+          onChange={(e) => {
+            const value = e.target.value === '' ? null : Number(e.target.value)
+            if (value === null || (Number.isSafeInteger(value) && value >= 0)) void setPrefs({ agentCeiling: value })
+          }}
+        />
+      </label>
+      <p className="mt-1 text-xs leading-body text-ink-faint">
+        Leave empty for the preset default: unlimited under auto, four otherwise. Zero means unlimited.
       </p>
     </div>
   )

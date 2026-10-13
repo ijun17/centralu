@@ -11,7 +11,8 @@ import type { AppSessionKey, OnDemandApps, SessionAppsHub } from './session-apps
  * it searches the apps it could attach, attaches one (its tools join this session), and detaches it
  * (they leave). An app that is not attached costs no context.
  *
- * What may be attached, decided here and asked again on every count of a session's apps:
+ * Auto opens project trust and pair consent through the manager's caller-preset policy (#603),
+ * without changing sharing or remembered grants. Otherwise, what may be attached, decided here and asked again on every count of a session's apps:
  *
  *   a project app of another project   only if the person shares it (`apps.setShared`, off by default),
  *                                      and only once the person allowed this pair of projects (the
@@ -35,8 +36,8 @@ type Record_ = {
   appId: string
   /** The server name chosen when it was attached (`app-<id>`, or `app-<id>-2` if that was taken) — fixed for the session */
   server: string
-  /** How the pair of projects was allowed: 'always' leans on the remembered consent, 'once' on this attachment alone */
-  consent: 'always' | 'once' | 'none'
+  /** Auto grants count only while the caller is auto; remembered and one-time grants retain their own lifetime. */
+  consent: 'always' | 'once' | 'none' | 'auto'
   at: number
 }
 
@@ -50,6 +51,8 @@ export type AppAccessStore = {
 
 export type AppAccessDeps = {
   hub: SessionAppsHub
+  /** The manager reads the calling session's preset at each boundary. */
+  boundaryOpen?(sessionId: string, boundary?: string): boolean
   store: AppAccessStore
   /** The session as decision 4 sees it, or null for one that gets no apps at all (a session an app stood up) */
   session(sessionId: string): AppSessionKey | null
@@ -125,13 +128,13 @@ export class AppAccess implements OnDemandApps {
 
   allowed(session: AppSessionKey, app: ExternalAppInfo): boolean {
     const from = session.projectId
-    if (from === null || !this.projectTrusted(from)) return false
+    if (from === null || (!this.projectTrusted(from) && !this.deps.boundaryOpen?.(session.id))) return false
     if (app.projectId === null) return true
     if (app.projectId === from || app.shared !== true) return false
     const r = this.records(session.id).find((x) => x.appId === app.appId && x.projectId === app.projectId)
     if (!r) return false
     // "Once" was this attachment's own answer; "always" holds only while the person keeps it (revoking detaches)
-    return r.consent === 'once' || !!this.deps.store.getProjectConsent(from, app.projectId, 'apps')
+    return !!this.deps.boundaryOpen?.(session.id) || r.consent === 'once' || !!this.deps.store.getProjectConsent(from, app.projectId, 'apps')
   }
 
   // ── The three tools ──
@@ -159,7 +162,7 @@ export class AppAccess implements OnDemandApps {
     const app = named.app
     const target: AppRef = { projectId: app.projectId, appId: app.appId }
     const has = already.find((h) => h.ref.appId === target.appId && h.ref.projectId === target.projectId)
-    if (has) return { ok: true, server: has.server, tools: await this.toolNames(target), when: 'now', already: true }
+    if (has) return { ok: true, server: has.server, tools: await this.toolNames(target, sessionId), when: 'now', already: true }
     if (!this.candidates(session).some((a) => a.appId === app.appId && a.projectId === app.projectId)) {
       return { ok: false, error: this.whyNot(session, app) }
     }
@@ -173,7 +176,7 @@ export class AppAccess implements OnDemandApps {
         signal,
       )
       if (!res.ok) return res
-      consent = this.deps.store.getProjectConsent(session.projectId!, app.projectId, 'apps') ? 'always' : 'once'
+      consent = this.deps.boundaryOpen?.(sessionId) ? 'auto' : this.deps.store.getProjectConsent(session.projectId!, app.projectId, 'apps') ? 'always' : 'once'
       // The person may have taken a while: the app could have stopped being shared, or this session gone, meanwhile
       const again = this.gate(sessionId)
       if (!again.ok) return again
@@ -188,7 +191,7 @@ export class AppAccess implements OnDemandApps {
     const server = this.freeServer(app.appId, taken)
     this.save(sessionId, [...kept, { projectId: app.projectId, appId: app.appId, server, consent, at: Date.now() }])
     const when = this.deps.attachedChanged(sessionId)
-    return { ok: true, server, tools: await this.toolNames(target), when }
+    return { ok: true, server, tools: await this.toolNames(target, sessionId), when }
   }
 
   detach(sessionId: string, ref: string): DetachOutcome {
@@ -240,7 +243,7 @@ export class AppAccess implements OnDemandApps {
     const session = this.deps.session(sessionId)
     if (!session) return { ok: false, error: 'This session cannot attach apps.' }
     if (session.projectId === null) return { ok: false, error: 'Only a session in a project can attach apps from other projects.' }
-    if (!this.projectTrusted(session.projectId)) {
+    if (!this.projectTrusted(session.projectId) && !this.deps.boundaryOpen?.(sessionId, 'attach from an untrusted project')) {
       return { ok: false, error: "This session's project is not trusted, so it cannot attach apps — the person can trust it from the project menu." }
     }
     return { ok: true, session }
@@ -251,7 +254,7 @@ export class AppAccess implements OnDemandApps {
     const have = this.deps.hub.refsFor(session)
     return this.deps.hub.rt
       .list()
-      .filter((a) => !UNUSABLE.has(a.status))
+      .filter((a) => !UNUSABLE.has(a.status) || (a.status === 'untrusted' && this.deps.boundaryOpen?.(session.id)))
       .filter((a) => a.projectId === null || (a.projectId !== session.projectId && a.shared === true))
       .filter((a) => !have.some((h) => h.ref.appId === a.appId && h.ref.projectId === a.projectId))
       .sort((x, y) => this.refOf(x).localeCompare(this.refOf(y)))
@@ -319,13 +322,13 @@ export class AppAccess implements OnDemandApps {
   }
 
   /** The app's agent tools for the tool result — started here if never listed, within the hub's cap; empty on failure */
-  private async toolNames(ref: AppRef): Promise<string[]> {
+  private async toolNames(ref: AppRef, sessionId: string): Promise<string[]> {
     const known = this.deps.hub.rt.knownTools(ref, 'model')
     if (known) return known.map((t) => t.name)
     let timer: NodeJS.Timeout | undefined
     try {
       const listed = await Promise.race([
-        this.deps.hub.rt.tools(ref, 'model'),
+        this.deps.hub.rt.tools(ref, 'model', sessionId),
         new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error('timeout')), this.deps.toolListWaitMs ?? TOOL_LIST_WAIT_MS))),
       ])
       return listed.map((t) => t.name)
@@ -371,7 +374,7 @@ function parse(raw: string | null): Record_[] {
         typeof x.appId === 'string' &&
         typeof x.server === 'string' &&
         x.server.startsWith(appMcpServerName('')) &&
-        (x.consent === 'always' || x.consent === 'once' || x.consent === 'none'),
+        (x.consent === 'always' || x.consent === 'once' || x.consent === 'none' || x.consent === 'auto'),
     )
   } catch {
     return []

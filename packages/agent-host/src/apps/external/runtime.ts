@@ -651,6 +651,13 @@ export class ExternalApps {
     return out
   }
 
+  private sessionBoundaryOpen: (sessionId: string) => boolean = () => false
+
+  /** Host-owned policy; a request cannot claim an auto preset in its arguments. */
+  setSessionBoundaryPolicy(policy: (sessionId: string) => boolean): void {
+    this.sessionBoundaryOpen = policy
+  }
+
   /**
    * An app's tool list — if the app is down, **this is where it starts** (the first time it is
    * needed).
@@ -659,9 +666,9 @@ export class ExternalApps {
    * read is the place it is enforced: this list becomes the source of truth both for what attaches to
    * a session (A-5) and for the tools a screen can call.
    */
-  async tools(ref: AppRef, audience?: Audience): Promise<Tool[]> {
+  async tools(ref: AppRef, audience?: Audience, sessionId?: string): Promise<Tool[]> {
     const e = this.require(ref)
-    const all = await this.use(e, async () => e.life.tools ?? [])
+    const all = await this.use(e, async () => e.life.tools ?? [], !!sessionId && this.sessionBoundaryOpen(sessionId))
     return all.filter((t) => !audience || t.visibility.includes(audience)).map((t) => t.tool)
   }
 
@@ -844,7 +851,8 @@ export class ExternalApps {
 
     // Checks that end before anything is sent to the app — do not even need to start a process
     if (!e.manifest) return done('rejected', null, `This app's manifest is invalid: ${e.error}`)
-    if (!e.scope.trusted) return done('rejected', null, "This app's project is not trusted, so Centralu does not call its apps")
+    const open = caller.kind === 'session' && this.sessionBoundaryOpen(caller.sessionId)
+    if (!e.scope.trusted && !open) return done('rejected', null, "This app's project is not trusted, so Centralu does not call its apps")
     const held = this.held(e)
     if (held) return done('rejected', null, held)
     if (e.life.gaveUp) return done('rejected', null, `This app stopped after failing ${this.timing.maxFailures} times in a row`)
@@ -916,7 +924,7 @@ export class ExternalApps {
           abort.abort()
           for (const sig of upstream) sig.removeEventListener('abort', onUp)
         }
-      })
+      }, open)
     } catch (err) {
       // Failed to start (a failed startup, or changed while backing off) — never reached the app, but this is not a policy denial
       return done('error', null, (err as Error).message)
@@ -1584,11 +1592,11 @@ export class ExternalApps {
   // ── Lifecycle ──────────────────────────────────────────────────────────────────────
 
   /** An app is never idle while in use — the idle timer is set again once it is done */
-  private async use<T>(e: AppEntry, fn: (proc: AppProcess) => Promise<T>): Promise<T> {
+  private async use<T>(e: AppEntry, fn: (proc: AppProcess) => Promise<T>, boundaryOpen = false): Promise<T> {
     e.life.inflight += 1
     this.clearIdle(e)
     try {
-      return await fn(await this.ensureRunning(e))
+      return await fn(await this.ensureRunning(e, boundaryOpen))
     } finally {
       e.life.inflight -= 1
       if (e.life.inflight === 0) for (const w of e.life.idleWaiters.splice(0)) w()
@@ -1625,10 +1633,10 @@ export class ExternalApps {
    * encountered restoring sessions (see the `resuming` comment in `manager.ts`). Everyone waits on the
    * same in-progress startup promise instead.
    */
-  private ensureRunning(e: AppEntry): Promise<AppProcess> {
+  private ensureRunning(e: AppEntry, boundaryOpen = false): Promise<AppProcess> {
     const L = e.life
     if (!e.manifest) throw new AppUnavailableError(`The app cannot start — its manifest is invalid: ${e.error}`)
-    if (!e.scope.trusted) {
+    if (!e.scope.trusted && !boundaryOpen) {
       throw new AppUnavailableError("This app's project is not trusted, so the app does not start — trust the project and it will")
     }
     // An imported app never starts before a person reviews and enables it (E-3) — checked on every call: if server or uses changes after being enabled, it is blocked starting from the next startup

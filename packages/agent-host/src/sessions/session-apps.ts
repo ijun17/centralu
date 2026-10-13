@@ -164,7 +164,7 @@ export class SessionAppsHub {
 
   constructor(
     readonly rt: ExternalApps,
-    readonly opts: { toolListWaitMs?: number; callJoinWaitMs?: number; onDemand?: OnDemandApps } = {},
+    readonly opts: { toolListWaitMs?: number; callJoinWaitMs?: number; onDemand?: OnDemandApps; boundaryOpen?: (sessionId: string) => boolean } = {},
   ) {
     this.stopListening = rt.onAppsChanged(() => {
       for (const a of [...this.live.values()]) a.recheck()
@@ -282,7 +282,7 @@ export class SessionAppsHub {
    * keep answering "yes" even after trust is revoked.
    */
   refsFor(session: AppSessionKey): Hit[] {
-    const usable = this.rt.list().filter((a) => !UNUSABLE.has(a.status))
+    const usable = this.rt.list().filter((a) => !UNUSABLE.has(a.status) || (a.status === 'untrusted' && !!this.opts.boundaryOpen?.(session.id)))
     const hits = usable
       .filter((a) => givesApp(session, a))
       .map((a) => ({ ref: { projectId: a.projectId, appId: a.appId }, server: appMcpServerName(a.appId) }))
@@ -320,8 +320,8 @@ export class SessionAppsHub {
     const own = session?.id ? this.opts.onDemand?.attached(session.id).find((x) => sameRef(x.ref, ref)) : undefined
     const onDemand = !!session && !!own && this.opts.onDemand!.allowed(session, app)
     if (!session || (!givesApp(session, app) && !onDemand)) return { reachable: false, reason: 'other-project' }
-    if (app.status === 'untrusted') return { reachable: false, reason: 'untrusted' }
-    if (UNUSABLE.has(app.status)) return { reachable: false, reason: 'app-unusable', status: app.status }
+    if (app.status === 'untrusted' && !this.opts.boundaryOpen?.(session.id)) return { reachable: false, reason: 'untrusted' }
+    if (UNUSABLE.has(app.status) && !(app.status === 'untrusted' && this.opts.boundaryOpen?.(session.id))) return { reachable: false, reason: 'app-unusable', status: app.status }
     const server = givesApp(session, app) ? appMcpServerName(app.appId) : own!.server
     const attached = live?.appAttachment?.(server) ?? 'attached'
     if (attached === 'restart') return { reachable: false, reason: 'restart' }
@@ -416,7 +416,7 @@ class Attachment implements SessionApps {
     let timer: NodeJS.Timeout | undefined
     try {
       const listed = await Promise.race([
-        this.hub.rt.tools(hit.ref, 'model'),
+        this.hub.rt.tools(hit.ref, 'model', this.session.id),
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error(`did not list its tools within ${Math.round(waitMs / 1000)}s`)), waitMs)
         }),

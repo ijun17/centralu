@@ -20,7 +20,9 @@ another in the same project; the reader set reads no other project and cannot se
 
 `start_agent` and `agent_session` let an ordinary session start a Claude or Codex session in its own project and
 work with it ([agent-host.md](agent-host.md) §1.2.1). They add no reach the caller lacked (the child works on the
-same files under the same or a lower preset), but they multiply what runs, so:
+same files under the same or a lower preset), but they multiply what runs. The rules below
+apply to `safe` and `normal`; `auto` opens the consent, depth, ownership, trust and cleanup
+boundaries (#603), with a log line instead of a card or refusal:
 
 - **The person's consent**, a card in the caller's session the first time it starts one: once, always for this
   session (kept while the host serves it), always for this project (stored as the project's `agents` consent,
@@ -30,7 +32,9 @@ same files under the same or a lower preset), but they multiply what runs, so:
 - **Depth one**: a session marked `askedBy` (started by `start_agent` or opened by `ask_project`) can neither
   start agents nor ask a project.
 - **Ownership**: `agent_session` acts only on a session whose `askedBy` is the caller, in its project.
-- **A ceiling**: at most 4 children running at once per project, over all its sessions (`AGENT_CEILING`).
+- **A ceiling**: Settings → Orchestrator → Running agents per project (`prefs.agentCeiling`).
+  Empty uses the preset default: no ceiling under `auto`, 4 otherwise (`AGENT_CEILING`); zero
+  explicitly removes the ceiling, and a positive integer limits all running children in each project.
 - **Visible**: each child is an ordinary session in the sidebar with its own approval cards and Stop, and outlives
   the caller's deletion. Its task is recorded as sent by the caller (`from`), not by the person.
   Mid-turn follow-ups keep that provenance and are framed as the parent's words, through the same message path
@@ -74,15 +78,16 @@ need the project's explicit setup command or an install by the child under its p
 
 ### Asking another project (#371 part B)
 
-`ask_project` is the one way an ordinary session acts outside its own project, so it is a new
-capability with its own controls ([agent-host.md](agent-host.md) §1.2):
+`ask_project` is the one way an ordinary session acts outside its own project. Under `auto`,
+consent and depth/trust refusals are open and logged; delegated sessions inherit the caller's
+preset, so an `auto` child may delegate again. Under `safe` and `normal` it has these controls ([agent-host.md](agent-host.md) §1.2):
 
 - **The person's consent per pair of projects**, asked as a card in the caller's session the first
   time X asks Y; only "always" is remembered (store `project_consents`), and Settings revokes it.
   Without consent nothing is started in the other project. The card is the boundary, not the tool's
   description: a caller steered by injected text can at most raise a card.
 - **What the delegated session runs is gated by its own project's permissions.** It starts under the
-  `normal` preset with that project's trust, as a session the person opens there would; its approvals
+  caller's preset with that project's trust, as a session the person opens there would; its approvals
   stand as cards in that session. Under a person's global bypass it runs as freely as that person's
   own sessions there — the owner's decision is that the delegated session may change code in its own
   project. The task arrives framed as sent by another session, never as the person.
@@ -118,7 +123,7 @@ Claude Code can discover other Claude processes on the same machine through
 the same permission-mode class, including two `safe` sessions. That path does not pass through
 Centralu's `ask_project` consent card.
 
-Every Claude query Centralu builds applies inline SDK `settings.crossSessionInbound: 'refuse'`
+Every `safe` or `normal` Claude query Centralu builds applies inline SDK `settings.crossSessionInbound: 'refuse'`
 to drop inbound peer messages and adds `ListAgents` and its alias `ListPeers` to
 `disallowedTools`. It also forces `CLAUDE_CODE_HARBOR_KITE=0` in the child environment: in the
 inspected CLI versions 2.1.263–2.1.289 this undocumented gate disables peer listing,
@@ -126,7 +131,8 @@ cross-session sends and inbox binding. `SendMessage` remains available because i
 continues the session's own background subagents. Existing settings, denies and environment
 are merged, and settings-file selection remains governed by project trust and session kind.
 
-These controls cover workers, orchestrators, coordinators, worktree managers, builders, app
+Under `auto`, the adapter applies none of these cross-session controls (#603); the session's
+own CLI settings and environment still apply. For other presets these controls cover workers, orchestrators, coordinators, worktree managers, builders, app
 agents, `start_agent` children and resumed sessions, including fresh keeper processes. A host
 handover that adopts an existing CLI cannot retroactively change its startup flags or
 environment; processes started before this fix must be restarted.
@@ -229,6 +235,10 @@ app started gets none (`appsFor`).
 
 ### When the person is asked
 
+"Open" means the calling session's own `auto` preset opens that permission boundary (#603),
+read at call time by `SessionManager.autoBoundaryOpen`; auto allowances are logged, without
+writing remembered consents. Tool profiles, same-project scope, valid inputs, app sharing,
+and the target's own preset still apply. Global bypass under `normal` does not open host boundaries.
 "Allowed" runs without a card, "asks" raises a card in the calling session, "refused" fails the call
 without asking. "Bypass" is the person's own global setting (`defaultMode: "bypassPermissions"` in
 `~/.claude/settings.json`; `approval_policy = "never"` in `~/.codex/config.toml`), which only the
@@ -236,26 +246,29 @@ without asking. "Bypass" is the person's own global setting (`defaultMode: "bypa
 
 | Call | Claude `safe` | Claude `normal` | Claude `normal` + bypass | Claude `auto` | Codex `safe` | Codex `normal` | Codex `normal` + bypass | Codex `auto` | Enforced in |
 |---|---|---|---|---|---|---|---|---|---|
-| A Centralu tool the profile has | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | Claude: `canUseTool`, `isOrchestratorTool` and only when the session was given the server, checked before auto's refusal (`adapters/claude/index.ts`). Codex: `default_tools_approval_mode: 'approve'` on the bridge, and an elicitation for it accepted only on a thread that has it (`adapters/codex/index.ts`, `mcpConfig`, `onServerRequest`) |
+| A Centralu tool the profile has | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `isOrchestratorTool` and only when the session was given the server, checked before auto's refusal (`adapters/claude/index.ts`). Codex: `default_tools_approval_mode: 'approve'` on the bridge, and an elicitation for it accepted only on a thread that has it (`adapters/codex/index.ts`, `mcpConfig`, `onServerRequest`) |
 | A Centralu tool the profile does not have | refused | refused | refused | refused | refused | refused | refused | refused | `profileAllows` (exposure and execution) |
-| `ask_project`, first time for a pair of projects | asks (consent card) | asks | asks | asks | asks | asks | asks | asks | `ensureProjectAccess` in `SessionManager.askProject`; "always" is kept in `project_consents` |
-| `ask_project` from a session that was itself asked | refused | refused | refused | refused | refused | refused | refused | refused | `askProject` (depth one) |
-| `ask_project` from an untrusted project | refused | refused | refused | refused | refused | refused | refused | refused | `askProject` (the caller's project trust, #382) |
-| `ask_project` into an untrusted project, first time for the pair | asks (the card says it is not trusted) | asks | asks | asks | asks | asks | asks | asks | `ensureProjectAccess` (`to.trusted`), `projectAccessQuestion` |
-| `start_agent`, first time for a session | asks (consent card: once, always for this session, always for this project) | asks | asks | asks | asks | asks | asks | asks | `ensureAgentConsent` in `SessionManager.startAgent`; "always for this session" lives while the host serves it, "always for this project" is kept in `project_consents` (kind `agents`) |
-| `start_agent` from a session that was itself started or asked (`askedBy`) | refused | refused | refused | refused | refused | refused | refused | refused | `startAgent` (depth one; `askProject` refuses the same sessions) |
-| `start_agent` from an untrusted project | refused | refused | refused | refused | refused | refused | refused | refused | `startAgent` (the project's trust, #382) |
-| `start_agent` past 4 running children in the project | refused | refused | refused | refused | refused | refused | refused | refused | `agentCeilingError` (`AGENT_CEILING`) |
-| `agent_session` on a session the caller did not start | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (`askedBy` is the caller, same project) |
-| `agent_session` delete, a worktree child with uncommitted changes or a tip not proven on the trunk | refused | refused | refused | refused | refused | refused | refused | refused | `cleanUpWorktreeChild` (#76's hard gate, measured at the call: clean worktree, and trunk ancestry or a merged PR whose head is the tip); a proven one goes to the trash with its worktree and branch |
+| `ask_project`, first time for a pair of projects | asks (consent card) | asks | asks | open | asks | asks | asks | open | `ensureProjectAccess` in `SessionManager.askProject`; "always" is kept in `project_consents` |
+| `ask_project` from a session that was itself asked | refused | refused | refused | open | refused | refused | refused | open | `askProject` (depth one) |
+| `ask_project` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `askProject` (the caller's project trust, #382) |
+| `ask_project` into an untrusted project, first time for the pair | asks (the card says it is not trusted) | asks | asks | open | asks | asks | asks | open | `ensureProjectAccess` (`to.trusted`), `projectAccessQuestion` |
+| `start_agent`, first time for a session | asks (consent card: once, always for this session, always for this project) | asks | asks | open | asks | asks | asks | open | `ensureAgentConsent` in `SessionManager.startAgent`; "always for this session" lives while the host serves it, "always for this project" is kept in `project_consents` (kind `agents`) |
+| `start_agent` from a session that was itself started or asked (`askedBy`) | refused | refused | refused | open | refused | refused | refused | open | `startAgent` (depth one; `askProject` refuses the same sessions) |
+| `start_agent` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `startAgent` (the project's trust, #382) |
+| `start_agent` past 4 running children in the project, default setting | refused | refused | refused | open | refused | refused | refused | open | `agentCeilingError` (`prefs.agentCeiling`; empty: auto unlimited, otherwise `AGENT_CEILING`; 0: unlimited) |
+| `agent_session` on a session the caller did not start | refused | refused | refused | open | refused | refused | refused | open | `agentSession` (same project in every preset; ownership opens under auto) |
+| `agent_session` delete, a worktree child with uncommitted changes or a tip not proven on the trunk | refused | refused | refused | open | refused | refused | refused | open | `cleanUpWorktreeChild` (auto removes the worktree and branch without proof; other presets retain #76's hard gate, measured at the call: clean worktree, and trunk ancestry or a merged PR whose head is the tip); a proven one goes to the trash with its worktree and branch |
 | `agent_session` send, to a child the person raised above the caller's preset | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (`presetWithin`) |
-| `create_project` (the orchestrator makes a new project, empty or a clone) | asks (a card with the full path and, for a clone, the repository, every time) | asks | asks | asks | asks | asks | asks | asks | `SessionManager.createProjectAsked` → `askHost`; the folder is made only after "Create", and never over anything already there (`projectFolderTarget`, `makeProjectFolder`); by default in `~/Centralu`, a folder of the home that macOS does not protect, so making one raises no OS permission prompt (the Desktop did); a clone takes https, ssh and scp-like addresses only, never `ext::`, `file://` or a local path (`gitSourceError`), clones no submodules and never asks for a sign-in (`project-clone.ts`) |
-| `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | asks | asks | asks | asks | asks | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
-| `attach_app`, a user-folder app | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `AppAccess.attach` (no card: the person's own folder) |
-| `find_apps` / `attach_app` from an untrusted project | refused | refused | refused | refused | refused | refused | refused | refused | `AppAccess.gate` |
-| An app tool the app marks `readOnlyHint` | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | Claude: `canUseTool`, `appToolOf` + `SessionApps.readOnly`. Codex: per-tool `approval_mode: 'approve'` (`mcpConfig`) |
-| Any other app tool | asks | asks | allowed | allowed | asks | asks | allowed | allowed | Claude: the card in `canUseTool`; bypass and auto never reach it. Codex: `appApprovalModeFor` (`prompt`, `writes`, or `approve` when the person's policy resolves to `never`) |
-| The agent's own tools (commands, edits) | asks, reads run | the person's settings | allowed | allowed | asks, reads run | the person's settings | allowed | allowed | `permissionOptionsFor` in each adapter |
+| `create_project` (the orchestrator makes a new project, empty or a clone) | asks (a card with the full path and, for a clone, the repository, every time) | asks | asks | open | asks | asks | asks | open | `SessionManager.createProjectAsked` → `askHost`; the folder is made only after "Create", and never over anything already there (`projectFolderTarget`, `makeProjectFolder`); by default in `~/Centralu`, a folder of the home that macOS does not protect, so making one raises no OS permission prompt (the Desktop did); a clone takes https, ssh and scp-like addresses only, never `ext::`, `file://` or a local path (`gitSourceError`), clones no submodules and never asks for a sign-in (`project-clone.ts`) |
+| `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | open | asks | asks | asks | open | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
+| `attach_app`, an untrusted target project's shared app | refused | refused | refused | open | refused | refused | refused | open | `AppAccess`, `SessionAppsHub` and runtime startup/call gates use the caller's preset; auto does not mark the project trusted |
+| `update_centralu`, first time in an ordinary session | asks | asks | asks | open | asks | asks | asks | open | `updateCentraluAsked` → `askHost`; other presets keep session-only remembered consent |
+| Claude's independent-session discovery and messaging | refused | refused | refused | open | — | — | — | — | Claude adapter `withoutCrossSessionMessaging`, applied only outside auto |
+| `attach_app`, a user-folder app | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: the person's own folder) |
+| `find_apps` / `attach_app` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `AppAccess.gate` |
+| An app tool the app marks `readOnlyHint` | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `appToolOf` + `SessionApps.readOnly`. Codex: per-tool `approval_mode: 'approve'` (`mcpConfig`) |
+| Any other app tool | asks | asks | allowed | open | asks | asks | allowed | open | Claude: the card in `canUseTool`; bypass and auto never reach it. Codex: `appApprovalModeFor` (`prompt`, `writes`, or `approve` when the person's policy resolves to `never`) |
+| The agent's own tools (commands, edits) | asks, reads run | the person's settings | allowed | open | asks, reads run | the person's settings | allowed | open | `permissionOptionsFor` in each adapter |
 
 Rows that differ by session:
 
@@ -269,16 +282,15 @@ Rows that differ by session:
   a card from the orchestrator has `safe`.
 - **An agent an app started** (`run_agent`, `SessionManager.runAppAgent`) is `safe` whatever the
   calling session uses, has no Centralu server and no apps. Reads run; everything else asks.
-- **A session `ask_project` opened** in the other project starts under `normal` with that project's
-  trust (`askProject`), like a session the person opens there; under the person's bypass it runs
-  freely. It holds the reader set, so it can attach apps (with its own consent card) but cannot ask a
-  third project.
+- **A session `ask_project` opened** inherits the caller's preset and uses the target project's
+  trust (`askProject`). Reuse requires the same preset. An `auto` child can delegate again;
+  other presets keep depth one. Its own settings-file selection still follows project trust.
 - **A session `start_agent` started** (#561) runs in the caller's own folder under **the caller's
   preset**, so it never has more than the session that asked for it: `safe` stays `safe`, `normal` reads
   the person's own settings as the caller does, `auto` stays `auto`. No argument sets it and no tool of
   the caller changes it afterwards; the person may, and a child raised above the caller no longer takes
   work from it. Its approvals stand as cards in its own session. It holds the reader set but cannot start
-  agents or ask a project (depth one).
+  agents or ask a project under `safe`/`normal` (depth one); `auto` opens both.
 - **A builder's `check`** starts its app and runs the app's code without a card, under every preset,
   like any Centralu tool. This is intended (owner decision 2026-10-11, #382): the builder is the
   session writing that code, so a card for running it would ask the person about the builder's own
@@ -301,6 +313,11 @@ a planted `.codex/config.toml` cannot turn its app tools into `approve`. The thr
 Codex source, and no logged-in app call was run.
 
 ### Turning things off
+
+The table describes `safe`/`normal`. Under `auto`, project trust and revoked remembered
+consents do not close delegation or attachment; the session's preset is checked on each call.
+Auto attachments are recorded separately from consent grants and stop counting after a preset
+downgrade. The session-tools switch and app-sharing switch still apply to every preset.
 
 | Change | orchestrator | scoped | builder | reader |
 |---|---|---|---|---|
