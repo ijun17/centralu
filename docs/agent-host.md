@@ -729,10 +729,17 @@ Implementation rules:
     refresh closed the process over a running dev server. The manager writes the running set to the store on every
     change and when a process starts (`background_tasks:<id>`, empty for a new process); the host that adopts the
     process lists the session from that record and hands it to the adapter (`ProcessSource.adopt.backgroundTasks`),
-    whose tracker is seeded with it so the tasks' endings are reported. A session whose record is missing (the previous
-    host predates it) is `background_unknown` until the tool first lists its work. The definitions and launch-settings
-    refreshes defer by `sessionIdle`, not only by a turn, and a deferred restart waits for running background work as
-    it waits for the turn (`applyDeferredRestart`, re-checked when a `background_tasks` event arrives).
+    whose tracker is seeded with it so the tasks' endings are reported (timers excepted: they are read back from the
+    transcript). A session whose record is missing (the previous host predates it) is `background_unknown`, so it is
+    not put to sleep, until the tool's own full list arrives (`background_tasks` with `snapshot`, Claude's
+    `background_tasks_changed`), or until it has been quiet for two hours, which is logged and recorded as none. A level
+    built from an ending or a timer neither settles it nor is recorded. The record goes when the session is deleted.
+  - **Restarts and background work** (#648). A restart that changes safety (the permission preset, the launch
+    settings, the tool definitions a profile serves) waits only for the turn: an idle session restarts at once, and a
+    mid-turn change applies when the turn ends, whatever runs in the background or is unknown. Any other deferred
+    restart (a model, an app set) also waits while listed background work runs, at most one hour
+    (`applyDeferredRestart`). A restart that ends background work, or work that is unknown, says so in the
+    conversation first (a `restart` notice naming the tasks).
 - **The CLI version a process runs is reported once per process, as `agent_version`** (#297). Claude: the init
   message's `claude_code_version` (init comes again with every query; only a change is sent). Codex: the `initialize`
   answer's `userAgent`, `<client name>/<server version> (<os>) …` (measured, codex-cli 0.160.0:

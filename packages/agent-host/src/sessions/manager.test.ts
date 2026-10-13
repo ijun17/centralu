@@ -196,12 +196,6 @@ beforeEach(() => {
 const addProject = () => rpc('projects.add', { path: tmpdir() }) as Promise<{ id: string; path: string }>
 
 describe('tool definitions after a host switch (#581)', () => {
-  // A hot refresh waits for `sessionIdle` (#648): a tool that cannot report its background work is never idle while it
-  // runs, so the stand-in reports it, as the Claude adapter does
-  beforeEach(() => {
-    adapter.capabilities.backgroundTasks = true
-  })
-
   it('restarts a live idle session when its served prefix hash changed', async () => {
     const project = await addProject()
     const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
@@ -242,10 +236,6 @@ describe('tool definitions after a host switch (#581)', () => {
 })
 
 describe('adapter launch settings after a host switch (#589)', () => {
-  beforeEach(() => {
-    adapter.capabilities.backgroundTasks = true
-  })
-
   it('restarts a kept idle process when its adapter launch fingerprint changed', async () => {
     const project = await addProject()
     const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })

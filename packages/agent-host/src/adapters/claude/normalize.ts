@@ -857,7 +857,8 @@ export class ClaudeBackgroundTracker {
    */
   seed(tasks: readonly BackgroundTask[]): void {
     for (const t of tasks) {
-      if (t.status !== 'running' || this.seen.has(t.id)) continue
+      // A timer (`stoppable: false`, `ClaudeSchedules.live`) is not a CLI task: it is read back from the transcript
+      if (t.status !== 'running' || t.stoppable === false || this.seen.has(t.id)) continue
       this.info.set(t.id, {
         kind: t.kind,
         description: t.description,
@@ -899,7 +900,8 @@ export class ClaudeBackgroundTracker {
         this.live.push(id)
         this.seen.add(id)
       }
-      return [this.event()]
+      // The CLI's whole list: what an adopted process holds is known from here on (#648)
+      return [this.event(undefined, true)]
     }
     if (subtype === 'task_started' || subtype === 'task_updated') {
       const id = str(m.task_id)
@@ -970,9 +972,10 @@ export class ClaudeBackgroundTracker {
     }
   }
 
-  private event(ended?: BackgroundTask[]): NormalizedEvent {
+  private event(ended?: BackgroundTask[], snapshot?: true): NormalizedEvent {
     return {
       type: 'background_tasks',
+      ...(snapshot ? { snapshot } : {}),
       sessionId: this.sessionId,
       live: [...this.live.map((id) => this.entry(id, this.info.get(id))), ...this.schedules.live()],
       ...(ended ? { ended } : {}),

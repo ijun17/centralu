@@ -88,6 +88,8 @@ class Adapter implements AgentAdapter {
 const processes: AgentProcessHost = { spawn: () => new FakeProcess() as unknown as AgentProcess }
 
 const shell: BackgroundTask = { id: 'dev', kind: 'shell', description: 'npm run dev', parentCallId: 'toolu_1', stopsWithTurn: false, stoppable: true, status: 'running' }
+const notices = (id: string) =>
+  events.flatMap((e) => (e.type === 'notice' && e.sessionId === id && e.label === 'restart' ? [e.text] : []))
 const running = (s: { backgroundTasks: BackgroundTask[] }) => s.backgroundTasks.filter((t) => t.status === 'running').map((t) => t.id)
 
 let store: Store
@@ -157,10 +159,51 @@ describe('background work across a host swap (#648)', () => {
     expect(b.mgr.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
     expect(await b.mgr.sleepSession(id)).toBe(false)
 
-    // The CLI's first level: nothing runs
-    handle.emit({ type: 'background_tasks', sessionId: id, live: [] })
+    // A level built from what this host saw (an ending, a /loop timer) does not settle it, and is not recorded
+    handle.emit({ type: 'background_tasks', sessionId: id, live: [], ended: [{ ...shell, id: 'other', status: 'completed' }] })
+    expect(b.mgr.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
+    expect(store.appSetting(`background_tasks:${id}`)).toBeNull()
+
+    // The CLI's own full list does: nothing runs, and the next host is told so
+    handle.emit({ type: 'background_tasks', sessionId: id, live: [], snapshot: true })
     expect(b.mgr.sessionIdle(id)).toEqual({ idle: true })
+    expect(store.appSetting(`background_tasks:${id}`)).toBe('[]')
     expect(await b.mgr.sleepSession(id)).toBe(true)
+  })
+
+  it('an unknown state is bounded by quiet: after two hours without a word the session is taken as holding nothing, and recorded', async () => {
+    const a = host()
+    const id = await sessionWithShell(a)
+    store.deleteAppSetting(`background_tasks:${id}`)
+    const b = host(new Set([id]))
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const handle = await adopt(b, id)
+      const t0 = Date.now()
+      // Something said after an hour and a half restarts the quiet
+      vi.setSystemTime(t0 + 90 * 60_000)
+      handle.emit({ type: 'usage_update', sessionId: id, tokens: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 } })
+      vi.setSystemTime(t0 + 150 * 60_000)
+      expect(b.mgr.sessionIdle(id)).toEqual({ idle: false, reason: 'background_unknown' })
+      vi.setSystemTime(t0 + (90 + 120) * 60_000 + 1)
+      expect(b.mgr.sessionIdle(id)).toEqual({ idle: true })
+      expect(store.appSetting(`background_tasks:${id}`)).toBe('[]')
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('taking it as none'))
+    } finally {
+      log.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('a deleted session takes its record with it', async () => {
+    const a = host()
+    const p = (await a.rpc('projects.add', { path: tmpdir() })) as { id: string }
+    const s = (await a.rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }
+    a.claude.last.emit({ type: 'background_tasks', sessionId: s.id, live: [shell] })
+    expect(store.appSetting(`background_tasks:${s.id}`)).not.toBeNull()
+    await a.mgr.trashSession(s.id)
+    expect(store.appSetting(`background_tasks:${s.id}`)).toBeNull()
   })
 
   it('a new process starts known: it holds nothing, so an earlier unknown does not follow the session', async () => {
@@ -176,42 +219,98 @@ describe('background work across a host swap (#648)', () => {
   })
 
   it.each([
-    ['tool definitions', (id: string) => store.setAppSetting(`tool_prefix:${id}`, 'old-prefix')],
-    ['launch settings', (_id: string, b: ReturnType<typeof host>) => void (b.claude.fingerprint = 'v2')],
-  ])('a %s refresh leaves an adopted process alone while its shell runs, and restarts it once the shell ends', async (_what, change) => {
+    ['tool definitions', 'instructions', (id: string) => store.setAppSetting(`tool_prefix:${id}`, 'old-prefix')],
+    ['launch settings', 'launch_settings', (_id: string, b: ReturnType<typeof host>) => void (b.claude.fingerprint = 'v2')],
+  ] as const)('a %s refresh is a safety change: an idle adopted session restarts at once, shell or not, and says what stopped', async (_what, cause, change) => {
     const a = host()
     const id = await sessionWithShell(a)
     const b = host(new Set([id]))
     const old = await adopt(b, id)
     change(id, b)
+    const restart = vi.spyOn(b.mgr, 'restartSession')
 
     await b.mgr.refreshToolDefinitions()
-    expect(old.disposed).toBe(false)
-    expect(b.claude.last).toBe(old)
-
-    old.emit({ type: 'background_tasks', sessionId: id, live: [], ended: [{ ...shell, status: 'completed' }] })
-    await vi.waitFor(() => expect(b.claude.last).not.toBe(old))
     expect(old.disposed).toBe(true)
+    expect(restart).toHaveBeenCalledWith(id, cause)
     expect(b.session(id).live).toBe(true)
+    expect(notices(id)).toEqual([expect.stringContaining('npm run dev')])
   })
 
-  it('a deferred restart waits for a turn and for background work alike', async () => {
+  it('a safety refresh does not wait on an unknown background state either (a session from a host that kept no record)', async () => {
+    const a = host()
+    const id = await sessionWithShell(a)
+    store.deleteAppSetting(`background_tasks:${id}`)
+    const b = host(new Set([id]))
+    const old = await adopt(b, id)
+    b.claude.fingerprint = 'v2'
+    await b.mgr.refreshToolDefinitions()
+    expect(old.disposed).toBe(true)
+    expect(notices(id)).toEqual([expect.stringContaining('before Centralu was updated')])
+  })
+
+  it.each([
+    ['a permission change', { permissionPreset: 'safe' as const }],
+    ['a definitions change', null],
+  ])('%s made mid-turn applies at the end of the turn, while a shell runs', async (_what, settings) => {
     const a = host()
     const id = await sessionWithShell(a)
     const b = host(new Set([id]))
     const old = await adopt(b, id)
-    store.setAppSetting(`tool_prefix:${id}`, 'old-prefix')
-    await b.mgr.refreshToolDefinitions()
+    old.emit({ type: 'state_change', sessionId: id, state: 'working' })
+    if (settings) expect((await b.mgr.updateSettings(id, settings)).applied).toBe('after_turn')
+    else {
+      store.setAppSetting(`tool_prefix:${id}`, 'old-prefix')
+      await b.mgr.refreshToolDefinitions()
+    }
     expect(old.disposed).toBe(false)
 
-    // A turn runs and ends while the shell still runs: no restart yet
+    old.emit({ type: 'turn_complete', sessionId: id })
+    await vi.waitFor(() => expect(old.disposed).toBe(true))
+    expect(b.claude.last).not.toBe(old)
+    if (settings) expect(b.claude.last.opts.permissionPreset).toBe('safe')
+    expect(notices(id)).toEqual([expect.stringContaining('npm run dev')])
+  })
+
+  it('a change that is not about safety (a model) waits for the shell, at most an hour', async () => {
+    const a = host()
+    const id = await sessionWithShell(a)
+    const b = host(new Set([id]))
+    const old = await adopt(b, id)
     old.emit({ type: 'state_change', sessionId: id, state: 'working' })
+    expect((await b.mgr.updateSettings(id, { model: 'opus' })).applied).toBe('after_turn')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      old.emit({ type: 'turn_complete', sessionId: id })
+      await Promise.resolve()
+      expect(old.disposed).toBe(false)
+      vi.advanceTimersByTime(59 * 60_000)
+      expect(old.disposed).toBe(false)
+      vi.advanceTimersByTime(60_000)
+    } finally {
+      vi.useRealTimers()
+    }
+    await vi.waitFor(() => expect(old.disposed).toBe(true))
+    log.mockRestore()
+    expect(b.claude.last.opts.model).toBe('opus')
+    expect(notices(id)).toEqual([expect.stringContaining('npm run dev')])
+  })
+
+  it('a model change held for a shell applies as soon as the shell ends', async () => {
+    const a = host()
+    const id = await sessionWithShell(a)
+    const b = host(new Set([id]))
+    const old = await adopt(b, id)
+    old.emit({ type: 'state_change', sessionId: id, state: 'working' })
+    await b.mgr.updateSettings(id, { model: 'opus' })
     old.emit({ type: 'turn_complete', sessionId: id })
     await new Promise((r) => setTimeout(r, 10))
     expect(old.disposed).toBe(false)
 
     old.emit({ type: 'background_tasks', sessionId: id, live: [], ended: [{ ...shell, status: 'completed' }] })
     await vi.waitFor(() => expect(old.disposed).toBe(true))
+    // Nothing ran in the background any more, so nothing to say
+    expect(notices(id)).toEqual([])
   })
 })
 

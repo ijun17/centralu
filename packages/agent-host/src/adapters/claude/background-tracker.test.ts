@@ -43,6 +43,21 @@ describe('a tracker over a process adopted from a previous host (#648)', () => {
     expect(level[0]!.type === 'background_tasks' && level[0].live.map((x) => x.id)).toEqual(['b2'])
   })
 
+  it('only the CLI\'s own full list is marked as a snapshot, which settles what an adopted process holds', () => {
+    const t = new ClaudeBackgroundTracker('s1')
+    t.seed([shell])
+    const level = t.push({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'b1', task_type: 'local_bash', description: 'npm run dev' }] })
+    expect(level[0]!.type === 'background_tasks' && level[0].snapshot).toBe(true)
+    const ending = t.push({ type: 'system', subtype: 'task_notification', task_id: 'b1', status: 'completed' })
+    expect(ending[0]!.type === 'background_tasks' && ending[0].snapshot).toBeUndefined()
+  })
+
+  it('a recorded /loop timer is not seeded as a task: timers are read back from the transcript, and a seeded one would never end', () => {
+    const t = new ClaudeBackgroundTracker('s1')
+    t.seed([{ id: 'wakeup:1', kind: 'other', description: 'loop', stoppable: false, status: 'running' }])
+    expect(t.release('gone')).toEqual([])
+  })
+
   it('a tracker that was not seeded says nothing of a task it never saw listed, as before', () => {
     const t = new ClaudeBackgroundTracker('s1')
     expect(t.push({ type: 'system', subtype: 'task_notification', task_id: 'b1', status: 'completed' })).toEqual([])

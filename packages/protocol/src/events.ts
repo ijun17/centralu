@@ -619,6 +619,12 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
     live: z.array(BackgroundTask),
     ended: z.array(BackgroundTask).optional(),
     clearEnded: z.boolean().optional(),
+    /**
+     * `live` is the tool's own full list of what runs in the process (#648): Claude's `background_tasks_changed`. Only
+     * such a list settles what a process adopted from a previous host holds; a level built from what this host saw
+     * (an ending, a `/loop` timer) does not.
+     */
+    snapshot: z.boolean().optional(),
   }),
   /**
    * The version of the agent CLI this session's process runs (#297): Claude's init message (`claude_code_version`), the
