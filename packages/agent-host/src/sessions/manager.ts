@@ -69,7 +69,6 @@ import {
   isProjectId,
   isSessionId,
   parseUiPreferences,
-  RESERVED_APP_IDS,
   textSizeFromLegacyStep,
   sessionLiveDefaults,
   withoutToolRecord,
@@ -77,6 +76,7 @@ import {
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, ChildRunResult, AgentSessionOpts, AskProjectResult, StartAgentOpts, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, HistoryMessage, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { LaunchSettings } from '../adapters/contract.js'
 import { registeredTool } from '../adapters/registry.js'
+import { isAppAgent, toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
 
 /**
  * Where agent processes live when not with this host (#280 step 2 — the keeper). `spawn` starts a
@@ -1473,6 +1473,9 @@ export class SessionManager {
     // External apps (M4 A-5) — a worker gets these too. If the handle never comes up, the catch below closes
     // it
     const apps = this.appsFor(info)
+    // The same rule runs again on every wake (toolProfileOf). The builder slot was just written (setBuilder), so the
+    // flag says what the row's slot already says
+    const profile = toolProfileFor(this.profileFacts(info, !!params.builderOf))
     const from = this.handleSink()
     this.unborn.set(id, [])
     try {
@@ -1492,30 +1495,17 @@ export class SessionManager {
           ...this.handoffReadDirs(params.projectId, !!params.handoff?.fromSessionId),
           // Paths another project handed back to this session (#371), asked on every read
           mayRead: (path: string) => this.mayRead(id, path, cwd),
-          // An orchestrator gets all of them; an ordinary session the reader set (#320, #561). The same rule runs again
-          // on every wake
-          orchestratorTools:
-            info.kind === 'orchestrator' ? this.orchestratorToolsFor(id)
-            // Builder session (M4 C-3): just its own app's check — the bundle (builder) blocks the rest
-            : params.builderOf ? this.orchestratorToolsFor(id)
-            // Every other session: its own project, read-only (#320)
-            : this.readsOwnProject(info) ? this.readerToolsFor(id)
-            : undefined,
-          toolProfile:
-            info.kind === 'orchestrator' ? 'orchestrator'
-            : params.builderOf ? 'builder'
-            : this.readsOwnProject(info) ? 'reader'
-            : undefined,
+          // An orchestrator gets all of them, a builder session (M4 C-3) just its own app's check (the bundle blocks
+          // the rest), an ordinary session its own project, read-only (#320, #561)
+          orchestratorTools: this.toolBundleOf(id, profile, info),
+          toolProfile: profile ?? undefined,
           systemPromptAppend:
             info.kind === 'orchestrator' ? orchestratorRole() + this.skillsPrompt()
             // A builder session's (M4 C-2) role is entirely the roleAppend fixed at creation
             : (info.roleAppend ?? undefined),
           // The path back to the host — used by the orchestrator tools' bridge and an external app's bridge
           // (M4 A-5)
-          orchestratorBridge:
-            info.kind === 'orchestrator' || params.builderOf || apps || this.readsOwnProject(info)
-              ? (this.endpoint?.(id) ?? undefined)
-              : undefined,
+          orchestratorBridge: profile || apps ? (this.endpoint?.(id) ?? undefined) : undefined,
           // An MCP server the person approved is loaded here as a user-folder app (M4 A-7, decision 4)
           apps,
           // The answer schema an app supplied when it asked for this (M4 D-1) — Claude gets it on this
@@ -2065,6 +2055,7 @@ export class SessionManager {
     // If this is a builder session, it gets its own app's check (C-3) — the directory is re-checked right now
     // (a different session could have taken over in between)
     const builds = this.builderRefOf(m) !== null
+    const profile = toolProfileFor(this.profileFacts(m, builds))
     const from = this.handleSink()
     /*
      * **The configuration the process will receive is read here, exactly once** (#162). If the
@@ -2122,23 +2113,8 @@ export class SessionManager {
            * has just been attached passes this check the next time it wakes and receives the
            * child-only tools and role.
            */
-          orchestratorTools:
-            m.kind === 'orchestrator'
-              ? this.orchestratorToolsFor(sessionId)
-              : m.kind === 'coordinator'
-                ? this.orchestratorToolsFor(sessionId, m.scopeSessionIds ?? [])
-                : builds
-                  ? this.orchestratorToolsFor(sessionId)
-                  : // Every other session: its own project (#320, #561)
-                    this.readsOwnProject(m)
-                    ? this.readerToolsFor(sessionId)
-                    : undefined,
-          toolProfile:
-            m.kind === 'orchestrator' ? 'orchestrator'
-            : m.kind === 'coordinator' ? 'scoped'
-            : builds ? 'builder'
-            : this.readsOwnProject(m) ? 'reader'
-            : undefined,
+          orchestratorTools: this.toolBundleOf(sessionId, profile, m),
+          toolProfile: profile ?? undefined,
           /*
            * This is **where memory is handed over.** Switching tools breaks externalId, which routes
            * things down this path (a new process), and that is when the past conversation rides along
@@ -2153,10 +2129,7 @@ export class SessionManager {
               : // Reapplying the fixed role text — for a coordinator session an older build left (#372), and
                 // for a builder session (C-2) even if the app is broken
                 (m.roleAppend ?? undefined),
-          orchestratorBridge:
-            m.kind === 'orchestrator' || m.kind === 'coordinator' || builds || apps || this.readsOwnProject(m)
-              ? (this.endpoint?.(sessionId) ?? undefined)
-              : undefined,
+          orchestratorBridge: profile || apps ? (this.endpoint?.(sessionId) ?? undefined) : undefined,
           // An approved MCP server is a user-folder app — an orchestrator receives those apps right here (M4
           // A-7)
           apps,
@@ -6496,11 +6469,7 @@ export class SessionManager {
     if (!profileAllows(profile, name)) {
       throw Object.assign(new Error(`Not a tool of this session: ${name}`), { code: 'internal' })
     }
-    const tools =
-      profile === 'scoped' ? this.orchestratorToolsFor(sessionId, m.scopeSessionIds ?? [])
-      : profile === 'reader' ? this.readerToolsFor(sessionId)
-      : this.orchestratorToolsFor(sessionId)
-    return runOrchestratorTool(tools, name, args, { sessionId, profile })
+    return runOrchestratorTool(this.toolBundleOf(sessionId, profile, m), name, args, { sessionId, profile })
   }
 
   /**
@@ -6701,45 +6670,42 @@ export class SessionManager {
     return this.appsHub?.attach({ id: m.id, kind: m.kind, projectId: m.projectId, builderOf: this.builderRefOf(m) }) ?? undefined
   }
 
-  /**
-   * Is this an agent session stood up at an external app's request (M4 D-1) — one of the workers an
-   * external app owns (`appId`) that is not that app's own builder session. No separate marker exists
-   * for this: ownership (`appId`) and the builder directory already say it. A row stamped with a
-   * reserved id belongs to the removed control app (#372), never to an external app.
-   */
+  /** Is this an agent session stood up at an external app's request (M4 D-1; `isAppAgent` in tool-profiles.ts) */
   private isAppAgentSession(m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId'>): boolean {
-    return !!m.appId && m.kind === 'worker' && !RESERVED_APP_IDS.includes(m.appId) && this.builderRefOf(m) === null
+    return isAppAgent({ kind: m.kind, appId: m.appId ?? null, builder: this.builderRefOf(m) !== null })
   }
 
   /**
-   * The tool bundle this session receives (#69). null means no tools.
-   * Whether something is a manager comes down to a single relationship: if it has a worktree child, it
-   * is a manager (including an archived child — tools are not dangerous, and a manager created through
-   * adoption must still be able to propose things after its children are cleaned up).
+   * What the profile rule (tool-profiles.ts) reads about this session: its row, whether its app's builder
+   * slot points at it (looked up unless the caller just wrote it), and the Settings switch (#320) as it is
+   * right now.
+   */
+  private profileFacts(
+    m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId'>,
+    builder: boolean = this.builderRefOf(m) !== null,
+  ): ToolProfileFacts {
+    return { kind: m.kind, projectId: m.projectId, appId: m.appId ?? null, builder, sessionTools: this.uiPreferences().sessionTools }
+  }
+
+  /**
+   * The tool bundle this session receives (#69). null means no tools. The rule is `toolProfileFor`
+   * (tool-profiles.ts); creation and every wake hand the adapter the same answer, and the bridge asks
+   * here on every call.
    */
   toolProfileOf(sessionId: string): ToolProfile | null {
     const m = this.meta.get(sessionId)
-    if (!m) return null
-    if (m.kind === 'orchestrator') return 'orchestrator'
-    if (m.kind === 'coordinator') return 'scoped'
-    // Builder session (M4 C-3) — checked before manager: the bundle that session received (check) has to
-    // match the bundle the bridge asks about
-    if (this.builderRefOf(m)) return 'builder'
-    return this.readsOwnProject(m) ? 'reader' : null
+    return m ? toolProfileFor(this.profileFacts(m)) : null
   }
 
-  /**
-   * Does this ordinary session get the light, read-only set (#320)? On unless the person turned it off
-   * in Settings, and never for an agent session an app stood up (M4 D-1): that agent hands its answer
-   * back to the app, so reading the project's conversations would carry them out to an app that was
-   * never given them (the same reason it gets no apps, appsFor).
-   *
-   * The schemas are attached when the session starts, like every other bundle; turning the setting off
-   * stops the calls at once (readerToolsFor and the bridge both ask again) and takes the schemas away
-   * the next time the session starts.
-   */
-  private readsOwnProject(m: SessionInfo): boolean {
-    return m.kind === 'worker' && !!m.projectId && !this.isAppAgentSession(m) && this.uiPreferences().sessionTools
+  /** The object behind a profile's bundle: the full set, a coordinator's scope, or the reader's view of its own project */
+  private toolBundleOf(sessionId: string, profile: ToolProfile, m: Pick<SessionInfo, 'scopeSessionIds'>): OrchestratorTools
+  private toolBundleOf(sessionId: string, profile: ToolProfile | null, m: Pick<SessionInfo, 'scopeSessionIds'>): OrchestratorTools | undefined
+  private toolBundleOf(sessionId: string, profile: ToolProfile | null, m: Pick<SessionInfo, 'scopeSessionIds'>): OrchestratorTools | undefined {
+    return toolBundleFor(profile, m.scopeSessionIds, {
+      orchestrator: () => this.orchestratorToolsFor(sessionId),
+      scoped: (ids) => this.orchestratorToolsFor(sessionId, ids),
+      reader: () => this.readerToolsFor(sessionId),
+    })
   }
 
   /**

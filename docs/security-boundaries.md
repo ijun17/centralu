@@ -205,7 +205,8 @@ decided in its own issue; this is the whole matrix, audited against the code bef
 
 ### Which tools a session has
 
-The host gives a session one profile (`toolProfileOf` in `sessions/manager.ts`), and the profile
+The host gives a session one profile (`toolProfileFor` in `sessions/tool-profiles.ts`, asked through
+`SessionManager.toolProfileOf`), and the profile
 decides both which tools the session sees and which calls run (`profileAllows` in
 `sessions/orchestrator-tools.ts`). Claude's in-process server is built from the profile
 (`adapters/claude/orchestrator-mcp.ts`, `toolDefsFor`); Codex calls through the bridge, and the host
