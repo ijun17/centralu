@@ -194,6 +194,8 @@ describe('starting another agent in the same project', () => {
       await w.until(() => childrenOf(s).length === 1)
       // The report promised for any child that outlives the call is there
       expect(await w.mgr.agentSession(s, { sessionId: childrenOf(s)[0]!.id, action: 'status' })).toMatchObject({ ok: true, state: 'working', reported: true })
+      // and stored, so a host swap keeps it (#646)
+      expect(w.store.listReportMarks()).toEqual([{ sessionId: childrenOf(s)[0]!.id, callerSessionId: s }])
     })
 
     it('a task still being handed over at the bound is answered as "working", with the report and the unchecked note', async () => {
@@ -205,7 +207,10 @@ describe('starting another agent in the same project', () => {
       const p = w.mgr.startAgent(s, { task: 'slow hand-over', tool: 'codex', model: 'gpt-x', wait: false })
       await vi.advanceTimersByTimeAsync(START_AGENT_MODEL_CHECK_MS)
       await vi.advanceTimersByTimeAsync(START_AGENT_SETUP_MS)
-      expect(await p).toMatchObject({ ok: true, state: 'working', reported: true, notice: expect.stringContaining('"gpt-x" not checked') })
+      const r = await p
+      expect(r).toMatchObject({ ok: true, state: 'working', reported: true, notice: expect.stringContaining('"gpt-x" not checked') })
+      // The armed report is stored, so a host swap keeps it (#646)
+      expect(w.store.listReportMarks()).toEqual([{ sessionId: r.ok ? r.sessionId : '', callerSessionId: s }])
     })
 
     it('an approval and the withdrawal in the same instant: the answer says none was created, and none is', async () => {
