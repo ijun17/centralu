@@ -20,6 +20,11 @@ import { installedUpdate, applyOffer, updateStateText, useRelaunchCheck } from '
 export function UpdatesSection() {
   const reportedUpdate = useStore((s) => s.update)
   const checkUpdate = useStore((s) => s.checkUpdate)
+  useEffect(() => {
+    const phase = useStore.getState().update?.phase
+    if (phase === 'checking' || phase === 'updating' || phase === 'waiting_for_npm' || phase === 'restart_required') return
+    void checkUpdate(true)
+  }, [checkUpdate])
   const setUpdateAuto = useStore((s) => s.setUpdateAuto)
   const setUpdateAutoApply = useStore((s) => s.setUpdateAutoApply)
   const applyUpdate = useStore((s) => s.applyUpdate)
@@ -100,7 +105,8 @@ export function UpdatesSection() {
         there is no request that goes out silently.
       */}
       <p className="mt-1 text-xs leading-body text-ink-faint">
-        Once at startup and every six hours while the app is open. It asks the public npm
+        At startup, every six hours, and on focus if the last check is over an hour old.
+        Opening Updates or installing also checks again. It asks the public npm
         registry for one version number and nothing else; if it cannot reach it, nothing
         happens and nothing interrupts you.
       </p>

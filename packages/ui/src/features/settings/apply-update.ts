@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { APP_VERSION, isNewerVersion, type UpdateStatus } from '@cc/protocol'
 import type { RelaunchCheck } from '@cc/platform/ports'
 import { useStore } from '../../store/store.js'
@@ -38,6 +38,7 @@ export function applyOffer(update: UpdateStatus, windowVersion: string, relaunch
 /** An external install has no host `update_status` event; the window knows its own bundle. */
 export function installedUpdate(update: UpdateStatus | null, windowVersion: string, relaunch: RelaunchCheck | null | undefined): UpdateStatus | null {
   if (!relaunch?.ready || !relaunch.version || !isNewerVersion(relaunch.version, windowVersion)) return update
+  if (update?.phase === 'restart_required' && update.latest === relaunch.version) return update
   if (update?.phase === 'updating' || update?.phase === 'waiting_for_npm') return update
   return {
     current: update?.current ?? windowVersion,
@@ -148,6 +149,28 @@ export function useRelaunchCheck(): RelaunchCheck | null | undefined {
   return relaunch ? check : undefined
 }
 
+/** Focus checks respect automatic-check consent, and failed requests are throttled too. */
+export function useUpdateCheckOnFocus(): void {
+  const lastAttempt = useRef<number | null>(null)
+  useEffect(() => {
+    const read = () => {
+      const { update, checkUpdate } = useStore.getState()
+      if (document.hidden || !update?.auto || (update.phase !== 'idle' && update.phase !== 'failed')) return
+      const now = Date.now()
+      const last = Math.max(update.checkedAt ?? -Infinity, lastAttempt.current ?? -Infinity)
+      if (now - last <= 60 * 60 * 1000) return
+      lastAttempt.current = now
+      void checkUpdate(true)
+    }
+    window.addEventListener('focus', read)
+    document.addEventListener('visibilitychange', read)
+    return () => {
+      window.removeEventListener('focus', read)
+      document.removeEventListener('visibilitychange', read)
+    }
+  }, [])
+}
+
 /** How often a pending automatic apply looks again, for the typing pause to run out */
 const RECHECK_MS = 5_000
 
@@ -157,6 +180,7 @@ const RECHECK_MS = 5_000
  * Returns what it waits for, for the update line.
  */
 export function useAutoApplyUpdate(): string | null {
+  useUpdateCheckOnFocus()
   const reportedUpdate = useStore((s) => s.update)
   const relaunchPort = useStore((s) => s.platform?.relaunch)
   const applyUpdateNow = useStore((s) => s.applyUpdateNow)
@@ -206,13 +230,14 @@ export function useAutoApplyUpdate(): string | null {
 export function updateStateText(u: UpdateStatus | null, offer: ApplyOffer | null): string {
   if (!u) return 'Not checked yet'
   if (u.phase === 'checking') return 'Checking…'
-  if (u.phase === 'updating') return `Installing ${u.latest ?? 'the new version'}…`
+  if (u.phase === 'updating') return `Installing ${u.latest ?? 'the new version'}…${u.error ? ` ${u.error}` : ''}`
   if (u.phase === 'waiting_for_npm') return u.error ?? `Waiting for npm to serve ${u.latest ?? 'the new version'}…`
   if (u.phase === 'restart_required') {
+    const notice = u.error ? ` ${u.error}` : ''
     const v = u.latest ?? 'the new version'
-    if (offer?.kind === 'current') return `This window runs ${v}. The agent host switches to it from the bar above.`
-    if (offer?.kind === 'apply') return `Installed ${v}. Apply it to relaunch into it.`
-    return `Installed ${v}. Restart Centralu to use it.`
+    if (offer?.kind === 'current') return `This window runs ${v}. The agent host switches to it from the bar above.${notice}`
+    if (offer?.kind === 'apply') return `Installed ${v}. Apply it to relaunch into it.${notice}`
+    return `Installed ${v}. Restart Centralu to use it.${notice}`
   }
   if (u.phase === 'failed') return `Update failed: ${u.error ?? 'unknown reason'}`
   if (u.newer && u.latest) return `${u.latest} is available`

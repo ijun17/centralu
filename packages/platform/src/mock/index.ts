@@ -2741,6 +2741,8 @@ export class MockPlatform implements Platform {
    * Null means it could not be reached — different from "this is the latest version."
    */
   registryVersion: string | null = null
+  /** Records calls to the update status port, including forced checks. */
+  updateChecks: boolean[] = []
 
   /** For tests: `npm i -g` fails (it is never actually run) */
   updateFails: string | null = null
@@ -2767,10 +2769,11 @@ export class MockPlatform implements Platform {
    */
   readonly updates: UpdatePort = {
     status: async (force = false) => {
+      this.updateChecks.push(force)
       // Same as the real thing: if automatic checking is off, it asks nowhere until the person clicks
       if (!force && !this.updateStatus.auto) return { ...this.updateStatus }
       if (!force && this.updateStatus.checkedAt !== null) return { ...this.updateStatus }
-      if (this.updateStatus.phase === 'updating' || this.updateStatus.phase === 'restart_required') {
+      if (this.updateStatus.phase === 'updating' || this.updateStatus.phase === 'waiting_for_npm' || this.updateStatus.phase === 'restart_required') {
         return { ...this.updateStatus }
       }
       return this.runUpdateCheck()
@@ -2797,13 +2800,23 @@ export class MockPlatform implements Platform {
   }
 
   private installUpdate(): UpdateStatus {
-    if (this.updateStatus.phase === 'updating') return { ...this.updateStatus }
+    if (this.updateStatus.phase === 'updating' || this.updateStatus.phase === 'waiting_for_npm' || this.updateStatus.phase === 'restart_required') return { ...this.updateStatus }
     const latest = this.updateStatus.latest
     if (!this.updateStatus.newer || !latest) {
       this.setUpdateStatus({ phase: 'failed', error: 'There is no newer version to install' })
       return { ...this.updateStatus }
     }
-    this.setUpdateStatus({ phase: 'updating', error: null })
+    // Same target refresh as UpdateService, without a network or an npm command.
+    const fresh = this.registryVersion
+    const error = fresh === null ? `Could not refresh latest; using previously checked ${latest}.` : null
+    if (fresh !== null) {
+      this.setUpdateStatus({ latest: fresh, newer: isNewerVersion(fresh, this.updateStatus.current), checkedAt: this.now() })
+      if (!this.updateStatus.newer) {
+        this.setUpdateStatus({ phase: 'idle', error: null })
+        return { ...this.updateStatus }
+      }
+    }
+    this.setUpdateStatus({ phase: 'updating', error })
     /*
      * The end is announced **after** the response is given. Installing routinely exceeds
      * the RPC timeout, and the real thing behaves the same way, so "installing → please
@@ -2811,7 +2824,7 @@ export class MockPlatform implements Platform {
      */
     setTimeout(() => {
       if (this.updateFails) this.setUpdateStatus({ phase: 'failed', error: this.updateFails })
-      else this.setUpdateStatus({ phase: 'restart_required', error: null })
+      else this.setUpdateStatus({ phase: 'restart_required', error })
     }, 0)
     return { ...this.updateStatus }
   }

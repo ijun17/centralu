@@ -35,7 +35,7 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
   if (update.phase === 'updating') {
     return (
       <span className={`${tone} text-ink-faint`} data-testid="update-line" role="status">
-        Updating…
+        Updating to {update.latest ?? 'the new version'}…{update.error && ` ${update.error}`}
       </span>
     )
   }
@@ -52,6 +52,7 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
       return (
         <span className={`${tone} flex items-center gap-1.5 text-ink-muted`} data-testid="update-line" role="status">
           {update.latest ? `${update.latest} installed` : 'Update installed'}
+          {update.error && <span>{update.error}</span>}
           {waiting && <span className="text-ink-faint" data-testid="update-waiting">· applies when idle</span>}
           <button
             type="button"
@@ -74,6 +75,7 @@ export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
       // blocked, and the brightest thing on screen stays reserved for what waits on me.
       <span className={`${tone} text-ink-muted`} data-testid="update-line" role="status" title={offer.reason}>
         Restart Centralu to finish updating{update.latest ? ` to ${update.latest}` : ''}
+        {update.error && ` ${update.error}`}
       </span>
     )
   }

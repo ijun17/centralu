@@ -1168,13 +1168,26 @@ door, the host's switch to the new copy, and the old version's folder removed on
 
 The design is in [architecture.md](architecture.md) §4.5. The host's part is the install and one rule.
 
-**The install** (`updates.ts`). `updates.apply` runs `npm i -g --prefer-online centralu@<v>` and, when the installed app exists,
+**Checking (#635).** Startup and the six-hour background interval remain unchanged. Opening Settings → Updates
+forces a check, even with automatic checking off. With automatic checking on, focus/visibility restoration also
+checks when the last successful check is more than an hour old; attempts are throttled for an hour, including
+failures and paired focus/visibility events. Checks leave an active install or pending apply alone.
+
+**The install** (`updates.ts`). Before installing, `updates.apply` refreshes the registry with the forced eight-second
+deadline, including automatic installs. It pins the version returned now, not an hours-old `latest`. If the refresh
+fails, it installs the stored version and keeps a fallback notice in the status during and after installation. A tag
+that is no newer than the running build cancels the install. Lookup, npm retries and bundle replacement are one busy
+operation; concurrent checks/clicks cannot replace its target or start a second install. It runs `npm i -g --prefer-online centralu@<v>` and, when the installed app exists,
 `centralu install`, then reports `restart_required`; it never restarts anything. With `autoApply` on ("Apply updates
 automatically when idle", `updates.setAutoApply`, saved as `updates.autoApply` in the store's app settings, off by
 default) a check that finds a newer version starts the same install by itself, and turning the setting on with a newer
 version already known starts it at once. Not over an install under way or one already finished: a check after it leaves
 `restart_required` alone, so it installs once. A failed install is retried by the next check that finds the version
-again, six hours later.
+again (normally six hours later, or through a requested/focus check).
+
+On host shutdown, pending lookups and npm waits cannot start another command or publish stale completion. A command
+already launched is not undone. After reconnect or a host swap, the window re-reads status without replaying the
+install, and ignores replies from the previous host lifetime.
 
 Both commands run without a shell, through `tool-launch.ts` (`commandFor` in `updates.ts`): on Windows `npm` and
 `centralu` are batch files, which `execFile` cannot start by name (ENOENT) or by path (EINVAL), so each is read for the

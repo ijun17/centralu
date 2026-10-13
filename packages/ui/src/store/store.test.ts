@@ -1648,6 +1648,36 @@ describe('update status (#43)', () => {
     expect(useStore.getState().update?.latest).toBe('9999.0.0')
   })
 
+  it.each(['check', 'install'] as const)('ignores a late %s response from a host swapped mid-install (#635)', async (action) => {
+    const platform = new MockPlatform()
+    let resolve!: (value: typeof status) => void
+    const gate = new Promise<typeof status>((r) => { resolve = r })
+    const spy = action === 'check'
+      ? vi.spyOn(platform.updates, 'status').mockReturnValueOnce(gate)
+      : vi.spyOn(platform.updates, 'apply').mockReturnValueOnce(gate)
+    useStore.setState({ platform, update: { ...status, phase: 'updating' }, hostResyncs: 0 })
+    const pending = action === 'check' ? useStore.getState().checkUpdate(true) : useStore.getState().applyUpdate()
+    const replacement = { ...status, current: '9999.0.0', newer: false }
+    useStore.setState({ update: replacement, hostResyncs: 1 })
+    resolve(status)
+    await pending
+    expect(useStore.getState().update).toEqual(replacement)
+    expect(spy).toHaveBeenCalledTimes(1)
+    spy.mockRestore()
+  })
+
+  it('re-reads update status after reconnect without replaying an install (#635)', async () => {
+    const platform = new MockPlatform()
+    platform.registryVersion = '9999.0.2'
+    const apply = vi.spyOn(platform.updates, 'apply')
+    useStore.setState({ platform, update: { ...status, phase: 'updating' }, sessions: {}, chat: {}, connection: 'connected' })
+    await useStore.getState().recoverAfterReconnect(true)
+    await vi.waitFor(() => expect(useStore.getState().update?.latest).toBe('9999.0.2'))
+    expect(useStore.getState().update?.phase).toBe('idle')
+    expect(apply).not.toHaveBeenCalled()
+    apply.mockRestore()
+  })
+
   /** Installing must be started by a person — merely finding out does nothing on its own */
   it('merely learning of a new version installs nothing on its own', async () => {
     const platform = new MockPlatform()

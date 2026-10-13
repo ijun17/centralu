@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, win32 } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
 import { resolveCommand } from './tool-launch.js'
 import { UpdateService, commandFor, failureDetail, installedCopyPath, runCommand, type LatestResult } from './updates.js'
@@ -16,6 +16,7 @@ import { installedPaths } from '../../../packaging/npm/centralu/bin/platform.mjs
  */
 function make(
   opts: {
+    fetchLatest?: (timeoutMs: number) => Promise<LatestResult>
     registry?: string | null
     run?: (file: string, args: string[]) => Promise<void>
     autoApply?: boolean
@@ -30,8 +31,9 @@ function make(
   let registry = opts.registry ?? null
   let fetches = 0
   const svc = new UpdateService((s) => published.push(s), {
-    fetchLatest: async (): Promise<LatestResult> => {
+    fetchLatest: async (timeoutMs): Promise<LatestResult> => {
       fetches++
+      if (opts.fetchLatest) return opts.fetchLatest(timeoutMs)
       return registry === null ? { ok: false, reason: 'Could not reach the registry' } : { ok: true, version: registry }
     },
     run: async (file, args) => {
@@ -58,12 +60,147 @@ function make(
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((r) => { resolve = r })
+  return { promise, resolve }
+}
+
 /** Waits until state settles into shape — installation finishes after this returns */
 async function settle(): Promise<void> {
   for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0))
 }
 
 describe('UpdateService', () => {
+  describe('fresh install target (#635)', () => {
+    it.each([false, true])('installs the newest of two releases in one pass (auto-apply=%s)', async (automatic) => {
+      const h = make({ registry: '9999.0.1' })
+      await h.svc.check(true)
+      h.offer('9999.0.2')
+      if (automatic) h.svc.setAutoApply(true)
+      else h.svc.apply()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+      expect(h.calls).toEqual([['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.2']]])
+      expect(h.published).toContainEqual(expect.objectContaining({ phase: 'updating', latest: '9999.0.2' }))
+      h.svc.apply()
+      await h.svc.check(true)
+      await settle()
+      expect(h.calls).toHaveLength(1)
+    })
+
+    it('refreshes with the forced deadline even when a background check starts auto-apply', async () => {
+      const fetchLatest = vi.fn()
+        .mockResolvedValueOnce({ ok: true, version: '9999.0.1' })
+        .mockResolvedValue({ ok: true, version: '9999.0.2' })
+      const h = make({ autoApply: true, fetchLatest })
+      await h.svc.check(false)
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+      expect(fetchLatest.mock.calls).toEqual([[3000], [8000]])
+      expect(h.calls[0]?.[1]).toContain('centralu@9999.0.2')
+    })
+
+    it('falls back visibly to the stored version when the refresh fails, including after npm retries', async () => {
+      let attempts = 0
+      const h = make({ registry: '9999.0.1', run: async () => {
+        if (++attempts === 1) throw new Error('ETARGET')
+      }, wait: async () => {} })
+      await h.svc.check(true)
+      h.offer(null)
+      h.svc.apply()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+      expect(h.calls.every(([, args]) => args.includes('centralu@9999.0.1'))).toBe(true)
+      const notice = 'Could not refresh latest (Could not reach the registry); using previously checked 9999.0.1.'
+      expect(h.svc.current().error).toBe(notice)
+      expect(h.published).toContainEqual(expect.objectContaining({ phase: 'waiting_for_npm', error: expect.stringContaining(notice) }))
+      expect(h.published).toContainEqual(expect.objectContaining({ phase: 'updating', error: notice }))
+    })
+
+    it('does not install a withdrawn release when the fresh tag is no newer than the running build', async () => {
+      const h = make({ registry: '9999.0.1' })
+      await h.svc.check(true)
+      h.offer(APP_VERSION)
+      h.svc.apply()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('idle'))
+      expect(h.svc.current()).toMatchObject({ latest: APP_VERSION, newer: false })
+      expect(h.calls).toEqual([])
+    })
+
+    it('serializes an older check, a fresh lookup and duplicate clicks without changing an active target', async () => {
+      const old = deferred<LatestResult>()
+      const fresh = deferred<LatestResult>()
+      const npm = deferred<void>()
+      const fetchLatest = vi.fn()
+        .mockResolvedValueOnce({ ok: true, version: '9999.0.1' })
+        .mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise)
+      const h = make({ fetchLatest, run: () => npm.promise })
+      await h.svc.check(true)
+      const checking = h.svc.check(true)
+      h.svc.apply()
+      h.svc.apply()
+      old.resolve({ ok: true, version: '9999.0.2' })
+      await checking
+      await vi.waitFor(() => expect(fetchLatest).toHaveBeenCalledTimes(3))
+      expect(h.svc.current().phase).toBe('updating')
+      h.svc.apply()
+      expect((await h.svc.check(true)).phase).toBe('updating')
+      fresh.resolve({ ok: true, version: '9999.0.3' })
+      await vi.waitFor(() => expect(h.calls).toHaveLength(1))
+      h.svc.apply()
+      await h.svc.check(true)
+      expect(fetchLatest).toHaveBeenCalledTimes(3)
+      npm.resolve()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+      expect(h.calls).toEqual([['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.3']]])
+    })
+
+    it.each(['lookup', 'npm', 'retry'] as const)('starts no more commands or status events after shutdown during %s', async (stage) => {
+      const gate = deferred<void>()
+      let fetching = 0
+      let commands = 0
+      const h = make({ installedCopy: '/mock/Centralu', fetchLatest: async () => {
+        if (++fetching === 2 && stage === 'lookup') await gate.promise
+        return { ok: true, version: '9999.0.1' }
+      }, run: async () => {
+        if (stage === 'npm') await gate.promise
+        if (stage === 'retry' && ++commands === 1) throw new Error('ETARGET')
+      }, wait: () => gate.promise })
+      await h.svc.check(true)
+      h.svc.apply()
+      await vi.waitFor(() => {
+        if (stage === 'lookup') expect(fetching).toBe(2)
+        else if (stage === 'retry') expect(h.svc.current().phase).toBe('waiting_for_npm')
+        else expect(h.calls).toHaveLength(1)
+      })
+      h.svc.stop()
+      const events = h.published.length
+      gate.resolve()
+      await settle()
+      h.svc.apply()
+      await h.svc.check(true)
+      expect(h.calls).toHaveLength(stage === 'lookup' ? 0 : 1)
+      expect(h.published).toHaveLength(events)
+    })
+
+    it('keeps the six-hour background interval and turning checks off does not cancel an install', async () => {
+      let now = 100
+      const h = make({ registry: '9999.0.1', now: () => now })
+      await h.svc.check(false)
+      for (const elapsed of [0, 1, 3600_000, 6 * 3600_000 - 1]) {
+        now = 100 + elapsed
+        await h.svc.check(false)
+        expect(h.fetches).toBe(1)
+      }
+      now++
+      await h.svc.check(false)
+      expect(h.fetches).toBe(2)
+      h.offer('9999.0.2')
+      h.svc.apply()
+      await h.svc.setAuto(false)
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+      expect(h.calls[0]?.[1]).toContain('centralu@9999.0.2')
+    })
+  })
+
   /**
    * What is currently running is answered by a **build constant.**
    *

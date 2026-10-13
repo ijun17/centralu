@@ -4145,9 +4145,13 @@ export const useStore = create<AppState>((set, get) => ({
   async checkUpdate(force = true) {
     const platform = get().platform
     if (!platform) return
+    const hostResyncs = get().hostResyncs
     try {
-      set({ update: await platform.updates.status(force) })
+      const update = await platform.updates.status(force)
+      if (get().platform !== platform || get().hostResyncs !== hostResyncs) return
+      set({ update })
     } catch (e) {
+      if (get().platform !== platform || get().hostResyncs !== hostResyncs) return
       // A version check must never break the screen — the app matters more than the check itself
       set({ toast: `Could not check for updates: ${(e as Error).message}` })
     }
@@ -4417,9 +4421,13 @@ export const useStore = create<AppState>((set, get) => ({
   async applyUpdate() {
     const platform = get().platform
     if (!platform) return
+    const hostResyncs = get().hostResyncs
     try {
-      set({ update: await platform.updates.apply() })
+      const update = await platform.updates.apply()
+      if (get().platform !== platform || get().hostResyncs !== hostResyncs) return
+      set({ update })
     } catch (e) {
+      if (get().platform !== platform || get().hostResyncs !== hostResyncs) return
       set({ toast: `Could not update: ${(e as Error).message}` })
     }
   },
@@ -6143,6 +6151,9 @@ export const useStore = create<AppState>((set, get) => ({
   async recoverAfterReconnect(resync = false) {
     const s = get()
     if (!s.platform) return
+    // An install/check can end on the outgoing host without its final event reaching this window.
+    // Re-read only: replaying an install after a swap could run it twice.
+    void get().checkUpdate(false)
     // Resolves whether a message being sent at the moment of disconnect reached the host (#173)
     void settleUnsureSends(get, set)
     // Broadcasts from the gap while disconnected never come again — the app list (A-8) is also aligned to whatever the host currently knows

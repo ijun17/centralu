@@ -125,8 +125,10 @@ Shortcuts (the shortcut list), and Updates.`,
 
   updates: `# Updates
 Check from Settings → Updates. It reports a new version based on the npm registry, and the person
-clicks to install it. The check for a new version runs on startup and every six hours, and it can
-be turned off.
+clicks to install it. The check runs on startup, every six hours, when Updates opens, and on focus
+when the last check is over an hour old (with automatic checking on). Installing checks again
+and pins that version; if the check fails, it uses the stored version and says so. Automatic
+checking can be turned off.
 Once installed, the desktop app offers "Apply now": it relaunches into the new version, and running
 agents, terminals and commands keep going. "Apply updates automatically when idle" (off by default)
 installs a new version without a click and applies it once no session is working or waiting, no

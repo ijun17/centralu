@@ -28,8 +28,8 @@ const REGISTRY_URL = `https://registry.npmjs.org/${APP_SLUG}/latest`
 /**
  * How often to look again while the app is running.
  *
- * Six hours. Releases are days apart, so anything tighter is asking a question whose
- * answer cannot have changed — but "once at startup" is not enough either, because
+ * Six hours for background polling; explicit checks and installs refresh sooner (#635).
+ * "Once at startup" is not enough, because
  * this app is meant to be left open for days watching agents work, and a window that
  * has been up since Monday would never hear about Wednesday's release. Six hours is at
  * most four requests a day and still surfaces a release within the working day it ships.
@@ -168,6 +168,8 @@ export function runCommand(file: string, args: string[], resolve?: (file: string
 
 export class UpdateService {
   private status: UpdateStatus
+  private stopped = false
+  private installing = false
   private timer: ReturnType<typeof setInterval> | null = null
   private readonly deps: Required<UpdateDeps>
   /** One check at a time — the timer and the button can land together */
@@ -224,18 +226,25 @@ export class UpdateService {
    * closed while releases happened.
    */
   start(): void {
+    this.stopped = false
     if (!this.status.auto) return
     void this.check(false)
     this.startTimer()
   }
 
+  /** Shutdown (including a host swap): no asynchronous continuation may start more work. */
   stop(): void {
+    this.stopped = true
+    this.stopTimer()
+  }
+
+  private stopTimer(): void {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
   }
 
   private startTimer(): void {
-    this.stop()
+    this.stopTimer()
     this.timer = setInterval(() => void this.check(false), CHECK_INTERVAL_MS)
     // Do not hold the process open for a version check. Without this the host outlives
     // the window it serves by up to six hours (`pnpm host` in a terminal shows it).
@@ -254,7 +263,7 @@ export class UpdateService {
     this.status = { ...this.status, auto: enabled }
     this.deps.writeAuto(enabled)
     if (!enabled) {
-      this.stop()
+      this.stopTimer()
       this.emit()
       return this.current()
     }
@@ -296,6 +305,7 @@ export class UpdateService {
   async check(force: boolean): Promise<UpdateStatus> {
     // A second caller joins the first rather than opening its own request. The button
     // and the timer landing together used to be two fetches racing to write one field.
+    if (this.stopped || this.installing) return this.current()
     if (this.inFlight) return this.inFlight
     /*
      * With automatic checking off, nothing reaches the network unless a person asked.
@@ -333,6 +343,8 @@ export class UpdateService {
 
   private async runCheck(force: boolean): Promise<UpdateStatus> {
     const res = await this.deps.fetchLatest(force ? FORCED_TIMEOUT_MS : SCHEDULED_TIMEOUT_MS)
+    // An install may have started while this older check was waiting. Its fresh lookup owns the target.
+    if (this.stopped || this.installing) return this.current()
     if (!res.ok) {
       /*
        * A failed check keeps the last good answer.
@@ -368,7 +380,7 @@ export class UpdateService {
    * rest of the story arrives as `update_status` events.
    */
   apply(): UpdateStatus {
-    if (this.status.phase === 'updating' || this.status.phase === 'waiting_for_npm') return this.current()
+    if (this.stopped || this.installing || this.status.phase === 'restart_required') return this.current()
     const latest = this.status.latest
     if (!this.status.newer || !latest) {
       // Refusing out loud rather than shrugging: this can only be reached from a button
@@ -377,6 +389,7 @@ export class UpdateService {
       this.emit()
       return this.current()
     }
+    this.installing = true
     this.status = { ...this.status, phase: 'updating', error: null }
     this.emit()
     void this.runApply(latest)
@@ -387,6 +400,23 @@ export class UpdateService {
     let packageInstalled = false
     const copy = this.deps.installedCopy()
     try {
+      // Finish an older check before asking again, including when auto-apply started inside it.
+      // Keep the install busy throughout: checks and another click must not replace its target.
+      await this.inFlight
+      if (this.stopped) return
+      const fresh = await this.deps.fetchLatest(FORCED_TIMEOUT_MS)
+      if (this.stopped) return
+      if (fresh.ok) {
+        version = fresh.version
+        this.status = { ...this.status, latest: version, newer: isNewerVersion(version, this.status.current), checkedAt: this.deps.now() }
+        if (!this.status.newer) {
+          this.status = { ...this.status, phase: 'idle', error: null }
+          return
+        }
+      } else {
+        this.status = { ...this.status, error: `Could not refresh latest (${fresh.reason}); using previously checked ${version}.` }
+      }
+      this.emit()
       /*
        * **Pin the exact version instead of asking for `@latest`.**
        *
@@ -396,6 +426,7 @@ export class UpdateService {
        * Naming the version we found does not consult it.
        */
       await this.installPackage(version)
+      if (this.stopped) return
       packageInstalled = true
       /*
        * Refresh the copy that gets launched.
@@ -423,20 +454,24 @@ export class UpdateService {
        * it runs and is left for the next install to sweep.
        */
       if (copy) await this.deps.run(APP_SLUG, ['install'])
-      this.status = { ...this.status, phase: 'restart_required', error: null }
+      if (this.stopped) return
+      this.status = { ...this.status, phase: 'restart_required' }
     } catch (e) {
       /*
        * Say which half failed. "npm i -g worked but the installed copy did not get
        * refreshed" leaves the person launching the old app forever with no sign of it, and
        * that is the outcome most worth naming, with the one command that finishes it.
        */
+      if (this.stopped) return
       const reason = (e as Error).message
       const error = packageInstalled
         ? `npm installed ${version}, but the copy at ${copy} was not replaced (${reason}). Quit ${APP_NAME}, then run "${APP_SLUG} install" in a terminal.`
         : reason
       this.status = { ...this.status, phase: 'failed', error }
+    } finally {
+      this.installing = false
+      if (!this.stopped) this.emit()
     }
-    this.emit()
   }
 
   /**
@@ -447,16 +482,20 @@ export class UpdateService {
    */
   private async installPackage(version: string): Promise<void> {
     const started = this.deps.now()
+    const notice = this.status.error
     for (;;) {
+      if (this.stopped) return
       try {
         await this.deps.run('npm', ['i', '-g', '--prefer-online', `${APP_SLUG}@${version}`])
         return
       } catch (err) {
+        if (this.stopped) return
         if (!npmHasNotServedVersion(err) || this.deps.now() - started >= NPM_RETRY_WINDOW_MS) throw err
-        this.status = { ...this.status, phase: 'waiting_for_npm', error: `Waiting for npm to serve ${version}` }
+        this.status = { ...this.status, phase: 'waiting_for_npm', error: `Waiting for npm to serve ${version}${notice ? `. ${notice}` : ''}` }
         this.emit()
         await this.deps.wait(NPM_RETRY_DELAY_MS)
-        this.status = { ...this.status, phase: 'updating', error: null }
+        if (this.stopped) return
+        this.status = { ...this.status, phase: 'updating', error: notice }
         this.emit()
       }
     }

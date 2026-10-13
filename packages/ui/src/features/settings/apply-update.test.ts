@@ -113,14 +113,24 @@ describe('updateStateText', () => {
   })
 
   it('says an install is running, not what the last check found', () => {
-    expect(updateStateText({ ...everything, phase: 'updating' }, null)).toBe('Installing 0.1.0-beta.11…')
+    expect(updateStateText({ ...everything, phase: 'updating', error: null }, null)).toBe('Installing 0.1.0-beta.11…')
   })
 
   it('says an installed version waits for the window, worded by what the window can do', () => {
-    const u: UpdateStatus = { ...everything, phase: 'restart_required' }
+    const u: UpdateStatus = { ...everything, phase: 'restart_required', error: null }
     expect(updateStateText(u, { kind: 'current' })).toBe('This window runs 0.1.0-beta.11. The agent host switches to it from the bar above.')
     expect(updateStateText(u, { kind: 'apply' })).toBe('Installed 0.1.0-beta.11. Apply it to relaunch into it.')
     expect(updateStateText(u, { kind: 'restart' })).toBe('Installed 0.1.0-beta.11. Restart Centralu to use it.')
+  })
+
+  it('keeps the fallback notice visible while installing and after it finishes (#635)', () => {
+    const error = 'Could not refresh latest; using previously checked 0.1.0-beta.11.'
+    expect(installedUpdate({ ...installed, error }, OLD_WINDOW, { ready: true, version: installed.latest! })?.error).toBe(error)
+    for (const phase of ['updating', 'restart_required'] as const) {
+      for (const kind of ['apply', 'restart', 'current'] as const) {
+        expect(updateStateText({ ...installed, phase, error }, { kind })).toContain(error)
+      }
+    }
   })
 
   it('says a failed update, not that the version it failed on is available', () => {
