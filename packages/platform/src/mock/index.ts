@@ -2813,8 +2813,13 @@ export class MockPlatform implements Platform {
       const fresh = this.registryVersion
       if (fresh === null) error = `Could not refresh latest; using previously checked ${latest}.`
       else {
-        const target = isNewerVersion(latest, fresh) ? latest : fresh
-        this.setUpdateStatus({ latest: target, newer: isNewerVersion(target, this.updateStatus.current), checkedAt: this.now() })
+        const keepStored = age >= 0 && age < 3600_000 && isNewerVersion(latest, fresh)
+        const target = keepStored ? latest : fresh
+        this.setUpdateStatus({ latest: target, newer: isNewerVersion(target, this.updateStatus.current), checkedAt: keepStored ? this.updateStatus.checkedAt : this.now() })
+        if (!this.updateStatus.newer) {
+          this.setUpdateStatus({ phase: 'idle', error: null })
+          return { ...this.updateStatus }
+        }
       }
     }
     this.setUpdateStatus({ phase: 'updating', error })
@@ -2868,8 +2873,7 @@ export class MockPlatform implements Platform {
       this.setUpdateStatus({ phase: failure ? 'failed' : 'idle', error: failure ? failure.error : 'Could not reach the registry — check the network' })
       return { ...this.updateStatus }
     }
-    const stored = this.updateStatus.latest
-    const latest = stored && isNewerVersion(stored, this.registryVersion) ? stored : this.registryVersion
+    const latest = this.registryVersion
     this.setUpdateStatus({
       latest,
       newer: isNewerVersion(latest, this.updateStatus.current),

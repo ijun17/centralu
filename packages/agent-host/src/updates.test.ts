@@ -138,15 +138,56 @@ describe('UpdateService', () => {
       expect(h.svc.current()).toMatchObject({ latest: '9999.0.1', newer: true })
     })
 
-    it('a Settings check cannot discard the newer release before an install (#636 review)', async () => {
+    it.each([false, true])('ordinary checks follow a dist-tag rollback (forced=%s, #636 rollback)', async (force) => {
       const h = make({ registry: '9999.0.1' })
       await h.svc.check(true)
+      h.elapse(6 * 3600_000)
       h.offer(APP_VERSION)
+      await h.svc.check(force)
+      expect(h.svc.current()).toMatchObject({ latest: APP_VERSION, newer: false, phase: 'idle' })
+      expect(h.calls).toEqual([])
+    })
+
+    it.each([60_000, 1800_000, 3599_999, 3600_000, 3600_001, 7200_000])('limits install-time stale-edge protection to a stored age of less than one hour: %s ms (#636 rollback)', async (age) => {
+      const h = make({ registry: '9999.0.2' })
       await h.svc.check(true)
-      expect(h.svc.current()).toMatchObject({ latest: '9999.0.1', newer: true })
+      h.elapse(age)
+      h.offer('9999.0.1')
       h.svc.apply()
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
-      expect(h.calls[0]?.[1]).toContain('centralu@9999.0.1')
+      const target = age < 3600_000 ? '9999.0.2' : '9999.0.1'
+      expect(h.calls).toEqual([['npm', ['i', '-g', '--prefer-online', `centralu@${target}`]]])
+      expect(h.svc.current().latest).toBe(target)
+    })
+
+    it.each([APP_VERSION, '0.0.1'])('does not install when an old stored version is replaced by a fresh tag at %s (#636 rollback)', async (fresh) => {
+      const h = make({ registry: '9999.0.1' })
+      await h.svc.check(true)
+      h.elapse(3600_001)
+      h.offer(fresh)
+      h.svc.apply()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('idle'))
+      expect(h.svc.current()).toMatchObject({ latest: fresh, newer: false })
+      expect(h.calls).toEqual([])
+    })
+
+    it('retaining a newer install target does not renew when it was actually seen (#636 rollback)', async () => {
+      let fails = true
+      const h = make({ registry: '9999.0.2', run: async () => {
+        if (fails) throw new Error('EACCES')
+      } })
+      await h.svc.check(true)
+      const checkedAt = h.svc.current().checkedAt
+      h.elapse(3599_999)
+      h.offer('9999.0.1')
+      h.svc.apply()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('failed'))
+      expect(h.svc.current().checkedAt).toBe(checkedAt)
+      h.elapse(2)
+      fails = false
+      h.svc.apply()
+      await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
+      expect(h.calls[1]?.[1]).toContain('centralu@9999.0.1')
     })
 
     it.each(['9999.0.2', null])('keeps install errors through a forced check answering %s until another install (#636 review)', async (registry) => {

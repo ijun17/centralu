@@ -47,6 +47,8 @@ const SCHEDULED_TIMEOUT_MS = 3_000
 const FORCED_TIMEOUT_MS = 8_000
 /** Reuse a check that just found the release, especially when it starts auto-apply. */
 const INSTALL_CHECK_MAX_AGE_MS = 60_000
+/** A recent observation may outpace an npm edge; older tags must yield to a rollback. */
+const STORED_RELEASE_MAX_AGE_MS = 60 * 60 * 1000
 
 /** `npm i -g` on a cold cache is slow, but not this slow — past here something is stuck */
 const INSTALL_TIMEOUT_MS = 5 * 60 * 1000
@@ -361,7 +363,7 @@ export class UpdateService {
       this.emit()
       return this.current()
     }
-    const latest = this.newestSeen(res.version)
+    const latest = res.version
     this.status = {
       ...this.status,
       latest,
@@ -414,8 +416,16 @@ export class UpdateService {
         const fresh = await this.deps.fetchLatest(FORCED_TIMEOUT_MS)
         if (this.stopped) return
         if (fresh.ok) {
-          version = this.newestSeen(fresh.version)
-          this.status = { ...this.status, latest: version, newer: isNewerVersion(version, this.status.current), checkedAt: this.deps.now() }
+          const now = this.deps.now()
+          const storedAge = this.status.checkedAt === null ? Infinity : now - this.status.checkedAt
+          const keepStored = storedAge >= 0 && storedAge < STORED_RELEASE_MAX_AGE_MS && isNewerVersion(version, fresh.version)
+          if (!keepStored) version = fresh.version
+          // Keeping an earlier observation must not renew it indefinitely across failed installs.
+          this.status = { ...this.status, latest: version, newer: isNewerVersion(version, this.status.current), checkedAt: keepStored ? this.status.checkedAt : now }
+          if (!this.status.newer) {
+            this.status = { ...this.status, phase: 'idle', error: null }
+            return
+          }
         } else {
           this.status = { ...this.status, error: `Could not refresh latest (${fresh.reason}); using previously checked ${version}.` }
         }
@@ -503,12 +513,6 @@ export class UpdateService {
         this.emit()
       }
     }
-  }
-
-  /** A stale registry edge must not undo a newer release already seen by this host. */
-  private newestSeen(version: string): string {
-    const stored = this.status.latest
-    return stored && isNewerVersion(stored, version) ? stored : version
   }
 
   /** The scheduled check is due; a `force: false` caller in between reuses the last answer */

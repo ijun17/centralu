@@ -1172,12 +1172,14 @@ The design is in [architecture.md](architecture.md) §4.5. The host's part is th
 forces a check only with automatic checking on; with it off, use Check now. Focus/visibility restoration also
 checks only with automatic checking on, when the last successful check is more than an hour old; attempts are
 throttled for an hour, including failures and paired focus/visibility events. Checks leave an active install or pending apply alone. A failed install
-keeps its phase and error throughout later checks, until the next install attempt.
+keeps its phase and error throughout later checks, until the next install attempt. Successful ordinary checks
+follow npm exactly, including a lower `latest` after a dist-tag rollback, and recompute whether it is newer.
 
 **The install** (`updates.ts`). Before installing, `updates.apply` refreshes the registry with the forced eight-second
 deadline unless a successful check is less than one minute old, avoiding a second request when a check starts
-auto-apply. It pins the higher of the stored and freshly returned versions, always newer than the running build:
-an old registry edge cannot undo a newer release already seen. Regular checks preserve that highest version too.
+auto-apply. Only during installation, a stored version seen less than one hour ago may win over a lower fresh
+answer to tolerate a stale npm edge. Retaining it preserves its original check time; an older stored version yields
+to the fresh tag so a release rollback takes effect. A target at or below the running version installs nothing.
 If the refresh fails, it installs the stored version and keeps a fallback notice during and after installation.
 Lookup, npm retries and bundle replacement are one busy operation; concurrent checks/clicks cannot replace its target or start a second install. It runs `npm i -g --prefer-online centralu@<v>` and, when the installed app exists,
 `centralu install`, then reports `restart_required`; it never restarts anything. With `autoApply` on ("Apply updates

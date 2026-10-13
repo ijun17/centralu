@@ -472,6 +472,13 @@ describe.each([
     expect((await h.platform.updates.setAuto(true)).latest).toBe('9999.0.2')
   })
 
+  it('ordinary checks follow npm after a dist-tag rollback (#636 rollback)', async () => {
+    h.offerUpdate('9999.0.2')
+    await h.platform.updates.status(true)
+    h.offerUpdate(APP_VERSION)
+    expect(await h.platform.updates.status(true)).toMatchObject({ latest: APP_VERSION, newer: false, phase: 'idle' })
+  })
+
   /**
    * Installing responds **as soon as it starts**, and the word that it finished arrives as an
    * event (issue #43).
