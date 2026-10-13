@@ -11,6 +11,7 @@ const git = (cwd: string, args: string[]) => execFileSync('git', [
   '-c', 'user.name=Recovery test', '-c', 'user.email=recovery@example.test', '-c', 'core.autocrlf=false', ...args,
 ], { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim()
 const gitPath = (path: string) => path.replaceAll('\\', '/')
+const canonicalPath = (path: string) => gitPath(realpathSync.native(path))
 
 describe('worktree recovery follow-ups (#608)', () => {
   let dir: string
@@ -20,7 +21,7 @@ describe('worktree recovery follow-ups (#608)', () => {
   const branch = 'worker'
 
   beforeEach(() => {
-    dir = realpathSync(mkdtempSync(join(tmpdir(), 'cc-recovery-')))
+    dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-recovery-')))
     vi.stubEnv('CC_DATA_DIR', join(dir, 'data'))
     repo = join(dir, 'repo')
     child = join(dir, 'child')
@@ -69,7 +70,7 @@ describe('worktree recovery follow-ups (#608)', () => {
       git(repo, ['worktree', 'add', '-b', branch, child])
       git(child, ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init'])
       const module = join(child, 'modules', 'nested space')
-      const privateRepo = realpathSync(git(module, ['rev-parse', '--absolute-git-dir']))
+      const privateRepo = canonicalPath(git(module, ['rev-parse', '--absolute-git-dir']))
       const tip = commit(module, 'module work\n')
       git(child, ['add', 'modules/nested space'])
       if (location !== 'index') {
@@ -176,10 +177,10 @@ describe('worktree recovery follow-ups (#608)', () => {
     git(module, ['checkout', '-q', '--detach', base])
     git(child, ['add', 'old module'])
     git(child, ['commit', '-qm', 'move module HEAD back'])
-    const privateDir = realpathSync(git(module, ['rev-parse', '--absolute-git-dir']))
+    const privateDir = canonicalPath(git(module, ['rev-parse', '--absolute-git-dir']))
     git(child, ['mv', 'old module', 'new module'])
     git(child, ['commit', '-qm', 'rename module'])
-    expect(realpathSync(git(join(child, 'new module'), ['rev-parse', '--absolute-git-dir']))).toBe(privateDir)
+    expect(canonicalPath(git(join(child, 'new module'), ['rev-parse', '--absolute-git-dir']))).toBe(privateDir)
     const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
     const snapshotDir = join(worktreeRecoveryDir(sessionId), recovery.snapshot)
     remove()
@@ -310,7 +311,7 @@ describe('worktree recovery follow-ups (#608)', () => {
     try {
       recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
       for (const command of ['rev-list', 'log', 'bundle']) {
-        const moduleCalls = calls.mock.calls.filter(([cwd, args]) => cwd === module && args[0] === command)
+        const moduleCalls = calls.mock.calls.filter(([cwd, args]) => canonicalPath(cwd) === canonicalPath(module) && args[0] === command)
         expect(moduleCalls.length).toBeGreaterThan(0)
         expect(moduleCalls.every(([, args, opts]) => args.includes('--stdin') && opts?.input)).toBe(true)
       }

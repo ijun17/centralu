@@ -74,13 +74,15 @@ describe('input to a git that does not read it', () => {
 
 describe('git output written directly to a file', () => {
   it('does not impose the stdout buffer limit on repository listings', async () => {
-    const repo = realpathSync(mkdtempSync(join(tmpdir(), 'cc-git-output-')))
+    const repo = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-git-output-')))
     try {
       await runGit(repo, ['init', '-q'])
       const outputFile = join(repo, 'output')
       // rev-parse has deterministic output larger than this deliberately tiny buffer.
       await expect(runGit(repo, ['rev-parse', '--absolute-git-dir'], { maxBuffer: 1, outputFile })).resolves.toBe('')
-      expect(readFileSync(outputFile, 'utf8').trim().replaceAll('\\', '/')).toBe(join(repo, '.git').replaceAll('\\', '/'))
+      const actual = realpathSync.native(readFileSync(outputFile, 'utf8').trim()).replaceAll('\\', '/')
+      const expected = realpathSync.native(join(repo, '.git')).replaceAll('\\', '/')
+      expect(actual).toBe(expected)
     } finally {
       rmSync(repo, { recursive: true, force: true })
     }
