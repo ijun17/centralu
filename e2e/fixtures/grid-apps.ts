@@ -1,6 +1,6 @@
 import { expect, test, type FrameLocator, type Locator, type Page } from '@playwright/test'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './app-views.js'
-import { expectCoveredInSight, expectFrameTakesPointer, expectOutOfSight, hiddenAround, newSession } from './project-screen.js'
+import { expectCoveredInSight, expectFrameTakesPointer, expectOutOfSight, hiddenAround, dragRow, newSession } from './project-screen.js'
 
 /**
  * Apps on the grid (#288): an app's sidebar row dropped on the grid stands there as a panel, moves and leaves like a
@@ -312,6 +312,7 @@ export function gridAppTests(): void {
 
       // The project screen shows the app in its own pinned view; the grid's is hidden, not unloaded
       await page.getByTestId('project-header-alpha').click()
+      await dragRow(page, page.getByTestId(`app-row-${pinnedKey}`), 'padding')
       const onScreen = page.getByTestId(`pinned-app-${pinnedKey}`)
       await expect(onScreen).toHaveAttribute('data-mode', 'slot')
       await expect(onScreen.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
@@ -356,6 +357,7 @@ export function gridAppTests(): void {
 
       // The project screen: the grid's view waits out of sight, and the project's view stands in its panel
       await page.getByTestId('project-header-alpha').click()
+      await dragRow(page, page.getByTestId(`app-row-${pinnedKey}`), 'padding')
       await expectOutOfSight(onGrid)
       const pinned = page.getByTestId(`pinned-app-${pinnedKey}`)
       await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')

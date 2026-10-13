@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { fixtureViewHtml, startFixtureHost, type FixtureHost } from './app-views.js'
 import { openGrid, setApps, slider } from './grid-apps.js'
-import { newSession } from './project-screen.js'
+import { dragRow, newSession } from './project-screen.js'
 
 /**
  * "Show the conversation" under an app's view must show the builder's conversation wherever the view stands (#375).
@@ -153,6 +153,7 @@ export function builderLinkTests(): void {
     }) => {
       const { pid } = await alphaWithBuilder(page)
       await page.getByTestId('project-header-alpha').click()
+      await dragRow(page, page.getByTestId(`app-row-${pid}/slider`), 'padding')
       const view = page.getByTestId(`pinned-app-${pid}/slider`)
       await expect(view).toHaveAttribute('data-mode', 'slot')
       await expect(view.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')

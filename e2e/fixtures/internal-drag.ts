@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { newSession, panels, setup } from './project-screen.js'
+import { addSessionPanels, newSession, panels, setup } from './project-screen.js'
 
 /**
  * A drag that started inside the app is never a file from the OS (#286).
@@ -219,6 +219,7 @@ export function internalDragTests(): void {
       const a = await newSession(page, 'alpha')
       const b = await newSession(page, 'alpha')
       await page.getByTestId('project-header-alpha').click()
+      await addSessionPanels(page, [a, b])
       expect(await panels(page)).toEqual([`session:${a}`, `session:${b}`])
 
       const panel = (id: string) => `[data-testid="project-panel-session:${id}"]`
