@@ -133,7 +133,9 @@ intermittent failures (#368), and how long a merge may wait.
 ### Waiting without blocking
 
 Start `node .centralu/apps/project-board/bin/wait-checks.mjs <pr>` in the background instead of
-holding an MCP call open (or give `owner/repo#pr`). It polls until checks settle, prints one line,
+holding an MCP call open (or give `owner/repo#pr`). Use `--ref <branch|sha>` instead to wait for
+a branch or commit in the configured repository; branch heads are resolved on each poll.
+It polls until checks settle, prints one line,
 and exits 0 when green or 1 when a check failed. `PROJECT_BOARD_WAIT_POLL_MS` changes its 30-second
 poll only for tests.
 
