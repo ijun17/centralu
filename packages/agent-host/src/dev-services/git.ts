@@ -629,23 +629,14 @@ export async function gitValidBranchName(name: string): Promise<boolean> {
 /**
  * Removes a worktree. `force` discards even uncommitted changes.
  *
- * Checking with `gitWorktreeDirty` before removing is **the caller's job** — making that
- * judgment here would turn this into "silently deleted." This is a place that can hold hours of
- * an agent's work.
+ * The caller must preserve local work or obtain the person's discard decision before forcing
+ * removal. `withSubmodules` also removes initialized submodules (git requires a second force).
  */
-export async function gitWorktreeRemove(repoCwd: string, path: string, force = false): Promise<void> {
-  await git(repoCwd, ['worktree', 'remove', ...(force ? ['--force'] : []), path])
+export async function gitWorktreeRemove(repoCwd: string, path: string, force = false, withSubmodules = false): Promise<void> {
+  await git(repoCwd, ['worktree', 'remove', ...(force ? ['--force', ...(withSubmodules ? ['--force'] : [])] : []), path])
 }
 
-/**
- * Deletes a branch ref (for the hard gate in #76 only).
- *
- * Why `-D`: `-d`'s own safety check (confirming a merge) cannot see a squash merge — the gate
- * exists precisely to cover that blind spot, so **the caller's proof** is the safety check here,
- * not git's. Code that has not passed the gate must not call this function.
- * Deleting still leaves the commit in the reflog — the caller logs the tip sha to leave a path
- * back to it.
- */
+/** Deletes a branch ref after the caller has preserved local work or obtained the person's discard decision. */
 export async function gitBranchDelete(repoCwd: string, branch: string, trust: GitTrust = {}): Promise<void> {
   await git(repoCwd, ['branch', '-D', branch], trust)
 }

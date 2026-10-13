@@ -1,3 +1,4 @@
+import { saveWorktreeRecovery, restoreWorktreeRecovery, clearWorktreeRecovery, worktreeRecoveryBytes, worktreeRecoveryDir, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
 import { randomUUID } from 'node:crypto'
 import { residentCost } from './tool-cost.js'
 import { orchestratorHome, orchestratorRole } from './orchestrator-home.js'
@@ -93,7 +94,7 @@ export type AgentProcessHost = {
 export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess; version?: string }
 import { Store } from '../dev-services/store.js'
 import type { UpdateService } from '../updates.js'
-import { sessionIdle, type SessionIdle } from '../idle.js'
+import { sessionBusy, sessionIdle, type SessionIdle } from '../idle.js'
 import {
   gitSummary,
   gitStatusFiles,
@@ -1951,6 +1952,7 @@ export class SessionManager {
     sessionId: string,
     adopt?: AgentProcess,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }> {
+    if (this.worktreeCleanup.has(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
@@ -2290,6 +2292,7 @@ export class SessionManager {
    * exactly as it was, and only what happens from here on piles up in the copy.
    */
   async forkConversation(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
+    if (this.worktreeCleanup.has(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
@@ -2346,7 +2349,8 @@ export class SessionManager {
    * delete knows that layout (the Claude SDK's `deleteSession`). Left in place it is also a second way back — the
    * tool, and **+ → Past conversations**, still have it.
    */
-  async trashSession(sessionId: string, removeWorktree = false, removeExternal = false): Promise<void> {
+  async trashSession(sessionId: string, removeWorktree = false, removeExternal = false, recovery?: WorktreeRecovery): Promise<void> {
+    if (this.worktreeCleanup.has(sessionId) && !recovery) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const m = this.meta.get(sessionId)
     if (!m) {
       // Already in the trash, or never here: nothing to move. Say it is gone anyway, so a screen holding a stale row lets go
@@ -2428,6 +2432,7 @@ export class SessionManager {
       projectPath: project?.path ?? null,
       removeExternal: removeExternal && !!externalId,
       removeWorktree: removeWorktree && !!m.worktree,
+      ...(recovery ? { recovery } : {}),
     })
     // Tears down this session's inline app views (M4 B-1) — releases whatever app it was holding onto. A
     // restored conversation reopens them from its history
@@ -2439,7 +2444,7 @@ export class SessionManager {
   private trashBusy = new Set<string>()
 
   private async trashOp<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
-    if (this.trashBusy.has(sessionId)) {
+    if (this.trashBusy.has(sessionId) || this.worktreeCleanup.has(sessionId)) {
       throw Object.assign(new Error('That session is already being restored or deleted'), { code: 'internal' })
     }
     this.trashBusy.add(sessionId)
@@ -2459,6 +2464,7 @@ export class SessionManager {
         const live = record.projectId ? projects.get(record.projectId) : undefined
         const files =
           (await attachmentBytes(r.id).catch(() => 0)) +
+          (await worktreeRecoveryBytes(r.id).catch(() => 0)) +
           (record.projectId ? await handoffNoteBytes(record.projectId, r.id).catch(() => 0) : 0)
         return {
           id: r.id,
@@ -2539,14 +2545,21 @@ export class SessionManager {
         // Two central orchestrators would answer the same questions; the app has one (FR-11)
         throw Object.assign(new Error('Another orchestrator is in place — the app runs one at a time'), { code: 'internal' })
       }
+      let recovered: { branch: string; notice: string } | undefined
+      if (record.recovery && t.session.worktree && projectId) {
+        const repo = this.store.listProjects().find((p) => p.id === projectId)!.path
+        recovered = await restoreWorktreeRecovery(sessionId, repo, t.session.worktree.path, t.session.worktree.branch, record.recovery, this.gitTrust(projectId))
+      }
       const back = await this.store.restoreSession(sessionId, projectId)
       if (!back) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
       const LIVE_ONLY: SessionState[] = ['working', 'waiting_approval']
       const fixed = LIVE_ONLY.includes(back.state) ? { ...back, state: 'idle' as const, waitingSince: null } : back
-      if (fixed !== back) this.store.upsertSession(fixed)
+      if (recovered && fixed.worktree) fixed.worktree = { ...fixed.worktree, branch: recovered.branch }
+      if (fixed !== back || recovered) this.store.upsertSession(fixed)
       this.meta.set(sessionId, fixed)
       const session = { ...this.meta.get(sessionId)!, live: false }
       this.emit({ type: 'session_created', sessionId, session })
+      if (recovered) this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'worktree recovery', text: recovered.notice })
       return { session, project: registered }
     })
   }
@@ -2590,6 +2603,7 @@ export class SessionManager {
          */
         await gitWorktreeRemove(record.projectPath, s.worktree.path, true).catch(() => {})
       }
+      await clearWorktreeRecovery(sessionId)
       await this.store.purgeSession(sessionId)
       await clearAttachments(sessionId).catch(() => {})
       /*
@@ -2685,6 +2699,7 @@ export class SessionManager {
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
   ): Promise<SessionInfo & { applied: SettingsApplied }> {
+    if (this.worktreeCleanup.has(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
@@ -3440,6 +3455,7 @@ export class SessionManager {
   ): Promise<void> {
     const restarting = this.deferredRestarts.get(sessionId)
     if (restarting) await restarting
+    if (this.worktreeCleanup.has(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
@@ -3452,6 +3468,7 @@ export class SessionManager {
       }
     }
 
+    if (this.worktreeCleanup.has(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const h = this.requireHandle(sessionId)
     // A message from the person is always a message boundary — continuing after an interrupt means everything
     // before it is one chunk (#66)
@@ -3532,6 +3549,7 @@ export class SessionManager {
    * untouched, and only the tool underneath it is swapped.
    */
   async switchTool(sessionId: string, tool: ToolName): Promise<SessionInfo> {
+    if (this.worktreeCleanup.has(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
     if (m.tool === tool) return { ...m, live: this.handles.has(sessionId) }
@@ -4427,6 +4445,7 @@ export class SessionManager {
    * reports background work.
    */
   sessionIdle(sessionId: string): SessionIdle {
+    if (this.worktreeCleanup.has(sessionId)) return { idle: false, reason: 'turn' }
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
     if (this.agentRuns.get(sessionId)?.waitingForInputs) return { idle: false, reason: 'turn' }
@@ -4509,6 +4528,7 @@ export class SessionManager {
     /** What made the restart, for the cache's rebuild cause (§6.1); a plain new process when absent */
     cause?: RebuildCause,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
+    if (this.worktreeCleanup.has(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     if (cause) {
       this.restartReasons.set(sessionId, cause)
       if (cause === 'launch_settings') console.error(`[sessions] restarting ${sessionId}: launch settings changed or previously unrecorded`)
@@ -5714,7 +5734,7 @@ export class SessionManager {
    *   send    gives it more, including during the caller's turn on adapters that accept mid-turn input; refused
    *           while it works on the person's own message or has a higher preset than the caller
    *   stop    stops the turn the caller gave it; a turn the person started there is theirs
-   *   delete  cleans up a child's merged, clean worktree (`cleanUpWorktreeChild`, #76's hard gate, part 3)
+   *   delete  sets aside local work in the trash, then removes an idle child's worktree and branch (#608)
    */
   async agentSession(callerId: string, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult> {
     if (opts.sessionId === callerId && opts.action !== 'status') {
@@ -5755,12 +5775,11 @@ export class SessionManager {
           return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool }
         }
         case 'delete': {
-          // Safe/normal retain the losslessness proof; auto opens it at cleanup time.
           if (d && !d.settled) return { ok: false, error: `"${child.name}" is still working on what you gave it — stop it or wait first.` }
-          const r = await this.cleanUpWorktreeChild(callerId, child)
+          const r = await this.cleanUpWorktreeChild(child)
           if (!r.ok) return r
           if (d) this.delegations.delete(key)
-          return { ok: true, state: 'deleted', sessionId: child.id, sessionName: child.name, tool: child.tool, branch: r.branch, proof: r.proof }
+          return { ok: true, state: 'deleted', sessionId: child.id, sessionName: child.name, tool: child.tool, branch: r.branch, setAside: r.setAside }
         }
         case 'send': {
           if (!presetWithin(child.permissionPreset, caller.permissionPreset)) {
@@ -5832,64 +5851,45 @@ export class SessionManager {
     return { branch: agentBranch(opts.task, randomUUID()) }
   }
 
-  /**
-   * Cleans up a child's merged worktree (#76's hard gate, moved from the retired worktree manager's tool to
-   * agent_session delete, #561 part 3). Outside auto it runs **only when losslessness is proven at this moment**: no uncommitted
-   * changes, and the branch's current tip has landed on the trunk (by ancestry, or by a merged pull request whose head
-   * is that tip). Not the cached merged badge: a commit could have landed since (TOCTOU). Under safe/normal every deletion outside that
-   * proof stays the person's, in the delete dialog. The session goes to the trash like any other (an agent never
-   * deletes one for good), the worktree and branch are removed, the tool's own conversation is kept, and the tip is
-   * logged for reflog recovery.
-   */
-  private async cleanUpWorktreeChild(callerId: string, target: SessionInfo): Promise<{ ok: true; branch: string; proof: string } | { ok: false; error: string }> {
+  /** Prevent a send/resume from racing the snapshot and worktree removal. */
+  private worktreeCleanup = new Set<string>()
+
+  /** #608: the parent decides; local work follows the session into the trash in every preset. */
+  private async cleanUpWorktreeChild(target: SessionInfo): Promise<{ ok: true; branch: string; setAside: WorktreeRecovery } | { ok: false; error: string }> {
     if (!target.worktree?.base || !target.projectId) {
       return { ok: false, error: `"${target.name}" works in no worktree of its own, so there is nothing to clean up — the person deletes a session` }
     }
-    if (target.state === 'working' || target.state === 'waiting_approval' || this.agentRuns.has(target.id)) {
-      return { ok: false, error: `"${target.name}" is still working — clean it up once its turn ends` }
+    if (target.state === 'working' || target.state === 'waiting_approval' || this.agentRuns.has(target.id) || sessionBusy({ ...target, live: this.handles.has(target.id) })) {
+      return { ok: false, error: `"${target.name}" is still working — stop it or wait first` }
     }
-    const cwd = this.cwdOf(target.projectId)
-    const { branch, path, base } = target.worktree
-
-    let proof: string | null = this.autoBoundaryOpen(callerId, 'delete without losslessness proof') ? 'auto preset' : null
-    if (!proof) {
-      // Gate 1: uncommitted changes. A failed measurement counts as dirty: not knowing is never the safe side
-      const wt = await gitWorktreeDirty(path, this.gitTrust(target.projectId)).catch(() => ({ dirty: true, changedFiles: -1 }))
-      if (wt.dirty) {
-        const n = wt.changedFiles >= 0 ? `${wt.changedFiles} ` : ''
-        return { ok: false, error: `There are ${n}uncommitted changes in "${target.name}" — have it commit (or discard) them, then delete again` }
+    if (this.resuming.has(target.id) || this.deferredRestarts.has(target.id)) return { ok: false, error: `"${target.name}" is waking or restarting — wait for it first` }
+    if (this.worktreeCleanup.has(target.id)) return { ok: false, error: 'This worktree is already being removed' }
+    this.worktreeCleanup.add(target.id)
+    const { branch, path } = target.worktree
+    try {
+      const cwd = this.cwdOf(target.projectId)
+      // Disposal must succeed before reading a snapshot or removing any files. An idle CLI is still a process.
+      const handle = this.handles.get(target.id)
+      if (handle) {
+        await handle.dispose()
+        this.handles.delete(target.id)
+        this.running.delete(target.id)
       }
-
-      // Gate 2: has the branch's **current** tip landed on the trunk
-      const trunk = this.trunkOf(target.projectId) ?? 'HEAD'
-      if (await gitBranchMerged(cwd, branch, base, trunk).catch(() => false)) {
-        proof = 'trunk ancestry'
-      } else if (this.ghAvailable) {
-        const pr = await this.prLookup(cwd, branch).catch(() => null)
-        if (pr === 'unavailable') this.ghAvailable = false
-        else if (pr && pr.state === 'merged') {
-          const tip = await gitRevParse(cwd, `refs/heads/${branch}`)
-          if (pr.headOid && tip && tip === pr.headOid) proof = `PR #${pr.number}`
-          else if (pr.headOid && tip) {
-            return { ok: false, error: `PR #${pr.number} was merged, but "${branch}" has a new commit since — it is deleted only once that commit has landed on the trunk too` }
-          }
-        }
+      const trunk = await gitRevParse(cwd, this.trunkOf(target.projectId) ?? 'HEAD')
+      const setAside = await saveWorktreeRecovery(target.id, path, trunk ?? 'missing-trunk')
+      if (setAside.changedFiles || setAside.commits) {
+        this.onEvent({ type: 'notice', sessionId: target.id, level: 'info', from: 'Centralu', label: 'worktree recovery',
+          text: `Local work saved before worktree deletion: ${setAside.changedFiles} uncommitted files, ${setAside.commits} commits not on the trunk. Recovery patches and bundles are at ${worktreeRecoveryDir(target.id)}. Restore from Settings → Trash or recover these files manually before deleting this session for good.` })
       }
-      if (!proof) {
-        return {
-          ok: false,
-          error: `Could not prove that "${branch}" has landed on the trunk — it is deleted only once a merge (or a merged PR) is confirmed. Discarding it without proof is the person's job, in the delete dialog`,
-        }
-      }
+      await this.trashSession(target.id, false, false, setAside)
+      await gitWorktreeRemove(cwd, path, true, true)
+      await gitBranchDelete(cwd, branch, this.gitTrust(target.projectId))
+      return { ok: true, branch, setAside }
+    } catch (e) {
+      return { ok: false, error: `Could not finish removing "${branch}": ${(e as Error).message}. Any saved recovery files are at ${worktreeRecoveryDir(target.id)}.` }
+    } finally {
+      this.worktreeCleanup.delete(target.id)
     }
-
-    const tip = await gitRevParse(cwd, `refs/heads/${branch}`)
-    await this.trashSession(target.id)
-    await gitWorktreeRemove(cwd, path, true).catch(() => {})
-    // Never rolled back on failure: a leftover branch ref costs nothing but a stray badge
-    await gitBranchDelete(cwd, branch, this.gitTrust(target.projectId)).catch(() => {})
-    console.error(`[worktree] cleaned up ${branch} (tip ${tip?.slice(0, 8) ?? '?'}, proof: ${proof})`)
-    return { ok: true, branch, proof }
   }
 
   /** A saved ceiling overrides the caller's preset default: auto unlimited, otherwise AGENT_CEILING. */
@@ -6745,8 +6745,7 @@ export class SessionManager {
             // mystery
             console.error('[worktree] gh not found — PR detection off for this run (local merge detection unaffected)')
           } else if (pr) {
-            // headOid is material for the gate (#76's hard gate), not for the chip — only the protocol shape
-            // is loaded here
+            // Keep the protocol's chip shape; the lookup's headOid is not a UI field.
             const chip = { number: pr.number, state: pr.state, url: pr.url }
             // Never written if it was deleted while this was waiting (#163) — this used to resurrect an
             // id-less row back into meta

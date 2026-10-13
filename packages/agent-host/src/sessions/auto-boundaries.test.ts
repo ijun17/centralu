@@ -218,7 +218,7 @@ describe('auto Centralu boundaries (#603)', () => {
   )
 
   it.each(['auto', 'safe', 'normal'] as const)(
-    '%s: dirty and unproven worktree cleanup follows the caller preset',
+    '%s: dirty and unproven worktree cleanup keeps local work in the trash (#608)',
     async (preset) => {
       for (const state of ['dirty', 'unmerged']) {
         const git = (cwd: string, ...args: string[]) =>
@@ -248,18 +248,14 @@ describe('auto Centralu boundaries (#603)', () => {
           git(child.worktree!.path, 'commit', '-qm', 'unmerged')
         }
         const result = await w.mgr.agentSession(caller, { sessionId: child.id, action: 'delete' })
-        if (preset === 'auto')
-          expect(result).toMatchObject({ ok: true, state: 'deleted', proof: 'auto preset' })
-        else
-          expect(result).toMatchObject({
-            ok: false,
-            error: expect.stringContaining(state === 'dirty' ? 'uncommitted changes' : 'Could not prove'),
-          })
-        expect(existsSync(child.worktree!.path)).toBe(preset !== 'auto')
-        expect(git(w.caller.path, 'branch', '--list', child.worktree!.branch).length > 0).toBe(
-          preset !== 'auto',
-        )
-        expect(w.mgr.listSessions().some((s) => s.id === child.id)).toBe(preset !== 'auto')
+        expect(result).toMatchObject({ ok: true, state: 'deleted', setAside: {
+          changedFiles: state === 'dirty' ? 1 : 0,
+          commits: state === 'unmerged' ? 1 : 0,
+        } })
+        expect(w.store.trashedSession(child.id)?.record.recovery).toBeDefined()
+        expect(existsSync(child.worktree!.path)).toBe(false)
+        expect(git(w.caller.path, 'branch', '--list', child.worktree!.branch)).toBe('')
+        expect(w.mgr.listSessions().some((s) => s.id === child.id)).toBe(false)
       }
     },
   )

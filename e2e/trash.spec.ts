@@ -151,3 +151,31 @@ test('a deleted project sends its sessions to the trash, and restoring one bring
   await expect(page.getByTestId('project-alpha')).toBeVisible()
   await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
 })
+
+test('restoring a worktree session offers its recovery patch and bundle in the conversation', async ({ page }) => {
+  await setup(page, ['/tmp/alpha'])
+  const id = await newSession(page, 'alpha', 'keep the local work')
+  await deleteSession(page, id)
+  // The host's restore and recovery are covered with real git in manager.test.ts. Here the
+  // port returns the same notice so the path from Settings to the offered files is exercised.
+  await page.evaluate(() => {
+    const mock = (window as any).__mock
+    const restore = mock.trash.restore
+    mock.trash.restore = async (sessionId: string) => {
+      const back = await restore(sessionId)
+      mock.emit({
+        type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'worktree recovery',
+        text: 'Restored branch feat/work. Recovery files remain at /tmp/recovery/0.patch and /tmp/recovery/0.bundle. Apply patches with git apply; fetch bundles with git fetch <bundle> HEAD:<branch>.',
+      })
+      return back
+    }
+  })
+  await openTrash(page)
+  await page.getByTestId(`trash-restore-${id}`).click()
+  await expect(page.getByTestId('trash-list-empty')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.getByTestId(`session-row-${id}`).click()
+  await expect(page.getByTestId('msg-mark')).toContainText('/tmp/recovery/0.patch')
+  await expect(page.getByTestId('msg-mark')).toContainText('/tmp/recovery/0.bundle')
+  await expect(page.getByTestId('msg-mark')).toContainText('git apply')
+})

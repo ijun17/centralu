@@ -62,8 +62,8 @@ new thread.
 **The worktree manager** (`manager`, #69/#76) was folded into ordinary sessions (#561 part 3, owner 2026-10-12). It was
 a project's seat that watched its worktree sessions, proposed new ones (`propose_worktree_session`, which the person
 then created) and deleted a merged one behind a hard gate (`delete_worktree_session`). Now a session starts worktree
-agents itself (`start_agent` with `worktree`, §1.2.1), works with them (`agent_session`) and cleans up a merged, clean
-one with `agent_session` `delete`, behind the same gate (`cleanUpWorktreeChild`). What stayed: the person's own worktree
+agents itself (`start_agent` with `worktree`, §1.2.1), works with them (`agent_session`) and removes an idle child
+with `agent_session` `delete`, keeping local work with the session in the trash (#608, `cleanUpWorktreeChild`). What stayed: the person's own worktree
 sessions (the new-session window's option; they now stand alone instead of under a manager made for them), merge and
 pull-request detection on every worktree session, and the project's trunk (`worktrees.setTrunk`, the project menu's
 "Worktree trunk", kept in the former slot's row). The orchestrator gets no replacement for `propose_worktree_session`:
@@ -257,20 +257,21 @@ own budget (`AGENT_TOOLS`, `AGENT_BUDGET_CHARS`).
 | Tool | Arguments → what comes back |
 |---|---|
 | `start_agent` | `{ task, tool?: string, model?, effort?, wait?, worktree?, branch? }` → the child's id and name, and its answer (`done`) or `working` |
-| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete, text? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `stopped` and `deleted` (a merged, clean worktree child cleaned up, part 3) |
+| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete, text? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `stopped` and `deleted` (an idle worktree child removed, local work kept in the trash, #608) |
 
 The optional `tool` is a registry name, accepted as a string by the schema and checked against the
 current registry at call time. An unknown name returns an error listing the installed tools; adding
 an adapter does not require changing this schema.
 
 Under `auto` (#603), the host's shared `autoBoundaryOpen` decision opens consent, depth,
-project trust, same-project ownership and worktree losslessness gates, with allowances logged.
+project trust and same-project ownership gates, with allowances logged. Worktree cleanup keeps local work
+in the trash under every preset (#608).
 `agent_session` can status, wait, send or stop any session in the same project, and delete
 any worktree session there,
 including another parent's child or the person's turn; adapter mid-turn support and the
 child's own preset still apply. Observing an app agent reuses its completion watcher, so
-`run_agent` still receives its answer and the agent keeps its `safe` preset. Cleanup removes the worktree and branch even with dirty
-files or an unproven tip, logs the tip, and keeps the conversation in the trash. `run_agent`
+`run_agent` still receives its answer and the agent keeps its `safe` preset. Cleanup removes an idle worktree and branch even with dirty files or an unproven tip, after setting aside
+local work with the conversation in the trash (#608). `run_agent`
 app agents stay `safe`, and no session gets a preset above its caller. When auto observes another
 caller's unfinished delegation, its wait has its own bound and cancellation and returns
 `reported: false` while working. It does not consume the owner's report, key, waiter count
@@ -403,6 +404,37 @@ It is refused on an adapter without this capability, while the child works on so
 a child, stops that child's turn. A child left running (`wait: false`, or past the bound) is its own session: the
 caller's Stop does not reach it, it has its own Stop. Deleting the caller drops its waits and its session consent;
 the children keep their turns and their link.
+
+**Deleting a worktree child** (#608, decision owner 2026-10-13). In every preset the parent decides whether
+to remove its child: neither uncommitted files nor an unproven merge refuses deletion. A working child must
+finish or be stopped first. Cleanup refuses a child still waking/restarting, blocks sends/resumes, and requires
+successful disposal of the idle CLI before snapshotting. Failed capture leaves the worktree and branch in place. Once captured,
+the session goes to the trash, then git removes the worktree (including initialized submodules) and branch.
+Removal errors are reported with the recovery location; they are not silently answered as success. The
+tool's conversation remains. The answer reports the uncommitted file and commit counts, or that nothing
+needed setting aside. A saved notice also offers the recovery directory in the trashed conversation. Counts
+compare reachability against the configured local trunk (project HEAD if unset),
+not a GitHub merge badge; squash/rebase commits may therefore be kept conservatively. An unreadable trunk
+keeps all reachable commits.
+
+The trash's optional `recovery` JSON field remembers the snapshot id, tip and counts; this is additive and
+needs no schema migration. Files live at `<data>/worktree-recovery/<session id>/<snapshot id>/`:
+`0.patch` holds the root's working changes from HEAD, `0.staged.patch` its staged changes, `0.bundle` a
+self-contained bundle of HEAD when commits are absent from the trunk, and `snapshot.json` the tip and
+repository map. Initialized submodules use subsequent numbers, recursively. Binary files and symlink
+targets are preserved; ignored untracked files are excluded. A private temporary index captures the
+working tree without changing its real index; hooks and filters are disabled to keep the bytes on disk.
+The index is removed after capture. Clean, merged work creates only the small restore metadata, no patch
+or bundle. Trash byte totals include recovery files.
+
+Restore recreates the root branch/worktree at its saved tip and attempts both patches before making the
+session live (its CLI remains stopped). If the original branch name is occupied, it uses `recovered/<session id>`.
+A notice offers the recovery paths and `git apply` / `git fetch <bundle> HEAD:<branch>` instructions; patches
+that cannot be applied and all submodule recovery remain available for manual recovery. A restore interrupted
+after creating the worktree does not reapply patches on retry. Each later deletion uses a new snapshot so
+earlier files are retained. Deleting for good, including empty trash, removes the entire session recovery
+directory; cleanup failure leaves the trash entry retryable. No automatic trash expiry is implemented; expiry
+must use `purgeSession` if added. Writes by other programs during capture are outside this session's lock.
 
 **Size.** The two definitions are 956 characters (`AGENT_BUDGET_CHARS` 1,000; 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
 made in words, like ask_project's, which deferred was not found) and defers `agent_session`, which every

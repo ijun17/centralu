@@ -1,3 +1,4 @@
+import type { WorktreeRecovery } from './worktree-recovery.js'
 import Database from 'better-sqlite3'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -3673,6 +3674,7 @@ export type TrashRecord = {
   projectPath: string | null
   removeExternal: boolean
   removeWorktree: boolean
+  recovery?: WorktreeRecovery
 }
 
 /** One row of `listTrash` */
@@ -3704,6 +3706,12 @@ function parseTrashRecord(json: string | null): TrashRecord {
     projectPath: str(r.projectPath),
     removeExternal: r.removeExternal === true,
     removeWorktree: r.removeWorktree === true,
+    ...(r.recovery && typeof r.recovery === 'object' &&
+      typeof (r.recovery as WorktreeRecovery).snapshot === 'string' &&
+      typeof (r.recovery as WorktreeRecovery).tip === 'string' &&
+      typeof (r.recovery as WorktreeRecovery).changedFiles === 'number' &&
+      typeof (r.recovery as WorktreeRecovery).commits === 'number'
+      ? { recovery: r.recovery as WorktreeRecovery } : {}),
   }
 }
 

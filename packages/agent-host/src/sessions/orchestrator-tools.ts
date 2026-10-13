@@ -551,7 +551,10 @@ function agentRunText(r: ChildRunResult): ToolOutput {
     case 'deleted':
       return {
         text:
-          `Cleaned up ${who}: "${r.branch}" had landed on the trunk (${r.proof}), so its worktree and branch were removed and the session went to the trash. ` +
+          `Cleaned up ${who}: its worktree and branch "${r.branch}" were removed and the session went to the trash. ` +
+          (r.setAside.changedFiles || r.setAside.commits
+            ? `${r.setAside.changedFiles} uncommitted files, ${r.setAside.commits} commits not on the trunk, kept in the trash. `
+            : 'Nothing needed setting aside. ') +
           'Tell the person in one line.',
       }
     case 'at_rest':
