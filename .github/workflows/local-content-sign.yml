@@ -20,6 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -32,10 +33,11 @@ jobs:
           node --input-type=module <<'JS'
           import { createHash } from 'node:crypto'
           import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
-          import { validateLocalManifest } from './scripts/local-manifest.mjs'
+          import { readAppVersion, validateLocalManifest } from './scripts/local-manifest.mjs'
+          // Advisory check; enforce ref access with environment deployment branch rules.
           if (process.env.DRY_RUN !== 'true' && process.env.GITHUB_REF !== 'refs/heads/main') throw new Error('real signing runs only from main')
           const bytes = Buffer.from(process.env.INPUT_MANIFEST, 'utf8')
-          const m = validateLocalManifest(bytes)
+          const m = validateLocalManifest(bytes, readAppVersion())
           mkdirSync('manifest-data')
           writeFileSync('manifest-data/content-manifest.json', bytes)
           appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Version: ${m.appVersion}\n\nInstalled (reported): ${m.local.installedVersion}\n\nNext release: ${m.local.nextRelease}\n\nCommit (reported): ${m.local.commit}\n\nDirty: ${m.local.dirty}\n\nFiles: ${m.files.length}\n\nManifest SHA-256: ${createHash('sha256').update(bytes).digest('hex')}\n\nDry run: ${process.env.DRY_RUN}\n`)
@@ -54,6 +56,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:

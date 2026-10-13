@@ -7,7 +7,7 @@ import { installLocalBundle, requestSignature, stampLocalVersion } from '../scri
 import { buildManifest, MANIFEST_NAME, SIGNATURE_NAME, verifyManifest } from '../scripts/content-manifest.mjs'
 import { APP_VERSION } from '../packages/protocol/src/brand.js'
 // @ts-expect-error — plain JavaScript policy runs in Actions without installing dependencies
-import { assertLocalVersion, chooseLocalVersion, MAX_LOCAL_MANIFEST_BYTES, nextReleaseVersion, validateLocalManifest } from '../scripts/local-manifest.mjs'
+import { assertLocalVersion, chooseLocalVersion, MAX_LOCAL_MANIFEST_BYTES, nextReleaseVersion, readAppVersion, validateLocalManifest } from '../scripts/local-manifest.mjs'
 
 const dirs: string[] = []
 const temp = () => { const dir = mkdtempSync(join(tmpdir(), 'cc-local-update-')); dirs.push(dir); return dir }
@@ -17,12 +17,13 @@ const allowedBase = base
 function fixture() {
   const paths = ['centralu-keeper', 'host/main.mjs', 'host/bundle-info.json', 'host/schema.sql', 'host/node_modules/better-sqlite3/package.json', 'host/node_modules/node-pty/package.json']
   return {
-    format: 1, appVersion: `${base}.local.1`, platform: 'darwin-arm64', minShellVersion: 1,
+    format: 1, appVersion: `${APP_VERSION}.local.1`, platform: 'darwin-arm64', minShellVersion: 1,
     files: paths.sort().map((path) => ({ path, size: 1, sha256: 'a'.repeat(64), executable: path === 'centralu-keeper' })),
-    local: { baseVersion: base, installedVersion: base, nextRelease: '0.2.0-beta.21', commit: 'a'.repeat(40), dirty: true, requestId: 'b'.repeat(32) },
+    local: { baseVersion: APP_VERSION, installedVersion: APP_VERSION, nextRelease: nextReleaseVersion(APP_VERSION), commit: 'a'.repeat(40), dirty: true, requestId: 'b'.repeat(32) },
   }
 }
 const bytes = (m: unknown) => Buffer.from(`${JSON.stringify(m, null, 2)}\n`)
+const validate = (input: Buffer) => validateLocalManifest(input, APP_VERSION)
 
 describe('local update version bounds', () => {
   it('increments local counters only when the installed and next-release bounds permit it', () => {
@@ -83,49 +84,70 @@ it('keeps real signing behind approval, and runs no dependency installs or suppl
   const workflow = readFileSync(resolve('.github/workflows/local-content-sign.yml'), 'utf8')
   expect(workflow).toContain("inputs.dry_run == false && 'npm-publish' || ''")
   expect(workflow).toContain("GITHUB_REF !== 'refs/heads/main'")
-  expect(workflow).toContain('validateLocalManifest(bytes)')
+  expect(workflow).toContain('validateLocalManifest(bytes, readAppVersion())')
+  expect(workflow.match(/ref: \$\{\{ github.sha \}\}/g)).toHaveLength(2)
+  expect(readFileSync(resolve('scripts/content-manifest.mts'), 'utf8')).toContain('validateLocalManifest(manifest, readAppVersion())')
   expect(workflow).toContain('sign-local manifest-data/content-manifest.json')
   expect(workflow).not.toMatch(/pnpm install|npm install|eval\(/)
 })
 
 
 describe('the data-only manifest boundary', () => {
+  it('derives the signing bounds from checkout data rather than an uploaded future release', () => {
+    expect(readAppVersion()).toBe(APP_VERSION)
+    const file = join(temp(), 'brand.ts')
+    writeFileSync(file, `export const APP_VERSION = '${base}'\nthrow new Error('brand.ts must never execute')\n`)
+    expect(readAppVersion(file)).toBe(base)
+    writeFileSync(file, 'export const APP_VERSION = uploaded.version\n')
+    expect(() => readAppVersion(file)).toThrow(/checked-out APP_VERSION is missing/)
+    expect(() => validateLocalManifest(bytes(fixture()))).toThrow(/invalid version/)
+
+    const future = `${APP_VERSION.split('-')[0]}-beta.999`
+    const crafted = {
+      ...fixture(), appVersion: `${future}.local.1`,
+      local: { ...fixture().local, baseVersion: future, installedVersion: future, nextRelease: nextReleaseVersion(future) },
+    }
+    expect(() => validate(bytes(crafted))).toThrow(/baseVersion must match checked-out APP_VERSION/)
+    expect(() => validate(bytes({ ...crafted, local: { ...crafted.local, baseVersion: APP_VERSION } }))).toThrow(/must be <base>\.local/)
+    expect(() => validate(bytes({ ...fixture(), local: { ...fixture().local, nextRelease: crafted.local.nextRelease } }))).toThrow(/incorrect next release/)
+  })
+
   it('accepts provenance and refuses changes across the manifest shape', () => {
-    expect(validateLocalManifest(bytes(fixture())).local.dirty).toBe(true)
+    expect(validate(bytes(fixture())).local.dirty).toBe(true)
     const bad = [
       { platform: 'linux-x64' }, { platform: 'darwin-x64' }, { format: 2 }, { minShellVersion: 2 },
       { appVersion: base }, { appVersion: `${base}-local.1` }, { files: [] }, { local: {} }, { code: 'process.exit()' },
       { local: { ...fixture().local, dirty: 'true' } }, { local: { ...fixture().local, commit: 'bad' } },
       { local: { ...fixture().local, nextRelease: '9.0.0' } },
-      { local: { ...fixture().local, installedVersion: `${base}.local.1` } },
+      { local: { ...fixture().local, installedVersion: `${APP_VERSION}.local.1` } },
     ]
-    for (const mutation of bad) expect(() => validateLocalManifest(bytes({ ...fixture(), ...mutation })), JSON.stringify(mutation)).toThrow()
+    for (const mutation of bad) expect(() => validate(bytes({ ...fixture(), ...mutation })), JSON.stringify(mutation)).toThrow()
     for (const path of ['/host/a', 'host/../a', 'host/./a', 'host//a', 'host/a\\b', 'host/a\n', 'evil.mjs', 'host', 'content-manifest.json']) {
       const m = fixture(); m.files.push({ path, size: 1, sha256: 'a'.repeat(64), executable: false }); m.files.sort((a, b) => Buffer.compare(Buffer.from(a.path), Buffer.from(b.path)))
-      expect(() => validateLocalManifest(bytes(m)), path).toThrow()
+      expect(() => validate(bytes(m)), path).toThrow()
     }
     for (const mutation of [{ size: -1 }, { size: 1.5 }, { size: Number.MAX_SAFE_INTEGER + 1 }, { sha256: 'A'.repeat(64) }, { executable: 'true' }, { unknown: true }]) {
       const m = fixture(); Object.assign(m.files[0]!, mutation)
-      expect(() => validateLocalManifest(bytes(m)), JSON.stringify(mutation)).toThrow()
+      expect(() => validate(bytes(m)), JSON.stringify(mutation)).toThrow()
     }
     const duplicate = fixture(); duplicate.files.push({ ...duplicate.files[0]!, path: 'Centralu-keeper' })
-    expect(() => validateLocalManifest(bytes(duplicate))).toThrow()
+    expect(() => validate(bytes(duplicate))).toThrow()
     const prefix = fixture(); prefix.files.push({ path: 'host/node_modules', size: 0, sha256: 'a'.repeat(64), executable: false }); prefix.files.sort((a, b) => Buffer.compare(Buffer.from(a.path), Buffer.from(b.path)))
-    expect(() => validateLocalManifest(bytes(prefix))).toThrow(/also a directory/)
+    expect(() => validate(bytes(prefix))).toThrow(/also a directory/)
     const missing = fixture(); missing.files = missing.files.filter((f) => f.path !== 'host/main.mjs')
-    expect(() => validateLocalManifest(bytes(missing))).toThrow(/required file/)
+    expect(() => validate(bytes(missing))).toThrow(/required file/)
     const noExec = fixture(); noExec.files[0]!.executable = false
-    expect(() => validateLocalManifest(bytes(noExec))).toThrow(/executable/)
+    expect(() => validate(bytes(noExec))).toThrow(/executable/)
   })
 
   it('sweeps the input byte limit and rejects malformed JSON and UTF-8', () => {
     const original = bytes(fixture())
     for (let length = MAX_LOCAL_MANIFEST_BYTES - 3; length <= MAX_LOCAL_MANIFEST_BYTES + 3; length++) {
       const input = Buffer.concat([original, Buffer.alloc(length - original.length, 32)])
-      if (length <= MAX_LOCAL_MANIFEST_BYTES) expect(() => validateLocalManifest(input)).not.toThrow()
-      else expect(() => validateLocalManifest(input)).toThrow(/size limit/)
+      if (length <= MAX_LOCAL_MANIFEST_BYTES) expect(() => validate(input)).not.toThrow()
+      else expect(() => validate(input)).toThrow(/size limit/)
     }
-    for (const input of [Buffer.alloc(0), Buffer.from('{'), Buffer.from([0xff]), bytes(null), bytes([])]) expect(() => validateLocalManifest(input)).toThrow()
+    for (const input of [Buffer.alloc(0), Buffer.from('{'), Buffer.from([0xff]), bytes(null), bytes([])]) expect(() => validate(input)).toThrow()
   })
 
   it('rehearses the exact workflow signer with a throwaway key and preserves the original bytes', () => {
@@ -158,7 +180,7 @@ describe('the data-only manifest boundary', () => {
 
   it.skipIf(process.platform === 'win32')('rehearses both workflow run blocks locally without environment secrets', () => {
     const root = temp()
-    for (const path of ['scripts/content-manifest.mts', 'scripts/local-manifest.mjs', 'packaging/npm/centralu/bin/semver.mjs', 'packaging/shell/keys.json']) {
+    for (const path of ['scripts/content-manifest.mts', 'scripts/local-manifest.mjs', 'packaging/npm/centralu/bin/semver.mjs', 'packaging/shell/keys.json', 'packages/protocol/src/brand.ts']) {
       mkdirSync(join(root, path, '..'), { recursive: true })
       cpSync(resolve(path), join(root, path))
     }
@@ -173,6 +195,25 @@ describe('the data-only manifest boundary', () => {
     expect(JSON.parse(readFileSync(join(root, 'manifest-data', SIGNATURE_NAME), 'utf8')).comment).toContain('throwaway')
     expect(readFileSync(summary, 'utf8')).toContain('Dirty: true')
     expect(() => execFileSync('/bin/bash', ['-e', '-u', '-o', 'pipefail', '-c', blocks[0]!], { cwd: root, env: { ...env, DRY_RUN: 'false' }, stdio: 'pipe' })).toThrow(/real signing runs only from main/)
+
+    const future = `${APP_VERSION.split('-')[0]}-beta.999`
+    const crafted = bytes({
+      ...fixture(), appVersion: `${future}.local.1`,
+      local: { ...fixture().local, baseVersion: future, installedVersion: future, nextRelease: nextReleaseVersion(future) },
+    })
+    rmSync(join(root, 'manifest-data'), { recursive: true, force: true })
+    expect(() => execFileSync('/bin/bash', ['-e', '-u', '-o', 'pipefail', '-c', blocks[0]!], {
+      cwd: root, env: { ...env, INPUT_MANIFEST: crafted.toString('utf8') }, stdio: 'pipe',
+    })).toThrow(/baseVersion must match checked-out APP_VERSION/)
+    expect(existsSync(join(root, 'manifest-data', MANIFEST_NAME))).toBe(false)
+
+    // The signer must independently refuse the same data if it reaches the artifact boundary.
+    mkdirSync(join(root, 'manifest-data'))
+    writeFileSync(join(root, 'manifest-data', MANIFEST_NAME), crafted)
+    expect(() => execFileSync('/bin/bash', ['-e', '-u', '-o', 'pipefail', '-c', blocks[1]!], {
+      cwd: root, env, stdio: 'pipe',
+    })).toThrow(/baseVersion must match checked-out APP_VERSION/)
+    expect(existsSync(join(root, 'manifest-data', SIGNATURE_NAME))).toBe(false)
   })
 
   it.skipIf(process.platform === 'win32')('dispatches only manifest data, watches the matching run and downloads only its signature using fake gh', async () => {

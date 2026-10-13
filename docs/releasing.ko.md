@@ -180,10 +180,12 @@ detached는 선택이 아니다. libuv는 detached가 아닌 모든 자식을, �
 
 ## Local maintainer updates (#610)
 
-`pnpm local-update` builds only macOS arm64 on the maintainer's machine. The window,
-keeper and host stay local; only `content-manifest.json` (at most 60,000 UTF-8 bytes)
-goes to `.github/workflows/local-content-sign.yml`. Other machines and platforms
-continue to receive full npm releases.
+`pnpm local-update` normally builds and installs macOS arm64 content on the maintainer's
+selected machine. Only `content-manifest.json` (at most 60,000 UTF-8 bytes) is sent to
+`.github/workflows/local-content-sign.yml`; the command uploads no executables. This is
+an intended workflow, not a machine restriction: a signed manifest and its matching files
+can be copied to any other `darwin-arm64` machine trusting the key with a lower highest-seen
+version. The signature is not machine-bound. Full npm releases remain the public update path.
 
 ```bash
 pnpm local-update --plan        # read the installed version and check the version bounds
@@ -215,16 +217,33 @@ equal/older candidates and candidates at or beyond the next release are refused.
 format needs a prerelease base: appending `.local.N` to a stable `1.2.3` is not SemVer
 and is refused rather than changing the shell/keeper's version rules.
 
-The dispatch is always from `main`, so the workflow must first be merged there. A tiny job
+The command dispatches from `main`, so the workflow must first be merged there. A tiny job
 validates the JSON and uploads only those exact bytes; its summary shows the manifest hash,
 version and reported source provenance. It allows only format 1, shell 1, `darwin-arm64`,
 a bounded sorted file list containing the keeper and required host entry points, safe paths,
-file sizes, SHA-256 hashes and executable bits. The signing job validates again after download,
+file sizes, SHA-256 hashes and executable bits. Both validation passes read `APP_VERSION`
+from `packages/protocol/src/brand.ts` in the checked-out main commit, require the reported
+base to match it, and derive the next release and upper bound from it. Uploaded claims cannot
+choose a future base such as `beta.999`. The signing job validates again after download,
 then uses `signatureBytes` in `scripts/content-manifest.mts`, the same Ed25519 routine as
-`release.yml`. It installs no dependencies and executes no uploaded code. Real signing is
-allowed only from `main`, uses the existing `CONTENT_SIGNING_KEY`, and waits on the existing
-`npm-publish` environment's required reviewer. No npm token or private key reaches the local
-command; no shell identity, public keys or keeper trust rules change.
+`release.yml`. It installs no dependencies and executes no uploaded code. The unmodified
+workflow checks `GITHUB_REF == main` for real signing, uses the existing `CONTENT_SIGNING_KEY`,
+and waits on `npm-publish` approval. This main check is advisory: at security-review time the
+environment has no deployment branch policy, and an edited branch workflow could get the key
+after approval. The parent/owner must separately restrict the environment to `main` and `v*`
+tags in GitHub settings before merge; this PR does not configure or verify those settings.
+No npm token or private key reaches the local command; no shell identity, public keys or
+keeper trust rules change.
+
+**Local content signing (#610).** Whoever can dispatch on main and approve `npm-publish` can
+get arbitrary unreviewed dirty-tree code signed with the release key. The manifest's commit,
+dirty flag and installed version are self-reported; the signature proves the listed hashes,
+not a reviewed source checkout. Approval is exercised with the owner's `gh` token. The
+reviewed environment has one required reviewer, allows self-review, and lets administrators
+bypass protection: dispatch and approval can use the same token. A local signature is not
+machine-bound and verifies with the matching files on any `darwin-arm64` machine trusting
+the same key whose highest-seen version is lower. See [Signed content](security-boundaries.md#local-content-signing-610)
+for this trust boundary.
 
 The command prints the run URL and waits; it never approves itself. The maintainer or their
 agent reviews the validation job's summary and approves the pending deployment:

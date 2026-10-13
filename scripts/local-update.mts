@@ -51,7 +51,7 @@ export function stampLocalVersion(root: string, base: string, version: string): 
 }
 
 export async function requestSignature(manifest: Buffer, work: string, ref = 'main'): Promise<string> {
-  const m = validateLocalManifest(manifest)
+  const m = validateLocalManifest(manifest, APP_VERSION)
   // stdin preserves newlines and avoids both shell interpolation and command-line size limits.
   execFileSync('gh', ['workflow', 'run', WORKFLOW, '--ref', ref, '--json'], {
     cwd: ROOT, input: JSON.stringify({ manifest: manifest.toString('utf8'), dry_run: 'false' }), stdio: ['pipe', 'inherit', 'inherit'],
@@ -133,7 +133,7 @@ async function main(): Promise<void> {
       ...JSON.parse(original.toString('utf8')),
       local: { baseVersion: APP_VERSION, installedVersion: installed, nextRelease: nextReleaseVersion(APP_VERSION), commit, dirty, requestId: randomBytes(16).toString('hex') },
     }, null, 2)}\n`)
-    validateLocalManifest(manifest)
+    validateLocalManifest(manifest, APP_VERSION)
     writeFileSync(join(contentDir, MANIFEST_NAME), manifest)
     // Fetch the release-pinned shell; never build a new identity for a local update.
     const lockEntries = readLock()

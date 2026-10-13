@@ -696,7 +696,8 @@ be on the other end matters as much as on `keeper.sock`.
 
 With the thin shell ([plans/thin-shell.md](plans/thin-shell.md)), the keeper and the host run from a
 folder outside any signed app bundle, with the permissions the person granted to the shell. The boundary
-is **what may be started from that folder**: only files a release signed. The verifier is
+is **what may be started from that folder**: only files signed by a key compiled into the verifier,
+including release content and owner-approved local content (#610). The verifier is
 `apps/desktop/content-verify` (shared by the shell and, on a handoff, the keeper); the writer is
 `scripts/content-manifest.mts`. Its first user is the shell (`apps/desktop/src-tauri/shell`, step 3 of
 the plan), which a macOS release window opens since step 4 (§10.2) when the shell it carries is the one
@@ -709,7 +710,8 @@ which verifies the next build's content itself before handing over to it (step 5
   The key is chosen by id (the first 8 bytes of SHA-256 over the public key) among the keys compiled in
   from `packaging/shell/keys.json` (`current` and `next`); an id that is not among them is refused.
 - **The private keys** exist only as the `npm-publish` environment secrets, behind the same approval as
-  the npm token. The release workflow passes `CONTENT_SIGNING_KEY` to the darwin platform job only, and
+  the npm token. Within `release.yml`, `CONTENT_SIGNING_KEY` goes only to the darwin platform job;
+  `local-content-sign.yml` also receives it in its approved signing job (#610).
   `release-npm.mts` takes it out of its environment before starting anything. A rehearsal has no
   environment and signs with a key generated in memory, which no keys.json holds; a publish refuses to
   sign with one (`--require-content-key`) and checks its signature against keys.json before publishing.
@@ -733,6 +735,7 @@ which verifies the next build's content itself before handing over to it (step 5
 - **Other refusals:** a manifest for another platform, one that needs a newer shell, an unknown `format`,
   a manifest over 16 MiB or a signature file over 64 KiB, and a version lower than the highest this data
   folder has started unless the window asks for a rollback (`version::check_not_downgrade`).
+
 
 The shell adds:
 
@@ -797,6 +800,35 @@ Limits:
 - Whoever holds a signing key can sign anything; rotating means moving `next` to `current` in a new shell
   version, which is why the shell carries both.
 - Windows has no verifier copy yet (`verify_and_copy` is Unix only); it has no shell either (§8).
+
+### Local content signing (#610)
+
+Whoever can dispatch `local-content-sign.yml` on `main` and approve `npm-publish` can have
+**arbitrary unreviewed dirty-tree code signed with the release key**. The manifest supplies file
+hashes, not source code for CI to rebuild or review. Its `commit`, `dirty` and installed version
+are self-reported; signing does not attest that the code came from that commit or was reviewed.
+CI treats the manifest as data and never executes the uploaded code, but the resulting signature
+grants that code the same content trust as a release.
+
+Both validation passes read `APP_VERSION` as data from `packages/protocol/src/brand.ts` in the
+checked-out workflow commit (the dispatched `main` commit for this workflow). The uploaded
+`local.baseVersion` must equal it, and the next release and upper bound are derived from it.
+A manifest claiming `beta.999` cannot advance the shell's highest-seen floor when main is on
+`beta.20`. The reported installed version is not an attestation of any machine's state.
+
+Approval uses the owner's `gh`-authenticated token. At the #610 security review, `npm-publish`
+has one required reviewer, self-review is allowed, and administrators can bypass protection;
+the same owner token can dispatch and approve. This is not an independent two-person review.
+The workflow's `GITHUB_REF == main` check is advisory: the environment has no deployment branch
+policy at review time, so a branch with an edited workflow could receive the key after approval.
+Restricting the environment to `main` and `v*` tags is a separate GitHub settings change for the
+parent/owner before merge; this PR does not configure or verify that restriction. The check in
+workflow code is not a substitute for that policy.
+
+**The signature is not machine-bound.** A signed local manifest and its matching files verify
+on any `darwin-arm64` machine trusting the same key whose highest-seen version is lower. No
+machine identity, target path or owner account is part of the signature's authorization. The
+local command's selected install target is a convenience, not a restriction on redistribution.
 
 ## App servers
 

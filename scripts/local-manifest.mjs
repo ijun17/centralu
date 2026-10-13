@@ -1,5 +1,6 @@
 /** Data-only policy for local signing; also used by the command before dispatch. */
 import { Buffer } from 'node:buffer'
+import { readFileSync } from 'node:fs'
 import { isNewer } from '../packaging/npm/centralu/bin/semver.mjs'
 
 export const MAX_LOCAL_MANIFEST_BYTES = 60_000
@@ -43,6 +44,14 @@ export function chooseLocalVersion(base, installed, requested) {
   return version
 }
 
+/** Read trusted checkout data, without executing brand.ts or accepting an uploaded version. */
+export function readAppVersion(file = new URL('../packages/protocol/src/brand.ts', import.meta.url)) {
+  const match = /^export const APP_VERSION = '([^']+)'/m.exec(readFileSync(file, 'utf8'))
+  if (!match) throw new Error('checked-out APP_VERSION is missing')
+  checkVersion(match[1])
+  return match[1]
+}
+
 function record(value, name) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${name} must be an object`)
   return value
@@ -51,7 +60,8 @@ function fields(value, expected, name) {
   if (Object.keys(value).sort().join(',') !== [...expected].sort().join(',')) throw new Error(`unexpected ${name} fields`)
 }
 
-export function validateLocalManifest(bytes) {
+export function validateLocalManifest(bytes, appVersion) {
+  checkVersion(appVersion)
   if (bytes.length === 0 || bytes.length > MAX_LOCAL_MANIFEST_BYTES) throw new Error('local manifest exceeds input size limit')
   const text = bytes.toString('utf8')
   if (!Buffer.from(text).equals(bytes)) throw new Error('manifest must be UTF-8')
@@ -62,7 +72,8 @@ export function validateLocalManifest(bytes) {
   fields(local, ['baseVersion', 'installedVersion', 'nextRelease', 'commit', 'dirty', 'requestId'], 'provenance')
   if (typeof local.requestId !== 'string' || !/^[0-9a-f]{32}$/.test(local.requestId)) throw new Error('request id is required')
   if (typeof local.commit !== 'string' || !/^[0-9a-f]{40}$/.test(local.commit) || typeof local.dirty !== 'boolean') throw new Error('commit and dirty flag are required')
-  if (assertLocalVersion(m.appVersion, local.baseVersion, local.installedVersion) !== local.nextRelease) throw new Error('incorrect next release')
+  if (local.baseVersion !== appVersion) throw new Error('local baseVersion must match checked-out APP_VERSION')
+  if (assertLocalVersion(m.appVersion, appVersion, local.installedVersion) !== local.nextRelease) throw new Error('incorrect next release')
   if (!Array.isArray(m.files) || m.files.length < 2) throw new Error('content files are required')
   const seen = new Set()
   let previous = ''
