@@ -9326,16 +9326,16 @@ test('A locally replaced bundle offers Apply now without an npm install event (#
   await expect(page.getByTestId('update-line')).toBeHidden()
   await page.evaluate(() => {
     const w = window as any
-    w.__mock.relaunchCheck = { ready: true, version: '9.9.9-local.1' }
+    w.__mock.relaunchCheck = { ready: true, version: '0.1.0-beta.20.local.1' }
     // Returning from the local-build terminal discovers the external install.
     window.dispatchEvent(new Event('focus'))
   })
   await expect(page.getByTestId('update-apply-now')).toBeVisible()
-  await expect(page.getByTestId('update-line')).toContainText('9.9.9-local.1 installed')
+  await expect(page.getByTestId('update-line')).toContainText('0.1.0-beta.20.local.1 installed')
   expect(await page.evaluate(() => (window as any).__mock.relaunches)).toBe(0)
   await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
   await page.getByTestId('settings-tab-updates').click()
-  await expect(page.getByTestId('update-state')).toContainText('Installed 9.9.9-local.1')
+  await expect(page.getByTestId('update-state')).toContainText('Installed 0.1.0-beta.20.local.1')
   await expect(page.getByTestId('update-apply')).toBeHidden()
   await page.getByTestId('update-apply-now-settings').click()
   await expect.poll(() => page.evaluate(() => (window as any).__mock.relaunches)).toBe(1)

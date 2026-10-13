@@ -81,7 +81,7 @@ export async function requestSignature(manifest: Buffer, work: string, ref = 'ma
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
   if (args.includes('--help')) {
-    console.log('pnpm local-update [--target /Applications/Centralu.app] [--version <base>-local.N] [--dry-run | --plan]\n--dry-run builds and signs with a throwaway key locally; never dispatches or installs.\n--plan checks platform/version and prints the plan without building, dispatching or installing.')
+    console.log('pnpm local-update [--target /Applications/Centralu.app] [--version <base>.local.N] [--dry-run | --plan]\n--dry-run builds and signs with a throwaway key locally; never dispatches or installs.\n--plan checks platform/version and prints the plan without building, dispatching or installing.')
     return
   }
   for (let i = 0; i < args.length; i++) {

@@ -205,15 +205,15 @@ are copied; ignored build inputs are not. Keep the checkout still while the snap
 No host is launched and any build subprocess receives a temporary `CC_DATA_DIR`.
 
 **Version bounds are enforced twice**, before building and immediately before installing:
-`<current>-local.N` must be strictly above the installed copy and below the next release.
-`N` is positive and increments from the installed local copy; `--version` can request an
-explicit counter. The next release increments the final numeric release identifier
-(`beta.20` → `beta.21`, or `1.2.3` → `1.2.4`). Invalid versions and impossible bounds are
-refused. In particular, SemVer orders `beta.20-local.1` **above** `beta.21` (the identifier
-`20-local` is alphanumeric), and `1.2.3-local.1` **below** installed `1.2.3`. These literal
-suffixes cannot update those installed bases; they are refused rather than overriding the
-shell/keeper's existing version rules. A version spelling decision is required before
-using this path for the current numeric beta.
+`<current>.local.N` must be strictly above the installed copy and below the next release.
+For example, `0.1.0-beta.20 < 0.1.0-beta.20.local.1 < 0.1.0-beta.21` under the existing
+SemVer rules. `N` is positive and increments from the installed local copy; `--version`
+can request an explicit counter. Moving from `beta.19.local.128` to a `beta.20` checkout
+starts at `beta.20.local.1`. The next release increments the final numeric release
+identifier (`beta.20` → `beta.21`). Invalid versions, the old `-local.N` spelling,
+equal/older candidates and candidates at or beyond the next release are refused. This
+format needs a prerelease base: appending `.local.N` to a stable `1.2.3` is not SemVer
+and is refused rather than changing the shell/keeper's version rules.
 
 The dispatch is always from `main`, so the workflow must first be merged there. A tiny job
 validates the JSON and uploads only those exact bytes; its summary shows the manifest hash,
@@ -247,9 +247,22 @@ confirming the previous command has ended. The app and keeper are never stopped 
 
 A window running from the replaced target checks its bundle on focus and every five seconds
 while visible and offers **Apply now**, even without an npm install event. Automatic apply
-keeps the existing setting and idle/typing checks. The first update of a window built before
-this detection change needs one manual restart to gain the new detection; subsequent local
-updates offer the button. Existing keeper verification and handoff still decide what runs.
+keeps the existing setting and idle/typing checks. Existing keeper verification and handoff
+still decide what runs.
+
+**Applying this change for the first time.** A window built before this PR only checks the
+bundle after the host reports an npm install (`restart_required`). A local install emits
+no such host event, and replacing files on disk cannot replace the UI code already loaded
+in that window. If it already offers **Apply now**, use that button: no separate bootstrap
+restart is needed. Otherwise load the newly installed window once by closing and reopening
+it. With agents active, first enable Settings → Background → **Keep agents running after
+Centralu quits**, and use **Quit**, not **Quit completely**; otherwise wait until they finish.
+The reopened window attaches to the existing keeper; use its **Switch to this build** action
+to apply the new keeper/host. This is the first application of the new window code, not an
+additional **Restart completely**, a shell rebuild or a permission reset. Subsequent local
+installs are detected by that window and offer **Apply now**. There is no existing CLI or
+app-link endpoint for requesting the old window's relaunch; the command does not force it
+to exit or forge an npm-install event.
 
 To rehearse the workflow without the real key after it is available on the default branch:
 

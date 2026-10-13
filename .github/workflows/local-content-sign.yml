@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       manifest:
-        description: 'Exact UTF-8 content-manifest.json bytes (macOS arm64, local version only)'
+        description: 'Exact UTF-8 content-manifest.json bytes (macOS arm64, <current>.local.N only)'
         type: string
         required: true
       dry_run:

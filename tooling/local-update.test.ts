@@ -5,41 +5,47 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { installLocalBundle, requestSignature, stampLocalVersion } from '../scripts/local-update.mjs'
 import { buildManifest, MANIFEST_NAME, SIGNATURE_NAME, verifyManifest } from '../scripts/content-manifest.mjs'
+import { APP_VERSION } from '../packages/protocol/src/brand.js'
 // @ts-expect-error — plain JavaScript policy runs in Actions without installing dependencies
 import { assertLocalVersion, chooseLocalVersion, MAX_LOCAL_MANIFEST_BYTES, nextReleaseVersion, validateLocalManifest } from '../scripts/local-manifest.mjs'
 
 const dirs: string[] = []
 const temp = () => { const dir = mkdtempSync(join(tmpdir(), 'cc-local-update-')); dirs.push(dir); return dir }
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }) })
-const base = '0.1.0-beta.20'
-const allowedBase = '1.2.3'
+const base = '0.2.0-beta.20'
+const allowedBase = base
 function fixture() {
   const paths = ['centralu-keeper', 'host/main.mjs', 'host/bundle-info.json', 'host/schema.sql', 'host/node_modules/better-sqlite3/package.json', 'host/node_modules/node-pty/package.json']
   return {
-    format: 1, appVersion: '1.2.3-local.1', platform: 'darwin-arm64', minShellVersion: 1,
+    format: 1, appVersion: `${base}.local.1`, platform: 'darwin-arm64', minShellVersion: 1,
     files: paths.sort().map((path) => ({ path, size: 1, sha256: 'a'.repeat(64), executable: path === 'centralu-keeper' })),
-    local: { baseVersion: '1.2.3', installedVersion: '1.2.2', nextRelease: '1.2.4', commit: 'a'.repeat(40), dirty: true, requestId: 'b'.repeat(32) },
+    local: { baseVersion: base, installedVersion: base, nextRelease: '0.2.0-beta.21', commit: 'a'.repeat(40), dirty: true, requestId: 'b'.repeat(32) },
   }
 }
 const bytes = (m: unknown) => Buffer.from(`${JSON.stringify(m, null, 2)}\n`)
 
 describe('local update version bounds', () => {
   it('increments local counters only when the installed and next-release bounds permit it', () => {
-    expect(chooseLocalVersion('1.2.3', '1.2.2')).toBe('1.2.3-local.1')
+    expect(chooseLocalVersion(base, base)).toBe(`${base}.local.1`)
     for (let n = 2; n <= 128; n++) {
-      const installed = `1.2.3-local.${n - 1}`
-      expect(chooseLocalVersion('1.2.3', installed)).toBe(`1.2.3-local.${n}`)
-      expect(() => assertLocalVersion(installed, '1.2.3', installed)).toThrow(/above installed/)
+      const installed = `${base}.local.${n - 1}`
+      expect(chooseLocalVersion(base, installed)).toBe(`${base}.local.${n}`)
+      expect(() => assertLocalVersion(installed, base, installed)).toThrow(/above installed/)
     }
   })
-  it('refuses the requested suffix when SemVer would put it above the next beta', () => {
-    expect(nextReleaseVersion(base)).toBe('0.1.0-beta.21')
-    expect(() => assertLocalVersion(`${base}-local.1`, base, base)).toThrow(/above installed and below next/)
+  it('places the approved suffix between the current beta and next release and refuses other spellings', () => {
+    expect(nextReleaseVersion(base)).toBe('0.2.0-beta.21')
+    expect(assertLocalVersion(`${base}.local.1`, base, base)).toBe('0.2.0-beta.21')
+    expect(() => assertLocalVersion(`${base}-local.1`, base, base)).toThrow(/must be <base>\.local/)
+    for (const installed of [`${base}.local.1`, `${base}.local.2`, '0.2.0-beta.21', '0.2.0']) {
+      expect(() => assertLocalVersion(`${base}.local.1`, base, installed), installed).toThrow(/above installed and below next/)
+    }
+    expect(chooseLocalVersion(base, '0.2.0-beta.19.local.128')).toBe(`${base}.local.1`)
   })
   it('refuses malformed bases, installed versions, counters and build metadata', () => {
-    for (const value of ['', 'v1.2.3', '01.2.3', '1.2.3+build', '1.2.3-beta.01', '1.2.3-local.1', '1.2.3-beta']) expect(() => nextReleaseVersion(value), value).toThrow()
-    for (const n of ['', '0', '-1', '01', '1.1', '9007199254740992']) expect(() => assertLocalVersion(`${base}-local.${n}`, base, base), n).toThrow()
-    expect(() => chooseLocalVersion('1.2.3', '1.2.3')).toThrow(/above installed/)
+    for (const value of ['', 'v1.2.3', '01.2.3', '1.2.3+build', '1.2.3-beta.01', '1.2.3-local.1', `${base}.local.1`, '1.2.3-beta']) expect(() => nextReleaseVersion(value), value).toThrow()
+    for (const n of ['', '0', '-1', '01', '1.1', '9007199254740992']) expect(() => assertLocalVersion(`${base}.local.${n}`, base, base), n).toThrow()
+    expect(() => chooseLocalVersion('1.2.3', '1.2.3')).toThrow(/invalid version/)
     expect(() => chooseLocalVersion(allowedBase, 'invalid')).toThrow()
   })
 })
@@ -51,10 +57,10 @@ describe('version stamping', () => {
       mkdirSync(join(root, path, '..'), { recursive: true })
       cpSync(resolve(path), join(root, path))
     }
-    stampLocalVersion(root, base, `${base}-local.2`)
-    expect(readFileSync(join(root, 'packages/protocol/src/brand.ts'), 'utf8')).toContain(`${base}-local.2`)
-    expect(readFileSync(join(root, 'apps/desktop/src-tauri/Cargo.toml'), 'utf8')).toContain(`version = "${base}-local.2"`)
-    for (const path of ['apps/desktop/package.json', 'apps/desktop/src-tauri/tauri.conf.json']) expect(JSON.parse(readFileSync(join(root, path), 'utf8')).version).toBe(`${base}-local.2`)
+    stampLocalVersion(root, APP_VERSION, `${APP_VERSION}.local.2`)
+    expect(readFileSync(join(root, 'packages/protocol/src/brand.ts'), 'utf8')).toContain(`${APP_VERSION}.local.2`)
+    expect(readFileSync(join(root, 'apps/desktop/src-tauri/Cargo.toml'), 'utf8')).toContain(`version = "${APP_VERSION}.local.2"`)
+    for (const path of ['apps/desktop/package.json', 'apps/desktop/src-tauri/tauri.conf.json']) expect(JSON.parse(readFileSync(join(root, path), 'utf8')).version).toBe(`${APP_VERSION}.local.2`)
   })
 })
 
@@ -88,10 +94,10 @@ describe('the data-only manifest boundary', () => {
     expect(validateLocalManifest(bytes(fixture())).local.dirty).toBe(true)
     const bad = [
       { platform: 'linux-x64' }, { platform: 'darwin-x64' }, { format: 2 }, { minShellVersion: 2 },
-      { appVersion: '1.2.3' }, { files: [] }, { local: {} }, { code: 'process.exit()' },
+      { appVersion: base }, { appVersion: `${base}-local.1` }, { files: [] }, { local: {} }, { code: 'process.exit()' },
       { local: { ...fixture().local, dirty: 'true' } }, { local: { ...fixture().local, commit: 'bad' } },
       { local: { ...fixture().local, nextRelease: '9.0.0' } },
-      { local: { ...fixture().local, installedVersion: '1.2.3-local.1' } },
+      { local: { ...fixture().local, installedVersion: `${base}.local.1` } },
     ]
     for (const mutation of bad) expect(() => validateLocalManifest(bytes({ ...fixture(), ...mutation })), JSON.stringify(mutation)).toThrow()
     for (const path of ['/host/a', 'host/../a', 'host/./a', 'host//a', 'host/a\\b', 'host/a\n', 'evil.mjs', 'host', 'content-manifest.json']) {

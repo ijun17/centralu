@@ -16,7 +16,7 @@ function checkVersion(version) {
 
 export function nextReleaseVersion(base) {
   checkVersion(base)
-  if (/-local\.\d+$/.test(base)) throw new Error('base must be a release version')
+  if (/[.-]local\.\d+$/.test(base)) throw new Error('base must be a release version')
   const match = /^(.*[.-])(\d+)$/.exec(base)
   if (!match) throw new Error('release version must end in a numeric identifier')
   const next = `${match[1]}${Number(match[2]) + 1}`
@@ -28,15 +28,15 @@ export function assertLocalVersion(version, base, installed) {
   checkVersion(version)
   checkVersion(installed)
   const next = nextReleaseVersion(base)
-  const prefix = `${base}-local.`
+  const prefix = `${base}.local.`
   const n = version.startsWith(prefix) ? version.slice(prefix.length) : ''
-  if (!/^[1-9]\d*$/.test(n) || !Number.isSafeInteger(Number(n))) throw new Error('version must be <base>-local.N with positive N')
+  if (!/^[1-9]\d*$/.test(n) || !Number.isSafeInteger(Number(n))) throw new Error('version must be <base>.local.N with positive N')
   if (!isNewer(version, installed) || !isNewer(next, version)) throw new Error('local version must be above installed and below next release')
   return next
 }
 
 export function chooseLocalVersion(base, installed, requested) {
-  const prefix = `${base}-local.`
+  const prefix = `${base}.local.`
   const previous = installed.startsWith(prefix) ? Number(installed.slice(prefix.length)) : 0
   const version = requested ?? `${prefix}${previous + 1}`
   assertLocalVersion(version, base, installed)
