@@ -821,7 +821,15 @@ Claude's `normal` preset resolves `permissions.defaultMode` with the SDK's `reso
 With no valid mode, or a failed read, it sends `default` so tool calls needing permission still reach
 `canUseTool`. A session reading no settings files carries only the person's user-tier mode (#382).
 A configured bypass still bypasses the callback; neither an absent mode nor an escalating mode in a
-committed project file selects bypass. Existing adopted CLI processes keep their startup mode until restarted.
+committed project file selects bypass. Normal's launch fingerprint is now v2: after a keeper handoff,
+the host refresh restarts retained v1 processes, immediately when idle or after the current turn finishes
+(#589). The resumed process receives the explicit mode. Safe's derived flags did not change, so its
+fingerprint stays at v1; auto's existing v2 is unchanged.
+
+Released betas since beta.1 sent no `--permission-mode` under `normal`. With the person's Claude Code
+CLI >= 2.1.285 and a third-party provider or telemetry off, headless sessions start in auto mode when
+no configured settings mode overrides that default: a classifier, rather than Centralu's approval,
+decided tool use. The exposure depends on the person's installed CLI, not just the pinned SDK.
 
 The [SDK changelog](https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/CHANGELOG.md)
 records two separate changes: 0.3.286 leaves an omitted mode to the CLI, which can choose its automatic

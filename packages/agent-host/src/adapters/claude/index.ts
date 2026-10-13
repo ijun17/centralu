@@ -1602,7 +1602,8 @@ export class ClaudeAdapter implements AgentAdapter {
   launchSettingsFingerprint(settings: import('../contract.js').LaunchSettings): string {
     // Keep this alongside the query option construction. Bump the version when a setting the
     // adapter derives (including cross-session controls) changes without changing these inputs.
-    return JSON.stringify({ v: settings.permissionPreset === 'auto' ? 2 : 1, cwd: settings.cwd, permission: settings.permissionPreset, trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles })
+    // Normal v2 retires kept processes launched without an explicit mode (#578); safe's flags are unchanged.
+    return JSON.stringify({ v: settings.permissionPreset === 'safe' ? 1 : 2, cwd: settings.cwd, permission: settings.permissionPreset, trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles })
   }
 
   async detect(): Promise<DetectResult> {

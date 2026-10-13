@@ -1,9 +1,10 @@
 import { EventEmitter } from 'node:events'
 import { tmpdir } from 'node:os'
 import { PassThrough } from 'node:stream'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
+import { ClaudeAdapter } from '../adapters/claude/index.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
@@ -30,6 +31,7 @@ class Handle implements SessionHandle {
   externalId: string | null = 'ext-1'
   disposed = false
   detached = false
+  pendingOutputOnDetach = true
   constructor(
     readonly sessionId: string,
     readonly opts: CreateSessionOpts,
@@ -47,12 +49,14 @@ class Handle implements SessionHandle {
   }
   async detach() {
     // Output still on its way while the process is released is recorded by the leaving host
-    this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text: 'last words before the restart' })
+    if (this.pendingOutputOnDetach) this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text: 'last words before the restart' })
     this.detached = true
   }
 }
 
 class Adapter implements AgentAdapter {
+  // Use the production fingerprint: a fake version counter cannot catch a missed adapter bump.
+  launchSettingsFingerprint = ClaudeAdapter.prototype.launchSettingsFingerprint
   descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'x', login: 'x' }
   readonly capabilities: AdapterCapabilities = {
     approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
@@ -65,7 +69,7 @@ class Adapter implements AgentAdapter {
   }
   async listExternalSessions() {
     this.listed++
-    return []
+    return [{ externalId: 'ext-1', title: 'Kept conversation', updatedAt: Date.now() }]
   }
   async createSession(opts: CreateSessionOpts, emit: EventSink) {
     const h = new Handle(opts.sessionId, opts, emit)
@@ -107,6 +111,62 @@ async function workingSession(h: ReturnType<typeof host>): Promise<string> {
 }
 
 describe('a host restart under the keeper', () => {
+  it.each([
+    { preset: 'normal', working: false },
+    { preset: 'normal', working: true },
+    { preset: 'safe', working: false },
+    { preset: 'auto', working: false },
+  ] as const)('refreshes an adopted pre-#578 process only when its permission flags changed ($preset, working=$working)', async ({ preset, working }) => {
+    const a = host()
+    const project = (await a.rpc('projects.add', { path: tmpdir() })) as { id: string }
+    const session = await a.mgr.createSession({ projectId: project.id, cwd: tmpdir(), tool: 'claude', permissionPreset: preset })
+    const key = `launch_settings:${session.id}`
+    // Persist the released fingerprint, before normal acquired an explicit mode flag.
+    const legacy = JSON.parse(store.appSetting(key)!)
+    legacy.v = preset === 'auto' ? 2 : 1
+    const oldFingerprint = JSON.stringify(legacy)
+    store.setAppSetting(key, oldFingerprint)
+    a.claude.last.pendingOutputOnDetach = working
+    a.claude.last.emit({ type: 'state_change', sessionId: session.id, state: working ? 'working' : 'idle' })
+    await a.mgr.detachAll()
+
+    const b = host(new Set([session.id]))
+    try {
+      const kept = new FakeProcess() as unknown as AgentProcess
+      await b.mgr.adoptKept([{ sessionId: session.id, tool: 'claude', process: kept }])
+      const adopted = b.claude.last
+      expect(adopted.opts.processSource?.adopt?.process).toBe(kept)
+      expect(b.mgr.listSessions().find((s) => s.id === session.id)?.state).toBe(working ? 'working' : 'idle')
+      expect(store.appSetting(key)).toBe(oldFingerprint)
+      const restart = vi.spyOn(b.mgr, 'restartSession')
+
+      await b.mgr.refreshToolDefinitions()
+      if (working) {
+        expect(adopted.disposed).toBe(false)
+        adopted.emit({ type: 'turn_complete', sessionId: session.id })
+        await vi.waitFor(() => expect(b.claude.last).not.toBe(adopted))
+      }
+      if (preset === 'normal') {
+        expect(adopted.disposed).toBe(true)
+        expect(b.claude.last).not.toBe(adopted)
+        expect(b.claude.last.opts.processSource?.adopt).toBeUndefined()
+        expect(b.claude.last.opts.resumeExternalId).toBe('ext-1')
+        expect(store.appSetting(key)).not.toBe(oldFingerprint)
+        expect(restart).toHaveBeenCalledWith(session.id, 'launch_settings')
+      } else {
+        expect(adopted.disposed).toBe(false)
+        expect(b.claude.last).toBe(adopted)
+        expect(store.appSetting(key)).toBe(oldFingerprint)
+      }
+      const current = b.claude.last
+      await b.mgr.refreshToolDefinitions()
+      expect(b.claude.last).toBe(current)
+      expect(restart).toHaveBeenCalledTimes(preset === 'normal' ? 1 : 0)
+    } finally {
+      await b.mgr.disposeAll()
+    }
+  })
+
   it('the leaving host lets go of its sessions without stopping them and keeps their state', async () => {
     const a = host()
     const id = await workingSession(a)

@@ -302,6 +302,12 @@ Claude's automatic classifier, so omission is not a manual-approval guarantee. T
 rejects escalating modes from committed project settings before the adapter uses them. An explicit
 personal bypass remains intentional: it auto-approves before `canUseTool`, as the table below records.
 
+Released betas since beta.1 omitted `--permission-mode` under `normal`. With the person's Claude Code
+CLI >= 2.1.285 and a third-party provider or telemetry off, a headless session without a configured
+mode overriding the default starts in auto mode: a classifier, rather than Centralu's approval,
+decided tool use. Normal's v2 launch fingerprint makes the host refresh restart retained older
+processes after adoption, at idle or when their current turn finishes (#589).
+
 | Call | Claude `safe` | Claude `normal` | Claude `normal` + bypass | Claude `auto` | Codex `safe` | Codex `normal` | Codex `normal` + bypass | Codex `auto` | Enforced in |
 |---|---|---|---|---|---|---|---|---|---|
 | A Centralu tool the profile has | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `isOrchestratorTool` and only when the session was given the server, checked before auto's refusal (`adapters/claude/index.ts`). Codex: `default_tools_approval_mode: 'approve'` on the bridge, and an elicitation for it accepted only on a thread that has it (`adapters/codex/index.ts`, `mcpConfig`, `onServerRequest`) |
