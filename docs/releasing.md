@@ -317,10 +317,11 @@ choose a future base such as `beta.999`. The signing job validates again after d
 then uses `signatureBytes` in `scripts/content-manifest.mts`, the same Ed25519 routine as
 `release.yml`. It installs no dependencies and executes no uploaded code. The unmodified
 workflow checks `GITHUB_REF == main` for real signing, uses the existing `CONTENT_SIGNING_KEY`,
-and waits on `npm-publish` approval. This main check is advisory: at security-review time the
-environment has no deployment branch policy, and an edited branch workflow could get the key
-after approval. The parent/owner must separately restrict the environment to `main` and `v*`
-tags in GitHub settings before merge; this PR does not configure or verify those settings.
+and waits on `npm-publish` approval. That check in workflow code is advisory; the enforcement
+is the environment's deployment policy, which since 2026-10-13 admits only the `main` branch
+and `v*` tags (a repository setting, not in this repository's files). A branch carrying an
+edited workflow cannot receive the key even after approval. Keep that policy if the
+environment is ever recreated.
 No npm token or private key reaches the local command; no shell identity, public keys or
 keeper trust rules change.
 

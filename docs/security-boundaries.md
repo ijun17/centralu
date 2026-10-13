@@ -818,11 +818,12 @@ A manifest claiming `beta.999` cannot advance the shell's highest-seen floor whe
 Approval uses the owner's `gh`-authenticated token. At the #610 security review, `npm-publish`
 has one required reviewer, self-review is allowed, and administrators can bypass protection;
 the same owner token can dispatch and approve. This is not an independent two-person review.
-The workflow's `GITHUB_REF == main` check is advisory: the environment has no deployment branch
-policy at review time, so a branch with an edited workflow could receive the key after approval.
-Restricting the environment to `main` and `v*` tags is a separate GitHub settings change for the
-parent/owner before merge; this PR does not configure or verify that restriction. The check in
-workflow code is not a substitute for that policy.
+The workflow's `GITHUB_REF == main` check is advisory. The enforcement is the environment's
+deployment policy: since 2026-10-13 `npm-publish` admits only the `main` branch and `v*` tags, so
+a branch with an edited workflow cannot receive the key even after approval. This is a GitHub
+setting, not a file in the repository; anyone who can push to `main` or create a `v*` tag (today
+only the owner, the sole collaborator) can still run an edited workflow with the key after
+approval. The check in workflow code is not a substitute for that policy.
 
 **The signature is not machine-bound.** A signed local manifest and its matching files verify
 on any `darwin-arm64` machine trusting the same key whose highest-seen version is lower. No
