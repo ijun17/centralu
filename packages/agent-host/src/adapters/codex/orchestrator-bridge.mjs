@@ -171,7 +171,18 @@ async function handle(msg) {
       return ok(id, { content: [{ type: 'text', text: r.text }], isError: r.isError === true })
     } catch (e) {
       // Does not silently pretend it succeeded — pretending the model's request went through leaves only the person unaware
-      return ok(id, { content: [{ type: 'text', text: `Could not run the tool — ${e.message}` }], isError: true })
+      /*
+       * A call that timed out here may still have finished in the host (#660): the bridge cannot know. Say so, and
+       * say what to check and not to do, so the model neither starts the same work twice nor does it silently with
+       * its CLI's own subagents, which the person does not see.
+       */
+      const timedOut = /timed out/.test(e.message)
+      const after = timedOut
+        ? ' The host may have finished it anyway, so whether anything was created is not known here.' +
+          (params?.name === 'start_agent' ? ' Call read_session without a sessionId to see whether a new session exists before starting another.' : '') +
+          ' Do not do the work with your own subagents instead: tell the person and let them decide.'
+        : ''
+      return ok(id, { content: [{ type: 'text', text: `Could not run the tool — ${e.message}.${after}` }], isError: true })
     }
   }
 

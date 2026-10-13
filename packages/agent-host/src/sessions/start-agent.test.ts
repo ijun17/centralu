@@ -9,6 +9,8 @@ import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-
 import { AGENT_CEILING, agentBranch, agentNoteFrame, presetWithin } from './start-agent.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
+import { START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './manager.js'
+import type { ModelOption } from '@cc/protocol'
 
 /**
  * start_agent and agent_session (#561): an ordinary session starts another agent in its own project — behind the
@@ -86,6 +88,73 @@ describe('starting another agent in the same project', () => {
       isError: true, text: 'No agent named "missing-cli" here. Installed tools: claude, codex, fixture-agent.',
     })
     expect(childrenOf(s)).toHaveLength(1)
+  })
+
+  describe('a model list that is slow or never answers (#660)', () => {
+    const option = (id: string): ModelOption => ({ id, label: id, efforts: ['low', 'high'], defaultEffort: 'low', tiers: [] })
+    const codex = () => w.adapters.get('codex')!
+    const withList = (list: () => Promise<ModelOption[]>) => {
+      const calls = { n: 0 }
+      codex().listModels = () => {
+        calls.n++
+        return list()
+      }
+      return calls
+    }
+
+    it('starts the session anyway when the list never answers, within the bound, and says the model was not checked', async () => {
+      allowProject()
+      const s = await session()
+      const calls = withList(() => new Promise<ModelOption[]>(() => {}))
+      const t0 = Date.now()
+      const r = await w.mgr.startAgent(s, { task: 'check it', tool: 'codex', model: 'gpt-x', wait: false })
+      expect(Date.now() - t0).toBeLessThan(START_AGENT_MODEL_CHECK_MS + 4_000)
+      expect(r).toMatchObject({ ok: true, state: 'working', notice: expect.stringContaining('not checked') })
+      expect(childrenOf(s)).toEqual([expect.objectContaining({ tool: 'codex', model: 'gpt-x' })])
+      expect(!r.ok ? '' : r.notice).toContain('"gpt-x"')
+
+      // A read still pending is joined, not started again, so a hung tool does not get a process per call
+      const again = await w.mgr.startAgent(s, { task: 'and again', tool: 'codex', model: 'gpt-x', wait: false })
+      expect(again).toMatchObject({ ok: true })
+      expect(calls.n).toBe(1)
+    }, 20_000)
+
+    it('keeps a list that arrives after the bound, and checks the next call against it', async () => {
+      allowProject()
+      const s = await session()
+      const calls = withList(() => new Promise<ModelOption[]>((r) => setTimeout(() => r([option('gpt-real')]), START_AGENT_MODEL_CHECK_MS + 500)))
+      const first = await w.mgr.startAgent(s, { task: 'one', tool: 'codex', model: 'gpt-typo', wait: false })
+      expect(first).toMatchObject({ ok: true, notice: expect.stringContaining('not checked') })
+
+      await new Promise((r) => setTimeout(r, 1_500))
+      const second = await w.mgr.startAgent(s, { task: 'two', tool: 'codex', model: 'gpt-typo', wait: false })
+      expect(second).toMatchObject({ ok: false, error: expect.stringContaining('has no model "gpt-typo". Its models: gpt-real') })
+      expect(await w.mgr.startAgent(s, { task: 'three', tool: 'codex', model: 'gpt-real', effort: 'high', wait: false })).toMatchObject({ ok: true })
+      expect(calls.n).toBe(1)
+    }, 20_000)
+  })
+
+  it('past its setup bound without the person answering, says no session was created and withdraws the card', async () => {
+    const s = await session()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const p = w.mgr.startAgent(s, { task: 'wait for the person', wait: false })
+    for (let i = 0; i < 50 && !agentCard(s); i++) await vi.advanceTimersByTimeAsync(0)
+    expect(agentCard(s)).toBeDefined()
+    await vi.advanceTimersByTimeAsync(START_AGENT_SETUP_MS)
+    const r = await p
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('No session was created') })
+    expect(!r.ok && r.error).toContain('Do not do this with your own subagents')
+    expect(agentCard(s)).toBeUndefined()
+    expect(childrenOf(s)).toEqual([])
+  })
+
+  it('a refusal tells the calling model to ask the person, not to fall back to its own subagents', async () => {
+    const s = await session()
+    const p = w.mgr.startAgent(s, { task: 'implement the parser' })
+    await w.until(() => !!agentCard(s))
+    w.mgr.respondApproval(s, agentCard(s)!.requestId, 'deny')
+    const r = await p
+    expect(!r.ok && r.error).toContain('tell the person')
   })
 
   it('asks the person first; denied, nothing is started and the model reads a refusal', async () => {

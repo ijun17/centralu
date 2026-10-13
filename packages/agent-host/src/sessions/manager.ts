@@ -147,12 +147,64 @@ import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev
  * fails carrying its own name, the next occurrence of the same incident is its own diagnosis.
  */
 function withTimeout<T>(p: Promise<T>, ms: number, label = 'A call'): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
   return Promise.race([
     p,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} did not finish within ${Math.round(ms / 1000)}s`)), ms),
-    ),
-  ])
+    new Promise<T>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} did not finish within ${Math.round(ms / 1000)}s`)), ms)
+    }),
+  ]).finally(() => clearTimeout(timer))
+}
+
+/** How long one read of a tool's model list may run, whoever waits on it (#660) */
+const MODEL_LIST_READ_MS = 60_000
+/** After a failed read, how long a caller that cannot wait goes without a list before one is tried again (#660) */
+const MODEL_LIST_RETRY_MS = 60_000
+/** How long start_agent waits for a model list to check the model and effort asked for, before it starts anyway (#660) */
+export const START_AGENT_MODEL_CHECK_MS = 3_000
+/**
+ * How long start_agent may spend before the child exists: the model check, the card for the person and the session's
+ * own start. Under the Codex bridge's 280 seconds, so the caller reads an answer from the host that says whether a
+ * session was created, never the bridge's bare "timed out" (#660).
+ */
+export const START_AGENT_SETUP_MS = 200_000
+
+/**
+ * Said to the calling model when start_agent is refused or cut short (#660). A model that reads only "could not" tends
+ * to do the job with its own CLI's subagents, which the person does not see in the sidebar and did not agree to.
+ */
+const ASK_THE_PERSON = 'Do not do this with your own subagents instead: tell the person what stopped it and let them decide.'
+
+/** How far start_agent's setup had come when its bound passed (#660) */
+type StartProgress = { stage: 'checking' | 'asking' | 'creating' | 'created'; childId?: string }
+
+/** The answer when start_agent's setup outlasts its bound: it states whether a session exists, and what to do next */
+function startAgentLate(progress: StartProgress): ChildRunResult {
+  const seconds = Math.round(START_AGENT_SETUP_MS / 1000)
+  switch (progress.stage) {
+    case 'created':
+      return {
+        ok: false,
+        error:
+          `The session [${progress.childId}] was created, but handing it the task took longer than ${seconds} seconds. ` +
+          `Do not start another: agent_session(sessionId="${progress.childId}", action="status") shows where it stands. ${ASK_THE_PERSON}`,
+      }
+    case 'creating':
+      return {
+        ok: false,
+        error:
+          `Starting the session took longer than ${seconds} seconds and had not finished, so a session may or may not exist. ` +
+          `Do not call start_agent again until read_session (without a sessionId) shows whether a new session is there. ${ASK_THE_PERSON}`,
+      }
+    case 'asking':
+      return {
+        ok: false,
+        error:
+          `No session was created: the person did not answer the question in this session within ${seconds} seconds, so it was withdrawn. ${ASK_THE_PERSON}`,
+      }
+    default:
+      return { ok: false, error: `No session was created: checking the request took longer than ${seconds} seconds. Try again once; if it repeats, ask the person. ${ASK_THE_PERSON}` }
+  }
 }
 
 /**
@@ -3910,6 +3962,38 @@ export class SessionManager {
    * opens would make that click feel slow.
    */
   private modelCache = new Map<ToolName, { models: ModelOption[]; at: number }>()
+  /** One read of a tool's list at a time: a second asker waits on it instead of starting another tool process */
+  private modelFetches = new Map<ToolName, Promise<ModelOption[]>>()
+  /** When a read last failed, so a caller that cannot wait does not start another one at once (#660) */
+  private modelFailures = new Map<ToolName, number>()
+
+  /**
+   * Reads the list once at a time and **keeps the result whenever it arrives**, also after the caller that asked has
+   * stopped waiting: a Codex list that takes 20 seconds is cached for the next call instead of being thrown away at
+   * the caller's bound and read again from scratch (#660). The read has its own ceiling, so it cannot stay pending
+   * and block every later asker.
+   */
+  private fetchModels(tool: ToolName, adapter: AgentAdapter): Promise<ModelOption[]> {
+    const running = this.modelFetches.get(tool)
+    if (running) return running
+    const p = withTimeout(adapter.listModels!(), MODEL_LIST_READ_MS, `${tool}'s model list`).then(
+      (models) => {
+        this.modelCache.set(tool, { models, at: Date.now() })
+        this.modelFailures.delete(tool)
+        return models
+      },
+      (err: unknown) => {
+        this.modelFailures.set(tool, Date.now())
+        throw err
+      },
+    )
+    this.modelFetches.set(tool, p)
+    const clear = () => {
+      if (this.modelFetches.get(tool) === p) this.modelFetches.delete(tool)
+    }
+    p.then(clear, clear)
+    return p
+  }
 
   async listModels(tool: ToolName): Promise<{ supported: boolean; reason?: string; models: ModelOption[] }> {
     const adapter = this.adapters.get(tool)
@@ -3921,13 +4005,38 @@ export class SessionManager {
     if (hit && Date.now() - hit.at < 5 * 60_000) return { supported: true, models: hit.models }
 
     try {
-      const models = await withTimeout(adapter.listModels(), 15_000)
-      this.modelCache.set(tool, { models, at: Date.now() })
+      const models = await withTimeout(this.fetchModels(tool, adapter), 15_000)
       return { supported: true, models }
     } catch (err) {
       // Leaving the list empty just because it failed to read would erase even the model already chosen — the
       // last known list is kept instead
       return { supported: false, reason: (err as Error).message, models: hit?.models ?? [] }
+    }
+  }
+
+  /**
+   * The list for checking a choice, **never waiting longer than `ms`** (#660). A list we already have, however old,
+   * answers at once (and an old one is refreshed in the background); otherwise one read is started or joined and
+   * waited on for `ms`. Null when there is no list in time: the caller goes on without checking. A read that fails
+   * is not started again for a minute, so a hung Codex does not get a new tool process on every call.
+   */
+  private async modelsWithin(tool: ToolName, ms: number): Promise<ModelOption[] | null> {
+    const adapter = this.adapters.get(tool)
+    if (!adapter?.listModels) return null
+    const hit = this.modelCache.get(tool)
+    const stale = !hit || Date.now() - hit.at >= 5 * 60_000
+    if (hit && !stale) return hit.models
+    const failedAt = this.modelFailures.get(tool)
+    const failedRecently = failedAt !== undefined && Date.now() - failedAt < MODEL_LIST_RETRY_MS && !this.modelFetches.has(tool)
+    if (failedRecently) return hit?.models ?? null
+    const read = this.fetchModels(tool, adapter)
+    // Nobody may be left waiting on this when it fails after the bound
+    read.catch(() => {})
+    if (hit) return hit.models
+    try {
+      return await withTimeout(read, ms)
+    } catch {
+      return null
     }
   }
 
@@ -5693,35 +5802,76 @@ export class SessionManager {
    *      "working" and the caller is told when the turn ends (the reportBack path); agent_session waits again.
    */
   async startAgent(callerId: string, opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult> {
+    /*
+     * **The setup has a bound of its own (#660).** Before the child exists the call can wait on the person's card, a
+     * model list and the tool's own start, none of which `wait: false` shortens; the Codex bridge cuts the call at 280
+     * seconds with a bare "timed out" that says nothing of whether a session exists. So the setup is raced against a
+     * bound under that, the card is withdrawn when it passes, and the answer says what was and was not created.
+     */
+    const progress: StartProgress = { stage: 'checking' }
+    const ctl = new AbortController()
+    const onAbort = () => ctl.abort()
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) ctl.abort()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<ChildRunResult>((resolve) => {
+      timer = setTimeout(() => {
+        ctl.abort()
+        resolve(startAgentLate(progress))
+      }, START_AGENT_SETUP_MS)
+    })
+    let set: Awaited<ReturnType<SessionManager['setUpAgent']>>
+    try {
+      set = await Promise.race([this.setUpAgent(callerId, opts, ctl.signal, progress), late.then((r) => ({ done: r }))])
+    } finally {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+    }
+    if ('done' in set) return set.done
+    const { key, d, notice } = set
+    const result = opts.wait === false ? this.agentWorking(d) : await this.awaitAgent(key, d, signal)
+    return result.ok && notice ? { ...result, notice: [result.notice, notice].filter(Boolean).join('; ') } : result
+  }
+
+  /** Everything start_agent does before it waits on the child's turn (#660); `done` is a final answer, otherwise the child works */
+  private async setUpAgent(
+    callerId: string,
+    opts: StartAgentOpts,
+    signal: AbortSignal,
+    progress: StartProgress,
+  ): Promise<{ done: ChildRunResult } | { key: string; d: Delegation; notice: string | undefined }> {
+    const done = (r: ChildRunResult) => ({ done: r })
     const caller = this.meta.get(callerId)
-    if (!caller?.projectId) return { ok: false, error: 'This session belongs to no project, so it cannot start agents.' }
+    if (!caller?.projectId) return done({ ok: false, error: 'This session belongs to no project, so it cannot start agents.' })
     if ((caller.askedBy || [...this.delegations.values()].some((d) => d.sessionId === callerId && !d.agent && !d.settled)) && !this.autoBoundaryOpen(callerId, 'delegation depth')) {
-      return { ok: false, error: 'This session was itself started or asked by another session, so it cannot start agents — say in your answer what is needed instead.' }
+      return done({ ok: false, error: 'This session was itself started or asked by another session, so it cannot start agents — say in your answer what is needed instead.' })
     }
     const project = this.store.listProjects().find((p) => p.id === caller.projectId)
-    if (!project) return { ok: false, error: 'This session\'s project is no longer registered.' }
+    if (!project) return done({ ok: false, error: 'This session\'s project is no longer registered.' })
     if (project.trusted !== true && !this.autoBoundaryOpen(callerId, 'start in an untrusted project')) {
-      return { ok: false, error: "This session's project is not trusted, so it cannot start agents — the person can trust it from the project menu." }
+      return done({ ok: false, error: `This session's project is not trusted, so it cannot start agents — the person can trust it from the project menu. ${ASK_THE_PERSON}` })
     }
     const tool = opts.tool ?? this.firstTool(project.defaultTool)
-    if (!tool) return { ok: false, error: 'No agent adapter is available. Install and configure an agent CLI before starting an agent.' }
+    if (!tool) return done({ ok: false, error: 'No agent adapter is available. Install and configure an agent CLI before starting an agent.' })
     const adapter = this.adapters.get(tool)
-    if (!adapter) return { ok: false, error: `No agent named "${tool}" here. Installed tools: ${[...this.adapters.keys()].join(', ') || 'none'}.` }
+    if (!adapter) return done({ ok: false, error: `No agent named "${tool}" here. Installed tools: ${[...this.adapters.keys()].join(', ') || 'none'}.` })
     const full = this.agentCeilingError(callerId, project.id)
-    if (full) return { ok: false, error: full }
+    if (full) return done({ ok: false, error: full })
     // The project's remembered choice for that tool (#107), as a session the person opens there gets. A remembered
     // effort belongs to the remembered model: with another model named, that model's default effort is used
     const remembered = this.store.projectToolDefaults(project.id)[tool]
     const model = opts.model ?? remembered?.model ?? undefined
     const effort = opts.effort ?? (!opts.model || opts.model === remembered?.model ? (remembered?.effort ?? undefined) : undefined)
-    const wrong = await this.agentChoiceError(tool, opts.model, opts.effort, model)
-    if (wrong) return { ok: false, error: wrong }
+    const checked = await this.agentChoiceError(tool, opts.model, opts.effort, model)
+    if (checked.error) return done({ ok: false, error: checked.error })
+    const unchecked = checked.unchecked
     const found = await adapter.detect()
-    if (!found.installed || !found.loggedIn) return { ok: false, error: `${adapter.descriptor.label} cannot take the task: ${found.detail}` }
+    if (!found.installed || !found.loggedIn) return done({ ok: false, error: `${adapter.descriptor.label} cannot take the task: ${found.detail}. ${ASK_THE_PERSON}` })
     // A new worktree (part 2): its branch is settled before the card, which names it
     const worktree = opts.worktree || opts.branch ? await this.agentWorktreeBranch(project, opts) : null
-    if (worktree && 'error' in worktree) return { ok: false, error: worktree.error }
+    if (worktree && 'error' in worktree) return done({ ok: false, error: worktree.error })
 
+    progress.stage = 'asking'
     const consent = await this.ensureAgentConsent(
       callerId,
       {
@@ -5735,15 +5885,18 @@ export class SessionManager {
       },
       signal,
     )
-    if (!consent.ok) return consent
+    if (!consent.ok) return done(consent)
+    // The bound passed while the card stood (the caller has its answer): nothing is created now
+    if (signal.aborted) return done({ ok: false, error: 'The call was withdrawn before the session was created, so none was.' })
     // The card may have stood a while: counted again
     const fullNow = this.agentCeilingError(callerId, project.id)
-    if (fullNow) return { ok: false, error: fullNow }
+    if (fullNow) return done({ ok: false, error: fullNow })
 
     // The caller's own folder (a worktree session's is its worktree), so the two work on the same files; or a new
     // worktree of the project's repository (part 2), which createSession makes in the worktree root
     const cwd = worktree ? project.path : (this.store.sessionCwd(callerId) ?? caller.worktree?.path ?? project.path)
     let child: SessionInfo
+    progress.stage = 'creating'
     try {
       child = await this.createSession({
         projectId: project.id,
@@ -5761,8 +5914,10 @@ export class SessionManager {
         ...(worktree ? { worktree: true, worktreeBranch: worktree.branch, ...(caller.worktree ? { worktreeBase: caller.worktree.branch } : {}) } : {}),
       })
     } catch (e) {
-      return { ok: false, error: `Could not start the session: ${(e as Error).message}` }
+      return done({ ok: false, error: `Could not start the session: ${(e as Error).message}` })
     }
+    progress.stage = 'created'
+    progress.childId = child.id
     // A worktree session is named by its branch, as every worktree session is; otherwise by its job
     if (!worktree) this.rename(child.id, agentName(opts.task))
     const key = `${callerId}>${child.id}`
@@ -5772,11 +5927,10 @@ export class SessionManager {
     } catch (e) {
       this.delegations.delete(key)
       if (this.agentRuns.get(child.id) === d.wait) this.agentRuns.delete(child.id)
-      return { ok: false, error: `Could not give the task to the new session: ${(e as Error).message}` }
+      return done({ ok: false, error: `Could not give the task to the new session: ${(e as Error).message}` })
     }
     const notice = this.handles.get(child.id)?.delegationNotice?.()
-    const result = opts.wait === false ? this.agentWorking(d) : await this.awaitAgent(key, d, signal)
-    return result.ok && notice ? { ...result, notice: [result.notice, notice].filter(Boolean).join('; ') } : result
+    return { key, d, notice: [unchecked, notice].filter(Boolean).join('; ') || undefined }
   }
 
   /**
@@ -5985,20 +6139,35 @@ export class SessionManager {
    * wrong name costs one call rather than a child whose first turn fails. Lenient where the list is: a name the
    * list's ids or labels contain (an alias such as "sonnet") passes, and a tool that cannot list its models passes all.
    */
-  private async agentChoiceError(tool: string, askedModel: string | undefined, askedEffort: string | undefined, model: string | undefined): Promise<string | null> {
-    if (!askedModel && !askedEffort) return null
-    const { supported, models } = await this.listModels(tool)
-    if (!supported || models.length === 0) return null
+  private async agentChoiceError(
+    tool: string,
+    askedModel: string | undefined,
+    askedEffort: string | undefined,
+    model: string | undefined,
+  ): Promise<{ error: string | null; unchecked?: string }> {
+    if (!askedModel && !askedEffort) return { error: null }
+    /*
+     * **A bounded wait on a cached list (#660).** The check helps a caller that misspelled a model; it must never
+     * hold the call, so with no list in time the child starts on the name as given, and the answer says it was not
+     * checked. A tool that cannot list its models passes silently, as it always did.
+     */
+    const adapter = this.adapters.get(tool)
+    if (!adapter?.listModels) return { error: null }
+    const models = await this.modelsWithin(tool, START_AGENT_MODEL_CHECK_MS)
+    if (!models || models.length === 0) {
+      const what = [askedModel && `model "${askedModel}"`, askedEffort && `effort "${askedEffort}"`].filter(Boolean).join(' and ')
+      return { error: null, unchecked: `${what} not checked: ${tool}'s model list was not available in time. If the session's first turn fails on it, start again without it` }
+    }
     const find = (name: string) => {
       const n = name.toLowerCase()
       return models.find((m) => m.id.toLowerCase() === n) ?? models.find((m) => m.id.toLowerCase().includes(n) || m.label.toLowerCase().includes(n))
     }
-    if (askedModel && !find(askedModel)) return `${tool} has no model "${askedModel}". Its models: ${models.map((m) => m.id).join(', ')}.`
+    if (askedModel && !find(askedModel)) return { error: `${tool} has no model "${askedModel}". Its models: ${models.map((m) => m.id).join(', ')}.` }
     if (askedEffort) {
       const m = model ? find(model) : models[0]
-      if (m && m.efforts.length > 0 && !m.efforts.includes(askedEffort)) return `${m.id} has no effort "${askedEffort}". Its efforts: ${m.efforts.join(', ')}.`
+      if (m && m.efforts.length > 0 && !m.efforts.includes(askedEffort)) return { error: `${m.id} has no effort "${askedEffort}". Its efforts: ${m.efforts.join(', ')}.` }
     }
-    return null
+    return { error: null }
   }
 
   /** Update grants last only for the calling session on this host; they never change automatic application. */
@@ -6036,8 +6205,8 @@ export class SessionManager {
       return { ok: true }
     }
     if (decision === 'allow') return { ok: true }
-    if (decision === 'deny') return { ok: false, error: 'The person did not allow this session to start another agent. Do not start one again unless they tell you to.' }
-    return { ok: false, error: 'The question to the person was withdrawn before they answered, so no agent was started.' }
+    if (decision === 'deny') return { ok: false, error: `The person did not allow this session to start another agent. Do not start one again unless they tell you to. ${ASK_THE_PERSON}` }
+    return { ok: false, error: `The question to the person was withdrawn before they answered, so no agent was started. ${ASK_THE_PERSON}` }
   }
 
   /**

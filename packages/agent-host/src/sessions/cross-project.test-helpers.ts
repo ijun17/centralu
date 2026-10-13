@@ -60,6 +60,8 @@ export class CrossAdapter implements AgentAdapter {
   }
   capabilities = { approvals: true, contextUsage: 'exact' as const, resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false, midTurnInput: true }
   handles = new Map<string, CrossHandle>()
+  /** A test sets this to give the tool a model list */
+  listModels?: () => Promise<import('@cc/protocol').ModelOption[]>
   async detect() {
     return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
   }

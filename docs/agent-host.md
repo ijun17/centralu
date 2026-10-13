@@ -289,12 +289,18 @@ below retained for `safe` and `normal`:
    and for a new `agent_session send` turn.
 3. **Choice.** `tool` defaults to the project's tool; `model` and `effort` to that tool's remembered choice for the
    project (#107). A model or effort the tool's list does not have is refused with the list (`agentChoiceError`;
-   an alias the ids or labels contain passes, and a tool that cannot list passes all).
+   an alias the ids or labels contain passes, and a tool that cannot list passes all). The check never holds the call
+   (#660): it uses the cached list (one read at a time, kept whenever it arrives, a failed read not retried for a
+   minute) and waits at most `START_AGENT_MODEL_CHECK_MS` (3 s) for a missing one; without a list in time the child
+   starts on the name as given and the answer says it was not checked.
 4. **Consent** (`ensureAgentConsent`). A card in the caller's approval slot, detail `agent_start` (the tool, model,
    preset and task): allow once, always for this session (`always`, kept in memory while this host serves the
    session), always for this project (`always` with scope `project`, the card's ⌥; stored as the project's
    `project_consents` row of kind `agents`, from and to the same project, listed and revoked in Settings →
    Permissions), deny.
+   Everything before the child exists (check, card, start) has one bound, `START_AGENT_SETUP_MS` (200 s, under the Codex
+   bridge's 280 s): past it the card is withdrawn and the answer says whether a session was created. Refusals and this
+   answer tell the calling model to ask the person rather than do the work with its own CLI's subagents (#660).
 5. **The child.** A visible session in the caller's own folder (a worktree session's worktree), named from the task,
    marked `askedBy` the caller (drawn indented under it in the sidebar, owner decision 2026-10-12; its header links
    back: "Started by …"), under **the caller's permission preset**:
