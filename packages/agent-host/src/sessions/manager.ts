@@ -1,4 +1,4 @@
-import { saveWorktreeRecovery, restoreWorktreeRecovery, stageWorktreeRecoveryRemoval, worktreeRecoveryBytes, worktreeRecoveryDir, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
+import { saveWorktreeRecovery, restoreWorktreeRecovery, repairWorktreeRecoveryRemovals, stageWorktreeRecoveryRemoval, worktreeRecoveryBytes, worktreeRecoveryDir, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
 import { randomUUID } from 'node:crypto'
 import { residentCost } from './tool-cost.js'
 import { orchestratorHome, orchestratorRole } from './orchestrator-home.js'
@@ -299,6 +299,23 @@ function isCompactionMarker(row: StoredMessage): boolean {
  * limit hit, error) means the turn is over (C-4) */
 const inTurn = (state: SessionState): boolean => state === 'working' || state === 'waiting_approval'
 
+/** A path resolved through the nearest folder that exists, so a folder not made yet still compares with its parent's real path */
+function canonicalPath(path: string): string {
+  const full = resolve(path)
+  try {
+    return realpathSync.native(full)
+  } catch {
+    const parent = dirname(full)
+    return parent === full ? full : join(canonicalPath(parent), basename(full))
+  }
+}
+
+/** Whether `path` is `folder` or lies inside it, judged by segment: `/a/wt-old` is not inside `/a/wt` */
+function insideFolder(path: string, folder: string): boolean {
+  const rel = relative(folder, path)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+}
+
 /** Length of the conversation list received from the tool before waking — receiving this many may
  * mean the list was truncated (externalGone) */
 const EXTERNAL_LIST_LIMIT = 200
@@ -592,6 +609,8 @@ export class SessionManager {
      * someone. A failure here is no reason to block session restore, so it is not awaited.
      */
     void this.sweepOrphanHandoffNotes().catch(() => {})
+    // Recovery folders a purge moved aside and never finished with (#647): back for an entry still in the trash, gone otherwise
+    void repairWorktreeRecoveryRemovals((id) => store.isTrashed(id)).catch((e) => console.error(`[trash] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
     this.nameUnnamedWorktrees()
     /*
      * Merge detection also runs once at startup (#69) — a merge could have happened in a terminal
@@ -1964,7 +1983,7 @@ export class SessionManager {
     sessionId: string,
     adopt?: AgentProcess,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }> {
-    if (this.worktreeCleanup.has(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    if (this.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
@@ -2304,7 +2323,7 @@ export class SessionManager {
    * exactly as it was, and only what happens from here on piles up in the copy.
    */
   async forkConversation(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
-    if (this.worktreeCleanup.has(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    if (this.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
@@ -2647,7 +2666,8 @@ export class SessionManager {
       try {
         await this.store.purgeSession(sessionId)
       } catch (e) {
-        await recoveryRemoval.abort().catch(() => {})
+        // Not swallowed: the folder left aside carries the session id, and the next start puts it back (#647)
+        await recoveryRemoval.abort().catch((cause: Error) => console.error(`[trash] recovery files of ${sessionId.slice(0, 8)} could not be put back after a failed purge and stay aside until the next start: ${cause.message}`))
         throw e
       }
       await recoveryRemoval.commit().catch(() => {})
@@ -2745,7 +2765,7 @@ export class SessionManager {
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
   ): Promise<SessionInfo & { applied: SettingsApplied }> {
-    if (this.worktreeCleanup.has(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    if (this.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
@@ -3501,7 +3521,7 @@ export class SessionManager {
   ): Promise<void> {
     const restarting = this.deferredRestarts.get(sessionId)
     if (restarting) await restarting
-    if (this.worktreeCleanup.has(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    if (this.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
@@ -3514,7 +3534,7 @@ export class SessionManager {
       }
     }
 
-    if (this.worktreeCleanup.has(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    if (this.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const h = this.requireHandle(sessionId)
     // A message from the person is always a message boundary — continuing after an interrupt means everything
     // before it is one chunk (#66)
@@ -3595,7 +3615,7 @@ export class SessionManager {
    * untouched, and only the tool underneath it is swapped.
    */
   async switchTool(sessionId: string, tool: ToolName): Promise<SessionInfo> {
-    if (this.worktreeCleanup.has(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    if (this.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
     if (m.tool === tool) return { ...m, live: this.handles.has(sessionId) }
@@ -4491,7 +4511,7 @@ export class SessionManager {
    * reports background work.
    */
   sessionIdle(sessionId: string): SessionIdle {
-    if (this.worktreeCleanup.has(sessionId)) return { idle: false, reason: 'turn' }
+    if (this.worktreeCleanupBlocks(sessionId)) return { idle: false, reason: 'turn' }
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
     if (this.agentRuns.get(sessionId)?.waitingForInputs) return { idle: false, reason: 'turn' }
@@ -4573,7 +4593,7 @@ export class SessionManager {
     /** What made the restart, for the cache's rebuild cause (§6.1); a plain new process when absent */
     cause?: RebuildCause,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
-    if (this.worktreeCleanup.has(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    if (this.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     if (cause) {
       this.restartReasons.set(sessionId, cause)
       if (cause === 'launch_settings') console.error(`[sessions] restarting ${sessionId}: launch settings changed or previously unrecorded`)
@@ -5937,8 +5957,23 @@ export class SessionManager {
     return { branch: agentBranch(opts.task, randomUUID()) }
   }
 
-  /** Prevent a send/resume from racing the snapshot and worktree removal. */
-  private worktreeCleanup = new Set<string>()
+  /** Prevent a send/resume from racing the snapshot and worktree removal: the child, by id, and its worktree folder */
+  private worktreeCleanup = new Map<string, string>()
+
+  /**
+   * Whether a cleanup under way holds this session still (#647): the child whose worktree goes, and every session whose
+   * folder is inside that worktree. A helper the child started works there; woken during the snapshot, it would write
+   * into a folder about to be removed. Cheap while no cleanup runs, which is nearly always.
+   */
+  private worktreeCleanupBlocks(sessionId: string): boolean {
+    if (this.worktreeCleanup.size === 0) return false
+    if (this.worktreeCleanup.has(sessionId)) return true
+    const cwd = this.store.sessionCwd(sessionId) ?? this.meta.get(sessionId)?.worktree?.path
+    if (!cwd) return false
+    const path = canonicalPath(cwd)
+    for (const folder of this.worktreeCleanup.values()) if (insideFolder(path, folder)) return true
+    return false
+  }
 
   /** #608: the parent decides; local work follows the session into the trash in every preset. */
   private async cleanUpWorktreeChild(target: SessionInfo): Promise<{ ok: true; branch: string; setAside: WorktreeRecovery; warning?: string } | { ok: false; error: string }> {
@@ -5955,12 +5990,15 @@ export class SessionManager {
     if (this.worktreeCleanup.has(target.id)) return { ok: false, error: 'This worktree is already being removed' }
     // A sidebar delete already under way keeps the worktree in place; it is not taken away behind it (#647)
     if (this.trashing.has(target.id)) return { ok: false, error: `"${target.name}" is already being deleted; its worktree stays in place` }
-    const occupants = this.sessionsWorkingInside(target)
-    if (occupants.length) {
-      return { ok: false, error: `${occupants.map((s) => `"${s.name}"`).join(', ')} still ${occupants.length === 1 ? 'works' : 'work'} in the worktree of "${target.name}" — stop or delete ${occupants.length === 1 ? 'it' : 'them'} first` }
+    const occupied = (): { ok: false; error: string } | null => {
+      const occupants = this.sessionsInside(target)
+      if (!occupants.length) return null
+      return { ok: false, error: `${occupants.map((s) => `"${s.name}"`).join(', ')} ${occupants.length === 1 ? 'is' : 'are'} still in the worktree of "${target.name}" — delete ${occupants.length === 1 ? 'it' : 'them'} first` }
     }
-    this.worktreeCleanup.add(target.id)
+    const taken = occupied()
+    if (taken) return taken
     const { branch, path } = target.worktree
+    this.worktreeCleanup.set(target.id, canonicalPath(path))
     try {
       const cwd = this.cwdOf(target.projectId)
       // Disposal must succeed before reading a snapshot or removing any files. An idle CLI is still a process.
@@ -5976,7 +6014,13 @@ export class SessionManager {
         this.onEvent({ type: 'notice', sessionId: target.id, level: 'info', from: 'Centralu', label: 'worktree recovery',
           text: `Local work saved before worktree deletion: ${setAside.changedFiles} uncommitted files, ${setAside.commits} commits not on the trunk. Recovery patches and bundles are at ${worktreeRecoveryDir(target.id)}. Restore from Settings → Trash or recover these files manually before deleting this session for good.` })
       }
+      // The snapshot took a while (bundles may take up to two minutes): a session may have come into the folder meanwhile
+      // (one restored from the trash, one opened there). It stays in place, and so does the worktree; the snapshot is kept.
+      const appeared = occupied()
+      if (appeared) return appeared
       await this.trashSession(target.id, false, false, setAside)
+      const appearedSince = occupied()
+      if (appearedSince) return { ok: true, branch, setAside, warning: `The session is in the trash, but worktree ${path} and branch ${branch} were left: ${appearedSince.error}. Recovery files are at ${worktreeRecoveryDir(target.id)}.` }
       try {
         await gitWorktreeRemove(cwd, path, true, true)
       } catch (e) {
@@ -5996,36 +6040,18 @@ export class SessionManager {
   }
 
   /**
-   * The other sessions whose folder is inside this worktree and that still hold a process or a turn (#647): a helper
-   * the child started without a worktree of its own works in the child's. Removing the worktree under it would
-   * lose what it writes next, so cleanup is refused while one is there. A session with no process and no turn is
-   * not counted: nothing of it is running in the folder.
+   * The other sessions whose folder is inside this worktree (#647): a helper the child started without a worktree of
+   * its own works in the child's. One asleep counts too — after a host swap no session has a process, and a message
+   * wakes it right there. Removing the worktree under it would lose what it writes next, so cleanup is refused.
    */
-  private sessionsWorkingInside(target: SessionInfo): SessionInfo[] {
+  private sessionsInside(target: SessionInfo): SessionInfo[] {
     const root = target.worktree?.path
     if (!root) return []
-    // Resolved through the nearest folder that exists, so a folder not made yet still compares with its parent's real path
-    const canonical = (path: string): string => {
-      const full = resolve(path)
-      try {
-        return realpathSync.native(full)
-      } catch {
-        const parent = dirname(full)
-        return parent === full ? full : join(canonical(parent), basename(full))
-      }
-    }
-    const inside = (path: string, folder: string): boolean => {
-      const rel = relative(folder, path)
-      return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
-    }
-    const folder = canonical(root)
+    const folder = canonicalPath(root)
     return [...this.meta.values()].filter((s) => {
       if (s.id === target.id) return false
-      const busy = s.state === 'working' || s.state === 'waiting_approval' || this.resuming.has(s.id) ||
-        (this.agentRuns.has(s.id) && !this.agentRuns.get(s.id)!.finished)
-      if (!busy && !this.handles.has(s.id)) return false
       const cwd = this.store.sessionCwd(s.id) ?? s.worktree?.path
-      return !!cwd && inside(canonical(cwd), folder)
+      return !!cwd && insideFolder(canonicalPath(cwd), folder)
     })
   }
 

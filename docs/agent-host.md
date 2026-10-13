@@ -424,9 +424,13 @@ to remove its child: neither uncommitted files nor an unproven merge refuses del
 finish or be stopped first. A missing worktree folder is refused with its path and a request to restore it;
 the live/stored session retains worktree metadata (only the trash list hides missing folders), so it never
 becomes a same-folder deletion. Cleanup refuses a child still waking/restarting, blocks sends/resumes, and requires
-successful disposal of the idle CLI before snapshotting. It is also refused while another session that holds a
-process or a turn has its folder inside the worktree (#647): a helper the child started without a worktree of
-its own works there, and the answer names it so the parent stops or deletes it first. A sidebar delete already
+successful disposal of the idle CLI before snapshotting. It is also refused while any other session has its
+folder inside the worktree (#647), asleep or not: a helper the child started without a worktree of its own
+works there, and after a host swap no session has a process, so a message would wake it right in the folder.
+The answer names those sessions so the parent deletes them first. While a cleanup runs, every session whose
+folder is inside that worktree is held like the child itself (no send, wake, resume or fork), and the
+occupants are checked again after the snapshot and again after trashing: one that came in meanwhile (restored
+from the trash, opened there) keeps the worktree in place, with the snapshot kept. A sidebar delete already
 under way refuses it too, and a cleanup cannot join a delete that started first: that delete's trash record
 carries no recovery snapshot, so the worktree stays in place for that path. Failed capture leaves the worktree and branch in place. Once captured,
 the session goes to the trash, then git removes the worktree (including initialized submodules) and branch.
@@ -473,9 +477,12 @@ or bundle. Trash byte totals include recovery files.
 
 Restore recreates the root branch/worktree at its saved tip and attempts both patches before making the
 session live (its CLI remains stopped). If the original branch name is occupied, it uses `recovered/<session id>`.
-A name is taken over only when it is free, or when it already sits at the saved tip with no worktree on it
-(#647): `git worktree add -b` creates the branch before the folder, so a failed attempt leaves the branch
-behind, and a retry reuses that leftover instead of failing on it. Any other occupied name gets a numeric suffix.
+An occupied original name is left alone, whoever made it. A recovery name is taken over when it is free, or
+when restore made it (#647): `git worktree add -b` creates the branch before the folder, so a failed attempt
+leaves the branch behind, and a retry reuses that leftover instead of failing on it. The mark is a ref under
+`refs/centralu/recovered/<branch>` at the saved tip, written before the branch; a branch at the saved tip
+without it is the person's and gets a numeric suffix instead, so a later cleanup never deletes a branch the
+person made.
 If HEAD and the bundled stored branch differ, restore also creates `recovered/<session id>-stored-branch`
 at the stored tip and names it in the notice. An occupied recovery name gets a numeric suffix; a retry
 reuses a branch already at that tip. Existing branches are never overwritten.
@@ -489,7 +496,10 @@ clears the old marker before applying patches again. Each later deletion uses a 
 files are retained. Deleting for good, including empty trash, removes the entire session recovery directory
 only after the rows are gone (#647): the directory is first moved aside, which fails where removal would and
 leaves the trash entry retryable, then deleted once the database step succeeds, or moved back when that step
-fails, so the entry stays restorable. No automatic trash expiry is implemented; expiry
+fails, so the entry stays restorable. A folder that cannot be moved back is logged and left aside under
+`<session id>.purging-<random>`; at startup, when no purge runs, such folders go back under their session's
+name while the entry is still in the trash (joining any snapshot made since), and are deleted once it is gone,
+so a crash at any point of a purge is repaired. No automatic trash expiry is implemented; expiry
 must use `purgeSession` if added. Gitlinks found only in older merged superproject history remain a
 follow-up ([#623](https://github.com/ijun17/centralu/issues/623)); a superproject merge does not prove
 that module commits were pushed. Writes by other programs during capture are outside this session's lock.

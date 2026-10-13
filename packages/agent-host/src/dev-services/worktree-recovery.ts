@@ -33,11 +33,43 @@ export async function clearWorktreeRecovery(sessionId: string): Promise<void> {
 export async function stageWorktreeRecoveryRemoval(sessionId: string): Promise<{ commit: () => Promise<void>; abort: () => Promise<void> }> {
   const dir = worktreeRecoveryDir(sessionId)
   if (!existsSync(dir)) return { commit: async () => {}, abort: async () => {} }
-  const staged = `${dir}.purging-${randomUUID()}`
+  const staged = `${dir}${PURGING}${randomUUID()}`
   await rename(dir, staged)
   return {
     commit: () => rm(staged, { recursive: true, force: true, maxRetries: 3 }),
     abort: () => rename(staged, dir),
+  }
+}
+
+const PURGING = '.purging-'
+
+/**
+ * Finishes what a purge interrupted by a crash left (#647): a folder moved aside goes back under its session's name
+ * while that session is still in the trash (its snapshots join any made since), and is deleted once the entry is gone.
+ * Run at startup, when no purge is under way.
+ */
+export async function repairWorktreeRecoveryRemovals(trashed: (sessionId: string) => boolean): Promise<void> {
+  const root = join(dataRoot(), 'worktree-recovery')
+  if (!existsSync(root)) return
+  for (const name of await readdir(root)) {
+    const at = name.indexOf(PURGING)
+    if (at === -1) continue
+    const sessionId = name.slice(0, at)
+    if (!isSessionId(sessionId)) continue
+    const staged = join(root, name)
+    if (!trashed(sessionId)) {
+      await rm(staged, { recursive: true, force: true, maxRetries: 3 })
+      continue
+    }
+    const dir = join(root, sessionId)
+    if (!existsSync(dir)) {
+      await rename(staged, dir)
+      continue
+    }
+    for (const snapshot of await readdir(staged)) {
+      if (!existsSync(join(dir, snapshot))) await rename(join(staged, snapshot), join(dir, snapshot))
+    }
+    await rm(staged, { recursive: true, force: true, maxRetries: 3 })
   }
 }
 
@@ -298,27 +330,34 @@ export async function restoreWorktreeRecovery(
   if (!existsSync(path)) {
     await rm(join(dir, 'patches-applied'), { force: true })
     /*
-     * A branch name is taken over only when it is free, or when it already sits at the saved tip with no worktree
-     * on it (#647): `git worktree add -b` creates the branch before the folder, so a failed attempt leaves the
-     * branch behind, and a retry must find its own leftover reusable rather than fail on it forever. Any other
-     * occupied name is left alone and a numbered recovery name is used instead.
+     * An occupied original name is left alone, whoever made it. A recovery name is taken over when it is free, or when
+     * this code made it (#647): `git worktree add -b` creates the branch before the folder, so a failed attempt leaves
+     * the branch behind, and a retry must find its own leftover reusable rather than fail on it forever. The mark is a
+     * ref under `refs/centralu/recovered/` written before the branch; a branch at the saved tip without it is the
+     * person's, and a numbered name is used instead, so a later cleanup never deletes a branch the person made.
      */
-    const reusable = async (name: string): Promise<boolean | null> => {
-      const ref = `refs/heads/${name}`
-      const existing = await runGit(repo, ['rev-parse', '--verify', ref]).then((s) => s.trim()).catch(() => null)
+    const tipOf = (ref: string) => runGit(repo, ['rev-parse', '--verify', ref]).then((s) => s.trim()).catch(() => null)
+    const ours = async (name: string): Promise<boolean | null> => {
+      const existing = await tipOf(`refs/heads/${name}`)
       if (!existing) return null
-      if (existing !== recovery.tip) return false
-      return (await runGit(repo, ['for-each-ref', '--format=%(worktreepath)', ref])).trim() === ''
+      if (existing !== recovery.tip || (await tipOf(`refs/centralu/recovered/${name}`)) !== recovery.tip) return false
+      return (await runGit(repo, ['for-each-ref', '--format=%(worktreepath)', `refs/heads/${name}`])).trim() === ''
     }
     let create = true
-    let state = await reusable(branch)
-    if (state === false) {
+    if (await tipOf(`refs/heads/${branch}`)) {
       const base = `recovered/${sessionId}`
       branch = base
-      for (let suffix = 1; (state = await reusable(branch)) === false; suffix++) branch = `${base}-${suffix}`
+      for (let suffix = 1; ; suffix++) {
+        const state = await ours(branch)
+        if (state !== false) {
+          create = state === null
+          break
+        }
+        branch = `${base}-${suffix}`
+      }
     }
-    if (state === true) create = false
     if (root.bundle) await runGit(repo, ['fetch', join(dir, '0.bundle'), ...(root.refs ?? ['HEAD'])], { allowRepoPrograms: trust.trusted === true })
+    if (create && branch.startsWith('recovered/')) await runGit(repo, ['update-ref', `refs/centralu/recovered/${branch}`, recovery.tip])
     await runGit(repo, ['worktree', 'add', ...(create ? ['-b', branch, path, recovery.tip] : [path, branch])], { allowRepoPrograms: trust.trusted === true })
     if (root.patch || root.staged) {
       try {

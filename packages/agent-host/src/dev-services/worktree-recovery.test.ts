@@ -165,13 +165,13 @@ describe('worktree recovery follow-ups (#608)', () => {
       const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
       remove()
       if (name === 'recovered') git(repo, ['branch', branch, 'main'])
-      const expected = name === 'recovered' ? `recovered/${sessionId}` : branch
+      const expected = `recovered/${sessionId}`
       // `git worktree add -b` creates the branch before the folder: a parent that is a file fails the second step.
       const blocker = join(dir, 'blocker')
       writeFileSync(blocker, '')
       const path = join(blocker, 'child')
       await expect(restoreWorktreeRecovery(sessionId, repo, path, branch, recovery, {})).rejects.toThrow()
-      expect(git(repo, ['rev-parse', expected])).toBe(tip)
+      expect(git(repo, ['rev-parse', name === 'recovered' ? expected : branch])).toBe(tip)
       expect(existsSync(path)).toBe(false)
       rmSync(blocker)
       const restored = await restoreWorktreeRecovery(sessionId, repo, path, branch, recovery, {})
@@ -179,9 +179,24 @@ describe('worktree recovery follow-ups (#608)', () => {
       expect(git(path, ['symbolic-ref', '--short', 'HEAD'])).toBe(expected)
       expect(git(path, ['rev-parse', 'HEAD'])).toBe(tip)
       expect(readFileSync(join(path, 'file.txt'), 'utf8')).toBe('uncommitted\n')
-      expect(git(repo, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/recovered/'])).toBe(name === 'recovered' ? expected : '')
+      expect(git(repo, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/recovered/'])).toBe(expected)
+      // The original name the first attempt created is left as it is, like any branch the person could have made
+      if (name === 'original') expect(git(repo, ['rev-parse', branch])).toBe(tip)
     }, process.platform === 'win32' ? 90_000 : 30_000,
   )
+
+  it('does not adopt a recovery-named branch the person made, even at the saved tip (#647)', async () => {
+    git(repo, ['worktree', 'add', '-b', branch, child])
+    const tip = commit(child, 'saved work\n')
+    const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+    remove()
+    git(repo, ['branch', branch, 'main'])
+    git(repo, ['branch', `recovered/${sessionId}`, tip])
+    const restored = await restoreWorktreeRecovery(sessionId, repo, child, branch, recovery, {})
+    expect(restored.branch).toBe(`recovered/${sessionId}-1`)
+    expect(git(repo, ['rev-parse', `refs/centralu/recovered/recovered/${sessionId}-1`])).toBe(tip)
+    expect(() => git(repo, ['rev-parse', '--verify', `refs/centralu/recovered/recovered/${sessionId}`])).toThrow()
+  }, process.platform === 'win32' ? 90_000 : 30_000)
 
   it('leaves a recovery branch that moved on alone and numbers its own (#647)', async () => {
     git(repo, ['worktree', 'add', '-b', branch, child])
