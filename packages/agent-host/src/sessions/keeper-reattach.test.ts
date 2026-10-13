@@ -131,6 +131,9 @@ describe('a host restart under the keeper', () => {
     await a.mgr.detachAll()
 
     const b = host(new Set([session.id]))
+    // The refresh waits for `sessionIdle` (#648), which never calls a tool that cannot report its background work idle
+    // while it runs: the stand-in reports it, as the Claude adapter does
+    b.claude.capabilities.backgroundTasks = true
     try {
       const kept = new FakeProcess() as unknown as AgentProcess
       await b.mgr.adoptKept([{ sessionId: session.id, tool: 'claude', process: kept }])

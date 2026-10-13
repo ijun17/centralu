@@ -848,6 +848,29 @@ export class ClaudeBackgroundTracker {
     return this.schedules.recover(messages) ? [this.event()] : []
   }
 
+  /**
+   * The tasks the previous host last saw running in an adopted process (#648, `ProcessSource.adopt.backgroundTasks`).
+   * The CLI sends its level only when it changes, so without this a tracker over an adopted process would list nothing
+   * and, since only a task the level once listed counts as background work, report none of their endings either: the
+   * session would read as idle and be put to sleep, or restarted, over a running shell. The manager lists them itself;
+   * this only makes the tracker know them, so the next `task_notification` or level is read against them.
+   */
+  seed(tasks: readonly BackgroundTask[]): void {
+    for (const t of tasks) {
+      if (t.status !== 'running' || this.seen.has(t.id)) continue
+      this.info.set(t.id, {
+        kind: t.kind,
+        description: t.description,
+        ...(t.parentCallId ? { parentCallId: t.parentCallId } : {}),
+        ...(t.ambient ? { ambient: true } : {}),
+        // `entry` derives stopsWithTurn from the kind unless the task is nested; a seeded one without it was nested
+        ...(t.stopsWithTurn === undefined && (t.kind === 'agent' || t.kind === 'shell') ? { nested: true } : {}),
+      })
+      this.live.push(t.id)
+      this.seen.add(t.id)
+    }
+  }
+
   /** Drops the wake-ups whose time has passed; the new level when that changed anything */
   tick(): NormalizedEvent[] {
     return this.schedules.prune() ? [this.event()] : []

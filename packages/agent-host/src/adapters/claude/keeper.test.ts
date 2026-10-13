@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { NormalizedEvent } from '@cc/protocol'
+import type { BackgroundTask, NormalizedEvent } from '@cc/protocol'
 import type { AgentProcess, AgentSpawnSpec } from '../contract.js'
 
 /**
@@ -61,7 +61,7 @@ function fakeProcess() {
   return { detach: vi.fn(async () => {}), kill: vi.fn(() => true) } as unknown as AgentProcess & { detach: ReturnType<typeof vi.fn> }
 }
 
-async function adoptedSession(openCalls: { callId: string; tool: string }[]) {
+async function adoptedSession(openCalls: { callId: string; tool: string }[], backgroundTasks?: BackgroundTask[]) {
   const events: NormalizedEvent[] = []
   const adopted = fakeProcess()
   const spawned: AgentSpawnSpec[] = []
@@ -73,7 +73,7 @@ async function adoptedSession(openCalls: { callId: string; tool: string }[]) {
       resumeExternalId: 'conv-1',
       processSource: {
         spawn: (spec) => (spawned.push(spec), fakeProcess()),
-        adopt: { process: adopted, openCalls },
+        adopt: { process: adopted, openCalls, ...(backgroundTasks ? { backgroundTasks } : {}) },
       },
     },
     (e) => events.push(e),
@@ -128,6 +128,33 @@ describe('claude under the keeper', () => {
     const { events } = await adoptedSession([{ callId: 'c1', tool: 'Bash' }])
     expect(sdk.state.interrupts).toBe(0)
     expect(events.filter((e) => e.type === 'error')).toHaveLength(0)
+  })
+
+  /**
+   * A shell started with `run_in_background` keeps running in the kept CLI, which lists its tasks only when they
+   * change (#648): the previous host's record seeds the tracker, so the shell's ending is reported, and until then
+   * the session reads as holding background work. Without the record, the CLI's notification about an unknown task
+   * is a foreground task's ending to the tracker, which says nothing.
+   */
+  it('the background shells the previous host recorded are known: their endings are reported', async () => {
+    const shell: BackgroundTask = { id: 'b1', kind: 'shell', description: 'npm run dev', stopsWithTurn: false, stoppable: true, status: 'running' }
+    const { events, handle } = await adoptedSession([], [shell])
+    sdk.push({ type: 'system', subtype: 'task_notification', task_id: 'b1', status: 'completed', summary: 'exited 0' })
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'background_tasks')).toBe(true))
+    const level = events.find((e) => e.type === 'background_tasks')
+    expect(level && level.type === 'background_tasks' && level.ended?.map((t) => [t.id, t.status])).toEqual([['b1', 'completed']])
+    expect(level && level.type === 'background_tasks' && level.live).toEqual([])
+    await handle.detach!()
+    sdk.end()
+  })
+
+  it('without a record from the previous host, the tracker starts empty, as before', async () => {
+    const { events, handle } = await adoptedSession([])
+    sdk.push({ type: 'system', subtype: 'task_notification', task_id: 'b1', status: 'completed', summary: 'exited 0' })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(events.some((e) => e.type === 'background_tasks')).toBe(false)
+    await handle.detach!()
+    sdk.end()
   })
 
   it('detaching tells the CLI nothing: no close, no deny for a waiting approval, and the stream ending is no crash', async () => {

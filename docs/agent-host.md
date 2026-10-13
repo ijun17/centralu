@@ -724,6 +724,15 @@ Implementation rules:
     whether a session's process can be swapped without losing work (#297): no turn, no pending approval or question,
     no running task that is not ambient, and never idle while a tool that cannot report background work holds a
     process. The rule itself is `sessionIdle` in `idle.ts`, next to `hostBusy` (§4.5).
+  - **The running tasks survive a host swap** (#648). The tool lists its level only when it changes and says nothing
+    at startup, so a host that adopted a kept process read every session as idle, and the sleeper or a definitions
+    refresh closed the process over a running dev server. The manager writes the running set to the store on every
+    change and when a process starts (`background_tasks:<id>`, empty for a new process); the host that adopts the
+    process lists the session from that record and hands it to the adapter (`ProcessSource.adopt.backgroundTasks`),
+    whose tracker is seeded with it so the tasks' endings are reported. A session whose record is missing (the previous
+    host predates it) is `background_unknown` until the tool first lists its work. The definitions and launch-settings
+    refreshes defer by `sessionIdle`, not only by a turn, and a deferred restart waits for running background work as
+    it waits for the turn (`applyDeferredRestart`, re-checked when a `background_tasks` event arrives).
 - **The CLI version a process runs is reported once per process, as `agent_version`** (#297). Claude: the init
   message's `claude_code_version` (init comes again with every query; only a change is sent). Codex: the `initialize`
   answer's `userAgent`, `<client name>/<server version> (<os>) …` (measured, codex-cli 0.160.0:
@@ -1478,6 +1487,7 @@ of a tool's:
 | The quiet period counts from host start for a session this host has not heard from | A host that just replaced another (a restart, a swap) does not know what the person was doing a second ago |
 | Sleeping is `SessionManager.sleepSession`: refused unless still idle, the handle leaves the map, `session_live {live: false, reason: 'asleep'}` goes out, the process is disposed. A message arriving meanwhile starts a resume that waits for the dispose (`sleeping`) | Never two processes on one conversation; a send is never lost to a closing handle |
 | Waking is the ordinary `resumeSession`, the path a session takes after a host restart; every resume sends `session_live {live: true}` | One path to keep right. The event tells every window, not only the one that asked |
+| `session_live {live: false}` also goes out when a process is dropped and no new one takes its place (#648): `reason: 'restart_failed'` when a restart the host started (a refresh, a CLI move, "Restart agent") did not bring a process up, `'crashed'` when the process died | Before this the windows kept showing the session live, the screen's wake stepped back, and the person learnt only when a send failed. Now it shows asleep, and the next message wakes it |
 | Under the keeper the dispose stops the kept child (stdin closed, signalled). A host that takes over finds nothing to adopt for it, lists it asleep, and wakes it in a new child (`sleep-keeper.test.ts`). The sweep stops before a detach (`stopPlan`) | A sleep in the middle of a swap would end a process the next host is meant to adopt |
 | The screen wakes a session when its composer takes the keyboard or gets its first key, and on send; never on selecting or viewing it, and the grid's panels are not woken at startup | A session looked at is not a session typed to. The resume runs while the person types, so its 0.7 s is mostly hidden. Before #568 selecting woke a session and the grid woke every panel at startup, to hide a slow Codex resume |
 | Asleep shows quietly: the sidebar's tool mark fades and its tooltip says "asleep"; the conversation's line says "Asleep — it wakes when you type to it", then "Waking session…" while it starts | Not a state to act on, so no colour and no badge; but a person who wonders why the first answer is slower can find out |

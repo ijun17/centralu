@@ -1,5 +1,6 @@
 import type {
   AdapterCapabilities,
+  BackgroundTask,
   ModelOption,
   UsageSnapshot,
   ApprovalDecision,
@@ -520,6 +521,12 @@ export type ProcessSource = {
      * adapter knows which of its calls those are, and releases the turn.
      */
     openCalls: { callId: string; tool: string }[]
+    /**
+     * The background tasks the previous host last saw running in this process (#648). The tool sends its level only
+     * when it changes, so a tracker that starts empty would never list them, and their endings would go unreported:
+     * the adapter seeds its tracker with these. Absent or empty when the previous host saw none.
+     */
+    backgroundTasks?: readonly BackgroundTask[]
   }
 }
 

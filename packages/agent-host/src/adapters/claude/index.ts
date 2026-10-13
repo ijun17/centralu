@@ -399,6 +399,8 @@ class ClaudeSession implements SessionHandle {
     // An adopted CLI announces its id only with its next turn's init; it is the conversation we resume
     if (opts.processSource?.adopt) this.externalId = opts.resumeExternalId ?? null
     if (opts.processSource?.adopt && opts.resumeExternalId) void this.recoverSchedules(opts.resumeExternalId, opts.cwd)
+    // The background work the previous host saw in this process (#648): the CLI will not list it again by itself
+    if (opts.processSource?.adopt?.backgroundTasks?.length) this.stream.tasks.seed(opts.processSource.adopt.backgroundTasks)
   }
 
   /**

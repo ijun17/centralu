@@ -29,6 +29,7 @@ import type {
   AppQuestion,
   AppReach,
   ApprovalDetail,
+  BackgroundTask,
   ProjectConsent,
   ProjectConsentKind,
   ModelOption,
@@ -60,6 +61,7 @@ import type {
 import {
   APP_SLUG,
   applyBackgroundTasks,
+  liveBackgroundTasks,
   DATA_DIR,
   // The frame's single-line field (#120) — lives in protocol (app-frames.ts) because the mock
   // also needs to put words into a session built with the same frame.
@@ -457,6 +459,13 @@ export class SessionManager {
   private definitionsRestartAfterTurn = new Set<string>()
   /** A kept process was started with adapter settings from an older host build (#589). */
   private launchSettingsRestartAfterTurn = new Set<string>()
+  /**
+   * Sessions whose adopted process may hold background work this host knows nothing of (#648): the previous host left
+   * no list of it (a build before the list was kept), and the tool says its level only when it changes. Until the
+   * first level arrives, the session is never idle (`sessionIdle`: `background_unknown`), so it is neither put to sleep
+   * nor restarted over a shell nobody can see. A fresh process starts known: it holds nothing yet.
+   */
+  private backgroundUnknown = new Set<string>()
   private updates: UpdateService | null = null
   /** Sessions allowed to update once per host; an "always" answer adds this session only. */
   private updateConsents = new Set<string>()
@@ -1599,6 +1608,8 @@ export class SessionManager {
       }
     }
     this.handles.set(id, handle)
+    // A new process holds no background work yet (#648)
+    this.rememberBackgroundTasks(info)
     // The cache's first request (§6.1): a new conversation, or one taken over from outside in a new process
     this.cacheLedger.note(id, params.resumeExternalId ? 'new_process' : 'cold_start')
     this.running.set(id, {
@@ -1922,15 +1933,48 @@ export class SessionManager {
     tool: ToolName,
     adopt?: AgentProcess,
     version?: string | null,
+    /** The background tasks the previous host last saw running in the adopted process (#648), if it kept a list */
+    kept?: readonly BackgroundTask[] | null,
   ): { processSource?: ProcessSource } {
     const host = this.keeperOpts.processes
     if (!host) return {}
     return {
       processSource: {
         spawn: (spec) => host.spawn(sessionId, tool, spec, version ?? undefined),
-        ...(adopt ? { adopt: { process: adopt, openCalls: this.openToolCalls(sessionId) } } : {}),
+        ...(adopt ? { adopt: { process: adopt, openCalls: this.openToolCalls(sessionId), backgroundTasks: kept ?? [] } } : {}),
       },
     }
+  }
+
+  /**
+   * The running background tasks of a session's process, kept in the store (#648) so the host that adopts the process
+   * after a swap knows what it holds: the tool lists its level only when it changes, and `close()` on a process kills
+   * its shells silently. Written on every change and when a process starts (empty). `null` when no host ever wrote it
+   * for this session, which an adopted process reads as "unknown".
+   */
+  private backgroundTasksKey(sessionId: string): string {
+    return `background_tasks:${sessionId}`
+  }
+
+  private keptBackgroundTasks(sessionId: string): BackgroundTask[] | null {
+    const raw = this.store.appSetting(this.backgroundTasksKey(sessionId))
+    if (raw === null) return null
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      return Array.isArray(parsed) ? (parsed as BackgroundTask[]).filter((t) => t && typeof t.id === 'string' && t.status === 'running') : []
+    } catch {
+      return []
+    }
+  }
+
+  private rememberBackgroundTasks(m: SessionInfo): void {
+    this.store.setAppSetting(this.backgroundTasksKey(m.id), JSON.stringify(m.backgroundTasks.filter((t) => t.status === 'running')))
+  }
+
+  /** Background work the session's process holds that ending it would end (#648): what its tool listed as running */
+  private backgroundRunning(sessionId: string): boolean {
+    const m = this.meta.get(sessionId)
+    return !!m && liveBackgroundTasks(m.backgroundTasks).length > 0
   }
 
   /** Tool calls the store holds for this session with no result after them (the newest 200 rows) */
@@ -2103,12 +2147,14 @@ export class SessionManager {
      * adopted one keeps the version its keeper tag gave (adoptKept) — it was started long before.
      */
     if (!adopt) m.agentVersion = this.versionHint?.(tool) ?? null
+    // What the previous host saw running in the process this one adopts (#648); null when it kept no list
+    const kept = adopt ? this.keptBackgroundTasks(sessionId) : null
     try {
       const creating = adapter.createSession(
         {
           sessionId,
           cwd,
-          ...this.processSourceFor(sessionId, tool, adopt, m.agentVersion),
+          ...this.processSourceFor(sessionId, tool, adopt, m.agentVersion, kept),
           model: launched.model ?? undefined,
           effort: launched.effort ?? undefined,
           verbosity: launched.verbosity ?? undefined,
@@ -2214,6 +2260,9 @@ export class SessionManager {
       if (!adopt) {
         this.rememberToolPrefix(sessionId)
         this.rememberLaunchSettings(m, cwd)
+        // A new process holds no background work yet (#648); whatever an earlier adopted one left unknown is over
+        this.backgroundUnknown.delete(sessionId)
+        this.rememberBackgroundTasks(m)
       }
       // Every window learns it is awake, not only the one that asked (#568)
       this.emit({ type: 'session_live', sessionId, live: true })
@@ -2232,6 +2281,14 @@ export class SessionManager {
          */
         this.store.upsertSession(m)
         this.emit({ type: 'state_change', sessionId, state: m.state, reason: 'reattached' })
+        /*
+         * And it keeps its background work (#648): the shells the previous host saw running still run in it, and the
+         * tool will not list them again until something changes. They are listed from the kept record, as the tool's
+         * own level would be; with no record (the previous host predates it), the session is held as unknown until
+         * the tool first speaks, rather than read as idle and put to sleep over a running dev server.
+         */
+        if (kept === null) this.backgroundUnknown.add(sessionId)
+        else if (kept.length > 0) this.onEvent({ type: 'background_tasks', sessionId, live: kept })
       } else {
         m.state = 'idle'
         m.waitingSince = null
@@ -2967,6 +3024,8 @@ export class SessionManager {
           void dead.dispose().catch(() => {})
           this.handles.delete(e.sessionId)
           this.running.delete(e.sessionId)
+          // No process any more, and none coming by itself (#648): the windows stop showing it live
+          this.emit({ type: 'session_live', sessionId: e.sessionId, live: false, reason: 'crashed' })
         }
       }
     }
@@ -2992,12 +3051,21 @@ export class SessionManager {
     // A commit call still unanswered when its turn ends never will be: interrupted, or its process gone (#392)
     if (endedTurn && e.sessionId) this.forgetCommits(e.sessionId)
     if (endedTurn && e.sessionId) this.applyDeferredRestart(e.sessionId)
+    // A deferred restart also waits for the session's background work (#648): the moment it ends is a boundary too
+    if (e.type === 'background_tasks' && e.sessionId) this.applyDeferredRestart(e.sessionId)
   }
 
-  /** A note receipt follows turn_complete: re-check the same deferred change when the last hold is released. */
+  /**
+   * A note receipt follows turn_complete: re-check the same deferred change when the last hold is released.
+   *
+   * Background work the tool listed as running holds the restart too (#648): the process would take a shell started
+   * with `run_in_background` down with it. Only work that is known counts here; a process held as `backgroundUnknown`
+   * is not idle for sleep or a hot refresh (`sessionIdle`), but a change already committed to is applied at its turn's
+   * end as before, or it would wait on a tool that may never speak.
+   */
   private applyDeferredRestart(sessionId: string): void {
     const session = this.meta.get(sessionId)
-    if (!session || inTurn(session.state) || this.deferredRestarts.has(sessionId) || this.agentRuns.get(sessionId)?.waitingForInputs || !this.restartAfterTurn.delete(sessionId)) return
+    if (!session || inTurn(session.state) || this.backgroundRunning(sessionId) || this.deferredRestarts.has(sessionId) || this.agentRuns.get(sessionId)?.waitingForInputs || !this.restartAfterTurn.delete(sessionId)) return
     // An app attached or detached in this turn (#371 part A) is a reason of its own, settings or not.
     const apps = this.appsRestartAfterTurn.delete(sessionId)
     const definitions = this.definitionsRestartAfterTurn.delete(sessionId)
@@ -3175,6 +3243,9 @@ export class SessionManager {
       case 'background_tasks':
         // The same merge the UI's reducer and the mock run (#290), so a reconnect reads back what the screen showed
         m.backgroundTasks = applyBackgroundTasks(m.backgroundTasks, e)
+        // The tool has spoken: what runs is known, and kept for the host that may adopt this process (#648)
+        this.backgroundUnknown.delete(m.id)
+        this.rememberBackgroundTasks(m)
         break
       case 'agent_version':
         // What the process says it runs (#297) replaces what was assumed when it started
@@ -4503,7 +4574,8 @@ export class SessionManager {
     if (this.agentRuns.get(sessionId)?.waitingForInputs) return { idle: false, reason: 'turn' }
     return sessionIdle(m, {
       running: this.handles.has(sessionId),
-      reportsBackground: !!this.adapters.get(m.tool)?.capabilities.backgroundTasks,
+      // An adopted process whose work the previous host did not record is as silent as a tool that cannot report (#648)
+      reportsBackground: !!this.adapters.get(m.tool)?.capabilities.backgroundTasks && !this.backgroundUnknown.has(sessionId),
     })
   }
 
@@ -4605,7 +4677,23 @@ export class SessionManager {
        */
       this.closeStream(sessionId)
     }
-    return this.resumeSession(sessionId)
+    /*
+     * A process was dropped and no new one took its place (#648): every window is told, as a sleep tells it. Before
+     * this, a restart the host itself started (a definitions or launch-settings refresh, a CLI move) that failed left
+     * the windows showing the session live, so the screen's wake stepped back and the person learnt only when a send
+     * failed. The answer below still names the reason to whoever asked.
+     */
+    const dropped = (reason: string) => {
+      if (!h || this.handles.has(sessionId)) return
+      console.error(`[sessions] restart of ${sessionId.slice(0, 8)} did not bring a process up: ${reason}`)
+      this.emit({ type: 'session_live', sessionId, live: false, reason: 'restart_failed' })
+    }
+    const r = await this.resumeSession(sessionId).catch((err: Error) => {
+      dropped(err.message)
+      throw err
+    })
+    if (!r.resumed) dropped(r.reason ?? 'unknown')
+    return r
   }
 
   /** The persisted prefix a process was started with. It is separate from SessionInfo: a screen never needs it. */
@@ -4672,7 +4760,8 @@ export class SessionManager {
         this.store.setAppSetting(this.toolPrefixKey(session.id), next)
         continue
       }
-      if (inTurn(session.state)) {
+      // Not only a turn holds the restart (#648): a running shell, or an adopted process whose work is unknown, does too
+      if (!this.sessionIdle(session.id).idle) {
         this.restartAfterTurn.add(session.id)
         this.definitionsRestartAfterTurn.add(session.id)
         continue
@@ -4697,7 +4786,7 @@ export class SessionManager {
         this.store.setAppSetting(this.launchSettingsKey(session.id), next)
         continue
       }
-      if (inTurn(session.state)) {
+      if (!this.sessionIdle(session.id).idle) {
         this.restartAfterTurn.add(session.id)
         this.launchSettingsRestartAfterTurn.add(session.id)
         continue
