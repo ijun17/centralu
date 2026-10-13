@@ -909,7 +909,11 @@ const Composer = memo(function Composer({
    */
   const [composing, setComposing] = useState(false)
   const inputRef = useRef<HTMLTextAreaElement>(null)
-  const selectionAfterPick = useRef<{ text: string; caret: number } | null>(null)
+  const pendingSelection = useRef<{ text: string; caret: number } | null>(null)
+  const requestSelection = (next: { text: string; caret: number }) => {
+    pendingSelection.current = next
+    setCaret(next.caret)
+  }
   /** The person pressed the composer, so the focus that follows is theirs (#590) */
   const pressed = useRef(false)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -970,16 +974,17 @@ const Composer = memo(function Composer({
     el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_H)}px`
   }, [text])
 
-  // Apply the pick's caret with its value, before another input event. A next-frame move
+  // Apply the requested caret with its value, before another input event. A next-frame move
   // can collapse a newer selection (#368), making replacement text append to the old draft.
+  // Consume on every commit: recalled entries can share both their text and their caret.
   useLayoutEffect(() => {
-    const next = selectionAfterPick.current
-    selectionAfterPick.current = null
+    const next = pendingSelection.current
+    pendingSelection.current = null
     const el = inputRef.current
     if (!next || !el || el.value !== next.text) return
     el.focus()
     el.setSelectionRange(next.caret, next.caret)
-  }, [text, caret, sessionId])
+  })
 
   /*
    * A switch to a different session undoes any recall in progress (#38).
@@ -1039,9 +1044,8 @@ const Composer = memo(function Composer({
       return
     }
     const next = ac.apply(item)
-    selectionAfterPick.current = next
+    requestSelection(next)
     setText(next.text)
-    setCaret(next.caret)
   }
 
   /**
@@ -1083,18 +1087,14 @@ const Composer = memo(function Composer({
     if (step.kind === 'none') return false
 
     const next = step.kind === 'draft' ? draft.text : step.text
-    setRecall(step.kind === 'draft' ? null : { at: step.at, text: step.text })
     /*
      * The caret goes to the end. A shell does the same, and for a single-line history entry,
      * that spot is both the first line and the last, so it can still keep scrolling up and
      * down. Recalling a multi-line entry stops there, and that is the right behavior — it was
      * pulled up to be read and edited.
      */
-    setCaret(next.length)
-    requestAnimationFrame(() => {
-      const later = inputRef.current
-      if (later) later.setSelectionRange(next.length, next.length)
-    })
+    requestSelection({ text: next, caret: next.length })
+    setRecall(step.kind === 'draft' ? null : { at: step.at, text: step.text })
     return true
   }
 
@@ -1131,14 +1131,7 @@ const Composer = memo(function Composer({
     if (path) {
       setText((prev) => {
         const next = appendPath(prev, path)
-        // The caret has to move to the end so typing can continue from there
-        requestAnimationFrame(() => {
-          const el = inputRef.current
-          if (!el) return
-          el.focus()
-          el.setSelectionRange(next.length, next.length)
-          setCaret(next.length)
-        })
+        requestSelection({ text: next, caret: next.length })
         return next
       })
       return true
@@ -1174,13 +1167,7 @@ const Composer = memo(function Composer({
       const el = inputRef.current
       const sel = el && el.value === prev ? [el.selectionStart, el.selectionEnd] : [prev.length, prev.length]
       const { text: next, caret } = insertAtCaret(prev, sel[0] ?? prev.length, sel[1] ?? prev.length, piece)
-      requestAnimationFrame(() => {
-        const later = inputRef.current
-        if (!later) return
-        later.focus()
-        later.setSelectionRange(caret, caret)
-        setCaret(caret)
-      })
+      requestSelection({ text: next, caret })
       return next
     })
   }

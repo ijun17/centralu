@@ -63,9 +63,11 @@ Selectors are implemented as memoised wrappers around pure functions in `core`. 
 ### Composer text and selection
 
 An unsent draft belongs to its session in the UI store; typing and autocomplete picks update it
-synchronously. Recalled history is edited separately, leaving that draft intact. An autocomplete
-pick applies its caret in the same React commit as its text, in a layout effect. Deferring that
-selection until the next animation frame can collapse a selection the person made in the meantime,
+synchronously. Recalled history is edited separately, leaving that draft intact. Autocomplete,
+history recall, and drops of tree paths, links, or text apply their caret in the same React commit as their
+text, in one layout effect. The pending selection is consumed on every commit, even when a recalled
+entry has the same text and caret as the draft shown before it. Deferring the selection until the
+next animation frame can collapse a selection the person made in the meantime,
 so replacement text appends to the old draft instead (#368). File-search and command-list replies
 only update suggestions; they never restore the composer's text.
 

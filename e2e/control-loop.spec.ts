@@ -3793,6 +3793,20 @@ test('Typing a slash shows skills, and @ shows files', async ({ page }) => {
   await expect(page.getByTestId('prompt-input')).toHaveValue('take a look at this @src/SessionView.tsx ')
 })
 
+/** Lets the person act before a queued caret move, without depending on machine speed. */
+async function holdComposerFrames(page: Page): Promise<() => Promise<void>> {
+  await page.evaluate(() => {
+    const frame = window.requestAnimationFrame
+    const held: FrameRequestCallback[] = []
+    window.requestAnimationFrame = (callback) => (held.push(callback), 0)
+    ;(window as any).__releaseComposerFrames = () => {
+      window.requestAnimationFrame = frame
+      for (const callback of held) callback(performance.now())
+    }
+  })
+  return () => page.evaluate(() => (window as any).__releaseComposerFrames())
+}
+
 for (const trigger of ['/rev', '@Session']) {
   test(`Replacing text after picking ${trigger} keeps the person's selection`, async ({ page }) => {
     await setup(page, { projects: ['/tmp/alpha'] })
@@ -3810,24 +3824,71 @@ for (const trigger of ['/rev', '@Session']) {
 
     // Hold the pick's next-frame caret move until after the person selects the replacement.
     // This is the interleaving behind #368; fill() also selects before inserting its text.
-    await page.evaluate(() => {
-      const frame = window.requestAnimationFrame
-      const held: FrameRequestCallback[] = []
-      window.requestAnimationFrame = (callback) => (held.push(callback), 0)
-      ;(window as any).__releaseComposerFrames = () => {
-        window.requestAnimationFrame = frame
-        for (const callback of held) callback(performance.now())
-      }
-    })
+    const release = await holdComposerFrames(page)
     await page.keyboard.press('Enter')
     await expect(input).toHaveValue(trigger === '/rev' ? '/review ' : '@src/SessionView.tsx ')
     await page.keyboard.press('ControlOrMeta+A')
-    await page.evaluate(() => (window as any).__releaseComposerFrames())
+    await release()
     await page.keyboard.insertText('take a look at this @Session')
     await expect(input).toHaveValue('take a look at this @Session')
     await expect(page.getByTestId('autocomplete-item-0')).toContainText('SessionView.tsx')
     await page.keyboard.press('Enter')
     await expect(input).toHaveValue('take a look at this @src/SessionView.tsx ')
+  })
+}
+
+for (const source of [
+  'history recall',
+  'history recall with a matching draft',
+  'dropping a tree path',
+  'dropping a link',
+  'dropping text',
+]) {
+  test(`Replacing text after ${source} keeps the person's selection`, async ({ page }) => {
+    await setup(page, { projects: ['/tmp/alpha'] })
+    await newSession(page, 'alpha', 'sent message')
+    const input = page.getByTestId('prompt-input')
+    const recalling = source.startsWith('history recall')
+    const draft = source === 'history recall with a matching draft'
+      ? 'sent message'
+      : recalling ? 'unsent draft' : 'see please'
+    await input.fill(draft)
+    // A link/text drop belongs in the middle; a tree path still belongs at the end.
+    if (source !== 'history recall with a matching draft') {
+      await input.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(4, 4))
+    }
+    const release = await holdComposerFrames(page)
+    if (recalling) {
+      await page.keyboard.press('ArrowUp')
+      await expect(input).toHaveValue('sent message')
+    } else {
+      const data = await page.evaluateHandle((kind) => {
+        const dt = new DataTransfer()
+        if (kind === 'dropping a tree path') dt.setData('application/x-cc-path', 'src/a.ts')
+        else {
+          dt.setData('text/plain', kind === 'dropping a link' ? 'reference' : 'dropped note')
+          if (kind === 'dropping a link') dt.setData('text/uri-list', 'https://example.test/reference')
+        }
+        return dt
+      }, source)
+      await page.getByTestId('input-dropzone').dispatchEvent('drop', { dataTransfer: data })
+      await data.dispose()
+      const expected = source === 'dropping a tree path'
+        ? 'see please @src/a.ts '
+        : source === 'dropping a link'
+          ? 'see [reference](https://example.test/reference) please'
+          : 'see dropped note please'
+      await expect(input).toHaveValue(expected)
+    }
+    await page.keyboard.press('ControlOrMeta+A')
+    await release()
+    await page.keyboard.insertText('replacement text')
+    await expect(input).toHaveValue('replacement text')
+    if (recalling) {
+      // Editing recalled text still leaves the session's unfinished draft intact.
+      await page.keyboard.press('ArrowDown')
+      await expect(input).toHaveValue(draft)
+    }
   })
 }
 
