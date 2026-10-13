@@ -343,13 +343,27 @@ const FAILS = [
 ]
 const ERROR = /^\s*(?:→\s+\S|(?:[A-Z]\w*)?Error\b:?|AssertionError|thread '.*' panicked|panicked at|Caused by:|expected\b)/
 
-/** Prefer a runner's failure summary over setup warnings and its earlier progress output. */
+/** Choose each runner's detailed block, then the earliest of those blocks in the log. */
 export function failureLineIndex(lines) {
-  for (const re of [...FAILS, ERROR, /^\s*##\[error\]/]) {
-    const at = lines.findIndex((line) => re.test(line))
-    if (at >= 0) return at
-  }
-  return -1
+  const runners = [
+    [/^\s*FAIL\s+\S/, /^\s*(?:×|✗|❌)\s+\S/],
+    [/^\s*\d+\)\s+\[[^\]]+\]\s+›/, /^\s*✘\s+\S/],
+    [
+      /^\s*(?:---- .+ stdout ----|thread .*panicked\b|panicked at\b)/,
+      /^\s*test\s+\S+\s+\.\.\.\s+FAILED\b/,
+    ],
+    [/\berror\s+TS\d+:/],
+    [/^\s*\d+:\d+\s+error\s+/],
+  ]
+  const candidates = runners.map((markers) => {
+    for (const marker of markers) {
+      const at = lines.findIndex((line) => marker.test(line))
+      if (at >= 0) return at
+    }
+    return -1
+  }).filter((at) => at >= 0)
+  if (candidates.length) return Math.min(...candidates)
+  return lines.findIndex((line) => ERROR.test(line) || /^\s*##\[error\]/.test(line))
 }
 
 /**
