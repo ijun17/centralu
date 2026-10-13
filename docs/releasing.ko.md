@@ -93,7 +93,11 @@ The previous nine waits (4 min 30 s) expired before 0.1.0-beta.18 became visible
 probes once and warns without waiting.
 
 Before rehearsing, run `node .centralu/apps/project-board/bin/wait-checks.mjs --ref main`;
-`--ref <sha>` also works. The `<pr|owner/repo#pr>` form still waits for a pull request.
+`--ref <sha>` also works.
+The ref is resolved once; output includes its pinned SHA, such as `repo@main (abc1234)`.
+It waits for at least one workflow run for that SHA and for every workflow run to complete
+before reading checks, including jobs that register late.
+The `<pr|owner/repo#pr>` form still waits for a pull request.
 Exit 0 means all reported checks passed, 1 means settled failures, and 2 means an argument
 or GitHub error. Absent or pending checks keep it waiting. Release tools still enforce the
 required-check set.

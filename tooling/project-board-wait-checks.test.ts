@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 const ROOT = new URL('../', import.meta.url).pathname
 const SCRIPT = join(ROOT, '.centralu/apps/project-board/bin/wait-checks.mjs')
+const SHA = 'abc1234' + '0'.repeat(33)
 let dir = ''
 
 afterEach(() => {
@@ -13,7 +14,7 @@ afterEach(() => {
   dir = ''
 })
 
-function run(args: string[], conclusion = 'success', direct = false, pending = false) {
+function run(args: string[], conclusion = 'success', direct = false, pending = false, scenario = '') {
   dir = mkdtempSync(join(tmpdir(), 'cc-wait-checks-'))
   const bin = join(dir, 'bin')
   const node = join(dir, 'node')
@@ -26,20 +27,37 @@ const a = process.argv.slice(2)
 const log = process.env.FAKE_GH_LOG
 const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse) : []
 fs.appendFileSync(log, JSON.stringify(a) + '\n')
-if (a[0] === 'pr') process.stdout.write(JSON.stringify({ headRefOid: 'abc' }))
-else if (a[1].includes('/check-runs')) {
+const scenario = process.env.FAKE_SCENARIO
+const workflowPolls = calls.filter(c => c[1].includes('/actions/runs?')).length
+if (a[0] === 'pr') process.stdout.write(JSON.stringify({ headRefOid: process.env.FAKE_SHA }))
+else if (a[1].includes('/actions/runs?')) {
+  const done = { status: 'completed' }
+  let pages = [{ workflow_runs: [done] }]
+  if (scenario === 'missing' && workflowPolls === 0) pages = [{ workflow_runs: [] }]
+  if (scenario === 'cancelled') pages = [{ workflow_runs: [done, { status: workflowPolls === 0 ? 'in_progress' : 'completed' }] }]
+  if (scenario === 'late') pages = [
+    { workflow_runs: Array.from({ length: 100 }, () => done) },
+    { workflow_runs: [{ status: workflowPolls === 0 ? 'queued' : 'completed' }] },
+  ]
+  process.stdout.write(JSON.stringify(pages))
+} else if (a[1].includes('/check-runs')) {
   const n = calls.filter(c => c[1].includes('/check-runs')).length
-  const check = { status: 'completed', conclusion: process.env.FAKE_CONCLUSION }
-  const checks = process.env.FAKE_PENDING && n === 0 ? [] : process.env.FAKE_PENDING && n === 1 ? [{ status: 'in_progress' }] : [check, check]
+  const conclusion = scenario === 'late' && workflowPolls >= 2 ? 'failure'
+    : (scenario === 'cancelled' && workflowPolls < 2) || a[1].includes('/def5678/') ? 'cancelled'
+    : process.env.FAKE_CONCLUSION
+  const check = { status: 'completed', conclusion }
+  const checks = scenario === 'moving' && n === 0 ? [{ status: 'in_progress' }] : process.env.FAKE_PENDING && n === 0 ? [] : process.env.FAKE_PENDING && n === 1 ? [{ status: 'in_progress' }] : [check, check]
   process.stdout.write(JSON.stringify({ check_runs: checks }))
 } else if (a[1].endsWith('/status')) process.stdout.write(JSON.stringify({ statuses: [] }))
-else if (a[1].includes('/commits/')) process.stdout.write(JSON.stringify({ sha: 'abc' }))
-else process.exit(2)
+else if (a[1].includes('/commits/')) {
+  const resolved = calls.some(c => c[1] === a[1])
+  process.stdout.write(JSON.stringify({ sha: scenario === 'moving' && resolved ? 'def5678' : process.env.FAKE_SHA }))
+} else process.exit(2)
 `)
   chmodSync(join(bin, 'gh'), 0o755)
   const result = spawnSync(direct ? SCRIPT : process.execPath, direct ? args : [SCRIPT, ...args], {
-    encoding: 'utf8', timeout: 15_000,
-    env: { ...process.env, PATH: `${bin}:${node}`, PROJECT_BOARD_WAIT_POLL_MS: '1', FAKE_GH_LOG: join(dir, 'calls'), FAKE_CONCLUSION: conclusion, FAKE_PENDING: pending ? '1' : '' },
+    encoding: 'utf8', timeout: 25_000,
+    env: { ...process.env, PATH: `${bin}:${node}`, PROJECT_BOARD_WAIT_POLL_MS: '1', FAKE_GH_LOG: join(dir, 'calls'), FAKE_CONCLUSION: conclusion, FAKE_SHA: SHA, FAKE_SCENARIO: scenario, FAKE_PENDING: pending ? '1' : '' },
   })
   return { ...result, calls: () => readFileSync(join(dir, 'calls'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as string[]) }
 }
@@ -61,9 +79,9 @@ describe.skipIf(process.platform === 'win32')('wait-checks', { timeout: 30_000 }
   it.each(['main', 'fix/cache-rate', '0123456789abcdef0123456789abcdef01234567'])('resolves --ref %s and checks its commit', (ref) => {
     const r = run(['--ref', ref])
     expect(r.status).toBe(0)
-    expect(r.stdout.trim()).toBe(`ijun17/centralu@${ref}: 2/2 checks passed.`)
+    expect(r.stdout.trim()).toBe(`ijun17/centralu@${ref} (abc1234): 2/2 checks passed.`)
     expect(r.calls()).toContainEqual(['api', `repos/ijun17/centralu/commits/${encodeURIComponent(ref)}`])
-    expect(r.calls()).toContainEqual(['api', 'repos/ijun17/centralu/commits/abc/check-runs?per_page=100'])
+    expect(r.calls()).toContainEqual(['api', `repos/ijun17/centralu/commits/${SHA}/check-runs?per_page=100`])
     expect(r.calls().some((a) => a[0] === 'pr')).toBe(false)
   })
 
@@ -71,7 +89,38 @@ describe.skipIf(process.platform === 'win32')('wait-checks', { timeout: 30_000 }
     const r = run(['--ref', 'main'], 'success', false, true)
     expect(r.status).toBe(0)
     expect(r.calls().filter((a) => a[1]?.includes('/check-runs'))).toHaveLength(3)
-    expect(r.stdout.trim()).toBe('ijun17/centralu@main: 2/2 checks passed.')
+    expect(r.stdout.trim()).toBe('ijun17/centralu@main (abc1234): 2/2 checks passed.')
+  })
+
+  it('pins a moving branch once and reports the original SHA', () => {
+    const r = run(['--ref', 'main'], 'success', false, false, 'moving')
+    expect(r.status).toBe(0)
+    expect(r.stdout.trim()).toBe('ijun17/centralu@main (abc1234): 2/2 checks passed.')
+    expect(r.calls().filter((a) => a[1] === 'repos/ijun17/centralu/commits/main')).toHaveLength(1)
+    expect(r.calls().some((a) => a[1]?.includes('def5678'))).toBe(false)
+  })
+
+  it('waits for a late-registering workflow on the next page before reporting its failure', () => {
+    const r = run(['--ref', 'main'], 'success', false, false, 'late')
+    expect(r.status).toBe(1)
+    expect(r.stdout).toContain('0/2 checks passed; 2 failed.')
+    const polls = r.calls().filter((a) => a[1]?.includes('/actions/runs?'))
+    expect(polls).toHaveLength(2)
+    expect(polls[0]).toEqual(['api', `repos/ijun17/centralu/actions/runs?head_sha=${SHA}&per_page=100`, '--paginate', '--slurp'])
+  })
+
+  it('does not read a cancelled check while its replacement workflow is running', () => {
+    const r = run(['--ref', 'main'], 'success', false, false, 'cancelled')
+    expect(r.status).toBe(0)
+    const calls = r.calls()
+    const firstCheck = calls.findIndex((a) => a[1]?.includes('/check-runs'))
+    expect(calls.slice(0, firstCheck).filter((a) => a[1]?.includes('/actions/runs?'))).toHaveLength(2)
+  })
+
+  it('waits for workflow runs to be registered even when checks are already green', () => {
+    const r = run(['--ref', 'main'], 'success', false, false, 'missing')
+    expect(r.status).toBe(0)
+    expect(r.calls().filter((a) => a[1]?.includes('/actions/runs?'))).toHaveLength(2)
   })
 
   it('returns failure for a settled failed ref', () => {

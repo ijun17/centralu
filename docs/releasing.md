@@ -97,6 +97,9 @@ does nothing without `confirm: true`. The board's "Release" dialog shows the sam
 
 Before rehearsing, wait for main's checks with
 `node .centralu/apps/project-board/bin/wait-checks.mjs --ref main` (a commit SHA works too).
+The ref is resolved once; output includes its pinned SHA, such as `repo@main (abc1234)`.
+It waits for at least one workflow run for that SHA and for every workflow run to complete
+before reading checks, including jobs that register late.
 The existing `<pr|owner/repo#pr>` form waits for a pull request. The script exits 0 when all
 reported checks pass, 1 on settled failures, and 2 on an argument or GitHub error; absent or
 pending checks keep it waiting. Release tools still enforce the required-check set.

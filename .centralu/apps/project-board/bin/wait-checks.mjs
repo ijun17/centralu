@@ -13,7 +13,7 @@ if (!ref && !match) {
 const config = JSON.parse(await readFile(new URL('../project.json', import.meta.url), 'utf8'))
 const repo = match?.[1] ?? config.repository
 const number = match ? Number(match[2]) : null
-const label = ref ? `${repo}@${ref}` : `${repo}#${number}`
+let label = ref ? `${repo}@${ref}` : `${repo}#${number}`
 const every = Math.max(1_000, Number(process.env.PROJECT_BOARD_WAIT_POLL_MS) || 30_000)
 const gh = (args) =>
   new Promise((resolve, reject) =>
@@ -23,11 +23,22 @@ const gh = (args) =>
   )
 const pause = () => new Promise((resolve) => setTimeout(resolve, every))
 
+let pinnedSha
 for (;;) {
   try {
-    const sha = ref
-      ? JSON.parse(await gh(['api', `repos/${repo}/commits/${encodeURIComponent(ref)}`])).sha
-      : JSON.parse(await gh(['pr', 'view', String(number), '-R', repo, '--json', 'headRefOid'])).headRefOid
+    if (ref && !pinnedSha) {
+      pinnedSha = JSON.parse(await gh(['api', `repos/${repo}/commits/${encodeURIComponent(ref)}`])).sha
+      label = `${repo}@${ref} (${pinnedSha.slice(0, 7)})`
+    }
+    const sha = pinnedSha ?? JSON.parse(await gh(['pr', 'view', String(number), '-R', repo, '--json', 'headRefOid'])).headRefOid
+    // A workflow can exist before its jobs register check runs. Read every page, then read
+    // checks only after the workflows settle so an earlier check snapshot cannot win the race.
+    const pages = JSON.parse(await gh(['api', `repos/${repo}/actions/runs?head_sha=${sha}&per_page=100`, '--paginate', '--slurp']))
+    const workflows = pages.flatMap((page) => page.workflow_runs ?? [])
+    if (!workflows.length || workflows.some((run) => run.status !== 'completed')) {
+      await pause()
+      continue
+    }
     const [runs, statuses] = await Promise.all([
       gh(['api', `repos/${repo}/commits/${sha}/check-runs?per_page=100`]).then(JSON.parse),
       gh(['api', `repos/${repo}/commits/${sha}/status`]).then(JSON.parse),
