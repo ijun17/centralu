@@ -352,7 +352,7 @@ describe('project screen arrangement (#203)', () => {
       foldedProjects: [untouched.id], panelOpen: false, introSeen: true,
     } as never
     await useStore.getState().attach(mock)
-    const migrated = { ...legacy, panels: ['app:slider', 'session:first', 'session:last', 'app:alpha', 'app:zebra'] }
+    const migrated = { ...legacy, panels: ['app:slider', 'session:first', 'session:gone', 'session:last', 'app:alpha', 'app:zebra'] }
     expect(useStore.getState().projectPanels).toEqual({ [arranged.id]: migrated })
     useStore.setState({ view: 'focus', focusedProjectId: arranged.id, focusedSessionId: null })
     expect(projectScreenSessions(useStore.getState())).toEqual(['first', 'last'])
@@ -368,6 +368,52 @@ describe('project screen arrangement (#203)', () => {
     useStore.setState({ focusedProjectId: untouched.id, focusedSessionId: null, view: 'focus' })
     expect(projectScreenSessions(useStore.getState())).toEqual([])
     expect(projectScreenAppKeys(useStore.getState())).toEqual([])
+  })
+
+  it.each(['empty', 'partial', 'failed'])(
+    'persists legacy app panels when the startup catalog is %s and draws them after discovery recovers',
+    async (catalog) => {
+      const mock = new MockPlatform()
+      const project = await mock.projects.add(`/tmp/arr-catalog-${catalog}`)
+      mock.sessions.set('kept', sessionInfo('kept', { projectId: project.id }))
+      const apps = ['offline', 'available', 'hidden'].map((appId) => ({ appId, projectId: project.id } as ExternalAppInfo))
+      mock.setExternalApps(catalog === 'partial' ? [apps[1]!] : [])
+      const list = mock.apps.list
+      if (catalog === 'failed') mock.apps.list = async () => { throw new Error('Discovery unavailable') }
+      const legacy = { order: ['app:offline', 'session:kept', 'app:available', 'app:hidden'], hidden: ['app:hidden'] }
+      mock.workspaceSnapshot = { projectPanels: { [project.id]: legacy } } as never
+
+      await useStore.getState().attach(mock)
+      await tick()
+      const migrated = { ...legacy, panels: ['app:offline', 'session:kept', 'app:available'] }
+      expect(stored(mock)?.[project.id]).toEqual(migrated)
+      useStore.setState({ view: 'focus', focusedProjectId: project.id, focusedSessionId: null })
+      expect(projectScreenAppKeys(useStore.getState())).toEqual(catalog === 'partial' ? [`${project.id}/available`] : [])
+
+      mock.apps.list = list
+      mock.setExternalApps(apps)
+      await useStore.getState().refreshExternalApps()
+      expect(projectScreenAppKeys(useStore.getState())).toEqual([`${project.id}/offline`, `${project.id}/available`])
+      expect(useStore.getState().projectPanels[project.id]).toEqual(migrated)
+      await useStore.getState().attach(mock)
+      expect(useStore.getState().projectPanels[project.id]).toEqual(migrated)
+    },
+  )
+
+  it('an empty-array legacy entry keeps the lone visible session, while a project without an entry starts empty', async () => {
+    const mock = new MockPlatform()
+    const arranged = await mock.projects.add('/tmp/arr-empty-entry')
+    const untouched = await mock.projects.add('/tmp/arr-no-entry')
+    mock.sessions.set('solo', sessionInfo('solo', { projectId: arranged.id }))
+    mock.sessions.set('other', sessionInfo('other', { projectId: untouched.id }))
+    mock.workspaceSnapshot = { projectPanels: { [arranged.id]: { order: [], hidden: [] } } } as never
+    await useStore.getState().attach(mock)
+    await tick()
+    expect(stored(mock)).toEqual({ [arranged.id]: { panels: ['session:solo'], order: [], hidden: [] } })
+    useStore.setState({ view: 'focus', focusedProjectId: arranged.id, focusedSessionId: null })
+    expect(projectScreenSessions(useStore.getState())).toEqual(['solo'])
+    useStore.setState({ focusedProjectId: untouched.id })
+    expect(projectScreenSessions(useStore.getState())).toEqual([])
   })
 
   it('leaves with its project', async () => {

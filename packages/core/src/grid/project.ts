@@ -33,11 +33,9 @@ export function arrangePanels(present: readonly string[], saved: ProjectArrangem
 export function migrateArrangement(present: readonly string[], saved: ProjectArrangement): ProjectArrangement {
   if (saved.panels !== undefined) return saved
   const hidden = new Set(saved.hidden)
-  const here = new Set(present)
-  // Empty legacy arrays carry no evidence of a deliberate arrangement.
-  const panels = saved.order.length || saved.hidden.length
-    ? [...new Set([...saved.order, ...present])].filter((id) => here.has(id) && !hidden.has(id))
-    : []
+  // Startup discovery can fail or omit offline machines: absence is not evidence of deletion.
+  // Any saved entry is arranged, even empty arrays left by showing a lone panel again.
+  const panels = [...new Set([...saved.order, ...present])].filter((id) => !hidden.has(id))
   return { ...saved, panels }
 }
 

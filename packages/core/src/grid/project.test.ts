@@ -43,17 +43,26 @@ describe('withOrder and withPanel', () => {
 })
 
 describe('migration', () => {
-  it('preserves the legacy visible order including unplaced panels, but not hidden or gone ones', () => {
+  it('preserves every non-hidden legacy ordered id and appends unplaced available panels', () => {
     const legacy = { order: [app, b, b, 'session:gone'], hidden: [a] }
     const migrated = migrateArrangement([a, b, c, app], legacy)
-    expect(migrated).toEqual({ ...legacy, panels: [app, b, c] })
+    expect(migrated).toEqual({ ...legacy, panels: [app, b, 'session:gone', c] })
     expect(arrangePanels([a, b, c, app, 'session:new'], migrated)).toEqual([app, b, c])
   })
 
-  it('migrates hide-only and all-hidden layouts, while an unarranged project stays empty', () => {
+  it('migrates hide-only, all-hidden and empty-array entries as arranged projects', () => {
     expect(migrateArrangement([a, b, app], { order: [], hidden: [b] }).panels).toEqual([a, app])
     expect(migrateArrangement([a, b], { order: [], hidden: [a, b] }).panels).toEqual([])
-    expect(migrateArrangement([a, b], { order: [], hidden: [] }).panels).toEqual([])
+    expect(migrateArrangement([a, b], { order: [], hidden: [] }).panels).toEqual([a, b])
+  })
+
+  it.each([{ apps: [] }, { apps: [app] }])('keeps legacy app ids with an incomplete initial catalog $apps and draws them when available', ({ apps }) => {
+    const absent = 'app:offline'
+    const legacy = { order: [absent, a, app, absent, 'app:hidden'], hidden: ['app:hidden'] }
+    const migrated = migrateArrangement([a, ...apps], legacy)
+    expect(migrated).toEqual({ ...legacy, panels: [absent, a, app] })
+    expect(arrangePanels([a, ...apps], migrated)).toEqual([a, ...apps])
+    expect(arrangePanels([a, app, absent, 'app:hidden'], migrated)).toEqual([absent, a, app])
   })
 
   it('is idempotent and never derives new panels once the explicit field exists', () => {

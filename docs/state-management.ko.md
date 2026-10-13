@@ -138,9 +138,12 @@ removing a panel takes it off the list. New sessions never join automatically. T
 session and app catalogs filter the list, so trashed sessions cannot draw. Notification visibility
 and pinned app overlays use the same membership as ProjectView.
 
-On restore, after the initial catalogs load, legacy arrangements with nonempty `order` or
-`hidden` arrays become their currently visible panels: surviving ordered ids first, then remaining
-available ids in sidebar order, excluding hidden ids. Untouched projects stay empty. An existing
+On restore, every saved legacy entry becomes explicit membership: all non-hidden `order` ids
+first, including unavailable ids, then remaining available ids in sidebar order. Startup app
+discovery can fail or omit an offline machine, so availability filters drawing, not migration.
+An empty-array entry still counts as arranged (the old build wrote one after hiding and showing a
+lone panel); with no remembered order, migration keeps everything currently available. Only a
+project without an entry starts empty. An existing
 `panels` field, including an empty list, is authoritative and never migrates again. Retain the
 legacy arrays for the previous build during updates; writes project membership into `order` and
 put other available ids in `hidden`. After the whole workspace restore succeeds, the normal snapshot writer persists the migration
