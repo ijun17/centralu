@@ -83,16 +83,27 @@ function split(raw) {
   return [core, pre]
 }
 
+const LOCAL_BUILD = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*\.local\.[1-9]\d*$/
+
+/** A maintainer's local build: `<base>.local.N`, strict SemVer, with a prerelease base and a positive N (`scripts/local-manifest.mjs`). */
+export function isLocalBuildVersion(v) {
+  return typeof v === 'string' && v.length <= 64 && LOCAL_BUILD.test(v)
+}
+
 /**
- * Whether the copy `centralu install` made is at or above `target`, so replacing it would be a
- * downgrade (#645). `centralu install` leaves such a copy alone unless `--force` is given, and the
- * in-app update does the same with the mirror in `packages/protocol/src/semver.ts` (pinned by
- * `tooling/launcher-semver.test.ts`).
+ * Whether the copy `centralu install` made is kept rather than replaced by `target` (#645).
  *
- * The case: a local build (`0.2.0-beta.21.local.1`) is installed and waiting for "Apply now" while
- * npm's beta.21 arrives. Equal counts too: re-copying the same version changes nothing. Unknown (no
- * copy, or a version that could not be read) never keeps a copy from being refreshed.
+ * npm is the source of truth for releases: any released version in the copy, even a higher one, is
+ * replaced by the target, so a release pulled from `latest` (a dist-tag rollback) does not survive in
+ * /Applications. The one exception is a maintainer's local build (`<base>.local.N`, `pnpm
+ * local-update`, #610/#613) newer than the target: it waits there for "Apply now", and putting the
+ * release it was cut from over it would undo it. The copy's version must be well-formed SemVer in
+ * that exact shape; anything unreadable or malformed (`garbage`, `$(VERSION)`, an empty file) is
+ * replaced, so a corrupt plist or version file can never block every later update.
+ *
+ * `centralu install` applies this unless `--force` is given; the in-app update applies the mirror in
+ * `packages/protocol/src/semver.ts` (pinned answer to answer by `tooling/launcher-semver.test.ts`).
  */
 export function keepsInstalledCopy(target, copyVersion) {
-  return typeof copyVersion === 'string' && copyVersion.trim() !== '' && !isNewer(target, copyVersion)
+  return isLocalBuildVersion(copyVersion) && isNewer(copyVersion, target)
 }

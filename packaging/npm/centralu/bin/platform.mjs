@@ -357,3 +357,15 @@ export function busyMessage(path) {
 export function isBusyError(e) {
   return e?.code === 'EBUSY' || e?.code === 'EPERM' || e?.code === 'EACCES' || e?.code === 'ENOTEMPTY'
 }
+
+/**
+ * The command that prints the version a macOS bundle carries (`CFBundleShortVersionString`).
+ *
+ * `plutil` reads XML and binary plists alike, so nothing breaks if Tauri ever writes a binary one.
+ * The in-app update runs the same command (`installedCopyVersionSource` in
+ * `packages/agent-host/src/os.ts`, pinned to this by `updates.test.ts`), so the host and the
+ * launcher can never disagree about which version a copy is (#645).
+ */
+export function bundleVersionCommand(bundle) {
+  return { command: '/usr/bin/plutil', args: ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', posix.join(bundle, 'Contents', 'Info.plist')] }
+}

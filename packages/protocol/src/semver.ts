@@ -75,19 +75,27 @@ function split(raw: string): [number[], string | null] {
   return [core, pre]
 }
 
+const LOCAL_BUILD = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*\.local\.[1-9]\d*$/
+
+/** A maintainer's local build: `<base>.local.N`, strict SemVer, with a prerelease base and a positive N (`scripts/local-manifest.mjs`). */
+export function isLocalBuildVersion(v: string | null | undefined): boolean {
+  return typeof v === 'string' && v.length <= 64 && LOCAL_BUILD.test(v)
+}
+
 /**
- * Whether the copy `centralu install` made is at or above `target`, so replacing it with `target`
- * would be a downgrade (#645).
+ * Whether the copy `centralu install` made is kept rather than replaced by `target` (#645).
  *
- * The case this exists for: a local build (`0.2.0-beta.21.local.1`, `pnpm local-update`) sits in
- * /Applications waiting for "Apply now" while the running host is still beta.20, and auto-apply
- * installs npm's beta.21. Without this, `centralu install` would put beta.21 over the newer local
- * build. Equal counts too: re-copying the same version changes nothing and costs a bundle swap.
- * Unknown (no copy, or a version that could not be read) never keeps a copy from being refreshed.
+ * npm is the source of truth for releases: any released version in the copy, even a higher one, is
+ * replaced by the target, so a release pulled from `latest` (a dist-tag rollback) does not survive in
+ * /Applications. The one exception is a maintainer's local build (`<base>.local.N`, `pnpm
+ * local-update`, #610/#613) newer than the target: it waits there for "Apply now", and putting the
+ * release it was cut from over it would undo it. The copy's version must be well-formed SemVer in
+ * that exact shape; anything unreadable or malformed (`garbage`, `$(VERSION)`, an empty file) is
+ * replaced, so a corrupt plist or version file can never block every later update.
  *
  * Mirrored in the launcher (`keepsInstalledCopy` in `packaging/npm/centralu/bin/semver.mjs`), where
  * `centralu install` applies the same rule by itself, and pinned to it by `tooling/launcher-semver.test.ts`.
  */
 export function keepsInstalledCopy(target: string, copyVersion: string | null | undefined): boolean {
-  return typeof copyVersion === 'string' && copyVersion.trim() !== '' && !isNewerVersion(target, copyVersion)
+  return isLocalBuildVersion(copyVersion) && isNewerVersion(copyVersion as string, target)
 }

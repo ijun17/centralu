@@ -1,12 +1,14 @@
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, win32 } from 'node:path'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { APP_VERSION, type UpdateStatus } from '@cc/protocol'
+import { installedCopyVersionSource } from './os.js'
 import { resolveCommand } from './tool-launch.js'
 import { UpdateService, commandFor, failureDetail, installedCopyPath, readInstalledCopyVersion, runCommand, type LatestResult } from './updates.js'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
-import { installedPaths } from '../../../packaging/npm/centralu/bin/platform.mjs'
+import { bundleVersionCommand, installedPaths } from '../../../packaging/npm/centralu/bin/platform.mjs'
 
 /**
  * Checking for and installing app updates (issue #43).
@@ -468,37 +470,75 @@ describe('UpdateService', () => {
   })
 
   /**
-   * A local build (`pnpm local-update`) waiting in /Applications for "Apply now" outranks the release
-   * it was cut from. An npm install must not put that release over it (#645): the package is still
-   * updated, the copy is kept, and the notice says so.
+   * What the installed copy holds decides only one thing: whether `centralu install` runs after npm
+   * (#645). npm is the source of truth for releases, so any released version is replaced, a higher one
+   * too (a release pulled from `latest` must not survive in /Applications). The one copy kept is a
+   * maintainer's local build (`<base>.local.N`) newer than the target, waiting for "Apply now". A
+   * version that cannot be read or is malformed is replaced, so a corrupt plist cannot block updates.
    */
-  describe('an installed copy at or above the target (#645)', () => {
+  describe('the installed copy after npm (#645)', () => {
     const copy = '/Applications/Centralu.app'
+    const target = '9999.0.1-beta.21'
 
-    it.each(['9999.0.1.local.1', '9999.0.1', '9999.0.2'])('carrying %s is kept: npm updates the package, the copy is not replaced', async (copyVersion) => {
-      const h = make({ registry: '9999.0.1', installedCopy: copy, installedCopyVersion: () => copyVersion })
+    it.each([`${target}.local.1`, `${target}.local.12`])('a newer local build %s is kept: npm updates the package, the copy is not replaced', async (copyVersion) => {
+      const h = make({ registry: target, installedCopy: copy, installedCopyVersion: () => copyVersion })
       await h.svc.check(true)
       await h.svc.apply()
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
-      expect(h.calls).toEqual([['npm', ['i', '-g', '--prefer-online', 'centralu@9999.0.1']]])
-      expect(h.svc.current().error).toBe(`The copy at ${copy} is ${copyVersion}, not older than 9999.0.1, and was kept.`)
+      expect(h.calls).toEqual([['npm', ['i', '-g', '--prefer-online', `centralu@${target}`]]])
+      expect(h.svc.current().error).toBe(`The local build ${copyVersion} at ${copy} is newer than ${target} and was kept.`)
     })
 
-    it.each(['9999.0.0', '9999.0.1-beta.1', '', null])('carrying %s is replaced as before', async (copyVersion) => {
-      const h = make({ registry: '9999.0.1', installedCopy: copy, installedCopyVersion: () => copyVersion })
+    it.each([
+      // A release pulled from `latest`: a terminal `centralu update` put beta.22 there, then npm went back to beta.21
+      '9999.0.1-beta.22',
+      '9999.0.1',
+      target,
+      '9999.0.1-beta.20',
+      // An older local build
+      '9999.0.1-beta.20.local.9',
+      // Unreadable or malformed: never a reason to keep the copy
+      'garbage',
+      '$(VERSION)',
+      '9999.0.1-beta.21.local.0',
+      '9999.0.1-beta.21.local.01',
+      '9999.0.1.local.1',
+      '9999.0.1-beta.21-local.1',
+      '',
+      null,
+    ])('a copy at %s is replaced by the target', async (copyVersion) => {
+      const h = make({ registry: target, installedCopy: copy, installedCopyVersion: () => copyVersion })
       await h.svc.check(true)
       await h.svc.apply()
       await vi.waitFor(() => expect(h.svc.current().phase).toBe('restart_required'))
-      expect(h.calls.map(([file]) => file)).toEqual(['npm', 'centralu'])
+      expect(h.calls).toEqual([['npm', ['i', '-g', '--prefer-online', `centralu@${target}`]], ['centralu', ['install']]])
       expect(h.svc.current().error).toBeNull()
     })
 
-    it('reads the version from the bundle on macOS, the version file on Windows, and nothing on Linux', () => {
+    it('reads the macOS bundle with the launcher\'s own command, and the version file on Windows', () => {
+      const bundle = '/Applications/Centralu.app'
+      const launcher = bundleVersionCommand(bundle) as { command: string; args: string[] }
+      expect(installedCopyVersionSource(bundle, 'darwin')).toEqual({ kind: 'command', file: launcher.command, args: launcher.args })
+      expect(installedCopyVersionSource(bundle, 'win32')).toEqual({ kind: 'file', name: 'centralu-version.txt' })
+      expect(installedCopyVersionSource(bundle, 'linux')).toBeNull()
+      const dir = mkdtempSync(join(tmpdir(), 'cc-installed-copy-'))
+      try {
+        expect(readInstalledCopyVersion(dir, 'win32')).toBeNull()
+        writeFileSync(join(dir, 'centralu-version.txt'), '0.2.0-beta.21\n')
+        expect(readInstalledCopyVersion(dir, 'win32')).toBe('0.2.0-beta.21')
+        expect(readInstalledCopyVersion(dir, 'linux')).toBeNull()
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    })
+
+    it.runIf(process.platform === 'darwin').each(['xml1', 'binary1'])('reads a %s Info.plist on macOS', (format) => {
       const dir = mkdtempSync(join(tmpdir(), 'cc-installed-copy-'))
       try {
         expect(readInstalledCopyVersion(dir, 'darwin')).toBeNull()
         mkdirSync(join(dir, 'Contents'))
-        writeFileSync(join(dir, 'Contents', 'Info.plist'), [
+        const plist = join(dir, 'Contents', 'Info.plist')
+        writeFileSync(plist, [
           '<?xml version="1.0" encoding="UTF-8"?>',
           '<plist version="1.0">',
           '<dict>',
@@ -510,11 +550,8 @@ describe('UpdateService', () => {
           '</plist>',
           '',
         ].join('\n'))
+        execFileSync('/usr/bin/plutil', ['-convert', format, plist])
         expect(readInstalledCopyVersion(dir, 'darwin')).toBe('0.2.0-beta.21.local.1')
-        expect(readInstalledCopyVersion(dir, 'win32')).toBeNull()
-        writeFileSync(join(dir, 'centralu-version.txt'), '0.2.0-beta.21\n')
-        expect(readInstalledCopyVersion(dir, 'win32')).toBe('0.2.0-beta.21')
-        expect(readInstalledCopyVersion(dir, 'linux')).toBeNull()
       } finally {
         rmSync(dir, { recursive: true, force: true })
       }

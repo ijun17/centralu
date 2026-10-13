@@ -1235,13 +1235,18 @@ answer to tolerate a stale npm edge. Retaining it preserves its original check t
 to the fresh tag so a release rollback takes effect. A target at or below the running version installs nothing.
 If the refresh fails, it installs the stored version and keeps a fallback notice during and after installation.
 Lookup, npm retries and bundle replacement are one busy operation; concurrent checks/clicks cannot replace its target or start a second install. It runs `npm i -g --prefer-online centralu@<v>` and, when the installed app exists,
-`centralu install`, then reports `restart_required`; it never restarts anything. The copy is left alone when the
-version it carries is at or above the target (`readInstalledCopyVersion`: the bundle's `Info.plist` on macOS, the
-launcher's `centralu-version.txt` on Windows, nothing on Linux; `keepsInstalledCopy`, mirrored in the launcher): a
-local build (`0.1.0-beta.21.local.1`, `pnpm local-update`) waiting in /Applications for "Apply now" outranks npm's
-beta.21, and replacing it would be a downgrade. The package is still updated, `restart_required` carries a notice
-naming the kept copy, and the window's own bundle check offers to apply it. `centralu install` applies the same rule
-by itself and takes `--force` to replace such a copy on purpose (#645). With `autoApply` on ("Apply updates
+`centralu install`, then reports `restart_required`; it never restarts anything. npm is the source of truth for
+releases, so the copy is replaced whatever released version it holds, a higher one too: a release pulled from
+`latest` must not survive in /Applications to be offered by "Apply now". The one copy left alone is a maintainer's
+local build (`<base>.local.N`, `pnpm local-update`, #610/#613) newer than the target, waiting for "Apply now";
+putting the release it was cut from over it would undo it (`keepsInstalledCopy`, mirrored in the launcher's
+`semver.mjs`). A version that cannot be read or is not well-formed SemVer in that shape is replaced, so a corrupt
+plist or version file cannot block updates. The version is read the same way as the launcher reads it
+(`readInstalledCopyVersion`: `plutil -extract CFBundleShortVersionString raw` on the bundle's `Info.plist`, XML or
+binary, on macOS; the launcher's `centralu-version.txt` on Windows; nothing on Linux). When a local build is kept,
+the package is still updated, `restart_required` carries a notice naming it, and the window's own bundle check offers
+to apply it. `centralu install` applies the same rule by itself and takes `--force` to replace such a copy on
+purpose (#645). With `autoApply` on ("Apply updates
 automatically when idle", `updates.setAutoApply`, saved as `updates.autoApply` in the store's app settings, off by
 default) a check that finds a newer version starts the same install by itself, and turning the setting on with a newer
 version already known starts it at once. Not over an install under way or one already finished: a check after it leaves

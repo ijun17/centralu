@@ -900,10 +900,14 @@ automatically when idle", `updates.setAutoApply`, 저장소의 앱 설정에 `up
 
 설치 전에 `updates.apply`는 레지스트리를 다시 묻는다(#635). 아는 새 버전이 없으면(자동 확인 꺼짐, 또는 오래된 "최신"
 답) 거절하지 않고 먼저 다시 물어, 새 것이 없으면 그것을 결과로(`idle`, 오류 없음) 알리고 `failed`로 두지 않는다(#645).
-호출은 대상이 정해질 때 답한다. 설치된 복사본이 대상보다 낮지 않은 버전이면(macOS는 번들의 `Info.plist`, Windows는
-런처의 `centralu-version.txt`) 패키지만 올리고 복사본은 두며 `restart_required`에 그 사실을 적는다: 로컬 빌드
-(`0.1.0-beta.21.local.1`)가 "Apply now"를 기다리는 자리에 npm의 beta.21을 덮으면 내려가는 것이다. `centralu install`도
-같은 규칙을 스스로 적용하고, `--force`로 일부러 바꿀 수 있다(#645).
+호출은 대상이 정해질 때 답한다. 릴리스의 기준은 npm이므로, 설치된 복사본은
+어떤 릴리스 버전이든(더 높은 것도) 대상으로 바뀐다: `latest`에서 내려간 릴리스가 /Applications에 남아 "Apply now"로
+제안되면 안 된다. 그대로 두는 복사본은 대상보다 새로운 관리자의 로컬 빌드(`<base>.local.N`, `pnpm local-update`,
+#610/#613) 하나뿐이다. 그 모양의 올바른 SemVer가 아니거나 읽을 수 없는 버전은 바뀐다: 깨진 plist나 버전 파일이
+업데이트를 막을 수 없다. 버전은 런처와 같은 방법으로 읽는다(macOS는 번들 `Info.plist`에 `plutil -extract
+CFBundleShortVersionString raw`, XML·바이너리 모두; Windows는 런처의 `centralu-version.txt`). 로컬 빌드를 두면 패키지만
+올리고 `restart_required`에 그 사실을 적는다. `centralu install`도 같은 규칙을 스스로 적용하고, `--force`로 일부러 바꿀
+수 있다(#645).
 
 두 명령 모두 셸 없이 `tool-launch.ts`를 거쳐 돈다(`updates.ts`의 `commandFor`): Windows에서 `npm`과 `centralu`는
 배치 파일이라 `execFile`이 이름으로도(ENOENT) 경로로도(EINVAL) 띄우지 못하므로, 각 파일을 읽어 그것이 띄우는 `.js`를

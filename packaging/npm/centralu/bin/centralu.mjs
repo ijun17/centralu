@@ -26,6 +26,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import { copyDiffers, isNewer, keepsInstalledCopy } from './semver.mjs'
 import {
   asideCopies,
+  bundleVersionCommand,
   busyMessage,
   earlyExitMessage,
   executableIn,
@@ -65,7 +66,12 @@ const pkg = require('../package.json')
 
 const APP_NAME = 'Centralu'
 const BUNDLE = `${APP_NAME}.app`
-const INSTALLED = `/Applications/${BUNDLE}`
+/*
+ * `CENTRALU_INSTALLED_COPY` points `install` and the copy checks at another bundle path. It exists
+ * so the launcher's own tests can run `centralu install` against a temporary folder and never
+ * against the real /Applications (tooling/launcher-install.test.ts).
+ */
+const INSTALLED = process.env.CENTRALU_INSTALLED_COPY || `/Applications/${BUNDLE}`
 
 const PLATFORM = process.platform
 const HOME = homedir()
@@ -276,20 +282,22 @@ function queryRegistry(key) {
  * erodes trust, and pnpm blocks postinstall by default anyway. This is only run when the
  * person explicitly asks for it.
  *
- * **Never over a copy that is not older** (#645), unless `--force`. The in-app update runs this
- * after `npm i -g` with the same rule (`keepsInstalledCopy`): a local build (`0.2.0-beta.21.local.1`)
- * installed by hand and waiting for "Apply now" would otherwise be replaced by npm's beta.21 — a
- * downgrade of the one copy people click, done by an update. `--force` is for going back on purpose.
+ * **Never over a newer local build** (#645), unless `--force`. The in-app update runs this after
+ * `npm i -g` with the same rule (`keepsInstalledCopy`): a maintainer's local build
+ * (`0.2.0-beta.21.local.1`) waiting for "Apply now" would otherwise be replaced by npm's beta.21.
+ * Any released version is replaced, even a higher one: npm is the source of truth for releases,
+ * and a release pulled from `latest` must not survive here. The check comes before finding the app
+ * package, since keeping the copy needs nothing from it. `--force` replaces a local build on purpose.
  */
 function install(force) {
-  const app = requireApp()
   const copy = installedCopyVersion()
   if (!force && keepsInstalledCopy(pkg.version, copy)) {
     const where = PLATFORM === 'win32' ? WIN.dir : INSTALLED
-    console.log(`${where} holds ${copy}, which is not older than this package (${pkg.version}), and was left as it is.`)
+    console.log(`${where} holds the local build ${copy}, newer than this package (${pkg.version}), and was left as it is.`)
     console.log('To replace it anyway: centralu install --force')
     return
   }
+  const app = requireApp()
   if (PLATFORM === 'win32') return installWindows(app)
   if (PLATFORM !== 'darwin') return installDesktopEntry(app)
   if (existsSync(INSTALLED)) console.log(`Replacing the existing ${INSTALLED} with the new version.`)
@@ -510,6 +518,7 @@ async function update() {
 
 /**
  * The version of the copy placed in /Applications. null if there is nothing to compare.
+ * (`bundleVersionCommand`: the in-app update reads it with the same command.)
  *
  * `defaults` is used because there is no guarantee Info.plist stays XML — Tauri just happens
  * to write it as XML today, and if it ever switches to a binary plist, anything reading it
@@ -529,7 +538,8 @@ function installedCopyVersion() {
   }
   if (PLATFORM !== 'darwin' || !existsSync(INSTALLED)) return null
   try {
-    const out = execFileSync('/usr/bin/defaults', ['read', join(INSTALLED, 'Contents/Info.plist'), 'CFBundleShortVersionString'], {
+    const read = bundleVersionCommand(INSTALLED)
+    const out = execFileSync(read.command, read.args, {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     })
@@ -574,7 +584,7 @@ const HELP = `${APP_NAME} ${pkg.version}
   centralu              Launches the app
   centralu install      Registers it in the app list (macOS: /Applications, Linux: a menu entry,
                         Windows: %LOCALAPPDATA%\\Programs\\Centralu and a Start menu shortcut).
-                        A copy that is not older is kept; --force replaces it anyway
+                        A newer local build there is kept; --force replaces it anyway
   centralu uninstall    Removes that registration (conversation history is kept)
   centralu update       Upgrades if a new version is available
   centralu serve        Runs the host alone on this machine, for the app on another computer

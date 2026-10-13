@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { APP_NAME, APP_SLUG, APP_VERSION, isNewerVersion, keepsInstalledCopy, type UpdateStatus } from '@cc/protocol'
@@ -115,20 +115,20 @@ function existingInstalledCopy(): string | null {
 /**
  * The version the installed copy carries, or null when there is none to read (#645).
  *
- * Which file and how it is written is the platform's answer (`installedCopyVersionSource`, `os.ts`).
- * The plist is read as text the way the shell does (`bundle_version` in `src-tauri/src/sidecar.rs`):
- * Tauri writes an XML plist, and this is only for a comparison, so an unreadable one is simply
- * unknown. The path is joined by this host's rules, since the read happens here.
+ * How to read it is the platform's answer (`installedCopyVersionSource`, `os.ts`): on macOS the
+ * launcher's own `plutil` command, so the two never disagree about a copy. Unreadable is unknown,
+ * and `keepsInstalledCopy` replaces a copy whose version is unknown or malformed.
  */
 export function readInstalledCopyVersion(copy: string, platform: Platform = HOST_PLATFORM): string | null {
-  const source = installedCopyVersionSource(platform)
+  const source = installedCopyVersionSource(copy, platform)
   if (!source) return null
   try {
-    const text = readFileSync(join(copy, ...source.path), 'utf8')
-    const v = (source.format === 'plist' ? /<key>CFBundleShortVersionString<\/key>\s*<string>([^<]*)<\/string>/.exec(text)?.[1] ?? '' : text).trim()
-    return v && v.length <= 64 ? v : null
+    const text =
+      source.kind === 'command'
+        ? execFileSync(source.file, source.args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000, windowsHide: true })
+        : readFileSync(join(copy, source.name), 'utf8')
+    return text.trim() || null
   } catch {
-    // Missing or unreadable: unknown, and unknown never keeps a copy from being refreshed
     return null
   }
 }
@@ -553,13 +553,16 @@ export class UpdateService {
        * Only if one exists: on macOS `centralu install` *creates* `/Applications/…`, and
        * putting an app there is not something to do to someone who never asked. By this
        * point the launcher on disk is the new one, so running it is safe — its `install`
-       * keeps a copy at or above the version it carries (#645), the same rule as here.
+       * keeps a newer local build (#645), the same rule as here.
        *
-       * And only if the copy is older than what npm just installed (#645): a local build
-       * (`pnpm local-update`) waiting in /Applications for "Apply now" outranks the release it
-       * was cut from, and replacing it would be a downgrade of the one copy people click. The
-       * package is still updated — the launcher and `centralu serve` come from it — and the
-       * notice says what was kept; the window's own bundle check offers to apply the copy.
+       * And not over a maintainer's local build newer than the target (#645, `keepsInstalledCopy`):
+       * one (`pnpm local-update`) waiting in /Applications for "Apply now" outranks the release it
+       * was cut from, and replacing it would undo it. Every other copy is replaced, a higher
+       * released one too: npm is the source of truth for releases, and one pulled from `latest`
+       * must not survive in /Applications to be offered by "Apply now". An unreadable or malformed
+       * version is replaced as well, so a corrupt plist cannot block updates. When a local build is
+       * kept the package is still updated — the launcher and `centralu serve` come from it — and
+       * the notice says what was kept; the window's own bundle check offers to apply the copy.
        *
        * `centralu` resolves through PATH, which the host augments from the login shell at
        * startup (`env-path.ts`) precisely because a GUI app does not inherit one.
@@ -581,7 +584,7 @@ export class UpdateService {
       if (copy) {
         const copyVersion = this.deps.installedCopyVersion(copy)
         if (keepsInstalledCopy(version, copyVersion)) {
-          const notice = `The copy at ${copy} is ${copyVersion}, not older than ${version}, and was kept.`
+          const notice = `The local build ${copyVersion} at ${copy} is newer than ${version} and was kept.`
           this.status = { ...this.status, error: this.status.error ? `${this.status.error} ${notice}` : notice }
         } else {
           await this.deps.run(APP_SLUG, ['install'])
