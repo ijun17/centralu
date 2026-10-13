@@ -322,6 +322,64 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     expect(await page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(sessionId)
   })
 
+  for (const path of ['pinned', 'grid', 'relaunched window'] as const) {
+    test(`${path} recovers when a swap drops the instance-open answer`, async ({ page }) => {
+      const pid = await trustedProject(page, '/tmp/alpha')
+      await setApps(page, [app('slider', pid, { name: 'Slider' })])
+      if (path === 'relaunched window') {
+        await page.getByTestId(`app-row-${pid}/slider`).click()
+        await expect(page.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+        // A new page has no instance; it restores the app selection before the keeper swaps hosts.
+        await page.reload()
+        await page.waitForFunction(() => (window as any).__mock && (window as any).__store)
+        await trustedProject(page, '/tmp/alpha')
+        await setApps(page, [app('slider', pid, { name: 'Slider' })])
+      }
+      await page.evaluate(async ({ pid, path, restoredApp }) => {
+        const w = window as any
+        const mock = w.__mock
+        if (path === 'relaunched window') {
+          mock.externalAppList = [restoredApp]
+          mock.workspaceSnapshot = { view: 'app', focusedApp: { projectId: pid, appId: 'slider' } }
+        }
+        mock.viewFrameProvider = (a: string, i: string, o: unknown) => w.__viewFrame(a, i, o)
+        w.__openKeys = []
+        w.__recoveries = []
+        w.__homeCalls = 0
+        let outcome: unknown
+        mock.openViewProvider = async (a: string, p: string | null, openKey: string, recover: boolean) => {
+          w.__openKeys.push(openKey)
+          w.__recoveries.push(recover)
+          if (!outcome) {
+            w.__homeCalls++
+            outcome = await w.__openView(a, p)
+            mock.setConnectionState('disconnected')
+            throw Object.assign(new Error('Host restarted before an answer came'), { code: 'connection_lost' })
+          }
+          return outcome
+        }
+        if (path === 'relaunched window') await w.__store.getState().attach(mock)
+        if (path === 'grid') {
+          await w.__store.getState().setGridPanels([{ kind: 'app', projectId: pid, appId: 'slider' }])
+          w.__store.getState().setView('grid')
+        }
+      }, { pid, path, restoredApp: app('slider', pid, { name: 'Slider' }) })
+      if (path === 'pinned') await page.getByTestId(`app-row-${pid}/slider`).click()
+      await expect(page.getByText('Reconnecting…', { exact: true })).toBeVisible()
+      await expect(page.getByTestId('pinned-open-failed')).toHaveCount(0)
+      expect(await page.evaluate(() => (window as any).__homeCalls)).toBe(1)
+      await page.evaluate(() => (window as any).__mock.setConnectionState('resync_required'))
+      await expect(page.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+      await expect(page.getByTestId('pinned-open-failed')).toHaveCount(0)
+      expect(await page.evaluate(() => (window as any).__homeCalls)).toBe(1)
+      const keys = await page.evaluate(() => (window as any).__openKeys as string[])
+      expect(keys).toHaveLength(2)
+      expect(keys[0]).toBeTruthy()
+      expect(keys[1]).toBe(keys[0])
+      expect(await page.evaluate(() => (window as any).__recoveries)).toEqual([false, true])
+    })
+  }
+
   test('an app with no view still shows in the list, and opening it says "this app has no screen" — home is not even called', async ({ page }) => {
     const pid = await trustedProject(page, '/tmp/alpha')
     await setApps(page, [app('headless', pid, { home: null, description: 'Only tools for agents.' })])

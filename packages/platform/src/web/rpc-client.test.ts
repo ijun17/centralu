@@ -711,3 +711,26 @@ describe('RpcClient — an answer that cannot be read', () => {
     rpc.close()
   })
 })
+
+
+describe('view reads versus calls with side effects during a swap', () => {
+  it.each([
+    ['apps.viewFrame', { appId: 'notes', projectId: null, instanceId: 'view', hostOrigin: 'http://localhost' }, true],
+    ['apps.inlineReopen', { sessionId: 's', callId: 'c' }, true],
+    ['apps.recoverView', { appId: 'notes', projectId: null, openKey: 'aabbccdd-1234-4567-8123-aabbccddeeff' }, true],
+    ['apps.holdViews', { instanceIds: ['view'] as string[] }, true],
+    ['apps.inlineViews', { sessionId: 's' }, true],
+    ['apps.openView', { appId: 'notes', projectId: null, openKey: 'aabbccdd-1234-4567-8123-aabbccddeeff' }, true],
+    ['apps.openView', { appId: 'notes', projectId: null }, false],
+    ['apps.invoke', { appId: 'notes', name: 'save', args: {} }, false],
+  ] as const)('%s reports uncertainty only for a call with side effects (%j)', async (method, params, safe) => {
+    const rpc = makeClient()
+    rpc.connect()
+    FakeWebSocket.last.ready()
+    const response = rpc.call(method, params)
+    const failure = expect(response).rejects.toThrow(safe ? 'while opening this app screen' : 'may or may not')
+    FakeWebSocket.last.drop()
+    await failure
+    rpc.close()
+  })
+})

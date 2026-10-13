@@ -10,7 +10,7 @@ import type { OpenView, ViewHost } from './views/view-host.js'
  * view is not open", until the person reopened it.
  *
  * So the leaving host writes down what it takes to serve each open view again — its id, its app
- * and its `ui://` address, nothing the app returned — and the next host started under the keeper
+ * and its `ui://` address. A keyed pinned open also carries its home outcome or unfinished reservation — and the next host started under the keeper
  * opens them again under the same ids at startup. With the view's address also stable (the front
  * door's port and a secret derived from the keeper's token, main.ts), the UI's re-request after
  * the reconnect gets the very address it already has and leaves the view alone (AppFrame).

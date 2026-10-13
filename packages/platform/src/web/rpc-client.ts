@@ -40,6 +40,7 @@ export type RpcClientOptions = {
 type Pending = {
   /** Which method was called — its result schema is what the answer is read through */
   method: RpcMethodName
+  viewRead: boolean
   resolve: (v: unknown) => void
   reject: (e: Error) => void
   timer: ReturnType<typeof setTimeout>
@@ -444,7 +445,7 @@ export class RpcClient {
     for (const [id, p] of [...this.pending]) {
       if (p.frame !== null) continue
       this.take(id)
-      p.reject(rpcError(`${reason} before an answer came — the host may or may not have done this; check before trying again`, 'connection_lost', false))
+      p.reject(rpcError(p.viewRead ? `${reason} while opening this app screen` : `${reason} before an answer came — the host may or may not have done this; check before trying again`, 'connection_lost', false))
     }
   }
 
@@ -494,7 +495,9 @@ export class RpcClient {
       }, this.opts.callTimeoutMs ?? (method === 'apps.invoke' ? APP_CALL_TIMEOUT_MS : LONG_CALLS.has(method) ? LONG_CALL_TIMEOUT_MS : DEFAULT_CALL_TIMEOUT_MS))
       // Sent now if the host is ready, otherwise after the next hello_ok
       const ws = this.ready ? this.ws : null
-      this.pending.set(id, { method, resolve: resolve as (v: unknown) => void, reject, timer, frame: ws ? null : frame, bytes })
+      const viewRead = ['apps.viewFrame', 'apps.recoverView', 'apps.inlineReopen', 'apps.inlineViews', 'apps.holdViews'].includes(method) ||
+        (method === 'apps.openView' && 'openKey' in params && typeof params.openKey === 'string')
+      this.pending.set(id, { method, viewRead, resolve: resolve as (v: unknown) => void, reject, timer, frame: ws ? null : frame, bytes })
       this.queuedBytes += bytes
       ws?.send(frame)
     })

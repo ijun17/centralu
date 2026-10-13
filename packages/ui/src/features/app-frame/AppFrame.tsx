@@ -4,6 +4,7 @@ import { APP_DRAG_NOTIFICATION, APP_VERSION, type AppId } from '@cc/protocol'
 import type { AppToolResult, AppViewFrame } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.js'
 import { externalAppKey, useStore } from '../../store/store.js'
+import { viewReconnect } from '../../store/viewReconnect.js'
 import { DragRelay } from './dragRelay.js'
 import { activeTheme, readHostStyles } from './hostStyles.js'
 
@@ -224,14 +225,6 @@ function fillDimensions(el: Element | null): McpUiHostContext['containerDimensio
 type Phase = 'loading' | 'reconnecting' | 'ready' | 'error' | 'closed'
 type LinkAsk = { url: string; answer: (open: boolean) => void }
 
-/**
- * `apps.viewFrame` only reads the address for an instance we already have. Unlike an app tool
- * call, asking again cannot do work twice, so a host swap may safely retry it. A bound still
- * matters: a host that keeps dropping the request must eventually show its reason.
- */
-const VIEW_FRAME_RECONNECT_LIMIT = 3
-type FrameRetry = { kind: 'load' | 'resync'; resyncs: number; sawDisconnected: boolean }
-
 export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFrame(
   { appId, projectId = null, instanceId, toolInput, toolResult, toolCancelled, changeSignal, onMessage, onFailed, fill = false, loading, className },
   ref,
@@ -280,15 +273,11 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   const changeRef = useRef(signal)
   changeRef.current = signal
   const hostResyncs = useStore((s) => s.hostResyncs)
-  const connection = useStore((s) => s.connection)
   /** The address the frame was loaded with — null until it is, and again once the load is undone */
   const loadedUrl = useRef<string | null>(null)
   /** An address already asked for that has to be loaded (another host gave a different one) — the load below takes it instead of asking again */
   const nextFrame = useRef<AppViewFrame | null>(null)
   const [reload, setReload] = useState(0)
-  const reconnects = useRef(0)
-  const [frameRetry, setFrameRetry] = useState<FrameRetry | null>(null)
-  const [resyncRetry, setResyncRetry] = useState(0)
 
   /** A link opens only after the person confirms it. If an earlier question is still pending, it is closed as rejected */
   const linkAskRef = useRef<LinkAsk | null>(null)
@@ -315,7 +304,7 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
     let cancelled = false
     let bridge: AppBridge | null = null
     sent.current = { input: false, result: false, change: changeRef.current }
-    setPhase(reconnects.current > 0 ? 'reconnecting' : 'loading')
+    setPhase('loading')
     setError(null)
     const known = nextFrame.current
     nextFrame.current = null
@@ -324,11 +313,9 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       const [{ AppBridge, PostMessageTransport }, frame] = await Promise.all([
         // The bridge is loaded only when a view first opens — someone who never opens an app view pays zero startup cost
         import('@modelcontextprotocol/ext-apps/app-bridge'),
-        known ?? platform.apps.viewFrame(appId, instanceId, { projectId, hostOrigin: window.location.origin }),
+        known ?? viewReconnect(platform, () => platform.apps.viewFrame(appId, instanceId, { projectId, hostOrigin: window.location.origin }), () => { if (!cancelled) setPhase('reconnecting') }),
       ])
       if (cancelled) return
-      reconnects.current = 0
-      setFrameRetry(null)
       bridge = new AppBridge(
         null,
         { name: 'Centralu', version: APP_VERSION },
@@ -409,17 +396,6 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
       loadedUrl.current = frame.url
     })().catch((e: unknown) => {
       if (cancelled) return
-      if ((e as { code?: unknown }).code === 'connection_lost' && reconnects.current < VIEW_FRAME_RECONNECT_LIMIT) {
-        /*
-         * The RPC client only gives this code to a request that was on the old socket. The next
-         * connection (or a resync already observed since this request started) is a new host to
-         * ask, rather than another attempt at the host that just disappeared.
-         */
-        setPhase('reconnecting')
-        setFrameRetry({ kind: 'load', resyncs: hostResyncs, sawDisconnected: useStore.getState().connection !== 'connected' })
-        reconnects.current += 1
-        return
-      }
       const message = e instanceof Error ? e.message : String(e)
       setError(message)
       setPhase('error')
@@ -439,38 +415,22 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
   }, [platform, appId, projectId, instanceId, askToOpen, settleLink, reload])
 
   /*
-   * Wait until there is evidence of a new host before repeating the read. A new-host resync can
-   * arrive before the dropped RPC settles; the request's recorded counter covers that ordering.
-   * A regular disconnect/reconnect has no resync, so seeing the previously disconnected port
-   * connected again is its equivalent. The client itself supplies the reconnect backoff.
-   */
-  useEffect(() => {
-    if (!frameRetry) return
-    const newHost = hostResyncs > frameRetry.resyncs || (frameRetry.sawDisconnected && connection === 'connected')
-    if (!newHost) return
-    setFrameRetry(null)
-    if (frameRetry.kind === 'load') setReload((n) => n + 1)
-    else setResyncRetry((n) => n + 1)
-  }, [frameRetry, hostResyncs, connection])
-
-  /*
    * Another host lifetime: ask for the address again (see the header). A view still loading is
    * skipped, since its own request already goes to the new host; so is one taken down.
    */
+  const refreshing = useRef<{ url: string; request: Promise<void> } | null>(null)
   const resyncsSeen = useRef(hostResyncs)
-  const resyncRetriesSeen = useRef(resyncRetry)
   useEffect(() => {
-    if (hostResyncs === resyncsSeen.current && resyncRetry === resyncRetriesSeen.current) return
+    if (hostResyncs === resyncsSeen.current) return
     resyncsSeen.current = hostResyncs
-    resyncRetriesSeen.current = resyncRetry
     const loaded = loadedUrl.current
-    if (loaded === null) return
-    let cancelled = false
-    platform.apps.viewFrame(appId, instanceId, { projectId, hostOrigin: window.location.origin }).then(
+    if (loaded === null || refreshing.current?.url === loaded) return
+    // A resync greeting also wakes the current retry. Starting another read would reset its bound.
+    const request = viewReconnect(platform, () => platform.apps.viewFrame(appId, instanceId, { projectId, hostOrigin: window.location.origin }), () => {
+      if (loadedUrl.current === loaded) setPhase('reconnecting')
+    }).then(
       (frame) => {
-        if (cancelled || loadedUrl.current !== loaded) return
-        reconnects.current = 0
-        setFrameRetry(null)
+        if (loadedUrl.current !== loaded) return
         if (frame.url === loaded) {
           setPhase('ready')
           return
@@ -479,23 +439,21 @@ export const AppFrame = forwardRef<AppFrameHandle, AppFrameProps>(function AppFr
         setReload((n) => n + 1)
       },
       (e: unknown) => {
-        if (cancelled || loadedUrl.current !== loaded) return
-        if ((e as { code?: unknown }).code === 'connection_lost' && reconnects.current < VIEW_FRAME_RECONNECT_LIMIT) {
-          setPhase('reconnecting')
-          setFrameRetry({ kind: 'resync', resyncs: hostResyncs, sawDisconnected: useStore.getState().connection !== 'connected' })
-          reconnects.current += 1
-          return
-        }
+        if (loadedUrl.current !== loaded) return
         const message = e instanceof Error ? e.message : String(e)
         setError(message)
         setPhase('error')
         onFailedRef.current?.(message)
       },
-    )
-    return () => {
-      cancelled = true
-    }
-  }, [hostResyncs, resyncRetry, platform, appId, projectId, instanceId])
+    ).finally(() => {
+      if (refreshing.current?.request === request) {
+        // Greetings received during this read already woke its retry; absorb a delayed React effect too.
+        resyncsSeen.current = useStore.getState().hostResyncs
+        refreshing.current = null
+      }
+    })
+    refreshing.current = { url: loaded, request }
+  }, [hostResyncs, platform, appId, projectId, instanceId])
 
   /*
    * A last-ditch attempt for the case where the parent tears the view down without calling

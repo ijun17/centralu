@@ -180,6 +180,28 @@ describe('apps.openView', () => {
     expect(page.body).toContain(`view from app process ${v.toolResult._meta?.['fixture/served-by']}`)
   })
 
+  it('a client open key shares concurrent requests and reclaims the same instance without calling home twice', async () => {
+    plant('slider', { home: 'home' })
+    await start()
+    const params = { appId: 'slider', projectId: 'p1', lease: true, openKey: 'aabbccdd-1234-4567-8123-aabbccddeeff' }
+    const [first, repeated] = await Promise.all([rpc('apps.openView', params, { client: 1 }), rpc('apps.openView', params, { client: 1 })])
+    expect(repeated).toEqual(first)
+    expect(homeCalls('slider')).toBe(1)
+    views.holderGone(1)
+    expect(await rpc('apps.recoverView', params, { client: 2 })).toEqual(first)
+    expect(homeCalls('slider')).toBe(1)
+    expect(views.list()).toHaveLength(1)
+  })
+
+  it('recovery without an original reservation never runs a home tool', async () => {
+    plant('slider', { home: 'home' })
+    await start()
+    await expect(rpc('apps.recoverView', { appId: 'slider', projectId: 'p1', openKey: 'aabbccdd-1234-4567-8123-aabbccddeeff' }))
+      .rejects.toThrow('may or may not')
+    expect(homeCalls('slider')).toBe(0)
+    expect(views.list()).toHaveLength(0)
+  })
+
   it('a home that declares no view, a missing home, and a view that is not a ui:// are rejected without even being called, and leave no instance', async () => {
     plant('plain', { home: 'no_screen' })
     plant('nohome')

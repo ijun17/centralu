@@ -854,7 +854,8 @@ export interface AppsPort {
    * screen, or the app could not be reached. `machine` names a linked machine for its user-folder
    * app (#82); a project app's id already names its machine.
    */
-  openView(appId: AppId, projectId: string | null, machine?: string): Promise<AppHomeView>
+  /** Keep openKey unchanged; recover queries the original outcome without running home again. */
+  openView(appId: AppId, projectId: string | null, machine?: string, openKey?: string, recover?: boolean): Promise<AppHomeView>
   /** Closes a pinned screen — releases the app it was holding. Passes quietly if it is already closed */
   closeView(instanceId: string): Promise<void>
   /**

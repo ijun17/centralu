@@ -60,6 +60,7 @@ import { isOnScreen } from '../app/onscreen.js'
 import { activateTab, defaultLayout, sanitizeLayout, type PanelGroup, type PanelTab } from './panelLayout.js'
 import { closeLayer, EMPTY_NAV, sameScreen, step, visit, type NavHistory, type Screen } from './navHistory.js'
 import { reloadBudget } from './reloadBudget.js'
+import { viewReconnect } from './viewReconnect.js'
 import { appendChat, bumpChatKeysAbove, messagesToChat, nextChatKey, subagentRow, type ChatAttachment, type ChatItem } from './transcript.js'
 export { audienceText, compactionText, errorText, handoffText, markerText, messagesToChat, noticeLine, resetText } from './transcript.js'
 export type { ChatAttachment, ChatItem, NoticeLine } from './transcript.js'
@@ -272,6 +273,8 @@ export type PinnedView = {
  * or the frame failing to mount. Whoever closes it, teardown goes first.
  */
 export type InlineView = {
+  /** Discovery must not close an instance while its reopen answer is being recovered. */
+  reopening?: boolean
   callId: string
   appId: string
   projectId: string | null
@@ -5732,14 +5735,15 @@ export const useStore = create<AppState>((set, get) => ({
   async reopenInlineView(sessionId, callId) {
     const platform = get().platform
     const v = get().inlineViews[sessionId]?.[callId]
-    if (!platform || !v || v.state !== 'parked' || v.rejected || !v.kept) return
+    if (!platform || !v || v.state !== 'parked' || v.reopening || v.rejected || !v.kept) return
     const patch = (next: Partial<InlineView>) =>
       set((s) => {
         const cur = s.inlineViews[sessionId]?.[callId]
         return cur ? { inlineViews: { ...s.inlineViews, [sessionId]: { ...s.inlineViews[sessionId], [callId]: { ...cur, ...next } } } } : {}
       })
+    patch({ reopening: true })
     try {
-      const r = await platform.apps.reopenInlineView(sessionId, callId)
+      const r = await viewReconnect(platform, () => platform.apps.reopenInlineView(sessionId, callId))
       // If an outcome (from a call still running) arrived during the reopen, it is the newer one
       const now = get().inlineViews[sessionId]?.[callId]
       patch({
@@ -5756,6 +5760,8 @@ export const useStore = create<AppState>((set, get) => ({
       capInlineViews(get, sessionId, callId)
     } catch (e) {
       patch({ kept: false, reason: (e as Error).message })
+    } finally {
+      patch({ reopening: false })
     }
   },
 
@@ -5843,7 +5849,13 @@ export const useStore = create<AppState>((set, get) => ({
       set((s) => ({ pinnedViews: s.pinnedViews.map((p) => (p.key === key ? fn(p) : p)) }))
     patch((p) => ({ ...p, phase: 'opening', error: null }))
     try {
-      const v = await platform.apps.openView(pv.appId, pv.projectId, pv.machine ?? undefined)
+      const openKey = crypto.randomUUID()
+      let recover = false
+      const v = await viewReconnect(platform, () => {
+        const reclaim = recover
+        recover = true
+        return platform.apps.openView(pv.appId, pv.projectId, pv.machine ?? undefined, openKey, reclaim)
+      })
       /*
        * It was closed while opening (its slot is gone), or the app was blocked and returned to idle.
        * The instance just opened has nowhere to go — if it is not released, a view nobody sees ends up
@@ -6422,7 +6434,7 @@ async function syncInlineViews(get: () => AppState, set: (fn: (s: AppState) => P
   if (!platform) return
   let kept: Awaited<ReturnType<typeof platform.apps.inlineViews>>
   try {
-    kept = await platform.apps.inlineViews(sessionId)
+    kept = await viewReconnect(platform, () => platform.apps.inlineViews(sessionId))
   } catch {
     return
   }
@@ -6442,6 +6454,7 @@ async function syncInlineViews(get: () => AppState, set: (fn: (s: AppState) => P
   for (const k of kept) {
     if (!k.instanceId || releasedOrphans.has(k.instanceId)) continue
     const cur = get().inlineViews[sessionId]?.[k.callId]
+    if (cur?.reopening) continue
     if (cur && cur.state !== 'parked' && cur.instanceId === k.instanceId) continue
     // Between two reads of history (before an earlier close has reached the host), the same instance is never closed twice — an instance id is never reused
     const id = k.instanceId
@@ -6469,7 +6482,7 @@ async function holdPinnedViews(get: () => AppState, set: (fn: (s: AppState) => P
   if (!platform || held.length === 0) return
   let missing: string[]
   try {
-    missing = await platform.apps.holdViews(held)
+    missing = await viewReconnect(platform, () => platform.apps.holdViews(held))
   } catch {
     return
   }

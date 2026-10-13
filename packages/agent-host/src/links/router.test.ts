@@ -191,6 +191,19 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       await expect(router.handle('apps.openView', { appId: 'notes', projectId: null, machine: 'm9' })).rejects.toThrow(/No linked machine m9/)
     })
 
+    it.each([
+      { projectId: 'm1.p1', machine: undefined, appId: 'board', localProject: 'p1' },
+      { projectId: null, machine: 'm1', appId: 'notes', localProject: null },
+    ])('recovers a keyed view on its own machine without recalling home ($appId)', async ({ projectId, machine, appId, localProject }) => {
+      const { router, local, m1 } = rig()
+      const openKey = 'aabbccdd-1234-4567-8123-aabbccddeeff'
+      m1.answers['apps.recoverView'] = { instanceId: 'inst-aaaaaaaaaaaaaaaa', tool: 'home', resourceUri: 'ui://board/main', toolInput: {}, toolResult: { content: [] }, runId: 'once' }
+      expect(await router.handle('apps.recoverView', { appId, projectId, ...(machine ? { machine } : {}), openKey, lease: true }))
+        .toMatchObject({ instanceId: 'm1.inst-aaaaaaaaaaaaaaaa', runId: 'once' })
+      expect(m1.calls).toEqual([{ method: 'apps.recoverView', params: { appId, projectId: localProject, openKey } }])
+      expect(local).toEqual([])
+    })
+
     it('opens a linked machine’s view without the window’s lease, which only the hub’s own views carry (#392)', async () => {
       const { router, local, m1, m2 } = rig()
       m1.answers['apps.openView'] = { instanceId: 'inst-aaaaaaaaaaaaaaaa', tool: 'show', resourceUri: 'ui://board/main', toolInput: {}, toolResult: { content: [] }, runId: 'r1' }

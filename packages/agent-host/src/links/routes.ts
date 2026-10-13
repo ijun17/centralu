@@ -247,6 +247,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
    * link, not the window, so its views are opened without one and live until closed, as before
    */
   'apps.openView': { kind: 'project', orMachine: true, result: (r, q) => q.openedView(r), params: ({ lease: _lease, ...p }) => p },
+  'apps.recoverView': { kind: 'project', orMachine: true, result: (r, q) => q.openedView(r), params: ({ lease: _lease, ...p }) => p },
   'apps.readResource': view(['projectId', 'instanceId']),
   'apps.invoke': view(['projectId', 'instanceId']),
   'apps.inlineReopen': session((r, q) => q.inlineView(r)),

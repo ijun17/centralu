@@ -196,6 +196,29 @@ Codex orchestrator bridge connect there.
 | The swap's detach hands agents, terminals and commands over | They are the keeper's children (§4.3), so A lets go of them and B re-attaches in its normal startup: a running turn goes on across the swap. The host reports `keepsAgents: true` only when it has the keeper's child service; one without it still stops its children, and the window says so. |
 
 
+**App views opening during a swap (#580).** A relaunched window first attaches to the keeper's existing host,
+then requests its automatic switch. Startup waits for that switch before opening panels; otherwise the new window
+can run a home tool on an older host which does not understand keyed opens. The normal build bar still handles
+switches that need a decision, and a failed switch stays visible without being requested again.
+
+Every view-opening path subscribes before its RPC and waits for a reconnect or resync before retrying a dropped
+answer, up to three retries and 30 seconds per reconnect wait. Subscribing first also covers a new-host greeting
+that arrives before the dropped call's rejection. Reads use a quiet reconnect state; uncertainty wording belongs
+to tool calls and messages with side effects.
+
+| Path | RPC and recovery |
+|---|---|
+| Sidebar app, project app panel, grid app panel, restored workspace | The store's `startPinnedView` calls `apps.openView` with a fresh client `openKey` for each logical open. After a dropped answer, `apps.recoverView` queries/reclaims that key; it never calls home again. The host shares concurrent opens and hands the original home outcome and instance to the next host. |
+| New `AppFrame`, including a conversation's tool-created view | `apps.viewFrame` reads an existing instance's address; it is safe to ask again. |
+| Already-loaded frame after a host resync | `apps.viewFrame` reads the replacement host's address and reloads only if it changed. |
+| Parked conversation view | `apps.inlineReopen` reuses the session/call's instance and kept outcome; it never repeats the tool. |
+| Reconnect lease claims and conversation-view discovery | `apps.holdViews` and `apps.inlineViews` are idempotent and wait/retry too. A missing leased instance returns its slot to idle for a fresh keyed open. |
+
+A keyed home open reserves its instance **before** running the home tool. If the drain cuts that tool while it is
+still running, the reservation is handed over and recovery reports the uncertain tool outcome instead of calling
+it twice. Keys/outcomes live with their bounded view instances and disappear when those instances close. Failure reservations release the app immediately and expire under the lease grace period. If an
+unplanned crash lost the reservation, recovery reports uncertainty and never reruns the home tool.
+
 ### 4.3 The keeper holds agents, terminals and commands (#280, option C step 2)
 
 The host no longer spawns its long-lived children itself. Under the keeper, claude, codex app-server, terminals and

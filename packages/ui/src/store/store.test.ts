@@ -2528,6 +2528,43 @@ describe('a pinned view (M4 B-2)', () => {
     ])
   })
 
+  it.each(['pinned', 'project panel', 'grid', 'linked user app', 'restored window'])(
+    '%s waits for a replacement host after its instance-open answer is dropped', async (path) => {
+      const mock = await live()
+      if (path === 'restored window') {
+        mock.workspaceSnapshot = { view: 'app', focusedApp: { projectId: 'p1', appId: 'slider' } }
+        await useStore.getState().attach(mock)
+      } else if (path === 'grid') useStore.getState().ensureGridAppView('p1', 'slider')
+      else if (path === 'project panel') useStore.getState().ensurePinnedView('p1', 'slider')
+      else if (path === 'linked user app') useStore.getState().openApp(null, 'slider', { machine: 'm1' })
+      else useStore.getState().openApp('p1', 'slider')
+      const key = pinned()[0]!.key
+      const keys: (string | undefined)[] = []
+      const recoveries: (boolean | undefined)[] = []
+      const answer = { instanceId: 'kept-view', tool: 'home', resourceUri: 'ui://slider/main', toolInput: {}, toolResult: { content: [] }, runId: 'once' }
+      mock.openViewProvider = async (_a, _p, openKey, recover) => {
+        keys.push(openKey)
+        recoveries.push(recover)
+        if (keys.length === 1) {
+          mock.setConnectionState('disconnected')
+          throw Object.assign(new Error('Host restarted before an answer came'), { code: 'connection_lost' })
+        }
+        return answer
+      }
+      const opening = useStore.getState().startPinnedView(key)
+      await Promise.resolve()
+      expect(pinned()[0]).toMatchObject({ phase: 'opening', error: null })
+      expect(keys).toHaveLength(1)
+      mock.setConnectionState('resync_required')
+      await opening
+      expect(pinned()[0]).toMatchObject({ phase: 'open', instanceId: 'kept-view', error: null })
+      expect(keys).toHaveLength(2)
+      expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/)
+      expect(keys[1]).toBe(keys[0])
+      expect(recoveries).toEqual([false, true])
+    },
+  )
+
   it('closing it while it is opening also releases the just-opened instance', async () => {
     const mock = await live()
     let release!: () => void
@@ -4569,6 +4606,35 @@ describe('a parked in-conversation view lets go of its call (#392)', () => {
     expect(view().state).toBe('live')
     expect(view().toolInput).toEqual({ text: big })
     expect(view().toolResult).toEqual({ content: [{ type: 'text', text: big }] })
+  })
+})
+
+describe('a conversation view opening across a host swap', () => {
+  it('retries the session/call reopen after a dropped answer without repeating its app tool', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('iv-swap', sessionInfo('iv-swap'))
+    await useStore.getState().attach(mock)
+    const base = { type: 'app_view', sessionId: 'iv-swap', callId: 'c1', appId: 'viewer', projectId: 'p1', tool: 'show' } as const
+    mock.emit({ ...base, phase: 'open', instanceId: 'first-inline', toolInput: { once: true } } as NormalizedEvent)
+    mock.emit({ ...base, phase: 'result', toolResult: { content: [] }, kept: true } as NormalizedEvent)
+    await useStore.getState().closeInlineView('iv-swap', 'c1', 'Scrolled away')
+    const reopen = mock.apps.reopenInlineView
+    let opened: Awaited<ReturnType<typeof reopen>>
+    const retry = vi.spyOn(mock.apps, 'reopenInlineView').mockImplementation(async (...args) => {
+      if (retry.mock.calls.length === 1) {
+        opened = await reopen(...args)
+        mock.setConnectionState('disconnected')
+        throw Object.assign(new Error('Connection lost'), { code: 'connection_lost' })
+      }
+      return reopen(...args)
+    })
+    const opening = useStore.getState().reopenInlineView('iv-swap', 'c1')
+    await vi.waitFor(() => expect(useStore.getState().connection).toBe('disconnected'))
+    mock.setConnectionState('resync_required')
+    await opening
+    expect(useStore.getState().inlineViews['iv-swap']!['c1']).toMatchObject({ state: 'live', instanceId: opened!.instanceId })
+    expect(retry).toHaveBeenCalledTimes(2)
+    expect(mock.appToolCalls).toEqual([])
   })
 })
 

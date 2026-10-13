@@ -474,6 +474,7 @@ function Body({
   onMessage: (m: AppFrameMessage) => Promise<boolean>
 }) {
   const trust = useStore((s) => s.setProjectTrusted)
+  const connection = useStore((s) => s.connection)
   const title = app?.title ?? pv.appId
   /*
    * While the instance is open, the frame is drawn **no matter what.** If the app gets blocked or
@@ -580,7 +581,7 @@ function Body({
     )
   }
   const label =
-    pv.phase === 'restarting' ? `Restarting ${title}…` : app.info.status === 'running' ? `Opening ${title}…` : `Starting ${title}…`
+    pv.phase === 'opening' && connection !== 'connected' ? 'Reconnecting…' : pv.phase === 'restarting' ? `Restarting ${title}…` : app.info.status === 'running' ? `Opening ${title}…` : `Starting ${title}…`
   return <Skeleton label={label} />
 }
 

@@ -1,6 +1,7 @@
 import { createHmac, randomBytes } from 'node:crypto'
 import type { Server } from 'node:http'
-import { MACHINE_ID_RE } from '@cc/protocol'
+import { MACHINE_ID_RE, RpcMethods } from '@cc/protocol'
+import type { HomeView } from './home-view.js'
 import { createHttpHandler, type HttpRoute } from '../transport/http.js'
 import { withDragRelay } from './drag-relay.js'
 import { allowAttribute, approvedPermissions, buildProxyCsp, buildViewCsp, type ViewCspDomains, type ViewPermissions } from './csp.js'
@@ -69,7 +70,8 @@ export type ViewFrame = {
  * again. `leased`: a window holds it under a lease (`hold`), and the next host keeps it only as
  * long as a window claims it again.
  */
-export type OpenView = { id: string; app: AppRef; uri: string; leased?: boolean }
+type HomeOpen = { key: string; outcome?: HomeView; error?: string }
+export type OpenView = { id: string; app: AppRef; uri: string; leased?: boolean; home?: HomeOpen }
 
 /**
  * Which window holds a leased instance (#392). `holder` is the connection that opened or last
@@ -103,6 +105,7 @@ type Instance = {
   release: (() => void) | null
   /** null: no window leases it (a view inside a conversation, or one an older window opened), and it lives until closed */
   lease: Lease | null
+  home?: HomeOpen
 }
 
 /** One view as it is about to be served: this host's own instance, or a linked machine's (`own: false`) */
@@ -187,6 +190,7 @@ function fail(message: string): never {
 
 export class ViewHost {
   private readonly instances = new Map<string, Instance>()
+  private readonly openingHomes = new Map<string, Promise<HomeView>>()
   private readonly origins = new Map<string, Origin>()
   /** Origin servers being closed, by key: one started again for the same key waits for its port to be free */
   private readonly closingOrigins = new Map<string, Promise<void>>()
@@ -233,6 +237,46 @@ export class ViewHost {
     const lease = holder === undefined ? null : { holder, orphanSince: null }
     this.instances.set(id, { id, app: ref, uri, doc: null, release, lease })
     return { instanceId: id }
+  }
+
+  /** A logical home open may run its tool once, even when its answer is lost in a swap. */
+  homeOpen(app: AppRef, key: string, holder?: number): Promise<HomeView> | null {
+    const inst = [...this.instances.values()].find((i) => i.home?.key === key)
+    if (!inst) return null
+    if (!sameApp(inst.app, app)) fail('This open key belongs to another app')
+    if (inst.home!.outcome) {
+      if (holder !== undefined) this.hold([inst.id], holder)
+      return Promise.resolve(inst.home!.outcome!)
+    }
+    if (inst.home!.error) return Promise.reject(new Error(inst.home!.error))
+    const opening = this.openingHomes.get(inst.id)
+    if (opening) {
+      if (holder !== undefined) this.hold([inst.id], holder)
+      return opening
+    }
+    return Promise.reject(new Error(
+      'Host restarted while the home tool was running — the app may or may not have done this; check before opening again',
+    ))
+  }
+
+  rememberHome(instanceId: string, key: string, work: () => Promise<HomeView>): Promise<HomeView> {
+    const inst = this.instances.get(instanceId)!
+    // Reserve before calling the tool; an unfinished reservation is also handed over.
+    inst.home = { key }
+    const opening = work().then((outcome) => {
+      inst.home!.outcome = outcome
+      return outcome
+    }, (e: unknown) => {
+      inst.home!.error = e instanceof Error ? e.message : String(e)
+      // Keep a short-lived failure reservation, but never hold an app open for a failed screen.
+      inst.release?.()
+      inst.release = null
+      inst.lease = { holder: null, orphanSince: Date.now() }
+      this.scheduleSweep()
+      throw e
+    }).finally(() => this.openingHomes.delete(instanceId))
+    this.openingHomes.set(instanceId, opening)
+    return opening
   }
 
   close(instanceId: string): void {
@@ -294,7 +338,7 @@ export class ViewHost {
 
   /** Every open instance, oldest first — what a planned hand-over records (view-handover.ts) */
   list(): OpenView[] {
-    return [...this.instances.values()].map((i) => ({ id: i.id, app: { ...i.app }, uri: i.uri, ...(i.lease ? { leased: true } : {}) }))
+    return [...this.instances.values()].map((i) => ({ id: i.id, app: { ...i.app }, uri: i.uri, ...(i.lease ? { leased: true } : {}), ...(i.home ? { home: i.home } : {}) }))
   }
 
   /**
@@ -323,8 +367,19 @@ export class ViewHost {
         continue
       }
       // A leased view belonged to a connection of the previous host: no one holds it until a window claims it
-      const lease = v.leased === true ? { holder: null, orphanSince: now } : null
-      this.instances.set(v.id, { id: v.id, app: ref, uri: v.uri, doc: null, release, lease })
+      let lease = v.leased === true ? { holder: null, orphanSince: now } : null
+      let home: HomeOpen | undefined
+      if (v.home && typeof v.home.key === 'string' && RpcMethods['apps.openView'].params.shape.openKey.safeParse(v.home.key).success) {
+        const outcome = RpcMethods['apps.openView'].result.safeParse(v.home.outcome)
+        home = { key: v.home.key, ...(outcome.success && outcome.data.instanceId === v.id ? { outcome: outcome.data as HomeView } : {}),
+          ...(typeof v.home.error === 'string' ? { error: v.home.error } : {}) }
+      }
+      if (home && !home.outcome) {
+        release?.()
+        release = null
+        lease = { holder: null, orphanSince: now }
+      }
+      this.instances.set(v.id, { id: v.id, app: ref, uri: v.uri, doc: null, release, lease, ...(home ? { home } : {}) })
       opened.push(v.id)
     }
     if (opened.some((id) => this.instances.get(id)?.lease)) this.scheduleSweep()

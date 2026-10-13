@@ -6,6 +6,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { AlertKind, Platform, RelaunchCheck, RelaunchPort, ShortcutKeys, SystemPort } from '../ports/index.js'
 import { createWebPlatform } from '../web/index.js'
+import { finishRelaunchSwap } from './relaunch-swap.js'
 import type { ShellStart, SwapView } from './switch-plan.js'
 
 export {
@@ -386,6 +387,9 @@ export function tauriRelaunchPort(): RelaunchPort {
 }
 
 export async function createTauriPlatform(): Promise<Platform> {
+  await waitForHost()
+  const attached = await hostBuild().catch(() => null)
+  if (attached) await finishRelaunchSwap(attached, async (cb) => listen<HostBuild>('host-build', (e) => cb(e.payload)), switchHostBuild)
   const { port, token } = await waitForHost()
 
   // Ask the shell how much of our top bar the OS has already claimed. Only Rust knows

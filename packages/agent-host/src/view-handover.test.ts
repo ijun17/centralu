@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { recordViewHandover, restoreViewHandover, VIEW_HANDOVER_KEY, VIEW_HANDOVER_MAX_AGE_MS, type HandoverSettings } from './view-handover.js'
 import { OriginPorts } from './views/origin-ports.js'
 import { ViewHost, type AppRef, type ViewSource } from './views/view-host.js'
@@ -22,10 +22,10 @@ function settings(): HandoverSettings & { values: Map<string, string> } {
   }
 }
 
-function host(): ViewHost {
+function host(retain: ViewSource['retain'] = () => () => {}): ViewHost {
   const source: ViewSource = {
     readResource: async (_a, uri) => ({ contents: [{ uri, mimeType: VIEW_MIME_TYPE, text: 'x' }] }),
-    retain: () => () => {},
+    retain,
   }
   return new ViewHost({
     secret: 'view-handover-test-secret-0123456789abcdef',
@@ -50,6 +50,57 @@ describe('the view hand-over record', () => {
     expect(s.values.has(VIEW_HANDOVER_KEY)).toBe(false)
     // A second start finds nothing to reopen
     expect(restoreViewHandover(s, host(), null, 1_000 + 6_000)).toEqual({ restored: 0, skipped: 0 })
+  })
+
+  it('recovers a lost home-open answer from the next host without running the home tool again', async () => {
+    const first = host()
+    const s = settings()
+    const key = 'aabbccdd-1234-4567-8123-aabbccddeeff'
+    const id = first.open(NOTES, 'ui://notes/board', 1).instanceId
+    const home = { instanceId: id, tool: 'home', resourceUri: 'ui://notes/board', toolInput: {}, toolResult: { content: [{ type: 'text' as const, text: 'original home result' }] }, runId: 'original-run' }
+    const tool = vi.fn(async () => home)
+    await first.rememberHome(id, key, tool)
+    first.holderGone(1)
+    recordViewHandover(s, first, null, 1000)
+    const next = host()
+    restoreViewHandover(s, next, null, 2000)
+    expect(await next.homeOpen(NOTES, key, 2)).toEqual(home)
+    expect(tool).toHaveBeenCalledTimes(1)
+    expect(next.list()).toHaveLength(1)
+    await first.dispose()
+    await next.dispose()
+  })
+
+  it.each(['running', 'failed'])('a %s home tool is never repeated after the drain cuts its answer', async (state) => {
+    const first = host()
+    const s = settings()
+    const key = 'aabbccdd-1234-4567-8123-aabbccddeeff'
+    const id = first.open(NOTES, 'ui://notes/board', 1).instanceId
+    let finish!: () => void
+    const result = first.rememberHome(id, key, () => new Promise((_resolve, reject) => { finish = () => reject(new Error('Home failed after writing')) }))
+    const rejected = expect(result).rejects.toThrow('Home failed')
+    if (state === 'failed') { finish(); await rejected }
+    recordViewHandover(s, first, null, 1000)
+    const next = host()
+    restoreViewHandover(s, next, null, 2000)
+    await expect(next.homeOpen(NOTES, key, 2)).rejects.toThrow(state === 'running' ? 'may or may not' : 'Home failed')
+    if (state === 'running') { finish(); await rejected }
+    await first.dispose()
+    await next.dispose()
+  })
+
+  it('a failed keyed open remembers the failure but releases the app immediately', async () => {
+    const release = vi.fn()
+    const first = host(() => release)
+    const id = first.open(NOTES, 'ui://notes/board', 1).instanceId
+    const key = 'aabbccdd-1234-4567-8123-aabbccddeeff'
+    const home = vi.fn(async () => { throw new Error('Failed after writing') })
+    await expect(first.rememberHome(id, key, home)).rejects.toThrow('Failed after writing')
+    expect(release).toHaveBeenCalledTimes(1)
+    await expect(first.homeOpen(NOTES, key, 2)).rejects.toThrow('Failed after writing')
+    expect(home).toHaveBeenCalledTimes(1)
+    await first.dispose()
+    expect(release).toHaveBeenCalledTimes(1)
   })
 
   // #384: the record is written by the previous host, which may be another build

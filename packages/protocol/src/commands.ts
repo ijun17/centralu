@@ -660,6 +660,15 @@ export const MessageImage = z.discriminatedUnion('ok', [
 ])
 export type MessageImage = z.infer<typeof MessageImage>
 
+const AppHomeViewResult = z.object({
+  instanceId: z.string(),
+  tool: z.string(),
+  resourceUri: z.string(),
+  toolInput: z.record(z.string(), z.unknown()),
+  toolResult: z.looseObject({ content: z.array(z.record(z.string(), z.unknown())) }),
+  runId: z.string(),
+})
+
 export const RpcMethods = {
   'agents.createSession': { params: CreateSessionParams, result: SessionInfo },
   'agents.send': {
@@ -1258,7 +1267,8 @@ export const RpcMethods = {
    * tool-result).
    *
    * If there is no `home`, or that tool did not declare a screen, or the app cannot be reached
-   * (not trusted, or failed to start), this fails with a reason and leaves no instance behind. If
+   * (not trusted, or failed to start), this fails with a reason and leaves no live screen behind. A
+   * keyed open keeps only a failure reservation during the lease grace period, without holding the app. If
    * the app itself answered with a failure, this still opens — drawing a failure is also the
    * screen's job.
    *
@@ -1267,21 +1277,16 @@ export const RpcMethods = {
    * machine. Absent: this host's own app, as before.
    */
   'apps.openView': {
+    // openKey: one client-chosen UUID per logical open. Repeats reuse the instance and home outcome,
+    // including after a planned host handover, so a lost answer never runs the home tool twice.
     /*
      * `lease` (#392, additive): the view belongs to this window's connection. Once the connection ends, the host waits
      * a few minutes for a window to claim it (`apps.holdViews`) and then closes it, so a reloaded or closed window does
      * not hold its apps open for good. Without it (an older window, or a linked machine's view) the view lives until
      * `apps.closeView`.
      */
-    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam, lease: z.boolean().optional() }),
-    result: z.object({
-      instanceId: z.string(),
-      tool: z.string(),
-      resourceUri: z.string(),
-      toolInput: z.record(z.string(), z.unknown()),
-      toolResult: z.looseObject({ content: z.array(z.record(z.string(), z.unknown())) }),
-      runId: z.string(),
-    }),
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam, lease: z.boolean().optional(), openKey: z.string().uuid().optional() }),
+    result: AppHomeViewResult,
   },
   /**
    * Closes the pinned screen (M4 B-2). Releases the app the instance was holding on to — an app
@@ -1291,6 +1296,11 @@ export const RpcMethods = {
   'apps.closeView': {
     params: z.object({ instanceId: z.string() }),
     result: z.object({ ok: z.literal(true) }),
+  },
+  /** Reclaims a keyed home open after losing its answer; never calls the home tool. */
+  'apps.recoverView': {
+    params: z.object({ appId: AppId, projectId: ProjectId.nullable(), ...machineParam, lease: z.boolean().optional(), openKey: z.string().uuid() }),
+    result: AppHomeViewResult,
   },
   /**
    * A window claims the pinned screens it shows (#392), after every reconnect: each leased instance

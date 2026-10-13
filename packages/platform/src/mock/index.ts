@@ -809,6 +809,8 @@ export class MockPlatform implements Platform {
   /** The previous conversation of a session chosen to be imported (externalId → list of lines) */
   externalHistory = new Map<string, { role: 'user' | 'assistant'; text: string }[]>()
 
+  private readonly homeOpens = new Map<string, AppHomeView>()
+
   readonly apps = {
     /**
      * The app screen (M4 B-3). There is no host in the mock, so no address can be constructed.
@@ -849,11 +851,13 @@ export class MockPlatform implements Platform {
      * nothing is plugged in, this just records the call and fabricates an instance with an
      * empty result.
      */
-    openView: async (appId: string, projectId: string | null, machine?: string): Promise<AppHomeView> => {
+    openView: async (appId: string, projectId: string | null, machine?: string, openKey?: string, recover = false): Promise<AppHomeView> => {
       this.openedViews.push(machine ? { appId, projectId, machine } : { appId, projectId })
+      const previous = openKey ? this.homeOpens.get(openKey) : undefined
+      if (recover && !this.openViewProvider && !previous) throw new Error('The original app open could not be recovered')
       const v: AppHomeView = this.openViewProvider
-        ? await this.openViewProvider(appId, projectId)
-        : {
+        ? await this.openViewProvider(appId, projectId, openKey, recover)
+        : previous ?? {
             instanceId: `mock-view-${++this.idc}`,
             tool: 'home',
             resourceUri: `ui://${appId}/home`,
@@ -862,6 +866,7 @@ export class MockPlatform implements Platform {
             runId: `mock-run-${this.idc}`,
           }
       // Like the host's ViewHost, holds which app and screen the instance belongs to — "this came from that screen" is checked against this
+      if (openKey) this.homeOpens.set(openKey, v)
       this.pinnedInstances.set(v.instanceId, { appId, projectId, uri: v.resourceUri })
       return v
     },
@@ -872,6 +877,7 @@ export class MockPlatform implements Platform {
     },
     closeView: async (instanceId: string) => {
       this.closedViews.push(instanceId)
+      for (const [key, home] of this.homeOpens) if (home.instanceId === instanceId) this.homeOpens.delete(key)
       // If it was an in-conversation screen, that record's instance also closes — like the host, the record (input, outcome) stays
       for (const rec of this.inlineRecords.values()) if (rec.instanceId === instanceId) rec.instanceId = null
     },
@@ -919,9 +925,9 @@ export class MockPlatform implements Platform {
       this.reopenedViews.push({ sessionId, callId })
       const rec = this.inlineRecords.get(`${sessionId} ${callId}`)
       if (!rec) throw new Error("This view's result is no longer kept. Open the app instead")
-      const instanceId = this.inlineInstanceProvider
+      const instanceId = rec.instanceId ?? (this.inlineInstanceProvider
         ? await this.inlineInstanceProvider(rec.appId, rec.projectId)
-        : `mock-inline-${++this.idc}`
+        : `mock-inline-${++this.idc}`)
       this.inlineInstances.set(instanceId, { sessionId, appId: rec.appId, projectId: rec.projectId })
       rec.instanceId = instanceId
       return {
@@ -1437,7 +1443,7 @@ export class MockPlatform implements Platform {
   readonly reopenedViews: { sessionId: string; callId: string }[] = []
   /** The side that builds a new instance when reopening (a test plugs in the real ViewHost) */
   inlineInstanceProvider: ((appId: string, projectId: string | null) => string | Promise<string>) | null = null
-  openViewProvider: ((appId: string, projectId: string | null) => Promise<AppHomeView>) | null = null
+  openViewProvider: ((appId: string, projectId: string | null, openKey?: string, recover?: boolean) => Promise<AppHomeView>) | null = null
   /** External apps discovered (M4 A-8) — a test fills this in with `setExternalApps`. The mock's discovery is this array */
   externalAppList: ExternalAppInfo[] = []
   /** Like the host: changes the list and broadcasts `external_apps_changed` */

@@ -532,6 +532,35 @@ test('a view that is not open fails with a reason', async ({ page }) => {
 test.describe('after the connection comes back to another host', () => {
   const resync = (page: Page) => page.evaluate(() => (window as any).__mock.setConnectionState('resync_required'))
 
+  for (const early of [false, true]) {
+    test(`a first address read dropped during a swap recovers (early resync: ${early})`, async ({ page }) => {
+      const id = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
+      await page.evaluate(({ id, early }) => {
+        const w = window as any
+        const mock = w.__mock
+        const read = mock.viewFrameProvider
+        let dropped = false
+        mock.viewFrameProvider = async (...args: unknown[]) => {
+          if (!dropped) {
+            dropped = true
+            mock.setConnectionState('disconnected')
+            if (early) mock.setConnectionState('resync_required')
+            throw Object.assign(new Error('Connection lost'), { code: 'connection_lost' })
+          }
+          return read(...args)
+        }
+        w.__appFrame.mount('first-open', { appId: 'fixture', projectId: 'p1', instanceId: id })
+      }, { id, early })
+      const frame = page.getByTestId('frame-first-open')
+      if (!early) {
+        await expect(frame.getByTestId('app-frame-loading')).toHaveText('Reconnecting…')
+        await page.evaluate(() => (window as any).__mock.setConnectionState('resync_required'))
+      }
+      await expect(frame.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
+      await expect(frame.getByTestId('app-frame-error')).toHaveCount(0)
+    })
+  }
+
   test('retries an address read the mock transport drops during a host swap', async ({ page }) => {
     const id = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
     await mount(page, 'dropped', { appId: 'fixture', projectId: 'p1', instanceId: id })
@@ -557,6 +586,24 @@ test.describe('after the connection comes back to another host', () => {
     await page.evaluate(() => (window as any).__mock.setConnectionState('connected'))
     await expect(page.getByTestId('frame-dropped').getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
     await expect(page.getByTestId('frame-dropped').getByTestId('app-frame-error')).toHaveCount(0)
+  })
+
+  test('a loaded frame bounds repeated dropped reads even when every reconnect resyncs', async ({ page }) => {
+    const id = fx.open({ projectId: 'p1', appId: 'fixture' }, 'ui://fixture/main')
+    await mount(page, 'bounded', { appId: 'fixture', projectId: 'p1', instanceId: id })
+    await page.evaluate(() => {
+      const w = window as any
+      w.__droppedReads = 0
+      w.__mock.viewFrameProvider = async () => {
+        w.__droppedReads++
+        w.__mock.setConnectionState('disconnected')
+        w.__mock.setConnectionState('resync_required')
+        throw Object.assign(new Error('Connection lost'), { code: 'connection_lost' })
+      }
+      w.__mock.setConnectionState('resync_required')
+    })
+    await expect(page.getByTestId('frame-bounded').getByTestId('app-frame-error')).toContainText('kept disconnecting')
+    expect(await page.evaluate(() => (window as any).__droppedReads)).toBe(4)
   })
 
   test('the same address leaves the view alone: no reload, the state it built is still there, and it keeps calling', async ({ page }) => {

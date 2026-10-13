@@ -1,4 +1,4 @@
-import type { CallToolResult } from '@modelcontextprotocol/client'
+import type { HomeView } from './views/home-view.js'
 import type { AppRef, ExternalApps } from './apps/external/runtime.js'
 import type { ViewHost } from './views/view-host.js'
 
@@ -26,23 +26,27 @@ import type { ViewHost } from './views/view-host.js'
  * main.ts (rpc.ts) and the tests share the same function (the same arrangement as
  * `app-view-source.ts`).
  */
-export type HomeView = {
-  instanceId: string
-  tool: string
-  resourceUri: string
-  /** What to send the view as tool-input — the exact arguments the host called with */
-  toolInput: Record<string, unknown>
-  /** The app's answer as is — becomes the view's tool-result */
-  toolResult: CallToolResult
-  runId: string
-}
+export type { HomeView } from './views/home-view.js'
 
 /** `holder`: the connection that leases the view (ViewHost `LEASE_GRACE_MS`); none for a view that lives until closed */
-export async function openHomeView(apps: ExternalApps, views: ViewHost, ref: AppRef, holder?: number): Promise<HomeView> {
+export async function openHomeView(apps: ExternalApps, views: ViewHost, ref: AppRef, holder?: number, openKey?: string): Promise<HomeView> {
+  const prior = openKey ? views.homeOpen(ref, openKey, holder) : null
+  if (prior) return prior
   const home = await apps.homeView(ref)
+  // Two calls may have checked the metadata concurrently.
+  const concurrent = openKey ? views.homeOpen(ref, openKey, holder) : null
+  if (concurrent) return concurrent
   const toolInput: Record<string, unknown> = {}
-  const out = await apps.call(ref, home.tool, toolInput, { kind: 'view' })
-  if (!out.result) throw Object.assign(new Error(out.error ?? `The home tool "${home.tool}" did not answer`), { code: 'internal' })
-  const { instanceId } = views.open(ref, home.resourceUri, holder)
-  return { instanceId, tool: home.tool, resourceUri: home.resourceUri, toolInput, toolResult: out.result, runId: out.runId }
+  const invoke = async () => {
+    const out = await apps.call(ref, home.tool, toolInput, { kind: 'view' })
+    if (!out.result) throw Object.assign(new Error(out.error ?? `The home tool "${home.tool}" did not answer`), { code: 'internal' })
+    return { tool: home.tool, resourceUri: home.resourceUri, toolInput, toolResult: out.result, runId: out.runId }
+  }
+  if (openKey) {
+    const { instanceId } = views.open(ref, home.resourceUri, holder)
+    return views.rememberHome(instanceId, openKey, async () => ({ instanceId, ...await invoke() }))
+  }
+  // Older callers retain their existing contract.
+  const outcome = await invoke()
+  return { ...views.open(ref, home.resourceUri, holder), ...outcome }
 }

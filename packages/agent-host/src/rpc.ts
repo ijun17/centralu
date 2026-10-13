@@ -363,9 +363,16 @@ export function createRpcHandler(
       return { appId: d.app.appId, projectId: d.app.projectId, uri: d.uri, origin: d.origin, resource: d.resource as { contents: unknown[] } }
     },
     'apps.openView': async (p, ctx) => {
-      const { appId, projectId, lease } = RpcMethods['apps.openView'].params.parse(p)
+      const { appId, projectId, lease, openKey } = RpcMethods['apps.openView'].params.parse(p)
       // A window that asks for a lease holds the view through its connection (#392); an older window's view lives until closed
-      return openHomeView(requireExternalApps(), requireViews(), { appId, projectId }, lease && ctx ? ctx.client : undefined)
+      return openHomeView(requireExternalApps(), requireViews(), { appId, projectId }, lease && ctx ? ctx.client : undefined, openKey)
+    },
+    'apps.recoverView': async (p, ctx) => {
+      const { appId, projectId, openKey, lease } = RpcMethods['apps.recoverView'].params.parse(p)
+      const prior = requireViews().homeOpen({ appId, projectId }, openKey, lease && ctx ? ctx.client : undefined)
+      if (prior) return prior
+      // No reservation survived (a crash, an eviction, or an older host). Repeating a home tool is unsafe.
+      throw new Error('The original app open could not be recovered — the home tool may or may not have run; check before opening again')
     },
     'apps.holdViews': async (p, ctx) => {
       const { instanceIds } = RpcMethods['apps.holdViews'].params.parse(p)
