@@ -56,8 +56,10 @@ are blocked during cleanup; disposal
 must complete before snapshotting or removing the worktree. Patches preserve tracked and non-ignored untracked
 files (binary bytes and staged changes included); full git bundles keep the union of HEAD and the stored branch not reachable from the local trunk.
 A switched or detached HEAD does not drop the stored branch. Submodule HEAD/local branches and gitlink
-targets from the index and every unmerged superproject commit are bundled when their commits are absent
-from remote refs, even after submodule HEAD moves away. Temporary named refs make gitlink-only targets
+targets from the index, HEAD tree, and every unmerged superproject commit are bundled when locally
+available and absent from remote refs, even after submodule HEAD moves away. Batch object checks
+skip unfetched targets, and historical `.gitmodules` names preserve targets across path renames.
+History and tree listings stream to temporary files instead of filling a stdout buffer. Temporary named refs make gitlink-only targets
 fetchable from the bundle and are removed from the live repository after capture. If the trunk cannot be
 read, all reachable commits are kept conservatively. Initialized submodules are captured separately. Snapshotting uses a private index with repository hooks and filters disabled. It does not
 change the child's index or execute repository programs. Patch bytes go directly to files, without UTF-8 stdout
@@ -69,8 +71,10 @@ The recovery directory is `<data>/worktree-recovery/<session id>/<snapshot id>/`
 Restore recreates the root worktree/branch and attempts to apply its patches, with a conversation notice offering
 the files and manual bundle/patch recovery (submodules are manual). A bundled stored branch that differs
 from HEAD also gets a `recovered/<session id>-stored-branch` branch, with a numeric suffix if occupied.
-Existing branches are not overwritten. If a retry finds the worktree already present, it leaves patches
-unapplied and explicitly warns that manual recovery may still be needed.
+Existing branches are not overwritten. If a retry finds the worktree already present, it leaves the files
+and index alone. A marker written after successful patch application lets the notice report prior success;
+without one, it warns that manual recovery may still be needed. Recreating the worktree clears the marker.
+Gitlinks found only in older merged history remain tracked by [#623](https://github.com/ijun17/centralu/issues/623).
 Recovery files remain after restore and through later deletions, until the session is purged through Settings;
 purge/empty trash removes the entire session recovery directory before its row is deleted. The trash has no
 automatic expiry today; any future expiry must use the same purge path. Other programs with the person's

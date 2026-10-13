@@ -1,4 +1,5 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
+import { open } from 'node:fs/promises'
 import { devNull } from 'node:os'
 import { promisify } from 'node:util'
 import { programPath } from '../tool-launch.js'
@@ -57,6 +58,8 @@ export type RunGitOptions = {
   input?: string
   timeout?: number
   maxBuffer?: number
+  /** Stream stdout to a private file instead of buffering large repository listings. */
+  outputFile?: string
   /** Added to the host's environment for this call (a clone's non-interactive settings, #515) */
   env?: Record<string, string>
 }
@@ -133,11 +136,42 @@ export async function gitArgv(cwd: string, args: string[], allowRepoPrograms = f
 }
 
 /**
- * Runs git and returns its stdout. A non-zero exit rejects with the error `execFile` gives, so
- * `stdout`, `stderr` and `code` are on it as before.
+ * Runs git and returns its stdout, or streams it to outputFile. Buffered calls retain
+ * execFile errors; streamed calls also report the exit code and bounded stderr.
  */
 export async function runGit(cwd: string, args: string[], opts: RunGitOptions = {}): Promise<string> {
   const argv = await gitArgv(cwd, args, opts.allowRepoPrograms)
+  if (opts.outputFile) {
+    const output = await open(opts.outputFile, 'w', 0o600)
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn(programPath('git'), argv, {
+          cwd, stdio: ['pipe', output.fd, 'pipe'], timeout: opts.timeout ?? DEFAULTS.timeout,
+          ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
+        })
+        let stderr = ''
+        let overflow = false
+        child.stderr!.on('data', (chunk: Buffer) => {
+          if (overflow) return
+          stderr += chunk.toString()
+          if (Buffer.byteLength(stderr) > (opts.maxBuffer ?? DEFAULTS.maxBuffer)) {
+            overflow = true
+            child.kill()
+          }
+        })
+        child.on('error', reject)
+        child.on('close', (code, signal) => {
+          if (code === 0 && !overflow) resolve()
+          else reject(Object.assign(new Error(overflow ? 'Git stderr exceeded maxBuffer' : stderr || `Git exited with ${code ?? signal}`), { code, stderr }))
+        })
+        child.stdin!.on('error', () => {})
+        child.stdin!.end(opts.input)
+      })
+      return ''
+    } finally {
+      await output.close()
+    }
+  }
   const run = exec(programPath('git'), argv, {
     cwd,
     timeout: opts.timeout ?? DEFAULTS.timeout,

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as gitModule from './git-exec.js'
 import { restoreWorktreeRecovery, saveWorktreeRecovery, worktreeRecoveryDir } from './worktree-recovery.js'
 
 const git = (cwd: string, args: string[]) => execFileSync('git', [
@@ -43,6 +44,16 @@ describe('worktree recovery follow-ups (#608)', () => {
     git(cwd, ['commit', '-qm', content.trim()])
     return git(cwd, ['rev-parse', 'HEAD'])
   }
+  const moduleFixture = () => {
+    const source = join(dir, 'source')
+    git(dir, ['init', '-q', '-b', 'main', source])
+    const base = commit(source, 'module base\n')
+    git(repo, ['-c', 'protocol.file.allow=always', 'submodule', 'add', '--name', 'stable-name', source, 'old module'])
+    git(repo, ['commit', '-qam', 'add module'])
+    git(repo, ['worktree', 'add', '-b', branch, child])
+    git(child, ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init'])
+    return { source, base, module: join(child, 'old module') }
+  }
   const remove = () => {
     git(repo, ['worktree', 'remove', '--force', '--force', child])
     git(repo, ['branch', '-D', branch])
@@ -73,6 +84,7 @@ describe('worktree recovery follow-ups (#608)', () => {
         git(child, ['checkout', '-q', '--detach', 'main'])
       }
       expect(git(module, ['branch', '--contains', tip])).toBe('')
+      git(child, ['config', 'diff.ignoreSubmodules', 'all'])
       const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
       expect(git(module, ['for-each-ref', '--format=%(refname)', 'refs/centralu-recovery/'])).toBe('')
       const snapshotDir = join(worktreeRecoveryDir(sessionId), recovery.snapshot)
@@ -144,4 +156,95 @@ describe('worktree recovery follow-ups (#608)', () => {
       expect(git(child, ['show', ':file.txt'])).toBe('base')
     }, process.platform === 'win32' ? 90_000 : 30_000,
   )
+  it.each(['history', 'index'])('review: ignores unfetched gitlinks from the %s before deleting', async (location) => {
+    const { source, module } = moduleFixture()
+    const absent = commit(source, 'work from another worker\n')
+    git(child, ['update-index', '--cacheinfo', `160000,${absent},old module`])
+    if (location === 'history') git(child, ['commit', '-qm', 'merge another worker without updating module'])
+    expect(() => git(module, ['cat-file', '-e', `${absent}^{commit}`])).toThrow()
+    const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+    remove()
+    expect(existsSync(child)).toBe(false)
+    expect(recovery.commits).toBe(location === 'history' ? 1 : 0)
+  }, process.platform === 'win32' ? 90_000 : 30_000)
+
+  it('review: preserves old-path gitlinks after git mv with a stable custom module name', async () => {
+    const { base, module } = moduleFixture()
+    const tip = commit(module, 'only recorded under old name\n')
+    git(child, ['add', 'old module'])
+    git(child, ['commit', '-qm', 'record module work'])
+    git(module, ['checkout', '-q', '--detach', base])
+    git(child, ['add', 'old module'])
+    git(child, ['commit', '-qm', 'move module HEAD back'])
+    const privateDir = realpathSync(git(module, ['rev-parse', '--absolute-git-dir']))
+    git(child, ['mv', 'old module', 'new module'])
+    git(child, ['commit', '-qm', 'rename module'])
+    expect(realpathSync(git(join(child, 'new module'), ['rev-parse', '--absolute-git-dir']))).toBe(privateDir)
+    const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+    const snapshotDir = join(worktreeRecoveryDir(sessionId), recovery.snapshot)
+    remove()
+    expect(existsSync(privateDir)).toBe(false)
+    const snapshot = JSON.parse(readFileSync(join(snapshotDir, 'snapshot.json'), 'utf8')) as {
+      repositories: { path: string }[]
+    }
+    const index = snapshot.repositories.findIndex((entry) => entry.path === 'new module')
+    const bundle = join(snapshotDir, `${index}.bundle`)
+    expect(existsSync(bundle)).toBe(true)
+    const ref = git(repo, ['bundle', 'list-heads', bundle]).split('\n').find((row) => row.startsWith(`${tip} `))!.split(' ')[1]!
+    const recovered = join(dir, 'recovered-renamed')
+    git(dir, ['init', '-q', recovered])
+    git(recovered, ['fetch', bundle, `${ref}:refs/heads/recovered`])
+    expect(git(recovered, ['show', 'recovered:file.txt'])).toBe('only recorded under old name')
+  }, process.platform === 'win32' ? 90_000 : 30_000)
+
+  it('review: scans a long missing-trunk history and a tree larger than the stdout limit in bounded calls', async () => {
+    const inputGit = (args: string[], input: string) => execFileSync('git', [
+      '-c', 'user.name=Recovery test', '-c', 'user.email=recovery@example.test', ...args,
+    ], { cwd: repo, input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim()
+    const blob = git(repo, ['rev-parse', 'HEAD:file.txt'])
+    // No giant checkout: real Git trees/commits are sufficient to reproduce the old
+    // 32 MiB ls-tree overflow, and raw history exceeds that buffer as well.
+    const rows = Array.from({ length: 140_000 }, (_, n) => `100644 blob ${blob}\t${String(n).padStart(6, '0')}-${'x'.repeat(190)}\n`).join('')
+    expect(Buffer.byteLength(rows)).toBeGreaterThan(32 * 1024 * 1024)
+    const tree = inputGit(['mktree'], rows)
+    const initial = git(repo, ['rev-parse', 'HEAD'])
+    let stream = ''
+    for (let n = 0; n < 2_000; n++) {
+      stream += `commit refs/heads/${branch}\nmark :${n + 1}\ncommitter Recovery <recovery@example.test> ${1700000000 + n} +0000\ndata 4\nstep\nfrom ${n ? `:${n}` : initial}\n`
+      if (n === 0) stream += `M 040000 ${tree} giant\n`
+      if (n === 1_999) stream += `deleteall\nM 100644 ${blob} file.txt\n`
+      stream += '\n'
+    }
+    inputGit(['fast-import', '--quiet'], stream)
+    git(repo, ['worktree', 'add', child, branch])
+    const calls = vi.spyOn(gitModule, 'runGit')
+    try {
+      const recovery = await saveWorktreeRecovery(sessionId, child, 'missing-trunk', branch)
+      expect(recovery.commits).toBe(2_001)
+      expect(calls.mock.calls.filter(([, args]) => args[0] === 'ls-tree')).toHaveLength(1)
+      expect(calls.mock.calls.filter(([, args]) => args[0] === 'log')).toHaveLength(1)
+      expect(calls.mock.calls.length).toBeLessThan(25)
+    } finally {
+      calls.mockRestore()
+    }
+  }, process.platform === 'win32' ? 180_000 : 60_000)
+
+  it.each(['working', 'staged', 'both'])('review: reports previously applied %s patches on a store-restore retry', async (patches) => {
+    git(repo, ['worktree', 'add', '-b', branch, child])
+    writeFileSync(join(child, 'file.txt'), 'saved work\n')
+    if (patches !== 'working') git(child, ['add', 'file.txt'])
+    if (patches === 'staged') writeFileSync(join(child, 'file.txt'), 'base\n')
+    const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+    remove()
+    // The store failed after the first invocation completed patch application.
+    await restoreWorktreeRecovery(sessionId, repo, child, branch, recovery, {})
+    const index = git(child, ['show', ':file.txt'])
+    writeFileSync(join(child, 'file.txt'), 'edits after the interruption\n')
+    const retry = await restoreWorktreeRecovery(sessionId, repo, child, branch, recovery, {})
+    expect(retry.notice).toContain('Saved patches were applied during the previous restore attempt')
+    expect(retry.notice).not.toContain('may still need manual recovery')
+    expect(git(child, ['show', ':file.txt'])).toBe(index)
+    expect(readFileSync(join(child, 'file.txt'), 'utf8')).toBe('edits after the interruption\n')
+  }, process.platform === 'win32' ? 90_000 : 30_000)
+
 })

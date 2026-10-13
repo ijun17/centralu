@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -55,17 +55,34 @@ describe('git is started in one place', () => {
  * has already said `fatal: not a git repository` and gone.
  */
 describe('input to a git that does not read it', () => {
-  it('fails only the call: EPIPE on its stdin never escapes', async () => {
+  it.each([false, true])('fails only the call: EPIPE on its stdin never escapes (file output: %s)', async (fileOutput) => {
     const notARepo = mkdtempSync(join(tmpdir(), 'cc-git-epipe-'))
     const uncaught: unknown[] = []
     const onUncaught = (e: unknown) => void uncaught.push(e)
     process.on('uncaughtException', onUncaught)
     try {
-      await expect(runGit(notARepo, ['commit', '-F', '-'], { input: 'x'.repeat(8 * 1024 * 1024) })).rejects.toThrow()
+      await expect(runGit(notARepo, ['commit', '-F', '-'], { input: 'x'.repeat(8 * 1024 * 1024), ...(fileOutput ? { outputFile: join(notARepo, 'output') } : {}) })).rejects.toThrow()
       await new Promise((r) => setTimeout(r, 100))
       expect(uncaught.map((e) => (e as NodeJS.ErrnoException).code)).toEqual([])
+      if (fileOutput) expect(readFileSync(join(notARepo, 'output'), 'utf8')).toBe('')
     } finally {
       process.off('uncaughtException', onUncaught)
+      rmSync(notARepo, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('git output written directly to a file', () => {
+  it('does not impose the stdout buffer limit on repository listings', async () => {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), 'cc-git-output-')))
+    try {
+      await runGit(repo, ['init', '-q'])
+      const outputFile = join(repo, 'output')
+      // rev-parse has deterministic output larger than this deliberately tiny buffer.
+      await expect(runGit(repo, ['rev-parse', '--absolute-git-dir'], { maxBuffer: 1, outputFile })).resolves.toBe('')
+      expect(readFileSync(outputFile, 'utf8').trim().replaceAll('\\', '/')).toBe(join(repo, '.git').replaceAll('\\', '/'))
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
     }
   })
 })

@@ -410,8 +410,12 @@ needed setting aside. A saved notice also offers the recovery directory in the t
 count the union of HEAD and the stored branch against the configured local trunk (project HEAD if unset),
 not a GitHub merge badge; squash/rebase commits may therefore be kept conservatively. An unreadable trunk
 keeps all reachable commits. Submodules count local HEAD/branch commits and gitlink targets from the
-index and every unmerged superproject commit against their remote refs. This includes intermediate
-commits and the stored branch even after the submodule HEAD moves away. Gitlink-only targets get
+index, HEAD tree, and every unmerged superproject commit against their remote refs. Candidate gitlinks
+are batch-checked in each module repository; unfetched objects are skipped because removing this
+checkout cannot lose them. A single raw log scan and one HEAD tree listing stream to temporary files,
+so history length does not require one process per commit or fit in the stdout buffer. Historical
+`.gitmodules` names associate renamed paths with their initialized module; each distinct manifest is read
+once. Capture includes intermediate commits and the stored branch even after the submodule HEAD moves away. Gitlink-only targets get
 temporary named refs in the bundle so they remain fetchable after the private module repository is removed;
 the temporary refs are removed from the live repository after bundling.
 
@@ -436,10 +440,14 @@ reuses a branch already at that tip. Existing branches are never overwritten.
 A notice offers the recovery paths and `git apply` / `git fetch <bundle> <ref>:<branch>` (`git bundle list-heads` lists saved refs) instructions; patches
 that cannot be applied and all submodule recovery remain available for manual recovery. A restore interrupted
 after creating the worktree does not reapply patches on retry, to preserve possible edits since the interruption.
-When patches exist, the notice explicitly says they were not applied on this retry and may need manual
-recovery. Each later deletion uses a new snapshot so earlier files are retained. Deleting for good, including empty trash, removes the entire session recovery
-directory; cleanup failure leaves the trash entry retryable. No automatic trash expiry is implemented; expiry
-must use `purgeSession` if added. Writes by other programs during capture are outside this session's lock.
+A `patches-applied` marker records the worktree path after both patches succeed. On retry the notice
+reports that prior success, preserving any subsequent edits. Without that marker it explicitly says
+patches were not applied on this retry and may need manual recovery. Recreating a missing worktree
+clears the old marker before applying patches again. Each later deletion uses a new snapshot so earlier
+files are retained. Deleting for good, including empty trash, removes the entire session recovery directory; cleanup failure leaves the trash entry retryable. No automatic trash expiry is implemented; expiry
+must use `purgeSession` if added. Gitlinks found only in older merged superproject history remain a
+follow-up ([#623](https://github.com/ijun17/centralu/issues/623)); a superproject merge does not prove
+that module commits were pushed. Writes by other programs during capture are outside this session's lock.
 
 **Size.** The two definitions are 956 characters (`AGENT_BUDGET_CHARS` 1,000; 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
 made in words, like ask_project's, which deferred was not found) and defers `agent_session`, which every

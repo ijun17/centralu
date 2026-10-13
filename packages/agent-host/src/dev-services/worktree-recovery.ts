@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { chmod, lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { createReadStream, existsSync } from 'node:fs'
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { isSessionId } from '@cc/protocol'
 import { dataRoot } from '../data-dir.js'
@@ -23,6 +24,27 @@ export async function clearWorktreeRecovery(sessionId: string): Promise<void> {
   await rm(worktreeRecoveryDir(sessionId), { recursive: true, force: true })
 }
 
+/** Read NUL records without imposing the subprocess stdout buffer limit on trees/history. */
+async function* gitRecords(repo: string, args: string[]): AsyncGenerator<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'cc-recovery-git-'))
+  const file = join(dir, 'records')
+  try {
+    await runGit(repo, args, { outputFile: file, timeout: RECOVERY_TIMEOUT })
+    let pending = ''
+    for await (const chunk of createReadStream(file, { encoding: 'utf8' })) {
+      pending += chunk
+      let end: number
+      while ((end = pending.indexOf('\0')) !== -1) {
+        yield pending.slice(0, end)
+        pending = pending.slice(end + 1)
+      }
+    }
+    if (pending) yield pending
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+}
+
 /** Preflight every repository before any private index is populated or objects are written. */
 export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk: string, branch?: string): Promise<WorktreeRecovery> {
   const plans: { repo: string; path: string; tip: string; refs: string[]; commits: number }[] = []
@@ -42,14 +64,24 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
     } else if (path) {
       // Removing the worktree also removes its private module repository. Preserve every local
       // branch plus detached HEAD when their commits are absent from that module's remotes.
-      refs.push(...(await runGit(repo, ['for-each-ref', '--format=%(refname)', 'refs/heads/'])).trim().split('\n').filter(Boolean), ...gitlinks)
+      refs.push(...(await runGit(repo, ['for-each-ref', '--format=%(refname)', 'refs/heads/'])).trim().split('\n').filter(Boolean))
+      // A superproject can name module objects this checkout never fetched. They cannot be
+      // lost here, and must not make rev-list or bundle creation refuse the deletion.
+      if (gitlinks.length) {
+        const available = await runGit(repo, ['cat-file', '--batch-check=%(objectname) %(objecttype)'], {
+          input: gitlinks.map((oid) => `${oid}^{commit}`).join('\n') + '\n', timeout: RECOVERY_TIMEOUT,
+        })
+        for (const row of available.trim().split('\n')) {
+          const [oid, type] = row.split(' ')
+          if (type === 'commit') refs.push(oid!)
+        }
+      }
     }
     const baselineOid = !path
       ? await runGit(repo, ['rev-parse', '--verify', `${trunk}^{commit}`]).then((s) => s.trim()).catch(() => null)
       : null
     const exclude = path ? ['--not', '--remotes'] : baselineOid ? ['--not', baselineOid] : []
-    const unmerged = (await runGit(repo, ['rev-list', ...refs, ...exclude], { timeout: RECOVERY_TIMEOUT })).trim().split('\n').filter(Boolean)
-    const commits = unmerged.length
+    const commits = Number((await runGit(repo, ['rev-list', '--count', ...refs, ...exclude], { timeout: RECOVERY_TIMEOUT })).trim())
     plans.push({ repo, path, tip, refs, commits })
     const stagedNames = new Set((await runGit(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip], { timeout: RECOVERY_TIMEOUT })).split('\0'))
     const modules: string[] = []
@@ -60,20 +92,60 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
       tips.add(oid)
       moduleCommits.set(rel, tips)
     }
-    // A gitlink can be the only reference to a module commit after its HEAD moves away.
-    // Inspect every unmerged tree, including intermediate commits and the stored branch.
-    for (const commit of unmerged) {
-      for (const row of (await runGit(repo, ['ls-tree', '-r', '-z', commit])).split('\0')) {
-        if (row.startsWith('160000 ')) keepGitlink(row.slice(row.indexOf('\t') + 1), row.split(' ')[2]!.split('\t')[0]!)
-      }
+    const manifests = new Set<string>()
+    const keepManifest = (rel: string, oid: string) => {
+      if (rel === '.gitmodules' && !/^0+$/.test(oid)) manifests.add(oid)
+    }
+    // Raw parent diffs include intermediate and merge-only gitlinks without a process per
+    // commit. HEAD's tree also covers unchanged links and the no-unmerged-commits case.
+    let change: RegExpMatchArray | null = null
+    for await (const row of gitRecords(repo, ['log', '--raw', '-z', '--no-renames', '--ignore-submodules=none', '--no-abbrev', '--format=', '--root', '-m', ...refs, ...exclude, '--'])) {
+      if (change) {
+        const [, oldMode, newMode, oldOid, newOid] = change
+        if (oldMode === '160000') keepGitlink(row, oldOid!)
+        if (newMode === '160000') keepGitlink(row, newOid!)
+        keepManifest(row, oldOid!)
+        keepManifest(row, newOid!)
+        change = null
+      } else change = row.match(/^\n*:(\d{6}) (\d{6}) ([a-f0-9]+) ([a-f0-9]+) [A-Z]$/)
+    }
+    for await (const row of gitRecords(repo, ['ls-tree', '-r', '-z', 'HEAD'])) {
+      const tab = row.indexOf('\t')
+      const [mode, , oid] = row.slice(0, tab).split(' ')
+      const rel = row.slice(tab + 1)
+      if (mode === '160000') keepGitlink(rel, oid!)
+      keepManifest(rel, oid!)
     }
     const stagedObjects: string[] = []
-    for (const row of (await runGit(repo, ['ls-files', '--stage', '-z'])).split('\0')) {
+    for await (const row of gitRecords(repo, ['ls-files', '--stage', '-z'])) {
       if (!row) continue
       const tab = row.indexOf('\t')
       const rel = row.slice(tab + 1)
-      if (row.startsWith('160000 ')) keepGitlink(rel, row.split(' ')[1]!)
-      else if (stagedNames.has(rel)) stagedObjects.push(row.split(' ')[1]!)
+      const oid = row.split(' ')[1]!
+      if (row.startsWith('160000 ')) keepGitlink(rel, oid)
+      else if (stagedNames.has(rel)) stagedObjects.push(oid)
+      keepManifest(rel, oid)
+    }
+    // git mv keeps the module name while changing its path. Read each distinct manifest
+    // once, and associate all historical paths of a name with the initialized checkout.
+    const modulePaths = new Map<string, Set<string>>()
+    for (const oid of manifests) {
+      const config = await runGit(repo, ['config', '--blob', oid, '-z', '--get-regexp', '^submodule\\..*\\.path$'])
+        .catch((e: { code?: number }) => { if (e.code === 1) return ''; throw e })
+      for (const row of config.split('\0').filter(Boolean)) {
+        const newline = row.indexOf('\n')
+        const name = row.slice('submodule.'.length, newline - '.path'.length)
+        const paths = modulePaths.get(name) ?? new Set<string>()
+        paths.add(row.slice(newline + 1))
+        modulePaths.set(name, paths)
+      }
+    }
+    for (const paths of modulePaths.values()) {
+      const tips = new Set([...paths].flatMap((rel) => [...(moduleCommits.get(rel) ?? [])]))
+      for (const rel of paths) {
+        modules.push(rel)
+        moduleCommits.set(rel, new Set([...(moduleCommits.get(rel) ?? []), ...tips]))
+      }
     }
     if (stagedObjects.length) {
       const sizes = await runGit(repo, ['cat-file', '--batch-check=%(objectsize)'], { input: stagedObjects.join('\n') + '\n' })
@@ -198,6 +270,7 @@ export async function restoreWorktreeRecovery(
     }
   }
   if (!existsSync(path)) {
+    await rm(join(dir, 'patches-applied'), { force: true })
     if (await runGit(repo, ['show-ref', '--verify', `refs/heads/${branch}`]).then(() => true).catch(() => false)) {
       branch = `recovered/${sessionId}`
     }
@@ -207,6 +280,7 @@ export async function restoreWorktreeRecovery(
       try {
         if (root.staged) await runGit(path, ['apply', '--cached', '--binary', join(dir, '0.staged.patch')])
         if (root.patch) await runGit(path, ['apply', '--binary', join(dir, '0.patch')])
+        await writeFile(join(dir, 'patches-applied'), await realpath(path), { mode: 0o600 })
       } catch {
         return { branch, notice: `Restored branch ${branch}. ${extraNotice}Patches could not all be applied. Recovery files remain at ${dir}; apply numbered .patch files manually with git apply and .staged.patch files with git apply --cached.` }
       }
@@ -218,7 +292,13 @@ export async function restoreWorktreeRecovery(
     if (await common(path) !== await common(repo)) throw new Error(`The worktree path belongs to another repository. Recovery files remain at ${dir}`)
     branch = (await runGit(path, ['symbolic-ref', '--quiet', '--short', 'HEAD'])).trim()
     if (root.patch || root.staged) {
-      extraNotice += 'The worktree already existed; saved patches were not applied on this retry and may still need manual recovery. '
+      const appliedTo = await readFile(join(dir, 'patches-applied'), 'utf8').catch((e: NodeJS.ErrnoException) => {
+        if (e.code === 'ENOENT') return null
+        throw e
+      })
+      extraNotice += appliedTo === await realpath(path)
+        ? 'Saved patches were applied during the previous restore attempt; they were not reapplied on this retry. '
+        : 'The worktree already existed; saved patches were not applied on this retry and may still need manual recovery. '
     }
   }
   return {
