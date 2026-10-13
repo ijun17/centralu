@@ -1,4 +1,4 @@
-import { saveWorktreeRecovery, restoreWorktreeRecovery, clearWorktreeRecovery, worktreeRecoveryBytes, worktreeRecoveryDir, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
+import { saveWorktreeRecovery, restoreWorktreeRecovery, stageWorktreeRecoveryRemoval, worktreeRecoveryBytes, worktreeRecoveryDir, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
 import { randomUUID } from 'node:crypto'
 import { residentCost } from './tool-cost.js'
 import { orchestratorHome, orchestratorRole } from './orchestrator-home.js'
@@ -20,8 +20,8 @@ import { makeProjectFolder, projectFolderTarget, type ProjectFolderTarget } from
 import { cloneInto } from '../dev-services/project-clone.js'
 import { contextAt, labelOf, lastActiveOf, orchestratorMemory, previewOf, timeOf } from './transcript-view.js'
 import { homedir } from 'node:os'
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { existsSync, rmSync, statSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { existsSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { exec } from 'node:child_process'
 import type {
   CacheStats,
@@ -2365,7 +2365,14 @@ export class SessionManager {
    */
   async trashSession(sessionId: string, removeWorktree = false, removeExternal = false, recovery?: WorktreeRecovery): Promise<void> {
     const pending = this.trashing.get(sessionId)
-    if (pending) return pending
+    if (pending) {
+      /*
+       * A worktree cleanup cannot ride on a delete that started first (#647): that one writes a trash record without
+       * the recovery snapshot, and removing the worktree after it would leave nothing a restore could bring back.
+       */
+      if (recovery) throw Object.assign(new Error('The session is already being deleted without its recovery snapshot'), { code: 'internal' })
+      return pending
+    }
     // The first request owns the options; concurrent sidebar/agent deletes share its result.
     const deleting = this.trashSessionOnce(sessionId, removeWorktree, removeExternal, recovery)
     this.trashing.set(sessionId, deleting)
@@ -2600,7 +2607,8 @@ export class SessionManager {
    * believes 550MB is gone). It is skipped when a live session holds the same conversation (it was pulled back
    * from Past conversations meanwhile): deleting it would take that session's history. Then the worktree, when
    * chosen (a failure does not stop the purge — its folder is plain files the person can still remove). Then our
-   * rows, and last the attachments and the handoff note, which have to outlive the rows that point at them.
+   * rows, and last the recovery files, the attachments and the handoff note, which have to outlive the rows that
+   * point at them.
    */
   async purgeSession(sessionId: string): Promise<void> {
     return this.trashOp(sessionId, async () => {
@@ -2630,8 +2638,19 @@ export class SessionManager {
          */
         await gitWorktreeRemove(record.projectPath, s.worktree.path, true).catch(() => {})
       }
-      await clearWorktreeRecovery(sessionId)
-      await this.store.purgeSession(sessionId)
+      /*
+       * The recovery files go only once the rows are gone (#647): cleared first, a failed database step would leave
+       * a trash entry nothing can restore. Set aside before, so a folder that cannot be removed still stops the
+       * purge while the entry is retryable; put back when the rows stay.
+       */
+      const recoveryRemoval = await stageWorktreeRecoveryRemoval(sessionId)
+      try {
+        await this.store.purgeSession(sessionId)
+      } catch (e) {
+        await recoveryRemoval.abort().catch(() => {})
+        throw e
+      }
+      await recoveryRemoval.commit().catch(() => {})
       await clearAttachments(sessionId).catch(() => {})
       /*
        * Sweeps up the handoff note that lost its purpose along with this session (#106). It matters
@@ -5934,6 +5953,12 @@ export class SessionManager {
     }
     if (this.resuming.has(target.id) || this.deferredRestarts.has(target.id)) return { ok: false, error: `"${target.name}" is waking or restarting — wait for it first` }
     if (this.worktreeCleanup.has(target.id)) return { ok: false, error: 'This worktree is already being removed' }
+    // A sidebar delete already under way keeps the worktree in place; it is not taken away behind it (#647)
+    if (this.trashing.has(target.id)) return { ok: false, error: `"${target.name}" is already being deleted; its worktree stays in place` }
+    const occupants = this.sessionsWorkingInside(target)
+    if (occupants.length) {
+      return { ok: false, error: `${occupants.map((s) => `"${s.name}"`).join(', ')} still ${occupants.length === 1 ? 'works' : 'work'} in the worktree of "${target.name}" — stop or delete ${occupants.length === 1 ? 'it' : 'them'} first` }
+    }
     this.worktreeCleanup.add(target.id)
     const { branch, path } = target.worktree
     try {
@@ -5968,6 +5993,40 @@ export class SessionManager {
     } finally {
       this.worktreeCleanup.delete(target.id)
     }
+  }
+
+  /**
+   * The other sessions whose folder is inside this worktree and that still hold a process or a turn (#647): a helper
+   * the child started without a worktree of its own works in the child's. Removing the worktree under it would
+   * lose what it writes next, so cleanup is refused while one is there. A session with no process and no turn is
+   * not counted: nothing of it is running in the folder.
+   */
+  private sessionsWorkingInside(target: SessionInfo): SessionInfo[] {
+    const root = target.worktree?.path
+    if (!root) return []
+    // Resolved through the nearest folder that exists, so a folder not made yet still compares with its parent's real path
+    const canonical = (path: string): string => {
+      const full = resolve(path)
+      try {
+        return realpathSync.native(full)
+      } catch {
+        const parent = dirname(full)
+        return parent === full ? full : join(canonical(parent), basename(full))
+      }
+    }
+    const inside = (path: string, folder: string): boolean => {
+      const rel = relative(folder, path)
+      return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+    }
+    const folder = canonical(root)
+    return [...this.meta.values()].filter((s) => {
+      if (s.id === target.id) return false
+      const busy = s.state === 'working' || s.state === 'waiting_approval' || this.resuming.has(s.id) ||
+        (this.agentRuns.has(s.id) && !this.agentRuns.get(s.id)!.finished)
+      if (!busy && !this.handles.has(s.id)) return false
+      const cwd = this.store.sessionCwd(s.id) ?? s.worktree?.path
+      return !!cwd && inside(canonical(cwd), folder)
+    })
   }
 
   /** A saved ceiling overrides the caller's preset default: auto unlimited, otherwise AGENT_CEILING. */

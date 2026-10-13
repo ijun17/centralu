@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createReadStream, existsSync } from 'node:fs'
-import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { isSessionId } from '@cc/protocol'
@@ -22,6 +22,23 @@ export function worktreeRecoveryDir(sessionId: string): string {
 
 export async function clearWorktreeRecovery(sessionId: string): Promise<void> {
   await rm(worktreeRecoveryDir(sessionId), { recursive: true, force: true })
+}
+
+/**
+ * Removal in two steps, so a purge never leaves a trash entry without the files it needs (#647). `stage` moves the
+ * session's recovery folder aside before the rows go: it fails where a removal would (a file held open on
+ * Windows), and the entry stays retryable. Once the rows are gone, `commit` deletes the moved folder; when the
+ * database step fails, `abort` puts it back under its own name, where a restore finds it again.
+ */
+export async function stageWorktreeRecoveryRemoval(sessionId: string): Promise<{ commit: () => Promise<void>; abort: () => Promise<void> }> {
+  const dir = worktreeRecoveryDir(sessionId)
+  if (!existsSync(dir)) return { commit: async () => {}, abort: async () => {} }
+  const staged = `${dir}.purging-${randomUUID()}`
+  await rename(dir, staged)
+  return {
+    commit: () => rm(staged, { recursive: true, force: true, maxRetries: 3 }),
+    abort: () => rename(staged, dir),
+  }
 }
 
 /** Read NUL records without imposing the subprocess stdout buffer limit on trees/history. */
@@ -280,11 +297,29 @@ export async function restoreWorktreeRecovery(
   }
   if (!existsSync(path)) {
     await rm(join(dir, 'patches-applied'), { force: true })
-    if (await runGit(repo, ['show-ref', '--verify', `refs/heads/${branch}`]).then(() => true).catch(() => false)) {
-      branch = `recovered/${sessionId}`
+    /*
+     * A branch name is taken over only when it is free, or when it already sits at the saved tip with no worktree
+     * on it (#647): `git worktree add -b` creates the branch before the folder, so a failed attempt leaves the
+     * branch behind, and a retry must find its own leftover reusable rather than fail on it forever. Any other
+     * occupied name is left alone and a numbered recovery name is used instead.
+     */
+    const reusable = async (name: string): Promise<boolean | null> => {
+      const ref = `refs/heads/${name}`
+      const existing = await runGit(repo, ['rev-parse', '--verify', ref]).then((s) => s.trim()).catch(() => null)
+      if (!existing) return null
+      if (existing !== recovery.tip) return false
+      return (await runGit(repo, ['for-each-ref', '--format=%(worktreepath)', ref])).trim() === ''
     }
+    let create = true
+    let state = await reusable(branch)
+    if (state === false) {
+      const base = `recovered/${sessionId}`
+      branch = base
+      for (let suffix = 1; (state = await reusable(branch)) === false; suffix++) branch = `${base}-${suffix}`
+    }
+    if (state === true) create = false
     if (root.bundle) await runGit(repo, ['fetch', join(dir, '0.bundle'), ...(root.refs ?? ['HEAD'])], { allowRepoPrograms: trust.trusted === true })
-    await runGit(repo, ['worktree', 'add', '-b', branch, path, recovery.tip], { allowRepoPrograms: trust.trusted === true })
+    await runGit(repo, ['worktree', 'add', ...(create ? ['-b', branch, path, recovery.tip] : [path, branch])], { allowRepoPrograms: trust.trusted === true })
     if (root.patch || root.staged) {
       try {
         if (root.staged) await runGit(path, ['apply', '--cached', '--binary', join(dir, '0.staged.patch')])

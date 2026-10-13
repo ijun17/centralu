@@ -157,6 +157,45 @@ describe('worktree recovery follow-ups (#608)', () => {
       expect(git(child, ['show', ':file.txt'])).toBe('base')
     }, process.platform === 'win32' ? 90_000 : 30_000,
   )
+  it.each(['original', 'recovered'])(
+    'retries a restore whose failed first attempt left the %s branch behind (#647)', async (name) => {
+      git(repo, ['worktree', 'add', '-b', branch, child])
+      const tip = commit(child, 'saved work\n')
+      writeFileSync(join(child, 'file.txt'), 'uncommitted\n')
+      const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+      remove()
+      if (name === 'recovered') git(repo, ['branch', branch, 'main'])
+      const expected = name === 'recovered' ? `recovered/${sessionId}` : branch
+      // `git worktree add -b` creates the branch before the folder: a parent that is a file fails the second step.
+      const blocker = join(dir, 'blocker')
+      writeFileSync(blocker, '')
+      const path = join(blocker, 'child')
+      await expect(restoreWorktreeRecovery(sessionId, repo, path, branch, recovery, {})).rejects.toThrow()
+      expect(git(repo, ['rev-parse', expected])).toBe(tip)
+      expect(existsSync(path)).toBe(false)
+      rmSync(blocker)
+      const restored = await restoreWorktreeRecovery(sessionId, repo, path, branch, recovery, {})
+      expect(restored.branch).toBe(expected)
+      expect(git(path, ['symbolic-ref', '--short', 'HEAD'])).toBe(expected)
+      expect(git(path, ['rev-parse', 'HEAD'])).toBe(tip)
+      expect(readFileSync(join(path, 'file.txt'), 'utf8')).toBe('uncommitted\n')
+      expect(git(repo, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/recovered/'])).toBe(name === 'recovered' ? expected : '')
+    }, process.platform === 'win32' ? 90_000 : 30_000,
+  )
+
+  it('leaves a recovery branch that moved on alone and numbers its own (#647)', async () => {
+    git(repo, ['worktree', 'add', '-b', branch, child])
+    const tip = commit(child, 'saved work\n')
+    const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+    remove()
+    git(repo, ['branch', branch, 'main'])
+    git(repo, ['branch', `recovered/${sessionId}`, 'main'])
+    const restored = await restoreWorktreeRecovery(sessionId, repo, child, branch, recovery, {})
+    expect(restored.branch).toBe(`recovered/${sessionId}-1`)
+    expect(git(child, ['rev-parse', 'HEAD'])).toBe(tip)
+    expect(git(repo, ['rev-parse', `recovered/${sessionId}`])).toBe(git(repo, ['rev-parse', 'main']))
+  }, process.platform === 'win32' ? 90_000 : 30_000)
+
   it.each(['history', 'index'])('review: ignores unfetched gitlinks from the %s before deleting', async (location) => {
     const { source, module } = moduleFixture()
     const absent = commit(source, 'work from another worker\n')
