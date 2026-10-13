@@ -101,7 +101,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 포커스 뷰 | 기본 배치: 사이드바와 세션 하나 | product-spec §5.1 |
 | 인박스 | 프로젝트를 가로질러 사람을 기다리는 세션 전부를 급한 순서로 | `packages/ui/src/features/inbox/`; product-spec FR-15 |
 | 그리드 | 여러 패널을 한꺼번에: 세션과 앱 | `packages/ui/src/features/grid/`; product-spec §5.4 |
-| 프로젝트 화면 | 프로젝트 자기 페이지: 그 세션, 앱, git | `packages/ui/src/features/project/`; product-spec §5.5 |
+| 프로젝트 화면 | A project's page: explicitly added session and app panels, plus git; starts empty | `packages/ui/src/features/project/`; product-spec §5.5 |
 | 워크스페이스 | UI 자신의 상태(배치, 열린 세션)를 한 덩어리로 찍은 것. 바뀔 때마다 저장하고 시작할 때 되살린다 | `Store.saveWorkspace`; [state-management.ko.md](state-management.ko.md) §5 |
 
 ### 1.5 프로세스와 빌드

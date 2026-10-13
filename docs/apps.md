@@ -284,8 +284,8 @@ row and catch all of these is gone (#372 follow-up): nothing stands under the or
   the same entry, instance and frame as the app view's: the frame never moves in the document (a
   moved iframe loses its document), the view is laid over the panel's slot and only its style
   changes (`pinned-app/slots.ts`). In a panel the view has no header; the panel's Open goes to the
-  app view, and hiding the panel closes the view, teardown first. The app's sidebar row dropped on
-  the screen brings a hidden panel back where it lands. While anything is dragged, the panel lays a
+  app view, and removing the panel closes the view, teardown first. The app's sidebar row dropped on
+  the screen adds its panel where it lands. Project screens start empty; apps never appear automatically. While anything is dragged, the panel lays a
   transparent cover over the view (`pinned-app/dragShield.tsx`, #296), and the view stays in sight:
   in WebKit a drag goes into a frame whatever its pointer-events say, and the row or panel would
   land in the app instead of beside it. The cover is the panel's child in React's tree, portalled

@@ -29,8 +29,8 @@ export type Onscreen = {
 
 export function isOnScreen(view: View, sessionId: string, ctx: Onscreen): boolean {
   /*
-   * The focus lane with no session picked is the project screen (#203), and it shows every session of its project
-   * as a panel. Answering "not on screen" for them would put a "Finished" card (and a sound) over the very panel the
+   * The focus lane with no session picked is the project screen (#203), and it shows the sessions explicitly added
+   * as panels. Answering "not on screen" for them would put a "Finished" card (and a sound) over the very panel the
    * person is watching finish, the way the builder pane's turns did before `builderPaneSessionId`.
    */
   if (view === 'focus') return ctx.focusedSessionId ? ctx.focusedSessionId === sessionId : !!ctx.projectScreen?.includes(sessionId)

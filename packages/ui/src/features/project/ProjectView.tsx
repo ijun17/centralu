@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent } from 'react'
-import { appPanelId, arrangePanels, columnsFor, parsePanelId, rowsFor, sessionPanelId, withHidden, withOrder } from '@cc/core'
+import { appPanelId, arrangePanels, columnsFor, parsePanelId, rowsFor, sessionPanelId, withPanel, withOrder } from '@cc/core'
 import { externalAppKey, useStore } from '../../store/store.js'
 import { useSessionsOf } from '../../store/selectors.js'
 import { useProjectApps } from '../../store/app-catalog.js'
@@ -18,20 +18,13 @@ import { dragVerdict, droppedArrangement, droppedPanelId } from './drop.js'
 /**
  * The project screen (#203) — what clicking a project's name opens.
  *
- * It shows **everything the project has** — its sessions and its apps — as panels, laid out and
- * moved the way the grid lays out and moves sessions. Nobody has to put a panel here: a session
- * created in the project appears at the end, a session sent to the trash (#204) is gone because it
- * is no longer in the session list, and a panel the person does not want is hidden, not deleted.
- * What is remembered, per project and across restarts, is only the person's hand: the order they
- * dragged panels into and what they hid (core's `arrangePanels`, the store's `projectPanels`).
+ * Like the global grid, it starts empty and remembers only panels the person adds, in order.
+ * Creating a session does not add a panel; a session in the trash is unavailable and leaves
+ * the screen. Removing a panel leaves the session or app itself untouched.
  *
- * The project's sidebar rows can be dropped here the way sessions are dropped on the grid: a
- * hidden one comes back where it lands, a visible one moves there (drop.ts). Only this project's —
- * another project's session or app, and the orchestrator, are refused while still being dragged.
- *
- * The global grid is untouched by any of this. It keeps its own hand-picked list across projects;
- * this screen is one project, whole. A session can be on both, the way it can be on the grid and
- * in the sidebar — they are ways of looking, and the session is one.
+ * This project's sidebar session and app rows can be dropped here: an absent panel is added
+ * where it lands, a visible one moves there (drop.ts). Other projects and the orchestrator
+ * are refused during the drag. The global grid keeps its own list across projects.
  *
  * Unlike the grid, the evidence panel stays beside it. The grid dropped it because its sessions
  * belong to different projects, so there is no one repository for it to show; here there is, and
@@ -69,7 +62,6 @@ export function ProjectView({ projectId }: { projectId: string }) {
     [sessions, apps],
   )
   const visible = useMemo(() => arrangePanels(present, saved), [present, saved])
-  const hidden = useMemo(() => (saved?.hidden ?? []).filter((id) => present.includes(id)), [saved, present])
   const appsById = useMemo(() => new Map(apps.map((a) => [a.appId, a])), [apps])
 
   // Same as GridView: moving a DOM node resets its scroll, so it is put back before paint
@@ -126,23 +118,13 @@ export function ProjectView({ projectId }: { projectId: string }) {
   const working = sessions.filter((s) => s.state === 'working' && visible.includes(sessionPanelId(s.id)))
   useOrbitSync(working.map((s) => s.id).join(' '))
 
-  const hide = (id: string) => {
+  const remove = (id: string) => {
     snapshotScroll()
     const p = parsePanelId(id)
     // An app's panel is its pinned view: taking it off the screen closes the view, teardown first
     if (p?.kind === 'app') void dismissPinned(externalAppKey(projectId, p.id))
-    arrange(projectId, withHidden(present, saved, id, true))
+    arrange(projectId, withPanel(present, saved, id, false))
   }
-  const show = (id: string) => {
-    snapshotScroll()
-    arrange(projectId, withHidden(present, saved, id, false))
-  }
-  const labelOf = (id: string): string => {
-    const p = parsePanelId(id)
-    if (p?.kind === 'app') return appsById.get(p.id)?.title ?? p.id
-    return (p && sessions.find((s) => s.id === p.id)?.name) || id
-  }
-
   const startDrag = (id: string, e: DragEvent<HTMLElement>) => {
     e.dataTransfer.setData(PANEL_MIME, id)
     // A session's panel also carries the session, so it can be dropped on the Grid button like a sidebar row
@@ -204,27 +186,6 @@ export function ProjectView({ projectId }: { projectId: string }) {
           {project.name}
         </h1>
         <span className="readout truncate text-xs text-ink-faint">{project.path}</span>
-        {hidden.length > 0 && (
-          /*
-            Hidden panels are named here, one button each, rather than behind a menu: a panel that
-            left the screen with no trace is a panel nobody remembers hiding.
-          */
-          <div className="ml-auto flex min-w-0 flex-wrap items-center gap-1" data-testid="project-hidden">
-            <span className="text-xs text-ink-faint">Hidden</span>
-            {hidden.map((id) => (
-              <button
-                key={id}
-                type="button"
-                className="max-w-[160px] truncate rounded-md border border-line px-1.5 py-0.5 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink"
-                onClick={() => show(id)}
-                title={`Show ${labelOf(id)} on this screen again`}
-                data-testid={`project-show-${id}`}
-              >
-                {labelOf(id)}
-              </button>
-            ))}
-          </div>
-        )}
       </DragRegion>
       <div
         ref={ref}
@@ -250,27 +211,21 @@ export function ProjectView({ projectId }: { projectId: string }) {
       >
         {visible.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center" data-testid="project-empty">
-            {present.length === 0 ? (
-              <>
-                <p className="text-md text-ink-muted">Nothing in this project yet</p>
-                <button
-                  type="button"
-                  className="flex items-center gap-1.5 rounded-md border border-line px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong"
-                  onClick={() => openNewSession(projectId)}
-                  data-testid="project-empty-new-session"
-                >
-                  <PlusIcon size={12} /> New session
-                </button>
-                <p className="text-xs text-ink-faint">Its sessions and apps appear here as panels you can arrange</p>
-              </>
-            ) : (
-              // Said the way the empty grid says it — and the names above still bring a panel back
-              <p className="text-md leading-body text-ink-muted">
-                Drag this project&apos;s sessions and apps here from the sidebar
-                <span className="mt-1 block text-xs text-ink-faint">
-                  They keep running — this is another way to look at them
-                </span>
-              </p>
+            <p className="text-md leading-body text-ink-muted">
+              Drag this project&apos;s sessions and apps here from the sidebar
+              <span className="mt-1 block text-xs text-ink-faint">
+                They keep running — this is another way to look at them
+              </span>
+            </p>
+            {sessions.length === 0 && (
+              <button
+                type="button"
+                className="flex items-center gap-1.5 rounded-md border border-line px-3 py-1 text-sm text-ink transition-colors hover:border-line-strong"
+                onClick={() => openNewSession(projectId)}
+                data-testid="project-empty-new-session"
+              >
+                <PlusIcon size={12} /> New session
+              </button>
             )}
           </div>
         ) : (
@@ -345,9 +300,9 @@ export function ProjectView({ projectId }: { projectId: string }) {
                       headerDrag={(e) => startDrag(id, e)}
                       headerExtra={
                         <IconButton
-                          label="Hide from this screen (the session keeps running)"
-                          onClick={() => hide(id)}
-                          testId={`project-hide-${id}`}
+                          label="Remove from this screen (the session keeps running)"
+                          onClick={() => remove(id)}
+                          testId={`project-remove-${id}`}
                           align="right"
                         >
                           <CloseIcon size={14} />
@@ -362,7 +317,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
                       dragged={dragging === id}
                       onDragStart={(e) => startDrag(id, e)}
                       onOpen={() => openApp(projectId, p.id)}
-                      remove={{ label: 'Hide from this screen (closes its view)', testId: `project-hide-${id}`, onClick: () => hide(id) }}
+                      remove={{ label: 'Remove from this screen (closes its view)', testId: `project-remove-${id}`, onClick: () => remove(id) }}
                       slotTestId={`project-slot-${p.id}`}
                       openTestId={`project-open-app-${p.id}`}
                     />

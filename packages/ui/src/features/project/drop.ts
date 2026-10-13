@@ -1,4 +1,4 @@
-import { appPanelId, arrangePanels, sessionPanelId, withHidden, withOrder, type ProjectArrangement } from '@cc/core'
+import { appPanelId, arrangePanels, sessionPanelId, withPanel, withOrder, type ProjectArrangement } from '@cc/core'
 import { APP_MIME, PANEL_MIME, SESSION_MIME, moveTo, projectItemMime } from '../sidebar/reorder.js'
 
 /**
@@ -55,11 +55,8 @@ export function droppedPanelId(
  * before or after the panel `target`, or at the end when `target` is null (the padding, a gap, the
  * empty screen). Null when nothing changes, so nothing is written.
  *
- * The grid's rule, with the screen's hidden set standing in for the grid's list: a hidden panel is
- * shown again where it was dropped; a visible one moves there, and dropped on the padding stays
- * where it is, as a session already on the grid does. An id the project does not have changes
- * nothing — the panels are derived from what the project has, so it could not appear anyway, and
- * writing an order down for it would pin the order of a screen nobody arranged.
+ * The grid's rule: an absent panel is added where it lands; a visible one moves there.
+ * Dropping a visible panel on padding leaves it in place. Other projects change nothing.
  */
 export function droppedArrangement(
   present: readonly string[],
@@ -75,7 +72,7 @@ export function droppedArrangement(
     const order = moveTo(visible, id, target, before)
     return order.every((x, i) => x === visible[i]) ? null : withOrder(present, saved, order)
   }
-  // Hidden: shown again (at the end, withHidden's rule), then moved to where it was dropped
-  const shown = withHidden(present, saved, id, false)
+  // Add at the end, then move to the drop target.
+  const shown = withPanel(present, saved, id, true)
   return target ? withOrder(present, shown, moveTo(arrangePanels(present, shown), id, target, before)) : shown
 }

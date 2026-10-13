@@ -99,7 +99,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Focus view | The main layout: sidebar plus one session | product-spec §5.1 |
 | Inbox | Every session waiting on the person, across projects, most urgent first | `packages/ui/src/features/inbox/`; product-spec FR-15 |
 | Grid | Several panels at once: sessions and apps | `packages/ui/src/features/grid/`; product-spec §5.4 |
-| Project screen | A project's own page: its sessions, apps, git | `packages/ui/src/features/project/`; product-spec §5.5 |
+| Project screen | A project's page: explicitly added session and app panels, plus git; starts empty | `packages/ui/src/features/project/`; product-spec §5.5 |
 | Workspace | The UI's own state as one snapshot (layout, open sessions), saved on every change and restored at start | `Store.saveWorkspace`; [state-management.md](state-management.md) §5 |
 
 ### 1.5 Processes and builds

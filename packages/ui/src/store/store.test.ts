@@ -18,6 +18,7 @@ import {
   PENDING_EVENTS_MAX,
   PENDING_EVENTS_MAX_AGE_MS,
   projectScreenSessions,
+  projectScreenAppKeys,
   registerPinnedFrame,
   useStore,
   type ChatItem,
@@ -285,7 +286,7 @@ describe('sidebar folding (#205)', () => {
 
 /*
  * The project screen's arrangement (#203): per project, in the workspace snapshot, next to the fold. The panels are
- * derived from what the project has; only the order the person dragged and what they hid are kept.
+ * explicitly chosen by the person and restored once the availability catalogs have loaded.
  */
 describe('project screen arrangement (#203)', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
@@ -298,21 +299,21 @@ describe('project screen arrangement (#203)', () => {
     const b = await mock.projects.add('/tmp/arr-b')
     await useStore.getState().attach(mock)
 
-    useStore.getState().arrangeProject(a.id, { order: ['session:x', 'session:y'], hidden: ['app:z'] })
+    useStore.getState().arrangeProject(a.id, { panels: ['session:x', 'session:y'], order: ['session:x', 'session:y'], hidden: ['app:z'] })
     await tick()
-    expect(stored(mock)).toEqual({ [a.id]: { order: ['session:x', 'session:y'], hidden: ['app:z'] } })
+    expect(stored(mock)).toEqual({ [a.id]: { panels: ['session:x', 'session:y'], order: ['session:x', 'session:y'], hidden: ['app:z'] } })
     expect(stored(mock)?.[b.id]).toBeUndefined()
 
     useStore.setState({ projectPanels: {} })
     await useStore.getState().attach(mock)
-    expect(useStore.getState().projectPanels).toEqual({ [a.id]: { order: ['session:x', 'session:y'], hidden: ['app:z'] } })
+    expect(useStore.getState().projectPanels).toEqual({ [a.id]: { panels: ['session:x', 'session:y'], order: ['session:x', 'session:y'], hidden: ['app:z'] } })
   })
 
   it('no save made while restoring writes an empty arrangement over the stored one', async () => {
     const mock = new MockPlatform()
     const a = await mock.projects.add('/tmp/arr-restore')
     mock.sessions.set('arr-r1', sessionInfo('arr-r1', { projectId: a.id }))
-    const saved = { [a.id]: { order: ['session:arr-r1'], hidden: [] } }
+    const saved = { [a.id]: { panels: ['session:arr-r1'], order: ['session:arr-r1'], hidden: [] } }
     mock.workspaceSnapshot = { focusedSessionId: 'arr-r1', projectPanels: saved } as never
     /*
      * Restoring the focused session used to save the snapshot midway, and a crash right after must not find the
@@ -334,6 +335,41 @@ describe('project screen arrangement (#203)', () => {
     expect((mock.workspaceSnapshot as { projectPanels?: unknown }).projectPanels).toEqual(saved)
   })
 
+  it('migrates arranged projects once from loaded catalogs and saves only after all workspace fields are restored', async () => {
+    const mock = new MockPlatform()
+    const arranged = await mock.projects.add('/tmp/arr-migrate')
+    const untouched = await mock.projects.add('/tmp/arr-untouched')
+    for (const id of ['first', 'hidden', 'last']) mock.sessions.set(id, sessionInfo(id, { projectId: arranged.id }))
+    mock.sessions.set('untouched', sessionInfo('untouched', { projectId: untouched.id }))
+    mock.setExternalApps([
+      { appId: 'slider', projectId: arranged.id } as never,
+      { appId: 'zebra', name: 'Zebra', projectId: arranged.id } as never,
+      { appId: 'alpha', name: 'Alpha', projectId: arranged.id } as never,
+    ])
+    const legacy = { order: ['app:slider', 'session:first', 'session:gone'], hidden: ['session:hidden'] }
+    mock.workspaceSnapshot = {
+      projectPanels: { [arranged.id]: legacy }, focusedSessionId: 'first',
+      foldedProjects: [untouched.id], panelOpen: false, introSeen: true,
+    } as never
+    await useStore.getState().attach(mock)
+    const migrated = { ...legacy, panels: ['app:slider', 'session:first', 'session:last', 'app:alpha', 'app:zebra'] }
+    expect(useStore.getState().projectPanels).toEqual({ [arranged.id]: migrated })
+    useStore.setState({ view: 'focus', focusedProjectId: arranged.id, focusedSessionId: null })
+    expect(projectScreenSessions(useStore.getState())).toEqual(['first', 'last'])
+    expect(projectScreenAppKeys(useStore.getState())).toEqual([`${arranged.id}/slider`, `${arranged.id}/zebra`, `${arranged.id}/alpha`])
+    await tick()
+    expect(stored(mock)?.[arranged.id]).toEqual(migrated)
+    expect(mock.workspaceSnapshot).toMatchObject({
+      focusedSessionId: 'first', foldedProjects: [untouched.id], panelOpen: false, introSeen: true,
+    })
+    mock.sessions.set('new', sessionInfo('new', { projectId: arranged.id }))
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().projectPanels[arranged.id]).toEqual(migrated)
+    useStore.setState({ focusedProjectId: untouched.id, focusedSessionId: null, view: 'focus' })
+    expect(projectScreenSessions(useStore.getState())).toEqual([])
+    expect(projectScreenAppKeys(useStore.getState())).toEqual([])
+  })
+
   it('leaves with its project', async () => {
     const mock = new MockPlatform()
     const a = await mock.projects.add('/tmp/arr-gone')
@@ -349,7 +385,7 @@ describe('project screen arrangement (#203)', () => {
     expect(Object.keys(stored(mock) ?? {})).toEqual([b.id])
   })
 
-  it('the project screen puts its sessions on screen, less the hidden ones, and only while no session is picked', () => {
+  it('the project screen shows only listed sessions, and only while no session is picked', () => {
     useStore.setState({
       projects: { p1: { id: 'p1', path: '/tmp/p1', name: 'p1' } as never, p2: { id: 'p2', path: '/tmp/p2', name: 'p2' } as never },
       sessions: {
@@ -357,7 +393,7 @@ describe('project screen arrangement (#203)', () => {
         s2: { ...sessionInfo('s2', { projectId: 'p1' }) } as never,
         s3: { ...sessionInfo('s3', { projectId: 'p2' }) } as never,
       },
-      projectPanels: { p1: { order: [], hidden: ['session:s2'] } },
+      projectPanels: { p1: { panels: ['session:s1'], order: ['session:s1'], hidden: ['session:s2'] } },
       focusedProjectId: 'p1',
       focusedSessionId: null,
       view: 'focus',

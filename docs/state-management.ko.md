@@ -129,3 +129,20 @@ selector는 `core`의 순수 함수를 메모이즈해 감싼 형태로 구현�
 - **기기별 질문은 기기를 싣는다**: 새 세션 대화상자의 `agents.detect`, 세션 메뉴의 모델과 능력 목록, 원격 세션의
   "older CLI" 줄(`machineAgentVersions[machine]`, 머리줄이 처음 필요할 때와 resync 때 읽는다), `projects.add {path,
   machine}`, `projects.create`/`projects.createPreview {name, parent?, machine}`(#515).
+
+## Project panel membership (#604)
+
+`projectPanels` in the UI workspace snapshot is an explicit ordered `panels` list per project.
+A project without an entry starts empty. Sidebar dragging adds or reorders a session or app;
+removing a panel takes it off the list. New sessions never join automatically. The available
+session and app catalogs filter the list, so trashed sessions cannot draw. Notification visibility
+and pinned app overlays use the same membership as ProjectView.
+
+On restore, after the initial catalogs load, legacy arrangements with nonempty `order` or
+`hidden` arrays become their currently visible panels: surviving ordered ids first, then remaining
+available ids in sidebar order, excluding hidden ids. Untouched projects stay empty. An existing
+`panels` field, including an empty list, is authoritative and never migrates again. Retain the
+legacy arrays for the previous build during updates; writes project membership into `order` and
+put other available ids in `hidden`. After the whole workspace restore succeeds, the normal snapshot writer persists the migration
+once. This prevents another launch from migrating newly created sessions into the list and avoids
+writing over a snapshot midway through restoration.

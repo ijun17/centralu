@@ -214,9 +214,14 @@ export const seenDrags = (page: Page) =>
 /** What the project screen remembers for a project (the store's `projectPanels`) */
 export const arrangement = (page: Page, projectId: string) =>
   page.evaluate(
-    (p) => (window as any).__store.getState().projectPanels[p] as { order: string[]; hidden: string[] } | undefined,
+    (p) => (window as any).__store.getState().projectPanels[p] as { panels: string[]; order: string[]; hidden: string[] } | undefined,
     projectId,
   )
+
+/** Adds panels through the same visible sidebar gesture a person uses. */
+export async function addSessionPanels(page: Page, ids: string[]): Promise<void> {
+  for (const id of ids) await dragRow(page, page.getByTestId(`session-row-${id}`), 'padding')
+}
 
 const projectIdOf = (page: Page, name: string) =>
   page.evaluate(
@@ -237,15 +242,14 @@ const gridPanels = (page: Page) => page.evaluate(() => (window as any).__store.g
  */
 export function sidebarDropTests(): void {
   test.describe('sidebar rows dropped on the project screen', () => {
-    test('with every panel hidden the screen asks for the project’s rows, and a hidden session dropped on it comes back', async ({
+    test('an untouched screen asks for the project’s rows and adds only the dropped session', async ({
       page,
     }) => {
       await setup(page, ['/tmp/alpha'])
       const a = await newSession(page, 'alpha')
       const b = await newSession(page, 'alpha')
       await page.getByTestId('project-header-alpha').click()
-      await page.getByTestId(`project-hide-session:${a}`).click()
-      await page.getByTestId(`project-hide-session:${b}`).click()
+      expect(await panels(page)).toEqual([])
 
       const empty = page.getByTestId('project-empty')
       await expect(empty).toContainText("Drag this project's sessions and apps here from the sidebar")
@@ -255,8 +259,9 @@ export function sidebarDropTests(): void {
 
       await dragRow(page, page.getByTestId(`session-row-${b}`), 'padding')
       await expect.poll(() => panels(page)).toEqual([`session:${b}`])
-      // The other stays hidden, still named above; the grid is not touched
-      await expect(page.getByTestId(`project-show-session:${a}`)).toBeVisible()
+      // The other stays in the sidebar; there is no hidden-panel UI and the grid is untouched
+      await expect(page.getByTestId(`session-row-${a}`)).toBeVisible()
+      await expect(page.getByTestId('project-hidden')).toHaveCount(0)
       expect(await gridPanels(page)).toEqual([])
     })
 
@@ -269,7 +274,7 @@ export function sidebarDropTests(): void {
       const c = await newSession(page, 'alpha')
       const pid = await projectIdOf(page, 'alpha')
       await page.getByTestId('project-header-alpha').click()
-      await page.getByTestId(`project-hide-session:${c}`).click()
+      await addSessionPanels(page, [a, b])
       expect(await panels(page)).toEqual([`session:${a}`, `session:${b}`])
 
       await dragRow(page, page.getByTestId(`session-row-${c}`), { panel: `session:${a}`, side: 'before' })
@@ -280,6 +285,7 @@ export function sidebarDropTests(): void {
 
       // Remembered through the screen's own arrangement; the grid keeps its own list
       expect(await arrangement(page, pid)).toEqual({
+        panels: [`session:${a}`, `session:${b}`, `session:${c}`],
         order: [`session:${a}`, `session:${b}`, `session:${c}`],
         hidden: [],
       })
@@ -293,6 +299,7 @@ export function sidebarDropTests(): void {
       const a = await newSession(page, 'alpha')
       const b = await newSession(page, 'alpha')
       await page.getByTestId('project-header-alpha').click()
+      await addSessionPanels(page, [a, b])
       expect(await panels(page)).toEqual([`session:${a}`, `session:${b}`])
 
       // By hand, so the row can end without a drop anywhere (Escape, or let go outside the window)
@@ -351,7 +358,7 @@ export function sidebarDropTests(): void {
       await expect(page.getByTestId('orchestrator-button')).toHaveAttribute('draggable', 'true')
       const pid = await projectIdOf(page, 'alpha')
       await page.getByTestId('project-header-alpha').click()
-      await page.getByTestId(`project-hide-session:${hidden}`).click()
+      await addSessionPanels(page, [a])
       const before = await arrangement(page, pid)
       expect(await panels(page)).toEqual([`session:${a}`])
       await watchDrags(page)
@@ -499,10 +506,18 @@ export function appPanelTests(): void {
           ]),
         pid,
       )
+      await page.getByTestId('project-header-alpha').click()
+      await expect(page.getByTestId('project-empty-new-session')).toBeVisible()
+      expect(await panels(page)).toEqual([])
+      await expect(page.getByTestId(`pinned-app-${pid}/slider`)).toHaveCount(0)
       const s = await newSession(page, 'alpha')
       const key = `${pid}/slider`
 
       await page.getByTestId('project-header-alpha').click()
+      expect(await panels(page)).toEqual([])
+      await expect(page.getByTestId(`pinned-app-${key}`)).toHaveCount(0)
+      await addSessionPanels(page, [s])
+      await dragRow(page, page.getByTestId(`app-row-${key}`), 'padding')
       expect(await panels(page)).toEqual([`session:${s}`, 'app:slider'])
       const pinned = page.getByTestId(`pinned-app-${key}`)
       await expect(pinned).toHaveAttribute('data-mode', 'slot')
@@ -568,18 +583,18 @@ export function appPanelTests(): void {
       await expectOverSlot(page, key)
       await page.evaluate(() => (window as any).__store.getState().setPrefs({ textSize: 1 }))
 
-      // Hiding the panel closes the view, teardown first
+      // Removing the panel closes the view, teardown first
       const instanceId = await page.evaluate(
         () => (window as any).__store.getState().pinnedViews[0].instanceId as string,
       )
-      await page.getByTestId('project-hide-app:slider').click()
+      await page.getByTestId('project-remove-app:slider').click()
       await expect(pinned).toHaveCount(0)
       await expect.poll(() => teardowns(page)).toBe(1)
       await expect.poll(() => closed(page)).toEqual([instanceId])
       expect(await panels(page)).toEqual([`session:${s}`])
     })
 
-    test('a hidden app comes back where its sidebar row is dropped, a row dropped on an app’s view lands beside it, and another project’s app of the same name is refused', async ({
+    test('a removed app comes back where its sidebar row is dropped, a row dropped on an app’s view lands beside it, and another project’s app of the same name is refused', async ({
       page,
     }) => {
       await page.evaluate(() => ((window as any).__mock.nextPickedDirectory = '/tmp/alpha'))
@@ -617,8 +632,12 @@ export function appPanelTests(): void {
       const pinned = page.getByTestId(`pinned-app-${key}`)
 
       await page.getByTestId('project-header-alpha').click()
+      expect(await panels(page)).toEqual([])
+      await expect(page.getByTestId(`pinned-app-${key}`)).toHaveCount(0)
+      await addSessionPanels(page, [s])
+      await dragRow(page, page.getByTestId(`app-row-${key}`), 'padding')
       expect(await panels(page)).toEqual([`session:${s}`, 'app:slider'])
-      await page.getByTestId('project-hide-app:slider').click()
+      await page.getByTestId('project-remove-app:slider').click()
       await expect(pinned).toHaveCount(0)
       expect(await panels(page)).toEqual([`session:${s}`])
 
@@ -643,7 +662,7 @@ export function appPanelTests(): void {
       const v = viewOf(page, key)
       await v.locator('#call').click()
       await expect(v.locator('li[data-k="call-result"]')).toHaveCount(1)
-      await page.getByTestId(`project-hide-session:${s}`).click()
+      await page.getByTestId(`project-remove-session:${s}`).click()
       expect(await panels(page)).toEqual(['app:slider'])
       await dragRow(page, page.getByTestId(`session-row-${s}`), { panel: 'app:slider', side: 'before' })
       await expect.poll(() => panels(page)).toEqual([`session:${s}`, 'app:slider'])
@@ -690,6 +709,10 @@ export function appPanelTests(): void {
       const key = `${pid}/slider`
       const pinned = page.getByTestId(`pinned-app-${key}`)
       await page.getByTestId('project-header-alpha').click()
+      expect(await panels(page)).toEqual([])
+      await expect(page.getByTestId(`pinned-app-${key}`)).toHaveCount(0)
+      await addSessionPanels(page, [s])
+      await dragRow(page, page.getByTestId(`app-row-${key}`), 'padding')
       expect(await panels(page)).toEqual([`session:${s}`, 'app:slider'])
       await expect(pinned.getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')
       const v = viewOf(page, key)
@@ -713,7 +736,7 @@ export function appPanelTests(): void {
       expect(await opened(page)).toBe(1)
 
       // The keyboard reaches the view from its panel's header, as it reaches a session panel's conversation (#288)
-      await page.getByTestId('project-hide-app:slider').focus()
+      await page.getByTestId('project-remove-app:slider').focus()
       await page.keyboard.press('Tab')
       await expect
         .poll(() =>

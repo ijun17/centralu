@@ -1,56 +1,66 @@
 import { describe, expect, it } from 'vitest'
-import { appPanelId, arrangePanels, parsePanelId, sanitizeArrangements, sessionPanelId, withHidden, withOrder } from './project.js'
+import { appPanelId, arrangePanels, migrateArrangement, parsePanelId, sanitizeArrangements, sessionPanelId, withPanel, withOrder } from './project.js'
 
 const [a, b, c] = ['session:a', 'session:b', 'session:c']
 const app = 'app:slider'
+const saved = (panels: string[]) => ({ panels, order: panels, hidden: [] })
 
 describe('arrangePanels', () => {
-  it('an untouched project shows everything it has, in its natural order', () => {
-    expect(arrangePanels([a, b, app], undefined)).toEqual([a, b, app])
+  it('an untouched project starts empty even when it has sessions and apps', () => {
+    expect(arrangePanels([a, b, app], undefined)).toEqual([])
   })
 
-  it('dragged panels keep their order and a panel created after the drag lands at the end', () => {
-    expect(arrangePanels([a, b, c, app], { order: [app, b, a], hidden: [] })).toEqual([app, b, a, c])
+  it('keeps only explicit panels in order and never adds a newly created session', () => {
+    expect(arrangePanels([a, b, c, app], saved([app, b, a]))).toEqual([app, b, a])
+    expect(arrangePanels([a, b], saved([]))).toEqual([])
   })
 
-  it('a hidden panel is left out, and an id that no longer exists is skipped', () => {
-    expect(arrangePanels([a, b], { order: ['session:gone', b, a], hidden: [a] })).toEqual([b])
-  })
-
-  it('an order with a repeated id still shows the panel once', () => {
-    expect(arrangePanels([a, b], { order: [b, b, a], hidden: [] })).toEqual([b, a])
+  it('skips unavailable and duplicate ids without erasing temporarily unlisted apps', () => {
+    const arrangement = saved([app, b, b, a])
+    expect(arrangePanels([a], arrangement)).toEqual([a])
+    expect(arrangePanels([a, app], arrangement)).toEqual([app, a])
+    expect(arrangement.panels).toEqual([app, b, b, a])
   })
 })
 
-describe('withOrder', () => {
-  it('stores what the screen shows and drops ids that no longer exist', () => {
-    expect(withOrder([a, b], { order: [], hidden: [a, 'session:gone'] }, [b, 'session:gone'])).toEqual({
-      order: [b],
-      hidden: [a],
+describe('withOrder and withPanel', () => {
+  it('writes ordered membership with a legacy projection readable by the previous build', () => {
+    expect(withOrder([a, b, app], undefined, [b, b, 'session:gone'])).toEqual({
+      panels: [b], order: [b], hidden: [a, app],
     })
   })
+
+  it('adds only the requested available panel, removes it, and adds it back at the end', () => {
+    const first = withPanel([a, b, c], undefined, b, true)
+    expect(arrangePanels([a, b, c], first)).toEqual([b])
+    const next = withPanel([a, b, c], first, a, true)
+    expect(arrangePanels([a, b, c], next)).toEqual([b, a])
+    const removed = withPanel([a, b, c], next, b, false)
+    expect(removed.panels).toEqual([a])
+    expect(arrangePanels([a, b, c], withPanel([a, b, c], removed, b, true))).toEqual([a, b])
+    expect(withPanel([a], undefined, 'session:gone', true)).toEqual({ panels: [], order: [], hidden: [a] })
+  })
 })
 
-describe('withHidden', () => {
-  it('hiding takes the panel off the screen and out of the order', () => {
-    const next = withHidden([a, b, c], { order: [c, b, a], hidden: [] }, b, true)
-    expect(next).toEqual({ order: [c, a], hidden: [b] })
-    expect(arrangePanels([a, b, c], next)).toEqual([c, a])
+describe('migration', () => {
+  it('preserves the legacy visible order including unplaced panels, but not hidden or gone ones', () => {
+    const legacy = { order: [app, b, b, 'session:gone'], hidden: [a] }
+    const migrated = migrateArrangement([a, b, c, app], legacy)
+    expect(migrated).toEqual({ ...legacy, panels: [app, b, c] })
+    expect(arrangePanels([a, b, c, app, 'session:new'], migrated)).toEqual([app, b, c])
   })
 
-  it('a panel shown again comes back at the end, not at the place it held', () => {
-    const hidden = withHidden([a, b, c], { order: [b, a, c], hidden: [] }, b, true)
-    const shown = withHidden([a, b, c], hidden, b, false)
-    expect(arrangePanels([a, b, c], shown)).toEqual([a, c, b])
+  it('migrates hide-only and all-hidden layouts, while an unarranged project stays empty', () => {
+    expect(migrateArrangement([a, b, app], { order: [], hidden: [b] }).panels).toEqual([a, app])
+    expect(migrateArrangement([a, b], { order: [], hidden: [a, b] }).panels).toEqual([])
+    expect(migrateArrangement([a, b], { order: [], hidden: [] }).panels).toEqual([])
   })
 
-  it('shown again on a screen nobody has dragged, it still comes back at the end', () => {
-    const hidden = withHidden([a, b, c], undefined, a, true)
-    expect(arrangePanels([a, b, c], withHidden([a, b, c], hidden, a, false))).toEqual([b, c, a])
-  })
-
-  it('an id that does not exist is not hidden', () => {
-    expect(withHidden([a], undefined, 'session:gone', true)).toEqual({ order: [], hidden: [] })
+  it('is idempotent and never derives new panels once the explicit field exists', () => {
+    const arrangement = saved([])
+    expect(migrateArrangement([a, app], arrangement)).toBe(arrangement)
+    const migrated = migrateArrangement([a], { order: [a], hidden: [] })
+    expect(migrateArrangement([a, b, app], migrated)).toBe(migrated)
   })
 })
 
@@ -65,10 +75,14 @@ describe('panel ids', () => {
 })
 
 describe('sanitizeArrangements', () => {
-  it('keeps lists of strings and drops everything else instead of throwing', () => {
-    expect(
-      sanitizeArrangements({ p1: { order: [a, 3, null], hidden: 'no' }, p2: null, p3: { order: [b] } }),
-    ).toEqual({ p1: { order: [a], hidden: [] }, p3: { order: [b], hidden: [] } })
+  it('keeps legacy fields and distinguishes missing explicit membership from empty or malformed membership', () => {
+    expect(sanitizeArrangements({
+      p1: { order: [a, 3, null], hidden: 'no' }, p2: null,
+      p3: { panels: [b, 3], order: [b] }, p4: { panels: 'no' }, p5: [],
+    })).toEqual({
+      p1: { order: [a], hidden: [] }, p3: { panels: [b], order: [b], hidden: [] },
+      p4: { panels: [], order: [], hidden: [] },
+    })
     expect(sanitizeArrangements([a])).toEqual({})
     expect(sanitizeArrangements(undefined)).toEqual({})
   })

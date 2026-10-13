@@ -142,3 +142,20 @@ by its `machine_status`.
 - **Per-machine questions carry the machine**: the new-session dialog's `agents.detect`, the model and capability
   lists of a session's menu, a remote session's "older CLI" line (`machineAgentVersions[machine]`, read when its header
   first needs it and again on its resync), `projects.add {path, machine}`, and `projects.create`/`projects.createPreview {name, parent?, machine}` (#515).
+
+## Project panel membership (#604)
+
+`projectPanels` in the UI workspace snapshot is an explicit ordered `panels` list per project.
+A project without an entry starts empty. Sidebar dragging adds or reorders a session or app;
+removing a panel takes it off the list. New sessions never join automatically. The available
+session and app catalogs filter the list, so trashed sessions cannot draw. Notification visibility
+and pinned app overlays use the same membership as ProjectView.
+
+On restore, after the initial catalogs load, legacy arrangements with nonempty `order` or
+`hidden` arrays become their currently visible panels: surviving ordered ids first, then remaining
+available ids in sidebar order, excluding hidden ids. Untouched projects stay empty. An existing
+`panels` field, including an empty list, is authoritative and never migrates again. Retain the
+legacy arrays for the previous build during updates; writes project membership into `order` and
+put other available ids in `hidden`. After the whole workspace restore succeeds, the normal snapshot writer persists the migration
+once. This prevents another launch from migrating newly created sessions into the list and avoids
+writing over a snapshot midway through restoration.

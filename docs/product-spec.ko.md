@@ -660,32 +660,33 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 | 창이 담지 못하는 크기는 창이 담는 만큼으로 **잘린다** (모든 열, 그리고 그리드가 가질 수 있는 만큼의 행) — 빠지지는 않는다; 단추가 점선이 되고 창이 담는 크기를 말한다. 창이 넓어지면 다시 자란다 | 모든 패널이 보이는 채로 남는다. 단추보다 작은 패널이 말없이 서 있는 것보다 말하는 편이 낫다. 이미 그리드 전체를 덮는 패널은 표시하지 않는다: 창이 허락하는 만큼 크다. |
 | 끌어서 순서 바꾸기는 그대로다; 미리보기는 새 순서를 같은 열 수에 채운다 | 떨어뜨려도 화면은 바뀌지 않는다 (#53). 크기가 있으면 미리보기가 확정된 순서보다 한 줄 더 또는 덜 필요할 수 있다 — 끄는 도중 칸의 높이가 바뀌는 유일한 경우다. |
 
-### 5.5 프로젝트 화면 (2026-09-30, [#203](https://github.com/ijun17/centralu/issues/203))
+### 5.5 Project screen (2026-09-30, [#203](https://github.com/ijun17/centralu/issues/203))
 
-사이드바에서 프로젝트 이름을 누르면 그 프로젝트의 화면이 열린다 (이름은 여는 자리이고, 옆의 화살표가
-그 프로젝트의 줄을 접는다, #205). 이 화면은 **프로젝트가 가진 모든 것 — 세션과 앱 — 을 패널로** 보이고,
-그리드처럼 늘어놓고 옮긴다.
+Clicking a project's name in the sidebar opens its screen (the name opens it; the arrow beside it
+folds the project's rows, #205). Like the grid, the screen starts empty and shows **only panels the
+person adds**, laid out and moved the way the grid's are (owner, 2026-10-13, [#604](https://github.com/ijun17/centralu/issues/604)).
 
-| 결정 | 이유 |
+| Decision | Why |
 |---|---|
-| **모든 것이 저절로 선다**; 손으로 올려야 하는 것은 없다 | 이 화면은 "이 프로젝트"이지 그중에서 고른 것이 아니다. 채워지기를 기다리는 화면은 처음 열 때 비어 있는데, 그때가 바로 스스로를 설명해야 하는 유일한 순간이다. |
-| 새 패널은 **맨 끝에** 선다; 아무도 옮기지 않은 패널은 옮긴 패널 뒤에 사이드바 순서대로 선다 | 누군가 만든 배치의 한가운데로 끼어드는 패널은 그 뒤의 모든 패널을 민다. |
-| 패널은 **숨길** 수 있다 (×, 세션은 계속 돈다); 숨긴 패널은 패널들 위에 이름으로 남고, 이름으로 되돌리면 맨 끝에 선다 | 숨기기는 지우기가 아니고, 흔적 없이 사라진 패널은 숨긴 것을 아무도 기억하지 못한다. 예전 자리는 그 뒤로 바뀐 화면의 기억일 뿐이다. |
-| **그 프로젝트의 사이드바 줄을 여기에 떨어뜨릴 수 있다** — 세션을 그리드에 떨어뜨리듯, 세션과 앱 모두. 숨긴 것은 떨어뜨린 자리에 돌아오고 (손 아래 패널의 앞이나 뒤, 여백이면 맨 끝), 보이는 것은 그리로 옮겨지며, 여백에 떨어뜨리면 제자리에 남는다. 순서는 옮긴 패널처럼 기억한다 | 원하는 자리로 패널을 되돌리는 일이 두 동작(되돌리고, 끌고)이 아니라 한 동작이 되고, 그 동작은 그리드가 이미 손에 가르쳐 두었다. 여백 규칙은 이미 올라 있는 세션에 대한 그리드의 규칙이다. |
-| **이 프로젝트의 것만**: 다른 프로젝트의 세션이나 앱, 그리고 오케스트레이터는 끄는 동안 이미 거절된다 — 드롭 커서가 없다 — 그래도 도착한 드롭은 무시한다 | 이 화면은 프로젝트 하나, 통째다; 다른 프로젝트의 패널이 끼면 고른 목록이 되고, 그건 그리드의 일이다. 거절은 손을 놓기 전에 보여야 한다, 아니면 드롭이 고장으로 읽힌다. 페이지는 드롭 전까지 끌리는 것의 타입은 읽어도 데이터는 못 읽으므로, 프로젝트를 타입 하나에 담는다 (`application/x-cc-of-project.<id>`); 드롭은 데이터를 다시 확인하고, 앱은 프로젝트를 담은 키로 맞춘다 — 두 프로젝트가 같은 id의 앱을 하나씩 가질 수 있다. |
-| **프로젝트마다, 재시작을 넘어** 기억하는 것은 옮긴 순서와 숨긴 목록뿐이고, 작업 공간 스냅샷에 사이드바 접힘과 나란히 둔다 | 한 프로젝트를 보는 방식이고, UI만 읽고 쓴다; host는 여기에 따라 아무것도 하지 않는다. 그리드의 표(`grid_layout`)가 주는 것 — 세션이나 프로젝트와 함께 패널이 떠나는 것 (#288부터는 앱도 담는다) — 은 여기서는 패널을 있는 것에서 끌어내는 데서 오므로, 지킬 패널 목록은 없고 그 위에 얹은 손만 있다. 프로젝트를 지우면 그 배치도 지운다. |
-| 휴지통의 세션(FR-22)은 패널이 되지 않는다; 되살린 세션은 맨 끝으로 돌아온다 | 패널은 세션 목록에서 끌어내고, 휴지통의 세션은 거기 없다 — 기억한 순서가 그 이름을 담고 있어도 아무것도 서지 않는다. |
-| **앱의 패널은 그 앱의 고정 화면이다** (apps.ko.md §6.2): 같은 인스턴스, 같은 프레임; Open은 앱 화면으로 가고; ×는 teardown을 먼저 보내고 화면을 닫는다. 무엇이든 끄는 동안 패널이 자기 화면 위에 투명한 덮개를 얹고 화면은 보이는 채로 남는다 — 그리드와 같다 (§5.4) | 옮겨진 iframe은 문서를 잃고, 인스턴스 하나에는 프레임이 하나여야 한다. 그래서 화면을 패널 안에 그리지 않고 패널 위에 얹는다 — 이 화면, 앱 화면, 세션 사이를 오가도 문서는 하나다. 머리글의 Runs·Secrets·Versions·Builder는 패널에 자리가 없는 옆 판을 여는 것이라 앱 화면에 남는다. 여기에 앱을 보이면 그 앱이 열린다(host가 `home`을 부른다) — 신뢰와 가져오기 확인은 언제나처럼 그 안에서다. WebKit에서는 프레임의 pointer-events가 무엇이든 끌기가 프레임 안으로 들어간다 (Playwright의 WebKit에서 측정): 앱 화면 위에 떨어뜨린 줄은 앱 옆이 아니라 앱 안에 떨어지고, 머리글이 아니라 옆에서 앱 화면으로 옮겨 온 세션 패널은 화면에 아예 닿지 않았다 (#288). 프레임 위의 덮개가 둘 다 페이지에서 받는다; 화면을 가려도 받았지만 끄는 내내 화면이 비었다 (#296). |
-| 앱의 패널은 세션의 패널과 **같은 손짓**을 받는다: 사이드바에서 떨어뜨리기, 머리글로 순서 바꾸기, 같은 드롭 규칙과 표시 (손 아래 패널의 `data-drop`), 그리고 키보드 순서의 자리 — 머리글에서 Tab을 누르면 그 화면으로 들어가고, 나오면 머리글로 돌아온다 | 화면은 문서에서 모든 패널 뒤에 선다 (패널 안이 아니라 위에 얹히므로). 그래서 자리가 포커스를 넘겨주지 않으면 Tab은 화면을 건너뛰고 마지막 패널 뒤에야 닿는다 (#288). |
-| **그리드는 그리드대로다** | 여전히 프로젝트를 가로질러 손으로 고른 목록이고, 세션과 함께 앱도 담는다 (§5.4). 세션이나 앱은 둘 모두에 있을 수 있다; 그리드 위의 앱은 이 화면의 것과 따로 자기 화면을 가진다. 세션 패널을 Grid 버튼에 떨어뜨리면 사이드바 줄처럼 그리드에 오른다. |
-| 그리드와 달리 **근거 패널이 옆에 남는다** | 프로젝트 하나, 저장소 하나: §5.4의 반론 1이 여기에는 해당하지 않는다. 열 수는 남은 폭에서 계산하므로(`columnsFor`) 어느 쪽이든 패널이 최소 폭 아래로 내려가지 않는다. |
+| **Start empty; add only the panels the person chooses** | A project may contain many sessions and apps, but the screen should show only what the person puts there, as the global grid does (owner, 2026-10-13, #604). Creating a session does not add a panel. |
+| × **removes** a panel from the list; the session keeps running, and an app view closes with teardown first | This removes a way of looking, not the session or app. There is no hidden set or show-again header; the sidebar remains the place to add a panel. |
+| **Drag this project's sidebar sessions and apps onto the screen** | An absent panel is added where it lands (before or after the target, or at the end on padding); a visible one moves there and stays put on padding. This is the grid's existing gesture. |
+| **Only this project's**: another project's session or app, and the orchestrator, are refused while still being dragged — no drop cursor — and a drop that arrives anyway is ignored | The screen is one project, whole; a panel from another would make it a selection, which is the grid's job. The refusal has to show before the hand lets go, or the drop reads as broken. A page can read a drag's types but not its data until the drop, so the project goes in a type of its own (`application/x-cc-of-project.<id>`); the drop checks the data again, and an app by its key, which carries its project — two projects can each have an app with the same id. |
+| Remember the **explicit ordered `panels` list per project across restarts**, in the workspace snapshot beside the sidebar fold | The UI owns this view; the host acts on none of it. Availability filters membership, so unavailable sessions or apps do not draw. Deleting a project drops its entry. |
+| **Additive migration**: previously arranged projects keep their currently visible panels in order; untouched projects start empty | After loading the initial catalogs, legacy nonempty `order` or `hidden` lists are converted once to explicit membership. Preserve legacy fields until a later release, so the previous build can still read snapshots during an update. Subsequent writes project the list into `order` and put other available ids in `hidden`. |
+| A session in the trash (FR-22) is never a visible panel | A trashed session is absent from the availability list, so its remembered id draws nothing. |
+| **An app's panel is its pinned view** (apps.md §6.2): the same instance in the same frame; Open goes to the app view; × closes the view, teardown first. While anything is dragged, the panel covers its view with a transparent layer and the view stays in sight, as on the grid (§5.4) | An iframe that moves loses its document, and one instance must have one frame. The view is laid over the panel instead of drawn inside it, so going between this screen, the app view and a session keeps one document. The header's Runs, Secrets, Versions and Builder open side panels a panel has no room for, so they stay in the app view. Showing an app here opens it (the host calls `home`), inside trust and import confirmation as always. In WebKit a drag goes into a frame whatever the frame's pointer-events say (measured in Playwright's WebKit): a row dropped on an app's view would land in the app instead of beside it, and a session's panel carried into an app's view from the side, not through its header, never reached the screen at all (#288). The cover above the frame catches both on the page; hiding the view did too, at the cost of a blank screen for the whole drag (#296). |
+| An app's panel takes the **same gestures** as a session's: dropped from the sidebar, reordered by its header, the same drop rules and highlight (`data-drop` on the panel under the hand), and a place in the keyboard order — Tab from its header goes into its view, and back out to the header | The view stands after every panel in the document (it is laid over the panel, not inside it), so without its slot handing focus on, Tab would skip it and reach it only after the last panel (#288). |
+| **The grid is its own** | It stays a hand-picked list across projects, and holds apps as well as sessions (§5.4). A session or an app can be on both; on the grid an app has a view of its own, apart from this screen's. A session's panel dropped on the Grid button goes onto the grid, like a sidebar row. |
+| The **evidence panel stays** beside it, unlike the grid | One project, one repository: objection 1 of §5.4 does not apply. Columns come from the width that is left (`columnsFor`), so no panel goes below the minimum either way. |
 
-패널은 그리드의 부품을 같이 쓴다: `SessionPane`, 열 수 계산, 온전한 픽셀 트랙과 working 링(#208), 그리고
-입력창 접기와 링 멈추기 설정. 보이는 패널에서 끝난 세션은 카드가 아니라 바람을 받는다. 패널은 세션 포커스를
-가져가지 않으므로 패널에 입력해도 화면을 떠나지 않는다; §5.4의 반론 2는 여기서도 유효하다 — ⌘⇧A와
-인박스는 포커스 뷰를 연다. 아무것도 없는 프로젝트는 그렇다고 말하고 새 세션을 권한다; 패널을 모두 숨긴
-프로젝트는 빈 그리드의 말투로 사이드바에서 세션과 앱을 끌어오라고 한다.
-
+The panels share the grid's parts: `SessionPane`, the column count, the whole-pixel tracks and the
+working ring (#208), and the settings that fold the message box and stop the ring. A session that
+finishes in a visible panel gets the breeze, not a card. A panel does not take the session focus, so
+typing in one does not leave the screen; objection 2 of §5.4 holds here too — ⌘⇧A and the inbox open
+the focus view. Every empty screen explains that this project's sessions and apps can be dragged
+in from the sidebar, in the empty grid's wording and style. If the project has no sessions, it also
+offers New session; creating one leaves the panel list empty until the person adds it.
 ---
 
 ## 6. 시스템 아키텍처

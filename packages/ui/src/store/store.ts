@@ -50,6 +50,8 @@ import {
   gridSessionIds,
   sanitizeGridPanels,
   sanitizeArrangements,
+  migrateArrangement,
+  arrangePanels,
   sessionPanelId,
   isAway,
   type ProjectArrangement,
@@ -845,15 +847,9 @@ export type AppState = {
   /** Unfolds only this project and folds all the rest (#205) — for focusing on one in a single move */
   foldOtherProjects(projectId: string): void
   /**
-   * What the person did to each project's screen (#203): the order they dragged its panels into and
-   * the panels they hid. The panels themselves are derived from what the project has (`arrangePanels`).
-   *
-   * Kept in the workspace snapshot, next to the fold above, rather than in a host table like the
-   * grid's `grid_panels`. It is a way of looking at a project that only this UI reads and writes;
-   * the host acts on none of it. Its ids are sessions *and* apps, which a table keyed to the
-   * sessions table could not hold without its own cleanup rules for apps. And what the grid's
-   * table buys — dropping a panel when its session goes — is already given here by deriving the
-   * panels from the session list. Deleting a project drops its entry (`deleteProject`).
+   * Explicit ordered panel lists per project (#604), kept in the workspace snapshot.
+   * Availability filters membership, so trashed sessions leave the screen. Deleting a
+   * project drops its entry. Legacy order/hidden fields remain for the previous build.
    */
   projectPanels: Record<string, ProjectArrangement>
   /** Writes one project's arrangement whole and saves the snapshot */
@@ -2182,7 +2178,7 @@ export function newSessionProjectOf(
 }
 
 /**
- * The sessions the project screen shows right now: every session of the project the person has not hidden. The
+ * The sessions explicitly placed on the project screen right now. The
  * trash (#204) needs no rule here — a trashed session is not in `sessions`.
  */
 export function projectScreenSessions(
@@ -2190,10 +2186,9 @@ export function projectScreenSessions(
 ): string[] {
   const pid = projectScreenOf(s)
   if (!pid) return []
-  const hidden = new Set(s.projectPanels[pid]?.hidden ?? [])
-  return Object.values(s.sessions)
-    .filter((x) => x.projectId === pid && !hidden.has(sessionPanelId(x.id)))
-    .map((x) => x.id)
+  const sessions = Object.values(s.sessions).filter((x) => x.projectId === pid)
+  const shown = new Set(arrangePanels(sessions.map((x) => sessionPanelId(x.id)), s.projectPanels[pid]))
+  return sessions.filter((x) => shown.has(sessionPanelId(x.id))).map((x) => x.id)
 }
 
 /**
@@ -2205,10 +2200,9 @@ export function projectScreenAppKeys(
 ): string[] {
   const pid = projectScreenOf(s)
   if (!pid) return []
-  const hidden = new Set(s.projectPanels[pid]?.hidden ?? [])
-  return s.externalApps
-    .filter((a) => a.projectId === pid && !hidden.has(appPanelId(a.appId)))
-    .map((a) => externalAppKey(pid, a.appId))
+  const apps = s.externalApps.filter((a) => a.projectId === pid)
+  const shown = new Set(arrangePanels(apps.map((a) => appPanelId(a.appId)), s.projectPanels[pid]))
+  return apps.filter((a) => shown.has(appPanelId(a.appId))).map((a) => externalAppKey(pid, a.appId))
 }
 
 /**
@@ -2991,6 +2985,7 @@ export const useStore = create<AppState>((set, get) => ({
 
     // Come back to where you were (C-3). A session that no longer exists is quietly skipped.
     restoringWorkspace = true
+    let migratedProjectPanels = false
     try {
       const snap = await platform.workspace.load()
       if (snap) {
@@ -3007,7 +3002,18 @@ export const useStore = create<AppState>((set, get) => ({
           set({ foldedProjects: savedFolds.filter((id): id is string => typeof id === 'string') })
         }
         // The project screens' arrangements (#203), first for the same reason as the fold above
-        set({ projectPanels: sanitizeArrangements((snap as { projectPanels?: unknown }).projectPanels) })
+        const arrangements = sanitizeArrangements((snap as { projectPanels?: unknown }).projectPanels)
+        set({
+          projectPanels: Object.fromEntries(Object.entries(arrangements).map(([pid, saved]) => {
+            const present = [
+              ...Object.values(get().sessions).filter((s) => s.projectId === pid).map((s) => sessionPanelId(s.id)),
+              ...get().externalApps.filter((a) => a.projectId === pid)
+                .sort((a, b) => (a.name ?? a.appId).localeCompare(b.name ?? b.appId) || a.appId.localeCompare(b.appId))
+                .map((a) => appPanelId(a.appId)),
+            ]
+            return [pid, migrateArrangement(present, saved)]
+          })),
+        })
         // The person's span per app (#306). A snapshot from before it has none; an entry that is not a span is dropped
         const savedSpans = (snap as { appSpans?: unknown }).appSpans
         if (savedSpans && typeof savedSpans === 'object' && !Array.isArray(savedSpans)) {
@@ -3113,12 +3119,15 @@ export const useStore = create<AppState>((set, get) => ({
         if (typeof savedSpinGrid === 'boolean') set({ spinGrid: savedSpinGrid })
         const savedSpinIcon = (snap as { spinSessionIcon?: boolean }).spinSessionIcon
         if (typeof savedSpinIcon === 'boolean') set({ spinSessionIcon: savedSpinIcon })
+        migratedProjectPanels = Object.values(arrangements).some((saved) => saved.panels === undefined)
       }
     } catch {
       /* The app works normally even with no snapshot */
     } finally {
       restoringWorkspace = false
     }
+    // Persist migration only after the whole restore succeeds, so a restart cannot migrate newly created sessions again.
+    if (migratedProjectPanels) get().saveWorkspace()
     // History starts at the screen the restore left (#374): the steps it took to get there are not the person's
     const restored = screenOf(get())
     set({ nav: restored ? { entries: [restored], index: 0 } : EMPTY_NAV })
