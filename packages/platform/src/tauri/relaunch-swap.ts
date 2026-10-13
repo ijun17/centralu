@@ -1,7 +1,12 @@
 import { autoSwitch, type AutoSwitchInput } from './switch-plan.js'
 
 type Build = AutoSwitchInput['build'] & { mode: string }
-export type RelaunchSwapResult = { tried: boolean; error?: string }
+export type RelaunchSwapResult = {
+  tried: boolean
+  error?: string
+  /** The keeper retains its last swap across handoffs; only a different swap can settle this attempt. */
+  previousSwapStartedAt?: number
+}
 
 /** The relaunched window must not run home tools on the older host that is about to leave. */
 export async function finishRelaunchSwap(

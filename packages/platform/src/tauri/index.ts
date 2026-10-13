@@ -450,7 +450,7 @@ export async function createTauriPlatform(): Promise<TauriPlatform> {
 
   return {
     ...base,
-    relaunchSwap,
+    relaunchSwap: { ...relaunchSwap, previousSwapStartedAt: attached?.swap?.startedAt },
     ...(mode === 'keeper'
       ? {
           background: {
