@@ -17,7 +17,7 @@ import type { SessionIdle } from '../idle.js'
  *
  *   - anything `sessionIdle` counts (idle.ts): a turn, an approval or a question waiting, background work, or a tool
  *     that cannot report its background work;
- *   - work it waits on (`waitsOn`): a child it started with `start_agent`, or a session ask_project opened for it,
+ *   - work it waits on (`waitsOn`): a child it started with `start_agent`, or a session handling its ask_project task,
  *     still in the turn it gave them, a session it owns (`askedBy`, a former worktree manager's children, #561) while it
  *     works, and a session that owes it a report (`reportBack`). Waking it for the answer would
  *     cost the resume it saved, moments later. A child waiting on its parent sleeps by the ordinary rule: it is idle;

@@ -612,7 +612,7 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
   }),
   /**
    * One project reaching another (#371) — raised by **the host** in the calling session, the first time a session of
-   * `from` asks to reach `to`. `access` says how: 'delegate' starts a session in `to` and gives it a task
+   * `from` asks to reach `to`. `access` says how: 'delegate' gives an existing session in `to` a task
    * (ask_project, part B); 'apps' attaches one of `to`'s apps to the caller (part A, with `app` naming it).
    *
    * Unlike `capability`, this one has all three answers: allow once (this call only), always (remembered for this
@@ -626,14 +626,16 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
       id: z.string(),
       name: z.string(),
       /**
-       * Whether the person trusts the target project (#382). `false` is said on the card: a session ask_project opens
-       * there follows that trust. Absent from a host that predates it, read as not saying.
+       * Whether the person trusts the target project (#382). `false` is said on the card: the existing target session
+       * follows that trust. Absent from a host that predates it, read as not saying.
        */
       trusted: z.boolean().optional(),
     }),
     /** One line for a person to read: what the caller wants done there (the task, cut short; or the app's use) */
     text: z.string(),
     app: z.object({ appId: z.string(), name: z.string() }).optional(),
+    /** The existing session chosen for ask_project; absent from older hosts. */
+    session: z.object({ id: z.string(), name: z.string() }).optional(),
   }),
   /**
    * A session asks to start another agent in its own project (#561, start_agent) — raised by **the host** in the

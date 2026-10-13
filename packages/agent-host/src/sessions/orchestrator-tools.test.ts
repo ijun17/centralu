@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import {
@@ -232,7 +232,16 @@ describe('ask_project', () => {
     expect(seen).toEqual({ project: 'toolkit' })
     expect(r.text).toContain('still working on it')
     expect(r.text).toContain('waiting for the person to approve')
-    expect(r.text).toContain('call ask_project again with project "toolkit" and no task')
+    expect(r.text).toContain('call ask_project again with project "toolkit", session "d1" and no task')
+  })
+
+  it('passes the named existing session through the shared tool schema and runner', async () => {
+    const askProject = vi.fn(async () => done)
+    const tools = toolsWith({ askProject })
+    const args = { project: 'toolkit', session: 'Sprites', task: 'export' }
+    expect(DELEGATE_TOOLS[0].schema.parse(args)).toEqual(args)
+    await runOrchestratorTool(tools, 'ask_project', args, { sessionId: 's1', profile: 'reader' })
+    expect(askProject).toHaveBeenCalledWith(args, undefined)
   })
 
   it('reports a refusal as an error, and is not a tool of any directing seat', async () => {

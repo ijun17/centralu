@@ -172,67 +172,57 @@ and without it Codex in auto (`approvalPolicy: never`) refused every call on its
 
 ### 1.2 Asking another project (`ask_project`, #371 part B)
 
-The one reach an ordinary session has outside its project. `ask_project({ project, task })` gives a
-task to another registered project and returns the answer of the session that did it, the way a
-subagent's result comes back. It rides with the reader set (same profile, same Settings switch) but
-is its own set, `DELEGATE_TOOLS`, with its own budget, because it acts. The orchestrator, managers
-and leads do not get it: they already direct sessions with `send_to_session`, inside their view.
-
-Under `auto` (#603), `autoBoundaryOpen` reads the calling session's own preset at each host
-boundary. The consent card is allowed and logged without storing a consent, and depth and
-untrusted-caller refusals open. Children inherit the caller's preset and can delegate again.
-The following consent and refusal rules describe `safe`/`normal`. Trust still decides which
-repository instruction and settings files a delegated session reads.
+The one reach an ordinary session has outside its project. `ask_project({ project, session?, task? })`
+gives a task to an **existing ordinary session** in another registered project and returns its answer.
+It never creates a session in another project (#614, owner decision 2026-10-13). Creation remains the
+person's action in that project; `start_agent` creates only within its caller's own project. The global
+orchestrator, which belongs to no project, retains its own create-session tool.
 
 What one call does (`SessionManager.askProject`):
 
-1. **The target.** Another registered project, by name or id. Its own project is refused ("do the
-   work here"); an unknown name is refused with the other projects' names. A session that was itself
-   asked (`askedBy` set) cannot ask a third project: depth one, so two projects that consented to each
-   other cannot bounce a task between them without a person. A session in a project the person has not
-   trusted cannot ask at all, the rule `attach_app` follows (#382): text in that repository could be
-   what is asking. An untrusted project can be asked; the card says it is not trusted.
-2. **Consent** (`ensureProjectAccess`, kind `delegate`). The first time a session of project X asks
-   project Y, a card stands in the caller's session, in the approval slot (detail `project_access`):
-   allow once, always for this pair, deny. Only "always" is stored (store v44, `project_consents`,
-   one row per from, to and kind; both ids cascade with their project). Settings → Permissions lists
-   the pairs and revokes them. Deny and a withdrawn card return a refusal the model reads as "do not
-   ask again unless told". The same gate serves part A's app tools (kind `apps`). The detail carries
-   the target's trust (`to.trusted`), and the question names an untrusted target "(not trusted)"
-   wherever it stands: on the card, in the conversation and in a notification (#382).
-3. **The delegated session.** The idle (or finished) session this caller asked in that project
-   before, so a second ask builds on the first; otherwise a new one with that project's folder, its
-   instructions (its trust, as for any session), its default tool and that tool's remembered model and
-   effort, under the caller's preset (including `safe` and `auto`); reuse requires the same preset, so its approvals
-   stand as cards in that session where the person sees them. It is an ordinary visible session,
-   named `Asked by <project> · HH:MM` and marked `askedBy` (store v45) with the caller; its header
-   links back, and the caller's conversation shows a compact card linking to it.
-4. **The task** goes in a frame (`askFrame`): who asks, and that the final message is the answer and
-   should name files by absolute path. It is recorded as sent by the caller (`from`), like
-   `send_to_session`. The call waits on the turn with the same watcher an app's agent uses
-   (`AgentRunWait`).
-5. **The answer.** The turn's final text (`finalAnswer`), JSON-quoted for the model like a worker's
-   preview (someone else's words), cut in the middle past 6,000 characters. The absolute paths it
-   names that exist **inside the target project's folder** (resolved through symlinks; never the
-   project root itself) become readable to the caller (`readGrants`): a file opens that file, a folder
-   opens what is under it. Paths outside are listed but not opened. A grant lives while this host
-   serves the caller. Claude reads through `CreateSessionOpts.mayRead`, asked in `canUseTool` (a read
-   outside the working folder lands there; `additionalDirectories` is fixed at launch); Codex does not
-   restrict reads, so it needs nothing.
+1. **The project.** Name or id of another registered project. Its own project is refused; an unknown
+   name lists the other projects. Under `safe`/`normal`, an untrusted caller cannot ask, and a child
+   started by another session or a session currently handling a cross-project task cannot delegate
+   again (depth one). Under `auto` (#603), the caller's own preset opens and logs those boundaries.
+2. **The session.** `session` names an ordinary session by name or id. Orchestrators, builders and
+   app agents are excluded. Without it, exactly one ordinary session is selected; otherwise the call
+   lists the candidates with id, name, state and last activity and asks the caller to name one.
+   Duplicate names require an id. No ordinary session means a refusal telling the person to open
+   one there. Selection never creates, renames or takes ownership of a session. Old
+   `Asked by <project> · HH:MM` sessions remain ordinary sessions; startup removes their former
+   cross-project `askedBy` mark, retaining their name and history.
+3. **Consent.** `ensureProjectAccess` (`delegate`) raises a card in the caller's session naming
+   `<caller project> asks <project> / <session>` and the task. Allow once, always for this project
+   pair, or deny; only always is stored in `project_consents` and revoked in Settings → Permissions.
+   The card states the target's trust, including in conversation and notification text. Under `auto`
+   the card is skipped and logged without saving consent. The selected session keeps its own tool,
+   model, effort, preset, project trust and approvals. Availability is checked again after consent.
+4. **Delivery.** The task travels in `askFrame`, explaining the caller and how the answer comes
+   back, and appears in the target conversation with `from` identifying the asking session. An idle
+   session resumes as needed. A busy turn accepts the task through the adapter's tracked mid-turn
+   input path (#594); no interrupt or CLI-specific logic is added to the manager. A CLI that cannot
+   take such a note returns busy with the session's state. Another active delegation is also busy,
+   preserving its owner's watcher. `AgentRunWait` holds until the delivered input's receipt completes,
+   even if the CLI queues it into a later turn; an earlier turn's answer cannot finish this call.
+5. **The answer.** Final text is JSON-quoted as another session's words and clipped after 6,000
+   characters. Named files and folders inside the target project, resolved through symlinks, become
+   readable to the caller for this host's lifetime (`readGrants`); the project root is never granted.
+   Outside paths are listed without grants. Claude checks grants on each read through `mayRead`;
+   Codex's reads are already unrestricted.
 
-**Long work.** A call waits up to `ASK_WAIT_MS` (240 s), under Codex's 300-s `tool_timeout_sec`
-(now set on the `centralu` server too) with the same margin as an app's long call. Past it the
-answer is "still working" with the session's name, and a call with the same project and no task
-waits on the same turn; a new task while one runs is refused. The bridge waits 280 s for
-`orchestrator.tool` (was 60 s), so "still working" reaches the model before any timeout does.
+**Long work.** A call waits up to `ASK_WAIT_MS` (240 s), below the Codex MCP ceiling of 300 s and
+bridge wait of 280 s. It then answers still working, naming the session and how to call again with
+`project`, `session` and no task. Without `session`, one outstanding call in that project is enough
+to continue waiting, even if another session was opened meanwhile. Multiple outstanding tasks need
+an explicit session. A new task cannot replace unfinished work in the same session.
 
-**Stop.** Stop on the caller (`interrupt`) stops the delegated turn and ends the call with that
-reason; so does the call's own cancellation (the MCP request's signal, Claude). The person stopping
-the delegated session, or a failed turn, returns an error naming the session and suggesting the
-next step. Deleting the caller drops the wait and its grants; the delegated session keeps its turn,
-since it is now that project's own session.
+**Stop.** Stop on the caller or cancellation of the call stops the assigned turn and ends its wait.
+Stopping the target, a failed turn or deleting it returns an error naming the session. Deleting the
+caller drops the wait and grants while the target keeps its turn. Existing report-back observers,
+approval notices and sleep dependencies follow the same watcher; tracked notes cannot report an
+intermediate turn's completion.
 
-**Size.** Measured like the reader set (haiku, `scripts/probe-reader-tools.mts`): `ask_project`
+**Size.** Historical baseline before the optional session selector (#614). Measured like the reader set (haiku, `scripts/probe-reader-tools.mts`): `ask_project`
 is 350 characters (`DELEGATE_BUDGET_CHARS` 400) and costs **+103 tokens** loaded (the set: +192 →
 +295), +10 deferred. It is loaded: asked "Have the toolkit project export the sprites again, then
 tell me where the files are", the model called it for that project 7 times in 10 loaded and 0 in 5
@@ -243,7 +233,7 @@ the tool. One of five unrelated how-to questions drew a call naming a project th
 (7 in 10 each), and the guide, which lists every seat's tools, keeps no word of the removed
 control rail's tasks (#372). Two other wordings did no better (0 and 3 in 5).
 
-`scripts/smoke-ask-project.mts` runs it end to end on a temp store and data folder: a haiku session
+`packages/agent-host/scripts/smoke-ask-project.mts` runs it end to end on a temp store and data folder: a haiku session
 in one scratch project has the other write a file with a number only it knows and reads it back
 (`CALLER`/`CALLEE` = `claude` or `codex`).
 
@@ -286,8 +276,7 @@ What one `start_agent` call does (`SessionManager.startAgent`), with the refusal
 below retained for `safe` and `normal`:
 
 1. **Who may.** An ordinary session (`reader` profile) of a trusted project (#382's rule), not one marked `askedBy`:
-   depth one, so a child cannot start agents, and neither can a session ask_project opened (the same mark makes
-   `askProject` refuse both).
+   depth one, so a child cannot start agents, and neither can a session handling an active ask_project task.
 2. **How many.** Settings → Orchestrator → Running agents per project persists `prefs.agentCeiling`,
    read at call time. Empty/null means no ceiling under `auto`, `AGENT_CEILING` (4) otherwise;
    zero is unlimited, and a positive integer sets a ceiling per project over all its sessions.
@@ -1298,7 +1287,7 @@ of a tool's:
 | A live session sleeps once it has said nothing (no event of any kind) for the set time: **15 minutes** by default, "Put idle sessions to sleep after" in Settings → Background (`agents.setSleepPolicy`, saved as `agents.sleepAfterMinutes`, `off` for never) | The owner's decision (2026-10-12). Inside the 1 h cache lifetime Claude Code asks for, so the wake still reads the cache |
 | Only a tool whose adapter says so (`capabilities.sleep`): Claude yes, Codex no | Claude's resume was measured to keep the cache. A large Codex thread took 7-13 s to resume and its cache on resume is unmeasured; Codex's memory is better won by one shared app-server per account (#561 E3), decided separately |
 | Never while `sessionIdle` says no: a turn, an approval or a question waiting, background work (the CLI's own timers included, below), or a tool that cannot report its background work | The same rule as moving a session to a new CLI (§4.6): ending the process would end what it holds |
-| Never while it waits on others (`waitsOn`): a child it started with `start_agent` (or a session ask_project opened for it) still in the turn it gave it, a session it owns (`askedBy`; a former worktree manager's worktree sessions, #561) while that one works, or a session that owes it a report (`reportBack`) | Their answer comes back to it in moments, and waking it for that costs the resume it saved. A child waiting on its parent sleeps by the ordinary rule: it is idle |
+| Never while it waits on others (`waitsOn`): a child it started with `start_agent` (or a session handling its ask_project task) still in the turn it gave it, a session it owns (`askedBy`; a former worktree manager's worktree sessions, #561) while that one works, or a session that owes it a report (`reportBack`) | Their answer comes back to it in moments, and waking it for that costs the resume it saved. A child waiting on its parent sleeps by the ordinary rule: it is idle |
 | The quiet period counts from host start for a session this host has not heard from | A host that just replaced another (a restart, a swap) does not know what the person was doing a second ago |
 | Sleeping is `SessionManager.sleepSession`: refused unless still idle, the handle leaves the map, `session_live {live: false, reason: 'asleep'}` goes out, the process is disposed. A message arriving meanwhile starts a resume that waits for the dispose (`sleeping`) | Never two processes on one conversation; a send is never lost to a closing handle |
 | Waking is the ordinary `resumeSession`, the path a session takes after a host restart; every resume sends `session_live {live: true}` | One path to keep right. The event tells every window, not only the one that asked |

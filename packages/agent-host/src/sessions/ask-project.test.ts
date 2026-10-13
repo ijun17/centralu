@@ -2,7 +2,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ASK_WAIT_MS, clipAnswer, pathsIn, readableGrants, underGrant } from './ask-project.js'
+import { ASK_WAIT_MS, askFrame, clipAnswer, pathsIn, readableGrants, underGrant } from './ask-project.js'
+import { SessionManager } from './manager.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 
 /**
@@ -70,8 +71,11 @@ describe('what the caller may read', () => {
 
 describe('asking another project', () => {
   let w: CrossWorld
+  let targetSession: string
   beforeEach(async () => {
     w = await crossWorld()
+    targetSession = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'codex', model: 'gpt-5.6-luna', effort: 'low', permissionPreset: 'normal' })).id
+    w.mgr.rename(targetSession, 'Sprites')
   })
   afterEach(async () => {
     vi.useRealTimers()
@@ -79,7 +83,161 @@ describe('asking another project', () => {
   })
 
   const handleOf = (id: string) => w.adapters.get('claude')!.handles.get(id) ?? w.adapters.get('codex')!.handles.get(id)
-  const delegatedIn = (callerId: string) => w.mgr.listSessions().filter((s) => s.askedBy === callerId)
+  const delegatedIn = (_callerId: string) => w.mgr.listSessions().filter((s) => s.id === targetSession)
+
+  it('refuses an empty project without consent, adapter discovery or session creation, including under auto', async () => {
+    await w.mgr.trashSession(targetSession)
+    const caller = await w.callerSession()
+    await w.mgr.updateSettings(caller, { permissionPreset: 'auto' })
+    const create = vi.spyOn(w.mgr, 'createSession')
+    const detect = vi.spyOn(w.adapters.get('codex')!, 'detect')
+    expect(await w.mgr.askProject(caller, { project: w.target.id, task: 'export' })).toMatchObject({ ok: false, error: expect.stringContaining('The person has to open one there') })
+    expect(create).not.toHaveBeenCalled()
+    expect(detect).not.toHaveBeenCalled()
+    expect(w.card(caller)).toBeUndefined()
+  })
+
+  it('lists multiple sessions with their names, states and last activity, then accepts a name or id', async () => {
+    const caller = await w.callerSession()
+    const other = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })
+    w.mgr.rename(other.id, 'Review')
+    handleOf(other.id)!.answer('old answer')
+    const list = await w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
+    expect(!list.ok && list.error).toContain('Name a session')
+    expect(!list.ok && list.error).toContain('"name":"Sprites","state":"idle","lastActive":null')
+    expect(!list.ok && list.error).toContain('"name":"Review","state":"waiting_input","lastActive":"')
+    expect(w.card(caller)).toBeUndefined()
+    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    for (const session of ['Sprites', targetSession]) {
+      const call = w.mgr.askProject(caller, { project: w.target.id, session, task: 'export' })
+      await w.until(() => handleOf(targetSession)!.sent.length === (session === 'Sprites' ? 1 : 2))
+      handleOf(targetSession)!.answer('done')
+      expect(await call).toMatchObject({ ok: true, sessionId: targetSession })
+    }
+    expect(handleOf(other.id)!.sent).toEqual([])
+  })
+
+  it('refuses duplicate names, unknown names and a session from another project without creating or sending', async () => {
+    const caller = await w.callerSession()
+    const other = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })
+    w.mgr.rename(other.id, 'Sprites')
+    for (const session of ['Sprites', 'missing', caller]) {
+      expect(await w.mgr.askProject(caller, { project: w.target.id, session, task: 'export' })).toMatchObject({ ok: false, error: expect.stringContaining('No unique ordinary session') })
+    }
+    expect(handleOf(targetSession)!.sent).toEqual([])
+    expect(w.card(caller)).toBeUndefined()
+  })
+
+  it('excludes the orchestrator, builders and app agents from selection', async () => {
+    const caller = await w.callerSession()
+    const excluded = []
+    for (const params of [{ kind: 'orchestrator' as const }, { appId: 'builder', builderOf: { projectId: w.target.id, appId: 'builder' } }, { appId: 'agent', appAgent: {} }]) {
+      excluded.push(await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal', ...params }))
+    }
+    for (const session of excluded) {
+      expect(await w.mgr.askProject(caller, { project: w.target.id, session: session.id, task: 'export' })).toMatchObject({ ok: false })
+    }
+    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    const call = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
+    await w.until(() => handleOf(targetSession)!.sent.length === 1)
+    handleOf(targetSession)!.answer('done')
+    expect(await call).toMatchObject({ ok: true, sessionId: targetSession })
+  })
+
+  it.each(['claude', 'codex'] as const)('%s delivers a busy session a visible mid-turn note and waits for its receipt', async (tool) => {
+    await w.mgr.switchTool(targetSession, tool)
+    const caller = await w.callerSession()
+    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    await w.mgr.send(targetSession, 'person work')
+    const h = handleOf(targetSession)!
+    const call = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
+    await w.until(() => h.sent.length === 2)
+    expect(h.interrupted).toBe(0)
+    expect(h.sent[1]).toContain("through Centralu's ask_project")
+    expect(w.events).toContainEqual(expect.objectContaining({ type: 'user_message', sessionId: targetSession, from: expect.objectContaining({ sessionId: caller }) }))
+    let answered = false
+    void call.then(() => { answered = true })
+    h.answer('old turn answer', false)
+    await Promise.resolve()
+    expect(answered).toBe(false)
+    h.answer('note answer')
+    expect(await call).toMatchObject({ ok: true, answer: 'note answer', sessionId: targetSession })
+  })
+
+  it('keeps an existing report-back marker until the mid-turn task completes, then reports once', async () => {
+    const caller = await w.callerSession()
+    const directing = await w.mgr.createSession({ projectId: null, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal', kind: 'orchestrator' })
+    const directingHandle = handleOf(directing.id)!
+    await directingHandle.opts.orchestratorTools!.sendToSession(targetSession, 'original task', true)
+    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    const call = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
+    const h = handleOf(targetSession)!
+    await w.until(() => h.sent.length === 2)
+    h.answer('old turn', false)
+    await Promise.resolve()
+    expect(directingHandle.sent).toEqual([])
+    h.answer('note answer')
+    expect(await call).toMatchObject({ ok: true, answer: 'note answer' })
+    await w.until(() => directingHandle.sent.length === 1)
+    expect(directingHandle.sent[0]).toContain(`sourceSessionId: ${targetSession}`)
+    h.answer('later turn')
+    await Promise.resolve()
+    expect(directingHandle.sent).toHaveLength(1)
+  })
+
+  it.each(['working', 'waiting_approval'] as const)('reports busy with state %s when the CLI cannot accept mid-turn input', async (state) => {
+    const caller = await w.callerSession()
+    handleOf(targetSession)!.event({ type: 'state_change', sessionId: targetSession, state })
+    w.adapters.get('codex')!.capabilities.midTurnInput = false
+    expect(await w.mgr.askProject(caller, { project: w.target.id, task: 'export' })).toMatchObject({ ok: false, error: expect.stringContaining(`busy (${state})`) })
+    expect(handleOf(targetSession)!.sent).toEqual([])
+    expect(w.card(caller)).toBeUndefined()
+  })
+
+  it('rechecks a session deleted while its consent card was open and never replaces it', async () => {
+    const caller = await w.callerSession()
+    const call = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
+    await w.until(() => !!w.card(caller))
+    expect(w.card(caller)!.detail).toMatchObject({ session: { id: targetSession, name: 'Sprites' } })
+    await w.mgr.trashSession(targetSession)
+    w.mgr.respondApproval(caller, w.card(caller)!.requestId, 'allow')
+    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('no longer available') })
+    expect(w.mgr.listSessions().filter((s) => s.projectId === w.target.id)).toEqual([])
+  })
+
+  it("does not replace another caller's active delegation watcher", async () => {
+    const caller = await w.callerSession()
+    const other = await w.callerSession()
+    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    const first = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
+    await w.until(() => handleOf(targetSession)!.sent.length === 1)
+    expect(await w.mgr.askProject(other, { project: w.target.id, task: 'review' })).toMatchObject({ ok: false, error: expect.stringContaining('another delegated task') })
+    handleOf(targetSession)!.answer('original answer')
+    expect(await first).toMatchObject({ ok: true, answer: 'original answer' })
+  })
+
+  it.each(['live', 'trashed', 'purged'] as const)('restores old cross-project asked sessions as ordinary sessions when their caller is %s', async (ownerState) => {
+    const caller = await w.callerSession()
+    const original = w.mgr.listSessions().find((s) => s.id === targetSession)!
+    await w.mgr.send(targetSession, askFrame(w.caller.name, 'old task'), undefined, { sessionId: caller, name: 'Old caller' })
+    handleOf(targetSession)!.answer('old history')
+    w.store.upsertSession({ ...original, name: 'Asked by consumer · 10:00', askedBy: caller })
+    if (ownerState !== 'live') await w.mgr.trashSession(caller)
+    if (ownerState === 'purged') await w.mgr.purgeSession(caller)
+    await w.mgr.disposeAll()
+    w.mgr = new SessionManager(w.store, w.adapters, (e) => w.events.push(e), undefined, join(w.target.path, 'test-worktrees'))
+    const restored = w.mgr.listSessions().find((s) => s.id === targetSession)!
+    expect(restored.askedBy).toBeUndefined()
+    expect(restored.name).toBe('Asked by consumer · 10:00')
+    expect(w.store.loadMessages(targetSession, 10)).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ text: 'old history' }) }))
+    expect(w.store.listSessions().find((s) => s.id === targetSession)?.askedBy).toBeNull()
+  })
+
+  it('refuses every cross-project child creation even under auto', async () => {
+    const caller = await w.callerSession()
+    await w.mgr.updateSettings(caller, { permissionPreset: 'auto' })
+    await expect(w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'codex', permissionPreset: 'auto', askedBy: caller })).rejects.toThrow('cannot create a session in another project')
+  })
 
   it('without the person\'s consent, nothing is started in the other project and the model reads a refusal', async () => {
     const s = await w.callerSession()
@@ -90,10 +248,11 @@ describe('asking another project', () => {
     const r = await p
     expect(r.ok).toBe(false)
     expect(!r.ok && r.error).toContain('did not allow')
-    expect(w.mgr.listSessions().filter((x) => x.projectId === w.target.id)).toEqual([])
+    expect(w.mgr.listSessions().filter((x) => x.projectId === w.target.id)).toHaveLength(1)
+    expect(handleOf(targetSession)!.sent).toEqual([])
   })
 
-  it('opens a visible session in the target project, with its folder, default tool and the normal preset, marked as asked', async () => {
+  it('delivers to the only existing ordinary session and preserves its name, CLI, settings and provenance', async () => {
     w.store.setProjectDefaultTool(w.target.id, 'codex')
     w.store.setProjectToolDefaults(w.target.id, 'codex', { model: 'gpt-5.6-luna', effort: 'low' })
     const s = await w.callerSession()
@@ -105,7 +264,8 @@ describe('asking another project', () => {
     expect(d.tool).toBe('codex')
     expect([d.model, d.effort]).toEqual(['gpt-5.6-luna', 'low'])
     expect(d.permissionPreset).toBe('normal')
-    expect(d.name).toMatch(new RegExp(`^Asked by ${w.caller.name} · \\d\\d:\\d\\d$`))
+    expect(d.name).toBe('Sprites')
+    expect(d.askedBy).toBeUndefined()
     const h = handleOf(d.id)!
     expect(h.opts.cwd).toBe(w.target.path)
     // The task travels framed: who asks, and how the answer gets back
@@ -227,7 +387,8 @@ describe('asking another project', () => {
     const r = await w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
     expect(!r.ok && r.error).toContain("This session's project is not trusted, so it cannot ask another project")
     expect(w.card(s)).toBeUndefined()
-    expect(w.mgr.listSessions().filter((x) => x.projectId === w.target.id)).toEqual([])
+    expect(w.mgr.listSessions().filter((x) => x.projectId === w.target.id)).toHaveLength(1)
+    expect(handleOf(targetSession)!.sent).toEqual([])
   })
 
   it('asking into an untrusted project raises a card that says the target is not trusted; a trusted target is said to be', async () => {

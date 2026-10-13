@@ -3241,8 +3241,7 @@ function WorktreeProposalRow({ item }: { item: Extract<ChatItem, { kind: 'tool' 
  * conversation; the model already says what it made of it.
  *
  * The delegated session is read from the result (`[id]`, which every answer but a refusal carries) and, before the
- * result exists, from the sessions this one asked in that project (`askedBy`) — the host reuses one per caller and
- * project, so that is the one working now.
+ * result exists, from the delivered task's conversation provenance (`from`) in that project.
  */
 function AskProjectRow({ item, sessionId }: { item: Extract<ChatItem, { kind: 'tool' }>; sessionId: string }) {
   const [open, setOpen] = useState(false)
@@ -3253,9 +3252,10 @@ function AskProjectRow({ item, sessionId }: { item: Extract<ChatItem, { kind: 't
     if (fromResult && s.sessions[fromResult]) return fromResult
     if (item.result !== undefined && item.ok === false && !fromResult) return null
     const asked = Object.values(s.sessions).filter(
-      (x) => x.askedBy === sessionId && (!projectName || (x.projectId && s.projects[x.projectId]?.name === projectName)),
+      (x) => (!projectName || (x.projectId && s.projects[x.projectId]?.name === projectName)) &&
+        (s.chat[x.id] ?? []).some((row) => row.kind === 'user' && row.from?.sessionId === sessionId && row.text.includes("through Centralu's ask_project")),
     )
-    return (asked.find((x) => x.state !== 'idle') ?? asked[asked.length - 1])?.id ?? null
+    return asked.length === 1 ? asked[0]!.id : null
   })
   const delegated = useStore((s) => (delegatedId ? s.sessions[delegatedId] : undefined))
   const focus = useStore((s) => s.focusSession)

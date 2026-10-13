@@ -11,8 +11,8 @@
  *   for consumer's (Codex reaches ask_project through the bridge, and does not restrict reads, so the read-grant
  *   check is Claude's only).
  *
- * Passes when: the consent card stood in the caller with the project_access detail; a session opened in toolkit
- * marked `askedBy`; the file exists; the caller's final answer carries the number that is in the file; and the
+ * Passes when: the consent card stood in the caller with the project_access detail; the existing toolkit session received the task
+ * with caller provenance; the file exists; the caller's final answer carries the number that is in the file; and the
  * caller's read of that file raised no card (the read grant).
  *
  * Run with: node --import tsx packages/agent-host/scripts/smoke-ask-project.mts
@@ -80,10 +80,6 @@ ws.on('message', (raw: unknown) => {
   if (f.kind !== 'event') return
   const e = f.event
   events.push(e)
-  if (e.type === 'session_created' && e.session?.askedBy) {
-    delegatedId = e.session.id
-    log('delegated session opened:', e.session.name, `(${e.session.tool}, ${e.session.model ?? 'default model'})`)
-  }
   if (e.type === 'approval_request') {
     cards.push({ sessionId: e.sessionId, detail: e.detail })
     // The person: "always" for the pair, and allow whatever the delegated session asks
@@ -99,7 +95,9 @@ await new Promise((r) => setTimeout(r, 300))
 
 const pc = await rpc('projects.add', { path: consumer })
 const pt = await rpc('projects.add', { path: toolkit })
-// Toolkit's own choice of agent and model, as a person who used it would have left them (the delegated session takes them)
+// The script plays the person: trust the scratch projects and open the session that receives the task.
+await rpc('projects.setTrusted', { projectId: pc.id, trusted: true })
+await rpc('projects.setTrusted', { projectId: pt.id, trusted: true })
 const seed = await rpc('agents.createSession', { projectId: pt.id, cwd: toolkit, tool: CALLEE, permissionPreset: 'normal' })
 await rpc('agents.updateSettings', CALLEE === 'codex' ? { sessionId: seed.id, model: 'gpt-5.6-luna', effort: 'low' } : { sessionId: seed.id, model: 'haiku' })
 const caller = await rpc(
@@ -109,6 +107,7 @@ const caller = await rpc(
     : { projectId: pc.id, cwd: consumer, tool: 'claude', model: 'haiku', permissionPreset: 'safe' },
 )
 callerId = caller.id
+delegatedId = seed.id
 log('caller:', callerId, '· caller tool:', CALLER, '· callee tool:', CALLEE)
 
 const mark = events.length
@@ -147,7 +146,9 @@ console.log('\n── caller answer ──\n' + answer.trim().slice(0, 600) + '\
 const checks: [string, boolean][] = [
   ['the caller turn ended', ended],
   ['consent card stood in the caller (project_access, delegate)', !!consent && consent.detail.access === 'delegate'],
-  ['a session opened in toolkit, marked askedBy', !!delegatedId],
+  ['the consent names the existing session', consent?.detail.session?.id === delegatedId],
+  ['the existing toolkit session received a task from the caller', events.slice(mark).some((e) => e.type === 'user_message' && e.sessionId === delegatedId && e.from?.sessionId === callerId)],
+  ['no session was created by ask_project', !events.slice(mark).some((e) => e.type === 'session_created')],
   ['toolkit wrote out/secret.txt', !!number],
   ['the caller answered with the number in the file', !!number && answer.includes(number.replace(/\D/g, '').slice(0, 6))],
   ...(CALLER === 'claude' ? [['the caller read the file without a card (read grant)', callerReadCards.length === 0] as [string, boolean]] : []),

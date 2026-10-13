@@ -4,7 +4,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path'
 /**
  * ask_project (#371 part B) — what a session in one project gets back when it asks another project to do something.
  *
- * Standing the delegated session up, the consent and the wait are the manager's (`SessionManager.askProject`). What
+ * Selecting the existing session, the consent and the wait are the manager's (`SessionManager.askProject`). What
  * lives here is the pure part around it: the frame the task travels in, the cut of a long answer, which paths the
  * answer names and which of them the caller may read.
  */

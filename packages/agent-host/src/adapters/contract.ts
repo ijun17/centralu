@@ -249,12 +249,12 @@ export type OrchestratorTools = {
   ): Promise<{ ok: boolean; error?: string; /** takes effect once the running turn ends (#164) */ deferred?: boolean }>
   /**
    * Asks another project to do a task (#371 part B, ask_project) — an ordinary session's only reach outside its own
-   * project, and only with the person's consent for the pair. Starts (or reuses) a visible session in the target
+   * project, and only with the person's consent for the pair. Selects an existing ordinary session in the target
    * project with that project's folder, instructions, tool and permissions, sends the task, and waits for the turn,
    * up to a bound (`ASK_WAIT_MS`): past it, the answer is "still working" and a call with no task waits again.
    * `signal` is the caller's tool call: aborted, the delegated turn is stopped too.
    */
-  askProject(opts: { project: string; task?: string }, signal?: AbortSignal): Promise<AskProjectResult>
+  askProject(opts: { project: string; session?: string; task?: string }, signal?: AbortSignal): Promise<AskProjectResult>
   /**
    * Starts another agent in the caller's own project (#561, start_agent): a visible session marked `askedBy` the
    * caller, under the caller's permission preset, behind the person's consent. Waits like askProject unless

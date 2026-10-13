@@ -77,16 +77,13 @@ describe('auto Centralu boundaries (#603)', () => {
     w.mgr.setProjectTrusted(w.caller.id, false)
     const grandchild = await start(first.sessionId)
     expect(grandchild).toMatchObject({ ok: true, state: 'working' })
+    const target = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })
     const asking = w.mgr.askProject(
       first.sessionId,
       { project: w.target.id, task: 'check' },
       AbortSignal.timeout(1000),
     )
-    await w.until(() =>
-      w.mgr.listSessions().some((s) => s.projectId === w.target.id && s.askedBy === first.sessionId),
-    )
-    const target = w.mgr.listSessions().find((s) => s.projectId === w.target.id)!
-    expect(target.permissionPreset).toBe('auto')
+    expect(target.permissionPreset).toBe('normal')
     await w.until(() => !!handle(target.id)?.sent.length)
     handle(target.id).answer('checked')
     expect(await asking).toMatchObject({ ok: true, answer: 'checked' })
@@ -100,14 +97,13 @@ describe('auto Centralu boundaries (#603)', () => {
   })
 
   it.each(['safe', 'normal'] as const)(
-    '%s: ask_project children inherit the caller preset',
+    '%s: ask_project preserves the target preset',
     async (preset) => {
       const id = await session(preset)
       w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+      const child = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'auto' })
       const call = w.mgr.askProject(id, { project: w.target.id, task: 'check' }, AbortSignal.timeout(1000))
-      await w.until(() => w.mgr.listSessions().some((s) => s.askedBy === id))
-      const child = w.mgr.listSessions().find((s) => s.askedBy === id)!
-      expect(child.permissionPreset).toBe(preset)
+      expect(child.permissionPreset).toBe('auto')
       await w.until(() => !!handle(child.id)?.sent.length)
       handle(child.id).answer('done')
       expect((await call).ok).toBe(true)

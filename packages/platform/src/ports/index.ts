@@ -587,7 +587,7 @@ export interface ApprovalRulesPort {
 
 /**
  * Cross-project consents (#371): the person's remembered "always" for one project reaching another — 'delegate'
- * (ask_project starts a session there) or 'apps' (its apps attach to the caller). Listed and revoked in Settings;
+ * (ask_project delivers to an existing session there) or 'apps' (its apps attach to the caller). Listed and revoked in Settings;
  * the host raises the question itself, as an approval card in the calling session.
  */
 export interface ProjectConsentsPort {

@@ -481,8 +481,8 @@ export class SessionManager {
    */
   private hostAsks = new Map<string, HostAsk>()
   /**
-   * ask_project's delegations still owed to their caller (#371 part B) — `<caller session>><target project>` -> the
-   * delegation. One per pair at a time: a second task while the first runs is refused, and a call with no task waits
+   * ask_project's delegations still owed to their caller (#371 part B) — `<caller session>><target project>><target session>` -> the
+   * delegation. One per chosen session at a time: a second task while the first runs is refused, and a call with no task waits
    * on this one. Removed once the caller has read the outcome; an outcome nobody comes back for goes with the caller.
    */
   private delegations = new Map<string, Delegation>()
@@ -562,7 +562,9 @@ export class SessionManager {
      * again once something addresses it — that is better than showing a state that is not true.
      */
     const LIVE_ONLY: SessionState[] = ['working', 'waiting_approval']
-    for (const s of store.listSessions()) {
+    const storedSessions = store.listSessions()
+    const storedProjects = new Map(storedSessions.map((s) => [s.id, s.projectId]))
+    for (const s of storedSessions) {
       /*
        * Except where the process **does** still exist (#280 step 2): the keeper kept it through the
        * restart and `adoptKept` re-attaches it. That state is true; if the adoption fails, it is reset
@@ -570,7 +572,14 @@ export class SessionManager {
        */
       const stale = LIVE_ONLY.includes(s.state) && !keeperOpts.keptSessions?.has(s.id)
       const fixed = stale ? { ...s, state: 'idle' as const, waitingSince: null } : s
+      // Old cross-project ownership must also go when its caller has been trashed or purged.
+      const ownerProject = fixed.askedBy ? storedProjects.get(fixed.askedBy) ?? store.trashedSession(fixed.askedBy)?.record.projectId : undefined
+      const first = fixed.askedBy && ownerProject === undefined ? store.loadMessagesFrom(fixed.id, 0, 1)[0]?.payload as { text?: string; from?: { sessionId: string } } | undefined : undefined
+      const oldAsk = fixed.askedBy && (ownerProject !== undefined ? ownerProject !== fixed.projectId
+        : first?.from?.sessionId === fixed.askedBy && first.text?.includes("through Centralu's ask_project"))
+      if (oldAsk) delete fixed.askedBy
       this.meta.set(s.id, fixed)
+      if (oldAsk) store.upsertSession(fixed)
       if (stale) {
         console.error(`[agent-host] stale state reset: ${s.id.slice(0, 8)} ${s.state} -> idle`)
         store.upsertSession(fixed)
@@ -1298,10 +1307,13 @@ export class SessionManager {
        * tool: the tool the app picked is not the person's choice.
        */
       appAgent?: { outputSchema?: Record<string, unknown> }
-      /** The session in another project that asked for this one (#371 part B) — filled only by `askProject` */
+      /** The same-project session that started this agent (#561). */
       askedBy?: string
     },
   ): Promise<SessionInfo> {
+    if (params.askedBy && this.meta.get(params.askedBy)?.projectId !== params.projectId) {
+      throw new Error('A session cannot create a session in another project')
+    }
     if (!params.tool) {
       throw Object.assign(new Error('No agent adapter is available. Install and configure an agent CLI before creating a session.'), { code: 'tool_not_installed' })
     }
@@ -4438,7 +4450,7 @@ export class SessionManager {
 
   /**
    * The sessions whose running work this one waits on (#568, the sleep rule in sleep.ts): a child it started with
-   * `start_agent`, or a session ask_project opened for it, while the turn it gave them runs, and a session that owes
+   * `start_agent`, or a session handling its ask_project task, while the turn it gave them runs, and a session that owes
    * it a report (`reportBack`, `awaitingReport`). Their answer is about to come back to it.
    */
   waitsOn(sessionId: string): string[] {
@@ -5266,7 +5278,7 @@ export class SessionManager {
     callerSessionId: string,
     toProjectId: string,
     access: ProjectConsentKind,
-    what: { text: string; app?: { appId: string; name: string } },
+    what: { text: string; app?: { appId: string; name: string }; session?: { id: string; name: string } },
     signal?: AbortSignal,
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     const caller = this.meta.get(callerSessionId)
@@ -5285,10 +5297,11 @@ export class SessionManager {
         kind: 'project_access',
         access,
         from: { id: from.id, name: from.name },
-        // Said on the card (#382): a session opened there follows its trust, so the person should know before allowing
+        // Said on the card (#382): the selected session there follows its trust, so the person should know before allowing
         to: { id: to.id, name: to.name, trusted: to.trusted },
         text: what.text,
         ...(what.app ? { app: what.app } : {}),
+        ...(what.session ? { session: what.session } : {}),
       },
       signal,
     )
@@ -5362,9 +5375,8 @@ export class SessionManager {
    *      and a session that was itself asked by another project cannot ask a third: depth one, so two projects
    *      that consented to each other cannot bounce a task between them without a person.
    *   2. The person's consent for the pair (`ensureProjectAccess`, kind 'delegate').
-   *   3. A session in the target: the idle one this caller asked there before, else a new one with that project's
-   *      folder, instructions and default tool, under the caller's preset — never above what the caller
-   *      gets, so its own approvals stand as cards in that session, where the person sees them. Marked `askedBy`.
+   *   3. An existing ordinary session in the target, named by name or id; no creation or ownership change.
+   *      Without a name exactly one is selected, otherwise its sessions are listed for the caller to choose.
    *   4. The task goes in a frame (`askFrame`) marked as sent by the caller, and the call waits for the turn, up to
    *      `ASK_WAIT_MS`. Past it the answer is "still working" and a call with no task waits again.
    *   5. The final answer comes back cut to size, and the paths it names inside the target project become readable
@@ -5373,10 +5385,10 @@ export class SessionManager {
    * Stop on the caller, the call's own signal, or the person deleting either session ends the wait; the first two
    * stop the delegated turn as well.
    */
-  async askProject(callerId: string, opts: { project: string; task?: string }, signal?: AbortSignal): Promise<AskProjectResult> {
+  async askProject(callerId: string, opts: { project: string; session?: string; task?: string }, signal?: AbortSignal): Promise<AskProjectResult> {
     const caller = this.meta.get(callerId)
     if (!caller?.projectId) return { ok: false, error: 'This session belongs to no project, so it cannot ask another one' }
-    if (caller.askedBy && !this.autoBoundaryOpen(callerId, 'delegation depth')) {
+    if ((caller.askedBy || [...this.delegations.values()].some((d) => d.sessionId === callerId && !d.agent && !d.settled)) && !this.autoBoundaryOpen(callerId, 'delegation depth')) {
       // `askedBy` marks a child of start_agent too (#561): depth one for both reaches
       return { ok: false, error: 'This session was itself started or asked by another session, so it cannot ask a project — say in your answer what is needed instead.' }
     }
@@ -5405,65 +5417,77 @@ export class SessionManager {
     }
     if (target.id === caller.projectId) return { ok: false, error: `${target.name} is this session's own project — do the work here.` }
 
-    const key = `${callerId}>${target.id}`
+    const candidates = [...this.meta.values()].filter((s) =>
+      s.projectId === target.id && s.kind === 'worker' && !s.appId && !this.builderRefOf(s),
+    )
+    const list = () => candidates.map((s) => JSON.stringify({
+      id: s.id, name: s.name, state: s.state, lastActive: lastActiveOf(this.store, s.id) ?? null,
+    })).join('\n')
+    const wantedSession = opts.session?.trim()
+    // A bounded call can keep waiting even when the person has since opened another session.
+    const outstanding = [...this.delegations.entries()].filter(([, d]) =>
+      d.callerId === callerId && d.target.id === target.id && !d.agent,
+    )
+    if (!opts.task && !wantedSession && outstanding.length === 1) {
+      const [key, pending] = outstanding[0]!
+      return this.awaitDelegation(key, pending, signal)
+    }
+    const named = wantedSession
+      ? candidates.filter((s) => s.name.toLowerCase() === wantedSession.toLowerCase())
+      : candidates
+    const chosen = candidates.find((s) => s.id === wantedSession) ?? (named.length === 1 ? named[0] : undefined)
+    if (!chosen) {
+      return { ok: false, error: candidates.length
+        ? `${wantedSession ? `No unique ordinary session named "${wantedSession}" in ${target.name}. ` : ''}Name a session with the session argument. Sessions (name, state, last active):\n${list()}`
+        : `${target.name} has no ordinary session. The person has to open one there; this call cannot create one.` }
+    }
+    const key = `${callerId}>${target.id}>${chosen.id}`
     const pending = this.delegations.get(key)
     if (pending && !opts.task) return this.awaitDelegation(key, pending, signal)
     if (pending && !pending.settled) {
-      return {
-        ok: false,
-        error: `${target.name} is still working on your last task in the session "${this.meta.get(pending.sessionId)?.name ?? pending.sessionId}". Call ask_project with project "${target.name}" and no task to wait for it.`,
-      }
+      return { ok: false, error: `${target.name} is still working on your last task in the session "${chosen.name}". Call ask_project with project "${target.name}", session "${chosen.id}" and no task to wait for it.` }
     }
-    // An answer the caller never came back for gives way to the new task
-    if (pending) this.delegations.delete(key)
-    if (!opts.task) return { ok: false, error: `Give a task: what ${target.name} should do.` }
+    if (!opts.task) return { ok: false, error: `Give a task: what ${target.name} / ${chosen.name} should do.` }
 
-    const consent = await this.ensureProjectAccess(callerId, target.id, 'delegate', { text: taskLine(opts.task) }, signal)
+    const available = (): string | undefined => {
+      const current = this.meta.get(chosen.id)
+      if (!current || current.projectId !== target.id || current.kind !== 'worker' || current.appId || this.builderRefOf(current)) return 'The chosen session is no longer available'
+      if (this.agentRuns.has(chosen.id) && !this.agentRuns.get(chosen.id)!.finished) return `"${current.name}" is busy (${current.state}) with another delegated task. Wait for it.`
+      if (inTurn(current.state) && (!this.adapters.get(current.tool)?.capabilities.midTurnInput || !this.handles.get(current.id)?.sendTracked)) return `"${current.name}" is busy (${current.state}); its CLI cannot take a mid-turn note. Try again later.`
+    }
+    const busy = available()
+    if (busy) return { ok: false, error: busy }
+    const consent = await this.ensureProjectAccess(callerId, target.id, 'delegate', {
+      text: taskLine(opts.task), session: { id: chosen.id, name: chosen.name },
+    }, signal)
     if (!consent.ok) return consent
-
-    // The idle session this caller asked there before keeps its context: the second ask ("now fix the one that
-    // came out wrong") builds on the first. Busy means the person took it over; a new one is opened instead
-    const reuse = [...this.meta.values()]
-      // Done with its turn (waiting_input) or at rest (idle); working or waiting on an approval is busy
-      .filter((s) => s.askedBy === callerId && s.projectId === target.id && s.kind === 'worker' && s.permissionPreset === caller.permissionPreset && (s.state === 'idle' || s.state === 'waiting_input') && !this.agentRuns.has(s.id))
-      .sort((a, b) => b.createdAt - a.createdAt)[0]
-    let delegatedId: string
-    if (reuse) {
-      delegatedId = reuse.id
-    } else {
-      const tool = this.firstTool(target.defaultTool)
-      if (!tool) return { ok: false, error: `Could not open a session in ${target.name}: no agent adapter is available. Install and configure an agent CLI first.` }
-      const adapter = this.adapters.get(tool)!
-      const found = await adapter.detect()
-      if (!found.installed || !found.loggedIn) {
-        return { ok: false, error: `${target.name}'s agent (${adapter.descriptor.label}) cannot take the task: ${found.detail}` }
-      }
-      try {
-        // The model and effort a session the person opens there would start on (the project's remembered choice, #107)
-        const remembered = this.store.projectToolDefaults(target.id)[tool]
-        const info = await this.createSession({
-          projectId: target.id,
-          cwd: target.path,
-          tool,
-          ...(remembered?.model ? { model: remembered.model } : {}),
-          ...(remembered?.effort ? { effort: remembered.effort } : {}),
-          permissionPreset: caller.permissionPreset,
-          askedBy: callerId,
-        })
-        delegatedId = info.id
-      } catch (e) {
-        return { ok: false, error: `Could not open a session in ${target.name}: ${(e as Error).message}` }
-      }
-      const callerProject = projects.find((p) => p.id === caller.projectId)?.name ?? 'another project'
-      this.rename(delegatedId, `Asked by ${callerProject} · ${new Date().toTimeString().slice(0, 5)}`)
-    }
-
+    // Consent can wait while the person deletes or starts work in the chosen session.
+    const changed = available()
+    if (changed) return { ok: false, error: changed }
+    if (signal?.aborted) return { ok: false, error: 'The call was cancelled before delivery' }
+    if (pending) this.delegations.delete(key)
+    const delegatedId = chosen.id
+    const midTurn = inTurn(this.meta.get(delegatedId)!.state)
+    let releaseInput: (() => void) | undefined
     const d = this.startDelegation(key, callerId, delegatedId, target)
     const callerProject = projects.find((p) => p.id === caller.projectId)?.name ?? 'another project'
     try {
-      await this.deliver(delegatedId, askFrame(callerProject, opts.task), undefined, { sessionId: callerId, name: labelOf(this.store, caller) }, false)
+      const from = { sessionId: callerId, name: labelOf(this.store, caller) }
+      if (midTurn) {
+        const releaseHold = d.wait.holdInput()
+        const release = () => { releaseHold(); this.applyDeferredRestart(delegatedId) }
+        releaseInput = release
+        await this.deliver(delegatedId, askFrame(callerProject, opts.task), undefined, from, false, undefined, 'inline', (h, input) => {
+          const fail = (e: Error) => { d.wait.fail(e); release() }
+          void h.sendTracked!(input, { complete: release, fail }).then(release, fail)
+        })
+      } else {
+        await this.deliver(delegatedId, askFrame(callerProject, opts.task), undefined, from, false)
+      }
     } catch (e) {
-      this.delegations.delete(key)
+      d.wait.fail(e as Error)
+      releaseInput?.()
+      if (this.delegations.get(key) === d) this.delegations.delete(key)
       if (this.agentRuns.get(delegatedId) === d.wait) this.agentRuns.delete(delegatedId)
       return { ok: false, error: `Could not hand the task to ${target.name}: ${(e as Error).message}` }
     }
@@ -5505,7 +5529,7 @@ export class SessionManager {
     void d.outcome.then((r) => {
       if (this.agentRuns.get(sessionId) === wait) this.agentRuns.delete(sessionId)
       // Queued notes can finish after the original turn. Report only the whole delegation's ending.
-      if (agent) void this.reportBackIfAwaited(sessionId, r.ok
+      if (agent || wait.tracksInputs) void this.reportBackIfAwaited(sessionId, r.ok
         ? { type: 'turn_complete', sessionId }
         : { type: 'error', sessionId, error: { code: 'internal', message: r.error, retryable: false } }, r.ok ? r.answer : undefined)
     })
@@ -5622,7 +5646,7 @@ export class SessionManager {
   async startAgent(callerId: string, opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult> {
     const caller = this.meta.get(callerId)
     if (!caller?.projectId) return { ok: false, error: 'This session belongs to no project, so it cannot start agents.' }
-    if (caller.askedBy && !this.autoBoundaryOpen(callerId, 'delegation depth')) {
+    if ((caller.askedBy || [...this.delegations.values()].some((d) => d.sessionId === callerId && !d.agent && !d.settled)) && !this.autoBoundaryOpen(callerId, 'delegation depth')) {
       return { ok: false, error: 'This session was itself started or asked by another session, so it cannot start agents — say in your answer what is needed instead.' }
     }
     const project = this.store.listProjects().find((p) => p.id === caller.projectId)

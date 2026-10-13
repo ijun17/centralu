@@ -165,9 +165,8 @@ describe("auto observes another caller's delegation without consuming it", () =>
       const owner = await session('normal', w.target)
       const observer = await session('auto')
       w.store.setProjectConsent(w.target.id, w.caller.id, 'delegate')
-      const asking = w.mgr.askProject(owner, { project: w.caller.id, task: 'other project work' })
-      await w.until(() => w.mgr.listSessions().some((s) => s.askedBy === owner))
-      const child = w.mgr.listSessions().find((s) => s.askedBy === owner)!.id
+      const child = await session('normal')
+      const asking = w.mgr.askProject(owner, { project: w.caller.id, session: child, task: 'other project work' })
       await w.until(() => !!handle(child)?.sent.length)
       const observed = w.mgr.agentSession(observer, { sessionId: child, action })
       if (action === 'wait') handle(child).answer('cross-project answer')
@@ -189,10 +188,10 @@ describe("auto observes another caller's delegation without consuming it", () =>
       const observer = await session('auto')
       w.store.setProjectConsent(w.target.id, w.caller.id, 'delegate')
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-      const asking = w.mgr.askProject(owner, { project: w.caller.id, task: 'other project work' })
-      for (let n = 0; n < 50 && !w.mgr.listSessions().some((s) => s.askedBy === owner); n++)
+      const child = await session('normal')
+      const asking = w.mgr.askProject(owner, { project: w.caller.id, session: child, task: 'other project work' })
+      for (let n = 0; n < 50 && !handle(child)?.sent.length; n++)
         await vi.advanceTimersByTimeAsync(0)
-      const child = w.mgr.listSessions().find((s) => s.askedBy === owner)!.id
       await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
       expect(await asking).toMatchObject({ ok: true, state: 'working' })
       vi.useRealTimers()
@@ -206,7 +205,7 @@ describe("auto observes another caller's delegation without consuming it", () =>
       )
       expect(await w.mgr.askProject(owner, { project: w.caller.id })).toMatchObject({
         ok: false,
-        error: expect.stringContaining('Give a task'),
+        error: expect.stringContaining('Name a session'),
       })
       expect(handle(observer).sent).toEqual([])
     },

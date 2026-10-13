@@ -38,12 +38,13 @@ export function askProjectTests(): void {
           access: 'delegate',
           from: { id: consumer, name: 'consumer' },
           to: { id: toolkit, name: 'toolkit' },
+          session: { id: 'existing', name: 'Sprites' },
           text: 'export the sprites',
         },
       })
       const card = page.locator('[data-testid="approval-card"][data-kind="project_access"]')
       await expect(card).toBeVisible()
-      await expect(card.getByTestId('approval-detail')).toHaveText('Let consumer ask toolkit to export the sprites?')
+      await expect(card.getByTestId('approval-detail')).toHaveText('Let consumer ask toolkit / Sprites to export the sprites?')
       await expect(card.getByTestId('approve-allow')).toContainText('Allow once')
       await expect(card.getByTestId('approve-always')).toContainText('Always for this pair')
       await expect(card.getByTestId('approve-deny')).toContainText('Deny')
@@ -84,20 +85,22 @@ export function askProjectTests(): void {
       await expect(card.getByTestId('approval-untrusted')).toHaveCount(0)
     })
 
-    test('the caller\'s card links to the session doing the work, and that session links back', async ({ page }) => {
+    test('the caller\'s card opens the existing session and the task shows its caller', async ({ page }) => {
       const { caller, toolkit } = await start(page)
       await emit(page, caller, { type: 'state_change', state: 'working' })
       await emit(page, caller, { type: 'tool_call', callId: 'ask-1', summary: { tool: 'mcp__centralu__ask_project', title: 'toolkit', readOnly: false, paths: [] } })
-      // The host opens the delegated session in the other project, marked with the caller
+      // An existing ordinary session receives a task with visible caller provenance
       await page.evaluate(
-        ([d, p, c]) =>
+        ([d, p]) =>
           (window as any).__mock.emit({
             type: 'session_created',
             sessionId: d,
-            session: { id: d, projectId: p, tool: 'claude', externalId: null, name: 'Asked by consumer · 10:00', autoNamed: false, state: 'working', createdAt: Date.now(), askedBy: c },
+            session: { id: d, projectId: p, tool: 'claude', externalId: null, name: 'Sprites', autoNamed: false, state: 'working', createdAt: Date.now() },
           }),
-        ['delegated-1', toolkit, caller] as const,
+        ['delegated-1', toolkit] as const,
       )
+
+      await emit(page, 'delegated-1', { type: 'user_message', seq: 1, text: "[A session asks through Centralu's ask_project.] Export sprites", from: { sessionId: caller, name: 'consumer session' } })
 
       const card = page.getByTestId('ask-project-card')
       await expect(card).toBeVisible()
@@ -106,17 +109,17 @@ export function askProjectTests(): void {
 
       await card.getByTestId('ask-project-open').click()
       await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe('delegated-1')
-      const back = page.getByTestId('asked-by-badge')
-      await expect(back).toContainText('Asked by consumer')
-      await back.click()
-      await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(caller)
+      await expect(page.getByText('Export sprites', { exact: false })).toBeVisible()
+      await expect(page.getByTestId('msg-user-from')).toHaveText('consumer session ⤷')
+      await expect(page.getByTestId('asked-by-badge')).toHaveCount(0)
+      await page.evaluate((id) => (window as any).__store.getState().focusSession(id), caller)
 
       // The answer lands: the card says so, and the model's text is one click away
       await emit(page, caller, {
         type: 'tool_result',
         callId: 'ask-1',
         ok: true,
-        summary: 'toolkit answered (from the session "Asked by consumer · 10:00" [delegated-1] in toolkit), as JSON:\n"Exported 12 sprites"',
+        summary: 'toolkit answered (from the session "Sprites" [delegated-1] in toolkit), as JSON:\n"Exported 12 sprites"',
       })
       await expect(card.getByTestId('ask-project-status')).toContainText('answered')
       await expect(card.getByTestId('ask-project-result')).toHaveCount(0)

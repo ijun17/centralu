@@ -28,6 +28,7 @@ describe('the start-agent question (#561)', () => {
 describe('the cross-project consent question (#371)', () => {
   const base = { kind: 'project_access' as const, from: { id: 'a', name: 'Consumer' }, to: { id: 'b', name: 'Toolkit' } }
   it('names the caller first and says what it would do in the other project', () => {
+    expect(projectAccessQuestion({ ...base, access: 'delegate', session: { id: 's', name: 'Sprites' }, text: 'extract the assets' })).toBe('Let Consumer ask Toolkit / Sprites to extract the assets?')
     expect(projectAccessQuestion({ ...base, access: 'delegate', text: 'extract the assets' })).toBe('Let Consumer ask Toolkit to extract the assets?')
     expect(projectAccessQuestion({ ...base, access: 'apps', text: '', app: { appId: 'x', name: 'Extractor' } })).toBe(
       'Let Consumer use the app Extractor from Toolkit?',

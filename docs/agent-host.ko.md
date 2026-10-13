@@ -152,48 +152,57 @@ Codex가 모든 호출을 스스로 거절했다. `scripts/smoke-reader.mts`가 
 
 ### 1.2 다른 프로젝트에 맡기기 (`ask_project`, #371 B)
 
-평범한 세션이 자기 프로젝트 밖으로 손을 뻗는 유일한 길이다. `ask_project({ project, task })`는 등록된 다른 프로젝트에
-일을 주고, 그 일을 한 세션의 답을 돌려준다 — 서브에이전트의 결과가 돌아오는 방식으로. 읽기 묶음과 함께 실리지만(같은
-프로필, 같은 설정 스위치) 행동하는 도구이므로 따로 `DELEGATE_TOOLS`라는 묶음과 예산을 둔다. 오케스트레이터·매니저·리드는
-받지 않는다: 그들은 이미 자기 시야 안에서 `send_to_session`으로 세션을 부린다.
+The one reach an ordinary session has outside its project. `ask_project({ project, session?, task? })`
+gives a task to an **existing ordinary session** in another registered project and returns its answer.
+It never creates a session in another project (#614, owner decision 2026-10-13). Creation remains the
+person's action in that project; `start_agent` creates only within its caller's own project. The global
+orchestrator, which belongs to no project, retains its own create-session tool.
 
-한 번의 호출이 하는 일(`SessionManager.askProject`):
+What one call does (`SessionManager.askProject`):
 
-1. **대상.** 등록된 다른 프로젝트, 이름이나 id로. 자기 프로젝트는 거절한다("여기서 하라"). 모르는 이름은 다른 프로젝트들의
-   이름과 함께 거절한다. 자신이 맡겨진 세션(`askedBy`가 있는)은 세 번째 프로젝트에 맡길 수 없다: 깊이 1이라, 서로 동의한
-   두 프로젝트도 사람 없이 일을 주고받으며 돌 수 없다. 사람이 신뢰하지 않은 프로젝트의 세션은 아예 맡길 수 없다.
-   `attach_app`이 따르는 규칙과 같다(#382): 그 저장소의 글이 묻는 쪽일 수 있다. 신뢰하지 않은 프로젝트에 맡기는 것은 된다.
-   카드가 그 프로젝트를 신뢰하지 않았다고 말한다.
-2. **동의**(`ensureProjectAccess`, 종류 `delegate`). 프로젝트 X의 세션이 Y에 처음 맡길 때, 호출한 세션의 승인 자리에 카드가
-   선다(detail `project_access`): 이번만 허용, 이 쌍은 항상, 거절. "항상"만 저장한다(스토어 v44, `project_consents`,
-   from·to·종류마다 한 줄; 두 id 모두 프로젝트와 함께 지워진다). 설정 → Permissions가 쌍을 보여 주고 철회한다. 거절과
-   거둬진 카드는 모델이 "시키기 전에는 다시 묻지 말라"로 읽는 거절을 돌려준다. A부분의 앱 도구도 같은 문을 쓴다(종류 `apps`).
-   detail은 대상의 신뢰(`to.trusted`)를 싣고, 질문은 신뢰하지 않은 대상을 어디에 서든(카드, 대화, 알림) "(not trusted)"로
-   부른다(#382).
-3. **맡겨진 세션.** 이 호출자가 그 프로젝트에 전에 맡겼던 쉬는(또는 턴을 마친) 세션을 다시 쓴다 — 두 번째 부탁이 첫 번째
-   위에 쌓이도록. 없으면 그 프로젝트의 폴더, 지침(여느 세션처럼 그 프로젝트의 신뢰), 기본 도구와 그 도구에 기억된 모델·추론
-   강도로, `normal` 프리셋 아래 새로 띄운다 — 사람이 그 프로젝트에서 여는 세션과 같다. 그래서 그 세션의 승인은 사람이 보는 그
-   세션에 카드로 선다. 보이는 평범한 세션이며 이름은 `Asked by <project> · HH:MM`, 호출자를 `askedBy`(스토어 v45)로
-   표시한다. 헤더가 호출자로 되돌아가는 링크를 달고, 호출한 쪽 대화에는 이 세션으로 가는 작은 카드가 남는다.
-4. **일**은 틀(`askFrame`)에 담겨 간다: 누가 맡기는지, 마지막 메시지가 곧 답이며 파일은 절대 경로로 적으라는 것. 호출자가
-   보낸 것(`from`)으로 기록된다 — `send_to_session`처럼. 호출은 앱의 에이전트가 쓰는 감시자(`AgentRunWait`)로 턴을 기다린다.
-5. **답.** 턴의 마지막 글(`finalAnswer`)을 워커의 미리보기처럼 JSON으로 감싸(남의 말이다) 모델에 주고, 6,000자를 넘으면
-   가운데를 자른다. 답이 이름 붙인 절대 경로 중 **대상 프로젝트 폴더 안에** 실제로 있는 것(심볼릭 링크를 풀어서; 프로젝트
-   루트 자체는 결코 아니다)만 호출자가 읽을 수 있게 된다(`readGrants`): 파일은 그 파일을, 폴더는 그 아래를 연다. 밖의 경로는
-   알려 주되 열지 않는다. 허가는 이 호스트가 호출자를 돌보는 동안 산다. Claude는 `CreateSessionOpts.mayRead`로 읽는다 —
-   작업 폴더 밖 읽기는 `canUseTool`에 떨어지고(`additionalDirectories`는 시작할 때 고정된다) 거기서 이것을 묻는다. Codex는 읽기를
-   막지 않으므로 필요 없다.
+1. **The project.** Name or id of another registered project. Its own project is refused; an unknown
+   name lists the other projects. Under `safe`/`normal`, an untrusted caller cannot ask, and a child
+   started by another session or a session currently handling a cross-project task cannot delegate
+   again (depth one). Under `auto` (#603), the caller's own preset opens and logs those boundaries.
+2. **The session.** `session` names an ordinary session by name or id. Orchestrators, builders and
+   app agents are excluded. Without it, exactly one ordinary session is selected; otherwise the call
+   lists the candidates with id, name, state and last activity and asks the caller to name one.
+   Duplicate names require an id. No ordinary session means a refusal telling the person to open
+   one there. Selection never creates, renames or takes ownership of a session. Old
+   `Asked by <project> · HH:MM` sessions remain ordinary sessions; startup removes their former
+   cross-project `askedBy` mark, retaining their name and history.
+3. **Consent.** `ensureProjectAccess` (`delegate`) raises a card in the caller's session naming
+   `<caller project> asks <project> / <session>` and the task. Allow once, always for this project
+   pair, or deny; only always is stored in `project_consents` and revoked in Settings → Permissions.
+   The card states the target's trust, including in conversation and notification text. Under `auto`
+   the card is skipped and logged without saving consent. The selected session keeps its own tool,
+   model, effort, preset, project trust and approvals. Availability is checked again after consent.
+4. **Delivery.** The task travels in `askFrame`, explaining the caller and how the answer comes
+   back, and appears in the target conversation with `from` identifying the asking session. An idle
+   session resumes as needed. A busy turn accepts the task through the adapter's tracked mid-turn
+   input path (#594); no interrupt or CLI-specific logic is added to the manager. A CLI that cannot
+   take such a note returns busy with the session's state. Another active delegation is also busy,
+   preserving its owner's watcher. `AgentRunWait` holds until the delivered input's receipt completes,
+   even if the CLI queues it into a later turn; an earlier turn's answer cannot finish this call.
+5. **The answer.** Final text is JSON-quoted as another session's words and clipped after 6,000
+   characters. Named files and folders inside the target project, resolved through symlinks, become
+   readable to the caller for this host's lifetime (`readGrants`); the project root is never granted.
+   Outside paths are listed without grants. Claude checks grants on each read through `mayRead`;
+   Codex's reads are already unrestricted.
 
-**긴 일.** 한 호출은 `ASK_WAIT_MS`(240초)까지 기다린다 — Codex의 `tool_timeout_sec` 300초(이제 `centralu` 서버에도 건다)
-아래, 앱의 긴 호출과 같은 여유로. 넘으면 세션 이름과 함께 "still working"을 답하고, 같은 프로젝트로 task 없이 부르면 같은
-턴을 계속 기다린다. 하나가 도는 동안 새 일은 거절한다. 다리는 `orchestrator.tool`을 280초까지 기다리므로(전에는 60초)
-"still working"이 어떤 타임아웃보다 먼저 모델에 닿는다.
+**Long work.** A call waits up to `ASK_WAIT_MS` (240 s), below the Codex MCP ceiling of 300 s and
+bridge wait of 280 s. It then answers still working, naming the session and how to call again with
+`project`, `session` and no task. Without `session`, one outstanding call in that project is enough
+to continue waiting, even if another session was opened meanwhile. Multiple outstanding tasks need
+an explicit session. A new task cannot replace unfinished work in the same session.
 
-**Stop.** 호출자의 Stop(`interrupt`)은 맡겨진 턴을 멈추고 그 이유로 호출을 끝낸다. 호출 자신의 취소(MCP 요청의 signal,
-Claude)도 같다. 사람이 맡겨진 세션을 멈추거나 턴이 실패하면 그 세션을 이름 붙여 다음 할 일을 일러 주는 오류를 돌려준다.
-호출자를 지우면 기다림과 허가가 사라진다. 맡겨진 세션은 이제 그 프로젝트의 세션이므로 자기 턴을 이어 간다.
+**Stop.** Stop on the caller or cancellation of the call stops the assigned turn and ends its wait.
+Stopping the target, a failed turn or deleting it returns an error naming the session. Deleting the
+caller drops the wait and grants while the target keeps its turn. Existing report-back observers,
+approval notices and sleep dependencies follow the same watcher; tracked notes cannot report an
+intermediate turn's completion.
 
-**크기.** 읽기 묶음과 같은 방식으로 쟀다(haiku, `scripts/probe-reader-tools.mts`): `ask_project`는 350자
+**Size.** Historical baseline before the optional session selector (#614). 읽기 묶음과 같은 방식으로 쟀다(haiku, `scripts/probe-reader-tools.mts`): `ask_project`는 350자
 (`DELEGATE_BUDGET_CHARS` 400)이고 로드하면 **+103토큰**(묶음: +192 → +295), 미루면 +10이다. 로드한다: "Have the toolkit
 project export the sprites again, then tell me where the files are"에 로드하면 10번 중 7번 그 프로젝트로 불렀고, 미루면
 5번 중 0번 — 지난 대화와 자기 폴더를 뒤졌다. #320이 `recall`에서 잰 실패와 같다. 놓친 경우는 그런 프로젝트가 없다는 답이고,
@@ -201,7 +210,7 @@ project export the sprites again, then tell me where the files are"에 로드하
 설명은 "a task"가 아니라 "a job"이라 쓴다: 모델에게는 같게 읽히고(각각 10번 중 7번), 모든 자리의 도구를 나열하는 안내서에
 없어진 컨트롤 레일의 task라는 말이 남지 않게 한다(#372). 다른 문구 두 가지는 낫지 않았다(5번 중 0, 3).
 
-`scripts/smoke-ask-project.mts`가 임시 스토어와 데이터 폴더에서 처음부터 끝까지 돌린다: 한 임시 프로젝트의 haiku 세션이 다른
+`packages/agent-host/scripts/smoke-ask-project.mts`가 임시 스토어와 데이터 폴더에서 처음부터 끝까지 돌린다: 한 임시 프로젝트의 haiku 세션이 다른
 프로젝트에 자기만 아는 숫자를 쓴 파일을 만들게 하고 그 파일을 읽어 온다(`CALLER`/`CALLEE` = `claude` 또는 `codex`).
 
 ### 1.2.1 같은 프로젝트에서 다른 에이전트 띄우기 (`start_agent`, `agent_session`, #561)
@@ -222,8 +231,8 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 
 `start_agent` 한 번(`SessionManager.startAgent`):
 
-1. **누가.** 믿는 프로젝트(#382 규칙)의 평범한 세션(`reader`)이고, `askedBy`가 붙지 않은 세션. 깊이 하나: 자식은
-   에이전트를 띄우지 못하고, ask_project가 연 세션도 못 띄운다(같은 표시로 `askProject`도 둘 다 거절한다).
+1. **Who may.** An ordinary session (`reader` profile) of a trusted project (#382's rule), not one marked `askedBy`:
+   depth one, so a child cannot start agents, and neither can a session handling an active ask_project task.
 2. **몇 개.** 한 프로젝트에서 동시에 도는 자식은 `AGENT_CEILING`(4)까지, 그 프로젝트의 모든 세션을 합쳐 센다.
    부모가 준 턴이 도는 동안 센다. 카드 전과 후에 두 번 본다.
 3. **고르기.** `tool`은 프로젝트의 도구, `model`과 `effort`는 그 도구에 대해 프로젝트가 기억한 선택(#107)이
@@ -992,7 +1001,7 @@ host.log에 그렇다는 줄 하나를 쓴다. 탐침은 여기에 꽂힌다.
 | 살아 있는 세션이 정한 시간 동안 아무 말이 없으면(어떤 이벤트도 없으면) 잠든다: 기본 **15분**, 설정 → Background의 "Put idle sessions to sleep after"(`agents.setSleepPolicy`, `agents.sleepAfterMinutes`로 저장, 끄면 `off`) | 소유자의 결정(2026-10-12). Claude Code가 요청하는 1시간 캐시 수명 안이라 깨운 턴도 캐시를 읽는다 |
 | 어댑터가 된다고 하는 도구만(`capabilities.sleep`): Claude는 예, Codex는 아니오 | Claude의 재개는 캐시를 지킨다고 측정됐다. 큰 Codex 스레드는 재개에 7-13초가 걸렸고 재개 때의 캐시는 측정하지 않았다. Codex의 메모리는 계정당 app-server 하나를 함께 쓰는 쪽(#561 E3)이 더 얻는다. 따로 정한다 |
 | `sessionIdle`이 아니라고 하는 동안은 재우지 않는다: 턴, 기다리는 승인이나 질문, 백그라운드 작업(아래의 CLI 자신의 타이머 포함), 백그라운드 작업을 알리지 못하는 도구 | 새 CLI로 옮기는 규칙(§4.6)과 같다: 프로세스를 끝내면 그것이 쥔 것도 끝난다 |
-| 다른 세션을 기다리는 동안은 재우지 않는다(`waitsOn`): `start_agent`로 띄운 자식(또는 ask_project가 연 세션)이 맡긴 턴을 돌고 있거나, 자기가 가진 세션(`askedBy`. 예전 워크트리 매니저의 워크트리 세션, #561)이 일하고 있거나, 보고를 빚진 세션(`reportBack`)이 있을 때 | 답이 곧 돌아오고, 그때 깨우면 아낀 재개 비용을 그대로 낸다. 부모를 기다리는 자식은 보통 규칙대로 잔다: 유휴이기 때문이다 |
+| Never while it waits on others (`waitsOn`): a child it started with `start_agent` (or a session handling its ask_project task) still in the turn it gave it, a session it owns (`askedBy`; a former worktree manager's worktree sessions, #561) while that one works, or a session that owes it a report (`reportBack`) | Their answer comes back to it in moments, and waking it for that costs the resume it saved. A child waiting on its parent sleeps by the ordinary rule: it is idle |
 | 이 호스트가 아직 소식을 듣지 못한 세션의 조용한 시간은 호스트 시작부터 센다 | 다른 호스트를 막 이어받은 호스트(재시작, 교체)는 사람이 1초 전에 무엇을 했는지 모른다 |
 | 재우기는 `SessionManager.sleepSession`: 여전히 유휴가 아니면 거절하고, 핸들을 맵에서 빼고, `session_live {live: false, reason: 'asleep'}`를 보내고, 프로세스를 정리한다. 그 사이 온 메시지는 정리가 끝나기를 기다리는 재개를 시작한다(`sleeping`) | 한 대화에 프로세스가 둘이 되지 않고, 닫히는 핸들에 메시지를 잃지 않는다 |
 | 깨우기는 보통의 `resumeSession`, 호스트 재시작 뒤 세션이 가는 길이다. 모든 재개는 `session_live {live: true}`를 보낸다 | 맞게 지킬 길이 하나다. 요청한 창만이 아니라 모든 창이 안다 |

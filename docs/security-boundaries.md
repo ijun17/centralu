@@ -29,7 +29,7 @@ boundaries (#603), with a log line instead of a card or refusal:
   revoked in Settings → Permissions). Injected text can at most raise a card.
 - **Never above the caller**: the child gets the caller's preset; a child the person raised above it takes no
   more work from the caller.
-- **Depth one**: a session marked `askedBy` (started by `start_agent` or opened by `ask_project`) can neither
+- **Depth one**: a session marked `askedBy` (started by `start_agent`), or handling an active `ask_project` task, can neither
   start agents nor ask a project.
 - **Ownership**: `agent_session` acts only on a session whose `askedBy` is the caller, in its project. Under
   `auto`, another caller's delegation can be observed without consuming its report or result;
@@ -84,27 +84,35 @@ need the project's explicit setup command or an install by the child under its p
 ### Asking another project (#371 part B)
 
 `ask_project` is the one way an ordinary session acts outside its own project. Under `auto`,
-consent and depth/trust refusals are open and logged; delegated sessions inherit the caller's
-preset, so an `auto` child may delegate again. Under `safe` and `normal` it has these controls ([agent-host.md](agent-host.md) §1.2):
+consent and depth/trust refusals are open and logged. The existing target session keeps its own
+preset; session creation in another project is forbidden under every preset (#614). Under `safe`
+and `normal` it has these controls ([agent-host.md](agent-host.md) §1.2):
 
 - **The person's consent per pair of projects**, asked as a card in the caller's session the first
   time X asks Y; only "always" is remembered (store `project_consents`), and Settings revokes it.
-  Without consent nothing is started in the other project. The card is the boundary, not the tool's
-  description: a caller steered by injected text can at most raise a card.
-- **What the delegated session runs is gated by its own project's permissions.** It starts under the
-  caller's preset with that project's trust, as a session the person opens there would; its approvals
-  stand as cards in that session. Under a person's global bypass it runs as freely as that person's
+  The card names the selected session as well as its project. Without consent no task is delivered.
+  The card is the boundary, not the tool's description: a caller steered by injected text can at most raise a card.
+- **What the delegated session runs is gated by its own project's permissions.** The existing session keeps its own
+  preset and project trust; its approvals stand as cards in that session. Under a person's global bypass it runs as freely as that person's
   own sessions there — the owner's decision is that the delegated session may change code in its own
   project. The task arrives framed as sent by another session, never as the person.
-- **Depth one.** A session that was itself asked cannot ask a third project, so two projects that
+- **Depth one.** A session handling an active cross-project task cannot ask a third project, so two projects that
   consented to each other cannot pass a task back and forth without a person.
 - **Trust** (owner decision 2026-10-11, #382). A session in a project the person has not trusted cannot
   ask at all, the rule `attach_app` follows: text in that repository could be the one asking, and the
   card would then be the only thing between a planted instruction and another project. An untrusted
   project *can* be asked, and the card says so ("Let X ask Y (not trusted) to …", and a line on what
-  that means): the session opened there reads none of its settings or instruction files and runs none
+  that means): the selected session there reads none of its settings or instruction files and runs none
   of its apps, but works on its files under the person's own permission settings. A remembered
   "always" for the pair still skips the card, also after the target loses trust.
+- **Existing sessions only** (#614). Selection by name or id is confined to ordinary sessions in the
+  named target project. Without a selector, exactly one is required; ambiguity lists names, states
+  and last activity, and no session refuses until the person opens one. Builders, app agents and
+  orchestrators cannot be targets. No preset permits cross-project child creation. Old ask-created
+  sessions remain ordinary sessions without cross-project ownership. A busy session accepts tracked
+  mid-turn input only if its adapter supports it; otherwise it returns busy and its state. Another
+  delegation's watcher cannot be overwritten. Delivered input is visible in conversation with the
+  asking session's `from`; waiting and Stop follow its completion receipt, including queued turns.
 - **The answer is someone else's words**, JSON-quoted for the caller like a worker's preview.
 - **Files come back by name, and only from inside the target project.** A named path is granted
   to the caller only if it exists inside the target project's folder after resolving symlinks, and
@@ -287,9 +295,9 @@ Rows that differ by session:
   a card from the orchestrator has `safe`.
 - **An agent an app started** (`run_agent`, `SessionManager.runAppAgent`) is `safe` whatever the
   calling session uses, has no Centralu server and no apps. Reads run; everything else asks.
-- **A session `ask_project` opened** inherits the caller's preset and uses the target project's
-  trust (`askProject`). Reuse requires the same preset. An `auto` child can delegate again;
-  other presets keep depth one. Its own settings-file selection still follows project trust.
+- **A session `ask_project` addresses** already exists and keeps its own preset, tool and project
+  trust. The caller's `auto` skips host consent; it does not raise the target's permissions. Depth
+  one applies during a delegated task under `safe`/`normal`; the target's own `auto` opens that gate.
 - **A session `start_agent` started** (#561) runs in the caller's own folder under **the caller's
   preset**, so it never has more than the session that asked for it: `safe` stays `safe`, `normal` reads
   the person's own settings as the caller does, `auto` stays `auto`. No argument sets it and no tool of
@@ -328,7 +336,7 @@ downgrade. The session-tools switch and app-sharing switch still apply to every 
 |---|---|---|---|---|
 | "Let sessions look at their own project" off | — | — | — | Becomes none. Calls refused at once (`readerToolsFor`; the bridge through `toolProfileOf`); apps it attached leave at once (`onDemand.allowed` in `useExternalApps`, recounted by `setUiPreferences`). Ones allowed "once" are forgotten (`AppAccess.dropOnce`); the rest come back if it is turned on again (#382); the schemas leave Claude at the next start |
 | Its project loses trust | No change (reads no project files) | No change (reads no project files) | Its app stops, so `check` cannot start it | Settings files at the next start; its project's apps stop and leave at once; `find_apps` and `attach_app` refused; apps it attached leave at once. `ask_project` and `start_agent` refused (#382, #561) |
-| The other project loses trust | — | — | — | Apps attached from it leave at once; `ask_project` to it still runs, its card says it is not trusted, and the session it opens there follows its trust |
+| The other project loses trust | — | — | — | Apps attached from it leave at once; `ask_project` to it still runs, its card says it is not trusted, and the existing target session follows its trust |
 | The person revokes a pair in Settings | — | — | — | Apps attached under "always" leave at once; the next `ask_project` or `attach_app` asks again; for a project's `agents` row, the next `start_agent` asks again (a child already running is left to finish) |
 | Sharing of an app turned off | — | — | — | Leaves every session that attached it |
 

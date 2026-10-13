@@ -292,8 +292,8 @@ export const READER_TOOLS = [
 export const DELEGATE_TOOLS = [
   {
     name: 'ask_project',
-    description: "Has another Centralu project do a job in its own folder; returns its session's answer. For another project's apps, use find_apps.",
-    schema: z.object({ project: z.string(), task: z.string().optional() }),
+    description: "Asks another project's existing session; returns its answer. For another project's apps, use find_apps.",
+    schema: z.object({ project: z.string(), session: z.string().optional(), task: z.string().optional() }),
   },
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
@@ -521,7 +521,7 @@ function askProjectText(r: AskProjectResult): ToolOutput {
     return {
       text:
         `${r.project} is still working on it in ${where}${r.notice ? ` — ${r.notice}` : ''}. ` +
-        `To keep waiting, call ask_project again with project "${r.project}" and no task; the work goes on meanwhile.`,
+        `To keep waiting, call ask_project again with project "${r.project}", session "${r.sessionId}" and no task; the work goes on meanwhile.`,
     }
   }
   const lines = [`${r.project} answered (from ${where}), as JSON:`, trustedJsonText(r.answer || '(no final text)')]
@@ -606,7 +606,8 @@ export async function runOrchestratorTool(
     const project = typeof args.project === 'string' ? args.project.trim() : ''
     if (!project) return { text: 'Give a project — the name of another Centralu project.', isError: true }
     const task = typeof args.task === 'string' && args.task.trim() ? args.task : undefined
-    return askProjectText(await tools.askProject({ project, ...(task ? { task } : {}) }, signal))
+    const session = typeof args.session === 'string' && args.session.trim() ? args.session.trim() : undefined
+    return askProjectText(await tools.askProject({ project, ...(session ? { session } : {}), ...(task ? { task } : {}) }, signal))
   }
 
   if (name === 'start_agent' || name === 'agent_session') {

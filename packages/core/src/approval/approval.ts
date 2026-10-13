@@ -90,7 +90,7 @@ export function projectAccessQuestion(d: Extract<ApprovalDetail, { kind: 'projec
   // An untrusted target is named as such wherever the question stands (#382): what runs there follows that trust
   const to = d.to.trusted === false ? `${d.to.name} (not trusted)` : d.to.name
   if (d.access === 'apps') return `Let ${d.from.name} use ${d.app ? `the app ${d.app.name} from ` : 'apps from '}${to}?`
-  return `Let ${d.from.name} ask ${to} to ${d.text}?`
+  return `Let ${d.from.name} ask ${to}${d.session ? ` / ${d.session.name}` : ''} to ${d.text}?`
 }
 
 /**
