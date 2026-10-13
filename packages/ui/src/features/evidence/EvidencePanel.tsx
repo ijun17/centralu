@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { RelativeAge } from '../../components/RelativeAge.jsx'
 import { isPlainEscape } from '../../app/keys.js'
 import type { GitCommit, GitFileStatus } from '@cc/protocol'
 import { laneCount, layoutCommits } from '@cc/core'
@@ -17,7 +18,7 @@ import {
   type PanelGroup,
 } from '../../store/panelLayout.js'
 import { FileTree } from '../files/FileTree.jsx'
-import { COMMIT_LIMIT, commitAgo, hasMultipleAuthors } from './commits.js'
+import { COMMIT_LIMIT, hasMultipleAuthors } from './commits.js'
 import { fitTabs } from './fitTabs.js'
 import { TabActionSlot, TabActions } from './tabActions.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
@@ -1040,8 +1041,6 @@ function CommitHistory({ projectId }: { projectId: string }) {
     }
   }, [platform, projectId, touched])
 
-  // Read once — checking the clock per row would give rows in the same list different reference times
-  const now = Date.now()
   const withAuthor = commits ? hasMultipleAuthors(commits) : false
   const graph = useMemo(() => {
     const rows = layoutCommits(commits ?? [])
@@ -1081,14 +1080,13 @@ function CommitHistory({ projectId }: { projectId: string }) {
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm text-ink-muted">{c.subject}</span>
                 <span className="readout block truncate text-2xs text-ink-faint">
+                  {c.shortSha} · <RelativeAge when={c.when} />
                   {[
-                    c.shortSha,
-                    commitAgo(c.when, now),
                     ...(withAuthor ? [c.author] : []),
                     ...(c.parents.length > 1 ? ['merge'] : []),
                     // Which session made it (#50) — known through observation, without a hook. Absent for a human commit
                     ...(c.sessionName ? [c.sessionName] : []),
-                  ].join(' · ')}
+                  ].map((text) => ` · ${text}`).join('')}
                 </span>
               </span>
             </button>

@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useLabelNow } from '../../app/useLabelNow.js'
+import { DAY, HOUR, MINUTE } from '../../app/labelClock.js'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { useInbox } from '../../store/selectors.js'
 import { letterOf } from '../../app/keys.js'
@@ -24,17 +26,9 @@ export function Inbox() {
   const toggle = useStore((s) => s.toggleInbox)
   const focusSession = useStore((s) => s.focusSession)
   const projects = useStore((s) => s.projects)
-  const [now, setNow] = useState(() => Date.now())
-  const items = useInbox(now)
+  const items = useInbox(Date.now())
   const [cursor, setCursor] = useState(0)
   const panelRef = useRef<HTMLDivElement>(null)
-
-  // Refreshes elapsed time (the 1-second poll is display-only — state itself is event-driven)
-  useEffect(() => {
-    if (!open) return
-    const t = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(t)
-  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -132,9 +126,7 @@ export function Inbox() {
                           : 'Waiting for input'}
                     </span>
                     {/* The longer the wait, the brighter it gets — time pressure is stated without any new shape */}
-                    <span className={`readout w-16 text-right text-xs ${waitingTone(it.waitingMs)}`}>
-                      {formatWaiting(it.waitingMs)}
-                    </span>
+                    <WaitingTime since={it.waitingSince} />
                   </span>
                 </button>
               </li>
@@ -144,4 +136,18 @@ export function Inbox() {
       </div>
     </>
   )
+}
+
+function WaitingTime({ since }: { since: number | null }) {
+  const next = useCallback((now: number) => {
+    if (since === null) return null
+    const elapsed = Math.max(0, now - since)
+    const step = elapsed < MINUTE ? 1000 : elapsed < DAY ? MINUTE : HOUR
+    return step - now % step
+  }, [since])
+  const now = useLabelNow(since === null ? null : next)
+  const elapsed = since === null ? 0 : Math.max(0, now - since)
+  return <span className={`readout w-16 text-right text-xs ${waitingTone(elapsed)}`}>
+    {formatWaiting(elapsed)}
+  </span>
 }

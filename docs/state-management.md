@@ -60,6 +60,22 @@ The do-not-store list — the following **must not exist as fields** and must be
 
 Selectors are implemented as memoised wrappers around pure functions in `core`. Because the ordering and urgency rules live in core, the unit tests run without React.
 
+### Relative-time labels (#615)
+
+Time labels derive their text from stored timestamps and the current wall clock. `app/labelClock.ts`
+owns one shared timeout; `app/useLabelNow.ts` subscribes only while a changing label is mounted.
+It stops unless both `document.visibilityState` is visible and the store's `appFocused` signal is true,
+then catches up immediately on return. Visibility and store listeners are detached with the last label.
+Minute/hour deadlines align across labels so a list does not create a separate wake-up for each timestamp;
+only due labels repaint. Minute-bearing waits advance every minute, and waits beyond a day show days/hours
+and advance hourly. Short activity waits retain their measured second/five-second/ten-second cadence;
+short inbox waits show seconds. Activity rows scrolled out of view advance at most once a minute.
+
+The activity row, inbox approval/input/error waits, past conversations' last-active text, Git history ages,
+and open usage-reset tooltips use this clock. Sidebar rows, session headers, approval/question cards,
+and app-run cards currently show state, absolute timestamps or completed durations, with no live relative
+label to subscribe. Empty or closed surfaces create no clock work; a reset tooltip stops ticking at its deadline.
+
 ### Composer text and selection
 
 An unsent draft belongs to its session in the UI store; typing and autocomplete picks update it

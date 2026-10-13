@@ -69,7 +69,8 @@ export function formatWaiting(ms: number): string {
   if (s < 60) return `${s}s`
   const m = Math.floor(s / 60)
   if (m < 60) return `${m}m`
-  return `${Math.floor(m / 60)}h ${m % 60}m`
+  if (m < 1440) return `${Math.floor(m / 60)}h ${m % 60}m`
+  return `${Math.floor(m / 1440)}d ${Math.floor(m / 60) % 24}h`
 }
 
 /**

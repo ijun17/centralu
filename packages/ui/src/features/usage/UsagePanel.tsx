@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useLabelNow } from '../../app/useLabelNow.js'
+import { DAY, HOUR, MINUTE } from '../../app/labelClock.js'
 import type { CacheStats, ToolName, UsageSnapshot, UsageWindow } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Tooltip } from '../../components/primitives.jsx'
@@ -120,7 +122,9 @@ function Donut({ window: w }: { window: UsageWindow }) {
             {w.scope && ` · ${w.scope}`}
           </span>
           <span className="readout mt-1 block">{w.percent}% used</span>
-          <span className="readout block text-ink-faint">{resetText(w.resetsAt)}</span>
+          <span className="readout block text-ink-faint">
+            <ResetTime resetsAt={w.resetsAt} />
+          </span>
         </span>
       }
     >
@@ -157,10 +161,21 @@ function Donut({ window: w }: { window: UsageWindow }) {
   )
 }
 
+function ResetTime({ resetsAt }: { resetsAt: string | null }) {
+  const at = resetsAt ? Date.parse(resetsAt) : NaN
+  const next = useCallback((now: number) => {
+    if (!Number.isFinite(at) || at <= now) return null
+    const step = at - now > DAY ? HOUR : MINUTE
+    return Math.min(step - now % step, at - now)
+  }, [at])
+  const now = useLabelNow(Number.isFinite(at) ? next : null)
+  return <>{resetText(resetsAt, now)}</>
+}
+
 /** Time remaining in human units — "how much is left" matters more than the exact moment */
-function resetText(resetsAt: string | null): string {
+function resetText(resetsAt: string | null, now: number): string {
   if (!resetsAt) return 'reset time unknown'
-  const ms = new Date(resetsAt).getTime() - Date.now()
+  const ms = new Date(resetsAt).getTime() - now
   if (!Number.isFinite(ms)) return 'reset time unknown'
   if (ms <= 0) return 'resets soon'
   const min = Math.floor(ms / 60000)

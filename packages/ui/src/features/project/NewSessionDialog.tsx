@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { RelativeAge } from '../../components/RelativeAge.jsx'
 import type { ExternalSession, GitBranch, ToolName, ToolStatus } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -41,17 +42,6 @@ function fmtBytes(n: number): string {
   if (kb < 1024) return `${Math.round(kb)}KB`
   const mb = kb / 1024
   return mb < 1024 ? `${Math.round(mb)}MB` : `${(mb / 1024).toFixed(1)}GB`
-}
-
-/** just now · 32m ago · 3h ago · 5d ago — "how long ago" matters more than the exact time */
-function ago(ms: number): string {
-  const min = Math.floor((Date.now() - ms) / 60000)
-  if (min < 1) return 'just now'
-  if (min < 60) return `${min}m ago`
-  const hour = Math.floor(min / 60)
-  if (hour < 24) return `${hour}h ago`
-  const day = Math.floor(hour / 24)
-  return day < 30 ? `${day}d ago` : `${Math.floor(day / 30)}mo ago`
 }
 
 /**
@@ -451,13 +441,11 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                   otherwise a recent conversation looks old and cannot be found (a dogfooding
                   finding).
                 */
-                  meta={[
-                    `last ${ago(s.updatedAt)}`,
-                    s.branch,
-                    s.importedAs ? 'Already open · click to jump' : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
+                  meta={<>
+                    last <RelativeAge when={s.updatedAt} />
+                    {s.branch && ` · ${s.branch}`}
+                    {s.importedAs && ' · Already open · click to jump'}
+                  </>}
                 />
               ))}
           </div>
@@ -714,7 +702,7 @@ function PastRow({
   selected: boolean
   onSelect: () => void
   title: string
-  meta: string
+  meta: ReactNode
   testId: string
 }) {
   return (
