@@ -2076,7 +2076,7 @@ export class MockPlatform implements Platform {
         verbosity: sess.verbosity,
         serviceTier: sess.serviceTier,
         permissionPreset: sess.permissionPreset,
-        by: 'person',
+        person: true,
       })
       return { ...sess }
     },

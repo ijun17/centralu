@@ -2770,7 +2770,7 @@ export class SessionManager {
       verbosity: m.verbosity,
       serviceTier: m.serviceTier,
       permissionPreset: m.permissionPreset,
-      by,
+      ...(by === 'person' ? { person: true } : { by }),
     })
 
     /*

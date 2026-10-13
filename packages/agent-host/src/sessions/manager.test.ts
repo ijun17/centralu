@@ -1330,7 +1330,8 @@ describe('a settings change actually takes effect', () => {
 
     const changed = events.filter((e) => e.type === 'settings_changed' && e.sessionId === s.id)
     expect(changed).toHaveLength(1)
-    expect(changed[0]).toMatchObject({ model: 'opus', permissionPreset: 'auto', by: 'person' })
+    expect(changed[0]).toMatchObject({ model: 'opus', permissionPreset: 'auto', person: true })
+    expect(changed[0]).not.toHaveProperty('by')
     // What goes out is a valid frame, the way the transport checks it
     expect(NormalizedEventSchema.safeParse(changed[0]).success).toBe(true)
 
@@ -1338,6 +1339,22 @@ describe('a settings change actually takes effect', () => {
     events.length = 0
     await rpc('agents.updateSettings', { sessionId: s.id, effort: 'high' })
     expect(events.filter((e) => e.type === 'settings_changed')).toMatchObject([{ model: 'opus', effort: 'high', permissionPreset: 'auto' }])
+  })
+
+  /*
+   * #659 review: the orchestrator's settings tool on a linked machine reaches that machine's `agents.updateSettings`.
+   * Without its origin the machine announced the change as a person's, and the hub's window raised no toast.
+   */
+  it("announces a change as the orchestrator's when the call says so, with no person flag (#659)", async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', model: 'fable' })) as { id: string }
+    events.length = 0
+
+    await rpc('agents.updateSettings', { sessionId: s.id, model: 'opus', by: 'orchestrator' })
+
+    const changed = events.filter((e) => e.type === 'settings_changed')
+    expect(changed).toMatchObject([{ model: 'opus', by: 'orchestrator' }])
+    expect(changed[0]).not.toHaveProperty('person')
   })
 
   it('sends nothing for a session that does not exist (#659)', async () => {
@@ -5604,7 +5621,7 @@ describe('resets, notices and switches the tool made (#304)', () => {
     await rpc('agents.send', { sessionId: s.id, text: 'work' })
     await rpc('agents.updateSettings', { sessionId: s.id, model: 'haiku' })
     // The person's own save was announced (#659); the tool's switch after it is not, since nothing was recorded
-    expect(events.filter((e) => e.type === 'settings_changed')).toMatchObject([{ model: 'haiku', by: 'person' }])
+    expect(events.filter((e) => e.type === 'settings_changed')).toMatchObject([{ model: 'haiku', person: true }])
     events.length = 0
     h.emitEvent({
       type: 'settings_changed', sessionId: s.id, model: 'claude-sonnet-4-6', effort: null, verbosity: null, serviceTier: null, by: 'tool',

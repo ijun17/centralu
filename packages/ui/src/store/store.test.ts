@@ -4481,7 +4481,7 @@ describe('resets, notices and switches the tool made (#304)', () => {
     const recovery = useStore.getState().recoverAfterReconnect(true)
     await list.asked
     const set = (model: string, permissionPreset: 'safe' | 'normal' | 'auto') =>
-      mock.emit({ type: 'settings_changed', sessionId: 'n-5', model, effort: null, verbosity: null, serviceTier: null, permissionPreset, by: 'person' })
+      mock.emit({ type: 'settings_changed', sessionId: 'n-5', model, effort: null, verbosity: null, serviceTier: null, permissionPreset, person: true })
     set('opus', 'auto')
     set('fable', 'normal')
     list.release()

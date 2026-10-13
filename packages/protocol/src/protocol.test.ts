@@ -5,6 +5,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
 import {
   applyBackgroundTasks,
   ATTACHMENT_MAX_BASE64,
@@ -129,6 +130,9 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'settings_changed', sessionId: 's1', model: 'gpt-5.3-codex', effort: 'high', verbosity: null },
   // The tool switched by itself (#304) — the host records it without a restart and the screen shows it without a toast
   { type: 'settings_changed', sessionId: 's1', model: 'claude-sonnet-4-6', effort: null, verbosity: null, by: 'tool' },
+  // A change a client made through agents.updateSettings (#659), with the preset the event now carries
+  { type: 'settings_changed', sessionId: 's1', model: 'opus', effort: null, verbosity: null, serviceTier: null, permissionPreset: 'auto', person: true },
+  { type: 'settings_changed', sessionId: 's1', model: 'opus', effort: null, verbosity: null, permissionPreset: 'safe', by: 'orchestrator' },
   // Claude Code's /clear (#304), measured: conversation_reset {trigger: 'clear'}
   { type: 'conversation_reset', sessionId: 's1', seq: 21, trigger: 'clear' },
   { type: 'conversation_reset', sessionId: 's1' },
@@ -245,6 +249,29 @@ describe('golden: every v1 event type', () => {
 })
 
 describe('forward compatibility (docs/protocol.md §4)', () => {
+  /*
+   * #659: a build from before `person` and `permissionPreset` parses the new frame with the shape below (copied from
+   * the schema as it stood). A frame that fails there is dropped whole (`parseServerFrame` salvages only answers), so a
+   * window of the old build, open while the host is swapped, would miss the change. A new word in `by` did exactly that.
+   */
+  it('an older build still parses every settings_changed frame this one sends (#659)', () => {
+    const before = z.object({
+      sessionId: z.string(),
+      type: z.literal('settings_changed'),
+      model: z.string().nullable(),
+      effort: z.string().nullable(),
+      verbosity: z.string().nullable(),
+      serviceTier: z.string().nullable().optional(),
+      by: z.enum(['orchestrator', 'tool']).optional(),
+    })
+    const sent = GOLDEN_EVENTS_V1.filter((e) => (e as { type: string }).type === 'settings_changed')
+    expect(sent.length).toBeGreaterThanOrEqual(4)
+    for (const raw of sent) {
+      const parsed = before.safeParse(raw)
+      expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true)
+    }
+  })
+
   it('ignores an unknown event type (does not throw)', () => {
     expect(parseEventLenient({ type: 'future_event_from_v2', sessionId: 's1' })).toBeNull()
   })

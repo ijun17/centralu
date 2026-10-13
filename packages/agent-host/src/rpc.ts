@@ -234,8 +234,8 @@ export function createRpcHandler(
        * reached the host — nothing happened, silently, with no error. Passing the parsed result
        * through whole means this spot never needs fixing again as more settings are added.
        */
-      const { sessionId, ...settings } = RpcMethods['agents.updateSettings'].params.parse(p)
-      return await mgr.updateSettings(sessionId, settings)
+      const { sessionId, by, ...settings } = RpcMethods['agents.updateSettings'].params.parse(p)
+      return await mgr.updateSettings(sessionId, settings, by ?? 'person')
     },
     'agents.switchTool': async (p) => {
       const { sessionId, tool } = RpcMethods['agents.switchTool'].params.parse(p)

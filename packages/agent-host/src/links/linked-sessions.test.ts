@@ -43,6 +43,17 @@ async function listText(m: RoutedMachine): Promise<string> {
 }
 
 describe('reading a linked machine for the hub’s orchestrator', () => {
+  it('says the orchestrator is the one changing a machine’s session settings (#659)', async () => {
+    const calls: [string, unknown][] = []
+    const reader = linkedSessions(() => [machine({})], async (method, params) => {
+      calls.push([method, params])
+      return { id: 'm1.w1', applied: 'saved' }
+    })
+    await reader.updateSettings('m1.w1', { model: 'opus' })
+    // The machine broadcasts the change as the orchestrator's, so the hub's window still raises its toast
+    expect(calls).toEqual([['agents.updateSettings', expect.objectContaining({ model: 'opus', by: 'orchestrator' })]])
+  })
+
   it('keeps a linked project with no default agent and refuses creation with a clear reason', async () => {
     const m = machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: null }] })
     const reader = linkedSessions(() => [m])

@@ -553,13 +553,19 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
      * restart and the screen updates the model shown without a toast: a `notice` in the conversation says why.
      * From an adapter, the snapshot is the adapter's own view; the host applies only the fields that differ from what
      * the process was launched with, and re-sends its full snapshot.
-     *
-     * `person` means a client changed it through `agents.updateSettings` (#659). The caller already has the answer,
-     * but every other window, linked machine and the person's own window (when an agent made the call) only learns
-     * it from this event. It updates the values shown without the "Orchestrator changed" toast: nobody else's hand
-     * was involved, and the caller's own toast states what it did.
      */
-    by: z.enum(['orchestrator', 'tool', 'person']).optional(),
+    by: z.enum(['orchestrator', 'tool']).optional(),
+    /**
+     * A client changed it through `agents.updateSettings` (#659). The caller already has the answer, but every other
+     * window, linked machine and the person's own window (when an agent made the call) only learns it from this event.
+     * It updates the values shown without the "Orchestrator changed" toast: nobody else's hand was involved, and the
+     * caller's own toast states what it did.
+     *
+     * **A separate flag, not a third `by` word**: a build from before it parses this frame against a `by` enum without
+     * the new word, and a frame that fails to parse is dropped whole. As a flag it is stripped as an unknown key, and
+     * that build still updates the values (and raises one toast, as it did for any change not made by a tool).
+     */
+    person: z.boolean().optional(),
   }),
   z.object({ ...base, type: z.literal('history_synced'), added: z.number() }),
   /** The session was deleted — the list must stay correct in other windows and after a reconnect too */

@@ -16,7 +16,7 @@ import type { SessionManager } from './sessions/manager.js'
 describe('agents.updateSettings — no field leaks', () => {
   it('the settings fields the schema knows about', () => {
     const shape = Object.keys(RpcMethods['agents.updateSettings'].params.shape)
-    expect(shape.sort()).toEqual(['effort', 'model', 'permissionPreset', 'serviceTier', 'sessionId', 'verbosity'])
+    expect(shape.sort()).toEqual(['by', 'effort', 'model', 'permissionPreset', 'serviceTier', 'sessionId', 'verbosity'])
   })
 
   it('the handler strips only sessionId and passes the rest through whole', async () => {

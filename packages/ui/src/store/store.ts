@@ -3346,7 +3346,7 @@ export const useStore = create<AppState>((set, get) => ({
          * nothing from the person. The same for a change a client made through `agents.updateSettings` (#659): the
          * caller's own toast says what it did, and the values here are the ones it chose.
          */
-        ...(what && e.by !== 'tool' && e.by !== 'person' ? { toast: `Orchestrator changed ${cur0.name}: ${what}` } : {}),
+        ...(what && e.by !== 'tool' && !e.person ? { toast: `Orchestrator changed ${cur0.name}: ${what}` } : {}),
       }))
       /*
        * Fields a list that is still out must not write back over (#642): the merge keeps a value that differs from the

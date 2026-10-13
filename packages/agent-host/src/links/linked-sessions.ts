@@ -158,7 +158,7 @@ export function linkedSessions(
     async updateSettings(sessionId, s) {
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
-      return attempt(m, async () => ({ info: (await route('agents.updateSettings', { sessionId, ...s })) as SessionInfo & { applied?: string } }))
+      return attempt(m, async () => ({ info: (await route('agents.updateSettings', { sessionId, ...s, by: 'orchestrator' })) as SessionInfo & { applied?: string } }))
     },
 
     async findProjects(ref) {

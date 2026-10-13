@@ -76,7 +76,7 @@ type NormalizedEvent =
   | { type: 'context_update';   sessionId, used, window, exactness: 'exact'|'estimate' }
   | { type: 'limit_reached';    sessionId, resumeAt?, usedPercent?, windowMins? }
   | { type: 'session_title';    sessionId, title, auto }        // auto=false: 사람이 지은 이름 — 자동 이름이 덮지 않는다
-  | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier?, permissionPreset?, by? }  // #30: 사람 아닌 손이 설정을 바꿨다. by 'tool': 에이전트 도구가 스스로 바꿨다 (#304). by 'person': 클라이언트가 agents.updateSettings를 불렀다 (#659)
+  | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier?, permissionPreset?, by?, person? }  // #30: 사람 아닌 손이 설정을 바꿨다. by 'tool': 에이전트 도구가 스스로 바꿨다 (#304). person: 클라이언트가 agents.updateSettings를 불렀다 (#659)
   | { type: 'files_touched';    sessionId, paths: string[] }    // FR-2 충돌 감지, FR-5 하이라이트
   | { type: 'goal';             sessionId, goal: SessionGoal|null }  // 배지; codex는 알려 주고, claude는 CLI의 /goal 답과 Stop 훅 피드백에서 읽는다
   | { type: 'background_tasks'; sessionId, live: BackgroundTask[], ended?: BackgroundTask[], clearEnded? }  // #290: 살아 있는 집합(REPLACE)과 방금 끝난 것
@@ -139,8 +139,10 @@ Codex는 `spawnAgent` collab 항목(그 `receiverThreadIds`가 자식 스레드�
 - `by: 'tool'`인 `settings_changed`는 도구가 스스로 바꾼 것이다 — Claude Code의 거절 폴백, 다른 Codex 클라이언트가 스레드를
   바꾼 경우. 대화의 알림이 무엇이 왜 바뀌었는지 말하고, 이벤트는 표시된 모델을 갱신한다.
 - 저장된 `agents.updateSettings`는 모두 전체 스냅숏(`permissionPreset` 포함)을 실은 `settings_changed`로 방송된다(#659). 부른 쪽은
-  응답도 받지만, 다른 창과 연결된 기계, 에이전트가 불렀을 때의 사람 창은 이 이벤트로만 새 값을 안다. `by: 'person'`은 "Orchestrator
-  changed" 토스트 없이 표시된 값만 갱신하고, 오케스트레이터가 바꾼 경우(`by` 없음 또는 `orchestrator`)는 토스트를 계속 띄운다.
+  응답도 받지만, 다른 창과 연결된 기계, 에이전트가 불렀을 때의 사람 창은 이 이벤트로만 새 값을 안다. `person: true`는 클라이언트의
+  호출을 뜻하며 "Orchestrator changed" 토스트 없이 표시된 값만 갱신한다(`by`의 새 단어가 아니라 플래그다: 그 단어를 모르는 빌드는
+  프레임을 해석하지 못해 통째로 버린다). 오케스트레이터의 호출은 연결된 기계에도 RPC에 `by: 'orchestrator'`를 실어 보내고, 변경은
+  오케스트레이터의 것으로 방송되므로 토스트가 남는다.
 
 | 결정 | 이유 |
 |---|---|
