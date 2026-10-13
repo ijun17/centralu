@@ -148,13 +148,23 @@ export function Tooltip({
     setPos({ top, left })
   }, [open, placement, align])
   /*
-   * Scrolling makes the measured position stale — instead of measuring again, it closes. A
-   * hover tooltip reappears soon anyway if the hand stays put, and a hand that is scrolling is
-   * looking elsewhere regardless.
+   * Only scrolling an ancestor can move the anchor and make the measured position stale.
+   * Conversation auto-follow also emits scroll events during an answer; closing on those
+   * unrelated events dismissed every tooltip even while its anchor stayed still (#611).
    */
   useEffect(() => {
     if (!open) return
-    const close = () => setOpen(false)
+    const close = (event: Event) => {
+      const target = event.target
+      const anchor = anchorRef.current
+      if (
+        target === window ||
+        target === document ||
+        (target instanceof Element && anchor && target.contains(anchor))
+      ) {
+        setOpen(false)
+      }
+    }
     window.addEventListener('scroll', close, true)
     return () => window.removeEventListener('scroll', close, true)
   }, [open])
