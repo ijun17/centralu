@@ -1447,7 +1447,7 @@ change · 1 compaction · 1 unknown")과, 이름을 올린 세션마다 그 아�
 | `compaction` 압축 | `compaction` 이벤트, 또는 `conversation_reset`(Claude Code의 /clear): 다음 요청은 캐시가 본 적 없는 요약이나 빈 대화로 시작한다 |
 | `thread_restart` 스레드 재시작 | 붙이거나 뗀 앱을 받으려고 Codex의 스레드가 다시 시작했다(`sessionAppsChanged`, 바로 또는 턴이 끝날 때) |
 | `instructions` 도구 변경 | Claude가 붙이거나 뗀 앱을 바로 받았다(도구 목록은 프롬프트의 일부다), 또는 스킬이나 MCP 변경으로 오케스트레이터가 다시 시작했다 |
-| `launch_settings` 시작 설정 변경 | 키퍼가 보존한 프로세스의 어댑터 시작 지문이 바뀌었거나 이전 빌드가 지문을 기록하지 않아 다시 띄웠다(#589). 유휴 프로세스는 바로, 작업 중인 프로세스는 턴이 끝난 뒤 다시 띄운다 |
+| `launch_settings` 시작 설정 변경 | 키퍼가 보존한 프로세스의 어댑터 시작 지문이 바뀌었거나 이전 빌드가 지문을 기록하지 않아 다시 띄웠다(#589). 유휴 프로세스는 바로, 작업 중인 프로세스는 턴이 끝난 뒤 다시 띄운다. 프로젝트 신뢰를 바꾸면 그 프로젝트의 실행 중인 세션도 같은 경로로 다시 뜨고, 대화에 그 이유가 남는다(#663) |
 | `expired` 캐시 만료 | 이 줄의 마지막 쓰기에 대해 API가 알린 수명보다 오래 쉬었다(Claude의 `cache_creation` 내역: `ephemeral_1h_input_tokens` 또는 `ephemeral_5m_input_tokens`) |
 | `probably_expired` 아마 만료 | 알린 수명이 없을 때 5분 넘게 쉬었다(Codex는 알리지 않는다. 아직 쓴 적 없는 Claude 줄도) |
 | `unknown` 모름 | 위의 어느 것도 아니다. 알린 수명보다 짧게 쉰 경우도 |

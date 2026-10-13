@@ -536,6 +536,8 @@ export class SessionManager {
   private definitionsRestartAfterTurn = new Set<string>()
   /** A kept process was started with adapter settings from an older host build (#589). */
   private launchSettingsRestartAfterTurn = new Set<string>()
+  /** Sessions whose pending launch-settings restart comes from a change of their project's trust (#663): the restart says so */
+  private trustRestartNotice = new Set<string>()
   /**
    * Sessions whose adopted process may hold background work this host knows nothing of (#648) -> when the session was
    * last heard from. The previous host left no list of it (a build before the list was kept), and the tool says its
@@ -944,13 +946,19 @@ export class SessionManager {
 
   /**
    * Project trust (M4 A-2, plan decision 3). The app runtime reads it fresh from the store every
-   * time, so this only writes it — telling it to rescan is the RPC layer's job (this layer does not
-   * know about the runtime).
+   * time, so telling it to rescan is the RPC layer's job (this layer does not know about the runtime).
+   *
+   * Trust decides which setting files a session reads (Claude `settingSources`, Codex `repoFilesConfig`), and a
+   * live process keeps the ones it started with (#663). The flag is part of the launch-settings fingerprint, so a
+   * change goes through the same safety restart as any other launch-settings change (#656): an idle session of the
+   * project restarts now, one in a turn at the end of the turn, background work or not, and the conversation says
+   * why. The flag is written before this returns; the promise settles when the idle restarts are done.
    */
-  setProjectTrusted(projectId: string, trusted: boolean): void {
+  setProjectTrusted(projectId: string, trusted: boolean): Promise<void> {
     if (!this.store.setProjectTrusted(projectId, trusted)) {
       throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
     }
+    return this.refreshLaunchSettings(projectId, true)
   }
 
   /**
@@ -2115,6 +2123,17 @@ export class SessionManager {
     if (text) this.onEvent({ type: 'notice', sessionId, level: 'warning', from: 'Centralu', label: 'restart', text })
   }
 
+  /** Says in the conversation that the restart in progress applies a change of the project's trust (#663) */
+  private noticeTrustRestart(sessionId: string): void {
+    if (!this.trustRestartNotice.delete(sessionId)) return
+    const m = this.meta.get(sessionId)
+    if (!m || !this.handles.has(sessionId)) return
+    const text = this.projectTrusted(m.projectId)
+      ? "Restarted the agent to apply this project's new trust: it now reads the project's own settings and instruction files (CLAUDE.md, AGENTS.md)."
+      : "Restarted the agent to apply this project's removed trust: it now reads only your own settings, not the project's files."
+    this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'restart', text })
+  }
+
   /** Tool calls the store holds for this session with no result after them (the newest 200 rows) */
   private openToolCalls(sessionId: string): { callId: string; tool: string }[] {
     const open = new Map<string, string>()
@@ -2651,6 +2670,7 @@ export class SessionManager {
     if (m.projectId) project = this.store.listProjects().find((p) => p.id === m.projectId)
     this.running.delete(sessionId)
     this.restartAfterTurn.delete(sessionId)
+    this.trustRestartNotice.delete(sessionId)
     // A deleted session's branch is never asked about again (#392: one entry per worktree session ever made)
     this.prCheckedAt.delete(sessionId)
     // Kept until its turn ends, which a deleted session's never does (#392)
@@ -4907,6 +4927,7 @@ export class SessionManager {
     this.appsRestartAfterTurn.delete(sessionId)
     this.definitionsRestartAfterTurn.delete(sessionId)
     this.launchSettingsRestartAfterTurn.delete(sessionId)
+    this.noticeTrustRestart(sessionId)
     // A restart for any reason ends a wait for background work: whatever it was holding is applied now (#648)
     this.clearBackgroundHold(sessionId)
     const h = this.handles.get(sessionId)
@@ -5027,8 +5048,9 @@ export class SessionManager {
    * environment). The adapter owns the fingerprint; the host only gives it the same safe
    * boundary behaviour as changed tool definitions.
    */
-  private async refreshLaunchSettings(): Promise<void> {
-    for (const session of this.meta.values()) {
+  private async refreshLaunchSettings(projectId?: string, trustChange = false): Promise<void> {
+    for (const session of [...this.meta.values()]) {
+      if (projectId !== undefined && session.projectId !== projectId) continue
       const cwd = this.store.sessionCwd(session.id)
       if (!cwd) continue
       const next = this.launchSettingsFingerprint(session, cwd)
@@ -5038,6 +5060,7 @@ export class SessionManager {
         this.store.setAppSetting(this.launchSettingsKey(session.id), next)
         continue
       }
+      if (trustChange) this.trustRestartNotice.add(session.id)
       // A safety change too, so the same rule as the definitions above
       if (inTurn(session.state)) {
         this.restartAfterTurn.add(session.id)

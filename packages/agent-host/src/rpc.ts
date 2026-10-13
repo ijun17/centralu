@@ -629,7 +629,8 @@ export function createRpcHandler(
     },
     'projects.setTrusted': async (p) => {
       const { projectId, trusted } = RpcMethods['projects.setTrusted'].params.parse(p)
-      mgr.setProjectTrusted(projectId, trusted)
+      // The toggle answers at once; the project's idle sessions restart behind it (#663)
+      void mgr.setProjectTrusted(projectId, trusted).catch((err) => console.error('[sessions] restarting for a trust change failed:', err))
       externalApps?.refresh()
       return { ok: true as const }
     },

@@ -5806,3 +5806,69 @@ describe('resets, notices and switches the tool made (#304)', () => {
     expect(adapter.lastOpts?.model).toBe('haiku')
   })
 })
+
+describe('project trust changes restart live sessions (#663)', () => {
+  const trustNotices = () => events.filter((e) => e.type === 'notice' && e.label === 'restart' && /trust/.test(e.text))
+
+  it('restarts an idle session with the project setting sources when the project becomes trusted', async () => {
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const old = adapter.handleOf(session.id)!
+    expect(adapter.lastOpts?.projectTrusted).toBe(false)
+
+    await mgr.setProjectTrusted(project.id, true)
+
+    expect(old.disposed).toBe(true)
+    expect(adapter.handleOf(session.id)).not.toBe(old)
+    expect(adapter.lastOpts?.projectTrusted).toBe(true)
+    expect(store.appSetting(`launch_settings:${session.id}`)).toContain('trusted')
+    expect(trustNotices()).toHaveLength(1)
+    expect(trustNotices()[0]).toMatchObject({ sessionId: session.id, text: expect.stringContaining('now reads the project') })
+  })
+
+  it('restarts an idle session with user-only sources when the project is no longer trusted', async () => {
+    const project = await addProject()
+    await mgr.setProjectTrusted(project.id, true)
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const old = adapter.handleOf(session.id)!
+    expect(adapter.lastOpts?.projectTrusted).toBe(true)
+
+    await mgr.setProjectTrusted(project.id, false)
+
+    expect(old.disposed).toBe(true)
+    expect(adapter.handleOf(session.id)).not.toBe(old)
+    expect(adapter.lastOpts?.projectTrusted).toBe(false)
+    expect(trustNotices()).toHaveLength(1)
+    expect(trustNotices()[0]).toMatchObject({ sessionId: session.id, text: expect.stringContaining('only your own settings') })
+  })
+
+  it('restarts an in-turn session at the end of its turn', async () => {
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const old = adapter.handleOf(session.id)!
+    await rpc('agents.send', { sessionId: session.id, text: 'work' })
+
+    await mgr.setProjectTrusted(project.id, true)
+    expect(old.disposed).toBe(false)
+    expect(trustNotices()).toHaveLength(0)
+
+    old.finishTurn()
+    await vi.waitFor(() => expect(adapter.handleOf(session.id)).not.toBe(old))
+    expect(old.disposed).toBe(true)
+    expect(adapter.lastOpts?.projectTrusted).toBe(true)
+    expect(trustNotices()).toHaveLength(1)
+  })
+
+  it('leaves the sessions of other projects alone', async () => {
+    const project = await addProject()
+    const other = await rpc('projects.add', { path: mkdtempSync(join(tmpdir(), 'trust-other-')) }) as { id: string; path: string }
+    const bystander = await mgr.createSession({ projectId: other.id, cwd: other.path, tool: 'claude', permissionPreset: 'normal' })
+    const handle = adapter.handleOf(bystander.id)!
+
+    await mgr.setProjectTrusted(project.id, true)
+
+    expect(handle.disposed).toBe(false)
+    expect(adapter.handleOf(bystander.id)).toBe(handle)
+    expect(trustNotices()).toHaveLength(0)
+  })
+})
