@@ -182,6 +182,7 @@ This is not a claim that npm fits GUI apps in general. The conditions line up fo
       reason to let it hold up publishing (changing it later is one line in the shell's
       optionalDependencies)
 - [ ] Keep GitHub Releases' `.dmg` as **a secondary path only**. State alongside it that receiving it that way shows the warning
+      **Still unimplemented:** CI no longer builds a DMG (#628), and the npm release ships only the staged `.app`.
 - [ ] Defer a brew tap until after signing — a cask attaches quarantine by default, so adding one now only widens the failure experience
 
 ### 2-6. Blocked twice while publishing (npm was right both times)
