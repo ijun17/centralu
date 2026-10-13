@@ -25,11 +25,11 @@ export async function clearWorktreeRecovery(sessionId: string): Promise<void> {
 }
 
 /** Read NUL records without imposing the subprocess stdout buffer limit on trees/history. */
-async function* gitRecords(repo: string, args: string[]): AsyncGenerator<string> {
+async function* gitRecords(repo: string, args: string[], input?: string): AsyncGenerator<string> {
   const dir = await mkdtemp(join(tmpdir(), 'cc-recovery-git-'))
   const file = join(dir, 'records')
   try {
-    await runGit(repo, args, { outputFile: file, timeout: RECOVERY_TIMEOUT })
+    await runGit(repo, args, { outputFile: file, timeout: RECOVERY_TIMEOUT, input })
     let pending = ''
     for await (const chunk of createReadStream(file, { encoding: 'utf8' })) {
       pending += chunk
@@ -70,6 +70,8 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
       if (gitlinks.length) {
         const available = await runGit(repo, ['cat-file', '--batch-check=%(objectname) %(objecttype)'], {
           input: gitlinks.map((oid) => `${oid}^{commit}`).join('\n') + '\n', timeout: RECOVERY_TIMEOUT,
+          // Older Git ignores the lazy-fetch switch; disallow transports there too.
+          env: { GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: '' },
         })
         for (const row of available.trim().split('\n')) {
           const [oid, type] = row.split(' ')
@@ -80,8 +82,13 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
     const baselineOid = !path
       ? await runGit(repo, ['rev-parse', '--verify', `${trunk}^{commit}`]).then((s) => s.trim()).catch(() => null)
       : null
-    const exclude = path ? ['--not', '--remotes'] : baselineOid ? ['--not', baselineOid] : []
-    const commits = Number((await runGit(repo, ['rev-list', '--count', ...refs, ...exclude], { timeout: RECOVERY_TIMEOUT })).trim())
+    const exclude = path
+      ? (await runGit(repo, ['for-each-ref', '--format=^%(objectname)', 'refs/remotes/'])).trim().split('\n').filter(Boolean)
+      : baselineOid ? [`^${baselineOid}`] : []
+    // Keep both positive and negative revisions on stdin: --not on the command line
+    // does not affect stdin revisions, and large module histories exceed Windows argv limits.
+    const revisions = [...refs, ...exclude].join('\n') + '\n'
+    const commits = Number((await runGit(repo, ['rev-list', '--count', '--stdin'], { input: revisions, timeout: RECOVERY_TIMEOUT })).trim())
     plans.push({ repo, path, tip, refs, commits })
     const stagedNames = new Set((await runGit(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip], { timeout: RECOVERY_TIMEOUT })).split('\0'))
     const modules: string[] = []
@@ -99,7 +106,7 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
     // Raw parent diffs include intermediate and merge-only gitlinks without a process per
     // commit. HEAD's tree also covers unchanged links and the no-unmerged-commits case.
     let change: RegExpMatchArray | null = null
-    for await (const row of gitRecords(repo, ['log', '--raw', '-z', '--no-renames', '--ignore-submodules=none', '--no-abbrev', '--format=', '--root', '-m', ...refs, ...exclude, '--'])) {
+    for await (const row of gitRecords(repo, ['log', '--raw', '-z', '--no-renames', '--ignore-submodules=none', '--no-abbrev', '--format=', '--root', '--diff-merges=separate', '--stdin'], revisions)) {
       if (change) {
         const [, oldMode, newMode, oldOid, newOid] = change
         if (oldMode === '160000') keepGitlink(row, oldOid!)
@@ -194,6 +201,7 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
         // Bundle headers only advertise named refs, not bare object ids. Temporary refs keep
         // gitlink-only commits fetchable after the private submodule repository is removed.
         const temporaryRefs: string[] = []
+        const updates: string[] = []
         try {
           entry.refs = []
           for (const ref of refs) {
@@ -201,13 +209,14 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
             else {
               const name = `refs/centralu-recovery/${snapshotId}/gitlink-${temporaryRefs.length}`
               temporaryRefs.push(name)
-              await runGit(repo, ['update-ref', name, ref])
+              updates.push(`create ${name} ${ref}`)
               entry.refs.push(name)
             }
           }
-          await runGit(repo, ['bundle', 'create', join(dir, `${n}.bundle`), ...entry.refs], { timeout: RECOVERY_TIMEOUT })
+          if (updates.length) await runGit(repo, ['update-ref', '--stdin'], { input: updates.join('\n') + '\n', timeout: RECOVERY_TIMEOUT })
+          await runGit(repo, ['bundle', 'create', join(dir, `${n}.bundle`), '--stdin'], { input: entry.refs.join('\n') + '\n', timeout: RECOVERY_TIMEOUT })
         } finally {
-          for (const ref of temporaryRefs) await runGit(repo, ['update-ref', '-d', ref])
+          if (temporaryRefs.length) await runGit(repo, ['update-ref', '--stdin'], { input: temporaryRefs.map((ref) => `delete ${ref}`).join('\n') + '\n', timeout: RECOVERY_TIMEOUT })
         }
       }
       entry.staged = await patchFile(repo, tip, join(dir, `${n}.staged.patch`))

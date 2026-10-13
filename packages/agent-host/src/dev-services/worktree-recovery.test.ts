@@ -247,4 +247,112 @@ describe('worktree recovery follow-ups (#608)', () => {
     expect(readFileSync(join(child, 'file.txt'), 'utf8')).toBe('edits after the interruption\n')
   }, process.platform === 'win32' ? 90_000 : 30_000)
 
+  it.each(['combined', 'dense-combined'])('re-review: preserves merge-only gitlinks with log.diffMerges=%s', async (format) => {
+    const { base, module } = moduleFixture()
+    const target = commit(module, 'only merge M records T\n')
+    git(module, ['checkout', '-q', '--detach', base])
+    const other = commit(module, 'other parent U\n')
+    git(module, ['checkout', '-q', '--detach', base])
+    const resolution = commit(module, 'later resolution V\n')
+    git(module, ['checkout', '-q', '--detach', base])
+    const initial = git(child, ['rev-parse', 'HEAD'])
+    const superCommit = (oid: string, parents: string[], message: string) => {
+      git(child, ['update-index', '--cacheinfo', `160000,${oid},old module`])
+      const tree = git(child, ['write-tree'])
+      return git(child, ['commit-tree', tree, ...parents.flatMap((parent) => ['-p', parent]), '-m', message])
+    }
+    const left = superCommit(base, [initial], 'left')
+    const right = superCommit(base, [initial], 'right')
+    const merge = superCommit(target, [left, right], 'M records T')
+    const otherParent = superCommit(other, [initial], 'other parent records U')
+    const merge2 = superCommit(resolution, [merge, otherParent], 'M2 resolves to V')
+    git(child, ['reset', '--hard', merge2])
+    git(child, ['config', 'log.diffMerges', format])
+    expect(git(child, ['log', '-m', '--raw', '--format='])).toContain('::160000')
+    const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+    const bundle = join(worktreeRecoveryDir(sessionId), recovery.snapshot, '1.bundle')
+    remove()
+    const ref = git(repo, ['bundle', 'list-heads', bundle]).split('\n').find((row) => row.startsWith(`${target} `))?.split(' ')[1]
+    expect(ref).toBeDefined()
+    const recovered = join(dir, 'merge-recovered')
+    git(dir, ['init', '-q', recovered])
+    git(recovered, ['fetch', bundle, `${ref}:refs/heads/recovered`])
+    expect(git(recovered, ['show', 'recovered:file.txt'])).toBe('only merge M records T')
+  }, process.platform === 'win32' ? 90_000 : 30_000)
+
+  it('re-review: keeps a thousand gitlinks off Windows command lines and in the bundle', async () => {
+    const { module, base } = moduleFixture()
+    const initial = git(child, ['rev-parse', 'HEAD'])
+    const importGit = (cwd: string, input: string) => execFileSync('git', ['fast-import', '--quiet'], {
+      cwd, input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    const header = (ref: string, n: number, parent: string) =>
+      `commit ${ref}\nmark :${n + 1}\ncommitter Recovery <recovery@example.test> ${1700000000 + n} +0000\ndata 4\nstep\nfrom ${parent}\n`
+    let stream = ''
+    for (let n = 0; n < 1_000; n++) stream += header('refs/heads/many', n, n ? `:${n}` : base) + '\n'
+    importGit(module, stream)
+    const tips = git(module, ['rev-list', 'many', `^${base}`]).split('\n')
+    expect(tips.join(' ').length).toBeGreaterThan(32_767)
+    stream = ''
+    for (const [n, tip] of tips.entries()) {
+      stream += header(`refs/heads/${branch}`, n, n ? `:${n}` : initial) + `M 160000 ${tip} "old module"\n\n`
+    }
+    importGit(child, stream)
+    git(child, ['reset', '--hard', branch])
+    git(module, ['branch', '-D', 'many'])
+    const run = gitModule.runGit
+    const calls = vi.spyOn(gitModule, 'runGit').mockImplementation(async (cwd, args, opts) => {
+      // Exercise real Git while imposing Windows' command-line bound on every platform.
+      if (args.join(' ').length >= 32_767) throw new Error('Windows command line exceeds 32767 characters')
+      return run(cwd, args, opts)
+    })
+    let recovery: Awaited<ReturnType<typeof saveWorktreeRecovery>>
+    try {
+      recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+      for (const command of ['rev-list', 'log', 'bundle']) {
+        const moduleCalls = calls.mock.calls.filter(([cwd, args]) => cwd === module && args[0] === command)
+        expect(moduleCalls.length).toBeGreaterThan(0)
+        expect(moduleCalls.every(([, args, opts]) => args.includes('--stdin') && opts?.input)).toBe(true)
+      }
+    } finally {
+      calls.mockRestore()
+    }
+    expect(recovery!.commits).toBe(2_000)
+    const bundle = join(worktreeRecoveryDir(sessionId), recovery!.snapshot, '1.bundle')
+    remove()
+    const heads = git(repo, ['bundle', 'list-heads', bundle])
+    for (const tip of tips) expect(heads).toContain(`${tip} refs/centralu-recovery/`)
+  }, process.platform === 'win32' ? 180_000 : 60_000)
+
+  it.each([true, false])('re-review: checking partial-clone gitlinks stays local (lazy-fetch switch supported: %s)', async (supportsSwitch) => {
+    const { source, module } = moduleFixture()
+    const absent = commit(source, 'available only from the promisor remote\n')
+    git(module, ['config', 'protocol.file.allow', 'always'])
+    git(module, ['config', 'remote.origin.promisor', 'true'])
+    git(module, ['config', 'remote.origin.partialclonefilter', 'blob:none'])
+    git(child, ['update-index', '--cacheinfo', `160000,${absent},old module`])
+    git(child, ['commit', '-qm', 'record unfetched commit'])
+    const trace = join(dir, 'git-trace')
+    vi.stubEnv('GIT_TRACE', gitPath(trace))
+    const run = gitModule.runGit
+    const calls = vi.spyOn(gitModule, 'runGit').mockImplementation((cwd, args, opts) => {
+      // Model pre-2.45 Git ignoring GIT_NO_LAZY_FETCH while retaining the real transport.
+      if (!supportsSwitch && args[0] === 'cat-file') return run(cwd, args, { ...opts, env: { ...opts?.env, GIT_NO_LAZY_FETCH: '0' } })
+      return run(cwd, args, opts)
+    })
+    let recovery: Awaited<ReturnType<typeof saveWorktreeRecovery>>
+    try {
+      recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+    } finally {
+      calls.mockRestore()
+    }
+    expect(readFileSync(trace, 'utf8')).not.toMatch(supportsSwitch ? /fetch origin/ : /upload-pack/)
+
+    expect(await gitModule.runGit(module, ['cat-file', '--batch-check'], {
+      input: `${absent}\n`, env: { GIT_NO_LAZY_FETCH: '1' },
+    })).toContain('missing')
+    expect(recovery!.commits).toBe(1)
+    remove()
+  }, process.platform === 'win32' ? 90_000 : 30_000)
+
 })

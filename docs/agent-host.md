@@ -412,12 +412,23 @@ not a GitHub merge badge; squash/rebase commits may therefore be kept conservati
 keeps all reachable commits. Submodules count local HEAD/branch commits and gitlink targets from the
 index, HEAD tree, and every unmerged superproject commit against their remote refs. Candidate gitlinks
 are batch-checked in each module repository; unfetched objects are skipped because removing this
-checkout cannot lose them. A single raw log scan and one HEAD tree listing stream to temporary files,
+checkout cannot lose them. Existence checks set `GIT_NO_LAZY_FETCH=1` and disable transports with
+`GIT_ALLOW_PROTOCOL=`; the latter also prevents network access on Git versions that predate the lazy-fetch
+switch. A single raw log scan and one HEAD tree listing stream to temporary files,
 so history length does not require one process per commit or fit in the stdout buffer. Historical
 `.gitmodules` names associate renamed paths with their initialized module; each distinct manifest is read
 once. Capture includes intermediate commits and the stored branch even after the submodule HEAD moves away. Gitlink-only targets get
 temporary named refs in the bundle so they remain fetchable after the private module repository is removed;
-the temporary refs are removed from the live repository after bundling.
+the temporary refs are removed from the live repository after bundling. Revision lists, bundle refs, and
+temporary ref updates use stdin, keeping large module histories below Windows command-line limits.
+The raw log explicitly uses `--diff-merges=separate`, independent of the person's `log.diffMerges` setting.
+
+**Git compatibility.** This repository does not otherwise pin a minimum Git version. Recovery capture
+requires Git 2.31 or newer: that release introduced both `--diff-merges` and `bundle --stdin`
+([upstream release notes](https://raw.githubusercontent.com/git/git/v2.31.0/Documentation/RelNotes/2.31.0.txt)).
+Older Git fails capture before deletion; upgrade Git to use recovery. The lazy-fetch switch arrived in
+[Git 2.45](https://raw.githubusercontent.com/git/git/v2.45.0/Documentation/RelNotes/2.45.0.txt);
+on 2.31–2.44 the empty protocol allowlist still prevents existence checks from reaching a remote.
 
 The trash's optional `recovery` JSON field remembers the snapshot id, tip and counts; this is additive and
 needs no schema migration. Files live at `<data>/worktree-recovery/<session id>/<snapshot id>/`:

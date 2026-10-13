@@ -58,8 +58,11 @@ files (binary bytes and staged changes included); full git bundles keep the unio
 A switched or detached HEAD does not drop the stored branch. Submodule HEAD/local branches and gitlink
 targets from the index, HEAD tree, and every unmerged superproject commit are bundled when locally
 available and absent from remote refs, even after submodule HEAD moves away. Batch object checks
-skip unfetched targets, and historical `.gitmodules` names preserve targets across path renames.
-History and tree listings stream to temporary files instead of filling a stdout buffer. Temporary named refs make gitlink-only targets
+skip unfetched targets without lazy-fetching (`GIT_NO_LAZY_FETCH=1`); an empty `GIT_ALLOW_PROTOCOL`
+also blocks transport access on older Git. Historical `.gitmodules` names preserve targets across path renames.
+History and tree listings stream to temporary files instead of filling a stdout buffer. Separate merge
+diffs are explicit, so `log.diffMerges` cannot hide merge-only gitlinks. Revision/ref lists travel on stdin
+instead of exceeding Windows command-line limits. Recovery requires Git 2.31+ (see the host document). Temporary named refs make gitlink-only targets
 fetchable from the bundle and are removed from the live repository after capture. If the trunk cannot be
 read, all reachable commits are kept conservatively. Initialized submodules are captured separately. Snapshotting uses a private index with repository hooks and filters disabled. It does not
 change the child's index or execute repository programs. Patch bytes go directly to files, without UTF-8 stdout
