@@ -51,6 +51,11 @@ script rehearses by default and why nothing publishes automatically.
   the bundles as artifacts. Since nobody on the project owns a Linux machine, this is the
   only place a Linux build is ever exercised. Download the artifact to try it; GitHub
   artifacts are zips and drop the exec bit, so `chmod +x` the AppImage after unzipping.
+- On macOS, CI passes `--bundles app` and uploads `Centralu-app.tar.gz`, preserving the app's
+  executable bits and signature. It no longer creates or uploads a DMG (#628): intermittent
+  `bundle_dmg.sh` failures blocked otherwise valid builds, and no workflow consumes that image.
+  `release.yml` builds its own app through `release-npm.mts`; npm publishes the staged `.app`,
+  never a DMG, so there is no release DMG step to retry.
 - The same workflow builds **windows-x64** (#14) and uploads two artifacts:
   `centralu-windows-x64`, a portable folder (`Centralu\centralu.exe` beside
   `Centralu\resources\host\`), and `centralu-windows-x64-setup`, the NSIS installer
@@ -255,7 +260,8 @@ DMG step is the one that can fail for reasons unrelated to the code — Tauri's
 `bundle_dmg.sh` drives Finder through `osascript`, so a shell with no GUI session behind
 it (an agent, an ssh session) is denied Automation access and exits 64. Losing a release
 to that, with a correctly built and signed `.app` already sitting there, is not a trade
-worth making. CI still builds the `.dmg`, which is where a genuine break in it should show.
+worth making. PR and main CI now also build only the `.app`; the default local Tauri
+configuration still includes the `.dmg`, but neither CI nor the npm release ships one.
 
 Flags:
 
@@ -490,8 +496,8 @@ copied and checked the bundle, before anything is packed):
   then the content in the bundle is verified again and must still have the manifest that was signed, the
   shell's files must hash to `shell.json`, and `codesign --verify --deep --strict` must pass.
   `tooling/bundle-stage.test.ts` stages a made-up bundle the same way on every macOS test run.
-- The `.dmg` that CI builds is made by `tauri build` before any of this and carries neither; nothing ships
-  it.
+- A `.dmg` made by the default local `tauri build` precedes this staging and carries neither.
+  CI no longer creates it; nothing ships it.
 
 Publishing a shell version (shell v1 is the first):
 

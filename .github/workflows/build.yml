@@ -86,11 +86,10 @@ jobs:
             # Pinned for the same reason: `macos-latest` moves between Xcode and SDK
             # versions without warning, and a release build is not the place to find out.
             runner: macos-14
-            # The `.app` is tarred first (see the step below) because it, not the `.dmg`,
-            # is what npm publishes — the artifact should be the thing that ships.
+            # npm publishes the `.app`; no workflow consumes the DMG (#628).
+            # Tar the app first (below) to preserve its executable bits and signature.
             artifacts: |
               apps/desktop/src-tauri/target/release/bundle/macos/Centralu-app.tar.gz
-              apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
           # windows-x64 (#14, phase W1). Pinned like the others: `windows-latest` moves to a new
           # Visual Studio and Windows SDK without warning.
           #
@@ -158,6 +157,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Build bundle
+        if: runner.os != 'macOS'
         env:
           # linuxdeploy and appimagetool are AppImages themselves and mount via FUSE.
           # GitHub runners can refuse that, and when they do the failure is a bare
@@ -165,6 +165,11 @@ jobs:
           # tooling to unpack and run instead, which works with or without /dev/fuse.
           APPIMAGE_EXTRACT_AND_RUN: 1
         run: pnpm --filter @cc/desktop exec tauri build
+
+      - name: Build macOS app
+        if: runner.os == 'macOS'
+        # The unused DMG's intermittent bundle_dmg.sh failures must not block releases.
+        run: pnpm --filter @cc/desktop exec tauri build --bundles app
 
       - name: Tar the .app
         if: runner.os == 'macOS'

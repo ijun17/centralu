@@ -281,7 +281,7 @@ const TARGETS: Record<string, Target | undefined> = {
      * failure mode from the release path: Tauri's `bundle_dmg.sh` drives Finder through
      * `osascript`, and a shell with no GUI session behind it is denied Automation access
      * and exits 64. That would fail a release whose `.app` was already built and signed.
-     * The `.dmg` is still built in CI, where a break in it should be visible.
+     * CI also builds only the `.app` (#628); no workflow consumes or ships a `.dmg`.
      */
     bundles: 'app',
     stagesShell: true,

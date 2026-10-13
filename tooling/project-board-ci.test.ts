@@ -267,6 +267,17 @@ const KNOWN = [
 ].join('\n')
 
 describe("a failed job's log", () => {
+  it('quotes the Tauri bundling error ahead of the generic exit-code annotation', () => {
+    const error = 'failed to bundle project: error running bundle_dmg.sh: `failed to run /tmp/bundle/dmg/bundle_dmg.sh`'
+    const log = ['Bundling Centralu_aarch64.dmg', 'Running bundle_dmg.sh', error, '##[error]Process completed with exit code 1.']
+    expect(firstFailure(log.map(stamp).join('\n'))).toEqual({ line: null, error })
+  })
+
+  it('keeps a bundling error that follows a failed test marker', () => {
+    const error = 'failed to bundle project: error running bundle_dmg.sh'
+    expect(firstFailure(['FAIL bundle smoke', error].map(stamp).join('\n'))).toEqual({ line: 'FAIL bundle smoke', error })
+  })
+
   it('gives the first failing test line and its error, without colour codes or timestamps', () => {
     expect(firstFailure(VITEST_LOG)).toEqual({
       line: 'FAIL app-runtime packages/agent-host/src/apps/external/lifecycle.test.ts > the shutdown rule (S-5) > even a descendant left by an app that ended cleanly on its own is collected — its entire group is ended',
@@ -531,6 +542,17 @@ describe.skipIf(process.platform === 'win32')('the project board app: ci_status 
     expect(r.text).not.toContain('undefined')
   })
 
+  it('finds the Tauri bundle failure after misleading setup output', async () => {
+    const error = 'failed to bundle project: error running bundle_dmg.sh: `failed to run /tmp/bundle/dmg/bundle_dmg.sh`'
+    const log = ['Downloading error-chain', ...Array.from({ length: 60 }, () => 'setup noise'), error, '##[error]Process completed with exit code 1.']
+    runtime(ghState({ logs: { '12': log.map(stamp).join('\n') } }))
+    const r = await call('read_failed_job', { job: 12 })
+    expect(r.isError).toBe(false)
+    expect(r.text).toContain(error)
+    expect(r.text).toContain('failure near line 62')
+    expect(r.text).not.toContain('Downloading error-chain')
+  })
+
   it('refuses to merge for an account without maintain or admin, before reading anything else', async () => {
     runtime(ghState({ permissions: { admin: false, maintain: false, push: true } }))
     const r = await call('merge_when_green', { pr: 77 })
@@ -676,7 +698,7 @@ describe('failure excerpt fallbacks', () => {
 })
 
 describe('failure excerpts across runners', () => {
-  const summaries = ['FAIL unit example.test.ts > fails', '  1) [chromium] › example.spec.ts:5:1 › fails', '---- example::fails stdout ----', "thread 'example::fails' panicked at src/lib.rs:4:5:", 'src/main.ts(1,1): error TS1234: bad type', '  1:2 error bad lint']
+  const summaries = ['FAIL unit example.test.ts > fails', '  1) [chromium] › example.spec.ts:5:1 › fails', '---- example::fails stdout ----', "thread 'example::fails' panicked at src/lib.rs:4:5:", 'src/main.ts(1,1): error TS1234: bad type', '  1:2 error bad lint', 'failed to bundle project: error running bundle_dmg.sh']
   it.each(summaries)('takes %s when it is the first detailed failure in log order', (first) => {
     expect(failureLineIndex(['setup', first, ...summaries.filter((line) => line !== first)])).toBe(1)
   })

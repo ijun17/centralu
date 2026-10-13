@@ -341,7 +341,8 @@ const FAILS = [
   /\berror\s+TS\d+:/, // tsc
   /^\s*\d+:\d+\s+error\s+/, // eslint
 ]
-const ERROR = /^\s*(?:→\s+\S|(?:[A-Z]\w*)?Error\b:?|AssertionError|thread '.*' panicked|panicked at|Caused by:|expected\b)/
+const BUNDLE_ERROR = /^\s*failed to bundle project:/
+const ERROR = /^\s*(?:→\s+\S|(?:[A-Z]\w*)?Error\b:?|AssertionError|thread '.*' panicked|panicked at|Caused by:|expected\b|failed to bundle project:)/
 
 /** Choose each runner's detailed block, then the earliest of those blocks in the log. */
 export function failureLineIndex(lines) {
@@ -354,6 +355,7 @@ export function failureLineIndex(lines) {
     ],
     [/\berror\s+TS\d+:/],
     [/^\s*\d+:\d+\s+error\s+/],
+    [BUNDLE_ERROR],
   ]
   const candidates = runners.map((markers) => {
     for (const marker of markers) {
@@ -368,7 +370,7 @@ export function failureLineIndex(lines) {
 
 /**
  * The first failing test line in a job log and the error that follows it. A log with no test
- * failure (a build or install step failed) gives its first `##[error]` line instead.
+ * failure gives Tauri's bundling error, or its first useful `##[error]` line instead.
  */
 export function firstFailure(log) {
   const lines = cleanLog(log)
@@ -391,6 +393,8 @@ export function firstFailure(log) {
     }
     return { line: clip(line), error: error ? clip(error) : null }
   }
+  const bundle = lines.find((line) => BUNDLE_ERROR.test(line))
+  if (bundle) return { line: null, error: clip(bundle) }
   const errors = lines.filter((l) => l.startsWith('##[error]')).map((l) => l.slice(9))
   const telling = errors.find((l) => !/^Process completed with exit code/.test(l)) ?? errors[0]
   return telling ? { line: null, error: clip(telling) } : { line: null, error: null }
