@@ -52,6 +52,7 @@ import {
   sanitizeArrangements,
   migrateArrangement,
   arrangePanels,
+  withPanel,
   sessionPanelId,
   isAway,
   type ProjectArrangement,
@@ -848,7 +849,7 @@ export type AppState = {
   foldOtherProjects(projectId: string): void
   /**
    * Explicit ordered panel lists per project (#604), kept in the workspace snapshot.
-   * Availability filters membership, so trashed sessions leave the screen. Deleting a
+   * Availability filters drawing; explicit session deletion removes membership. Deleting a
    * project drops its entry. Legacy order/hidden fields remain for the previous build.
    */
   projectPanels: Record<string, ProjectArrangement>
@@ -3526,11 +3527,18 @@ export const useStore = create<AppState>((set, get) => ({
 
     // A deletion means the session is gone, so it does not run through the reducer
     if (e.type === 'session_deleted') {
+      const panelId = sessionPanelId(sessionId)
+      const wasPanel = Object.values(get().projectPanels).some((saved) => saved.panels?.includes(panelId))
       set((s) => {
         const sessions = { ...s.sessions }
         delete sessions[sessionId]
-        return { sessions, ...forgetSessions(s, new Set([sessionId])) }
+        // List omission on reconnect is ambiguous; only this explicit deletion signal removes membership.
+        const projectPanels = Object.fromEntries(Object.entries(s.projectPanels).map(([pid, saved]) => [
+          pid, saved.panels?.includes(panelId) ? withPanel([], saved, panelId, false) : saved,
+        ]))
+        return { sessions, ...forgetSessions(s, new Set([sessionId])), projectPanels }
       })
+      if (wasPanel) get().saveWorkspace()
       return
     }
 

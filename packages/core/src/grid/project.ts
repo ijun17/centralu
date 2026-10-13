@@ -1,6 +1,6 @@
 /**
  * Project screens contain only panels the person adds, in their chosen order (#604).
- * Availability filters that list: a trashed session cannot appear, and new sessions never
+ * Availability filters drawing: a trashed session cannot appear, and new sessions never
  * join it automatically. Session and app ids carry their kind to avoid collisions.
  * Legacy order/hidden fields remain readable by the previous build during an update.
  */
@@ -39,28 +39,46 @@ export function migrateArrangement(present: readonly string[], saved: ProjectArr
   return { ...saved, panels }
 }
 
-/** Write explicit membership and its legacy projection, keeping only available ids. */
+/** Preserve legacy exclusions too: an older window may read the snapshot after discovery recovers. */
+function writeArrangement(
+  present: readonly string[],
+  saved: ProjectArrangement | undefined,
+  panels: string[],
+): ProjectArrangement {
+  const shown = new Set(panels)
+  const hidden = [...new Set([...(saved?.hidden ?? []), ...present, ...(saved?.panels ?? [])])]
+    .filter((id) => !shown.has(id))
+  return { panels, order: panels, hidden }
+}
+
+/** Reorder available slots while keeping unavailable ids in their saved slots. A reorder never drops saved membership. */
 export function withOrder(
   present: readonly string[],
-  _saved: ProjectArrangement | undefined,
+  saved: ProjectArrangement | undefined,
   order: readonly string[],
 ): ProjectArrangement {
   const here = new Set(present)
-  const panels = [...new Set(order)].filter((id) => here.has(id))
-  const shown = new Set(panels)
-  return { panels, order: panels, hidden: [...new Set(present)].filter((id) => !shown.has(id)) }
+  const previous = [...new Set(saved?.panels ?? [])]
+  // Retain selected available ids omitted by an edit too; a reorder is not a removal.
+  const ordered = [...new Set([...order, ...previous])].filter((id) => here.has(id))
+  let at = 0
+  const panels = previous.map((id) => here.has(id) ? ordered[at++]! : id)
+  panels.push(...ordered.slice(at))
+  return writeArrangement(present, saved, panels)
 }
 
-/** Add at the end or remove, as on the grid; the underlying session or app is untouched. */
+/** Add at the end or remove only this id, even if other panels are temporarily unavailable. */
 export function withPanel(
   present: readonly string[],
   saved: ProjectArrangement | undefined,
   id: string,
   add: boolean,
 ): ProjectArrangement {
-  const panels = arrangePanels(present, saved).filter((x) => x !== id)
-  if (add && present.includes(id)) panels.push(id)
-  return withOrder(present, saved, panels)
+  const previous = [...new Set(saved?.panels ?? [])]
+  if (add && !present.includes(id)) return writeArrangement(present, saved, previous)
+  const panels = previous.filter((x) => x !== id)
+  if (add) panels.push(id)
+  return writeArrangement(present, saved, panels)
 }
 
 /** Workspace snapshots are untyped JSON; a malformed list must not break restoration. */

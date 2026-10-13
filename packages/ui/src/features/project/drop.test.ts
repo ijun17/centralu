@@ -97,6 +97,18 @@ describe('droppedArrangement', () => {
     expect(droppedArrangement(present, all, a, b, true)).toBeNull()
   })
 
+  it('a sidebar reorder preserves an unavailable app between the visible slots', () => {
+    const next = droppedArrangement([a, b, c], { panels: [a, app, b], order: [a, app, b], hidden: [] }, b, a, true)
+    expect(next?.panels).toEqual([b, app, a])
+    expect(arrangePanels([a, b, c, app], next ?? undefined)).toEqual([b, app, a])
+  })
+
+  it('a sidebar addition at a target preserves unavailable app slots', () => {
+    const next = droppedArrangement([a, b, c], { panels: [a, app, b], order: [a, app, b], hidden: [] }, c, a, true)
+    expect(next?.panels).toEqual([c, app, a, b])
+    expect(arrangePanels([a, b, c, app], next ?? undefined)).toEqual([c, app, a, b])
+  })
+
   it('a panel the project does not have changes nothing, listed or not', () => {
     expect(droppedArrangement(present, undefined, 'session:other', a, true)).toBeNull()
     expect(droppedArrangement(present, empty, 'session:other', null, false)).toBeNull()

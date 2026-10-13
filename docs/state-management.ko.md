@@ -138,6 +138,14 @@ removing a panel takes it off the list. New sessions never join automatically. T
 session and app catalogs filter the list, so trashed sessions cannot draw. Notification visibility
 and pinned app overlays use the same membership as ProjectView.
 
+Edits preserve unavailable saved ids. Reordering fills the available slots in the requested order
+and keeps unavailable ids in their saved slots; adding appends one id, and removing takes only
+that id off the list. Legacy `order` includes unavailable ids, and `hidden` retains unavailable
+exclusions for older windows. An explicit `session_deleted` event removes that session's membership
+and saves it; omission from a catalog or reconnect never does. Project apps have no explicit
+removal event (`external_apps_changed` only requests rediscovery), so their remembered ids remain
+until the person removes their panels. If an app returns, its panel draws in the preserved slot.
+
 On restore, every saved legacy entry becomes explicit membership: all non-hidden `order` ids
 first, including unavailable ids, then remaining available ids in sidebar order. Startup app
 discovery can fail or omit an offline machine, so availability filters drawing, not migration.

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExternalAppInfo, MachineInfo, NormalizedEvent, SessionInfo } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'
-import { DEFAULT_NOTIFY_POLICY, sessionGridPanel, type NotifyPolicy } from '@cc/core'
+import { DEFAULT_NOTIFY_POLICY, arrangePanels, withOrder, withPanel, sessionGridPanel, type NotifyPolicy } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import {
@@ -414,6 +414,51 @@ describe('project screen arrangement (#203)', () => {
     expect(projectScreenSessions(useStore.getState())).toEqual(['solo'])
     useStore.setState({ focusedProjectId: untouched.id })
     expect(projectScreenSessions(useStore.getState())).toEqual([])
+  })
+
+  it.each(['reorder', 'add', 'remove'])(
+    '%s edits retain unavailable app panels in the snapshot and draw them when discovery recovers',
+    async (edit) => {
+      const mock = new MockPlatform()
+      const project = await mock.projects.add(`/tmp/arr-offline-edit-${edit}`)
+      for (const id of ['a', 'b', 'c']) mock.sessions.set(id, sessionInfo(id, { projectId: project.id }))
+      const saved = { panels: ['session:a', 'app:offline', 'session:b'], order: ['session:a', 'app:offline', 'session:b'], hidden: [] }
+      mock.workspaceSnapshot = { projectPanels: { [project.id]: saved } } as never
+      await useStore.getState().attach(mock)
+      const present = ['session:a', 'session:b', 'session:c']
+      const next = edit === 'reorder' ? withOrder(present, saved, ['session:b', 'session:a'])
+        : withPanel(present, saved, edit === 'add' ? 'session:c' : 'session:a', edit === 'add')
+      const expected = edit === 'reorder' ? ['session:b', 'app:offline', 'session:a']
+        : edit === 'add' ? ['session:a', 'app:offline', 'session:b', 'session:c'] : ['app:offline', 'session:b']
+      useStore.getState().arrangeProject(project.id, next)
+      await tick()
+      expect(stored(mock)?.[project.id]).toMatchObject({ panels: expected, order: expected })
+      mock.setExternalApps([{ appId: 'offline', projectId: project.id } as ExternalAppInfo])
+      await useStore.getState().refreshExternalApps()
+      useStore.setState({ view: 'focus', focusedProjectId: project.id, focusedSessionId: null })
+      expect(projectScreenAppKeys(useStore.getState())).toEqual([`${project.id}/offline`])
+      expect(arrangePanels([...present, 'app:offline'], useStore.getState().projectPanels[project.id])).toEqual(expected)
+      await useStore.getState().attach(mock)
+      expect(useStore.getState().projectPanels[project.id]?.panels).toEqual(expected)
+    },
+  )
+
+  it('explicit session deletion removes its panel without discarding unavailable apps, and trash restore does not re-add it', async () => {
+    const mock = new MockPlatform()
+    const project = await mock.projects.add('/tmp/arr-trash-signal')
+    mock.sessions.set('kept', sessionInfo('kept', { projectId: project.id }))
+    mock.sessions.set('deleted', sessionInfo('deleted', { projectId: project.id }))
+    useStore.getState().arrangeProject(project.id, { panels: ['session:kept', 'app:offline', 'session:deleted'], order: [], hidden: [] })
+    mock.workspaceSnapshot = { projectPanels: useStore.getState().projectPanels } as never
+    await useStore.getState().attach(mock)
+    mock.sessions.delete('deleted')
+    mock.emit({ type: 'session_deleted', sessionId: 'deleted' })
+    await tick()
+    expect(useStore.getState().projectPanels[project.id]?.panels).toEqual(['session:kept', 'app:offline'])
+    expect(stored(mock)?.[project.id]).toMatchObject({ panels: ['session:kept', 'app:offline'] })
+    mock.sessions.set('deleted', sessionInfo('deleted', { projectId: project.id }))
+    await useStore.getState().attach(mock)
+    expect(useStore.getState().projectPanels[project.id]?.panels).toEqual(['session:kept', 'app:offline'])
   })
 
   it('leaves with its project', async () => {

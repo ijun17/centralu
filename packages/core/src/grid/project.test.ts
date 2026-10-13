@@ -42,6 +42,51 @@ describe('withOrder and withPanel', () => {
   })
 })
 
+describe('editing while apps are unavailable', () => {
+  const layouts = [
+    { where: 'first', panels: [app, a, b], reordered: [app, b, a], removed: [app, b] },
+    { where: 'middle', panels: [a, app, b], reordered: [b, app, a], removed: [app, b] },
+    { where: 'last', panels: [a, b, app], reordered: [b, a, app], removed: [b, app] },
+  ]
+
+  it.each(layouts)('reordering keeps an unavailable app in its saved $where position', ({ panels, reordered }) => {
+    const next = withOrder([a, b, c], saved(panels), [b, a])
+    expect(next.panels).toEqual(reordered)
+    expect(next.order).toEqual(reordered)
+    expect(arrangePanels([a, b, c, app], next)).toEqual(reordered)
+  })
+
+  it.each(layouts)('adding keeps an unavailable app in its saved $where position', ({ panels }) => {
+    const next = withPanel([a, b, c], saved(panels), c, true)
+    expect(next.panels).toEqual([...panels, c])
+    expect(arrangePanels([a, b, c, app], next)).toEqual([...panels, c])
+  })
+
+  it.each(layouts)('removing a session keeps an unavailable app in its saved $where position', ({ panels, removed }) => {
+    const next = withPanel([a, b, c], saved(panels), a, false)
+    expect(next.panels).toEqual(removed)
+    expect(arrangePanels([a, b, c, app], next)).toEqual(removed)
+  })
+
+  it('removes an unavailable panel only when explicitly asked, preserving other unavailable panels and legacy exclusions', () => {
+    const other = 'app:other'
+    const next = withPanel([a, b], { panels: [other, a, app, b], order: [other, a, app, b], hidden: ['app:hidden'] }, app, false)
+    expect(next.panels).toEqual([other, a, b])
+    expect(next.hidden).toEqual(['app:hidden', app])
+    expect(arrangePanels([a, b, app, other], next)).toEqual([other, a, b])
+  })
+
+  it('an edit with no available panels preserves the entire saved list', () => {
+    const initial = saved([app, 'app:other'])
+    expect(withOrder([], initial, []).panels).toEqual(initial.panels)
+    expect(withPanel([], initial, 'session:unknown', true).panels).toEqual(initial.panels)
+  })
+
+  it('a reorder naming only some visible panels cannot silently remove another saved panel', () => {
+    expect(withOrder([a, b], saved([a, app, b]), [b]).panels).toEqual([b, app, a])
+  })
+})
+
 describe('migration', () => {
   it('preserves every non-hidden legacy ordered id and appends unplaced available panels', () => {
     const legacy = { order: [app, b, b, 'session:gone'], hidden: [a] }
