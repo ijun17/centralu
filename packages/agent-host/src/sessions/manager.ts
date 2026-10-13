@@ -5779,7 +5779,7 @@ export class SessionManager {
           const r = await this.cleanUpWorktreeChild(child)
           if (!r.ok) return r
           if (d) this.delegations.delete(key)
-          return { ok: true, state: 'deleted', sessionId: child.id, sessionName: child.name, tool: child.tool, branch: r.branch, setAside: r.setAside }
+          return { ok: true, state: 'deleted', sessionId: child.id, sessionName: child.name, tool: child.tool, branch: r.branch, setAside: r.setAside, ...(r.warning ? { warning: r.warning } : {}) }
         }
         case 'send': {
           if (!presetWithin(child.permissionPreset, caller.permissionPreset)) {
@@ -5855,7 +5855,7 @@ export class SessionManager {
   private worktreeCleanup = new Set<string>()
 
   /** #608: the parent decides; local work follows the session into the trash in every preset. */
-  private async cleanUpWorktreeChild(target: SessionInfo): Promise<{ ok: true; branch: string; setAside: WorktreeRecovery } | { ok: false; error: string }> {
+  private async cleanUpWorktreeChild(target: SessionInfo): Promise<{ ok: true; branch: string; setAside: WorktreeRecovery; warning?: string } | { ok: false; error: string }> {
     if (!target.worktree?.base || !target.projectId) {
       return { ok: false, error: `"${target.name}" works in no worktree of its own, so there is nothing to clean up — the person deletes a session` }
     }
@@ -5876,14 +5876,22 @@ export class SessionManager {
         this.running.delete(target.id)
       }
       const trunk = await gitRevParse(cwd, this.trunkOf(target.projectId) ?? 'HEAD')
-      const setAside = await saveWorktreeRecovery(target.id, path, trunk ?? 'missing-trunk')
+      const setAside = await saveWorktreeRecovery(target.id, path, trunk ?? 'missing-trunk', branch)
       if (setAside.changedFiles || setAside.commits) {
         this.onEvent({ type: 'notice', sessionId: target.id, level: 'info', from: 'Centralu', label: 'worktree recovery',
           text: `Local work saved before worktree deletion: ${setAside.changedFiles} uncommitted files, ${setAside.commits} commits not on the trunk. Recovery patches and bundles are at ${worktreeRecoveryDir(target.id)}. Restore from Settings → Trash or recover these files manually before deleting this session for good.` })
       }
       await this.trashSession(target.id, false, false, setAside)
-      await gitWorktreeRemove(cwd, path, true, true)
-      await gitBranchDelete(cwd, branch, this.gitTrust(target.projectId))
+      try {
+        await gitWorktreeRemove(cwd, path, true, true)
+      } catch (e) {
+        return { ok: true, branch, setAside, warning: `The session is in the trash, but worktree ${path} and branch ${branch} were left: ${(e as Error).message}. Recovery files are at ${worktreeRecoveryDir(target.id)}.` }
+      }
+      try {
+        await gitBranchDelete(cwd, branch, this.gitTrust(target.projectId))
+      } catch (e) {
+        return { ok: true, branch, setAside, warning: `The session is in the trash and its worktree was removed, but branch ${branch} was left: ${(e as Error).message}. Recovery files are at ${worktreeRecoveryDir(target.id)}.` }
+      }
       return { ok: true, branch, setAside }
     } catch (e) {
       return { ok: false, error: `Could not finish removing "${branch}": ${(e as Error).message}. Any saved recovery files are at ${worktreeRecoveryDir(target.id)}.` }

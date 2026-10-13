@@ -54,10 +54,14 @@ boundaries (#603), with a log line instead of a card or refusal:
 Same-project scope, the preset's ownership rules and the refusal for working children remain. Sends and resumes
 are blocked during cleanup; disposal
 must complete before snapshotting or removing the worktree. Patches preserve tracked and non-ignored untracked
-files (binary bytes and staged changes included); full git bundles keep commits not reachable from the local
-trunk. If the trunk cannot be read, all reachable commits are kept conservatively. Initialized submodules are
+files (binary bytes and staged changes included); full git bundles keep the union of HEAD and the stored branch not reachable from the local trunk.
+A switched or detached HEAD does not drop the stored branch. Submodule HEAD/local branches are bundled
+when their commits are absent from remote refs, including commits recorded by the child superproject. If the trunk cannot be read, all reachable commits are kept conservatively. Initialized submodules are
 captured separately. Snapshotting uses a private index with repository hooks and filters disabled. It does not
-change the child's index or execute repository programs. Ignored untracked files are not kept.
+change the child's index or execute repository programs. Patch bytes go directly to files, without UTF-8 stdout
+decoding. Input above 256 MiB (all working files considered by git add plus changed staged blobs, including
+initialized submodules) is refused before any git add; files and the real index stay untouched. Once trashed,
+a removal failure returns `deleted` with a warning naming what was left. Ignored untracked files are not kept.
 
 The recovery directory is `<data>/worktree-recovery/<session id>/<snapshot id>/`, tied to the trash record.
 Restore recreates the root worktree/branch and attempts to apply its patches, with a conversation notice offering

@@ -410,26 +410,32 @@ to remove its child: neither uncommitted files nor an unproven merge refuses del
 finish or be stopped first. Cleanup refuses a child still waking/restarting, blocks sends/resumes, and requires
 successful disposal of the idle CLI before snapshotting. Failed capture leaves the worktree and branch in place. Once captured,
 the session goes to the trash, then git removes the worktree (including initialized submodules) and branch.
-Removal errors are reported with the recovery location; they are not silently answered as success. The
+After trashing, removal errors return `deleted` with a warning naming the leftover worktree/branch and
+recovery location. The parent cannot retry a trashed session through `agent_session`. Capture errors still
+return a refusal before trashing. The
 tool's conversation remains. The answer reports the uncommitted file and commit counts, or that nothing
 needed setting aside. A saved notice also offers the recovery directory in the trashed conversation. Counts
-compare reachability against the configured local trunk (project HEAD if unset),
+count the union of HEAD and the stored branch against the configured local trunk (project HEAD if unset),
 not a GitHub merge badge; squash/rebase commits may therefore be kept conservatively. An unreadable trunk
-keeps all reachable commits.
+keeps all reachable commits. Submodules count local HEAD/branch commits absent from their remote refs,
+even when the child superproject already records those commits.
 
 The trash's optional `recovery` JSON field remembers the snapshot id, tip and counts; this is additive and
 needs no schema migration. Files live at `<data>/worktree-recovery/<session id>/<snapshot id>/`:
 `0.patch` holds the root's working changes from HEAD, `0.staged.patch` its staged changes, `0.bundle` a
-self-contained bundle of HEAD when commits are absent from the trunk, and `snapshot.json` the tip and
-repository map. Initialized submodules use subsequent numbers, recursively. Binary files and symlink
+self-contained bundle of both HEAD and the stored branch when commits are absent from the trunk, and
+`snapshot.json` the tip, repository map and exported refs. Initialized submodules use subsequent numbers, recursively. Binary files and symlink
 targets are preserved; ignored untracked files are excluded. A private temporary index captures the
 working tree without changing its real index; hooks and filters are disabled to keep the bytes on disk.
-The index is removed after capture. Clean, merged work creates only the small restore metadata, no patch
+Git writes patches directly with `diff --output`, preserving CP949/Latin-1 text bytes without a stdout buffer
+limit. Before any `git add`, a preflight refuses input above 256 MiB across all initialized repositories
+(tracked and non-ignored untracked working files plus changed staged blobs). It leaves the files and index
+untouched. Add/diff allow 120 seconds. The index is removed after capture. Clean, merged work creates only the small restore metadata, no patch
 or bundle. Trash byte totals include recovery files.
 
 Restore recreates the root branch/worktree at its saved tip and attempts both patches before making the
 session live (its CLI remains stopped). If the original branch name is occupied, it uses `recovered/<session id>`.
-A notice offers the recovery paths and `git apply` / `git fetch <bundle> HEAD:<branch>` instructions; patches
+A notice offers the recovery paths and `git apply` / `git fetch <bundle> <ref>:<branch>` (`git bundle list-heads` lists saved refs) instructions; patches
 that cannot be applied and all submodule recovery remain available for manual recovery. A restore interrupted
 after creating the worktree does not reapply patches on retry. Each later deletion uses a new snapshot so
 earlier files are retained. Deleting for good, including empty trash, removes the entire session recovery

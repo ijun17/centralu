@@ -15,6 +15,7 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from 'node:fs'
 import { rm } from 'node:fs/promises'
@@ -23,7 +24,7 @@ import { tmpdir } from 'node:os'
 import type { AdapterCapabilities, ApprovalDecision, GridPanel, NormalizedEvent, SessionInfo, StoredMessage, ToolName, TrashedSession, Attachment } from '@cc/protocol'
 import { NormalizedEvent as NormalizedEventSchema, sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, HistoryMessage, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
-import { worktreeRecoveryDir } from '../dev-services/worktree-recovery.js'
+import { WORKTREE_RECOVERY_MAX_BYTES, worktreeRecoveryDir } from '../dev-services/worktree-recovery.js'
 import { Store } from '../dev-services/store.js'
 import { plantedRepo } from '../dev-services/planted-repo.test-helpers.js'
 import { SessionManager } from './manager.js'
@@ -3619,6 +3620,143 @@ describe('worktree sessions', () => {
       expect(store.isTrashed(s.id)).toBe(false)
       expect(wtMgr.listSessions().find((x) => x.id === s.id)!.live).toBe(false)
       snapshot.mockRestore()
+    })
+
+    it('review: round-trips CP949 staged and working text and Latin-1 untracked text as bytes', async () => {
+      const { s, managerId } = await makeChild('feat/cp949')
+      const path = join(s.worktree!.path, 'legacy.txt')
+      const original = Buffer.from([0xbe, 0xc8, 0xb3, 0xe7, 10]) // "hello" in Korean, encoded as CP949
+      writeFileSync(path, original)
+      g(s.worktree!.path, ['add', 'legacy.txt'])
+      g(s.worktree!.path, ['commit', '-qm', 'CP949 text'])
+      const staged = Buffer.concat([original, Buffer.from([0xbc, 0xbc, 0xb0, 0xe8, 10])])
+      writeFileSync(path, staged)
+      g(s.worktree!.path, ['add', 'legacy.txt'])
+      const working = Buffer.concat([staged, original])
+      writeFileSync(path, working)
+      const latin = Buffer.from([0x63, 0x61, 0x66, 0xe9, 10])
+      writeFileSync(join(s.worktree!.path, 'latin.txt'), latin)
+      expect((await remove(s, managerId)).isError).not.toBe(true)
+      await wtMgr.restoreSession(s.id)
+      expect(readFileSync(path)).toEqual(working)
+      expect(execFileSync('git', ['show', ':legacy.txt'], { cwd: s.worktree!.path })).toEqual(staged)
+      expect(readFileSync(join(s.worktree!.path, 'latin.txt'))).toEqual(latin)
+    })
+
+    it('review: restores a text patch larger than the old stdout buffer limit', async () => {
+      const { s, managerId } = await makeChild('feat/large-text-patch')
+      const bytes = Buffer.alloc(33 * 1024 * 1024, 0x61)
+      const path = join(s.worktree!.path, 'text.txt')
+      writeFileSync(path, bytes)
+      expect((await remove(s, managerId)).isError).not.toBe(true)
+      expect(lstatSync(join(saved(s).dir, '0.patch')).size).toBeGreaterThan(32 * 1024 * 1024)
+      await wtMgr.restoreSession(s.id)
+      expect(readFileSync(path).equals(bytes)).toBe(true)
+    }, process.platform === 'win32' ? 90_000 : 30_000)
+
+    it.each([-1, 0, 1])('review: enforces the input cap at the limit plus %i bytes before any git add', async (delta) => {
+      const { s, managerId } = await makeChild('feat/too-large')
+      const path = join(s.worktree!.path, 'large.bin')
+      writeFileSync(path, '')
+      truncateSync(path, WORKTREE_RECOVERY_MAX_BYTES - readFileSync(join(s.worktree!.path, 'a.txt')).length + delta)
+      const index = g(s.worktree!.path, ['ls-files', '--stage'])
+      const gitModule = await import('../dev-services/git-exec.js')
+      const git = vi.spyOn(gitModule, 'runGit')
+      try {
+        const r = await remove(s, managerId)
+        if (delta > 0) {
+          expect(r.isError).toBe(true)
+          expect(r.text).toContain('256 MiB input limit')
+          expect(git.mock.calls.some(([, args]) => args[0] === 'add')).toBe(false)
+          expect(existsSync(path)).toBe(true)
+          expect(g(s.worktree!.path, ['ls-files', '--stage'])).toBe(index)
+          expect(store.isTrashed(s.id)).toBe(false)
+        } else {
+          expect(r.isError).not.toBe(true)
+          expect(git.mock.calls.some(([, args]) => args[0] === 'add')).toBe(true)
+          expect(saved(s).recovery.changedFiles).toBe(1)
+        }
+      } finally {
+        git.mockRestore()
+      }
+    }, process.platform === 'win32' ? 90_000 : 30_000)
+
+    it.each(['switched', 'detached'] as const)('review: bundles both HEAD and the stored branch when the child is %s', async (mode) => {
+      const { s, managerId } = await makeChild(`feat/stored-${mode}`)
+      writeFileSync(join(s.worktree!.path, 'stored.txt'), 'stored branch work\n')
+      g(s.worktree!.path, ['add', '.'])
+      g(s.worktree!.path, ['commit', '-qm', 'stored branch work'])
+      const storedTip = g(s.worktree!.path, ['rev-parse', 'HEAD']).trim()
+      g(s.worktree!.path, ['checkout', '-q', '-b', 'different', 'main'])
+      writeFileSync(join(s.worktree!.path, 'head.txt'), 'HEAD work\n')
+      g(s.worktree!.path, ['add', '.'])
+      g(s.worktree!.path, ['commit', '-qm', 'different HEAD work'])
+      const head = g(s.worktree!.path, ['rev-parse', 'HEAD']).trim()
+      if (mode === 'detached') {
+        g(s.worktree!.path, ['checkout', '-q', '--detach'])
+        g(repo, ['branch', '-D', 'different'])
+      }
+      expect((await remove(s, managerId)).isError).not.toBe(true)
+      const { recovery, dir } = saved(s)
+      expect(recovery.commits).toBe(2)
+      expect(g(repo, ['branch', '--list', s.worktree!.branch])).toBe('')
+      const recovered = join(root, 'recover-both')
+      g(root, ['init', '-q', recovered])
+      g(recovered, ['fetch', join(dir, '0.bundle'), 'HEAD:refs/heads/saved-head', `refs/heads/${s.worktree!.branch}:refs/heads/saved-branch`])
+      expect(g(recovered, ['rev-parse', 'saved-head']).trim()).toBe(head)
+      expect(g(recovered, ['rev-parse', 'saved-branch']).trim()).toBe(storedTip)
+      expect(g(recovered, ['show', 'saved-branch:stored.txt'])).toBe('stored branch work\n')
+    })
+
+    it('review: bundles a local submodule commit already recorded by the child superproject commit', async () => {
+      const source = join(root, 'module-source')
+      g(root, ['init', '-q', '-b', 'main', source])
+      writeFileSync(join(source, 'module.txt'), 'initial\n')
+      g(source, ['add', '.'])
+      g(source, ['commit', '-qm', 'initial module'])
+      g(repo, ['-c', 'protocol.file.allow=always', 'submodule', 'add', source, 'nested'])
+      g(repo, ['commit', '-qm', 'initial submodule'])
+      const { s, managerId } = await makeChild('feat/recorded-module')
+      g(s.worktree!.path, ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init'])
+      const nested = join(s.worktree!.path, 'nested')
+      writeFileSync(join(nested, 'module.txt'), 'local S\n')
+      g(nested, ['add', '.'])
+      g(nested, ['commit', '-qm', 'local S'])
+      const tip = g(nested, ['rev-parse', 'HEAD']).trim()
+      const moduleDir = g(nested, ['rev-parse', '--absolute-git-dir']).trim()
+      g(s.worktree!.path, ['add', 'nested'])
+      g(s.worktree!.path, ['commit', '-qm', 'record local S in superproject'])
+      expect((await remove(s, managerId)).isError).not.toBe(true)
+      const { recovery, dir } = saved(s)
+      expect(recovery.commits).toBe(2)
+      expect(existsSync(moduleDir)).toBe(false)
+      const recovered = join(root, 'recover-module')
+      g(root, ['clone', '-q', join(dir, '1.bundle'), recovered])
+      expect(g(recovered, ['rev-parse', 'HEAD']).trim()).toBe(tip)
+      expect(readFileSync(join(recovered, 'module.txt'), 'utf8')).toBe('local S\n')
+    }, process.platform === 'win32' ? 45_000 : 15_000)
+
+    it.each(['worktree', 'branch'] as const)('review: reports deleted with a warning when %s removal fails after trashing', async (failure) => {
+      const { s, managerId } = await makeChild(`feat/leftover-${failure}`)
+      writeFileSync(join(s.worktree!.path, 'wip.txt'), 'saved\n')
+      const gitModule = await import('../dev-services/git.js')
+      const removal = vi.spyOn(gitModule, failure === 'worktree' ? 'gitWorktreeRemove' : 'gitBranchDelete').mockRejectedValueOnce(new Error('removal denied'))
+      const sessionTool = vi.spyOn(wtMgr, 'agentSession')
+      try {
+        const r = await remove(s, managerId)
+        expect(r.isError).not.toBe(true)
+        expect(await sessionTool.mock.results[0]!.value).toMatchObject({ ok: true, state: 'deleted', warning: expect.stringContaining('removal denied') })
+        expect(r.text).toContain('Warning:')
+        expect(r.text).toContain(failure === 'worktree' ? s.worktree!.path : s.worktree!.branch)
+        expect(r.text).not.toContain('its worktree and branch')
+        expect(store.isTrashed(s.id)).toBe(true)
+        expect(existsSync(s.worktree!.path)).toBe(failure === 'worktree')
+        expect(g(repo, ['branch', '--list', '--format=%(refname:short)', s.worktree!.branch]).trim()).toBe(s.worktree!.branch)
+        expect(readFileSync(join(saved(s).dir, '0.patch'), 'utf8')).toContain('saved')
+      } finally {
+        sessionTool.mockRestore()
+        removal.mockRestore()
+      }
     })
 
     it('only the session that started it cleans it up, and a session the person made is no one\'s to delete', async () => {

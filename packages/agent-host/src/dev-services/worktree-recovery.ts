@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { isSessionId } from '@cc/protocol'
 import { dataRoot } from '../data-dir.js'
@@ -8,7 +8,11 @@ import { runGit, type GitTrust } from './git-exec.js'
 import { assertExistingPath } from './path-guard.js'
 
 export type WorktreeRecovery = { snapshot: string; tip: string; changedFiles: number; commits: number }
-type Snapshot = WorktreeRecovery & { repositories: { path: string; tip: string; patch: boolean; staged: boolean; bundle: boolean }[] }
+type RepositorySnapshot = { path: string; tip: string; patch: boolean; staged: boolean; bundle: boolean; refs?: string[] }
+type Snapshot = WorktreeRecovery & { repositories: RepositorySnapshot[] }
+
+export const WORKTREE_RECOVERY_MAX_BYTES = 256 * 1024 * 1024
+const RECOVERY_TIMEOUT = 120_000
 
 export function worktreeRecoveryDir(sessionId: string): string {
   if (!isSessionId(sessionId)) throw new Error('Invalid session id for worktree recovery')
@@ -19,63 +23,100 @@ export async function clearWorktreeRecovery(sessionId: string): Promise<void> {
   await rm(worktreeRecoveryDir(sessionId), { recursive: true, force: true })
 }
 
-/** Snapshot through a private index: never stage the child's files or change its real index. */
-export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk: string): Promise<WorktreeRecovery> {
-  const snapshotId = randomUUID()
-  const dir = join(worktreeRecoveryDir(sessionId), snapshotId)
-  await mkdir(dir, { recursive: true, mode: 0o700 })
-  const snapshot: Snapshot = { snapshot: snapshotId, tip: '', changedFiles: 0, commits: 0, repositories: [] }
-  const capture = async (repo: string, path: string, baseline: string): Promise<void> => {
-    const n = snapshot.repositories.length
+/** Preflight every repository before any private index is populated or objects are written. */
+export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk: string, branch?: string): Promise<WorktreeRecovery> {
+  const plans: { repo: string; path: string; tip: string; refs: string[]; commits: number }[] = []
+  let bytes = 0
+  const account = (size: number) => {
+    bytes += size
+    if (bytes > WORKTREE_RECOVERY_MAX_BYTES) {
+      throw new Error(`Worktree recovery exceeds the 256 MiB input limit (tracked and non-ignored untracked files plus staged changes, including submodules). No files were staged or removed; save the work elsewhere before deleting.`)
+    }
+  }
+  const prepare = async (repo: string, path: string): Promise<void> => {
     const tip = (await runGit(repo, ['rev-parse', '--verify', 'HEAD'])).trim()
-    const baselineOid = await runGit(repo, ['rev-parse', '--verify', `${baseline}^{commit}`]).then((s) => s.trim()).catch(() => null)
-    const commits = Number((await runGit(repo, ['rev-list', '--count', tip, ...(baselineOid ? ['--not', baselineOid] : [])])).trim())
-    const entry = { path, tip, patch: false, staged: false, bundle: commits > 0 }
-    snapshot.repositories.push(entry)
-    if (n === 0) snapshot.tip = tip
-    snapshot.commits += commits
-    if (entry.bundle) {
-      // A full bundle remains usable even after the original repository or trunk disappears.
-      await runGit(repo, ['bundle', 'create', join(dir, `${n}.bundle`), 'HEAD'], { timeout: 120_000 })
+    const refs = ['HEAD']
+    if (!path && branch) {
+      const ref = `refs/heads/${branch}`
+      if (await runGit(repo, ['rev-parse', '--verify', ref]).then(() => true).catch(() => false)) refs.push(ref)
+    } else if (path) {
+      // Removing the worktree also removes its private module repository. Preserve every local
+      // branch plus detached HEAD when their commits are absent from that module's remotes.
+      refs.push(...(await runGit(repo, ['for-each-ref', '--format=%(refname)', 'refs/heads/'])).trim().split('\n').filter(Boolean))
     }
-    const stagedPatch = await runGit(repo, ['diff', '--cached', '--binary', '--full-index', '--no-renames', tip])
-    entry.staged = !!stagedPatch
-    if (stagedPatch) await writeFile(join(dir, `${n}.staged.patch`), stagedPatch, { mode: 0o600 })
-    const stagedNames = await runGit(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip])
-    const modules = new Map<string, string>()
-    for (const row of (await runGit(repo, ['ls-tree', '-rz', tip])).split('\0')) {
-      if (row.startsWith('160000 ')) modules.set(row.slice(row.indexOf('\t') + 1), row.slice(14, row.indexOf('\t')))
+    const baselineOid = !path
+      ? await runGit(repo, ['rev-parse', '--verify', `${trunk}^{commit}`]).then((s) => s.trim()).catch(() => null)
+      : null
+    const exclude = path ? ['--not', '--remotes'] : baselineOid ? ['--not', baselineOid] : []
+    const commits = Number((await runGit(repo, ['rev-list', '--count', ...refs, ...exclude])).trim())
+    plans.push({ repo, path, tip, refs, commits })
+    const stagedNames = new Set((await runGit(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip], { timeout: RECOVERY_TIMEOUT })).split('\0'))
+    const modules: string[] = []
+    const stagedObjects: string[] = []
+    for (const row of (await runGit(repo, ['ls-files', '--stage', '-z'])).split('\0')) {
+      if (!row) continue
+      const tab = row.indexOf('\t')
+      const rel = row.slice(tab + 1)
+      if (row.startsWith('160000 ')) modules.push(rel)
+      else if (stagedNames.has(rel)) stagedObjects.push(row.split(' ')[1]!)
     }
-    const env = { GIT_INDEX_FILE: join(dir, `${n}.index`) }
-    try {
-      await runGit(repo, ['read-tree', tip], { env })
-      // Locked git disables filters/hooks even for a trusted repo. The patch keeps the actual bytes,
-      // including binary files and symlink targets, without executing repository programs.
-      await runGit(repo, ['add', '-A', '--', '.'], { env })
-      const names = await runGit(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip], { env })
-      snapshot.changedFiles += new Set([...names.split('\0'), ...stagedNames.split('\0')].filter(Boolean)).size
-      const patch = await runGit(repo, ['diff', '--cached', '--binary', '--full-index', '--no-renames', tip], { env })
-      for (const row of (await runGit(repo, ['ls-files', '--stage', '-z'], { env })).split('\0')) {
-        if (!row.startsWith('160000 ')) continue
-        const rel = row.slice(row.indexOf('\t') + 1)
-        if (!modules.has(rel)) modules.set(rel, 'missing-baseline')
+    if (stagedObjects.length) {
+      const sizes = await runGit(repo, ['cat-file', '--batch-check=%(objectsize)'], { input: stagedObjects.join('\n') + '\n' })
+      for (const size of sizes.trim().split('\n')) {
+        if (!/^\d+$/.test(size)) throw new Error('Could not measure staged recovery data')
+        account(Number(size))
       }
-      entry.patch = !!patch
-      if (patch) await writeFile(join(dir, `${n}.patch`), patch, { mode: 0o600 })
-    } finally {
-      await rm(env.GIT_INDEX_FILE, { force: true })
     }
-    // A superproject patch cannot hold a submodule's working files or local commits.
-    for (const [rel, baseline] of modules) {
+    const files = new Set((await runGit(repo, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])).split('\0').filter(Boolean))
+    for (const rel of files) {
+      const file = await lstat(join(repo, rel)).catch((e: NodeJS.ErrnoException) => {
+        if (e.code !== 'ENOENT') throw e
+        return null
+      })
+      if (file?.isFile() || file?.isSymbolicLink()) account(file.size)
+      else if (file?.isDirectory() && existsSync(join(repo, rel, '.git'))) modules.push(rel)
+    }
+    for (const rel of new Set(modules)) {
       await assertExistingPath(repo, rel).catch((e) => {
         if (existsSync(join(repo, rel))) throw e
       })
-      if (!existsSync(join(repo, rel, '.git'))) continue
-      await capture(join(repo, rel), path ? `${path}/${rel}` : rel, baseline)
+      if (existsSync(join(repo, rel, '.git'))) await prepare(join(repo, rel), path ? `${path}/${rel}` : rel)
     }
   }
+  await prepare(cwd, '')
+  const snapshotId = randomUUID()
+  const dir = join(worktreeRecoveryDir(sessionId), snapshotId)
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  const snapshot: Snapshot = { snapshot: snapshotId, tip: plans[0]!.tip, changedFiles: 0, commits: 0, repositories: [] }
+  const patchFile = async (repo: string, tip: string, file: string, env?: Record<string, string>): Promise<boolean> => {
+    // Git writes bytes directly. Decoding stdout as UTF-8 would corrupt CP949/Latin-1 patches,
+    // and buffering stdout would fail on large diffs even within the measured input limit.
+    await runGit(repo, ['diff', '--cached', '--binary', '--full-index', '--no-renames', `--output=${file}`, tip], { env, timeout: RECOVERY_TIMEOUT })
+    await chmod(file, 0o600)
+    if ((await stat(file)).size > 0) return true
+    await rm(file)
+    return false
+  }
   try {
-    await capture(cwd, '', trunk)
+    for (const [n, plan] of plans.entries()) {
+      const { repo, path, tip, refs, commits } = plan
+      const entry: RepositorySnapshot = { path, tip, refs, patch: false, staged: false, bundle: commits > 0 }
+      snapshot.repositories.push(entry)
+      snapshot.commits += commits
+      if (entry.bundle) await runGit(repo, ['bundle', 'create', join(dir, `${n}.bundle`), ...refs], { timeout: RECOVERY_TIMEOUT })
+      entry.staged = await patchFile(repo, tip, join(dir, `${n}.staged.patch`))
+      const stagedNames = await runGit(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip], { timeout: RECOVERY_TIMEOUT })
+      const env = { GIT_INDEX_FILE: join(dir, `${n}.index`) }
+      try {
+        await runGit(repo, ['read-tree', tip], { env })
+        await runGit(repo, ['add', '-A', '--', '.'], { env, timeout: RECOVERY_TIMEOUT })
+        const names = await runGit(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip], { env, timeout: RECOVERY_TIMEOUT })
+        snapshot.changedFiles += new Set([...names.split('\0'), ...stagedNames.split('\0')].filter(Boolean)).size
+        entry.patch = await patchFile(repo, tip, join(dir, `${n}.patch`), env)
+      } finally {
+        await rm(env.GIT_INDEX_FILE, { force: true })
+      }
+    }
     await writeFile(join(dir, 'snapshot.json'), JSON.stringify(snapshot), { mode: 0o600 })
     return { snapshot: snapshotId, tip: snapshot.tip, changedFiles: snapshot.changedFiles, commits: snapshot.commits }
   } catch (e) {
@@ -106,7 +147,7 @@ export async function restoreWorktreeRecovery(
     if (await runGit(repo, ['show-ref', '--verify', `refs/heads/${branch}`]).then(() => true).catch(() => false)) {
       branch = `recovered/${sessionId}`
     }
-    if (root.bundle) await runGit(repo, ['fetch', join(dir, '0.bundle'), 'HEAD'], { allowRepoPrograms: trust.trusted === true })
+    if (root.bundle) await runGit(repo, ['fetch', join(dir, '0.bundle'), ...(root.refs ?? ['HEAD'])], { allowRepoPrograms: trust.trusted === true })
     await runGit(repo, ['worktree', 'add', '-b', branch, path, recovery.tip], { allowRepoPrograms: trust.trusted === true })
     if (root.patch || root.staged) {
       try {
@@ -125,7 +166,7 @@ export async function restoreWorktreeRecovery(
   }
   return {
     branch,
-    notice: `Restored branch ${branch}. Recovery files remain at ${dir}: ${recovery.changedFiles} uncommitted files, ${recovery.commits} commits not on the trunk. ` +
-      'Numbered .patch files can be applied with git apply; .bundle files can be fetched with git fetch <bundle> HEAD:<branch>. snapshot.json names each repository. Submodule recovery is manual. These files are removed when this session is deleted for good.',
+    notice: `Restored branch ${branch}. Recovery files remain at ${dir}: ${recovery.changedFiles} uncommitted files, ${recovery.commits} commits absent from the trunk or submodule remotes. ` +
+      'Numbered .patch files can be applied with git apply; .bundle files list their saved refs with git bundle list-heads and can be fetched with git fetch <bundle> <ref>:<branch>. snapshot.json names each repository and its refs. Submodule recovery is manual. These files are removed when this session is deleted for good.',
   }
 }

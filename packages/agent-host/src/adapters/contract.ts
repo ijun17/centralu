@@ -164,7 +164,7 @@ export type ChildRunResult =
       | { state: 'working'; reported: boolean }
       | { state: 'at_rest'; answer: string; sessionState: string }
       | { state: 'stopped' }
-      | { state: 'deleted'; branch: string; setAside: { changedFiles: number; commits: number } }
+      | { state: 'deleted'; branch: string; warning?: string; setAside: { changedFiles: number; commits: number } }
     ))
   | { ok: false; error: string }
 
