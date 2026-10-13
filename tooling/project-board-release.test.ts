@@ -220,7 +220,9 @@ if (args[0] === 'api') {
   if (path === R + '/branches/main/protection/required_status_checks') json({ contexts: ['build'], checks: [] })
   if (path === R + '/rules/branches/main') json([])
   if (/\/commits\/[0-9a-f]+\/check-runs$/.test(path)) {
-    const c = { green: ['completed', 'success'], failing: ['completed', 'failure'], pending: ['in_progress', null] }[st.ci]
+    const verdict = st.prs.some((p) => path.includes('/' + p.headRefOid + '/')) ? st.prCi : st.ci
+    if (verdict === 'none') json({ check_runs: [] })
+    const c = { green: ['completed', 'success'], failing: ['completed', 'failure'], pending: ['in_progress', null] }[verdict]
     json({ check_runs: [{ id: 1, name: 'build', status: c[0], conclusion: c[1], html_url: 'https://github.com/ijun17/centralu/actions/runs/1/job/1', app: { slug: 'github-actions' } }] })
   }
   if (/\/commits\/[0-9a-f]+\/status$/.test(path)) json({ statuses: [] })
@@ -237,9 +239,10 @@ fail('fake gh: unexpected call ' + JSON.stringify(args) + '\n')
 type Run = { id: number; status: string; conclusion: string | null; event: string; head_branch: string; head_sha: string; html_url: string; created_at: string }
 type State = {
   permissions: Record<string, boolean>
-  ci: 'green' | 'failing' | 'pending'
+  ci: 'green' | 'failing' | 'pending' | 'none'
+  prCi?: 'green' | 'failing' | 'pending' | 'none'
   files: Record<string, string>
-  prs: { number: number; state: string; headRefName: string }[]
+  prs: { number: number; state: string; headRefName: string; baseRefName?: string; headRefOid?: string; mergeCommit?: { oid: string } }[]
   runs: Run[]
   jobs: Record<string, { name: string; status: string; conclusion: string | null }[]>
   pending: Record<string, unknown[]>
@@ -359,6 +362,7 @@ function repo({ bumped = false, version = APP_VERSION }: { bumped?: boolean; ver
   write(work, 'docs/releasing.md', `Released ${version} on a Monday.\n`)
   const released = commitAll(work, `chore(release): ${version} (#541)`)
   g(work, 'tag', `v${version}`)
+  write(work, '.github/workflows/build.yml', 'on:\n  push:\n    branches: [main]\n  pull_request:\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo test\n')
   write(work, 'a.txt', 'one\n')
   commitAll(work, 'feat(ui): one (#10)')
   write(work, 'b.txt', 'two\n')
@@ -394,7 +398,109 @@ const run = (extra: Partial<Run>): Run => ({
   ...extra,
 })
 
+/** Distinct PR head and squash commit, with real trees and a fetchable remote PR head. */
+function bumpEvidence(s: Repo, { differentTree = false } = {}) {
+  const tree = g(s.work, 'rev-parse', `${differentTree ? s.released : s.tip}^{tree}`)
+  const prHead = g(s.work, 'commit-tree', tree, '-p', s.released, '-m', 'chore(release): bump candidate')
+  g(s.work, 'push', '-q', 'origin', `${prHead}:refs/pull/900/head`)
+  patchState((st) => {
+    st.ci = 'pending'
+    st.prCi = 'green'
+    st.prs.push({ number: 900, state: 'MERGED', headRefName: `chore/release-${NEXT}`, baseRefName: 'main', headRefOid: prHead, mergeCommit: { oid: s.tip } })
+  })
+  return prHead
+}
+
 describe.skipIf(process.platform === 'win32')('release', { timeout: 60_000 }, () => {
+  it.each(['pending', 'none'] as const)('accepts the bump PR same tree when main CI is %s, in both steps', async (ci) => {
+    const s = repo({ bumped: true })
+    // Release jobs can share CI names; their separate event is not PR CI evidence.
+    write(s.work, '.github/workflows/release.yml', 'on:\n  workflow_dispatch:\njobs:\n  build:\n    runs-on: ubuntu-latest\n')
+    s.tip = commitAll(s.work, 'ci: add a separate release workflow')
+    g(s.work, 'push', '-q', 'origin', 'main')
+    patchState((st) => { st.dispatchSha = s.tip })
+    const prHead = bumpEvidence(s)
+    patchState((st) => { st.ci = ci })
+    expect(prHead).not.toBe(s.tip)
+    runtime()
+    for (const step of ['rehearse', 'tag']) {
+      const r = await call('release', { step, path: s.work, skipRehearsal: true, confirm: true })
+      expect(r.isError, r.text).toBe(false)
+      expect(r.data.lines.join(' ')).toContain("CI: PR #900's run on the same tree")
+    }
+    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(s.tip)
+  })
+
+  it('reports the same PR evidence in status and uses main green CI directly when it arrives', async () => {
+    const s = repo({ bumped: true })
+    bumpEvidence(s)
+    runtime()
+    const status = await call('release_status', { path: s.work })
+    expect(status.data.lines.join(' ')).toContain("CI: PR #900's run on the same tree")
+    patchState((st) => { st.ci = 'green'; st.prCi = 'failing' })
+    for (const step of ['rehearse', 'tag', 'status']) {
+      const r = await call(step === 'status' ? 'release_status' : 'release', { step, path: s.work, skipRehearsal: true })
+      expect(r.isError, r.text).toBe(false)
+      expect(r.data.lines.join(' ')).toContain("CI: main's own checks")
+    }
+  })
+
+  it.each([
+    ['different tree', 'different tree'],
+    ['later merge', "merge commit is not main's head"],
+    ['main failing', 'Main CI failed'],
+    ['PR failing', 'head checks are not all green'],
+    ['PR pending', 'head checks are not all green'],
+    ['PR missing', 'head checks are not all green'],
+    ['event job', 'uses event or branch context'],
+    ['push-only job', 'does not run on both push and pull_request'],
+  ])('refuses %s in both steps and reports the reason in status', async (scenario, reason) => {
+    const s = repo({ bumped: true })
+    if (scenario === 'event job' || scenario === 'push-only job') {
+      const file = '.github/workflows/build.yml'
+      const workflow = readFileSync(join(s.work, file), 'utf8')
+      write(s.work, file, scenario === 'event job' ? workflow.replace('    runs-on:', "    if: github.event_name == 'push'\n    runs-on:") : workflow.replace('  pull_request:\n', ''))
+      s.tip = commitAll(s.work, 'ci: change required build')
+      g(s.work, 'push', '-q', 'origin', 'main')
+    }
+    bumpEvidence(s, { differentTree: scenario === 'different tree' })
+    if (scenario === 'later merge') {
+      // Even an empty subsequent merge with the identical tree invalidates the exemption.
+      g(s.work, 'commit', '--allow-empty', '-q', '-m', 'docs: later merge (#901)')
+      g(s.work, 'push', '-q', 'origin', 'main')
+    }
+    patchState((st) => {
+      if (scenario === 'main failing') st.ci = 'failing'
+      if (scenario === 'PR failing') st.prCi = 'failing'
+      if (scenario === 'PR pending') st.prCi = 'pending'
+      if (scenario === 'PR missing') st.prCi = 'none'
+    })
+    runtime()
+    for (const step of ['rehearse', 'tag']) {
+      const r = await call('release', { step, path: s.work, skipRehearsal: true, confirm: true })
+      expect(r.isError, r.text).toBe(true)
+      expect(r.data.problems.join(' ')).toContain(reason)
+    }
+    const status = await call('release_status', { path: s.work })
+    expect(status.data.lines.join(' ')).toContain(reason)
+    expect(status.data.summary).toContain('Wait for green CI')
+    expect(ghWrites()).toEqual([])
+    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
+  })
+
+  it('blocks tagging when pending main CI fails after rehearsal accepted the PR evidence', async () => {
+    const s = repo({ bumped: true })
+    bumpEvidence(s)
+    runtime()
+    const rehearsal = await call('release', { step: 'rehearse', path: s.work, confirm: true })
+    expect(rehearsal.isError, rehearsal.text).toBe(false)
+    patchState((st) => { st.ci = 'failing' })
+    const tag = await call('release', { step: 'tag', path: s.work, skipRehearsal: true, confirm: true })
+    expect(tag.isError, tag.text).toBe(true)
+    expect(tag.data.problems.join(' ')).toContain('Main CI failed')
+    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
+  })
+
   it('passes check, with the status open to the screen and the steps to agents', async () => {
     const r = await runtime().check(ref)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])
@@ -411,7 +517,7 @@ describe.skipIf(process.platform === 'win32')('release', { timeout: 60_000 }, ()
     expect(r.data).toMatchObject({ ok: true, phase: 'released', version: APP_VERSION, head: s.tip })
     expect(r.data.summary).toBe(`main at ${s.tip.slice(0, 7)} carries ${APP_VERSION}: released as v${APP_VERSION}. Next: ${APP_VERSION} is released. 2 changes since: bump with release step bump.`)
     expect(r.data.lines).toEqual([
-      `CI on main at ${s.tip.slice(0, 7)}: green.`,
+      `CI: main's own checks on ${s.tip.slice(0, 7)} are green.`,
       `Checkout: clean, on main at ${s.tip.slice(0, 7)}.`,
       `Release run for v${APP_VERSION}: succeeded, https://github.com/ijun17/centralu/actions/runs/60.`,
       `Merged since v${APP_VERSION} (2):`,
@@ -694,7 +800,7 @@ describe.skipIf(process.platform === 'win32')('release', { timeout: 60_000 }, ()
     expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
     const skipped = await call('release', { step: 'tag', path: s.work, skipRehearsal: true })
     expect(skipped.isError).toBe(false)
-    expect(skipped.data.lines[1]).toBe('Rehearsal: skipped (skipRehearsal: true).')
+    expect(skipped.data.lines).toContain('Rehearsal: skipped (skipRehearsal: true).')
   })
 
   it('tags main after a rehearsal, pushes only the tag, and answers the release run', async () => {

@@ -13,7 +13,7 @@
 // that carry it are `release.versionFiles`. A bump changes each of them and refuses when one does not
 // carry the version, or when any non-exempt text file of the repository still carries it and is
 // not on the list: a file nobody listed is caught at the bump, not at the release.
-import { canMerge } from './ci.mjs'
+import { canMerge, workflowEventJobs } from './ci.mjs'
 import {
   changes,
   commitFiles,
@@ -22,6 +22,7 @@ import {
   filesAt,
   filesHolding,
   GitError,
+  git,
   head,
   isAncestor,
   pushRef,
@@ -30,6 +31,7 @@ import {
   showFile,
   subjects,
   topLevel,
+  treeOf,
 } from './git.mjs'
 import { bumpText, compareVersions, declaredVersion, filesNamed, nextVersion, parseVersion, releaseNotes, versionLines } from './versions.mjs'
 
@@ -131,6 +133,44 @@ async function ciProblems(s, ci) {
   return r.verdict === 'green' ? [] : [`CI on ${s.main} at ${short(s.tip)} is not green: ${r.summary}`]
 }
 
+/** The same evidence and refusal reasons serve status, rehearsal and tagging (#629). */
+async function releaseCi(s, cfg, gh, ci, allowPr = true) {
+  const main = await ci(s.tip)
+  const mainLine = `CI on ${s.main} at ${short(s.tip)}: ${main.verdict}.`
+  const refuse = (why) => ({ problems: [`CI on ${s.main} at ${short(s.tip)} is not green: ${main.summary}. ${why}`], lines: [mainLine, why] })
+  if (main.verdict === 'failing') return refuse('Main CI failed; PR evidence cannot override it.')
+  if (main.verdict === 'green') return { problems: [], lines: [`CI: ${s.main}'s own checks on ${short(s.tip)} are green.`] }
+  if (!allowPr) return refuse('Main CI is required for bumping the next version.')
+
+  const pr = (await gh.prsWithHead(s.repo, `${cfg.branchPrefix}${s.version}`)).find((p) => p.state === 'MERGED' && p.baseRefName === s.main)
+  if (!pr) return refuse('No merged bump PR for this version; main CI is required.')
+  if (pr.mergeCommit?.oid !== s.tip) return refuse(`PR #${pr.number}'s merge commit is not main's head; something merged after it or it is not this bump.`)
+  const parents = (await git(s.root, ['rev-list', '--parents', '-n', '1', s.tip])).trim().split(/\s+/).slice(1)
+  if (parents.length !== 1) return refuse(`PR #${pr.number} did not land as a squash commit; main CI is required.`)
+  if (!/^[0-9a-f]{40}$/.test(pr.headRefOid ?? '')) return refuse(`PR #${pr.number}'s head commit is unavailable.`)
+  const [prHead] = await fetchRefs(s.root, s.remote, [pr.headRefOid], `refs/centralu-release/${process.pid}-${++calls}`)
+  if (await treeOf(s.root, s.tip) !== await treeOf(s.root, prHead)) return refuse(`PR #${pr.number}'s head has a different tree from main; main CI is required.`)
+
+  const required = main.required ?? []
+  const covered = new Set()
+  const reasons = []
+  // Release workflows reuse build job names but are a separate gate, not the source of PR CI.
+  for (const file of main.workflows ?? []) {
+    for (const job of workflowEventJobs(await showFile(s.root, s.tip, file))) {
+      const names = job.names.filter((n) => required.includes(n))
+      for (const name of names) covered.add(name)
+      if (names.length && job.reason) reasons.push(`${file}: ${names.join(', ')} ${job.reason}`)
+    }
+  }
+  const unknown = required.filter((name) => !covered.has(name))
+  if (!required.length || unknown.length) reasons.push(`required jobs could not be audited${unknown.length ? `: ${unknown.join(', ')}` : ''}`)
+  if (reasons.length) return refuse(`Main CI is required because ${reasons.join('; ')}.`)
+
+  const tested = await ci(prHead)
+  if (tested.verdict !== 'green') return refuse(`PR #${pr.number}'s head checks are not all green: ${tested.summary}.`)
+  return { problems: [], lines: [`CI: PR #${pr.number}'s run on the same tree (${short(prHead)}); ${s.main} at ${short(s.tip)} is ${main.verdict}.`] }
+}
+
 /** The version files main carries, the bumped text of each, and every problem with them. */
 async function versionFiles(s, cfg, from, to) {
   const all = await filesAt(s.root, s.tip)
@@ -199,8 +239,8 @@ function notesLines(s) {
 export async function releaseStatus({ repo, dir, cfg, gh, ci }) {
   const s = { repo, ...(await readState({ repo, dir, cfg, gh })) }
   const lines = []
-  const verdict = await ci(s.tip)
-  lines.push(`CI on ${s.main} at ${short(s.tip)}: ${verdict.verdict}.`)
+  const evidence = await releaseCi(s, cfg, gh, ci, !s.tagged)
+  lines.push(...evidence.lines)
   const local = await checkoutProblems(s)
   lines.push(local.length ? `Checkout: ${local.join(' ')}` : `Checkout: clean, on ${s.main} at ${short(s.tip)}.`)
   const runs = await runsFor(s, cfg, gh)
@@ -242,6 +282,7 @@ export async function releaseStatus({ repo, dir, cfg, gh, ci }) {
           ? 'Wait for the rehearsal; call release_status again.'
           : `Rehearse with release step rehearse (confirm: true), then tag ${s.tag}.`
   }
+  if (!s.tagged && evidence.problems.length) next = `Wait for green CI: ${evidence.problems.join(' ')}`
   if (duplicates.length) {
     const safe = duplicates.filter((d) => d.safe)
     lines.push(`Duplicate release runs for ${s.tag}: ${duplicates.map((d) => d.run.url ?? d.run.id).join(', ')}.`)
@@ -367,7 +408,8 @@ async function findRun(gh, repo, file, filter, match, after) {
 export async function rehearseRelease({ repo, dir, cfg, gh, ci, permissions }, { confirm = false }) {
   if (!canMerge(permissions)) throw new ReleaseRefusal([NOT_MAINTAINER])
   const s = { repo, ...(await readState({ repo, dir, cfg, gh })) }
-  const problems = [...(await ciProblems(s, ci))]
+  const evidence = await releaseCi(s, cfg, gh, ci)
+  const problems = [...evidence.problems]
   if (s.tagged) problems.push(`${s.version} is released already (${s.tag}); bump first.`)
   const vf = await versionFiles(s, cfg, s.version)
   problems.push(...vf.problems)
@@ -375,12 +417,12 @@ export async function rehearseRelease({ repo, dir, cfg, gh, ci, permissions }, {
   const file = workflowFile(cfg)
   const { rehearsal } = await runsFor(s, cfg, gh)
   if (rehearsal && (rehearsal.status !== 'completed' || rehearsal.conclusion === 'success'))
-    return { summary: `A rehearsal on ${short(s.tip)} ${runState(rehearsal)}${rehearsal.url ? `: ${rehearsal.url}` : ''}; not starting another.`, lines: [], started: false, run: rehearsal.url }
+    return { summary: `A rehearsal on ${short(s.tip)} ${runState(rehearsal)}${rehearsal.url ? `: ${rehearsal.url}` : ''}; not starting another.`, lines: evidence.lines, started: false, run: rehearsal.url }
   const inputs = Object.entries(cfg.rehearsalInputs).map(([k, v]) => `${k}=${v}`).join(', ')
   if (!confirm)
     return {
       summary: `Ready to rehearse ${s.version} on ${s.main} at ${short(s.tip)} (${file} with ${inputs}; builds and packs, publishes nothing, asks no approval). Call again with confirm: true to start it.`,
-      lines: [],
+      lines: evidence.lines,
       started: false,
     }
   const at = Date.now()
@@ -388,7 +430,7 @@ export async function rehearseRelease({ repo, dir, cfg, gh, ci, permissions }, {
   const run = await findRun(gh, repo, file, { event: 'workflow_dispatch', headSha: s.tip }, () => true, at)
   return {
     summary: `Started the rehearsal of ${s.version} on ${short(s.tip)}${run?.url ? `: ${run.url}` : `; GitHub does not list the run yet, look at ${file}'s runs`}. Tag once it succeeds.`,
-    lines: [],
+    lines: evidence.lines,
     started: true,
     run: run?.url ?? null,
   }
@@ -400,7 +442,8 @@ export async function rehearseRelease({ repo, dir, cfg, gh, ci, permissions }, {
 export async function tagRelease({ repo, dir, cfg, gh, ci, permissions }, { version, skipRehearsal = false, confirm = false }) {
   if (!canMerge(permissions)) throw new ReleaseRefusal([NOT_MAINTAINER])
   const s = { repo, ...(await readState({ repo, dir, cfg, gh })) }
-  const problems = [...(await checkoutProblems(s)), ...(await ciProblems(s, ci))]
+  const evidence = await releaseCi(s, cfg, gh, ci)
+  const problems = [...(await checkoutProblems(s)), ...evidence.problems]
   if (version !== undefined && String(version).replace(/^v/, '') !== s.version) problems.push(`${s.main} at ${short(s.tip)} carries ${s.version}, not ${String(version).replace(/^v/, '')}; merge its bump first.`)
   if (s.tagged) problems.push(`${s.tag} is tagged already${s.tagged.sha === s.tip ? '' : ` (on ${short(s.tagged.sha)})`}; a release tag is never moved. Bump to the next version instead.`)
   else if (s.last && compareVersions(s.version, s.last.version) <= 0) problems.push(`${s.version} is not after ${s.last.name}, the latest release tag.`)
@@ -415,6 +458,7 @@ export async function tagRelease({ repo, dir, cfg, gh, ci, permissions }, { vers
   if (problems.length) throw new ReleaseRefusal(problems)
 
   const lines = [
+    ...evidence.lines,
     `${s.main} at ${short(s.tip)}: CI green, every version file carries ${s.version}.`,
     skipRehearsal ? 'Rehearsal: skipped (skipRehearsal: true).' : `Rehearsal: succeeded${rehearsal?.url ? `, ${rehearsal.url}` : ''}.`,
     ...notesLines(s),

@@ -81,6 +81,40 @@ script rehearses by default and why nothing publishes automatically.
 A push to a branch or a merge still publishes nothing. **A `v*` tag now does** — that is what
 the tag is for.
 
+### Reusing the bump PR's CI (#629)
+
+For `rehearse` and `tag`, the board can use the bump PR's green required checks while
+main's checks are pending or absent. The PR must be merged into main from
+`release.branchPrefix` plus the current version, main's head must be its single-parent
+squash merge commit, and `git rev-parse <sha>^{tree}` must match for main and the PR head.
+Even a later commit with an unchanged tree invalidates this evidence. Every required
+check on that exact PR head must be reported and green; missing, pending or failed
+checks refuse it. `bump` still requires main's own green CI.
+
+Main's green checks are used directly. A failing main check blocks reuse, including a
+run that was pending at rehearsal and fails before tagging: every call reads CI again.
+Both steps and `release_status` name their evidence, for example
+`CI: PR #624's run on the same tree`, or explain why main's CI is required. Status's
+next step waits for CI when neither source qualifies.
+
+Workflow event audit (2026-10-13):
+
+| Workflow and jobs | Event-dependent behavior | Required for this CI gate? |
+| --- | --- | --- |
+| `build.yml`: `bundle`, `verify`, `content-verify`, `windows-tests`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux` | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency uses the ref but does not change test behavior. | Yes: the configured CI workflow, unless branch protection specifies the set. |
+| `release.yml`: `guard`, `platform`, `shim` | Tag push or manual dispatch; `guard` validates the tag on push and dry-run controls publishing. Neither main push nor PR runs it. | No; rehearsal remains a separate tag prerequisite. |
+| `shell-release.yml`: `guard`, `build`, `publish` | Manual dispatch only. | No. |
+| `local-content-sign.yml`: `validate`, `sign` | Manual dispatch only; real signing requires main. | No. |
+| `drift.yml`: `claude-sdk`, `codex-protocol` | Schedule or manual dispatch only. | No. |
+| `discord-notify.yml`: `notify` | Issue, PR and discussion notifications (`pull_request_target`, not build CI). | No. |
+
+Before reusing PR evidence, the tool audits the configured `ci.workflows` files from
+main's fetched commit against the required check names. A required job with event/branch context (including
+shell scripts), one outside a shared push/PR workflow, or a required name it cannot
+map to an audited job requires main's own run and says why. This is conservative:
+unsupported workflow shapes do not grant an exemption. No workflow conditions or
+release approvals are changed by this optimization.
+
 ## One-time setup
 
 1. Create an npm token with **Bypass 2FA** (npmjs.com → Access Tokens → Granular). What the
@@ -96,7 +130,7 @@ the tag is for.
 The project board app (`.centralu/apps/project-board`) carries these steps as tools (#386):
 `release_status` says where the release stands and what is next, and `release` takes `step`
 `bump`, `rehearse`, `tag` or `approve`. Each step is for a login with maintain or admin
-permission, checks everything first (a clean checkout on main at GitHub's main, CI green on main,
+permission, checks everything first (a clean checkout on main at GitHub's main, qualifying green CI,
 the version untagged, a successful rehearsal before the tag) and refuses with every reason, and
 does nothing without `confirm: true`. The board's "Release" dialog shows the same state.
 

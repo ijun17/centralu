@@ -14,6 +14,7 @@ import {
   stripAttribution,
   summarizeDescription,
   workflowCheckNames,
+  workflowEventJobs,
   // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 } from '../.centralu/apps/project-board/ci.mjs'
 
@@ -701,5 +702,19 @@ describe('failure excerpts across runners', () => {
   const summaries = ['FAIL unit example.test.ts > fails', '  1) [chromium] › example.spec.ts:5:1 › fails', '---- example::fails stdout ----', "thread 'example::fails' panicked at src/lib.rs:4:5:", 'src/main.ts(1,1): error TS1234: bad type', '  1:2 error bad lint', 'failed to bundle project: error running bundle_dmg.sh']
   it.each(summaries)('takes %s when it is the first detailed failure in log order', (first) => {
     expect(failureLineIndex(['setup', first, ...summaries.filter((line) => line !== first)])).toBe(1)
+  })
+})
+
+describe('release CI event audit', () => {
+  it('finds no event-dependent jobs in the release CI workflow', () => {
+    const jobs = workflowEventJobs(readFileSync(join(REPO_ROOT, '.github/workflows/build.yml'), 'utf8'))
+    expect(jobs.length).toBeGreaterThan(0)
+    expect(jobs.every((j: { reason: string | null }) => j.reason === null)).toBe(true)
+  })
+
+  it.each(["    if: github.event_name == 'push'", '    steps:\n      - run: |\n          if [ "$GITHUB_EVENT_NAME" = push ]; then echo check; fi', '    env:\n      BRANCH: ${{ github.ref }}'])('requires main for event-dependent job content: %s', (body) => {
+    expect(workflowEventJobs(`on:\n  push:\n  pull_request:\njobs:\n  verify:\n${body}\n`)).toEqual([
+      { names: ['verify'], unresolved: [], reason: 'uses event or branch context' },
+    ])
   })
 })

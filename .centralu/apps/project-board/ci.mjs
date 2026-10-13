@@ -177,6 +177,26 @@ export function workflowCheckNames(text) {
   return { names: [...new Set(names)], unresolved: [...new Set(unresolved)] }
 }
 
+/**
+ * Conservative audit for reusing PR checks on main. Inspect scripts too: an event branch may be
+ * inside `run`, not `if`. Concurrency groups do not change what a job tests. Unknown required
+ * names are refused by the caller, so an unsupported workflow shape cannot grant an exemption.
+ */
+export function workflowEventJobs(text) {
+  const clean = String(text).split(/\r?\n/).filter((line) => !/^\s*#/.test(line)).join('\n')
+  const jobsAt = clean.search(/^jobs:\s*$/m)
+  if (jobsAt < 0) return []
+  const header = clean.slice(0, jobsAt)
+  const shared = /^ {2}push:/m.test(header) && /^ {2}pull_request:/m.test(header)
+  const context = /github\.(?:event\b|event_name\b|ref\b|ref_name\b|ref_type\b|head_ref\b|base_ref\b)|GITHUB_(?:EVENT|REF|HEAD_REF|BASE_REF)/
+  const global = header.replace(/^concurrency:[\s\S]*?(?=^\S|$(?![\s\S]))/gm, '')
+  const blocks = clean.slice(jobsAt + 'jobs:'.length).split(/(?=^ {2}[\w-]+:\s*$)/m).filter((b) => /^ {2}[\w-]+:/m.test(b))
+  return blocks.map((body) => ({
+    ...workflowCheckNames(`jobs:\n${body}`),
+    reason: !shared ? 'does not run on both push and pull_request' : context.test(global + body) ? 'uses event or branch context' : null,
+  }))
+}
+
 // --- What the reported checks add up to -----------------------------------------------------------
 
 const PASSED = new Set(['success', 'neutral', 'skipped'])

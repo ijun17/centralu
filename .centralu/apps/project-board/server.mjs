@@ -1216,7 +1216,7 @@ async function ciOfMain(repo, sha) {
   const { defaultBranch } = await readRepo(repo)
   const req = await readRequired(repo, defaultBranch, CI.workflows, workflowCheckNames)
   const checks = await evaluate(repo, sha, req)
-  return { verdict: checks.verdict, summary: ciLines(defaultBranch, sha, req, checks).summary }
+  return { verdict: checks.verdict, required: checks.rows.map((r) => r.name), workflows: CI.workflows, summary: ciLines(defaultBranch, sha, req, checks).summary }
 }
 
 /** open_pr's own code, answering whether it went and what it said. */
@@ -1654,7 +1654,7 @@ serveStdio(() => {
     {
       title: 'Release: bump, rehearse, tag, approve',
       description:
-        "docs/releasing.md as steps, maintainer only (maintain or admin on the repository). Each step checks everything first and refuses with every reason, changing nothing; without confirm: true it only says what it would do. bump: needs a clean checkout on main at GitHub's main, CI green and the current version released; moves every file in project.json release.versionFiles from main's version to version (or the next by bump, default prerelease), refuses when a listed file lacks the version or an unlisted file carries it, commits in a temporary index, pushes chore/release-<version> and opens the pull request from the template with the merged list as the notes draft. rehearse: starts the release workflow on main with its dry-run input. tag: needs a clean checkout on main at GitHub's main, CI green, main's version untagged and after the last tag, and a successful rehearsal on that commit (or skipRehearsal: true); pushes the tag on main's commit and answers the release run. approve: approves the tag's release run on its environment (npm-publish), only what GitHub says this login may approve; the shim's approval is the last reversible moment.",
+        "docs/releasing.md as steps, maintainer only (maintain or admin on the repository). Each step checks everything first and refuses with every reason, changing nothing; without confirm: true it only says what it would do. bump: needs a clean checkout on main at GitHub's main, CI green and the current version released; moves every file in project.json release.versionFiles from main's version to version (or the next by bump, default prerelease), refuses when a listed file lacks the version or an unlisted file carries it, commits in a temporary index, pushes chore/release-<version> and opens the pull request from the template with the merged list as the notes draft. rehearse: starts the release workflow on main with its dry-run input. rehearse and tag may use the merged bump PR's green checks when main is its squash commit with the identical tree, and required jobs do not depend on the event; failing main CI always blocks. Both report the CI evidence used. tag: needs a clean checkout on main at GitHub's main, CI green, main's version untagged and after the last tag, and a successful rehearsal on that commit (or skipRehearsal: true); pushes the tag on main's commit and answers the release run. approve: approves the tag's release run on its environment (npm-publish), only what GitHub says this login may approve; the shim's approval is the last reversible moment.",
       inputSchema: z.object({
         step: z.enum(['bump', 'rehearse', 'tag', 'approve', 'cancel_duplicate']),
         confirm: z.boolean().optional().describe('Do it; default false (check and say what it would do)'),
