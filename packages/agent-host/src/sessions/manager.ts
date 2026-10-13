@@ -2343,6 +2343,8 @@ export class SessionManager {
     }
   }
 
+  private trashing = new Map<string, Promise<void>>()
+
   /**
    * Moves a session to the trash (#204) — what deleting a session means now. Nothing is destroyed: the process
    * stops, and the session leaves every list (sidebar, inbox, palette, grid, search, the agents' session tools and
@@ -2362,6 +2364,19 @@ export class SessionManager {
    * tool, and **+ → Past conversations**, still have it.
    */
   async trashSession(sessionId: string, removeWorktree = false, removeExternal = false, recovery?: WorktreeRecovery): Promise<void> {
+    const pending = this.trashing.get(sessionId)
+    if (pending) return pending
+    // The first request owns the options; concurrent sidebar/agent deletes share its result.
+    const deleting = this.trashSessionOnce(sessionId, removeWorktree, removeExternal, recovery)
+    this.trashing.set(sessionId, deleting)
+    try {
+      await deleting
+    } finally {
+      this.trashing.delete(sessionId)
+    }
+  }
+
+  private async trashSessionOnce(sessionId: string, removeWorktree: boolean, removeExternal: boolean, recovery?: WorktreeRecovery): Promise<void> {
     if (this.worktreeCleanup.has(sessionId) && !recovery) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const m = this.meta.get(sessionId)
     if (!m) {
@@ -5816,6 +5831,12 @@ export class SessionManager {
         }
         case 'delete': {
           if (!child.worktree) {
+            const busy = child.state === 'working' || child.state === 'waiting_approval' ||
+              !!child.pendingApproval || child.pendingQuestions.length > 0 ||
+              (this.agentRuns.has(child.id) && !this.agentRuns.get(child.id)!.finished)
+            if (!this.trashing.has(child.id) && busy && (!d || d.settled || d.callerId !== callerId)) {
+              return { ok: false, error: `"${child.name}" is busy with something else; the person may be using it. Wait for that turn and its pending approval or question to finish before deleting it.` }
+            }
             // Use the sidebar's stop/flush/trash path, including pending waits and wake withdrawal.
             await this.trashSession(child.id)
             if (d) this.delegations.delete(key)
@@ -5907,6 +5928,9 @@ export class SessionManager {
     }
     if (target.state === 'working' || target.state === 'waiting_approval' || this.agentRuns.has(target.id) || sessionBusy({ ...target, live: this.handles.has(target.id) })) {
       return { ok: false, error: `"${target.name}" is still working — stop it or wait first` }
+    }
+    if (!existsSync(target.worktree.path)) {
+      return { ok: false, error: `The worktree folder for "${target.name}" is missing: ${target.worktree.path}. Restore the folder before cleanup; its branch has been left in place.` }
     }
     if (this.resuming.has(target.id) || this.deferredRestarts.has(target.id)) return { ok: false, error: `"${target.name}" is waking or restarting — wait for it first` }
     if (this.worktreeCleanup.has(target.id)) return { ok: false, error: 'This worktree is already being removed' }

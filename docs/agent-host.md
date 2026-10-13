@@ -410,14 +410,20 @@ the children keep their turns and their link.
 **Deleting a child without a worktree** (#637). In every preset, the caller may delete only a session it started
 in the same project (`askedBy` or `parentSessionId` equals the caller). The host uses the sidebar's
 `trashSession` path: withdraw a pending wake, settle waits, dispose the child process if present, flush streamed
-messages, then move the session to the trash and emit `session_deleted`. This works mid-turn, including while
-the parent is working; it does not stop the parent's turn. History and the tool's conversation remain restorable.
+messages, then move the session to the trash and emit `session_deleted`. Mid-turn deletion requires the caller's
+own unsettled delegation, including while the parent is working; it does not stop the parent's turn. If the
+person has started another turn, or an approval/question remains without that delegation, deletion is refused
+until that work finishes, even under `auto`. History and the tool's conversation remain restorable.
+Concurrent sidebar and agent trash requests share one operation per session: the first request's options and
+result apply to both, with one process disposal, store write and deletion event.
 The result is `deleted` without worktree/branch recovery fields. A session belonging to another caller, an
 unowned session, a session in another project, and self-deletion are refused.
 
 **Deleting a worktree child** (#608, decision owner 2026-10-13). In every preset the parent decides whether
 to remove its child: neither uncommitted files nor an unproven merge refuses deletion. A working child must
-finish or be stopped first. Cleanup refuses a child still waking/restarting, blocks sends/resumes, and requires
+finish or be stopped first. A missing worktree folder is refused with its path and a request to restore it;
+the live/stored session retains worktree metadata (only the trash list hides missing folders), so it never
+becomes a same-folder deletion. Cleanup refuses a child still waking/restarting, blocks sends/resumes, and requires
 successful disposal of the idle CLI before snapshotting. Failed capture leaves the worktree and branch in place. Once captured,
 the session goes to the trash, then git removes the worktree (including initialized submodules) and branch.
 After trashing, removal errors return `deleted` with a warning naming the leftover worktree/branch and
