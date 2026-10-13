@@ -123,6 +123,26 @@ Release tools still enforce the required-check set.
 
 The steps by hand:
 
+The bump scans every tracked text file on remote main, with no extension or e2e exclusion.
+It reports each unexpected reference as `file:line`, including versions followed by `.local.N`,
+`-rc` or `+build`, inside template strings, and in unquoted text. A different numeric or
+alphanumeric continuation (for example, `beta.210` when checking `beta.21`) is not a hit.
+Automatic replacement still changes only whole single- or double-quoted versions in
+`release.versionFiles`; derive embedded runtime/test values from `APP_VERSION`.
+
+Historical references and intentional pins belong in `release.ignore` in
+`.centralu/apps/project-board/project.json`. This explicit path allowlist uses the same patterns
+as `versionFiles`: `*` matches within a path segment and `**` matches zero or more folders.
+The repository allows `docs/**/*.md`, `**/CHANGELOG*`, `**/release-notes/**/*.md`,
+`**/pnpm-lock.yaml`, `**/package-lock.json`, `**/npm-shrinkwrap.json` and `**/*.lock`.
+These files are scanned only when they are declared in `versionFiles`: that list always wins,
+so the app's own versions in `Cargo.lock` must still be current and are bumped.
+For a fixture that deliberately pins a historical version, add its exact path, for example
+`"fixtures/pinned-version.json"`, to `release.ignore` and explain the pin in the fixture or its
+test. Fixtures and tests are not exempt by default. Keep exemptions narrow; they skip the whole
+file. `release` with `step: "bump"` and no `confirm` runs these checks without pushing or opening
+a release PR (and still reports other readiness problems, such as not being on main).
+
 1. Bump `APP_VERSION` in `packages/protocol/src/brand.ts`, and the same version in every
    file listed under `release.versionFiles` in `.centralu/apps/project-board/project.json`:
    `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml` (and

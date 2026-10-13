@@ -52,6 +52,26 @@ Linux 패키지는 번들 호스트를 한 번 더, 풀린 채로 AppImage 옆�
 
 프로젝트 보드 앱(`.centralu/apps/project-board`)이 이 단계들을 도구로 갖고 있다(#386): `release_status`는 릴리스가 어디까지 왔고 다음이 무엇인지 말하고, `release`는 `step`으로 `bump`, `rehearse`, `tag`, `approve`를 받는다. 각 단계는 maintain이나 admin 권한이 있는 로그인만 쓸 수 있고, 먼저 모든 것을 확인하며(GitHub의 main과 같은 main에 있는 깨끗한 체크아웃, main의 CI green, 태그가 없는 버전, 태그 전에 성공한 리허설) 이유를 모두 들어 거부하고, `confirm: true` 없이는 아무것도 하지 않는다. 보드의 "Release" 대화상자가 같은 상태를 보여 준다. 손으로 하는 단계:
 
+The bump scans every tracked text file on remote main, with no extension or e2e exclusion.
+It reports each unexpected reference as `file:line`, including versions followed by `.local.N`,
+`-rc` or `+build`, inside template strings, and in unquoted text. A different numeric or
+alphanumeric continuation (for example, `beta.210` when checking `beta.21`) is not a hit.
+Automatic replacement still changes only whole single- or double-quoted versions in
+`release.versionFiles`; derive embedded runtime/test values from `APP_VERSION`.
+
+Historical references and intentional pins belong in `release.ignore` in
+`.centralu/apps/project-board/project.json`. This explicit path allowlist uses the same patterns
+as `versionFiles`: `*` matches within a path segment and `**` matches zero or more folders.
+The repository allows `docs/**/*.md`, `**/CHANGELOG*`, `**/release-notes/**/*.md`,
+`**/pnpm-lock.yaml`, `**/package-lock.json`, `**/npm-shrinkwrap.json` and `**/*.lock`.
+These files are scanned only when they are declared in `versionFiles`: that list always wins,
+so the app's own versions in `Cargo.lock` must still be current and are bumped.
+For a fixture that deliberately pins a historical version, add its exact path, for example
+`"fixtures/pinned-version.json"`, to `release.ignore` and explain the pin in the fixture or its
+test. Fixtures and tests are not exempt by default. Keep exemptions narrow; they skip the whole
+file. `release` with `step: "bump"` and no `confirm` runs these checks without pushing or opening
+a release PR (and still reports other readiness problems, such as not being on main).
+
 1. `packages/protocol/src/brand.ts`의 `APP_VERSION`을 올리고, 같은 버전을 `.centralu/apps/project-board/project.json`의 `release.versionFiles`에 있는 모든 파일에 반영한다: `apps/desktop/src-tauri/tauri.conf.json`, `apps/desktop/src-tauri/Cargo.toml`(과 `Cargo.lock`), `apps/desktop/package.json`, 그리고 모든 `packaging/npm/*/package.json`(shim의 핀 포함). 하나라도 어긋나면 `tooling/brand.test.ts`가 실패하고, 버전을 가진 파일이 그 목록에 없으면 `tooling/project-board-release.test.ts`가 실패한다. 커밋하고 push한다 — 릴리스 스크립트는 더러운 트리에서는 실행을 거부하므로, 배포되는 것과 git에 있는 것이 서로 다를 수 없다.
 
 2. **리허설한다.** Actions → `release` → Run workflow, `dry_run`은 체크된 채로 둔다. 모든 플랫폼을 빌드하고 모든 패키지를 pack하되 아무것도 배포하지 않는다. 승인도 요구하지 않는다: `npm pack`에는 토큰이 필요 없고, 리허설에 게이트를 두면 시도할 때마다 승인이 하나씩 든다 — 첫 릴리스에서 그런 식으로 세 번을 썼다.

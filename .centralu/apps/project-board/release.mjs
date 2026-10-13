@@ -11,7 +11,7 @@
 //
 // The version lives in one declaration (`release.source` in project.json, brand.ts here); the files
 // that carry it are `release.versionFiles`. A bump changes each of them and refuses when one does not
-// carry the version, or when any file of the repository still carries it as a quoted string and is
+// carry the version, or when any non-exempt text file of the repository still carries it and is
 // not on the list: a file nobody listed is caught at the bump, not at the release.
 import { canMerge } from './ci.mjs'
 import {
@@ -31,7 +31,7 @@ import {
   subjects,
   topLevel,
 } from './git.mjs'
-import { bumpText, compareVersions, declaredVersion, filesNamed, nextVersion, parseVersion, releaseNotes } from './versions.mjs'
+import { bumpText, compareVersions, declaredVersion, filesNamed, nextVersion, parseVersion, releaseNotes, versionLines } from './versions.mjs'
 
 /** A refusal: nothing was pushed, tagged, started or approved. */
 export class ReleaseRefusal extends Error {
@@ -148,9 +148,11 @@ async function versionFiles(s, cfg, from, to) {
     counts[path] = r.count
   }
   // A file that carries the version and is not listed would keep the old one after the bump
-  const holding = await filesHolding(s.root, s.tip, [`"${from}"`, `'${from}'`])
-  for (const p of holding.filter((p) => !named.includes(p) && !filesNamed(cfg.ignore, [p]).length))
-    problems.push(`${p} carries "${from}" but is not in project.json release.versionFiles; add it there (or to release.ignore if that string is not the version).`)
+  const holding = await filesHolding(s.root, s.tip, [from])
+  for (const p of holding.filter((p) => !named.includes(p) && !filesNamed(cfg.ignore, [p]).length)) {
+    for (const line of versionLines(await showFile(s.root, s.tip, p), from))
+      problems.push(`${p}:${line} carries "${from}" but is not in project.json release.versionFiles; derive it from the version source, or add it to release.ignore if it intentionally pins a version.`)
+  }
   return { named, files, counts, problems }
 }
 
@@ -305,7 +307,7 @@ export async function bumpRelease({ repo, dir, cfg, gh, ci, openPr, permissions 
     base: s.main,
     why: [String(notes ?? '').trim() || `Ship what merged since ${s.notesFrom ?? 'the last release'}.`, ...(merged.length ? ['', ...merged] : [])].join('\n'),
     whatChanged: `The version ${s.version} → ${next} in ${vf.named.map((p) => `\`${p}\``).join(', ')}.`,
-    verified: `The release tool's checks on ${s.main} at ${short(s.tip)}: CI green, every file in release.versionFiles carried ${s.version} and now carries ${next}, and no other file carries ${s.version} as a quoted string. \`tooling/brand.test.ts\` runs on this pull request.`,
+    verified: `The release tool's checks on ${s.main} at ${short(s.tip)}: CI green, every file in release.versionFiles carried ${s.version} and now carries ${next}, and no other tracked text file outside release.ignore carries ${s.version}, including embedded references. \`tooling/brand.test.ts\` runs on this pull request.`,
     usability: 'n/a',
     notExercised: `The release workflow, until ${cfg.tagPrefix}${next} is tagged.`,
     closes: String(closes ?? '').trim() || 'No issue: a release.',

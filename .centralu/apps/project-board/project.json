@@ -25,7 +25,15 @@
       "apps/desktop/src-tauri/Cargo.lock",
       "packaging/npm/*/package.json"
     ],
-    "ignore": [],
+    "ignore": [
+      "docs/**/*.md",
+      "**/CHANGELOG*",
+      "**/release-notes/**/*.md",
+      "**/pnpm-lock.yaml",
+      "**/package-lock.json",
+      "**/npm-shrinkwrap.json",
+      "**/*.lock"
+    ],
     "tagPrefix": "v",
     "branchPrefix": "chore/release-",
     "workflow": ".github/workflows/release.yml",

@@ -157,8 +157,8 @@ export const filesAt = async (dir, rev) => (await git(dir, ['ls-tree', '-r', '--
 /** The files of a commit that hold any of the fixed strings; empty when none does. */
 export async function filesHolding(dir, rev, strings) {
   try {
-    const text = await git(dir, ['grep', '-l', '-I', '-F', ...strings.flatMap((s) => ['-e', s]), rev, '--'])
-    return text.split('\n').filter(Boolean).map((l) => l.slice(rev.length + 1))
+    const text = await git(dir, ['grep', '-l', '-z', '-I', '-F', ...strings.flatMap((s) => ['-e', s]), rev, '--'])
+    return text.split('\0').filter(Boolean).map((l) => l.slice(rev.length + 1))
   } catch (e) {
     if (e.code === 1 && !e.stderr.trim()) return [] // nothing found
     throw e

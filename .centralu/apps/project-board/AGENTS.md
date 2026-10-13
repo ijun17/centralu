@@ -223,8 +223,10 @@ step shows on the screen.
     checkout clean, on main and at main's commit on the remote, CI green, main's version tagged
     (released), the new version after it and after the latest tag, untagged, and no branch or open pull
     request for it yet. Every file in `versionFiles` must carry main's version as a quoted string, and
-    no other file may (`git grep` on main's commit; a file carrying it that is not listed is refused by
-    name, so a version file nobody listed is caught at the bump, not after the release). The bump
+    no other tracked text file outside `release.ignore` may carry it, including suffixes and template
+    strings (`git grep` on main's commit, no extension filter; each hit is reported as `file:line`).
+    `ignore` explicitly allows historical docs, release notes and lockfiles; intentional fixture pins
+    need an exact path there. `versionFiles` wins over `ignore`. See docs/releasing.md. The bump
     replaces the quoted version only (prose like "removed in 0.1.0-beta.16" stays), commits it on main
     in a temporary index (the checkout, its index and branches never move), pushes
     `chore/release-<version>` (never forced) and opens the pull request through `open_pr`'s own code,

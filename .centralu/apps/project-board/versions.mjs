@@ -76,6 +76,18 @@ export const versionPattern = (version) => new RegExp(`(["'])${escape(version)}\
 
 export const carries = (text, version) => versionPattern(version).test(String(text ?? ''))
 
+/**
+ * Detection is broader than replacement: suffixes, templates and unquoted text can all pin a
+ * release. Numeric/alphanumeric continuations (beta.210 versus beta.21) are different versions.
+ * Return each matching line once, even when it holds several references.
+ */
+export function versionLines(text, version) {
+  const pattern = new RegExp(`(?<![0-9.])${escape(version)}(?![0-9A-Za-z])`)
+  return String(text ?? '')
+    .split('\n')
+    .flatMap((line, i) => (pattern.test(line) ? [i + 1] : []))
+}
+
 /** `text` with every quoted `from` turned into `to`, and how many there were. */
 export function bumpText(text, from, to) {
   let count = 0
