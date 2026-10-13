@@ -16,13 +16,13 @@ permissions:
   contents: read
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - name: Validate data and show what approval signs
@@ -42,7 +42,7 @@ jobs:
           writeFileSync('manifest-data/content-manifest.json', bytes)
           appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Version: ${m.appVersion}\n\nInstalled (reported): ${m.local.installedVersion}\n\nNext release: ${m.local.nextRelease}\n\nCommit (reported): ${m.local.commit}\n\nDirty: ${m.local.dirty}\n\nFiles: ${m.files.length}\n\nManifest SHA-256: ${createHash('sha256').update(bytes).digest('hex')}\n\nDry run: ${process.env.DRY_RUN}\n`)
           JS
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: local-manifest
           path: manifest-data/content-manifest.json
@@ -50,18 +50,18 @@ jobs:
           retention-days: 1
   sign:
     needs: validate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Real signing requires the same environment approval and key as a release.
     environment: ${{ inputs.dry_run == false && 'npm-publish' || '' }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: local-manifest
           path: manifest-data
@@ -74,7 +74,7 @@ jobs:
           args=()
           if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
           node --experimental-strip-types scripts/content-manifest.mts sign-local manifest-data/content-manifest.json "${args[@]}"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: local-content-signature
           path: manifest-data/content-manifest.json.sig

@@ -4,6 +4,25 @@
 
 Centralu의 한 버전이 사용자에게 도달하는 방법을 다룬다. 배포 채널은 npm뿐이다. 다운로드 페이지도, 업데이트 서버도 없다.
 
+## CI runner and action pins
+
+All workflows use explicit hosted runner labels, including matrix values; the guard in
+`tooling/workflow-runners.test.ts` rejects floating `ubuntu-latest`, `macos-latest` and
+`windows-latest` labels. General Linux jobs use `ubuntu-24.04`. Native Linux bundles keep
+`ubuntu-22.04` / `ubuntu-22.04-arm` for their glibc floor; macOS stays on `macos-14`
+(arm64), and Windows on `windows-2022`.
+
+Confirmed from the **Runner Image** sections of [build run 38417790949](https://github.com/ijun17/centralu/actions/runs/38417790949)
+and [local signing run 38431334485](https://github.com/ijun17/centralu/actions/runs/38431334485)
+on 2026-10-14. An OS label pins the OS generation, not GitHub's weekly image revision.
+The Ubuntu 26 migration of `ubuntu-latest` starts on 2026-10-19 (#639); a separate PR
+should try `ubuntu-26.04` across the matrix before changing these pins.
+
+JavaScript actions use Node 24 releases pinned to full commit SHAs, with version
+comments. This action runtime is separate from the host/build Node 22 selected by
+`setup-node`. When updating pins, check upstream release notes and `action.yml`, and
+exercise the artifact upload/download pair together.
+
 ## 패키지가 이런 모양인 이유
 
 npm에는 다섯 개의 패키지가 올라간다:
