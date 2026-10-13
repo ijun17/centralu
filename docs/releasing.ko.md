@@ -178,120 +178,112 @@ detached는 선택이 아니다. libuv는 detached가 아닌 모든 자식을, �
 
 **아직 증명되지 않은 것.** run 32381990293은 #29의 빌드 관련 두 질문에 증거로 답했다: `node-pty`(어느 아키텍처에도 Linux prebuild가 없어 러너에서 node-gyp이 컴파일한다)와 `better-sqlite3` 모두 arm64에서 빌드되고, AppImage 툴링은 x64와 일관된 크기의 번들을 만들어 낸다. 하지만 green 빌드가 *실행된다*는 것까지 증명하지는 않으며, 어느 Linux 아키텍처에서도 아무도 실행해 본 적이 없다. 이는 beta.2로 배포된 x64 패키지에 이미 참인 것과 같은 사실이고, README도 양쪽 모두에 그렇게 적고 있다.
 
-## Local maintainer updates (#610)
+## 유지관리자의 로컬 업데이트 (#610)
 
-`pnpm local-update` normally builds and installs macOS arm64 content on the maintainer's
-selected machine. Only `content-manifest.json` (at most 60,000 UTF-8 bytes) is sent to
-`.github/workflows/local-content-sign.yml`; the command uploads no executables. This is
-an intended workflow, not a machine restriction: a signed manifest and its matching files
-can be copied to any other `darwin-arm64` machine trusting the key with a lower highest-seen
-version. The signature is not machine-bound. Full npm releases remain the public update path.
+`pnpm local-update`는 보통 유지관리자가 선택한 머신에서 macOS arm64 콘텐츠를 빌드하고 설치한다.
+`.github/workflows/local-content-sign.yml`로 보내는 것은 `content-manifest.json`(UTF-8 기준 최대
+60,000바이트)뿐이며, 명령은 실행 파일을 업로드하지 않는다. 이것은 의도한 작업 경로이지 머신을
+제한하는 장치는 아니다: 서명된 매니페스트와 그에 맞는 파일은 같은 키를 신뢰하고 지금까지 시작한
+최고 버전이 더 낮은 다른 `darwin-arm64` 머신에도 복사할 수 있다. 서명은 특정 머신에 묶이지 않는다.
+일반 사용자에게 배포하는 업데이트 경로는 여전히 전체 npm 릴리스다.
 
 ```bash
-pnpm local-update --plan        # read the installed version and check the version bounds
-pnpm local-update --dry-run     # local build + throwaway signing; no dispatch or install
-pnpm local-update               # build, dispatch, wait for approval, verify, install
-# For a copy running from a different location:
+pnpm local-update --plan        # 설치된 버전을 읽고 버전 범위를 확인한다
+pnpm local-update --dry-run     # 로컬 빌드 + 임시 키 서명; 워크플로 실행이나 설치는 하지 않는다
+pnpm local-update               # 빌드, 워크플로 실행, 승인 대기, 검증, 설치
+# 다른 위치에서 실행하는 복사본이라면:
 pnpm local-update --target /path/to/Centralu.app
 ```
 
-The default target is `/Applications/Centralu.app`, exactly the copy `centralu install`
-replaces. The command builds in a disposable checkout below the system temporary directory,
-stamps the local version into the UI/host, Rust workspace and Tauri bundle, and runs the
-release's `tauri build --bundles app` path (including host and frontend bundling). It reuses
-a temporary Cargo cache for incremental updates. Dirty and unpushed source is allowed:
-the signed manifest records the original commit and dirty flag, base version, reported
-installed version, next release bound and a unique request id. Generated local version
-changes do not change that original dirty flag. The tracked and nonignored untracked files
-are copied; ignored build inputs are not. Keep the checkout still while the snapshot is taken.
-No host is launched and any build subprocess receives a temporary `CC_DATA_DIR`.
+기본 대상은 `/Applications/Centralu.app`으로, `centralu install`이 교체하는 바로 그 복사본이다.
+명령은 시스템 임시 폴더 아래의 일회용 체크아웃에서 빌드하고, UI/호스트, Rust 워크스페이스와
+Tauri 번들에 로컬 버전을 넣은 뒤 릴리스의 `tauri build --bundles app` 경로를 돌린다(호스트와
+프런트엔드 번들링도 포함한다). 증분 업데이트에는 임시 Cargo 캐시를 다시 쓴다. 커밋하지 않은 변경과
+아직 push하지 않은 소스도 허용한다: 서명된 매니페스트에 원래 커밋과 dirty 플래그, 기준 버전,
+신고된 설치 버전, 다음 릴리스의 상한과 고유 요청 id를 기록한다. 빌드용 로컬 버전을 넣으면서 생기는
+변경은 원래의 dirty 플래그를 바꾸지 않는다. 추적 중인 파일과 ignore되지 않은 미추적 파일을
+복사하며, ignore된 빌드 입력은 복사하지 않는다. 스냅샷을 뜨는 동안에는 체크아웃을 바꾸지 않는다.
+호스트는 시작하지 않으며, 모든 빌드 자식 프로세스에는 임시 `CC_DATA_DIR`를 준다.
 
-**Version bounds are enforced twice**, before building and immediately before installing:
-`<current>.local.N` must be strictly above the installed copy and below the next release.
-For example, `0.1.0-beta.20 < 0.1.0-beta.20.local.1 < 0.1.0-beta.21` under the existing
-SemVer rules. `N` is positive and increments from the installed local copy; `--version`
-can request an explicit counter. Moving from `beta.19.local.128` to a `beta.20` checkout
-starts at `beta.20.local.1`. The next release increments the final numeric release
-identifier (`beta.20` → `beta.21`). Invalid versions, the old `-local.N` spelling,
-equal/older candidates and candidates at or beyond the next release are refused. This
-format needs a prerelease base: appending `.local.N` to a stable `1.2.3` is not SemVer
-and is refused rather than changing the shell/keeper's version rules.
+**버전 범위는 빌드 전과 설치 직전에 두 번 확인한다.** `<current>.local.N`은 설치된 복사본보다
+높고 다음 릴리스보다 낮아야 한다. 기존 SemVer 규칙에서, 예를 들어
+`0.1.0-beta.20 < 0.1.0-beta.20.local.1 < 0.1.0-beta.21`이다. `N`은 양수이고 설치된 로컬
+복사본의 번호에서 하나씩 올라간다. `--version`으로 번호를 직접 지정할 수도 있다.
+`beta.19.local.128`에서 `beta.20` 체크아웃으로 옮기면 `beta.20.local.1`부터 시작한다.
+다음 릴리스는 릴리스 버전의 마지막 숫자 식별자를 하나 올린 값이다(`beta.20` → `beta.21`).
+잘못된 버전, 예전 `-local.N` 표기, 설치된 버전과 같거나 더 낮은 후보, 다음 릴리스 이상인 후보는
+거부한다. 이 형식에는 prerelease 기준 버전이 필요하다: 안정 버전 `1.2.3` 뒤에 `.local.N`을 붙이면
+SemVer가 아니므로, 셸/키퍼의 버전 규칙을 바꾸는 대신 거부한다.
 
-The command dispatches from `main`, so the workflow must first be merged there. A tiny job
-validates the JSON and uploads only those exact bytes; its summary shows the manifest hash,
-version and reported source provenance. It allows only format 1, shell 1, `darwin-arm64`,
-a bounded sorted file list containing the keeper and required host entry points, safe paths,
-file sizes, SHA-256 hashes and executable bits. Both validation passes read `APP_VERSION`
-from `packages/protocol/src/brand.ts` in the checked-out main commit, require the reported
-base to match it, and derive the next release and upper bound from it. Uploaded claims cannot
-choose a future base such as `beta.999`. The signing job validates again after download,
-then uses `signatureBytes` in `scripts/content-manifest.mts`, the same Ed25519 routine as
-`release.yml`. It installs no dependencies and executes no uploaded code. The unmodified
-workflow checks `GITHUB_REF == main` for real signing, uses the existing `CONTENT_SIGNING_KEY`,
-and waits on `npm-publish` approval. This main check is advisory: at security-review time the
-environment has no deployment branch policy, and an edited branch workflow could get the key
-after approval. The parent/owner must separately restrict the environment to `main` and `v*`
-tags in GitHub settings before merge; this PR does not configure or verify those settings.
-No npm token or private key reaches the local command; no shell identity, public keys or
-keeper trust rules change.
+명령은 `main`에서 워크플로를 실행하므로, 워크플로가 먼저 그 브랜치에 병합되어 있어야 한다.
+작은 잡 하나가 JSON을 검증하고 그 바이트 그대로 업로드한다. 실행 요약에는 매니페스트 해시,
+버전과 신고된 소스 정보가 나온다. 허용하는 것은 format 1, shell 1, `darwin-arm64`뿐이며,
+파일 목록은 크기가 제한되고 정렬되어 있어야 한다. 키퍼와 필수 호스트 진입점, 안전한 경로,
+파일 크기, SHA-256 해시와 실행 비트도 확인한다. 두 검증 단계 모두 체크아웃한 main 커밋의
+`packages/protocol/src/brand.ts`에서 `APP_VERSION`을 읽고, 신고된 기준 버전이 그 값과 같은지
+확인한 뒤 그 값에서 다음 릴리스와 상한을 계산한다. 업로드한 정보만으로 `beta.999` 같은 미래의
+기준 버전을 고를 수는 없다. 서명 잡은 다운로드한 뒤 다시 검증하고, `release.yml`과 같은
+`scripts/content-manifest.mts`의 `signatureBytes`로 서명한다. 의존성을 설치하지 않으며
+업로드된 코드를 실행하지도 않는다. 수정하지 않은 워크플로는 실제 서명에서 `GITHUB_REF == main`을
+확인하고 기존 `CONTENT_SIGNING_KEY`를 쓰며, `npm-publish` 승인을 기다린다. 이 main 확인은
+보조 장치다: 보안 검토 당시 환경에는 배포 브랜치 정책이 없으므로, 다른 브랜치에서 워크플로를
+고친 뒤 승인받으면 키를 얻을 수 있다. 부모 에이전트/소유자가 병합 전에 GitHub 설정에서 환경을
+`main`과 `v*` 태그로 따로 제한해야 한다. 이 PR은 그 설정을 바꾸거나 검증하지 않는다.
+npm 토큰이나 개인 키가 로컬 명령으로 넘어오지는 않으며, 셸의 신원, 공개 키와 키퍼의 신뢰 규칙도
+바꾸지 않는다.
 
-**Local content signing (#610).** Whoever can dispatch on main and approve `npm-publish` can
-get arbitrary unreviewed dirty-tree code signed with the release key. The manifest's commit,
-dirty flag and installed version are self-reported; the signature proves the listed hashes,
-not a reviewed source checkout. Approval is exercised with the owner's `gh` token. The
-reviewed environment has one required reviewer, allows self-review, and lets administrators
-bypass protection: dispatch and approval can use the same token. A local signature is not
-machine-bound and verifies with the matching files on any `darwin-arm64` machine trusting
-the same key whose highest-seen version is lower. See [Signed content](security-boundaries.md#local-content-signing-610)
-for this trust boundary.
+**로컬 콘텐츠 서명 (#610).** main에서 워크플로를 실행하고 `npm-publish`를 승인할 수 있는 사람은
+검토되지 않은 임의의 dirty-tree 코드를 릴리스 키로 서명받을 수 있다. 매니페스트의 커밋, dirty
+플래그와 설치 버전은 모두 자기 신고다. 서명이 증명하는 것은 목록의 해시이지, 검토된 소스
+체크아웃이 아니다. 승인은 소유자의 `gh` 토큰으로 한다. 검토 당시 환경은 필수 검토자가 한 명이고,
+자기 승인을 허용하며, 관리자는 보호를 우회할 수 있다: 실행과 승인에 같은 토큰을 쓸 수 있다.
+로컬 서명은 특정 머신에 묶이지 않으며, 같은 키를 신뢰하고 지금까지 시작한 최고 버전이 더 낮은
+어떤 `darwin-arm64` 머신에서도 그에 맞는 파일과 함께 검증된다. 이 신뢰 경계는
+[Signed content](security-boundaries.md#local-content-signing-610)에 설명되어 있다.
 
-The command prints the run URL and waits; it never approves itself. The maintainer or their
-agent reviews the validation job's summary and approves the pending deployment:
+명령은 실행 URL을 출력하고 기다리며, 스스로 승인하지는 않는다. 유지관리자나 그 에이전트가
+검증 잡의 요약을 읽고 대기 중인 배포를 승인한다:
 
 ```bash
 gh api repos/ijun17/centralu/actions/runs/RUN_ID/pending_deployments
-# Use the npm-publish environment id from that response:
+# 응답에서 npm-publish 환경 id를 가져온다:
 gh api --method POST repos/ijun17/centralu/actions/runs/RUN_ID/pending_deployments \
   -F 'environment_ids[]=ENVIRONMENT_ID' -f state=approved \
   -f comment='Approve the reviewed local content manifest'
 ```
 
-Only `local-content-signature` is downloaded. The command verifies the exact manifest and
-all local files against `packaging/shell/keys.json`, carries the existing pinned shell from
-`shell.lock`, stages and checks the bundle, then copies it with `ditto` and the npm launcher's
-atomic swap. Rejection, a failed run, a mismatched signature or a newly installed higher
-version stops before replacement. The command keeps build artifacts in the temporary folder
-it prints. An interruption may leave its `lock` directory: remove only that directory after
-confirming the previous command has ended. The app and keeper are never stopped by the command.
+내려받는 것은 `local-content-signature`뿐이다. 명령은 `packaging/shell/keys.json`의 키로
+매니페스트의 정확한 바이트와 모든 로컬 파일을 검증하고, `shell.lock`에 핀된 기존 셸을 번들에 넣어
+번들을 준비하고 확인한 뒤 `ditto`와 npm 런처의 원자적 교체로 복사한다. 승인 거절, 실행 실패,
+서명 불일치, 또는 기다리는 동안 더 높은 버전이 설치된 경우에는 교체 전에 멈춘다. 빌드 산출물은
+명령이 출력한 임시 폴더에 남긴다. 중간에 끊기면 `lock` 폴더가 남을 수 있다: 이전 명령이 끝난 것을
+확인한 뒤 그 폴더만 지운다. 명령은 앱이나 키퍼를 종료하지 않는다.
 
-A window running from the replaced target checks its bundle on focus and every five seconds
-while visible and offers **Apply now**, even without an npm install event. Automatic apply
-keeps the existing setting and idle/typing checks. Existing keeper verification and handoff
-still decide what runs.
+교체한 대상에서 실행하는 창은 포커스를 받을 때와 화면에 보이는 동안 5초마다 자기 번들을 확인하고,
+npm 설치 이벤트가 없어도 **Apply now**를 보여 준다. 자동 적용은 기존 설정과 유휴/타이핑 확인을
+그대로 따른다. 무엇을 실행할지는 여전히 기존 키퍼의 검증과 인계가 결정한다.
 
-**Applying this change for the first time.** A window built before this PR only checks the
-bundle after the host reports an npm install (`restart_required`). A local install emits
-no such host event, and replacing files on disk cannot replace the UI code already loaded
-in that window. If it already offers **Apply now**, use that button: no separate bootstrap
-restart is needed. Otherwise load the newly installed window once by closing and reopening
-it. With agents active, first enable Settings → Background → **Keep agents running after
-Centralu quits**, and use **Quit**, not **Quit completely**; otherwise wait until they finish.
-The reopened window attaches to the existing keeper; use its **Switch to this build** action
-to apply the new keeper/host. This is the first application of the new window code, not an
-additional **Restart completely**, a shell rebuild or a permission reset. Subsequent local
-installs are detected by that window and offer **Apply now**. There is no existing CLI or
-app-link endpoint for requesting the old window's relaunch; the command does not force it
-to exit or forge an npm-install event.
+**이 변경을 처음 적용할 때.** 이 PR보다 먼저 빌드한 창은 호스트가 npm 설치 상태
+(`restart_required`)를 알린 뒤에만 번들을 확인한다. 로컬 설치는 그런 호스트 이벤트를 보내지 않으며,
+디스크의 파일을 바꾼다고 그 창에 이미 로드된 UI 코드가 바뀌지는 않는다. 이미 **Apply now**가
+보인다면 그 버튼을 쓴다: 별도의 최초 재시작은 필요 없다. 그렇지 않으면 창을 닫고 다시 열어 새로
+설치한 창을 한 번 로드한다. 에이전트가 실행 중이면 먼저 Settings → Background →
+**Keep agents running after Centralu quits**를 켜고 **Quit completely**가 아닌 **Quit**를 쓴다.
+그렇지 않으면 에이전트가 끝날 때까지 기다린다. 다시 연 창은 기존 키퍼에 붙으며, 그 창의
+**Switch to this build**로 새 키퍼/호스트를 적용한다. 이것은 새 창 코드를 처음 적용하는 것이지,
+추가 **Restart completely**, 셸 재빌드나 권한 초기화가 아니다. 이후 로컬 설치는 그 창이 감지하고
+**Apply now**를 보여 준다. 예전 창의 재실행을 요청하는 기존 CLI나 앱 링크 엔드포인트는 없으며,
+명령은 그 창을 강제로 종료하거나 npm 설치 이벤트를 꾸며 내지 않는다.
 
-To rehearse the workflow without the real key after it is available on the default branch:
+워크플로가 기본 브랜치에 들어간 뒤, 실제 키 없이 워크플로를 리허설하려면:
 
 ```bash
-# Use the manifest path printed by the local dry run; preserve its exact bytes.
+# 로컬 dry run이 출력한 매니페스트 경로를 쓴다. 바이트를 그대로 보존한다.
 node --input-type=module -e 'import {readFileSync} from "node:fs"; console.log(JSON.stringify({manifest:readFileSync(process.argv[1],"utf8"),dry_run:"true"}))' \
   /temporary/build/content/content-manifest.json | gh workflow run local-content-sign.yml --ref main --json
 ```
 
-`dry_run` defaults to true, skips the environment and its secrets, signs with an in-memory
-throwaway key, and verifies the signature inside that process. Its artifact is deliberately
-untrusted and cannot be installed by `local-update`. CI steps can also be rehearsed locally:
+`dry_run`의 기본값은 true다. 환경과 그 시크릿을 쓰지 않고 메모리에서 만든 임시 키로 서명하며,
+같은 프로세스 안에서 서명을 검증한다. 그 아티팩트는 의도적으로 신뢰되지 않으며 `local-update`로
+설치할 수 없다. CI 단계는 로컬에서도 리허설할 수 있다:
 `node --experimental-strip-types scripts/content-manifest.mts sign-local /temporary/content-manifest.json --dry-run`.

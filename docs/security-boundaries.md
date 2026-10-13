@@ -736,7 +736,6 @@ which verifies the next build's content itself before handing over to it (step 5
   a manifest over 16 MiB or a signature file over 64 KiB, and a version lower than the highest this data
   folder has started unless the window asks for a rollback (`version::check_not_downgrade`).
 
-
 The shell adds:
 
 - **The keys it trusts are keys.json, compiled in.** A test build can trust one more key (the integration
