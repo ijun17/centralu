@@ -115,7 +115,7 @@ test('the gauge updates its usage and cache content in place while hovered and s
   await page.clock.fastForward(5 * 60_000)
   await expect(gauge).toHaveAttribute('data-percent', '73')
   await expect(tip).toContainText('73% used')
-  await expect(page.getByTestId('usage-donut-cache-claude')).toHaveText('Cache hit 90% · last 5 h')
+  await expect(page.getByTestId('usage-donut-cache-claude')).toHaveText('Cache hit 90.0% · last 5 h')
   await staysOpen(page, gauge)
 })
 
