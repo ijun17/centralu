@@ -1,4 +1,4 @@
-import { saveWorktreeRecovery, restoreWorktreeRecovery, repairWorktreeRecoveryRemovals, stageWorktreeRecoveryRemoval, worktreeRecoveryBytes, worktreeRecoveryDir, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
+import { saveWorktreeRecovery, restoreWorktreeRecovery, repairWorktreeRecoveryRemovals, clearRecoveredBranchMark, stageWorktreeRecoveryRemoval, worktreeRecoveryBytes, worktreeRecoveryDir, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
 import { randomUUID } from 'node:crypto'
 import { residentCost } from './tool-cost.js'
 import { orchestratorHome, orchestratorRole } from './orchestrator-home.js'
@@ -610,7 +610,8 @@ export class SessionManager {
      */
     void this.sweepOrphanHandoffNotes().catch(() => {})
     // Recovery folders a purge moved aside and never finished with (#647): back for an entry still in the trash, gone otherwise
-    void repairWorktreeRecoveryRemovals((id) => store.isTrashed(id)).catch((e) => console.error(`[trash] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
+    // Not awaited here; a purge or restore waits for it, so neither reads the folder while it is still aside
+    this.recoveryRepair = repairWorktreeRecoveryRemovals((id) => store.isTrashed(id)).catch((e) => console.error(`[trash] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
     this.nameUnnamedWorktrees()
     /*
      * Merge detection also runs once at startup (#69) — a merge could have happened in a terminal
@@ -2493,6 +2494,9 @@ export class SessionManager {
     this.emit({ type: 'session_deleted', sessionId })
   }
 
+  /** The startup repair of recovery folders an interrupted purge left aside (#647) */
+  private recoveryRepair: Promise<void> = Promise.resolve()
+
   /** Only one trash operation per session at a time — a purge racing a restore would restore half of a deleted session */
   private trashBusy = new Set<string>()
 
@@ -2566,6 +2570,7 @@ export class SessionManager {
    */
   async restoreSession(sessionId: string): Promise<{ session: SessionInfo; project: ProjectInfo | null }> {
     return this.trashOp(sessionId, async () => {
+      await this.recoveryRepair
       const t = this.store.trashedSession(sessionId)
       if (!t) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
       const { record } = t
@@ -2631,6 +2636,7 @@ export class SessionManager {
    */
   async purgeSession(sessionId: string): Promise<void> {
     return this.trashOp(sessionId, async () => {
+      await this.recoveryRepair
       const t = this.store.trashedSession(sessionId)
       if (!t) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
       const { session: s, record } = t
@@ -6028,6 +6034,7 @@ export class SessionManager {
       }
       try {
         await gitBranchDelete(cwd, branch, this.gitTrust(target.projectId))
+        await clearRecoveredBranchMark(cwd, branch).catch(() => {})
       } catch (e) {
         return { ok: true, branch, setAside, warning: `The session is in the trash and its worktree was removed, but branch ${branch} was left: ${(e as Error).message}. Recovery files are at ${worktreeRecoveryDir(target.id)}.` }
       }

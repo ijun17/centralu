@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as gitModule from './git-exec.js'
-import { restoreWorktreeRecovery, saveWorktreeRecovery, worktreeRecoveryDir } from './worktree-recovery.js'
+import { clearRecoveredBranchMark, repairWorktreeRecoveryRemovals, restoreWorktreeRecovery, saveWorktreeRecovery, worktreeRecoveryDir } from './worktree-recovery.js'
 
 const git = (cwd: string, args: string[]) => execFileSync('git', [
   '-c', 'user.name=Recovery test', '-c', 'user.email=recovery@example.test', '-c', 'core.autocrlf=false', ...args,
@@ -197,6 +197,54 @@ describe('worktree recovery follow-ups (#608)', () => {
     expect(git(repo, ['rev-parse', `refs/centralu/recovered/recovered/${sessionId}-1`])).toBe(tip)
     expect(() => git(repo, ['rev-parse', '--verify', `refs/centralu/recovered/recovered/${sessionId}`])).toThrow()
   }, process.platform === 'win32' ? 90_000 : 30_000)
+
+  it('does not adopt a recovery branch the person deleted and made again at the saved tip (#647)', async () => {
+    git(repo, ['worktree', 'add', '-b', branch, child])
+    const tip = commit(child, 'saved work\n')
+    const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+    remove()
+    git(repo, ['branch', branch, 'main'])
+    const first = await restoreWorktreeRecovery(sessionId, repo, child, branch, recovery, {})
+    expect(first.branch).toBe(`recovered/${sessionId}`)
+    // The person removes the restored worktree and branch by hand (the mark stays), then makes the branch again
+    git(repo, ['worktree', 'remove', '--force', child])
+    git(repo, ['branch', '-D', `recovered/${sessionId}`])
+    git(repo, ['branch', `recovered/${sessionId}`, tip])
+    const again = await restoreWorktreeRecovery(sessionId, repo, child, branch, recovery, {})
+    expect(again.branch).toBe(`recovered/${sessionId}-1`)
+  }, process.platform === 'win32' ? 90_000 : 30_000)
+
+  it('drops the mark together with its recovery branch (#647)', async () => {
+    git(repo, ['worktree', 'add', '-b', branch, child])
+    commit(child, 'saved work\n')
+    const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+    remove()
+    git(repo, ['branch', branch, 'main'])
+    const restored = await restoreWorktreeRecovery(sessionId, repo, child, branch, recovery, {})
+    expect(git(repo, ['for-each-ref', '--format=%(refname)', 'refs/centralu/'])).toBe(`refs/centralu/recovered/${restored.branch}`)
+    await clearRecoveredBranchMark(repo, restored.branch)
+    expect(git(repo, ['for-each-ref', '--format=%(refname)', 'refs/centralu/'])).toBe('')
+    await clearRecoveredBranchMark(repo, branch)
+  }, process.platform === 'win32' ? 90_000 : 30_000)
+
+  it('repairs the other folders when one folder left by a purge cannot be repaired (#647)', async () => {
+    const root = join(dir, 'data', 'worktree-recovery')
+    const [blocked, other] = [randomUUID(), randomUUID()].sort() as [string, string]
+    // The blocked session's own name is taken by a file, so its snapshots cannot be moved back
+    mkdirSync(join(root, `${blocked}.purging-1`, 'snap'), { recursive: true })
+    writeFileSync(join(root, blocked), '')
+    mkdirSync(join(root, `${other}.purging-2`, 'snap'), { recursive: true })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await repairWorktreeRecoveryRemovals(() => true)
+      expect(log).toHaveBeenCalledWith(expect.stringContaining(`${blocked}.purging-1`))
+    } finally {
+      log.mockRestore()
+    }
+    expect(existsSync(join(root, other, 'snap'))).toBe(true)
+    expect(existsSync(join(root, `${other}.purging-2`))).toBe(false)
+    expect(existsSync(join(root, `${blocked}.purging-1`, 'snap'))).toBe(true)
+  })
 
   it('leaves a recovery branch that moved on alone and numbers its own (#647)', async () => {
     git(repo, ['worktree', 'add', '-b', branch, child])

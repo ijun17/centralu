@@ -480,9 +480,11 @@ session live (its CLI remains stopped). If the original branch name is occupied,
 An occupied original name is left alone, whoever made it. A recovery name is taken over when it is free, or
 when restore made it (#647): `git worktree add -b` creates the branch before the folder, so a failed attempt
 leaves the branch behind, and a retry reuses that leftover instead of failing on it. The mark is a ref under
-`refs/centralu/recovered/<branch>` at the saved tip, written before the branch; a branch at the saved tip
-without it is the person's and gets a numeric suffix instead, so a later cleanup never deletes a branch the
-person made.
+`refs/centralu/recovered/<branch>` at the saved tip; restore creates the mark and the branch together, both
+with the same one-time reflog message, and adopts a branch only when its creation entry matches the mark's.
+A branch the person deletes and makes again at the same commit has a new reflog, so it is never adopted and
+a numeric suffix is used instead: a later cleanup never deletes a branch the person made. A cleanup that
+deletes a recovery branch deletes its mark too, so saved commits do not stay reachable for good.
 If HEAD and the bundled stored branch differ, restore also creates `recovered/<session id>-stored-branch`
 at the stored tip and names it in the notice. An occupied recovery name gets a numeric suffix; a retry
 reuses a branch already at that tip. Existing branches are never overwritten.
@@ -497,9 +499,10 @@ files are retained. Deleting for good, including empty trash, removes the entire
 only after the rows are gone (#647): the directory is first moved aside, which fails where removal would and
 leaves the trash entry retryable, then deleted once the database step succeeds, or moved back when that step
 fails, so the entry stays restorable. A folder that cannot be moved back is logged and left aside under
-`<session id>.purging-<random>`; at startup, when no purge runs, such folders go back under their session's
+`<session id>.purging-<random>`; at startup such folders go back under their session's
 name while the entry is still in the trash (joining any snapshot made since), and are deleted once it is gone,
-so a crash at any point of a purge is repaired. No automatic trash expiry is implemented; expiry
+so a crash at any point of a purge is repaired. Purge and restore wait for that repair; a folder that cannot
+be repaired (held open on Windows) is logged and retried at the next start, and the others go on. No automatic trash expiry is implemented; expiry
 must use `purgeSession` if added. Gitlinks found only in older merged superproject history remain a
 follow-up ([#623](https://github.com/ijun17/centralu/issues/623)); a superproject merge does not prove
 that module commits were pushed. Writes by other programs during capture are outside this session's lock.
