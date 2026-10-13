@@ -112,18 +112,34 @@ export function linkedHostsUiTests(): void {
         await page.getByTestId(`app-row-${MACHINE}:_user/notes`).click()
         await expect(page.getByTestId(`pinned-app-${MACHINE}:_user/notes`).getByTestId('pinned-title')).toHaveText('Remote notes')
         await expect(appView(page, `${MACHINE}:_user/notes`).locator('#count')).toHaveText('0', { timeout: 30_000 })
-        // The window asks for a lease on every pinned view (#392); the hub drops it before the machine (links/routes.ts)
+        // The window sends a lease and a fresh logical-open key; only the lease is stripped at the hub.
+        const openKey = expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
         expect(calls.filter((c) => c.method === 'apps.openView' && c.params.appId === 'notes').map((c) => c.params)).toEqual([
-          { appId: 'notes', projectId: null, machine: MACHINE, lease: true },
+          { appId: 'notes', projectId: null, machine: MACHINE, lease: true, openKey },
         ])
 
         await page.getByTestId('app-row-_user/notes').click()
         await expect(page.getByTestId('pinned-app-_user/notes').getByTestId('pinned-title')).toHaveText('Hub notes')
         await expect(appView(page, '_user/notes').locator('#count')).toHaveText('0', { timeout: 30_000 })
         expect(calls.filter((c) => c.method === 'apps.openView' && c.params.appId === 'notes').map((c) => c.params)).toEqual([
-          { appId: 'notes', projectId: null, machine: MACHINE, lease: true },
-          { appId: 'notes', projectId: null, lease: true },
+          { appId: 'notes', projectId: null, machine: MACHINE, lease: true, openKey },
+          { appId: 'notes', projectId: null, lease: true, openKey },
         ])
+      })
+
+      await test.step('each logical-open key recovers the original instance on its owning host', async () => {
+        const opens = calls.filter((c) => c.method === 'apps.openView')
+        expect(opens).toHaveLength(4)
+        expect(new Set(opens.map((c) => c.params.openKey)).size).toBe(4)
+        expect(calls.filter((c) => c.method === 'apps.recoverView')).toEqual([])
+        for (const { params } of opens) {
+          // This is a read-only probe: do not take the browser's lease when querying the result.
+          const { lease: _lease, ...query } = params
+          const recovered = await hubCall(pair.hub.port, 'apps.recoverView', query) as { instanceId: string }
+          const key = params.projectId ? `${params.projectId}/${params.appId}` : `${params.machine ? `${params.machine}:` : ''}_user/${params.appId}`
+          const src = await page.getByTestId(`pinned-app-${key}`).getByTestId('app-frame-iframe').getAttribute('src')
+          expect(src).toContain(`/views/${recovered.instanceId}/`)
+        }
       })
     })
   })

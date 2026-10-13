@@ -208,13 +208,14 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       const { router, local, m1, m2 } = rig()
       m1.answers['apps.openView'] = { instanceId: 'inst-aaaaaaaaaaaaaaaa', tool: 'show', resourceUri: 'ui://board/main', toolInput: {}, toolResult: { content: [] }, runId: 'r1' }
       m2.answers['apps.openView'] = { instanceId: 'inst-u', tool: 'show', resourceUri: 'ui://notes/main', toolInput: {}, toolResult: { content: [] }, runId: 'r1' }
+      const openKey = 'aabbccdd-1234-4567-8123-aabbccddeeff'
       // That machine sees the hub's link, not the window, so a lease there would be tied to the wrong connection
-      await router.handle('apps.openView', { appId: 'board', projectId: 'm1.p1', lease: true })
-      await router.handle('apps.openView', { appId: 'notes', projectId: null, machine: 'm2', lease: true })
-      await router.handle('apps.openView', { appId: 'notes', projectId: null, lease: true })
-      expect(m1.calls).toEqual([{ method: 'apps.openView', params: { appId: 'board', projectId: 'p1' } }])
-      expect(m2.calls).toEqual([{ method: 'apps.openView', params: { appId: 'notes', projectId: null } }])
-      expect(local).toEqual([{ method: 'apps.openView', params: { appId: 'notes', projectId: null, lease: true } }])
+      await router.handle('apps.openView', { appId: 'board', projectId: 'm1.p1', lease: true, openKey })
+      await router.handle('apps.openView', { appId: 'notes', projectId: null, machine: 'm2', lease: true, openKey })
+      await router.handle('apps.openView', { appId: 'notes', projectId: null, lease: true, openKey })
+      expect(m1.calls).toEqual([{ method: 'apps.openView', params: { appId: 'board', projectId: 'p1', openKey } }])
+      expect(m2.calls).toEqual([{ method: 'apps.openView', params: { appId: 'notes', projectId: null, openKey } }])
+      expect(local).toEqual([{ method: 'apps.openView', params: { appId: 'notes', projectId: null, lease: true, openKey } }])
     })
 
     it('hands the hub’s own handler the window’s connection whatever the route, and never a linked machine (#392)', async () => {
