@@ -177,3 +177,89 @@ detached는 선택이 아니다. libuv는 detached가 아닌 모든 자식을, �
 4. `.github/workflows/release.yml`의 `linux-arm64` matrix 항목.
 
 **아직 증명되지 않은 것.** run 32381990293은 #29의 빌드 관련 두 질문에 증거로 답했다: `node-pty`(어느 아키텍처에도 Linux prebuild가 없어 러너에서 node-gyp이 컴파일한다)와 `better-sqlite3` 모두 arm64에서 빌드되고, AppImage 툴링은 x64와 일관된 크기의 번들을 만들어 낸다. 하지만 green 빌드가 *실행된다*는 것까지 증명하지는 않으며, 어느 Linux 아키텍처에서도 아무도 실행해 본 적이 없다. 이는 beta.2로 배포된 x64 패키지에 이미 참인 것과 같은 사실이고, README도 양쪽 모두에 그렇게 적고 있다.
+
+## Local maintainer updates (#610)
+
+`pnpm local-update` builds only macOS arm64 on the maintainer's machine. The window,
+keeper and host stay local; only `content-manifest.json` (at most 60,000 UTF-8 bytes)
+goes to `.github/workflows/local-content-sign.yml`. Other machines and platforms
+continue to receive full npm releases.
+
+```bash
+pnpm local-update --plan        # read the installed version and check the version bounds
+pnpm local-update --dry-run     # local build + throwaway signing; no dispatch or install
+pnpm local-update               # build, dispatch, wait for approval, verify, install
+# For a copy running from a different location:
+pnpm local-update --target /path/to/Centralu.app
+```
+
+The default target is `/Applications/Centralu.app`, exactly the copy `centralu install`
+replaces. The command builds in a disposable checkout below the system temporary directory,
+stamps the local version into the UI/host, Rust workspace and Tauri bundle, and runs the
+release's `tauri build --bundles app` path (including host and frontend bundling). It reuses
+a temporary Cargo cache for incremental updates. Dirty and unpushed source is allowed:
+the signed manifest records the original commit and dirty flag, base version, reported
+installed version, next release bound and a unique request id. Generated local version
+changes do not change that original dirty flag. The tracked and nonignored untracked files
+are copied; ignored build inputs are not. Keep the checkout still while the snapshot is taken.
+No host is launched and any build subprocess receives a temporary `CC_DATA_DIR`.
+
+**Version bounds are enforced twice**, before building and immediately before installing:
+`<current>-local.N` must be strictly above the installed copy and below the next release.
+`N` is positive and increments from the installed local copy; `--version` can request an
+explicit counter. The next release increments the final numeric release identifier
+(`beta.20` → `beta.21`, or `1.2.3` → `1.2.4`). Invalid versions and impossible bounds are
+refused. In particular, SemVer orders `beta.20-local.1` **above** `beta.21` (the identifier
+`20-local` is alphanumeric), and `1.2.3-local.1` **below** installed `1.2.3`. These literal
+suffixes cannot update those installed bases; they are refused rather than overriding the
+shell/keeper's existing version rules. A version spelling decision is required before
+using this path for the current numeric beta.
+
+The dispatch is always from `main`, so the workflow must first be merged there. A tiny job
+validates the JSON and uploads only those exact bytes; its summary shows the manifest hash,
+version and reported source provenance. It allows only format 1, shell 1, `darwin-arm64`,
+a bounded sorted file list containing the keeper and required host entry points, safe paths,
+file sizes, SHA-256 hashes and executable bits. The signing job validates again after download,
+then uses `signatureBytes` in `scripts/content-manifest.mts`, the same Ed25519 routine as
+`release.yml`. It installs no dependencies and executes no uploaded code. Real signing is
+allowed only from `main`, uses the existing `CONTENT_SIGNING_KEY`, and waits on the existing
+`npm-publish` environment's required reviewer. No npm token or private key reaches the local
+command; no shell identity, public keys or keeper trust rules change.
+
+The command prints the run URL and waits; it never approves itself. The maintainer or their
+agent reviews the validation job's summary and approves the pending deployment:
+
+```bash
+gh api repos/ijun17/centralu/actions/runs/RUN_ID/pending_deployments
+# Use the npm-publish environment id from that response:
+gh api --method POST repos/ijun17/centralu/actions/runs/RUN_ID/pending_deployments \
+  -F 'environment_ids[]=ENVIRONMENT_ID' -f state=approved \
+  -f comment='Approve the reviewed local content manifest'
+```
+
+Only `local-content-signature` is downloaded. The command verifies the exact manifest and
+all local files against `packaging/shell/keys.json`, carries the existing pinned shell from
+`shell.lock`, stages and checks the bundle, then copies it with `ditto` and the npm launcher's
+atomic swap. Rejection, a failed run, a mismatched signature or a newly installed higher
+version stops before replacement. The command keeps build artifacts in the temporary folder
+it prints. An interruption may leave its `lock` directory: remove only that directory after
+confirming the previous command has ended. The app and keeper are never stopped by the command.
+
+A window running from the replaced target checks its bundle on focus and every five seconds
+while visible and offers **Apply now**, even without an npm install event. Automatic apply
+keeps the existing setting and idle/typing checks. The first update of a window built before
+this detection change needs one manual restart to gain the new detection; subsequent local
+updates offer the button. Existing keeper verification and handoff still decide what runs.
+
+To rehearse the workflow without the real key after it is available on the default branch:
+
+```bash
+# Use the manifest path printed by the local dry run; preserve its exact bytes.
+node --input-type=module -e 'import {readFileSync} from "node:fs"; console.log(JSON.stringify({manifest:readFileSync(process.argv[1],"utf8"),dry_run:"true"}))' \
+  /temporary/build/content/content-manifest.json | gh workflow run local-content-sign.yml --ref main --json
+```
+
+`dry_run` defaults to true, skips the environment and its secrets, signs with an in-memory
+throwaway key, and verifies the signature inside that process. Its artifact is deliberately
+untrusted and cannot be installed by `local-update`. CI steps can also be rehearsed locally:
+`node --experimental-strip-types scripts/content-manifest.mts sign-local /temporary/content-manifest.json --dry-run`.

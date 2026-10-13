@@ -1,0 +1,79 @@
+# Only JSON crosses this boundary. Uploaded executables never reach this runner.
+name: local content sign
+run-name: local-sign ${{ fromJSON(inputs.manifest).appVersion }} ${{ fromJSON(inputs.manifest).local.requestId }}
+on:
+  workflow_dispatch:
+    inputs:
+      manifest:
+        description: 'Exact UTF-8 content-manifest.json bytes (macOS arm64, local version only)'
+        type: string
+        required: true
+      dry_run:
+        description: 'Use an in-memory throwaway key; no approval and nothing installable'
+        type: boolean
+        default: true
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Validate data and show what approval signs
+        env:
+          INPUT_MANIFEST: ${{ inputs.manifest }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          node --input-type=module <<'JS'
+          import { createHash } from 'node:crypto'
+          import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs'
+          import { validateLocalManifest } from './scripts/local-manifest.mjs'
+          if (process.env.DRY_RUN !== 'true' && process.env.GITHUB_REF !== 'refs/heads/main') throw new Error('real signing runs only from main')
+          const bytes = Buffer.from(process.env.INPUT_MANIFEST, 'utf8')
+          const m = validateLocalManifest(bytes)
+          mkdirSync('manifest-data')
+          writeFileSync('manifest-data/content-manifest.json', bytes)
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Version: ${m.appVersion}\n\nInstalled (reported): ${m.local.installedVersion}\n\nNext release: ${m.local.nextRelease}\n\nCommit (reported): ${m.local.commit}\n\nDirty: ${m.local.dirty}\n\nFiles: ${m.files.length}\n\nManifest SHA-256: ${createHash('sha256').update(bytes).digest('hex')}\n\nDry run: ${process.env.DRY_RUN}\n`)
+          JS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: local-manifest
+          path: manifest-data/content-manifest.json
+          if-no-files-found: error
+          retention-days: 1
+  sign:
+    needs: validate
+    runs-on: ubuntu-latest
+    # Real signing requires the same environment approval and key as a release.
+    environment: ${{ inputs.dry_run == false && 'npm-publish' || '' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: local-manifest
+          path: manifest-data
+      - name: Validate again and sign the exact bytes
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          CONTENT_SIGNING_KEY: ${{ inputs.dry_run == false && secrets.CONTENT_SIGNING_KEY || '' }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          node --experimental-strip-types scripts/content-manifest.mts sign-local manifest-data/content-manifest.json "${args[@]}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: local-content-signature
+          path: manifest-data/content-manifest.json.sig
+          if-no-files-found: error
+          retention-days: 1

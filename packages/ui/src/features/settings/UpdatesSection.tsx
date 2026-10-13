@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { APP_VERSION } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
-import { applyOffer, updateStateText, useRelaunchCheck } from './apply-update.js'
+import { installedUpdate, applyOffer, updateStateText, useRelaunchCheck } from './apply-update.js'
 
 /**
  * Updates (issue #43).
@@ -18,13 +18,14 @@ import { applyOffer, updateStateText, useRelaunchCheck } from './apply-update.js
  * entirely.
  */
 export function UpdatesSection() {
-  const update = useStore((s) => s.update)
+  const reportedUpdate = useStore((s) => s.update)
   const checkUpdate = useStore((s) => s.checkUpdate)
   const setUpdateAuto = useStore((s) => s.setUpdateAuto)
   const setUpdateAutoApply = useStore((s) => s.setUpdateAutoApply)
   const applyUpdate = useStore((s) => s.applyUpdate)
   const applyUpdateNow = useStore((s) => s.applyUpdateNow)
   const relaunch = useRelaunchCheck()
+  const update = installedUpdate(reportedUpdate, APP_VERSION, relaunch)
   const offer = update?.phase === 'restart_required' ? applyOffer(update, APP_VERSION, relaunch) : null
 
   /*

@@ -35,6 +35,19 @@ export function applyOffer(update: UpdateStatus, windowVersion: string, relaunch
   return { kind: 'restart', ...(relaunch?.reason ? { reason: relaunch.reason } : {}) }
 }
 
+/** An external install has no host `update_status` event; the window knows its own bundle. */
+export function installedUpdate(update: UpdateStatus | null, windowVersion: string, relaunch: RelaunchCheck | null | undefined): UpdateStatus | null {
+  if (!relaunch?.ready || !relaunch.version || !isNewerVersion(relaunch.version, windowVersion)) return update
+  if (update?.phase === 'updating' || update?.phase === 'waiting_for_npm') return update
+  return {
+    current: update?.current ?? windowVersion,
+    auto: update?.auto ?? true,
+    autoApply: update?.autoApply ?? false,
+    checkedAt: update?.checkedAt ?? null,
+    latest: relaunch.version, newer: true, phase: 'restart_required', error: null,
+  }
+}
+
 /**
  * How long after the last keystroke in a text field the window counts as "someone is typing". A
  * relaunch reloads the window; the composer keeps a draft, but a sentence half typed into a dialog
@@ -98,22 +111,38 @@ export function typedWithin(ms: number, now = Date.now()): boolean {
 }
 
 /**
- * The platform's "would a relaunch start the new build", asked again whenever the update reaches
- * `restart_required`. Undefined where the platform cannot relaunch at all.
+ * Check on focus and periodically: external installs do not produce a host update event.
+ * Undefined where the platform cannot relaunch at all.
  */
 export function useRelaunchCheck(): RelaunchCheck | null | undefined {
   const relaunch = useStore((s) => s.platform?.relaunch)
   const phase = useStore((s) => s.update?.phase)
   const [check, setCheck] = useState<RelaunchCheck | null>(null)
   useEffect(() => {
-    if (!relaunch || phase !== 'restart_required') return setCheck(null)
+    if (!relaunch) return setCheck(null)
     let live = true
-    void relaunch
-      .check()
-      .then((c) => live && setCheck(c))
-      .catch((e: Error) => live && setCheck({ ready: false, reason: e.message }))
+    let checking = false
+    const read = async () => {
+      if (checking || document.hidden) return
+      checking = true
+      try {
+        const c = await relaunch.check()
+        if (live) setCheck(c)
+      } catch (e) {
+        if (live) setCheck({ ready: false, reason: String(e) })
+      } finally {
+        checking = false
+      }
+    }
+    void read()
+    const timer = setInterval(() => void read(), RECHECK_MS)
+    window.addEventListener('focus', read)
+    document.addEventListener('visibilitychange', read)
     return () => {
       live = false
+      clearInterval(timer)
+      window.removeEventListener('focus', read)
+      document.removeEventListener('visibilitychange', read)
     }
   }, [relaunch, phase])
   return relaunch ? check : undefined
@@ -128,10 +157,11 @@ const RECHECK_MS = 5_000
  * Returns what it waits for, for the update line.
  */
 export function useAutoApplyUpdate(): string | null {
-  const update = useStore((s) => s.update)
+  const reportedUpdate = useStore((s) => s.update)
   const relaunchPort = useStore((s) => s.platform?.relaunch)
   const applyUpdateNow = useStore((s) => s.applyUpdateNow)
   const relaunch = useRelaunchCheck()
+  const update = installedUpdate(reportedUpdate, APP_VERSION, relaunch)
   const [busy, setBusy] = useState<boolean | null>(null)
   // Only re-renders, so the decision below is taken again when just the clock moved
   const [, setTick] = useState(0)

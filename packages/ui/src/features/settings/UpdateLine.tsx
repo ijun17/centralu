@@ -1,7 +1,7 @@
 import { APP_VERSION } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { Tooltip } from '../../components/primitives.jsx'
-import { applyOffer, useRelaunchCheck } from './apply-update.js'
+import { installedUpdate, applyOffer, useRelaunchCheck } from './apply-update.js'
 
 /**
  * "A new version is available" — a quiet line on the dashboard (issue #43).
@@ -23,10 +23,11 @@ import { applyOffer, useRelaunchCheck } from './apply-update.js'
  * @param waiting what an automatic apply waits for (`useAutoApplyUpdate`), null when none is pending
  */
 export function UpdateLine({ waiting = null }: { waiting?: string | null }) {
-  const update = useStore((s) => s.update)
+  const reportedUpdate = useStore((s) => s.update)
   const applyUpdate = useStore((s) => s.applyUpdate)
   const applyUpdateNow = useStore((s) => s.applyUpdateNow)
   const relaunch = useRelaunchCheck()
+  const update = installedUpdate(reportedUpdate, APP_VERSION, relaunch)
   if (!update) return null
 
   const tone = 'text-xs leading-none'

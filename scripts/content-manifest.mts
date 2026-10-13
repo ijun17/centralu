@@ -33,6 +33,8 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sig
 import { lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+// @ts-expect-error — dependency-free policy also runs directly in the signing workflow
+import { validateLocalManifest } from './local-manifest.mjs'
 
 export const MANIFEST_NAME = 'content-manifest.json'
 export const SIGNATURE_NAME = 'content-manifest.json.sig'
@@ -343,7 +345,21 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     return i === -1 ? undefined : process.argv[i + 1]
   }
   const platform = flag('--platform')
-  if (command === 'sign' && dir) {
+  if (command === 'sign-local' && dir) {
+    const manifest = readFileSync(dir)
+    const local = validateLocalManifest(manifest)
+    const dryRun = process.argv.includes('--dry-run')
+    const pem = process.env.CONTENT_SIGNING_KEY
+    delete process.env.CONTENT_SIGNING_KEY
+    delete process.env.CONTENT_SIGNING_KEY_NEXT
+    const key = resolveSigningKey({ dryRun, pem })
+    const keys = dryRun ? [{ name: 'throwaway', keyId: key.keyId, publicKey: key.publicKey }] : trustedKeys()
+    if (!dryRun && (key.throwaway || !keys.some((k) => k.keyId === key.keyId))) throw new Error('a trusted CONTENT_SIGNING_KEY is required')
+    const signature = signatureBytes(manifest, key, keys)
+    verifyManifest(manifest, signature, { keys, platform: 'darwin-arm64' })
+    writeFileSync(join(dirname(dir), SIGNATURE_NAME), signature)
+    console.log(`signed local ${local.appVersion} (${local.local.commit}, dirty=${local.local.dirty})${dryRun ? ' with a throwaway key' : ''}`)
+  } else if (command === 'sign' && dir) {
     const appVersion = flag('--app-version')
     if (!appVersion) throw new Error('--app-version is required')
     const pem = process.env.CONTENT_SIGNING_KEY

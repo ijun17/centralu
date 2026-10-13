@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { UpdateStatus } from '@cc/protocol'
-import { applyOffer, autoApplyDecision, updateStateText, type AutoApplyInput } from './apply-update.js'
+import { applyOffer, installedUpdate, autoApplyDecision, updateStateText, type AutoApplyInput } from './apply-update.js'
 
 /**
  * Applying an installed update (#352): what the update line offers, and when the automatic mode
@@ -18,6 +18,31 @@ const installed: UpdateStatus = {
 }
 const OLD_WINDOW = '0.1.0-beta.10'
 const ready = { ready: true }
+
+describe('external installs', () => {
+  it('offers the newer bundle on disk even before an npm status arrives', () => {
+    const disk = { ready: true, version: '0.1.0-beta.11' }
+    const update = installedUpdate(null, OLD_WINDOW, disk)!
+    expect(update.phase).toBe('restart_required')
+    expect(update.latest).toBe(disk.version)
+    expect(update.autoApply).toBe(false)
+    expect(applyOffer(update, OLD_WINDOW, disk)).toEqual({ kind: 'apply' })
+    expect(installedUpdate({ ...installed, phase: 'idle', latest: OLD_WINDOW }, OLD_WINDOW, disk)?.latest).toBe(disk.version)
+  })
+
+  it('keeps automatic apply consent and refuses equal, older or unknown disk versions', () => {
+    for (const disk of [undefined, null, { ready: false, version: '9.0.0' }, { ready: true }, { ready: true, version: OLD_WINDOW }, { ready: true, version: '0.1.0-beta.9' }]) {
+      expect(installedUpdate(installed, OLD_WINDOW, disk)).toBe(installed)
+    }
+    const disk = { ready: true, version: '0.1.0-beta.12' }
+    for (const phase of ['updating', 'waiting_for_npm'] as const) {
+      const busy = { ...installed, phase }
+      expect(installedUpdate(busy, OLD_WINDOW, disk)).toBe(busy)
+    }
+    const update = installedUpdate(installed, OLD_WINDOW, disk)!
+    expect(autoApplyDecision({ update, windowVersion: OLD_WINDOW, relaunch: disk, busy: false, typing: false, tried: false })).toEqual({ apply: true })
+  })
+})
 
 describe('applyOffer', () => {
   it('offers "Apply now" when a relaunch starts the installed build', () => {

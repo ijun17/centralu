@@ -9320,3 +9320,23 @@ test('Nothing sends while an attachment is uploading, and it goes out with the t
     await page.evaluate(() => (window as any).__mock.sentAttachments.map((a: { name: string }) => a.name)),
   ).toEqual(['shot.png'])
 })
+
+test('A locally replaced bundle offers Apply now without an npm install event (#610)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await expect(page.getByTestId('update-line')).toBeHidden()
+  await page.evaluate(() => {
+    const w = window as any
+    w.__mock.relaunchCheck = { ready: true, version: '9.9.9-local.1' }
+    // Returning from the local-build terminal discovers the external install.
+    window.dispatchEvent(new Event('focus'))
+  })
+  await expect(page.getByTestId('update-apply-now')).toBeVisible()
+  await expect(page.getByTestId('update-line')).toContainText('9.9.9-local.1 installed')
+  expect(await page.evaluate(() => (window as any).__mock.relaunches)).toBe(0)
+  await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+  await page.getByTestId('settings-tab-updates').click()
+  await expect(page.getByTestId('update-state')).toContainText('Installed 9.9.9-local.1')
+  await expect(page.getByTestId('update-apply')).toBeHidden()
+  await page.getByTestId('update-apply-now-settings').click()
+  await expect.poll(() => page.evaluate(() => (window as any).__mock.relaunches)).toBe(1)
+})
