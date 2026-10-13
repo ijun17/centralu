@@ -292,7 +292,8 @@ below retained for `safe` and `normal`:
    an alias the ids or labels contain passes, and a tool that cannot list passes all). The check never holds the call
    (#660): it uses the cached list (one read at a time, kept whenever it arrives, a failed read not retried for a
    minute) and waits at most `START_AGENT_MODEL_CHECK_MS` (3 s) for a missing one; without a list in time the child
-   starts on the name as given and the answer says it was not checked.
+   starts on the name as given and the answer says it was not checked (an empty list is said to be empty). A name the
+   cached list lacks is refused only after a fresh read (the CLI may have been updated).
 4. **Consent** (`ensureAgentConsent`). A card in the caller's approval slot, detail `agent_start` (the tool, model,
    preset and task): allow once, always for this session (`always`, kept in memory while this host serves the
    session), always for this project (`always` with scope `project`, the card's ⌥; stored as the project's
@@ -301,6 +302,8 @@ below retained for `safe` and `normal`:
    Everything before the child exists (check, card, start) has one bound, `START_AGENT_SETUP_MS` (200 s, under the Codex
    bridge's 280 s): past it the card is withdrawn and the answer says whether a session was created. Refusals and this
    answer tell the calling model to ask the person rather than do the work with its own CLI's subagents (#660).
+   The wait of `wait: true` is cut to what is left of `START_AGENT_CALL_MS` (270 s), so setup and wait together stay
+   inside the bridge's bound; past it the answer is `working`, with the report armed.
 5. **The child.** A visible session in the caller's own folder (a worktree session's worktree), named from the task,
    marked `askedBy` the caller (drawn indented under it in the sidebar, owner decision 2026-10-12; its header links
    back: "Started by …"), under **the caller's permission preset**:

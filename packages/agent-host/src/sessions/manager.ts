@@ -168,6 +168,11 @@ export const START_AGENT_MODEL_CHECK_MS = 3_000
  * session was created, never the bridge's bare "timed out" (#660).
  */
 export const START_AGENT_SETUP_MS = 200_000
+/**
+ * How long one start_agent call may take in all, setup and wait together: the Codex bridge's 280 seconds
+ * (`APP_CALL_TIMEOUT_MS`, orchestrator-bridge.mjs) less a margin. What the setup used is taken off the wait.
+ */
+export const START_AGENT_CALL_MS = 270_000
 
 /**
  * Said to the calling model when start_agent is refused or cut short (#660). A model that reads only "could not" tends
@@ -176,25 +181,33 @@ export const START_AGENT_SETUP_MS = 200_000
 const ASK_THE_PERSON = 'Do not do this with your own subagents instead: tell the person what stopped it and let them decide.'
 
 /** How far start_agent's setup had come when its bound passed (#660) */
-type StartProgress = { stage: 'checking' | 'asking' | 'creating' | 'created'; childId?: string }
+type StartProgress = {
+  stage: 'checking' | 'asking' | 'creating' | 'created'
+  childId?: string
+  /** Set once the child's run is registered, so a late answer can describe it as the normal path does */
+  d?: Delegation
+  /** Said when the model or effort asked for could not be checked */
+  unchecked?: string
+}
 
 /** The answer when start_agent's setup outlasts its bound: it states whether a session exists, and what to do next */
 function startAgentLate(progress: StartProgress): ChildRunResult {
   const seconds = Math.round(START_AGENT_SETUP_MS / 1000)
+  const note = progress.unchecked ? ` (${progress.unchecked}.)` : ''
   switch (progress.stage) {
     case 'created':
       return {
         ok: false,
         error:
           `The session [${progress.childId}] was created, but handing it the task took longer than ${seconds} seconds. ` +
-          `Do not start another: agent_session(sessionId="${progress.childId}", action="status") shows where it stands. ${ASK_THE_PERSON}`,
+          `Do not start another: agent_session(sessionId="${progress.childId}", action="status") shows where it stands. ${ASK_THE_PERSON}${note}`,
       }
     case 'creating':
       return {
         ok: false,
         error:
           `Starting the session took longer than ${seconds} seconds and had not finished, so a session may or may not exist. ` +
-          `Do not call start_agent again until read_session (without a sessionId) shows whether a new session is there. ${ASK_THE_PERSON}`,
+          `Do not call start_agent again until read_session (without a sessionId) shows whether a new session is there; if one starts, you will be told when it ends. ${ASK_THE_PERSON}${note}`,
       }
     case 'asking':
       return {
@@ -4019,22 +4032,25 @@ export class SessionManager {
    * answers at once (and an old one is refreshed in the background); otherwise one read is started or joined and
    * waited on for `ms`. Null when there is no list in time: the caller goes on without checking. A read that fails
    * is not started again for a minute, so a hung Codex does not get a new tool process on every call.
+   *
+   * `fresh` skips the cached list and reads again: the CLI may have been updated since, so a name the cached list
+   * lacks is not refused on its word alone. `cached` says which kind of list came back.
    */
-  private async modelsWithin(tool: ToolName, ms: number): Promise<ModelOption[] | null> {
+  private async modelsWithin(tool: ToolName, ms: number, fresh = false): Promise<{ models: ModelOption[]; cached: boolean } | null> {
     const adapter = this.adapters.get(tool)
     if (!adapter?.listModels) return null
     const hit = this.modelCache.get(tool)
     const stale = !hit || Date.now() - hit.at >= 5 * 60_000
-    if (hit && !stale) return hit.models
+    if (hit && !stale && !fresh) return { models: hit.models, cached: true }
     const failedAt = this.modelFailures.get(tool)
     const failedRecently = failedAt !== undefined && Date.now() - failedAt < MODEL_LIST_RETRY_MS && !this.modelFetches.has(tool)
-    if (failedRecently) return hit?.models ?? null
+    if (failedRecently) return hit && !fresh ? { models: hit.models, cached: true } : null
     const read = this.fetchModels(tool, adapter)
     // Nobody may be left waiting on this when it fails after the bound
     read.catch(() => {})
-    if (hit) return hit.models
+    if (hit && !fresh) return { models: hit.models, cached: true }
     try {
-      return await withTimeout(read, ms)
+      return { models: await withTimeout(read, ms), cached: false }
     } catch {
       return null
     }
@@ -5808,6 +5824,7 @@ export class SessionManager {
      * seconds with a bare "timed out" that says nothing of whether a session exists. So the setup is raced against a
      * bound under that, the card is withdrawn when it passes, and the answer says what was and was not created.
      */
+    const startedAt = Date.now()
     const progress: StartProgress = { stage: 'checking' }
     const ctl = new AbortController()
     const onAbort = () => ctl.abort()
@@ -5817,19 +5834,35 @@ export class SessionManager {
     const late = new Promise<ChildRunResult>((resolve) => {
       timer = setTimeout(() => {
         ctl.abort()
-        resolve(startAgentLate(progress))
+        const d = progress.stage === 'created' ? progress.d : undefined
+        // The child exists and its run is registered: answered as the normal path does, with the report armed
+        if (d) {
+          const notice = [progress.unchecked, this.handles.get(d.sessionId)?.delegationNotice?.()].filter(Boolean).join('; ')
+          const working = this.agentWorking(d)
+          resolve(working.ok && notice ? { ...working, notice: [working.notice, notice].filter(Boolean).join('; ') } : working)
+        } else resolve(startAgentLate(progress))
       }, START_AGENT_SETUP_MS)
     })
     let set: Awaited<ReturnType<SessionManager['setUpAgent']>>
+    const setup = this.setUpAgent(callerId, opts, ctl.signal, progress)
     try {
-      set = await Promise.race([this.setUpAgent(callerId, opts, ctl.signal, progress), late.then((r) => ({ done: r }))])
+      set = await Promise.race([setup, late.then((r) => ({ done: r }))])
     } finally {
       clearTimeout(timer)
       signal?.removeEventListener('abort', onAbort)
     }
-    if ('done' in set) return set.done
+    if ('done' in set) {
+      /*
+       * A start still in flight past the bound is not left without its report: if the session does come up, the
+       * caller is told when its turn ends, as for any child that outlives the call
+       */
+      void setup.then((r) => { if ('key' in r) this.agentWorking(r.d) }, () => {})
+      return set.done
+    }
     const { key, d, notice } = set
-    const result = opts.wait === false ? this.agentWorking(d) : await this.awaitAgent(key, d, signal)
+    // What the setup used comes off the wait, so the whole call ends inside the bridge's bound
+    const left = Math.max(1_000, START_AGENT_CALL_MS - (Date.now() - startedAt))
+    const result = opts.wait === false ? this.agentWorking(d) : await this.awaitAgent(key, d, signal, false, Math.min(ASK_WAIT_MS, left))
     return result.ok && notice ? { ...result, notice: [result.notice, notice].filter(Boolean).join('; ') } : result
   }
 
@@ -5865,6 +5898,7 @@ export class SessionManager {
     const checked = await this.agentChoiceError(tool, opts.model, opts.effort, model)
     if (checked.error) return done({ ok: false, error: checked.error })
     const unchecked = checked.unchecked
+    progress.unchecked = unchecked
     const found = await adapter.detect()
     if (!found.installed || !found.loggedIn) return done({ ok: false, error: `${adapter.descriptor.label} cannot take the task: ${found.detail}. ${ASK_THE_PERSON}` })
     // A new worktree (part 2): its branch is settled before the card, which names it
@@ -5922,6 +5956,7 @@ export class SessionManager {
     if (!worktree) this.rename(child.id, agentName(opts.task))
     const key = `${callerId}>${child.id}`
     const d = this.startDelegation(key, callerId, child.id, { id: project.id, name: project.name, path: child.worktree?.path ?? cwd }, true)
+    progress.d = d
     try {
       await this.deliver(child.id, agentFrame(labelOf(this.store, caller), opts.task), undefined, { sessionId: callerId, name: labelOf(this.store, caller) }, false)
     } catch (e) {
@@ -6153,21 +6188,32 @@ export class SessionManager {
      */
     const adapter = this.adapters.get(tool)
     if (!adapter?.listModels) return { error: null }
-    const models = await this.modelsWithin(tool, START_AGENT_MODEL_CHECK_MS)
-    if (!models || models.length === 0) {
-      const what = [askedModel && `model "${askedModel}"`, askedEffort && `effort "${askedEffort}"`].filter(Boolean).join(' and ')
-      return { error: null, unchecked: `${what} not checked: ${tool}'s model list was not available in time. If the session's first turn fails on it, start again without it` }
+    const what = [askedModel && `model "${askedModel}"`, askedEffort && `effort "${askedEffort}"`].filter(Boolean).join(' and ')
+    const notChecked = (why: string) => ({ error: null, unchecked: `${what} not checked: ${why}. If the session's first turn fails on it, start again without it` })
+    const mismatch = (models: ModelOption[]): string | null => {
+      const find = (name: string) => {
+        const n = name.toLowerCase()
+        return models.find((m) => m.id.toLowerCase() === n) ?? models.find((m) => m.id.toLowerCase().includes(n) || m.label.toLowerCase().includes(n))
+      }
+      if (askedModel && !find(askedModel)) return `${tool} has no model "${askedModel}". Its models: ${models.map((m) => m.id).join(', ')}.`
+      if (askedEffort) {
+        const m = model ? find(model) : models[0]
+        if (m && m.efforts.length > 0 && !m.efforts.includes(askedEffort)) return `${m.id} has no effort "${askedEffort}". Its efforts: ${m.efforts.join(', ')}.`
+      }
+      return null
     }
-    const find = (name: string) => {
-      const n = name.toLowerCase()
-      return models.find((m) => m.id.toLowerCase() === n) ?? models.find((m) => m.id.toLowerCase().includes(n) || m.label.toLowerCase().includes(n))
+    let got = await this.modelsWithin(tool, START_AGENT_MODEL_CHECK_MS)
+    if (!got) return notChecked(`${tool}'s model list was not available in time`)
+    if (got.models.length === 0) return notChecked(`${tool} listed no models`)
+    let wrong = mismatch(got.models)
+    if (wrong && got.cached) {
+      // The CLI may have been updated since the list was read: a refusal waits on a fresh one
+      got = await this.modelsWithin(tool, START_AGENT_MODEL_CHECK_MS, true)
+      if (!got) return notChecked(`${tool}'s saved model list lacks it and a new one was not available in time`)
+      if (got.models.length === 0) return notChecked(`${tool} listed no models`)
+      wrong = mismatch(got.models)
     }
-    if (askedModel && !find(askedModel)) return { error: `${tool} has no model "${askedModel}". Its models: ${models.map((m) => m.id).join(', ')}.` }
-    if (askedEffort) {
-      const m = model ? find(model) : models[0]
-      if (m && m.efforts.length > 0 && !m.efforts.includes(askedEffort)) return { error: `${m.id} has no effort "${askedEffort}". Its efforts: ${m.efforts.join(', ')}.` }
-    }
-    return { error: null }
+    return { error: wrong }
   }
 
   /** Update grants last only for the calling session on this host; they never change automatic application. */
@@ -6241,13 +6287,13 @@ export class SessionManager {
   }
 
   /** Waits on a child's turn up to the bound (#561), like `awaitDelegation`, and reads its outcome for the caller */
-  private async awaitAgent(key: string, d: Delegation, signal?: AbortSignal, observing = false): Promise<ChildRunResult> {
+  private async awaitAgent(key: string, d: Delegation, signal?: AbortSignal, observing = false, boundMs = ASK_WAIT_MS): Promise<ChildRunResult> {
     // Only the owner consumes its report/key/grants. Auto observers have their own bound and cancellation.
     if (!observing && this.awaitingReport.get(d.sessionId) === d.callerId) this.awaitingReport.delete(d.sessionId)
     const name = () => this.meta.get(d.sessionId)?.name ?? d.sessionId
     let timer: ReturnType<typeof setTimeout> | undefined
     let onAbort: (() => void) | undefined
-    const bound = new Promise<'bound'>((resolve) => (timer = setTimeout(() => resolve('bound'), ASK_WAIT_MS)))
+    const bound = new Promise<'bound'>((resolve) => (timer = setTimeout(() => resolve('bound'), boundMs)))
     const aborted = new Promise<'aborted'>((resolve) => {
       if (!signal) return
       onAbort = () => resolve('aborted')

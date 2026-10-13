@@ -9,7 +9,7 @@ import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-
 import { AGENT_CEILING, agentBranch, agentNoteFrame, presetWithin } from './start-agent.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
-import { START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './manager.js'
+import { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './manager.js'
 import type { ModelOption } from '@cc/protocol'
 
 /**
@@ -122,7 +122,10 @@ describe('starting another agent in the same project', () => {
     it('keeps a list that arrives after the bound, and checks the next call against it', async () => {
       allowProject()
       const s = await session()
-      const calls = withList(() => new Promise<ModelOption[]>((r) => setTimeout(() => r([option('gpt-real')]), START_AGENT_MODEL_CHECK_MS + 500)))
+      // Slow once; a later read (the refusal checks a name the saved list lacks against a fresh one) is quick
+      const calls = withList(() =>
+        new Promise<ModelOption[]>((r) => setTimeout(() => r([option('gpt-real')]), calls.n === 1 ? START_AGENT_MODEL_CHECK_MS + 500 : 0)),
+      )
       const first = await w.mgr.startAgent(s, { task: 'one', tool: 'codex', model: 'gpt-typo', wait: false })
       expect(first).toMatchObject({ ok: true, notice: expect.stringContaining('not checked') })
 
@@ -130,7 +133,8 @@ describe('starting another agent in the same project', () => {
       const second = await w.mgr.startAgent(s, { task: 'two', tool: 'codex', model: 'gpt-typo', wait: false })
       expect(second).toMatchObject({ ok: false, error: expect.stringContaining('has no model "gpt-typo". Its models: gpt-real') })
       expect(await w.mgr.startAgent(s, { task: 'three', tool: 'codex', model: 'gpt-real', effort: 'high', wait: false })).toMatchObject({ ok: true })
-      expect(calls.n).toBe(1)
+      // The slow read, and the fresh one the refusal waited on; the valid name needed neither
+      expect(calls.n).toBe(2)
     }, 20_000)
   })
 
@@ -146,6 +150,105 @@ describe('starting another agent in the same project', () => {
     expect(!r.ok && r.error).toContain('Do not do this with your own subagents')
     expect(agentCard(s)).toBeUndefined()
     expect(childrenOf(s)).toEqual([])
+  })
+
+  describe('the whole call stays inside the bridge bound (#660)', () => {
+    const settled = async <T,>(p: Promise<T>) => Promise.race([p, Promise.resolve('pending' as const)])
+    const cardOf = async (s: string) => {
+      for (let i = 0; i < 50 && !agentCard(s); i++) await vi.advanceTimersByTimeAsync(0)
+      expect(agentCard(s)).toBeDefined()
+    }
+
+    it('wait=true: a card answered late leaves only the rest of the bound to wait, then answers "working"', async () => {
+      const s = await session()
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+      const p = w.mgr.startAgent(s, { task: 'a long job' })
+      await cardOf(s)
+      await vi.advanceTimersByTimeAsync(150_000)
+      w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow')
+      await vi.advanceTimersByTimeAsync(START_AGENT_CALL_MS - 150_000 + 1_000)
+      // Waiting the full ask bound after the card would still be pending here
+      expect(await settled(p)).toMatchObject({ ok: true, state: 'working', reported: true })
+      expect(childrenOf(s)).toHaveLength(1)
+    })
+
+    it('a session that is slow to start past the bound says one may exist, and its report is armed when it comes up', async () => {
+      allowProject()
+      const s = await session()
+      const adapter = w.adapters.get('codex')!
+      const create = adapter.createSession.bind(adapter)
+      let release!: () => void
+      const gate = new Promise<void>((r) => (release = r))
+      vi.spyOn(adapter, 'createSession').mockImplementation(async (opts, emit) => {
+        await gate
+        return create(opts, emit)
+      })
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+      const p = w.mgr.startAgent(s, { task: 'slow start', tool: 'codex', wait: false })
+      await vi.advanceTimersByTimeAsync(START_AGENT_SETUP_MS)
+      const r = await p
+      expect(r).toMatchObject({ ok: false, error: expect.stringContaining('may or may not exist') })
+      expect(childrenOf(s)).toEqual([])
+      vi.useRealTimers()
+      release()
+      await w.until(() => childrenOf(s).length === 1)
+      // The report promised for any child that outlives the call is there
+      expect(await w.mgr.agentSession(s, { sessionId: childrenOf(s)[0]!.id, action: 'status' })).toMatchObject({ ok: true, state: 'working', reported: true })
+    })
+
+    it('a task still being handed over at the bound is answered as "working", with the report and the unchecked note', async () => {
+      allowProject()
+      const s = await session()
+      w.adapters.get('codex')!.listModels = () => new Promise<ModelOption[]>(() => {})
+      vi.spyOn(w.mgr as unknown as { deliver: () => Promise<void> }, 'deliver').mockImplementation(() => new Promise<void>(() => {}))
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+      const p = w.mgr.startAgent(s, { task: 'slow hand-over', tool: 'codex', model: 'gpt-x', wait: false })
+      await vi.advanceTimersByTimeAsync(START_AGENT_MODEL_CHECK_MS)
+      await vi.advanceTimersByTimeAsync(START_AGENT_SETUP_MS)
+      expect(await p).toMatchObject({ ok: true, state: 'working', reported: true, notice: expect.stringContaining('"gpt-x" not checked') })
+    })
+
+    it('an approval and the withdrawal in the same instant: the answer says none was created, and none is', async () => {
+      const s = await session()
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+      // Registered before the call's own timer, so on one synchronous advance the person's "allow" is given first
+      // and the bound's withdrawal follows before the start that the "allow" releases can run
+      setTimeout(() => w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow'), START_AGENT_SETUP_MS)
+      const p = w.mgr.startAgent(s, { task: 'race', wait: false })
+      await cardOf(s)
+      vi.advanceTimersByTime(START_AGENT_SETUP_MS)
+      const r = await p
+      expect(r).toMatchObject({ ok: false, error: expect.stringContaining('No session was created') })
+      for (let i = 0; i < 20; i++) await vi.advanceTimersByTimeAsync(0)
+      expect(childrenOf(s)).toEqual([])
+      expect(agentCard(s)).toBeUndefined()
+    })
+  })
+
+  describe('what the model check says about the list (#660)', () => {
+    const option = (id: string): ModelOption => ({ id, label: id, efforts: [], defaultEffort: null, tiers: [] })
+
+    it('an empty list is said to be empty, not late', async () => {
+      allowProject()
+      const s = await session()
+      w.adapters.get('codex')!.listModels = async () => []
+      const r = await w.mgr.startAgent(s, { task: 'x', tool: 'codex', model: 'gpt-x', wait: false })
+      expect(r).toMatchObject({ ok: true, notice: expect.stringContaining('listed no models') })
+      expect(!r.ok ? '' : r.notice).not.toContain('not available in time')
+    })
+
+    it('a name the saved list lacks is checked against a fresh list before it is refused (the CLI may have been updated)', async () => {
+      allowProject()
+      const s = await session()
+      let models = [option('gpt-old')]
+      w.adapters.get('codex')!.listModels = async () => models
+      expect(await w.mgr.startAgent(s, { task: 'one', tool: 'codex', model: 'gpt-old', wait: false })).toMatchObject({ ok: true })
+      models = [option('gpt-old'), option('gpt-new')]
+      expect(await w.mgr.startAgent(s, { task: 'two', tool: 'codex', model: 'gpt-new', wait: false })).toMatchObject({ ok: true })
+      expect(childrenOf(s).map((c) => c.model)).toEqual(['gpt-old', 'gpt-new'])
+      // Still refused when the fresh list does not have it either
+      expect(await w.mgr.startAgent(s, { task: 'three', tool: 'codex', model: 'gpt-typo', wait: false })).toMatchObject({ ok: false, error: expect.stringContaining('has no model "gpt-typo". Its models: gpt-old, gpt-new') })
+    })
   })
 
   it('a refusal tells the calling model to ask the person, not to fall back to its own subagents', async () => {
