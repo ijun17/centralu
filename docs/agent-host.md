@@ -276,7 +276,11 @@ caller's unfinished delegation, its wait has its own bound and cancellation and 
 `reported: false` while working. It does not consume the owner's report, key, waiter count
 or read grants. A stop leaves the owner's failure report and result available, including
 cross-project `ask_project` delegations. Self wait, stop, delete and send are refused in
-all presets; self status does not create a delegation.
+all presets; self status does not create a delegation. A person's own turn or an app request
+without a delegation is also observed without registering ownership: the app's existing
+completion watcher is reused, or a temporary event reader watches the person's turn and
+is removed when the observation ends. These observations do not add a `waitsOn` dependency,
+prevent an idle caller from sleeping, or stop the target when the caller is interrupted.
 
 What one `start_agent` call does (`SessionManager.startAgent`), with the refusal/card rules
 below retained for `safe` and `normal`:

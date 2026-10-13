@@ -33,7 +33,9 @@ boundaries (#603), with a log line instead of a card or refusal:
   start agents nor ask a project.
 - **Ownership**: `agent_session` acts only on a session whose `askedBy` is the caller, in its project. Under
   `auto`, another caller's delegation can be observed without consuming its report or result;
-  observer waits never grant files or stop work on cancellation. An explicit stop preserves
+  observer waits never grant files or stop work on cancellation. A person's turn or app request
+  with no delegation stays unowned by its observer, does not pin that caller awake, and
+  continues if the caller is stopped. An explicit stop preserves
   the owner's error report/result. Self wait, stop, delete and send are refused in every preset.
 - **A ceiling**: Settings → Orchestrator → Running agents per project (`prefs.agentCeiling`).
   Empty uses the preset default: no ceiling under `auto`, 4 otherwise (`AGENT_CEILING`); zero

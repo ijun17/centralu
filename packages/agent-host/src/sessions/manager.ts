@@ -471,6 +471,8 @@ export class SessionManager {
    * comment on `runAppAgent`).
    */
   private agentRuns = new Map<string, AgentRunWait>()
+  /** Temporary readers of a person's turn; they never own work or pin the calling session awake. */
+  private turnObservers = new Map<string, Set<AgentRunWait>>()
   /**
    * A card the host raises in a session's approval slot — requestId -> question: an app's capability question (M4
    * D-4), or one project reaching another (#371). It uses the same slot as the adapter's card (the session's
@@ -2380,6 +2382,7 @@ export class SessionManager {
       agentRun.deleted = true
       agentRun.fail(new Error('the person deleted the agent session before it answered'))
     }
+    for (const observer of this.turnObservers.get(sessionId) ?? []) observer.fail(new Error('the person deleted the session before it answered'))
     // What this session asked other projects to do (#371): nobody is left to read the answer. The delegated session
     // keeps its turn — it is that project's own session now, and the person may want what it is doing — but the wait
     // and the grants go
@@ -2905,6 +2908,7 @@ export class SessionManager {
     // Capture the answer before an event subscriber can send more input into this conversation.
     const run = e.sessionId ? this.agentRuns.get(e.sessionId) : undefined
     run?.onEvent(e)
+    if (e.sessionId) for (const observer of this.turnObservers.get(e.sessionId) ?? []) observer.onEvent(e)
     this.emit(seq != null ? ({ ...e, seq } as NormalizedEvent) : e)
     /*
      * Reporting happens **no matter how the turn ends** (#166). It used to only consume the marker on
@@ -4485,6 +4489,7 @@ export class SessionManager {
     // Receipt failures and ending events may be emitted synchronously by interrupt.
     const run = this.agentRuns.get(sessionId)
     if (run) run.stoppedByPerson = true
+    for (const observer of this.turnObservers.get(sessionId) ?? []) observer.stoppedByPerson = true
     handle.interrupt()
     // Stop on a caller stops what it asked another project to do (#371): the call it is waiting in ends with it
     // A child start_agent started (#561) stops only while the caller is waiting on it: one left running with
@@ -5466,10 +5471,10 @@ export class SessionManager {
   }
 
   /** Registers the wait on the delegated session's turn (the same watcher an app's agent uses, `AgentRunWait`) */
-  private startDelegation(key: string, callerId: string, sessionId: string, target: { id: string; name: string; path: string }, agent = false, runningWait?: AgentRunWait): Delegation {
+  private startDelegation(key: string, callerId: string, sessionId: string, target: { id: string; name: string; path: string }, agent = false): Delegation {
     let notice: string | undefined
     let answerAfter = this.meta.get(sessionId)?.lastSeq ?? 0
-    const wait = runningWait ?? new AgentRunWait((message) => (notice = message), () => this.meta.get(sessionId)?.name ?? 'the session', undefined, () => {
+    const wait = new AgentRunWait((message) => (notice = message), () => this.meta.get(sessionId)?.name ?? 'the session', undefined, () => {
       // Queued turns have no new stored user row: their input was recorded before the previous answer.
       const answer = finalAnswer(this.store.loadMessages(sessionId, 50).filter((m) => m.seq > answerAfter))
       answerAfter = this.meta.get(sessionId)?.lastSeq ?? answerAfter
@@ -5507,6 +5512,43 @@ export class SessionManager {
     this.agentRuns.set(sessionId, wait)
     this.delegations.set(key, d)
     return d
+  }
+
+  /** Read an existing turn without claiming it in delegations, agentRuns or the caller's sleep graph. */
+  private observeTurn(child: SessionInfo, subscribe: boolean): { run: Delegation; release(): void } {
+    const active = this.agentRuns.get(child.id)
+    const shared = active && !active.finished ? active : undefined
+    const wait = shared ?? new AgentRunWait(() => {}, () => child.name, undefined,
+      () => finalAnswer(this.store.loadMessages(child.id, 50)))
+    const project = this.store.listProjects().find((p) => p.id === child.projectId)
+    const target = { id: child.projectId ?? '', name: project?.name ?? '', path: this.store.sessionCwd(child.id) ?? project?.path ?? '' }
+    if (!shared && subscribe) {
+      const readers = this.turnObservers.get(child.id) ?? new Set<AgentRunWait>()
+      readers.add(wait)
+      this.turnObservers.set(child.id, readers)
+    }
+    return {
+      run: {
+        // This is the target's own turn, never work owned by its observer.
+        callerId: child.id, sessionId: child.id,
+        target,
+        wait, get settled() { return wait.finished }, notice: () => undefined,
+        outcome: wait.done.then((r) => ({ ok: true as const, answer: r.answer }),
+          (e: Error) => ({ ok: false as const, error: e.message })),
+        stop: (why) => {
+          // Only an explicit stop of the target may interrupt it or fail an app's watcher.
+          if (wait.finished) return
+          wait.fail(new Error(`${why}, so the turn was stopped`))
+          this.handles.get(child.id)?.interrupt()
+        },
+      },
+      release: () => {
+        if (shared) return
+        const readers = this.turnObservers.get(child.id)
+        readers?.delete(wait)
+        if (readers?.size === 0) this.turnObservers.delete(child.id)
+      },
+    }
   }
 
   /** Waits for a delegation up to the bound, and turns its outcome into what the caller reads */
@@ -5686,87 +5728,94 @@ export class SessionManager {
     if (opts.sessionId === callerId) return this.agentAtRest(child)
     const key = `${callerId}>${child.id}`
     let d = this.delegations.get(key)
+    let releaseObservation: (() => void) | undefined
     if (!d && this.autoBoundaryOpen(callerId)) {
       const existing = [...this.delegations.values()].find((run) => run.sessionId === child.id && !run.settled)
       if (existing) d = existing
       else if (opts.action !== 'delete' && (child.state === 'working' || child.state === 'waiting_approval')) {
-        const project = this.store.listProjects().find((p) => p.id === child.projectId)
-        // Preserve an app request's completion watcher; observing a turn does not start a child.
-        d = this.startDelegation(key, callerId, child.id, { id: caller.projectId, name: project?.name ?? '', path: this.store.sessionCwd(child.id) ?? project?.path ?? '' }, false, this.agentRuns.get(child.id))
+        const observation = this.observeTurn(child, opts.action !== 'status')
+        d = observation.run
+        releaseObservation = observation.release
       }
     }
     const observing = !!d && d.callerId !== callerId
-    switch (opts.action) {
-      case 'status':
-        if (d && !d.settled) return this.agentWorking(d, false, observing)
-        return d ? this.awaitAgent(key, d, signal, observing) : this.agentAtRest(child)
-      case 'wait':
-        return d ? this.awaitAgent(key, d, signal, observing) : this.agentAtRest(child)
-      case 'stop': {
-        if (!d || d.settled) return { ok: false, error: `Nothing you gave "${child.name}" is running.` }
-        if (!observing && this.awaitingReport.get(child.id) === callerId) this.awaitingReport.delete(child.id)
-        d.stop('the session that started it stopped it')
-        await d.outcome
-        if (!observing) this.delegations.delete(key)
-        return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool }
-      }
-      case 'delete': {
-        // Safe/normal retain the losslessness proof; auto opens it at cleanup time.
-        if (d && !d.settled) return { ok: false, error: `"${child.name}" is still working on what you gave it — stop it or wait first.` }
-        const r = await this.cleanUpWorktreeChild(callerId, child)
-        if (!r.ok) return r
-        if (d) this.delegations.delete(key)
-        return { ok: true, state: 'deleted', sessionId: child.id, sessionName: child.name, tool: child.tool, branch: r.branch, proof: r.proof }
-      }
-      case 'send': {
-        if (!presetWithin(child.permissionPreset, caller.permissionPreset)) {
-          return {
-            ok: false,
-            error: `"${child.name}" now has more permissions (${child.permissionPreset}) than this session (${caller.permissionPreset}), so this session cannot give it work. Tell the person.`,
-          }
+    try {
+      switch (opts.action) {
+        case 'status':
+          if (d && !d.settled) return this.agentWorking(d, false, observing)
+          return d ? await this.awaitAgent(key, d, signal, observing) : this.agentAtRest(child)
+        case 'wait':
+          return d ? await this.awaitAgent(key, d, signal, observing) : this.agentAtRest(child)
+        case 'stop': {
+          if (!d || d.settled) return { ok: false, error: `Nothing you gave "${child.name}" is running.` }
+          if (!observing && this.awaitingReport.get(child.id) === callerId) this.awaitingReport.delete(child.id)
+          d.stop('the session that started it stopped it')
+          await d.outcome
+          if (!observing) this.delegations.delete(key)
+          return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool }
         }
-        const from = { sessionId: callerId, name: labelOf(this.store, caller) }
-        if (d && !d.settled) {
-          const text = agentNoteFrame(from.name, opts.text ?? '')
-          if (!this.adapters.get(child.tool)?.capabilities.midTurnInput || !this.handles.get(child.id)?.sendTracked) {
-            return { ok: false, error: `"${child.name}" cannot take messages while working. Wait for it (action "wait") or stop it first.` }
+        case 'delete': {
+          // Safe/normal retain the losslessness proof; auto opens it at cleanup time.
+          if (d && !d.settled) return { ok: false, error: `"${child.name}" is still working on what you gave it — stop it or wait first.` }
+          const r = await this.cleanUpWorktreeChild(callerId, child)
+          if (!r.ok) return r
+          if (d) this.delegations.delete(key)
+          return { ok: true, state: 'deleted', sessionId: child.id, sessionName: child.name, tool: child.tool, branch: r.branch, proof: r.proof }
+        }
+        case 'send': {
+          if (!presetWithin(child.permissionPreset, caller.permissionPreset)) {
+            return {
+              ok: false,
+              error: `"${child.name}" now has more permissions (${child.permissionPreset}) than this session (${caller.permissionPreset}), so this session cannot give it work. Tell the person.`,
+            }
           }
-          const releaseHold = d.wait.holdInput()
-          const release = () => {
-            releaseHold()
-            this.applyDeferredRestart(child.id)
+          const from = { sessionId: callerId, name: labelOf(this.store, caller) }
+          if (d && !d.settled) {
+            const text = agentNoteFrame(from.name, opts.text ?? '')
+            if (!this.adapters.get(child.tool)?.capabilities.midTurnInput || !this.handles.get(child.id)?.sendTracked) {
+              return { ok: false, error: `"${child.name}" cannot take messages while working. Wait for it (action "wait") or stop it first.` }
+            }
+            const releaseHold = d.wait.holdInput()
+            const release = () => {
+              releaseHold()
+              this.applyDeferredRestart(child.id)
+            }
+            try {
+              await this.deliver(child.id, text, undefined, from, false, undefined, 'inline', (h, input) => {
+                const fail = (e: Error) => { d.wait.fail(e); release() }
+                void h.sendTracked!(input, { complete: release, fail }).then(release, fail)
+              })
+            } catch (e) {
+              release()
+              return { ok: false, error: `Could not send it: ${(e as Error).message}` }
+            }
+            // Keep the same outcome and any active wait. A send must not re-arm a report on top of that wait.
+            return this.agentWorking(d, false, observing)
           }
+          if (child.state === 'working' || child.state === 'waiting_approval' || (this.agentRuns.has(child.id) && !this.agentRuns.get(child.id)!.finished)) {
+            return { ok: false, error: `"${child.name}" is busy with something else (the person may be using it). Try again later.` }
+          }
+          // An answer the caller never came back for gives way to the new message
+          if (d) this.delegations.delete(key)
+          const full = this.agentCeilingError(callerId, child.projectId ?? '')
+          if (full) return { ok: false, error: full }
+          const project = this.store.listProjects().find((p) => p.id === child.projectId)
+          const cwd = this.store.sessionCwd(child.id) ?? child.worktree?.path ?? project?.path ?? ''
+          const next = this.startDelegation(key, callerId, child.id, { id: child.projectId ?? '', name: project?.name ?? '', path: cwd }, true)
           try {
-            await this.deliver(child.id, text, undefined, from, false, undefined, 'inline', (h, input) => {
-              const fail = (e: Error) => { d.wait.fail(e); release() }
-              void h.sendTracked!(input, { complete: release, fail }).then(release, fail)
-            })
+            await this.deliver(child.id, agentFrame(from.name, opts.text ?? ''), undefined, from, false)
           } catch (e) {
-            release()
+            this.delegations.delete(key)
+            if (this.agentRuns.get(child.id) === next.wait) this.agentRuns.delete(child.id)
             return { ok: false, error: `Could not send it: ${(e as Error).message}` }
           }
-          // Keep the same outcome and any active wait. A send must not re-arm a report on top of that wait.
-          return this.agentWorking(d, false, observing)
+          return this.awaitAgent(key, next, signal)
         }
-        if (child.state === 'working' || child.state === 'waiting_approval' || (this.agentRuns.has(child.id) && !this.agentRuns.get(child.id)!.finished)) {
-          return { ok: false, error: `"${child.name}" is busy with something else (the person may be using it). Try again later.` }
-        }
-        // An answer the caller never came back for gives way to the new message
-        if (d) this.delegations.delete(key)
-        const full = this.agentCeilingError(callerId, child.projectId ?? '')
-        if (full) return { ok: false, error: full }
-        const project = this.store.listProjects().find((p) => p.id === child.projectId)
-        const cwd = this.store.sessionCwd(child.id) ?? child.worktree?.path ?? project?.path ?? ''
-        const next = this.startDelegation(key, callerId, child.id, { id: child.projectId ?? '', name: project?.name ?? '', path: cwd }, true)
-        try {
-          await this.deliver(child.id, agentFrame(from.name, opts.text ?? ''), undefined, from, false)
-        } catch (e) {
-          this.delegations.delete(key)
-          if (this.agentRuns.get(child.id) === next.wait) this.agentRuns.delete(child.id)
-          return { ok: false, error: `Could not send it: ${(e as Error).message}` }
-        }
-        return this.awaitAgent(key, next, signal)
+        default:
+          return { ok: false, error: 'Unknown agent_session action.' }
       }
+    } finally {
+      releaseObservation?.()
     }
   }
 
@@ -6922,6 +6971,7 @@ export class SessionManager {
 
   async disposeAll(): Promise<void> {
     this.watchers.close()
+    for (const readers of this.turnObservers.values()) for (const observer of readers) observer.fail(new Error('Centralu is stopping'))
     this.appsHub?.rt.attachBrokerHost(null)
     for (const run of [...this.agentRuns.values()]) run.fail(new Error('Centralu is shutting down'))
     for (const ask of [...this.hostAsks.values()]) ask.resolve(null)
@@ -6962,6 +7012,7 @@ export class SessionManager {
     this.watchers.close()
     this.appsHub?.rt.attachBrokerHost(null)
     for (const run of [...this.agentRuns.values()]) run.fail(new Error('Centralu is restarting'))
+    for (const readers of this.turnObservers.values()) for (const observer of readers) observer.fail(new Error('Centralu is restarting'))
     for (const ask of [...this.hostAsks.values()]) ask.resolve(null)
     this.hostAsks.clear()
     for (const q of [...this.appQuestions.values()]) q.resolve(null)

@@ -100,6 +100,34 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     expect(h.opts.permissionPreset).toBe('safe')
   })
 
+  it.each(['status', 'wait', 'cancel'] as const)('%s observation never makes an app request belong to its observer', async (action) => {
+    plant('project', 'notes', { agent: true })
+    rt.refresh()
+    const caller = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude', permissionPreset: 'auto' })) as SessionInfo
+    const observer = (await rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude', permissionPreset: 'auto' })) as SessionInfo
+    claude.onSend = (h) => h.emit({ type: 'state_change', sessionId: h.sessionId, state: 'working' })
+    const request = callFromSession(caller, 'app-notes', { args: { prompt: 'Summarize.' } })
+    await until(() => agentSessions(), (sessions) => sessions.some((s) => s.state === 'working'))
+    const child = agentSessions()[0]!
+    const controller = new AbortController()
+    const observation = mgr.agentSession(observer.id, { sessionId: child.id, action: action === 'cancel' ? 'wait' : action }, controller.signal)
+    if (action === 'status') expect(await observation).toMatchObject({ ok: true, state: 'working', reported: false })
+    if (action === 'cancel') {
+      controller.abort()
+      expect(await observation).toMatchObject({ ok: false, error: expect.stringContaining('left running') })
+    } else mgr.interrupt(observer.id)
+    const h = claude.handles.get(child.id)!
+    expect(h.interrupted).toBe(false)
+    expect(mgr.waitsOn(observer.id)).toEqual([])
+    Object.assign(claude.capabilities, { backgroundTasks: true, sleep: true })
+    expect(await mgr.sleepSession(observer.id)).toBe(true)
+    h.say('The app still gets its answer.')
+    h.done()
+    if (action === 'wait') expect(await observation).toMatchObject({ ok: true, state: 'done', answer: 'The app still gets its answer.', readable: [] })
+    expect(brokerSaid(await request)).toMatchObject({ isError: false, text: 'The app still gets its answer.' })
+    expect(h.opts.permissionPreset).toBe('safe')
+  })
+
   it('given a schema, Claude receives it as the query\'s outputFormat, and the answer is taken from the turn\'s outcome and validated', async () => {
     plant('project', 'notes', { agent: true })
     rt.refresh()
