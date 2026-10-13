@@ -2862,6 +2862,8 @@ describe('worktree sessions', () => {
     repo = join(root, 'repo')
     wtRoot = join(root, 'worktrees')
     execFileSync('git', ['init', '-q', '-b', 'main', repo], { cwd: root })
+    // Byte-level recovery assertions use a deterministic Git policy, independent of the runner's global config.
+    execFileSync('git', ['config', 'core.autocrlf', 'false'], { cwd: repo })
     writeFileSync(join(repo, 'a.txt'), 'hello\n')
     execFileSync('git', ['add', '.'], { cwd: repo })
     // No detached `git maintenance run --auto` after the commit (#368): see the cleanup section
@@ -3429,7 +3431,19 @@ describe('worktree sessions', () => {
       return { recovery, dir: join(worktreeRecoveryDir(s.id), recovery.snapshot) }
     }
 
-    it.each(['safe', 'normal', 'auto'] as const)('keeps tracked, untracked, binary and staged work under %s; restore offers and applies it', async (preset) => {
+    const inRecoveryFolder = async (run: () => Promise<void>) => {
+      const previous = process.env.CC_DATA_DIR
+      // Backslashes reproduce Windows JSON escaping on every OS, without a fake filesystem.
+      process.env.CC_DATA_DIR = join(root, 'recovery\\files')
+      try {
+        await run()
+      } finally {
+        if (previous === undefined) delete process.env.CC_DATA_DIR
+        else process.env.CC_DATA_DIR = previous
+      }
+    }
+
+    it.each(['safe', 'normal', 'auto'] as const)('keeps tracked, untracked, binary and staged work under %s; restore offers and applies it', async (preset) => inRecoveryFolder(async () => {
       const { s, managerId } = await makeChild(`feat/dirty-${preset}`, preset)
       writeFileSync(join(s.worktree!.path, 'a.txt'), 'staged version\n')
       g(s.worktree!.path, ['add', 'a.txt'])
@@ -3447,7 +3461,7 @@ describe('worktree sessions', () => {
       expect(existsSync(s.worktree!.path)).toBe(false)
       expect(() => g(repo, ['rev-parse', '--verify', `refs/heads/${s.worktree!.branch}`])).toThrow()
       const { recovery, dir } = saved(s)
-      expect((await wtMgr.readTrashed(s.id, 100)).some((m) => JSON.stringify(m.payload).includes(worktreeRecoveryDir(s.id)))).toBe(true)
+      expect((await wtMgr.readTrashed(s.id, 100)).some((m) => typeof (m.payload as { text?: unknown }).text === 'string' && (m.payload as { text: string }).text.includes(worktreeRecoveryDir(s.id)))).toBe(true)
       expect(readFileSync(join(dir, '0.patch'), 'utf8')).not.toContain('not kept')
       expect(readFileSync(join(dir, '0.staged.patch'), 'utf8')).toContain('staged version')
       expect((await wtMgr.listTrash()).sessions.find((t) => t.id === s.id)!.bytes).toBeGreaterThan(100)
@@ -3466,7 +3480,7 @@ describe('worktree sessions', () => {
       expect(existsSync(dir)).toBe(true)
       expect(await wtMgr.emptyTrash()).toEqual({ purged: 1, failed: [] })
       expect(existsSync(worktreeRecoveryDir(s.id))).toBe(false)
-    }, process.platform === 'win32' ? 45_000 : 15_000)
+    }), process.platform === 'win32' ? 45_000 : 15_000)
 
     it('keeps unmerged commits in a self-contained bundle and restores the branch', async () => {
       const { s, managerId } = await makeChild('feat/unmerged')
@@ -3480,7 +3494,7 @@ describe('worktree sessions', () => {
       const { dir } = saved(s)
       expect(existsSync(join(dir, '0.bundle'))).toBe(true)
       const clone = join(root, 'from-bundle')
-      g(root, ['clone', '-q', join(dir, '0.bundle'), clone])
+      g(root, ['clone', '-q', '-c', 'core.autocrlf=false', join(dir, '0.bundle'), clone])
       expect(g(clone, ['rev-parse', 'HEAD']).trim()).toBe(tip)
       await wtMgr.restoreSession(s.id)
       expect(g(s.worktree!.path, ['rev-parse', 'HEAD']).trim()).toBe(tip)
@@ -3731,7 +3745,7 @@ describe('worktree sessions', () => {
       expect(recovery.commits).toBe(2)
       expect(existsSync(moduleDir)).toBe(false)
       const recovered = join(root, 'recover-module')
-      g(root, ['clone', '-q', join(dir, '1.bundle'), recovered])
+      g(root, ['clone', '-q', '-c', 'core.autocrlf=false', join(dir, '1.bundle'), recovered])
       expect(g(recovered, ['rev-parse', 'HEAD']).trim()).toBe(tip)
       expect(readFileSync(join(recovered, 'module.txt'), 'utf8')).toBe('local S\n')
     }, process.platform === 'win32' ? 45_000 : 15_000)
@@ -3758,6 +3772,39 @@ describe('worktree sessions', () => {
         removal.mockRestore()
       }
     })
+
+    it.each(['false', 'true'] as const)('restores staged, untracked, CP949 and binary data under core.autocrlf=%s', async (autocrlf) => {
+      g(repo, ['config', 'core.autocrlf', autocrlf])
+      const { s, managerId } = await makeChild(`feat/autocrlf-${autocrlf}`)
+      const path = join(s.worktree!.path, 'legacy.txt')
+      const line = Buffer.from([0xbe, 0xc8, 0xb3, 0xe7, 10])
+      writeFileSync(path, line)
+      g(s.worktree!.path, ['add', 'legacy.txt'])
+      g(s.worktree!.path, ['commit', '-qm', 'CP949 base'])
+      const staged = Buffer.concat([line, line])
+      writeFileSync(path, staged)
+      g(s.worktree!.path, ['add', 'legacy.txt'])
+      const crlfLine = Buffer.from([0xbe, 0xc8, 0xb3, 0xe7, 13, 10])
+      // With autocrlf=true, Git applies LF text with the configured CRLF checkout policy.
+      const inputLine = autocrlf === 'true' ? line : crlfLine
+      const working = Buffer.concat([inputLine, inputLine, inputLine])
+      const restoredWorking = Buffer.concat([crlfLine, crlfLine, crlfLine])
+      writeFileSync(path, working)
+      const untracked = Buffer.from([0x63, 0x61, 0x66, 0xe9, ...(autocrlf === 'true' ? [10] : [13, 10])])
+      writeFileSync(join(s.worktree!.path, 'latin.txt'), untracked)
+      const binary = Buffer.from([0, 255, 13, 10, 128, 10])
+      writeFileSync(join(s.worktree!.path, 'binary.dat'), binary)
+      expect((await remove(s, managerId)).isError).not.toBe(true)
+      await wtMgr.restoreSession(s.id)
+      expect(readFileSync(path)).toEqual(restoredWorking)
+      expect(execFileSync('git', ['show', ':legacy.txt'], { cwd: s.worktree!.path })).toEqual(staged)
+      expect(readFileSync(join(s.worktree!.path, 'latin.txt'))).toEqual(Buffer.from([0x63, 0x61, 0x66, 0xe9, 13, 10]))
+      expect(readFileSync(join(s.worktree!.path, 'binary.dat'))).toEqual(binary)
+      expect(g(s.worktree!.path, ['config', '--get', 'core.autocrlf']).trim()).toBe(autocrlf)
+      const restoreNotice = events.filter((e) => e.type === 'notice' && e.sessionId === s.id && e.label === 'worktree recovery').at(-1)!
+      expect(restoreNotice).toMatchObject({ text: expect.stringContaining('Recovery files remain') })
+      expect((restoreNotice as { text: string }).text).not.toContain('could not all be applied')
+    }, process.platform === 'win32' ? 45_000 : 15_000)
 
     it('only the session that started it cleans it up, and a session the person made is no one\'s to delete', async () => {
       const { profileAllows, orchestratorToolSchemas } = await import('./orchestrator-tools.js')
