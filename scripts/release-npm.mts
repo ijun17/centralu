@@ -38,7 +38,7 @@ import { APP_NAME, APP_VERSION } from '../packages/protocol/src/brand.js'
 import { checkStaged, shellToCarry, stageBundle, stageContent, type CarriedShell } from './bundle-stage.mjs'
 import { resolveSigningKey, trustedKeys, verifyContent, type SigningKey } from './content-manifest.mjs'
 import { hostPackageDir, hostPackageProblems, remotePlatforms, stageHostPackage } from './host-package.mjs'
-import { publishStep, stillMissing, viewPublished } from './release-registry.mjs'
+import { publishStep, stillMissing, viewPublished, VISIBLE_DELAY_MS, VISIBLE_TRIES } from './release-registry.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BUNDLE_ROOT = join(ROOT, 'apps/desktop/src-tauri/target/release/bundle')
@@ -721,10 +721,6 @@ async function stageShellAndContent(platform: string, bundle: string): Promise<v
 function onRegistry(name: string): boolean {
   return viewPublished(name, APP_VERSION, viaShell('npm')).state === 'present'
 }
-
-/** How long the shim waits for packages published moments ago to show on the registry */
-const VISIBLE_TRIES = 10
-const VISIBLE_DELAY_MS = 30_000
 
 async function assertPinnedPlatformsPublished() {
   const main = JSON.parse(readFileSync(join(MAIN_PKG, 'package.json'), 'utf8')) as {

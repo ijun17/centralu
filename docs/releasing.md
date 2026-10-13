@@ -93,8 +93,14 @@ The project board app (`.centralu/apps/project-board`) carries these steps as to
 `bump`, `rehearse`, `tag` or `approve`. Each step is for a login with maintain or admin
 permission, checks everything first (a clean checkout on main at GitHub's main, CI green on main,
 the version untagged, a successful rehearsal before the tag) and refuses with every reason, and
-does nothing without `confirm: true`. The board's "Release" dialog shows the same state. The
-steps by hand:
+does nothing without `confirm: true`. The board's "Release" dialog shows the same state.
+
+Before rehearsing, wait for main's checks with
+`node .centralu/apps/project-board/bin/wait-checks.mjs --ref main` (a commit SHA works too).
+The existing `<pr|owner/repo#pr>` form waits for a pull request. The script exits 0 when all
+reported checks pass, 1 on settled failures, and 2 on an argument or GitHub error; absent or
+pending checks keep it waiting. Release tools still enforce the required-check set.
+The steps by hand:
 
 1. Bump `APP_VERSION` in `packages/protocol/src/brand.ts`, and the same version in every
    file listed under `release.versionFiles` in `.centralu/apps/project-board/project.json`:
@@ -173,9 +179,10 @@ package and failed after it failed again on every re-run (`EPUBLISHCONFLICT`), a
 not go out without a bump.
 
 The shim job waits for the registry: it asks for every platform and host-only package at this
-version up to ten times, 30 s apart, before it gives up. 0.1.0-beta.14's shim job failed once on
-packages its platform jobs had published moments before and the registry did not show yet. A
-rehearsal asks once and warns, since it published nothing.
+version immediately, then up to twenty more times, 30 s apart (ten minutes of waits). The
+0.1.0-beta.18 shim exhausted the previous nine waits (4 min 30 s) before the packages appeared;
+this matches the update installer's ten-minute retry window (#586). A rehearsal asks once and
+warns, since it published nothing.
 
 ### Publishing by hand
 

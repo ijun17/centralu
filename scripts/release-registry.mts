@@ -14,6 +14,10 @@
  */
 import { execFileSync } from 'node:child_process'
 
+/** Twenty 30-second waits after the initial probe: npm propagation can take ten minutes (#587). */
+export const VISIBLE_TRIES = 21
+export const VISIBLE_DELAY_MS = 30_000
+
 /** What the registry holds at one exact version */
 export type Published = { state: 'absent' } | { state: 'present'; gitHead: string | null }
 

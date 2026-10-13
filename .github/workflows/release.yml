@@ -310,7 +310,7 @@ jobs:
   # `centralu` is a launcher script and nothing else — no bundle, no native code — so this
   # is the one job with no platform requirement, and `--shim-only` is the mode that says so.
   # The script still refuses to publish it while any pinned platform package (or host-only
-  # package) is missing from the registry at this version, after waiting a few minutes for
+  # package) is missing from the registry at this version, after waiting up to ten minutes for
   # packages published moments ago to show there; `needs` makes that check a formality rather
   # than the last line of defence, which is the right order for the two to be in.
   shim:

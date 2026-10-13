@@ -5,7 +5,7 @@
  * moment ago, not visible yet" from "not published".
  */
 import { describe, expect, it } from 'vitest'
-import { parseView, publishStep, stillMissing } from '../scripts/release-registry.mjs'
+import { parseView, publishStep, stillMissing, VISIBLE_DELAY_MS, VISIBLE_TRIES } from '../scripts/release-registry.mjs'
 
 const HEAD = '844bd5030000000000000000000000000000abcd'
 const E404 = JSON.stringify({ error: { code: 'E404', summary: 'No match found for version 9.9.9' } })
@@ -40,6 +40,22 @@ describe('publishing on a re-run', () => {
 })
 
 describe('waiting for packages published a moment ago', () => {
+  it('allows ten minutes of propagation, including the final probe, before giving up (#587)', async () => {
+    const boundaries = [...Array.from({ length: 43 }, (_, n) => n * 30_000), 599_999, 600_001, Infinity]
+    for (const visibleAt of boundaries) {
+      let elapsed = 0
+      let probes = 0
+      const missing = await stillMissing(['platform'], () => { probes++; return elapsed >= visibleAt }, {
+        tries: VISIBLE_TRIES,
+        delayMs: VISIBLE_DELAY_MS,
+        sleep: async (ms) => { elapsed += ms },
+      })
+      expect(elapsed).toBe(Math.min(Math.ceil(visibleAt / 30_000) * 30_000, 600_000))
+      expect(probes).toBe(elapsed / 30_000 + 1)
+      expect(missing).toEqual(visibleAt <= 600_000 ? [] : ['platform'])
+    }
+  })
+
   it('asks again while any is missing, and answers what never appeared', async () => {
     const seen = new Map([['a', 0], ['b', 0]])
     const visibleAfter: Record<string, number> = { a: 1, b: 3 }
