@@ -14,7 +14,7 @@ vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: vi.fn() }))
 vi.mock('@tauri-apps/plugin-notification', () => ({ isPermissionGranted: vi.fn(), requestPermission: vi.fn(), sendNotification: vi.fn() }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 
-const { createTauriPlatform, listenForQuit } = await import('./index.js')
+const { createTauriPlatform, listenForQuit, autoSwitch } = await import('./index.js')
 
 /**
  * The desktop at the moment the host fails to come up (#184). Checks only the seam with the
@@ -94,5 +94,37 @@ describe('background mode (#280)', () => {
     } finally {
       await p.dispose()
     }
+  })
+})
+
+
+describe('a relaunched window whose automatic swap fails', () => {
+  it('creates a working platform on the attached host and carries the attempt/error into the build bar', async () => {
+    const build = {
+      mode: 'keeper', relaunched: true, sameBuild: false, keeperSameBuild: false, busy: false, keepsAgents: true,
+      app: { version: `0.1.0-beta.${20}`, commit: 'new' },
+      host: { version: `0.1.0-beta.${19}`, commit: 'old' },
+      keeper: { version: `0.1.0-beta.${19}`, commit: 'old' },
+    }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'host_info') return { port: 1, token: 't' }
+      if (cmd === 'host_error') return null
+      if (cmd === 'host_build') return build
+      if (cmd === 'switch_host_build') throw new Error('Keeper refused the handoff')
+      return null
+    })
+    try {
+      const platform = await createTauriPlatform()
+      try {
+        expect(platform.background).toBeDefined()
+        const next = autoSwitch({ build, tried: platform.relaunchSwap.tried, autoApply: false, dismissed: false })
+        if (next === 'switch') await invoke('switch_host_build').catch(() => {})
+        expect(invoke.mock.calls.filter(([cmd]) => cmd === 'switch_host_build')).toHaveLength(1)
+        expect(next).toBe('none')
+        expect(platform.relaunchSwap).toEqual({ tried: true, error: 'Keeper refused the handoff' })
+        expect(unlistened).toContain('host-build')
+      } finally { await platform.dispose() }
+    } finally { warn.mockRestore() }
   })
 })

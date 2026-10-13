@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App, applyCachedTheme, applyCachedTypography, confirmKeyAction, useStore } from '@cc/ui'
 import {
@@ -16,6 +16,7 @@ import {
   switchPlan,
   type HostBuild,
   type HostStatus,
+  type TauriPlatform,
 } from '@cc/platform/tauri'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
@@ -78,7 +79,7 @@ function retry() {
  * The web build (apps/web) has no such path at all: closing a browser tab is the browser's own
  * business.
  */
-function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platform'] }) {
+function DesktopRoot({ platform }: { platform: TauriPlatform }) {
   const [askQuit, setAskQuit] = useState(false)
   /**
    * Leftover processes still running from our project folders (requested by the person,
@@ -182,7 +183,7 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
   const [askSwitch, setAskSwitch] = useState(false)
   const [askRestart, setAskRestart] = useState(false)
   const [restarting, setRestarting] = useState(false)
-  const [switchError, setSwitchError] = useState<string | null>(null)
+  const [switchError, setSwitchError] = useState<string | null>(platform.relaunchSwap.error ?? null)
   const [dismissed, setDismissed] = useState(false)
   // A failed swap stays on the bar until dismissed; this remembers which one was
   const [dismissedSwap, setDismissedSwap] = useState<number | null>(null)
@@ -218,7 +219,7 @@ function DesktopRoot({ platform }: { platform: ComponentProps<typeof App>['platf
    * app opened from a backup, a build that cannot be ordered) never switches by itself.
    */
   const autoApply = useStore((s) => s.update?.autoApply ?? false)
-  const autoTried = useRef(false)
+  const autoTried = useRef(platform.relaunchSwap.tried)
   useEffect(() => {
     if (!build || build.mode !== 'keeper') return
     const next = autoSwitch({ build, autoApply, tried: autoTried.current, dismissed })

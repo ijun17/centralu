@@ -384,7 +384,12 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         // Leased to this window's connection (#392): a reload or a closed window lets the host close it
         const params = { appId, projectId, ...(machine ? { machine } : {}), lease: true }
         const v = recover && openKey
-          ? await rpc.call('apps.recoverView', { ...params, openKey })
+          ? await rpc.call('apps.recoverView', { ...params, openKey }).catch((e: unknown) => {
+              if (e instanceof Error && e.message.startsWith('Unknown method: apps.recoverView')) {
+                throw new Error('The original app open could not be recovered on this older host — the home tool may or may not have run; check before opening again', { cause: e })
+              }
+              throw e
+            })
           : await rpc.call('apps.openView', { ...params, ...(openKey ? { openKey } : {}) })
         return { ...v, toolResult: v.toolResult as AppToolResult }
       },

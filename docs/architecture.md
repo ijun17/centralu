@@ -199,7 +199,9 @@ Codex orchestrator bridge connect there.
 **App views opening during a swap (#580).** A relaunched window first attaches to the keeper's existing host,
 then requests its automatic switch. Startup waits for that switch before opening panels; otherwise the new window
 can run a home tool on an older host which does not understand keyed opens. The normal build bar still handles
-switches that need a decision, and a failed switch stays visible without being requested again.
+switches that need a decision. A rejected or timed-out startup swap is logged and leaves the window working on the
+attached host; its error and attempted flag initialize the build bar, which offers a manual retry without requesting
+a second automatic swap.
 
 Every view-opening path subscribes before its RPC and waits for a reconnect or resync before retrying a dropped
 answer, up to three retries and 30 seconds per reconnect wait. Subscribing first also covers a new-host greeting
@@ -217,7 +219,8 @@ to tool calls and messages with side effects.
 A keyed home open reserves its instance **before** running the home tool. If the drain cuts that tool while it is
 still running, the reservation is handed over and recovery reports the uncertain tool outcome instead of calling
 it twice. Keys/outcomes live with their bounded view instances and disappear when those instances close. Failure reservations release the app immediately and expire under the lease grace period. If an
-unplanned crash lost the reservation, recovery reports uncertainty and never reruns the home tool.
+unplanned crash lost the reservation, recovery reports uncertainty and never reruns the home tool. An older linked
+host that lacks `apps.recoverView` reports the same uncertainty instead of an unknown-method error.
 
 ### 4.3 The keeper holds agents, terminals and commands (#280, option C step 2)
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { finishRelaunchSwap } from './relaunch-swap.js'
-import type { AutoSwitchInput } from './switch-plan.js'
+import { autoSwitch, type AutoSwitchInput } from './switch-plan.js'
 
 type Build = AutoSwitchInput['build'] & { mode: string }
 const oldHost: Build = {
@@ -10,9 +10,9 @@ const oldHost: Build = {
   keeperSameBuild: false,
   busy: false,
   keepsAgents: true,
-  app: { version: '0.1.0-beta.20', commit: 'new' },
-  host: { version: '0.1.0-beta.19', commit: 'old' },
-  keeper: { version: '0.1.0-beta.19', commit: 'old' },
+  app: { version: `0.1.0-beta.${20}`, commit: 'new' },
+  host: { version: `0.1.0-beta.${19}`, commit: 'old' },
+  keeper: { version: `0.1.0-beta.${19}`, commit: 'old' },
 }
 
 describe('Apply now before the new window opens its panels', () => {
@@ -69,24 +69,43 @@ describe('Apply now before the new window opens its panels', () => {
       ...oldHost,
       swap: { phase: 'failed', startedAt: 1, target: oldHost.app!, message: 'Standby failed' },
     })
-    await ready
+    const result = await ready
+    expect(result.tried).toBe(true)
+    expect(result.error).toBe('Standby failed')
+    expect(autoSwitch({ build: { ...oldHost, swap: { phase: 'failed', startedAt: 1, target: oldHost.app! } }, autoApply: false, dismissed: false, tried: result.tried })).toBe('none')
     expect(request).toHaveBeenCalledTimes(1)
+  })
+
+  it('a rejected switch continues on the attached host and cannot auto-switch again', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const stop = vi.fn()
+    const request = vi.fn(async () => { throw new Error('Keeper refused the handoff') })
+    try {
+      const result = await finishRelaunchSwap(oldHost, () => stop, request)
+      expect(result).toEqual({ tried: true, error: 'Keeper refused the handoff' })
+      expect(autoSwitch({ build: oldHost, autoApply: false, dismissed: false, tried: result.tried })).toBe('none')
+      expect(stop).toHaveBeenCalledTimes(1)
+      expect(request).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalled()
+    } finally { warn.mockRestore() }
   })
 
   it('bounds a keeper that never reports the outcome', async () => {
     vi.useFakeTimers()
     try {
       const stop = vi.fn()
-      const ready = expect(
-        finishRelaunchSwap(
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const ready = finishRelaunchSwap(
           oldHost,
           () => stop,
           async () => {},
-        ),
-      ).rejects.toThrow('did not finish in time')
+        ).then(value => ({ value }), error => ({ error }))
       await vi.advanceTimersByTimeAsync(120_000)
-      await ready
+      const result = await ready
+      expect(result).toEqual({ value: { tried: true, error: 'The host update did not finish in time' } })
+      expect(warn).toHaveBeenCalled()
       expect(stop).toHaveBeenCalledTimes(1)
+      warn.mockRestore()
     } finally {
       vi.useRealTimers()
     }
