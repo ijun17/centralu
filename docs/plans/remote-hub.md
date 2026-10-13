@@ -85,8 +85,8 @@ side up to the newer one, and does not connect until they match or the person de
 
 - **The hub is older:** the existing one-click update and seamless switch.
 - **The remote is older:** update it over ssh (the installer/updater, phase 3).
-- **The question says what stops.** On a remote without a keeper (Linux today, until #350), an
-  update cuts running agents; the prompt names them.
+- **The question says what stops.** On a remote without a keeper (Linux today, until the keeper is the Linux
+  default: runtime-unification step 4b), an update cuts running agents; the prompt names them.
 - **One side updates later:** the link stays up and the prompt comes again; the tolerant parsing
   rule (#339) covers the moment in between.
 - **Dev builds** (not on npm): no "newer" to compare; connect when `protocolVersion` matches, with
@@ -155,7 +155,7 @@ wakes sessions that were live. So the hub must:
    attachments upload, per-machine usage, Remote-SSH links.
 3. **Installing and updating remotes.** Install over ssh (bundled host plus a pinned Node, no npm
    or sudo), update and rollback (needed by §4), supervision without a session (keeper on Linux,
-   after #350), uninstall. Designed in §10.
+   after runtime-unification step 4b), uninstall. Designed in §10.
 4. **Hosts across machines.** Orchestrator and Centralu tools through the router, `ask_project`
    across machines, the reverse direction with consent. Planned in §12.
 
@@ -420,10 +420,12 @@ of these. Built as `centralu serve --autostart`, which the hub runs over ssh (§
 
 **The keeper on a remote** is what would let an update leave agents running (§4). Today it cannot run there: the Linux
 package carries the host unpacked but the keeper only inside the AppImage (read from the published package), its idle
-rules end it when no window attaches, and #350 is open. The AppImage problem itself (a keeper running from a FUSE
-mount that disappears with the window) does not arise for a host-only install, where the keeper would be a plain file
-beside `host/`; it links no GUI library, which the release already checks (`checkKeeperExe`). So a remote keeper is a
-release change plus a headless mode, after #350 (owner decision 5). Windows has no keeper at all.
+rules end it when no window attaches, and the keeper is still opt-in on Linux (#350 is fixed by #458; what is left is
+running the real window on a Linux desktop, [spikes/2026-10-linux-keeper.md](../spikes/2026-10-linux-keeper.md) §7).
+The AppImage problem itself (a keeper running from a FUSE mount that disappears with the window) does not arise for a
+host-only install, where the keeper would be a plain file beside `host/`; it links no GUI library, which the release
+already checks (`checkKeeperExe`). So a remote keeper is a release change plus a headless mode, after
+runtime-unification step 4b (owner decision 5). Windows has no keeper at all.
 
 ### 10.5 Update, rollback and uninstall
 
@@ -549,7 +551,7 @@ The owner took every recommendation of the design. Each line keeps the question,
 | 2 | Host-only npm packages | **The existing platform packages first**; `@centralu/host-<platform>` (about 4 MB) later, in a release change, which the installer prefers for the versions that have one | The platform packages already carry the host and work for every published version; the cost is Linux downloading 88 MB to keep 12, which a host-only package removes without blocking anything now |
 | 3 | How a Windows (and WSL) remote host outlives the link | **Started detached through WMI** (`serve --detach`); when WMI process creation is blocked, the hub says so and **falls back to a link-bound host** that runs while the link is up | WMI was the only measured start that survives the ssh session on Windows, and leaves nothing behind (no task, no service). Some managed machines block it (Defender's attack surface reduction rule for PSExec and WMI commands, off by default); the link-bound start still works there, only without outliving the link. A scheduled task is the opt-in of 4 |
 | 4 | Start the remote host at boot | **Offered per machine, off by default** (a systemd user unit and linger on Linux; a per-user scheduled task on Windows and for WSL) | After a reboot the next link starts the host anyway (7); autostart matters only for agents that should run with no hub around, and linger may need an administrator |
-| 5 | A keeper on Linux remotes | **Right after phase 3's first four steps and #350** | Without it §4's prompt says "this stops N agents" on every Linux update. Windows stays without one |
+| 5 | A keeper on Linux remotes | **Right after phase 3's first four steps and runtime-unification step 4b** (#350 itself is fixed, #458) | Without it §4's prompt says "this stops N agents" on every Linux update. Windows stays without one |
 | 6 | Sign the Linux and Windows host folders | **npm's integrity and registry signatures now; signing comes with the Linux keeper (5)** | Integrity checked on the remote plus registry signatures checked by the hub is what every npm user gets today; signing pays off once a Linux keeper starts from verified content as the macOS one does |
 | 7 | Start a remote host the link finds not running | **Automatically**, and say so in the machine's row and in `host.log` | Adding the machine was the consent (§3.2); asking each time would turn every reboot of the remote into a prompt |
 

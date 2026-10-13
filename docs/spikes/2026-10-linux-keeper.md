@@ -69,7 +69,10 @@ reaper of orphans. The unit tests ran outside any namespace once the fix was in.
 `-s TERM -<pid>` and `-15 -<pid>` do the same. In procps-ng's `src/kill.c`, getopt sees `-12345` as an unknown option
 `1`, and the "special case for signal digit negative PIDs" sends to `'0' - optopt`, minus that first digit, then
 exits. 3.3.17 (Ubuntu 22.04) used the whole argument (`atoi(argv[optind-1])`); 4.0.5 and later parse the whole
-argument again. 4.0.3 and 4.0.4 have the bug.
+argument again. 4.0.3 and 4.0.4 have the bug. Measured on a second system for the record (2026-10-14, Oracle Linux 9.8
+arm64, procps-ng 3.3.17, `strace -e kill`): `/bin/kill -TERM -105221` → `kill(-105221, SIGTERM)`, the leader's group
+and nothing else, and `-40000` → `kill(-40000, SIGTERM)` ESRCH; so a distribution on 3.3.17 (RHEL 9 and its clones)
+never saw the bug, and the fix below is the same `kill(2)` call on every one.
 
 **Where it hit.** `host_proc.rs`: `stop_pid_gracefully` sends TERM to the host, waits up to 3 s, then always calls
 `kill_group(pid)`, which ran `/bin/kill -TERM -<pid>`. `keeper-integration.mjs` with beta.12's keeper, pids burned to
