@@ -134,13 +134,12 @@ async function ciProblems(s, ci) {
 }
 
 /** The same evidence and refusal reasons serve status, rehearsal and tagging (#629). */
-async function releaseCi(s, cfg, gh, ci, allowPr = true) {
+async function releaseCi(s, cfg, gh, ci) {
   const main = await ci(s.tip)
   const mainLine = `CI on ${s.main} at ${short(s.tip)}: ${main.verdict}.`
   const refuse = (why) => ({ problems: [`CI on ${s.main} at ${short(s.tip)} is not green: ${main.summary}. ${why}`], lines: [mainLine, why] })
   if (main.verdict === 'failing') return refuse('Main CI failed; PR evidence cannot override it.')
   if (main.verdict === 'green') return { problems: [], lines: [`CI: ${s.main}'s own checks on ${short(s.tip)} are green.`] }
-  if (!allowPr) return refuse('Main CI is required for bumping the next version.')
 
   const pr = (await gh.prsWithHead(s.repo, `${cfg.branchPrefix}${s.version}`)).find((p) => p.state === 'MERGED' && p.baseRefName === s.main)
   if (!pr) return refuse('No merged bump PR for this version; main CI is required.')
@@ -166,9 +165,22 @@ async function releaseCi(s, cfg, gh, ci, allowPr = true) {
   if (!required.length || unknown.length) reasons.push(`required jobs could not be audited${unknown.length ? `: ${unknown.join(', ')}` : ''}`)
   if (reasons.length) return refuse(`Main CI is required because ${reasons.join('; ')}.`)
 
-  const tested = await ci(prHead)
+  const tested = await ci(prHead, { pr: true })
   if (tested.verdict !== 'green') return refuse(`PR #${pr.number}'s head checks are not all green: ${tested.summary}.`)
   return { problems: [], lines: [`CI: PR #${pr.number}'s run on the same tree (${short(prHead)}); ${s.main} at ${short(s.tip)} is ${main.verdict}.`] }
+}
+
+/** Publication cannot rely on a PR while main CI is still able to fail (#633 review). */
+async function approvalCi(s, tagSha, ci) {
+  const problems = []
+  const lines = []
+  for (const sha of new Set([s.tip, tagSha])) {
+    const r = await ci(sha)
+    const label = sha === s.tip ? "Main's own CI" : "The tagged commit's own CI"
+    lines.push(`${label} at ${short(sha)}: ${r.verdict}.`)
+    if (r.verdict !== 'green') problems.push(`${label} at ${short(sha)} must be green before npm-publish approval: ${r.summary}. PR evidence cannot authorize publication.`)
+  }
+  return { problems, lines }
 }
 
 /** The version files main carries, the bumped text of each, and every problem with them. */
@@ -239,7 +251,7 @@ function notesLines(s) {
 export async function releaseStatus({ repo, dir, cfg, gh, ci }) {
   const s = { repo, ...(await readState({ repo, dir, cfg, gh })) }
   const lines = []
-  const evidence = await releaseCi(s, cfg, gh, ci, !s.tagged)
+  const evidence = s.tagged ? await approvalCi(s, s.tagged.sha, ci) : await releaseCi(s, cfg, gh, ci)
   lines.push(...evidence.lines)
   const local = await checkoutProblems(s)
   lines.push(local.length ? `Checkout: ${local.join(' ')}` : `Checkout: clean, on ${s.main} at ${short(s.tip)}.`)
@@ -282,7 +294,7 @@ export async function releaseStatus({ repo, dir, cfg, gh, ci }) {
           ? 'Wait for the rehearsal; call release_status again.'
           : `Rehearse with release step rehearse (confirm: true), then tag ${s.tag}.`
   }
-  if (!s.tagged && evidence.problems.length) next = `Wait for green CI: ${evidence.problems.join(' ')}`
+  if (evidence.problems.length && (!s.tagged || !['released', 'failed'].includes(phase))) next = `Wait for green CI: ${evidence.problems.join(' ')}`
   if (duplicates.length) {
     const safe = duplicates.filter((d) => d.safe)
     lines.push(`Duplicate release runs for ${s.tag}: ${duplicates.map((d) => d.run.url ?? d.run.id).join(', ')}.`)
@@ -491,7 +503,7 @@ export async function tagRelease({ repo, dir, cfg, gh, ci, permissions }, { vers
  * agent drives the release end to end, approvals included, every step shown). Only that run, only the
  * configured environment, only what GitHub says this login may approve.
  */
-export async function approveRelease({ repo, dir, cfg, gh, permissions }, { version, comment, confirm = false }) {
+export async function approveRelease({ repo, dir, cfg, gh, ci, permissions }, { version, comment, confirm = false }) {
   if (!canMerge(permissions)) throw new ReleaseRefusal([NOT_MAINTAINER])
   const s = { repo, ...(await readState({ repo, dir, cfg, gh })) }
   const want = version !== undefined ? String(version).replace(/^v/, '') : s.version
@@ -511,7 +523,9 @@ export async function approveRelease({ repo, dir, cfg, gh, permissions }, { vers
   const jobs = (await gh.runJobs(repo, run.id)).filter((j) => j.status === 'waiting').map((j) => j.name)
   const what = jobs.length ? list(jobs) : 'the waiting jobs'
   const last = jobs.length > 0 && jobs.every((j) => /shim/i.test(j))
-  const lines = [`Waiting on ${cfg.environment}: ${what}.`, ...(last ? ['This is the shim: the last moment anything is reversible (docs/releasing.md).'] : [])]
+  const evidence = await approvalCi(s, t.sha, ci)
+  if (evidence.problems.length) throw new ReleaseRefusal(evidence.problems)
+  const lines = [...evidence.lines, `Waiting on ${cfg.environment}: ${what}.`, ...(last ? ['This is the shim: the last moment anything is reversible (docs/releasing.md).'] : [])]
   if (!confirm) return { summary: `${tag}'s release run waits for approval on ${cfg.environment} (${what}); nothing approved yet. Call again with confirm: true to approve, or approve on GitHub: ${run.url}`, lines, approved: false, run: run.url }
   await gh.approveDeployments(repo, run.id, [...new Set(pending.map((p) => p.environmentId))], String(comment ?? '').trim() || `Approved through the project board's release tool for ${tag}.`)
   return { summary: `Approved ${cfg.environment} for ${tag} (${what})${run.url ? `: ${run.url}` : ''}.${last ? '' : ' The shim asks again once every platform job succeeds.'}`, lines, approved: true, run: run.url }

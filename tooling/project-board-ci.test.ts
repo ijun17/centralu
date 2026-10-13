@@ -718,3 +718,14 @@ describe('release CI event audit', () => {
     ])
   })
 })
+
+
+it('documents that called scripts need manual event review in both release guides', () => {
+  const workflow = 'on:\n  push:\n  pull_request:\njobs:\n  verify:\n    steps:\n      - run: node scripts/check.mjs\n'
+  expect(workflowEventJobs(workflow)[0].reason).toBeNull()
+  for (const file of ['docs/releasing.md', 'docs/releasing.ko.md']) {
+    const doc = readFileSync(join(REPO_ROOT, file), 'utf8')
+    expect(doc).toContain('The automated event audit does not follow scripts called by workflow steps')
+    expect(doc).toContain('Those need manual\nreview for event-dependent behavior')
+  }
+})

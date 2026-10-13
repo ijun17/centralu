@@ -217,6 +217,12 @@ step shows on the screen.
   (`ready-to-tag`, `tagged`, `publishing`, `waiting-approval`, `released`, `failed`), CI on main, the
   checkout's state, the rehearsal or the release run, the jobs waiting for approval, what merged since
   the last tag (the release notes draft, without `chore(release)` commits) and the next step.
+- **Release CI sources (#633 review):** match GitHub Actions check-suite ids to runs of the
+  configured CI workflow files and exact commit/event (main push or PR). Release/rehearsal checks
+  can have the same job names and never replace CI checks. Before every npm-publish approval,
+  require main's own green CI, and the tagged commit's own CI too if main moved; no PR fallback.
+  Status reports this publication gate. The inline event scan does not follow called scripts or
+  actions; review those manually as described in docs/releasing.md.
 - **CI evidence for rehearse and tag (#629):** main green is used directly and main failure always
   blocks. Otherwise the merged bump PR may supply green required checks only when main is its
   single-parent squash commit and the PR head has the identical Git tree. Audit required workflow

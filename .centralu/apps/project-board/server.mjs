@@ -1211,11 +1211,12 @@ async function restack({ pr, lower, path, push }) {
 // it, the tag prefix, the workflow and its environment).
 const RELEASE = releaseConfig(config.release)
 
-/** main's CI, as ci_status reads it: every required check reported and passed is green. */
-async function ciOfMain(repo, sha) {
+/** Release CI: only configured workflow suites, on the exact commit and source event. */
+async function ciForRelease(repo, sha, { pr = false } = {}) {
   const { defaultBranch } = await readRepo(repo)
   const req = await readRequired(repo, defaultBranch, CI.workflows, workflowCheckNames)
-  const checks = await evaluate(repo, sha, req)
+  const reported = await readChecks(repo, sha, { workflows: CI.workflows, event: pr ? 'pull_request' : 'push', ...(pr ? {} : { branch: defaultBranch }) })
+  const checks = evaluateChecks({ required: req.names, reported, alsoReported: req.unresolved.length > 0 })
   return { verdict: checks.verdict, required: checks.rows.map((r) => r.name), workflows: CI.workflows, summary: ciLines(defaultBranch, sha, req, checks).summary }
 }
 
@@ -1231,7 +1232,7 @@ const RELEASE_GH = { readRepo, prsWithHead, workflowRuns, runJobs, pendingDeploy
 
 async function release(args, step) {
   const repo = config.repository
-  const ctx = { repo, dir: args.path ?? APP_DIR, cfg: RELEASE, gh: RELEASE_GH, ci: (sha) => ciOfMain(repo, sha), openPr: openPrResult }
+  const ctx = { repo, dir: args.path ?? APP_DIR, cfg: RELEASE, gh: RELEASE_GH, ci: (sha, options) => ciForRelease(repo, sha, options), openPr: openPrResult }
   try {
     if (step === 'status') {
       const r = await guarded(() => releaseStatus(ctx))
@@ -1654,7 +1655,7 @@ serveStdio(() => {
     {
       title: 'Release: bump, rehearse, tag, approve',
       description:
-        "docs/releasing.md as steps, maintainer only (maintain or admin on the repository). Each step checks everything first and refuses with every reason, changing nothing; without confirm: true it only says what it would do. bump: needs a clean checkout on main at GitHub's main, CI green and the current version released; moves every file in project.json release.versionFiles from main's version to version (or the next by bump, default prerelease), refuses when a listed file lacks the version or an unlisted file carries it, commits in a temporary index, pushes chore/release-<version> and opens the pull request from the template with the merged list as the notes draft. rehearse: starts the release workflow on main with its dry-run input. rehearse and tag may use the merged bump PR's green checks when main is its squash commit with the identical tree, and required jobs do not depend on the event; failing main CI always blocks. Both report the CI evidence used. tag: needs a clean checkout on main at GitHub's main, CI green, main's version untagged and after the last tag, and a successful rehearsal on that commit (or skipRehearsal: true); pushes the tag on main's commit and answers the release run. approve: approves the tag's release run on its environment (npm-publish), only what GitHub says this login may approve; the shim's approval is the last reversible moment.",
+        "docs/releasing.md as steps, maintainer only (maintain or admin on the repository). Each step checks everything first and refuses with every reason, changing nothing; without confirm: true it only says what it would do. bump: needs a clean checkout on main at GitHub's main, CI green and the current version released; moves every file in project.json release.versionFiles from main's version to version (or the next by bump, default prerelease), refuses when a listed file lacks the version or an unlisted file carries it, commits in a temporary index, pushes chore/release-<version> and opens the pull request from the template with the merged list as the notes draft. rehearse: starts the release workflow on main with its dry-run input. rehearse and tag may use the merged bump PR's green checks when main is its squash commit with the identical tree, and required jobs do not depend on the event; failing main CI always blocks. Both report the CI evidence used. tag: needs a clean checkout on main at GitHub's main, CI green, main's version untagged and after the last tag, and a successful rehearsal on that commit (or skipRehearsal: true); pushes the tag on main's commit and answers the release run. approve: requires main's own green CI (and the tagged commit's if main moved), then approves the tag's release run on its environment (npm-publish), only what GitHub says this login may approve; the shim's approval is the last reversible moment.",
       inputSchema: z.object({
         step: z.enum(['bump', 'rehearse', 'tag', 'approve', 'cancel_duplicate']),
         confirm: z.boolean().optional().describe('Do it; default false (check and say what it would do)'),

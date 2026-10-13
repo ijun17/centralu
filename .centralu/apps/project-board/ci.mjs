@@ -179,7 +179,8 @@ export function workflowCheckNames(text) {
 
 /**
  * Conservative audit for reusing PR checks on main. Inspect scripts too: an event branch may be
- * inside `run`, not `if`. Concurrency groups do not change what a job tests. Unknown required
+ * inside inline `run`, not `if`. Called scripts need manual review (docs/releasing.md).
+ * Concurrency groups do not change what a job tests. Unknown required
  * names are refused by the caller, so an unsupported workflow shape cannot grant an exemption.
  */
 export function workflowEventJobs(text) {

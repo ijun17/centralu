@@ -190,6 +190,17 @@ if (args[0] === 'pr' && args[1] === 'list') {
   const head = args[args.indexOf('--head') + 1]
   json(st.prs.filter((p) => p.headRefName === head))
 }
+if (args[0] === 'api' && args[1] === '--paginate' && args[2] === '--slurp') {
+  const [path, query] = args[3].split('?')
+  const q = new URLSearchParams(query)
+  if (path === R + '/actions/workflows/build.yml/runs') {
+    const pr = st.prs.find((p) => p.headRefOid === q.get('head_sha'))
+    const event = pr ? 'pull_request' : 'push'
+    const branch = pr ? pr.headRefName : 'main'
+    const runs = [{ id: 1, check_suite_id: 11, head_sha: q.get('head_sha'), event, head_branch: branch }]
+    json([{ workflow_runs: runs.filter((r) => (!q.get('event') || r.event === q.get('event')) && (!q.get('branch') || r.head_branch === q.get('branch'))) }])
+  }
+}
 if (args[0] === 'api' && args[1] === '-X') {
   const [method, path] = [args[2], args[3]]
   const body = JSON.parse(stdin)
@@ -220,10 +231,13 @@ if (args[0] === 'api') {
   if (path === R + '/branches/main/protection/required_status_checks') json({ contexts: ['build'], checks: [] })
   if (path === R + '/rules/branches/main') json([])
   if (/\/commits\/[0-9a-f]+\/check-runs$/.test(path)) {
-    const verdict = st.prs.some((p) => path.includes('/' + p.headRefOid + '/')) ? st.prCi : st.ci
-    if (verdict === 'none') json({ check_runs: [] })
+    const sha = path.split('/').at(-2)
+    const verdict = st.ciBySha?.[sha] || (st.prs.some((p) => p.headRefOid === sha) ? st.prCi : st.ci)
+    const collision = st.collidingReleaseChecks === true || st.collidingReleaseChecks === (st.prs.some((p) => p.headRefOid === sha) ? 'PR' : 'main')
+    const releaseChecks = collision ? [{ id: 99, name: 'build', status: 'completed', conclusion: 'success', started_at: '2026-10-13T12:00:00Z', check_suite: { id: 99 }, app: { slug: 'github-actions' } }] : []
+    if (verdict === 'none') json({ check_runs: releaseChecks })
     const c = { green: ['completed', 'success'], failing: ['completed', 'failure'], pending: ['in_progress', null] }[verdict]
-    json({ check_runs: [{ id: 1, name: 'build', status: c[0], conclusion: c[1], html_url: 'https://github.com/ijun17/centralu/actions/runs/1/job/1', app: { slug: 'github-actions' } }] })
+    json({ check_runs: [{ id: 1, name: 'build', status: c[0], conclusion: c[1], html_url: 'https://github.com/ijun17/centralu/actions/runs/1/job/1', started_at: '2026-10-13T10:00:00Z', check_suite: { id: 11 }, app: { slug: st.ciApp || 'github-actions' } }, ...releaseChecks] })
   }
   if (/\/commits\/[0-9a-f]+\/status$/.test(path)) json({ statuses: [] })
   if (path === R + '/actions/workflows/release.yml/runs')
@@ -241,6 +255,9 @@ type State = {
   permissions: Record<string, boolean>
   ci: 'green' | 'failing' | 'pending' | 'none'
   prCi?: 'green' | 'failing' | 'pending' | 'none'
+  collidingReleaseChecks?: boolean | 'main' | 'PR'
+  ciApp?: string
+  ciBySha?: Record<string, string>
   files: Record<string, string>
   prs: { number: number; state: string; headRefName: string; baseRefName?: string; headRefOid?: string; mergeCommit?: { oid: string } }[]
   runs: Run[]
@@ -501,6 +518,112 @@ describe.skipIf(process.platform === 'win32')('release', { timeout: 60_000 }, ()
     expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
   })
 
+  it.each(['main', 'PR'] as const)('ignores newer passing release checks with the same name as failing %s CI', async (source) => {
+    const s = repo({ bumped: true })
+    bumpEvidence(s)
+    patchState((st) => {
+      st.collidingReleaseChecks = source
+      if (source === 'main') st.ci = 'failing'
+      else st.prCi = 'failing'
+    })
+    runtime()
+    const reason = source === 'main' ? 'Main CI failed' : 'head checks are not all green'
+    for (const step of ['rehearse', 'tag']) {
+      const r = await call('release', { step, path: s.work, skipRehearsal: true, confirm: true })
+      expect(r.isError, r.text).toBe(true)
+      expect(r.data.problems.join(' ')).toContain(reason)
+    }
+    const status = await call('release_status', { path: s.work })
+    expect(status.data.lines.join(' ')).toContain(reason)
+    expect(ghWrites()).toEqual([])
+  })
+
+  it('refuses checks from another app even when their suite id and name match CI', async () => {
+    const s = repo({ bumped: true })
+    bumpEvidence(s)
+    patchState((st) => { st.ci = 'green'; st.ciApp = 'another-app' })
+    runtime()
+    const r = await call('release', { step: 'tag', path: s.work, skipRehearsal: true, confirm: true })
+    expect(r.isError, r.text).toBe(true)
+    expect(ghWrites()).toEqual([])
+  })
+
+  it.each(['multiple parents', 'different base'])('refuses bump PR evidence with %s', async (scenario) => {
+    const s = repo({ bumped: true })
+    if (scenario === 'multiple parents') {
+      const merge = g(s.work, 'commit-tree', g(s.work, 'rev-parse', `${s.tip}^{tree}`), '-p', s.tip, '-p', s.released, '-m', 'chore(release): merge bump')
+      g(s.work, 'reset', '--hard', merge)
+      g(s.work, 'push', '-q', 'origin', 'main')
+      s.tip = merge
+    }
+    bumpEvidence(s)
+    if (scenario === 'different base') patchState((st) => { st.prs[0]!.baseRefName = 'other-base' })
+    runtime()
+    for (const step of ['rehearse', 'tag']) {
+      const r = await call('release', { step, path: s.work, skipRehearsal: true, confirm: true })
+      expect(r.isError, r.text).toBe(true)
+      expect(r.data.problems.join(' ')).toContain(scenario === 'multiple parents' ? 'did not land as a squash commit' : 'No merged bump PR')
+    }
+    expect(ghWrites()).toEqual([])
+  })
+
+  it.each(['pending', 'failing', 'none'] as const)('blocks every publication approval while main CI is %s despite green PR and release checks', async (ci) => {
+    const s = repo({ bumped: true })
+    bumpEvidence(s)
+    g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
+    patchState((st) => {
+      st.ci = ci
+      st.collidingReleaseChecks = true
+      st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'waiting', conclusion: null }))
+      st.pending['61'] = [{ environment: { id: 7, name: 'npm-publish' }, current_user_can_approve: true, reviewers: [] }]
+    })
+    runtime()
+    for (const job of ['linux-x64', 'centralu (shim)']) {
+      patchState((st) => { st.jobs['61'] = [{ name: job, status: 'waiting', conclusion: null }] })
+      for (const confirm of [false, true]) {
+        const r = await call('release', { step: 'approve', path: s.work, confirm })
+        expect(r.isError, r.text).toBe(true)
+        expect(r.data.problems.join(' ')).toContain('must be green before npm-publish approval')
+      }
+    }
+    const status = await call('release_status', { path: s.work })
+    expect(status.data.summary).toContain('Wait for green CI')
+    expect(status.data.summary).toContain('PR evidence cannot authorize publication')
+    expect(status.data.lines.join(' ')).toContain(`Main's own CI at ${s.tip.slice(0, 7)}: ${ci}.`)
+    expect(ghWrites()).toEqual([])
+    patchState((st) => { st.ci = 'green' })
+    const approved = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(approved.isError, approved.text).toBe(false)
+    expect(approved.data.approved).toBe(true)
+    expect(ghWrites()).toHaveLength(1)
+    // Every call rechecks CI, including the shim's later approval.
+    patchState((st) => { st.ci = 'failing' })
+    const again = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(again.isError, again.text).toBe(true)
+    expect(ghWrites()).toHaveLength(1)
+  })
+
+  it('does not let a newer green main authorize a tag whose own main CI failed', async () => {
+    const s = repo({ bumped: true })
+    const tagged = s.tip
+    g(s.work, 'push', '-q', 'origin', `${tagged}:refs/tags/v${NEXT}`)
+    g(s.work, 'commit', '--allow-empty', '-q', '-m', 'docs: later change')
+    g(s.work, 'push', '-q', 'origin', 'main')
+    patchState((st) => {
+      st.ci = 'green'
+      st.ciBySha = { [tagged]: 'failing' }
+      st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: tagged, status: 'waiting', conclusion: null }))
+      st.pending['61'] = [{ environment: { id: 7, name: 'npm-publish' }, current_user_can_approve: true, reviewers: [] }]
+    })
+    runtime()
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(r.isError, r.text).toBe(true)
+    expect(r.data.problems.join(' ')).toContain("The tagged commit's own CI")
+    const status = await call('release_status', { path: s.work })
+    expect(status.data.summary).toContain("The tagged commit's own CI")
+    expect(ghWrites()).toEqual([])
+  })
+
   it('passes check, with the status open to the screen and the steps to agents', async () => {
     const r = await runtime().check(ref)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])
@@ -517,7 +640,8 @@ describe.skipIf(process.platform === 'win32')('release', { timeout: 60_000 }, ()
     expect(r.data).toMatchObject({ ok: true, phase: 'released', version: APP_VERSION, head: s.tip })
     expect(r.data.summary).toBe(`main at ${s.tip.slice(0, 7)} carries ${APP_VERSION}: released as v${APP_VERSION}. Next: ${APP_VERSION} is released. 2 changes since: bump with release step bump.`)
     expect(r.data.lines).toEqual([
-      `CI: main's own checks on ${s.tip.slice(0, 7)} are green.`,
+      `Main's own CI at ${s.tip.slice(0, 7)}: green.`,
+      `The tagged commit's own CI at ${s.released.slice(0, 7)}: green.`,
       `Checkout: clean, on main at ${s.tip.slice(0, 7)}.`,
       `Release run for v${APP_VERSION}: succeeded, https://github.com/ijun17/centralu/actions/runs/60.`,
       `Merged since v${APP_VERSION} (2):`,

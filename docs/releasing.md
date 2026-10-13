@@ -97,6 +97,18 @@ Both steps and `release_status` name their evidence, for example
 `CI: PR #624's run on the same tree`, or explain why main's CI is required. Status's
 next step waits for CI when neither source qualifies.
 
+Release CI reads only GitHub Actions check suites belonging to the configured CI
+workflow files, matching their run's commit and event: push-to-main for main, and
+pull-request runs for the PR head. Release/rehearsal checks with the same job names
+cannot replace build checks; check names alone are not evidence of their source.
+
+Tagging does not authorize publication. Before every `npm-publish` approval (platform
+jobs and the later shim job), `approve` requires main's **own** CI to be green, with
+no PR fallback. If main moved, the tagged commit's own CI must also be green: newer
+main checks cannot hide a failure on the code about to ship. Pending, absent or failed
+CI refuses approval, and tagged `release_status` explains this gate before suggesting
+approval. Direct approval in GitHub's UI is outside this tool's enforcement.
+
 Workflow event audit (2026-10-13):
 
 | Workflow and jobs | Event-dependent behavior | Required for this CI gate? |
@@ -109,11 +121,20 @@ Workflow event audit (2026-10-13):
 | `discord-notify.yml`: `notify` | Issue, PR and discussion notifications (`pull_request_target`, not build CI). | No. |
 
 Before reusing PR evidence, the tool audits the configured `ci.workflows` files from
-main's fetched commit against the required check names. A required job with event/branch context (including
-shell scripts), one outside a shared push/PR workflow, or a required name it cannot
+main's fetched commit against the required check names. A required job with event/branch
+context (including inline shell scripts), one outside a shared push/PR workflow, or a required name it cannot
 map to an audited job requires main's own run and says why. This is conservative:
-unsupported workflow shapes do not grant an exemption. No workflow conditions or
-release approvals are changed by this optimization.
+unsupported workflow shapes do not grant an exemption. No workflow conditions are
+changed by this optimization.
+
+The automated event audit does not follow scripts called by workflow steps, package
+scripts, imported modules, local actions, or reusable workflows. Those need manual
+review for event-dependent behavior (including environment variables) when they
+change. A clean inline scan is not proof that called code behaves identically. If a
+required called script behaves differently on push-to-main and pull requests, wait
+for main's own green run before invoking `rehearse` or `tag`; the automated fallback
+cannot establish equivalence for that script. Publication still waits for main's
+own CI through the approval gate above.
 
 ## One-time setup
 
