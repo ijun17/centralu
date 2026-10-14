@@ -1175,6 +1175,13 @@ export type AppState = {
   /** Opens/closes the session-creation window (`null` closes it) */
   openNewSession(projectId: string | null, opts?: { worktree?: boolean }): void
   /**
+   * Starts a session in the project at once, with what the project remembers (its last tool, and that tool's model and
+   * effort: `createSession` reads them), and gives the new session's composer the keyboard (#543). A remembered tool that
+   * is logged out gives way to one that is not (the dialog's rule); when none can run, or the host refuses, the options
+   * window opens instead and states why: a one-click start must never end in "nothing happened".
+   */
+  startSessionNow(projectId: string): Promise<void>
+  /**
    * Sets the project's worktree trunk (#76). It was chosen when making the worktree manager, which was folded into
    * ordinary sessions (#561 part 3); a failure is thrown back to the dialog, which keeps it in place (#180).
    */
@@ -1668,6 +1675,9 @@ async function usableDefaults(
     return saved // Same reason as above — failing to ask is not the same as "does not exist"
   }
 }
+
+/** Projects with a one-click start (`startSessionNow`) in flight: a re-entry guard, nothing to draw from it */
+const startingNow = new Set<string>()
 
 /** A handoff in progress — calling it twice on the same session births two new sessions (module state: purely a re-entry guard, nothing to draw from it) */
 const handoffInFlight = new Set<string>()
@@ -4547,6 +4557,40 @@ export const useStore = create<AppState>((set, get) => ({
       newSessionBranch: prop?.branch ?? '',
       ...(prop ? { worktreeProposals: queue.filter((_, i) => i !== at) } : {}),
     })
+  },
+
+  async startSessionNow(projectId) {
+    const project = get().projects[projectId]
+    const platform = get().platform
+    // A second click while the first is still starting would make a second session
+    if (!project || !platform || startingNow.has(projectId)) return
+    startingNow.add(projectId)
+    try {
+      let tool = project.defaultTool ?? get().tools[0]?.name ?? ''
+      /*
+       * The host does not check a login when it creates a session: a tool that is logged out would fail on the first
+       * turn instead. So the same rule as the dialog's applies first: a remembered tool that cannot run gives way to
+       * one that can, and when none can the dialog opens, which states why. Failing to ask is not "unusable".
+       */
+      const found = await platform.agents.detect(project.machine ?? null).catch(() => [])
+      const usable = (t: string) => {
+        const d = found.find((x) => x.name === t)
+        return d?.installed === true && d.loggedIn
+      }
+      if (found.length > 0 && !usable(tool)) {
+        const other = found.find((x) => x.installed && x.loggedIn)?.name
+        if (!other) return get().openNewSession(projectId)
+        tool = other
+      }
+      const created = await get().createSession(projectId, { tool })
+      // What comes next is the first instruction (#528): the composer takes the keyboard, as it does after the dialog's Start
+      get().askComposerFocus(created.id)
+    } catch (e) {
+      get().openNewSession(projectId)
+      get().setToast(`Could not start a session: ${(e as Error).message}`)
+    } finally {
+      startingNow.delete(projectId)
+    }
   },
 
   async setWorktreeTrunk(projectId, baseBranch) {

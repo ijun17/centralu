@@ -66,18 +66,18 @@ uxTask({
   task: 'Start a new session in a project and give it its first instruction',
   path: 'mouse',
   access: 'discoverable',
-  notes: ["The + on the project the person is in (#529); the project's menu still has New session too"],
+  notes: [
+    "The + on the project the person is in (#529) starts a session at once with the project's tool, model and effort (#543); the chevron beside it and the project's menu open the dialog that asks",
+  ],
   start: demo,
   run: async (u, page) => {
     await u.click(page.getByTestId('project-new-session-centralu'))
-    await u.until('the new-session dialog', () => expect(page.getByTestId('new-session-dialog')).toBeVisible())
-    await u.click(page.getByTestId('create-session-confirm'))
-    await u.until('the new session', () => expect(page.getByTestId('new-session-dialog')).toBeHidden())
+    await u.until('the new session', () => expect(page.getByTestId('prompt-input')).toBeFocused())
     await u.fill(page.getByTestId('prompt-input'), 'Fix the login bug')
     await u.press('Enter')
   },
   goal: startedThere,
-  budget: { operators: 30, M: 3, H: 2, seconds: 13.3 },
+  budget: { operators: 26, M: 2, H: 2, seconds: 10.6 },
 })
 
 uxTask({

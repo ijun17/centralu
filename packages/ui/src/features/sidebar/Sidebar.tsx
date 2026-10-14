@@ -494,6 +494,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   // Whether the dialog is open is held by the store — the first-run screen also needs to open this dialog
   const newSessionOpen = useStore((s) => s.newSessionFor === projectId)
   const openNewSession = useStore((s) => s.openNewSession)
+  const startSessionNow = useStore((s) => s.startSessionNow)
   const [confirming, setConfirming] = useState<string | null>(null)
   /** The session whose handoff confirmation dialog is open (null when none is) */
   const [handingOff, setHandingOff] = useState<string | null>(null)
@@ -679,12 +680,24 @@ function ProjectBlock({ projectId }: { projectId: string }) {
             summary.length > 0 ? '' : 'ml-auto'
           } ${open ? 'opacity-100' : 'opacity-0'}`}
         >
+          {/*
+            A split button (#543): the `+` starts a session at once, with what the project remembers (its last
+            tool and that tool's model and effort); the chevron beside it opens the window that asks. In the
+            common case the window's only step was Start, a decision and a click (2.7 s) every time.
+          */}
           <IconButton
             label={`New session in ${project.name}`}
-            onClick={() => openNewSession(projectId)}
+            onClick={() => void startSessionNow(projectId)}
             testId={`project-new-session-${project.name}`}
           >
             <PlusIcon size={14} />
+          </IconButton>
+          <IconButton
+            label={`New session in ${project.name}: choose the tool, a worktree or a past conversation`}
+            onClick={() => openNewSession(projectId)}
+            testId={`project-new-session-options-${project.name}`}
+          >
+            <ChevronIcon open size={12} />
           </IconButton>
         </span>
         <span
