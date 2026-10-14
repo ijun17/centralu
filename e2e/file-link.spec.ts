@@ -347,10 +347,24 @@ test('the path in a tool card opens the file; a path outside the project stays t
   await expect(page.getByTestId('tool-card').nth(1)).toContainText('Read: /etc/hosts.conf')
 
   // The keyboard reaches the link and the toggle separately; Enter on the link opens the viewer, not the card
-  await link.focus()
-  await page.keyboard.press('Enter')
-  await expect(page.getByTestId('viewer-path')).toHaveText('src/a.ts')
+  /*
+   * This is the first time the viewer opens in the run, and its code is a lazy chunk: on a cold runner (the first test
+   * of a WebKit worker, #681's CI: 12 s for the test, the viewer not there after 5 s) it can be late. So the whole step
+   * is retried as a unit (focus, check the focus, Enter, wait for the viewer) inside a generous bound, instead of
+   * trusting one Enter and a 5 s wait. A second Enter after the first opened only opens the same file again.
+   */
+  await expect(async () => {
+    await link.focus()
+    await expect(link).toBeFocused({ timeout: 1000 })
+    await page.keyboard.press('Enter')
+    await expect(page.getByTestId('viewer-path')).toHaveText('src/a.ts', { timeout: 4000 })
+  }).toPass({ timeout: 25_000 })
   await expect(page.getByTestId('code-viewer')).toContainText('second line')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('overlay')).toHaveCount(0)
+  // And the pointer opens it the same way
+  await link.click()
+  await expect(page.getByTestId('viewer-path')).toHaveText('src/a.ts')
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('overlay')).toHaveCount(0)
   await expect(page.getByTestId('tool-card-toggle').first()).toHaveAttribute('aria-expanded', 'false')
