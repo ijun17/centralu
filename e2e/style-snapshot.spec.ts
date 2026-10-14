@@ -226,7 +226,8 @@ test('question card', async ({ page }) => {
   await openDemo(page)
   await openSession(page, 'Pick the hero copy')
   await expect(page.getByTestId('question-card')).toBeVisible()
-  await page.getByTestId('question-card').locator('button').first().click()
+  // A click on an option answers a single-choice question (#543), so the picked look is the "Other" slot's
+  await page.getByTestId('question-other').click()
   await snapshot(page, 'question')
 })
 

@@ -88,7 +88,6 @@ export function linkedHostsTests(): void {
         await send(page, 'ask me a question')
         await expect(page.getByTestId('question-card')).toBeVisible()
         await page.getByTestId('question-option').filter({ hasText: 'Yes' }).click()
-        await page.getByTestId('question-submit').click()
         await expect(page.getByTestId('question-card')).toHaveCount(0)
         await expect(page.getByTestId('chat-stream')).toContainText('answered: Yes')
       })

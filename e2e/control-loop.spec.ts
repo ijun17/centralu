@@ -7247,7 +7247,7 @@ const QUESTIONS = [
   },
 ]
 
-test('Clicking an option to answer sends that answer to the session', async ({ page }) => {
+test('Clicking the option of a single-choice question answers at once, with no Answer click (#543)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'q')
   await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
@@ -7258,10 +7258,56 @@ test('Clicking an option to answer sends that answer to the session', async ({ p
   await expect(page.getByTestId('question-card')).toContainText('Warm')
 
   await page.getByTestId('question-option').filter({ hasText: 'Ramen' }).click()
-  await page.getByTestId('question-submit').click()
 
   await expect(page.getByTestId('chat-stream')).toContainText('Answer received: Ramen')
   await expect(page.getByTestId('question-card')).toHaveCount(0)
+})
+
+test('Enter on a focused option of a single-choice question answers it (#543)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'q')
+  await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
+
+  await page.getByTestId('question-option').filter({ hasText: 'Kimbap' }).focus()
+  await page.keyboard.press('Enter')
+
+  await expect(page.getByTestId('chat-stream')).toContainText('Answer received: Kimbap')
+  await expect(page.getByTestId('question-card')).toHaveCount(0)
+})
+
+test('A single-choice question still opens "Other" without sending, and Answer sends the typed text (#543)', async ({
+  page,
+}) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'q')
+  await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
+
+  await page.getByTestId('question-other').click()
+  await expect(page.getByTestId('question-other-input')).toBeFocused()
+  await expect(page.getByTestId('question-card')).toBeVisible()
+  await expect(page.getByTestId('chat-stream')).not.toContainText('Answer received')
+
+  await page.getByTestId('question-other-input').fill('Something else')
+  await page.getByTestId('question-submit').click()
+  await expect(page.getByTestId('chat-stream')).toContainText('Answer received: Something else')
+})
+
+test('A multiple-choice question keeps Answer: picking options sends nothing (#543)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'q')
+  await emitEvent(page, 0, {
+    type: 'question_request',
+    requestId: 'q1',
+    questions: [{ ...QUESTIONS[0], multiSelect: true }],
+  })
+
+  await page.getByTestId('question-option').filter({ hasText: 'Kimbap' }).click()
+  await page.getByTestId('question-option').filter({ hasText: 'Ramen' }).click()
+  await expect(page.getByTestId('question-card')).toBeVisible()
+  await expect(page.getByTestId('chat-stream')).not.toContainText('Answer received')
+
+  await page.getByTestId('question-submit').click()
+  await expect(page.getByTestId('chat-stream')).toContainText('Answer received: Kimbap+Ramen')
 })
 
 test('Multiple questions split into tabs, and sending requires answering all of them', async ({ page }) => {

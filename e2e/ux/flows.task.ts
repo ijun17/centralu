@@ -275,10 +275,9 @@ uxTask({
     await u.click(page.getByTestId(`session-row-${await sessionId(page, QUESTION)}`), { label: `session row "${QUESTION}"` })
     await u.until('the question', () => expect(page.getByTestId('question-card')).toBeVisible())
     await u.click(page.getByTestId('question-option').first(), { among: page.getByTestId('question-option') })
-    await u.click(page.getByTestId('question-submit'))
   },
   goal: async (page) => expect(page.getByTestId('question-card')).toBeHidden(),
-  budget: { operators: 15, M: 3, seconds: 8.9 },
+  budget: { operators: 11, M: 2, seconds: 6.0 },
 })
 
 uxTask({
