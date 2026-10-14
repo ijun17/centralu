@@ -241,6 +241,117 @@ describe('starting another agent in the same project', () => {
     expect(await w.mgr.agentSession(second, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: false })
   })
 
+  describe('what an approval rests on, read again when the person answers (#673 review)', () => {
+    /** A safe session whose card stands, its call already answered "pending" */
+    const pendingCard = async () => {
+      const s = await session('safe')
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const p = w.mgr.startAgent(s, { task: 'wait for the person', wait: false })
+      for (let i = 0; i < 50 && !agentCard(s); i++) await vi.advanceTimersByTimeAsync(0)
+      const requestId = agentCard(s)!.requestId
+      await vi.advanceTimersByTimeAsync(START_AGENT_SETUP_MS)
+      expect(await p).toMatchObject({ ok: true, state: 'pending' })
+      vi.useRealTimers()
+      return { s, requestId }
+    }
+    const told = (s: string, requestId: string) => handleOf(s)?.sent.find((t) => t.includes(`start_agent request ${requestId} did not start a session`))
+
+    it('the person stops trusting the project: the card is withdrawn and the session told', async () => {
+      const { s, requestId } = await pendingCard()
+      await w.mgr.setProjectTrusted(w.caller.id, false)
+      expect(agentCard(s)).toBeUndefined()
+      await w.until(() => !!told(s, requestId))
+      expect(told(s, requestId)).toContain('stopped trusting')
+      expect(w.store.loadMessages(s, 30).map((m) => JSON.stringify(m.payload)).some((t) => t.includes('no longer trusted'))).toBe(true)
+      expect(w.store.listAgentStartRequests()).toEqual([])
+    })
+
+    it('trust taken away elsewhere (another host): an approval starts nothing, and the session is told', async () => {
+      const { s, requestId } = await pendingCard()
+      w.store.setProjectTrusted(w.caller.id, false)
+      w.mgr.respondApproval(s, requestId, 'allow')
+      await w.until(() => !!told(s, requestId))
+      expect(told(s, requestId)).toContain('no longer trusted')
+      expect(childrenOf(s)).toEqual([])
+    })
+
+    it('a preset raised while the card stood: the approval for the lower one starts nothing', async () => {
+      const { s, requestId } = await pendingCard()
+      expect(agentCard(s)!.detail).toMatchObject({ preset: 'safe' })
+      await w.mgr.updateSettings(s, { permissionPreset: 'auto' })
+      w.mgr.respondApproval(s, requestId, 'allow')
+      await w.until(() => !!told(s, requestId))
+      expect(told(s, requestId)).toContain('raised to auto')
+      expect(childrenOf(s)).toEqual([])
+    })
+
+    it('a session that began handling another project\'s task while the card stood starts nothing (depth one)', async () => {
+      const s = await session('safe')
+      const p = w.mgr.startAgent(s, { task: 'wait for the person', wait: false })
+      await w.until(() => !!agentCard(s))
+      const requestId = agentCard(s)!.requestId
+      // Another project asks this very session for something
+      await w.mgr.setProjectTrusted(w.target.id, true)
+      const asker = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
+      w.store.setProjectConsent(w.target.id, w.caller.id, 'delegate')
+      void w.mgr.askProject(asker, { project: w.caller.id, session: s, task: 'check something' })
+      await w.until(() => !!handleOf(s)?.sent.some((t) => t.includes('check something')))
+      w.mgr.respondApproval(s, requestId, 'allow')
+      expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('itself started or asked') })
+      expect(childrenOf(s)).toEqual([])
+    })
+  })
+
+  it('starts at once cannot pass the ceiling together: the place is taken at the check (#673 review)', async () => {
+    const s = await session('normal')
+    const adapter = w.adapters.get('codex')!
+    const create = adapter.createSession.bind(adapter)
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    let reached = 0
+    vi.spyOn(adapter, 'createSession').mockImplementation(async (opts, emit) => {
+      reached++
+      await gate
+      return create(opts, emit)
+    })
+    const calls = Array.from({ length: 2 * AGENT_CEILING }, (_, i) => w.mgr.startAgent(s, { task: `job ${i}`, tool: 'codex', wait: false }))
+    await w.until(() => reached >= AGENT_CEILING)
+    // Give any call that slipped past the ceiling the time to reach the start too
+    await new Promise((r) => setTimeout(r, 50))
+    expect(reached).toBe(AGENT_CEILING)
+    release()
+    const results = await Promise.all(calls)
+    expect(results.filter((r) => r.ok)).toHaveLength(AGENT_CEILING)
+    expect(results.filter((r) => !r.ok).every((r) => !r.ok && r.error.includes('the most at once'))).toBe(true)
+    expect(childrenOf(s)).toHaveLength(AGENT_CEILING)
+    // A failed start gives its place back
+    for (const c of childrenOf(s)) handleOf(c.id)!.answer('done')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(await w.mgr.startAgent(s, { task: 'after', tool: 'codex', wait: false })).toMatchObject({ ok: true })
+  })
+
+  it('the same job asked again while its card stands gets the same handle, not a second card (#673 review)', async () => {
+    const s = await session('safe')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const p = w.mgr.startAgent(s, { task: 'one job', wait: false })
+    for (let i = 0; i < 50 && !agentCard(s); i++) await vi.advanceTimersByTimeAsync(0)
+    const requestId = agentCard(s)!.requestId
+    await vi.advanceTimersByTimeAsync(START_AGENT_SETUP_MS)
+    await p
+    vi.useRealTimers()
+    // A host swap's drain cut the first call short and told the model to call again
+    expect(await w.mgr.startAgent(s, { task: 'one job', wait: false })).toMatchObject({ ok: true, state: 'pending', sessionId: requestId })
+    expect(w.events.filter((e) => e.type === 'approval_request' && e.sessionId === s && (e as { seq?: number }).seq != null)).toHaveLength(1)
+    expect(w.store.listAgentStartRequests()).toHaveLength(1)
+    // Another job is another request
+    const other = w.mgr.startAgent(s, { task: 'another job', wait: false })
+    await w.until(() => w.store.listAgentStartRequests().length === 2)
+    w.mgr.respondApproval(s, requestId, 'deny')
+    await w.until(() => agentCard(s)?.requestId !== requestId && !!agentCard(s))
+    w.mgr.respondApproval(s, agentCard(s)!.requestId, 'deny')
+    expect(await other).toMatchObject({ ok: false })
+  })
+
   it('deleting the session that asked withdraws its card, with a line in that session (#673)', async () => {
     const s = await session('safe')
     const p = w.mgr.startAgent(s, { task: 'wait for the person', wait: false })

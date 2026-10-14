@@ -294,7 +294,10 @@ below retained for `safe` and `normal`:
    read at call time. Empty/null means no ceiling under `auto`, `AGENT_CEILING` (4) otherwise;
    zero is unlimited, and a positive integer sets a ceiling per project over all its sessions.
    A child counts while a delegated turn runs. Checked before the card and again after it,
-   and for a new `agent_session send` turn.
+   and for a new `agent_session send` turn. The check after the card also takes the place (#673 review,
+   `agentStartReserved`): one synchronous step, held through `createSession` until the child's delegation counts it,
+   given back if the start fails, so calls at once cannot pass the ceiling together. A request still waiting on the
+   person's card holds no place: it may stand for hours, and is counted when it is approved.
 3. **Choice.** `tool` defaults to the project's tool; `model` and `effort` to that tool's remembered choice for the
    project (#107). A model or effort the tool's list does not have is refused with the list (`agentChoiceError`;
    an alias the ids or labels contain passes, and a tool that cannot list passes all). The check never holds the call
@@ -321,7 +324,13 @@ below retained for `safe` and `normal`:
    raised again (`raiseHostAsks`, not recorded twice) when that turn ends, unless it ended in an error. While it stands
    the request is in the store's `agent_start_requests` (v50): a host swap or restart leaves the row (the leaving
    host's call answers `pending`), and the next host raises the card again (`resumeAgentStart`) and starts the child
-   when it is approved, after reading the caller and the project's trust again. A request ends when it is answered,
+   when it is approved. An approval (here or there) first reads again what the start rests on (#673 review): the
+   caller is still here, its project still trusted, it is still allowed by depth one (it may have begun handling an
+   ask_project task meanwhile), and its preset is no higher than the one on the card; otherwise no child starts and the
+   caller is told why. Turning trust off withdraws the project's standing cards at once and tells their callers. The
+   same caller asking the same task (and tool, when named) while its card stands gets the existing handle back, not a
+   second card: a host swap's drain tells a cut call to call again, and that call never read its `pending`. A
+   request ends when it is answered,
    when the caller withdraws it (`agent_session stop`), when its call is cancelled while the card stands, or when the
    caller is deleted; each end without a child leaves a notice in the caller's session for the person
    (`Centralu · agent request`), apart from a denial on a card the call was still waiting on, which the card shows.

@@ -198,6 +198,10 @@ type StartProgress = {
   unchecked?: string
 }
 
+/** The refusal for a session that may not start agents because it was itself started or asked (#561) */
+const AGENT_DEPTH_ERROR =
+  'This session was itself started or asked by another session, so it cannot start agents — say in your answer what is needed instead.'
+
 /** The person's answer on a start_agent card, read as consent; a refusal says whether they refused or nobody answered */
 type AgentConsent = { ok: true } | { ok: false; error: string; why: 'denied' | 'withdrawn' }
 
@@ -244,7 +248,7 @@ function agentStartPending(req: AgentStartRequest): ChildRunResult {
 }
 
 /** What the person reads in the caller's session when a start_agent request ends without a session (#673) */
-function agentStartPersonText(req: Pick<AgentStartRequest, 'detail'>, how: 'denied' | 'withdrawn' | 'cancelled' | 'deleted' | 'stopped' | 'failed', why?: string): string {
+function agentStartPersonText(req: Pick<AgentStartRequest, 'detail'>, how: 'denied' | 'withdrawn' | 'cancelled' | 'deleted' | 'stopped' | 'untrusted' | 'failed', why?: string): string {
   const what = `The request to start ${req.detail.tool} (“${req.detail.text}”)`
   switch (how) {
     case 'denied':
@@ -255,6 +259,8 @@ function agentStartPersonText(req: Pick<AgentStartRequest, 'detail'>, how: 'deni
       return `${what} was withdrawn: this session was deleted. No agent was started.`
     case 'stopped':
       return `${what} was withdrawn by this session. No agent was started.`
+    case 'untrusted':
+      return `${what} was withdrawn: the project is no longer trusted. The session was told; no agent was started.`
     case 'failed':
       return `${what} was allowed, but no agent was started: ${(why ?? '').slice(0, 300)}`
     default:
@@ -712,6 +718,11 @@ export class SessionManager {
    * until the caller goes.
    */
   private agentStarts = new Map<string, AgentStartRecord>()
+  /**
+   * Places taken by starts between their ceiling check and the child's delegation (#673 review) — project id -> how
+   * many. Counted by `agentCeilingError` with the running children, so starts at once cannot pass the ceiling together.
+   */
+  private agentStartReserved = new Map<string, number>()
   /** `disposeAll` has begun (#673): a card it withdraws is not the person's answer, and its request stays stored */
   private disposing = false
   /**
@@ -1096,6 +1107,17 @@ export class SessionManager {
   setProjectTrusted(projectId: string, trusted: boolean): Promise<void> {
     if (!this.store.setProjectTrusted(projectId, trusted)) {
       throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
+    }
+    // A start_agent card standing in that project rests on the trust just taken away (#673 review): withdrawn, and told
+    if (!trusted) {
+      for (const rec of [...this.agentStarts.values()]) {
+        if (rec.ended || rec.req.projectId !== projectId) continue
+        this.withdrawAgentStart(
+          rec.req.requestId,
+          `The person stopped trusting this session's project, so no agent was started. ${ASK_THE_PERSON}`,
+          agentStartPersonText(rec.req, 'untrusted'),
+        )
+      }
     }
     return this.refreshLaunchSettings(projectId, true)
   }
@@ -6341,14 +6363,20 @@ export class SessionManager {
     const done = (r: ChildRunResult) => ({ done: r })
     const caller = this.meta.get(callerId)
     if (!caller?.projectId) return done({ ok: false, error: 'This session belongs to no project, so it cannot start agents.' })
-    if ((caller.askedBy || [...this.delegations.values()].some((d) => d.sessionId === callerId && !d.agent && !d.settled)) && !this.autoBoundaryOpen(callerId, 'delegation depth')) {
-      return done({ ok: false, error: 'This session was itself started or asked by another session, so it cannot start agents — say in your answer what is needed instead.' })
-    }
+    if (this.agentDepthBlocked(caller) && !this.autoBoundaryOpen(callerId, 'delegation depth')) return done({ ok: false, error: AGENT_DEPTH_ERROR })
     const project = this.store.listProjects().find((p) => p.id === caller.projectId)
     if (!project) return done({ ok: false, error: 'This session\'s project is no longer registered.' })
     if (project.trusted !== true && !this.autoBoundaryOpen(callerId, 'start in an untrusted project')) {
       return done({ ok: false, error: `This session's project is not trusted, so it cannot start agents — the person can trust it from the project menu. ${ASK_THE_PERSON}` })
     }
+    /*
+     * The same job already waiting on the person (#673 review): a call cut short by a host swap's drain is told to call
+     * again, and a model that does gets the handle it never read, not a second card for the same work
+     */
+    const waiting = [...this.agentStarts.values()].find(
+      (r) => !r.ended && r.req.callerId === callerId && r.req.task === opts.task && (!opts.tool || r.req.tool === opts.tool),
+    )
+    if (waiting) return done(agentStartPending(waiting.req))
     const tool = opts.tool ?? this.firstTool(project.defaultTool)
     if (!tool) return done({ ok: false, error: 'No agent adapter is available. Install and configure an agent CLI before starting an agent.' })
     const adapter = this.adapters.get(tool)
@@ -6399,6 +6427,9 @@ export class SessionManager {
       // raises the card again (#673)
       if (request && consent.why === 'withdrawn' && (this.handingOver || this.disposing)) return done(agentStartPending(request))
       if (request) {
+        // Withdrawn for a reason of its own (trust revoked, the caller withdrew it): that reason is the answer
+        const ended = this.agentStarts.get(request.requestId)?.ended
+        if (ended && 'error' in ended) return done({ ok: false, error: ended.error })
         const how = consent.why === 'denied' ? 'denied' : signal.aborted ? 'cancelled' : 'withdrawn'
         this.endAgentStart(request.requestId, { error: consent.error, person: agentStartPersonText(request, how), denied: consent.why === 'denied' })
       }
@@ -6410,7 +6441,7 @@ export class SessionManager {
       if (request) this.endAgentStart(request.requestId, { error, person: agentStartPersonText(request, 'cancelled') })
       return done({ ok: false, error })
     }
-    const r = await this.createAgentChild(callerId, { id: project.id, name: project.name, path: project.path }, choice, progress)
+    const r = await this.createAgentChild(callerId, { id: project.id, name: project.name, path: project.path }, choice, progress, request?.detail.preset)
     if (request) {
       if ('key' in r) this.endAgentStart(request.requestId, { childId: r.d.sessionId })
       else {
@@ -6424,27 +6455,71 @@ export class SessionManager {
   /**
    * The child itself, once the person (or the project's trust) allowed it (#561, #673): counted again, made in the
    * caller's folder or a new worktree, named, and given the task. A card may have stood for hours, so what the start
-   * rests on is read again first: the caller is still here and its project still trusted.
+   * rests on is read again first (#673 review): the caller is still here, its project still trusted, it still may start
+   * agents (depth one), and its preset is no higher than the one the person read on the card (`approvedPreset`).
+   *
+   * **The place is taken before the first wait** (#673 review): the ceiling is checked and a place reserved in one
+   * synchronous step (`agentStartReserved`), held until the child's delegation counts it or the start fails. Checked
+   * and counted on either side of `createSession`, eight calls at once all passed a ceiling of four.
    */
   private async createAgentChild(
     callerId: string,
     project: { id: string; name: string; path: string },
     choice: Pick<AgentStartRequest, 'tool' | 'model' | 'effort' | 'worktreeBranch' | 'task' | 'unchecked'>,
     progress: StartProgress,
+    approvedPreset?: PermissionPreset,
   ): Promise<{ done: ChildRunResult } | { key: string; d: Delegation; notice: string | undefined }> {
     const done = (r: ChildRunResult) => ({ done: r })
     const caller = this.meta.get(callerId)
     if (!caller) return done({ ok: false, error: 'The session that asked is no longer here.' })
     const now = this.store.listProjects().find((p) => p.id === project.id)
     if (!now) return done({ ok: false, error: 'This session\'s project is no longer registered.' })
-    if (now.trusted !== true && caller.permissionPreset !== 'auto') {
+    const auto = caller.permissionPreset === 'auto'
+    if (now.trusted !== true && !auto) {
       return done({ ok: false, error: `This session's project is no longer trusted, so it cannot start agents. ${ASK_THE_PERSON}` })
+    }
+    if (this.agentDepthBlocked(caller) && !auto) return done({ ok: false, error: AGENT_DEPTH_ERROR })
+    if (approvedPreset && !presetWithin(caller.permissionPreset, approvedPreset)) {
+      return done({
+        ok: false,
+        error:
+          `This session's permissions were raised to ${caller.permissionPreset} after the person allowed a session with ${approvedPreset}, ` +
+          `so none was started. Call start_agent again if it is still needed: the person decides on the new permissions. ${ASK_THE_PERSON}`,
+      })
     }
     const { tool, model, effort, unchecked } = choice
     const worktree = choice.worktreeBranch ? { branch: choice.worktreeBranch } : null
-    // The card may have stood a while: counted again
+    // The card may have stood a while: counted again, and the place taken now
     const fullNow = this.agentCeilingError(callerId, project.id)
     if (fullNow) return done({ ok: false, error: fullNow })
+    this.agentStartReserved.set(project.id, (this.agentStartReserved.get(project.id) ?? 0) + 1)
+    let reserved = true
+    const release = () => {
+      if (!reserved) return
+      reserved = false
+      const left = (this.agentStartReserved.get(project.id) ?? 1) - 1
+      if (left > 0) this.agentStartReserved.set(project.id, left)
+      else this.agentStartReserved.delete(project.id)
+    }
+    try {
+      return await this.createReservedChild(callerId, caller, project, { tool, model, effort, unchecked, task: choice.task }, worktree, progress, release)
+    } finally {
+      release()
+    }
+  }
+
+  /** The rest of `createAgentChild`, with its place reserved; `release` once the delegation counts the child */
+  private async createReservedChild(
+    callerId: string,
+    caller: SessionInfo,
+    project: { id: string; name: string; path: string },
+    choice: { tool: string; model?: string; effort?: string; unchecked?: string; task: string },
+    worktree: { branch: string } | null,
+    progress: StartProgress,
+    release: () => void,
+  ): Promise<{ done: ChildRunResult } | { key: string; d: Delegation; notice: string | undefined }> {
+    const done = (r: ChildRunResult) => ({ done: r })
+    const { tool, model, effort, unchecked } = choice
 
     // The caller's own folder (a worktree session's is its worktree), so the two work on the same files; or a new
     // worktree of the project's repository (part 2), which createSession makes in the worktree root
@@ -6476,6 +6551,8 @@ export class SessionManager {
     if (!worktree) this.rename(child.id, agentName(choice.task))
     const key = `${callerId}>${child.id}`
     const d = this.startDelegation(key, callerId, child.id, { id: project.id, name: project.name, path: child.worktree?.path ?? cwd }, true)
+    // The delegation counts the child now
+    release()
     progress.d = d
     try {
       await this.deliver(child.id, agentFrame(labelOf(this.store, caller), choice.task), undefined, { sessionId: callerId, name: labelOf(this.store, caller) }, false)
@@ -6816,7 +6893,10 @@ export class SessionManager {
     const configured = this.uiPreferences().agentCeiling
     const ceiling = configured ?? (this.autoBoundaryOpen(callerId) ? 0 : AGENT_CEILING)
     if (ceiling === 0) return null
-    const running = [...this.delegations.values()].filter((d) => d.agent && !d.settled && this.meta.get(d.sessionId)?.projectId === projectId).length
+    // A start under way holds its place from its check (#673 review); a request still waiting on the person holds none
+    const running =
+      [...this.delegations.values()].filter((d) => d.agent && !d.settled && this.meta.get(d.sessionId)?.projectId === projectId).length +
+      (this.agentStartReserved.get(projectId) ?? 0)
     if (running < ceiling) return null
     return `${running} agents started by this project's sessions are already working, the most at once. Wait for one (agent_session, action "wait") or stop one, then try again.`
   }
@@ -6943,6 +7023,11 @@ export class SessionManager {
     return this.agentConsentFrom(callerId, detail.project.id, await this.askHost(callerId, detail, signal, { requestId }))
   }
 
+  /** Depth one (#561): a session started by another, or handling an ask_project task now, starts no agents */
+  private agentDepthBlocked(caller: SessionInfo): boolean {
+    return !!caller.askedBy || [...this.delegations.values()].some((d) => d.sessionId === caller.id && !d.agent && !d.settled)
+  }
+
   /** A `normal` caller in a trusted project needs no card to start agents (#673): the project's trust, read now */
   private trustIsAgentConsent(callerId: string, projectId: string): boolean {
     if (this.meta.get(callerId)?.permissionPreset !== 'normal') return false
@@ -7058,7 +7143,7 @@ export class SessionManager {
       }
       const project = this.store.listProjects().find((p) => p.id === req.projectId)
       const r = project
-        ? await this.createAgentChild(req.callerId, { id: project.id, name: project.name, path: project.path }, req, { stage: 'creating' })
+        ? await this.createAgentChild(req.callerId, { id: project.id, name: project.name, path: project.path }, req, { stage: 'creating' }, req.detail.preset)
         : { done: { ok: false as const, error: "This session's project is no longer registered." } }
       if ('key' in r) {
         this.endAgentStart(req.requestId, { childId: r.d.sessionId })

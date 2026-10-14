@@ -30,7 +30,9 @@ boundaries (#603), with a log line instead of a card or refusal:
   the first time it starts one: once, always for this session (kept while the host serves it), always for this
   project (stored as the project's `agents` consent, revoked in Settings → Permissions). Injected text can at most
   raise a card, and a card is never withdrawn by a timer: it stands until the person answers, the caller withdraws
-  it, or the caller is deleted, and survives a host swap (`agent_start_requests`).
+  it, the caller is deleted or the project loses trust, and survives a host swap (`agent_start_requests`). An
+  approval reads trust, depth and the caller's preset again: a preset raised above the one on the card starts
+  nothing, so the person never approves one set of permissions and gets another.
 - **Never above the caller**: the child gets the caller's preset; a child the person raised above it takes no
   more work from the caller.
 - **Depth one**: a session marked `askedBy` (started by `start_agent`), or handling an active `ask_project` task, can neither
@@ -397,7 +399,7 @@ downgrade. The session-tools switch and app-sharing switch still apply to every 
 | Change | orchestrator | scoped | builder | reader |
 |---|---|---|---|---|
 | "Let sessions look at their own project" off | — | — | — | Becomes none. Calls refused at once (`readerToolsFor`; the bridge through `toolProfileOf`); apps it attached leave at once (`onDemand.allowed` in `useExternalApps`, recounted by `setUiPreferences`). Ones allowed "once" are forgotten (`AppAccess.dropOnce`); the rest come back if it is turned on again (#382); the schemas leave Claude at the next start |
-| Its project loses trust | No change (reads no project files) | No change (reads no project files) | Its app stops, so `check` cannot start it | Settings files at the next start; its project's apps stop and leave at once; `find_apps` and `attach_app` refused; apps it attached leave at once. `ask_project` and `start_agent` refused (#382, #561) |
+| Its project loses trust | No change (reads no project files) | No change (reads no project files) | Its app stops, so `check` cannot start it | Settings files at the next start; its project's apps stop and leave at once; `find_apps` and `attach_app` refused; apps it attached leave at once. `ask_project` and `start_agent` refused (#382, #561); its standing `start_agent` cards are withdrawn and their callers told (#673) |
 | The other project loses trust | — | — | — | Apps attached from it leave at once; `ask_project` to it still runs, its card says it is not trusted, and the existing target session follows its trust |
 | The person revokes a pair in Settings | — | — | — | Apps attached under "always" leave at once; the next `ask_project` or `attach_app` asks again; for a project's `agents` row, the next `start_agent` of a `safe` session asks again (a child already running is left to finish; a `normal` session needs no row in a trusted project, #673) |
 | Sharing of an app turned off | — | — | — | Leaves every session that attached it |
