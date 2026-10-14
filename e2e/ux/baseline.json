@@ -1731,7 +1731,7 @@
         }
       ],
       "notes": [
-        "A backticked path in the reply is a link (#39); the path in a tool card is one too (open-file.mouse-tool-card)"
+        "A backticked path in the reply is a link (#39); the path in a tool card (\"Read packages/…\") is not"
       ],
       "breaches": []
     },
@@ -1749,19 +1749,19 @@
         "M": 1,
         "R": 1
       },
-      "seconds": 3.11,
-      "waitMs": 374,
-      "travelPx": 222,
+      "seconds": 3.07,
+      "waitMs": 370,
+      "travelPx": 167,
       "steps": [
         {
           "kind": "click",
           "label": "tool-card",
           "operators": "H M P B B",
-          "seconds": 3.11,
+          "seconds": 3.07,
           "pointer": {
-            "D": 222,
-            "W": 19,
-            "ID": 3.65
+            "D": 167,
+            "W": 21,
+            "ID": 3.17
           }
         },
         {
@@ -1769,7 +1769,7 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 374
+          "waitMs": 370
         }
       ],
       "notes": [
@@ -1925,7 +1925,7 @@
         }
       ],
       "notes": [
-        "Through the Files tab, folder by folder: what a person does when no link names the file (before #543 item 6, also when only a tool card did)",
+        "Through the Files tab, folder by folder: what a person does when the path is in a tool card, not a link",
         "dir-packages: a choice among 5 (Hick–Hyman 0.39 s, not added)",
         "dir-packages/ui: a choice among 5 (Hick–Hyman 0.39 s, not added)",
         "dir-packages/ui/src: a choice among 2 (Hick–Hyman 0.24 s, not added)",
