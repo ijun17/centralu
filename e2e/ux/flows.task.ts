@@ -103,10 +103,39 @@ uxTask({
   task: 'Open a file the agent named',
   path: 'mouse',
   access: 'discoverable',
-  notes: ['A backticked path in the reply is a link (#39); the path in a tool card ("Read packages/…") is not'],
+  notes: ['A backticked path in the reply is a link (#39); the path in a tool card is one too (open-file.mouse-tool-card)'],
   start: withFile,
   run: async (u, page) => {
     await u.click(page.getByTestId('file-link'))
+  },
+  goal: viewing,
+  budget: { operators: 7, M: 1, seconds: 3.5 },
+})
+
+uxTask({
+  id: 'open-file.mouse-tool-card',
+  task: 'Open a file the agent named',
+  path: 'mouse',
+  access: 'discoverable',
+  notes: ['The path in a tool card ("Read: /repo/packages/…") is a link (#543 item 6); it cost the tree walk below before'],
+  start: async (page) => {
+    await demo(page)
+    await page.evaluate(
+      ({ path, sid }) => {
+        const m = (window as any).__mock
+        const s = (window as any).__store.getState()
+        const root: string = s.projects[s.sessions[sid].projectId].path
+        m.fsState.files = { ...m.fsState.files, [path]: ':root {\n  --ring: 1;\n}\n' }
+        const callId = 'ux-read'
+        m.emit({ type: 'tool_call', sessionId: sid, callId, summary: { tool: 'Read', title: `Read: ${root}/${path}`, readOnly: true, paths: [`${root}/${path}`] } })
+        m.emit({ type: 'tool_result', sessionId: sid, callId, ok: true, summary: ':root {' })
+      },
+      { path: STYLES, sid: await sessionId(page, OPEN) },
+    )
+    await expect(page.getByTestId('tool-card').getByTestId('file-link')).toBeVisible()
+  },
+  run: async (u, page) => {
+    await u.click(page.getByTestId('tool-card').getByTestId('file-link'))
   },
   goal: viewing,
   budget: { operators: 7, M: 1, seconds: 3.5 },
@@ -117,7 +146,7 @@ uxTask({
   task: 'Open a file the agent named',
   path: 'mouse',
   access: 'discoverable',
-  notes: ['Through the Files tab, folder by folder: what a person does when the path is in a tool card, not a link'],
+  notes: ['Through the Files tab, folder by folder: what a person does when no link names the file (before #543 item 6, also when only a tool card did)'],
   start: withFile,
   run: async (u, page) => {
     await u.click(page.getByTestId('evidence-tab-files'))

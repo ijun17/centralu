@@ -108,3 +108,36 @@ export function parseFileRef(raw: string, projectRoot: string | null): FileRef |
 
   return { path, line }
 }
+
+/** A piece of a tool card's title: plain text, or a path the viewer can open */
+export type TitlePiece = { text: string; ref?: FileRef }
+
+/**
+ * Cut a tool card's title at the files the call named (`ToolSummary.paths`), so a path the viewer can open is
+ * a link and the rest of the title stays text (the audit of 2026-10, item 6).
+ *
+ * The same floor as an agent's backticked path decides which: `parseFileRef` (inside the project, an extension,
+ * nothing outside the root), so a card never links a file a reply's link would leave as text. A path the title
+ * does not contain stays unlinked, and the pieces always join back to the title.
+ */
+export function titlePieces(title: string, paths: readonly string[] | undefined, projectRoot: string | null): TitlePiece[] {
+  const found: { at: number; end: number; ref: FileRef }[] = []
+  for (const p of paths ?? []) {
+    const ref = parseFileRef(p, projectRoot)
+    if (!ref) continue
+    // After the previous one, so a path named twice cuts at its two places and the pieces never overlap
+    const from = found.length > 0 ? found[found.length - 1]!.end : 0
+    const at = title.indexOf(p, from)
+    if (at < 0) continue
+    found.push({ at, end: at + p.length, ref })
+  }
+  const pieces: TitlePiece[] = []
+  let cursor = 0
+  for (const f of found) {
+    if (f.at > cursor) pieces.push({ text: title.slice(cursor, f.at) })
+    pieces.push({ text: title.slice(f.at, f.end), ref: f.ref })
+    cursor = f.end
+  }
+  if (cursor < title.length || pieces.length === 0) pieces.push({ text: title.slice(cursor) })
+  return pieces
+}

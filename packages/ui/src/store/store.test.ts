@@ -2141,6 +2141,16 @@ describe('messagesToChat — restoring tool output', () => {
     expect(items[0]).toMatchObject({ kind: 'tool', result: '3 passed', ok: true })
   })
 
+  it('a restored card keeps the files its call named, so their paths are links as they were live', () => {
+    const named = {
+      ...call(1),
+      payload: { type: 'tool_call', summary: { tool: 'Read', title: 'Read: /repo/a.ts', readOnly: true, paths: ['/repo/a.ts'] } },
+    }
+    expect(messagesToChat([named])[0]).toMatchObject({ kind: 'tool', paths: ['/repo/a.ts'] })
+    // A call that named none (and a row written before `paths` was kept) carries no field
+    expect(messagesToChat([call(1)])[0]).not.toHaveProperty('paths')
+  })
+
   it('with several calls, they are paired in the order they were emitted — the two are never swapped', () => {
     const items = messagesToChat([call(1), call(2), result(3, 'first'), result(4, 'second', false)])
     expect(items.map((i) => (i.kind === 'tool' ? [i.result, i.ok] : null))).toEqual([

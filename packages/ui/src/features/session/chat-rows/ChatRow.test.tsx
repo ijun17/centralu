@@ -171,6 +171,22 @@ describe('ChatRow: tool cards', () => {
     expect(text).toBe('Bash ls -la')
   })
 
+  it('draws the file a call names as a link in the title, apart from the toggle (a button holds no button)', () => {
+    const { html, text } = row(tool({ tool: 'Read', title: 'Read: /repo/src/a.ts', paths: ['/repo/src/a.ts'] }))
+    expect(testIds(html)).toEqual(['tool-card', 'tool-card-toggle', 'tool-card-title', 'file-link'])
+    expect(text).toBe('Read Read: /repo/src/a.ts')
+    // The link's text is the path, and it is not inside the toggle button
+    expect(html).toMatch(/<button[^>]*data-testid="file-link"[^>]*>\/repo\/src\/a\.ts<\/button>/)
+    expect(html).not.toMatch(/data-testid="tool-card-toggle"[^>]*>(?:(?!<\/button>).)*file-link/s)
+  })
+
+  it('keeps a title whose file is outside the project, or that names none, as one toggle button', () => {
+    const outside = row(tool({ tool: 'Read', title: 'Read: /etc/hosts.conf', paths: ['/etc/hosts.conf'] }))
+    expect(testIds(outside.html)).toEqual(['tool-card', 'tool-card-toggle'])
+    expect(outside.text).toBe('Read Read: /etc/hosts.conf')
+    expect(testIds(row(tool({ tool: 'Read', title: 'Read: /repo/src/a.ts' })).html)).toEqual(['tool-card', 'tool-card-toggle'])
+  })
+
   it('puts a closed steps drawer under a card that launched a subagent, and under no other', () => {
     const launch = row(tool({ tool: 'Agent', title: 'Explore the repo', callId: 'c1' }))
     expect(testIds(launch.html)).toEqual(['tool-card', 'tool-card-toggle', 'subagent-steps', 'subagent-steps-toggle'])

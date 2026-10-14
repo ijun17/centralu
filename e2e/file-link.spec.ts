@@ -312,3 +312,52 @@ test('the same path links in a project session and stays text in the orchestrato
   // Same words, no button around them — the span sits straight in the paragraph
   expect(await code.evaluate((el) => el.parentElement?.tagName)).toBe('P')
 })
+
+/** Put a tool call (and optionally its result) on the session that is on screen */
+async function agentCalls(page: Page, tool: string, title: string, paths: string[], callId: string) {
+  await page.evaluate(
+    ({ tool, title, paths, callId }) => {
+      const m = (window as any).__mock
+      const id = (window as any).__store.getState().focusedSessionId
+      m.emit({ type: 'tool_call', sessionId: id, callId, summary: { tool, title, readOnly: tool === 'Read', paths } })
+      m.emit({ type: 'tool_result', sessionId: id, callId, ok: true, summary: 'done' })
+    },
+    { tool, title, paths, callId },
+  )
+}
+
+/**
+ * The path in a tool card ("Read: /repo/src/a.ts") opens the file like a reply's link does (audit 2026-10,
+ * item 6, #543). Only a file the same rule would link becomes one; the rest of the title stays text, and the
+ * card still opens and closes from its header, with the mouse or the keyboard.
+ */
+test('the path in a tool card opens the file; a path outside the project stays text', async ({ page }) => {
+  await setup(page)
+  await seedFiles(page, { 'src/a.ts': 'first line\nsecond line' })
+  await newSession(page, 'alpha', 'work')
+  await agentCalls(page, 'Read', 'Read: /tmp/alpha/src/a.ts', ['/tmp/alpha/src/a.ts'], 'c1')
+  await agentCalls(page, 'Read', 'Read: /etc/hosts.conf', ['/etc/hosts.conf'], 'c2')
+
+  await expect(page.getByTestId('tool-card')).toHaveCount(2)
+  // Only the file inside the project is a link, and it reads as the title did
+  const link = page.getByTestId('tool-card').first().getByTestId('file-link')
+  await expect(link).toHaveText('/tmp/alpha/src/a.ts')
+  await expect(page.getByTestId('tool-card').first().getByTestId('tool-card-title')).toHaveText('Read: /tmp/alpha/src/a.ts')
+  await expect(page.getByTestId('tool-card').nth(1).getByTestId('file-link')).toHaveCount(0)
+  await expect(page.getByTestId('tool-card').nth(1)).toContainText('Read: /etc/hosts.conf')
+
+  // The keyboard reaches the link and the toggle separately; Enter on the link opens the viewer, not the card
+  await link.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('viewer-path')).toHaveText('src/a.ts')
+  await expect(page.getByTestId('code-viewer')).toContainText('second line')
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('overlay')).toHaveCount(0)
+  await expect(page.getByTestId('tool-card-toggle').first()).toHaveAttribute('aria-expanded', 'false')
+
+  // The header still toggles the card: its button, and the empty rest of the row
+  await page.getByTestId('tool-card-toggle').first().click()
+  await expect(page.getByTestId('tool-card-toggle').first()).toHaveAttribute('aria-expanded', 'true')
+  await page.getByTestId('tool-card-toggle').first().press('Enter')
+  await expect(page.getByTestId('tool-card-toggle').first()).toHaveAttribute('aria-expanded', 'false')
+})

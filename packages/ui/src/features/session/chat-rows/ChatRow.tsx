@@ -3,7 +3,8 @@ import { launchesSubagent } from '@cc/protocol'
 import { messagesToChat, useStore, type ChatItem } from '../../../store/store.js'
 import { ChevronIcon } from '../../../components/icons.jsx'
 import { ZoomableImage } from '../ZoomableImage.jsx'
-import { Markdown } from '../Markdown.jsx'
+import { FileLink, Markdown } from '../Markdown.jsx'
+import { titlePieces } from '../filePath.js'
 import { InlineViewSlot } from '../InlineView.jsx'
 import { NoticeMark } from '../NoticeMark.jsx'
 import { UserAttachment } from './attachments.jsx'
@@ -267,6 +268,9 @@ export function ToolCard({
   projectId: string | null
 }) {
   const [open, setOpen] = useState(false)
+  // The files the title names that the viewer can open are links (the audit of 2026-10, item 6)
+  const pieces = useMemo(() => titlePieces(item.title, item.paths, projectRoot), [item.title, item.paths, projectRoot])
+  const linked = pieces.some((p) => p.ref)
   const lines = item.result ? item.result.replace(/\s+$/, '').split('\n') : []
   const hidden = Math.max(0, lines.length - PREVIEW_LINES)
   /*
@@ -304,20 +308,60 @@ export function ToolCard({
 
   return (
     <div className="rounded-md border border-line bg-surface-raised/60" data-testid="tool-card">
-      <button
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        data-testid="tool-card-toggle"
-      >
-        {/* There must be one expand indicator across the whole app — the same chevron as the file tree */}
-        <span className="shrink-0 text-ink-faint">
-          <ChevronIcon open={open} />
-        </span>
-        <span className="readout shrink-0 text-xs text-ink-muted">{item.tool}</span>
-        <span className="readout truncate text-xs text-ink-faint">{item.title}</span>
-        {item.ok === false && <span className="ml-auto shrink-0 text-xs text-ink">Failed</span>}
-      </button>
+      {linked ? (
+        /*
+         * A title with a file the viewer can open (the audit of 2026-10, item 6). A link cannot sit inside the
+         * toggle button (a button holds no button), so the toggle is the chevron and the tool's name, the
+         * title follows with its path as a link, and the empty rest of the row still toggles for the pointer.
+         */
+        <div className="flex w-full items-center">
+          <button
+            className="flex shrink-0 items-center gap-2 py-1.5 pl-2.5 pr-2 text-left"
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+            data-testid="tool-card-toggle"
+          >
+            <span className="shrink-0 text-ink-faint">
+              <ChevronIcon open={open} />
+            </span>
+            <span className="readout shrink-0 text-xs text-ink-muted">{item.tool}</span>
+          </button>
+          <span className="readout min-w-0 truncate py-1.5 text-xs text-ink-faint" data-testid="tool-card-title">
+            {pieces.map((p, i) =>
+              p.ref ? (
+                <FileLink key={i} refInfo={p.ref} projectId={projectId}>
+                  {p.text}
+                </FileLink>
+              ) : (
+                <span key={i}>{p.text}</span>
+              ),
+            )}
+          </span>
+          {/* Not focusable: the toggle button above is the keyboard's way to the same action */}
+          <div
+            className="flex min-h-[2rem] flex-1 shrink-0 items-center justify-end gap-2 self-stretch px-2.5"
+            onClick={() => setOpen((o) => !o)}
+            aria-hidden
+          >
+            {item.ok === false && <span className="text-xs text-ink">Failed</span>}
+          </div>
+        </div>
+      ) : (
+        <button
+          className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          data-testid="tool-card-toggle"
+        >
+          {/* There must be one expand indicator across the whole app — the same chevron as the file tree */}
+          <span className="shrink-0 text-ink-faint">
+            <ChevronIcon open={open} />
+          </span>
+          <span className="readout shrink-0 text-xs text-ink-muted">{item.tool}</span>
+          <span className="readout truncate text-xs text-ink-faint">{item.title}</span>
+          {item.ok === false && <span className="ml-auto shrink-0 text-xs text-ink">Failed</span>}
+        </button>
+      )}
 
       {liveTail.length > 0 && (
         <div className="border-t border-line px-2.5 py-1.5">

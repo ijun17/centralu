@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseFileRef } from './filePath.js'
+import { parseFileRef, titlePieces } from './filePath.js'
 
 const ROOT = '/Users/me/proj'
 
@@ -82,5 +82,33 @@ describe('parseFileRef — what an agent said that we are willing to open', () =
     expect(parseFileRef('useState()', ROOT)).toBeNull()
     expect(parseFileRef('a.ts;rm', ROOT)).toBeNull()
     expect(parseFileRef("'src/a.ts'", ROOT)).toBeNull()
+  })
+})
+
+describe('titlePieces: the files a tool card names', () => {
+  it('cuts the title at an absolute path inside the project and keeps the rest as text', () => {
+    expect(titlePieces(`Edit: ${ROOT}/src/a.ts`, [`${ROOT}/src/a.ts`], ROOT)).toEqual([
+      { text: 'Edit: ' },
+      { text: `${ROOT}/src/a.ts`, ref: { path: 'src/a.ts', line: null } },
+    ])
+  })
+
+  it('links every file of a title that names several, in order', () => {
+    expect(titlePieces('src/a.ts, src/b.ts', ['src/a.ts', 'src/b.ts'], ROOT)).toEqual([
+      { text: 'src/a.ts', ref: { path: 'src/a.ts', line: null } },
+      { text: ', ' },
+      { text: 'src/b.ts', ref: { path: 'src/b.ts', line: null } },
+    ])
+  })
+
+  it('leaves a file outside the project, a directory and a path the title does not hold as text', () => {
+    expect(titlePieces('Read: /etc/hosts.conf', ['/etc/hosts.conf'], ROOT)).toEqual([{ text: 'Read: /etc/hosts.conf' }])
+    expect(titlePieces('Read: src', ['src'], ROOT)).toEqual([{ text: 'Read: src' }])
+    expect(titlePieces('Edit files', ['src/a.ts'], ROOT)).toEqual([{ text: 'Edit files' }])
+  })
+
+  it('links nothing without paths or without a project', () => {
+    expect(titlePieces('Read: src/a.ts', undefined, ROOT)).toEqual([{ text: 'Read: src/a.ts' }])
+    expect(titlePieces('Read: src/a.ts', ['src/a.ts'], null)).toEqual([{ text: 'Read: src/a.ts' }])
   })
 })

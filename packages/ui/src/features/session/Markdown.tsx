@@ -178,7 +178,7 @@ function tryDecode(href: string): string {
  * link in the neighboring pane of the grid would open the same path in a different project —
  * WKWebView does not give focus on a button click, so a pane's onFocusCapture cannot move focus.
  */
-function FileLink({
+export function FileLink({
   refInfo,
   projectId,
   children,
