@@ -48,7 +48,7 @@ import { launchFor, toolExecutable, type ToolLaunch } from '../../tool-launch.js
 import { installedCliVersion } from '../../cli-version.js'
 import { ClaudeLinks, ClaudePlaceholderError, windowsStart, type ExeFs } from './exe-link.js'
 import { StartGate } from './start-gate.js'
-import { deleteClaudeSession, listClaudeSessions, readClaudeHistory, readClaudeTranscriptTail } from './history.js'
+import { deleteClaudeSession, forkClaudeSession, listClaudeSessions, readClaudeHistory, readClaudeTranscriptTail } from './history.js'
 import { readUsageFromAny, type UsageQuery } from './usage.js'
 import { ORCHESTRATOR_MCP_NAME, orchestratorMcp } from './orchestrator-mcp.js'
 import { appProxy, type AppProxy } from './app-proxy.js'
@@ -1657,6 +1657,14 @@ export class ClaudeAdapter implements AgentAdapter {
 
   listExternalSessions(cwd: string, limit: number) {
     return listClaudeSessions(cwd, limit)
+  }
+
+  /**
+   * A copy of the conversation to continue apart from the original (#677, a fork of a busy session). Claude never
+   * locks a conversation, so this is not the way around a lock it is for Codex: it is the fork a requester chose.
+   */
+  forkConversation(externalId: string, cwd: string) {
+    return forkClaudeSession(externalId, cwd)
   }
 
   /** Deletes the original conversation ("actually delete") — the SDK's deleteSession knows its own file layout. */

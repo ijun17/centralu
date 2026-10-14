@@ -38,7 +38,8 @@ export function appSessionsNeedAttention(sessions: SessionSummary[]): boolean {
  * Lays out the session list in tree order: a session immediately followed by the sessions it started (owner decision
  * 2026-10-12 on #561). A child is grouped by who started it, `askedBy` for a start_agent child, whether it runs in its
  * parent's folder or in a new worktree; `parentSessionId` still places a worktree session under the session that held
- * it (#69, a former worktree manager's children). `askedBy` of an ask_project session names a session of another
+ * it (#69, a former worktree manager's children). A fork (#677, `forkedFrom`) hangs under the session it was copied
+ * from, ahead of the session that asked for it. `askedBy` of an ask_project session names a session of another
  * project, which is not in this list, so that session stays at the top level with its "Asked by" mark.
  *
  * Hierarchy lives only in the sidebar — the grid, the inbox and the palette all stay flat lists
@@ -52,7 +53,8 @@ export function appSessionsNeedAttention(sessions: SessionSummary[]): boolean {
 export function orderAsTree(sessions: SessionSummary[]): { s: SessionSummary; nested: boolean }[] {
   const here = new Set(sessions.map((x) => x.id))
   const parentOf = (s: SessionSummary): string | null =>
-    s.parentSessionId && here.has(s.parentSessionId) ? s.parentSessionId
+    s.forkedFrom && s.forkedFrom !== s.id && here.has(s.forkedFrom) ? s.forkedFrom
+    : s.parentSessionId && here.has(s.parentSessionId) ? s.parentSessionId
     : s.askedBy && s.askedBy !== s.id && here.has(s.askedBy) ? s.askedBy
     : null
   const byId = new Map(sessions.map((x) => [x.id, x]))

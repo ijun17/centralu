@@ -139,6 +139,11 @@ export type SessionSummary = {
    */
   askedBy?: string | null
   /**
+   * The session this one was forked from (#677): another session asked a busy one for work and chose a copy of its
+   * conversation. The sidebar hangs it under that session, ahead of who asked for it.
+   */
+  forkedFrom?: string | null
+  /**
    * The linked machine this session runs on (#82, docs/plans/remote-hub.md), or null/absent for this computer. Its id
    * then reads `<machine>.<id>`; nothing parses that, everything groups and labels by this field.
    */

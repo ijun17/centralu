@@ -333,12 +333,14 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
   describe('a task that joins a turn the person is running gives its caller none of that turn\'s cards', () => {
     it('ask_project into the person\'s turn', async () => {
       const caller = await w.callerSession()
+      // Joining a turn that is not its own is a note, the caller's choice under auto (#677)
+      await w.mgr.updateSettings(caller, { permissionPreset: 'auto' })
       const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
       w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
       const cards = answering(handleOf(target))
       await w.mgr.send(target, "the person's own work")
       let settled = false
-      void w.mgr.askProject(caller, { project: w.target.id, session: target, task: 'also this' }).then(() => { settled = true })
+      void w.mgr.askProject(caller, { project: w.target.id, session: target, task: 'also this', ifBusy: 'note' }).then(() => { settled = true })
       await w.until(() => handleOf(target).sent.length === 2)
       cards.ask('q-person')
       cards.approval('a-person')

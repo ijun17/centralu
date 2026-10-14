@@ -121,6 +121,16 @@ export function storeTooNewMessage(minReaderVersion: number, knownVersion: numbe
  * The dev-only store (docs/agent-host.md §5). Replaced by rusqlite once the app moves to
  * Tauri; the schema file (protocol/src/schema/schema.sql) is shared as-is.
  */
+/** A request held for a busy session until its turn ends (#677, `queued_requests`) */
+export type QueuedRequest = {
+  id: string
+  sessionId: string
+  callerSessionId: string
+  via: 'ask_project' | 'agent_session' | 'send_to_session'
+  text: string
+  queuedAt: number
+}
+
 export class Store {
   private db: Database.Database
 
@@ -1896,6 +1906,43 @@ export class Store {
           `)
         },
       },
+      {
+        to: 52,
+        breaksOlderReaders: false,
+        /**
+         * Requests to a busy session (#677). `queued_requests`: work another session asked a busy session for, held to
+         * be delivered as a new turn when the running one ends (the requester's `ifBusy: "queue"`).
+         *
+         *   id                 the handle the requester was given
+         *   session_id         the busy session it waits for
+         *   caller_session_id  the requester, told when the delivered turn ends
+         *   via                the tool it came through: `ask_project`, `agent_session` or `send_to_session`
+         *   text               the requester's words, framed as that tool frames them when delivered
+         *   queued_at          the order it is delivered in
+         *
+         * Kept in the store so a host swap (#280) does not lose it: the next host delivers it when the session's turn
+         * ends, or at once for a session already at rest. Not foreign keys; purging either session deletes the rows.
+         *
+         * `sessions.forked_from_session_id`: the session whose conversation a forked sub-session was copied from
+         * (`ifBusy: "fork"`). The sidebar hangs the fork under it; the requester stays in `asked_by_session_id`.
+         *
+         * **Expand only (#292's rule).** A new table and a nullable column; an older host reads neither.
+         */
+        run: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS queued_requests (
+              id                TEXT PRIMARY KEY,
+              session_id        TEXT NOT NULL,
+              caller_session_id TEXT NOT NULL,
+              via               TEXT NOT NULL,
+              text              TEXT NOT NULL,
+              queued_at         INTEGER NOT NULL
+            )
+          `)
+          const cols = (this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).map((c) => c.name)
+          if (!cols.includes('forked_from_session_id')) this.db.exec(`ALTER TABLE sessions ADD COLUMN forked_from_session_id TEXT`)
+        },
+      },
     ]
   }
 
@@ -2374,8 +2421,8 @@ export class Store {
   upsertSession(s: SessionInfo): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, worktree_base, parent_session_id, scope_session_ids, role_append, app_id, asked_by_session_id, context_used, context_window, context_exactness)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @scopeSessionIds, @roleAppend, @appId, @askedBy, @contextUsed, @contextWindow, @contextExactness)
+        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, worktree_base, parent_session_id, scope_session_ids, role_append, app_id, asked_by_session_id, forked_from_session_id, context_used, context_window, context_exactness)
+         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @scopeSessionIds, @roleAppend, @appId, @askedBy, @forkedFrom, @contextUsed, @contextWindow, @contextExactness)
          ON CONFLICT(id) DO UPDATE SET
            tool = excluded.tool,
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
@@ -2392,6 +2439,7 @@ export class Store {
            role_append = excluded.role_append,
            app_id = excluded.app_id,
            asked_by_session_id = excluded.asked_by_session_id,
+           forked_from_session_id = excluded.forked_from_session_id,
            context_used = excluded.context_used, context_window = excluded.context_window,
            context_exactness = excluded.context_exactness`,
       )
@@ -2413,6 +2461,7 @@ export class Store {
         roleAppend: s.roleAppend ?? null,
         appId: s.appId ?? null,
         askedBy: s.askedBy ?? null,
+        forkedFrom: s.forkedFrom ?? null,
         /*
          * Context rides the ordinary upsert (issue #48), which the manager already runs after
          * every event — so a reading is on disk the instant it arrives, with no second write
@@ -2586,6 +2635,7 @@ export class Store {
                 s.parent_session_id as parentSessionId,
                 s.scope_session_ids as scopeSessionIdsJson, s.role_append as roleAppend, s.app_id as appId,
                 s.asked_by_session_id as askedBy,
+                s.forked_from_session_id as forkedFrom,
                 s.context_used as contextUsed, s.context_window as contextWindow,
                 s.context_exactness as contextExactness,
                 COALESCE((SELECT MAX(seq) FROM messages m WHERE m.session_id = s.id), 0) as lastSeq
@@ -2849,6 +2899,7 @@ export class Store {
       this.db.prepare(`DELETE FROM report_marks WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM agent_start_requests WHERE caller_session_id = ?`).run(sessionId)
       this.db.prepare(`DELETE FROM delegated_turns WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
+      this.db.prepare(`DELETE FROM queued_requests WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM sessions WHERE id = ? AND deleted_at IS NOT NULL`).run(sessionId)
       return true
     })
@@ -3690,6 +3741,27 @@ export class Store {
 
   setDelegatedTurnTold(sessionId: string, told: readonly string[]): void {
     this.db.prepare(`UPDATE delegated_turns SET told_cards = ? WHERE session_id = ?`).run(told.join(' '), sessionId)
+  }
+
+  // ── Requests held for a busy session (#677) — see migration v52 ──
+
+  listQueuedRequests(): QueuedRequest[] {
+    return this.db
+      .prepare(
+        `SELECT id, session_id as sessionId, caller_session_id as callerSessionId, via, text, queued_at as queuedAt
+           FROM queued_requests ORDER BY queued_at, rowid`,
+      )
+      .all() as QueuedRequest[]
+  }
+
+  addQueuedRequest(r: QueuedRequest): void {
+    this.db
+      .prepare(`INSERT INTO queued_requests (id, session_id, caller_session_id, via, text, queued_at) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(r.id, r.sessionId, r.callerSessionId, r.via, r.text, r.queuedAt)
+  }
+
+  removeQueuedRequest(id: string): void {
+    this.db.prepare(`DELETE FROM queued_requests WHERE id = ?`).run(id)
   }
 
   clearDelegatedTurn(sessionId: string): void {

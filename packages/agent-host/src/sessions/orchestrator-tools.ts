@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { ToolName } from '@cc/protocol'
-import type { ChildRunResult, AskProjectResult, OrchestratorTools, RoutedCard } from '../adapters/contract.js'
+import type { BusyChoice, ChildRunResult, AskProjectResult, IfBusy, OrchestratorTools, RoutedCard } from '../adapters/contract.js'
+
+const IF_BUSY: readonly IfBusy[] = ['note', 'queue', 'fork', 'fork_read']
 import { ORCHESTRATOR_MCP_NAME, type ToolCaller, type ToolOutput, type ToolProfile } from '../apps/contract.js'
 import { appGuide, APP_GUIDE_TOPICS, type GuideSeats, type GuideTool } from './app-guide.js'
 
@@ -83,6 +85,8 @@ export const ORCHESTRATOR_TOOLS = [
         .boolean()
         .optional()
         .describe('Whether to notify me when that session finishes the work. Set true if the person is waiting for the result.'),
+      // #677: a session busy with a turn that is not yours returns the choices, which name this argument; no words here
+      ifBusy: z.enum(['note', 'queue', 'fork', 'fork_read']).optional(),
     }),
   },
   {
@@ -305,12 +309,20 @@ export const DELEGATE_TOOLS = [
   {
     name: 'ask_project',
     description: "Asks another project's existing session; returns its answer. For another project's apps, use find_apps.",
-    schema: z.object({ project: z.string(), session: z.string().optional(), task: z.string().optional() }),
+    /*
+     * ifBusy (#677): a busy session returns its choices, and that answer names this argument and its values ("note",
+     * "queue"), so it needs no words or enum here: this definition rides in every ordinary Claude request (the
+     * reader's 2,300 there), and the runner refuses any other value.
+     */
+    schema: z.object({ project: z.string(), session: z.string().optional(), task: z.string().optional(), ifBusy: z.string().optional() }),
   },
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
-/** The ceiling for DELEGATE_TOOLS, counted the same way as READER_BUDGET_CHARS. The set is measured in docs/agent-host.md */
-export const DELEGATE_BUDGET_CHARS = 400
+/**
+ * The ceiling for DELEGATE_TOOLS, counted the same way as READER_BUDGET_CHARS. The set is measured in docs/agent-host.md.
+ * 400 until #677's `ifBusy` (a bare string: a busy session's answer names the argument and its values).
+ */
+export const DELEGATE_BUDGET_CHARS = 450
 
 /**
  * Other agents in the same project (#561) — an ordinary session starts a Claude or Codex session on a task and works
@@ -345,13 +357,24 @@ export const AGENT_TOOLS = [
      * Not in the description: the answer that shows a card names the call, and the description rides in every request.
      */
     description: 'Checks, messages, waits for, stops or deletes a session start_agent started.',
-    schema: z.object({ sessionId: z.string(), action: z.enum(['status', 'send', 'wait', 'stop', 'delete', 'answer']), text: z.string().optional(), card: z.string().optional() }),
+    schema: z.object({
+      sessionId: z.string(),
+      action: z.enum(['status', 'send', 'wait', 'stop', 'delete', 'answer']),
+      text: z.string().optional(),
+      card: z.string().optional(),
+      // #677: send to a busy session returns its choices, which name this argument
+      ifBusy: z.enum(['note', 'queue', 'fork', 'fork_read']).optional(),
+    }),
     deferred: true,
   },
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
 
-/** The ceiling for AGENT_TOOLS, counted like READER_BUDGET_CHARS (both tools, since Codex loads them). Measured in docs/tool-cost.md */
-export const AGENT_BUDGET_CHARS = 1000
+/**
+ * The ceiling for AGENT_TOOLS, counted like READER_BUDGET_CHARS (both tools, since Codex loads them). Measured in
+ * docs/tool-cost.md. 1,000 until #676/#677 gave agent_session `answer`, `card` and `ifBusy` (1,060 with them, no words
+ * added: the answers that need them name them). Claude defers agent_session, so its every request does not carry them.
+ */
+export const AGENT_BUDGET_CHARS = 1100
 
 /**
  * Another project's app tools, on demand (#371 part A) — rides with the reader set, so a project's
@@ -460,11 +483,12 @@ export const READER_BUDGET_CHARS = 1750
  * Codex's possible loaded set 4,020 (3,540 definitions + 480 instructions), with none marked deferred.
  * Its ceiling rises from 3,700 to 4,050, covering the loaded set including Codex's header.
  * Like READER_BUDGET_CHARS, raising one is a decision about that seat's every request. The worktree manager's
- * seat went with the role (#561 part 3).
+ * seat went with the role (#561 part 3). Scoped rises from 2,350 to 2,400 for send_to_session's `ifBusy` (#677, an
+ * enum with no words: 2,330 on Claude, 2,382 on Codex); nothing makes a new coordinator since #372.
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
   orchestrator: 9_500,
-  scoped: 2_350,
+  scoped: 2_400,
   builder: 1_500,
   reader: READER_BUDGET_CHARS + DELEGATE_BUDGET_CHARS + AGENT_BUDGET_CHARS + APP_ACCESS_BUDGET_CHARS,
 }
@@ -539,6 +563,24 @@ function cardsText(cards: readonly RoutedCard[]): string {
     .join('\n')
 }
 
+/**
+ * A busy session's choices (#677), as the requester reads them: each with whether it can be taken now, and the call
+ * that takes it. Nothing was sent; the requester decides.
+ */
+function busyText(b: { sessionName: string; sessionId: string; sessionState: string; choices: readonly BusyChoice[] }, call: (choice: string) => string): string {
+  const what: Record<BusyChoice['choice'], string> = {
+    note: 'add it to the running turn as a note; that turn\'s answer stays its owner\'s, and you read the reply to your note',
+    queue: 'hold it and deliver it as a new turn when the running one ends; you are told when that turn ends',
+    fork: 'start a sub-session from a copy of its conversation now, linked to you, in a worktree of its own (fork_read: read-only work in its folder)',
+  }
+  const lines = b.choices.map((c) => `- ${c.choice}: ${c.available ? `${what[c.choice]}. ${call(c.choice === 'fork' ? 'fork' : c.choice)}` : `not available: ${c.why}`}`)
+  return `"${b.sessionName}" [${b.sessionId}] is busy (${b.sessionState}) with a turn that is not yours, so nothing was sent. Choose:\n${lines.join('\n')}`
+}
+
+function queuedText(q: { sessionName: string; sessionId: string; queueId: string; position: number }): string {
+  return `Queued for "${q.sessionName}" [${q.sessionId}] as ${q.queueId}, number ${q.position} in its queue: it goes in as a new turn when the running one ends, and you are told when that turn ends.`
+}
+
 const ANSWER_FORM = 'Answer a question with its option label, or your own words; one line per question; several choices of one question separated by ";". The person may answer first; the first answer counts.'
 
 /**
@@ -549,6 +591,8 @@ const ANSWER_FORM = 'Answer a question with its option label, or your own words;
 function askProjectText(r: AskProjectResult): ToolOutput {
   if (!r.ok) return { text: r.error, isError: true }
   const where = `the session "${r.sessionName}" [${r.sessionId}] in ${r.project}`
+  if (r.state === 'busy') return { text: busyText(r, (c) => `ask_project with the same task and ifBusy "${c}".`) }
+  if (r.state === 'queued') return { text: `${queuedText(r)} Call ask_project with project "${r.project}", session "${r.sessionId}" and no task to see where it stands.` }
   if (r.state === 'asking') {
     return {
       text:
@@ -588,7 +632,13 @@ function agentRunText(r: ChildRunResult): ToolOutput {
         'action="stop" withdraws the request.',
     }
   }
-  const who = `the ${r.tool} session "${r.sessionName}" [${r.sessionId}]`
+  const who = `the ${r.tool} session "${r.sessionName}" [${r.sessionId}]` + (r.via === 'fork' ? `, a fork of [${r.forkedFrom}]` : '')
+  const out = agentStateText(r, who)
+  // Which busy choice ran (#677), said first
+  return r.via === 'note' ? { ...out, text: `Added as a note to the running turn. ${out.text}` } : out
+}
+
+function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { state: 'pending' }>, who: string): ToolOutput {
   switch (r.state) {
     case 'working':
       return {
@@ -603,6 +653,10 @@ function agentRunText(r: ChildRunResult): ToolOutput {
           `${who} is waiting on you in the turn you gave it:\n${cardsText(r.cards)}\n` +
           `agent_session(sessionId="${r.sessionId}", action="answer", card=…, text=…) answers it. ${ANSWER_FORM}`,
       }
+    case 'busy':
+      return { text: busyText(r, (c) => `agent_session(sessionId="${r.sessionId}", action="send", text=…, ifBusy="${c}").`) }
+    case 'queued':
+      return { text: `${queuedText(r)} agent_session(sessionId="${r.sessionId}", action="stop") withdraws it.` }
     case 'answered':
       return { text: `Answered card ${r.card} in ${who}; it goes on. agent_session(sessionId="${r.sessionId}", action="wait") waits for its answer.` }
     case 'stopped':
@@ -688,7 +742,9 @@ export async function runOrchestratorTool(
     if (!project) return { text: 'Give a project — the name of another Centralu project.', isError: true }
     const task = typeof args.task === 'string' && args.task.trim() ? args.task : undefined
     const session = typeof args.session === 'string' && args.session.trim() ? args.session.trim() : undefined
-    return askProjectText(await tools.askProject({ project, ...(session ? { session } : {}), ...(task ? { task } : {}) }, signal))
+    if (args.ifBusy !== undefined && args.ifBusy !== 'note' && args.ifBusy !== 'queue') return { text: 'ifBusy is "note" or "queue" for ask_project.', isError: true }
+    const ifBusy = args.ifBusy === 'note' || args.ifBusy === 'queue' ? args.ifBusy : undefined
+    return askProjectText(await tools.askProject({ project, ...(session ? { session } : {}), ...(task ? { task } : {}), ...(ifBusy ? { ifBusy } : {}) }, signal))
   }
 
   if (name === 'start_agent' || name === 'agent_session') {
@@ -727,7 +783,8 @@ export async function runOrchestratorTool(
     if (action === 'send' && !text) return { text: 'Give text: what to send it.', isError: true }
     if (action === 'answer' && !text) return { text: 'Give text: the answer.', isError: true }
     const card = str(args.card)
-    return agentRunText(await tools.agentSession({ sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}) }, signal))
+    const ifBusy = IF_BUSY.find((v) => v === args.ifBusy)
+    return agentRunText(await tools.agentSession({ sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}), ...(ifBusy ? { ifBusy } : {}) }, signal))
   }
 
   if (name === 'recall') {
@@ -937,7 +994,16 @@ export async function runOrchestratorTool(
   if (name === 'send_to_session') {
     const sessionId = String(args.sessionId ?? '')
     const reportBack = args.reportBack === true
-    const r = await tools.sendToSession(sessionId, String(args.text ?? ''), reportBack)
+    const ifBusy = IF_BUSY.find((v) => v === args.ifBusy)
+    const r = await tools.sendToSession(sessionId, String(args.text ?? ''), reportBack, ifBusy)
+    // A busy session (#677): its choices, or which one ran and its handle
+    if (r.ok && r.busy) {
+      const b = r.busy
+      if (b.state === 'busy') return { text: busyText(b, (c) => `send_to_session with the same text and ifBusy "${c}".`) }
+      if (b.state === 'queued') return { text: queuedText(b) }
+      if (b.state === 'forked') return { text: `Forked [${b.forkedFrom}] into "${b.sessionName}" [${b.sessionId}], which took your instruction; you are told when its turn ends.` }
+      return { text: `Added as a note to the running turn of ${sessionId}${reportBack ? ' (I will let you know once that turn is done)' : ''}.` }
+    }
     /*
      * Report the failure as-is. If it silently pretended to succeed, the orchestrator would
      * believe it had assigned the work and move on, and the person would only see "I asked for

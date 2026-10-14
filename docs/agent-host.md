@@ -202,10 +202,12 @@ What one call does (`SessionManager.askProject`):
    model, effort, preset, project trust and approvals. Availability is checked again after consent.
 4. **Delivery.** The task travels in `askFrame`, explaining the caller and how the answer comes
    back, and appears in the target conversation with `from` identifying the asking session. An idle
-   session resumes as needed. A busy turn accepts the task through the adapter's tracked mid-turn
-   input path (#594); no interrupt or CLI-specific logic is added to the manager. A CLI that cannot
-   take such a note returns busy with the session's state. Another active delegation is also busy,
-   preserving its owner's watcher. `AgentRunWait` holds until the delivered input's receipt completes,
+   session resumes as needed. A session busy with a turn that is not the caller's (the person's,
+   another delegation, or requests queued ahead) returns the choices instead (§1.2.3, #677): the
+   caller passes `ifBusy` `note` (an `auto` caller only, through the adapter's tracked mid-turn input
+   path, #594, on a CLI that takes it, and never into another caller's delegation) or `queue`; no
+   fork across projects. No interrupt or CLI-specific logic is added to the manager, and another
+   delegation's watcher is never replaced. `AgentRunWait` holds until the delivered input's receipt completes,
    even if the CLI queues it into a later turn; an earlier turn's answer cannot finish this call.
 5. **The answer.** Final text is JSON-quoted as another session's words and clipped after 6,000
    characters. Named files and folders inside the target project, resolved through symlinks, become
@@ -253,7 +255,7 @@ own budget (`AGENT_TOOLS`, `AGENT_BUDGET_CHARS`).
 | Tool | Arguments → what comes back |
 |---|---|
 | `start_agent` | `{ task, tool?: string, model?, effort?, wait?, worktree?, branch? }` → the child's id and name, and its answer (`done`) or `working`; or `pending` with a request handle while the person's card stands (#673) |
-| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete\|answer, text?, card? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, §1.2.2, #676), `stopped` and `deleted` (a child moved to the trash; worktree cleanup also preserves local work, #608/#637) |
+| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete\|answer, text?, card?, ifBusy? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, §1.2.2, #676), `busy` and `queued` (a send to a session busy with a turn that is not the caller's, §1.2.3, #677), `stopped` and `deleted` (a child moved to the trash; worktree cleanup also preserves local work, #608/#637) |
 
 The optional `tool` is a registry name, accepted as a string by the schema and checked against the
 current registry at call time. An unknown name returns an error listing the installed tools; adding
@@ -556,7 +558,7 @@ must use `purgeSession` if added. Gitlinks found only in older merged superproje
 follow-up ([#623](https://github.com/ijun17/centralu/issues/623)); a superproject merge does not prove
 that module commits were pushed. Writes by other programs during capture are outside this session's lock.
 
-**Size.** The two definitions are 990 characters (`AGENT_BUDGET_CHARS` 1,000; 956 before #676's `answer` action and `card`, 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
+**Size.** The two definitions are 1,060 characters (`AGENT_BUDGET_CHARS` 1,100; 990 before #677's `ifBusy`, 956 before #676's `answer` action and `card`, 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
 made in words, like ask_project's, which deferred was not found) and defers `agent_session`, which every
 `start_agent` answer names; Codex reaches both through its `exec` tool. Measured in tool-cost.md §10: +170 tokens per ordinary Claude request (412 → 582); "Have Codex …" reached `start_agent` 3 of 3 on Claude, "another agent" went to each CLI's own sub-agents. No `name` argument: the child
 is named from its task and the person renames it.
@@ -665,6 +667,26 @@ already running (the person's, or someone else's) gives no one that turn.
   an answer meant for an earlier card onto a new one in the same session, or into a later turn; a handle that matches
   no standing card is refused, and the caller reads the card again. `told_cards` keeps handles too, so a new card
   under a reused id is told.
+
+### 1.2.3 Requests to a busy session (#677)
+
+When session B asks session A for work (`agent_session` send, `ask_project` to an existing session, `send_to_session`)
+while A runs a turn that is not B's (the person's, another session's delegation, an app's), or while requests are
+queued ahead, Centralu does not decide for B (owner decision 2026-10-14). The request tool returns `busy` with the
+choices, each marked available or not and why (`busyChoices`), and sends nothing; B calls again with `ifBusy`, or
+passes it up front. B's own running turn there is not busy for B: a note into its own work goes on as before. Messages
+the person sends are unchanged. The answer says which choice ran and its handle.
+
+| `ifBusy` | What happens |
+|---|---|
+| `note` | Today's mid-turn note (#594/#606/#653): only when B's own preset is `auto`, and only on a CLI that takes input mid-turn (`send_to_session` sends as before). The turn's answer stays its owner's; B reads the reply to its note on its own reader. Not into another caller's `ask_project` task. |
+| `queue` | Held (`queued`, `enqueue`) and delivered as a new turn B owns when A's running turn ends (`drainQueue`, from the turn's end and the boundaries that free a session): B's delegation for `agent_session` and `ask_project`, its turn for `send_to_session`, each framed as that tool frames its work, with the report when it ends and its cards (§1.2.2). One at a time, oldest first. The answer is a handle (`qr-…`) and the place in the queue; `agent_session` status (or `ask_project` with no task) says where it stands, `stop` withdraws it. Written to `queued_requests` (store v52): `detachAll` delivers nothing (`handingOver`), and the next host delivers a request when the kept session's turn ends there, or soon after start for a session at rest (a kept one after its adoption, so its input never starts a second process). A request whose session or requester is gone is dropped, as are those of a trashed session. |
+| `fork`, `fork_read` | A sub-session from a copy of A's conversation now (`forkFor`): the adapter's `forkConversation` (Claude: the SDK's `forkSession`, which writes the copy beside the original's transcript; Codex: `thread/fork`), resumed with its history on screen (`importHistory`). An adapter without it, a session with no conversation yet, and `ask_project` (which never creates a session in another project) are not offered a fork. start_agent's gates apply: depth one, the project's trust (#382; #673's consent rule as `ensureAgentConsent` has it) and the per-project ceiling, checked again after the card. The preset is the lowest of B's and A's. `fork` gets a worktree of its own (`agentWorktreeBranch`, branched from A's branch when A is a worktree session; a project with no git repository is refused and pointed at `fork_read`); `fork_read` is read-only work in A's folder under at most `safe`, so two agents never write one folder. Linked to B: `askedBy` B for a same-project ordinary session (the orchestrator through the delegation alone), its turn B's delegation (the report, its cards), and `forkedFrom` A (`sessions.forked_from_session_id`, store v52), which the sidebar uses to hang it under A, ahead of `parentSessionId` and `askedBy` (`orderAsTree`, `foldGroupsHiding`). |
+
+**Sizes.** `ifBusy` carries no words in any schema: the `busy` answer names it and its values. `ask_project`'s is a
+bare string (the enum would put the reader's Claude request over its 2,300), and the runner refuses other values;
+`DELEGATE_BUDGET_CHARS` rises from 400 to 450, `AGENT_BUDGET_CHARS` from 1,000 to 1,100 (the agent set is 1,060 with
+#676's `answer` and `card`), and the scoped seat's from 2,350 to 2,400 for `send_to_session`'s.
 
 ### 1.3 Making a new project (`projects.create`, `create_project`, #515)
 
@@ -2103,7 +2125,7 @@ step against:
 | Steps | What they do | Older build |
 |---|---|---|
 | 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43 | add a column | reads it (39: shows sessions in the trash as live ones; 43: an older host's `grid.set` writes no span, so app panels fall back to their defaults, #306) |
-| 3, 6, 9, 16, 19, 34, 36, 41, 42, 49, 50, 51 | add a table (3 also backfills the index: heavy; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646; 50 adds `agent_start_requests`, a start_agent card still waiting for the person, #673; 51 adds `delegated_turns`, the session that gave a running turn, #676) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ) |
+| 3, 6, 9, 16, 19, 34, 36, 41, 42, 49, 50, 51, 52 | add a table (3 also backfills the index: heavy; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646; 50 adds `agent_start_requests`, a start_agent card still waiting for the person, #673; 51 adds `delegated_turns`, the session that gave a running turn, #676; 52 adds `queued_requests`, a request held for a busy session, and the nullable `sessions.forked_from_session_id`, #677) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ) |
 | 10, 11, 40 | rebuild with the same shape (10: `sessions` with `project_id` nullable; 11 and 40: the index, then `VACUUM`: heavy) | reads it |
 | 21, 26, 29, 35, 48 | rewrite data one way (21 rewrites every message: heavy; 48 gives a former worktree manager's worktree sessions `askedBy`, #561) | reads it, cannot be undone |
 | **13, 28, 32** | **drop a table or a column** | **breaks: raises `min_reader_version`** |

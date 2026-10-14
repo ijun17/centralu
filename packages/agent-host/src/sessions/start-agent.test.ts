@@ -292,9 +292,10 @@ describe('starting another agent in the same project', () => {
       const requestId = agentCard(s)!.requestId
       // Another project asks this very session for something
       await w.mgr.setProjectTrusted(w.target.id, true)
-      const asker = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
+      // The session waits on its card, a turn that is not the asker's: the task joins it as a note (#677), which needs auto
+      const asker = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'auto' })).id
       w.store.setProjectConsent(w.target.id, w.caller.id, 'delegate')
-      void w.mgr.askProject(asker, { project: w.caller.id, session: s, task: 'check something' })
+      void w.mgr.askProject(asker, { project: w.caller.id, session: s, task: 'check something', ifBusy: 'note' })
       await w.until(() => !!handleOf(s)?.sent.some((t) => t.includes('check something')))
       w.mgr.respondApproval(s, requestId, 'allow')
       expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('itself started or asked') })
@@ -866,7 +867,11 @@ describe('starting another agent in the same project', () => {
     handleOf(c)!.answer('first done')
     await w.mgr.agentSession(s, { sessionId: c, action: 'wait' })
     await w.mgr.send(c, 'the person\'s task')
-    expect(await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('busy with something else') })
+    // Busy with the person's turn (#677): the choices, and no note from a session that is not auto
+    expect(await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'note' })).toMatchObject({
+      ok: true, state: 'busy', choices: [{ choice: 'note', available: false, why: expect.stringContaining('auto') }, { choice: 'queue', available: true }, { choice: 'fork' }],
+    })
+    expect(await w.mgr.agentSession(s, { sessionId: c, action: 'send', text: 'note', ifBusy: 'note' })).toMatchObject({ ok: false, error: expect.stringContaining('auto') })
     expect(handleOf(c)!.sent).toHaveLength(2)
     expect(handleOf(c)!.interrupted).toBe(0)
   })

@@ -153,8 +153,8 @@ describe('auto Centralu boundaries (#603)', () => {
       state: 'working',
     })
     expect(
-      await w.mgr.agentSession(caller, { sessionId: child.sessionId, action: 'send', text: 'note' }),
-    ).toMatchObject({ ok: true, state: 'working' })
+      await w.mgr.agentSession(caller, { sessionId: child.sessionId, action: 'send', text: 'note', ifBusy: 'note' }),
+    ).toMatchObject({ ok: true, state: 'working', via: 'note' })
     const wait = w.mgr.agentSession(caller, { sessionId: child.sessionId, action: 'wait' })
     handle(child.sessionId).answer('done')
     expect(await wait).toMatchObject({ ok: true, state: 'done', answer: 'done' })

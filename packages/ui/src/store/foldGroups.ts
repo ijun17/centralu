@@ -29,7 +29,8 @@ export function foldGroupsHiding(
   const appKey = own !== null && listedApps.has(own) ? own : null
   const keys: string[] = appKey !== null ? [appGroupKey(appKey)] : []
   const parentId =
-    session.parentSessionId ? session.parentSessionId
+    session.forkedFrom && session.forkedFrom !== session.id ? session.forkedFrom
+    : session.parentSessionId ? session.parentSessionId
     : session.askedBy && session.askedBy !== session.id ? session.askedBy
     : null
   const parent = parentId ? all[parentId] : undefined

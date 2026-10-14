@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 51, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 52, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -169,6 +169,14 @@ erDiagram
     TEXT worktree_manager
     INTEGER trusted
   }
+  queued_requests {
+    TEXT id PK
+    TEXT session_id
+    TEXT caller_session_id
+    TEXT via
+    TEXT text
+    INTEGER queued_at
+  }
   report_marks {
     TEXT session_id PK
     TEXT caller_session_id
@@ -208,6 +216,7 @@ erDiagram
     INTEGER deleted_at
     TEXT trash
     TEXT asked_by_session_id
+    TEXT forked_from_session_id
   }
   subagent_messages {
     TEXT session_id PK, FK
@@ -468,6 +477,19 @@ Added in schema.sql.
 | `worktree_manager` | TEXT | yes |  |  | v27 |
 | `trusted` | INTEGER | no | `0` |  | v33 |
 
+### `queued_requests`
+
+Added in v52.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `id` | TEXT | yes |  | PK | v52 |
+| `session_id` | TEXT | no |  |  | v52 |
+| `caller_session_id` | TEXT | no |  |  | v52 |
+| `via` | TEXT | no |  |  | v52 |
+| `text` | TEXT | no |  |  | v52 |
+| `queued_at` | INTEGER | no |  |  | v52 |
+
 ### `report_marks`
 
 Added in v49.
@@ -517,6 +539,7 @@ Added in schema.sql.
 | `deleted_at` | INTEGER | yes |  |  | v39 |
 | `trash` | TEXT | yes |  |  | v39 |
 | `asked_by_session_id` | TEXT | yes |  |  | v45 |
+| `forked_from_session_id` | TEXT | yes |  |  | v52 |
 
 Indexes:
 

@@ -327,6 +327,12 @@ export const SessionInfo = z.object({
    * (#614); cross-project tasks retain their asking session in conversation `from` instead.
    */
   askedBy: z.string().nullable().optional(),
+  /**
+   * The session whose conversation this one was forked from (#677): another session asked a busy session for work and
+   * chose a fork, a sub-session starting from a copy of its conversation. The sidebar hangs it under that session;
+   * the requester is `askedBy`. Absent from a host that predates it.
+   */
+  forkedFrom: z.string().nullable().optional(),
   ...machineField,
   /**
    * The hub could not reach this session's machine, and answered from what it last heard (#82): the

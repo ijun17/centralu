@@ -70,6 +70,8 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 읽기 허락 | 위임된 세션의 답이 이름을 댄, 대상 프로젝트 안의 경로. 이 호스트가 도는 동안 호출한 쪽이 읽을 수 있다 | `readGrants`, `ask-project.ts` | |
 | 보고 표지 | "끝나면 알려 준다": 일을 준 세션에게 턴이 끝났다는 보고를 빚진 세션(`start_agent`가 기다림을 넘겼을 때, `reportBack`을 켠 `send_to_session`). 보고하면 지우고, 호스트 교체를 넘겨 살아남는다(#646) | `awaitingReport`, `manager.ts`; `report_marks`(스토어 v49) | |
 | 맡긴 턴 | 다른 세션의 일이 시작한 턴(`ask_project`, `start_agent`, `agent_session` send, 쉬는 세션에 보낸 `send_to_session`). 도는 동안 그 턴의 카드는 맡긴 세션에게도 간다: 답할 수 있는 질문, 알림만 받는 승인(#676). 턴과 함께 끝나고, 호스트 교체를 넘겨 살아남는다 | `turnOwners`, `manager.ts`; `delegated_turns`(스토어 v51) | |
+| 대기 중인 요청 | 한 세션이 바쁜 세션에게 청하고 대기를 고른 일(`ifBusy: "queue"`). 돌던 턴이 끝나면 요청한 세션이 소유한 새 턴으로 전해진다. 호스트 교체를 넘겨 살아남는다(#677) | `queued`, `manager.ts`; `queued_requests`(스토어 v52) | |
+| 포크 | 다른 세션의 요청을 위해 바쁜 세션의 대화를 복사해 시작한 하위 세션(`ifBusy: "fork"`). 요청한 세션과 연결되고 사이드바에서는 원본 아래에 놓인다(#677) | `SessionInfo.forkedFrom`; `sessions.forked_from_session_id`(스토어 v52) | |
 | 안 읽음 | 사람이 마지막으로 본 곳(`lastReadSeq`) 너머에 내용이 있는가. 상태와는 따로다 | `SessionInfo.lastReadSeq` | |
 
 ### 1.3 앱
@@ -275,6 +277,7 @@ classDiagram
 - `report_marks`: 세션이 일을 준 세션에게 빚진 보고. 전해질 때까지 남는다.
 - `agent_start_requests`: 사람이 아직 답하지 않은 start_agent 카드. 다음 호스트가 다시 세운다(#673).
 - `delegated_turns`: 세션에게 지금 도는 턴을 맡긴 세션과, 그 세션에 이미 알린 카드. 턴이 끝날 때까지 남는다.
+- `queued_requests`: 바쁜 세션을 위해 붙잡아 둔 요청. 새 턴으로 전해질 때까지 남는다.
 
 ### 2.3 앱
 

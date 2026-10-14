@@ -17,6 +17,11 @@ describe('foldGroupsHiding (#666)', () => {
     expect(foldGroupsHiding(wt, all(s('parent'), wt), keyOf, listed)).toEqual([childrenGroupKey('parent')])
   })
 
+  it('names the group of the session a fork was copied from, not of the session that asked for it (#677)', () => {
+    const fork = s('fork', { askedBy: 'asker', parentSessionId: 'asker', forkedFrom: 'busy' })
+    expect(foldGroupsHiding(fork, all(s('busy'), s('asker'), fork), keyOf, listed)).toEqual([childrenGroupKey('busy')])
+  })
+
   it('names the app’s group when the app is listed, and nothing for a removed one', () => {
     const owned = s('owned', { appId: 'slider' })
     expect(foldGroupsHiding(owned, all(owned), keyOf, listed)).toEqual([appGroupKey('p/slider')])

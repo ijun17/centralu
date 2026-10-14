@@ -1,6 +1,7 @@
 import { describe, expect, it, afterEach } from 'vitest'
 import {
   __setSessionApiForTest,
+  forkClaudeSession,
   listClaudeSessions,
   readClaudeHistory,
   UNSUPPORTED as CLAUDE_UNSUPPORTED,
@@ -23,6 +24,28 @@ import { cleanTitle, stripInjectedBlocks } from './history-text.js'
  */
 
 afterEach(() => __setSessionApiForTest(undefined))
+
+describe('claude — SDK forkSession (#677)', () => {
+  it('copies the conversation under a new id, from the folder the original ran in', async () => {
+    const calls: unknown[] = []
+    __setSessionApiForTest({
+      listSessions: async () => [],
+      forkSession: async (id, o) => {
+        calls.push([id, o])
+        return { sessionId: 'new-id' }
+      },
+    })
+    expect(await forkClaudeSession('old-id', '/work/app')).toBe('new-id')
+    expect(calls).toEqual([['old-id', { dir: '/work/app' }]])
+  })
+
+  it('says so when the SDK cannot fork, or forks without a new id, rather than continuing the original', async () => {
+    __setSessionApiForTest({ listSessions: async () => [] })
+    await expect(forkClaudeSession('old-id', '/work/app')).rejects.toThrow('cannot fork')
+    __setSessionApiForTest({ listSessions: async () => [], forkSession: async () => ({}) })
+    await expect(forkClaudeSession('old-id', '/work/app')).rejects.toThrow('no session id')
+  })
+})
 
 describe('claude — SDK listSessions/getSessionMessages', () => {
   it('carries the list into summaries (title priority: user-set -> summary -> first prompt)', async () => {

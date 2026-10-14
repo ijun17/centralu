@@ -34,6 +34,7 @@ type SessionApi = {
   listSessions?: (o?: Record<string, unknown>) => Promise<SdkSessionInfo[]>
   getSessionMessages?: (id: string, o?: Record<string, unknown>) => Promise<SdkSessionMessage[]>
   deleteSession?: (id: string, o?: Record<string, unknown>) => Promise<void>
+  forkSession?: (id: string, o?: Record<string, unknown>) => Promise<{ sessionId?: unknown }>
 }
 
 let cached: SessionApi | null | undefined
@@ -162,4 +163,18 @@ export async function deleteClaudeSession(externalId: string, cwd: string): Prom
   const sdk = await sessionApi()
   if (!sdk?.deleteSession) throw new Error(UNSUPPORTED)
   await sdk.deleteSession(externalId, { dir: cwd })
+}
+
+/**
+ * A copy of a conversation under a new id (#677: a fork of a busy session), through the SDK's own `forkSession` (SDK
+ * 0.3.263), which knows its file layout: the copy is a full transcript the CLI resumes like any other. The original is
+ * left as it is, and a copy taken mid-turn holds what the transcript has so far. `dir` is the folder the original ran
+ * in, the one its transcript is kept under.
+ */
+export async function forkClaudeSession(externalId: string, cwd: string): Promise<string> {
+  const sdk = await sessionApi()
+  if (!sdk?.forkSession) throw new Error('The installed Claude Code SDK cannot fork a conversation (update the SDK)')
+  const r = await sdk.forkSession(externalId, { dir: cwd })
+  if (typeof r?.sessionId !== 'string' || !r.sessionId) throw new Error('Claude Code forked the conversation but returned no session id')
+  return r.sessionId
 }

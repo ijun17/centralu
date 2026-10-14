@@ -139,6 +139,24 @@ export type RoutedCard = {
   requestId: string
 } & ({ kind: 'question'; questions: Question[] } | { kind: 'approval'; detail: ApprovalDetail; answerable: boolean })
 
+/**
+ * A request to a session busy with a turn that is not the requester's (#677): what the requester may do instead. The
+ * requester chooses, by calling again with `ifBusy`; nothing was sent.
+ *
+ *   note       add it to the running turn as a mid-turn note (#594/#606/#653): only an `auto` requester, on a CLI that
+ *              takes input mid-turn; the turn's answer stays its owner's, the note's reply comes to the requester
+ *   queue      hold it and deliver it as a new turn when the running one ends; the requester is told when that ends
+ *   fork       a sub-session started from a copy of the session's conversation now, linked to the requester, in a
+ *              worktree of its own (`fork_read`: read-only work, in the session's folder, under at most `safe`)
+ */
+export type IfBusy = 'note' | 'queue' | 'fork' | 'fork_read'
+export type BusyChoice = { choice: 'note' | 'queue' | 'fork'; available: boolean; why?: string }
+export type BusyAnswer =
+  | { state: 'busy'; sessionId: string; sessionName: string; sessionState: string; choices: BusyChoice[] }
+  | { state: 'queued'; sessionId: string; sessionName: string; queueId: string; position: number }
+  | { state: 'noted'; sessionId: string; sessionName: string }
+  | { state: 'forked'; sessionId: string; sessionName: string; forkedFrom: string }
+
 /** What one ask_project call comes back with (#371 part B) — rendered for the model by runOrchestratorTool */
 export type AskProjectResult =
   | {
@@ -172,6 +190,7 @@ export type AskProjectResult =
       sessionName: string
       cards: RoutedCard[]
     }
+  | ({ ok: true; project: string } & Extract<BusyAnswer, { state: 'busy' | 'queued' }>)
   | { ok: false; error: string }
 
 /**
@@ -182,18 +201,32 @@ export type AskProjectResult =
  *   at_rest   nothing the caller gave it is running (agent_session status/wait); `answer` is its last final text
  *   asking    the turn the caller gave it waits on a card the caller reads here and answers with agent_session (#676)
  *   answered  agent_session answer reached the card
+ *   busy      the session is busy with a turn that is not the caller's: nothing was sent, the choices are listed (#677)
+ *   queued    held until the session's running turn ends, then delivered as a new turn (#677)
  *   stopped   agent_session stop ended the turn
  *   deleted   agent_session delete put a child in the trash; worktree children also report branch cleanup
  *   pending   no session yet (#673): the start waits on the person's card. `sessionId` is the request's handle, which
  *             agent_session follows (status, wait) or withdraws (stop) until the person answers
  */
 export type ChildRunResult =
-  | ({ ok: true; sessionId: string; sessionName: string; tool: string; notice?: string } & (
+  | ({
+      ok: true
+      sessionId: string
+      sessionName: string
+      tool: string
+      notice?: string
+      /** Which busy choice ran (#677): a note into the running turn, or a fork of the session (`sessionId` is the fork) */
+      via?: 'note' | 'fork'
+      /** For a fork: the session it was copied from */
+      forkedFrom?: string
+    } & (
       | { state: 'done'; answer: string; readable: string[]; outside: string[] }
       | { state: 'working'; reported: boolean }
       | { state: 'at_rest'; answer: string; sessionState: string }
       | { state: 'asking'; cards: RoutedCard[] }
       | { state: 'answered'; card: string }
+      | { state: 'busy'; sessionState: string; choices: BusyChoice[] }
+      | { state: 'queued'; queueId: string; position: number }
       | { state: 'stopped' }
       | { state: 'pending' }
       | { state: 'deleted'; branch?: undefined; setAside?: undefined; warning?: undefined }
@@ -209,6 +242,8 @@ export type AgentSessionOpts = {
   sessionId: string
   action: 'status' | 'send' | 'wait' | 'stop' | 'delete' | 'answer'
   text?: string
+  /** send to a busy session (#677): what to do instead of returning the choices */
+  ifBusy?: IfBusy
   /** answer (#676): which card, when more than one stands */
   card?: string
 }
@@ -232,7 +267,13 @@ export type OrchestratorTools = {
    * default, because waking it up on every turn end would create a loop where they wake each
    * other, and would also double the turn cost.
    */
-  sendToSession(sessionId: string, text: string, reportBack?: boolean): Promise<{ ok: boolean; error?: string }>
+  sendToSession(
+    sessionId: string,
+    text: string,
+    reportBack?: boolean,
+    /** What to do when the session is busy with a turn that is not this seat's (#677); absent: the choices come back */
+    ifBusy?: IfBusy,
+  ): Promise<{ ok: boolean; error?: string; busy?: BusyAnswer }>
   /**
    * Reads a session's recent conversation.
    *
@@ -300,7 +341,7 @@ export type OrchestratorTools = {
    * up to a bound (`ASK_WAIT_MS`): past it, the answer is "still working" and a call with no task waits again.
    * `signal` is the caller's tool call: aborted, the delegated turn is stopped too.
    */
-  askProject(opts: { project: string; session?: string; task?: string }, signal?: AbortSignal): Promise<AskProjectResult>
+  askProject(opts: { project: string; session?: string; task?: string; ifBusy?: Exclude<IfBusy, 'fork' | 'fork_read'> }, signal?: AbortSignal): Promise<AskProjectResult>
   /**
    * Starts another agent in the caller's own project (#561, start_agent): a visible session marked `askedBy` the
    * caller, under the caller's permission preset, behind the person's consent. Waits like askProject unless
@@ -923,9 +964,10 @@ export interface AgentAdapter {
    *   thread/fork    works even while locked
    *
    * So this is a fork in the road, not a dead end. We leave the original untouched and continue
-   * from the copy instead. An adapter without this capability leaves it unimplemented — claude
-   * does not need it since it never locks in the first place (we also confirmed by measurement
-   * that a concurrent resume simply works).
+   * from the copy instead. Claude never needed it for that (it never locks, and a concurrent resume
+   * simply works, measured), but implements it for the second use: a fork a requester chose for a
+   * busy session (#677, `ifBusy: "fork"`), a sub-session that starts from a copy of the conversation.
+   * An adapter without it leaves it unimplemented, and a fork is then not offered.
    */
   forkConversation?(externalId: string, cwd: string): Promise<string>
 

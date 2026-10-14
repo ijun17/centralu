@@ -182,10 +182,12 @@ What one call does (`SessionManager.askProject`):
    model, effort, preset, project trust and approvals. Availability is checked again after consent.
 4. **Delivery.** The task travels in `askFrame`, explaining the caller and how the answer comes
    back, and appears in the target conversation with `from` identifying the asking session. An idle
-   session resumes as needed. A busy turn accepts the task through the adapter's tracked mid-turn
-   input path (#594); no interrupt or CLI-specific logic is added to the manager. A CLI that cannot
-   take such a note returns busy with the session's state. Another active delegation is also busy,
-   preserving its owner's watcher. `AgentRunWait` holds until the delivered input's receipt completes,
+   session resumes as needed. A session busy with a turn that is not the caller's (the person's,
+   another delegation, or requests queued ahead) returns the choices instead (§1.2.3, #677): the
+   caller passes `ifBusy` `note` (an `auto` caller only, through the adapter's tracked mid-turn input
+   path, #594, on a CLI that takes it, and never into another caller's delegation) or `queue`; no
+   fork across projects. No interrupt or CLI-specific logic is added to the manager, and another
+   delegation's watcher is never replaced. `AgentRunWait` holds until the delivered input's receipt completes,
    even if the CLI queues it into a later turn; an earlier turn's answer cannot finish this call.
 5. **The answer.** Final text is JSON-quoted as another session's words and clipped after 6,000
    characters. Named files and folders inside the target project, resolved through symlinks, become
@@ -229,7 +231,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 | 도구 | 인자 → 돌아오는 것 |
 |---|---|
 | `start_agent` | `{ task, tool?: string, model?, effort?, wait?, worktree?, branch? }` → 자식의 id와 이름, 그리고 답(`done`) 또는 `working`. 사람의 카드가 서 있는 동안에는 요청 핸들과 함께 `pending`(#673) |
-| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete\|answer, text?, card? }` → 같은 상태들, 더해서 `at_rest`(부른 세션이 준 일이 돌지 않음, 마지막 답), `asking`과 `answered`(부른 세션이 준 턴의 카드, §1.2.2, #676), `stopped`, `deleted`(병합되고 깨끗한 워크트리 자식을 치움, 3부) |
+| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete\|answer, text?, card?, ifBusy? }` → 같은 상태들, 더해서 `at_rest`(부른 세션이 준 일이 돌지 않음, 마지막 답), `asking`과 `answered`(부른 세션이 준 턴의 카드, §1.2.2, #676), `busy`와 `queued`(부른 세션의 턴이 아닌 턴으로 바쁜 세션에 보낸 것, §1.2.3, #677), `stopped`, `deleted`(병합되고 깨끗한 워크트리 자식을 치움, 3부) |
 
 선택 인자 `tool`은 레지스트리 이름이다. 스키마는 문자열을 받고, 호출할 때 현재 레지스트리에
 있는지 확인한다. 모르는 이름이면 설치된 도구 목록을 담은 오류를 반환하므로, 어댑터를 추가해도
@@ -308,7 +310,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 턴도 멈춘다. 계속 돌게 둔 자식(`wait: false`, 또는 한도를 넘긴 것)은 자기 세션이라 부모의 멈춤이 닿지 않고 자기
 멈춤 버튼이 있다. 부르는 세션을 지우면 기다림과 세션 동의는 사라지고, 자식은 턴과 링크를 지킨다.
 
-**크기.** 두 정의는 990자(`AGENT_BUDGET_CHARS` 1,000. #676의 `answer` 동작과 `card` 전에는 956자, 레지스트리 이름 스키마 전에는 992자, 작업 트리 인자 전에는 918자, `delete` 전에는 974자). Claude는 `start_agent`를 올려 두고 `agent_session`을 미룬다
+**크기.** 두 정의는 1,060자(`AGENT_BUDGET_CHARS` 1,100. #677의 `ifBusy` 전에는 990자, #676의 `answer` 동작과 `card` 전에는 956자, 레지스트리 이름 스키마 전에는 992자, 작업 트리 인자 전에는 918자, `delete` 전에는 974자). Claude는 `start_agent`를 올려 두고 `agent_session`을 미룬다
 (`start_agent`의 모든 답이 그 이름을 댄다). 잰 값은 tool-cost.md에 있다.
 
 **stdout은 예약되어 있다.** `main.ts`가 딱 한 줄을 찍는다: Tauri 수퍼바이저가 포트와 인증
@@ -391,6 +393,26 @@ Node 래퍼다. codex-cli 0.160(macOS arm64)에서 측정: 래퍼로 띄운 유�
   요청 번호를 다시 매기므로(`req-1`, …), 요청 id만으로는 앞 카드에 대한 답이 같은 세션의 새 카드나 나중 턴의 카드로
   들어갈 수 있다. 지금 떠 있는 카드와 맞지 않는 핸들은 거절하고, 맡긴 세션은 카드를 다시 읽는다. `told_cards`도
   핸들을 적으므로, 같은 id를 다시 쓴 새 카드도 알린다.
+
+### 1.2.3 바쁜 세션에 보낸 요청 (#677)
+
+세션 B가 세션 A에게 일을 청할 때(`agent_session` send, 이미 있는 세션에 보내는 `ask_project`, `send_to_session`) A가
+B의 것이 아닌 턴(사람의 턴, 다른 세션의 위임, 앱의 일)을 돌고 있거나 앞서 대기 중인 요청이 있으면, Centralu는 B 대신
+결정하지 않는다(사장님 결정 2026-10-14). 요청 도구는 아무것도 보내지 않고 선택지가 담긴 `busy`를 돌려준다. 선택지마다
+지금 고를 수 있는지와 그 이유가 붙는다(`busyChoices`). B는 `ifBusy`를 붙여 다시 부르거나 처음부터 붙인다. 그 세션에서
+B 자신의 턴이 돌고 있으면 B에게는 바쁜 것이 아니다: 자기 일에 메모를 더하는 것은 예전과 같다. 사람이 보내는 메시지는
+바뀌지 않는다. 답은 어떤 선택지가 실행됐는지와 그 핸들을 말한다.
+
+| `ifBusy` | 일어나는 일 |
+|---|---|
+| `note` | 지금까지의 턴 중간 메모(#594/#606/#653): B 자신의 프리셋이 `auto`일 때만, 턴 중간 입력을 받는 CLI에서만(`send_to_session`은 예전처럼 보낸다). 턴의 답은 턴 주인의 것이고, B는 자기 메모에 대한 답을 자기 리더에서 읽는다. 다른 호출자의 `ask_project` 일에는 넣지 않는다. |
+| `queue` | 붙잡아 두었다가(`queued`, `enqueue`) A의 턴이 끝나면 B가 소유한 새 턴으로 전한다(`drainQueue`, 턴의 끝과 세션을 비우는 다른 경계에서): `agent_session`과 `ask_project`는 B의 위임으로, `send_to_session`은 B의 턴으로, 각 도구의 틀에 담아 보내고, 끝나면 보고하며 그 턴의 카드도 간다(§1.2.2). 한 번에 하나씩, 먼저 온 것부터. 답은 핸들(`qr-…`)과 대기 순서이고, `agent_session` status(또는 task 없는 `ask_project`)가 어디쯤인지 말하며 `stop`은 거둬들인다. `queued_requests`(스토어 v52)에 적는다: `detachAll`은 아무것도 전하지 않고(`handingOver`), 다음 호스트가 키퍼가 쥔 세션의 턴이 거기서 끝날 때, 쉬고 있는 세션이면 시작 직후에 전한다(키퍼가 쥔 세션은 넘겨받은 뒤에: 그 입력이 두 번째 프로세스를 띄우지 않도록). 세션이나 요청한 세션이 없어진 요청은 버리고, 휴지통에 간 세션의 요청도 버린다. |
+| `fork`, `fork_read` | 지금 A의 대화를 복사한 하위 세션(`forkFor`): 어댑터의 `forkConversation`(Claude: 원본 대화 기록 옆에 복사본을 쓰는 SDK `forkSession`, Codex: `thread/fork`)으로 만들고, 기록을 화면에 가져와 이어간다(`importHistory`). 이것이 없는 어댑터, 아직 대화가 없는 세션, 그리고 `ask_project`(다른 프로젝트에 세션을 만들지 않는다)에는 포크를 내놓지 않는다. start_agent의 문을 그대로 거친다: 깊이 하나, 프로젝트 신뢰(#382, 동의 규칙은 `ensureAgentConsent`가 가진 대로 #673), 프로젝트당 상한(카드 뒤에 다시 센다). 프리셋은 B와 A 중 낮은 쪽이다. `fork`는 자기 워크트리를 받고(`agentWorktreeBranch`, A가 워크트리 세션이면 A의 브랜치에서 갈라진다. git 저장소가 아닌 프로젝트는 거절하고 `fork_read`를 가리킨다), `fork_read`는 A의 폴더에서 하는 읽기 일로 많아야 `safe`다: 두 에이전트가 한 폴더에 쓰지 않는다. B와 연결된다: 같은 프로젝트의 평범한 세션이면 `askedBy` B(오케스트레이터는 위임으로만), 그 턴은 B의 위임(보고, 카드), 그리고 `forkedFrom` A(`sessions.forked_from_session_id`, 스토어 v52). 사이드바는 이것으로 포크를 A 아래에 둔다. `parentSessionId`와 `askedBy`보다 먼저 본다(`orderAsTree`, `foldGroupsHiding`). |
+
+**크기.** `ifBusy`는 어느 스키마에도 설명을 싣지 않는다: `busy` 답이 이름과 값을 알려 준다. `ask_project`의 것은 그냥
+문자열이다(열거형이면 reader의 Claude 요청이 2,300자를 넘는다). 다른 값은 실행기가 거절한다. `DELEGATE_BUDGET_CHARS`는
+400에서 450으로, `AGENT_BUDGET_CHARS`는 1,000에서 1,100으로(#676의 `answer`와 `card`까지 더해 agent 묶음은 1,060자),
+scoped 좌석은 `send_to_session`의 것 때문에 2,350에서 2,400으로 올린다.
 
 ### 1.3 새 프로젝트 만들기 (`projects.create`, `create_project`, #515)
 
@@ -1397,7 +1419,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 | 단계 | 하는 일 | 옛 빌드 |
 |---|---|---|
 | 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43 | 열 추가 | 읽는다 (39: 휴지통의 세션을 살아 있는 세션으로 보여 준다; 43: 이전 host의 `grid.set`은 크기를 쓰지 않으므로 앱 패널이 기본값으로 돌아간다, #306) |
-| 3, 6, 9, 16, 19, 34, 36, 41, 42, 49, 50, 51 | 테이블 추가 (3은 색인도 채운다: 무거움; 42는 그리드의 세션 줄을 `grid_layout`에 한 번 옮겨 적고 `grid_panels`는 그대로 둔다, #288; 49는 세션이 일을 준 세션에게 빚진 보고를 적는 `report_marks`를 더한다, #646; 50은 아직 사람의 답을 기다리는 start_agent 카드를 적는 `agent_start_requests`를 더한다, #673; 51은 돌고 있는 턴을 맡긴 세션을 적는 `delegated_turns`를 더한다, #676) | 읽는다 (42: 이전 host는 그리드를 `grid_panels`에 두므로, 두 빌드의 그리드가 달라질 수 있다) |
+| 3, 6, 9, 16, 19, 34, 36, 41, 42, 49, 50, 51, 52 | 테이블 추가 (3은 색인도 채운다: 무거움; 42는 그리드의 세션 줄을 `grid_layout`에 한 번 옮겨 적고 `grid_panels`는 그대로 둔다, #288; 49는 세션이 일을 준 세션에게 빚진 보고를 적는 `report_marks`를 더한다, #646; 50은 아직 사람의 답을 기다리는 start_agent 카드를 적는 `agent_start_requests`를 더한다, #673; 51은 돌고 있는 턴을 맡긴 세션을 적는 `delegated_turns`를 더한다, #676; 52는 바쁜 세션을 위해 붙잡아 둔 요청을 적는 `queued_requests`와 nullable `sessions.forked_from_session_id`를 더한다, #677) | 읽는다 (42: 이전 host는 그리드를 `grid_panels`에 두므로, 두 빌드의 그리드가 달라질 수 있다) |
 | 10, 11, 40 | 같은 모양으로 다시 짓기 (10: `project_id`를 nullable로 한 `sessions`; 11과 40: 색인 후 `VACUUM`: 무거움) | 읽는다 |
 | 21, 26, 29, 35, 48 | 한 방향 데이터 고쳐 쓰기 (21은 모든 메시지를 고쳐 쓴다: 무거움. 48은 예전 워크트리 매니저의 워크트리 세션에 `askedBy`를 준다, #561) | 읽는다, 되돌릴 수 없다 |
 | **13, 28, 32** | **테이블이나 열 삭제** | **깨진다: `min_reader_version`을 올린다** |

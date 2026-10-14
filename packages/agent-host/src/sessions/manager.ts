@@ -5,6 +5,7 @@ import { orchestratorHome, orchestratorRole } from './orchestrator-home.js'
 import { dedupeNearbyHits, takeInTurns, windowAround } from './snippet.js'
 import { commandsFor, profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
 import { answersFrom, cardCall, cardHandle, cardNotice, decisionFrom } from './delegated-cards.js'
+import type { QueuedRequest } from '../dev-services/store.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -79,7 +80,7 @@ import {
   sessionLiveDefaults,
   withoutToolRecord,
 } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, AgentSpawnSpec, ChildRunResult, AgentSessionOpts, AskProjectResult, RoutedCard, StartAgentOpts, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, HistoryMessage, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, BusyAnswer, BusyChoice, ChildRunResult, AgentSessionOpts, AskProjectResult, RoutedCard, StartAgentOpts, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, HistoryMessage, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { LaunchSettings } from '../adapters/contract.js'
 import { registeredTool } from '../adapters/registry.js'
 import { isAppAgent, toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
@@ -615,6 +616,12 @@ export class SessionManager {
    * a host swap keeps the link while the kept session waits on a question.
    */
   private turnOwners = new Map<string, { callerId: string; untilTurnEnd: boolean; told: Set<string>; turnId: string }>()
+  /**
+   * Requests held for a busy session (#677, `ifBusy: "queue"`): session -> its queue, oldest first. Each goes in as a new
+   * turn of its requester's when the session's running turn ends (`drainQueue`). Mirrored in the store's
+   * `queued_requests` (v52), so a host swap keeps them.
+   */
+  private queued = new Map<string, QueuedRequest[]>()
   /** The owner's waits on a delegated turn, woken by a card it may read (#676): session -> wakers, each for one caller */
   private cardWakers = new Map<string, Set<{ callerId: string; wake: () => void }>>()
   private ownTurn(sessionId: string, callerId: string, untilTurnEnd: boolean): void {
@@ -887,6 +894,23 @@ export class SessionManager {
         continue
       }
       store.clearDelegatedTurn(row.sessionId)
+    }
+    /*
+     * Queued requests (#677) outlive the host: the next one delivers them when the session's turn ends, or soon after
+     * start for a session already at rest. A kept session waits for its adoption (`adoptKept`), so its first input
+     * does not start a second process. A request whose session or requester is gone is dropped.
+     */
+    for (const r of store.listQueuedRequests()) {
+      if (!this.meta.has(r.sessionId) || !this.meta.has(r.callerSessionId)) {
+        store.removeQueuedRequest(r.id)
+        continue
+      }
+      this.queued.set(r.sessionId, [...(this.queued.get(r.sessionId) ?? []), r])
+    }
+    if (this.queued.size) {
+      setTimeout(() => {
+        for (const id of this.queued.keys()) if (!keeperOpts.keptSessions?.has(id)) this.scheduleDrain(id)
+      }, 0)
     }
     /*
      * Sweeps orphaned handoff notes (#106). **Why startup is a safe moment for this**: no handoff is
@@ -1639,6 +1663,8 @@ export class SessionManager {
       appAgent?: { outputSchema?: Record<string, unknown> }
       /** The same-project session that started this agent (#561). */
       askedBy?: string
+      /** The session whose conversation this one is a copy of (#677, a fork of a busy session) */
+      forkedFrom?: string
     },
   ): Promise<SessionInfo> {
     if (params.askedBy && this.meta.get(params.askedBy)?.projectId !== params.projectId) {
@@ -1783,6 +1809,7 @@ export class SessionManager {
        * was none (#69); that role was folded into ordinary sessions (#561 part 3).
        */
       parentSessionId: worktree && params.askedBy ? params.askedBy : null,
+      ...(params.forkedFrom ? { forkedFrom: params.forkedFrom } : {}),
       ...sessionLiveDefaults(),
       // Started from what is installed now, until the process says (#297)
       agentVersion: this.versionHint?.(params.tool) ?? null,
@@ -2364,6 +2391,8 @@ export class SessionManager {
         // An adopted process does not announce its CLI version again; its tag says what it was started from (#297)
         m.agentVersion = k.version ?? null
         const r = await this.resumeSession(k.sessionId, k.process).catch((err: Error) => ({ resumed: false, reason: err.message }))
+        // A request queued for it under the old host goes in now if its turn ended during the swap (#677)
+        if (this.queued.has(k.sessionId)) this.scheduleDrain(k.sessionId)
         if (!r.resumed) {
           console.error(`[agent-host] could not re-attach ${k.sessionId.slice(0, 8)}: ${r.reason ?? 'unknown'}`)
           if (m.state === 'working' || m.state === 'waiting_approval') {
@@ -2885,6 +2914,8 @@ export class SessionManager {
     this.clearReport(sessionId)
     // Nobody is left to tell: the reports its children owed it go too
     for (const [child, caller] of [...this.awaitingReport]) if (caller === sessionId) this.clearReport(child)
+    // Requests held for it, or that it made, go too (#677)
+    this.dropQueued((r) => r.sessionId === sessionId || r.callerSessionId === sessionId)
     // The same for a delegated turn's link (#676), either way
     this.releaseTurn(sessionId)
     for (const [child, owner] of [...this.turnOwners]) if (owner.callerId === sessionId) this.releaseTurn(child)
@@ -3476,6 +3507,8 @@ export class SessionManager {
    * anyway after `BACKGROUND_HOLD_MAX_MS`.
    */
   private applyDeferredRestart(sessionId: string): void {
+    // The same boundaries free a busy session for the request queued for it (#677)
+    if (this.queued.has(sessionId)) this.scheduleDrain(sessionId)
     const session = this.meta.get(sessionId)
     if (!session || inTurn(session.state) || this.deferredRestarts.has(sessionId) || this.inputsHeld(sessionId) || !this.restartAfterTurn.has(sessionId)) return
     const hold = this.backgroundHolds.get(sessionId)
@@ -5649,7 +5682,7 @@ export class SessionManager {
       startAgent: async () => ({ ok: false, error: 'Only an ordinary project session can start agents this way' }),
       agentSession: async () => ({ ok: false, error: 'Only an ordinary project session can start agents this way' }),
 
-      sendToSession: async (sessionId, text, reportBack) => {
+      sendToSession: async (sessionId, text, reportBack, ifBusy) => {
         /*
          * Never fails silently. If the orchestrator names the wrong session and nothing happens, the
          * person only sees "I told it to and it did not" — returning the reason lets the orchestrator
@@ -5679,6 +5712,24 @@ export class SessionManager {
         }
         const target = this.meta.get(sessionId)
         if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
+        /*
+         * Busy with a turn that is not this seat's (#677): this seat chooses. A note goes in as before (auto only,
+         * #606); a queue holds it for a new turn when the running one ends; a fork copies the session's conversation
+         * into a sub-session. Each tells this seat when its turn ends. Without `ifBusy`, nothing is sent.
+         */
+        if (this.busyForCaller(orchestratorId, sessionId)) {
+          if (!ifBusy) return { ok: true, busy: this.busyAnswer(orchestratorId, target, 'send_to_session') }
+          if (ifBusy === 'queue') return { ok: true, busy: this.enqueue(orchestratorId, target, 'send_to_session', text) }
+          if (ifBusy === 'fork' || ifBusy === 'fork_read') {
+            const f = await this.forkFor(orchestratorId, target, text, ifBusy === 'fork_read')
+            if (!f.ok) return f
+            this.markReport(f.fork.id, orchestratorId)
+            return { ok: true, busy: { state: 'forked', sessionId: f.fork.id, sessionName: this.meta.get(f.fork.id)?.name ?? f.fork.name, forkedFrom: target.id } }
+          }
+          const note = this.busyChoices(orchestratorId, target, 'send_to_session').find((c) => c.choice === 'note')!
+          if (!note.available) return { ok: false, error: `No note to "${target.name}": ${note.why}. Queue it or fork it instead.` }
+          this.autoBoundaryOpen(orchestratorId, 'a note into a turn that is not its own')
+        }
 
         try {
           // Tagged with its source and kept in the store/UI. The adapter's reporting gate only ever fires for
@@ -5701,7 +5752,7 @@ export class SessionManager {
           // Instructing again without asking for a report clears this orchestrator's earlier request — the
           // new instruction replaces it (#166)
           else if (this.awaitingReport.get(sessionId) === orchestratorId) this.clearReport(sessionId)
-          return { ok: true }
+          return { ok: true, ...(atRest ? {} : { busy: { state: 'noted' as const, sessionId, sessionName: target.name } }) }
         } catch (e) {
           return { ok: false, error: (e as Error).message }
         }
@@ -6073,7 +6124,7 @@ export class SessionManager {
    * Stop on the caller, the call's own signal, or the person deleting either session ends the wait; the first two
    * stop an assigned idle target only while waiting; a task that joined the person's turn only ends the wait.
    */
-  async askProject(callerId: string, opts: { project: string; session?: string; task?: string }, signal?: AbortSignal): Promise<AskProjectResult> {
+  async askProject(callerId: string, opts: { project: string; session?: string; task?: string; ifBusy?: 'note' | 'queue' }, signal?: AbortSignal): Promise<AskProjectResult> {
     const caller = this.meta.get(callerId)
     if (!caller?.projectId) return { ok: false, error: 'This session belongs to no project, so it cannot ask another one' }
     if ((caller.askedBy || [...this.delegations.values()].some((d) => d.sessionId === callerId && !d.agent && !d.settled)) && !this.autoBoundaryOpen(callerId, 'delegation depth')) {
@@ -6132,6 +6183,9 @@ export class SessionManager {
     const key = `${callerId}>${target.id}>${chosen.id}`
     const pending = this.delegations.get(key)
     if (pending && !opts.task) return this.awaitDelegation(key, pending, signal)
+    // A request of the caller's still queued there (#677): where it stands
+    const held = !opts.task ? this.queuedOf(callerId, chosen.id) : undefined
+    if (held?.ok && held.state === 'queued') return { ok: true, project: target.name, state: 'queued', sessionId: held.sessionId, sessionName: held.sessionName, queueId: held.queueId, position: held.position }
     if (pending && !pending.settled) {
       return { ok: false, error: `${target.name} is still working on your last task in the session "${chosen.name}". Call ask_project with project "${target.name}", session "${chosen.id}" and no task to wait for it.` }
     }
@@ -6140,11 +6194,20 @@ export class SessionManager {
     const available = (): string | undefined => {
       const current = this.meta.get(chosen.id)
       if (!current || current.projectId !== target.id || current.kind !== 'worker' || current.appId || this.builderRefOf(current)) return 'The chosen session is no longer available'
-      if (this.agentRuns.has(chosen.id) && !this.agentRuns.get(chosen.id)!.finished) return `"${current.name}" is busy (${current.state}) with another delegated task. Wait for it.`
-      if (inTurn(current.state) && (!this.adapters.get(current.tool)?.capabilities.midTurnInput || !this.handles.get(current.id)?.sendTracked)) return `"${current.name}" is busy (${current.state}); its CLI cannot take a mid-turn note. Try again later.`
     }
-    const busy = available()
-    if (busy) return { ok: false, error: busy }
+    const gone = available()
+    if (gone) return { ok: false, error: gone }
+    /*
+     * Busy with a turn that is not the caller's (#677): the caller chooses. A note joins the running turn (auto only,
+     * #606); a queue holds the task for a new turn when it ends. No fork across projects: ask_project never creates a
+     * session in another project. Without `ifBusy` nothing is asked or sent, and the choices come back.
+     */
+    const busyNow = this.busyForCaller(callerId, chosen.id)
+    if (busyNow && !opts.ifBusy) return { ok: true, project: target.name, ...this.busyAnswer(callerId, chosen, 'ask_project') }
+    if (busyNow && opts.ifBusy === 'note') {
+      const note = this.busyChoices(callerId, chosen, 'ask_project').find((c) => c.choice === 'note')!
+      if (!note.available) return { ok: false, error: `No note to "${chosen.name}": ${note.why}. Queue it instead (ifBusy "queue").` }
+    }
     const consent = await this.ensureProjectAccess(callerId, target.id, 'delegate', {
       text: taskLine(opts.task), session: { id: chosen.id, name: chosen.name },
     }, signal)
@@ -6153,6 +6216,17 @@ export class SessionManager {
     const changed = available()
     if (changed) return { ok: false, error: changed }
     if (signal?.aborted) return { ok: false, error: 'The call was cancelled before delivery' }
+    const busyAfter = this.busyForCaller(callerId, chosen.id)
+    if (busyAfter && opts.ifBusy === 'queue') {
+      const current = this.meta.get(chosen.id)!
+      return { ok: true, project: target.name, ...this.enqueue(callerId, current, 'ask_project', opts.task) }
+    }
+    if (busyAfter) {
+      // It became busy while the card stood, or the note it chose is no longer possible: the choices, again
+      const note = this.busyChoices(callerId, this.meta.get(chosen.id)!, 'ask_project').find((c) => c.choice === 'note')!
+      if (opts.ifBusy !== 'note' || !note.available) return { ok: true, project: target.name, ...this.busyAnswer(callerId, this.meta.get(chosen.id)!, 'ask_project') }
+      this.autoBoundaryOpen(callerId, 'a note into a turn that is not its own')
+    }
     if (pending) this.delegations.delete(key)
     const delegatedId = chosen.id
     const midTurn = inTurn(this.meta.get(delegatedId)!.state)
@@ -6716,6 +6790,9 @@ export class SessionManager {
     try {
       switch (opts.action) {
         case 'status': {
+          // A request still queued for it (#677)
+          const held = (!d || d.settled) ? this.queuedOf(callerId, child.id) : undefined
+          if (held) return held
           // The cards of the turn it gave are what the owner reads first (#676)
           const cards = d && !d.settled && !observing ? this.routedCards(child.id, callerId) : []
           if (d && cards.length) return this.agentAsking(d, cards)
@@ -6725,6 +6802,10 @@ export class SessionManager {
         case 'wait':
           return d ? await this.awaitAgent(key, d, signal, observing) : this.agentAtRest(child)
         case 'stop': {
+          // A queued request is withdrawn before it is delivered (#677)
+          if ((!d || d.settled) && this.dropQueued((r) => r.sessionId === child.id && r.callerSessionId === callerId).length) {
+            return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool }
+          }
           if (!d || d.settled) return { ok: false, error: `Nothing you gave "${child.name}" is running.` }
           if (!observing && this.awaitingReport.get(child.id) === callerId) this.clearReport(child.id)
           d.stop('the session that started it stopped it', observing)
@@ -6759,6 +6840,24 @@ export class SessionManager {
             }
           }
           const from = { sessionId: callerId, name: labelOf(this.store, caller) }
+          /*
+           * Busy with a turn that is not the caller's (#677): the caller chooses what happens, a note into that turn,
+           * a queue, or a fork; without `ifBusy` nothing is sent and the choices come back. Its own delegation's
+           * turn is not busy for it: a note into its own work goes on as before.
+           */
+          if ((d && !d.settled && observing) || ((!d || d.settled) && this.busyForCaller(callerId, child.id))) {
+            if (!opts.ifBusy) return { ok: true, tool: child.tool, ...this.busyAnswer(callerId, child, 'agent_session') }
+            if (opts.ifBusy === 'queue') return { ok: true, tool: child.tool, ...this.enqueue(callerId, child, 'agent_session', opts.text ?? '') }
+            if (opts.ifBusy === 'fork' || opts.ifBusy === 'fork_read') {
+              const f = await this.forkFor(callerId, child, opts.text ?? '', opts.ifBusy === 'fork_read', signal)
+              if (!f.ok) return f
+              const r = await this.awaitAgent(f.key, f.d, signal)
+              return r.ok ? { ...r, via: 'fork', forkedFrom: child.id } : r
+            }
+            const note = this.busyChoices(callerId, child, 'agent_session').find((c) => c.choice === 'note')!
+            if (!note.available || !d || d.settled) return { ok: false, error: `No note to "${child.name}": ${note.why ?? 'nothing is running there to add it to'}. Queue it or fork it instead.` }
+            this.autoBoundaryOpen(callerId, 'a note into a turn that is not its own')
+          }
           if (d && !d.settled) {
             const text = agentNoteFrame(from.name, opts.text ?? '')
             if (!this.adapters.get(child.tool)?.capabilities.midTurnInput || !this.handles.get(child.id)?.sendTracked) {
@@ -6805,7 +6904,8 @@ export class SessionManager {
               return { ok: false, error: `Could not send it: ${(e as Error).message}` }
             }
             // Keep the same outcome and any active wait. A send must not re-arm a report on top of that wait.
-            return this.agentWorking(d, false, observing)
+            const working = this.agentWorking(d, false, observing)
+            return working.ok && observing ? { ...working, via: 'note' } : working
           }
           if (child.state === 'working' || child.state === 'waiting_approval' || (this.agentRuns.has(child.id) && !this.agentRuns.get(child.id)!.finished)) {
             return { ok: false, error: `"${child.name}" is busy with something else (the person may be using it). Try again later.` }
@@ -7464,6 +7564,244 @@ export class SessionManager {
     // Told when it ends, as a wait past its bound is: the answer to the card lets the turn go on without this call
     this.markReport(d.sessionId, d.callerId)
     return { ok: true, state: 'asking', sessionId: d.sessionId, sessionName: this.meta.get(d.sessionId)?.name ?? d.sessionId, tool: this.meta.get(d.sessionId)?.tool ?? '', cards }
+  }
+
+  // ── Requests to a busy session (#677) ────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Whether a request from `callerId` finds the session busy with a turn that is not the caller's (#677): a turn
+   * running (the person's, another session's or an app's), or requests queued ahead of it. The caller's own running
+   * turn there is not busy for it: a note into its own work stays its own path.
+   */
+  private busyForCaller(callerId: string, sessionId: string): boolean {
+    const m = this.meta.get(sessionId)
+    if (!m) return false
+    if (this.queued.get(sessionId)?.length) return true
+    const run = this.agentRuns.get(sessionId)
+    const running = inTurn(m.state) || (!!run && !run.finished)
+    if (!running) return false
+    return this.turnOwners.get(sessionId)?.callerId !== callerId
+  }
+
+  /**
+   * What a requester may do about a busy session (#677), each with whether it can, now. The requester chooses; nothing
+   * was sent. `from`: the tool the request came through, which decides what a note is and whether a fork can be.
+   */
+  private busyChoices(callerId: string, target: SessionInfo, from: QueuedRequest['via']): BusyChoice[] {
+    const auto = this.meta.get(callerId)?.permissionPreset === 'auto'
+    const adapter = this.adapters.get(target.tool)
+    const midTurn = !!adapter?.capabilities.midTurnInput && !!this.handles.get(target.id)?.sendTracked
+    const running = inTurn(target.state) || (!!this.agentRuns.get(target.id) && !this.agentRuns.get(target.id)!.finished)
+    const noteWhy = !auto
+      ? 'only a session whose permission preset is auto adds a note to a turn that is not its own (#606)'
+      : !running
+        ? 'nothing is running there to add it to: requests are queued ahead of yours'
+        : from === 'ask_project' && this.agentRuns.has(target.id) && !this.agentRuns.get(target.id)!.finished
+          ? "another session's task runs there"
+          : from !== 'send_to_session' && !midTurn
+            ? 'its CLI cannot take a note during a turn'
+            : undefined
+    const forkWhy = from === 'ask_project'
+      ? 'ask_project never creates a session in another project'
+      : !adapter?.forkConversation
+        ? `${adapter?.descriptor.label ?? target.tool} cannot fork a conversation`
+        : !(target.externalId ?? target.importedFrom)
+          ? 'it has no conversation to copy yet'
+          : this.forkGateError(callerId, target) ?? undefined
+    return [
+      { choice: 'note', available: !noteWhy, ...(noteWhy ? { why: noteWhy } : {}) },
+      { choice: 'queue', available: true },
+      { choice: 'fork', available: !forkWhy, ...(forkWhy ? { why: forkWhy } : {}) },
+    ]
+  }
+
+  private busyAnswer(callerId: string, target: SessionInfo, from: QueuedRequest['via']): Extract<BusyAnswer, { state: 'busy' }> {
+    return { state: 'busy', sessionId: target.id, sessionName: target.name, sessionState: this.queued.get(target.id)?.length && !inTurn(target.state) ? 'queued requests' : target.state, choices: this.busyChoices(callerId, target, from) }
+  }
+
+  /**
+   * start_agent's rules for a fork (#677): it starts an agent, so it takes the same gates. Depth one, the project's
+   * trust and the per-project ceiling here; the person's consent when the fork is made (`ensureAgentConsent`).
+   */
+  private forkGateError(callerId: string, target: SessionInfo): string | null {
+    const caller = this.meta.get(callerId)
+    if (!caller) return 'the requesting session is gone'
+    if (this.agentDepthBlocked(caller) && !this.autoBoundaryOpen(callerId)) {
+      return 'this session was itself started or asked by another session, so it cannot start a sub-session'
+    }
+    const project = this.store.listProjects().find((p) => p.id === target.projectId)
+    if (!project) return 'its project is no longer registered'
+    if (project.trusted !== true && !this.autoBoundaryOpen(callerId)) return "its project is not trusted (the person can trust it from the project menu)"
+    return this.agentCeilingError(callerId, project.id)
+  }
+
+  /** Holds a request for a busy session until its turn ends (#677); the handle and the place in its queue */
+  private enqueue(callerId: string, target: SessionInfo, via: QueuedRequest['via'], text: string): Extract<BusyAnswer, { state: 'queued' }> {
+    const r: QueuedRequest = { id: `qr-${randomUUID()}`, sessionId: target.id, callerSessionId: callerId, via, text, queuedAt: Date.now() }
+    const list = [...(this.queued.get(target.id) ?? []), r]
+    this.queued.set(target.id, list)
+    this.store.addQueuedRequest(r)
+    // The turn may have ended while the caller chose
+    this.scheduleDrain(target.id)
+    return { state: 'queued', sessionId: target.id, sessionName: target.name, queueId: r.id, position: list.length }
+  }
+
+  private dropQueued(which: (r: QueuedRequest) => boolean): QueuedRequest[] {
+    const dropped: QueuedRequest[] = []
+    for (const [id, list] of [...this.queued]) {
+      const keep = list.filter((r) => !which(r))
+      for (const r of list) if (which(r)) { dropped.push(r); this.store.removeQueuedRequest(r.id) }
+      if (keep.length) this.queued.set(id, keep)
+      else this.queued.delete(id)
+    }
+    return dropped
+  }
+
+  /** After the event that freed the session has run its course (reports, observers), the next queued request goes in */
+  private scheduleDrain(sessionId: string): void {
+    setTimeout(() => void this.drainQueue(sessionId), 0)
+  }
+
+  /**
+   * Delivers the oldest request queued for a session now at rest (#677), as a new turn its requester owns: the
+   * requester's delegation (`agent_session`, `ask_project`) or turn (`send_to_session`), with its cards (#676) and the
+   * report when it ends. One at a time; the next waits for that turn to end. Not while the host is leaving: the next
+   * one delivers it.
+   */
+  private async drainQueue(sessionId: string): Promise<void> {
+    if (this.disposing || this.handingOver) return
+    const m = this.meta.get(sessionId)
+    const list = this.queued.get(sessionId)
+    if (!m || !list?.length) return
+    const run = this.agentRuns.get(sessionId)
+    if (inTurn(m.state) || (run && !run.finished) || this.inputsHeld(sessionId) || this.deferredRestarts.has(sessionId) || this.trashing.has(sessionId)) return
+    const r = list[0]!
+    this.dropQueued((x) => x.id === r.id)
+    const caller = this.meta.get(r.callerSessionId)
+    if (!caller) return this.scheduleDrain(sessionId)
+    const from = { sessionId: caller.id, name: labelOf(this.store, caller) }
+    const project = this.store.listProjects().find((p) => p.id === m.projectId)
+    const target = { id: m.projectId ?? '', name: project?.name ?? '', path: this.store.sessionCwd(m.id) ?? m.worktree?.path ?? project?.path ?? '' }
+    let d: Delegation | undefined
+    try {
+      if (r.via === 'send_to_session') {
+        this.ownTurn(sessionId, caller.id, true)
+        await this.send(sessionId, r.text, undefined, from)
+      } else if (r.via === 'agent_session') {
+        d = this.startDelegation(`${caller.id}>${sessionId}`, caller.id, sessionId, target, true)
+        await this.deliver(sessionId, agentFrame(from.name, r.text), undefined, from, false)
+      } else {
+        d = this.startDelegation(`${caller.id}>${target.id}>${sessionId}`, caller.id, sessionId, target, false)
+        const callerProject = this.store.listProjects().find((p) => p.id === caller.projectId)?.name ?? 'another project'
+        await this.deliver(sessionId, askFrame(callerProject, r.text), undefined, from, false)
+      }
+      // The requester is told when the turn ends, as for work it did not wait on
+      this.markReport(sessionId, caller.id)
+    } catch (e) {
+      if (d) {
+        d.wait.fail(e as Error)
+      } else this.releaseTurn(sessionId, caller.id)
+      void this.tellQueuedFailed(caller.id, sessionId, (e as Error).message)
+      this.scheduleDrain(sessionId)
+    }
+  }
+
+  /** A queued request could not be delivered (#677): said in the requester's session, as a report is */
+  private async tellQueuedFailed(callerId: string, sessionId: string, why: string): Promise<void> {
+    const name = this.meta.get(sessionId)?.name ?? sessionId
+    try {
+      await this.deliver(
+        callerId,
+        `[Centralu] Your queued request to another session was not delivered.\nSession: ${frameField(name)}\nid: ${sessionId}\n\nReason: ${why.slice(0, 600)}`,
+        undefined,
+        { sessionId, name },
+        true,
+      )
+    } catch {
+      // The requester may be asleep or deleted — a notice must not destabilize the host
+    }
+  }
+
+  /** The caller's requests still queued for a session (#677), as status reads them */
+  private queuedOf(callerId: string, sessionId: string): ChildRunResult | undefined {
+    const list = this.queued.get(sessionId) ?? []
+    const i = list.findIndex((r) => r.callerSessionId === callerId)
+    const m = this.meta.get(sessionId)
+    if (i < 0 || !m) return undefined
+    return { ok: true, state: 'queued', sessionId, sessionName: m.name, tool: m.tool, queueId: list[i]!.id, position: i + 1 }
+  }
+
+  /**
+   * A sub-session from a copy of a busy session's conversation (#677, `ifBusy: "fork"`), linked to the requester: its
+   * turn is the requester's delegation (the report, and its cards, #676), and the sidebar hangs it under the session it
+   * was copied from (`forkedFrom`). start_agent's gates (`forkGateError`, the consent card) and its preset rule: never
+   * above the requester, and never above the session it copies. `readOnly` (`fork_read`) shares that session's folder
+   * under at most `safe`, so two agents never write one folder; otherwise it gets a worktree of its own, branched from
+   * that session's branch when it has one.
+   */
+  private async forkFor(callerId: string, target: SessionInfo, text: string, readOnly: boolean, signal?: AbortSignal): Promise<{ ok: false; error: string } | { ok: true; key: string; d: Delegation; fork: SessionInfo }> {
+    const fork = this.busyChoices(callerId, target, 'agent_session').find((c) => c.choice === 'fork')!
+    if (!fork.available) return { ok: false, error: `No fork of "${target.name}": ${fork.why}.` }
+    const caller = this.meta.get(callerId)!
+    const adapter = this.adapters.get(target.tool)!
+    const project = this.store.listProjects().find((p) => p.id === target.projectId)!
+    const PRESETS: PermissionPreset[] = ['safe', 'normal', 'auto']
+    const lowest = (...ps: PermissionPreset[]) => PRESETS[Math.min(...ps.map((p) => PRESETS.indexOf(p)))]!
+    const preset = lowest(caller.permissionPreset, target.permissionPreset, ...(readOnly ? ['safe' as const] : []))
+    const worktree = readOnly ? null : await this.agentWorktreeBranch(project, { task: text })
+    if (worktree && 'error' in worktree) return { ok: false, error: `${worktree.error.replace('Start the agent without one.', 'Use fork_read for read-only work, or queue it.')}` }
+    const consent = await this.ensureAgentConsent(
+      callerId,
+      {
+        kind: 'agent_start',
+        project: { id: project.id, name: project.name },
+        tool: adapter.descriptor.label,
+        ...(target.model ? { model: target.model } : {}),
+        preset,
+        ...(worktree ? { worktree: { branch: worktree.branch } } : {}),
+        text: taskLine(`(a copy of "${target.name}") ${text}`),
+      },
+      signal,
+    )
+    if (!consent.ok) return consent
+    const full = this.agentCeilingError(callerId, project.id)
+    if (full) return { ok: false, error: full }
+    let forked: string
+    try {
+      forked = await adapter.forkConversation!(target.externalId ?? target.importedFrom!, this.cwdFor(target))
+    } catch (e) {
+      return { ok: false, error: `Could not copy "${target.name}"'s conversation: ${(e as Error).message}` }
+    }
+    let child: SessionInfo
+    try {
+      child = await this.createSession({
+        projectId: project.id,
+        cwd: readOnly ? this.cwdFor(target) : project.path,
+        tool: target.tool,
+        ...(target.model ? { model: target.model } : {}),
+        ...(target.effort ? { effort: target.effort } : {}),
+        permissionPreset: preset,
+        // A same-project ordinary session owns it as its agent; the orchestrator, which has no project, through the delegation alone
+        ...(caller.projectId === project.id ? { askedBy: callerId } : {}),
+        forkedFrom: target.id,
+        resumeExternalId: forked,
+        importHistory: true,
+        ...(worktree ? { worktree: true, worktreeBranch: worktree.branch, ...(target.worktree ? { worktreeBase: target.worktree.branch } : {}) } : {}),
+      })
+    } catch (e) {
+      return { ok: false, error: `Could not start the fork of "${target.name}": ${(e as Error).message}` }
+    }
+    if (!worktree) this.rename(child.id, `Fork of ${target.name}`.slice(0, 48))
+    const key = `${callerId}>${child.id}`
+    const d = this.startDelegation(key, callerId, child.id, { id: project.id, name: project.name, path: child.worktree?.path ?? this.cwdFor(child) }, true)
+    try {
+      await this.deliver(child.id, agentFrame(labelOf(this.store, caller), text), undefined, { sessionId: callerId, name: labelOf(this.store, caller) }, false)
+    } catch (e) {
+      d.wait.fail(e as Error)
+      this.delegations.delete(key)
+      return { ok: false, error: `The fork "${child.name}" [${child.id}] was made but did not take the request: ${(e as Error).message}` }
+    }
+    return { ok: true, key, d, fork: child }
   }
 
   /** A child with nothing of the caller's running: its last final answer (#561) */

@@ -19,6 +19,17 @@ describe('orderAsTree', () => {
     ).toEqual(['parent', '  same-folder', '  worktree', 'other', '  mine-too'])
   })
 
+  it('hangs a fork under the session it was copied from, not under the session that asked for it (#677)', () => {
+    expect(
+      shape([
+        s('busy'),
+        s('asker'),
+        s('fork', { askedBy: 'asker', forkedFrom: 'busy' }),
+        s('worktree-fork', { askedBy: 'asker', parentSessionId: 'asker', forkedFrom: 'busy' }),
+      ]),
+    ).toEqual(['busy', '  fork', '  worktree-fork', 'asker'])
+  })
+
   it('keeps a former manager\'s worktree sessions under it, by parentSessionId', () => {
     expect(shape([s('mgr'), s('wt', { parentSessionId: 'mgr' })])).toEqual(['mgr', '  wt'])
   })
