@@ -178,3 +178,22 @@ test('an agent asking with nothing installed is told so, and nothing relaunches 
   expect(out.error).toContain('No update is installed')
   expect(await page.evaluate(() => (window as any).__mock.relaunches)).toBe(0)
 })
+
+// #665 review: the shell's "ready" only meant another build, and an older bundle on disk was offered as the update
+test('an older build on disk is not offered as the installed update, to the person or an agent (#665)', async ({ page }) => {
+  await start(page)
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.relaunchCheck = { ready: true, version: '0.0.5' }
+    m.offerUpdate('9.9.1')
+  })
+  await page.getByTestId('update-line').click()
+  await focus(page)
+  // The line says to restart, as where the window cannot relaunch, and offers no Apply now
+  await expect(page.getByTestId('update-line')).toContainText('Restart Centralu to finish updating to 9.9.1')
+  await expect(page.getByTestId('update-apply-now')).toHaveCount(0)
+  const out = await page.evaluate(() => (window as any).__mock.agentApply())
+  expect(out.ok).toBe(false)
+  expect(out.error).toContain('0.0.5')
+  expect(await page.evaluate(() => (window as any).__mock.relaunches)).toBe(0)
+})

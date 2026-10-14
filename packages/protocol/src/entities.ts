@@ -600,7 +600,12 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
     diffPreview: z.string(),
     multi: z.boolean().default(false),
   }),
-  z.object({ kind: z.literal('other'), raw: z.string() }),
+  /**
+   * Anything else, as one text to read. `about` names a card the host raised that a window may know more about
+   * (#665: `centralu_apply`, an agent applying the installed update); a window that does not know it, or predates
+   * the field, reads `raw` as it always has, so the question is the whole of the card in every build.
+   */
+  z.object({ kind: z.literal('other'), raw: z.string(), about: z.string().optional() }),
   z.object({
     kind: z.literal('capability'),
     /** The app trying to use the capability — name is from the manifest */
@@ -657,13 +662,13 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
     text: z.string(),
   }),
   /**
-   * A session asks to check or install Centralu itself (#581), or to apply the installed build (#665): the window
-   * relaunches into it while the keeper holds every agent, as its "Apply now" does. A window older than `apply` keeps
-   * the word as it came (parseTolerant) and still shows the card.
+   * An ordinary session asks to check or install Centralu itself (#581). Applying the installed build (#665) is not an
+   * action here: a released window parses events strictly and drops one whose enum it does not know, so that card
+   * rides on `other` with `about: 'centralu_apply'`.
    */
   z.object({
     kind: z.literal('centralu_update'),
-    action: z.enum(['check', 'install', 'apply']),
+    action: z.enum(['check', 'install']),
   }),
   /**
    * The orchestrator asks to make a new project (#515, create_project) — raised by **the host** in the orchestrator's
@@ -686,6 +691,25 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
   }),
 ])
 export type ApprovalDetail = z.infer<typeof ApprovalDetail>
+
+/** The `about` of an agent's apply card (#665), on an `other` detail */
+export const CENTRALU_APPLY = 'centralu_apply'
+
+/**
+ * The question an agent's apply card asks (#665), carried whole as the card's text so a window of any build reads it.
+ * Here rather than with the other questions in core: the host raises this card, and the host does not import core.
+ * It says what the relaunch costs: the agents keep running, but the relaunched window moves the agent host to the new
+ * build at once, and that swap stops Centralu tool calls still running past its 10-second drain, in every session.
+ */
+export const CENTRALU_APPLY_QUESTION =
+  'Allow this session to apply the installed Centralu update? The window relaunches into it and running agents keep going. ' +
+  'Right after, the new window switches the agent host to the new build: in any session, a Centralu tool call still running ' +
+  'after 10 seconds (an agent waiting on its child agents, for one) is stopped and has to be tried again.'
+
+/** An agent's apply card (#665): an update question, whose "always" is for this session only */
+export function isCentraluApply(d: ApprovalDetail): boolean {
+  return d.kind === 'other' && d.about === CENTRALU_APPLY
+}
 
 /** One remembered "always" from one project to another (#371) — a row of Settings' list, with the names as they are now */
 export const ProjectConsent = z.object({

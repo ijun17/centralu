@@ -14,8 +14,9 @@ import type { NormalizedEvent } from '@cc/protocol'
  *      reasons, before the person is asked anything.
  *   2. After the caller's consent, the windows are asked again (a minute on a card can change what is installed or
  *      which windows are open), and `update_apply_go` names the first ready window's ticket. That window alone runs its
- *      "Apply now" and reports (`updates.reportApply`); its connection ending after the go counts as started, since a
- *      relaunched window can close before its report is written.
+ *      "Apply now" and reports (`updates.reportApply`): "started" right before it relaunches, then an error or done.
+ *      Its connection ending counts as the relaunch only after "started", since a relaunching window can close before
+ *      its last report is written; ending before it is answered as not known.
  *
  * One window relaunches: tickets go to one answer per request, and the keeper's relaunch (`apply_update_relaunch`) is
  * the one owner of the swap that follows, as it is for the button. A replayed request or go (a window reconnecting
@@ -32,9 +33,13 @@ export type ApplyOutcome = { ok: true; version?: string } | { ok: false; error: 
 const ANSWER_MS = 5_000
 /** How long the picked window gets to report. Its relaunch is one call to the shell, which answers before it exits */
 const OUTCOME_MS = 20_000
+/** How long a window whose connection ended before it said "started" gets to reconnect and report */
+const GONE_GRACE_MS = 5_000
 
 export const NO_WINDOW =
   'No Centralu window is open, so nothing was relaunched. The installed build starts the next time the person opens Centralu.'
+export const WINDOW_GONE =
+  'The window that was told to relaunch went away before it said it was relaunching, so whether it relaunched is not known. Look at Centralu.'
 export const NO_ANSWER =
   'No Centralu window answered. A window of an older build cannot apply an update for an agent: ask the person to click Apply now on the update line.'
 
@@ -48,8 +53,13 @@ type Probe = {
 type Go = {
   requestId: string
   ticket: string
+  /** The connection the window last spoke on: the go's answer, then its latest report */
   client: number
+  /** The window said it is relaunching now (`reportApply` with `started`) */
+  started: boolean
   version?: string
+  /** Running while the window's connection is gone before "started", for it to come back */
+  grace?: ReturnType<typeof setTimeout>
   finish: (o: ApplyOutcome) => void
 }
 
@@ -64,6 +74,7 @@ export class UpdateApplyBroker {
       windows: () => number
       answerMs?: number
       outcomeMs?: number
+      goneGraceMs?: number
     },
   ) {}
 
@@ -119,22 +130,35 @@ export class UpdateApplyBroker {
     return { ticket: null }
   }
 
-  /** Tells the picked window to relaunch and waits for its report, its connection ending, or the bound */
+  /**
+   * Tells the picked window to relaunch and waits for its outcome (#665 review). The window says "started" right before
+   * it relaunches; only after that does its connection ending count as the relaunch. Ending before it — a crash, a
+   * reload, a lost socket — is not a success: the window is given `goneGraceMs` to come back and report under the same
+   * ticket, then the answer says whether it relaunched is not known.
+   */
   go(ready: Extract<ApplyProbe, { ready: true }>): Promise<ApplyOutcome> {
     return new Promise<ApplyOutcome>((resolve) => {
       const g: Go = {
         requestId: ready.requestId,
         ticket: ready.ticket,
         client: ready.client,
+        started: false,
         ...(ready.version ? { version: ready.version } : {}),
         finish: (o) => {
           if (!this.goes.delete(ready.ticket)) return
           clearTimeout(timer)
+          clearTimeout(g.grace)
           resolve(o)
         },
       }
       const timer = setTimeout(
-        () => g.finish({ ok: false, error: 'The window was told to relaunch but did not say whether it did. Look at Centralu to see whether it relaunched.' }),
+        () =>
+          g.finish({
+            ok: false,
+            error: g.started
+              ? 'The window said it was relaunching but is still open. Look at Centralu to see whether it relaunched.'
+              : 'The window was told to relaunch but did not say whether it did. Look at Centralu to see whether it relaunched.',
+          }),
         this.opts.outcomeMs ?? OUTCOME_MS,
       )
       this.goes.set(ready.ticket, g)
@@ -142,19 +166,43 @@ export class UpdateApplyBroker {
     })
   }
 
-  /** `updates.reportApply`: the picked window's outcome. A report for another window's ticket, or a stale one, is dropped */
-  report(client: number, r: { requestId: string; ticket: string; error?: string }): void {
+  /**
+   * `updates.reportApply`: the picked window's outcome. Matched by ticket, not by connection: only that window was given
+   * it, and a window that reconnected has a new connection number. A report naming another ticket, or a settled one, is
+   * dropped. The connection it came on is the one whose end is watched from then on.
+   */
+  report(client: number, r: { requestId: string; ticket: string; started?: boolean; error?: string }): void {
     const g = this.goes.get(r.ticket)
-    if (!g || g.requestId !== r.requestId || g.client !== client) return
-    g.finish(r.error ? { ok: false, error: r.error } : { ok: true, ...(g.version ? { version: g.version } : {}) })
+    if (!g || g.requestId !== r.requestId) return
+    g.client = client
+    clearTimeout(g.grace)
+    g.grace = undefined
+    if (r.error) return g.finish({ ok: false, error: r.error })
+    if (r.started) {
+      g.started = true
+      return
+    }
+    g.finish(this.relaunched(g))
   }
 
-  /** A window's connection ended: after its go that is the relaunch; before, a window less to wait for */
+  /** A window's connection ended: after "started" that is the relaunch; before it, unknown; and one less to wait for */
   clientGone(client: number): void {
-    for (const g of [...this.goes.values()]) if (g.client === client) g.finish({ ok: true, ...(g.version ? { version: g.version } : {}) })
+    for (const g of [...this.goes.values()]) {
+      if (g.client !== client) continue
+      if (g.started) {
+        g.finish(this.relaunched(g))
+        continue
+      }
+      clearTimeout(g.grace)
+      g.grace = setTimeout(() => g.finish({ ok: false, error: WINDOW_GONE }), this.opts.goneGraceMs ?? GONE_GRACE_MS)
+    }
     for (const p of [...this.probes.values()]) {
       if (p.answered.size >= this.opts.windows()) p.finish(this.notReady(p))
     }
+  }
+
+  private relaunched(g: Go): ApplyOutcome {
+    return { ok: true, ...(g.version ? { version: g.version } : {}) }
   }
 
   private notReady(p: Probe): ApplyProbe {

@@ -4485,7 +4485,13 @@ export const useStore = create<AppState>((set, get) => ({
     if (!platform) return
     // Checked again at the go, as the shell checks again when the button is pressed: the bundle may have changed since
     const verdict = await agentApplyVerdict(platform.relaunch, get().update)
-    const error = verdict.ready ? await get().applyUpdateNow() : verdict.reason
+    if (!verdict.ready) return void (await platform.updates.reportApply({ requestId, ticket, error: verdict.reason }).catch(() => {}))
+    /*
+     * Said, and heard, before the relaunch: the host counts this window closing as the relaunch only after it (#665
+     * review). Not heard (the host gone mid-swap), the relaunch goes ahead anyway, as the button's would.
+     */
+    await platform.updates.reportApply({ requestId, ticket, started: true }).catch(() => {})
+    const error = await get().applyUpdateNow()
     await platform.updates.reportApply({ requestId, ticket, ...(error ? { error } : {}) }).catch(() => {})
   },
   setNotifyPolicy(notifyPolicy) {

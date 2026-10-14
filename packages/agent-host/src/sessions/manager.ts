@@ -61,6 +61,9 @@ import type {
 import {
   APP_SLUG,
   applyBackgroundTasks,
+  CENTRALU_APPLY,
+  CENTRALU_APPLY_QUESTION,
+  isCentraluApply,
   liveBackgroundTasks,
   DATA_DIR,
   // The frame's single-line field (#120) — lives in protocol (app-frames.ts) because the mock
@@ -4051,7 +4054,8 @@ export class SessionManager {
     if (ask && ask.sessionId === sessionId) {
       this.hostAsks.delete(requestId)
       // A new project (#515) has nothing to remember either: "always" makes this one, as allow does
-      const keepsAlways = ask.detail.kind === 'project_access' || ask.detail.kind === 'agent_start' || ask.detail.kind === 'centralu_update'
+      const keepsAlways =
+        ask.detail.kind === 'project_access' || ask.detail.kind === 'agent_start' || ask.detail.kind === 'centralu_update' || isCentraluApply(ask.detail)
       const answer = !keepsAlways && decision === 'always' ? 'allow' : decision
       this.onEvent({ type: 'approval_resolved', sessionId, requestId, decision: answer })
       // Starting agents (#561) has two always: this session (the card's default) or the whole project (⌥)
@@ -5822,7 +5826,7 @@ export class SessionManager {
     if (this.autoBoundaryOpen(sessionId, `${detail.kind}${note}`)) return Promise.resolve('allow')
     return new Promise<HostAskAnswer>((resolve) => {
       if (signal?.aborted) return resolve(null)
-      const requestId = `${detail.kind === 'project_access' ? 'xp' : detail.kind === 'agent_start' ? 'ag' : detail.kind === 'centralu_update' ? 'up' : 'mk'}-${randomUUID()}`
+      const requestId = `${detail.kind === 'project_access' ? 'xp' : detail.kind === 'agent_start' ? 'ag' : detail.kind === 'centralu_update' || isCentraluApply(detail) ? 'up' : 'mk'}-${randomUUID()}`
       this.hostAsks.set(requestId, { requestId, sessionId, detail, shown: false, resolve })
       signal?.addEventListener('abort', () => {
         if (!this.hostAsks.delete(requestId)) return
@@ -6673,7 +6677,8 @@ export class SessionManager {
     }
     const outcome = await broker.apply(async () => {
       if (this.updateApplyConsents.has(sessionId)) return null
-      const decision = await this.askHost(sessionId, { kind: 'centralu_update', action: 'apply' }, signal)
+      // As `other` with its whole question as the text: a released window drops a detail it cannot parse (#665 review)
+      const decision = await this.askHost(sessionId, { kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }, signal)
       if (decision === 'always') this.updateApplyConsents.add(sessionId)
       else if (decision === null) return 'The question to the person was withdrawn before they answered, so nothing was relaunched.'
       else if (decision !== 'allow') return 'The person did not allow this session to apply the Centralu update. Do not ask again unless they tell you to.'
@@ -7855,7 +7860,7 @@ type HostAskAnswer = 'allow' | 'always' | 'always_project' | 'deny' | null
 type HostAsk = {
   requestId: string
   sessionId: string
-  detail: Extract<ApprovalDetail, { kind: 'capability' | 'project_access' | 'project_create' | 'agent_start' | 'centralu_update' }>
+  detail: Extract<ApprovalDetail, { kind: 'capability' | 'project_access' | 'project_create' | 'agent_start' | 'centralu_update' | 'other' }>
   shown: boolean
   resolve: (d: HostAskAnswer) => void
 }

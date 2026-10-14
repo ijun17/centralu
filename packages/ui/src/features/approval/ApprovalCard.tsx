@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { ApprovalDetail } from '@cc/protocol'
+import { isCentraluApply, type ApprovalDetail } from '@cc/protocol'
 import { agentStartQuestion, centraluUpdateQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useShortcut } from '../../app/shortcut.js'
@@ -27,6 +27,8 @@ export function ApprovalCard({
   const busy = useStore((s) => !!s.approvalsInFlight[requestId])
   const sc = useShortcut()
   const inComposer = useComposerFocused(sessionId)
+  // An update card (#581) or an agent's apply card (#665): its "always" is for this session only, never the project
+  const updateCard = detail.kind === 'centralu_update' || isCentraluApply(detail)
   const keys: AnswerKeys = inComposer
     ? { allow: sc(...APPROVAL_COMBOS.allow), deny: sc(...APPROVAL_COMBOS.deny), always: sc(...APPROVAL_COMBOS.always) }
     : BARE_KEYS
@@ -53,7 +55,7 @@ export function ApprovalCard({
         return
       }
       // An update grant is deliberately per-session only; it must not become an app-wide setting.
-      if (detail.kind === 'centralu_update') {
+      if (detail.kind === 'centralu_update' || isCentraluApply(detail)) {
         void respond(sessionId, requestId, action.decision)
         e.preventDefault()
         return
@@ -141,16 +143,16 @@ export function ApprovalCard({
           testId="approve-always"
           disabled={busy}
           title={
-            detail.kind === 'centralu_update'
-              ? detail.action === 'apply'
-                ? 'Allow this session to apply Centralu updates while it is running'
-                : 'Allow Centralu updates from this session while it is running'
-              : `Hold ${sc('alt')} and click to apply to the whole project`
+            isCentraluApply(detail)
+              ? 'Allow this session to apply Centralu updates while it is running'
+              : detail.kind === 'centralu_update'
+                ? 'Allow Centralu updates from this session while it is running'
+                : `Hold ${sc('alt')} and click to apply to the whole project`
           }
-          onClick={(alt) => void respond(sessionId, requestId, 'always', detail.kind === 'centralu_update' ? 'session' : alt ? 'project' : 'session')}
+          onClick={(alt) => void respond(sessionId, requestId, 'always', updateCard ? 'session' : alt ? 'project' : 'session')}
         />
         {/* Project scope is ⌥a, a letter: from the composer it stays a click with ⌥ held (the button's title says so) */}
-        {!inComposer && detail.kind !== 'centralu_update' && (
+        {!inComposer && !updateCard && (
           <span className="ml-auto text-2xs text-ink-faint">
             <Kbd alt /> <Kbd>a</Kbd> whole project
           </span>

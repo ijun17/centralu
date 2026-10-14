@@ -28,8 +28,27 @@ export type ApplyOffer =
  */
 export function applyOffer(update: UpdateStatus, windowVersion: string, relaunch: RelaunchCheck | null | undefined): ApplyOffer {
   if (update.latest && !isNewerVersion(update.latest, windowVersion)) return { kind: 'current' }
-  if (relaunch?.ready) return { kind: 'apply' }
-  return { kind: 'restart', ...(relaunch?.reason ? { reason: relaunch.reason } : {}) }
+  if (!relaunch?.ready) return { kind: 'restart', ...(relaunch?.reason ? { reason: relaunch.reason } : {}) }
+  /*
+   * The shell's `ready` says only that the bundle on disk is another build than this window (#665 review): it may be
+   * an older one (a backed-up app restored over the installed one). A relaunch is offered only into the version the
+   * update line names, read from the bundle itself, and only forward. A local build (`<base>.local.N`) orders by the
+   * same rule, as a prerelease identifier.
+   */
+  const disk = relaunch.version
+  if (!disk) return { kind: 'restart', reason: 'The app on disk does not say which version it is, so relaunching could start any build.' }
+  if (!isNewerVersion(disk, windowVersion)) {
+    return { kind: 'restart', reason: `The app on disk is ${disk}, not newer than this window (${windowVersion}); relaunching would not start the update.` }
+  }
+  if (update.latest && !sameVersion(disk, update.latest)) {
+    return { kind: 'restart', reason: `The app on disk is ${disk}, not the installed ${update.latest}; relaunching would start another build.` }
+  }
+  return { kind: 'apply' }
+}
+
+/** Equal by the comparison's own rule: neither is newer (build metadata and a leading `v` do not count) */
+function sameVersion(a: string, b: string): boolean {
+  return !isNewerVersion(a, b) && !isNewerVersion(b, a)
 }
 
 /** An external install has no host `update_status` event; the window knows its own bundle. */

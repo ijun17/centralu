@@ -102,12 +102,8 @@ export function agentStartQuestion(d: Extract<ApprovalDetail, { kind: 'agent_sta
   return `Start ${d.tool}${d.model ? ` (${d.model})` : ''} in ${where} with ${d.preset} permissions, to ${d.text}?`
 }
 
-/**
- * The question an update card asks (#581, #665). Applying says what it does to the person's window: it relaunches,
- * and the agents keep running.
- */
+/** The question an update card asks (#581) */
 export function centraluUpdateQuestion(d: Extract<ApprovalDetail, { kind: 'centralu_update' }>): string {
-  if (d.action === 'apply') return 'Allow this session to apply the installed Centralu update? The window relaunches; running agents keep going.'
   return `Allow this session to ${d.action === 'check' ? 'check for' : 'install'} a Centralu update?`
 }
 

@@ -645,8 +645,8 @@ export interface UpdatePort {
    * relaunches on the `update_apply_go` naming it.
    */
   answerApply(a: { requestId: string; ready: boolean; reason?: string; version?: string }): Promise<{ ticket: string | null }>
-  /** The picked window's outcome: no `error` once its relaunch started (#665) */
-  reportApply(r: { requestId: string; ticket: string; error?: string }): Promise<void>
+  /** The picked window's outcome (#665): `started` right before relaunching, then `error`, or neither once the shell accepted it */
+  reportApply(r: { requestId: string; ticket: string; started?: boolean; error?: string }): Promise<void>
 }
 
 /**

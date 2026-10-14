@@ -2819,6 +2819,8 @@ export class MockPlatform implements Platform {
     },
     reportApply: async (r) => {
       this.applyReports.push(r)
+      // "Started" is the last word before the relaunch; the outcome is what follows it
+      if (r.started) return
       this.applyOutcomes.get(r.ticket)?.(r.error)
       this.applyOutcomes.delete(r.ticket)
     },
@@ -2826,7 +2828,7 @@ export class MockPlatform implements Platform {
 
   /** For tests (#665): what the window answered to an agent's "Apply now", and what it reported after the go */
   applyAnswers: { requestId: string; ready: boolean; reason?: string; version?: string }[] = []
-  applyReports: { requestId: string; ticket: string; error?: string }[] = []
+  applyReports: { requestId: string; ticket: string; started?: boolean; error?: string }[] = []
   private applyWaits = new Map<string, (r: { ticket: string } | { error: string }) => void>()
   private applyOutcomes = new Map<string, (error: string | undefined) => void>()
   private applyRequests = 0
@@ -2911,7 +2913,16 @@ export class MockPlatform implements Platform {
   private busyWatchers = new Set<(busy: boolean | null) => void>()
 
   readonly relaunch: RelaunchPort = {
-    check: async () => ({ ...this.relaunchCheck }),
+    /*
+     * The real shell reads the version out of the bundle on disk (#665 review), which an install just replaced: a test
+     * that says only `ready` gets the version it installed. One that names a `version` gets that one, an older bundle
+     * included.
+     */
+    check: async () => {
+      const c = { ...this.relaunchCheck }
+      const installed = this.updateStatus.phase === 'restart_required' ? this.updateStatus.latest : null
+      return c.ready && c.version === undefined && installed ? { ...c, version: installed } : c
+    },
     relaunch: async () => {
       if (this.relaunchFails) throw new Error(this.relaunchFails)
       this.relaunches++

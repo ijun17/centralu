@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ApprovalDetail } from '@cc/protocol'
+import { CENTRALU_APPLY, CENTRALU_APPLY_QUESTION, isCentraluApply, type ApprovalDetail } from '@cc/protocol'
 import { agentStartQuestion, centraluUpdateQuestion, findMatchingRule, matchesRule, previewMatches, projectAccessQuestion, projectCreateQuestion, suggestMatcher } from './approval.js'
 
 describe('the new-project question (#515)', () => {
@@ -114,10 +114,19 @@ describe('rule preview (making the result visible instead of limiting what can b
   })
 })
 
-describe('centraluUpdateQuestion (#581, #665)', () => {
-  it('says what each action does, and that applying relaunches the window while agents keep going', () => {
+describe('update cards (#581, #665)', () => {
+  it('says what check and install ask', () => {
     expect(centraluUpdateQuestion({ kind: 'centralu_update', action: 'check' })).toBe('Allow this session to check for a Centralu update?')
     expect(centraluUpdateQuestion({ kind: 'centralu_update', action: 'install' })).toBe('Allow this session to install a Centralu update?')
-    expect(centraluUpdateQuestion({ kind: 'centralu_update', action: 'apply' })).toContain('The window relaunches; running agents keep going.')
+  })
+
+  // #665 review: "running agents keep going" alone hid what the host switch right after the relaunch stops
+  it('says that applying relaunches the window and that the host switch after it stops long Centralu tool calls', () => {
+    expect(CENTRALU_APPLY_QUESTION).toContain('running agents keep going')
+    expect(CENTRALU_APPLY_QUESTION).toContain('switches the agent host')
+    expect(CENTRALU_APPLY_QUESTION).toContain('after 10 seconds')
+    expect(CENTRALU_APPLY_QUESTION).toContain('child agents')
+    expect(isCentraluApply({ kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY })).toBe(true)
+    expect(isCentraluApply({ kind: 'other', raw: 'a tool the adapter did not recognise' })).toBe(false)
   })
 })

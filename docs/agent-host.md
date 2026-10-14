@@ -1369,16 +1369,26 @@ performs its own safe relaunch/switch step.
 **Applying for an agent (#665).** `update_centralu(action: "apply")` is the window's "Apply now" asked for by an agent.
 Only a window can relaunch, so the host asks over the event stream (`update-apply.ts`, `UpdateApplyBroker`): an
 `update_apply_request` that every window answers with the checks its button makes (`agentApplyVerdict`: a relaunch
-port, an installed build newer than the window, a bundle the shell reports ready), through `updates.answerApply`.
+port, an installed build newer than the window, and a bundle on disk whose own version, read by the shell from its
+`Info.plist`, is newer than the window and the same as the installed one), through `updates.answerApply`. The
+shell's `ready` alone says only "another build": an older app restored over the installed one is one too.
 The first window that is ready gets a ticket. With none ready, the call ends with the windows' reasons ("nothing is
 installed", "already runs it", a browser window that cannot relaunch) or, with no window open or none answering
 within 5 s, says so. Then the caller's own preset decides, as for every Centralu boundary (#606): `auto` goes on and
-is logged, `normal` raises a `centralu_update` card with action `apply` (its "always" covers applying for that
-session only, apart from check and install), `safe` and an agent an app started are refused before any window is
+is logged, `normal` raises a card (its "always" covers applying for that session only, apart from check and
+install), `safe` and an agent an app started are refused before any window is
 asked. After consent the windows are asked again, since a card can stand for minutes, and `update_apply_go` names the
-first ready window's ticket. That window alone runs `applyUpdateNow` (the keeper is told, then the shell relaunches)
-and reports through `updates.reportApply`; its connection ending after the go counts as the relaunch, since the
-window can close before its report is written. One window relaunches: one ticket goes per request, and the
+first ready window's ticket. That window alone checks again, reports `started` through `updates.reportApply`, runs
+`applyUpdateNow` (the keeper is told, then the shell relaunches) and reports the outcome. Only after `started` does its
+connection ending count as the relaunch, since a relaunching window can close before its last report; ending before
+it is given 5 s to come back and report, then answered as "whether it relaunched is not known". Reports are matched
+by ticket, not by connection: only that window was given it, and a window that reconnected has a new connection.
+
+The card rides on the `other` detail, `{ kind: 'other', raw: <question>, about: 'centralu_apply' }`, rather than a
+new kind or a new `centralu_update` action: a released window parses events strictly and drops one whose detail it
+cannot parse, while `other` with its text has been read by every build. The question says what the relaunch costs: the
+agents keep running, and the new window switches the host at once, which stops a Centralu tool call still running
+after 10 s in any session (an agent waiting on its children included). One window relaunches: one ticket goes per request, and the
 keeper's relaunch is the single owner of the switch the new window makes. A replayed request or go starts nothing (the
 host is no longer asking, or the window no longer holds the ticket), a linked machine's apply events never reach a
 hub's windows (`links/qualifier.ts`), and a host swap in the middle ends that host's requests: the next host knows

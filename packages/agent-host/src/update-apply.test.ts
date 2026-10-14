@@ -1,22 +1,32 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
-import { NO_ANSWER, NO_WINDOW, UpdateApplyBroker } from './update-apply.js'
+import { NO_ANSWER, NO_WINDOW, UpdateApplyBroker, WINDOW_GONE } from './update-apply.js'
 
 type Verdict = { ready: true; version?: string } | { ready: false; reason: string } | 'silent'
 
 /**
  * Windows played by the test (#665). Each answers a request with its verdict, as the store does, and holds the ticket
- * it got; told to go with its own ticket it relaunches (counted) and reports, or closes before reporting.
+ * it got. Told to go with its own ticket it relaunches (counted), the way `onGo` says:
+ *   report        says "started", then done (or `reportError`), as the store does
+ *   closeStarted  says "started", then its connection ends: the relaunch
+ *   closeEarly    its connection ends before it said anything: a crash or a lost socket
+ *   hold          says nothing yet; the test reports for it
  */
-function host(verdicts: Verdict[], opts: { closeOnGo?: boolean; reportError?: string; answerMs?: number } = {}) {
+type OnGo = 'report' | 'closeStarted' | 'closeEarly' | 'hold'
+function host(verdicts: Verdict[], opts: { onGo?: OnGo; reportError?: string; answerMs?: number; goneGraceMs?: number } = {}) {
   const events: NormalizedEvent[] = []
   const tickets = new Map<number, Map<string, string>>()
   const relaunched: number[] = []
   let open = verdicts.length
+  const close = (client: number) => {
+    open--
+    broker.clientGone(client)
+  }
   const broker: UpdateApplyBroker = new UpdateApplyBroker({
     windows: () => open,
     answerMs: opts.answerMs ?? 1_000,
     outcomeMs: 1_000,
+    goneGraceMs: opts.goneGraceMs ?? 50,
     push: (e) => {
       events.push(e)
       verdicts.forEach((v, i) => {
@@ -28,20 +38,30 @@ function host(verdicts: Verdict[], opts: { closeOnGo?: boolean; reportError?: st
           }
           if (e.type === 'update_apply_go' && tickets.get(client)?.get(e.requestId) === e.ticket) {
             relaunched.push(client)
-            if (opts.closeOnGo) {
-              open--
-              broker.clientGone(client)
-            } else broker.report(client, { requestId: e.requestId, ticket: e.ticket, ...(opts.reportError ? { error: opts.reportError } : {}) })
+            const r = { requestId: e.requestId, ticket: e.ticket }
+            switch (opts.onGo ?? 'report') {
+              case 'report':
+                broker.report(client, { ...r, started: true })
+                broker.report(client, { ...r, ...(opts.reportError ? { error: opts.reportError } : {}) })
+                break
+              case 'closeStarted':
+                broker.report(client, { ...r, started: true })
+                close(client)
+                break
+              case 'closeEarly':
+                close(client)
+                break
+              case 'hold':
+                break
+            }
           }
         })
       })
     },
   })
-  const close = (client: number) => {
-    open--
-    broker.clientGone(client)
-  }
-  return { broker, events, relaunched, tickets, close }
+  /** The go the host sent last, as the test needs its ids */
+  const lastGo = () => events.filter((e) => e.type === 'update_apply_go').at(-1) as Extract<NormalizedEvent, { type: 'update_apply_go' }>
+  return { broker, events, relaunched, tickets, close, lastGo }
 }
 
 const allow = async () => null
@@ -107,9 +127,48 @@ describe('UpdateApplyBroker (#665)', () => {
     expect(h.relaunched).toEqual([])
   })
 
-  it('the window closing after its go is the relaunch', async () => {
-    const h = host([{ ready: true, version: '9.9.9' }], { closeOnGo: true })
+  it('the window closing after it said "started" is the relaunch', async () => {
+    const h = host([{ ready: true, version: '9.9.9' }], { onGo: 'closeStarted' })
     expect(await h.broker.apply(allow)).toEqual({ ok: true, version: '9.9.9' })
+  })
+
+  // #665 review: any disconnect after the go read as "relaunching"
+  it('the window going away before it said "started" is not a success: whether it relaunched is unknown', async () => {
+    const h = host([{ ready: true, version: '9.9.9' }], { onGo: 'closeEarly' })
+    expect(await h.broker.apply(allow)).toEqual({ ok: false, error: WINDOW_GONE })
+  })
+
+  it('a window that reconnects under a new connection still reports by its ticket', async () => {
+    const h = host([{ ready: true, version: '9.9.9' }], { onGo: 'hold', goneGraceMs: 60_000 })
+    const out = h.broker.apply(allow)
+    await vi.waitFor(() => expect(h.relaunched).toEqual([1]))
+    const go = h.lastGo()
+    // Its socket drops, and it comes back as connection 7 within the grace
+    h.close(1)
+    h.broker.report(7, { requestId: go.requestId, ticket: go.ticket, started: true })
+    // From then on the new connection's end is the relaunch
+    h.broker.clientGone(7)
+    expect(await out).toEqual({ ok: true, version: '9.9.9' })
+  })
+
+  // #665 review: a report from another connection must not settle the go
+  it("another connection's report, with a ticket it was never given, is ignored while the go runs", async () => {
+    const h = host([{ ready: true }, { ready: false, reason: 'A browser window.' }], { onGo: 'hold' })
+    const out = h.broker.apply(allow)
+    await vi.waitFor(() => expect(h.relaunched).toEqual([1]))
+    const go = h.lastGo()
+    let settled = false
+    void out.then(() => (settled = true))
+    // Window 2 claims the go succeeded: a guessed ticket, a ticket of another request, then the started-then-close pattern
+    h.broker.report(2, { requestId: go.requestId, ticket: 'guessed' })
+    h.broker.report(2, { requestId: 'another', ticket: go.ticket })
+    h.broker.report(2, { requestId: go.requestId, ticket: 'guessed', started: true })
+    h.close(2)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(settled).toBe(false)
+    // The real window's refusal is what the agent hears
+    h.broker.report(1, { requestId: go.requestId, ticket: go.ticket, error: 'Not relaunched.' })
+    expect(await out).toEqual({ ok: false, error: 'Not relaunched.' })
   })
 
   it("the window's refusal reaches the agent", async () => {

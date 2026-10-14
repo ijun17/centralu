@@ -23,7 +23,7 @@ import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AdapterCapabilities, ApprovalDecision, GridPanel, NormalizedEvent, SessionInfo, StoredMessage, ToolName, TrashedSession, Attachment } from '@cc/protocol'
-import { NormalizedEvent as NormalizedEventSchema, sessionLiveDefaults } from '@cc/protocol'
+import { CENTRALU_APPLY, CENTRALU_APPLY_QUESTION, NormalizedEvent as NormalizedEventSchema, sessionLiveDefaults } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, HistoryMessage, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { WORKTREE_RECOVERY_MAX_BYTES, worktreeRecoveryDir } from '../dev-services/worktree-recovery.js'
 import { Store } from '../dev-services/store.js'
@@ -468,25 +468,36 @@ describe('applying an installed update for an agent (#665)', () => {
     const project = await addProject()
     const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
     const call = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
-    await vi.waitFor(() => expect(card(session.id)?.detail).toEqual({ kind: 'centralu_update', action: 'apply' }))
+    await vi.waitFor(() => expect(card(session.id)?.detail).toEqual({ kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }))
     expect(w.relaunches).toEqual([])
     mgr.respondApproval(session.id, card(session.id)!.requestId, 'allow')
     expect((await call).isError).toBeUndefined()
     expect(w.relaunches).toHaveLength(1)
 
-    // Denied: nothing goes to the window, and the agent is told not to ask again
-    const denied = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
+    // "Always" on the apply card covers the next apply of this session, with no card
+    const always = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
     await vi.waitFor(() => expect(card(session.id)).toBeTruthy())
-    mgr.respondApproval(session.id, card(session.id)!.requestId, 'deny')
+    mgr.respondApproval(session.id, card(session.id)!.requestId, 'always', 'project')
+    expect((await always).isError).toBeUndefined()
+    expect((await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })).isError).toBeUndefined()
+    expect(card(session.id)).toBeUndefined()
+    expect(store.listProjectConsents()).toEqual([])
+    expect(w.relaunches).toHaveLength(3)
+    const other = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+
+    // Denied: nothing goes to the window, and the agent is told not to ask again
+    const denied = mgr.runOrchestratorTool(other.id, 'update_centralu', { action: 'apply' })
+    await vi.waitFor(() => expect(card(other.id)).toBeTruthy())
+    mgr.respondApproval(other.id, card(other.id)!.requestId, 'deny')
     expect(await denied).toMatchObject({ isError: true, text: expect.stringContaining('did not allow') })
-    expect(w.relaunches).toHaveLength(1)
-    expect(w.asked.filter((e) => e.type === 'update_apply_go')).toHaveLength(1)
+    expect(w.relaunches).toHaveLength(3)
+    expect(w.asked.filter((e) => e.type === 'update_apply_go')).toHaveLength(3)
   })
 
   it("normal: an earlier install's always does not cover applying", async () => {
     windowWith({ ready: true })
     const updates = new UpdateService(() => {}, { fetchLatest: async () => ({ ok: true as const, version: '9999.0.0' }), run: async () => {}, installedCopy: () => null })
-    vi.spyOn(updates, 'apply').mockImplementation(() => updates.current())
+    vi.spyOn(updates, 'apply').mockImplementation(async () => ({ ...updates.current(), phase: 'updating' as const }))
     mgr.useUpdates(updates)
     const project = await addProject()
     const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
@@ -495,7 +506,7 @@ describe('applying an installed update for an agent (#665)', () => {
     mgr.respondApproval(session.id, card(session.id)!.requestId, 'always')
     await install
     const apply = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
-    await vi.waitFor(() => expect(card(session.id)?.detail).toEqual({ kind: 'centralu_update', action: 'apply' }))
+    await vi.waitFor(() => expect(card(session.id)?.detail).toEqual({ kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }))
     mgr.respondApproval(session.id, card(session.id)!.requestId, 'deny')
     expect((await apply).isError).toBe(true)
   })

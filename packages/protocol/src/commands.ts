@@ -1996,11 +1996,12 @@ export const RpcMethods = {
     result: z.object({ ticket: z.string().nullable() }),
   },
   /**
-   * The picked window's outcome (#665): sent once its relaunch started (no `error`), or with why it did not. A
-   * relaunched window may close before this arrives; the host reads its connection ending as started.
+   * The picked window's outcome (#665): `started` right before it relaunches, then with `error` when it did not, or
+   * with neither once the shell accepted the relaunch. A relaunching window may close before that last report; the
+   * host reads its connection ending as the relaunch only after `started`.
    */
   'updates.reportApply': {
-    params: z.object({ requestId: z.string(), ticket: z.string(), error: z.string().optional() }),
+    params: z.object({ requestId: z.string(), ticket: z.string(), started: z.boolean().optional(), error: z.string().optional() }),
     result: z.object({}),
   },
   /**

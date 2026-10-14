@@ -7,6 +7,9 @@ import { randomUUID } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import {
+  ApprovalDetail,
+  CENTRALU_APPLY,
+  CENTRALU_APPLY_QUESTION,
   applyBackgroundTasks,
   ATTACHMENT_MAX_BASE64,
   type BackgroundTask,
@@ -512,5 +515,31 @@ describe("a session's background tasks (#290)", () => {
   it('an unknown kind from a newer host reads as other instead of failing the event', () => {
     const e = NormalizedEvent.parse({ type: 'background_tasks', sessionId: 's1', live: [{ id: 'm', kind: 'monitor', description: 'watch' }] })
     expect(e.type === 'background_tasks' && e.live[0]).toMatchObject({ kind: 'other', status: 'running' })
+  })
+})
+
+/**
+ * An agent's apply card (#665 review) must read right in a window released before it. Such a window parses events
+ * strictly (`parseServerFrame`) and drops one whose detail it cannot parse, so the card rides on `other`, the shape
+ * every build has read since v1, with its whole question as the text.
+ */
+describe('the apply card in a released window (#665)', () => {
+  // ApprovalDetail's branches as beta.22 shipped them, for the two kinds in question
+  const released = z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('other'), raw: z.string() }),
+    z.object({ kind: z.literal('centralu_update'), action: z.enum(['check', 'install']) }),
+  ])
+  const card = { kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }
+
+  it('parses there, with the question as its text', () => {
+    const parsed = released.safeParse(card)
+    expect(parsed.success).toBe(true)
+    expect(parsed.data).toEqual({ kind: 'other', raw: CENTRALU_APPLY_QUESTION })
+    expect(ApprovalDetail.parse(card)).toEqual(card)
+  })
+
+  it('would have been dropped as an update card with a new action', () => {
+    expect(released.safeParse({ kind: 'centralu_update', action: 'apply' }).success).toBe(false)
+    expect(ApprovalDetail.safeParse({ kind: 'centralu_update', action: 'apply' }).success).toBe(false)
   })
 })

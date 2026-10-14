@@ -1739,11 +1739,19 @@ describe('update status (#43)', () => {
       const stop = windowOf(platform)
       const applyNow = vi.fn(useStore.getState().applyUpdateNow)
       useStore.setState({ applyUpdateNow: applyNow })
+      // What the host had heard when the shell was asked to relaunch: "started" comes first (#665 review)
+      const relaunch = platform.relaunch.relaunch
+      let heardBefore: unknown[] = []
+      platform.relaunch.relaunch = async () => {
+        heardBefore = [...platform.applyReports]
+        await relaunch()
+      }
       expect(await platform.agentApply()).toEqual({ ok: true })
       expect(applyNow).toHaveBeenCalledTimes(1)
       expect(platform.relaunches).toBe(1)
       expect(platform.applyAnswers).toEqual([expect.objectContaining({ ready: true, version: '9999.0.0' })])
-      expect(platform.applyReports).toEqual([expect.not.objectContaining({ error: expect.anything() })])
+      expect(heardBefore).toEqual([expect.objectContaining({ started: true })])
+      expect(platform.applyReports).toEqual([expect.objectContaining({ started: true }), expect.not.objectContaining({ error: expect.anything() })])
       stop()
     })
 

@@ -87,7 +87,7 @@ type NormalizedEvent =
   // app-scoped (sessionId optional — not every fact belongs to a conversation)
   | { type: 'update_status';    status: UpdateStatus }          // #43; autoApply (#352) defaults to false
   | { type: 'update_apply_request'; requestId }                 // #665: an agent's "Apply now"; each window answers with updates.answerApply
-  | { type: 'update_apply_go';  requestId, ticket }             // #665: only the window holding ticket relaunches, then updates.reportApply
+  | { type: 'update_apply_go';  requestId, ticket }             // #665: only the window holding ticket relaunches: updates.reportApply started, then the outcome
   | { type: 'agent_versions';   status: AgentVersions }         // #297: { installed: {tool: version|null}, autoApply (defaults to true), checkedAt }
   | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
   | { type: 'themes_changed' }                                // #312: a file in <data>/themes changed — re-read themes.list
