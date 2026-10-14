@@ -3626,8 +3626,17 @@ export const useStore = create<AppState>((set, get) => ({
         })
           ? trimWindow(chat)
           : null
+      /*
+       * A "Finished" card says the session is waiting for the person. Once the session starts another turn (a
+       * message from the person or from an agent), that is no longer true, and a card that stays says it is
+       * (#674). Only this session's finished cards go: its approval and error cards still describe something
+       * the person has not seen, and other sessions' cards are not about this one.
+       */
+      const turnBegan = withSeq.state === 'working' && cur.state !== 'working'
+      const notices = turnBegan ? st.notices.filter((n) => !(n.sessionId === sessionId && n.kind === 'done')) : st.notices
       return {
         sessions,
+        ...(notices.length !== st.notices.length ? { notices } : {}),
         ...(lockedLate !== null
           ? { wakeError: { ...st.wakeError, [sessionId]: lockedLate }, wakeLocked: { ...st.wakeLocked, [sessionId]: true } }
           : {}),

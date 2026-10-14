@@ -6893,6 +6893,67 @@ test("A gust does not blow when an off-screen session finishes — that is the c
 })
 
 /*
+ * A "Finished" card stops being true when its session is given more work or goes away (#674).
+ * The session being watched is always one that did not finish, since a card only exists off screen.
+ */
+async function sessionIds(page: Page): Promise<string[]> {
+  return page.evaluate(() => [...(window as any).__mock.sessions.values()].map((s: { id: string }) => s.id))
+}
+
+test('A finished card goes away when that session starts another turn', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second') // Watching this one
+  const [first] = (await sessionIds(page)) as [string]
+
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  await expect(page.getByTestId('notice').and(page.locator(`[data-session="${first}"]`))).toHaveCount(1)
+
+  await emitEvent(page, 0, { type: 'state_change', state: 'working' })
+  await expect(page.getByTestId('notice')).toHaveCount(0)
+})
+
+test('A finished card goes away when that session is deleted', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second')
+  const [first] = (await sessionIds(page)) as [string]
+
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  await expect(page.getByTestId('notice')).toHaveCount(1)
+
+  await page.getByTestId(`session-menu-${first}`).click()
+  await page.getByTestId(`delete-session-${first}`).click()
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId(`session-row-${first}`)).toBeHidden()
+
+  await expect(page.getByTestId('notice')).toHaveCount(0)
+})
+
+test("Another session's finished card stays when this session starts working or is deleted", async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first')
+  await newSession(page, 'alpha', 'second')
+  await newSession(page, 'alpha', 'third') // Watching this one
+  const [first, second] = (await sessionIds(page)) as [string, string]
+
+  await emitEvent(page, 0, { type: 'turn_complete' })
+  await emitEvent(page, 1, { type: 'turn_complete' })
+  await expect(page.getByTestId('notice')).toHaveCount(2)
+
+  await emitEvent(page, 0, { type: 'state_change', state: 'working' })
+  await expect(page.getByTestId('notice')).toHaveCount(1)
+  await expect(page.getByTestId('notice')).toHaveAttribute('data-session', second)
+
+  await page.getByTestId(`session-menu-${first}`).click()
+  await page.getByTestId(`delete-session-${first}`).click()
+  await page.getByTestId('confirm-delete-yes').click()
+  await expect(page.getByTestId(`session-row-${first}`)).toBeHidden()
+  await expect(page.getByTestId('notice')).toHaveCount(1)
+  await expect(page.getByTestId('notice')).toHaveAttribute('data-session', second)
+})
+
+/*
  * The notice card — for someone who stepped away.
  *
  * An OS banner clears after a few seconds, so something that arrived while the person was away
