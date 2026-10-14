@@ -282,7 +282,7 @@ pixel. A pull request that makes one cheaper tightens it.
 | See what the agent changed in a file | `open-diff.mouse` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.10 | 546 |
 | Open a file the agent named: its link in the reply | `open-file.mouse-link` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.08 | 211 |
 | Open a file the agent named: the Files tab, folder by folder | `open-file.mouse-tree` | `H M P B B M P B B M P B B M P B B M P B B M P B B` | 0 | 6 | 12 | 1 | 6 | 25 | 15.83 | 890 |
-| Open a file the agent named: the path in a tool card (since #543 item 6) | `open-file.mouse-tool-card` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.11 | 222 |
+| Open a file the agent named: the path in a tool card (since #543 item 6) | `open-file.mouse-tool-card` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.07 | 167 |
 | Attach a file to a message | `attach-file.mouse` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.16 | 426 |
 | Commit the session's changes with a message | `commit.mouse` | `H M P B B P B B H 30K H M P B B` | 30 | 3 | 6 | 3 | 2 | 44 | 16.33 | 1398 |
 | Stop a session that is working | `stop-session.mouse` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.12 | 384 |
@@ -312,7 +312,7 @@ What they show:
   tab), a pick followed by a confirm (a question's option then Answer, a saved command then Run).
 - **Hidden entry points.** A session's ⋯ appears only under the pointer (rename, delete and hand off
   begin with a `P` to reveal it). A path in a tool card ("Read packages/…") was not a link, so the
-  same file cost 15.8 s through the tree instead of 3.1 s (a link since #543 item 6: 3.11 s). A project can be reordered only by a drag
+  same file cost 15.8 s through the tree instead of 3.1 s (a link since #543 item 6: 3.07 s). A project can be reordered only by a drag
   nothing on screen mentions. Adding a machine lives in Settings, not in the sidebar's machine group
   where the machines are.
 - **Fields that do not take the keyboard**: the composer after clicking a session's row (the core
@@ -332,7 +332,7 @@ that changes is re-priced by Fitts's law. Each is a proposal, not a decision.
 | 3 | Start a new session (`new-session.mouse`) | 30 · 12.98 · 3 · 1198 | The `+` opens a dialog whose only step in the common case is Start (`M P B B`, 2.72 s) | One click on `+` starts a session with the last-used tool and no worktree; the dialog moves behind a "…" beside it (partly done: #529 made the `+` visible; **done in #543**, where the "…" is a chevron beside the `+` and the budget is 26 operators, M 2, 10.6 s) | 26 · 10.26 (−2.72) | H | UI only (the tool from the project's last session) |
 | 4 | Send a message to another session (`send-to-session.mouse`) | 36 · 13.39 · 2 · 1141 | Clicking a session's row leaves the keyboard on the row: a `P B B` into the composer before typing | A click on a row (not arrowing through rows) gives the composer the keyboard, as the palette does since #528 | 33 · 11.95 (−1.44) | H | UI only |
 | 5 | Answer a question (`answer-question.mouse`) | 13 · 8.04 · 3 · 1332 (**done, #543**: now 9 · 5.42 · 2 · 1005) | Picking the option is the decision; Answer is a second one (`M P B B`, 2.62 s) | For a single question with one choice, clicking an option answers; Answer stays for several questions, multiple choice and "Other" | 9 · 5.42 (−2.62) | H | UI only |
-| 6 | Open a file the agent named (`open-file.mouse-tree`) | 25 · 15.83 · 6 · 889 | A path in a tool card is not a link; the tree costs one `M P B B` per folder | Paths in tool cards (Read, Edit, Write) open the file like a reply's link; an Edit opens its diff | 5 · 3.08 (−12.75) | M | UI only (`openFile` exists). **Done** (#543): the link opens the file (`open-file.mouse-tool-card`, 5 · 3.11); the Edit's diff is not part of it |
+| 6 | Open a file the agent named (`open-file.mouse-tree`) | 25 · 15.83 · 6 · 889 | A path in a tool card is not a link; the tree costs one `M P B B` per folder | Paths in tool cards (Read, Edit, Write) open the file like a reply's link; an Edit opens its diff | 5 · 3.08 (−12.75) | M | UI only (`openFile` exists). **Done** (#543): the link opens the file (`open-file.mouse-tool-card`, 5 · 3.07); the Edit's diff is not part of it |
 | 7 | Commit the changes (`commit.mouse`) | 44 · 16.33 · 2 · 1398 | Commit is disabled until something is staged, a git idea people who are not developers do not have | With nothing staged, the button reads "Commit all" and stages everything; Stage all stays for those who stage | 40 · 13.54 (−2.79) | M | UI only (stage all, then commit: both exist) |
 | 8 | Link another machine (`add-machine.ssh-config`, `.mouse-manual`) | 17 · 11.05 · 4 · 2240 | Two levels into Settings (Settings, then Machines) while the machines are listed in the sidebar | An "Add machine" entry in the sidebar's machine group (and beside "Add project" before there is a group) opens the same form | 13 · 8.37 (−2.68); typed: 39 · 15.03 | L (first run) | UI only |
 | 9 | Link another machine (`add-machine.ssh-config`) | 17 · 11.05 · 4 · 2240 | When the probe finds one shell there is nothing to choose, yet Link still waits for a click | Link at once when the probe finds exactly one shell; the choice appears only when there are several | 13 · 8.34 (−2.71); with 8: 9 · 5.66 | L (first run) | UI only (the probe already returns the shells) |
