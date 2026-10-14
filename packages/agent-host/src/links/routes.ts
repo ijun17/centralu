@@ -285,6 +285,9 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'updates.setAuto': HUB,
   'updates.setAutoApply': HUB,
   'updates.apply': HUB,
+  // The hub's own windows answer the hub's own host (#665); a linked machine's events never ask them
+  'updates.answerApply': HUB,
+  'updates.reportApply': HUB,
   'machines.list': HUB,
   'machines.add': HUB,
   'machines.sshHosts': HUB,

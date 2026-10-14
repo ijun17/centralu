@@ -96,6 +96,7 @@ export type AgentProcessHost = {
 export type KeptAgent = { sessionId: string; tool: ToolName; process: AgentProcess; version?: string }
 import { Store } from '../dev-services/store.js'
 import type { UpdateService } from '../updates.js'
+import type { UpdateApplyBroker } from '../update-apply.js'
 import { sessionBusy, sessionIdle, type SessionIdle } from '../idle.js'
 import {
   gitSummary,
@@ -579,6 +580,10 @@ export class SessionManager {
   private updates: UpdateService | null = null
   /** Sessions allowed to update once per host; an "always" answer adds this session only. */
   private updateConsents = new Set<string>()
+  /** Asking a window to apply the installed update (#665); null on a host with no windows to ask (tests) */
+  private updateApply: UpdateApplyBroker | null = null
+  /** Sessions whose "always" covers applying (#665), kept apart from check and install: a relaunch is the person's window */
+  private updateApplyConsents = new Set<string>()
   /**
    * Where external apps are attached to a session (M4 A-5). It is null on a host with no runtime
    * (most tests), and in that case the session accepts no apps — it is optional, like any other
@@ -2687,6 +2692,8 @@ export class SessionManager {
     }
     this.readGrants.delete(sessionId)
     this.agentConsents.delete(sessionId)
+    this.updateConsents.delete(sessionId)
+    this.updateApplyConsents.delete(sessionId)
     // A capability question raised on this session has nowhere left to be answered (D-4) — it is ended with
     // no answer (the window does not remember it, just declines)
     for (const ask of [...this.hostAsks.values()]) {
@@ -5160,7 +5167,7 @@ export class SessionManager {
     const off = () => !this.uiPreferences().sessionTools
     const offError = 'Turned off in Settings'
     return {
-      updateCentralu: async (action) => (off() ? { ok: false, error: offError } : this.updateCentraluAsked(sessionId, action)),
+      updateCentralu: async (action, signal) => (off() ? { ok: false, error: offError } : this.updateCentraluAsked(sessionId, action, signal)),
       listSessions: async () => (off() ? [] : view.listSessions()),
       readSession: async (...a) => (off() ? { ok: false, error: offError } : view.readSession(...a)),
       recall: async (...a) => (off() ? { hits: [] } : view.recall(...a)),
@@ -5231,7 +5238,7 @@ export class SessionManager {
       : `Not a session this app manages: ${id}`
 
     return {
-      updateCentralu: async (action) => this.updateCentraluAsked(orchestratorId, action),
+      updateCentralu: async (action, signal) => this.updateCentraluAsked(orchestratorId, action, signal),
       listSessions: async () => {
         const byId = projects()
         const mine: OrchestratedSession[] = [...this.meta.values()]
@@ -6628,7 +6635,12 @@ export class SessionManager {
   }
 
   /** Update grants last only for the calling session on this host; they never change automatic application. */
-  private async updateCentraluAsked(sessionId: string, action: 'check' | 'install'): Promise<{ ok: boolean; error?: string; status?: import('@cc/protocol').UpdateStatus }> {
+  private async updateCentraluAsked(
+    sessionId: string,
+    action: 'check' | 'install' | 'apply',
+    signal?: AbortSignal,
+  ): Promise<{ ok: boolean; error?: string; status?: import('@cc/protocol').UpdateStatus; relaunched?: { version?: string } }> {
+    if (action === 'apply') return this.applyUpdateAsked(sessionId, signal)
     const updates = this.updates
     if (!updates) return { ok: false, error: 'Update checks are unavailable' }
     if (this.toolProfileOf(sessionId) === 'reader' && !this.updateConsents.has(sessionId)) {
@@ -6637,6 +6649,39 @@ export class SessionManager {
       else if (decision !== 'allow') return { ok: false, error: 'The person did not allow this Centralu update. Do not ask again unless they tell you to.' }
     }
     return { ok: true, status: action === 'check' ? await updates.check(true) : await updates.apply() }
+  }
+
+  /**
+   * `update_centralu` action "apply" (#665): a window relaunches into the installed build, as its "Apply now" does.
+   *
+   * By the caller's own preset, read now (as every boundary of #606): `auto` applies at once, `normal` raises a card in
+   * the caller (after a window said it is ready, so "nothing installed" never asks), `safe` is refused, as is an agent an
+   * app started. "Always" on the card covers applying for this session only, apart from check and install. The window
+   * still makes every check its button makes (update-apply.ts), so an agent can only ask for what the person could click.
+   */
+  private async applyUpdateAsked(sessionId: string, signal?: AbortSignal): Promise<{ ok: boolean; error?: string; relaunched?: { version?: string } }> {
+    const broker = this.updateApply
+    if (!broker) return { ok: false, error: 'Applying updates is unavailable on this host' }
+    const m = this.meta.get(sessionId)
+    if (!m) return { ok: false, error: 'The calling session is gone' }
+    if (this.isAppAgentSession(m)) return { ok: false, error: 'An agent an app started cannot apply Centralu updates.' }
+    if (m.permissionPreset === 'safe') {
+      return {
+        ok: false,
+        error: "This session's preset is safe, which cannot relaunch Centralu. Tell the person the update is ready to apply from the update line; do not ask again unless they tell you to.",
+      }
+    }
+    const outcome = await broker.apply(async () => {
+      if (this.updateApplyConsents.has(sessionId)) return null
+      const decision = await this.askHost(sessionId, { kind: 'centralu_update', action: 'apply' }, signal)
+      if (decision === 'always') this.updateApplyConsents.add(sessionId)
+      else if (decision === null) return 'The question to the person was withdrawn before they answered, so nothing was relaunched.'
+      else if (decision !== 'allow') return 'The person did not allow this session to apply the Centralu update. Do not ask again unless they tell you to.'
+      return null
+    })
+    if (!outcome.ok) return { ok: false, error: outcome.error }
+    console.error(`[updates] session ${sessionId} applied the installed update: a window is relaunching${outcome.version ? ` into ${outcome.version}` : ''}`)
+    return { ok: true, relaunched: outcome.version ? { version: outcome.version } : {} }
   }
 
   /**
@@ -7179,6 +7224,11 @@ export class SessionManager {
   /** The same service the window calls; this tool never writes the automatic-apply preference. */
   useUpdates(updates: UpdateService): void {
     this.updates = updates
+  }
+
+  /** The windows' "Apply now" for an agent (#665, update-apply.ts) — wired by the host, which owns the event stream */
+  useUpdateApply(broker: UpdateApplyBroker): void {
+    this.updateApply = broker
   }
 
   /**

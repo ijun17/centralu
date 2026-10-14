@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { UpdateStatus } from '@cc/protocol'
-import { applyOffer, installedUpdate, autoApplyDecision, updateStateText, type AutoApplyInput } from './apply-update.js'
+import { agentApplyVerdict, applyOffer, installedUpdate, autoApplyDecision, updateStateText, type AutoApplyInput } from './apply-update.js'
 
 /**
  * Applying an installed update (#352): what the update line offers, and when the automatic mode
@@ -152,5 +152,43 @@ describe('updateStateText', () => {
 
   it('says nothing was checked while no check has succeeded or failed', () => {
     expect(updateStateText({ ...everything, newer: false, error: null, latest: null }, null)).toBe('Not checked yet')
+  })
+})
+
+/**
+ * An agent's "Apply now" (#665) gets exactly the button's checks: what the update line would offer, read fresh from
+ * the shell, with a reason the agent can pass on whenever the button would not be there.
+ */
+describe('agentApplyVerdict', () => {
+  const port = (check: { ready: boolean; reason?: string; version?: string } | Error) => ({
+    check: async () => {
+      if (check instanceof Error) throw check
+      return check
+    },
+    relaunch: async () => {},
+    watchBusy: () => () => {},
+  })
+
+  it('is ready exactly when the update line offers Apply now', async () => {
+    expect(applyOffer(installed, OLD_WINDOW, ready)).toEqual({ kind: 'apply' })
+    expect(await agentApplyVerdict(port(ready), installed, OLD_WINDOW)).toEqual({ ready: true, version: installed.latest })
+    expect(await agentApplyVerdict(port({ ready: true, version: '0.1.0-beta.12' }), null, OLD_WINDOW)).toEqual({ ready: true, version: '0.1.0-beta.12' })
+  })
+
+  it('says why not, for every case the button is not offered', async () => {
+    const cases: [Parameters<typeof agentApplyVerdict>, string][] = [
+      [[undefined, installed, OLD_WINDOW], 'cannot relaunch itself'],
+      [[port(ready), null, OLD_WINDOW], 'No update is installed'],
+      [[port(ready), { ...installed, phase: 'idle' }, OLD_WINDOW], 'No update is installed'],
+      [[port(ready), { ...installed, phase: 'updating' }, OLD_WINDOW], 'still running'],
+      [[port(ready), installed, installed.latest!], 'already runs'],
+      [[port({ ready: false, reason: 'the bundle was not replaced' }), installed, OLD_WINDOW], 'the bundle was not replaced'],
+      [[port(new Error('shell gone')), installed, OLD_WINDOW], 'shell gone'],
+    ]
+    for (const [args, why] of cases) {
+      const v = await agentApplyVerdict(...args)
+      expect(v.ready).toBe(false)
+      expect(v.ready === false && v.reason).toContain(why)
+    }
   })
 })

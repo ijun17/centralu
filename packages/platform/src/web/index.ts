@@ -622,6 +622,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       setAuto: (enabled) => rpc.call('updates.setAuto', { enabled }),
       setAutoApply: (enabled) => rpc.call('updates.setAutoApply', { enabled }),
       apply: () => rpc.call('updates.apply', {}),
+      answerApply: (a) => rpc.call('updates.answerApply', a),
+      reportApply: async (r) => void (await rpc.call('updates.reportApply', r)),
     },
     capabilities: {
       osNotifications: typeof Notification !== 'undefined',

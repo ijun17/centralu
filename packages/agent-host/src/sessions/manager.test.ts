@@ -35,6 +35,7 @@ import { plantOldCoordinator } from './old-coordinator.test-helpers.js'
 import { normalizeNotification } from '../adapters/codex/normalize.js'
 import { createRpcHandler } from '../rpc.js'
 import { UpdateService } from '../updates.js'
+import { UpdateApplyBroker } from '../update-apply.js'
 
 class FakeHandle implements SessionHandle {
   externalId: string | null = 'ext-1'
@@ -417,6 +418,114 @@ describe('ordinary session update consent (#581)', () => {
     const other = mgr.runOrchestratorTool(second.id, 'update_centralu', { action: 'check' })
     await answer(second.id, 'deny')
     expect((await other).isError).toBe(true)
+  })
+})
+
+describe('applying an installed update for an agent (#665)', () => {
+  /**
+   * One window, played by the test: it answers each request the way the store does (ready or not) and, told to go,
+   * counts a relaunch and reports it started. `ready: false` with a reason stands for "nothing installed".
+   */
+  function windowWith(verdict: { ready: true; version?: string } | { ready: false; reason: string }) {
+    const relaunches: string[] = []
+    const asked: NormalizedEvent[] = []
+    const tickets = new Map<string, string>()
+    const broker: UpdateApplyBroker = new UpdateApplyBroker({
+      windows: () => 1,
+      answerMs: 2_000,
+      push: (e) => {
+        asked.push(e)
+        queueMicrotask(() => {
+          if (e.type === 'update_apply_request') {
+            const { ticket } = broker.answer(1, { requestId: e.requestId, ...verdict })
+            if (ticket) tickets.set(e.requestId, ticket)
+          }
+          if (e.type === 'update_apply_go' && tickets.get(e.requestId) === e.ticket) {
+            relaunches.push(e.ticket)
+            broker.report(1, { requestId: e.requestId, ticket: e.ticket })
+          }
+        })
+      },
+    })
+    mgr.useUpdateApply(broker)
+    return { relaunches, asked }
+  }
+  const card = (id: string) => mgr.listSessions().find((s) => s.id === id)?.pendingApproval ?? undefined
+
+  it('auto: reaches a window, which relaunches, with no card', async () => {
+    const w = windowWith({ ready: true, version: '9.9.9' })
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'auto' })
+    const out = await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
+    expect(out.isError).toBeUndefined()
+    expect(out.text).toContain('relaunching into 9.9.9')
+    expect(w.relaunches).toHaveLength(1)
+    expect(card(session.id)).toBeUndefined()
+  })
+
+  it('normal: raises a card first, and relaunches only after the person allows', async () => {
+    const w = windowWith({ ready: true })
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const call = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
+    await vi.waitFor(() => expect(card(session.id)?.detail).toEqual({ kind: 'centralu_update', action: 'apply' }))
+    expect(w.relaunches).toEqual([])
+    mgr.respondApproval(session.id, card(session.id)!.requestId, 'allow')
+    expect((await call).isError).toBeUndefined()
+    expect(w.relaunches).toHaveLength(1)
+
+    // Denied: nothing goes to the window, and the agent is told not to ask again
+    const denied = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
+    await vi.waitFor(() => expect(card(session.id)).toBeTruthy())
+    mgr.respondApproval(session.id, card(session.id)!.requestId, 'deny')
+    expect(await denied).toMatchObject({ isError: true, text: expect.stringContaining('did not allow') })
+    expect(w.relaunches).toHaveLength(1)
+    expect(w.asked.filter((e) => e.type === 'update_apply_go')).toHaveLength(1)
+  })
+
+  it("normal: an earlier install's always does not cover applying", async () => {
+    windowWith({ ready: true })
+    const updates = new UpdateService(() => {}, { fetchLatest: async () => ({ ok: true as const, version: '9999.0.0' }), run: async () => {}, installedCopy: () => null })
+    vi.spyOn(updates, 'apply').mockImplementation(() => updates.current())
+    mgr.useUpdates(updates)
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const install = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'install' })
+    await vi.waitFor(() => expect(card(session.id)).toBeTruthy())
+    mgr.respondApproval(session.id, card(session.id)!.requestId, 'always')
+    await install
+    const apply = mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
+    await vi.waitFor(() => expect(card(session.id)?.detail).toEqual({ kind: 'centralu_update', action: 'apply' }))
+    mgr.respondApproval(session.id, card(session.id)!.requestId, 'deny')
+    expect((await apply).isError).toBe(true)
+  })
+
+  it('safe: refused without asking the windows or the person', async () => {
+    const w = windowWith({ ready: true })
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'safe' })
+    const out = await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
+    expect(out).toMatchObject({ isError: true, text: expect.stringContaining('preset is safe') })
+    expect(w.asked).toEqual([])
+    expect(card(session.id)).toBeUndefined()
+  })
+
+  it('an agent an app started cannot apply, whatever its preset', async () => {
+    const w = windowWith({ ready: true })
+    const project = await addProject()
+    const agent = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'auto', appId: 'agent', appAgent: {} })
+    await expect(mgr.runOrchestratorTool(agent.id, 'update_centralu', { action: 'apply' })).rejects.toThrow()
+    expect(w.asked).toEqual([])
+  })
+
+  it('nothing installed: says so, and never raises a card', async () => {
+    const w = windowWith({ ready: false, reason: 'No update is installed to apply.' })
+    const project = await addProject()
+    const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
+    const out = await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })
+    expect(out).toMatchObject({ isError: true, text: expect.stringContaining('No update is installed to apply.') })
+    expect(card(session.id)).toBeUndefined()
+    expect(w.relaunches).toEqual([])
   })
 })
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ApprovalDetail } from '@cc/protocol'
-import { agentStartQuestion, findMatchingRule, matchesRule, previewMatches, projectAccessQuestion, projectCreateQuestion, suggestMatcher } from './approval.js'
+import { agentStartQuestion, centraluUpdateQuestion, findMatchingRule, matchesRule, previewMatches, projectAccessQuestion, projectCreateQuestion, suggestMatcher } from './approval.js'
 
 describe('the new-project question (#515)', () => {
   it('names the linked machine whose disk the path is on, and no machine for this computer (#82 phase 4)', () => {
@@ -111,5 +111,13 @@ describe('rule preview (making the result visible instead of limiting what can b
     expect(matchesRule('rm -rf /', suggested)).toBe(false)
     // Appending * is not safe either — chaining breaks through it
     expect(matchesRule('rm -rf node_modules; rm -rf /', suggested)).toBe(false)
+  })
+})
+
+describe('centraluUpdateQuestion (#581, #665)', () => {
+  it('says what each action does, and that applying relaunches the window while agents keep going', () => {
+    expect(centraluUpdateQuestion({ kind: 'centralu_update', action: 'check' })).toBe('Allow this session to check for a Centralu update?')
+    expect(centraluUpdateQuestion({ kind: 'centralu_update', action: 'install' })).toBe('Allow this session to install a Centralu update?')
+    expect(centraluUpdateQuestion({ kind: 'centralu_update', action: 'apply' })).toContain('The window relaunches; running agents keep going.')
   })
 })

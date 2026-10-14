@@ -17,6 +17,7 @@ const toInfo = (h: TerminalHandle) => ({
   alive: h.alive,
 })
 import type { UpdateService } from './updates.js'
+import type { UpdateApplyBroker } from './update-apply.js'
 import type { AgentVersionService } from './agent-versions.js'
 import type { SessionSleeper } from './sessions/sleep.js'
 import { resultText, type ExternalApps } from './apps/external/runtime.js'
@@ -78,6 +79,8 @@ export type RpcServices = {
   stopHost?: () => void
   /** What would stop if this host stopped now (`host.activity`, idle.ts `activityCounts`) */
   activity?: () => HostActivity
+  /** The windows' answers to an agent's "Apply now" (#665, update-apply.ts) */
+  updateApply?: UpdateApplyBroker
 }
 
 /** What the `machines.*` methods need from the hub's links (links/links.ts) */
@@ -107,7 +110,7 @@ function sessionIdsOf(panels: readonly GridPanel[]): string[] {
 export function createRpcHandler(
   mgr: SessionManager,
   adapters: Map<ToolName, AgentAdapter>,
-  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, activity }: RpcServices = {},
+  { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, activity, updateApply }: RpcServices = {},
 ) {
   const requireThemes = (): ThemeFiles => {
     if (!themes) throw Object.assign(new Error('Theme files are unavailable'), { code: 'internal' })
@@ -823,6 +826,16 @@ export function createRpcHandler(
     // Answers once the install has started, not once it has finished — see the note on
     // `updates.apply` in the protocol. The rest arrives as `update_status` events.
     'updates.apply': async () => requireUpdates().apply(),
+    // A window's answer and report for an agent's "Apply now" (#665). Without the broker (tests) nothing is waiting
+    'updates.answerApply': async (p, ctx) => {
+      const a = RpcMethods['updates.answerApply'].params.parse(p)
+      return updateApply && ctx ? updateApply.answer(ctx.client, a) : { ticket: null }
+    },
+    'updates.reportApply': async (p, ctx) => {
+      const r = RpcMethods['updates.reportApply'].params.parse(p)
+      if (updateApply && ctx) updateApply.report(ctx.client, r)
+      return {}
+    },
     'host.stop': async () => {
       if (!stopHost) {
         throw Object.assign(new Error('This host runs under the Centralu app, which stops it: quit the app instead'), { code: 'internal' })

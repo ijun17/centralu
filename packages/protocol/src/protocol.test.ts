@@ -230,6 +230,9 @@ const GOLDEN_EVENTS_V1: unknown[] = [
       phase: 'restart_required', error: null, checkedAt: 1755000000000,
     },
   },
+  // An agent's "Apply now" (#665): the request every window answers, and the go only the ticket's window follows
+  { type: 'update_apply_request', requestId: 'r1' },
+  { type: 'update_apply_go', requestId: 'r1', ticket: 't1' },
 ]
 
 describe('golden: every v1 event type', () => {

@@ -177,8 +177,15 @@ export type StartAgentOpts = { task: string; tool?: string; model?: string; effo
 export type AgentSessionOpts = { sessionId: string; action: 'status' | 'send' | 'wait' | 'stop' | 'delete'; text?: string }
 
 export type OrchestratorTools = {
-  /** Checks or starts installing Centralu itself. Ordinary sessions need the person's consent first. */
-  updateCentralu?(action: 'check' | 'install'): Promise<{ ok: boolean; error?: string; status?: UpdateStatus }>
+  /**
+   * Checks or starts installing Centralu itself; ordinary sessions need the person's consent first. "apply" (#665) asks
+   * a window to relaunch into the installed build, by the caller's own preset: auto applies, normal asks, safe is
+   * refused. `relaunched` says a relaunch started, with the version it starts when known.
+   */
+  updateCentralu?(
+    action: 'check' | 'install' | 'apply',
+    signal?: AbortSignal,
+  ): Promise<{ ok: boolean; error?: string; status?: UpdateStatus; relaunched?: { version?: string } }>
   /** Sessions this app currently manages (excludes the orchestrator itself and archived sessions) */
   listSessions(): Promise<OrchestratedSession[]>
   /**

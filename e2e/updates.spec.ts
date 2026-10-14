@@ -156,3 +156,25 @@ test('one install and apply reaches the newest release after the banner became s
   await page.getByTestId('update-apply-now').click()
   await expect.poll(() => page.evaluate(() => (window as any).__mock.relaunches)).toBe(1)
 })
+
+/**
+ * An agent's "Apply now" (#665): the host asks the window over the event stream, and the window runs its own button's
+ * path. The mock plays the host's half (`agentApply`); everything after the event is the real window.
+ */
+test('an agent applies the installed update: the window relaunches once, through its Apply now (#665)', async ({ page }) => {
+  await start(page)
+  await page.evaluate(() => { (window as any).__mock.relaunchCheck = { ready: true, version: '9999.0.0' } })
+  // The update line offers Apply now: what the agent may ask for is what the person could click
+  await focus(page)
+  await expect(page.getByTestId('update-apply-now')).toBeVisible()
+  expect(await page.evaluate(() => (window as any).__mock.agentApply())).toEqual({ ok: true })
+  expect(await page.evaluate(() => (window as any).__mock.relaunches)).toBe(1)
+})
+
+test('an agent asking with nothing installed is told so, and nothing relaunches (#665)', async ({ page }) => {
+  await start(page)
+  const out = await page.evaluate(() => (window as any).__mock.agentApply())
+  expect(out.ok).toBe(false)
+  expect(out.error).toContain('No update is installed')
+  expect(await page.evaluate(() => (window as any).__mock.relaunches)).toBe(0)
+})

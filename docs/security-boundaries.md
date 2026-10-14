@@ -265,6 +265,10 @@ An ordinary reader's `update_centralu` reaches the host's existing update servic
 lasts for that session while this host runs; it is not a project grant and it never changes the person's
 automatic-update preference. In the commands tier the orchestrator reaches it through `centralu_run`, while the
 reader is offered its compact definition, deferred behind tool search on Claude because updates are rare.
+Its `apply` action (#665) relaunches the person's window into the installed build, and is decided by the caller's own
+preset in every profile, orchestrator included: `auto` applies, `normal` asks on every call until "always" (kept
+apart from check and install), `safe` and app agents are refused. The window still makes every check its "Apply now"
+makes, so an agent can only ask for what the person could click.
 
 **The rare-commands tier** (#512, the default since 2026-10-12). The matrix is drawn for
 `CC_RARE_COMMANDS=resident`, where every command is a tool. By default (`CC_RARE_COMMANDS` unset, or
@@ -329,6 +333,7 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | open | asks | asks | asks | open | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
 | `attach_app`, an untrusted target project's shared app | refused | refused | refused | open | refused | refused | refused | open | `AppAccess`, `SessionAppsHub` and runtime startup/call gates use the caller's preset; auto does not mark the project trusted |
 | `update_centralu`, first time in an ordinary session | asks | asks | asks | open | asks | asks | asks | open | `updateCentraluAsked` → `askHost`; other presets keep session-only remembered consent |
+| `update_centralu` action `apply` (any profile that has the tool) | refused | asks | asks | open | refused | asks | asks | open | `applyUpdateAsked` → `askHost` after a window answered ready (`UpdateApplyBroker`); app agents refused; the window re-checks with its button's rules (`agentApplyVerdict`) |
 | Claude's independent-session discovery and messaging | refused | refused | refused | open | — | — | — | — | Claude adapter `withoutCrossSessionMessaging`, applied only outside auto |
 | `attach_app`, a user-folder app | allowed | allowed | allowed | open | allowed | allowed | allowed | open | `AppAccess.attach` (no card: the person's own folder) |
 | `find_apps` / `attach_app` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `AppAccess.gate` |

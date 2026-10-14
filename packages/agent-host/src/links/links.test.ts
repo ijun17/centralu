@@ -240,12 +240,16 @@ describe('a hub linked to another host (#82)', () => {
     expect(u.events().filter((e) => e.type === 'session_title').map((e) => e.sessionId)).toEqual(['m1.worker1'])
     // Hub-only events of the remote stay there
     remote.server.broadcast({ type: 'themes_changed' })
+    // An agent there applying its own update (#665) must not relaunch this window
+    remote.server.broadcast({ type: 'update_apply_request', requestId: 'r1' })
+    remote.server.broadcast({ type: 'update_apply_go', requestId: 'r1', ticket: 't1' })
     remote.server.broadcast({ type: 'external_apps_changed' })
     // A project the remote made (#515) reaches the hub's windows, which re-read the merged list
     remote.server.broadcast({ type: 'projects_changed' })
     await until(() => u.events().some((e) => e.type === 'external_apps_changed'))
     await until(() => u.events().some((e) => e.type === 'projects_changed'))
     expect(u.events().some((e) => e.type === 'themes_changed')).toBe(false)
+    expect(u.events().some((e) => e.type === 'update_apply_request' || e.type === 'update_apply_go')).toBe(false)
   })
 
   it('relays terminal output under the machine’s prefix', async () => {

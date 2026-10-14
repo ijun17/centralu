@@ -656,10 +656,14 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
     /** One line for a person to read: the task, cut short */
     text: z.string(),
   }),
-  /** An ordinary session asks to check or install Centralu itself (#581). */
+  /**
+   * A session asks to check or install Centralu itself (#581), or to apply the installed build (#665): the window
+   * relaunches into it while the keeper holds every agent, as its "Apply now" does. A window older than `apply` keeps
+   * the word as it came (parseTolerant) and still shows the card.
+   */
   z.object({
     kind: z.literal('centralu_update'),
-    action: z.enum(['check', 'install']),
+    action: z.enum(['check', 'install', 'apply']),
   }),
   /**
    * The orchestrator asks to make a new project (#515, create_project) — raised by **the host** in the orchestrator's

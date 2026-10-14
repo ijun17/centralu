@@ -64,6 +64,7 @@ import { isOnScreen } from '../app/onscreen.js'
 import { activateTab, defaultLayout, sanitizeLayout, type PanelGroup, type PanelTab } from './panelLayout.js'
 import { closeLayer, EMPTY_NAV, sameScreen, step, visit, type NavHistory, type Screen } from './navHistory.js'
 import { reloadBudget } from './reloadBudget.js'
+import { agentApplyVerdict } from '../features/settings/apply-offer.js'
 import { viewReconnect } from './viewReconnect.js'
 import { appendChat, bumpChatKeysAbove, messagesToChat, nextChatKey, subagentRow, type ChatAttachment, type ChatItem } from './transcript.js'
 export { audienceText, compactionText, errorText, handoffText, markerText, messagesToChat, noticeLine, resetText } from './transcript.js'
@@ -1154,9 +1155,17 @@ export type AppState = {
   /**
    * "Apply now" (#352): relaunches the desktop window into the installed version. The keeper is
    * told first and holds every agent through it. A refusal (the keeper too old to hold on with
-   * background mode off, the bundle not replaced) is shown, never silent.
+   * background mode off, the bundle not replaced) is shown, never silent. Resolves with that refusal, or null once the
+   * relaunch started.
    */
-  applyUpdateNow(): Promise<void>
+  applyUpdateNow(): Promise<string | null>
+  /**
+   * An agent's "Apply now" (#665): answers an `update_apply_request` with this window's checks, and keeps the ticket
+   * the host gives back. Nothing relaunches here
+   */
+  answerApplyRequest(requestId: string): Promise<void>
+  /** The `update_apply_go` naming this window's ticket: checks again, runs `applyUpdateNow`, reports the outcome */
+  runApplyRequest(requestId: string, ticket: string): Promise<void>
   setNotifyPolicy(p: NotifyPolicy): void
   /** Attaches something not yet sent to a session (removed if it is empty) */
   setDraft(sessionId: string, draft: Draft): void
@@ -1671,6 +1680,13 @@ async function usableDefaults(
 
 /** A handoff in progress — calling it twice on the same session births two new sessions (module state: purely a re-entry guard, nothing to draw from it) */
 const handoffInFlight = new Set<string>()
+/**
+ * The tickets the host gave this window for an agent's "Apply now" (#665), by request: the go names one of these. Kept
+ * as the answer's promise, since the host may send the go before the answer's reply has reached this window. A ticket
+ * no go came for is forgotten after a while: the host asks again after its card, so the first is never used.
+ */
+const applyTickets = new Map<string, Promise<string | null>>()
+const APPLY_TICKET_MS = 5 * 60_000
 
 /**
  * The handoff prompt (per a dogfooding request to "prompt it properly" — specifically, that the
@@ -3206,6 +3222,15 @@ export const useStore = create<AppState>((set, get) => ({
       set({ update: e.status })
       return
     }
+    // An agent's "Apply now" (#665): app-wide like update_status, so before the session guard too
+    if (e.type === 'update_apply_request') {
+      void get().answerApplyRequest(e.requestId)
+      return
+    }
+    if (e.type === 'update_apply_go') {
+      void get().runApplyRequest(e.requestId, e.ticket)
+      return
+    }
     // App-wide like update_status (#297): the installed agent CLIs, read on the host's own schedule
     if (e.type === 'agent_versions') {
       set({ agentVersions: e.status })
@@ -4427,12 +4452,41 @@ export const useStore = create<AppState>((set, get) => ({
 
   async applyUpdateNow() {
     const relaunch = get().platform?.relaunch
-    if (!relaunch) return
+    if (!relaunch) return 'This window cannot relaunch itself.'
     try {
       await relaunch.relaunch()
+      return null
     } catch (e) {
       set({ toast: `Could not apply the update: ${(e as Error).message}` })
+      return (e as Error).message
     }
+  },
+  async answerApplyRequest(requestId) {
+    const platform = get().platform
+    if (!platform) return
+    // A replayed request this window already answered is not answered twice
+    if (applyTickets.has(requestId)) return
+    const answer = (async () => {
+      const verdict = await agentApplyVerdict(platform.relaunch, get().update)
+      // A host mid-swap that still wants it asks again; this one's request is gone either way
+      return (await platform.updates.answerApply({ requestId, ...verdict }).catch(() => ({ ticket: null }))).ticket
+    })()
+    applyTickets.set(requestId, answer)
+    const ticket = await answer
+    if (ticket === null) applyTickets.delete(requestId)
+    else setTimeout(() => applyTickets.get(requestId) === answer && applyTickets.delete(requestId), APPLY_TICKET_MS)
+  },
+  async runApplyRequest(requestId, ticket) {
+    // Only the window holding this ticket relaunches, and only once: a replayed go finds it gone (#665)
+    const mine = applyTickets.get(requestId)
+    if (!mine || (await mine) !== ticket || applyTickets.get(requestId) !== mine) return
+    applyTickets.delete(requestId)
+    const platform = get().platform
+    if (!platform) return
+    // Checked again at the go, as the shell checks again when the button is pressed: the bundle may have changed since
+    const verdict = await agentApplyVerdict(platform.relaunch, get().update)
+    const error = verdict.ready ? await get().applyUpdateNow() : verdict.reason
+    await platform.updates.reportApply({ requestId, ticket, ...(error ? { error } : {}) }).catch(() => {})
   },
   setNotifyPolicy(notifyPolicy) {
     set({ notifyPolicy })

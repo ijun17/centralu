@@ -639,6 +639,14 @@ export interface UpdatePort {
    * like a failure on screen. The rest arrives as events.
    */
   apply(): Promise<UpdateStatus>
+  /**
+   * An agent's "Apply now" (#665): this window's answer to an `update_apply_request` event — whether its own "Apply
+   * now" could relaunch right now, and why not. A ticket comes back to the one window the host picks; that window
+   * relaunches on the `update_apply_go` naming it.
+   */
+  answerApply(a: { requestId: string; ready: boolean; reason?: string; version?: string }): Promise<{ ticket: string | null }>
+  /** The picked window's outcome: no `error` once its relaunch started (#665) */
+  reportApply(r: { requestId: string; ticket: string; error?: string }): Promise<void>
 }
 
 /**

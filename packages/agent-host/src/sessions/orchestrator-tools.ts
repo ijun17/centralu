@@ -35,8 +35,9 @@ export { ORCHESTRATOR_MCP_NAME, mcpServerNameError, proposedMcpServerNameError }
 export const ORCHESTRATOR_TOOLS = [
   {
     name: 'update_centralu',
-    description: 'Checks for or installs a Centralu update. Installing never changes the person\'s automatic-update setting.',
-    schema: z.object({ action: z.enum(['check', 'install']) }),
+    description:
+      'Checks for or installs a Centralu update, or applies the installed one (the window relaunches; agents keep running). Never changes the person\'s automatic-update setting.',
+    schema: z.object({ action: z.enum(['check', 'install', 'apply']) }),
   },
   {
     name: 'list_sessions',
@@ -251,8 +252,9 @@ export const BUILDER_TOOL_NAMES = ['check'] as const satisfies readonly Orchestr
 export const READER_TOOLS = [
   {
     name: 'update_centralu',
+    // "apply" (#665) needs no words of its own here: 8 characters in every reader's request, and the install answer names it
     description: 'Updates Centralu with consent.',
-    schema: z.object({ action: z.enum(['check', 'install']) }),
+    schema: z.object({ action: z.enum(['check', 'install', 'apply']) }),
     // Updates are rare (#581); keep the definition behind Claude's tool search like app_guide.
     deferred: true,
   },
@@ -592,14 +594,24 @@ export async function runOrchestratorTool(
 ): Promise<ToolOutput> {
   if (name === 'update_centralu') {
     const action = args.action
-    if (action !== 'check' && action !== 'install') return { text: 'Give action: check or install.', isError: true }
-    const r = tools.updateCentralu ? await tools.updateCentralu(action) : { ok: false, error: 'Update checks are unavailable' }
+    if (action !== 'check' && action !== 'install' && action !== 'apply') return { text: 'Give action: check, install or apply.', isError: true }
+    const r = tools.updateCentralu ? await tools.updateCentralu(action, signal) : { ok: false, error: 'Update checks are unavailable' }
+    if (action === 'apply') {
+      if (!r.ok) return { text: `Centralu update was not applied: ${r.error ?? 'unavailable'}`, isError: true }
+      const v = r.relaunched?.version
+      return {
+        text:
+          `Centralu is relaunching${v ? ` into ${v}` : ' into the installed build'}. Running agents, this one included, keep going; ` +
+          'the new window then moves the agent host to the new build by itself, and a Centralu tool call still running then may be stopped and need trying again.',
+      }
+    }
     if (!r.ok) return { text: `Centralu update did not start: ${r.error ?? 'unavailable'}`, isError: true }
     const s = r.status
     if (!s) return { text: 'Centralu update is unavailable.', isError: true }
     if (action === 'check') return { text: s.newer && s.latest ? `Centralu ${s.latest} is available.` : s.error ?? 'Centralu is up to date.' }
     // The install answers once its target is settled (#645): up to date is a result here, not a failure
-    const applies = 'The person applies the installed build from Centralu; their automatic-update setting was not changed.'
+    const applies =
+      'The person applies the installed build from Centralu, or update_centralu with action apply does; their automatic-update setting was not changed.'
     if (s.phase === 'failed') return { text: `Centralu update failed: ${s.error}` }
     if (s.phase === 'restart_required') return { text: `Centralu ${s.latest ?? ''} is installed. ${applies}` }
     if (s.phase === 'updating' || s.phase === 'waiting_for_npm') return { text: `Installing Centralu ${s.latest ?? ''}. ${applies}` }

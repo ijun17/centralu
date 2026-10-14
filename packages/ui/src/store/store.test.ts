@@ -1721,6 +1721,65 @@ describe('update status (#43)', () => {
     apply.mockRestore()
   })
 
+  /**
+   * An agent's "Apply now" (#665): the host asks over the event stream, and the window answers with the checks its
+   * button makes; told to go, it runs the button's own `applyUpdateNow`. The mock plays the host's half
+   * (`agentApply`), the window's half is the store's.
+   */
+  describe('an agent applying the installed update (#665)', () => {
+    const installed = { ...status, current: '0.0.1', latest: '9999.0.0', phase: 'restart_required' as const }
+    function windowOf(platform: MockPlatform) {
+      useStore.setState({ platform, update: installed })
+      return platform.agents.subscribe((e) => useStore.getState().dispatchEvent(e))
+    }
+
+    it('a request reaches the window, which relaunches through applyUpdateNow once', async () => {
+      const platform = new MockPlatform()
+      platform.relaunchCheck = { ready: true, version: '9999.0.0' }
+      const stop = windowOf(platform)
+      const applyNow = vi.fn(useStore.getState().applyUpdateNow)
+      useStore.setState({ applyUpdateNow: applyNow })
+      expect(await platform.agentApply()).toEqual({ ok: true })
+      expect(applyNow).toHaveBeenCalledTimes(1)
+      expect(platform.relaunches).toBe(1)
+      expect(platform.applyAnswers).toEqual([expect.objectContaining({ ready: true, version: '9999.0.0' })])
+      expect(platform.applyReports).toEqual([expect.not.objectContaining({ error: expect.anything() })])
+      stop()
+    })
+
+    it("a go for another window's ticket, or replayed, relaunches nothing", async () => {
+      const platform = new MockPlatform()
+      platform.relaunchCheck = { ready: true, version: '9999.0.0' }
+      const stop = windowOf(platform)
+      useStore.getState().dispatchEvent({ type: 'update_apply_go', requestId: 'r', ticket: 'someone-else' })
+      expect(await platform.agentApply()).toEqual({ ok: true })
+      // The same go again, as a reconnect would replay it
+      useStore.getState().dispatchEvent({ type: 'update_apply_go', requestId: 'apply-1', ticket: 'ticket-apply-1' })
+      await Promise.resolve()
+      expect(platform.relaunches).toBe(1)
+      stop()
+    })
+
+    it('nothing installed: the window says so and nothing relaunches', async () => {
+      const platform = new MockPlatform()
+      platform.relaunchCheck = { ready: false, reason: 'not replaced' }
+      const stop = windowOf(platform)
+      useStore.setState({ update: { ...status, phase: 'idle' } })
+      expect(await platform.agentApply()).toEqual({ ok: false, error: expect.stringContaining('No update is installed') })
+      expect(platform.relaunches).toBe(0)
+      stop()
+    })
+
+    it("the shell's refusal at the go reaches the host", async () => {
+      const platform = new MockPlatform()
+      platform.relaunchCheck = { ready: true, version: '9999.0.0' }
+      platform.relaunchFails = 'Not relaunched: the keeper is too old.'
+      const stop = windowOf(platform)
+      expect(await platform.agentApply()).toEqual({ ok: false, error: 'Not relaunched: the keeper is too old.' })
+      stop()
+    })
+  })
+
   /** Installing must be started by a person — merely finding out does nothing on its own */
   it('merely learning of a new version installs nothing on its own', async () => {
     const platform = new MockPlatform()

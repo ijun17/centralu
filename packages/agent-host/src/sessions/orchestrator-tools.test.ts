@@ -113,6 +113,19 @@ describe('Centralu update tool', () => {
     expect(failed.text).toBe('Centralu update failed: EACCES')
     expect((await runOrchestratorTool(toolsWith({ updateCentralu }), 'update_centralu', { action: 'auto' }, { sessionId: 's', profile: 'reader' })).isError).toBe(true)
   })
+
+  it('apply (#665): says a relaunch started and that agents keep going, or passes on why not', async () => {
+    const asked: string[] = []
+    const started = async (action: 'check' | 'install' | 'apply') => (asked.push(action), { ok: true, relaunched: { version: '0.1.1' } })
+    const out = await runOrchestratorTool(toolsWith({ updateCentralu: started }), 'update_centralu', { action: 'apply' }, { sessionId: 's', profile: 'reader' })
+    expect(asked).toEqual(['apply'])
+    expect(out.isError).toBeUndefined()
+    expect(out.text).toContain('relaunching into 0.1.1')
+    expect(out.text).toContain('keep going')
+    const refused = async () => ({ ok: false, error: 'No update is installed to apply.' })
+    const no = await runOrchestratorTool(toolsWith({ updateCentralu: refused }), 'update_centralu', { action: 'apply' }, { sessionId: 's', profile: 'reader' })
+    expect(no).toEqual({ isError: true, text: 'Centralu update was not applied: No update is installed to apply.' })
+  })
 })
 
 /** What the model is sent for a set of tools, in characters: each one's full name, description and JSON schema */

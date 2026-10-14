@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ApprovalDetail } from '@cc/protocol'
-import { agentStartQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
+import { agentStartQuestion, centraluUpdateQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { composingKey, letterOf } from '../../app/keys.js'
@@ -140,7 +140,13 @@ export function ApprovalCard({
           label="Always allow"
           testId="approve-always"
           disabled={busy}
-          title={detail.kind === 'centralu_update' ? 'Allow Centralu updates from this session while it is running' : `Hold ${sc('alt')} and click to apply to the whole project`}
+          title={
+            detail.kind === 'centralu_update'
+              ? detail.action === 'apply'
+                ? 'Allow this session to apply Centralu updates while it is running'
+                : 'Allow Centralu updates from this session while it is running'
+              : `Hold ${sc('alt')} and click to apply to the whole project`
+          }
           onClick={(alt) => void respond(sessionId, requestId, 'always', detail.kind === 'centralu_update' ? 'session' : alt ? 'project' : 'session')}
         />
         {/* Project scope is ⌥a, a letter: from the composer it stays a click with ⌥ held (the button's title says so) */}
@@ -563,6 +569,6 @@ export function detailText(d: ApprovalDetail): string {
   if (d.kind === 'project_access') return projectAccessQuestion(d)
   if (d.kind === 'project_create') return projectCreateQuestion(d)
   if (d.kind === 'agent_start') return agentStartQuestion(d)
-  if (d.kind === 'centralu_update') return `Allow this session to ${d.action === 'check' ? 'check for' : 'install'} a Centralu update?`
+  if (d.kind === 'centralu_update') return centraluUpdateQuestion(d)
   return d.raw
 }

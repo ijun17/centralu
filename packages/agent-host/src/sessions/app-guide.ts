@@ -137,7 +137,9 @@ a newer local build (<base>.local.N) waiting to be applied, which is kept; the l
 Once installed, the desktop app offers "Apply now": it relaunches into the new version, and running
 agents, terminals and commands keep going. "Apply updates automatically when idle" (off by default)
 installs a new version without a click and applies it once no session is working or waiting, no
-terminal or command is running, and the person is not typing. With it on, a failed install is tried
+terminal or command is running, and the person is not typing. An agent can ask for the same Apply now
+(update_centralu, action apply): under auto it applies, under normal the person is asked on a card,
+under safe it is refused, and it never applies what the button would not offer. With it on, a failed install is tried
 again after 10 minutes, then 1 hour, then every 6 hours; the error stays until the next attempt.
 From the terminal: \`centralu update\`. \`centralu install --force\` replaces a kept local build.`,
 }

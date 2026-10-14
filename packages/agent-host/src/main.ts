@@ -28,6 +28,7 @@ import { storeRunLedger } from './app-run-ledger.js'
 import { storePermissionBook } from './app-permission-book.js'
 import { runtimeViewSource } from './app-view-source.js'
 import { onExternalAppListChanged } from './app-list-events.js'
+import { UpdateApplyBroker } from './update-apply.js'
 import { broadcastAppChanges, broadcastAppRuns } from './app-change-events.js'
 import { ThemeFiles } from './themes.js'
 import { TerminalService } from './dev-services/terminal.js'
@@ -358,6 +359,12 @@ const updates = new UpdateService((status) => events.push({ type: 'update_status
 })
 mgr.useUpdates(updates)
 /*
+ * An agent's "Apply now" (#665): the windows are asked over the event stream and answer by RPC (update-apply.ts). The
+ * server is made further down; it is only read once a call runs, after listen.
+ */
+const updateApply = new UpdateApplyBroker({ push: (e) => events.push(e), windows: () => server.clientCount })
+mgr.useUpdateApply(updateApply)
+/*
  * The installed agent CLIs, and moving idle sessions onto them (#297). "Move idle sessions to a newly installed agent
  * CLI" is on unless the person turned it off (the owner's decision, 2026-10-05): a restart only happens when nothing in
  * the session would be lost, the conversation continues through resume, and a line in the conversation says so.
@@ -515,6 +522,7 @@ const router: Router = new Router({
     machines: links,
     stopHost: launch.startedByServe && !launch.underKeeper ? () => stopFromRequest() : undefined,
     activity: () => activityCounts(activity()),
+    updateApply,
   }),
   machines: () => links.all(),
 })
@@ -525,7 +533,11 @@ const server = new HostServer({
   allowedOrigins,
   onRpc: router.handle,
   // A window's connection ended: the pinned views it leased wait for a claim, then close (#392, view-host.ts)
-  onClientGone: (client) => views.holderGone(client),
+  onClientGone: (client) => {
+    views.holderGone(client)
+    // A window told to relaunch closing is its relaunch; one that had not answered is one less to wait for (#665)
+    updateApply.clientGone(client)
+  },
   // Every HTTP route sits behind this secret (transport/http.ts)
   http: { secret: httpSecret, routes: views.routes },
   // Which build this is and where it came from, in every hello_ok (#280, keeper-link.ts)

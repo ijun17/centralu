@@ -103,6 +103,15 @@ export function agentStartQuestion(d: Extract<ApprovalDetail, { kind: 'agent_sta
 }
 
 /**
+ * The question an update card asks (#581, #665). Applying says what it does to the person's window: it relaunches,
+ * and the agents keep running.
+ */
+export function centraluUpdateQuestion(d: Extract<ApprovalDetail, { kind: 'centralu_update' }>): string {
+  if (d.action === 'apply') return 'Allow this session to apply the installed Centralu update? The window relaunches; running agents keep going.'
+  return `Allow this session to ${d.action === 'check' ? 'check for' : 'install'} a Centralu update?`
+}
+
+/**
  * The question a new-project card asks (#515) — the full path is the whole of what is being agreed to, so it is in
  * the sentence wherever the question stands: the card, the conversation row, a notification.
  */

@@ -331,6 +331,11 @@ export class HostServer {
     for (const ws of this.clients) this.sendTo(ws, frame)
   }
 
+  /** The connections that said hello with the front door's token: windows, and a hub linked to this host. Never a bridge */
+  get clientCount(): number {
+    return this.clients.size
+  }
+
   /** This host lifetime's id — sent in every `hello_ok` (#82) */
   get streamEpoch(): string {
     return this.log.streamEpoch

@@ -1,5 +1,5 @@
 import type { Attachment, NormalizedEvent, StoredMessage, SubagentStep } from '@cc/protocol'
-import { agentStartQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
+import { agentStartQuestion, centraluUpdateQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
 
 /**
  * The conversation transcript — the rows a session's conversation draws, and the pure rules that
@@ -279,7 +279,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
                       : e.detail.kind === 'agent_start'
                         ? agentStartQuestion(e.detail)
                         : e.detail.kind === 'centralu_update'
-                          ? `Allow this session to ${e.detail.action === 'check' ? 'check for' : 'install'} a Centralu update?`
+                          ? centraluUpdateQuestion(e.detail)
                         : e.detail.raw,
         },
       ]

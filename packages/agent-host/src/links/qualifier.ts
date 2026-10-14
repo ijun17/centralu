@@ -231,7 +231,10 @@ export class Qualifier {
     const sid = typeof e.sessionId === 'string' ? this.id(e.sessionId) : undefined
     const base: Obj = { ...e, ...(sid !== undefined ? { sessionId: sid } : {}) }
     switch (e.type) {
+      // Another machine's agent asking its own windows to apply (#665) must never relaunch the hub's window
       case 'update_status':
+      case 'update_apply_request':
+      case 'update_apply_go':
       case 'themes_changed':
       case 'app_state_changed':
       case 'agent_versions':

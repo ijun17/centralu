@@ -670,6 +670,18 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('update_status'), status: UpdateStatus }),
   /**
+   * An agent asked to apply the installed update (#665, `update_centralu` action "apply"): each window that hears this
+   * makes the checks its "Apply now" makes and answers with `updates.answerApply`. Nothing relaunches yet; a window
+   * the host picks is told so by `update_apply_go`. A replay of this event after the host stopped asking is answered
+   * with no ticket, so it starts nothing.
+   */
+  z.object({ ...appScoped, type: z.literal('update_apply_request'), requestId: z.string() }),
+  /**
+   * The one window holding `ticket` (from its `updates.answerApply`) relaunches now, through the same path as its
+   * "Apply now" button, and reports with `updates.reportApply`. Every other window ignores it: only one relaunches.
+   */
+  z.object({ ...appScoped, type: z.literal('update_apply_go'), requestId: z.string(), ticket: z.string() }),
+  /**
    * An external app's tool call finished (M4 A-4). Deliberately coarse: it never carries what
    * changed, only that the receiving side should refetch. An external app's state lives inside the
    * app process, so "refetch" means calling that app's state tool again (on screen this is surfaced
