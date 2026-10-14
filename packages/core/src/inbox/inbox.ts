@@ -1,10 +1,16 @@
 import type { SessionState } from '@cc/protocol'
 import { URGENCY, isWaiting } from '../session/state-machine.js'
-import { isUnread } from '../unread/unread.js'
+import { isUnread, type ReadTracked } from '../unread/unread.js'
 
 /**
  * The inbox is derived state (docs/state-management.md §3). It is never stored.
  * Order: urgency → unread → when the wait started, ascending (the longest wait first).
+ *
+ * **What is listed** (#669): approvals and errors while the session is in that state, and a
+ * `waiting_input` session only while it is unread. A finished turn the person has already read
+ * (or marked Done) needs nothing more, so it leaves the list; a new answer (a new `lastSeq`)
+ * makes it unread again and it returns. The list, the counters, the sidebar's folded summary and
+ * "next waiting" all ask `isListedWaiting`, so they cannot disagree.
  */
 
 export type InboxCandidate = {
@@ -25,9 +31,14 @@ export type InboxItem = InboxCandidate & {
   waitingMs: number
 }
 
+/** Does this session belong in the inbox and its counters? */
+export function isListedWaiting(s: { state: SessionState } & ReadTracked): boolean {
+  return s.state === 'waiting_input' ? isUnread(s) : isWaiting(s.state)
+}
+
 export function buildInbox(sessions: readonly InboxCandidate[], now: number): InboxItem[] {
   return sessions
-    .filter((s) => isWaiting(s.state))
+    .filter(isListedWaiting)
     .map((s) => ({
       ...s,
       unread: isUnread(s),
@@ -49,6 +60,7 @@ export type WaitingCounts = { approval: number; error: number; input: number }
 export function countWaiting(sessions: readonly InboxCandidate[]): WaitingCounts {
   const c: WaitingCounts = { approval: 0, error: 0, input: 0 }
   for (const s of sessions) {
+    if (!isListedWaiting(s)) continue
     if (s.state === 'waiting_approval') c.approval++
     else if (s.state === 'error') c.error++
     else if (s.state === 'waiting_input') c.input++

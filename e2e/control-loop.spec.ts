@@ -92,6 +92,15 @@ async function emitEvent(page: Page, sessionIdx: number, event: Record<string, u
   )
 }
 
+/**
+ * The session finishes a turn with an answer the person has not read: text, then the end of the turn.
+ * The inbox lists a finished turn only while it is unread (#669), and a bare `turn_complete` carries nothing to read.
+ */
+async function finishTurnUnread(page: Page, sessionIdx: number) {
+  await emitEvent(page, sessionIdx, { type: 'message_delta', role: 'assistant', text: 'done, over to you' })
+  await emitEvent(page, sessionIdx, { type: 'turn_complete' })
+}
+
 test('Registering a project shows it in the sidebar (T5-2)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await expect(page.getByTestId('project-alpha')).toBeVisible()
@@ -469,7 +478,7 @@ test('The global counter counts everything waiting as one, and brightness signal
   await newSession(page, 'alpha', 'B')
 
   await injectApproval(page, 0, { kind: 'command', command: 'x', cwd: '/tmp' })
-  await emitEvent(page, 1, { type: 'turn_complete' })
+  await finishTurnUnread(page, 1)
 
   const count = page.getByTestId('count-waiting')
   await expect(count).toContainText('02')
@@ -494,7 +503,7 @@ test('Control loop: clearing five waiting items using only the keyboard (T5-5 co
   // 2 approvals + 3 replies waiting
   await injectApproval(page, 0, { kind: 'command', command: 'npm run build', cwd: '/tmp/alpha' })
   await injectApproval(page, 3, { kind: 'command', command: 'pytest', cwd: '/tmp/beta' })
-  for (const idx of [1, 2, 4]) await emitEvent(page, idx, { type: 'turn_complete' })
+  for (const idx of [1, 2, 4]) await finishTurnUnread(page, idx)
 
   await expect(page.getByTestId('count-waiting')).toContainText('05')
 
@@ -658,7 +667,7 @@ test('The inbox shortcut works right after sending a message (regression: the co
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'task one')
   await newSession(page, 'alpha', 'task two')
-  for (const idx of [0, 1]) await emitEvent(page, idx, { type: 'turn_complete' })
+  for (const idx of [0, 1]) await finishTurnUnread(page, idx)
 
   // Actual usage order: after sending a message, focus stays in the composer. Do not click body.
   await page.keyboard.press('Meta+i')
@@ -670,13 +679,15 @@ test('The inbox shortcut works right after sending a message (regression: the co
   await expect(page.getByTestId('prompt-input')).toHaveValue('')
 
   /*
-    And `d` must **do nothing at all.** It used to archive the session, and the screen read
-    "Dismiss" — a key pressed to mean "I am not answering right now" permanently removed the
-    session from the list. An irreversible action must not hide behind a single letter.
+    And `d` must not archive the session. It used to, and the screen read "Dismiss" — a key pressed to
+    mean "I am not answering right now" permanently removed the session from the app. An irreversible
+    action must not hide behind a single letter. Now `d` is Done (#669): it marks the row under the cursor
+    read, which takes it off this list and nothing more. Both sessions are still there, and nothing typed.
   */
   await page.keyboard.press('d')
-  await expect(page.locator('[data-testid^="inbox-item-"]')).toHaveCount(2)
+  await expect(page.locator('[data-testid^="inbox-item-"]')).toHaveCount(1)
   await expect(page.getByTestId('prompt-input')).toHaveValue('')
+  expect(await page.evaluate(() => Object.keys((window as any).__store.getState().sessions).length)).toBe(2)
 })
 
 test('A failed send is not swallowed silently (regression: waiting on a session that had died)', async ({
@@ -946,7 +957,10 @@ test('Scrubbing up and down through 10 inbox items never pushes the cursor out o
   for (let i = 0; i < 10; i++) await newSession(page, 'alpha', `task ${i}`)
   await page.evaluate(() => {
     const m = (window as any).__mock
-    for (const id of m.sessions.keys()) m.emit({ type: 'turn_complete', sessionId: id })
+    for (const id of m.sessions.keys()) {
+      m.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'done, over to you' })
+      m.emit({ type: 'turn_complete', sessionId: id })
+    }
   })
 
   await page.keyboard.press('Meta+i')
@@ -8876,7 +8890,10 @@ test('The orchestrator is still the orchestrator screen when entered via the inb
     () => [...(window as any).__mock.sessions.values()].find((s: any) => s.projectId === null).id,
   )
   await page.evaluate((id: string) => {
-    ;(window as any).__mock.emit({ type: 'state_change', sessionId: id, state: 'waiting_input' })
+    const m = (window as any).__mock
+    // An answer to read: the inbox lists a finished turn only while it is unread (#669)
+    m.emit({ type: 'message_delta', sessionId: id, role: 'assistant', text: 'here is the status' })
+    m.emit({ type: 'state_change', sessionId: id, state: 'waiting_input' })
   }, orc)
 
   // While looking elsewhere — switch over to the session screen

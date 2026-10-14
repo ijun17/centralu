@@ -1,4 +1,5 @@
 import type { SessionState } from '@cc/protocol'
+import { isListedWaiting, type ReadTracked } from '@cc/core'
 
 /**
  * What a folded project's name line says in place of the sessions it hides (#205).
@@ -23,10 +24,14 @@ export const FOLD_SUMMARY_STATES = ['waiting_approval', 'error', 'waiting_input'
 export type FoldSummaryState = (typeof FOLD_SUMMARY_STATES)[number]
 
 export function foldSummary(
-  sessions: readonly { state: SessionState }[],
+  sessions: readonly ({ state: SessionState } & ReadTracked)[],
 ): { state: FoldSummaryState; count: number }[] {
   const counts = new Map<SessionState, number>()
-  for (const s of sessions) counts.set(s.state, (counts.get(s.state) ?? 0) + 1)
+  for (const s of sessions) {
+    // Waiting states follow the inbox rule (#669): a read `waiting_input` session is not "waiting on me"
+    if (s.state === 'waiting_input' && !isListedWaiting(s)) continue
+    counts.set(s.state, (counts.get(s.state) ?? 0) + 1)
+  }
   return FOLD_SUMMARY_STATES.flatMap((state) => {
     const count = counts.get(state) ?? 0
     return count > 0 ? [{ state, count }] : []

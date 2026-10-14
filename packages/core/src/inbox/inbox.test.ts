@@ -6,7 +6,8 @@ const NOW = 1_000_000
 
 const s = (id: string, state: SessionState, opts: Partial<InboxCandidate> = {}): InboxCandidate => ({
   id, projectId: 'p1', name: id, state,
-  waitingSince: NOW - 60_000, lastSeq: 1, lastReadSeq: 1, ...opts,
+  // Unread by default, so a `waiting_input` session is listed unless a test reads it (#669)
+  waitingSince: NOW - 60_000, lastSeq: 2, lastReadSeq: 1, ...opts,
 })
 
 describe('inbox order (FR-15)', () => {
@@ -16,11 +17,33 @@ describe('inbox order (FR-15)', () => {
   })
 
   it('within the same urgency, unread comes first', () => {
+    // Approvals keep a read one listed (#669), so the order is observable here
+    const inbox = buildInbox(
+      [s('read', 'waiting_approval', { lastSeq: 5, lastReadSeq: 5 }), s('unread', 'waiting_approval', { lastSeq: 5, lastReadSeq: 2 })],
+      NOW,
+    )
+    expect(inbox.map((i) => i.id)).toEqual(['unread', 'read'])
+  })
+
+  it('lists a waiting_input session only while unread (#669)', () => {
     const inbox = buildInbox(
       [s('read', 'waiting_input', { lastSeq: 5, lastReadSeq: 5 }), s('unread', 'waiting_input', { lastSeq: 5, lastReadSeq: 2 })],
       NOW,
     )
-    expect(inbox.map((i) => i.id)).toEqual(['unread', 'read'])
+    expect(inbox.map((i) => i.id)).toEqual(['unread'])
+  })
+
+  it('a new answer (a new lastSeq) lists a read waiting_input session again (#669)', () => {
+    expect(buildInbox([s('a', 'waiting_input', { lastSeq: 5, lastReadSeq: 5 })], NOW)).toHaveLength(0)
+    expect(buildInbox([s('a', 'waiting_input', { lastSeq: 6, lastReadSeq: 5 })], NOW).map((i) => i.id)).toEqual(['a'])
+  })
+
+  it('approvals and errors stay listed even when read (#669)', () => {
+    const inbox = buildInbox(
+      [s('ap', 'waiting_approval', { lastSeq: 5, lastReadSeq: 5 }), s('er', 'error', { lastSeq: 5, lastReadSeq: 5 })],
+      NOW,
+    )
+    expect(inbox.map((i) => i.id)).toEqual(['ap', 'er'])
   })
 
   it('with the same urgency and the same read state, the longest wait comes first', () => {
@@ -62,6 +85,16 @@ describe('global counters (FR-12: never summed)', () => {
       s('4', 'waiting_input'), s('5', 'waiting_input'), s('6', 'working'), s('7', 'error'),
     ])
     expect(c).toEqual({ approval: 2, error: 1, input: 3 })
+  })
+
+  it('counts a waiting_input session only while unread; approvals and errors always (#669)', () => {
+    const c = countWaiting([
+      s('1', 'waiting_input', { lastSeq: 4, lastReadSeq: 4 }),
+      s('2', 'waiting_input', { lastSeq: 5, lastReadSeq: 4 }),
+      s('3', 'waiting_approval', { lastSeq: 4, lastReadSeq: 4 }),
+      s('4', 'error', { lastSeq: 4, lastReadSeq: 4 }),
+    ])
+    expect(c).toEqual({ approval: 1, error: 1, input: 1 })
   })
 })
 

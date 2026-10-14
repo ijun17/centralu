@@ -25,9 +25,12 @@ export function Inbox() {
   useFocusReturn(open)
   const toggle = useStore((s) => s.toggleInbox)
   const focusSession = useStore((s) => s.focusSession)
+  const markRead = useStore((s) => s.markRead)
   const projects = useStore((s) => s.projects)
   const items = useInbox(Date.now())
-  const [cursor, setCursor] = useState(0)
+  const [rawCursor, setCursor] = useState(0)
+  // Done removes a row, so the cursor can end up past the end: keep it on the last row
+  const cursor = Math.min(rawCursor, Math.max(items.length - 1, 0))
   const panelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -51,13 +54,17 @@ export function Inbox() {
           focusSession(item.id, { preferGrid: true })
           toggle(false)
         }
+      } else if (letter === 'd' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        // Done (#669): marks a finished turn read without opening it. Approvals and errors have no Done.
+        const item = items[cursor]
+        if (item?.state === 'waiting_input') void markRead(item.id)
       } else if (e.key === 'Escape') toggle(false)
       else return
       e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, items, cursor, focusSession, toggle])
+  }, [open, items, cursor, focusSession, toggle, markRead])
 
   if (!open) return null
 
@@ -85,6 +92,7 @@ export function Inbox() {
             <Kbd>↑</Kbd>
             <Kbd>↓</Kbd> Move
             <Kbd>↵</Kbd> Open
+            <Kbd>D</Kbd> Done
             <Kbd>esc</Kbd> Close
           </span>
         </header>
@@ -97,11 +105,14 @@ export function Inbox() {
         ) : (
           <ul className="max-h-[calc(56vh/var(--text-zoom))] overflow-y-auto">
             {items.map((it, i) => (
-              <li key={it.id}>
+              <li
+                key={it.id}
+                className={`flex items-center border-l-2 transition-colors ${
+                  i === cursor ? 'border-l-ink-muted bg-surface-hover/40' : 'border-l-transparent hover:bg-surface-hover/20'
+                }`}
+              >
                 <button
-                  className={`flex w-full items-center gap-2.5 border-l-2 py-2 pl-3 pr-4 text-left transition-colors ${
-                    i === cursor ? 'border-l-ink-muted bg-surface-hover/40' : 'border-l-transparent hover:bg-surface-hover/20'
-                  }`}
+                  className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-4 text-left"
                   onClick={() => {
                     focusSession(it.id, { preferGrid: true })
                     toggle(false)
@@ -129,6 +140,17 @@ export function Inbox() {
                     <WaitingTime since={it.waitingSince} />
                   </span>
                 </button>
+                {/* Done (#669): the answer was read elsewhere or needs nothing more; marks it read without opening it */}
+                {it.state === 'waiting_input' && (
+                  <button
+                    className="mr-3 shrink-0 rounded border border-line px-2 py-0.5 text-xs text-ink-muted hover:bg-surface-hover hover:text-ink"
+                    onClick={() => void markRead(it.id)}
+                    aria-label={`Done: ${it.name}`}
+                    data-testid={`inbox-done-${it.id}`}
+                  >
+                    Done
+                  </button>
+                )}
               </li>
             ))}
           </ul>
