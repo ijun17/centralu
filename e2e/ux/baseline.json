@@ -331,18 +331,18 @@
       "task": "Answer a question an agent asked in another session",
       "path": "mouse",
       "access": "discoverable",
-      "operators": "H M P B B M P B B",
+      "operators": "H M P B B M P B B M P B B",
       "counts": {
         "K": 0,
-        "P": 2,
-        "B": 4,
+        "P": 3,
+        "B": 6,
         "H": 1,
-        "M": 2,
+        "M": 3,
         "R": 2
       },
-      "seconds": 5.42,
-      "waitMs": 4,
-      "travelPx": 1005,
+      "seconds": 8.04,
+      "waitMs": 8,
+      "travelPx": 1332,
       "steps": [
         {
           "kind": "click",
@@ -360,7 +360,7 @@
           "label": "the question",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 2
+          "waitMs": 4
         },
         {
           "kind": "click",
@@ -369,7 +369,7 @@
           "seconds": 2.46,
           "pointer": {
             "D": 475,
-            "W": 403,
+            "W": 404,
             "ID": 1.12
           },
           "choice": {
@@ -379,11 +379,22 @@
           }
         },
         {
+          "kind": "click",
+          "label": "question-submit",
+          "operators": "M P B B",
+          "seconds": 2.62,
+          "pointer": {
+            "D": 327,
+            "W": 60,
+            "ID": 2.68
+          }
+        },
+        {
           "kind": "wait",
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 2
+          "waitMs": 4
         }
       ],
       "notes": [

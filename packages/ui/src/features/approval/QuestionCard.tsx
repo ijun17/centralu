@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { Question, QuestionAnswer } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 
@@ -55,6 +55,11 @@ export function QuestionCard({
   const [otherText, setOtherText] = useState<Record<number, string>>({})
   const [active, setActive] = useState(0)
   const [sending, setSending] = useState(false)
+  /*
+   * `sending` is state, so two clicks (or a click and Enter) handled before React re-renders
+   * would both still read it as false. The ref changes at once and gates every send.
+   */
+  const inFlight = useRef(false)
 
   const toggle = (qi: number, label: string, multi: boolean) => {
     setPicked((p) => {
@@ -85,13 +90,19 @@ export function QuestionCard({
   const quick = answersOnPick(questions)
 
   const send = async (answers: QuestionAnswer[]) => {
+    if (inFlight.current) return
+    inFlight.current = true
     setSending(true)
-    await answer(sessionId, requestId, answers)
-    setSending(false)
+    try {
+      await answer(sessionId, requestId, answers)
+    } finally {
+      inFlight.current = false
+      setSending(false)
+    }
   }
 
   const submit = async () => {
-    if (!ready || sending) return
+    if (!ready) return
     await send(
       questions.map((q, i) => ({
         question: q.question,
@@ -108,7 +119,7 @@ export function QuestionCard({
    */
   const pick = (qi: number, label: string, multi: boolean) => {
     if (quick) {
-      if (sending) return
+      if (inFlight.current) return
       toggle(qi, label, multi)
       void send([{ question: questions[qi]!.question, answers: [label] }])
       return

@@ -7275,6 +7275,40 @@ test('Enter on a focused option of a single-choice question answers it (#543)', 
   await expect(page.getByTestId('question-card')).toHaveCount(0)
 })
 
+test('Two clicks, or a click and Enter, on a single-choice option send one answer even on a slow host (#543)', async ({
+  page,
+}) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'q')
+  // A host that takes its time: the card stays up while the answer is on its way
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    const calls: unknown[] = []
+    ;(window as any).__answerCalls = calls
+    const real = m.agents.answerQuestion.bind(m.agents)
+    m.agents.answerQuestion = async (...args: unknown[]) => {
+      calls.push(args)
+      await new Promise((r) => setTimeout(r, 400))
+      return real(...args)
+    }
+  })
+  await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
+
+  // Both land before React has re-rendered, so state alone could not tell the second one apart
+  await page.getByTestId('question-option').filter({ hasText: 'Kimbap' }).evaluate((el) => {
+    ;(el as HTMLButtonElement).click()
+    ;(el as HTMLButtonElement).click()
+  })
+  // A later click on the other option and Enter on the first one, still while it is sending
+  await page.getByTestId('question-option').filter({ hasText: 'Ramen' }).click()
+  await page.keyboard.press('Enter')
+
+  await expect(page.getByTestId('chat-stream')).toContainText('Answer received: Kimbap')
+  await expect(page.getByTestId('question-card')).toHaveCount(0)
+  expect(await page.evaluate(() => (window as any).__answerCalls.length)).toBe(1)
+  await expect(page.getByTestId('chat-stream')).not.toContainText('Answer received: Ramen')
+})
+
 test('A single-choice question still opens "Other" without sending, and Answer sends the typed text (#543)', async ({
   page,
 }) => {
