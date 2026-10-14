@@ -13,7 +13,8 @@ import type { ApprovalDetail, ApprovalScope } from '@cc/protocol'
  * edit, several files, a command that was too long) back as "needs checking". When the strip itself was
  * removed (the user's request, 2026-09-10 — every time it appeared or disappeared, the whole screen was
  * pushed around), the question that rule answered went with it. An approval is now answered **on that
- * session's card**: the inbox takes you there.
+ * session's card**, or, where the card's question is a plain yes or no, on the waiting list's or the sidebar's row
+ * that shows it (#543, `answersInPlace` below).
  */
 
 /*
@@ -116,4 +117,25 @@ export function projectCreateQuestion(d: Extract<ApprovalDetail, { kind: 'projec
   const where = d.machine ? `${d.path} on ${d.machine}` : d.path
   if (d.source) return `Clone ${d.source.git}${d.source.branch ? ` (${d.source.branch})` : ''} into ${where} and add it as the project ${d.name}?`
   return `Make the empty folder ${where} and add it as the project ${d.name}?`
+}
+
+/**
+ * Whether a waiting approval can be answered from a list row (#543): the waiting list's row and the sidebar's row
+ * offer Allow and Deny without opening the session, and only for a card whose question is a plain yes or no that one
+ * line states whole.
+ *
+ * - A **command** and a **single-file edit**: the line is the command or the path, the tooltip the card's whole text.
+ *   Their card's "Always allow" is not on the row: what it remembers is the card's to show (the pattern, the scope).
+ * - Everything else opens the session instead. Starting an agent and reaching another project carry scopes and
+ *   consequences the card spells out (the permissions, an untrusted target); an edit of several files is more than one
+ *   path; an app's capability is remembered for good; an update relaunches things; a new project makes a folder; and
+ *   `other` is a tool nobody here knows how to read.
+ * - **Anything else pending** in the session (a question beside the approval) also opens it: one answer from a row
+ *   would leave the person not knowing what the agent goes on to do with the other.
+ */
+export function answersInPlace(detail: ApprovalDetail, otherPending = 0): boolean {
+  if (otherPending > 0) return false
+  if (detail.kind === 'command') return true
+  if (detail.kind === 'file_edit') return !detail.multi
+  return false
 }

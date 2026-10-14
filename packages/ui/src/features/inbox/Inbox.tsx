@@ -7,6 +7,7 @@ import { letterOf } from '../../app/keys.js'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import { Kbd, StateDot, formatWaiting, waitingTone } from '../../components/primitives.jsx'
 import { SessionMachineTag } from '../machines/MachineTag.jsx'
+import { RowApproval, rowAnswerFor, useRowsSettled } from '../approval/RowApproval.jsx'
 
 /**
  * The inbox (FR-15) — the entry point for coming back to the desk.
@@ -26,12 +27,15 @@ export function Inbox() {
   const toggle = useStore((s) => s.toggleInbox)
   const focusSession = useStore((s) => s.focusSession)
   const markRead = useStore((s) => s.markRead)
+  const respondApproval = useStore((s) => s.respondApproval)
   const projects = useStore((s) => s.projects)
   const items = useInbox(Date.now())
   const [rawCursor, setCursor] = useState(0)
   // Done removes a row, so the cursor can end up past the end: keep it on the last row
   const cursor = Math.min(rawCursor, Math.max(items.length - 1, 0))
   const panelRef = useRef<HTMLDivElement>(null)
+  // No row answers an approval while the list is still moving (#543): the order is part of what moves it
+  const settled = useRowsSettled(items.map((it) => it.id).join('|'))
 
   useEffect(() => {
     if (!open) return
@@ -58,13 +62,22 @@ export function Inbox() {
         // Done (#669): marks a finished turn read without opening it. Approvals and errors have no Done.
         const item = items[cursor]
         if (item?.state === 'waiting_input') void markRead(item.id)
+      } else if ((letter === 'y' || letter === 'n') && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        /*
+         * Allow and Deny on the row under the cursor (#543), the approval card's own letters. Only a row that offers
+         * them (`rowAnswerFor`), with the request id it shows, and not while the rows are moving or on a held key: the
+         * row that slid under the cursor is not the one the person read.
+         */
+        const item = items[cursor]
+        const answer = item && settled && !e.repeat ? rowAnswerFor(useStore.getState().sessions[item.id]) : null
+        if (item && answer) void respondApproval(item.id, answer.requestId, letter === 'y' ? 'allow' : 'deny')
       } else if (e.key === 'Escape') toggle(false)
       else return
       e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, items, cursor, focusSession, toggle, markRead])
+  }, [open, items, cursor, focusSession, toggle, markRead, respondApproval, settled])
 
   if (!open) return null
 
@@ -107,49 +120,64 @@ export function Inbox() {
             {items.map((it, i) => (
               <li
                 key={it.id}
-                className={`flex items-center border-l-2 transition-colors ${
+                className={`border-l-2 transition-colors ${
                   i === cursor ? 'border-l-ink-muted bg-surface-hover/40' : 'border-l-transparent hover:bg-surface-hover/20'
                 }`}
               >
-                <button
-                  className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-4 text-left"
-                  onClick={() => {
-                    focusSession(it.id, { preferGrid: true })
-                    toggle(false)
-                  }}
-                  data-testid={`inbox-item-${it.id}`}
-                >
-                  <StateDot state={it.state} />
-                  <span className={`truncate text-md ${it.unread ? 'text-ink' : 'text-ink-muted'}`}>
-                    {it.name}
-                  </span>
-                  <span className="truncate text-xs text-ink-faint">
-                    {(it.projectId ? projects[it.projectId]?.name : 'Orchestrator') ?? ''}
-                  </span>
-                  {/* Which machine it waits on (#82): an approval answered here acts there */}
-                  <SessionMachineTag sessionId={it.id} testId={`inbox-machine-${it.id}`} />
-                  <span className="ml-auto flex shrink-0 items-center gap-2.5">
-                    <span className="text-xs text-ink-faint">
-                      {it.state === 'waiting_approval'
-                        ? 'Needs approval'
-                        : it.state === 'error'
-                          ? 'Error'
-                          : 'Waiting for input'}
-                    </span>
-                    {/* The longer the wait, the brighter it gets — time pressure is stated without any new shape */}
-                    <WaitingTime since={it.waitingSince} />
-                  </span>
-                </button>
-                {/* Done (#669): the answer was read elsewhere or needs nothing more; marks it read without opening it */}
-                {it.state === 'waiting_input' && (
+                <div className="flex items-center">
                   <button
-                    className="mr-3 shrink-0 rounded border border-line px-2 py-0.5 text-xs text-ink-muted hover:bg-surface-hover hover:text-ink"
-                    onClick={() => void markRead(it.id)}
-                    aria-label={`Done: ${it.name}`}
-                    data-testid={`inbox-done-${it.id}`}
+                    className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-4 text-left"
+                    onClick={() => {
+                      focusSession(it.id, { preferGrid: true })
+                      toggle(false)
+                    }}
+                    data-testid={`inbox-item-${it.id}`}
                   >
-                    Done
+                    <StateDot state={it.state} />
+                    <span className={`truncate text-md ${it.unread ? 'text-ink' : 'text-ink-muted'}`}>
+                      {it.name}
+                    </span>
+                    <span className="truncate text-xs text-ink-faint">
+                      {(it.projectId ? projects[it.projectId]?.name : 'Orchestrator') ?? ''}
+                    </span>
+                    {/* Which machine it waits on (#82): an approval answered here acts there */}
+                    <SessionMachineTag sessionId={it.id} testId={`inbox-machine-${it.id}`} />
+                    <span className="ml-auto flex shrink-0 items-center gap-2.5">
+                      <span className="text-xs text-ink-faint">
+                        {it.state === 'waiting_approval'
+                          ? 'Needs approval'
+                          : it.state === 'error'
+                            ? 'Error'
+                            : 'Waiting for input'}
+                      </span>
+                      {/* The longer the wait, the brighter it gets — time pressure is stated without any new shape */}
+                      <WaitingTime since={it.waitingSince} />
+                    </span>
                   </button>
+                  {/* Done (#669): the answer was read elsewhere or needs nothing more; marks it read without opening it */}
+                  {it.state === 'waiting_input' && (
+                    <button
+                      className="mr-3 shrink-0 rounded border border-line px-2 py-0.5 text-xs text-ink-muted hover:bg-surface-hover hover:text-ink"
+                      onClick={() => void markRead(it.id)}
+                      aria-label={`Done: ${it.name}`}
+                      data-testid={`inbox-done-${it.id}`}
+                    >
+                      Done
+                    </button>
+                  )}
+                </div>
+                {/* What the approval asks, and Allow / Deny where the card's question is a plain yes or no (#543) */}
+                {it.state === 'waiting_approval' && (
+                  <RowApproval
+                    sessionId={it.id}
+                    place="inbox"
+                    keys={i === cursor}
+                    settled={settled}
+                    onOpen={() => {
+                      focusSession(it.id, { preferGrid: true })
+                      toggle(false)
+                    }}
+                  />
                 )}
               </li>
             ))}

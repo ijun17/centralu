@@ -1836,6 +1836,19 @@ export class MockPlatform implements Platform {
       decision: ApprovalDecision,
       scope?: ApprovalScope,
     ) => {
+      /*
+       * The host's rule (manager.respondApproval): an answer lands only on the request it names. One the session no
+       * longer holds (the process restarted, or a newer request replaced it) is removed and refused, never applied
+       * to whatever is pending now, so a row or a card drawn from an old request cannot answer a newer one (#543).
+       */
+      const held = this.sessions.get(sessionId)
+      if (held && held.pendingApproval?.requestId !== requestId) {
+        this.emit({ type: 'approval_resolved', sessionId, requestId, decision: 'deny' })
+        throw Object.assign(
+          new Error('That approval request is already gone (the agent restarted). The command was not run.'),
+          { code: 'approval_gone' },
+        )
+      }
       this.approvalAnswers.push({ sessionId, requestId, decision })
       this.approvalScopes.push(scope ?? null)
       this.emit({ type: 'approval_resolved', sessionId, requestId, decision })
@@ -3002,6 +3015,15 @@ export class MockPlatform implements Platform {
   requestApproval(sessionId: string, detail: ApprovalDetail, requestId = `req-${++this.idc}`): string {
     this.emit({ type: 'approval_request', sessionId, requestId, detail })
     return requestId
+  }
+
+  /**
+   * Scenario helper (#543): the host has moved on to another request whose event has not reached the window yet. The
+   * session's record holds the new one; nothing is emitted, so the screen still shows the old request.
+   */
+  replaceApprovalUnseen(sessionId: string, detail: ApprovalDetail, requestId: string): void {
+    const s = this.sessions.get(sessionId)
+    if (s) s.pendingApproval = { requestId, detail }
   }
 }
 

@@ -304,15 +304,15 @@ export function sidebarSelectionTests(): void {
         'asks you',
       )
       await expect(project.getByTestId(`session-row-${removedAppAgent}`)).toContainText('Gone · agent 09:00')
-      await expect(project.getByTestId(`session-row-${startedAgent}`).locator('xpath=..')).toHaveAttribute(
+      await expect(project.getByTestId(`session-row-${startedAgent}`).locator('xpath=ancestor::li[1]')).toHaveAttribute(
         'data-nested',
         'true',
       )
-      await expect(project.getByTestId(`session-row-${worktree}`).locator('xpath=..')).toHaveAttribute(
+      await expect(project.getByTestId(`session-row-${worktree}`).locator('xpath=ancestor::li[1]')).toHaveAttribute(
         'data-nested',
         'true',
       )
-      await expect(apps.getByTestId(`app-session-row-${builderChild}`).locator('xpath=..')).toHaveAttribute(
+      await expect(apps.getByTestId(`app-session-row-${builderChild}`).locator('xpath=ancestor::li[1]')).toHaveAttribute(
         'data-nested',
         '2',
       )

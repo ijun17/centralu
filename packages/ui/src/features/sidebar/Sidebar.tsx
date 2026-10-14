@@ -28,6 +28,7 @@ import { AppIcon, ChevronIcon, CrownIcon, DotsIcon, ImportIcon, PlusIcon, Search
 import { isRemoteUserApp, useMachineApps, useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { isAway } from '@cc/core'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
+import { RowApproval } from '../approval/RowApproval.jsx'
 import { AddRemoteProjectDialog } from '../machines/AddRemoteProjectDialog.jsx'
 import { useRemoteIde } from '../machines/remoteIde.js'
 import type { ExternalAppStatus } from '@cc/protocol'
@@ -171,6 +172,7 @@ function SessionRow({
   nested,
   level,
   children,
+  below,
 }: {
   id: string
   /** Carried in the drag, so the project screen can tell its own sessions from another project's (reorder.ts) */
@@ -196,6 +198,11 @@ function SessionRow({
    */
   level: 1 | 2 | 3
   children: ReactNode
+  /**
+   * A second line under the row (#543: what its approval asks, with Allow and Deny). The row's own line is a box of
+   * its own, so the chevron in the gutter and the ⋯ at the right edge stay centred on it, not on both lines.
+   */
+  below?: ReactNode
 }) {
   const drop = useDropLine(SESSION_MIME, onReorder)
   return (
@@ -211,7 +218,8 @@ function SessionRow({
       }}
       {...drop.handlers}
     >
-      {children}
+      <div className="relative">{children}</div>
+      {below}
     </li>
   )
 }
@@ -240,6 +248,15 @@ const DROP_LINE = 'after:pointer-events-none after:absolute after:inset-x-0 afte
 function dropLine(edge: 'top' | 'bottom' | null): string {
   if (!edge) return ''
   return `${DROP_LINE} ${edge === 'top' ? 'after:-top-px' : 'after:-bottom-px'}`
+}
+
+/**
+ * The line under a session's row while it waits on an approval (#543): what it asks, and Allow / Deny where its card's
+ * question is a plain yes or no (`RowApproval`). Only while it waits, and not while the name is being edited.
+ */
+function approvalLine(s: SessionSummary, renaming: string | null, open: () => void): ReactNode {
+  if (s.state !== 'waiting_approval' || !s.pendingApproval || renaming === s.id) return null
+  return <RowApproval sessionId={s.id} place="sidebar" onOpen={open} />
 }
 
 /** The observation lane — high density, using as little space as possible (docs/architecture.md design principle 1) */
@@ -861,6 +878,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                 projectId={projectId}
                 nested={nested}
                 level={nested ? 2 : 1}
+                below={approvalLine(s, renaming, () => focusSession(s.id))}
                 /*
                  * A child row cannot be dragged — position is membership (#69). Letting a row
                  * drawn indented under a parent be moved by hand would make the new position read
@@ -1192,6 +1210,7 @@ function ProjectAppSessions({ sessions, projectId, folded }: { sessions: Session
         projectId={projectId}
         nested={nested ? 2 : 1}
         level={nested ? 3 : 2}
+        below={approvalLine(s, renaming, () => focusSession(s.id))}
         draggable={renaming !== s.id && !nested}
         onReorder={() => {}}
       >
@@ -1349,6 +1368,7 @@ function UserAppSessions({ sessions: own }: { sessions: SessionSummary[] }) {
           <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} />
           <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
         </button>
+        {approvalLine(s, null, () => focusSession(s.id))}
       </li>
     )
   })

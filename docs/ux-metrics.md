@@ -212,8 +212,8 @@ the keyboard. Since #529 every core task has a discoverable path, and the paths 
 | Task | Path | Operators | K | P | B | H | M | Ops | KLM s | Travel px |
 |---|---|---|---|---|---|---|---|---|---|---|
 | Start a new session and give it its first instruction | mouse (the open project's +, #529; since #543 it starts the session at once) | `H M P B B H 18K M K` | 19 | 1 | 2 | 2 | 2 | 26 | 10.27 | 534 |
-| Answer an approval waiting in another session | mouse (sidebar) | `H M P B B M P B B` | 0 | 2 | 4 | 1 | 2 | 9 | 5.56 | 741 |
-|  | mouse (waiting list) | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.35 | 1050 |
+| Answer an approval waiting in another session | mouse (Allow on its sidebar row, #543) | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.14 | 586 |
+|  | mouse (Allow on its waiting-list row, #543) | `H M P B B M P B B` | 0 | 2 | 4 | 1 | 2 | 9 | 5.83 | 982 |
 | Answer an approval while typing a message in its session | mouse (the card's Allow, keyboard still in the composer) | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.01 | 357 |
 | Switch to another session by name | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.92 | 525 |
 | Switch back to the session you were just in | mouse (the top bar's back arrow) | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.21 | 663 |
@@ -231,6 +231,7 @@ the keyboard. Since #529 every core task has a discoverable path, and the paths 
 |---|---|---|---|---|---|---|---|---|---|---|
 | Start a new session and give it its first instruction | keyboard (palette, New session) | `M 8K M 19K M K` | 28 | 0 | 0 | 0 | 3 | 31 | 11.89 | 0 |
 | Answer an approval waiting in another session | keyboard (⌘⇧A, y) | `M 3K M K` | 4 | 0 | 0 | 0 | 2 | 6 | 3.82 | 0 |
+|  | keyboard (⌘I, y on the waiting list's row, #543) | `M K K M K` | 3 | 0 | 0 | 0 | 2 | 5 | 3.54 | 0 |
 | Answer an approval while typing a message in its session | keyboard (⌘⇧Y from the composer) | `M 3K` | 3 | 0 | 0 | 0 | 1 | 4 | 2.19 | 0 |
 | Switch to another session by name | keyboard (palette) | `M 7K M K` | 8 | 0 | 0 | 0 | 2 | 10 | 4.94 | 0 |
 | Switch back to the session you were just in | keyboard (back) | `M K K` | 2 | 0 | 0 | 0 | 1 | 3 | 1.91 | 0 |
@@ -261,9 +262,10 @@ What the baseline shows:
 - **Picking a machine from the ssh config (#514) is 6.7 s cheaper than typing it**: 17 operators
   against 43. The typed form moves the hand between the keyboard and the mouse five times (2 s of H
   alone).
-- **The waiting list, the way the app points to an approval out of sight, costs 8.4 s by mouse**,
-  against 5.6 s for the sidebar row when it is in sight. The keys (`⌘⇧A`, `y`: 3.8 s) are the
-  expert's answer, not the task's.
+- **The waiting list, the way the app points to an approval out of sight, cost 8.4 s by mouse**,
+  against 5.6 s for the sidebar row when it is in sight: both opened the session to reach the card's
+  Allow. Since #543 the rows show the command and answer it in place: 5.8 s and 3.1 s. The keys
+  (`⌘⇧A`, `y`: 3.8 s; `⌘I`, `y`: 3.5 s) are the expert's answer, not the task's.
 
 ## Audit 2026-10
 
@@ -327,8 +329,8 @@ that changes is re-priced by Fitts's law. Each is a proposal, not a decision.
 
 | Rank | Task (path) | Now: ops · KLM s · M · travel px | What costs | Proposed change | After: ops · KLM s (Δ) | Often | Work |
 |---|---|---|---|---|---|---|---|
-| 1 | Answer an approval (`approve.mouse-inbox`) | 13 · 8.35 · 3 · 1050 | The waiting list only navigates: open the list, pick the row, then find Allow in the card (`M P B B` three times) | Allow and Deny on each waiting-list row, with the command it asks about shown in the row | 9 · 5.85 (−2.50) | H | UI only (the waiting session already carries its approval) |
-| 2 | Answer an approval (`approve.mouse`) | 9 · 5.56 · 2 · 741 | The sidebar row only opens the session; Allow is a second pointing across the window | An Allow / Deny pair on a waiting row in the sidebar (only while it waits), the command in its tooltip | 5 · ~3.1 (−2.4) | H | UI only |
+| 1 (built, #543: 5.83 s) | Answer an approval (`approve.mouse-inbox`) | 13 · 8.35 · 3 · 1050 | The waiting list only navigates: open the list, pick the row, then find Allow in the card (`M P B B` three times) | Allow and Deny on each waiting-list row, with the command it asks about shown in the row | 9 · 5.85 (−2.50) | H | UI only (the waiting session already carries its approval) |
+| 2 (built, #543: 3.14 s; the command on a line under the row, not only in a tooltip) | Answer an approval (`approve.mouse`) | 9 · 5.56 · 2 · 741 | The sidebar row only opens the session; Allow is a second pointing across the window | An Allow / Deny pair on a waiting row in the sidebar (only while it waits), the command in its tooltip | 5 · ~3.1 (−2.4) | H | UI only |
 | 3 | Start a new session (`new-session.mouse`) | 30 · 12.98 · 3 · 1198 | The `+` opens a dialog whose only step in the common case is Start (`M P B B`, 2.72 s) | One click on `+` starts a session with the last-used tool and no worktree; the dialog moves behind a "…" beside it (partly done: #529 made the `+` visible; **done in #543**, where the "…" is a chevron beside the `+` and the budget is 26 operators, M 2, 10.6 s) | 26 · 10.26 (−2.72) | H | UI only (the tool from the project's last session) |
 | 4 | Send a message to another session (`send-to-session.mouse`) | 36 · 13.39 · 2 · 1141 | Clicking a session's row leaves the keyboard on the row: a `P B B` into the composer before typing | A click on a row (not arrowing through rows) gives the composer the keyboard, as the palette does since #528 | 33 · 11.95 (−1.44) | H | UI only |
 | 5 | Answer a question (`answer-question.mouse`) | 13 · 8.04 · 3 · 1332 (**done, #543**: now 9 · 5.42 · 2 · 1005) | Picking the option is the decision; Answer is a second one (`M P B B`, 2.62 s) | For a single question with one choice, clicking an option answers; Answer stays for several questions, multiple choice and "Other" | 9 · 5.42 (−2.62) | H | UI only |

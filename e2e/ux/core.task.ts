@@ -121,22 +121,30 @@ uxTask({
   },
 })
 
+/**
+ * The approval was allowed, by the request id the demo raised, and the session on screen is still the one the person
+ * was in: answering from a row (#543) does not open the session
+ */
+const allowedInPlace = async (page: Page) => {
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__mock.approvalAnswers.map((a: { requestId: string; decision: string }) => `${a.requestId}:${a.decision}`)))
+    .toEqual(['demo-approval:allow'])
+  await expect(page.getByTestId('session-name')).toHaveText(OPEN)
+}
+
 uxTask({
   id: 'approve.mouse',
   task: 'Answer an approval waiting in another session',
   path: 'mouse',
   access: 'discoverable',
+  notes: ["Allow on the session's sidebar row, under the command it asks to run (#543)"],
   start: demo,
   run: async (u, page) => {
-    await clickRow(u, page, APPROVING)
-    await u.until('the approval card', () => expect(page.getByTestId('approval-card')).toBeVisible())
-    await u.click(page.getByTestId('approve-allow'))
+    const id = await sessionId(page, APPROVING)
+    await u.click(page.getByTestId(`sidebar-approve-allow-${id}`), { label: `Allow on the sidebar row "${APPROVING}"` })
   },
-  goal: async (page) => {
-    await expect(page.getByTestId('session-name')).toHaveText(APPROVING)
-    await expect(page.getByTestId('approval-card')).toBeHidden()
-  },
-  budget: { operators: 9, M: 2, H: 1, seconds: 5.8 },
+  goal: allowedInPlace,
+  budget: { operators: 5, M: 1, H: 1, seconds: 3.3 },
 })
 
 uxTask({
@@ -144,21 +152,39 @@ uxTask({
   task: 'Answer an approval waiting in another session',
   path: 'mouse',
   access: 'discoverable',
-  notes: ['Through the waiting list (the top-bar count), the way the app points to it when the session is not in sight'],
+  notes: [
+    'Through the waiting list (the top-bar count), the way the app points to it when the session is not in sight',
+    "Allow on the row, under the command it asks to run (#543): the session is not opened",
+  ],
   start: demo,
   run: async (u, page) => {
     await u.click(page.getByTestId('counter'))
     await u.until('the waiting list', () => expect(page.getByTestId('inbox')).toBeVisible())
     const id = await sessionId(page, APPROVING)
-    await u.click(page.getByTestId(`inbox-item-${id}`), { among: page.locator('[data-testid^="inbox-item-"]'), label: `waiting-list row "${APPROVING}"` })
-    await u.until('the approval card', () => expect(page.getByTestId('approval-card')).toBeVisible())
-    await u.click(page.getByTestId('approve-allow'))
+    await u.click(page.getByTestId(`inbox-approve-allow-${id}`), {
+      among: page.locator('[data-testid^="inbox-item-"]'),
+      label: `Allow on the waiting-list row "${APPROVING}"`,
+    })
   },
-  goal: async (page) => {
-    await expect(page.getByTestId('session-name')).toHaveText(APPROVING)
-    await expect(page.getByTestId('approval-card')).toBeHidden()
+  goal: allowedInPlace,
+  budget: { operators: 9, M: 2, H: 1, seconds: 6.0 },
+})
+
+// The waiting list's y answers the row under its cursor (#543); the row prints it, but the list is opened by a key here
+uxTask({
+  id: 'approve.inbox-keyboard',
+  task: 'Answer an approval waiting in another session',
+  path: 'keyboard',
+  access: 'shortcut',
+  notes: ['⌘I / Ctrl+I opens the waiting list with its cursor on the approval (approvals come first); y allows it'],
+  start: demo,
+  run: async (u, page) => {
+    await u.press('ControlOrMeta+i')
+    const id = await sessionId(page, APPROVING)
+    await u.until('the row, ready to answer', () => expect(page.getByTestId(`inbox-approve-allow-${id}`)).toBeEnabled())
+    await u.press('y')
   },
-  budget: { operators: 13, M: 3, H: 1, seconds: 8.6 },
+  goal: allowedInPlace,
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -278,7 +304,7 @@ uxTask({
     await clickRow(u, page, DONE)
   },
   goal: backIn,
-  budget: { operators: 5, M: 1, H: 1, seconds: 3.1 },
+  budget: { operators: 5, M: 1, H: 1, seconds: 3.3 },
 })
 
 // ---------------------------------------------------------------------------------------------
@@ -423,7 +449,7 @@ uxTask({
     await u.click(page.getByTestId(`app-row-${NOTES}`))
   },
   goal: openedNotes,
-  budget: { operators: 5, M: 1, H: 1, seconds: 3.1 },
+  budget: { operators: 5, M: 1, H: 1, seconds: 3.3 },
 })
 
 uxTask({
@@ -508,7 +534,7 @@ uxTask({
     await u.click(page.getByTestId('add-project'))
   },
   goal: async (page) => expect(page.getByTestId('project-new-thing')).toBeVisible(),
-  budget: { operators: 5, M: 1, H: 1, seconds: 3.1 },
+  budget: { operators: 5, M: 1, H: 1, seconds: 3.3 },
 })
 
 // Every step is a control on screen: New folder, the name field, Create

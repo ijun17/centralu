@@ -93,8 +93,8 @@ export function sidebarGroupTests(): void {
 
       // Level 1 is 16px in from the project row's section; every further level is 16px more (plus the guide line's 1px)
       const sectionX = (await page.getByTestId('project-alpha').boundingBox())!.x
-      const level1 = (await page.getByTestId(`session-row-${plain}`).locator('..').boundingBox())!.x - sectionX
-      const level2 = (await page.getByTestId(`session-row-${KIDS[0]}`).locator('..').boundingBox())!.x - sectionX
+      const level1 = (await page.getByTestId(`session-row-${plain}`).locator('xpath=ancestor::li[1]').boundingBox())!.x - sectionX
+      const level2 = (await page.getByTestId(`session-row-${KIDS[0]}`).locator('xpath=ancestor::li[1]').boundingBox())!.x - sectionX
       expect(level1).toBeCloseTo(16, 0)
       expect(level2 - level1).toBeCloseTo(16, 0)
       await expect(page.locator(`li[data-level="1"]`).filter({ has: page.getByTestId(`session-row-${plain}`) })).toHaveCount(1)
@@ -326,7 +326,7 @@ export function sidebarGroupTests(): void {
 
       // A child cannot be dragged to reorder (position is membership), so a fold never changes who is whose
       await page.getByTestId(`children-fold-${PARENT}`).click()
-      await expect(page.getByTestId(`session-row-${KIDS[0]}`).locator('..')).toHaveAttribute('draggable', 'false')
+      await expect(page.getByTestId(`session-row-${KIDS[0]}`).locator('xpath=ancestor::li[1]')).toHaveAttribute('draggable', 'false')
 
       // A project is still grabbed by its name row and dropped on another project
       await page.evaluate((p: string) => ((window as any).__mock.nextPickedDirectory = p), '/tmp/beta')

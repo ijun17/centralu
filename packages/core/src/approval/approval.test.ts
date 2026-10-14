@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CENTRALU_APPLY, CENTRALU_APPLY_QUESTION, isCentraluApply, type ApprovalDetail } from '@cc/protocol'
-import { agentStartQuestion, centraluUpdateQuestion, findMatchingRule, matchesRule, previewMatches, projectAccessQuestion, projectCreateQuestion, suggestMatcher } from './approval.js'
+import { agentStartQuestion, answersInPlace, centraluUpdateQuestion, findMatchingRule, matchesRule, previewMatches, projectAccessQuestion, projectCreateQuestion, suggestMatcher } from './approval.js'
 
 describe('the new-project question (#515)', () => {
   it('names the linked machine whose disk the path is on, and no machine for this computer (#82 phase 4)', () => {
@@ -128,5 +128,26 @@ describe('update cards (#581, #665)', () => {
     expect(CENTRALU_APPLY_QUESTION).toContain('child agents')
     expect(isCentraluApply({ kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY })).toBe(true)
     expect(isCentraluApply({ kind: 'other', raw: 'a tool the adapter did not recognise' })).toBe(false)
+  })
+})
+
+describe('answering from a list row (#543)', () => {
+  it('a command and a single-file edit can be allowed or denied in place', () => {
+    expect(answersInPlace({ kind: 'command', command: 'ls', cwd: '/p' })).toBe(true)
+    expect(answersInPlace({ kind: 'file_edit', path: 'a.ts', diffPreview: '+x', multi: false })).toBe(true)
+  })
+
+  it('a card that offers more, or says more than one line, opens the session instead', () => {
+    expect(answersInPlace({ kind: 'file_edit', path: 'a.ts, b.ts', diffPreview: '', multi: true })).toBe(false)
+    expect(answersInPlace({ kind: 'agent_start', project: { id: 'p', name: 'w' }, tool: 'Codex', preset: 'safe', text: 'x' })).toBe(false)
+    expect(answersInPlace({ kind: 'project_access', access: 'delegate', from: { id: 'a', name: 'A' }, to: { id: 'b', name: 'B' }, text: 'x' })).toBe(false)
+    expect(answersInPlace({ kind: 'capability', app: { appId: 'app-x', projectId: null, name: 'X' }, capability: 'host:x', text: 'x' })).toBe(false)
+    expect(answersInPlace({ kind: 'project_create', name: 'n', path: '/n' })).toBe(false)
+    expect(answersInPlace({ kind: 'centralu_update', action: 'install' })).toBe(false)
+    expect(answersInPlace({ kind: 'other', raw: '{}' })).toBe(false)
+  })
+
+  it('anything else pending in the session opens it too', () => {
+    expect(answersInPlace({ kind: 'command', command: 'ls', cwd: '/p' }, 1)).toBe(false)
   })
 })
