@@ -138,18 +138,131 @@ describe('starting another agent in the same project', () => {
     }, 20_000)
   })
 
-  it('past its setup bound without the person answering, says no session was created and withdraws the card', async () => {
-    const s = await session()
+  it('in a trusted project a normal session starts the child without a card (#673)', async () => {
+    const s = await session('normal')
+    const r = await w.mgr.startAgent(s, { task: 'write it', wait: false })
+    expect(r).toMatchObject({ ok: true, state: 'working', reported: true })
+    expect(childrenOf(s)).toHaveLength(1)
+    expect(w.events.filter((e) => e.type === 'approval_request' && e.sessionId === s)).toEqual([])
+    // Nothing remembered: it is the trust, read at each call
+    expect(w.mgr.projectConsents()).toEqual([])
+  })
+
+  it('a safe session in a trusted project still asks (#673)', async () => {
+    const s = await session('safe')
+    const p = w.mgr.startAgent(s, { task: 'write it', wait: false })
+    await w.until(() => !!agentCard(s))
+    expect(agentCard(s)!.detail).toMatchObject({ kind: 'agent_start', preset: 'safe' })
+    w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow')
+    expect(await p).toMatchObject({ ok: true, state: 'working' })
+  })
+
+  it('past its setup bound the card stays: the call answers "pending" with a handle, and a later approval starts the child with its report (#673)', async () => {
+    const s = await session('safe')
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const p = w.mgr.startAgent(s, { task: 'wait for the person', wait: false })
     for (let i = 0; i < 50 && !agentCard(s); i++) await vi.advanceTimersByTimeAsync(0)
     expect(agentCard(s)).toBeDefined()
+    const requestId = agentCard(s)!.requestId
     await vi.advanceTimersByTimeAsync(START_AGENT_SETUP_MS)
     const r = await p
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('No session was created') })
-    expect(!r.ok && r.error).toContain('Do not do this with your own subagents')
+    expect(r).toMatchObject({ ok: true, state: 'pending', sessionId: requestId })
+    // Long past the bound the card is still there, and nothing was created
+    await vi.advanceTimersByTimeAsync(START_AGENT_SETUP_MS * 5)
+    expect(agentCard(s)?.requestId).toBe(requestId)
+    expect(childrenOf(s)).toEqual([])
+    expect(await w.mgr.agentSession(s, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: true, state: 'pending', sessionId: requestId })
+    vi.useRealTimers()
+
+    w.mgr.respondApproval(s, requestId, 'allow')
+    await w.until(() => childrenOf(s).length === 1)
+    const child = childrenOf(s)[0]!.id
+    await w.until(() => w.store.listReportMarks().length === 1)
+    expect(w.store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: s }])
+    // The handle now leads to the child
+    expect(await w.mgr.agentSession(s, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: true, state: 'working', sessionId: child })
+    expect(w.store.listAgentStartRequests()).toEqual([])
+  })
+
+  it('a pending request the person denies later is told to the caller, and shown in its session (#673)', async () => {
+    const s = await session('safe')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const p = w.mgr.startAgent(s, { task: 'wait for the person', wait: false })
+    for (let i = 0; i < 50 && !agentCard(s); i++) await vi.advanceTimersByTimeAsync(0)
+    const requestId = agentCard(s)!.requestId
+    await vi.advanceTimersByTimeAsync(START_AGENT_SETUP_MS)
+    expect(await p).toMatchObject({ ok: true, state: 'pending' })
+    vi.useRealTimers()
+
+    w.mgr.respondApproval(s, requestId, 'deny')
+    // The caller's model hears it as a message: no call is left to answer it
+    await w.until(() => !!handleOf(s)?.sent.some((t) => t.includes(`start_agent request ${requestId} did not start a session`)))
+    expect(handleOf(s)!.sent.find((t) => t.includes(requestId))).toContain('did not allow')
+    expect(childrenOf(s)).toEqual([])
+    expect(await w.mgr.agentSession(s, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: false, error: expect.stringContaining('did not allow') })
+    expect(w.store.listAgentStartRequests()).toEqual([])
+  })
+
+  it('agent_session waits on a pending request for the answer, and stop withdraws it with a line for the person (#673)', async () => {
+    const s = await session('safe')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const p = w.mgr.startAgent(s, { task: 'wait for the person', wait: false })
+    for (let i = 0; i < 50 && !agentCard(s); i++) await vi.advanceTimersByTimeAsync(0)
+    const requestId = agentCard(s)!.requestId
+    await vi.advanceTimersByTimeAsync(START_AGENT_SETUP_MS)
+    await p
+    // Unanswered, a wait returns at its bound still pending
+    const waiting = w.mgr.agentSession(s, { sessionId: requestId, action: 'wait' })
+    await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
+    expect(await waiting).toMatchObject({ ok: true, state: 'pending' })
+    vi.useRealTimers()
+    expect(await w.mgr.agentSession(s, { sessionId: requestId, action: 'send', text: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('No session yet') })
+
+    // Answered during a wait, the wait returns with the child
+    const second = await session('safe')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const q = w.mgr.startAgent(second, { task: 'another', wait: false })
+    for (let i = 0; i < 50 && !agentCard(second); i++) await vi.advanceTimersByTimeAsync(0)
+    const other = agentCard(second)!.requestId
+    await vi.advanceTimersByTimeAsync(START_AGENT_SETUP_MS)
+    await q
+    vi.useRealTimers()
+    const answered = w.mgr.agentSession(second, { sessionId: other, action: 'wait' })
+    w.mgr.respondApproval(second, other, 'allow')
+    expect(await answered).toMatchObject({ ok: true, state: 'working', sessionId: childrenOf(second)[0]?.id })
+
+    const stopped = await w.mgr.agentSession(s, { sessionId: requestId, action: 'stop' })
+    expect(stopped).toMatchObject({ ok: true, state: 'stopped', sessionId: requestId })
     expect(agentCard(s)).toBeUndefined()
     expect(childrenOf(s)).toEqual([])
+    const notice = w.store.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('was withdrawn by this session'))
+    expect(notice).toBeDefined()
+    // Another session cannot follow or withdraw it
+    expect(await w.mgr.agentSession(second, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: false })
+  })
+
+  it('deleting the session that asked withdraws its card, with a line in that session (#673)', async () => {
+    const s = await session('safe')
+    const p = w.mgr.startAgent(s, { task: 'wait for the person', wait: false })
+    await w.until(() => !!agentCard(s))
+    await w.mgr.trashSession(s)
+    expect(await p).toMatchObject({ ok: false })
+    expect(childrenOf(s)).toEqual([])
+    expect(w.store.listAgentStartRequests()).toEqual([])
+    const notice = w.store.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('this session was deleted'))
+    expect(notice).toBeDefined()
+  })
+
+  it('a call cancelled while its card stands withdraws it, with a line for the person (#673)', async () => {
+    const s = await session('safe')
+    const ctl = new AbortController()
+    const p = w.mgr.startAgent(s, { task: 'wait for the person', wait: false }, ctl.signal)
+    await w.until(() => !!agentCard(s))
+    ctl.abort()
+    expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('withdrawn') })
+    expect(agentCard(s)).toBeUndefined()
+    const notice = w.store.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('the call that asked was cancelled'))
+    expect(notice).toBeDefined()
   })
 
   describe('the whole call stays inside the bridge bound (#660)', () => {
@@ -160,7 +273,7 @@ describe('starting another agent in the same project', () => {
     }
 
     it('wait=true: a card answered late leaves only the rest of the bound to wait, then answers "working"', async () => {
-      const s = await session()
+      const s = await session('safe')
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
       const p = w.mgr.startAgent(s, { task: 'a long job' })
       await cardOf(s)
@@ -213,20 +326,21 @@ describe('starting another agent in the same project', () => {
       expect(w.store.listReportMarks()).toEqual([{ sessionId: r.ok ? r.sessionId : '', callerSessionId: s }])
     })
 
-    it('an approval and the withdrawal in the same instant: the answer says none was created, and none is', async () => {
-      const s = await session()
+    it('an approval and the bound in the same instant: the answer is "pending", and the child starts with its report (#673)', async () => {
+      const s = await session('safe')
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
       // Registered before the call's own timer, so on one synchronous advance the person's "allow" is given first
-      // and the bound's withdrawal follows before the start that the "allow" releases can run
+      // and the bound follows before the start that the "allow" releases can run
       setTimeout(() => w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow'), START_AGENT_SETUP_MS)
       const p = w.mgr.startAgent(s, { task: 'race', wait: false })
       await cardOf(s)
       vi.advanceTimersByTime(START_AGENT_SETUP_MS)
       const r = await p
-      expect(r).toMatchObject({ ok: false, error: expect.stringContaining('No session was created') })
+      expect(r).toMatchObject({ ok: true, state: 'pending' })
       for (let i = 0; i < 20; i++) await vi.advanceTimersByTimeAsync(0)
-      expect(childrenOf(s)).toEqual([])
+      expect(childrenOf(s)).toHaveLength(1)
       expect(agentCard(s)).toBeUndefined()
+      expect(w.store.listReportMarks()).toEqual([{ sessionId: childrenOf(s)[0]!.id, callerSessionId: s }])
     })
   })
 
@@ -257,7 +371,7 @@ describe('starting another agent in the same project', () => {
   })
 
   it('a refusal tells the calling model to ask the person, not to fall back to its own subagents', async () => {
-    const s = await session()
+    const s = await session('safe')
     const p = w.mgr.startAgent(s, { task: 'implement the parser' })
     await w.until(() => !!agentCard(s))
     w.mgr.respondApproval(s, agentCard(s)!.requestId, 'deny')
@@ -266,10 +380,10 @@ describe('starting another agent in the same project', () => {
   })
 
   it('asks the person first; denied, nothing is started and the model reads a refusal', async () => {
-    const s = await session()
+    const s = await session('safe')
     const p = w.mgr.startAgent(s, { task: 'implement the parser', tool: 'codex' })
     await w.until(() => !!agentCard(s))
-    expect(agentCard(s)!.detail).toMatchObject({ kind: 'agent_start', project: { id: w.caller.id }, tool: 'Codex', preset: 'normal', text: 'implement the parser' })
+    expect(agentCard(s)!.detail).toMatchObject({ kind: 'agent_start', project: { id: w.caller.id }, tool: 'Codex', preset: 'safe', text: 'implement the parser' })
     w.mgr.respondApproval(s, agentCard(s)!.requestId, 'deny')
     const r = await p
     expect(!r.ok && r.error).toContain('did not allow')
@@ -277,7 +391,7 @@ describe('starting another agent in the same project', () => {
   })
 
   it('opens a visible child in the same folder on the tool asked for, framed and recorded as sent by the parent, and returns its answer', async () => {
-    const s = await session()
+    const s = await session('safe')
     const p = w.mgr.startAgent(s, { task: 'implement the parser', tool: 'codex' })
     await w.until(() => !!agentCard(s))
     w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow')
@@ -295,7 +409,7 @@ describe('starting another agent in the same project', () => {
   })
 
   it('"always for this session" stops asking that session only; "always for this project" every session there, until revoked', async () => {
-    const s = await session()
+    const s = await session('safe')
     const first = w.mgr.startAgent(s, { task: 'one', wait: false })
     await w.until(() => !!agentCard(s))
     w.mgr.respondApproval(s, agentCard(s)!.requestId, 'always', 'session')
@@ -303,13 +417,13 @@ describe('starting another agent in the same project', () => {
     expect(await w.mgr.startAgent(s, { task: 'two', wait: false })).toMatchObject({ ok: true })
     expect(agentCard(s)).toBeUndefined()
 
-    const other = await session()
+    const other = await session('safe')
     const third = w.mgr.startAgent(other, { task: 'three', wait: false })
     await w.until(() => !!agentCard(other))
     w.mgr.respondApproval(other, agentCard(other)!.requestId, 'always', 'project')
     expect(await third).toMatchObject({ ok: true })
     expect(w.mgr.projectConsents()).toEqual([expect.objectContaining({ fromProjectId: w.caller.id, toProjectId: w.caller.id, kind: 'agents' })])
-    const fresh = await session()
+    const fresh = await session('safe')
     expect(await w.mgr.startAgent(fresh, { task: 'four', wait: false })).toMatchObject({ ok: true })
 
     // Four children run now, the ceiling: two of them finish, so the next start reaches the card
@@ -901,7 +1015,7 @@ describe('starting another agent in the same project', () => {
 
     it('opens the child in a worktree on a branch named from its job, said on the card, linked to its parent', async () => {
       repo()
-      const s = await session()
+      const s = await session('safe')
       const p = w.mgr.startAgent(s, { task: 'Write the parser!', worktree: true, wait: false })
       await w.until(() => !!agentCard(s))
       const branch = (agentCard(s)!.detail as { worktree?: { branch: string } }).worktree?.branch

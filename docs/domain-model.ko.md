@@ -272,6 +272,7 @@ classDiagram
 - `approval_rules`: 명령의 "항상 허용" 규칙.
 - `project_consents`: 한 프로젝트가 다른 프로젝트에 닿도록 기억해 둔 동의.
 - `report_marks`: 세션이 일을 준 세션에게 빚진 보고. 전해질 때까지 남는다.
+- `agent_start_requests`: 사람이 아직 답하지 않은 start_agent 카드. 다음 호스트가 다시 세운다(#673).
 
 ### 2.3 앱
 

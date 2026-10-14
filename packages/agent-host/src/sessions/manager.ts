@@ -189,11 +189,77 @@ const ASK_THE_PERSON = 'Do not do this with your own subagents instead: tell the
 /** How far start_agent's setup had come when its bound passed (#660) */
 type StartProgress = {
   stage: 'checking' | 'asking' | 'creating' | 'created'
+  /** The card's request, while one stands (#673): past the bound the call answers "pending" and the card stays */
+  requestId?: string
   childId?: string
   /** Set once the child's run is registered, so a late answer can describe it as the normal path does */
   d?: Delegation
   /** Said when the model or effort asked for could not be checked */
   unchecked?: string
+}
+
+/** The person's answer on a start_agent card, read as consent; a refusal says whether they refused or nobody answered */
+type AgentConsent = { ok: true } | { ok: false; error: string; why: 'denied' | 'withdrawn' }
+
+/**
+ * A start_agent request waiting on the person's card (#673), as stored in `agent_start_requests`: everything the start
+ * needs once allowed, so a host that takes over after a swap or restart can raise the card again and start the child.
+ */
+type AgentStartRequest = {
+  requestId: string
+  callerId: string
+  projectId: string
+  tool: string
+  model?: string
+  effort?: string
+  worktreeBranch?: string
+  task: string
+  unchecked?: string
+  detail: Extract<ApprovalDetail, { kind: 'agent_start' }>
+}
+
+/** Reads a stored request back; a row this build cannot read is dropped rather than raised half-formed */
+function readAgentStartRequest(raw: unknown): AgentStartRequest | null {
+  const r = raw as Partial<AgentStartRequest> | null
+  if (!r || typeof r !== 'object') return null
+  if (typeof r.requestId !== 'string' || typeof r.callerId !== 'string' || typeof r.projectId !== 'string') return null
+  if (typeof r.tool !== 'string' || typeof r.task !== 'string' || r.detail?.kind !== 'agent_start') return null
+  return r as AgentStartRequest
+}
+
+/** One such request while this host serves it (`SessionManager.agentStarts`) */
+type AgentStartRecord = {
+  req: AgentStartRequest
+  /** The call that raised it has answered "pending" (#673): how it ends is told to the caller as a message */
+  detached: boolean
+  ended?: { childId: string } | { error: string }
+  /** Resolves when it ends (agent_session wait on the handle) */
+  done: Promise<void>
+  end: () => void
+}
+
+/** The answer while a start waits on the person (#673): the request's id is the handle agent_session follows */
+function agentStartPending(req: AgentStartRequest): ChildRunResult {
+  return { ok: true, state: 'pending', sessionId: req.requestId, sessionName: '', tool: req.detail.tool }
+}
+
+/** What the person reads in the caller's session when a start_agent request ends without a session (#673) */
+function agentStartPersonText(req: Pick<AgentStartRequest, 'detail'>, how: 'denied' | 'withdrawn' | 'cancelled' | 'deleted' | 'stopped' | 'failed', why?: string): string {
+  const what = `The request to start ${req.detail.tool} (“${req.detail.text}”)`
+  switch (how) {
+    case 'denied':
+      return `${what} was denied. The session was told; no agent was started.`
+    case 'cancelled':
+      return `${what} was withdrawn: the call that asked was cancelled before you answered. No agent was started.`
+    case 'deleted':
+      return `${what} was withdrawn: this session was deleted. No agent was started.`
+    case 'stopped':
+      return `${what} was withdrawn by this session. No agent was started.`
+    case 'failed':
+      return `${what} was allowed, but no agent was started: ${(why ?? '').slice(0, 300)}`
+    default:
+      return `${what} was withdrawn before you answered. No agent was started.`
+  }
 }
 
 /** The answer when start_agent's setup outlasts its bound: it states whether a session exists, and what to do next */
@@ -416,6 +482,8 @@ const HOST_RECALL_MAX_HITS = 50
  * this host makes starts with `_`. The window shows only the sender's name; the id is what the injection gate reads
  */
 const HUB_SENDER = '_hub-orchestrator'
+/** The sender Centralu's own messages to a session are recorded under (#673): like `HUB_SENDER`, no session's id */
+const HOST_SENDER = '_centralu'
 
 /** Key for the builder-session directory (APP_BUILDERS_KEY) — an app is identified by (project, id) */
 const builderKey = (ref: AppRef): string => `${ref.projectId ?? '_user'}/${ref.appId}`
@@ -637,6 +705,16 @@ export class SessionManager {
    */
   private agentConsents = new Set<string>()
   /**
+   * start_agent requests whose card stands or stood (#673) — request id -> the request. A card is no longer withdrawn
+   * when the call's bound passes: the call answers "pending" with the request id as a handle, the card stays until the
+   * person answers, and an approval starts the child then. Mirrored in the store's `agent_start_requests` while it
+   * stands, so the next host raises it again (`resumeAgentStart`). Kept after it ends, for agent_session on the handle,
+   * until the caller goes.
+   */
+  private agentStarts = new Map<string, AgentStartRecord>()
+  /** `disposeAll` has begun (#673): a card it withdraws is not the person's answer, and its request stays stored */
+  private disposing = false
+  /**
    * What a session may read beyond its folder because another project handed it back (#371 part B) — session id ->
    * resolved paths (files, or output folders). Live only: the grant lasts while this host serves the session, and a
    * restart asks again (the caller's agent then raises its own card for a read outside its folder).
@@ -748,6 +826,18 @@ export class SessionManager {
         console.error(`[agent-host] report mark dropped: ${mark.sessionId.slice(0, 8)} ended its turn during the swap`)
       }
       store.clearReportMark(mark.sessionId)
+    }
+    /*
+     * start_agent requests the previous host left standing (#673): the person has not answered yet, so the card is
+     * raised again in its session and an approval starts the child here. A request whose caller is gone ends.
+     */
+    for (const row of store.listAgentStartRequests()) {
+      const req = readAgentStartRequest(row.request)
+      if (!req || req.requestId !== row.requestId || req.callerId !== row.callerSessionId) {
+        store.deleteAgentStartRequest(row.requestId)
+        continue
+      }
+      this.resumeAgentStart(req)
     }
     /*
      * Sweeps orphaned handoff notes (#106). **Why startup is a safe moment for this**: no handoff is
@@ -2695,6 +2785,12 @@ export class SessionManager {
     }
     this.readGrants.delete(sessionId)
     this.agentConsents.delete(sessionId)
+    // Its start_agent requests (#673): a standing card is withdrawn, with a line saying so if the session is restored
+    for (const rec of [...this.agentStarts.values()]) {
+      if (rec.req.callerId !== sessionId) continue
+      this.withdrawAgentStart(rec.req.requestId, 'The session that asked was deleted.', agentStartPersonText(rec.req, 'deleted'))
+      this.agentStarts.delete(rec.req.requestId)
+    }
     this.updateConsents.delete(sessionId)
     this.updateApplyConsents.delete(sessionId)
     // A capability question raised on this session has nowhere left to be answered (D-4) — it is ended with
@@ -3282,6 +3378,12 @@ export class SessionManager {
     // The card slot is now empty — if a capability question was waiting, it is raised (D-4). Either the
     // adapter's card just closed, or a card that had been hiding ours just closed
     if (e.type === 'approval_resolved' && e.sessionId) this.raiseHostAsks(e.sessionId)
+    /*
+     * A card still standing when the turn ends is raised again (#673): a start_agent request that answered "pending"
+     * outlives the call, and the turn's own events cleared the slot meanwhile. An error is left showing; the card
+     * comes back at the next turn's end
+     */
+    if (endedTurn && e.sessionId && this.meta.get(e.sessionId)?.state !== 'error') this.raiseHostAsks(e.sessionId)
     // Applies a setting that changed mid-turn now (#164) — if it was reverted in between there is no drift,
     // so nothing happens
     // A commit call still unanswered when its turn ends never will be: interrupted, or its process gone (#392)
@@ -4057,6 +4159,7 @@ export class SessionManager {
       const keepsAlways =
         ask.detail.kind === 'project_access' || ask.detail.kind === 'agent_start' || ask.detail.kind === 'centralu_update' || isCentraluApply(ask.detail)
       const answer = !keepsAlways && decision === 'always' ? 'allow' : decision
+      this.restAfterCard(ask)
       this.onEvent({ type: 'approval_resolved', sessionId, requestId, decision: answer })
       // Starting agents (#561) has two always: this session (the card's default) or the whole project (⌥)
       ask.resolve(ask.detail.kind === 'agent_start' && answer === 'always' && scope === 'project' ? 'always_project' : answer)
@@ -5819,15 +5922,19 @@ export class SessionManager {
     return true
   }
 
-  /** Auto allows and logs; other presets raise a host card, withdrawn if the signal fires. */
-  private askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal): Promise<HostAskAnswer> {
+  /**
+   * Auto allows and logs; other presets raise a host card, withdrawn if the signal fires. `requestId` is given when the
+   * caller tracks the card itself (a start_agent request, #673); `shown` raises one the conversation already records
+   * (a request carried over from the previous host) without recording it again.
+   */
+  private askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal, card: { requestId?: string; shown?: boolean } = {}): Promise<HostAskAnswer> {
     if (signal?.aborted) return Promise.resolve(null)
     const note = detail.kind === 'project_access' && !detail.to.trusted ? ' (target not trusted)' : ''
     if (this.autoBoundaryOpen(sessionId, `${detail.kind}${note}`)) return Promise.resolve('allow')
     return new Promise<HostAskAnswer>((resolve) => {
       if (signal?.aborted) return resolve(null)
-      const requestId = `${detail.kind === 'project_access' ? 'xp' : detail.kind === 'agent_start' ? 'ag' : detail.kind === 'centralu_update' || isCentraluApply(detail) ? 'up' : 'mk'}-${randomUUID()}`
-      this.hostAsks.set(requestId, { requestId, sessionId, detail, shown: false, resolve })
+      const requestId = card.requestId ?? `${detail.kind === 'project_access' ? 'xp' : detail.kind === 'agent_start' ? 'ag' : detail.kind === 'centralu_update' || isCentraluApply(detail) ? 'up' : 'mk'}-${randomUUID()}`
+      this.hostAsks.set(requestId, { requestId, sessionId, detail, shown: card.shown ?? false, resolve })
       signal?.addEventListener('abort', () => {
         if (!this.hostAsks.delete(requestId)) return
         // An unanswerable card is never left behind
@@ -6155,7 +6262,8 @@ export class SessionManager {
    *   1. Who may: an ordinary session of a trusted project (the rule ask_project and attach_app follow, #382), and
    *      not one that was itself started or asked by another session (`askedBy`): depth one.
    *   2. How many: at most `AGENT_CEILING` children run at once in a project, over all its sessions.
-   *   3. The person's consent (`ensureAgentConsent`): once, always for this session, or always for this project.
+   *   3. The person's consent (`ensureAgentConsent`): the project's trust for a `normal` caller (#673); otherwise a
+   *      card, answered once, always for this session, or always for this project.
    *   4. The child: a visible session in the caller's folder, marked `askedBy` the caller, on the tool, model and
    *      effort asked for (or the project's own, as a session the person opens there), under **the caller's own
    *      permission preset**: never more than the caller has, and nothing the caller can change afterwards.
@@ -6168,7 +6276,7 @@ export class SessionManager {
      * **The setup has a bound of its own (#660).** Before the child exists the call can wait on the person's card, a
      * model list and the tool's own start, none of which `wait: false` shortens; the Codex bridge cuts the call at 280
      * seconds with a bare "timed out" that says nothing of whether a session exists. So the setup is raced against a
-     * bound under that, the card is withdrawn when it passes, and the answer says what was and was not created.
+     * bound under that, and the answer says what was and was not created. A card still standing then stays (#673).
      */
     const startedAt = Date.now()
     const progress: StartProgress = { stage: 'checking' }
@@ -6179,6 +6287,17 @@ export class SessionManager {
     let timer: ReturnType<typeof setTimeout> | undefined
     const late = new Promise<ChildRunResult>((resolve) => {
       timer = setTimeout(() => {
+        /*
+         * **A card is not withdrawn at the bound (#673).** The person may be away; the card stays in the caller's
+         * session, the call answers "pending" with the request as a handle, and the setup goes on in the background:
+         * an approval starts the child with its report armed (below), a refusal is told to the caller as a message
+         */
+        const standing = progress.stage === 'asking' && progress.requestId ? this.agentStarts.get(progress.requestId) : undefined
+        if (standing && !standing.ended) {
+          standing.detached = true
+          resolve(agentStartPending(standing.req))
+          return
+        }
         ctl.abort()
         const d = progress.stage === 'created' ? progress.d : undefined
         // The child exists and its run is registered: answered as the normal path does, with the report armed
@@ -6252,22 +6371,77 @@ export class SessionManager {
     if (worktree && 'error' in worktree) return done({ ok: false, error: worktree.error })
 
     progress.stage = 'asking'
-    const consent = await this.ensureAgentConsent(
-      callerId,
-      {
-        kind: 'agent_start',
-        project: { id: project.id, name: project.name },
-        tool: adapter.descriptor.label,
-        ...(model ? { model } : {}),
-        preset: caller.permissionPreset,
-        ...(worktree ? { worktree: { branch: worktree.branch } } : {}),
-        text: taskLine(opts.task),
-      },
-      signal,
-    )
-    if (!consent.ok) return done(consent)
-    // The bound passed while the card stood (the caller has its answer): nothing is created now
-    if (signal.aborted) return done({ ok: false, error: 'The call was withdrawn before the session was created, so none was.' })
+    const detail: Extract<ApprovalDetail, { kind: 'agent_start' }> = {
+      kind: 'agent_start',
+      project: { id: project.id, name: project.name },
+      tool: adapter.descriptor.label,
+      ...(model ? { model } : {}),
+      preset: caller.permissionPreset,
+      ...(worktree ? { worktree: { branch: worktree.branch } } : {}),
+      text: taskLine(opts.task),
+    }
+    const choice = {
+      tool,
+      ...(model ? { model } : {}),
+      ...(effort ? { effort } : {}),
+      ...(worktree ? { worktreeBranch: worktree.branch } : {}),
+      task: opts.task,
+      ...(unchecked ? { unchecked } : {}),
+    }
+    let request: AgentStartRequest | undefined
+    const consent = await this.ensureAgentConsent(callerId, detail, signal, (requestId) => {
+      request = { requestId, callerId, projectId: project.id, ...choice, detail }
+      this.openAgentStart(request)
+      progress.requestId = requestId
+    })
+    if (!consent.ok) {
+      // The host is leaving (a swap or a quit), not the person answering: the request stays stored, and the next host
+      // raises the card again (#673)
+      if (request && consent.why === 'withdrawn' && (this.handingOver || this.disposing)) return done(agentStartPending(request))
+      if (request) {
+        const how = consent.why === 'denied' ? 'denied' : signal.aborted ? 'cancelled' : 'withdrawn'
+        this.endAgentStart(request.requestId, { error: consent.error, person: agentStartPersonText(request, how), denied: consent.why === 'denied' })
+      }
+      return done(consent)
+    }
+    // The call was cancelled in the instant the card was answered: nothing is created now
+    if (signal.aborted) {
+      const error = 'The call was withdrawn before the session was created, so none was.'
+      if (request) this.endAgentStart(request.requestId, { error, person: agentStartPersonText(request, 'cancelled') })
+      return done({ ok: false, error })
+    }
+    const r = await this.createAgentChild(callerId, { id: project.id, name: project.name, path: project.path }, choice, progress)
+    if (request) {
+      if ('key' in r) this.endAgentStart(request.requestId, { childId: r.d.sessionId })
+      else {
+        const error = r.done.ok ? 'No session was created.' : r.done.error
+        this.endAgentStart(request.requestId, { error, person: agentStartPersonText(request, 'failed', error) })
+      }
+    }
+    return r
+  }
+
+  /**
+   * The child itself, once the person (or the project's trust) allowed it (#561, #673): counted again, made in the
+   * caller's folder or a new worktree, named, and given the task. A card may have stood for hours, so what the start
+   * rests on is read again first: the caller is still here and its project still trusted.
+   */
+  private async createAgentChild(
+    callerId: string,
+    project: { id: string; name: string; path: string },
+    choice: Pick<AgentStartRequest, 'tool' | 'model' | 'effort' | 'worktreeBranch' | 'task' | 'unchecked'>,
+    progress: StartProgress,
+  ): Promise<{ done: ChildRunResult } | { key: string; d: Delegation; notice: string | undefined }> {
+    const done = (r: ChildRunResult) => ({ done: r })
+    const caller = this.meta.get(callerId)
+    if (!caller) return done({ ok: false, error: 'The session that asked is no longer here.' })
+    const now = this.store.listProjects().find((p) => p.id === project.id)
+    if (!now) return done({ ok: false, error: 'This session\'s project is no longer registered.' })
+    if (now.trusted !== true && caller.permissionPreset !== 'auto') {
+      return done({ ok: false, error: `This session's project is no longer trusted, so it cannot start agents. ${ASK_THE_PERSON}` })
+    }
+    const { tool, model, effort, unchecked } = choice
+    const worktree = choice.worktreeBranch ? { branch: choice.worktreeBranch } : null
     // The card may have stood a while: counted again
     const fullNow = this.agentCeilingError(callerId, project.id)
     if (fullNow) return done({ ok: false, error: fullNow })
@@ -6299,12 +6473,12 @@ export class SessionManager {
     progress.stage = 'created'
     progress.childId = child.id
     // A worktree session is named by its branch, as every worktree session is; otherwise by its job
-    if (!worktree) this.rename(child.id, agentName(opts.task))
+    if (!worktree) this.rename(child.id, agentName(choice.task))
     const key = `${callerId}>${child.id}`
     const d = this.startDelegation(key, callerId, child.id, { id: project.id, name: project.name, path: child.worktree?.path ?? cwd }, true)
     progress.d = d
     try {
-      await this.deliver(child.id, agentFrame(labelOf(this.store, caller), opts.task), undefined, { sessionId: callerId, name: labelOf(this.store, caller) }, false)
+      await this.deliver(child.id, agentFrame(labelOf(this.store, caller), choice.task), undefined, { sessionId: callerId, name: labelOf(this.store, caller) }, false)
     } catch (e) {
       this.delegations.delete(key)
       if (this.agentRuns.get(child.id) === d.wait) this.agentRuns.delete(child.id)
@@ -6327,6 +6501,18 @@ export class SessionManager {
   async agentSession(callerId: string, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult> {
     if (opts.sessionId === callerId && opts.action !== 'status') {
       return { ok: false, error: 'agent_session cannot wait on, stop, delete or send to its own calling session.' }
+    }
+    // A start that answered "pending" (#673): its handle is the request's id until the person answers
+    const request = this.agentStarts.get(opts.sessionId)
+    if (request && request.req.callerId === callerId) {
+      const r = await this.agentStartSession(request, opts.action, signal)
+      if ('ok' in r) return r
+      opts = { ...opts, sessionId: r.childId, action: r.action }
+    } else if (opts.sessionId.startsWith('ag-') && !this.meta.has(opts.sessionId)) {
+      return {
+        ok: false,
+        error: `No start_agent request ${opts.sessionId} of this session is open here: it ended before Centralu restarted, or it is not this session's. read_session (without a sessionId) lists the sessions.`,
+      }
     }
     const caller = this.meta.get(callerId)
     const child = this.meta.get(opts.sessionId)
@@ -6467,6 +6653,50 @@ export class SessionManager {
     } finally {
       releaseObservation?.()
     }
+  }
+
+  /**
+   * agent_session on a start_agent request's handle (#673). While the card stands: status says so, wait waits for the
+   * person's answer up to the bound, stop (or delete) withdraws the card, send is refused. Once the child started, the
+   * call goes on to that session (a wait that saw it start answers its status, so the call stays inside its bound);
+   * once it ended without one, the reason.
+   */
+  private async agentStartSession(
+    rec: AgentStartRecord,
+    action: AgentSessionOpts['action'],
+    signal?: AbortSignal,
+  ): Promise<ChildRunResult | { childId: string; action: AgentSessionOpts['action'] }> {
+    const id = rec.req.requestId
+    if (!rec.ended) {
+      if (action === 'stop' || action === 'delete') {
+        this.withdrawAgentStart(id, 'The session that asked withdrew the request.', agentStartPersonText(rec.req, 'stopped'))
+        return { ok: true, state: 'stopped', sessionId: id, sessionName: '', tool: rec.req.detail.tool }
+      }
+      if (action === 'send') return { ok: false, error: `No session yet: request ${id} is still waiting for the person's answer. Send once it has started.` }
+      if (action === 'wait') {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        let onAbort: (() => void) | undefined
+        await Promise.race([
+          rec.done,
+          new Promise<void>((resolve) => (timer = setTimeout(resolve, ASK_WAIT_MS))),
+          new Promise<void>((resolve) => {
+            if (!signal) return
+            onAbort = resolve
+            if (signal.aborted) resolve()
+            else signal.addEventListener('abort', onAbort, { once: true })
+          }),
+        ])
+        clearTimeout(timer)
+        if (onAbort) signal?.removeEventListener('abort', onAbort)
+        // Read again: the person may have answered while this waited
+        const ended = rec.ended as AgentStartRecord['ended']
+        if (ended && 'childId' in ended) return { childId: ended.childId, action: 'status' }
+      }
+      if (!rec.ended) return agentStartPending(rec.req)
+    }
+    const ended = rec.ended!
+    if ('error' in ended) return { ok: false, error: `Request ${id} started no session: ${ended.error}` }
+    return { childId: ended.childId, action }
   }
 
   /**
@@ -6693,17 +6923,36 @@ export class SessionManager {
    * The person's consent for a session to start agents (#561), the first time it does: a card in the caller's approval
    * slot. "Always" is kept for this session while this host serves it; with ⌥ (scope `project`) it is remembered as the
    * project's 'agents' consent, listed in Settings → Permissions with ask_project's pairs and revoked there.
+   *
+   * **Trust is the consent (#673).** A `normal` caller in a trusted project starts agents without a card: the person
+   * already decided about that project when they trusted it (#655), and a card in a session they were not looking at
+   * only made the session work alone. `safe` keeps the card, as it keeps every boundary closed (#606); `auto` opens it.
+   * `onCard` hears the request id before a card is raised, so the request can be kept until the person answers.
    */
   private async ensureAgentConsent(
     callerId: string,
     detail: Extract<ApprovalDetail, { kind: 'agent_start' }>,
     signal?: AbortSignal,
-  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    onCard?: (requestId: string) => void,
+  ): Promise<AgentConsent> {
     if (this.agentConsents.has(callerId)) return { ok: true }
     if (this.store.getProjectConsent(detail.project.id, detail.project.id, 'agents')) return { ok: true }
-    const decision = await this.askHost(callerId, detail, signal)
+    if (this.trustIsAgentConsent(callerId, detail.project.id)) return { ok: true }
+    const requestId = `ag-${randomUUID()}`
+    if (this.meta.get(callerId)?.permissionPreset !== 'auto') onCard?.(requestId)
+    return this.agentConsentFrom(callerId, detail.project.id, await this.askHost(callerId, detail, signal, { requestId }))
+  }
+
+  /** A `normal` caller in a trusted project needs no card to start agents (#673): the project's trust, read now */
+  private trustIsAgentConsent(callerId: string, projectId: string): boolean {
+    if (this.meta.get(callerId)?.permissionPreset !== 'normal') return false
+    return this.store.listProjects().find((p) => p.id === projectId)?.trusted === true
+  }
+
+  /** The person's answer on a start_agent card, as consent (remembered where they chose "always") or a refusal */
+  private agentConsentFrom(callerId: string, projectId: string, decision: HostAskAnswer): AgentConsent {
     if (decision === 'always_project') {
-      this.store.setProjectConsent(detail.project.id, detail.project.id, 'agents')
+      this.store.setProjectConsent(projectId, projectId, 'agents')
       this.emit({ type: 'project_consents_changed' })
       return { ok: true }
     }
@@ -6712,8 +6961,113 @@ export class SessionManager {
       return { ok: true }
     }
     if (decision === 'allow') return { ok: true }
-    if (decision === 'deny') return { ok: false, error: `The person did not allow this session to start another agent. Do not start one again unless they tell you to. ${ASK_THE_PERSON}` }
-    return { ok: false, error: `The question to the person was withdrawn before they answered, so no agent was started. ${ASK_THE_PERSON}` }
+    if (decision === 'deny') {
+      return { ok: false, why: 'denied', error: `The person did not allow this session to start another agent. Do not start one again unless they tell you to. ${ASK_THE_PERSON}` }
+    }
+    return { ok: false, why: 'withdrawn', error: `The question to the person was withdrawn before they answered, so no agent was started. ${ASK_THE_PERSON}` }
+  }
+
+  /** A start_agent request whose card now stands (#673): kept, in memory and in the store, until it is answered */
+  private openAgentStart(req: AgentStartRequest): AgentStartRecord {
+    let end!: () => void
+    const done = new Promise<void>((resolve) => (end = resolve))
+    const rec: AgentStartRecord = { req, detached: false, done, end }
+    this.agentStarts.set(req.requestId, rec)
+    this.store.putAgentStartRequest(req.requestId, req.callerId, req)
+    return rec
+  }
+
+  /**
+   * How a start_agent request ended (#673), once: the row goes, a wait on its handle returns, and unless a session
+   * started, the person is shown why in the caller's session (not only the model, in a tool result). A request whose
+   * call already answered "pending" is told to the caller as a message, since no call is left to answer it.
+   * A refusal the person gave on the card while the call waited needs no line: the card itself says "Denied".
+   */
+  private endAgentStart(requestId: string | undefined, ended: { childId: string } | { error: string; person: string; denied?: boolean }): void {
+    const rec = requestId ? this.agentStarts.get(requestId) : undefined
+    if (!rec || rec.ended) return
+    rec.ended = 'childId' in ended ? { childId: ended.childId } : { error: ended.error }
+    rec.end()
+    this.store.deleteAgentStartRequest(rec.req.requestId)
+    if ('childId' in ended) return
+    const { callerId } = rec.req
+    if (!this.meta.has(callerId)) return
+    if (!ended.denied || rec.detached) {
+      this.onEvent({ type: 'notice', sessionId: callerId, level: 'warning', from: 'Centralu', label: 'agent request', audience: 'you', text: ended.person })
+    }
+    if (rec.detached) void this.tellAgentStartEnded(rec.req, ended.error)
+  }
+
+  /** The caller of a request that already answered "pending" hears how it ended (#673), as a message in its session */
+  private async tellAgentStartEnded(req: AgentStartRequest, why: string): Promise<void> {
+    if (this.handingOver || this.disposing || !this.meta.has(req.callerId)) return
+    try {
+      await this.deliver(
+        req.callerId,
+        `[Centralu] Your start_agent request ${req.requestId} did not start a session.\n` +
+          `Agent: ${frameField(req.detail.tool)}\n` +
+          `Task: ${frameField(req.detail.text)}\n\n` +
+          `Reason: ${why.slice(0, 600)}`,
+        undefined,
+        { sessionId: HOST_SENDER, name: 'Centralu' },
+        false,
+      )
+    } catch {
+      // The caller may be asleep or deleted — the notice in its session is already there
+    }
+  }
+
+  /**
+   * Withdraws a request's card, when the session that asked withdraws it or is deleted (#673): the card closes, the
+   * request ends with `person` shown, and whatever waits on the card hears no answer.
+   */
+  private withdrawAgentStart(requestId: string, error: string, person: string): void {
+    const rec = this.agentStarts.get(requestId)
+    if (!rec || rec.ended) return
+    this.endAgentStart(requestId, { error, person })
+    const ask = this.hostAsks.get(requestId)
+    if (!ask) return
+    this.hostAsks.delete(requestId)
+    if (this.meta.get(ask.sessionId)?.pendingApproval?.requestId === requestId) {
+      this.restAfterCard(ask)
+      this.onEvent({ type: 'approval_resolved', sessionId: ask.sessionId, requestId, decision: 'deny' })
+    }
+    ask.resolve(null)
+  }
+
+  /**
+   * A request the previous host left standing (#673, `agent_start_requests`): its card is raised again, and an
+   * approval starts the child here, with the report armed, as the call would have. A request whose caller is gone ends.
+   */
+  private resumeAgentStart(req: AgentStartRequest): void {
+    const caller = this.meta.get(req.callerId)
+    if (!caller) {
+      this.store.deleteAgentStartRequest(req.requestId)
+      return
+    }
+    const rec = this.openAgentStart(req)
+    rec.detached = true
+    void (async () => {
+      const decision = await this.askHost(req.callerId, req.detail, undefined, { requestId: req.requestId, shown: true })
+      // The host is leaving again: the row stays for the next one
+      if (decision === null && (this.handingOver || this.disposing)) return
+      const consent = this.agentConsentFrom(req.callerId, req.projectId, decision)
+      if (!consent.ok) {
+        this.endAgentStart(req.requestId, { error: consent.error, person: agentStartPersonText(req, consent.why === 'denied' ? 'denied' : 'withdrawn'), denied: consent.why === 'denied' })
+        return
+      }
+      const project = this.store.listProjects().find((p) => p.id === req.projectId)
+      const r = project
+        ? await this.createAgentChild(req.callerId, { id: project.id, name: project.name, path: project.path }, req, { stage: 'creating' })
+        : { done: { ok: false as const, error: "This session's project is no longer registered." } }
+      if ('key' in r) {
+        this.endAgentStart(req.requestId, { childId: r.d.sessionId })
+        this.agentWorking(r.d)
+      } else {
+        const error = r.done.ok ? 'No session was created.' : r.done.error
+        this.endAgentStart(req.requestId, { error, person: agentStartPersonText(req, 'failed', error) })
+      }
+    })()
   }
 
   /**
@@ -6894,11 +7248,30 @@ export class SessionManager {
     const next = [...this.hostAsks.values()].find((a) => a.sessionId === sessionId)
     if (!next) return
     const e = { type: 'approval_request' as const, sessionId, requestId: next.requestId, detail: next.detail }
+    /*
+     * Raised again between turns (#673: a start_agent card that outlived its call, or one the previous host left): its
+     * answer returns the session to this. A first raise is always inside the tool call that asks
+     */
+    next.restState = next.shown && !inTurn(m.state) ? m.state : undefined
     if (!next.shown) {
       next.shown = true
       this.onEvent(e)
       return
     }
+    this.applyStateHint(e, m)
+    this.store.upsertSession(m)
+    this.emit(e)
+  }
+
+  /**
+   * A host card raised between turns closes back into that rest (#673), not into "working": no tool call is waiting on
+   * it, so nothing would ever end that turn. Set before the card's `approval_resolved`, which then changes no state, and
+   * without `onEvent`, since no turn ended (no report, no deferred restart).
+   */
+  private restAfterCard(ask: HostAsk): void {
+    const m = this.meta.get(ask.sessionId)
+    if (!ask.restState || m?.pendingApproval?.requestId !== ask.requestId) return
+    const e = { type: 'state_change' as const, sessionId: ask.sessionId, state: ask.restState }
     this.applyStateHint(e, m)
     this.store.upsertSession(m)
     this.emit(e)
@@ -7759,6 +8132,8 @@ export class SessionManager {
   }
 
   async disposeAll(): Promise<void> {
+    // The cards it closes below are not the person's answers: a standing start_agent request stays stored (#673)
+    this.disposing = true
     this.watchers.close()
     for (const readers of this.turnObservers.values()) for (const observer of readers) observer.fail(new Error('Centralu is stopping'))
     this.appsHub?.rt.attachBrokerHost(null)
@@ -7862,6 +8237,8 @@ type HostAsk = {
   sessionId: string
   detail: Extract<ApprovalDetail, { kind: 'capability' | 'project_access' | 'project_create' | 'agent_start' | 'centralu_update' | 'other' }>
   shown: boolean
+  /** The state the session rested in when the card was raised between turns (#673), to return to once it closes */
+  restState?: SessionState
   resolve: (d: HostAskAnswer) => void
 }
 

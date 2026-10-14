@@ -51,14 +51,19 @@ describe('auto Centralu boundaries (#603)', () => {
   })
 
   it.each(['safe', 'normal'] as const)(
-    '%s still asks at start and each cross-project consent',
+    '%s still asks at each cross-project consent; at start, safe asks and normal in a trusted project does not (#673)',
     async (preset) => {
       const id = await session(preset)
-      const pending = start(id)
-      await w.until(() => !!w.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
-      const card = w.mgr.listSessions().find((s) => s.id === id)!.pendingApproval!
-      w.mgr.respondApproval(id, card.requestId, 'deny')
-      expect((await pending).ok).toBe(false)
+      if (preset === 'safe') {
+        const pending = start(id)
+        await w.until(() => !!w.mgr.listSessions().find((s) => s.id === id)?.pendingApproval)
+        const card = w.mgr.listSessions().find((s) => s.id === id)!.pendingApproval!
+        w.mgr.respondApproval(id, card.requestId, 'deny')
+        expect((await pending).ok).toBe(false)
+      } else {
+        expect(await start(id)).toMatchObject({ ok: true })
+        expect(w.mgr.listSessions().find((s) => s.id === id)?.pendingApproval).toBeFalsy()
+      }
       for (const access of ['delegate', 'apps'] as const) {
         const call = w.mgr.ensureProjectAccess(id, w.target.id, access, { text: 'check' })
         await w.until(() => !!w.card(id))

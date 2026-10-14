@@ -90,6 +90,7 @@ export function Notices() {
 /** What happened — since this screen barely uses color, a single line on the left distinguishes it */
 const LOOK: Record<Notice['kind'], { label: string; edge: string }> = {
   approval: { label: 'Awaiting approval', edge: 'border-l-ink-signal' },
+  agent_start: { label: 'Wants to start an agent', edge: 'border-l-ink-signal' },
   error: { label: 'Error', edge: 'border-l-[var(--color-danger)]' },
   done: { label: 'Finished', edge: 'border-l-line-strong' },
 }

@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 49, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 50, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -28,6 +28,12 @@ erDiagram
   projects ||--o{ project_consents : "from_project_id"
   projects |o--o{ sessions : "project_id"
   sessions ||--o{ subagent_messages : "session_id"
+  agent_start_requests {
+    TEXT request_id PK
+    TEXT caller_session_id
+    TEXT request
+    INTEGER asked_at
+  }
   app_permissions {
     TEXT app_key PK
     TEXT project_id
@@ -223,6 +229,17 @@ erDiagram
 ```
 
 ## Tables
+
+### `agent_start_requests`
+
+Added in v50.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `request_id` | TEXT | yes |  | PK | v50 |
+| `caller_session_id` | TEXT | no |  |  | v50 |
+| `request` | TEXT | no |  |  | v50 |
+| `asked_at` | INTEGER | no |  |  | v50 |
 
 ### `app_permissions`
 

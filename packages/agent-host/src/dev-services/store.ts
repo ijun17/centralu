@@ -1828,6 +1828,39 @@ export class Store {
           `)
         },
       },
+      {
+        to: 50,
+        breaksOlderReaders: false,
+        /**
+         * start_agent requests still waiting for the person (#673) — `agent_start_requests`, one row per consent card
+         * a session raised to start another agent, from the moment the card stands until the person answers it or it is
+         * withdrawn.
+         *
+         *   request_id         the card's request id, which is also the handle the caller follows with agent_session
+         *   caller_session_id  the session that asked
+         *   request            what the start needs once allowed, as JSON (`AgentStartRequest` in the manager)
+         *   asked_at           when the card was raised
+         *
+         * The card used to be withdrawn after 200 seconds, so an absent person never saw it. It now stands until it is
+         * answered, which can outlive the host: a host swap (#280) or a restart reads these rows and raises the cards
+         * again, and an approval starts the child then. A row whose caller is no longer there is dropped.
+         *
+         * Not foreign keys, as `report_marks`: trashing the caller withdraws its rows through the manager, and purging
+         * deletes them (`purgeSession`).
+         *
+         * **Expand only (#292's rule).** A new table; an older host never reads it.
+         */
+        run: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS agent_start_requests (
+              request_id        TEXT PRIMARY KEY,
+              caller_session_id TEXT NOT NULL,
+              request           TEXT NOT NULL,
+              asked_at          INTEGER NOT NULL
+            )
+          `)
+        },
+      },
     ]
   }
 
@@ -2779,6 +2812,7 @@ export class Store {
         .run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM app_runs WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM report_marks WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
+      this.db.prepare(`DELETE FROM agent_start_requests WHERE caller_session_id = ?`).run(sessionId)
       this.db.prepare(`DELETE FROM sessions WHERE id = ? AND deleted_at IS NOT NULL`).run(sessionId)
       return true
     })
@@ -3569,6 +3603,34 @@ export class Store {
 
   clearReportMark(sessionId: string): void {
     this.db.prepare(`DELETE FROM report_marks WHERE session_id = ?`).run(sessionId)
+  }
+
+  // ── start_agent requests waiting for the person (#673) — see migration v50 ──
+
+  listAgentStartRequests(): { requestId: string; callerSessionId: string; request: unknown; askedAt: number }[] {
+    const rows = this.db
+      .prepare(`SELECT request_id as requestId, caller_session_id as callerSessionId, request, asked_at as askedAt FROM agent_start_requests ORDER BY asked_at`)
+      .all() as { requestId: string; callerSessionId: string; request: string; askedAt: number }[]
+    return rows.flatMap((r) => {
+      try {
+        return [{ ...r, request: JSON.parse(r.request) as unknown }]
+      } catch {
+        return []
+      }
+    })
+  }
+
+  putAgentStartRequest(requestId: string, callerSessionId: string, request: unknown): void {
+    this.db
+      .prepare(
+        `INSERT INTO agent_start_requests (request_id, caller_session_id, request, asked_at) VALUES (?, ?, ?, ?)
+           ON CONFLICT(request_id) DO UPDATE SET caller_session_id = excluded.caller_session_id, request = excluded.request`,
+      )
+      .run(requestId, callerSessionId, JSON.stringify(request), Date.now())
+  }
+
+  deleteAgentStartRequest(requestId: string): void {
+    this.db.prepare(`DELETE FROM agent_start_requests WHERE request_id = ?`).run(requestId)
   }
 
   // ── Linked machines (#82, v46) ─────────────────────────────────────────────────────────────

@@ -125,7 +125,8 @@ export type { PanelGroup, PanelTab } from './panelLayout.js'
  */
 export type Notice = {
   sessionId: string
-  kind: 'done' | 'approval' | 'error'
+  /** `agent_start`: the session asks to start another agent (#673), left as a card even while the app is in front */
+  kind: 'done' | 'approval' | 'error' | 'agent_start'
   /** The session's name at that moment — kept as written even if the session is renamed later */
   name: string
   at: number
@@ -3406,6 +3407,31 @@ export const useStore = create<AppState>((set, get) => ({
     let announced = false
 
     /*
+     * A session asks to start another agent (#673): a card in the top right whenever that session is off screen, the
+     * app in front or not. Other approvals leave one only while the app is behind (the notification policy), but this
+     * one used to stand unseen in a session the person was not looking at until it was withdrawn, and the session
+     * then worked alone. It now stands until answered, and comes back after the session's turn ends: each time it is
+     * raised off screen, the card is there; clicking it opens the session with the card.
+     */
+    if (e.type === 'approval_request' && e.detail.kind === 'agent_start') {
+      const s = get()
+      const seen =
+        s.appFocused &&
+        isOnScreen(s.view, sessionId, {
+          focusedSessionId: s.focusedSessionId,
+          orchestratorId: s.orchestratorId,
+          gridSessions: gridSessionIds(s.gridPanels),
+          builderPaneSessionId: s.builderPaneSessionId,
+          projectScreen: projectScreenSessions(s),
+        })
+      if (!seen) pushNotice(set, { sessionId, kind: 'agent_start', name: s.sessions[sessionId]?.name ?? sessionId, at: Date.now() })
+    }
+    // Answered (in another window, or withdrawn): the card in the top right has nothing left to open
+    if (e.type === 'approval_resolved' && get().notices.some((n) => n.sessionId === sessionId && n.kind === 'agent_start')) {
+      get().dismissNotices([sessionId])
+    }
+
+    /*
      * The response finished — the trigger for one sweep of the screen.
      *
      * **Visibility is decided right now.** This used to keep only the fact, and let the screen
@@ -3731,7 +3757,8 @@ export const useStore = create<AppState>((set, get) => ({
       if (one) {
         pushNotice(set, {
           sessionId,
-          kind: one.kind === 'error' ? 'error' : 'approval',
+          // A request to start an agent keeps its own words (#673), pushed above for the same event
+          kind: one.kind === 'error' ? 'error' : e.type === 'approval_request' && e.detail.kind === 'agent_start' ? 'agent_start' : 'approval',
           name: withSeq.name,
           at: Date.now(),
         })

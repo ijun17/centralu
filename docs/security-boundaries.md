@@ -24,9 +24,13 @@ same files under the same or a lower preset), but they multiply what runs. The r
 apply to `safe` and `normal`; `auto` opens the consent, depth, ownership and trust
 boundaries (#603), with a log line instead of a card or refusal:
 
-- **The person's consent**, a card in the caller's session the first time it starts one: once, always for this
-  session (kept while the host serves it), always for this project (stored as the project's `agents` consent,
-  revoked in Settings → Permissions). Injected text can at most raise a card.
+- **The person's consent.** For a `normal` caller it is the project's trust (#673): only a trusted project's
+  sessions can start agents at all, and trusting it was the person's decision about that project, so no card is
+  raised; trust is read at each call and when a standing card is approved. A `safe` caller gets a card in its session
+  the first time it starts one: once, always for this session (kept while the host serves it), always for this
+  project (stored as the project's `agents` consent, revoked in Settings → Permissions). Injected text can at most
+  raise a card, and a card is never withdrawn by a timer: it stands until the person answers, the caller withdraws
+  it, or the caller is deleted, and survives a host swap (`agent_start_requests`).
 - **Never above the caller**: the child gets the caller's preset; a child the person raised above it takes no
   more work from the caller.
 - **Depth one**: a session marked `askedBy` (started by `start_agent`), or handling an active `ask_project` task, can neither
@@ -220,7 +224,7 @@ front door" below).
 | `orchestrator` | The central orchestrator | Every session |
 | `scoped` | A coordinating session | Its member sessions |
 | `builder` | An app's builder session | Its own app (`check`) |
-| `reader` | Every other session in a project, while Settings → Orchestrator → "Let sessions look at their own project" is on | Its own project; acts only on the agents it started (`start_agent`, behind a consent card) and another project only through a consent card |
+| `reader` | Every other session in a project, while Settings → Orchestrator → "Let sessions look at their own project" is on | Its own project; acts only on the agents it started (`start_agent`: the project's trust under `normal`, a consent card under `safe`, #673) and another project only through a consent card |
 | none | A session with the switch off, a session with no project, and an agent an app started (`run_agent`) | No Centralu server at all |
 
 The worktree manager's profile (`manager`: list, read and send to its worktree sessions, propose one, delete a merged
@@ -321,7 +325,7 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `ask_project` from a session that was itself asked | refused | refused | refused | open | refused | refused | refused | open | `askProject` (depth one) |
 | `ask_project` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `askProject` (the caller's project trust, #382) |
 | `ask_project` into an untrusted project, first time for the pair | asks (the card says it is not trusted) | asks | asks | open | asks | asks | asks | open | `ensureProjectAccess` (`to.trusted`), `projectAccessQuestion` |
-| `start_agent`, first time for a session | asks (consent card: once, always for this session, always for this project) | asks | asks | open | asks | asks | asks | open | `ensureAgentConsent` in `SessionManager.startAgent`; "always for this session" lives while the host serves it, "always for this project" is kept in `project_consents` (kind `agents`) |
+| `start_agent`, first time for a session, trusted project | asks (consent card: once, always for this session, always for this project) | allowed (the project's trust is the consent, #673) | allowed | open | asks | allowed | allowed | open | `ensureAgentConsent` (`trustIsAgentConsent`) in `SessionManager.startAgent`; "always for this session" lives while the host serves it, "always for this project" is kept in `project_consents` (kind `agents`); a card past the setup bound stays, and the call answers `pending` (#673) |
 | `start_agent` from a session that was itself started or asked (`askedBy`) | refused | refused | refused | open | refused | refused | refused | open | `startAgent` (depth one; `askProject` refuses the same sessions) |
 | `start_agent` from an untrusted project | refused | refused | refused | open | refused | refused | refused | open | `startAgent` (the project's trust, #382) |
 | `start_agent` past 4 running children in the project, default setting | refused | refused | refused | open | refused | refused | refused | open | `agentCeilingError` (`prefs.agentCeiling`; empty: auto unlimited, otherwise `AGENT_CEILING`; 0: unlimited) |
@@ -395,7 +399,7 @@ downgrade. The session-tools switch and app-sharing switch still apply to every 
 | "Let sessions look at their own project" off | — | — | — | Becomes none. Calls refused at once (`readerToolsFor`; the bridge through `toolProfileOf`); apps it attached leave at once (`onDemand.allowed` in `useExternalApps`, recounted by `setUiPreferences`). Ones allowed "once" are forgotten (`AppAccess.dropOnce`); the rest come back if it is turned on again (#382); the schemas leave Claude at the next start |
 | Its project loses trust | No change (reads no project files) | No change (reads no project files) | Its app stops, so `check` cannot start it | Settings files at the next start; its project's apps stop and leave at once; `find_apps` and `attach_app` refused; apps it attached leave at once. `ask_project` and `start_agent` refused (#382, #561) |
 | The other project loses trust | — | — | — | Apps attached from it leave at once; `ask_project` to it still runs, its card says it is not trusted, and the existing target session follows its trust |
-| The person revokes a pair in Settings | — | — | — | Apps attached under "always" leave at once; the next `ask_project` or `attach_app` asks again; for a project's `agents` row, the next `start_agent` asks again (a child already running is left to finish) |
+| The person revokes a pair in Settings | — | — | — | Apps attached under "always" leave at once; the next `ask_project` or `attach_app` asks again; for a project's `agents` row, the next `start_agent` of a `safe` session asks again (a child already running is left to finish; a `normal` session needs no row in a trusted project, #673) |
 | Sharing of an app turned off | — | — | — | Leaves every session that attached it |
 
 ## Tool output in the store

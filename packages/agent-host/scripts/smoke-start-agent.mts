@@ -4,12 +4,13 @@
  *
  * One trusted scratch project, a host on a temp store and data folder (never `~/.centralu`). A Claude haiku session
  * (preset normal) is told to have another agent write a file with a number only that agent knows, then read the file.
- * The script plays the person: it allows the start_agent card once, and allows any approval the child raises.
+ * The script plays the person: it allows any approval the child raises. The parent raises no start_agent card: in a
+ * trusted project a `normal` session's start needs none (#673); one would be allowed too, and fail the check.
  *
  *   CHILD=codex (default: gpt-5.6-luna, low effort, the project's remembered choice) or CHILD=claude (haiku);
  *   WORKTREE=1 makes the project a git repository and has the child work in a new worktree (#561 part 2)
  *
- * Passes when: the agent_start card stood in the parent with the parent's preset; a child opened in the same project
+ * Passes when: no agent_start card stood in the parent; a child opened in the same project
  * marked `askedBy` the parent, on the tool asked for, with the parent's preset; the file exists; and the parent's
  * final answer carries the number that is in the file.
  *
@@ -144,7 +145,7 @@ console.log('\n── start_agent result (as the model read it) ──\n' + Stri
 console.log('\n── parent answer ──\n' + answer.trim().slice(0, 600) + '\n')
 const checks: [string, boolean][] = [
   ['the parent turn ended', ended],
-  ['the agent_start card stood in the parent, with its preset', !!consent && consent.detail.preset === 'normal'],
+  ['no agent_start card stood in the parent: the project\'s trust is the consent (#673)', !consent],
   ['a child opened in the same project, marked askedBy the parent', !!child && child.askedBy === parentId && child.projectId === project.id],
   [`the child runs ${CHILD} under the parent's preset`, !!child && child.tool === CHILD && child.permissionPreset === 'normal'],
   ...(WORKTREE ? [['the child works in a new worktree, not the project folder', !!child?.worktree && child.worktree.path !== website] as [string, boolean]] : []),

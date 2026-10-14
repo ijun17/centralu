@@ -273,6 +273,7 @@ Where it is stored:
 - `approval_rules`: "always allow" command rules.
 - `project_consents`: one project's remembered consent to reach another.
 - `report_marks`: the report a session owes the session that gave it work, until it is delivered.
+- `agent_start_requests`: a start_agent card the person has not answered yet, so the next host raises it again (#673).
 
 ### 2.3 Apps
 

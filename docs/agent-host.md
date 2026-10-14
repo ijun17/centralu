@@ -252,8 +252,8 @@ own budget (`AGENT_TOOLS`, `AGENT_BUDGET_CHARS`).
 
 | Tool | Arguments → what comes back |
 |---|---|
-| `start_agent` | `{ task, tool?: string, model?, effort?, wait?, worktree?, branch? }` → the child's id and name, and its answer (`done`) or `working` |
-| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete, text? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `stopped` and `deleted` (a child moved to the trash; worktree cleanup also preserves local work, #608/#637) |
+| `start_agent` | `{ task, tool?: string, model?, effort?, wait?, worktree?, branch? }` → the child's id and name, and its answer (`done`) or `working`; or `pending` with a request handle while the person's card stands (#673) |
+| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete, text? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `stopped` and `deleted` (a child moved to the trash; worktree cleanup also preserves local work, #608/#637). On a `pending` request's handle (#673): `status` and `wait` follow it (to the child once it started), `stop` or `delete` withdraws the card, `send` is refused |
 
 The optional `tool` is a registry name, accepted as a string by the schema and checked against the
 current registry at call time. An unknown name returns an error listing the installed tools; adding
@@ -302,14 +302,31 @@ below retained for `safe` and `normal`:
    minute) and waits at most `START_AGENT_MODEL_CHECK_MS` (3 s) for a missing one; without a list in time the child
    starts on the name as given and the answer says it was not checked (an empty list is said to be empty). A name the
    cached list lacks is refused only after a fresh read (the CLI may have been updated).
-4. **Consent** (`ensureAgentConsent`). A card in the caller's approval slot, detail `agent_start` (the tool, model,
-   preset and task): allow once, always for this session (`always`, kept in memory while this host serves the
-   session), always for this project (`always` with scope `project`, the card's ⌥; stored as the project's
-   `project_consents` row of kind `agents`, from and to the same project, listed and revoked in Settings →
-   Permissions), deny.
+4. **Consent** (`ensureAgentConsent`). **The project's trust is the consent for a `normal` caller** (#673, owner
+   decision 2026-10-14): trusting the project (#655) was already the person's decision about it, and a card in a
+   session they were not looking at only made the session work alone. Read at each call, nothing remembered; no
+   setting. A `safe` caller gets a card in its
+   approval slot, detail `agent_start` (the tool, model, preset and task): allow once, always for this session
+   (`always`, kept in memory while this host serves the session), always for this project (`always` with scope
+   `project`, the card's ⌥; stored as the project's `project_consents` row of kind `agents`, from and to the same
+   project, listed and revoked in Settings → Permissions), deny. `auto` opens it, as before.
    Everything before the child exists (check, card, start) has one bound, `START_AGENT_SETUP_MS` (200 s, under the Codex
-   bridge's 280 s): past it the card is withdrawn and the answer says whether a session was created. Refusals and this
-   answer tell the calling model to ask the person rather than do the work with its own CLI's subagents (#660).
+   bridge's 280 s): past it the answer says whether a session was created. Refusals and this answer tell the calling
+   model to ask the person rather than do the work with its own CLI's subagents (#660).
+   **A card is not withdrawn at the bound** (#673). The call answers `pending` with the request id (`ag-…`) as a
+   handle, and the setup goes on in the background: the card stays until the person answers. An approval then starts
+   the child with its report armed (the caller is told when its turn ends, as with `wait: false`); a refusal, or a
+   start that fails after the approval, is told to the caller as a message from Centralu (`HOST_SENDER`). The card
+   lives in the caller's single approval slot, which the caller's own next events clear while its turn goes on; it is
+   raised again (`raiseHostAsks`, not recorded twice) when that turn ends, unless it ended in an error. While it stands
+   the request is in the store's `agent_start_requests` (v50): a host swap or restart leaves the row (the leaving
+   host's call answers `pending`), and the next host raises the card again (`resumeAgentStart`) and starts the child
+   when it is approved, after reading the caller and the project's trust again. A request ends when it is answered,
+   when the caller withdraws it (`agent_session stop`), when its call is cancelled while the card stands, or when the
+   caller is deleted; each end without a child leaves a notice in the caller's session for the person
+   (`Centralu · agent request`), apart from a denial on a card the call was still waiting on, which the card shows.
+   In the window, a card raised in a session off screen leaves a card in the top right (`Notices`, kind
+   `agent_start`) even while the app is in front, and clicking it opens that session.
    The wait of `wait: true` is cut to what is left of `START_AGENT_CALL_MS` (270 s), so setup and wait together stay
    inside the bridge's bound; past it the answer is `working`, with the report armed.
 5. **The child.** A visible session in the caller's own folder (a worktree session's worktree), named from the task,
@@ -2039,7 +2056,7 @@ step against:
 | Steps | What they do | Older build |
 |---|---|---|
 | 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43 | add a column | reads it (39: shows sessions in the trash as live ones; 43: an older host's `grid.set` writes no span, so app panels fall back to their defaults, #306) |
-| 3, 6, 9, 16, 19, 34, 36, 41, 42, 49 | add a table (3 also backfills the index: heavy; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ) |
+| 3, 6, 9, 16, 19, 34, 36, 41, 42, 49, 50 | add a table (3 also backfills the index: heavy; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646; 50 adds `agent_start_requests`, a start_agent card still waiting for the person, #673) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ) |
 | 10, 11, 40 | rebuild with the same shape (10: `sessions` with `project_id` nullable; 11 and 40: the index, then `VACUUM`: heavy) | reads it |
 | 21, 26, 29, 35, 48 | rewrite data one way (21 rewrites every message: heavy; 48 gives a former worktree manager's worktree sessions `askedBy`, #561) | reads it, cannot be undone |
 | **13, 28, 32** | **drop a table or a column** | **breaks: raises `min_reader_version`** |

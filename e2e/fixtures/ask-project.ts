@@ -185,6 +185,59 @@ export function askProjectTests(): void {
       expect(await page.evaluate(() => (window as any).__mock.approvalScopes)).toEqual(['session', 'project', 'project'])
     })
 
+    // #673: the person was looking at another session and never saw the card, so the session worked alone
+    test('a card raised in a session off screen leaves a card in the top right that opens it', async ({ page }) => {
+      const { caller, consumer } = await start(page)
+      await emit(page, caller, { type: 'state_change', state: 'working' })
+      // The person moves on to another session
+      const other = await newSession(page, 'consumer')
+      await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(other)
+      await agentCard(page, caller, consumer, 'ag-off')
+      const toast = page.locator(`[data-testid="notice"][data-kind="agent_start"][data-session="${caller}"]`)
+      await expect(toast).toBeVisible()
+      await expect(toast).toContainText('Wants to start an agent')
+      await toast.getByTestId('notice-open').click()
+      await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(caller)
+      await expect(page.locator('[data-testid="approval-card"][data-kind="agent_start"]')).toBeVisible()
+      await expect(toast).toHaveCount(0)
+    })
+
+    test('a card answered elsewhere takes its card in the top right away', async ({ page }) => {
+      const { caller, consumer } = await start(page)
+      await emit(page, caller, { type: 'state_change', state: 'working' })
+      await newSession(page, 'consumer')
+      await agentCard(page, caller, consumer, 'ag-else')
+      const toast = page.locator(`[data-testid="notice"][data-kind="agent_start"][data-session="${caller}"]`)
+      await expect(toast).toBeVisible()
+      // Another window answered it, or the session withdrew it
+      await emit(page, caller, { type: 'approval_resolved', requestId: 'ag-else', decision: 'allow' })
+      await expect(toast).toHaveCount(0)
+    })
+
+    test('a card raised in the session on screen leaves no card in the top right', async ({ page }) => {
+      const { caller, consumer } = await start(page)
+      await emit(page, caller, { type: 'state_change', state: 'working' })
+      await agentCard(page, caller, consumer, 'ag-on')
+      await expect(page.locator('[data-testid="approval-card"][data-kind="agent_start"]')).toBeVisible()
+      await expect(page.locator('[data-testid="notice"][data-kind="agent_start"]')).toHaveCount(0)
+    })
+
+    test('a request that ended without an agent leaves a line in the session for the person', async ({ page }) => {
+      const { caller } = await start(page)
+      await emit(page, caller, {
+        type: 'notice',
+        seq: 5,
+        level: 'warning',
+        from: 'Centralu',
+        label: 'agent request',
+        audience: 'you',
+        text: 'The request to start Codex (“write the parser”) was withdrawn: the call that asked was cancelled before you answered. No agent was started.',
+      })
+      const line = page.getByTestId('msg-mark').filter({ hasText: 'write the parser' })
+      await expect(line.getByTestId('notice-head')).toContainText('Centralu · agent request')
+      await expect(line).toContainText('No agent was started.')
+    })
+
     test('the child links back to the session that started it, by name', async ({ page }) => {
       const { caller, consumer } = await start(page)
       await page.evaluate(

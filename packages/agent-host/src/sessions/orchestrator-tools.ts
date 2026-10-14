@@ -539,6 +539,17 @@ function askProjectText(r: AskProjectResult): ToolOutput {
  */
 function agentRunText(r: ChildRunResult): ToolOutput {
   if (!r.ok) return { text: r.error, isError: true }
+  // No session yet (#673): the handle is the request's, and the card stays up for the person
+  if (r.state === 'pending') {
+    return {
+      text:
+        `No session yet: starting ${r.tool} is waiting for the person's answer on the card in your session (request ${r.sessionId}). ` +
+        'Carry on with other work, and do not do this with your own subagents instead. If they allow it, the session starts and ' +
+        'you will be told when its turn ends; if they refuse or it is withdrawn, you will be told. ' +
+        `agent_session(sessionId="${r.sessionId}", action="status") shows where it stands, action="wait" waits for the answer, ` +
+        'action="stop" withdraws the request.',
+    }
+  }
   const who = `the ${r.tool} session "${r.sessionName}" [${r.sessionId}]`
   switch (r.state) {
     case 'working':
@@ -549,6 +560,8 @@ function agentRunText(r: ChildRunResult): ToolOutput {
           `agent_session(sessionId="${r.sessionId}", action="wait") waits for its answer, action="stop" stops it.`,
       }
     case 'stopped':
+      // A request withdrawn before the person answered has no session to name (#673)
+      if (!r.sessionName) return { text: `Withdrew request ${r.sessionId}: its card is gone and no session was started.` }
       return { text: `Stopped ${who}.` }
     case 'deleted':
       if (r.branch === undefined) return { text: `Moved ${who} to the trash. Tell the person in one line.` }
