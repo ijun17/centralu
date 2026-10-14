@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 50, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 51, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -94,6 +94,12 @@ erDiagram
     TEXT sha PK
     TEXT session_id
     INTEGER ts
+  }
+  delegated_turns {
+    TEXT session_id PK
+    TEXT caller_session_id
+    INTEGER started_at
+    TEXT told_cards
   }
   grid_layout {
     TEXT panel_key PK
@@ -341,6 +347,17 @@ Added in schema.sql.
 | `sha` | TEXT | no |  | PK 2 | schema.sql |
 | `session_id` | TEXT | no |  |  | schema.sql |
 | `ts` | INTEGER | no |  |  | schema.sql |
+
+### `delegated_turns`
+
+Added in v51.
+
+| Column | Type | Null | Default | Key | Added in |
+|---|---|---|---|---|---|
+| `session_id` | TEXT | yes |  | PK | v51 |
+| `caller_session_id` | TEXT | no |  |  | v51 |
+| `started_at` | INTEGER | no |  |  | v51 |
+| `told_cards` | TEXT | no | `''` |  | v51 |
 
 ### `grid_layout`
 

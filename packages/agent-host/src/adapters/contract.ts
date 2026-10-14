@@ -7,6 +7,8 @@ import type {
   ApprovalScope,
   GitSource,
   NormalizedEvent,
+  ApprovalDetail,
+  Question,
   SessionInfo,
   PermissionPreset,
   QuestionAnswer,
@@ -124,6 +126,16 @@ export type LinkedSessions = {
   recall(query: string, limit: number): Promise<{ hits: RecallHit[][]; notSearched: string[] }>
 }
 
+/**
+ * A card standing in a session whose turn the caller gave it (#676), as the caller reads it: a question it may answer
+ * (the person may too, and the first answer wins), or an approval it is only told of unless its own preset is `auto`
+ * when it answers. The questions and the approval's detail are the target's text: rendered fenced, never as an
+ * instruction.
+ */
+export type RoutedCard =
+  | { card: string; kind: 'question'; questions: Question[] }
+  | { card: string; kind: 'approval'; detail: ApprovalDetail; answerable: boolean }
+
 /** What one ask_project call comes back with (#371 part B) — rendered for the model by runOrchestratorTool */
 export type AskProjectResult =
   | {
@@ -148,6 +160,15 @@ export type AskProjectResult =
       /** What the delegated session waits on, when it waits on the person (an approval, a question) */
       notice?: string
     }
+  | {
+      ok: true
+      /** The delegated turn stopped on a card the caller may read and answer (#676): agent_session answers it */
+      state: 'asking'
+      project: string
+      sessionId: string
+      sessionName: string
+      cards: RoutedCard[]
+    }
   | { ok: false; error: string }
 
 /**
@@ -156,6 +177,8 @@ export type AskProjectResult =
  *   done      the turn the caller gave it ended; `answer` is its final text, cut in the middle when long
  *   working   still running past the wait's bound (or not waited on); `reported` says the caller will be told when it ends
  *   at_rest   nothing the caller gave it is running (agent_session status/wait); `answer` is its last final text
+ *   asking    the turn the caller gave it waits on a card the caller reads here and answers with agent_session (#676)
+ *   answered  agent_session answer reached the card
  *   stopped   agent_session stop ended the turn
  *   deleted   agent_session delete put a child in the trash; worktree children also report branch cleanup
  *   pending   no session yet (#673): the start waits on the person's card. `sessionId` is the request's handle, which
@@ -166,6 +189,8 @@ export type ChildRunResult =
       | { state: 'done'; answer: string; readable: string[]; outside: string[] }
       | { state: 'working'; reported: boolean }
       | { state: 'at_rest'; answer: string; sessionState: string }
+      | { state: 'asking'; cards: RoutedCard[] }
+      | { state: 'answered'; card: string }
       | { state: 'stopped' }
       | { state: 'pending' }
       | { state: 'deleted'; branch?: undefined; setAside?: undefined; warning?: undefined }
@@ -177,7 +202,13 @@ export type ChildRunResult =
 export type StartAgentOpts = { task: string; tool?: string; model?: string; effort?: string; wait?: boolean; worktree?: boolean; branch?: string }
 
 /** agent_session's arguments (#561) */
-export type AgentSessionOpts = { sessionId: string; action: 'status' | 'send' | 'wait' | 'stop' | 'delete'; text?: string }
+export type AgentSessionOpts = {
+  sessionId: string
+  action: 'status' | 'send' | 'wait' | 'stop' | 'delete' | 'answer'
+  text?: string
+  /** answer (#676): which card, when more than one stands */
+  card?: string
+}
 
 export type OrchestratorTools = {
   /**
@@ -215,7 +246,7 @@ export type OrchestratorTools = {
       /** Whether to expand tool-call bodies too. Collapsed by default (a full script's text would bury the conversation) */
       tools?: boolean
     },
-  ): Promise<{ ok: boolean; error?: string; lines?: string[]; state?: string }>
+  ): Promise<{ ok: boolean; error?: string; lines?: string[]; state?: string; /** Cards in its delegated turn waiting on this seat (#676) */ cards?: RoutedCard[] }>
   /**
    * Searches past conversations — **memory that crosses project boundaries**.
    *
@@ -275,6 +306,11 @@ export type OrchestratorTools = {
   startAgent(opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult>
   /** Works with a session the caller started (#561, agent_session): status, send more, wait, stop */
   agentSession(opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
+  /**
+   * Answers a card standing in a session whose turn this seat gave it (#676, answer_question): the directing seats'
+   * way, as agent_session's `answer` is an ordinary session's. Same rules (`SessionManager.answerRoutedCard`).
+   */
+  answerQuestion(opts: { sessionId: string; card?: string; text: string }): Promise<ChildRunResult>
   recall(
     query: string,
     limit?: number,

@@ -253,7 +253,7 @@ own budget (`AGENT_TOOLS`, `AGENT_BUDGET_CHARS`).
 | Tool | Arguments → what comes back |
 |---|---|
 | `start_agent` | `{ task, tool?: string, model?, effort?, wait?, worktree?, branch? }` → the child's id and name, and its answer (`done`) or `working`; or `pending` with a request handle while the person's card stands (#673) |
-| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete, text? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `stopped` and `deleted` (a child moved to the trash; worktree cleanup also preserves local work, #608/#637). On a `pending` request's handle (#673): `status` and `wait` follow it (to the child once it started), `stop` or `delete` withdraws the card, `send` is refused |
+| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete\|answer, text?, card? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, §1.2.2, #676), `stopped` and `deleted` (a child moved to the trash; worktree cleanup also preserves local work, #608/#637) |
 
 The optional `tool` is a registry name, accepted as a string by the schema and checked against the
 current registry at call time. An unknown name returns an error listing the installed tools; adding
@@ -556,7 +556,7 @@ must use `purgeSession` if added. Gitlinks found only in older merged superproje
 follow-up ([#623](https://github.com/ijun17/centralu/issues/623)); a superproject merge does not prove
 that module commits were pushed. Writes by other programs during capture are outside this session's lock.
 
-**Size.** The two definitions are 956 characters (`AGENT_BUDGET_CHARS` 1,000; 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
+**Size.** The two definitions are 990 characters (`AGENT_BUDGET_CHARS` 1,000; 956 before #676's `answer` action and `card`, 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
 made in words, like ask_project's, which deferred was not found) and defers `agent_session`, which every
 `start_agent` answer names; Codex reaches both through its `exec` tool. Measured in tool-cost.md §10: +170 tokens per ordinary Claude request (412 → 582); "Have Codex …" reached `start_agent` 3 of 3 on Claude, "another agent" went to each CLI's own sub-agents. No `name` argument: the child
 is named from its task and the person renames it.
@@ -627,6 +627,35 @@ The one addition (#280): under the keeper (`CC_KEEPER=1`), the host also writes
 `{"activity":{"busy":true|false}}` to stdout, once at start and whenever it changes
 (`keeper-link.ts`). That is what the keeper's idle rule reads. Started any other way, the host
 writes nothing but the ready line.
+
+### 1.2.2 Cards in a delegated turn (#676)
+
+When a session works on a turn another session gave it, the cards it raises in that turn go to that session as
+well as to the person (owner decision 2026-10-14, the child-question rule of #561 option B, scoped tightly). The turn
+is **delegated** when another session's work starts it: `ask_project` into a session at rest, `start_agent`, an
+`agent_session` send that starts a turn, and `send_to_session` to a session at rest. A task or note that joins a turn
+already running (the person's, or someone else's) gives no one that turn.
+
+- **The link** (`turnOwners`, `ownTurn` / `releaseTurn`): session → the session that gave it the turn. It ends with
+  the delegation's outcome (`startDelegation`), or with the turn for `send_to_session`. A card from a later turn the
+  person starts there never goes to the caller. Written to `delegated_turns` (store v51) as well as kept in memory:
+  the leaving host's `detachAll` keeps the rows (`handingOver`), and the next host restores the links of sessions the
+  keeper kept that are still in their turn, ending each with that turn; any other row is dropped. The kept CLI sends
+  its standing card again to the new host (§4.3); `told_cards` stops a second notice.
+- **Delivery** (`routeCard`). A wait of the caller on that turn (`agent_session` wait, `start_agent` waiting,
+  `ask_project` waiting) returns `asking` with the cards. With no wait, one notice goes into the caller's
+  conversation, marked as from the session, as a report is (`tellCardRaised`): host-written words naming the
+  session's id and the call that reads the card. Never the card's text: the question, its options and an approval's
+  detail are the target's words, so the caller reads them as a **tool result** (`agent_session` status, or
+  `read_session` for a directing seat), fenced as JSON (`cardsText`), not in the person's seat.
+- **Answering** (`answerRoutedCard`). A question: `agent_session` `answer` (an ordinary session, also across
+  projects for an `ask_project` target: only status and answer there) or `answer_question` (the orchestrator; a rare
+  command, so through `centralu_run` in the default tier; a coordinator only reads). `text` is the answer, one line
+  per question, `;` between a multi-select's choices, or a JSON array; a choice naming an option is that option's
+  label (`answersFrom`). The card stays in the session for the person; the first answer lands, a later one finds the
+  card gone. An approval: the caller is told, and may allow or deny only when its own preset is `auto` at the answer
+  (`answersApproval`, the rule of #603/#606), never as an app's agent, and never for a card the host raised in that
+  session; "always" stays the person's.
 
 ### 1.3 Making a new project (`projects.create`, `create_project`, #515)
 
@@ -2065,7 +2094,7 @@ step against:
 | Steps | What they do | Older build |
 |---|---|---|
 | 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43 | add a column | reads it (39: shows sessions in the trash as live ones; 43: an older host's `grid.set` writes no span, so app panels fall back to their defaults, #306) |
-| 3, 6, 9, 16, 19, 34, 36, 41, 42, 49, 50 | add a table (3 also backfills the index: heavy; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646; 50 adds `agent_start_requests`, a start_agent card still waiting for the person, #673) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ) |
+| 3, 6, 9, 16, 19, 34, 36, 41, 42, 49, 50, 51 | add a table (3 also backfills the index: heavy; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646; 50 adds `agent_start_requests`, a start_agent card still waiting for the person, #673; 51 adds `delegated_turns`, the session that gave a running turn, #676) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ) |
 | 10, 11, 40 | rebuild with the same shape (10: `sessions` with `project_id` nullable; 11 and 40: the index, then `VACUUM`: heavy) | reads it |
 | 21, 26, 29, 35, 48 | rewrite data one way (21 rewrites every message: heavy; 48 gives a former worktree manager's worktree sessions `askedBy`, #561) | reads it, cannot be undone |
 | **13, 28, 32** | **drop a table or a column** | **breaks: raises `min_reader_version`** |

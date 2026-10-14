@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { ToolName } from '@cc/protocol'
-import type { ChildRunResult, AskProjectResult, OrchestratorTools } from '../adapters/contract.js'
+import type { ChildRunResult, AskProjectResult, OrchestratorTools, RoutedCard } from '../adapters/contract.js'
 import { ORCHESTRATOR_MCP_NAME, type ToolCaller, type ToolOutput, type ToolProfile } from '../apps/contract.js'
 import { appGuide, APP_GUIDE_TOPICS, type GuideSeats, type GuideTool } from './app-guide.js'
 
@@ -84,6 +84,16 @@ export const ORCHESTRATOR_TOOLS = [
         .optional()
         .describe('Whether to notify me when that session finishes the work. Set true if the person is waiting for the result.'),
     }),
+  },
+  {
+    /*
+     * #676: a card raised in the turn this seat gave a session (send_to_session to a session at rest) comes to this
+     * seat too; read_session shows it, and this answers it. The directing seats' form of agent_session's "answer",
+     * which an ordinary session has. Rare for the orchestrator (RARE_COMMANDS): the notice of a card names the call.
+     */
+    name: 'answer_question',
+    description: 'Answers a card a session raised in the turn you gave it (read_session shows it). One line per question; allow/deny for an approval.',
+    schema: z.object({ sessionId: z.string(), card: z.string().optional(), text: z.string() }),
   },
   {
     name: 'app_guide',
@@ -330,8 +340,12 @@ export const AGENT_TOOLS = [
   },
   {
     name: 'agent_session',
+    /*
+     * "answer" (#676): a card of the turn the caller gave, which status shows; `card` only when more than one stands.
+     * Not in the description: the answer that shows a card names the call, and the description rides in every request.
+     */
     description: 'Checks, messages, waits for, stops or deletes a session start_agent started.',
-    schema: z.object({ sessionId: z.string(), action: z.enum(['status', 'send', 'wait', 'stop', 'delete']), text: z.string().optional() }),
+    schema: z.object({ sessionId: z.string(), action: z.enum(['status', 'send', 'wait', 'stop', 'delete', 'answer']), text: z.string().optional(), card: z.string().optional() }),
     deferred: true,
   },
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }[]
@@ -512,6 +526,22 @@ async function listSessionsText(tools: OrchestratorTools, caller: ToolCaller): P
 }
 
 /**
+ * The cards of a delegated turn as the caller reads them (#676). The questions, options and approval detail are the
+ * target's words: each card is one JSON line, as an answer is, so nothing in it can pose as a line of ours.
+ */
+function cardsText(cards: readonly RoutedCard[]): string {
+  return cards
+    .map((c) =>
+      c.kind === 'question'
+        ? `card ${c.card} (question), as JSON: ${trustedJsonText(JSON.stringify(c.questions.map((q) => ({ question: q.question, header: q.header, options: q.options.map((o) => o.label), ...(q.options.some((o) => o.description) ? { descriptions: q.options.map((o) => o.description) } : {}), multiSelect: q.multiSelect }))))}`
+        : `card ${c.card} (approval${c.answerable ? ', yours to allow or deny' : ', only the person can answer it'}), as JSON: ${trustedJsonText(JSON.stringify(c.detail))}`,
+    )
+    .join('\n')
+}
+
+const ANSWER_FORM = 'Answer a question with its option label, or your own words; one line per question; several choices of one question separated by ";". The person may answer first; the first answer counts.'
+
+/**
  * What the model reads back from ask_project (#371). The delegated session's answer is someone else's words, so it
  * is fenced the way a worker's preview is (JSON-quoted, one line): a line in it cannot pose as a line of ours. The
  * session is named so the person can be pointed at it; the paths come last, as a list the model can act on.
@@ -519,6 +549,14 @@ async function listSessionsText(tools: OrchestratorTools, caller: ToolCaller): P
 function askProjectText(r: AskProjectResult): ToolOutput {
   if (!r.ok) return { text: r.error, isError: true }
   const where = `the session "${r.sessionName}" [${r.sessionId}] in ${r.project}`
+  if (r.state === 'asking') {
+    return {
+      text:
+        `${where} is waiting on you in the task you gave it:\n${cardsText(r.cards)}\n` +
+        `Answer with agent_session(sessionId="${r.sessionId}", action="answer", card=…, text=…). ${ANSWER_FORM} ` +
+        `Then call ask_project with project "${r.project}", session "${r.sessionId}" and no task to wait for the answer.`,
+    }
+  }
   if (r.state === 'working') {
     return {
       text:
@@ -559,6 +597,14 @@ function agentRunText(r: ChildRunResult): ToolOutput {
           (r.reported ? 'You will be told when it ends; ' : '') +
           `agent_session(sessionId="${r.sessionId}", action="wait") waits for its answer, action="stop" stops it.`,
       }
+    case 'asking':
+      return {
+        text:
+          `${who} is waiting on you in the turn you gave it:\n${cardsText(r.cards)}\n` +
+          `agent_session(sessionId="${r.sessionId}", action="answer", card=…, text=…) answers it. ${ANSWER_FORM}`,
+      }
+    case 'answered':
+      return { text: `Answered card ${r.card} in ${who}; it goes on. agent_session(sessionId="${r.sessionId}", action="wait") waits for its answer.` }
     case 'stopped':
       // A request withdrawn before the person answered has no session to name (#673)
       if (!r.sessionName) return { text: `Withdrew request ${r.sessionId}: its card is gone and no session was started.` }
@@ -674,12 +720,14 @@ export async function runOrchestratorTool(
     const sessionId = str(args.sessionId)
     const action = args.action
     if (!sessionId) return { text: 'Give the sessionId start_agent returned.', isError: true }
-    if (action !== 'status' && action !== 'send' && action !== 'wait' && action !== 'stop' && action !== 'delete') {
-      return { text: 'Give an action: status, send, wait, stop or delete.', isError: true }
+    if (action !== 'status' && action !== 'send' && action !== 'wait' && action !== 'stop' && action !== 'delete' && action !== 'answer') {
+      return { text: 'Give an action: status, send, wait, stop, delete or answer.', isError: true }
     }
     const text = typeof args.text === 'string' && args.text.trim() ? args.text : undefined
     if (action === 'send' && !text) return { text: 'Give text: what to send it.', isError: true }
-    return agentRunText(await tools.agentSession({ sessionId, action, ...(text ? { text } : {}) }, signal))
+    if (action === 'answer' && !text) return { text: 'Give text: the answer.', isError: true }
+    const card = str(args.card)
+    return agentRunText(await tools.agentSession({ sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}) }, signal))
   }
 
   if (name === 'recall') {
@@ -705,6 +753,16 @@ export async function runOrchestratorTool(
     }
   }
 
+  if (name === 'answer_question') {
+    const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : ''
+    const text = typeof args.text === 'string' ? args.text.trim() : ''
+    if (!sessionId || !text) return { text: 'Give sessionId and text: the session and your answer.', isError: true }
+    const card = typeof args.card === 'string' && args.card.trim() ? args.card.trim() : undefined
+    const r = await tools.answerQuestion({ sessionId, text, ...(card ? { card } : {}) })
+    if (!r.ok) return { text: r.error, isError: true }
+    return { text: `Answered card ${r.state === 'answered' ? r.card : ''} in "${r.sessionName}" [${r.sessionId}]; it goes on.` }
+  }
+
   if (name === 'read_session') {
     // The reader set has no list_sessions — listing is read_session without an id (#320, see READER_TOOLS)
     if (caller.profile === 'reader' && !args.sessionId) return listSessionsText(tools, caller)
@@ -727,7 +785,19 @@ export async function runOrchestratorTool(
           // A reader (#320) has no send_to_session — pointing it at reportBack would name a tool it cannot call
           (caller.profile === 'reader' ? '\n' : '   If you want to know once it is done, use send_to_session\'s reportBack.\n\n')
         : ''
-    return { text: head + (r.lines?.join('\n') || '(no conversation)') }
+    // The cards of a turn this seat gave it (#676), after the conversation: the way to answer depends on the seat
+    const answer = caller.profile === 'reader'
+      ? `agent_session(sessionId="${String(args.sessionId)}", action="answer", card=…, text=…)`
+      : caller.profile !== 'human' && commandsFor(caller.profile).includes('answer_question')
+        ? `centralu_run(command="answer_question", args={sessionId: "${String(args.sessionId)}", card: …, text: …})`
+        : caller.profile !== 'human' && profileAllows(caller.profile, 'answer_question')
+          ? `answer_question(sessionId="${String(args.sessionId)}", card=…, text=…)`
+          : undefined
+    const cards = r.cards?.length
+      ? `\n\nWaiting on you in the turn you gave it:\n${cardsText(r.cards)}\n` +
+        (answer ? `${answer} answers it. ${ANSWER_FORM}` : 'Only the person can answer it from here; tell them if it matters.')
+      : ''
+    return { text: head + (r.lines?.join('\n') || '(no conversation)') + cards }
   }
 
   if (name === 'create_project') {
@@ -1106,7 +1176,7 @@ export function currentRareTier(): RareTier {
  * a session or a project).
  */
 export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly OrchestratorToolName[]>> = {
-  orchestrator: ['create_app', 'propose_skill', 'propose_mcp_server', 'update_centralu'],
+  orchestrator: ['create_app', 'propose_skill', 'propose_mcp_server', 'update_centralu', 'answer_question'],
 }
 
 /**

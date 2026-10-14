@@ -67,6 +67,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Project consent | A remembered "always" letting one project reach another: `delegate` (`ask_project`) or `apps` (attach its shared apps); or, from a project to itself, `agents` (its sessions may start agents, #561) | `ProjectConsent`, `entities.ts`; `project_consents` (store v44) | |
 | Read grant | A path inside the target project that a delegated answer named, readable by the caller while this host runs | `readGrants`, `ask-project.ts` | |
 | Report mark | "You will be told when it ends": a session that owes a report of its turn's end to the session that gave it work (`start_agent` past its wait, `send_to_session` with `reportBack`). Cleared once reported; survives a host swap (#646) | `awaitingReport`, `manager.ts`; `report_marks` (store v49) | |
+| Delegated turn | A turn another session's work started in a session (`ask_project`, `start_agent`, `agent_session` send, `send_to_session` to a session at rest). While it runs, its cards go to that session too: questions it may answer, approvals it is told of (#676). Ends with the turn; survives a host swap | `turnOwners`, `manager.ts`; `delegated_turns` (store v51) | |
 | Unread | Whether there is content past what the person last saw (`lastReadSeq`). Independent of state | `SessionInfo.lastReadSeq` | |
 
 ### 1.3 Apps
@@ -274,6 +275,7 @@ Where it is stored:
 - `project_consents`: one project's remembered consent to reach another.
 - `report_marks`: the report a session owes the session that gave it work, until it is delivered.
 - `agent_start_requests`: a start_agent card the person has not answered yet, so the next host raises it again (#673).
+- `delegated_turns`: the session that gave a session its running turn, and the cards it was told of, until the turn ends.
 
 ### 2.3 Apps
 

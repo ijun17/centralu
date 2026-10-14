@@ -69,6 +69,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 프로젝트 동의 | 한 프로젝트가 다른 프로젝트에 닿도록 기억해 둔 "항상": `delegate`(`ask_project`) 또는 `apps`(공유된 앱 붙이기). 또는 자기 자신에게 `agents`(그 프로젝트의 세션이 에이전트를 띄워도 됨, #561) | `ProjectConsent`, `entities.ts`; `project_consents`(스토어 v44) | |
 | 읽기 허락 | 위임된 세션의 답이 이름을 댄, 대상 프로젝트 안의 경로. 이 호스트가 도는 동안 호출한 쪽이 읽을 수 있다 | `readGrants`, `ask-project.ts` | |
 | 보고 표지 | "끝나면 알려 준다": 일을 준 세션에게 턴이 끝났다는 보고를 빚진 세션(`start_agent`가 기다림을 넘겼을 때, `reportBack`을 켠 `send_to_session`). 보고하면 지우고, 호스트 교체를 넘겨 살아남는다(#646) | `awaitingReport`, `manager.ts`; `report_marks`(스토어 v49) | |
+| 맡긴 턴 | 다른 세션의 일이 시작한 턴(`ask_project`, `start_agent`, `agent_session` send, 쉬는 세션에 보낸 `send_to_session`). 도는 동안 그 턴의 카드는 맡긴 세션에게도 간다: 답할 수 있는 질문, 알림만 받는 승인(#676). 턴과 함께 끝나고, 호스트 교체를 넘겨 살아남는다 | `turnOwners`, `manager.ts`; `delegated_turns`(스토어 v51) | |
 | 안 읽음 | 사람이 마지막으로 본 곳(`lastReadSeq`) 너머에 내용이 있는가. 상태와는 따로다 | `SessionInfo.lastReadSeq` | |
 
 ### 1.3 앱
@@ -273,6 +274,7 @@ classDiagram
 - `project_consents`: 한 프로젝트가 다른 프로젝트에 닿도록 기억해 둔 동의.
 - `report_marks`: 세션이 일을 준 세션에게 빚진 보고. 전해질 때까지 남는다.
 - `agent_start_requests`: 사람이 아직 답하지 않은 start_agent 카드. 다음 호스트가 다시 세운다(#673).
+- `delegated_turns`: 세션에게 지금 도는 턴을 맡긴 세션과, 그 세션에 이미 알린 카드. 턴이 끝날 때까지 남는다.
 
 ### 2.3 앱
 

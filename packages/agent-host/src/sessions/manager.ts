@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto'
 import { residentCost } from './tool-cost.js'
 import { orchestratorHome, orchestratorRole } from './orchestrator-home.js'
 import { dedupeNearbyHits, takeInTurns, windowAround } from './snippet.js'
-import { profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
+import { commandsFor, profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
+import { answersFrom, cardCall, cardNotice, decisionFrom } from './delegated-cards.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -78,7 +79,7 @@ import {
   sessionLiveDefaults,
   withoutToolRecord,
 } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, AgentSpawnSpec, ChildRunResult, AgentSessionOpts, AskProjectResult, StartAgentOpts, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, HistoryMessage, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, ChildRunResult, AgentSessionOpts, AskProjectResult, RoutedCard, StartAgentOpts, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, HistoryMessage, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { LaunchSettings } from '../adapters/contract.js'
 import { registeredTool } from '../adapters/registry.js'
 import { isAppAgent, toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
@@ -605,6 +606,29 @@ export class SessionManager {
     this.store.clearReportMark(sessionId)
   }
   /**
+   * Delegated turns (#676): session -> the session that gave it the turn it is running, and the cards that session was
+   * already told of. While the turn runs, its question cards go to that session as well as to the person, and its
+   * approval cards are told to it (`routeCard`). Set when another session's work starts the turn (`ask_project` into a
+   * session at rest, `start_agent`, `agent_session` send, `send_to_session` to a session at rest); never for work that
+   * joins a turn the person started. Ends with the delegation's outcome, or with the turn (`untilTurnEnd`: a
+   * `send_to_session` turn, or one a new host found in the store). Mirrored in the store's `delegated_turns` (v51) so
+   * a host swap keeps the link while the kept session waits on a question.
+   */
+  private turnOwners = new Map<string, { callerId: string; untilTurnEnd: boolean; told: Set<string> }>()
+  /** The owner's waits on a delegated turn, woken by a card it may read (#676): session -> wakers, each for one caller */
+  private cardWakers = new Map<string, Set<{ callerId: string; wake: () => void }>>()
+  private ownTurn(sessionId: string, callerId: string, untilTurnEnd: boolean): void {
+    this.turnOwners.set(sessionId, { callerId, untilTurnEnd, told: new Set() })
+    this.store.setDelegatedTurn(sessionId, callerId)
+  }
+  /** Ends the link; with `callerId`, only that caller's (a later delegation by someone else is not cut) */
+  private releaseTurn(sessionId: string, callerId?: string): void {
+    const owner = this.turnOwners.get(sessionId)
+    if (!owner || (callerId && owner.callerId !== callerId)) return
+    this.turnOwners.delete(sessionId)
+    this.store.clearDelegatedTurn(sessionId)
+  }
+  /**
    * Session currently being resumed -> its promise.
    *
    * If send() arrives twice at once, both see "no process" and each starts its own resume — two
@@ -849,6 +873,19 @@ export class SessionManager {
         continue
       }
       this.resumeAgentStart(req)
+    }
+    /*
+     * A delegated turn's link survives the swap the same way (#676): a kept session still in the turn may be waiting on
+     * a question its caller is to answer, and the kept CLI sends that card again to this host. With no delegation in
+     * this host's memory, the link ends with the turn. Any other row is dropped: that turn is over.
+     */
+    for (const row of store.listDelegatedTurns()) {
+      const s = this.meta.get(row.sessionId)
+      if (keeperOpts.keptSessions?.has(row.sessionId) && !!s && inTurn(s.state) && this.meta.has(row.callerSessionId)) {
+        this.turnOwners.set(row.sessionId, { callerId: row.callerSessionId, untilTurnEnd: true, told: new Set(row.told) })
+        continue
+      }
+      store.clearDelegatedTurn(row.sessionId)
     }
     /*
      * Sweeps orphaned handoff notes (#106). **Why startup is a safe moment for this**: no handoff is
@@ -2847,6 +2884,9 @@ export class SessionManager {
     this.clearReport(sessionId)
     // Nobody is left to tell: the reports its children owed it go too
     for (const [child, caller] of [...this.awaitingReport]) if (caller === sessionId) this.clearReport(child)
+    // The same for a delegated turn's link (#676), either way
+    this.releaseTurn(sessionId)
+    for (const [child, owner] of [...this.turnOwners]) if (owner.callerId === sessionId) this.releaseTurn(child)
     for (const key of [...this.observerNotes.keys()]) if (key.startsWith(`${sessionId}>`) || key.endsWith(`>${sessionId}`)) this.observerNotes.delete(key)
     this.forgetCommits(sessionId)
     this.meta.delete(sessionId)
@@ -3397,6 +3437,9 @@ export class SessionManager {
      * reported, the marker stayed set, and a later, unrelated turn ended up reported as "it finished".
      */
     if (endedTurn && e.sessionId && !run?.tracksInputs) void this.reportBackIfAwaited(e.sessionId, e, run?.completedAnswer)
+    // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
+    if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
+    if (endedTurn && e.sessionId && this.turnOwners.get(e.sessionId)?.untilTurnEnd) this.releaseTurn(e.sessionId)
     // The card slot is now empty — if a capability question was waiting, it is raised (D-4). Either the
     // adapter's card just closed, or a card that had been hiding ours just closed
     if (e.type === 'approval_resolved' && e.sessionId) this.raiseHostAsks(e.sessionId)
@@ -5305,6 +5348,8 @@ export class SessionManager {
       // Other agents in its own project (#561) — behind the person's consent, never above this session's preset
       startAgent: async (opts, signal) => (off() ? { ok: false, error: offError } : this.startAgent(sessionId, opts, signal)),
       agentSession: async (opts, signal) => (off() ? { ok: false, error: offError } : this.agentSession(sessionId, opts, signal)),
+      // An ordinary session answers through agent_session (#676)
+      answerQuestion: async () => ({ ok: false, error: 'Answer it with agent_session, action "answer"' }),
       sendToSession: refuse,
       createSession: refuse,
       updateSessionSettings: refuse,
@@ -5579,11 +5624,21 @@ export class SessionManager {
          */
         const from = around != null && anchor >= 0 ? Math.max(0, anchor - Math.floor(limit / 2)) : -1
         const picked = from >= 0 ? lines.slice(from, from + limit) : lines.slice(-limit)
+        // The cards of a turn this seat gave it (#676): this read is where a directing seat finds them
+        const cards = this.routedCards(sessionId, orchestratorId)
         return {
           ok: true,
           state: target.state,
           lines: picked.map((l) => (l.length > 2000 ? l.slice(0, 2000) + '…' : l)),
+          ...(cards.length ? { cards } : {}),
         }
+      },
+
+      // A card of a turn this seat gave a session in its view (#676) — the directing seats' agent_session answer
+      answerQuestion: async (opts) => {
+        const target = this.meta.get(opts.sessionId)
+        if (!target || !inScope(target)) return { ok: false, error: scopeError(opts.sessionId) }
+        return this.answerRoutedCard(orchestratorId, opts.sessionId, opts.card, opts.text)
       },
 
       // Only an ordinary session asks another project (#371): the orchestrator, managers and coordinators already
@@ -5628,10 +5683,18 @@ export class SessionManager {
           // Tagged with its source and kept in the store/UI. The adapter's reporting gate only ever fires for
           // a lower-privilege reportBack.
           const orch = this.meta.get(orchestratorId)
-          await this.send(sessionId, text, undefined, {
-            sessionId: orchestratorId,
-            name: orch?.name ?? 'Orchestrator',
-          })
+          // A session at rest starts a turn that is this seat's (#676): its cards come here too, until it ends
+          const atRest = !inTurn(target.state)
+          if (atRest) this.ownTurn(sessionId, orchestratorId, true)
+          try {
+            await this.send(sessionId, text, undefined, {
+              sessionId: orchestratorId,
+              name: orch?.name ?? 'Orchestrator',
+            })
+          } catch (e) {
+            if (atRest) this.releaseTurn(sessionId, orchestratorId)
+            throw e
+          }
           // Only comes back when asked for — silent by default
           if (reportBack) this.markReport(sessionId, orchestratorId)
           // Instructing again without asking for a report clears this orchestrator's earlier request — the
@@ -6159,8 +6222,12 @@ export class SessionManager {
       },
       ...(agent ? { agent: true } : {}),
     }
+    // The turn is the caller's (#676): its cards go to the caller too. A task that joined the person's turn is not
+    if (!joinedTurn) this.ownTurn(sessionId, callerId, false)
     void d.outcome.then((r) => {
       if (this.agentRuns.get(sessionId) === wait) this.agentRuns.delete(sessionId)
+      // A swap's failed waits are not the turn's end: the next host keeps the link while the kept turn runs
+      if (!joinedTurn && !this.handingOver) this.releaseTurn(sessionId, callerId)
       // Queued notes can finish after the original turn. Report only the whole delegation's ending.
       if (agent || wait.tracksInputs) void this.reportBackIfAwaited(sessionId, r.ok
         ? { type: 'turn_complete', sessionId }
@@ -6223,6 +6290,10 @@ export class SessionManager {
     const sessionName = () => this.meta.get(d.sessionId)?.name ?? d.sessionId
     let timer: ReturnType<typeof setTimeout> | undefined
     let onAbort: (() => void) | undefined
+    const asking = (cards: RoutedCard[]): AskProjectResult => ({ ok: true, state: 'asking', project: d.target.name, sessionId: d.sessionId, sessionName: sessionName(), cards })
+    // A card waiting on the caller comes first (#676), before and during the wait
+    const standing = d.settled ? [] : this.routedCards(d.sessionId, d.callerId)
+    if (standing.length) return asking(standing)
     const bound = new Promise<'bound'>((resolve) => (timer = setTimeout(() => resolve('bound'), ASK_WAIT_MS)))
     const aborted = new Promise<'aborted'>((resolve) => {
       if (!signal) return
@@ -6230,9 +6301,15 @@ export class SessionManager {
       if (signal.aborted) onAbort()
       else signal.addEventListener('abort', onAbort, { once: true })
     })
+    const card = this.untilCard(d.sessionId, d.callerId)
     d.waiters = (d.waiters ?? 0) + 1
     try {
-      const r = await Promise.race([d.outcome, ...(d.waitCancelled ? [d.waitCancelled] : []), bound, aborted])
+      const r = await Promise.race([d.outcome, ...(d.waitCancelled ? [d.waitCancelled] : []), bound, aborted, card.asked])
+      if (r === 'asked') {
+        const cards = this.routedCards(d.sessionId, d.callerId)
+        if (cards.length) return asking(cards)
+        return { ok: true, state: 'working', project: d.target.name, sessionId: d.sessionId, sessionName: sessionName() }
+      }
       if (r === 'aborted') {
         d.stop('the call that asked was cancelled')
         if (!d.joinedTurn) await d.outcome
@@ -6272,6 +6349,7 @@ export class SessionManager {
         outside,
       }
     } finally {
+      card.done()
       d.waiters = (d.waiters ?? 1) - 1
       clearTimeout(timer)
       if (onAbort) signal?.removeEventListener('abort', onAbort)
@@ -6559,6 +6637,7 @@ export class SessionManager {
     } catch (e) {
       this.delegations.delete(key)
       if (this.agentRuns.get(child.id) === d.wait) this.agentRuns.delete(child.id)
+      this.releaseTurn(child.id, callerId)
       return done({ ok: false, error: `Could not give the task to the new session: ${(e as Error).message}` })
     }
     const notice = this.handles.get(child.id)?.delegationNotice?.()
@@ -6593,12 +6672,25 @@ export class SessionManager {
     }
     const caller = this.meta.get(callerId)
     const child = this.meta.get(opts.sessionId)
+    /*
+     * A turn this caller gave a session of another project (#676, ask_project): its cards are the caller's to read and
+     * answer. Nothing else of that session is; ask_project with no task waits on the turn.
+     */
+    if (caller && child && child.projectId !== caller.projectId && this.turnOwners.get(child.id)?.callerId === callerId) {
+      if (opts.action === 'answer') return this.answerRoutedCard(callerId, child.id, opts.card, opts.text ?? '')
+      if (opts.action !== 'status' && opts.action !== 'wait') return { ok: false, error: `"${child.name}" is another project's session: you can read and answer the cards of the turn you gave it (status, answer), and wait on it with ask_project.` }
+      const cards = this.routedCards(child.id, callerId)
+      return cards.length
+        ? { ok: true, state: 'asking', sessionId: child.id, sessionName: child.name, tool: child.tool, cards }
+        : { ok: true, state: 'working', sessionId: child.id, sessionName: child.name, tool: child.tool, reported: false }
+    }
     const deletingWithoutWorktree = opts.action === 'delete' && !child?.worktree
     const startedHere = child?.askedBy === callerId || (deletingWithoutWorktree && child?.parentSessionId === callerId)
     if (!caller?.projectId || !child || (!startedHere && (deletingWithoutWorktree || !this.autoBoundaryOpen(callerId, 'session ownership'))) || child.projectId !== caller.projectId) {
       return { ok: false, error: `${opts.sessionId} is not a session this session started. agent_session works only on sessions start_agent started here.` }
     }
     if (opts.sessionId === callerId) return this.agentAtRest(child)
+    if (opts.action === 'answer') return this.answerRoutedCard(callerId, child.id, opts.card, opts.text ?? '')
     const key = `${callerId}>${child.id}`
     // An observer that sent a note reads its own note's reader, never the owner's delegation (#646)
     const note = this.delegations.has(key) ? undefined : this.observerNotes.get(key)
@@ -6615,11 +6707,20 @@ export class SessionManager {
       }
     }
     const observing = !!d && d.callerId !== callerId
+    // A turn it gave that this host has no delegation for (it found the link in the store after a swap, #676)
+    if (!d && (opts.action === 'status' || opts.action === 'wait')) {
+      const cards = this.routedCards(child.id, callerId)
+      if (cards.length) return { ok: true, state: 'asking', sessionId: child.id, sessionName: child.name, tool: child.tool, cards }
+    }
     try {
       switch (opts.action) {
-        case 'status':
+        case 'status': {
+          // The cards of the turn it gave are what the owner reads first (#676)
+          const cards = d && !d.settled && !observing ? this.routedCards(child.id, callerId) : []
+          if (d && cards.length) return this.agentAsking(d, cards)
           if (d && !d.settled) return this.agentWorking(d, false, observing)
           return d ? await this.awaitAgent(key, d, signal, observing) : this.agentAtRest(child)
+        }
         case 'wait':
           return d ? await this.awaitAgent(key, d, signal, observing) : this.agentAtRest(child)
         case 'stop': {
@@ -6720,6 +6821,7 @@ export class SessionManager {
           } catch (e) {
             this.delegations.delete(key)
             if (this.agentRuns.get(child.id) === next.wait) this.agentRuns.delete(child.id)
+            this.releaseTurn(child.id, callerId)
             return { ok: false, error: `Could not send it: ${(e as Error).message}` }
           }
           return this.awaitAgent(key, next, signal)
@@ -7211,6 +7313,139 @@ export class SessionManager {
     }
   }
 
+  /**
+   * The cards standing in a session's delegated turn that its owner reads (#676): its questions, and its approval with
+   * whether the owner may answer it. Nothing for anyone but the turn's owner. The cards are the session's own
+   * (`pendingQuestions`, `pendingApproval`), so an answer from the person takes them down for the owner too.
+   */
+  private routedCards(sessionId: string, callerId: string): RoutedCard[] {
+    const m = this.meta.get(sessionId)
+    if (!m || this.turnOwners.get(sessionId)?.callerId !== callerId) return []
+    const cards: RoutedCard[] = m.pendingQuestions.map((q) => ({ card: q.requestId, kind: 'question' as const, questions: q.questions }))
+    if (m.pendingApproval) {
+      cards.push({ card: m.pendingApproval.requestId, kind: 'approval', detail: m.pendingApproval.detail, answerable: this.answersApproval(callerId, m.pendingApproval.requestId) })
+    }
+    return cards
+  }
+
+  /**
+   * Whether a delegated turn's owner may answer its approval card (#676): only an `auto` owner, asked at the call (the
+   * rule #603/#606 give other Centralu boundaries), never an app's agent, and never a card the host raised in that
+   * session (its own reach to another project or agent is the person's to allow).
+   */
+  private answersApproval(callerId: string, requestId: string): boolean {
+    const caller = this.meta.get(callerId)
+    if (!caller || caller.permissionPreset !== 'auto' || this.isAppAgentSession(caller)) return false
+    return !this.hostAsks.has(requestId)
+  }
+
+  /**
+   * A card came up in a session (#676). When the session runs a turn another session gave it, that session is told:
+   * a wait of its own on the turn returns the card (`untilCard`), otherwise one notice goes into its conversation the
+   * way a report does. Once per card: a kept CLI sends a standing card again to the next host (`told` is stored).
+   */
+  private routeCard(sessionId: string, requestId: string, kind: 'question' | 'approval'): void {
+    const owner = this.turnOwners.get(sessionId)
+    if (!owner || this.handingOver || !this.meta.has(owner.callerId) || owner.told.has(requestId)) return
+    owner.told.add(requestId)
+    this.store.setDelegatedTurnTold(sessionId, [...owner.told])
+    let woke = false
+    for (const waker of this.cardWakers.get(sessionId) ?? []) {
+      if (waker.callerId !== owner.callerId) continue
+      waker.wake()
+      woke = true
+    }
+    if (!woke) void this.tellCardRaised(owner.callerId, sessionId, kind, requestId)
+  }
+
+  /** Resolves when a card its owner reads comes up in the session's turn (#676); `done` takes the waker down */
+  private untilCard(sessionId: string, callerId: string): { asked: Promise<'asked'>; done(): void } {
+    let waker!: { callerId: string; wake: () => void }
+    const asked = new Promise<'asked'>((resolve) => {
+      waker = { callerId, wake: () => resolve('asked') }
+    })
+    const set = this.cardWakers.get(sessionId) ?? new Set()
+    set.add(waker)
+    this.cardWakers.set(sessionId, set)
+    return {
+      asked,
+      done: () => {
+        set.delete(waker)
+        if (set.size === 0 && this.cardWakers.get(sessionId) === set) this.cardWakers.delete(sessionId)
+      },
+    }
+  }
+
+  /** The notice of a card (#676), delivered as a report is: marked as from the session, never carrying the card's text */
+  private async tellCardRaised(callerId: string, sessionId: string, kind: 'question' | 'approval', requestId: string): Promise<void> {
+    const profile = this.toolProfileOf(callerId)
+    const how = profile === null ? 'none' : commandsFor(profile).includes('answer_question') ? 'command' : profileAllows(profile, 'answer_question') ? 'tool' : 'none'
+    const text = cardNotice(kind, sessionId, cardCall(profile, sessionId, how), kind === 'approval' && this.answersApproval(callerId, requestId))
+    const name = this.meta.get(sessionId)?.name ?? sessionId
+    try {
+      // Relayed, as a report: the stored line names the source, and the agent reads the same host-written words, which
+      // carry nothing of the target's
+      await this.deliver(callerId, text, undefined, { sessionId, name }, true, undefined, 'inline', (h) => h.send(text))
+    } catch {
+      // The caller may be asleep or deleted — a notice must not destabilize the host
+    }
+  }
+
+  /**
+   * Answers a card of a delegated turn for its owner (#676): agent_session `answer`, answer_question. The owner must
+   * still own the session's running turn, and the card must still stand: once the person answered, it is gone, and the
+   * first answer counted. A question takes the owner's answer; an approval only from an owner whose preset is `auto`
+   * now, and only allow or deny.
+   */
+  async answerRoutedCard(callerId: string, sessionId: string, card: string | undefined, text: string): Promise<ChildRunResult> {
+    const m = this.meta.get(sessionId)
+    const name = m?.name ?? sessionId
+    if (!m || this.turnOwners.get(sessionId)?.callerId !== callerId) {
+      return { ok: false, error: `"${name}" is not running a turn you gave it, so none of its cards are yours to answer.` }
+    }
+    const cards = this.routedCards(sessionId, callerId)
+    const chosen = card ? cards.find((c) => c.card === card) : cards.length === 1 ? cards[0] : undefined
+    if (!chosen) {
+      return {
+        ok: false,
+        error: cards.length
+          ? `Name the card: ${cards.map((c) => c.card).join(', ')}.`
+          : card
+            ? `Card ${card} no longer stands in "${name}": it was answered (the person may have answered first) or withdrawn.`
+            : `"${name}" has no card waiting.`,
+      }
+    }
+    const answered: ChildRunResult = { ok: true, state: 'answered', card: chosen.card, sessionId, sessionName: name, tool: m.tool }
+    if (chosen.kind === 'approval') {
+      if (!chosen.answerable || !this.autoBoundaryOpen(callerId, 'answer an approval in a delegated turn')) {
+        return { ok: false, error: `Only the person can answer this approval in "${name}"${this.hostAsks.has(chosen.card) ? '' : ': your permission preset is not auto'}. Tell them if it matters.` }
+      }
+      const decision = decisionFrom(text)
+      if (!decision) return { ok: false, error: 'Answer an approval with allow or deny.' }
+      try {
+        this.respondApproval(sessionId, chosen.card, decision)
+      } catch (e) {
+        return { ok: false, error: `The approval was not answered: ${(e as Error).message}` }
+      }
+      return answered
+    }
+    const answers = answersFrom(chosen.questions, text)
+    if ('error' in answers) return { ok: false, error: answers.error }
+    try {
+      this.answerQuestion(sessionId, chosen.card, answers)
+    } catch (e) {
+      return { ok: false, error: `The question was not answered: ${(e as Error).message}` }
+    }
+    return answered
+  }
+
+  /** The owner's view of its delegated turn waiting on cards (#676), for start_agent and agent_session */
+  private agentAsking(d: Delegation, cards: RoutedCard[]): ChildRunResult {
+    // Told when it ends, as a wait past its bound is: the answer to the card lets the turn go on without this call
+    this.markReport(d.sessionId, d.callerId)
+    return { ok: true, state: 'asking', sessionId: d.sessionId, sessionName: this.meta.get(d.sessionId)?.name ?? d.sessionId, tool: this.meta.get(d.sessionId)?.tool ?? '', cards }
+  }
+
   /** A child with nothing of the caller's running: its last final answer (#561) */
   private agentAtRest(child: SessionInfo): ChildRunResult {
     return {
@@ -7228,6 +7463,9 @@ export class SessionManager {
   private async awaitAgent(key: string, d: Delegation, signal?: AbortSignal, observing = false, boundMs = ASK_WAIT_MS): Promise<ChildRunResult> {
     // Only the owner consumes its report/key/grants. Auto observers have their own bound and cancellation.
     if (!observing && this.awaitingReport.get(d.sessionId) === d.callerId) this.clearReport(d.sessionId)
+    // A card already waiting on the caller is what it reads first (#676): the turn goes nowhere until it is answered
+    const standing = observing || d.settled ? [] : this.routedCards(d.sessionId, d.callerId)
+    if (standing.length) return this.agentAsking(d, standing)
     const name = () => this.meta.get(d.sessionId)?.name ?? d.sessionId
     let timer: ReturnType<typeof setTimeout> | undefined
     let onAbort: (() => void) | undefined
@@ -7238,10 +7476,15 @@ export class SessionManager {
       if (signal.aborted) onAbort()
       else signal.addEventListener('abort', onAbort, { once: true })
     })
+    const card = observing ? undefined : this.untilCard(d.sessionId, d.callerId)
     if (!observing) d.waiters = (d.waiters ?? 0) + 1
     try {
-      const r = await Promise.race([d.outcome, bound, aborted])
+      const r = await Promise.race([d.outcome, bound, aborted, ...(card ? [card.asked] : [])])
       if (!observing) d.waiters = (d.waiters ?? 1) - 1
+      if (r === 'asked') {
+        const cards = this.routedCards(d.sessionId, d.callerId)
+        return cards.length ? this.agentAsking(d, cards) : this.agentWorking(d)
+      }
       if (r === 'aborted') {
         if (observing) return { ok: false, error: `The observation was cancelled; "${name()}" was left running.` }
         d.stop('the call that started it was cancelled')
@@ -7276,6 +7519,7 @@ export class SessionManager {
         outside,
       }
     } finally {
+      card?.done()
       clearTimeout(timer)
       if (onAbort) signal?.removeEventListener('abort', onAbort)
     }

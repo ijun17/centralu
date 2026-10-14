@@ -1861,6 +1861,39 @@ export class Store {
           `)
         },
       },
+      {
+        to: 51,
+        breaksOlderReaders: false,
+        /**
+         * Delegated turns (#676) — `delegated_turns`, one row per session whose running turn another session gave it
+         * (`ask_project`, `start_agent`, `agent_session` send, `send_to_session` to a session at rest). The turn's
+         * question cards go to that session as well as to the person, for as long as the turn runs.
+         *
+         *   session_id         the session running the delegated turn
+         *   caller_session_id  the session that gave it (the turn's owner)
+         *   started_at         when the turn was given
+         *   told_cards         the cards the caller was already told of, space-separated request ids: a kept CLI sends
+         *                      its standing card again to the next host, which then does not tell the caller twice
+         *
+         * Kept beside the host's memory (`SessionManager.turnOwners`) so a host swap (#280) does not cut the link while
+         * the kept session waits on a question: the new host reads the rows of the sessions the keeper kept and still
+         * running, and drops the rest, as it does `report_marks`.
+         *
+         * Not foreign keys, for the same reasons as `report_marks`; purging either session deletes the row.
+         *
+         * **Expand only (#292's rule).** A new table; an older host never reads it.
+         */
+        run: () => {
+          this.db.exec(`
+            CREATE TABLE IF NOT EXISTS delegated_turns (
+              session_id        TEXT PRIMARY KEY,
+              caller_session_id TEXT NOT NULL,
+              started_at        INTEGER NOT NULL,
+              told_cards        TEXT NOT NULL DEFAULT ''
+            )
+          `)
+        },
+      },
     ]
   }
 
@@ -2813,6 +2846,7 @@ export class Store {
       this.db.prepare(`DELETE FROM app_runs WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM report_marks WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM agent_start_requests WHERE caller_session_id = ?`).run(sessionId)
+      this.db.prepare(`DELETE FROM delegated_turns WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       this.db.prepare(`DELETE FROM sessions WHERE id = ? AND deleted_at IS NOT NULL`).run(sessionId)
       return true
     })
@@ -3631,6 +3665,33 @@ export class Store {
 
   deleteAgentStartRequest(requestId: string): void {
     this.db.prepare(`DELETE FROM agent_start_requests WHERE request_id = ?`).run(requestId)
+  }
+
+  // ── Sessions running a turn another session gave them (#676) — see migration v51 ──
+
+  listDelegatedTurns(): { sessionId: string; callerSessionId: string; told: string[] }[] {
+    const rows = this.db
+      .prepare(`SELECT session_id as sessionId, caller_session_id as callerSessionId, told_cards as told FROM delegated_turns ORDER BY started_at`)
+      .all() as { sessionId: string; callerSessionId: string; told: string }[]
+    return rows.map((r) => ({ ...r, told: r.told.split(' ').filter(Boolean) }))
+  }
+
+  /** A new delegated turn: the cards told of the session's earlier one go with it */
+  setDelegatedTurn(sessionId: string, callerSessionId: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO delegated_turns (session_id, caller_session_id, started_at, told_cards) VALUES (?, ?, ?, '')
+           ON CONFLICT(session_id) DO UPDATE SET caller_session_id = excluded.caller_session_id, started_at = excluded.started_at, told_cards = ''`,
+      )
+      .run(sessionId, callerSessionId, Date.now())
+  }
+
+  setDelegatedTurnTold(sessionId: string, told: readonly string[]): void {
+    this.db.prepare(`UPDATE delegated_turns SET told_cards = ? WHERE session_id = ?`).run(told.join(' '), sessionId)
+  }
+
+  clearDelegatedTurn(sessionId: string): void {
+    this.db.prepare(`DELETE FROM delegated_turns WHERE session_id = ?`).run(sessionId)
   }
 
   // ── Linked machines (#82, v46) ─────────────────────────────────────────────────────────────
