@@ -32,3 +32,24 @@ export function foldSummary(
     return count > 0 ? [{ state, count }] : []
   })
 }
+
+/**
+ * What a folded group (the children of a session, the sessions of an app) says about the rows it hides (#666).
+ *
+ * A fold must not hide the one thing the sidebar is for, "who is waiting for me" (FR-1), so a group that hides such a
+ * row keeps a sign. Two strengths, the same ladder as a row: `alert` is a hidden row that needs an answer (an
+ * approval, a question, an error) and is spoken in the signal ink; `unread` is a hidden row with something new to read
+ * and is spoken one step quieter. Working, idle and asleep rows say nothing, as in a project's `foldSummary`.
+ */
+export type GroupAttention = 'alert' | 'unread'
+
+export function groupAttention(
+  sessions: readonly { state: SessionState; pendingQuestions: readonly unknown[]; lastSeq: number; lastReadSeq: number }[],
+): GroupAttention | null {
+  let found: GroupAttention | null = null
+  for (const s of sessions) {
+    if (s.state === 'waiting_approval' || s.state === 'error' || s.pendingQuestions.length > 0) return 'alert'
+    if (s.lastSeq > s.lastReadSeq) found = 'unread'
+  }
+  return found
+}

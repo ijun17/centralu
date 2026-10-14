@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@cc/core'
-import { appSessionsNeedAttention, groupProjectAppSessions, orderAsTree } from './tree.js'
+import { appSessionsNeedAttention, groupProjectAppSessions, orderAsTree, treeRows } from './tree.js'
 
 const s = (id: string, over: Partial<SessionSummary> = {}) => ({ id, parentSessionId: null, askedBy: null, ...over }) as SessionSummary
 const shape = (list: SessionSummary[]) => orderAsTree(list).map(({ s, nested }) => (nested ? `  ${s.id}` : s.id))
@@ -58,5 +58,24 @@ describe('orderAsTree', () => {
     expect(appSessionsNeedAttention([s('finished', { state: 'waiting_input', pendingQuestions: [] })])).toBe(false)
     expect(appSessionsNeedAttention([s('approval', { state: 'waiting_approval', pendingQuestions: [] })])).toBe(true)
     expect(appSessionsNeedAttention([s('question', { state: 'idle', pendingQuestions: [{ requestId: 'question', questions: [] }] })])).toBe(true)
+  })
+})
+
+/** A folded parent keeps its row and its children's count; the children leave the rows (#666) */
+describe('treeRows', () => {
+  const list = [s('parent'), s('kid-1', { askedBy: 'parent' }), s('kid-2', { parentSessionId: 'parent' }), s('plain')]
+  const shapeRows = (folded: string[]) =>
+    treeRows(list, (id) => folded.includes(id)).map((r) => `${r.nested ? '  ' : ''}${r.s.id}${r.children.length ? `(${r.children.length}${r.folded ? ' folded' : ''})` : ''}`)
+
+  it('lists the children under an open parent, with their count on the parent', () => {
+    expect(shapeRows([])).toEqual(['parent(2)', '  kid-1', '  kid-2', 'plain'])
+  })
+
+  it('leaves the children out of a folded parent but keeps them countable', () => {
+    expect(shapeRows(['parent'])).toEqual(['parent(2 folded)', 'plain'])
+  })
+
+  it('folds nothing for a session that has no children', () => {
+    expect(shapeRows(['plain', 'kid-1'])).toEqual(['parent(2)', '  kid-1', '  kid-2', 'plain'])
   })
 })

@@ -1353,6 +1353,14 @@ export const UiPreferences = z.object({
   sessionTools: z.boolean(),
   /** Running children per project: null uses preset defaults (auto unlimited, otherwise 4); 0 is unlimited. */
   agentCeiling: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+  /**
+   * The sidebar groups the person folded (#666): the children of a session (`session:<id>`) and the
+   * sessions of an app (`app:<key>`). Only folded groups are listed, so a group nobody touched is
+   * open and an unknown or stale key does nothing. A way of looking, kept with the other screen
+   * preferences so it survives a restart; the patch carries the whole list, since a list cannot be
+   * patched by one entry.
+   */
+  foldedGroups: z.array(z.string().max(300)).max(500),
 })
 export type UiPreferences = z.infer<typeof UiPreferences>
 
@@ -1379,6 +1387,7 @@ export const DEFAULT_UI_PREFERENCES: UiPreferences = {
   lineHeight: 'normal',
   textSize: 1,
   sessionTools: true,
+  foldedGroups: [],
 }
 
 /**

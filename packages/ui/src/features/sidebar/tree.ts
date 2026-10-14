@@ -74,3 +74,35 @@ export function orderAsTree(sessions: SessionSummary[]): { s: SessionSummary; ne
     ]
   })
 }
+
+export type TreeRow = {
+  s: SessionSummary
+  nested: boolean
+  /** The sessions this row started and has in the list: what its chevron folds (#666). Empty for a child. */
+  children: SessionSummary[]
+  /** Its children are folded away: they are in `children` but not among the rows */
+  folded: boolean
+}
+
+/**
+ * `orderAsTree` as the rows to draw, with each parent's children and whether they are folded (#666). A folded parent
+ * keeps its place and its `children`, so the row can say how many it hides and whether one of them is waiting; the
+ * children themselves are left out of the rows.
+ */
+export function treeRows(sessions: SessionSummary[], isFolded: (parentId: string) => boolean): TreeRow[] {
+  const ordered = orderAsTree(sessions)
+  const rows: TreeRow[] = []
+  for (const { s, nested } of ordered) {
+    const last = rows[rows.length - 1]
+    if (nested && last) {
+      last.children.push(s)
+      continue
+    }
+    rows.push({ s, nested: false, children: [], folded: false })
+  }
+  return rows.flatMap((row) => {
+    const folded = row.children.length > 0 && isFolded(row.s.id)
+    const parent = { ...row, folded }
+    return folded ? [parent] : [parent, ...row.children.map((c) => ({ s: c, nested: true, children: [], folded: false }))]
+  })
+}

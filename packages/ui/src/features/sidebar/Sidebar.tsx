@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
-import { appSessionsNeedAttention, groupProjectAppSessions, orderAsTree } from './tree.js'
+import { appSessionsNeedAttention, groupProjectAppSessions, treeRows } from './tree.js'
+import { appGroupKey, childrenGroupKey } from '../../store/foldGroups.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { isPlainEnter, isPlainEscape } from '../../app/keys.js'
+import { composingKey, isPlainEnter, isPlainEscape } from '../../app/keys.js'
 import { externalAppKey, handoffBlockedBy, useStore } from '../../store/store.js'
 import { BackgroundMark } from '../session/BackgroundTasks.jsx'
 import { NewSessionDialog } from '../project/NewSessionDialog.jsx'
@@ -34,7 +35,7 @@ import { Modal } from '../../components/Modal.jsx'
 import { useOrbitSync } from '../../components/orbit.js'
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useTextZoom } from '../../store/store.js'
 import { APP_MIME, PROJECT_MIME, SESSION_MIME, dropsBefore, moveTo, projectItemMime } from './reorder.js'
-import { foldSummary, type FoldSummaryState } from './fold.js'
+import { foldSummary, groupAttention, type FoldSummaryState, type GroupAttention } from './fold.js'
 import { droppedGridList, droppedGridPanel, gridTakes } from '../grid/drop.js'
 
 /**
@@ -74,6 +75,88 @@ function useDropLine(mime: string, onDrop: (draggedId: string, before: boolean) 
   }
 }
 
+/** One level in is 16px (ml-4): the width of the gutter a chevron sits in, and a literal class so Tailwind finds it */
+const INDENT = { 1: 'ml-4', 2: 'ml-8', 3: 'ml-12' } as const
+
+/**
+ * The chevron of a group that folds (#666): the children a session started, the sessions an app owns.
+ *
+ * It stands in the **gutter to the left of its row**, the 16px the row's level leaves free, so the row's own content
+ * (tool mark, name) starts in the same column whether or not the row has a group. It is faint ink: a state, not a
+ * call to act, so it spends no brightness (the project row's arrow is the same). The project row keeps its own
+ * arrow; this one is for what stands under it.
+ */
+function GroupToggle({ folded, label, testId, onToggle }: { folded: boolean; label: string; testId: string; onToggle: () => void }) {
+  return (
+    <span className="absolute inset-y-0 -left-4 flex w-4 items-center justify-center">
+      <Tooltip content={label} testId={`${testId}-tip`}>
+        <button
+          type="button"
+          aria-label={label}
+          aria-expanded={!folded}
+          onClick={onToggle}
+          data-testid={testId}
+          className="flex size-4 items-center justify-center rounded-sm text-ink-faint transition-colors hover:text-ink"
+        >
+          <ChevronIcon open={!folded} size={10} />
+        </button>
+      </Tooltip>
+    </span>
+  )
+}
+
+/**
+ * What a folded group says about the rows it hides (#666): how many, and a sign when one of them needs the person.
+ *
+ * The count is quiet (faint ink, no chip): it explains why the rows below are missing. The sign is the part that must
+ * not be lost with the rows: a dot in the signal ink when a hidden row needs an answer (approval, question, error),
+ * one step quieter when it is only unread. Pure white is spent on the first alone, the way a row's mark spends it on
+ * "waiting for you" and nowhere else.
+ */
+function FoldedMark({ count, attention, testId }: { count: number; attention: GroupAttention | null; testId: string }) {
+  const label =
+    `${count} hidden` +
+    (attention === 'alert' ? ', one needs you' : attention === 'unread' ? ', one unread' : '')
+  return (
+    <span className="flex shrink-0 items-center gap-1" aria-label={label} title={label} data-testid={testId}>
+      <span className="readout text-2xs text-ink-faint" data-testid={`${testId}-count`}>
+        {count}
+      </span>
+      {attention && (
+        <span
+          className={`size-1.5 rounded-full ${attention === 'alert' ? 'bg-ink-signal' : 'bg-ink-muted'}`}
+          data-testid={`${testId}-attention`}
+          data-attention={attention}
+        />
+      )}
+    </span>
+  )
+}
+
+/**
+ * Left folds and Right unfolds the group of the focused row (#666), the way a tree row does. A row with no group
+ * ignores both, and so does a key with a modifier or one that belongs to an input method.
+ */
+function foldKeys(hasGroup: boolean, folded: boolean, setFolded: (folded: boolean) => void) {
+  return (e: React.KeyboardEvent) => {
+    if (!hasGroup || composingKey(e.nativeEvent) || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+    if (e.key === 'ArrowLeft' && !folded) {
+      e.preventDefault()
+      setFolded(true)
+    } else if (e.key === 'ArrowRight' && folded) {
+      e.preventDefault()
+      setFolded(false)
+    }
+  }
+}
+
+/** A group's folded state, remembered in the screen preferences (#666) */
+function useGroupFold(key: string): [boolean, (folded: boolean) => void] {
+  const folded = useStore((s) => s.prefs.foldedGroups.includes(key))
+  const setGroupsFolded = useStore((s) => s.setGroupsFolded)
+  return [folded, (next) => setGroupsFolded([key], next)]
+}
+
 /**
  * One session row. It can be dragged, and can receive another row being dropped on it.
  *
@@ -86,6 +169,7 @@ function SessionRow({
   onReorder,
   draggable,
   nested,
+  level,
   children,
 }: {
   id: string
@@ -104,14 +188,21 @@ function SessionRow({
    * decision).
    */
   nested?: boolean | number
+  /**
+   * How far in the row stands (#666): 1 for a session of a project, one more for the children it started, and for
+   * the sessions of an app (the app row is the level-1 item), one more again for theirs. Every level is 16px, the
+   * width of the chevron's gutter, so the tool mark of a level starts at one column. Levels 2 and up also carry the
+   * guide line that ties a row to what it hangs under; level 1 hangs under the project's tinted group instead.
+   */
+  level: 1 | 2 | 3
   children: ReactNode
 }) {
-  const depth = nested === true ? 1 : typeof nested === 'number' ? nested : 0
   const drop = useDropLine(SESSION_MIME, onReorder)
   return (
     <li
-      data-nested={nested === true ? true : depth || undefined}
-      className={`group/row relative ${depth ? `${depth === 1 ? 'ml-4' : 'ml-8'} border-l border-line/60` : ''} ${dropLine(drop.edge)}`}
+      data-nested={nested === true ? true : typeof nested === 'number' && nested > 0 ? nested : undefined}
+      data-level={level}
+      className={`group/row relative ${INDENT[level]} ${level > 1 ? 'border-l border-line/60' : ''} ${dropLine(drop.edge)}`}
       draggable={draggable}
       onDragStart={(e) => {
         e.dataTransfer.setData(SESSION_MIME, id)
@@ -531,6 +622,9 @@ function ProjectBlock({ projectId }: { projectId: string }) {
   const toggleFold = useStore((s) => s.toggleProjectFold)
   const foldOthers = useStore((s) => s.foldOtherProjects)
   const manyProjects = useStore((s) => Object.keys(s.projects).length > 1)
+  // Folded groups (#666): the children of a session. `foldedGroups` is one array, so this re-renders only when it changes
+  const foldedGroups = useStore((s) => s.prefs.foldedGroups)
+  const setGroupsFolded = useStore((s) => s.setGroupsFolded)
   /*
    * On a linked machine that is away (#82): its rows stay, from what the hub last heard, dimmed so they read as not
    * current. Nothing about them changes on its own until the machine is back.
@@ -743,15 +837,17 @@ function ProjectBlock({ projectId }: { projectId: string }) {
       */}
       {!folded && (
         <ul className="mt-1.5">
-          {orderAsTree(groupedSessions.project).map(({ s, nested }) => {
+          {treeRows(groupedSessions.project, (id) => foldedGroups.includes(childrenGroupKey(id))).map(({ s, nested, children, folded: childrenFolded }) => {
             const unread = s.lastSeq > s.lastReadSeq
             const focused = focusedSessionId === s.id
+            const groupKey = childrenGroupKey(s.id)
             return (
               <SessionRow
                 key={s.id}
                 id={s.id}
                 projectId={projectId}
                 nested={nested}
+                level={nested ? 2 : 1}
                 /*
                  * A child row cannot be dragged — position is membership (#69). Letting a row
                  * drawn indented under a parent be moved by hand would make the new position read
@@ -790,8 +886,17 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                   />
                 ) : (
                   <>
+                    {children.length > 0 && (
+                      <GroupToggle
+                        folded={childrenFolded}
+                        label={`${childrenFolded ? 'Show' : 'Hide'} the ${children.length === 1 ? 'session' : `${children.length} sessions`} ${s.name} started`}
+                        testId={`children-fold-${s.id}`}
+                        onToggle={() => setGroupsFolded([groupKey], !childrenFolded)}
+                      />
+                    )}
                     <button
                       onClick={() => focusSession(s.id)}
+                      onKeyDown={foldKeys(children.length > 0, childrenFolded, (next) => setGroupsFolded([groupKey], next))}
                       /*
                         Double-clicking the name edits it in place — the same convention as file
                         explorers and tab names, so the hand knows it before the person even finds
@@ -829,6 +934,9 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       */}
                       <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} />
                       <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
+                      {childrenFolded && (
+                        <FoldedMark count={children.length} attention={groupAttention(children)} testId={`children-folded-${s.id}`} />
+                      )}
                       {/*
                         Merged (#69) — this branch's work has landed on the trunk. A sign that it
                         is history, not ongoing work. Cleaning it up is the person's, in the delete
@@ -1003,22 +1111,48 @@ function AppRows({ apps, sessionsByApp, testId }: { apps: ExternalCatalogApp[]; 
   if (apps.length === 0) return null
   return (
     <ul data-testid={testId}>
-      {apps.map((a) => (
-        <Fragment key={a.key}>
-          <AppRow app={a} />
-          {a.projectId === null ? (
-            <UserAppSessions appId={a.appId} machine={a.info.machine ?? null} />
-          ) : (
-            <ProjectAppSessions sessions={sessionsByApp?.get(a.appId) ?? []} projectId={a.projectId} />
-          )}
-        </Fragment>
-      ))}
+      {apps.map((a) =>
+        a.projectId === null ? (
+          <UserAppGroup key={a.key} app={a} />
+        ) : (
+          <ProjectAppGroup key={a.key} app={a} projectId={a.projectId} sessions={sessionsByApp?.get(a.appId) ?? []} />
+        ),
+      )}
     </ul>
   )
 }
 
+/** A project app's row and, folded or not (#666), the sessions it owns */
+function ProjectAppGroup({ app, projectId, sessions }: { app: ExternalCatalogApp; projectId: string; sessions: SessionSummary[] }) {
+  const [folded, setFolded] = useGroupFold(appGroupKey(app.key))
+  return (
+    <>
+      <AppRow app={app} sessions={sessions} folded={folded} onFold={setFolded} />
+      <ProjectAppSessions sessions={sessions} projectId={projectId} folded={folded} />
+    </>
+  )
+}
+
+/** A user-folder app's row and, folded or not (#666), its builder and the agents it started */
+function UserAppGroup({ app }: { app: ExternalCatalogApp }) {
+  const [folded, setFolded] = useGroupFold(appGroupKey(app.key))
+  const all = useStore((s) => s.sessions)
+  const machine = app.info.machine ?? null
+  // The machine too (#82): two machines' user-folder apps can share an id, and neither has a project to tell them apart
+  const own = useMemo(
+    () => Object.values(all).filter((s) => !s.projectId && s.appId === app.appId && (s.machine ?? null) === machine),
+    [all, app.appId, machine],
+  )
+  return (
+    <>
+      <AppRow app={app} sessions={own} folded={folded} onFold={setFolded} />
+      {!folded && <UserAppSessions sessions={own} />}
+    </>
+  )
+}
+
 /** A listed project app owns these rows, so they cannot be reordered into the project's session list. */
-function ProjectAppSessions({ sessions, projectId }: { sessions: SessionSummary[]; projectId: string }) {
+function ProjectAppSessions({ sessions, projectId, folded }: { sessions: SessionSummary[]; projectId: string; folded: boolean }) {
   const selected = useSelectedSessionId()
   const focusSession = useStore((s) => s.focusSession)
   const renameSession = useStore((s) => s.rename)
@@ -1029,17 +1163,22 @@ function ProjectAppSessions({ sessions, projectId }: { sessions: SessionSummary[
   const [handingOff, setHandingOff] = useState<string | null>(null)
   const [sessionMenu, setSessionMenu] = useState<{ id: string; el: HTMLElement } | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
+  const foldedGroups = useStore((s) => s.prefs.foldedGroups)
+  const setGroupsFolded = useStore((s) => s.setGroupsFolded)
   return (
     <>
-      {orderAsTree(sessions).map(({ s, nested }) => {
+      {/* The app's group folded away leaves the dialogs of a row that was open (rename, delete) where they are */}
+      {(folded ? [] : treeRows(sessions, (id) => foldedGroups.includes(childrenGroupKey(id)))).map(({ s, nested, children, folded: childrenFolded }) => {
     const focused = selected === s.id
     const unread = s.lastSeq > s.lastReadSeq
+    const groupKey = childrenGroupKey(s.id)
     return (
       <SessionRow
         key={s.id}
         id={s.id}
         projectId={projectId}
         nested={nested ? 2 : 1}
+        level={nested ? 3 : 2}
         draggable={renaming !== s.id && !nested}
         onReorder={() => {}}
       >
@@ -1054,8 +1193,17 @@ function ProjectAppSessions({ sessions, projectId }: { sessions: SessionSummary[
           />
         ) : (
           <>
+            {children.length > 0 && (
+              <GroupToggle
+                folded={childrenFolded}
+                label={`${childrenFolded ? 'Show' : 'Hide'} the ${children.length === 1 ? 'session' : `${children.length} sessions`} ${s.name} started`}
+                testId={`children-fold-${s.id}`}
+                onToggle={() => setGroupsFolded([groupKey], !childrenFolded)}
+              />
+            )}
             <button
               onClick={() => focusSession(s.id)}
+              onKeyDown={foldKeys(children.length > 0, childrenFolded, (next) => setGroupsFolded([groupKey], next))}
               onDoubleClick={() => setRenaming(s.id)}
               data-testid={`app-session-row-${s.id}`}
               aria-current={focused ? 'page' : undefined}
@@ -1068,6 +1216,9 @@ function ProjectAppSessions({ sessions, projectId }: { sessions: SessionSummary[
             >
               <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} />
               <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
+              {childrenFolded && (
+                <FoldedMark count={children.length} attention={groupAttention(children)} testId={`children-folded-${s.id}`} />
+              )}
               {s.merged && <span className="shrink-0 rounded-md border border-line px-1 text-2xs leading-body text-ink-faint" data-testid={`merged-badge-${s.id}`}>merged</span>}
               {s.pr && !s.merged && <span className="shrink-0 rounded-md border border-line px-1 text-2xs leading-body text-ink-faint" data-testid={`pr-badge-${s.id}`} title={`Pull request #${s.pr.number} — ${s.pr.state}\n${s.pr.url}`}>PR #{s.pr.number}{s.pr.state === 'closed' ? ' ✕' : ''}</span>}
               <BackgroundMark tasks={s.backgroundTasks} testId={`background-mark-${s.id}`} />
@@ -1154,10 +1305,7 @@ function ProjectAppSessions({ sessions, projectId }: { sessions: SessionSummary[
  * up, a session of an app that was removed) has no row: search, the palette and the inbox still
  * reach it.
  */
-function UserAppSessions({ appId, machine }: { appId: string; machine: string | null }) {
-  const all = useStore((s) => s.sessions)
-  // The machine too (#82): two machines' user-folder apps can share an id, and neither has a project to tell them apart
-  const own = useMemo(() => Object.values(all).filter((s) => !s.projectId && s.appId === appId && (s.machine ?? null) === machine), [all, appId, machine])
+function UserAppSessions({ sessions: own }: { sessions: SessionSummary[] }) {
   const selected = useSelectedSessionId()
   const focusSession = useStore((s) => s.focusSession)
   return own.map((s) => {
@@ -1166,7 +1314,8 @@ function UserAppSessions({ appId, machine }: { appId: string; machine: string | 
     return (
       <li
         key={s.id}
-        className="relative ml-4 border-l border-line/60"
+        data-level={2}
+        className="relative ml-8 border-l border-line/60"
         // Onto the grid like any session row; it carries no project, so no project screen takes it
         draggable
         onDragStart={(e) => {
@@ -1192,7 +1341,18 @@ function UserAppSessions({ appId, machine }: { appId: string; machine: string | 
   })
 }
 
-function AppRow({ app }: { app: ExternalCatalogApp }) {
+function AppRow({
+  app,
+  sessions,
+  folded,
+  onFold,
+}: {
+  app: ExternalCatalogApp
+  /** The sessions this app owns: what its chevron folds, counted and checked for attention when folded (#666) */
+  sessions: SessionSummary[]
+  folded: boolean
+  onFold: (folded: boolean) => void
+}) {
   const openApp = useStore((s) => s.openApp)
   /*
    * A linked machine's user-folder app (#82) opens like this computer's, through the hub (remote-hub.md §11); only
@@ -1225,7 +1385,9 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
   const projectId = app.projectId
   return (
     <li
-      className="relative"
+      className="relative ml-4"
+      data-level={1}
+      data-folded={folded || undefined}
       /*
         An app row is dragged like a session row: onto the grid, any app (#288), or onto its
         project screen, a project's app (#203), where an absent panel is added where it is dropped.
@@ -1241,9 +1403,18 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
         e.dataTransfer.effectAllowed = 'move'
       }}
     >
+      {sessions.length > 0 && (
+        <GroupToggle
+          folded={folded}
+          label={`${folded ? 'Show' : 'Hide'} the ${sessions.length === 1 ? 'session' : `${sessions.length} sessions`} of ${app.title}`}
+          testId={`app-fold-${app.key}`}
+          onToggle={() => onFold(!folded)}
+        />
+      )}
       <button
         type="button"
         onClick={() => openApp(app.projectId, app.appId, { machine })}
+        onKeyDown={foldKeys(sessions.length > 0, folded, onFold)}
         data-testid={`app-row-${app.key}`}
         data-status={app.info.status}
         aria-current={active ? 'page' : undefined}
@@ -1257,6 +1428,9 @@ function AppRow({ app }: { app: ExternalCatalogApp }) {
           <AppIcon />
         </span>
         <span className="truncate">{app.title}</span>
+        {folded && sessions.length > 0 && (
+          <FoldedMark count={sessions.length} attention={groupAttention(sessions)} testId={`app-folded-${app.key}`} />
+        )}
         {hint && (
           <span
             className={`readout ml-auto shrink-0 text-2xs ${waitsForYou || app.status.tone === 'alert' ? 'text-ink' : 'text-ink-faint'}`}

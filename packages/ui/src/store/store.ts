@@ -65,6 +65,7 @@ import { activateTab, defaultLayout, sanitizeLayout, type PanelGroup, type Panel
 import { closeLayer, EMPTY_NAV, sameScreen, step, visit, type NavHistory, type Screen } from './navHistory.js'
 import { reloadBudget } from './reloadBudget.js'
 import { viewReconnect } from './viewReconnect.js'
+import { FOLDED_GROUPS_MAX, foldGroupsHiding } from './foldGroups.js'
 import { appendChat, bumpChatKeysAbove, messagesToChat, nextChatKey, subagentRow, type ChatAttachment, type ChatItem } from './transcript.js'
 export { audienceText, compactionText, errorText, handoffText, markerText, messagesToChat, noticeLine, resetText } from './transcript.js'
 export type { ChatAttachment, ChatItem, NoticeLine } from './transcript.js'
@@ -849,6 +850,13 @@ export type AppState = {
   foldedProjects: string[]
   /** Folds or unfolds that project's session rows (#205) */
   toggleProjectFold(projectId: string): void
+  /**
+   * Folds or unfolds a sidebar group (#666): the children a session started, or the sessions an app owns.
+   * Kept in the screen preferences (`prefs.foldedGroups`, `foldGroupsHiding` names the keys), not the workspace
+   * snapshot: it is a way of looking, and it survives a restart the same way the other preferences do. The screen
+   * changes at once; the save follows, and a failed one is said in a toast and undone.
+   */
+  setGroupsFolded(keys: string[], folded: boolean): void
   /** Unfolds only this project and folds all the rest (#205) — for focusing on one in a single move */
   foldOtherProjects(projectId: string): void
   /**
@@ -3774,6 +3782,14 @@ export const useStore = create<AppState>((set, get) => ({
      */
     const reveal =
       opts?.reveal !== false && !!projectId && get().foldedProjects.includes(projectId)
+    // The same for the group the row stands in (#666): the children of its parent, the sessions of its app
+    const picked = id ? get().sessions[id] : undefined
+    if (picked && opts?.reveal !== false) {
+      const listed = new Set(get().externalApps.map((a) => appKeyOf(a.projectId, a.appId, a.machine)))
+      const hiding = foldGroupsHiding(picked, get().sessions, (x) => appKeyOf(x.projectId, x.appId!, x.machine), listed)
+      const folded = get().prefs.foldedGroups
+      if (hiding.some((k) => folded.includes(k))) get().setGroupsFolded(hiding, false)
+    }
     // Switching sessions clears any overlay — the new session's conversation must be visible first
     set({
       focusedSessionId: id,
@@ -4494,6 +4510,21 @@ export const useStore = create<AppState>((set, get) => ({
         : [...s.foldedProjects, projectId],
     }))
     get().saveWorkspace()
+  },
+  setGroupsFolded(keys, folded) {
+    const before = get().prefs.foldedGroups
+    const next = folded
+      ? [...before, ...keys.filter((k, i) => !before.includes(k) && keys.indexOf(k) === i)].slice(-FOLDED_GROUPS_MAX)
+      : before.filter((k) => !keys.includes(k))
+    if (next.length === before.length && next.every((k, i) => k === before[i])) return
+    set((s) => ({ prefs: { ...s.prefs, foldedGroups: next } }))
+    const platform = get().platform
+    if (!platform) return
+    platform.prefs.save({ foldedGroups: next }).catch((e: unknown) => {
+      // Undone only if nothing changed it since: a later fold has its own save in flight
+      if (get().prefs.foldedGroups === next) set((s) => ({ prefs: { ...s.prefs, foldedGroups: before } }))
+      set({ toast: `Could not save that: ${(e as Error).message}` })
+    })
   },
   foldOtherProjects(projectId) {
     set((s) => ({ foldedProjects: Object.keys(s.projects).filter((id) => id !== projectId) }))
