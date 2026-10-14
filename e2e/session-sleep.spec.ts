@@ -18,7 +18,7 @@ test('a sleeping session says so quietly, is not woken by selecting it, and wake
   const second = await newSession(page, 'alpha')
   await asleep(page, first)
 
-  // The sidebar's mark fades and its tooltip names it; the second session is untouched
+  // The sidebar's mark keeps its look and its tooltip names it; the second session is untouched
   const mark = page.getByTestId(`session-row-${first}`).locator('[data-asleep]')
   await mark.hover()
   await expect(page.getByTestId('tool-mark-tip-claude')).toContainText('asleep')
@@ -43,6 +43,53 @@ test('a sleeping session says so quietly, is not woken by selecting it, and wake
   // Keys typed meanwhile went into the composer, as they would on any session
   await page.keyboard.type('next step')
   await expect(page.getByTestId('prompt-input')).toHaveValue('next step')
+})
+
+// What the mark's letter chip looks like, as the browser computes it: the class list and the opacity a person sees
+const chip = (page: Page, sessionId: string) =>
+  page.getByTestId(`session-row-${sessionId}`).getByTestId('tool-mark-claude').locator('span').first()
+const look = async (page: Page, sessionId: string) => {
+  const el = chip(page, sessionId)
+  return { classes: await el.getAttribute('class'), opacity: await el.evaluate((n) => getComputedStyle(n).opacity) }
+}
+// Through the legal path (idle → working → the state), as the state machine only follows those
+const setState = (page: Page, sessionId: string, state: string) =>
+  page.evaluate(
+    ([id, st]) => {
+      const mock = (window as any).__mock
+      if (st !== 'error') mock.emit({ type: 'state_change', sessionId: id, state: 'working' })
+      mock.emit({ type: 'state_change', sessionId: id, state: st })
+    },
+    [sessionId, state],
+  )
+
+test('an asleep mark looks exactly like the same session awake; only the tooltip says asleep, and an error still stands out (#670)', async ({ page }) => {
+  await setup(page, ['/tmp/alpha'])
+  const awake = await newSession(page, 'alpha')
+  const sleeper = await newSession(page, 'alpha')
+  const failed = await newSession(page, 'alpha')
+  for (const id of [awake, sleeper]) await setState(page, id, 'waiting_input')
+  await setState(page, failed, 'error')
+  const markOf = (id: string) => page.getByTestId(`session-row-${id}`).getByTestId('tool-mark-claude')
+  await expect(markOf(awake)).toHaveAttribute('data-state', 'waiting_input')
+  await expect(markOf(sleeper)).toHaveAttribute('data-state', 'waiting_input')
+  await expect(markOf(failed)).toHaveAttribute('data-state', 'error')
+  await asleep(page, sleeper)
+  await asleep(page, failed)
+  await expect(page.getByTestId(`session-row-${sleeper}`).locator('[data-asleep]')).toHaveCount(1)
+
+  // A finished turn looks like a finished turn, asleep or not
+  expect(await look(page, sleeper)).toEqual(await look(page, awake))
+  expect((await look(page, sleeper)).opacity).toBe('1')
+  await expect(markOf(sleeper)).toHaveAttribute('data-state', 'waiting_input')
+
+  // An error keeps its own treatment, asleep or awake
+  expect((await look(page, failed)).opacity).toBe('0.5')
+  expect(await look(page, failed)).not.toEqual(await look(page, sleeper))
+
+  // The information is kept for anyone who looks
+  await markOf(sleeper).hover()
+  await expect(page.getByTestId('tool-mark-tip-claude')).toHaveText(/asleep/)
 })
 
 test('a message to a sleeping session reads as waking, then goes through', async ({ page }) => {

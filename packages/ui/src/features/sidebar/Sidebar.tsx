@@ -2257,8 +2257,9 @@ const RING: Record<SessionState, string> = {
 
 /*
  * Asleep (#568): the session has no process, because the host put it to sleep when idle or nothing has woken it since a
- * restart. Said quietly: the letter fades further than a stalled one, the border keeps the state, and the tooltip names
- * it. Using the session (its composer, a message) wakes it.
+ * restart. Said only in the tooltip: the mark is drawn exactly as the same session awake in the same state, because
+ * sleep is nothing the person has to act on (using the session wakes it) and a fade would be mistaken for a stalled
+ * session (#670). So a finished turn still looks finished and idle still looks idle; only limited and error fade.
  */
 function ToolMark({ tool, state, asleep = false }: { tool: ToolName; state: SessionState; asleep?: boolean }) {
   const meta = useToolMeta(tool)
@@ -2275,7 +2276,7 @@ function ToolMark({ tool, state, asleep = false }: { tool: ToolName; state: Sess
         aria-label={label}
         data-testid={`tool-mark-${tool}`}
         data-state={state}
-        data-asleep={asleep || undefined}
+        data-asleep={asleep || undefined} // a hook for tests and the tooltip's wording; it changes no style
       >
         <span
           /*
@@ -2299,7 +2300,7 @@ function ToolMark({ tool, state, asleep = false }: { tool: ToolName; state: Sess
             would cut into that signal by the same amount.
           */
           className={`readout cc-chip flex size-[14px] items-center justify-center rounded-sm border border-line-strong bg-surface-floor text-2xs font-semibold leading-none text-ink ${
-            asleep ? 'opacity-40' : stalled ? 'opacity-50' : ''
+            stalled ? 'opacity-50' : ''
           }`}
         >
           {meta.mark}
