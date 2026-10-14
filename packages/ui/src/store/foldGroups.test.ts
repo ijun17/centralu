@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@cc/core'
-import { appGroupKey, childrenGroupKey, foldGroupsHiding } from './foldGroups.js'
+import { appGroupKey, childrenGroupKey, deadFoldKeys, foldGroupsHiding, sameKeys } from './foldGroups.js'
 
 const s = (id: string, over: Partial<SessionSummary> = {}) =>
   ({ id, projectId: 'p', appId: null, machine: null, parentSessionId: null, askedBy: null, ...over }) as SessionSummary
@@ -39,5 +39,33 @@ describe('foldGroupsHiding (#666)', () => {
     const far = s('far', { askedBy: 'elsewhere' })
     expect(foldGroupsHiding(far, all(far, s('elsewhere', { projectId: 'q' })), keyOf, listed)).toEqual([])
     expect(foldGroupsHiding(far, all(far), keyOf, listed)).toEqual([])
+  })
+})
+
+describe('deadFoldKeys (#666)', () => {
+  const sessions = { live: {} }
+  const apps = new Set(['p/slider', '_user/tool'])
+
+  it('names the folds of sessions and apps that are gone', () => {
+    expect(deadFoldKeys(['session:live', 'session:gone', 'app:p/slider', 'app:p/gone', 'app:_user/tool'], sessions, apps)).toEqual([
+      'session:gone',
+      'app:p/gone',
+    ])
+  })
+
+  it('leaves a linked machine’s keys alone: they are absent only until its link comes up', () => {
+    expect(deadFoldKeys(['session:m1.abc', 'app:m1.proj/slider', 'app:m1:_user/tool'], sessions, apps)).toEqual([])
+  })
+
+  it('judges no app while the app list says nothing, and ignores keys it does not know', () => {
+    expect(deadFoldKeys(['app:p/gone', 'session:gone', 'other:thing'], sessions, null)).toEqual(['session:gone'])
+  })
+})
+
+describe('sameKeys', () => {
+  it('compares by value and order', () => {
+    expect(sameKeys(['a', 'b'], ['a', 'b'])).toBe(true)
+    expect(sameKeys(['a', 'b'], ['b', 'a'])).toBe(false)
+    expect(sameKeys(['a'], ['a', 'b'])).toBe(false)
   })
 })

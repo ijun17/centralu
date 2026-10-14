@@ -36,7 +36,21 @@ async function seed(page: Page): Promise<{ plain: string; projectId: string; app
         })
       emit(ids.parent, 'parent', {})
       ids.kids.forEach((id: string, i: number) => emit(id, `kid ${i + 1}`, { parentSessionId: ids.parent, askedBy: ids.parent }))
+      const manifest = (appId: string, projectId: string | null) => ({
+        appId,
+        projectId,
+        dir: `/tmp/${appId}`,
+        name: appId,
+        version: '0.1.0',
+        description: null,
+        home: 'home',
+        trusted: true,
+        status: 'stopped',
+        error: null,
+        warnings: [],
+      })
       m.setExternalApps([
+        manifest('tool', null),
         {
           appId: 'slider',
           projectId: pid,
@@ -52,6 +66,8 @@ async function seed(page: Page): Promise<{ plain: string; projectId: string; app
         },
       ])
       emit(ids.appSession, 'app builder', { appId: 'slider' })
+      // A user-folder app's key (`_user/tool`) does not change when the project is added again, so it can be found after a reload
+      emit('g-user-app-session', 'user app builder', { projectId: null, appId: 'tool' })
       emit(ids.appKid, 'app helper', { appId: 'slider', parentSessionId: ids.appSession, askedBy: ids.appSession })
     },
     [projectId, { parent: PARENT, kids: KIDS, appSession: APP_SESSION, appKid: APP_KID }] as const,
@@ -102,7 +118,7 @@ export function sidebarGroupTests(): void {
       expect(spill).toBeLessThanOrEqual(0)
     })
 
-    test('folding a session’s children hides them behind a count, and the fold survives a reload', async ({ page }) => {
+    test('folding a session’s children hides them behind a count; unfolding drops it', async ({ page }) => {
       await seed(page)
       await expect(page.getByTestId(`children-folded-${PARENT}`)).toHaveCount(0)
 
@@ -114,20 +130,73 @@ export function sidebarGroupTests(): void {
       await expect(page.getByTestId(`app-session-row-${APP_KID}`)).toBeVisible()
       await expect.poll(() => foldedGroups(page)).toEqual([`session:${PARENT}`])
 
+      await page.getByTestId(`children-fold-${PARENT}`).click()
+      for (const id of KIDS) await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
+      await expect(page.getByTestId(`children-folded-${PARENT}`)).toHaveCount(0)
+      expect(await foldedGroups(page)).toEqual([])
+    })
+
+    /*
+     * The mock loses its sessions on a reload and keeps its preferences, and a fold whose session is gone is dropped
+     * at attach, so a session's fold cannot be followed across one here (the store tests do that with sessions that
+     * stay). A user-folder app's key does not depend on any session or project id, so it can.
+     */
+    test('a fold survives a reload', async ({ page }) => {
+      await seed(page)
+      const key = '_user/tool'
+      await page.getByTestId(`app-fold-${key}`).click()
+      await expect(page.getByTestId('app-session-row-g-user-app-session')).toHaveCount(0)
+      await expect(page.getByTestId(`app-folded-${key}-count`)).toHaveText('1')
+      await expect.poll(() => foldedGroups(page)).toEqual([`app:${key}`])
+
       await page.reload()
       await expect(page.getByTestId('add-project')).toBeVisible()
       await page.evaluate((p: string) => ((window as any).__mock.nextPickedDirectory = p), '/tmp/alpha')
       await page.getByTestId('add-project').click()
       await seed(page)
-      expect(await foldedGroups(page)).toEqual([`session:${PARENT}`])
-      await expect(page.getByTestId(`children-folded-${PARENT}-count`)).toHaveText('2')
-      for (const id of KIDS) await expect(page.getByTestId(`session-row-${id}`)).toHaveCount(0)
+      await expect(page.getByTestId(`app-folded-${key}-count`)).toHaveText('1')
+      await expect(page.getByTestId('app-session-row-g-user-app-session')).toHaveCount(0)
+      expect(await foldedGroups(page)).toEqual([`app:${key}`])
 
-      // Unfolding is remembered too, and drops the count
-      await page.getByTestId(`children-fold-${PARENT}`).click()
-      for (const id of KIDS) await expect(page.getByTestId(`session-row-${id}`)).toBeVisible()
-      await expect(page.getByTestId(`children-folded-${PARENT}`)).toHaveCount(0)
+      await page.getByTestId(`app-fold-${key}`).click()
+      await expect(page.getByTestId('app-session-row-g-user-app-session')).toBeVisible()
       expect(await foldedGroups(page)).toEqual([])
+    })
+
+    test('a deleted session’s fold is dropped, not kept toward the cap', async ({ page }) => {
+      await seed(page)
+      await page.getByTestId(`children-fold-${PARENT}`).click()
+      await expect.poll(() => foldedGroups(page)).toEqual([`session:${PARENT}`])
+      await page.evaluate((id) => (window as any).__mock.emit({ type: 'session_deleted', sessionId: id }), PARENT)
+      await expect(page.getByTestId(`session-row-${PARENT}`)).toHaveCount(0)
+      await expect.poll(() => foldedGroups(page)).toEqual([])
+    })
+
+    test('Left and Right type into the rename field and an input method, they do not fold', async ({ page }) => {
+      await seed(page)
+
+      // While the name is being edited the arrows move the caret
+      await page.getByTestId(`session-row-${PARENT}`).dblclick()
+      const input = page.getByTestId(`session-name-input-${PARENT}`)
+      await expect(input).toBeFocused()
+      await page.keyboard.press('ArrowLeft')
+      await page.keyboard.press('ArrowRight')
+      await expect(input).toBeVisible()
+      await expect(page.getByTestId(`session-row-${KIDS[0]}`)).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(input).toHaveCount(0)
+
+      // An arrow that belongs to an input method composing on the focused row (isComposing, or WebKit's keyCode 229)
+      const row = page.getByTestId(`session-row-${PARENT}`)
+      await row.focus()
+      for (const init of [{ isComposing: true }, { keyCode: 229 }]) {
+        await row.evaluate((el, i) => el.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true, ...i })), init)
+      }
+      await expect(page.getByTestId(`session-row-${KIDS[0]}`)).toBeVisible()
+      expect(await foldedGroups(page)).toEqual([])
+      // And the same row still folds on a plain Left
+      await page.keyboard.press('ArrowLeft')
+      await expect(page.getByTestId(`session-row-${KIDS[0]}`)).toHaveCount(0)
     })
 
     test('an app’s sessions fold behind a count on the app row', async ({ page }) => {
@@ -186,7 +255,7 @@ export function sidebarGroupTests(): void {
     })
 
     test('Left folds and Right unfolds the focused row’s group', async ({ page }) => {
-      const { plain } = await seed(page)
+      const { plain, appKey } = await seed(page)
 
       await page.getByTestId(`session-row-${PARENT}`).focus()
       await page.keyboard.press('ArrowLeft')
@@ -204,7 +273,6 @@ export function sidebarGroupTests(): void {
       await expect(page.getByTestId(`session-row-${KIDS[0]}`)).toBeVisible()
 
       // The app row answers too
-      const appKey = await page.evaluate(() => (document.querySelector('[data-testid^="app-row-"]') as HTMLElement).dataset.testid!.slice('app-row-'.length))
       await page.getByTestId(`app-row-${appKey}`).focus()
       await page.keyboard.press('ArrowLeft')
       await expect(page.getByTestId(`app-session-row-${APP_SESSION}`)).toHaveCount(0)

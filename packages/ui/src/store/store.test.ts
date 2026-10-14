@@ -162,21 +162,23 @@ describe('sidebar group folding (#666)', () => {
 
   it('a fold is saved through the screen preferences and survives a restart', async () => {
     const mock = new MockPlatform()
+    const a = await mock.projects.add('/tmp/group-save')
+    for (const id of ['g-a', 'g-b']) mock.sessions.set(id, sessionInfo(id, { projectId: a.id }))
     await useStore.getState().attach(mock)
-    useStore.getState().setGroupsFolded(['session:a', 'app:p/x'], true)
-    useStore.getState().setGroupsFolded(['session:a'], true)
+    useStore.getState().setGroupsFolded(['session:g-a', 'session:g-b'], true)
+    useStore.getState().setGroupsFolded(['session:g-a'], true)
     await tick()
-    expect(folded()).toEqual(['session:a', 'app:p/x'])
-    expect((await mock.prefs.load()).foldedGroups).toEqual(['session:a', 'app:p/x'])
+    expect(folded()).toEqual(['session:g-a', 'session:g-b'])
+    expect((await mock.prefs.load()).foldedGroups).toEqual(['session:g-a', 'session:g-b'])
 
-    useStore.getState().setGroupsFolded(['session:a'], false)
+    useStore.getState().setGroupsFolded(['session:g-a'], false)
     await tick()
-    expect((await mock.prefs.load()).foldedGroups).toEqual(['app:p/x'])
+    expect((await mock.prefs.load()).foldedGroups).toEqual(['session:g-b'])
 
     // Reopening the app: a store reset to the defaults reads the record back
     useStore.setState({ prefs: { ...useStore.getState().prefs, foldedGroups: [] } })
     await useStore.getState().attach(mock)
-    expect(folded()).toEqual(['app:p/x'])
+    expect(folded()).toEqual(['session:g-b'])
   })
 
   it('a save that fails is said and undone, and keeps no stale fold', async () => {
@@ -237,6 +239,120 @@ describe('sidebar group folding (#666)', () => {
 
     expect(useStore.getState().focusedSessionId).toBe('g-kid')
     expect(folded()).toEqual(['session:g-parent'])
+  })
+
+  it('a deleted session takes its fold with it, saved too', async () => {
+    const mock = new MockPlatform()
+    const a = await mock.projects.add('/tmp/group-del')
+    for (const id of ['g-parent', 'g-other']) mock.sessions.set(id, sessionInfo(id, { projectId: a.id }))
+    await useStore.getState().attach(mock)
+    useStore.getState().setGroupsFolded(['session:g-parent', 'session:g-other'], true)
+
+    mock.emit({ type: 'session_deleted', sessionId: 'g-parent' })
+    await tick()
+
+    expect(folded()).toEqual(['session:g-other'])
+    expect((await mock.prefs.load()).foldedGroups).toEqual(['session:g-other'])
+  })
+
+  it('the first attach drops folds of groups that are gone, and keeps what it cannot judge', async () => {
+    const mock = new MockPlatform()
+    const a = await mock.projects.add('/tmp/group-stale')
+    mock.sessions.set('g-live', sessionInfo('g-live', { projectId: a.id }))
+    const stale = Array.from({ length: 496 }, (_, i) => `session:gone-${i}`)
+    // A linked machine's session and a linked machine's app are not here until that link comes up
+    await mock.prefs.save({ foldedGroups: [...stale, 'session:g-live', 'session:m1.far', 'app:m1:_user/far', `app:${a.id}/removed`] })
+
+    await useStore.getState().attach(mock)
+    await tick()
+
+    // Apps are not judged while the list names none (it may be a read that failed)
+    expect(folded()).toEqual(['session:g-live', 'session:m1.far', 'app:m1:_user/far', `app:${a.id}/removed`])
+    expect((await mock.prefs.load()).foldedGroups).toEqual(folded())
+  })
+
+  it('a removed app takes its fold with it, but an empty list does not condemn them all', async () => {
+    const mock = new MockPlatform()
+    const a = await mock.projects.add('/tmp/group-apps')
+    const app = (appId: string) =>
+      ({ appId, projectId: a.id, dir: `/tmp/${appId}`, name: appId, version: '0.1.0', description: null, home: 'home', trusted: true, status: 'stopped', error: null, warnings: [] }) as never
+    mock.setExternalApps([app('keep'), app('drop')])
+    await useStore.getState().attach(mock)
+    useStore.getState().setGroupsFolded([`app:${a.id}/keep`, `app:${a.id}/drop`], true)
+
+    mock.setExternalApps([app('keep')])
+    await vi.waitFor(() => expect(folded()).toEqual([`app:${a.id}/keep`]))
+
+    mock.setExternalApps([])
+    await tick()
+    await tick()
+    expect(folded()).toEqual([`app:${a.id}/keep`])
+  })
+
+  it('another setting saved against a host that does not know folds leaves the folds alone', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    useStore.getState().setGroupsFolded(['session:a'], true)
+    await tick()
+    // An older host answers with the record it knows: no `foldedGroups` in it
+    const save = mock.prefs.save
+    mock.prefs.save = async (patch) => {
+      const { foldedGroups: _unknown, ...known } = await save(patch)
+      return known as never
+    }
+
+    await useStore.getState().setPrefs({ sessionTools: false })
+
+    expect(useStore.getState().prefs.sessionTools).toBe(false)
+    expect(folded()).toEqual(['session:a'])
+  })
+
+  it('a setting whose answer was written before a fold was saved does not bring the old folds back', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    const save = mock.prefs.save
+    let answer: (v: unknown) => void = () => {}
+    mock.prefs.save = (patch) => (patch.sessionTools === undefined ? save(patch) : new Promise((r) => (answer = r)) as never)
+
+    const pending = useStore.getState().setPrefs({ sessionTools: false })
+    useStore.getState().setGroupsFolded(['session:a'], true)
+    answer({ ...useStore.getState().prefs, sessionTools: false, foldedGroups: [] })
+    await pending
+
+    expect(folded()).toEqual(['session:a'])
+  })
+
+  it('a failed save is undone even when a reconnect handed the screen a new array of the same folds', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    useStore.getState().setGroupsFolded(['session:a'], true)
+    await tick()
+    let fail: (e: Error) => void = () => {}
+    mock.prefs.save = () => new Promise((_, reject) => (fail = reject))
+    useStore.getState().setGroupsFolded(['session:b'], true)
+    // What attach does when it reads the preferences again: same keys, new array
+    useStore.setState((s) => ({ prefs: { ...s.prefs, foldedGroups: [...s.prefs.foldedGroups] } }))
+
+    fail(new Error('offline'))
+    await tick()
+
+    expect(folded()).toEqual(['session:a'])
+    expect(useStore.getState().toast).toContain('offline')
+  })
+
+  it('a failed older save does not undo a newer fold that is still being saved', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    const fails: ((e: Error) => void)[] = []
+    mock.prefs.save = () => new Promise((_, reject) => fails.push(reject))
+    useStore.getState().setGroupsFolded(['session:b'], true)
+    useStore.getState().setGroupsFolded(['session:b'], false)
+    useStore.getState().setGroupsFolded(['session:b'], true)
+
+    fails[0]!(new Error('first failed'))
+    await tick()
+
+    expect(folded()).toEqual(['session:b'])
   })
 
   it('keeps at most 500 folds, dropping the oldest', async () => {

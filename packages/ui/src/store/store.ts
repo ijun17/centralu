@@ -65,7 +65,7 @@ import { activateTab, defaultLayout, sanitizeLayout, type PanelGroup, type Panel
 import { closeLayer, EMPTY_NAV, sameScreen, step, visit, type NavHistory, type Screen } from './navHistory.js'
 import { reloadBudget } from './reloadBudget.js'
 import { viewReconnect } from './viewReconnect.js'
-import { FOLDED_GROUPS_MAX, foldGroupsHiding } from './foldGroups.js'
+import { FOLDED_GROUPS_MAX, deadFoldKeys, foldGroupsHiding, sameKeys } from './foldGroups.js'
 import { appendChat, bumpChatKeysAbove, messagesToChat, nextChatKey, subagentRow, type ChatAttachment, type ChatItem } from './transcript.js'
 export { audienceText, compactionText, errorText, handoffText, markerText, messagesToChat, noticeLine, resetText } from './transcript.js'
 export type { ChatAttachment, ChatItem, NoticeLine } from './transcript.js'
@@ -857,6 +857,13 @@ export type AppState = {
    * changes at once; the save follows, and a failed one is said in a toast and undone.
    */
   setGroupsFolded(keys: string[], folded: boolean): void
+  /**
+   * Forgets the folds of groups that no longer exist (#666): a deleted session's children, a removed app's sessions.
+   * Left in, they would crowd the preference's cap and, past it, push out folds that are still in use. Runs where
+   * something can have gone: a deletion, a list read again, a project removed, the first attach. A key it cannot
+   * judge (another machine's, which may just be unlinked for now) stays. See `deadFoldKeys`.
+   */
+  pruneFoldedGroups(): void
   /** Unfolds only this project and folds all the rest (#205) — for focusing on one in a single move */
   foldOtherProjects(projectId: string): void
   /**
@@ -2507,6 +2514,8 @@ function penEvent(sessionId: string, e: NormalizedEvent, now: number): void {
  * late-departing answer arrive first, letting an old list overwrite the new one. This actually
  * overlaps while an app is coming up, since broadcasts arrive back to back (coming up → up).
  */
+/** The newest save of the folded groups (#666): an older one that fails must not undo what a later one is saving */
+let foldSaveSeq = 0
 let externalAppsReading: Promise<void> | null = null
 let externalAppsAgain = false
 
@@ -2942,6 +2951,7 @@ export const useStore = create<AppState>((set, get) => ({
     // Replay events that arrived before the list was registered — the first output of a session that
     // was already running before the app was even opened is held here
     replayPendingEvents(get)
+    get().pruneFoldedGroups()
 
     // A suggestion awaiting approval stays on the host even across the app being closed and reopened
     // — its card must reappear
@@ -3533,6 +3543,7 @@ export const useStore = create<AppState>((set, get) => ({
         return { sessions, ...forgetSessions(s, new Set([sessionId])), projectPanels }
       })
       if (wasPanel) get().saveWorkspace()
+      get().pruneFoldedGroups()
       return
     }
 
@@ -4357,6 +4368,7 @@ export const useStore = create<AppState>((set, get) => ({
       }
     })
     replayPendingEvents(get)
+    get().pruneFoldedGroups()
     // A remote's user-folder and project apps come and go with it
     void get().refreshExternalApps()
     // Its agent CLIs may have moved while it was away
@@ -4420,7 +4432,18 @@ export const useStore = create<AppState>((set, get) => ({
     const platform = get().platform
     if (!platform) return
     try {
-      set({ prefs: parseUiPreferences(await platform.prefs.save(patch)) })
+      const saved = parseUiPreferences(await platform.prefs.save(patch))
+      /*
+       * Only what this patch wrote is taken from the answer (#666). The answer is the host's whole record at that
+       * moment: a host from before a field answers without it (so reading it whole would reset the field to its default
+       * on every unrelated save), and a fold saved meanwhile may not be in it yet.
+       */
+      set((s) => ({
+        prefs: {
+          ...s.prefs,
+          ...Object.fromEntries(Object.keys(patch).filter((k) => k in saved).map((k) => [k, saved[k as keyof typeof saved]])),
+        },
+      }))
     } catch (e) {
       // The screen is left as is — leaving a failed setting turned on means it quietly reverts the next time it is turned on
       set({ toast: `Could not save that: ${(e as Error).message}` })
@@ -4516,15 +4539,29 @@ export const useStore = create<AppState>((set, get) => ({
     const next = folded
       ? [...before, ...keys.filter((k, i) => !before.includes(k) && keys.indexOf(k) === i)].slice(-FOLDED_GROUPS_MAX)
       : before.filter((k) => !keys.includes(k))
-    if (next.length === before.length && next.every((k, i) => k === before[i])) return
+    if (sameKeys(next, before)) return
     set((s) => ({ prefs: { ...s.prefs, foldedGroups: next } }))
     const platform = get().platform
     if (!platform) return
+    const mine = ++foldSaveSeq
     platform.prefs.save({ foldedGroups: next }).catch((e: unknown) => {
-      // Undone only if nothing changed it since: a later fold has its own save in flight
-      if (get().prefs.foldedGroups === next) set((s) => ({ prefs: { ...s.prefs, foldedGroups: before } }))
+      /*
+       * Undone only when this is still the newest save and the list is still what it wrote: a later fold has its own
+       * save in flight, and its state must not be rolled back by this one's failure. Compared by value, not identity:
+       * a reconnect reads the preferences again and hands the screen a new array with the same keys.
+       */
+      if (mine === foldSaveSeq && sameKeys(get().prefs.foldedGroups, next)) {
+        set((s) => ({ prefs: { ...s.prefs, foldedGroups: before } }))
+      }
       set({ toast: `Could not save that: ${(e as Error).message}` })
     })
+  },
+  pruneFoldedGroups() {
+    const s = get()
+    // An empty app list may be a read that failed; it names no app, so it must not condemn every app's fold
+    const apps = s.externalApps.length > 0 ? new Set(s.externalApps.map((a) => appKeyOf(a.projectId, a.appId, a.machine))) : null
+    const dead = deadFoldKeys(s.prefs.foldedGroups, s.sessions, apps)
+    if (dead.length > 0) get().setGroupsFolded(dead, false)
   },
   foldOtherProjects(projectId) {
     set((s) => ({ foldedProjects: Object.keys(s.projects).filter((id) => id !== projectId) }))
@@ -4690,6 +4727,7 @@ export const useStore = create<AppState>((set, get) => ({
     })
     // The fold and the arrangement just dropped live in the snapshot — write it, or the next launch reads them back
     get().saveWorkspace()
+    get().pruneFoldedGroups()
   },
 
   refreshProjectGit(projectId) {
@@ -5332,6 +5370,7 @@ export const useStore = create<AppState>((set, get) => ({
         try {
           const externalApps = await platform.apps.list()
           set({ externalApps })
+          get().pruneFoldedGroups()
           // If an app came up again with new code, reopen that app's open views (M4 C-4)
           followAppCode(get, set)
         } catch {
@@ -6245,6 +6284,7 @@ export const useStore = create<AppState>((set, get) => ({
     })
     // If the merge registered a session for the first time, replay any events held in the pen from before it was registered
     replayPendingEvents(get)
+    get().pruneFoldedGroups()
 
     /*
      * Resync: events from the gap never come again — the screen's conversation is merged with the
