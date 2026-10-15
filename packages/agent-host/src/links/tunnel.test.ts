@@ -13,6 +13,7 @@ import {
   serveCommand,
   shimNames,
   SSH_COMMAND_TIMEOUT_MS,
+  SSH_DETACH_TIMEOUT_MS,
   SSH_EXEC_TIMEOUT_MS,
   SshTunnel,
   stopCommand,
@@ -299,15 +300,21 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
       expect((t as unknown as { asking: Set<unknown> }).asking.size).toBe(0)
     })
 
-    it('stops an ssh that does not finish, at the deadline of a short question', async () => {
-      const t = tunnel({ FAKE_SSH_HANG: '1' }, undefined, { commandTimeoutMs: 300 })
-      const t0 = Date.now()
-      await expect(t.startHost()).rejects.toThrow(/did not finish within 300 ms/)
-      expect(Date.now() - t0).toBeLessThan(5000)
-      const pid = (logged().find((l) => typeof l === 'object' && l !== null && 'hanging' in l) as { hanging: number }).hanging
+    it('stops an ssh that does not finish when starting the host, at that deadline', async () => {
+      // A few seconds: the fake has to be running, and have said so, before the deadline can mean anything
+      const t = tunnel({ FAKE_SSH_HANG: '1' }, undefined, { detachTimeoutMs: 5000 })
+      const starting = t.startHost()
+      starting.catch(() => {})
+      let pid = 0
+      for (let i = 0; i < 400 && !pid; i++) {
+        pid = (logged().find((l) => typeof l === 'object' && l !== null && 'hanging' in l) as { hanging: number } | undefined)?.hanging ?? 0
+        if (!pid) await new Promise((r) => setTimeout(r, 10))
+      }
+      expect(pid).toBeGreaterThan(0)
+      await expect(starting).rejects.toThrow(/did not finish within 5 seconds/)
       // The ssh itself is gone, not only the wait for it
-      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow())
-    })
+      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 10_000 })
+    }, 30_000)
 
     it('puts the deadline on asking for the connection line too', async () => {
       const t = tunnel({ FAKE_SSH_HANG: '1', FAKE_SSH_LINE: line({ port: await freePort() }) }, undefined, { commandTimeoutMs: 300 })
@@ -321,13 +328,17 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
 
     it('gives an installer step far longer than a short question: a slow download is not cut short', async () => {
       expect(SSH_COMMAND_TIMEOUT_MS).toBeLessThanOrEqual(60_000)
+      expect(SSH_DETACH_TIMEOUT_MS).toBeGreaterThanOrEqual(120_000)
       expect(SSH_EXEC_TIMEOUT_MS).toBeGreaterThanOrEqual(15 * 60_000)
-      // The same slow remote: past a short question's deadline, inside a step's
-      const slow = { FAKE_SSH_SLOW_MS: '700' }
-      const limits = { commandTimeoutMs: 200, execTimeoutMs: 5000 }
+      /*
+       * The same slow remote. It takes longer than the deadline of starting a host, however late its
+       * process begins, and far less than the step's, so nothing here depends on how fast a process starts.
+       */
+      const slow = { FAKE_SSH_SLOW_MS: '4000' }
+      const limits = { detachTimeoutMs: 1500, execTimeoutMs: 60_000 }
       await expect(tunnel(slow, undefined, limits).startHost()).rejects.toThrow(/did not finish within/)
       expect((await tunnel(slow, undefined, limits).exec('true')).stdout).toBe('slow ok\n')
-    })
+    }, 30_000)
 
     it('reads a character that arrives in two pieces as one character', async () => {
       const r = await tunnel({ FAKE_SSH_SPLIT: '1' }).exec('true')
@@ -563,6 +574,11 @@ describe('the remote command per shell (#82)', () => {
       "Error: Cannot find module '/var/tmp/x.mjs'",
     )
     expect(lastLine('#< CLIXML\n<Objs Version="1.1.0.1"><S S="Error">Cloning into x</S></Objs>')).toBe('')
+    // The kept tail can begin after the header, inside the XML: it is still XML to the end
+    expect(lastLine('ssh: connect to host x port 22: Connection refused\nrest of the message_x000D__x000A_</S><S S="Error">Cloning into x</S></Objs>')).toBe('ssh: connect to host x port 22: Connection refused')
+    expect(lastLine('Cloning into x_x000D__x000A_</S></Objs>')).toBe('')
+    expect(lastLine('some error text that was cut_x000D__x000A_')).toBe('')
+    expect(lastLine('<S S="Error">Cloning into x</S></Objs>')).toBe('')
   })
 })
 

@@ -1962,7 +1962,7 @@ ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o
 ```
 
 `ConnectTimeout` only bounds the connection, so each asking ssh also has a deadline and a bound on its output
-(`SshTunnel.run`): 60 s for the connection line and for starting the host, 30 minutes for one installer, updater or
+(`SshTunnel.run`): 60 s for the connection line, 120 s for starting the host (`serve --detach` waits up to 30 s for the host itself, and its own message is the better reason), 30 minutes for one installer, updater or
 autostart step (the managed Windows install downloads about 30 MB of Node inside one step, which a slow link needs
 minutes for). Past its deadline, or once stdout is longer than 1 MiB, the ssh is stopped and the call rejects. Of stderr
 only the end is kept: 64 KiB for an asking ssh, 16 KiB for the forward, whose ssh lives as long as the link and carries

@@ -410,8 +410,10 @@ export type SshTunnelOptions = {
   forwardTimeoutMs?: number
   /** How long a host the forward runs (link-bound) may take to answer */
   startTimeoutMs?: number
-  /** How long a short question to the remote (the connection line, starting the host) may take, ssh's own connect time included */
+  /** How long a short question to the remote (the connection line) may take, ssh's own connect time included */
   commandTimeoutMs?: number
+  /** How long starting the remote's host (`centralu serve --detach`) may take: it waits for the host to answer before it does */
+  detachTimeoutMs?: number
   /** How long a step of the installer, updater or autostart (`exec`) may take: a download on a slow link is part of it */
   execTimeoutMs?: number
   log?: (line: string) => void
@@ -515,7 +517,7 @@ export class SshTunnel implements Tunnel {
   async startHost(): Promise<HostStart> {
     this.ifClosed()
     const remote = this.opts.remote ?? { shell: 'posix' }
-    const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, detachCommand(remote)], undefined, this.opts.commandTimeoutMs ?? SSH_COMMAND_TIMEOUT_MS)
+    const r = await this.run([...this.config(), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '--', this.opts.target, detachCommand(remote)], undefined, this.opts.detachTimeoutMs ?? SSH_DETACH_TIMEOUT_MS)
     this.ifClosed()
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
     if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) {
@@ -746,6 +748,12 @@ export class SshTunnel implements Tunnel {
 /** How long a short question to the remote may take before its ssh is stopped (`SshTunnelOptions.commandTimeoutMs`) */
 export const SSH_COMMAND_TIMEOUT_MS = 60_000
 /**
+ * How long starting the remote's host may take (`SshTunnelOptions.detachTimeoutMs`). `serve --detach` itself
+ * waits up to 30 s for the host to answer, on top of ssh's connect time and a cold Windows start, and
+ * what it says when that runs out is a better reason than the one this deadline gives.
+ */
+export const SSH_DETACH_TIMEOUT_MS = 120_000
+/**
  * How long one installer, updater or autostart step may take (`SshTunnelOptions.execTimeoutMs`). The
  * managed Windows install downloads about 30 MB of Node inside one step, and a slow link needs minutes
  * for that: this is far past what a working link needs, and only ends a step that is stuck.
@@ -772,15 +780,26 @@ export class Tail {
 }
 
 /**
+ * What a stderr says once PowerShell's CLIXML is taken out. The XML is the last thing a failing
+ * PowerShell writes, from its `#< CLIXML` header to the end. A kept tail (`Tail`) can start after
+ * that header, in the middle of the XML, and then only its tags and escapes (`_x000D__x000A_` is a
+ * line break) say what it is: from the start of the first line that shows either, the rest is XML.
+ */
+function withoutClixml(s: string): string[] {
+  let text = s.replace(/#< CLIXML[\s\S]*$/, '')
+  const xml = text.search(/<\/?(?:Objs|Obj|S|MS|PR|TN|TNRef|Props|I32|I64|B|AV)[\s>/]|_x000[0-9A-F]_/)
+  if (xml >= 0) text = text.slice(0, text.lastIndexOf('\n', xml) + 1)
+  return text.split(/\r?\n/)
+}
+
+/**
  * The one line of a remote's stderr that says why, for the person. Measured on a Windows laptop
  * (2026-10-05): ssh prefixes its own `** WARNING` lines about key exchange, PowerShell wraps an
  * error in CLIXML when its output is not a console, and a Node crash ends with `Node.js v22.x`,
  * which says nothing. Those are skipped; a line that names an error wins over the last one.
  */
 export function lastLine(s: string): string {
-  const lines = s
-    .replace(/#< CLIXML[\s\S]*$/, '')
-    .split(/\r?\n/)
+  const lines = withoutClixml(s)
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith('**') && !/^Node\.js v\d/.test(l) && !/^at /.test(l))
   return [...lines].reverse().find((l) => /error|denied|refused|timed out|not found|cannot|could not/i.test(l)) ?? lines.at(-1) ?? ''
