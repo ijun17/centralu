@@ -72,6 +72,7 @@ centralu/
 │  │     │     screens.ts (which screen is on)  appKeys.ts (how an app and its views are named)
 │  │     │     sessionList.ts (the sessions it holds: host lists merged in, events held for one not yet listed)
 │  │     │     apps.ts (external apps: the list, pinned and in-conversation views, their actions)
+│  │     │     events/ (`dispatchEvent` in index.ts, one handler file per event family)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)

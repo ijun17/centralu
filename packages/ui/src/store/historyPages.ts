@@ -1,11 +1,12 @@
 import type { StoredMessage } from '@cc/protocol'
-import type { AppState } from './state.js'
+import type { AppState, SubagentSteps } from './state.js'
 import { nextChatKey, type ChatItem } from './transcript.js'
 
 /**
  * Which rows of a conversation the screen holds: a page read from history merged with the rows
  * already on screen (`mergePage`, `prependPage`, `readBack`), and a conversation cut back to its
- * window when nobody is looking at it (`trimWindow`). Pure; the store's history actions call these.
+ * window when nobody is looking at it (`trimWindow`), with the subagent steps a launch card has read
+ * (`putSubagentSteps`, `withoutClosedSteps`). Pure; the store's history actions call these.
  */
 
 /**
@@ -222,3 +223,29 @@ export function trimWindow(items: ChatItem[]): { items: ChatItem[]; oldestSeq: n
  * window leaves slack, so the cut happens once per window's worth of rows rather than on every event.
  */
 export const OFFSCREEN_TRIM_AT = WINDOW_SIZE * 2
+
+/**
+ * A session's launch cards without the steps of the closed ones (#392), for when its conversation is cut back to the
+ * window. A closed card kept every step it had read, and a live session kept appending to it, for the life of the
+ * window. Opening it again reads them from the store, as the first opening did. An open card keeps its steps: it is
+ * still showing them, or will be when the person comes back.
+ */
+export function withoutClosedSteps(all: AppState['subagentSteps'], sessionId: string): AppState['subagentSteps'] {
+  const mine = all[sessionId]
+  if (!mine || Object.values(mine).every((c) => c.open)) return all
+  const kept: Record<string, SubagentSteps> = {}
+  for (const [callId, c] of Object.entries(mine)) if (c.open) kept[callId] = c
+  return { ...all, [sessionId]: kept }
+}
+
+/** A launch card's steps before the first read (#222) */
+export const SUBAGENT_STEPS_UNREAD: SubagentSteps = { open: false, rows: [], more: false, loading: false, error: null }
+
+export function putSubagentSteps(
+  all: AppState['subagentSteps'],
+  sessionId: string,
+  callId: string,
+  next: SubagentSteps,
+): Pick<AppState, 'subagentSteps'> {
+  return { subagentSteps: { ...all, [sessionId]: { ...all[sessionId], [callId]: next } } }
+}

@@ -17,19 +17,10 @@ import type {
   MachineInfo,
 } from '@cc/protocol'
 import {
-  allDoneNotification,
-  applyEvent,
-  nextStateFor,
-  badgeCount,
-  countWaiting,
   isProposalId,
-  pendingProposals,
-  proposalCandidates,
-  notificationFor,
   suggestMatcher,
   DEFAULT_NOTIFY_POLICY,
   readNotifyPolicy,
-  bumpSeq,
   initialSession,
   markRead as markReadPure,
   rename as renamePure,
@@ -42,28 +33,26 @@ import {
   sanitizeGridPanels,
   sanitizeArrangements,
   migrateArrangement,
-  withPanel,
   sessionPanelId,
   isAway,
   type ProjectArrangement,
   type SessionSummary,
 } from '@cc/core'
 import type { Platform, WorkspaceSnapshot } from '@cc/platform/ports'
-import { isOnScreen } from '../app/onscreen.js'
 import { activateTab, defaultLayout, sanitizeLayout } from './panelLayout.js'
 import { closeLayer, EMPTY_NAV, sameScreen, step, visit } from './navHistory.js'
 import { agentApplyVerdict } from '../features/settings/apply-offer.js'
 import { FOLDED_GROUPS_MAX, deadFoldKeys, foldGroupsHiding, sameKeys } from './foldGroups.js'
-import { appendChat, bumpChatKeysAbove, messagesToChat, nextChatKey, subagentRow, type ChatAttachment, type ChatItem } from './transcript.js'
+import { bumpChatKeysAbove, messagesToChat, nextChatKey, type ChatAttachment, type ChatItem } from './transcript.js'
 export { audienceText, compactionText, errorText, handoffText, markerText, messagesToChat, noticeLine, resetText } from './transcript.js'
 export type { ChatAttachment, ChatItem, NoticeLine } from './transcript.js'
-import { EMPTY_DRAFT, type AppState, type Draft, type InlineView, type Notice, type Overlay, type PinnedView, type SubagentSteps } from './state.js'
+import { EMPTY_DRAFT, type AppState, type Draft, type InlineView, type Notice, type Overlay, type PinnedView } from './state.js'
 export { EMPTY_DRAFT } from './state.js'
 export type { AppState, Draft, InlineView, Notice, Overlay, PinnedView, SubagentSteps } from './state.js'
-import { HISTORY_PAGE, OFFSCREEN_TRIM_AT, mergePage, prependPage, readBack, trimWindow } from './historyPages.js'
-import { externalAppKey, gridAppViewKey, isApp } from './appKeys.js'
+import { HISTORY_PAGE, SUBAGENT_STEPS_UNREAD, mergePage, prependPage, putSubagentSteps, readBack, trimWindow, withoutClosedSteps } from './historyPages.js'
+import { gridAppViewKey, isApp } from './appKeys.js'
 export { externalAppKey, gridAppViewKey, isApp } from './appKeys.js'
-import { projectScreenSessions, screenExists, screenOf } from './screens.js'
+import { screenExists, screenOf } from './screens.js'
 export {
   gridScreenAppKeys,
   newSessionProjectOf,
@@ -77,10 +66,8 @@ export {
 } from './screens.js'
 import {
   forgetSessions,
-  liveEventWatchers,
   liveFactsOf,
   mergeListedSince,
-  penEvent,
   replayPendingEvents,
   trackWorkingSince,
   watchLiveEvents,
@@ -88,9 +75,6 @@ import {
 export { PENDING_EVENTS_MAX, PENDING_EVENTS_MAX_AGE_MS } from './sessionList.js'
 import {
   appActions,
-  applyAppView,
-  capInlineViews,
-  codeStampOf,
   holdPinnedViews,
   inlineFrameKey,
   inlineFrames,
@@ -108,6 +92,8 @@ export {
   registerPinnedFrame,
 } from './apps.js'
 export type { InlineFrame } from './apps.js'
+import { eventActions } from './events/index.js'
+import { syncBadge } from './events/notices.js'
 
 /**
  * The store only does the wiring — all state-change logic lives in core (docs/state-management.md
@@ -650,42 +636,6 @@ function sameGit(a: ProjectInfo['git'], b: ProjectInfo['git']): boolean {
     a.isRepo === b.isRepo &&
     a.denied === b.denied
   )
-}
-
-/**
- * Calls of the orchestrator's proposal tools that have not returned yet, as `sessionId:callId` (a Codex call id may be
- * unique only within its thread): their `tool_result` re-reads the lists (#703)
- */
-const proposalCalls = new Set<string>()
-const PROPOSAL_CALLS_MAX = 50
-
-/**
- * Tells the system the number of things that need an answer (the dock badge): approvals and errors among the sessions,
- * and the orchestrator's pending proposals (#703), which wait like an approval. Called whenever either changes.
- */
-function syncBadge(get: () => AppState): void {
-  const st = get()
-  if (!st.platform) return
-  const waiting = [...Object.values(st.sessions), ...proposalCandidates(pendingProposals(st))]
-  void st.platform.system.setBadge(badgeCount(countWaiting(waiting)))
-}
-
-/**
- * Stacks a notification card — one per session.
- *
- * If the same session calls again, it is updated in place rather than added again, and **its
- * position keeps the order it was first added in.** Always sending it to the bottom would let a
- * busy session keep the cards constantly moving, so the card someone was about to press slips out
- * from under their finger.
- */
-function pushNotice(set: (fn: (s: AppState) => Partial<AppState>) => void, notice: Notice): void {
-  set((s) => {
-    const at = s.notices.findIndex((n) => n.sessionId === notice.sessionId)
-    if (at === -1) return { notices: [...s.notices, notice] }
-    const notices = [...s.notices]
-    notices[at] = notice
-    return { notices }
-  })
 }
 
 /**
@@ -1299,573 +1249,6 @@ export const useStore = create<AppState>((set, get) => ({
       // Leave it as is when nothing changed — putting in a new array reruns any effect watching this
       return kept.length === s.notices.length ? {} : { notices: kept }
     })
-  },
-
-  dispatchEvent(e) {
-    /*
-     * Events that do not belong to a session are handled **before the session guard** (issue #43).
-     *
-     * The `if (!sessionId) return` below is the widest door in this file, and anything caught by it
-     * vanishes silently — placing the update status handling after it would make the host's message
-     * arrive and do nothing, the worst kind of defect to trace.
-     */
-    if (e.type === 'update_status') {
-      set({ update: e.status })
-      return
-    }
-    // An agent's "Apply now" (#665): app-wide like update_status, so before the session guard too
-    if (e.type === 'update_apply_request') {
-      void get().answerApplyRequest(e.requestId)
-      return
-    }
-    if (e.type === 'update_apply_go') {
-      void get().runApplyRequest(e.requestId, e.ticket)
-      return
-    }
-    // App-wide like update_status (#297): the installed agent CLIs, read on the host's own schedule
-    if (e.type === 'agent_versions') {
-      set({ agentVersions: e.status })
-      return
-    }
-
-    if (e.type === 'themes_changed') {
-      void get().refreshThemes()
-      return
-    }
-
-    /*
-     * A linked machine's link changed state (#82). The event carries the whole row, so it replaces that machine's row
-     * rather than patching it. The machine's sessions are not touched: whether one is away is derived from this row
-     * (`isAway`), and what they are is read again only when the machine says so (`machine_resync`).
-     */
-    if (e.type === 'machine_status') {
-      set((s) => ({ machines: { ...s.machines, [e.machine.id]: e.machine } }))
-      return
-    }
-    // What the UI holds about one machine has to be read again (#82): its own recovery, not the whole app's
-    if (e.type === 'machine_resync') {
-      void get().recoverMachine(e.machineId)
-      return
-    }
-
-    /*
-     * An external app's tool call finished (M4 A-4 → B-5). Not re-read here. An external app's state
-     * lives in the app process, and re-reading it is the open view's own job, through its state tool.
-     * The store only counts, and that app's open `AppFrame`s turn this count's change into a single
-     * notification.
-     */
-    if (e.type === 'external_app_state_changed') {
-      const key = externalAppKey(e.projectId, e.appId)
-      const by = e.cause?.kind === 'view' ? (e.cause.instanceId ?? null) : null
-      set((s) => ({
-        externalAppChanges: { ...s.externalAppChanges, [key]: (s.externalAppChanges[key] ?? 0) + 1 },
-        externalAppChangedBy: { ...s.externalAppChangedBy, [key]: by },
-      }))
-      return
-    }
-
-    // An external app's run history changed (M4 D-6) — only counted. That app's runs panel re-reads on this count's change. The view never hears this
-    if (e.type === 'external_app_runs_changed') {
-      const key = externalAppKey(e.projectId, e.appId)
-      set((s) => ({ externalAppRunChanges: { ...s.externalAppRunChanges, [key]: (s.externalAppRunChanges[key] ?? 0) + 1 } }))
-      return
-    }
-
-    // An external app's slot or state changed (M4 A-8) — since what changed is not carried, the whole list is re-read
-    if (e.type === 'external_apps_changed') {
-      void get().refreshExternalApps()
-      return
-    }
-
-    /*
-     * A native subagent's step (#222). It is not the conversation: it changes no state, adds no row and never moves
-     * unread. It only joins a launch card's steps the person has opened, once every earlier step is read (`more`
-     * false) — appended past a page not read yet, it would leave a hole in the middle.
-     */
-    if (e.type === 'subagent_event') {
-      if (e.stepSeq === undefined) return
-      const cur = get().subagentSteps[e.sessionId]?.[e.parentCallId]
-      if (!cur || cur.more || cur.rows.some((r) => r.seq === e.stepSeq)) return
-      const row = subagentRow(e.sessionId, e.stepSeq, e.step)
-      set((s) => putSubagentSteps(s.subagentSteps, e.sessionId, e.parentCallId, { ...cur, rows: [...cur.rows, row] }))
-      return
-    }
-
-    // The host made a project (#515): the orchestrator's, once approved, or another window's
-    if (e.type === 'projects_changed') {
-      void get().refreshProjects()
-      return
-    }
-
-    // A cross-project consent was remembered or revoked (#371) — Settings' list re-reads on the version
-    if (e.type === 'project_consents_changed') {
-      set((s) => ({ projectConsentsVersion: s.projectConsentsVersion + 1 }))
-      return
-    }
-
-    // A capability question was created or closed (M4 D-4) — same coarseness, the whole list is re-read
-    if (e.type === 'external_app_questions_changed') {
-      void get().refreshAppQuestions()
-      return
-    }
-
-    // The host saved a change to a proposal list (#703): both lists are read after the write, whichever tool made it
-    if (e.type === 'orchestrator_proposals_changed') {
-      void get().refreshMcpProposals()
-      void get().refreshSkillProposals()
-      return
-    }
-
-    const sessionId = e.sessionId
-    if (!sessionId) return
-    // A recovery reading the session list keeps what this event says over an older row (`mergeListedSince`)
-    for (const touched of liveEventWatchers) if (!touched.has(sessionId)) touched.set(sessionId, new Set())
-
-    /*
-     * The host caught up on a conversation continued from outside (through the tool's own
-     * terminal). Its content already went into the store, so the screen is re-read whole — replaying
-     * events row by row here could mix in with the part we already knew.
-     */
-    if (e.type === 'history_synced') {
-      void get().loadHistory(sessionId)
-      return
-    }
-
-    /*
-     * The orchestrator changed this session's settings (#30).
-     *
-     * The toast is the point — if a setting changed by a hand other than the person's quietly seeped
-     * into the screen, the next person to open the menu would be baffled by a value they never chose.
-     * The value is a snapshot, so it is overwritten as is.
-     */
-    if (e.type === 'settings_changed') {
-      const cur0 = get().sessions[sessionId]
-      if (!cur0) return
-      const what = [
-        e.model !== cur0.model ? `model ${e.model ?? 'default'}` : null,
-        e.effort !== cur0.effort ? `effort ${e.effort ?? 'default'}` : null,
-        e.verbosity !== cur0.verbosity ? `verbosity ${e.verbosity ?? 'default'}` : null,
-        (e.serviceTier ?? null) !== cur0.serviceTier ? `speed ${e.serviceTier ?? 'default'}` : null,
-        e.permissionPreset && e.permissionPreset !== cur0.permissionPreset ? `permissions ${e.permissionPreset}` : null,
-      ]
-        .filter(Boolean)
-        .join(' · ')
-      set((s) => ({
-        sessions: {
-          ...s.sessions,
-          [sessionId]: {
-            ...s.sessions[sessionId]!,
-            model: e.model,
-            effort: e.effort,
-            verbosity: e.verbosity,
-            serviceTier: e.serviceTier ?? null,
-            // Absent on a tool's own switch and on frames from before #659: the value held stays
-            permissionPreset: e.permissionPreset ?? s.sessions[sessionId]!.permissionPreset,
-          },
-        },
-        /*
-         * A switch the agent tool made by itself (#304) updates the model shown without a toast: the tool's notice in
-         * the conversation already says what changed and why, and a toast would interrupt for something that needs
-         * nothing from the person. The same for a change a client made through `agents.updateSettings` (#659): the
-         * caller's own toast says what it did, and the values here are the ones it chose.
-         */
-        ...(what && e.by !== 'tool' && !e.person ? { toast: `Orchestrator changed ${cur0.name}: ${what}` } : {}),
-      }))
-      /*
-       * Fields a list that is still out must not write back over (#642): the merge keeps a value that differs from the
-       * one it asked with, but a change that lands back on that value would otherwise read as no change at all.
-       */
-      for (const touched of liveEventWatchers) {
-        const fields = touched.get(sessionId)
-        if (fields) for (const k of ['model', 'effort', 'verbosity', 'serviceTier', 'permissionPreset'] as const) fields.add(k)
-      }
-      return
-    }
-
-    /** Whether this event already alerted the person — a flag so the same instant does not fire twice */
-    let announced = false
-
-    /*
-     * A session asks to start another agent (#673): a card in the top right whenever that session is off screen, the
-     * app in front or not. Other approvals leave one only while the app is behind (the notification policy), but this
-     * one used to stand unseen in a session the person was not looking at until it was withdrawn, and the session
-     * then worked alone. It now stands until answered, and comes back after the session's turn ends: each time it is
-     * raised off screen, the card is there; clicking it opens the session with the card.
-     */
-    if (e.type === 'approval_request' && e.detail.kind === 'agent_start') {
-      const s = get()
-      const seen =
-        s.appFocused &&
-        isOnScreen(s.view, sessionId, {
-          focusedSessionId: s.focusedSessionId,
-          orchestratorId: s.orchestratorId,
-          gridSessions: gridSessionIds(s.gridPanels),
-          builderPaneSessionId: s.builderPaneSessionId,
-          projectScreen: projectScreenSessions(s),
-        })
-      if (!seen) pushNotice(set, { sessionId, kind: 'agent_start', name: s.sessions[sessionId]?.name ?? sessionId, at: Date.now() })
-    }
-    // Answered (in another window, or withdrawn): the card in the top right has nothing left to open
-    if (e.type === 'approval_resolved' && get().notices.some((n) => n.sessionId === sessionId && n.kind === 'agent_start')) {
-      get().dismissNotices([sessionId])
-    }
-
-    /*
-     * The response finished — the trigger for one sweep of the screen.
-     *
-     * **Visibility is decided right now.** This used to keep only the fact, and let the screen
-     * multiply in "is it visible" later, which lets the two moments fall out of sync: switching to
-     * the session at the very instant it becomes visible would also make that later check true, so
-     * **the sweep fired even though nothing had just finished** (dogfooding: "it also fires just from
-     * switching session windows"). Worse, since this value was never cleared, it repeated every time
-     * on switching back and forth.
-     *
-     * Deciding it once, at the instant the event happens, leaves no room to fall out of sync.
-     * The instant is kept alongside it so the same session finishing twice in a row still fires each
-     * time.
-     *
-     * Something that finished off screen is left as a **card**, not a sweep — since it was not being
-     * watched, a passing signal would be missed. The two are two faces of the same event, and mutually
-     * exclusive.
-     */
-    if (e.type === 'turn_complete') {
-      const s = get()
-      /*
-       * **Seen = the app is in front, and that session is on screen.**
-       *
-       * The first half used to be missing. `isOnScreen` only checks which session is showing in the
-       * UI, so it was true even with the app behind another window — but stepping away makes the
-       * whole app invisible. So the sweep fired in an empty room, and the very card built for the
-       * case of stepping away was never created. Exactly nothing happened in the one case a
-       * notification mattered most.
-       */
-      const seen =
-        s.appFocused &&
-        isOnScreen(s.view, sessionId, {
-          focusedSessionId: s.focusedSessionId,
-          orchestratorId: s.orchestratorId,
-          gridSessions: gridSessionIds(s.gridPanels),
-          builderPaneSessionId: s.builderPaneSessionId,
-          projectScreen: projectScreenSessions(s),
-        })
-      if (seen) {
-        set({ completion: { sessionId, at: Date.now() } })
-      } else {
-        pushNotice(set, {
-          sessionId,
-          kind: 'done',
-          name: s.sessions[sessionId]?.name ?? sessionId,
-          at: Date.now(),
-        })
-        /*
-         * The card and the sound go together. A card that piles up silently reads as "the card is
-         * there, why did it not alert me," and to someone who stepped away, a card is only seen once
-         * they come back — so a card alone is half the job. The sound follows the same policy as
-         * every other notification — quietly leave only the card while the app is in view.
-         */
-        if (s.notifyPolicy.done && (!s.appFocused || s.notifyPolicy.whenFocused)) {
-          announced = true
-          void s.platform?.system
-            .alert('done', s.notifyPolicy.sound)
-            .catch((err: Error) => set({ toast: `Could not alert: ${err.message}` }))
-        }
-      }
-
-      /*
-       * A finished turn is the cheapest strong hint that the working tree moved (issue #41):
-       * an agent just stopped editing in that folder, which is the very thing that made the
-       * sidebar's changed count wrong. No filesystem watcher needed for the common case —
-       * that is a bigger design (#34) and this must not wait for it.
-       *
-       * The session may not be registered yet (its events arrive buffered and are replayed
-       * after `attach` lists it); the replay runs this branch again with a project to name.
-       */
-      const projectId = s.sessions[sessionId]?.projectId
-      if (projectId) get().refreshProjectGit(projectId)
-    }
-
-    /*
-     * The only notice for a session the host created on its own (#69) — the orchestrator's
-     * `create_session`, or a manager set up by worktree adoption. Without this, such a session did
-     * not appear until after a reconnect, and any event that arrived before that stayed stuck in the
-     * holding pen forever (its release condition was "once registered," and nothing was there to
-     * register it). A session created through an RPC is already registered by its response, so this
-     * is silently discarded for that case.
-     */
-    if (e.type === 'session_created') {
-      const parsed = SessionInfo.safeParse(e.session)
-      if (parsed.success && !get().sessions[parsed.data.id]) {
-        const s = parsed.data
-        set((st) => ({
-          sessions: {
-            ...st.sessions,
-            [s.id]: {
-              ...initialSession({
-                id: s.id,
-                projectId: s.projectId,
-                kind: s.kind,
-                appId: s.appId,
-                askedBy: s.askedBy ?? null,
-                forkedFrom: s.forkedFrom ?? null,
-                name: s.name,
-                tool: s.tool,
-                model: s.model,
-                effort: s.effort,
-                verbosity: s.verbosity,
-                serviceTier: s.serviceTier,
-                permissionPreset: s.permissionPreset,
-                worktree: s.worktree,
-                parentSessionId: s.parentSessionId,
-                merged: s.worktreeMerged,
-                pr: s.worktreePr,
-                goal: s.goal,
-              }),
-              autoNamed: s.autoNamed,
-              state: s.state,
-                  live: s.live,
-              lastSeq: s.lastSeq,
-              lastReadSeq: s.lastReadSeq,
-              waitingSince: s.waitingSince,
-              ...liveFactsOf(s),
-            },
-          },
-        }))
-        // If there are events held from before registration, now is the moment to replay them
-        replayPendingEvents(get)
-      }
-      return
-    }
-
-    /*
-     * A handoff moved a live child to the session that took over (#693): the sidebar hangs it there now. A session
-     * not known here comes with its owner in the list, so the event is not held for it.
-     */
-    if (e.type === 'session_owner') {
-      set((s) => {
-        const cur = s.sessions[sessionId]
-        if (!cur) return {}
-        return { sessions: { ...s.sessions, [sessionId]: { ...cur, askedBy: e.askedBy, parentSessionId: e.parentSessionId } } }
-      })
-      return
-    }
-
-    /*
-     * An in-conversation app view (M4 B-1). Lives separate from cards — the view finds its own spot
-     * by the card's id. Recorded even before the session is registered: it takes its place under the
-     * card the instant the card is drawn.
-     */
-    if (e.type === 'app_view') {
-      const was = get().inlineViews[sessionId]?.[e.callId]
-      set((s) => ({ inlineViews: { ...s.inlineViews, [sessionId]: applyAppView(s.inlineViews[sessionId], e) } }))
-      // The host closed a live view — send teardown, then close it
-      if ((e.phase === 'closed' || e.phase === 'rejected') && was?.state === 'live') {
-        void get().closeInlineView(sessionId, e.callId, e.reason ?? 'This view was closed')
-      }
-      if (e.phase === 'open') {
-        // The code this view was opened with (C-4) — if the list's fingerprint differs from this, it is stale HTML (`followAppCode`)
-        const codeStamp = codeStampOf(get().externalApps, e.projectId, e.appId, get().sessions[sessionId]?.machine)
-        set((s) => {
-          const cur = s.inlineViews[sessionId]?.[e.callId]
-          return cur?.state === 'live' ? { inlineViews: { ...s.inlineViews, [sessionId]: { ...s.inlineViews[sessionId], [e.callId]: { ...cur, codeStamp } } } } : {}
-        })
-        capInlineViews(get, sessionId, e.callId)
-      }
-      return
-    }
-
-    // A deletion means the session is gone, so it does not run through the reducer
-    if (e.type === 'session_deleted') {
-      const panelId = sessionPanelId(sessionId)
-      const wasPanel = Object.values(get().projectPanels).some((saved) => saved.panels?.includes(panelId))
-      set((s) => {
-        const sessions = { ...s.sessions }
-        delete sessions[sessionId]
-        // List omission on reconnect is ambiguous; only this explicit deletion signal removes membership.
-        const projectPanels = Object.fromEntries(Object.entries(s.projectPanels).map(([pid, saved]) => [
-          pid, saved.panels?.includes(panelId) ? withPanel([], saved, panelId, false) : saved,
-        ]))
-        return { sessions, ...forgetSessions(s, new Set([sessionId])), projectPanels }
-      })
-      if (wasPanel) get().saveWorkspace()
-      get().pruneFoldedGroups()
-      return
-    }
-
-    const cur = get().sessions[sessionId]
-    if (!cur) {
-      // An event that arrived before the session was registered (the initial prompt streaming right
-      // away is one such case). Discarding it would lose the whole first turn, so it is held and
-      // replayed right after registration.
-      penEvent(sessionId, e, Date.now())
-      return
-    }
-
-    const next = applyEvent(cur, e, Date.now())
-    for (const touched of liveEventWatchers) {
-      const fields = touched.get(sessionId)!
-      // Keep changes even if a later event returns them to their pre-request value.
-      for (const k of Object.keys(next) as (keyof SessionSummary)[]) if (next[k] !== cur[k]) fields.add(k)
-      if (nextStateFor(e) === next.state) {
-        fields.add('state')
-        fields.add('waitingSince')
-      }
-      if (e.type === 'session_live') fields.add('live')
-    }
-    /*
-     * `chat[id]` being **absent** means "history has not been read yet" — focusing reads that and
-     * calls for history. But a non-conversation event (a state change, context usage, and so on)
-     * also arrives here, and writing `[]` for it would make that session read as "read, and empty,"
-     * so **history is never called for again.** Dogfooding, 2026-09-25: an 11,550-line session
-     * looked completely empty after reopening the app. An event the host sent while resuming it had
-     * arrived before the user ever clicked that session. So no slot is created for a session that had
-     * no conversation to append and no slot yet.
-     */
-    const had = get().chat[sessionId]
-    const appended = appendChat(had ?? [], e)
-    const chat = had === undefined && appended.length === 0 ? undefined : appended
-    /*
-     * The MCP-server and skill proposal lists are not re-read on the `tool_call` (#703). It arrives when the call starts,
-     * before the host has run it and saved the proposal, so a read on it came back with the old list and the card never
-     * showed. The host broadcasts `orchestrator_proposals_changed` after it writes a list; that is the signal above.
-     *
-     * A safety net for a host that predates that event (an old host still serving during a swap): the call's
-     * `tool_result` comes after the save, so it re-reads both lists. `centralu_run` may be either proposal (#512).
-     */
-    if (e.type === 'tool_call' && /(propose_mcp_server|propose_skill|centralu_run)$/.test(e.summary.tool)) {
-      if (proposalCalls.size >= PROPOSAL_CALLS_MAX) proposalCalls.delete(proposalCalls.values().next().value!)
-      proposalCalls.add(`${sessionId}:${e.callId}`)
-    }
-    if (e.type === 'tool_result' && proposalCalls.delete(`${sessionId}:${e.callId}`)) {
-      void get().refreshMcpProposals()
-      void get().refreshSkillProposals()
-    }
-    /*
-     * A worktree suggestion (#69) — the same principle (pointing), carrying one extra value: the
-     * branch name. The adapter carries it in the title (there is no other channel). If the title is
-     * exactly the tool's own name, the suggestion has no name — the window opens with an empty name.
-     */
-    if (e.type === 'tool_call' && /propose_worktree_session$/.test(e.summary.tool) && cur.projectId) {
-      const branch = /propose_worktree_session$/.test(e.summary.title) ? '' : e.summary.title
-      set((st) => ({
-        worktreeProposals: st.worktreeProposals.some(
-          (p) => p.projectId === cur.projectId && p.branch === branch,
-        )
-          ? st.worktreeProposals // The same suggestion arriving again does not queue up a second time (idempotent across replay and reconnect)
-          : [...st.worktreeProposals, { projectId: cur.projectId as string, branch }],
-      }))
-    }
-    /*
-     * **Unread tracking (`lastSeq`) advances only by the seq the host assigns within the session.**
-     *
-     * It used to advance by the conversation item's render key (`chatSeq`, shared across every
-     * session). That value flows through `markRead` into the host's `last_read_seq`, so after viewing
-     * a 200-message session, even a single event arriving in a 2-message session inflated that
-     * session's `last_read_seq` to around 201 — and even across a restart, its unread dot never
-     * appeared again. The render key and the stored sequence are two different numbering schemes.
-     */
-    const hostSeq = 'seq' in e && typeof e.seq === 'number' ? e.seq : null
-    let withSeq = hostSeq != null ? bumpSeq(next, hostSeq) : next
-    // A message sent by me (or by the orchestrator) also gets marked read by the host — the screen follows
-    if (e.type === 'user_message') withSeq = markReadPure(withSeq, e.seq)
-    /*
-     * A lock found after the session was already handed back (#168, item 5) — a slow background
-     * resume. The host has dropped the handle, so the session is dormant again, and its dormant line
-     * offers the same "Continue in a fork" as a lock found while waking.
-     */
-    const lockedLate = e.type === 'error' && e.error.code === 'conversation_locked' ? e.error.message : null
-    if (lockedLate !== null) withSeq = { ...withSeq, live: false }
-
-    set((st) => {
-      const sessions = { ...st.sessions, [sessionId]: withSeq }
-      /*
-       * An off-screen conversation is cut back to the window (OFFSCREEN_TRIM_AT), never while a page of history is
-       * still on its way: that page is merged against the rows it was asked for. The focused session is never cut,
-       * even while the orchestrator, the grid or a pinned app covers it: it is the conversation the person returns
-       * to, with the pages they loaded and their reading position (docs/state-management.md §4).
-       */
-      const trimmed =
-        chat !== undefined &&
-        chat.length > OFFSCREEN_TRIM_AT &&
-        sessionId !== st.focusedSessionId &&
-        !st.history[sessionId]?.loading &&
-        !isOnScreen(st.view, sessionId, {
-          focusedSessionId: st.focusedSessionId,
-          orchestratorId: st.orchestratorId,
-          gridSessions: gridSessionIds(st.gridPanels),
-          builderPaneSessionId: st.builderPaneSessionId,
-          projectScreen: projectScreenSessions(st),
-        })
-          ? trimWindow(chat)
-          : null
-      /*
-       * A "Finished" card says the session is waiting for the person. Once the session starts another turn (a
-       * message from the person or from an agent), that is no longer true, and a card that stays says it is
-       * (#674). Only this session's finished cards go: its approval and error cards still describe something
-       * the person has not seen, and other sessions' cards are not about this one.
-       */
-      const turnBegan = withSeq.state === 'working' && cur.state !== 'working'
-      const notices = turnBegan ? st.notices.filter((n) => !(n.sessionId === sessionId && n.kind === 'done')) : st.notices
-      return {
-        sessions,
-        ...(notices.length !== st.notices.length ? { notices } : {}),
-        ...(lockedLate !== null
-          ? { wakeError: { ...st.wakeError, [sessionId]: lockedLate }, wakeLocked: { ...st.wakeLocked, [sessionId]: true } }
-          : {}),
-        ...(trimmed
-          ? {
-              history: {
-                ...st.history,
-                [sessionId]: { oldestSeq: trimmed.oldestSeq, more: trimmed.oldestSeq > 1, loading: false },
-              },
-              subagentSteps: withoutClosedSteps(st.subagentSteps, sessionId),
-            }
-          : {}),
-        chat: chat === undefined ? st.chat : { ...st.chat, [sessionId]: trimmed ? trimmed.items : chat },
-        // A turn begins because an event arrived — this is where its start instant is
-        // recorded, so the elapsed line survives remounting (issue #23)
-        workingSince: trackWorkingSince(st.workingSince, sessions, Date.now()),
-      }
-    })
-
-    // Notifications are decided only when the state changed (the decision belongs to core, delivery to the system port)
-    if (withSeq.state !== cur.state) {
-      const st = get()
-      const platform = st.platform
-      if (!platform) return
-
-      const ctx = { appFocused: st.appFocused, policy: st.notifyPolicy }
-      const after = Object.values(st.sessions)
-      const before = after.map((x) => (x.id === sessionId ? cur : x))
-
-      // An OS banner has no machine tag to show, so the name carries it for a session on a linked machine (#82)
-      const named = withSeq.machine ? `${withSeq.name} on ${st.machines[withSeq.machine]?.name ?? withSeq.machine}` : withSeq.name
-      const one = notificationFor({ id: sessionId, name: named, state: withSeq.state }, cur.state, ctx)
-      const all = allDoneNotification(after, before, ctx)
-      // If there is a per-session notice, use only that — do not fire twice at the same instant
-      // If a per-session completion already fired, "all done" does not fire on top of it — twice at the same instant is just noise
-      const notice = one ?? (announced ? null : all)
-      if (notice) {
-        // The banner has been downgraded to a nice-to-have (this path is dead on macOS).
-        // If it could not be sent, it is left on screen — disappearing silently would make "notifications do not arrive" undiagnosable.
-        void platform.system.notify(notice.title, notice.body).catch((e: Error) => set({ toast: e.message }))
-        // The path that actually reaches the person. Goes through neither permissions nor signing.
-        void platform.system
-          .alert(notice.kind, st.notifyPolicy.sound)
-          .catch((e: Error) => set({ toast: `Could not alert: ${e.message}` }))
-      }
-      // An approval or error is only resolved once the person shows up → also left as a card so it survives until they come back.
-      // "All done" is not about a single session, so it never creates a card (a per-session card already exists for that).
-      if (one) {
-        pushNotice(set, {
-          sessionId,
-          // A request to start an agent keeps its own words (#673), pushed above for the same event
-          kind: one.kind === 'error' ? 'error' : e.type === 'approval_request' && e.detail.kind === 'agent_start' ? 'agent_start' : 'approval',
-          name: withSeq.name,
-          at: Date.now(),
-        })
-      }
-      syncBadge(get)
-    }
   },
 
   /** Selects only the project — git, files and the viewer can be viewed without picking a session */
@@ -4366,6 +3749,7 @@ export const useStore = create<AppState>((set, get) => ({
     set(ifSessionStill(sessionId, (st, cur) => ({ sessions: { ...st.sessions, [sessionId]: markReadPure(cur, s.lastSeq) } })))
   },
   ...appActions(set, get),
+  ...eventActions(set, get),
 }))
 
 /**
@@ -4376,32 +3760,6 @@ const subscriptions: (() => void)[] = []
 
 function detachAll(): void {
   for (const off of subscriptions.splice(0)) off()
-}
-
-/**
- * A session's launch cards without the steps of the closed ones (#392), for when its conversation is cut back to the
- * window. A closed card kept every step it had read, and a live session kept appending to it, for the life of the
- * window. Opening it again reads them from the store, as the first opening did. An open card keeps its steps: it is
- * still showing them, or will be when the person comes back.
- */
-function withoutClosedSteps(all: AppState['subagentSteps'], sessionId: string): AppState['subagentSteps'] {
-  const mine = all[sessionId]
-  if (!mine || Object.values(mine).every((c) => c.open)) return all
-  const kept: Record<string, SubagentSteps> = {}
-  for (const [callId, c] of Object.entries(mine)) if (c.open) kept[callId] = c
-  return { ...all, [sessionId]: kept }
-}
-
-/** A launch card's steps before the first read (#222) */
-const SUBAGENT_STEPS_UNREAD: SubagentSteps = { open: false, rows: [], more: false, loading: false, error: null }
-
-function putSubagentSteps(
-  all: AppState['subagentSteps'],
-  sessionId: string,
-  callId: string,
-  next: SubagentSteps,
-): Pick<AppState, 'subagentSteps'> {
-  return { subagentSteps: { ...all, [sessionId]: { ...all[sessionId], [callId]: next } } }
 }
 
 /** The last clean read of each theme file: a clean entry replaces it, a broken one leaves it (see `lastGoodThemes`) */

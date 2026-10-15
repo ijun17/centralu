@@ -74,6 +74,7 @@ centralu/
 │  │     │     screens.ts(지금 보이는 화면)  appKeys.ts(앱과 그 뷰의 이름)
 │  │     │     sessionList.ts(스토어가 가진 세션: 호스트 목록 병합, 아직 등록되지 않은 세션의 이벤트 보관)
 │  │     │     apps.ts(외부 앱: 목록, 고정 뷰와 대화 속 뷰, 그 액션)
+│  │     │     events/(`dispatchEvent`는 index.ts, 이벤트 계열마다 처리 파일 하나)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)
