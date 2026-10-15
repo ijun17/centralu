@@ -17,6 +17,16 @@ import { AskProjectRow, WorktreeProposalRow } from './delegation.jsx'
  * other in a circle (tooling/dependency-cruiser.cjs forbids one).
  */
 
+/**
+ * A single message bubble row.
+ *
+ * **The reason for memo is streaming.** While a response streams, each delta only changes the
+ * last row (the store's message_delta leaves every other item's identity untouched), and
+ * without memo, every visible bubble on screen was re-rendered **entirely** on each chunk — with
+ * a long answer filling the screen, that means re-parsing markdown many times over (measured:
+ * 2.7 renders per character). Markdown itself is already memoized, but that alone cannot stop
+ * the shell above it from running fresh every time.
+ */
 export const ChatRow = memo(function ChatRow({
   item,
   projectRoot,

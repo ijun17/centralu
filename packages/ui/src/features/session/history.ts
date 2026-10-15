@@ -35,7 +35,7 @@ export function sentMessages(chat: ChatItem[]): string[] {
  *
  * This does not count visually wrapped lines. Counting those needs the caret's on-screen
  * coordinates, which is not a judgment that can be tested as plain values without a DOM.
- * Wrapped lines are measured by caret.ts with a mirror element, and SessionView combines the
+ * Wrapped lines are measured by caret.ts with a mirror element, and Composer.tsx combines the
  * two — filtering first with the cheap judgment keeps the expensive measurement rare.
  *
  * (For a while this counted newlines only, full stop. When a long line wrapped, pressing the

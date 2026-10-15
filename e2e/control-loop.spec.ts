@@ -5068,7 +5068,7 @@ test("Scrolling pins the current turn's own message to the top", async ({ page }
     }
   })
   /*
-    It now **deliberately sits 6px off** (see SessionView's -top-[10px] comment — pinning it
+    It now **deliberately sits 6px off** (see ChatStream's -top-[10px] comment — pinning it
     flush lost twice to compositor rounding on the actual WKWebView, so this now folds that
     hairline gap into the design spacing instead). The contract is "close to the intended gap
     (4-8px)" — 0 would mean a regression back to flush, and a large value would mean it has

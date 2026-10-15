@@ -156,7 +156,7 @@ function PanelHeader({ projectName, branch }: { projectName: string; branch: str
   const openBranches = useStore((s) => s.openBranches)
 
   /*
-   * The header's height **has to match the conversation side's header** (SessionView's HEADER) —
+   * The header's height **has to match the conversation side's header** (SessionHeader's HEADER) —
    * the two stand side by side, and even a 1px mismatch reads as a doubled boundary. Back when this
    * was written as padding, this one came out to 41px and the other to 40px (their contents were
    * 24px and 23px respectively). So it is written as `h-10`, not padding: the two rows stay one row
