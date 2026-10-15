@@ -356,6 +356,28 @@ below retained for `safe` and `normal`:
    already finished its turn during the swap, so a later turn the person starts there is never reported as the
    assigned work (#166); that answer stays readable through `agent_session`. Paths the
    answer names inside the child's folder become readable to the caller, as ask_project's do.
+7. **Work that waits on its own background tasks** (#721). The caller hears of the work's last turn end, not its
+   first. On 2026-10-15 six children backgrounded `pnpm verify` and ended a turn "waiting for verify to finish"; that
+   turn used up the report, the turn the verify's completion started finished the work and told no one, and the
+   caller, asleep, heard nothing for an hour. Now:
+
+   | Rule | Why |
+   |---|---|
+   | A turn that **completes** while background work the session's tool lists as running (`liveBackgroundTasks`) is still going is a pause: the caller is told once, "The assigned work paused: its turn ended while background work it started still runs (…). You will be told again when the work ends", with the last response, and the report stays owed (`pausedReports`, the app setting `report_paused:<session>`) | The caller reads why the child stopped talking and that the answer is still to come, instead of "finished" |
+   | Later turn ends while work still runs say nothing; the first turn end with none left delivers the owed report ("finished", the answer of that turn) and wakes the caller through `deliver`'s resume | One pause notice per task: a Monitor that fires every few minutes would otherwise wake the caller each time. The turns that keep the report are the child's own work, never a loop: a report does not start the reporting session's turn |
+   | The work ends with no turn running and none starts within `PAUSED_REPORT_SETTLE_MS` (60 s): the report goes out as the end, with the last answer | Claude starts the turn within a second (its task-notification); a task the person stopped by hand starts none. Each change of the work starts the wait again, and a turn running when it is up reports at its own end |
+   | A failed or stopped turn (error, usage limit, the person's Stop, the #698 reasons) is reported as it ended, work running or not | Those need the caller now; the next turn is not the work's own |
+   | A call waiting on the turn (`wait: true`, `agent_session wait`) takes the paused answer, with a notice that the work is not over, and the report is held for the end without a separate pause notice. `status` and `wait` on a paused child read the answer and the same notice and leave the report owed | A read of the paused answer used to take the report down, and with it the end |
+   | A paused child at rest does not keep its caller awake (`waitsOn`); in a turn it does | The work may run for minutes or for good (a dev server); the report wakes the caller when it comes |
+   | The person talking to a paused child: their turn ends by the same rules, so the caller hears the end once the work is over | The work the caller gave is still the child's; the person's turn does not end it |
+   | New work from the same caller (`agent_session send`, a note) ends the pause: that run's own wait or report tells its end. Trashing either session takes the report down | A pause belongs to the work it was told for; held on, it would report the new work a second time |
+   | Across a host swap the pause stays with the mark when the keeper kept the child's process (the work runs on there); a host that finds no process drops both, and a kept process that cannot be re-attached reports the work as stopped | The work went with a process that is gone |
+   | A handoff moves a paused child with its report; the note says "paused on its own background work; its report comes when that work ends" | Not "finished; its report has not been delivered yet": the new session would wait for a report that is not late |
+   | Only a turn the delegation's own wait saw end is judged: the delegation's outcome path reports only a wait that failed with no ending event, or one notes held (`tracksInputs`) | Judged again a microtask later, the pause could read as the end once the work had ended |
+
+   Codex lists child threads as background work, so a Codex parent thread that ends with a child thread running is
+   paused the same way; a tool that cannot report its background work (`capabilities.backgroundTasks` off) never
+   pauses a report.
 
 **In a new worktree** (part 2). `worktree: true`, or a `branch`, opens the child in a new git worktree of the
 project's repository instead of the caller's folder, through the same path as the new-session window's worktree
@@ -1725,7 +1747,7 @@ of a tool's:
 | A live session sleeps once it has said nothing (no event of any kind) for the set time: **15 minutes** by default, "Put idle sessions to sleep after" in Settings → Background (`agents.setSleepPolicy`, saved as `agents.sleepAfterMinutes`, `off` for never) | The owner's decision (2026-10-12). Inside the 1 h cache lifetime Claude Code asks for, so the wake still reads the cache |
 | Only a tool whose adapter says so (`capabilities.sleep`): Claude yes, Codex no | Claude's resume was measured to keep the cache. A large Codex thread took 7-13 s to resume and its cache on resume is unmeasured; Codex's memory is better won by one shared app-server per account (#561 E3), decided separately |
 | Never while `sessionIdle` says no: a turn, an approval or a question waiting, background work (the CLI's own timers included, below), or a tool that cannot report its background work | The same rule as moving a session to a new CLI (§4.6): ending the process would end what it holds |
-| Never while it waits on others (`waitsOn`): a child it started with `start_agent` (or a session handling its ask_project task) still in the turn it gave it, a session it owns (`askedBy`; a former worktree manager's worktree sessions, #561) while that one works, or a session that owes it a report (`reportBack`) | Their answer comes back to it in moments, and waking it for that costs the resume it saved. A child waiting on its parent sleeps by the ordinary rule: it is idle |
+| Never while it waits on others (`waitsOn`): a child it started with `start_agent` (or a session handling its ask_project task) still in the turn it gave it, a session it owns (`askedBy`; a former worktree manager's worktree sessions, #561) while that one works, or a session that owes it a report (`reportBack`), except one whose report is paused over its own background work while it rests (#721, §1.2.1 step 7) | Their answer comes back to it in moments, and waking it for that costs the resume it saved. A child waiting on its parent sleeps by the ordinary rule: it is idle |
 | The quiet period counts from host start for a session this host has not heard from | A host that just replaced another (a restart, a swap) does not know what the person was doing a second ago |
 | Sleeping is `SessionManager.sleepSession`: refused unless still idle, the handle leaves the map, `session_live {live: false, reason: 'asleep'}` goes out, the process is disposed. A message arriving meanwhile starts a resume that waits for the dispose (`sleeping`) | Never two processes on one conversation; a send is never lost to a closing handle |
 | Waking is the ordinary `resumeSession`, the path a session takes after a host restart; every resume sends `session_live {live: true}` | One path to keep right. The event tells every window, not only the one that asked |

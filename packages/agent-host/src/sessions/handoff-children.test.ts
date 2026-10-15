@@ -51,6 +51,10 @@ class Handle implements SessionHandle {
   respondApproval() {
     return false
   }
+  /** Any event of the tool's, as the CLI sends it */
+  emitEvent(e: NormalizedEvent) {
+    this.emit(e)
+  }
   interrupt() {}
   async dispose() {}
   async detach() {}
@@ -205,6 +209,29 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(marker(heir)?.note).toBe(note)
     // The original was deleted afterwards (the handoff's default): the moved child kept its report
     expect(store.listReportMarks()).toEqual([{ sessionId: live, callerSessionId: heir }])
+  })
+
+  it('moves a child paused on its own background work (#721): the note says so, and the end is reported to the new session', async () => {
+    const h = host()
+    ;(h.claude.capabilities as { backgroundTasks: boolean }).backgroundTasks = true
+    const { project, parent } = await parentOf(h)
+    const child = await startChild(h, parent, 'long work')
+    h.mgr.rename(child, 'Port the parser')
+    const verify = { id: 'bg-verify', kind: 'shell' as const, description: 'pnpm verify', status: 'running' as const }
+    const ch = h.claude.handles.get(child)!
+    ch.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
+    ch.answer('waiting for verify')
+    await until(() => reports(h.claude.handles.get(parent), child).length === 1)
+    const heir = await handOff(h, project, parent)
+
+    expect(owner(child)).toBe(heir)
+    const note = readFileSync(handoffNotePath(project, parent), 'utf8')
+    expect(note).toContain(`"Port the parser" — paused on its own background work; its report comes when that work ends — handle: ${child}`)
+    ch.emitEvent({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
+    ch.emitEvent({ type: 'state_change', sessionId: child, state: 'working' })
+    ch.answer('verify passed')
+    await until(() => reports(h.claude.handles.get(heir), child).length === 1)
+    expect(store.listReportMarks()).toEqual([])
   })
 
   it('moves nothing and leaves the note alone when every child is settled', async () => {

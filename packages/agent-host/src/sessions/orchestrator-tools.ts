@@ -699,6 +699,7 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
       return {
         text:
           `${who} is not working on anything you gave it (${r.sessionState}${r.interruption ? `, ${interruptionWords(r.interruption)}` : ''}). Its last answer, as JSON:\n${trustedJsonText(r.answer || '(no final text)')}\n` +
+          (r.notice ? `${r.notice}\n` : '') +
           `agent_session(sessionId="${r.sessionId}", action="send", text=…) gives it more.`,
       }
     case 'done': {

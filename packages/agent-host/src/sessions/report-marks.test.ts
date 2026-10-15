@@ -48,6 +48,10 @@ class Handle implements SessionHandle {
   respondApproval() {
     return false
   }
+  /** Any event of the tool's, as the CLI sends it */
+  emitEvent(e: NormalizedEvent) {
+    this.emit(e)
+  }
   interrupt() {}
   async dispose() {}
   /** Set by a test: the turn ends while the leaving host lets the process go */
@@ -60,7 +64,7 @@ class Handle implements SessionHandle {
 class Adapter implements AgentAdapter {
   descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'x', login: 'x' }
   readonly capabilities: AdapterCapabilities = {
-    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: false,
+    approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: true,
   }
   handles = new Map<string, Handle>()
   readonly tool: ToolName = 'claude'
@@ -189,6 +193,46 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     expect(c.mgr.listSessions().find((s) => s.id === child)!.state).toBe('idle')
     expect(store.listReportMarks()).toEqual([])
     expect(c.mgr.waitsOn((await parentAndChild(c)).parent)).not.toContain(child)
+  })
+
+  it('held over the child\'s own background work (#721), it stays owed in the next host, which tells the work\'s end', async () => {
+    const verify = { id: 'bg-verify', kind: 'shell' as const, description: 'pnpm verify', status: 'running' as const }
+    const a = host()
+    const { parent, child } = await parentAndChild(a)
+    a.claude.handles.get(child)!.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
+    a.claude.handles.get(child)!.answer('waiting for verify')
+    await until(() => reports(a.claude.handles.get(parent), child).length === 1)
+    expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    await a.mgr.detachAll()
+
+    const b = host(new Set([child]))
+    await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
+    // At rest, yet still owing: the verify runs on in the kept process
+    expect(b.mgr.listSessions().find((s) => s.id === child)!.state).toBe('waiting_input')
+    expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    const h = b.claude.handles.get(child)!
+    h.emitEvent({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
+    h.emitEvent({ type: 'state_change', sessionId: child, state: 'working' })
+    h.answer('verify passed, PR opened')
+    await until(() => stored(parent).length === 1)
+    expect(stored(parent)[0]).toContain('verify passed, PR opened')
+    expect(store.listReportMarks()).toEqual([])
+    expect(store.appSetting(`report_paused:${child}`)).toBeNull()
+  })
+
+  it('held over background work, it is dropped by a host that finds no process: the work went with the old one', async () => {
+    const verify = { id: 'bg-verify', kind: 'shell' as const, description: 'pnpm verify', status: 'running' as const }
+    const a = host()
+    const { parent, child } = await parentAndChild(a)
+    a.claude.handles.get(child)!.emitEvent({ type: 'background_tasks', sessionId: child, live: [verify] })
+    a.claude.handles.get(child)!.answer('waiting for verify')
+    await until(() => reports(a.claude.handles.get(parent), child).length === 1)
+    await a.mgr.detachAll()
+
+    const c = host()
+    expect(store.listReportMarks()).toEqual([])
+    expect(store.appSetting(`report_paused:${child}`)).toBeNull()
+    expect(c.mgr.waitsOn(parent)).toEqual([])
   })
 
   it('goes with the child or the parent when either is trashed', async () => {
