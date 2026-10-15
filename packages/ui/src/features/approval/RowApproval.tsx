@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { wireSegments, type ApprovalDetail } from '@cc/protocol'
+import { wireJoin, wireSegments, type ApprovalDetail } from '@cc/protocol'
 import { answersInPlace, type SessionSummary } from '@cc/core'
 import { inFlightKey, useStore } from '../../store/store.js'
 import { Kbd, Tooltip } from '../../components/primitives.jsx'
@@ -215,29 +215,58 @@ export function rowView(d: ApprovalDetail, root: string | null, otherPending = 0
 
 /**
  * A path as a row shows it (#683 review): the file's name first, then its folder relative to the session's folder.
- * A path outside that folder (or with no folder to compare against) keeps its whole folder, and is not `inside`.
- * Windows paths compare without case and with either slash.
+ * Both are normalized first, segment by segment (`.`, `..`, repeated separators, either slash, a Windows drive), and
+ * compared whole segments at a time: `/proj/src/../../../../etc/zshrc` is `/etc/zshrc`, outside `/proj`, and a
+ * prefix of the text alone (`/proj-2` against `/proj`) is not inside. A path outside that folder, one that climbs out
+ * of it, or one with no folder to compare against keeps its whole (normalized) folder, and is not `inside`.
  */
 export function pathParts(path: string, root: string | null): { name: string; dir: string; inside: boolean } {
-  const p = path.replace(/\\/g, '/')
-  const drive = /^[a-z]:\//i
-  const absolute = p.startsWith('/') || drive.test(p)
-  let rel = p
+  const p = normalizePath(path)
+  let rel: string[] = p.segs
   let inside = false
-  if (absolute) {
-    const r = root?.replace(/\\/g, '/').replace(/\/+$/, '') ?? null
-    const fold = (x: string) => (drive.test(p) ? x.toLowerCase() : x)
-    if (r && fold(p).startsWith(`${fold(r)}/`)) {
-      rel = p.slice(r.length + 1)
+  if (p.prefix === '') {
+    // Relative: inside unless it climbs above where it starts
+    inside = !p.escapes
+  } else {
+    const r = root === null ? null : normalizePath(root)
+    // Drive letters and Windows paths compare without case
+    const fold = (x: string) => (/^[a-z]:\/$/i.test(p.prefix) ? x.toLowerCase() : x)
+    if (r && r.prefix !== '' && fold(r.prefix) === fold(p.prefix) && p.segs.length > r.segs.length && r.segs.every((seg, i) => fold(seg) === fold(p.segs[i]!))) {
+      rel = p.segs.slice(r.segs.length)
       inside = true
     }
-  } else {
-    inside = !wireSegments(p).includes('..')
   }
-  // Read as a wire path: the backslashes are already turned into the wire separator above
-  const segs = wireSegments(rel)
-  const name = segs.pop() ?? ''
-  return { name, dir: rel.slice(0, rel.length - name.length), inside }
+  const name = rel[rel.length - 1] ?? ''
+  const folder = wireJoin(...rel.slice(0, -1))
+  // Inside: relative to the session's folder. Otherwise the whole normalized folder, so the real target shows
+  const lead = inside ? '' : p.prefix
+  return { name, dir: folder ? `${lead}${folder}/` : lead, inside }
+}
+
+/**
+ * A path as a prefix (`/`, `C:/`, or `''` for a relative one) and its segments, with `.` and empty segments dropped
+ * and each `..` taking the segment before it. A `..` with nothing before it stays in a relative path (`escapes`); at
+ * an absolute root it goes nowhere, as the OS reads it.
+ */
+function normalizePath(path: string): { prefix: string; segs: string[]; escapes: boolean } {
+  const p = path.replace(/\\/g, '/')
+  const drive = /^([a-z]:)(\/|$)/i.exec(p)
+  const prefix = drive ? `${drive[1]}/` : p.startsWith('/') ? '/' : ''
+  const segs: string[] = []
+  let escapes = false
+  for (const seg of wireSegments(p.slice(drive ? drive[1]!.length : 0))) {
+    if (seg === '' || seg === '.') continue
+    if (seg === '..') {
+      if (segs.length > 0 && segs[segs.length - 1] !== '..') segs.pop()
+      else if (prefix === '') {
+        segs.push('..')
+        escapes = true
+      }
+      continue
+    }
+    segs.push(seg)
+  }
+  return { prefix, segs, escapes }
 }
 
 /** The card's text, cut after this many lines: an edit's diff can be thousands, and its card is one click away */

@@ -181,20 +181,24 @@ export function rowApprovalTests() {
   })
 
   // #683 review: requests whose line says nothing, or that carry a risk the line does not show
-  test('a network approval, an edit naming no file, a delete and a command outside the sandbox show Open', async ({ page }) => {
+  test('a network approval, an edit naming no file, a delete, a command outside the sandbox and a path climbing out show Open', async ({ page }) => {
     await setup(page, ['/tmp/alpha'])
-    const ids = [await newSession(page, 'alpha'), await newSession(page, 'alpha'), await newSession(page, 'alpha'), await newSession(page, 'alpha')]
+    const ids = [await newSession(page, 'alpha'), await newSession(page, 'alpha'), await newSession(page, 'alpha'), await newSession(page, 'alpha'), await newSession(page, 'alpha')]
     await newSession(page, 'alpha') // on screen
     await ask(page, ids[0]!, { kind: 'command', command: '', cwd: CWD, network: { host: 'docs.example.com', protocol: 'https' } })
     await ask(page, ids[1]!, { kind: 'file_edit', path: '(no path)', diffPreview: '', multi: false })
     await ask(page, ids[2]!, { kind: 'file_edit', path: '/tmp/alpha/old.ts', diffPreview: '-x', multi: false, change: 'delete' })
     await ask(page, ids[3]!, { kind: 'command', command: 'curl x', cwd: CWD, unsandboxed: true })
+    // #683 re-review: a path that starts in the project and climbs out of it
+    await ask(page, ids[4]!, { kind: 'file_edit', path: '/tmp/alpha/src/../../../etc/zshrc', diffPreview: '+x', multi: false })
     for (const id of ids) {
       await expect(page.getByTestId(`sidebar-approve-open-${id}`)).toBeVisible()
       await expect(page.getByTestId(`sidebar-approve-allow-${id}`)).toHaveCount(0)
     }
     await expect(page.getByTestId(`sidebar-approval-what-${ids[0]}`)).toContainText('network access to docs.example.com')
     await expect(page.getByTestId(`sidebar-approval-what-${ids[2]}`)).toContainText('Delete')
+    // Shown where it really lands, not as a file of the project
+    await expect(page.getByTestId(`sidebar-approval-what-${ids[4]}`)).toContainText('zshrc/etc/')
     // The card says it too
     await page.getByTestId(`sidebar-approve-open-${ids[3]}`).click()
     await expect(page.getByTestId('approval-detail')).toContainText('Runs outside the sandbox')

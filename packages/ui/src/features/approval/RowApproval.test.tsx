@@ -160,6 +160,29 @@ describe('what a row says', () => {
     expect(pathParts('/etc/hosts', null)).toEqual({ name: 'hosts', dir: '/etc/', inside: false })
   })
 
+  // #683 re-review: only the front of an absolute path was compared, so this was "inside" and showed "Edit zshrc src/…"
+  it('normalizes a path before comparing it, so one that climbs out of the folder is outside', () => {
+    expect(pathParts('/Users/me/proj/src/../../../../etc/zshrc', '/Users/me/proj')).toEqual({ name: 'zshrc', dir: '/etc/', inside: false })
+    expect(pathParts('/Users/me/proj/src/./a/../b.ts', '/Users/me/proj')).toEqual({ name: 'b.ts', dir: 'src/', inside: true })
+    expect(pathParts('/Users/me/proj//src///b.ts', '/Users/me/proj/')).toEqual({ name: 'b.ts', dir: 'src/', inside: true })
+    expect(pathParts('/Users/me/proj/../proj-2/a.ts', '/Users/me/proj')).toEqual({ name: 'a.ts', dir: '/Users/me/proj-2/', inside: false })
+    // The folder itself, or its parent through a dot segment, is not a file inside it
+    expect(pathParts('/Users/me/proj/src/..', '/Users/me/proj').inside).toBe(false)
+    // A root given with dot segments is read the same way
+    expect(pathParts('/Users/me/proj/a.ts', '/Users/me/x/../proj').inside).toBe(true)
+    // Relative: a .. that stays inside is fine, one that climbs out is not
+    expect(pathParts('src/../a.ts', '/Users/me/proj')).toEqual({ name: 'a.ts', dir: '', inside: true })
+    expect(pathParts('src/../../a.ts', '/Users/me/proj')).toEqual({ name: 'a.ts', dir: '../', inside: false })
+  })
+
+  it('normalizes Windows paths the same way, without case', () => {
+    expect(pathParts('C:\\proj\\..\\x', 'C:\\proj')).toEqual({ name: 'x', dir: 'C:/', inside: false })
+    expect(pathParts('C:\\proj\\src\\..\\..\\Windows\\win.ini', 'c:\\Proj')).toEqual({ name: 'win.ini', dir: 'C:/Windows/', inside: false })
+    expect(pathParts('c:/PROJ/src/./a.ts', 'C:\\proj')).toEqual({ name: 'a.ts', dir: 'src/', inside: true })
+    // Another drive is outside
+    expect(pathParts('D:\\proj\\a.ts', 'C:\\proj').inside).toBe(false)
+  })
+
   it("cuts a long diff in the tooltip and says the rest is on the card", () => {
     const diff = Array.from({ length: 40 }, (_, i) => `+line ${i}`).join('\n')
     const t = tooltipText({ kind: 'file_edit', path: 'a.ts', diffPreview: diff, multi: false })
