@@ -751,7 +751,7 @@ describe('Platform contract: tool call from a screen (web + real host + real app
     const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
     const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
     const project = await mgr.addProject(projRoot)
-    mgr.setProjectTrusted(project.id, true)
+    store.setProjectTrusted(project.id, true)
     const changes = broadcastAppChanges((e) => server.broadcast(e))
     const rt = new ExternalApps({
       projects: () => store.projectRoots(),
@@ -893,7 +893,7 @@ describe('Platform contract: pinned screen (web + real host + real app)', () => 
     const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
     const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
     const project = await mgr.addProject(projRoot)
-    mgr.setProjectTrusted(project.id, true)
+    store.setProjectTrusted(project.id, true)
     const rt = new ExternalApps({
       projects: () => store.projectRoots(),
       dataRoot: join(fixture, 'data'),
@@ -967,7 +967,7 @@ describe('Platform contract: new app (web + real host)', () => {
     const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
     const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
     const project = await mgr.addProject(projRoot)
-    mgr.setProjectTrusted(project.id, true)
+    store.setProjectTrusted(project.id, true)
     const rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
     rt.refresh()
     mgr.useExternalApps(rt)
@@ -1040,7 +1040,7 @@ describe('Platform contract: app secrets (web + real host)', () => {
     const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
     const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
     const project = await mgr.addProject(projRoot)
-    mgr.setProjectTrusted(project.id, true)
+    store.setProjectTrusted(project.id, true)
     const rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
     rt.refresh()
     const server = new HostServer({ port: 0, token: 'contract', onRpc: createRpcHandler(mgr, adapters, { externalApps: rt }) })

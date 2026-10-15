@@ -1740,6 +1740,9 @@ const APPLY_TICKET_MS = 5 * 60_000
  * A project the person registered from this window (adding a folder, or making one, #515) joins the list, and is asked
  * about once for trust — unless it is already trusted (the same folder chosen again).
  */
+/** What a project carries that any client may change through the host (#719); `git` and the identity stay as the window has them */
+const PROJECT_SETTING_KEYS = ['trusted', 'commands', 'worktreeSetup', 'worktreeManager', 'defaultTool', 'defaultModels'] as const satisfies readonly (keyof ProjectInfo)[]
+
 function joinProject(s: Pick<AppState, 'projects' | 'trustAsk'>, p: ProjectInfo): Pick<AppState, 'projects' | 'trustAsk'> {
   return { projects: { ...s.projects, [p.id]: p }, trustAsk: p.trusted ? s.trustAsk : p.id }
 }
@@ -4800,10 +4803,26 @@ export const useStore = create<AppState>((set, get) => ({
     if (!platform) return
     const list = await platform.projects.list().catch(() => null)
     if (!list) return
-    // Only new projects join, at the end: the rows already listed keep their objects (and their place)
+    /*
+     * New projects join at the end; the rows already listed keep their place. A listed row takes the host's value of
+     * the settings another client can change (trust, commands, worktree setup, defaults: #719) and keeps its object
+     * when none of them differs. `git` is left alone: it has its own refresh, and a list read does not carry the
+     * freshest count.
+     */
     set((s) => {
-      const fresh = list.filter((p) => !s.projects[p.id])
-      return fresh.length ? { projects: { ...s.projects, ...Object.fromEntries(fresh.map((p) => [p.id, p])) } } : {}
+      const next = { ...s.projects }
+      let changed = false
+      for (const p of list) {
+        const cur = s.projects[p.id]
+        if (!cur) {
+          next[p.id] = p
+          changed = true
+        } else if (PROJECT_SETTING_KEYS.some((k) => JSON.stringify(cur[k]) !== JSON.stringify(p[k]))) {
+          next[p.id] = { ...cur, ...Object.fromEntries(PROJECT_SETTING_KEYS.map((k) => [k, p[k]])) }
+          changed = true
+        }
+      }
+      return changed ? { projects: next } : {}
     })
   },
 

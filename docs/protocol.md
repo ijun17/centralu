@@ -147,6 +147,10 @@ reached nobody. Three shapes carry them:
   learns the new values only from this event. `person: true` marks a client's call and updates the values shown without the "Orchestrator changed" toast
   (a flag, not a `by` word: a build without the word would fail to parse the frame and drop it). The orchestrator's own call
   sends `by: 'orchestrator'` in the RPC, also to a linked machine, and the change is broadcast as its own, so the toast stays.
+- A per-project setting saved through RPC is announced with `projects_changed` (#719): `projects.setTrusted`, `projects.setCommands`,
+  `projects.setWorktreeSetup`, `worktrees.setTrunk`, and the default tool and per-tool model and effort a session records. Every
+  window re-reads the project list and takes the host's value of those fields (a listed row keeps its place and its `git`), so the
+  ⋯ menu, the trust mark and the project's apps agree with the host. The hub forwards the event of a linked machine.
 
 | Decision | Why |
 |---|---|

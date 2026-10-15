@@ -3590,6 +3590,31 @@ describe('new projects', () => {
     for (const id of Object.keys(before)) expect(useStore.getState().projects[id]).toBe(before[id])
   })
 
+  it('a setting another client wrote (trust, commands) replaces the listed value on projects_changed, and git stays as the window has it (#719)', async () => {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/old')
+    await useStore.getState().attach(mock)
+    const other = await mock.projects.add('/tmp/other')
+    mock.emit({ type: 'projects_changed' } as NormalizedEvent)
+    await vi.waitFor(() => expect(useStore.getState().projects[other.id]).toBeDefined())
+    const untouched = useStore.getState().projects[other.id]
+    const git = { branch: 'seen-here', changedFiles: 3, isRepo: true }
+    useStore.setState((s) => ({ projects: { ...s.projects, [p.id]: { ...s.projects[p.id]!, git } } }))
+    expect(useStore.getState().projects[p.id]?.trusted).toBe(false)
+
+    // Written behind the window's back, as another window or an agent over RPC does
+    await mock.projects.setTrusted(p.id, true)
+    await mock.projects.setCommands(p.id, [{ command: 'pnpm dev' }])
+    mock.emit({ type: 'projects_changed' } as NormalizedEvent)
+
+    await vi.waitFor(() => expect(useStore.getState().projects[p.id]?.trusted).toBe(true))
+    expect(useStore.getState().projects[p.id]?.commands).toEqual([{ command: 'pnpm dev' }])
+    expect(useStore.getState().projects[p.id]?.git).toEqual(git)
+    // A row nothing changed for keeps its object
+    expect(useStore.getState().projects[other.id]).toBe(untouched)
+    expect(Object.keys(useStore.getState().projects)).toEqual([p.id, other.id])
+  })
+
   it('createProject registers what the host made and asks about trust once, as adding a folder does', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)

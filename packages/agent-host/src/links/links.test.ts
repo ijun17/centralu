@@ -252,6 +252,25 @@ describe('a hub linked to another host (#82)', () => {
     expect(u.events().some((e) => e.type === 'update_apply_request' || e.type === 'update_apply_go')).toBe(false)
   })
 
+  it('shows a project setting another client wrote on the linked machine (#719)', async () => {
+    const { store, projectId } = seeded([])
+    const remote = await remoteHost(0, store)
+    const hub = await hubHost(() => lineFor(remote.port))
+    await until(() => status(hub) === 'connected')
+    const u = await ui(hub.port)
+    // Another window of that machine, reaching it directly, not through the hub
+    const other = await ui(remote.port)
+    const trustedOnHub = async () => (await u.call('projects.list')).find((p: any) => p.id === `m1.${projectId}`)?.trusted
+    expect(await trustedOnHub()).toBe(false)
+    await other.call('projects.setTrusted', { projectId, trusted: true })
+    await until(() => u.events().some((e) => e.type === 'projects_changed'))
+    expect(await trustedOnHub()).toBe(true)
+    const heard = u.events().filter((e) => e.type === 'projects_changed').length
+    await other.call('projects.setCommands', { projectId, commands: [{ command: 'pnpm dev' }] })
+    await until(() => u.events().filter((e) => e.type === 'projects_changed').length > heard)
+    expect((await u.call('projects.list')).find((p: any) => p.id === `m1.${projectId}`)?.commands).toEqual([{ command: 'pnpm dev' }])
+  })
+
   it('relays terminal output under the machine’s prefix', async () => {
     const remote = await remoteHost()
     const hub = await hubHost(() => lineFor(remote.port))
