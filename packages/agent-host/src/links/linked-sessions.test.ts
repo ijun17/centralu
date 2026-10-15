@@ -158,6 +158,40 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
   })
 })
 
+describe('the projects of linked machines, for ask_project (#700)', () => {
+  it('does not wait on a machine that is slow to list its projects: it is counted as away, from its mirror, and the others are heard', async () => {
+    const slow: RoutedMachine = {
+      ...machine({}, { mirror: { projects: [{ id: 'p-old', name: 'old', path: '/srv/old', defaultTool: null }] } }),
+      id: 'slow',
+      name: 'Slow box',
+      q: new Qualifier('slow', 2),
+      call: () => new Promise(() => {}),
+    }
+    const fine = machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: null }] })
+    const reader = linkedSessions(() => [slow, fine], undefined, undefined, { lookupMs: 30 })
+    const t0 = Date.now()
+    const { projects, away } = await reader.projects()
+    expect(Date.now() - t0).toBeLessThan(2000)
+    expect(away).toEqual([{ machine: 'Slow box', machineId: 'slow', why: 'did not answer within 30 ms' }])
+    expect(projects.map((p) => [p.id, p.machine, p.away])).toEqual([
+      ['slow.p-old', 'Slow box', 'did not answer within 30 ms'],
+      ['m1.p1', 'Box', undefined],
+    ])
+  })
+
+  it('keeps trust as the machine said it, and says nothing when an older machine does not (absent is not "not trusted", #382)', async () => {
+    const m = machine({
+      'projects.list': [
+        { id: 'a', name: 'a', path: '/a', defaultTool: null, trusted: true },
+        { id: 'b', name: 'b', path: '/b', defaultTool: null, trusted: false },
+        { id: 'c', name: 'c', path: '/c', defaultTool: null },
+      ],
+    })
+    const { projects } = await linkedSessions(() => [m]).projects()
+    expect(projects.map((p) => p.trusted)).toEqual([true, false, undefined])
+  })
+})
+
 describe('takeInTurns', () => {
   const a = ['a1', 'a2', 'a3', 'a4']
   const b = ['b1']

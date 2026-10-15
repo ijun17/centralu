@@ -510,16 +510,16 @@ const EXTERNAL_LIST_LIMIT = 200
 const HOST_READ_MAX_LINES = 200
 const HOST_RECALL_MAX_HITS = 50
 
+/** How much of a linked machine's last message is read for an answer; `clipAnswer` then cuts it to the usual size */
+const ANSWER_READ_MAX_CHARS = 100_000
+
+/** A machine that cannot be asked, as the verb phrase after its name: its plain cause, or the words a model reads for any other */
+const awayPhrase = (why: string): string => (why === NOT_REACHABLE ? `is ${NOT_REACHABLE}` : `could not be asked just now (${why})`)
+
 /**
  * The sender a hub's orchestrator's instruction is recorded under (`sendFromHub`). Not a session of this host: no id
  * this host makes starts with `_`. The window shows only the sender's name; the id is what the injection gate reads
  */
-/** A machine that cannot be asked, as the verb phrase after its name: its plain cause, or the words a model reads for any other */
-/** How much of a linked machine's last message is read for an answer; `clipAnswer` then cuts it to the usual size */
-const ANSWER_READ_MAX_CHARS = 100_000
-
-const awayPhrase = (why: string): string => (why === NOT_REACHABLE ? `is ${NOT_REACHABLE}` : `could not be asked just now (${why})`)
-
 const HUB_SENDER = '_hub-orchestrator'
 /** The sender Centralu's own messages to a session are recorded under (#673): like `HUB_SENDER`, no session's id */
 const HOST_SENDER = '_centralu'
@@ -1497,7 +1497,8 @@ export class SessionManager {
    * orchestrator is waiting on becomes its report, as `reportBackIfAwaited` does for this host's sessions: on
    * however the turn ended (#166), once, and then the watch is cleared.
    */
-  observeLinked(e: { type: string; sessionId?: unknown; state?: unknown; error?: { message?: string } }): void {
+  observeLinked(e: { type: string; sessionId?: unknown; state?: unknown; error?: { message?: string }; machine?: unknown }): void {
+    if (e.type === 'machine_status') return this.observeLinkLoss(e.machine)
     if (typeof e.sessionId !== 'string') return
     const ask = this.linkedAsks.get(e.sessionId)
     if (ask) this.observeLinkedAsk(ask, e)
@@ -1517,6 +1518,21 @@ export class SessionManager {
 
   /** ask_project's tasks in a linked machine's sessions (#700), by the session's qualified id */
   private linkedAsks = new Map<string, LinkedAsk>()
+
+  /**
+   * A machine's link that is no longer connected ends the tasks asked of its sessions: their events stop reaching the
+   * hub, so the turn's end would never be seen and the call would answer "still working" for good. The turn may well
+   * go on there; the sentence says so, and where to look.
+   */
+  private observeLinkLoss(machine: unknown): void {
+    const m = machine as { id?: unknown; name?: unknown; status?: unknown } | null
+    if (!m || typeof m.id !== 'string' || m.status === 'connected') return
+    const name = typeof m.name === 'string' && m.name ? m.name : m.id
+    for (const [sessionId, ask] of this.linkedAsks) {
+      if (ask.settled || !sessionId.startsWith(`${m.id}.`)) continue
+      ask.settle({ ok: false, error: `the link to ${name} dropped before the turn ended. The task was delivered and may still be running there; read the session once the link is back` })
+    }
+  }
 
   /** A linked machine's event for a session an ask_project is waiting on: the turn ends as `observeLinked` judges it (#166) */
   private observeLinkedAsk(ask: LinkedAsk, e: { type: string; state?: unknown; error?: { message?: string } }): void {
@@ -6416,7 +6432,12 @@ export class SessionManager {
   ): Promise<AskProjectResult> {
     const label = `${target.name} on ${target.machine}`
     const project = `${target.machineId}/${target.name}`
-    if (target.away) return { ok: false, error: `${target.machine} ${awayPhrase(target.away)}, so ${label} cannot be asked. Try again once its link is back.` }
+    if (target.away) {
+      // A task already given there: the machine is down, and what became of it is the answer, not a refusal to ask
+      const given = [...this.linkedAsks.values()].filter((a) => a.callerId === callerId && a.project === project && (!opts.session || a.sessionId === opts.session.trim()))
+      if (!opts.task && given.length === 1) return this.awaitLinkedAsk(given[0]!, reader, signal)
+      return { ok: false, error: `${target.machine} ${awayPhrase(target.away)}, so ${label} cannot be asked. Try again once its link is back.` }
+    }
     const listed = await reader.projectSessions(target)
     if (!listed.ok) return listed
     const sessions = listed.sessions
@@ -6457,7 +6478,7 @@ export class SessionManager {
         kind: 'project_access',
         access: 'delegate',
         from: { id: callerProjectId, name: callerProject },
-        to: { id: target.id, name: target.name, machine: target.machine, trusted: target.trusted },
+        to: { id: target.id, name: target.name, machine: target.machine, ...(target.trusted !== undefined ? { trusted: target.trusted } : {}) },
         text: taskLine(opts.task),
         session: { id: chosen.id, name: chosen.name },
       },
@@ -6466,6 +6487,20 @@ export class SessionManager {
     if (decision === 'deny') return { ok: false, error: `The person did not allow ${callerProject} to reach ${label} this way. Do not ask again unless they tell you to.` }
     if (decision === null) return { ok: false, error: `The question to the person was withdrawn before they answered, so ${label} was not reached.` }
     if (signal?.aborted) return { ok: false, error: 'The call was cancelled before delivery' }
+    /*
+     * The card stood while the person could use the session there: ask the machine again before anything is sent. A
+     * task sent into a turn that is not the caller's would join it (and its end would settle this call), the very
+     * thing the busy refusal above keeps out. A note or a queue is not available across machines, so this refuses.
+     */
+    const again = await reader.projectSessions(target)
+    if (!again.ok) return { ok: false, error: `Could not hand the task to ${label}: ${again.error}` }
+    const now = again.sessions.find((s) => s.id === chosen.id)
+    if (!now) return { ok: false, error: `The session "${chosen.name}" in ${label} is no longer available; nothing was sent.` }
+    if (inTurn(now.state as SessionState)) {
+      return { ok: false, error: `The session "${chosen.name}" in ${label} started a turn of its own while the question to the person stood (${now.state}); nothing was sent. Ask again once it is idle, or name another session.` }
+    }
+    const taken = this.linkedAsks.get(chosen.id)
+    if (taken && !taken.settled) return { ok: false, error: `The session "${chosen.name}" in ${label} was given another task while the question stood; nothing was sent. Name another session, or ask again later.` }
 
     let settle!: LinkedAsk['settle']
     const outcome = new Promise<{ ok: true } | { ok: false; error: string }>((resolve) => (settle = resolve))

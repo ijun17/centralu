@@ -91,8 +91,8 @@ export type LinkedProject = {
   /** The machine's name as the person gave it, and its id (what a qualified project name starts with) */
   machine: string
   machineId: string
-  /** Whether the person trusts the project on that machine (#382). Not said by a machine that predates it */
-  trusted: boolean
+  /** Whether the person trusts the project on that machine (#382). Absent from a machine that predates it: not saying, which is not "not trusted" */
+  trusted?: boolean
   /** Set when the machine cannot be asked just now: why. The project is then what the headers mirror last held */
   away?: string
 }

@@ -971,6 +971,9 @@ that existed on a linked machine and listed only this computer's.
 - **Consent.** The card names the machine; the answer "always" is read as once and nothing is remembered. Remembering
   needs a store step (`project_consents` has foreign keys to `projects`), which this does not take (§12.5, question 4
   stays open for a remembered form).
+- **Races.** The machine's sessions are read again after the card is answered and nothing is sent into a turn the person
+  started there meanwhile; a project list that takes over 4 s counts the machine as away for that call; a link that drops
+  after the task was sent ends the wait with a sentence (`machine_status`), since the turn's end can no longer be seen.
 - **Not built**: `ifBusy` (a note or a queue into a busy session there), the caller answering the machine's cards
   (`asking`; they stand in the hub's window and the call reports the wait), and stopping the machine's turn when the
   call is cancelled.

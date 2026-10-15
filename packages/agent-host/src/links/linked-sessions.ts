@@ -44,6 +44,13 @@ function fencedLine(line: string): string {
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
+/**
+ * How long a name is resolved against a machine's project list before that machine is counted as not answering. A
+ * name is looked up on every ask_project call, so one slow or half-open link must not hold up the asks that name a
+ * project on this computer or on another machine; the link's own call timeout is much longer
+ */
+const LOOKUP_MS = 4000
+
 /** What to tell the model when a machine could not answer: its own words for a refusal, a plain cause otherwise */
 function cause(m: RoutedMachine, err: unknown): string {
   const message = err instanceof Error ? err.message : String(err)
@@ -62,7 +69,10 @@ export function linkedSessions(
   route: RpcHandler = notRouted,
   /** This computer, as a machine names who sent an instruction (`host.send`): the orchestrator is not that machine's own */
   hubName?: string,
+  /** How long resolving a project name waits for one machine's project list (`lookupMs`); tests shorten it */
+  options: { lookupMs?: number } = {},
 ): LinkedSessions {
+  const lookupMs = options.lookupMs ?? LOOKUP_MS
   const owner = (sessionId: string): RoutedMachine | null => {
     const split = splitQualified(sessionId)
     if (!split) return null
@@ -95,7 +105,7 @@ export function linkedSessions(
       defaultTool: tool.data,
       machine: m.name,
       machineId: m.id,
-      trusted: p.trusted === true,
+      ...(typeof p.trusted === 'boolean' ? { trusted: p.trusted } : {}),
     }
   }
 
@@ -191,11 +201,17 @@ export function linkedSessions(
             return (m.lastKnown('projects') ?? []).map((raw) => projectOf(m, raw)).filter((p): p is LinkedProject => p !== null).map((p) => ({ ...p, away: why }))
           }
           if (!m.reachable) return mirrored(NOT_REACHABLE)
+          let timer: ReturnType<typeof setTimeout> | undefined
           try {
-            const list = await m.call('projects.list', {})
+            const slow = new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error(`did not answer within ${lookupMs % 1000 === 0 ? `${lookupMs / 1000} s` : `${lookupMs} ms`}`)), lookupMs)
+            })
+            const list = await Promise.race([m.call('projects.list', {}), slow])
             return (Array.isArray(list) ? list : []).map((raw) => projectOf(m, raw)).filter((p): p is LinkedProject => p !== null)
           } catch (err) {
             return mirrored(cause(m, err))
+          } finally {
+            clearTimeout(timer)
           }
         }),
       )

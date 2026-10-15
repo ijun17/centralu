@@ -35,6 +35,18 @@ describe('the projects a name points at, here and on linked machines (#700)', ()
     expect(matchProjects('nowhere/cc', all)).toEqual([])
   })
 
+  it('prefers the exact spelling anywhere over a spelling that differs in case, and this computer’s exact name over a machine’s', () => {
+    const mixed = [here('p1', 'Solo'), there('ijun1', 'Windows PC', 'p9', 'solo'), there('box', 'Linux box', 'p3', 'SOLO')]
+    // Written as the machine’s project is: only that one, though this computer’s differs by case alone
+    expect(matchProjects('solo', mixed).map((p) => p.id)).toEqual(['ijun1.p9'])
+    // Written as this computer’s is: it is not beaten by the machines’ projects that differ by case
+    expect(matchProjects('Solo', mixed).map((p) => p.id)).toEqual(['p1'])
+    // Spelled in none of the ways: every project of that name, any case, is a choice
+    expect(matchProjects('sOlO', mixed).map((p) => p.id)).toEqual(['p1', 'ijun1.p9', 'box.p3'])
+    // The machine’s exact name wins within it too
+    expect(matchProjects('ijun1/solo', [...mixed, there('ijun1', 'Windows PC', 'p10', 'Solo')]).map((p) => p.id)).toEqual(['ijun1.p9'])
+  })
+
   it('tells the choices apart by id and machine', () => {
     expect(projectChoice(here('p2', 'cc'))).toBe('cc [p2] on this computer')
     expect(projectChoice(there('ijun1', 'Windows PC', 'p9', 'cc'))).toBe('cc [ijun1.p9] on Windows PC')

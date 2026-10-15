@@ -1088,4 +1088,35 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     await remote.mgr.respondApproval('w1', remote.mgr.listSessions().find((s) => s.id === 'w1')!.pendingApproval!.requestId, 'allow')
     expect(await ask({ project: name })).toMatchObject({ ok: true, state: 'done', answer: 'approved' })
   })
+  it('sends nothing when the person started a turn in the session while the question stood', async () => {
+    const { remote, name, ask, answer, card } = await rig()
+    const call = ask({ project: name, task: 'say hello' })
+    await until(() => !!card())
+    // The person works in that session there while the card is up: a turn that waits on them
+    await remote.mgr.send('w1', 'please approve my command')
+    await until(() => remote.mgr.listSessions().find((s) => s.id === 'w1')?.state === 'waiting_approval')
+    await answer('allow')
+    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('started a turn of its own while the question to the person stood') })
+    // The task did not join their turn: it is nowhere in the conversation there
+    expect(remote.store.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
+    expect(remote.store.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes("through Centralu's ask_project"))).toBe(false)
+  })
+
+  it('ends the wait with a sentence when the link drops after the task was sent, instead of "still working" for good', async () => {
+    const { remote, name, ask, answer } = await rig()
+    const first = ask({ project: name, task: 'please approve the command' })
+    await answer('allow')
+    expect(await first).toMatchObject({ ok: true, state: 'working', notice: expect.stringContaining('approval there') })
+    await remote.close()
+    // The next call is told what happened to the task, not that it still works
+    let last: Awaited<ReturnType<typeof ask>> | undefined
+    await until(async () => {
+      last = await ask({ project: name })
+      return !last.ok || last.state !== 'working'
+    })
+    expect(last).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/the link to Remote box dropped before the turn ended.*may still be running there/),
+    })
+  })
 })
