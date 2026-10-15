@@ -69,6 +69,7 @@ centralu/
 │  │     │  └─ usage/  settings/  onboarding/
 │  │     ├─ components/         # feature-agnostic shared (Button, Kbd, VirtualList…)
 │  │     ├─ store/              # zustand store + selectors (reducers are imported from core)
+│  │     │                      #   store.ts가 스토어 하나를 만든다. 거기서 떼어 낸 부분(#428): state.ts(타입)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)
