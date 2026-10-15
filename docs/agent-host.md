@@ -1961,6 +1961,13 @@ ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o
     -o GatewayPorts=no -L 127.0.0.1:<port>:127.0.0.1:<port> -- <target>
 ```
 
+`ConnectTimeout` only bounds the connection, so each asking ssh also has a deadline and a bound on its output
+(`SshTunnel.run`): 60 s for the connection line and for starting the host, 30 minutes for one installer, updater or
+autostart step (the managed Windows install downloads about 30 MB of Node inside one step, which a slow link needs
+minutes for). Past its deadline, or once stdout is longer than 1 MiB, the ssh is stopped and the call rejects. Of stderr
+only the end is kept: 64 KiB for an asking ssh, 16 KiB for the forward, whose ssh lives as long as the link and carries
+a link-bound host's log. Output is decoded as a stream, so a character split between two chunks stays whole.
+
 **A machine with no host running is started** (plan §10.9, decision 7). When the connection line says
 `hostRunning: false`, the link goes to `starting`, runs `centralu serve --detach` through the same lookup as the
 connection command (§4.7), writes `[links] <machine>: no Centralu host is running there; starting one` and how it

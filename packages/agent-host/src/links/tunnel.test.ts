@@ -1,10 +1,25 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
-import { autostartCommand, connectionCommand, detachCommand, lastLine, parseConnectionLine, serveCommand, shimNames, SshTunnel, stopCommand, type RemoteSpec } from './tunnel.js'
+import {
+  autostartCommand,
+  connectionCommand,
+  detachCommand,
+  lastLine,
+  parseConnectionLine,
+  serveCommand,
+  shimNames,
+  SSH_COMMAND_TIMEOUT_MS,
+  SSH_EXEC_TIMEOUT_MS,
+  SshTunnel,
+  stopCommand,
+  Tail,
+  type RemoteSpec,
+  type SshTunnelOptions,
+} from './tunnel.js'
 
 /**
  * The ssh transport (#82, docs/plans/remote-hub.md §2) against a fake `ssh` on PATH: a Node script
@@ -42,6 +57,15 @@ if (L !== -1) {
   // end and use up the machine's ephemeral ports. A real remote has nothing listening there yet
   const server = net.createServer((c) => { if (rport === lport) return c.destroy(); const r = net.connect(Number(rport), rhost); c.pipe(r); r.pipe(c); c.on('error', () => r.destroy()); r.on('error', () => c.destroy()) })
   server.listen(Number(lport), bind)
+  // The remote host's log coming through the forward, then the session ending: megabytes of stderr, the reason last
+  if (process.env.FAKE_SSH_NOISE) {
+    setTimeout(() => {
+      process.stderr.write('ssh: Permission denied (publickey), said once at the start\n')
+      const junk = 'remote host log line '.padEnd(1000, '.') + '\n'
+      for (let i = 0; i < 5000; i++) process.stderr.write(junk)
+      process.stderr.write('ssh: connection reset by the remote, said last\n', () => process.exit(1))
+    }, 400)
+  }
   // A remote command after the target: a link-bound host runs in this session, and ends with it
   const remote = args[args.indexOf('--') + 2]
   if (remote && / serve($|[;} ])/.test(decode(remote).cmd)) {
@@ -53,6 +77,10 @@ if (L !== -1) {
   return
 }
 if (process.env.FAKE_SSH_HANG) { fs.appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ hanging: process.pid }) + '\n'); setInterval(() => {}, 1 << 30); return }
+if (process.env.FAKE_SSH_FLOOD) { const chunk = 'x'.repeat(65536); setInterval(() => process.stdout.write(chunk), 1); process.stdout.on('error', () => process.exit(0)); return }
+if (process.env.FAKE_SSH_SLOW_MS) { setTimeout(() => { process.stdout.write('slow ok\n'); process.exit(0) }, Number(process.env.FAKE_SSH_SLOW_MS)); return }
+// A three-byte character cut in the middle between two writes, as a pipe may deliver it
+if (process.env.FAKE_SSH_SPLIT) { const b = Buffer.from('한\n'); process.stdout.write(b.subarray(0, 2)); setTimeout(() => { process.stdout.write(b.subarray(2)); process.exit(0) }, 100); return }
 if (process.env.FAKE_SSH_UNREACHABLE) { process.stderr.write('ssh: connect to host x port 22: Operation timed out\n'); process.exit(255) }
 const { shell, cmd } = decode(args[args.length - 1])
 fs.appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ shell, run: cmd }) + '\n')
@@ -95,12 +123,13 @@ function line(over: Record<string, unknown> = {}) {
   return JSON.stringify({ v: 1, port: remotePort, token: 'tok', version: '0.1.0-beta.11', protocolVersion: 1, dataDir: '/home/me/.centralu', hostRunning: true, ...over })
 }
 
-function tunnel(env: Record<string, string>, remoteSpec?: RemoteSpec) {
+function tunnel(env: Record<string, string>, remoteSpec?: RemoteSpec, extra: Partial<SshTunnelOptions> = {}) {
   const t = new SshTunnel({
     target: 'box',
     remote: remoteSpec,
     env: { ...process.env, PATH: `${dir}${delimiter}${process.env.PATH}`, FAKE_SSH_LOG: log, FAKE_SSH_LINE: line(), FAKE_SSH_HAS: 'centralu', ...env },
     forwardTimeoutMs: 5000,
+    ...extra,
   })
   tunnels.push(t)
   return t
@@ -261,6 +290,62 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
     const big = 'A'.repeat(50_000)
     const r = await t.exec({ command: 'run-it', stdin: big })
     expect(JSON.parse(r.stdout)).toEqual({ cmd: 'run-it', stdin: big })
+  })
+
+  describe('bounds on what an asking ssh may do', () => {
+    it('stops an ssh that never stops printing, and rejects instead of holding its output', async () => {
+      const t = tunnel({ FAKE_SSH_FLOOD: '1' })
+      await expect(t.exec('true')).rejects.toThrow(/printed more than 1 MiB/)
+      expect((t as unknown as { asking: Set<unknown> }).asking.size).toBe(0)
+    })
+
+    it('stops an ssh that does not finish, at the deadline of a short question', async () => {
+      const t = tunnel({ FAKE_SSH_HANG: '1' }, undefined, { commandTimeoutMs: 300 })
+      const t0 = Date.now()
+      await expect(t.startHost()).rejects.toThrow(/did not finish within 300 ms/)
+      expect(Date.now() - t0).toBeLessThan(5000)
+      const pid = (logged().find((l) => typeof l === 'object' && l !== null && 'hanging' in l) as { hanging: number }).hanging
+      // The ssh itself is gone, not only the wait for it
+      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow())
+    })
+
+    it('puts the deadline on asking for the connection line too', async () => {
+      const t = tunnel({ FAKE_SSH_HANG: '1', FAKE_SSH_LINE: line({ port: await freePort() }) }, undefined, { commandTimeoutMs: 300 })
+      await expect(t.open()).rejects.toThrow(/did not finish within/)
+    })
+
+    it('stops an exec step that does not finish, at the step deadline', async () => {
+      const t = tunnel({ FAKE_SSH_HANG: '1' }, undefined, { execTimeoutMs: 300 })
+      await expect(t.exec('true')).rejects.toThrow(/did not finish within/)
+    })
+
+    it('gives an installer step far longer than a short question: a slow download is not cut short', async () => {
+      expect(SSH_COMMAND_TIMEOUT_MS).toBeLessThanOrEqual(60_000)
+      expect(SSH_EXEC_TIMEOUT_MS).toBeGreaterThanOrEqual(15 * 60_000)
+      // The same slow remote: past a short question's deadline, inside a step's
+      const slow = { FAKE_SSH_SLOW_MS: '700' }
+      const limits = { commandTimeoutMs: 200, execTimeoutMs: 5000 }
+      await expect(tunnel(slow, undefined, limits).startHost()).rejects.toThrow(/did not finish within/)
+      expect((await tunnel(slow, undefined, limits).exec('true')).stdout).toBe('slow ok\n')
+    })
+
+    it('reads a character that arrives in two pieces as one character', async () => {
+      const r = await tunnel({ FAKE_SSH_SPLIT: '1' }).exec('true')
+      expect(r.stdout).toBe('한\n')
+    })
+  })
+
+  describe('what the forward keeps of its ssh stderr', () => {
+    it('keeps only the end of megabytes of stderr, and the reason the link ended is its last line', async () => {
+      const t = tunnel({ FAKE_SSH_LINE: line({ port: await freePort() }), FAKE_SSH_NOISE: '1' })
+      const down = new Promise<string>((r) => t.onDown(r))
+      await t.open()
+      const reason = await down
+      expect(reason).toMatch(/ssh exited \(1\)/)
+      expect(reason).toContain('connection reset by the remote, said last')
+      // The first line is long gone: it was about 5 MB ago, and only the end is kept
+      expect(reason).not.toContain('Permission denied')
+    })
   })
 
   it('forgets an ssh that could not be started', async () => {
@@ -478,5 +563,22 @@ describe('the remote command per shell (#82)', () => {
       "Error: Cannot find module '/var/tmp/x.mjs'",
     )
     expect(lastLine('#< CLIXML\n<Objs Version="1.1.0.1"><S S="Error">Cloning into x</S></Objs>')).toBe('')
+  })
+})
+
+describe('Tail', () => {
+  it('keeps the last characters written, however much is written', () => {
+    const t = new Tail(10)
+    for (let i = 0; i < 1000; i++) t.push('0123456789')
+    t.push('abc')
+    expect(t.text).toBe('3456789abc')
+    expect(t.text.length).toBe(10)
+  })
+
+  it('keeps everything while under the bound', () => {
+    const t = new Tail(10)
+    t.push('ab')
+    t.push('cd')
+    expect(t.text).toBe('abcd')
   })
 })
