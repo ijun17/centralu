@@ -794,10 +794,15 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           the time: one icon on one row, not a row of icons on every project. Elsewhere it appears
           with the menu, on hover or focus.
         */}
+        {/*
+          While it is hidden it takes no width either (#734): a transparent pair still took 44px of the line, and with a
+          machine badge on the line a short name was cut ("notes…") beside empty space. It comes back on hover or focus,
+          where the name gives way to it if the line is full.
+        */}
         <span
           className={`-my-1 flex shrink-0 items-center transition-opacity focus-within:opacity-100 group-hover:opacity-100 ${
             summary.length > 0 ? '' : 'ml-auto'
-          } ${open ? 'opacity-100' : 'opacity-0'}`}
+          } ${open ? 'opacity-100' : 'max-w-0 overflow-hidden opacity-0 focus-within:max-w-none group-hover:max-w-none'}`}
         >
           {/*
             A split button (#543): the `+` starts a session at once, with what the project remembers (its last

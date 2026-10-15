@@ -100,6 +100,29 @@ export function sidebarMachinesTests(): void {
       await expect(page.getByTestId('project-machine-beta')).toHaveCount(0)
     })
 
+    test('a short remote name is shown whole beside its badge at the default width; only a name too long for the line is cut', async ({ page }) => {
+      await setup(page)
+      await link(page, 'Laptop')
+      await setMachine(page, 'laptop', { status: 'unreachable' })
+      await page.evaluate(async () => {
+        const w = window as unknown as MockWindow
+        await w.__mock.projects.add('/home/me/notes-site', 'laptop')
+        await w.__mock.projects.add('/home/me/a-project-name-far-too-long-for-one-sidebar-line', 'laptop')
+        await w.__store.getState().refreshProjects()
+      })
+      const cut = (name: string) => page.getByTestId(`project-header-${name}`).evaluate((el) => el.scrollWidth > el.clientWidth)
+      await expect(page.getByTestId('project-machine-notes-site')).toBeVisible()
+      // The sidebar at its default width, the pointer elsewhere: the hidden hover buttons take no room from the name
+      await page.mouse.move(900, 450)
+      expect(await cut('notes-site')).toBe(false)
+      expect(await cut('a-project-name-far-too-long-for-one-sidebar-line')).toBe(true)
+      // The badge still stands right after the name
+      const name = (await page.getByTestId('project-header-notes-site').boundingBox())!
+      const badge = (await page.getByTestId('project-machine-notes-site').boundingBox())!
+      expect(badge.x).toBeGreaterThanOrEqual(name.x + name.width)
+      expect(badge.x - (name.x + name.width)).toBeLessThanOrEqual(10)
+    })
+
     test('the badge is solid while its machine is connected and dashed while it is not, with the link’s error as its tooltip', async ({ page }) => {
       await setup(page)
       await link(page, 'Box')
