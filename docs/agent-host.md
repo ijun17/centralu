@@ -369,7 +369,7 @@ below retained for `safe` and `normal`:
    the child with its report armed (the caller is told when its turn ends, as with `wait: false`); a refusal, or a
    start that fails after the approval, is told to the caller as a message from Centralu (`HOST_SENDER`). The card
    lives in the caller's single approval slot, which the caller's own next events clear while its turn goes on; it is
-   raised again (`raiseHostAsks`, not recorded twice) when that turn ends, unless it ended in an error. While it stands
+   raised again (`raiseHostAsks` in `sessions/host-cards.ts`, not recorded twice) when that turn ends, unless it ended in an error. While it stands
    the request is in the store's `agent_start_requests` (v50): a host swap or restart leaves the row (the leaving
    host's call answers `pending`), and the next host raises the card again (`resumeAgentStart`) and starts the child
    when it is approved. An approval (here or there) first reads again what the start rests on (#673 review): the

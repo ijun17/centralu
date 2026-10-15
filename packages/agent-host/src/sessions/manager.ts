@@ -13,7 +13,7 @@ import { ChildOwnership, pausedReportKey, readPausedTasks, type AgentStartReques
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
 import { SessionAppsHub } from './session-apps.js'
 import { AppAccess, writeShared } from './app-access.js'
-import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, BrokerHost, CapabilityQuestion, ExternalApps, HostCapability } from '../apps/external/runtime.js'
+import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, BrokerHost, ExternalApps, HostCapability } from '../apps/external/runtime.js'
 import { AgentRunWait, finalAnswer } from './app-agents.js'
 import { CacheLedger } from './cache-ledger.js'
 import { askFrame, underGrant } from './ask-project.js'
@@ -30,7 +30,6 @@ import { existsSync, rmSync, statSync } from 'node:fs'
 import type {
   CacheStats,
   RebuildCause,
-  AppQuestion,
   AppReach,
   BackgroundTask,
   ProjectConsent,
@@ -139,9 +138,10 @@ import { mentions, readMessageImage, resolveWrittenPath, writtenForms } from '..
 import { handoffNoteBytes, handoffNoteDir, sweepHandoffNotes, writeHandoffNote, writeHandoffNoteSync } from '../dev-services/handoff-notes.js'
 import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
 import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, HUB_SENDER, agentStartPersonText, taskList } from './delegation-flow.js'
-import { type HostAsk, type HostAskAnswer } from './host-cards.js'
+import { type HostAsk } from './host-cards.js'
 import { RestartPolicy, type RestartHost } from './restart-policy.js'
 import { WorktreeSessions, type WorktreeHost, canonicalPath, insideFolder } from './worktree-sessions.js'
+import { HostCards, type HostCardsHost } from './host-cards.js'
 export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './delegation-flow.js'
 
 /**
@@ -491,6 +491,8 @@ export class SessionManager {
   private readonly restartPolicy: RestartPolicy
   /** A worktree session's worktree: made for a new session, taken apart on cleanup (worktree-sessions.ts) */
   private readonly worktrees: WorktreeSessions
+  /** The cards the host raises in a session's approval slot, and the screen's capability questions (host-cards.ts) */
+  private readonly hostCards: HostCards
   /** Holds the session's owed report over its own background work (#721); the mark itself stays as it is */
   private pauseReport(sessionId: string, running: readonly BackgroundTask[]): void {
     this.children.pauseReport(sessionId, running)
@@ -591,13 +593,6 @@ export class SessionManager {
   private agentRuns = new Map<string, AgentRunWait>()
   /** Temporary readers of a person's turn; they never own work or pin the calling session awake. */
   private turnObservers = new Map<string, Set<AgentRunWait>>()
-  /**
-   * A card the host raises in a session's approval slot — requestId -> question: an app's capability question (M4
-   * D-4), or one project reaching another (#371). It uses the same slot as the adapter's card (the session's
-   * `pendingApproval`), so if the adapter's card is already up, this one is raised only after that one closes
-   * (`raiseHostAsks`). The answer (`respondApproval`) never reaches the adapter — it is resolved right here.
-   */
-  private hostAsks = new Map<string, HostAsk>()
   /** Turns a quit cut, and who to tell, waiting for the start to finish (#698, `tellQuitNotices`) */
   private quitNotices: { sessionId: string; requester: string }[] = []
   /** Sessions whose tool is `retrying`, and since when (#698): flagged `reconnecting` once it lasts `RECONNECTING_FLAG_MS` */
@@ -610,21 +605,6 @@ export class SessionManager {
    * restart asks again (the caller's agent then raises its own card for a read outside its folder).
    */
   private readGrants = new Map<string, Set<string>>()
-  /**
-   * requestId of an approval response that reached the adapter (#158) — request id -> session id. If
-   * a second response arrives for the same request (double key press, or two windows both
-   * firing at once), the adapter no longer knows that request and returns `false`. Reading that as
-   * "the process got swapped" would broadcast `deny` for a command that just ran and record it that
-   * way too — an allowed command would show up as denied. A request found here has already been
-   * answered, so it is left alone quietly. Entries are evicted oldest first (a request id is never
-   * reused, so only the recent ones need remembering).
-   */
-  private answeredApprovals = new Map<string, string>()
-  /**
-   * Capability question for a chain started from the screen (M4 D-4) — drawn by that app's pinned
-   * view and the sidebar's app row (`apps.questions`). id -> question.
-   */
-  private appQuestions = new Map<string, { question: AppQuestion; resolve: (d: 'allow' | 'deny' | null) => void }>()
 
   constructor(
     private store: Store,
@@ -654,6 +634,7 @@ export class SessionManager {
     this.delegationFlow = new DelegationFlow(this.delegationHost())
     this.restartPolicy = new RestartPolicy(this.restartHost())
     this.worktrees = new WorktreeSessions(this.worktreeHost())
+    this.hostCards = new HostCards(this.hostCardsHost())
     this.proposals = new OrchestratorProposals(
       this.store,
       () => this.appsHub?.rt,
@@ -968,7 +949,7 @@ export class SessionManager {
     } catch (e) {
       return { ok: false, error: (e as Error).message }
     }
-    const decision = await this.askHost(
+    const decision = await this.hostCards.askHost(
       sessionId,
       { kind: 'project_create', name: target.name, path: target.path, ...(spec.source ? { source: spec.source } : {}) },
       signal,
@@ -1000,7 +981,7 @@ export class SessionManager {
   ): Promise<{ ok: true; projectId: string; name: string; path: string; machine: string } | { ok: false; error: string }> {
     const preview = await reader.previewProject(machine.id, spec)
     if (!preview.ok) return preview
-    const decision = await this.askHost(
+    const decision = await this.hostCards.askHost(
       sessionId,
       { kind: 'project_create', name: preview.name, path: preview.path, ...(spec.source ? { source: spec.source } : {}), machine: machine.name },
       signal,
@@ -2767,9 +2748,9 @@ export class SessionManager {
     this.updateApplyConsents.delete(sessionId)
     // A capability question raised on this session has nowhere left to be answered (D-4) — it is ended with
     // no answer (the window does not remember it, just declines)
-    for (const ask of [...this.hostAsks.values()]) {
+    for (const ask of [...this.hostCards.hostAsks.values()]) {
       if (ask.sessionId !== sessionId) continue
-      this.hostAsks.delete(ask.requestId)
+      this.hostCards.hostAsks.delete(ask.requestId)
       ask.resolve(null)
     }
     const handle = this.handles.get(sessionId)
@@ -3384,13 +3365,13 @@ export class SessionManager {
     if (endedTurn && e.sessionId && this.children.turnOwners.get(e.sessionId)?.untilTurnEnd) this.children.releaseTurn(e.sessionId)
     // The card slot is now empty — if a capability question was waiting, it is raised (D-4). Either the
     // adapter's card just closed, or a card that had been hiding ours just closed
-    if (e.type === 'approval_resolved' && e.sessionId) this.raiseHostAsks(e.sessionId)
+    if (e.type === 'approval_resolved' && e.sessionId) this.hostCards.raiseHostAsks(e.sessionId)
     /*
      * A card still standing when the turn ends is raised again (#673): a start_agent request that answered "pending"
      * outlives the call, and the turn's own events cleared the slot meanwhile. An error is left showing; the card
      * comes back at the next turn's end
      */
-    if (endedTurn && e.sessionId && this.meta.get(e.sessionId)?.state !== 'error') this.raiseHostAsks(e.sessionId)
+    if (endedTurn && e.sessionId && this.meta.get(e.sessionId)?.state !== 'error') this.hostCards.raiseHostAsks(e.sessionId)
     // Applies a setting that changed mid-turn now (#164) — if it was reverted in between there is no drift,
     // so nothing happens
     // A commit call still unanswered when its turn ends never will be: interrupted, or its process gone (#392)
@@ -4224,14 +4205,14 @@ export class SessionManager {
     // A card the host raised (M4 D-4, #371) — the adapter has never heard of this card, so it is resolved right here.
     // For a capability question "always allow" is treated as allow (the answer gets remembered regardless); a
     // cross-project consent keeps all three (always is the pair remembered)
-    const ask = this.hostAsks.get(requestId)
+    const ask = this.hostCards.hostAsks.get(requestId)
     if (ask && ask.sessionId === sessionId) {
-      this.hostAsks.delete(requestId)
+      this.hostCards.hostAsks.delete(requestId)
       // A new project (#515) has nothing to remember either: "always" makes this one, as allow does
       const keepsAlways =
         ask.detail.kind === 'project_access' || ask.detail.kind === 'agent_start' || ask.detail.kind === 'centralu_update' || isCentraluApply(ask.detail)
       const answer = !keepsAlways && decision === 'always' ? 'allow' : decision
-      this.restAfterCard(ask)
+      this.hostCards.restAfterCard(ask)
       this.onEvent({ type: 'approval_resolved', sessionId, requestId, decision: answer })
       // Starting agents (#561) has two always: this session (the card's default) or the whole project (⌥)
       ask.resolve(ask.detail.kind === 'agent_start' && answer === 'always' && scope === 'project' ? 'always_project' : answer)
@@ -4253,10 +4234,10 @@ export class SessionManager {
 
     // This is a second response to a request that has already been answered — since the first response
     // already landed, this never broadcasts a denial or reports a failure (#158)
-    if (!landed && this.answeredApprovals.get(requestId) === sessionId) return
+    if (!landed && this.hostCards.answeredApprovals.get(requestId) === sessionId) return
     if (landed) {
-      this.answeredApprovals.set(requestId, sessionId)
-      if (this.answeredApprovals.size > 256) this.answeredApprovals.delete(this.answeredApprovals.keys().next().value!)
+      this.hostCards.answeredApprovals.set(requestId, sessionId)
+      if (this.hostCards.answeredApprovals.size > 256) this.hostCards.answeredApprovals.delete(this.hostCards.answeredApprovals.keys().next().value!)
     }
 
     if (!landed) {
@@ -5261,6 +5242,26 @@ export class SessionManager {
     }
   }
 
+  /** What `HostCards` reaches of this manager (#428): its state read when used, its operations called through */
+  private hostCardsHost(): HostCardsHost {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
+    const self = this
+    return {
+      applyStateHint: (...a) => self.applyStateHint(...a),
+      autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
+      get emit() {
+        return self.emit
+      },
+      get meta() {
+        return self.meta
+      },
+      onEvent: (...a) => self.onEvent(...a),
+      get store() {
+        return self.store
+      },
+    }
+  }
+
   /** What `WorktreeSessions` reaches of this manager (#428): its state read when used, its operations called through */
   private worktreeHost(): WorktreeHost {
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
@@ -5346,7 +5347,7 @@ export class SessionManager {
       },
       answerRoutedCard: (...a) => self.answerRoutedCard(...a),
       applyDeferredRestart: (...a) => self.restartPolicy.applyDeferredRestart(...a),
-      askHost: (...a) => self.askHost(...a),
+      askHost: (...a) => self.hostCards.askHost(...a),
       autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
       builderRefOf: (...a) => self.builderRefOf(...a),
       busyAnswer: (...a) => self.busyAnswer(...a),
@@ -5413,7 +5414,7 @@ export class SessionManager {
       },
       uiPreferences: (...a) => self.uiPreferences(...a),
       untilCard: (...a) => self.untilCard(...a),
-      withdrawHostAsk: (...a) => self.withdrawHostAsk(...a),
+      withdrawHostAsk: (...a) => self.hostCards.withdrawHostAsk(...a),
     }
   }
 
@@ -5620,7 +5621,7 @@ export class SessionManager {
       runAgent: (req, ctx) => this.runAppAgent(req, ctx),
       hostData: (name, app) => this.appHostData(name, app),
       agentLabel: (tool) => this.adapters.get(tool)?.descriptor.label ?? tool,
-      askCapability: (q, signal) => this.askCapability(q, signal),
+      askCapability: (q, signal) => this.hostCards.askCapability(q, signal),
     }
   }
 
@@ -5668,7 +5669,7 @@ export class SessionManager {
     const to = projects.find((p) => p.id === toProjectId)
     if (!from || !to) return { ok: false, error: 'That project is no longer registered' }
     if (this.store.getProjectConsent(fromId, toProjectId, access)) return { ok: true }
-    const decision = await this.askHost(
+    const decision = await this.hostCards.askHost(
       callerSessionId,
       {
         kind: 'project_access',
@@ -5704,31 +5705,6 @@ export class SessionManager {
     if (this.meta.get(sessionId)?.permissionPreset !== 'auto') return false
     if (boundary) console.error(`[permissions] auto session ${sessionId}: ${boundary} allowed`)
     return true
-  }
-
-  /**
-   * Auto allows and logs; other presets raise a host card, withdrawn if the signal fires. `requestId` is given when the
-   * caller tracks the card itself (a start_agent request, #673); `shown` raises one the conversation already records
-   * (a request carried over from the previous host) without recording it again.
-   */
-  private askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal, card: { requestId?: string; shown?: boolean } = {}): Promise<HostAskAnswer> {
-    if (signal?.aborted) return Promise.resolve(null)
-    const note = detail.kind === 'project_access' && !detail.to.trusted ? ' (target not trusted)' : ''
-    if (this.autoBoundaryOpen(sessionId, `${detail.kind}${note}`)) return Promise.resolve('allow')
-    return new Promise<HostAskAnswer>((resolve) => {
-      if (signal?.aborted) return resolve(null)
-      const requestId = card.requestId ?? `${detail.kind === 'project_access' ? 'xp' : detail.kind === 'agent_start' ? 'ag' : detail.kind === 'centralu_update' || isCentraluApply(detail) ? 'up' : 'mk'}-${randomUUID()}`
-      const ask: HostAsk = { requestId, sessionId, detail, shown: card.shown ?? false, resolve }
-      this.hostAsks.set(requestId, ask)
-      signal?.addEventListener('abort', () => {
-        if (!this.hostAsks.delete(requestId)) return
-        // An unanswerable card is never left behind, in the session it stands in now (a handoff moves it, #693)
-        const m = this.meta.get(ask.sessionId)
-        if (m?.pendingApproval?.requestId === requestId) this.onEvent({ type: 'approval_resolved', sessionId: ask.sessionId, requestId, decision: 'deny' })
-        resolve(null)
-      }, { once: true })
-      this.raiseHostAsks(sessionId)
-    })
   }
 
   /** Every remembered cross-project consent, with the projects' names as they are now (#371, Settings) */
@@ -5807,7 +5783,7 @@ export class SessionManager {
     const updates = this.updates
     if (!updates) return { ok: false, error: 'Update checks are unavailable' }
     if (this.toolProfileOf(sessionId) === 'reader' && !this.updateConsents.has(sessionId)) {
-      const decision = await this.askHost(sessionId, { kind: 'centralu_update', action })
+      const decision = await this.hostCards.askHost(sessionId, { kind: 'centralu_update', action })
       if (decision === 'always') this.updateConsents.add(sessionId)
       else if (decision !== 'allow') return { ok: false, error: 'The person did not allow this Centralu update. Do not ask again unless they tell you to.' }
     }
@@ -5837,7 +5813,7 @@ export class SessionManager {
     const outcome = await broker.apply(async () => {
       if (this.updateApplyConsents.has(sessionId)) return null
       // As `other` with its whole question as the text: a released window drops a detail it cannot parse (#665 review)
-      const decision = await this.askHost(sessionId, { kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }, signal)
+      const decision = await this.hostCards.askHost(sessionId, { kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }, signal)
       if (decision === 'always') this.updateApplyConsents.add(sessionId)
       else if (decision === null) return 'The question to the person was withdrawn before they answered, so nothing was relaunched.'
       else if (decision !== 'allow') return 'The person did not allow this session to apply the Centralu update. Do not ask again unless they tell you to.'
@@ -5985,16 +5961,16 @@ export class SessionManager {
        */
       for (const r of starts) {
         r.req.callerId = to
-        const ask = this.hostAsks.get(r.req.requestId)
+        const ask = this.hostCards.hostAsks.get(r.req.requestId)
         if (!ask || ask.sessionId !== from) continue
         const standing = this.meta.get(from)?.pendingApproval?.requestId === ask.requestId
-        if (standing) this.restAfterCard(ask)
+        if (standing) this.hostCards.restAfterCard(ask)
         // Moved before the original's slot empties: closing it raises the next card waiting there, never this one again
         ask.sessionId = to
         ask.shown = true
         ask.restState = undefined
         if (standing) this.onEvent({ type: 'approval_resolved', sessionId: from, requestId: ask.requestId, decision: 'deny' })
-        this.raiseHostAsks(to)
+        this.hostCards.raiseHostAsks(to)
       }
     })
     const items = moved.map((c) => `${movedLabel(c)} (${c.state})`)
@@ -6044,7 +6020,7 @@ export class SessionManager {
     const target = this.meta.get(sessionId)
     if (!caller || caller.permissionPreset !== 'auto' || this.isAppAgentSession(caller)) return false
     if (!target || target.permissionPreset === 'safe' || this.isAppAgentSession(target)) return false
-    return !this.hostAsks.has(requestId)
+    return !this.hostCards.hostAsks.has(requestId)
   }
 
   /**
@@ -6133,7 +6109,7 @@ export class SessionManager {
     const answered: ChildRunResult = { ok: true, state: 'answered', card: chosen.card, sessionId, sessionName: name, tool: m.tool }
     if (chosen.kind === 'approval') {
       if (!chosen.answerable || !this.autoBoundaryOpen(callerId, 'answer an approval in a delegated turn')) {
-        const why = this.hostAsks.has(chosen.requestId) ? 'Centralu raised it there'
+        const why = this.hostCards.hostAsks.has(chosen.requestId) ? 'Centralu raised it there'
           : m.permissionPreset === 'safe' || this.isAppAgentSession(m) ? `"${name}" runs under ${this.isAppAgentSession(m) ? "an app's agent" : 'safe'}, and you cannot raise its permissions`
           : 'your permission preset is not auto'
         return { ok: false, error: `Only the person can answer this approval in "${name}": ${why}. Tell them if it matters.` }
@@ -6363,9 +6339,9 @@ export class SessionManager {
     keepAuto: boolean,
   ): void {
     const kept = (sessionId: string) => keepAuto && this.meta.get(sessionId)?.permissionPreset === 'auto'
-    for (const ask of [...this.hostAsks.values()]) {
+    for (const ask of [...this.hostCards.hostAsks.values()]) {
       const reach = ask.detail.kind === 'project_access' || (ask.detail.kind === 'agent_start' && !this.children.agentStarts.has(ask.requestId))
-      if (reach && !kept(ask.sessionId) && cards(ask)) this.withdrawHostAsk(ask.requestId)
+      if (reach && !kept(ask.sessionId) && cards(ask)) this.hostCards.withdrawHostAsk(ask.requestId)
     }
     const dropped = this.children.dropQueued((r) =>
       r.via === 'ask_project' &&
@@ -6374,18 +6350,6 @@ export class SessionManager {
       queued(r, this.meta.get(r.callerSessionId)?.projectId, this.meta.get(r.sessionId)?.projectId),
     )
     for (const r of dropped) void this.tellQueuedFailed(r.callerSessionId, r.sessionId, why)
-  }
-
-  /** A card the host raised closes unanswered: out of the session's slot, and whatever waits on it hears no answer */
-  private withdrawHostAsk(requestId: string): void {
-    const ask = this.hostAsks.get(requestId)
-    if (!ask) return
-    this.hostAsks.delete(requestId)
-    if (this.meta.get(ask.sessionId)?.pendingApproval?.requestId === requestId) {
-      this.restAfterCard(ask)
-      this.onEvent({ type: 'approval_resolved', sessionId: ask.sessionId, requestId, decision: 'deny' })
-    }
-    ask.resolve(null)
   }
 
   /** A queued request could not be delivered (#677): said in the requester's session, as a report is */
@@ -6413,101 +6377,14 @@ export class SessionManager {
     return { ok: true, state: 'queued', sessionId, sessionName: m.name, tool: m.tool, queueId: list[i]!.id, position: i + 1 }
   }
 
-  private askCapability(q: CapabilityQuestion, signal: AbortSignal): Promise<'allow' | 'deny' | null> {
-    return new Promise((resolve) => {
-      if (signal.aborted) return resolve(null)
-      const app = { appId: q.app.appId, projectId: q.app.projectId, name: q.appName }
-      if (q.origin.kind === 'session' && this.meta.has(q.origin.sessionId)) {
-        const requestId = `cap-${randomUUID()}`
-        const ask: HostAsk = {
-          requestId,
-          sessionId: q.origin.sessionId,
-          detail: { kind: 'capability' as const, app, capability: q.capability, text: q.text },
-          shown: false,
-          resolve: (d) => resolve(d === 'always' || d === 'always_project' ? 'allow' : d),
-        }
-        this.hostAsks.set(requestId, ask)
-        signal.addEventListener('abort', () => {
-          if (!this.hostAsks.delete(requestId)) return
-          // If the card is still showing, it is closed — an unanswerable card is never left behind
-          const m = this.meta.get(ask.sessionId)
-          if (m?.pendingApproval?.requestId === requestId) this.onEvent({ type: 'approval_resolved', sessionId: ask.sessionId, requestId, decision: 'deny' })
-          resolve(null)
-        }, { once: true })
-        this.raiseHostAsks(ask.sessionId)
-        return
-      }
-      const origin = q.origin.kind === 'view' ? q.origin.app : q.app
-      const id = `q-${randomUUID()}`
-      this.appQuestions.set(id, {
-        question: { id, app, capability: q.capability, text: q.text, origin: { appId: origin.appId, projectId: origin.projectId }, askedAt: q.askedAt, expiresAt: q.expiresAt },
-        resolve,
-      })
-      this.emit({ type: 'external_app_questions_changed' })
-      signal.addEventListener('abort', () => {
-        if (!this.appQuestions.delete(id)) return
-        this.emit({ type: 'external_app_questions_changed' })
-        resolve(null)
-      }, { once: true })
-    })
+  /** `HostCards.appQuestionList` (host-cards.ts), kept on the manager for its callers */
+  appQuestionList(...a: Parameters<HostCards['appQuestionList']>): ReturnType<HostCards['appQuestionList']> {
+    return this.hostCards.appQuestionList(...a)
   }
 
-  /**
-   * If this session's card slot is empty, raises one waiting capability question (M4 D-4). A
-   * session's approval card is one at a time (`pendingApproval`), so while an adapter's own card is
-   * showing, this waits, and raises once that one closes. If an adapter's card had been hiding ours
-   * and then closes, ours is raised **again** — but without recording it a second time (so the
-   * conversation never ends up with the same card as two separate lines).
-   */
-  private raiseHostAsks(sessionId: string): void {
-    const m = this.meta.get(sessionId)
-    if (!m || m.pendingApproval) return
-    const next = [...this.hostAsks.values()].find((a) => a.sessionId === sessionId)
-    if (!next) return
-    const e = { type: 'approval_request' as const, sessionId, requestId: next.requestId, detail: next.detail }
-    /*
-     * Raised again between turns (#673: a start_agent card that outlived its call, or one the previous host left): its
-     * answer returns the session to this. A first raise is always inside the tool call that asks
-     */
-    next.restState = next.shown && !inTurn(m.state) ? m.state : undefined
-    if (!next.shown) {
-      next.shown = true
-      this.onEvent(e)
-      return
-    }
-    this.applyStateHint(e, m)
-    this.store.upsertSession(m)
-    this.emit(e)
-  }
-
-  /**
-   * A host card raised between turns closes back into that rest (#673), not into "working": no tool call is waiting on
-   * it, so nothing would ever end that turn. Set before the card's `approval_resolved`, which then changes no state, and
-   * without `onEvent`, since no turn ended (no report, no deferred restart).
-   */
-  private restAfterCard(ask: HostAsk): void {
-    const m = this.meta.get(ask.sessionId)
-    if (!ask.restState || m?.pendingApproval?.requestId !== ask.requestId) return
-    const e = { type: 'state_change' as const, sessionId: ask.sessionId, state: ask.restState }
-    this.applyStateHint(e, m)
-    this.store.upsertSession(m)
-    this.emit(e)
-  }
-
-  /** Screen-originated capability questions still awaiting an answer (M4 D-4) */
-  appQuestionList(): AppQuestion[] {
-    return [...this.appQuestions.values()].map((x) => ({ ...x.question })).sort((a, b) => a.askedAt - b.askedAt)
-  }
-
-  /** Answers a capability question (M4 D-4) — refuses with a reason if the question is no longer open */
-  answerAppQuestion(questionId: string, decision: 'allow' | 'deny'): void {
-    const q = this.appQuestions.get(questionId)
-    if (!q) {
-      throw Object.assign(new Error('That question is no longer open — it timed out, or the app stopped waiting'), { code: 'internal' })
-    }
-    this.appQuestions.delete(questionId)
-    this.emit({ type: 'external_app_questions_changed' })
-    q.resolve(decision)
+  /** `HostCards.answerAppQuestion` (host-cards.ts), kept on the manager for its callers */
+  answerAppQuestion(...a: Parameters<HostCards['answerAppQuestion']>): ReturnType<HostCards['answerAppQuestion']> {
+    return this.hostCards.answerAppQuestion(...a)
   }
 
   /**
@@ -7408,10 +7285,10 @@ export class SessionManager {
     for (const readers of this.turnObservers.values()) for (const observer of readers) observer.fail(new Error('Centralu is stopping'))
     this.appsHub?.rt.attachBrokerHost(null)
     for (const run of [...this.agentRuns.values()]) run.fail(new Error('Centralu is shutting down'))
-    for (const ask of [...this.hostAsks.values()]) ask.resolve(null)
-    this.hostAsks.clear()
-    for (const q of [...this.appQuestions.values()]) q.resolve(null)
-    this.appQuestions.clear()
+    for (const ask of [...this.hostCards.hostAsks.values()]) ask.resolve(null)
+    this.hostCards.hostAsks.clear()
+    for (const q of [...this.hostCards.appQuestions.values()]) q.resolve(null)
+    this.hostCards.appQuestions.clear()
     this.appAccess?.dispose()
     this.appsHub?.dispose()
     // The messages in progress are written as they stand — a shutdown must not swallow the last two seconds (#66).
@@ -7456,10 +7333,10 @@ export class SessionManager {
     this.memoryGate?.close()
     for (const run of [...this.agentRuns.values()]) run.fail(new Error('Centralu is restarting'))
     for (const readers of this.turnObservers.values()) for (const observer of readers) observer.fail(new Error('Centralu is restarting'))
-    for (const ask of [...this.hostAsks.values()]) ask.resolve(null)
-    this.hostAsks.clear()
-    for (const q of [...this.appQuestions.values()]) q.resolve(null)
-    this.appQuestions.clear()
+    for (const ask of [...this.hostCards.hostAsks.values()]) ask.resolve(null)
+    this.hostCards.hostAsks.clear()
+    for (const q of [...this.hostCards.appQuestions.values()]) q.resolve(null)
+    this.hostCards.appQuestions.clear()
     this.appAccess?.dispose()
     this.appsHub?.dispose()
     await Promise.allSettled([...[...this.handles.values()].map((h) => (h.detach ? h.detach() : h.dispose())), ...this.mergeChecks])
