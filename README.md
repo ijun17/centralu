@@ -36,7 +36,7 @@ them it starts up fine and then has nothing to open a session with.
 
 | | |
 |---|---|
-| **Node 22.14 or newer** | the host sidecar runs on it. If it's missing or too old, the app says so on startup and names the version it wants |
+| **Node 22.14 or newer** | the host sidecar runs on it, and the bundled database crashes on an older 22.x. If it's missing, the app says so on startup |
 | **`claude` CLI**, logged in | for Claude Code sessions — `npm i -g @anthropic-ai/claude-code` |
 | **`codex` CLI**, logged in | for Codex sessions — `npm i -g @openai/codex`. Skip it if you don't use Codex |
 

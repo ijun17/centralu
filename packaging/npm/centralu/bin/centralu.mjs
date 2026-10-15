@@ -627,11 +627,12 @@ switch (cmd) {
       /*
        * Before anything spawns a host: under a Node below the floor the host crashes on its first
        * database call, with nothing in its log (issue #699). `--detach` also answers in the line the
-       * hub reads, so it can offer its managed install instead of quoting a crash. `--connection`,
-       * `--stop` and the other modes start no host and keep working, so the hub can still ask this
+       * hub reads, so it can offer its managed install instead of quoting a crash. `--autostart on`
+       * writes a boot entry that would start that host. `--connection`, `--stop`, `--autostart
+       * off|status` and `--rotate-token` start no host and keep working, so the hub can still ask this
        * machine what Node it has.
        */
-      const startsHost = args.mode === 'serve' || args.mode === 'detach'
+      const startsHost = args.mode === 'serve' || args.mode === 'detach' || (args.mode === 'autostart' && args.autostart === 'on')
       if (startsHost && belowFloor(process.versions.node, NODE_FLOOR)) {
         const message = oldNodeSentence(process.versions.node, NODE_FLOOR)
         console.error(`centralu serve: ${message}`)
@@ -639,7 +640,9 @@ switch (cmd) {
           const line = { v: 1, detach: { ok: false, how: null, reason: 'node_too_old', message, node: process.versions.node, floor: NODE_FLOOR } }
           process.stdout.write(`${JSON.stringify(line)}\n`)
         }
-        process.exit(1)
+        // Not process.exit: the line above is on a pipe, and exiting at once may cut it
+        process.exitCode = 1
+        break
       }
       // A launcher `--detach` started: what it carried (the data folder, a host entry) applies before
       // anything below reads the environment

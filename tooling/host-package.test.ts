@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { APP_VERSION } from '../packages/protocol/src/brand.js'
 import { hostOnlyPackage, type RemotePlatform } from '../packages/agent-host/src/links/install.js'
-import { hostPackageDir, hostPackageProblems, PIN_FILE, remotePlatforms, stageHostPackage } from '../scripts/host-package.mjs'
+import { hostPackageDir, hostPackageProblems, LAUNCHER_PACKAGE_FILE, PIN_FILE, remotePlatforms, stageHostPackage } from '../scripts/host-package.mjs'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { HOST_PACKAGES } from '../packaging/npm/centralu/bin/platform.mjs'
 
@@ -72,6 +72,7 @@ describe('staging and checking one (release-npm.mts)', () => {
     file('node_modules/node-pty/package.json', '{}')
     file(`node_modules/node-pty/prebuilds/${platform}/conpty.node`, 'MZ')
     copyFileSync(PIN_FILE, join(at, 'remote-runtime.json'))
+    copyFileSync(LAUNCHER_PACKAGE_FILE, join(at, 'centralu-package.json'))
   }
   /** A copy of `packaging/npm/host-<platform>`, to stage into */
   const pkgCopy = (platform: string) => {
@@ -105,6 +106,7 @@ describe('staging and checking one (release-npm.mts)', () => {
     rmSync(join(src, 'node_modules', 'node-pty', 'prebuilds'), { recursive: true })
     rmSync(join(src, 'node_modules', 'better-sqlite3'), { recursive: true })
     writeFileSync(join(src, 'remote-runtime.json'), '{}\n')
+    writeFileSync(join(src, 'centralu-package.json'), '{}\n')
     stageHostPackage(src, pkg)
     // The window must not ride along: that is the whole point of the package
     writeFileSync(join(pkg, 'centralu.exe'), 'MZ')
@@ -113,8 +115,11 @@ describe('staging and checking one (release-npm.mts)', () => {
       'host/node_modules/node-pty/prebuilds/win32-x64/conpty.node is missing: centralu serve would not start',
       'the host was bundled for linux-x64, not win32-x64',
       'host/remote-runtime.json differs from packaging/remote-runtime.json: the host was bundled before the Node pin moved',
+      'host/centralu-package.json differs from packaging/npm/centralu/package.json: the host was bundled before the Node floor moved',
       'the package folder holds more than the host: centralu.exe',
     ])
+    rmSync(join(pkg, 'host', 'centralu-package.json'))
+    expect(hostPackageProblems(pkg, 'win32-x64')).toContain('host/centralu-package.json is missing: a hub on this version could not tell which Node a machine needs')
   })
 
   it('refuses a manifest that would ship more or less than host/, or under another name', () => {

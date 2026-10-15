@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -21,6 +21,19 @@ import { scriptedAdapters } from './scripted-agent.test-helpers.js'
  * server, the hub with the router and links `main.ts` wires, linked to the other as `m1` on
  * loopback. Only the transport differs from a real link (tunnel.test.ts covers ssh).
  */
+
+/** `nodeFloor()` of the host's copy of the npm manifest, which a test can make unreadable */
+const flags = vi.hoisted(() => ({ floorBroken: false }))
+vi.mock('./install.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./install.js')>()
+  return {
+    ...actual,
+    nodeFloor: () => {
+      if (flags.floorBroken) throw new Error('centralu-package.json is missing from this host')
+      return actual.nodeFloor()
+    },
+  }
+})
 
 const TOKEN = 'tok'
 const cleanups: (() => Promise<void> | void)[] = []
@@ -547,7 +560,16 @@ describe('a machine whose Node is below the floor (#699)', () => {
    * `startHost` is what the machine's launcher answers; the scripted install steps switch the line to
    * the managed install, the way the machine's own launcher would then answer
    */
-  async function linkTo(o: { startHost: (n: number) => Promise<HostStart>; line?: Partial<ConnectionLine>; dev?: boolean; remote?: { shell: 'posix'; command?: string } }) {
+  async function linkTo(o: {
+    startHost: (n: number) => Promise<HostStart>
+    line?: Partial<ConnectionLine>
+    dev?: boolean
+    remote?: { shell: 'posix'; command?: string }
+    /** Every command fails, as an install does on a machine that cannot download */
+    failInstall?: boolean
+    /** What the commands after the install answer (an uninstall); the machine is then back as it was */
+    later?: string[]
+  }) {
     const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: APP_VERSION, files: { 'package.json': '{}' } })))
     cleanups.push(() => reg.close())
     const remote = await remoteHost()
@@ -564,8 +586,18 @@ describe('a machine whose Node is below the floor (#699)', () => {
     const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { hostRunning: running, install: installed ? MANAGED : OLD, ...o.line })), {
       exec: async (cmd: string) => {
         runs.push(cmd)
+        if (o.failInstall) return { code: 1, stderr: 'curl: (6) Could not resolve host', stdout: '' }
+        const i = runs.length - 1
+        if (i >= 3) {
+          const out = o.later?.[i - 3] ?? ''
+          if (out.includes('uninstalled')) {
+            installed = false
+            running = false
+          }
+          return { code: 0, stderr: '', stdout: out }
+        }
         installed = runs.length >= 3
-        return { code: 0, stderr: '', stdout: answers[runs.length - 1] ?? '' }
+        return { code: 0, stderr: '', stdout: answers[i] ?? '' }
       },
       startHost: async () => {
         calls.push(installed ? 'managed' : 'system')
@@ -591,7 +623,7 @@ describe('a machine whose Node is below the floor (#699)', () => {
     })
     cleanups.push(() => links.stop())
     links.start()
-    return { links, runs, calls, logs, row: () => links.list()[0]! }
+    return { links, runs, calls, logs, row: () => links.list()[0]!, starts: () => starts }
   }
 
   it('installs the pinned Node before it tries to start a host under the old one, and says so in one sentence', async () => {
@@ -642,6 +674,49 @@ describe('a machine whose Node is below the floor (#699)', () => {
     await new Promise((r) => setTimeout(r, 400))
     expect(l.runs).toHaveLength(3)
     expect(l.row().error).toBe('Centralu could not be started on Remote box: centralu serve exited (3221225477) before its host answered')
+  })
+
+  it('tries a failing install once, not at every retry (each one is a download)', async () => {
+    const l = await linkTo({ failInstall: true, startHost: async () => ({ how: 'detached', note: null }) })
+    await until(() => l.row().status === 'not_running')
+    await new Promise((r) => setTimeout(r, 700))
+    // Preflight failed once; the retries (every 50 to 200 ms here) report instead of trying again
+    expect(l.runs).toHaveLength(1)
+    expect(l.row().error).toMatch(/older than 22\.14\.0[\s\S]*installing it failed/)
+    expect(l.calls).toEqual([])
+  })
+
+  it('does not blame a Node at or above the floor for a crash, and installs nothing', async () => {
+    const l = await linkTo({
+      line: { install: { managed: false, current: null, previous: null, node: '22.20.0' } },
+      startHost: async () => {
+        throw new NodeTooOld('centralu serve exited (3221225477) before its host answered', 'crashed', null)
+      },
+    })
+    await until(() => l.row().status === 'not_running')
+    expect(l.row().error).toBe('Centralu could not be started on Remote box: centralu serve exited (3221225477) before its host answered')
+    expect(l.runs).toHaveLength(0)
+  })
+
+  it('treats the floor as unknown when this host’s copy of it is missing: no machine is judged, and the log says so', async () => {
+    flags.floorBroken = true
+    cleanups.push(() => void (flags.floorBroken = false))
+    const l = await linkTo({ startHost: async () => ({ how: 'detached', note: null }) })
+    await until(() => l.row().status === 'connected')
+    expect(l.runs).toHaveLength(0)
+    expect(l.starts()).toBe(1)
+    expect(l.logs.filter((x) => x.includes('the Node floor could not be read'))).toHaveLength(1)
+  })
+
+  it('does not put back what the person removed: after `machines.uninstall` a below-floor machine is named, not installed again', async () => {
+    const l = await linkTo({ later: ['CENTRALU-NOT-FOUND\n', 'CENTRALU-NOT-FOUND\n', 'CENTRALU-INSTALL uninstalled\n'], startHost: async () => ({ how: 'detached', note: null }) })
+    await until(() => l.row().status === 'connected')
+    expect(l.runs).toHaveLength(3)
+    await l.links.uninstall('m1')
+    await until(() => l.row().status === 'not_running')
+    expect(l.row().error).toMatch(/older than 22\.14\.0[\s\S]*removed from there on request/)
+    await new Promise((r) => setTimeout(r, 400))
+    expect(l.runs).toHaveLength(6)
   })
 
   it('names the floor and asks for a Node update where it may not install: a development hub, or a command of the person’s own', async () => {

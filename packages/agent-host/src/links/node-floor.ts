@@ -20,7 +20,7 @@ export function floorOf(range: string): string {
 
 /** Whether `found` (`22.12.0` or `v22.12.0`) is older than `floor`; a version that does not parse is let through */
 export function belowFloor(found: string | null | undefined, floor: string): boolean {
-  const v = (found ?? '').trim().replace(/^v/, '')
+  const v = (found ?? '').trim().replace(/^v/i, '')
   return /^\d+\.\d+\.\d+/.test(v) && isNewerVersion(floor, v)
 }
 

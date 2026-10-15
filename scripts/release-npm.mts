@@ -204,6 +204,13 @@ function checkRemoteRuntime(hostDir: string): void {
     fail(`${file} differs from packaging/remote-runtime.json: the host was bundled before the Node pin moved. Run pnpm bundle:host again`)
   }
   console.log('  pinned Node for remotes present (remote-runtime.json)')
+  // The Node floor a hub checks machines against is `engines.node` of the npm package; the host carries a copy (#699)
+  const floor = join(hostDir, 'centralu-package.json')
+  if (!existsSync(floor)) fail(`${floor} is missing: a hub on this build could not tell which Node a machine needs`)
+  if (readFileSync(floor, 'utf8') !== readFileSync(join(ROOT, 'packaging/npm/centralu/package.json'), 'utf8')) {
+    fail(`${floor} differs from packaging/npm/centralu/package.json: the host was bundled before the Node floor moved. Run pnpm bundle:host again`)
+  }
+  console.log('  Node floor present (centralu-package.json)')
 }
 
 /** The keeper's own executable, shipped next to the window's on macOS and Linux (#440) */

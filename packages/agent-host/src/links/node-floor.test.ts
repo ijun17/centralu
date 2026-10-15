@@ -16,6 +16,7 @@ describe('the Node floor the hub checks machines against (#699)', () => {
   it('reads a version below it, and nothing it cannot read', () => {
     expect(belowFloor('22.12.0', '22.14.0')).toBe(true)
     expect(belowFloor('v22.13.1', '22.14.0')).toBe(true)
+    expect(belowFloor('V22.13.1', '22.14.0')).toBe(true)
     expect(belowFloor('22.14.0', '22.14.0')).toBe(false)
     expect(belowFloor('24.21.0', '22.14.0')).toBe(false)
     expect(belowFloor(null, '22.14.0')).toBe(false)

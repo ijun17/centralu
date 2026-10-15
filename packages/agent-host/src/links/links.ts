@@ -160,6 +160,18 @@ export class LinkedMachine implements RoutedMachine {
    * installed over again
    */
   private switched: { note: string } | null = null
+  /**
+   * The hub tried to switch this machine to its own Node since the link last connected, whether or not
+   * the install worked: a failing install must not run again at every retry (each one is a download,
+   * and `operate` resets the backoff)
+   */
+  private switchTried = false
+  /** Why the install that was tried failed, kept so the retries keep saying it */
+  private switchFailure: string | null = null
+  /** The person removed what the hub installed (`machines.uninstall`); it does not come back unasked, until they install again */
+  private removedByPerson = false
+  /** The floor could not be read from this host once already; said once in the log */
+  private floorUnreadable = false
 
   constructor(
     private record: MachineRecord,
@@ -272,6 +284,7 @@ export class LinkedMachine implements RoutedMachine {
         nodeDist: installer.nodeDist,
         onStep: c.step,
       })
+      this.removedByPerson = false
       this.deps.log?.(`[links] ${this.name}: installed Centralu ${r.current.version} on Node ${r.current.node}${r.previous ? `; ${r.previous.version} kept to roll back to` : ''}`)
       return { ...this.installedNow(r), ...(pick.note ? { note: pick.note } : {}) }
     })
@@ -331,6 +344,7 @@ export class LinkedMachine implements RoutedMachine {
     return this.operate('uninstall', null, async (c) => {
       const r = await uninstallRemote(c)
       this.installed = { managed: false, current: null, previous: null }
+      this.removedByPerson = true
       if (this.bootStart) this.bootStart = { ...this.bootStart, on: false, linger: null }
       this.deps.log?.(`[links] ${this.name}: removed the Centralu this computer installed; its data stays`)
       return { machine: this.info(), stopped: r.stopped }
@@ -518,8 +532,9 @@ export class LinkedMachine implements RoutedMachine {
       if (this.held) return
       // A Node below the floor crashes the host on its first database call; the connection line says which Node answered (#699)
       const there = endpoint.line.install
-      if (there && !there.managed && belowFloor(there.node, nodeFloor())) {
-        if (await this.switchNode(new NodeTooOld(`Node ${there.node} is below ${nodeFloor()}`, 'refused', there.node))) return this.doOpen()
+      const floor = this.floor()
+      if (floor && there && !there.managed && belowFloor(there.node, floor)) {
+        if (await this.switchNode(new NodeTooOld(`Node ${there.node} is below ${floor}`, 'refused', there.node), floor)) return this.doOpen()
         return
       }
       this.setStatus('starting', null)
@@ -530,7 +545,7 @@ export class LinkedMachine implements RoutedMachine {
       } catch (err) {
         if (this.stopped) return
         if (err instanceof NodeTooOld) {
-          if (await this.switchNode(err, endpoint.line.install?.node ?? null)) return this.doOpen()
+          if (await this.switchNode(err, this.floor(), endpoint.line.install?.node ?? null)) return this.doOpen()
           return
         }
         this.setStatus('not_running', `Centralu could not be started on ${this.name}: ${(err as Error).message}`)
@@ -570,6 +585,20 @@ export class LinkedMachine implements RoutedMachine {
   }
 
   /**
+   * The Node floor, or null when this host's copy of it is missing or unreadable (a bundle built without it):
+   * then no machine is judged by it, which is how links behaved before the floor existed
+   */
+  private floor(): string | null {
+    try {
+      return nodeFloor()
+    } catch (err) {
+      if (!this.floorUnreadable) this.deps.log?.(`[links] ${this.name}: the Node floor could not be read, so no machine is checked against it: ${(err as Error).message}`)
+      this.floorUnreadable = true
+      return null
+    }
+  }
+
+  /**
    * The Node there is below the floor, or the host crashed the way that makes it crash (#699): the
    * hub installs its own (the pinned Node of `machines.install`, SHA-256 checked) and says so in one
    * sentence. True when it did, so the caller opens again and finds the managed launcher first. False
@@ -577,25 +606,32 @@ export class LinkedMachine implements RoutedMachine {
    * a command of the person's own, an install that failed, or a machine that already runs on the Node
    * the hub installed or was switched once since the link last connected
    */
-  private async switchNode(problem: NodeTooOld, nodeThere: string | null = null): Promise<boolean> {
+  private async switchNode(problem: NodeTooOld, floor: string | null, nodeThere: string | null = null): Promise<boolean> {
     const found = problem.found ?? nodeThere
-    const why = { name: this.name, found, floor: nodeFloor(), kind: problem.kind }
+    const why = { name: this.name, found, floor: floor ?? '', kind: problem.kind }
     const report = (reason: string | null) => {
       this.setStatus('not_running', reason === null ? `Centralu could not be started on ${this.name}: ${problem.message}` : updateNodeSentence({ ...why, reason }))
       this.retryLater()
       return false
     }
     const installer = this.deps.installer
-    if (this.switched || this.installed?.managed) return report(null)
+    if (this.switchTried && this.switchFailure) return report(this.switchFailure)
+    // A crash says nothing about the Node when the Node is at or above the floor: report it as it is
+    if (!floor || this.switchTried || this.installed?.managed || (problem.kind === 'crashed' && found !== null && !belowFloor(found, floor))) return report(null)
     if (!installer || !this.tunnel.exec) return report('this computer installs nothing')
     if (this.deps.hub.dev) return report('this development build is not published')
     if (this.record.remote.command) return report('it runs a command of its own in place of centralu')
+    if (this.removedByPerson) return report('it was removed from there on request, and is not put back unasked')
+    // An install the person started waits for itself; this one does not count as tried
+    if (this.busy) return report(`${this.operation?.kind ?? 'another change'} is running there, and this computer waits for it`)
+    this.switchTried = true
     this.deps.log?.(`[links] ${this.name}: ${problem.message}; installing the pinned Node there`)
     let result: MachineInstallResult
     try {
       result = await this.install()
     } catch (err) {
-      return report(`installing it failed: ${(err as Error).message}`)
+      this.switchFailure = `installing it failed: ${(err as Error).message}`
+      return report(this.switchFailure)
     }
     this.switched = { note: switchedSentence({ ...why, node: result.current.node }) }
     this.deps.log?.(`[links] ${this.name}: ${this.switched.note}`)
@@ -696,6 +732,8 @@ export class LinkedMachine implements RoutedMachine {
     this.attempt = 0
     this.refusedOnce = false
     this.switched = null
+    this.switchTried = false
+    this.switchFailure = null
     this.lastConnectedAt = Date.now()
     this.setStatus('connected', null)
     /*

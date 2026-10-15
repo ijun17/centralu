@@ -16,6 +16,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 /** The pinned Node for remotes: one archive per platform a hub installs on */
 export const PIN_FILE = join(ROOT, 'packaging/remote-runtime.json')
+/** The npm package's manifest, whose `engines.node` is the Node floor; the bundle carries a copy for the hub (#699) */
+export const LAUNCHER_PACKAGE_FILE = join(ROOT, 'packaging/npm/centralu/package.json')
 
 /** The platforms a hub installs on, which are the ones with a host-only package */
 export function remotePlatforms(pinFile = PIN_FILE): string[] {
@@ -41,9 +43,10 @@ export function stageHostPackage(hostSrc: string, pkgDir: string): void {
  * What would make the staged package fail on a remote, one sentence each; empty when none. The files
  * `centralu serve` cannot start without, a host bundled for this platform, the pinned Node beside it
  * (a hub on this version reads it from its own host, and a remote's host must carry the same one), the
+ * copy of the npm package's manifest that holds the Node floor, the
  * manifest that ships exactly `host/`, and nothing of the window.
  */
-export function hostPackageProblems(pkgDir: string, platform: string, pinFile = PIN_FILE): string[] {
+export function hostPackageProblems(pkgDir: string, platform: string, pinFile = PIN_FILE, launcherFile = LAUNCHER_PACKAGE_FILE): string[] {
   const problems: string[] = []
   const manifest = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as { name?: string; files?: string[] }
   if (manifest.name !== `@centralu/host-${platform}`) problems.push(`package.json names ${manifest.name}, not @centralu/host-${platform}`)
@@ -61,6 +64,9 @@ export function hostPackageProblems(pkgDir: string, platform: string, pinFile = 
   const runtime = join(host, 'remote-runtime.json')
   if (!existsSync(runtime)) problems.push('host/remote-runtime.json is missing: a hub on this version could not install it anywhere')
   else if (readFileSync(runtime, 'utf8') !== readFileSync(pinFile, 'utf8')) problems.push('host/remote-runtime.json differs from packaging/remote-runtime.json: the host was bundled before the Node pin moved')
+  const floor = join(host, 'centralu-package.json')
+  if (!existsSync(floor)) problems.push('host/centralu-package.json is missing: a hub on this version could not tell which Node a machine needs')
+  else if (readFileSync(floor, 'utf8') !== readFileSync(launcherFile, 'utf8')) problems.push('host/centralu-package.json differs from packaging/npm/centralu/package.json: the host was bundled before the Node floor moved')
   const extra = readdirSync(pkgDir).filter((n) => !['host', 'package.json', 'README.md'].includes(n))
   if (extra.length) problems.push(`the package folder holds more than the host: ${extra.join(', ')}`)
   return problems

@@ -23,7 +23,7 @@ export function floorOf(range) {
 
 /** Whether `found` (`22.12.0` or `v22.12.0`) is older than `floor`; a version that does not parse is let through */
 export function belowFloor(found, floor) {
-  const v = String(found).trim().replace(/^v/, '')
+  const v = String(found).trim().replace(/^v/i, '')
   if (!/^\d+\.\d+\.\d+/.test(v)) return false
   return isNewer(floor, v)
 }
@@ -34,7 +34,7 @@ export function belowFloor(found, floor) {
  * `--detach` answer.
  */
 export function oldNodeSentence(found, floor) {
-  const v = String(found).replace(/^v/, '')
+  const v = String(found).replace(/^v/i, '')
   return (
     `centralu serve needs Node ${floor} or newer and this is Node ${v}: update Node on this machine, ` +
     'or link this machine from a Centralu window on another computer, which installs a Node of its own there.'

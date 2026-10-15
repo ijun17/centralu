@@ -39,6 +39,7 @@ describe('the floor and its sentence', () => {
   it('puts a Node below it, and only that, under the floor', () => {
     expect(belowFloor('22.12.0', '22.14.0')).toBe(true)
     expect(belowFloor('v22.13.1', '22.14.0')).toBe(true)
+    expect(belowFloor('V22.13.1', '22.14.0')).toBe(true)
     expect(belowFloor('20.19.0', '22.14.0')).toBe(true)
     expect(belowFloor('22.14.0', '22.14.0')).toBe(false)
     expect(belowFloor('22.23.3', '22.14.0')).toBe(false)
@@ -93,6 +94,14 @@ describe('centralu serve under a Node below the floor', () => {
     const line = JSON.parse(r.stdout.trim().split('\n').at(-1)!) as { v: number; detach: Record<string, unknown> }
     expect(line.detach).toMatchObject({ ok: false, reason: 'node_too_old', node: '22.13.1', floor: '22.14.0', message: oldNodeSentence('22.13.1', '22.14.0') })
     expect(existsSync(r.data)).toBe(false)
+  })
+
+  it('will not write a boot entry that would start a host on it, but still reads and removes one', () => {
+    const on = run(['--autostart', 'on'], '22.12.0')
+    expect(on.status).toBe(1)
+    expect(on.stderr.trim()).toBe(`centralu serve: ${oldNodeSentence('22.12.0', '22.14.0')}`)
+    expect(on.stdout).toBe('')
+    for (const action of ['off', 'status']) expect(run(['--autostart', action], '22.12.0').stderr).not.toContain('needs Node')
   })
 
   it('still answers `--connection`, which starts no host, so the hub can read the Node that runs it', () => {
