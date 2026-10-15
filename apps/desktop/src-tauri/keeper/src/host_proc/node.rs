@@ -80,11 +80,11 @@ fn nvm_windows_versions(home: &str) -> Vec<String> {
 /// being present but not found, and the version being too low.
 pub(super) fn node_missing_message(looked: &[String]) -> String {
     format!(
-        "Could not find Node.js. Centralu requires Node {} or newer.\n\
+        "Could not find Node.js. Centralu requires {}.\n\
          Check with `node --version` in a terminal, and if it is missing, install it with \
          {} or from https://nodejs.org, then restart the app.\n\
          Looked in: {}",
-        min_node_text(),
+        min_node().map_or_else(|_| "a newer Node".to_string(), |f| format!("Node {} or newer", floor_text(f))),
         install_node_hint(Os::current()),
         looked.join(", ")
     )
@@ -100,10 +100,22 @@ const LAUNCHER_PACKAGE: &str = include_str!("../../../../../../packaging/npm/cen
 /// The bundled database module declares Node-API 10, which Node has from 22.14.0; under 22.12.0 it
 /// loads and then crashes on its first use, before the host logs a line (#699). The host bundle's
 /// esbuild target is node22 as well, so below 22 even the syntax breaks.
-pub(super) fn min_node() -> [u32; 3] {
-    let manifest: serde_json::Value = serde_json::from_str(LAUNCHER_PACKAGE).expect("packaging/npm/centralu/package.json is JSON");
-    let range = manifest["engines"]["node"].as_str().expect("engines.node is a string");
-    floor_of(range).unwrap_or_else(|| panic!("engines.node must be a plain floor like \">=22.14.0\", not {range:?}"))
+///
+/// Read once. An `engines.node` that is not a plain floor is an `Err` with a sentence naming it, never
+/// a panic: this runs on the supervisor's watcher thread, where a panic would leave the window on
+/// "Starting" with no reason. `the_floor_is_the_npm_packages_engines_and_nothing_else` fails in CI
+/// before such a package.json can ship.
+pub(super) fn min_node() -> Result<[u32; 3], String> {
+    static FLOOR: std::sync::OnceLock<Result<[u32; 3], String>> = std::sync::OnceLock::new();
+    FLOOR.get_or_init(|| read_floor(LAUNCHER_PACKAGE)).clone()
+}
+
+/// `min_node` for a given manifest text
+pub(super) fn read_floor(manifest: &str) -> Result<[u32; 3], String> {
+    let bad = |what: String| format!("Centralu cannot tell which Node it needs: {what}; reinstall Centralu.");
+    let manifest: serde_json::Value = serde_json::from_str(manifest).map_err(|e| bad(format!("its package.json is not JSON ({e})")))?;
+    let range = manifest["engines"]["node"].as_str().ok_or_else(|| bad("its package.json has no engines.node".into()))?;
+    floor_of(range).ok_or_else(|| bad(format!("engines.node is {range:?}, not a plain floor like \">=22.14.0\"")))
 }
 
 /// `>=22.14.0` or `>=22.14` → `[22, 14, 0]`; None for any other shape of range
@@ -118,17 +130,17 @@ pub(super) fn floor_of(range: &str) -> Option<[u32; 3]> {
 }
 
 /// The floor as the person reads it: `22.14.0`
-pub(super) fn min_node_text() -> String {
-    min_node().map(|n| n.to_string()).join(".")
+pub(super) fn floor_text(floor: [u32; 3]) -> String {
+    floor.map(|n| n.to_string()).join(".")
 }
 
-/// Whether a version (`v22.12.0`, as `node --version` prints it) is older than the floor
-pub(super) fn below_floor(parts: &[u32]) -> bool {
+/// Whether a version (`v22.12.0`, as `node --version` prints it) is older than `floor`
+pub(super) fn below_floor(parts: &[u32], floor: [u32; 3]) -> bool {
     let mut padded = [0u32; 3];
     for (slot, n) in padded.iter_mut().zip(parts) {
         *slot = *n;
     }
-    padded < min_node()
+    padded < floor
 }
 
 /// Finding Node takes around one second because it launches the whole login shell. Since the
@@ -289,7 +301,8 @@ pub(super) fn nvm_versions(root: &str) -> Vec<String> {
 
 /// `v22.3.1` → `[22, 3, 1]`. An empty vector if it does not parse as numbers.
 pub(super) fn version_parts(raw: &str) -> Vec<u32> {
-    let trimmed = raw.trim().trim_start_matches('v');
+    // `v22.14.0-rc.1` is 22.14.0: only the numbers before a prerelease or build tag count
+    let trimmed = raw.trim().trim_start_matches('v').split(['-', '+']).next().unwrap_or("");
     let parts: Vec<u32> = trimmed.split('.').filter_map(|p| p.parse().ok()).collect();
     if parts.is_empty() {
         Vec::new()
@@ -315,8 +328,9 @@ pub(super) fn check_node_version(path: &str) -> Result<String, String> {
     if parts.is_empty() {
         return Ok(path.to_string());
     }
-    if below_floor(&parts) {
-        let floor = min_node_text();
+    let floor = min_node()?;
+    if below_floor(&parts, floor) {
+        let floor = floor_text(floor);
         return Err(format!(
             "Node {floor} or newer is required, but {path} is {}: older than that, the bundled database \
              crashes on its first use.\n\

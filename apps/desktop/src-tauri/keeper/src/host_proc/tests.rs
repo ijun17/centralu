@@ -411,7 +411,7 @@ fn rejects_a_22_below_the_floor_and_names_it() {
     for old in ["v22.12.0", "v22.13.1", "v22.0.0"] {
         let path = fake_node(old, "cc-test-node-22-old");
         let err = check_node_version(&path).unwrap_err();
-        assert!(err.contains(&format!("Node {} or newer is required", min_node_text())), "{err}");
+        assert!(err.contains(&format!("Node {} or newer is required", floor_text(min_node().unwrap()))), "{err}");
         assert!(err.contains(old), "{err}");
         assert!(err.contains("crashes on its first use"), "{err}");
     }
@@ -425,11 +425,44 @@ fn the_floor_is_the_npm_packages_engines_and_nothing_else() {
     assert_eq!(floor_of(">=22.14"), Some([22, 14, 0]));
     assert_eq!(floor_of(">=22"), None);
     assert_eq!(floor_of("^22.14.0"), None);
-    assert!(min_node()[0] >= 22);
-    assert_eq!(min_node_text().split('.').count(), 3);
-    assert!(below_floor(&[min_node()[0], min_node()[1] - 1, 99]));
-    assert!(!below_floor(&min_node()));
-    assert!(!below_floor(&[min_node()[0] + 2]));
+    // The floor itself, once, so a quiet edit of engines.node is seen here as well as in the tooling tests
+    assert_eq!(min_node(), Ok([22, 14, 0]));
+    let floor = min_node().unwrap();
+    assert_eq!(floor_text(floor).split('.').count(), 3);
+    assert!(!below_floor(&floor, floor));
+    assert!(!below_floor(&[floor[0] + 2], floor));
+    // Just below, whatever the floor is: one patch down, or the end of the previous minor or major
+    let just_below = if floor[2] > 0 {
+        [floor[0], floor[1], floor[2] - 1]
+    } else if floor[1] > 0 {
+        [floor[0], floor[1] - 1, 99]
+    } else {
+        [floor[0] - 1, 99, 99]
+    };
+    assert!(below_floor(&just_below, floor));
+}
+
+#[test]
+fn a_package_json_with_no_usable_floor_is_a_sentence_naming_it_not_a_panic() {
+    let bad = |m: &str| read_floor(m).unwrap_err();
+    assert!(bad(r#"{"engines":{"node":">=22"}}"#).contains("\">=22\", not a plain floor"));
+    assert!(bad(r#"{"engines":{"node":"^22.14.0"}}"#).contains("^22.14.0"));
+    assert!(bad(r#"{"name":"centralu"}"#).contains("no engines.node"));
+    assert!(bad("not json").contains("not JSON"));
+    assert_eq!(read_floor(r#"{"engines":{"node":">=20.1.0"}}"#), Ok([20, 1, 0]));
+}
+
+#[test]
+fn a_prerelease_counts_by_its_numbers_and_unreadable_output_is_let_through() {
+    // `node --version` on a release candidate prints `v22.14.0-rc.1`: the numbers before the tag decide
+    let at_floor = fake_node("v22.14.0-rc.1", "cc-test-node-rc-at");
+    assert_eq!(check_node_version(&at_floor), Ok(at_floor.clone()));
+    let below = fake_node("v22.13.1-rc.1", "cc-test-node-rc-below");
+    assert!(check_node_version(&below).unwrap_err().contains("v22.13.1-rc.1"));
+    assert_eq!(version_parts("v22.14.0-rc.1+build5"), vec![22, 14, 0]);
+    // Output that is not a version at all gives no basis to refuse
+    let garbage = fake_node("Segmentation fault", "cc-test-node-garbage");
+    assert_eq!(check_node_version(&garbage), Ok(garbage.clone()));
 }
 
 #[test]
