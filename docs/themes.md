@@ -14,7 +14,7 @@ Four preferences, stored with the other screen preferences (`UiPreferences`):
 | `themeMode` | `dark` · `light` · `system` | Which side shows. `system` follows the OS (`prefers-color-scheme`). |
 | `themeDark` | a preset id or a theme file's id | The theme for the dark side |
 | `themeLight` | a preset id or a theme file's id | The theme for the light side |
-| `accent` | a CSS colour, or `null` (default) | Colours focus, selection, the working orbit and checked boxes |
+| `accent` | a CSS colour, or `null` (default) | Colours focus, selection and checked boxes |
 
 The two sides are chosen separately so that following the OS switches between two themes the
 person picked. An id that names nothing (a deleted file) falls back to that side's preset.
@@ -117,6 +117,12 @@ cards), the inks must stand out in this order:
 Settings checks each custom theme (WCAG contrast, with translucent inks measured where they land)
 and warns next to it when the order breaks. It is a warning, not a refusal: a theme is the
 person's, but a theme that breaks the order quietly hides what is waiting for them.
+
+A session's state is drawn with the same inks and no hue or motion (#736). The sidebar mark has four
+looks: idle (the chip's own `line-strong` border), answering (a 1.5px `ink-signal` ring), stopped
+(the same ring dashed, the chip on `surface-selected`: an error, an interruption or a limit) and
+waiting (the solid ring, the chip on `surface-selected`: an approval or a question). A grid or project
+panel follows with its own 1px border: `ink-signal` while answering or waiting, dashed when stopped.
 
 ## How it is applied
 

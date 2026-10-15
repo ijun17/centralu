@@ -25,7 +25,7 @@
 토큰이고, 생김새가 아니라 역할로 이름 붙는다(#312): 면(`surface-floor`, `surface-side`,
 `surface-raised`, `surface-selected`, `surface-hover`, `surface-deck`, `surface-reading`), 선(`line`,
 `line-strong`), 잉크(`ink-signal`, `ink`, `ink-muted`, `ink-faint`), `diff-*`, `danger`, 그리고
-효과(`focus`, `selection`, 스크롤바, 스크림, 그림자, 키캡, `activity-1…5`, `term-*`). 예전의 밝기
+효과(`focus`, `selection`, 스크롤바, 스크림, 그림자, 키캡, `term-*`). 예전의 밝기
 이름(`void`, `chalk`, `beacon`…)은 밝은 테마에서 거꾸로 읽힌다. 블록은 `inline`이 아닌 그냥
 `@theme`이라 유틸리티가 실행 중에 `var(--color-…)`를 읽고, 테마는 변수만 바꿔 전환할 수 있다. 같은
 이유로 그림자는 `shadow-(--shadow-modal)`로 쓴다 — Tailwind는 테마 그림자의 값을 `shadow-modal`

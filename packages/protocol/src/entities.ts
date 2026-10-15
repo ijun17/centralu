@@ -1413,7 +1413,7 @@ export const UiPreferences = z.object({
   themeLight: z.string().max(80),
   /**
    * An accent colour, or null for none (the default: the app is achromatic, and brightness is
-   * what speaks urgency). When set it colours focus, selection, the working orbit and checked
+   * what speaks urgency). When set it colours focus, selection and checked
    * controls — never the signal colour, which stays the one thing reserved for "waiting for you".
    */
   accent: z.string().max(80).nullable(),

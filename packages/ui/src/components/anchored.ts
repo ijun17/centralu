@@ -4,7 +4,7 @@ import { useLayoutEffect, useState, type RefObject } from 'react'
  * Where a popover that hangs under a button goes, so that all of it is inside the window.
  *
  * Why this exists: a popover drawn as an `absolute` child of its button is clipped by the first ancestor with an
- * overflow, and a grid panel is `overflow-hidden` (it has to be — its rounded corners and the orbit ring). The
+ * overflow, and a grid panel is `overflow-hidden` (it has to be — its rounded corners and its border). The
  * background-task list hung off the session header that way and lost its right side, Stop included, in any panel
  * narrower than the list (0.1.0-beta.9, the owner's screenshot). The popover is therefore rendered into
  * `document.body` and placed `fixed`, which leaves no box to clip it — the same reason the tooltip and the sidebar's

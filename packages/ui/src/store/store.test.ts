@@ -4680,12 +4680,12 @@ describe('the trash (#204)', () => {
 /*
  * The restore must not save a half-restored state (`restoringWorkspace` in store.ts). Every setter the restore goes
  * through saves, so a save in the middle of it used to write the defaults of every field restored later back over
- * the snapshot. The spinning-marker settings are restored last: the person turned both off, and after a restart
- * both were on again (2026-09-30).
+ * the snapshot. The folded-composer setting is restored last: the person turned it off, and after a restart
+ * it was on again (2026-09-30).
  */
 describe('restoring the workspace saves nothing until it is done', () => {
   const tick = () => new Promise((r) => setTimeout(r, 0))
-  const lateFields = { spinGrid: false, spinSessionIcon: false, foldComposer: false }
+  const lateFields = { foldComposer: false }
 
   it('settings turned off stay off across two launches, even the ones restored last', async () => {
     const mock = new MockPlatform()
@@ -4700,15 +4700,15 @@ describe('restoring the workspace saves nothing until it is done', () => {
       ...lateFields,
     } as never
 
-    // A launch starts from the defaults, which have all three on
-    useStore.setState({ spinGrid: true, spinSessionIcon: true, foldComposer: true })
+    // A launch starts from the defaults, which have it on
+    useStore.setState({ foldComposer: true })
     await useStore.getState().attach(mock)
     await tick()
     expect(useStore.getState()).toMatchObject(lateFields)
     // What the host keeps is what the next launch reads
     expect(mock.workspaceSnapshot).toMatchObject(lateFields)
 
-    useStore.setState({ spinGrid: true, spinSessionIcon: true, foldComposer: true })
+    useStore.setState({ foldComposer: true })
     await useStore.getState().attach(mock)
     await tick()
     expect(useStore.getState()).toMatchObject(lateFields)
@@ -4743,17 +4743,38 @@ describe('restoring the workspace saves nothing until it is done', () => {
       ...lateFields,
     } as never
 
-    useStore.setState({ spinGrid: true, spinSessionIcon: true, foldComposer: true })
+    useStore.setState({ foldComposer: true })
     await useStore.getState().attach(mock)
     await tick()
 
     expect(useStore.getState()).toMatchObject({ focusedSessionId: 'rail-r1', panelWidth: 333, sidebarWidth: 251, notifyPolicy: policy, ...lateFields })
     expect(useStore.getState()).not.toHaveProperty('railWidth')
 
-    useStore.getState().setSpinGrid(true)
+    useStore.getState().setFoldComposer(true)
     await tick()
-    expect(mock.workspaceSnapshot).toMatchObject({ panelWidth: 333, sidebarWidth: 251, spinGrid: true })
+    expect(mock.workspaceSnapshot).toMatchObject({ panelWidth: 333, sidebarWidth: 251, foldComposer: true })
     expect(mock.workspaceSnapshot).not.toHaveProperty('railWidth')
+  })
+
+  /*
+   * The spin switches left with the orbit (#736). A snapshot an older build wrote still carries them: it loads in full,
+   * nothing reads them, and the next save stops writing them (an older build reading that snapshot falls back to its
+   * default, which is on).
+   */
+  it('an old snapshot that still carries the spin switches loads in full, and the next save drops them (#736)', async () => {
+    const mock = new MockPlatform()
+    mock.workspaceSnapshot = { panelWidth: 333, spinGrid: false, spinSessionIcon: false, foldComposer: false } as never
+    await useStore.getState().attach(mock)
+    await tick()
+    expect(useStore.getState()).toMatchObject({ panelWidth: 333, foldComposer: false })
+    expect(useStore.getState()).not.toHaveProperty('spinGrid')
+    expect(useStore.getState()).not.toHaveProperty('spinSessionIcon')
+
+    useStore.getState().setFoldComposer(true)
+    await tick()
+    expect(mock.workspaceSnapshot).toMatchObject({ panelWidth: 333, foldComposer: true })
+    expect(mock.workspaceSnapshot).not.toHaveProperty('spinGrid')
+    expect(mock.workspaceSnapshot).not.toHaveProperty('spinSessionIcon')
   })
 
   it('a change the person makes after the restore is still saved', async () => {
@@ -4762,9 +4783,9 @@ describe('restoring the workspace saves nothing until it is done', () => {
     await useStore.getState().attach(mock)
     await tick()
 
-    useStore.getState().setSpinGrid(true)
+    useStore.getState().setFoldComposer(true)
     await tick()
-    expect(mock.workspaceSnapshot).toMatchObject({ spinGrid: true, spinSessionIcon: false })
+    expect(mock.workspaceSnapshot).toMatchObject({ foldComposer: true })
   })
 })
 

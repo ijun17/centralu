@@ -19,7 +19,7 @@ import { buildCatalog } from '../../store/app-catalog.js'
 import { SessionPane } from '../session/SessionView.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
-import { useOrbitSync } from '../../components/orbit.js'
+import { lookOf } from '../session/look.js'
 import { APP_MIME, SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reorder.js'
 import { AppPanel } from '../pinned-app/AppPanel.jsx'
 import { placeSlots } from '../pinned-app/slots.js'
@@ -201,15 +201,6 @@ export function GridView() {
   const rows = laid.rows
 
   /*
-    The border of a spinning panel has to be at the **same angle** as the sidebar's indicator
-    (components/orbit.ts). Bringing a session that is already spinning into the grid later would
-    otherwise make the panel's orbit start over from zero on its own.
-  */
-  useOrbitSync(
-    visible.filter((id) => byKey.get(id)?.kind === 'session' && sessions[id]?.state === 'working').join(' '),
-  )
-
-  /*
    * Every app panel shows its view, so every app on the grid has one. Opening it is the view's own business (it calls
    * `home` when the app can run), so an untrusted, invalid or stopped app stands here with its reason and its button.
    */
@@ -331,7 +322,8 @@ export function GridView() {
         >
           {order.map((id, i) => {
             const panel = byKey.get(id)!
-            const isWorking = panel.kind === 'session' && sessions[id]?.state === 'working'
+            const session = panel.kind === 'session' ? sessions[id] : undefined
+            const look = session ? lookOf({ ...session, openQuestions: session.pendingQuestions.length }) : 'idle'
             const cell = laid.cells[i]!
             const asked = askedOf(id)
             return (
@@ -342,18 +334,18 @@ export function GridView() {
                   else cards.current.delete(id)
                 }}
                 /*
-                A panel that is answering gets a spinning border (the same orbit as the sidebar
-                indicator). With several panels on screen, a single small indicator is not
-                something the eye can track to find which one is spinning — the grid is a screen
-                for **looking**, not reading, so it has to be caught out of the corner of the eye.
+                A panel wears the same four looks as the sidebar's mark (`lookOf`, styles/index.css `.cc-panel`):
+                with several panels on screen, a single small indicator is not something the eye can
+                track to find which one is answering or calling — the grid is a screen for **looking**,
+                not reading, so it has to be caught out of the corner of the eye.
               */
                 /*
                 The selected panel is not highlighted with a border (the conclusion of two
                 rounds of dogfooding). The first time, it failed to update, so a single panel
                 stayed lit for days; once that was fixed to follow the hand, the judgment came
                 back that the indicator was not needed at all — the cursor and the composer's
-                focus outline already say where the person is typing. Only the "answering"
-                indicator (cc-orbit-ring) remains.
+                focus outline already say where the person is typing. Only the look of the
+                session's state remains.
               */
                 /*
                 The panel's border is brighter than any line inside the panel (user's
@@ -370,11 +362,12 @@ export function GridView() {
                 (z-20) (user's observation). Raising the overlay's number to win would also work,
                 but then whoever next picks a number starts the same race over again. For
                 "highest within the panel" to actually be true, the panel has to be a fence —
-                exactly the method .cc-orbit in the same file uses for the badge.
+                the same fence the mark's ring needed.
               */
-                className={`relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-line-strong bg-surface-floor transition-opacity ${
-                  isWorking ? 'cc-orbit-ring' : ''
-                } ${dragging === id ? 'opacity-40' : ''}`}
+                className={`cc-panel relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-line-strong bg-surface-floor transition-opacity ${
+                  dragging === id ? 'opacity-40' : ''
+                }`}
+                data-look={look}
                 /*
                   Placed by hand rather than by the browser's auto-flow, because a spanning panel's place has to be
                   known to count the rows (core's `packGrid`). With every span 1 × 1 it is the same row-by-row order.
@@ -449,13 +442,6 @@ export function GridView() {
                   dropPanel(dragged, id, dropsBefore({ top: r.left, height: r.width }, e.clientX))
                 }}
               >
-                {/*
-                The spinning border is actually drawn by a child layer (cc-orbit-ring-layer in
-                styles/index.css). The panel's cc-orbit-ring class remains as a marker that "this
-                panel is spinning" — so tests and assistive technology can read the state as a
-                value, not as pixels.
-              */}
-                {isWorking && <div className="cc-orbit-ring-layer" aria-hidden />}
                 {panel.kind === 'app' ? (
                   <AppPanel
                     app={appsByKey.get(appKeyOf(panel.projectId, panel.appId, panel.machine))}

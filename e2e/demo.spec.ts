@@ -43,8 +43,8 @@ test('?demo=grid comes up as a grid with four panels', async ({ page }) => {
   await page.goto('/?demo=grid')
   await expect(page.getByTestId('grid')).toBeVisible()
   await expect(page.locator('[data-testid^="grid-panel-"]')).toHaveCount(4)
-  // One panel is mid-response — where the rainbow ring spins
-  await expect(page.locator('.cc-orbit-ring-layer')).toHaveCount(1)
+  // One panel is mid-response: the one with the answering look
+  await expect(page.locator('[data-testid^="grid-panel-"][data-look="answering"]')).toHaveCount(1)
 })
 
 /** `?mock=1` stays as it was — it is the door e2e uses, and the demo scene must not leak into it */

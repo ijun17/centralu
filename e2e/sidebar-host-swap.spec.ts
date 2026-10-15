@@ -12,10 +12,10 @@ async function workingCodex(page: Page) {
   })
 }
 
-test('a background Codex session keeps its orbit when re-attachment overtakes the host swap snapshot', async ({ page }) => {
+test('a background Codex session keeps its answering look when re-attachment overtakes the host swap snapshot', async ({ page }) => {
   const id = await workingCodex(page)
   const mark = page.getByTestId(`session-row-${id}`).getByTestId('tool-mark-codex')
-  await expect(mark).toHaveClass(/cc-orbit/)
+  await expect(mark).toHaveAttribute('data-look', 'answering')
   await page.evaluate(async (sessionId) => {
     const { __mock: mock, __store: store } = window as any
     mock.setConnectionState('disconnected')
@@ -44,7 +44,7 @@ test('a background Codex session keeps its orbit when re-attachment overtakes th
   }, id)
   expect(await page.evaluate(() => (window as any).__mock.resumeCalls)).toEqual([])
   await expect(mark).toHaveAttribute('data-state', 'working')
-  await expect(mark).toHaveClass(/cc-orbit/)
+  await expect(mark).toHaveAttribute('data-look', 'answering')
   await expect(mark).not.toHaveAttribute('data-asleep')
 })
 

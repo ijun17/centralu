@@ -910,10 +910,6 @@ function AppearanceSection() {
   const modEnter = useStore((s) => s.prefs.sendWithModifierEnter)
   const setPrefs = useStore((s) => s.setPrefs)
   const sc = useShortcut()
-  const spinGrid = useStore((s) => s.spinGrid)
-  const setSpinGrid = useStore((s) => s.setSpinGrid)
-  const spinIcon = useStore((s) => s.spinSessionIcon)
-  const setSpinIcon = useStore((s) => s.setSpinSessionIcon)
   return (
     <section>
       <ThemeSection />
@@ -971,44 +967,6 @@ function AppearanceSection() {
           Enter then writes a new line instead of sending, which is what you want when a prompt
           runs to several paragraphs. Shift+Enter writes a new line either way.
         </p>
-      </div>
-
-      {/*
-        A switch to stop the spinning indicator (user request, 2026-09-13).
-
-        It looks like a preference, but it is really a **power setting**. That is why the
-        description states a measurement — nobody touches a switch when they do not know what
-        turning it off improves. The grid and the icon are kept separate because what bothers
-        people about each is different: the panel border is large and catches the corner of the
-        eye, while the sidebar icon is small but always visible.
-      */}
-      <div className="mt-6 border-t border-line pt-4">
-        <p className="text-sm text-ink-muted">Spinning mark while a session is working</p>
-        <p className="mt-1 text-xs leading-body text-ink-faint">
-          Turning it off does not hide the mark — it stops moving and stays a bright grey. Motion
-          that never stops holds the display at full refresh: measured, turning both off took this
-          app from 7.0% to 2.9% CPU while one session was running.
-        </p>
-        <label className="mt-2.5 flex items-start gap-2 text-sm text-ink-muted">
-          <input
-            type="checkbox"
-            className="mt-0.5 accent-line-strong"
-            checked={spinGrid}
-            onChange={(e) => setSpinGrid(e.target.checked)}
-            data-testid="settings-spin-grid"
-          />
-          <span>Panel border in the grid and on project screens</span>
-        </label>
-        <label className="mt-1.5 flex items-start gap-2 text-sm text-ink-muted">
-          <input
-            type="checkbox"
-            className="mt-0.5 accent-line-strong"
-            checked={spinIcon}
-            onChange={(e) => setSpinIcon(e.target.checked)}
-            data-testid="settings-spin-icon"
-          />
-          <span>Session icon in the sidebar</span>
-        </label>
       </div>
     </section>
   )

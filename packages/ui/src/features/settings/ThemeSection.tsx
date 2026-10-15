@@ -130,7 +130,7 @@ export function ThemeSection() {
         )}
       </label>
       <p className="mt-1 text-xs leading-body text-ink-faint">
-        Colours focus, selection, the working orbit and checked boxes. Never the white of something waiting for you.
+        Colours focus, selection and checked boxes. Never the white of something waiting for you.
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">

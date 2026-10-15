@@ -7,7 +7,7 @@ import { useLabelNow } from '../../app/useLabelNow.js'
  * **Each repaint of the counter costs memory while a session works.** Measured on 2026-10-06 against the owner-sized
  * store in WebKit (docs/spikes/2026-10-memory-heavy-store.md §3): with the count re-rendered once a second, WebKit's
  * GPU process held ~190 MB for the whole of a working turn; with it re-rendered every ten minutes, ~100 MB, the
- * pulsing dot and the orbit still running. Animations run on the compositor and do not repaint; a changed number
+ * pulsing dot still running. Animations run on the compositor and do not repaint; a changed number
  * does, and WebKit keeps the window's backing stores while it repaints, letting them go within a few seconds of the
  * last repaint. Giving the number its own compositing layer did not help (189 MB against 191); re-rendering it every
  * 5, 10 or 30 seconds did (84–110, 109–193 and 79–106 MB at the 60 s and 120 s samples, the high one caught just

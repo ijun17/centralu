@@ -32,7 +32,7 @@ import { AddRemoteProjectDialog } from '../machines/AddRemoteProjectDialog.jsx'
 import { useRemoteIde } from '../machines/remoteIde.js'
 import type { ExternalAppStatus } from '@cc/protocol'
 import { Modal } from '../../components/Modal.jsx'
-import { useOrbitSync } from '../../components/orbit.js'
+import { lookOf, type SessionLook } from '../session/look.js'
 import { SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN, useTextZoom } from '../../store/store.js'
 import { APP_MIME, PROJECT_MIME, SESSION_MIME, dropsBefore, moveTo, projectItemMime } from './reorder.js'
 import { foldSummary, groupAttention, type FoldSummaryState, type GroupAttention } from './fold.js'
@@ -969,7 +969,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                         state. A separate dot right next to the mark would read as overlapping the
                         two, and blur both instead.
                       */}
-                      <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} />
+                      <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} />
                       <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
                       {childrenFolded && (
                         <FoldedMark count={children.length} attention={groupAttention(children)} testId={`children-folded-${s.id}`} />
@@ -1249,7 +1249,7 @@ function ProjectAppSessions({ sessions, projectId, folded }: { sessions: Session
                   : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
               }`}
             >
-              <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} />
+              <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} />
               <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
               {childrenFolded && (
                 <FoldedMark count={children.length} attention={groupAttention(children)} testId={`children-folded-${s.id}`} />
@@ -1368,7 +1368,7 @@ function UserAppSessions({ sessions: own }: { sessions: SessionSummary[] }) {
             focused ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
           }`}
         >
-          <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} />
+          <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} openQuestions={s.pendingQuestions.length} />
           <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
         </button>
         {approvalLine(s, null, () => focusSession(s.id))}
@@ -2337,10 +2337,9 @@ function ProjectMarks({ project }: { project: ProjectInfo }) {
  *
  * **Uses the same marks as a session row.** Inventing a new symbol would mean the person has to
  * learn it too, and it would read as the row's mark and the summary saying different things. So the
- * chip shape, ring color (RING) and spin (cc-orbit) match ToolMark exactly, and only the count sits
- * where the tool letter would. Approval is a pure white ring, so it stays the brightest thing on
- * screen even in a folded row — this app's rule that brightness is urgency holds in a folded row
- * too.
+ * chip shape and look (`lookOf`, the four looks of #736) match ToolMark exactly, and only the count sits
+ * where the tool letter would. Approval is a white ring on a grey fill, so it stays the strongest look
+ * even in a folded row.
  *
  * It stands at the far right of the name line (right before the ⋯). With several projects folded,
  * the summaries line up in one vertical column, readable top to bottom in a single glance to see
@@ -2362,21 +2361,19 @@ function FoldSummary({ name, counts }: { name: string; counts: { state: FoldSumm
   )
 }
 
-/** A chip like ToolMark — a count instead of a letter. A stalled state (error) dims the text just like ToolMark does */
+/** What each state a folded project counts looks like: the same four looks as a session's mark (#736) */
+const FOLD_LOOK: Record<FoldSummaryState, SessionLook> = {
+  waiting_approval: 'waiting',
+  error: 'stopped',
+  waiting_input: 'idle',
+  working: 'answering',
+}
+
+/** A chip like ToolMark — a count instead of a letter */
 function StateCount({ state, count }: { state: FoldSummaryState; count: number }) {
-  // Spins at **the same angle** as a grid panel or a session mark (components/orbit.ts)
-  useOrbitSync(state === 'working')
   return (
-    <span
-      className={`shrink-0 rounded-md p-[1.5px] ${state === 'working' ? 'cc-orbit' : ''}`}
-      style={state === 'working' ? undefined : { background: RING[state] }}
-      data-state={state}
-    >
-      <span
-        className={`readout cc-chip flex h-[14px] min-w-[14px] items-center justify-center rounded-sm border border-line-strong bg-surface-floor px-[3px] text-2xs font-semibold leading-none text-ink ${
-          state === 'error' ? 'opacity-50' : ''
-        }`}
-      >
+    <span className="cc-mark shrink-0 rounded-md" data-look={FOLD_LOOK[state]} data-state={state}>
+      <span className="readout cc-chip flex h-[14px] min-w-[14px] items-center justify-center rounded-sm border border-line-strong px-[3px] text-2xs font-semibold leading-none text-ink">
         {count}
       </span>
     </span>
@@ -2419,46 +2416,27 @@ function ProjectDetail({ project }: { project: ProjectInfo }) {
  * With our own glyph, that problem does not exist at all, and it fits this app's own rule of
  * distinguishing things by shape in grayscale.
  *
- * The border is the state. Brighter means more urgent — the same rule that runs through this whole
- * app. Only 'working' spins: a stalled state and a running one are already distinguishable even in
- * a still frame, but nothing answers "is it working or has it stopped" as certainly as motion does.
- *
- * A stalled state (rate-limited, error) dims the letter to set it apart from an active state. With
- * six states, telling them all apart by border brightness alone is hard, so the name is carried in
- * full in the tooltip.
+ * The ring and the fill are the state, in four looks (`lookOf`, #736; the lines are in styles/index.css
+ * under `.cc-mark`): a thin grey line at rest, a thick white line while it answers, the same line dashed
+ * on grey when the turn broke off, and solid on grey when the person has to act. Nothing moves. The
+ * chip's own 1px border is the same in all four, and the exact state is in the tooltip.
  */
-const RING: Record<SessionState, string> = {
-  working: '', // cc-orbit takes over the background
-  waiting_approval: 'var(--color-ink-signal)',
-  error: 'var(--color-ink-signal)',
-  waiting_input: 'var(--color-ink-muted)',
-  limited: 'var(--color-ink-faint)',
-  idle: 'transparent',
-}
-
 /*
  * Asleep (#568): the session has no process, because the host put it to sleep when idle or nothing has woken it since a
  * restart. Said only in the tooltip: the mark is drawn exactly as the same session awake in the same state, because
  * sleep is nothing the person has to act on (using the session wakes it) and a fade would be mistaken for a stalled
- * session (#670). So a finished turn still looks finished and idle still looks idle; only limited and error fade.
+ * session (#670). So a finished turn still looks finished and idle still looks idle.
  */
-function ToolMark({ tool, state, asleep = false, interruption = null }: { tool: ToolName; state: SessionState; asleep?: boolean; interruption?: Interruption | null }) {
+function ToolMark({ tool, state, asleep = false, interruption = null, openQuestions = 0 }: { tool: ToolName; state: SessionState; asleep?: boolean; interruption?: Interruption | null; openQuestions?: number }) {
   const meta = useToolMeta(tool)
   const label = `${meta.label} · ${stateLabel(state)}${interruption ? ` · ${interruptionLabel(interruption)}` : ''}${asleep ? ' · asleep' : ''}`
-  const stalled = state === 'limited' || state === 'error'
-  // Spins at **the same angle** as a grid panel's border (components/orbit.ts)
-  useOrbitSync(state === 'working')
+  const look = lookOf({ state, interruption, openQuestions })
 
   return (
     <Tooltip content={label} testId={`tool-mark-tip-${tool}`} className="shrink-0">
       <span
-        className={`shrink-0 rounded-md p-[1.5px] ${state === 'working' ? 'cc-orbit' : ''}`}
-        /*
-         * A stopped turn rests in a state that does not say so (`idle` after a quit, `waiting_input` after an interrupt),
-         * so its ring is the signal ink an error's is (#698): the turn needs the person. Working keeps its orbit; a
-         * tool reconnecting for too long is said in the tooltip and the inbox.
-         */
-        style={state === 'working' ? undefined : { background: interruption ? 'var(--color-ink-signal)' : RING[state] }}
+        className="cc-mark shrink-0 rounded-md"
+        data-look={look}
         aria-label={label}
         data-testid={`tool-mark-${tool}`}
         data-state={state}
@@ -2467,28 +2445,18 @@ function ToolMark({ tool, state, asleep = false, interruption = null }: { tool: 
       >
         <span
           /*
-           * A dark letter on a bright chip — grabs the eye in the list at a glance, but pure white
-           * (ink-signal) is not used. That belongs to "something is waiting for me," and using it here
-           * would bury the real signal. One step down, ink, is used instead. The letter is set in
-           * the terminal font (monospace) — a single-character glyph needs a fixed width, or the row
-           * would jitter.
-           */
-          /*
-            A bright letter on a dark background. With a bright chip, the spinning orbit ring got
-            buried in that brightness, and 'working' itself became invisible — the mark doubles as
-            the state indicator, and if the state cannot be seen, moving the mark here loses its
-            point.
+            A bright letter on a dark chip, set in the terminal font (monospace): a single-character glyph needs a
+            fixed width, or the row would jitter. The chip is 14px inside the ring's 1.5px, so the mark is 17px in
+            every look.
 
             The sidebar background (surface-side) and the chip background (surface-floor) differ by only a few steps, so
             a single border does not separate them well. Instead of raising the border brightness
             further, **the same treatment as a keycap** (cc-chip) is used: a 1px highlight on top and
             a shadow underneath. It reads as a separate object without spending more brightness, and
             brightness is the resource this app uses to state urgency, so spending it on decoration
-            would cut into that signal by the same amount.
+            would cut into that signal by the same amount. Its fill follows the look (`.cc-mark`).
           */
-          className={`readout cc-chip flex size-[14px] items-center justify-center rounded-sm border border-line-strong bg-surface-floor text-2xs font-semibold leading-none text-ink ${
-            stalled ? 'opacity-50' : ''
-          }`}
+          className="readout cc-chip flex size-[14px] items-center justify-center rounded-sm border border-line-strong text-2xs font-semibold leading-none text-ink"
         >
           {meta.mark}
         </span>

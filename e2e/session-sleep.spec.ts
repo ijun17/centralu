@@ -45,12 +45,18 @@ test('a sleeping session says so quietly, is not woken by selecting it, and wake
   await expect(page.getByTestId('prompt-input')).toHaveValue('next step')
 })
 
-// What the mark's letter chip looks like, as the browser computes it: the class list and the opacity a person sees
-const chip = (page: Page, sessionId: string) =>
-  page.getByTestId(`session-row-${sessionId}`).getByTestId('tool-mark-claude').locator('span').first()
+// What the mark looks like, as the browser computes it: its look (#736), the ring and the chip's fill and opacity
+const markEl = (page: Page, sessionId: string) => page.getByTestId(`session-row-${sessionId}`).getByTestId('tool-mark-claude')
 const look = async (page: Page, sessionId: string) => {
-  const el = chip(page, sessionId)
-  return { classes: await el.getAttribute('class'), opacity: await el.evaluate((n) => getComputedStyle(n).opacity) }
+  const mark = markEl(page, sessionId)
+  return {
+    look: await mark.getAttribute('data-look'),
+    ...(await mark.evaluate((n) => {
+      const ring = getComputedStyle(n)
+      const chip = getComputedStyle(n.querySelector('span')!)
+      return { ring: `${ring.backgroundColor} ${ring.borderTopStyle} ${ring.borderTopWidth}`, fill: chip.backgroundColor, opacity: chip.opacity }
+    })),
+  }
 }
 // Through the legal path (idle → working → the state), as the state machine only follows those
 const setState = (page: Page, sessionId: string, state: string) =>
@@ -83,8 +89,8 @@ test('an asleep mark looks exactly like the same session awake; only the tooltip
   expect((await look(page, sleeper)).opacity).toBe('1')
   await expect(markOf(sleeper)).toHaveAttribute('data-state', 'waiting_input')
 
-  // An error keeps its own treatment, asleep or awake
-  expect((await look(page, failed)).opacity).toBe('0.5')
+  // An error keeps its own look (stopped: a dashed ring on a grey chip), asleep or awake
+  expect((await look(page, failed)).look).toBe('stopped')
   expect(await look(page, failed)).not.toEqual(await look(page, sleeper))
 
   // The information is kept for anyone who looks

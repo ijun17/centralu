@@ -24,7 +24,7 @@ The selection criteria are the product spec §7.1 (lightness) and the architectu
 (`surface-floor`, `surface-side`, `surface-raised`, `surface-selected`, `surface-hover`,
 `surface-deck`, `surface-reading`), lines (`line`, `line-strong`), ink (`ink-signal`, `ink`,
 `ink-muted`, `ink-faint`), `diff-*`, `danger`, and the effects (`focus`, `selection`, the scrollbar,
-scrims, shadows, keycap, `activity-1…5`, `term-*`). The old brightness names (`void`, `chalk`,
+scrims, shadows, keycap, `term-*`). The old brightness names (`void`, `chalk`,
 `beacon`…) would read backwards in a light theme. The block is plain `@theme`, not `inline`, so
 utilities read `var(--color-…)` at run time and a theme can switch by changing variables alone; for
 the same reason shadows are used as `shadow-(--shadow-modal)`, since Tailwind copies a theme

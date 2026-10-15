@@ -7,7 +7,7 @@ import { SessionPane } from '../session/SessionView.jsx'
 import { CloseIcon, PlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
-import { useOrbitSync } from '../../components/orbit.js'
+import { lookOf } from '../session/look.js'
 import { PANEL_MIME, SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reorder.js'
 import { GRID_GAP, wholePixelTracks } from '../grid/tracks.js'
 import { useRealSize } from '../grid/real-size.js'
@@ -114,9 +114,6 @@ export function ProjectView({ projectId }: { projectId: string }) {
   const rows = rowsFor(visible.length, cols)
   const preview = dragging && over ? reorderIds(visible, dragging, over.id, over.before) : null
   const order = preview ?? visible
-
-  const working = sessions.filter((s) => s.state === 'working' && visible.includes(sessionPanelId(s.id)))
-  useOrbitSync(working.map((s) => s.id).join(' '))
 
   const remove = (id: string) => {
     snapshotScroll()
@@ -236,7 +233,8 @@ export function ProjectView({ projectId }: { projectId: string }) {
             {order.map((id) => {
               const p = parsePanelId(id)
               const sessionId = p?.kind === 'session' ? p.id : null
-              const isWorking = !!sessionId && working.some((s) => s.id === sessionId)
+              const session = sessionId ? sessions.find((s) => s.id === sessionId) : undefined
+              const look = session ? lookOf({ ...session, openQuestions: session.pendingQuestions.length }) : 'idle'
               return (
                 <div
                   key={id}
@@ -244,10 +242,11 @@ export function ProjectView({ projectId }: { projectId: string }) {
                     if (el) cards.current.set(id, el)
                     else cards.current.delete(id)
                   }}
-                  // The grid's panel, class for class — the ring (#208), the isolation and the colours are its reasons
-                  className={`relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-line-strong bg-surface-floor transition-opacity ${
-                    isWorking ? 'cc-orbit-ring' : ''
-                  } ${dragging === id ? 'opacity-40' : ''}`}
+                  // The grid's panel, class for class — the border (#208), the isolation and the colours are its reasons
+                  className={`cc-panel relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-line-strong bg-surface-floor transition-opacity ${
+                    dragging === id ? 'opacity-40' : ''
+                  }`}
+                  data-look={look}
                   data-testid={`project-panel-${id}`}
                   data-drop={over?.id === id ? (over.before ? 'before' : 'after') : undefined}
                   onDragOver={(e) => {
@@ -292,7 +291,6 @@ export function ProjectView({ projectId }: { projectId: string }) {
                     setDragging(null)
                   }}
                 >
-                  {isWorking && <div className="cc-orbit-ring-layer" aria-hidden />}
                   {sessionId ? (
                     <SessionPane
                       sessionId={sessionId}

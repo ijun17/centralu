@@ -32,28 +32,17 @@ export { THEME_TOKENS }
 export const ACCENT_TOKENS = [
   '--color-focus',
   '--color-selection',
-  '--color-activity-1',
-  '--color-activity-2',
-  '--color-activity-3',
-  '--color-activity-4',
-  '--color-activity-5',
 ] as const
 
 /**
  * What the accent writes over those tokens. The selection stays translucent (it brightens
- * whatever is under it, see ::selection in index.css), and the orbit keeps a sweep of shades
- * of one hue rather than five hues, held below white as the galaxy palette is.
+ * whatever is under it, see ::selection in index.css).
  */
 export function accentTokens(accent: string): Record<string, string> {
   const mix = (pct: number, other: string) => `color-mix(in oklab, ${accent} ${pct}%, ${other})`
   return {
     '--color-focus': accent,
     '--color-selection': mix(35, 'transparent'),
-    '--color-activity-1': mix(60, 'black'),
-    '--color-activity-2': accent,
-    '--color-activity-3': mix(70, 'white'),
-    '--color-activity-4': accent,
-    '--color-activity-5': mix(60, 'black'),
   }
 }
 
@@ -154,8 +143,8 @@ export function applyTheme(theme: ResolvedTheme, root: HTMLElement = document.do
   root.style.removeProperty('color-scheme')
   root.dataset.theme = theme.preset
   root.dataset.themeBase = theme.base
-  // The accent goes on top of the theme's own tokens: when it is on, it is what focus, selection
-  // and the orbit are, whichever theme is under it
+  // The accent goes on top of the theme's own tokens: when it is on, it is what focus and selection
+  // are, whichever theme is under it
   const layers = { ...theme.tokens, ...(theme.accent ? { '--color-accent': theme.accent, ...accentTokens(theme.accent) } : {}) }
   if (theme.accent) root.dataset.accent = ''
   else delete root.dataset.accent

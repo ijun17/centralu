@@ -89,13 +89,6 @@ export const THEME_TOKENS: readonly ThemeTokenDef[] = [
     ['keycap-bottom', 'Bottom'],
     ['keycap-border', 'Border'],
   ]),
-  ...defs('Activity', 'color', [
-    ['activity-1', 'Activity 1'],
-    ['activity-2', 'Activity 2'],
-    ['activity-3', 'Activity 3'],
-    ['activity-4', 'Activity 4'],
-    ['activity-5', 'Activity 5'],
-  ]),
   ...defs('Terminal', 'color', [
     ['term-bg', 'Background'],
     ['term-log-bg', 'Log background'],

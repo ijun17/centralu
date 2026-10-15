@@ -13,10 +13,9 @@ import { expect, test, type Page } from '@playwright/test'
  *  - Running animation count: an infinite CSS animation keeps repainting the screen with no commit at all
  *  - Total browser-process CPU: what the two above actually cost in practice (measured with top)
  *
- * Measured on WebKit — the real app is WKWebView. In particular, cc-orbit rotates a
- * conic-gradient angle through a registered CSS variable, and this is suspected of being unable
- * to offload to the compositor, forcing a main-thread repaint every frame. The numbers here are
- * the verdict on that suspicion.
+ * Measured on WebKit — the real app is WKWebView. It once caught a rotating session border
+ * (a conic-gradient angle animated through a registered CSS variable, unable to offload to the
+ * compositor); that border is gone (#736), and a session's look is a still line and fill.
  *
  * No threshold is set (same reason as perf-grid) — what comes out of this is **a number**.
  *   pnpm perf
