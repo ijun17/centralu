@@ -933,14 +933,17 @@ export class SessionManager {
     }
     /*
      * Who to tell of a turn a quit cut (#698): the session owed its report, else the one that gave the running turn
-     * (an ask_project or a send), else the one that started it. Read before the loops below clear those rows. An asker
-     * that delegated without waiting was at rest, not cut, and would otherwise never hear: its mark used to be dropped.
+     * (an ask_project or a send), else the one that started it; the first of them that still exists. Read before the
+     * loops below clear those rows. An asker that delegated without waiting was at rest, not cut, and would otherwise
+     * never hear: its mark used to be dropped.
+     *
+     * A requester the same quit cut is skipped when the notice is given (`tellAskerOfInterruption`, its `quit`).
      */
     const marks = new Map(store.listReportMarks().map((r) => [r.sessionId, r.callerSessionId]))
     const turnGivers = new Map(store.listDelegatedTurns().map((r) => [r.sessionId, r.callerSessionId]))
     for (const s of stoppedByQuit) {
-      const requester = marks.get(s.id) ?? turnGivers.get(s.id) ?? s.askedBy ?? undefined
-      if (requester && requester !== s.id && this.meta.has(requester)) this.quitNotices.push({ sessionId: s.id, requester })
+      const requester = [marks.get(s.id), turnGivers.get(s.id), s.askedBy].find((id): id is string => !!id && id !== s.id && this.meta.has(id))
+      if (requester) this.quitNotices.push({ sessionId: s.id, requester })
     }
     /*
      * "You will be told when it ends" survives a host swap (#646): the keeper kept the child's process and its turn is
@@ -3786,7 +3789,13 @@ export class SessionManager {
     // The session that gave the turn (an ask_project, a delegation past its bound), else the one that started it
     const asker = requester ?? m?.askedBy ?? undefined
     if (!m || !asker || asker === sessionId || !stop || stop.reason === 'reconnecting' || this.handingOver) return
-    if (!this.meta.has(asker)) return
+    /*
+     * **Not a requester a quit stopped** (#698). It waits for the person's Continue under its own "stopped" line; a
+     * notice would resume it and start a model turn with nobody there (at launch, when the same quit cut it), and that
+     * turn would clear its own mark before the person saw it. Once continued, its children's rows say they stopped.
+     */
+    const askerInfo = this.meta.get(asker)
+    if (!askerInfo || askerInfo.interruption?.reason === 'quit') return
     console.error(`[sessions] ${sessionId.slice(0, 8)} stopped (${stop.reason}) in a turn no report was owed for; telling ${asker.slice(0, 8)}, which started it`)
     const project = m.projectId ? (this.store.listProjects().find((p) => p.id === m.projectId)?.name ?? '(project no longer exists)') : '(none)'
     await this.deliverReport(asker, sessionId, labelOf(this.store, m), project, previewOf(this.store, sessionId, 600), { type: stop.reason === 'network' ? 'error' : 'state_change' })
@@ -3885,7 +3894,7 @@ export class SessionManager {
     const message = stop?.detail ?? (ending.type === 'error' ? String(ending.error?.message ?? '') : '')
     const failure = message ? `Error: ${message.slice(0, 600)}\n\n` : ''
     const resume = cutShort
-      ? `It keeps its conversation: send it a message (for example "Continue where you stopped.") to go on${stop?.reason === 'network' ? ', once the network is back' : ''}.\n`
+      ? `It keeps its conversation: send it a message to go on${stop?.reason === 'network' ? ', once the network is back' : ''}, the same one the person's Continue sends: "Continue where you stopped. Check what already happened before repeating a step."\n`
       : ''
     try {
       await this.deliver(

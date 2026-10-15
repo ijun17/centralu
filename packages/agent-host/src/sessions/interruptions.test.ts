@@ -26,6 +26,13 @@ describe('which failures the network caused', () => {
     'API Error: Connection lost while your computer was asleep',
     'API Error: Your computer went to sleep mid-response. The response above may be incomplete.',
     'API Error: Request timed out.',
+    // The CLI's own wording of a connection failure (claude-agent-sdk 0.3.263's bundled CLI)
+    'API Error: fetch failed',
+    'API Error: Connection dropped (ECONNRESET)',
+    'API Error: Connection dropped (UND_ERR_SOCKET)',
+    'API Error: No internet route — check your connection or VPN (ENETUNREACH)',
+    'API Error: Unable to connect to API. Check your internet connection',
+    'API Error: Request timed out. Check your internet connection and proxy settings',
     // Codex, the reasons host.log recorded for its reconnects
     'stream disconnected before completion: failed to lookup address information: nodename nor servname provided, or not known',
     'stream disconnected before completion: Transport error: network error: error decoding response body',
@@ -43,6 +50,10 @@ describe('which failures the network caused', () => {
     'Claude Code process exited with code 1. stderr: TypeError: fetch failed (ECONNREFUSED)',
     // Generic words outside the API's own sentences: an MCP server, a dev server the agent ran
     'MCP error -32000: Connection closed',
+    // A certificate or proxy setting: continuing fails the same way until the person fixes it
+    'API Error: Unable to connect to API: SSL certificate verification failed. Check your proxy or corporate SSL certificates',
+    // fetch failed from a tool, not from the API call
+    'WebFetch: fetch failed for https://example.com',
     'Bash failed: network error while installing packages',
   ])('not the network, since continuing would fail the same way: %s', (message) => {
     expect(isNetworkFailure(message)).toBe(false)
@@ -157,6 +168,8 @@ async function parentAndChild(h: ReturnType<typeof host>) {
 /** The report texts stored in the parent's conversation that name the child */
 const reportsTo = (parent: string, child: string) =>
   store.loadMessages(parent, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(child))
+/** The start's quit notices are taken on its first timer tick; this waits past it */
+const startNoticesRan = () => new Promise<void>((r) => setTimeout(() => setImmediate(r), 0))
 /** The host.log lines saying an asker is told of a stop; the decision is taken with the event that ended the turn */
 const toldLines = (log: { mock: { calls: unknown[][] } }) => log.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('no report was owed for; telling'))
 const info = (h: ReturnType<typeof host>, id: string) => h.mgr.listSessions().find((s) => s.id === id)!
@@ -183,7 +196,8 @@ describe('a turn the network stopped (#698)', () => {
     const told = reportsTo(parent, child)[1]!
     expect(told).toContain('stopped before finishing: a network error ended its turn')
     expect(told).toContain('ECONNREFUSED')
-    expect(told).toContain('Continue where you stopped.')
+    // The same sentence the person's Continue sends
+    expect(told).toContain('Continue where you stopped. Check what already happened before repeating a step.')
     expect(told).not.toContain('The assigned work finished')
     expect(a.claude.handles.get(parent)!.sent.filter((t) => t.includes(`sourceSessionId: ${child}`))).toHaveLength(2)
   })
@@ -291,7 +305,7 @@ describe('a turn its tool interrupted (#698)', () => {
     await until(() => reportsTo(parent, child).length === 1)
     expect(reportsTo(parent, child)[0]).toContain('stopped before finishing: its tool interrupted the turn')
     // Nothing to do with the network: no waiting for it
-    expect(reportsTo(parent, child)[0]).toContain('to go on.')
+    expect(reportsTo(parent, child)[0]).toContain('send it a message to go on, the same one')
     expect(reportsTo(parent, child)[0]).not.toContain('network')
     expect(info(a, child).interruption).toMatchObject({ reason: 'interrupted' })
   })
@@ -351,10 +365,38 @@ describe('a turn a quit stopped (#698)', () => {
     expect(reportsTo(parent, child)[0]).not.toContain('network')
     expect(info(b, orphan.sessionId).interruption).toMatchObject({ reason: 'quit' })
 
-    // The child is at rest now: the start after that tells nobody again
-    const c = host()
-    expect((c.mgr as unknown as { quitNotices: unknown[] }).quitNotices).toEqual([])
+    // The child is at rest now: the start after that tells nobody again, once its notices have had their moment
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    host()
+    await startNoticesRan()
+    expect(toldLines(log)).toEqual([])
     expect(reportsTo(parent, child)).toHaveLength(1)
+  })
+
+  it('a requester the same quit cut is not woken at launch: its own Continue covers its children', async () => {
+    const a = host()
+    const { parent, child } = await parentAndChild(a)
+    // The orchestrator was mid-turn too, waiting on its child, when the app quit
+    await a.mgr.send(parent, 'keep going while the child works')
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const b = host()
+    await startNoticesRan()
+    expect(toldLines(log)).toEqual([])
+    expect(reportsTo(parent, child)).toEqual([])
+    // Nothing resumed it, so its own stop is still there for the person to see and continue
+    expect(b.claude.handles.has(parent)).toBe(false)
+    expect(info(b, parent)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
+    expect(info(b, child).interruption).toMatchObject({ reason: 'quit' })
+  })
+
+  it('when the session owed the report is gone, the notice falls back to the turn giver, then the one that started it', async () => {
+    const a = host()
+    const { parent, child } = await parentAndChild(a)
+    // The report is owed to a session deleted since; the child was started by the parent
+    store.setReportMark(child, 'a-session-deleted-since')
+    host()
+    await until(() => reportsTo(parent, child).length === 1)
+    expect(reportsTo(parent, child)[0]).toContain('Centralu quit or restarted during its turn')
   })
 
   it("the orchestrator's list says which children stopped and why", async () => {

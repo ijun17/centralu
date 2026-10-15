@@ -19,13 +19,21 @@ import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
  *                 "… Transport error: timeout", "Connection failed: error sending request"
  *                 (host.log, the reasons of `Reconnecting... n/5`; a turn that gives up ends with the last one)
  *
+ * Read in the CLI itself (claude-agent-sdk 0.3.263's bundled CLI, the function that words a connection failure): after
+ * "API Error: " it says "Connection lost while your computer was asleep", "No response from API", "Request timed out.
+ * Check your internet connection and proxy settings", "Unable to connect to API. Check your internet connection",
+ * "Connection dropped (ECONNRESET | EPIPE | ConnectionClosed | …)", "Connection refused — …", "Can't reach the API
+ * server — …", "No internet route — …", "Unable to connect to API (<code>)"; and an error it does not recognise goes
+ * out as its own message, so a bare "API Error: fetch failed" is the API call itself failing. "Unable to connect to
+ * API: SSL …" is a certificate or proxy setting, not the network, and is left out.
+ *
  * A 401, a 400 for a model, a usage limit and the like are not here: continuing would only fail again the same way.
  * The words are the API's own sentences, so a generic phrase ("connection closed", "network error") is matched only
  * inside one: a tool's own failure can say it about something else (an MCP server, a dev server it ran).
  */
 const NETWORK_WORDS = [
   /\b(ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ENETDOWN)\b/,
-  /API Error: (No response from API|Can't reach the API server|Connection (refused|lost|reset|error)|Request timed out)/i,
+  /API Error: (No response from API|Can't reach the API server|Connection (refused|lost|reset|error|dropped)|Request timed out|No internet route|fetch failed|Unable to connect to API(?!: SSL))/i,
   /computer (went to sleep|was asleep)/i,
   /stream disconnected before completion/i,
   /failed to lookup address information/i,
