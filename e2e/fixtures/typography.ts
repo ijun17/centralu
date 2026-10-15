@@ -59,6 +59,21 @@ export function typographyTests() {
     expect(widths.hangul).toBeCloseTo(widths.latin * 2, 1)
   })
 
+  test('slow fonts do not move the first layout: the conversation opens at its bottom (#731)', async ({ page }) => {
+    // As in CI, where the fonts arrive after the first frame would have been laid out with the fallback
+    await page.route(/\.woff2(\?|$)/, async (route) => {
+      await new Promise((r) => setTimeout(r, 1200))
+      await route.continue()
+    })
+    await openDemo(page)
+    await page.evaluate(() => document.fonts.ready)
+    const gap = () => page.getByTestId('chat-stream').evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)
+    await expect.poll(gap).toBeLessThan(40)
+    // and it stays there once the fonts are in, rather than having been at the bottom only before they came
+    await page.waitForTimeout(500)
+    expect(await gap()).toBeLessThan(40)
+  })
+
   test('with nothing chosen, nothing is written on the root and the stylesheet’s fonts and line heights show', async ({ page }) => {
     await openDemo(page)
     for (const name of ['--font-sans', '--font-mono', '--leading-body', '--leading-code']) expect(await rootStyle(page, name)).toBe('')
