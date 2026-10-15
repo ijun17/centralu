@@ -1045,7 +1045,7 @@ Implementation rules:
     settings, the tool definitions a profile serves) waits only for the turn: an idle session restarts at once, and a
     mid-turn change applies when the turn ends, whatever runs in the background or is unknown. Any other deferred
     restart (a model, an app set) also waits while listed background work runs, at most one hour
-    (`applyDeferredRestart`). A restart that ends background work, or work that is unknown, says so in the
+    (`applyDeferredRestart`, in `RestartPolicy`, `sessions/restart-policy.ts`). A restart that ends background work, or work that is unknown, says so in the
     conversation first (a `restart` notice naming the tasks).
 - **The CLI version a process runs is reported once per process, as `agent_version`** (#297). Claude: the init
   message's `claude_code_version` (init comes again with every query; only a change is sent). Codex: the `initialize`

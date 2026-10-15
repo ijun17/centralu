@@ -674,7 +674,7 @@ interface AdapterCapabilities {
   - **재시작과 백그라운드 작업** (#648). 안전을 바꾸는 재시작(권한 프리셋, 실행 설정, 프로필이 내주는 도구 정의)은
     턴만 기다린다. 유휴 세션은 바로 다시 띄우고, 턴 중의 변경은 백그라운드에서 무엇이 돌든, 모르든 턴이 끝날 때
     적용한다. 그 밖의 미뤄진 재시작(모델, 앱 묶음)은 목록에 오른 백그라운드 작업이 도는 동안 최대 한 시간까지 더
-    기다린다(`applyDeferredRestart`). 백그라운드 작업을 끝내게 되거나 그 작업을 모르는 재시작은 먼저 대화에 그 사실을
+    기다린다(`sessions/restart-policy.ts`의 `RestartPolicy.applyDeferredRestart`). 백그라운드 작업을 끝내게 되거나 그 작업을 모르는 재시작은 먼저 대화에 그 사실을
     알린다(작업 이름을 담은 `restart` 알림).
 - **프로세스가 돌리는 CLI 버전은 프로세스마다 한 번 `agent_version`으로 알린다** (#297). Claude: init 메시지의
   `claude_code_version`(init은 질의마다 다시 오므로 바뀐 것만 보낸다). Codex: `initialize` 응답의 `userAgent`,

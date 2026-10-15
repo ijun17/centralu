@@ -30,6 +30,7 @@ import { Store } from '../dev-services/store.js'
 import { plantedRepo } from '../dev-services/planted-repo.test-helpers.js'
 import { SessionManager } from './manager.js'
 import type { ChildOwnership } from './child-ownership.js'
+import type { RestartPolicy } from './restart-policy.js'
 import { DEFAULT_RARE_TIER, setRareTier } from './orchestrator-tools.js'
 import { orchestratorPreamble, setOrchestratorPreamble } from './orchestrator-home.js'
 import { plantOldCoordinator } from './old-coordinator.test-helpers.js'
@@ -907,7 +908,7 @@ describe('approvals, read state, and messages', () => {
     const internals = mgr as unknown as {
       pendingCommits: Map<string, string>
       children: ChildOwnership
-      appsRestartAfterTurn: Set<string>
+      restartPolicy: RestartPolicy
     }
     const p = await addProject()
     const ended = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
@@ -923,11 +924,11 @@ describe('approvals, read state, and messages', () => {
     adapter.last!.emitToolCall('Bash', 'git commit -m "wip"')
     // What its turn's end would have consumed: an orchestrator's report, a restart for an app change
     internals.children.adoptReport(gone.id, 'orchestrator', null)
-    internals.appsRestartAfterTurn.add(gone.id)
+    internals.restartPolicy.appsRestartAfterTurn.add(gone.id)
     await rpc('agents.deleteSession', { sessionId: gone.id })
     expect(internals.pendingCommits.size).toBe(0)
     expect(internals.children.awaitingReport.has(gone.id)).toBe(false)
-    expect(internals.appsRestartAfterTurn.has(gone.id)).toBe(false)
+    expect(internals.restartPolicy.appsRestartAfterTurn.has(gone.id)).toBe(false)
   })
 
   it('messages are persisted and reloaded', async () => {

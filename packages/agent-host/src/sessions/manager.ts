@@ -156,6 +156,7 @@ import { handoffNoteBytes, handoffNoteDir, sweepHandoffNotes, writeHandoffNote, 
 import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
 import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, HUB_SENDER, agentStartPersonText, taskList } from './delegation-flow.js'
 import { type HostAsk, type HostAskAnswer } from './host-cards.js'
+import { RestartPolicy, type RestartHost } from './restart-policy.js'
 export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './delegation-flow.js'
 
 /**
@@ -370,17 +371,6 @@ function isCompactionMarker(row: StoredMessage): boolean {
 }
 
 /**
- * How long an adopted session whose background work is unknown (#648, no record from the previous host) may stay quiet
- * before it is taken as holding nothing: until then it is never put to sleep. Two hours is past any quiet a person
- * leaves a running dev server in while still at the machine, and short of keeping a forgotten session awake all night.
- */
-const BACKGROUND_UNKNOWN_MAX_MS = 2 * 60 * 60 * 1000
-/**
- * How long a restart that changes nothing about safety (a model, an app set) waits for the session's background work
- * to end before it is applied anyway (#648). A safety change does not wait at all (`applyDeferredRestart`).
- */
-const BACKGROUND_HOLD_MAX_MS = 60 * 60 * 1000
-/**
  * How long a report held over a session's own background work (#721) waits, once that work has ended with no turn
  * running, for the turn its ending may start. Claude starts that turn within a second of the task's end (its
  * task-notification); a task the person stopped by hand starts none, and the report then goes out with the last answer.
@@ -548,8 +538,6 @@ export class SessionManager {
   private usageCache = new Map<ToolName, { snapshot: UsageSnapshot; at: number }>()
   /** Every model request's cache figures over the last day, per tool (docs/agent-host.md §6.1); read by `usageFor` */
   private readonly cacheLedger = new CacheLedger()
-  /** Why a session's process is being restarted, for the cache's rebuild cause; taken when the new process comes up */
-  private readonly restartReasons = new Map<string, RebuildCause>()
   /**
    * `detachAll` is handing the sessions to the next host (#280): the waits it fails are not the end of their turns,
    * so no report goes out and the marks stay in the store for the host that sees those turns end (#646).
@@ -559,6 +547,8 @@ export class SessionManager {
   private readonly children: ChildOwnership
   /** The work one session gives another: ask_project, start_agent, agent_session (delegation-flow.ts) */
   private readonly delegationFlow: DelegationFlow
+  /** When a session's process is replaced, and the background work a restart waits for (restart-policy.ts) */
+  private readonly restartPolicy: RestartPolicy
   /** Holds the session's owed report over its own background work (#721); the mark itself stays as it is */
   private pauseReport(sessionId: string, running: readonly BackgroundTask[]): void {
     this.children.pauseReport(sessionId, running)
@@ -627,36 +617,6 @@ export class SessionManager {
    * that had joined the wake and was waiting is also not sent.
    */
   private leaving = new Map<string, string>()
-  /**
-   * Session whose configuration changed mid-turn — the process is swapped once that turn ends
-   * (#164). It used to be swapped on the spot, which made the running turn vanish (Codex closes its
-   * app-server), even though the screen said "starting next turn".
-   */
-  private restartAfterTurn = new Set<string>()
-  /** Input arriving after a note completes waits for its deferred process replacement, including disposal. */
-  private deferredRestarts = new Map<string, Promise<void>>()
-  /** A new host served a different Centralu tool prefix; replace the old agent at its safe boundary. */
-  private definitionsRestartAfterTurn = new Set<string>()
-  /** A kept process was started with adapter settings from an older host build (#589). */
-  private launchSettingsRestartAfterTurn = new Set<string>()
-  /** Sessions whose pending launch-settings restart comes from a change of their project's trust (#663): the restart says so */
-  private trustRestartNotice = new Set<string>()
-  /**
-   * Sessions whose adopted process may hold background work this host knows nothing of (#648) -> when the session was
-   * last heard from. The previous host left no list of it (a build before the list was kept), and the tool says its
-   * level only when it changes. Until the tool's own full list arrives (`snapshot`), the session is never idle
-   * (`sessionIdle`: `background_unknown`), so it is not put to sleep over a shell nobody can see; after
-   * `BACKGROUND_UNKNOWN_MAX_MS` without a word it is taken as holding nothing (`backgroundKnown`). A safety restart does
-   * not wait for it (`applyDeferredRestart`). A fresh process starts known: it holds nothing yet.
-   */
-  private backgroundUnknown = new Map<string, number>()
-  /**
-   * A deferred restart that changes nothing about safety, waiting for the session's background work to end (#648) ->
-   * when the wait began, and the timer that applies it anyway `BACKGROUND_HOLD_MAX_MS` later. The entry outlives its
-   * timer until the restart is applied: a timer that fires mid-turn finds the turn running, and the turn's end applies
-   * the restart then, counting from `since` rather than starting a new hour.
-   */
-  private backgroundHolds = new Map<string, { since: number; timer: ReturnType<typeof setTimeout> }>()
   private updates: UpdateService | null = null
   /** Sessions allowed to update once per host; an "always" answer adds this session only. */
   private updateConsents = new Set<string>()
@@ -674,12 +634,6 @@ export class SessionManager {
   private appAccess: AppAccess | null = null
   /** The orchestrator's MCP-server and skill proposals and its approved skills (#71, M4 A-7) */
   private readonly proposals: OrchestratorProposals
-  /**
-   * Codex sessions whose attached apps changed mid-turn (#371 part A) — restarted through resume when
-   * the turn ends, beside `restartAfterTurn`'s settings drift: a Codex thread keeps the MCP servers it
-   * started with, so the restart is what gives it (or takes away) an app it attached or detached.
-   */
-  private appsRestartAfterTurn = new Set<string>()
   /**
    * The installed version of a tool as last read (#297, agent-versions.ts), or null. A process started now runs it,
    * so a session carries it as its `agentVersion` until the process reports its own; it is also what the keeper's
@@ -756,6 +710,7 @@ export class SessionManager {
   ) {
     this.children = new ChildOwnership(store)
     this.delegationFlow = new DelegationFlow(this.delegationHost())
+    this.restartPolicy = new RestartPolicy(this.restartHost())
     this.proposals = new OrchestratorProposals(
       this.store,
       () => this.appsHub?.rt,
@@ -2413,67 +2368,9 @@ export class SessionManager {
     this.store.setAppSetting(this.backgroundTasksKey(m.id), JSON.stringify(m.backgroundTasks.filter((t) => t.status === 'running')))
   }
 
-  /** Background work the session's process holds that ending it would end (#648): what its tool listed as running */
-  private backgroundRunning(sessionId: string): boolean {
-    const m = this.meta.get(sessionId)
-    return !!m && liveBackgroundTasks(m.backgroundTasks).length > 0
-  }
-
-  /**
-   * Whether what the session's process holds in the background is known (#648). An adopted process with no record is
-   * not, until its tool lists its work; after `BACKGROUND_UNKNOWN_MAX_MS` without a word from the session it is taken
-   * as holding nothing, said in the log, and recorded so the next host does not start from unknown again.
-   */
-  private backgroundKnown(sessionId: string): boolean {
-    const since = this.backgroundUnknown.get(sessionId)
-    if (since === undefined) return true
-    if (Date.now() - since < BACKGROUND_UNKNOWN_MAX_MS) return false
-    this.backgroundUnknown.delete(sessionId)
-    console.error(
-      `[sessions] ${sessionId.slice(0, 8)}: no word of its background work since it was adopted, for ` +
-        `${Math.round(BACKGROUND_UNKNOWN_MAX_MS / 3_600_000)} h; taking it as none`,
-    )
-    const m = this.meta.get(sessionId)
-    if (m) this.rememberBackgroundTasks(m)
-    return true
-  }
-
-  /** The session's process is gone for good (deleted): nothing of its background work is kept (#648) */
-  private forgetBackground(sessionId: string): void {
-    this.backgroundUnknown.delete(sessionId)
-    this.clearBackgroundHold(sessionId)
-    this.store.deleteAppSetting(this.backgroundTasksKey(sessionId))
-  }
-
-  /**
-   * Says in the conversation that a restart is about to end the session's background work (#648): the tool's own
-   * ending of each task follows in the list, but a person whose dev server stopped should read why where they look.
-   */
-  private noticeBackgroundStopped(sessionId: string, cause: RebuildCause | undefined): void {
-    const m = this.meta.get(sessionId)
-    if (!m || !this.handles.has(sessionId)) return
-    const why =
-      cause === 'launch_settings' ? 'changed launch settings'
-      : cause === 'instructions' ? "changed Centralu tool definitions"
-      : cause === 'thread_restart' ? 'a change of attached apps'
-      : cause === 'model_change' ? 'a model change'
-      : this.running.get(sessionId)?.permissionPreset !== m.permissionPreset ? 'a permission change'
-      : 'changed settings'
-    const tasks = liveBackgroundTasks(m.backgroundTasks)
-    const text =
-      tasks.length > 0
-        ? `Restarting the agent to apply ${why}. The background work it was running stops with it: ` +
-          `${tasks.map((t) => t.description).join(', ')}. Ask the agent to start it again if you still need it.`
-        : this.backgroundUnknown.has(sessionId)
-          ? `Restarting the agent to apply ${why}. Any background work it started before Centralu was updated ` +
-            `(a dev server, a watcher) stops with it; ask the agent to start it again if you still need it.`
-          : null
-    if (text) this.onEvent({ type: 'notice', sessionId, level: 'warning', from: 'Centralu', label: 'restart', text })
-  }
-
   /** Says in the conversation that the restart in progress applies a change of the project's trust (#663) */
   private noticeTrustRestart(sessionId: string): void {
-    if (!this.trustRestartNotice.delete(sessionId)) return
+    if (!this.restartPolicy.trustRestartNotice.delete(sessionId)) return
     const m = this.meta.get(sessionId)
     if (!m || !this.handles.has(sessionId)) return
     const text = this.projectTrusted(m.projectId)
@@ -2751,14 +2648,14 @@ export class SessionManager {
         this.rememberToolPrefix(sessionId)
         this.rememberLaunchSettings(m, cwd)
         // A new process holds no background work yet (#648); whatever an earlier adopted one left unknown is over
-        this.backgroundUnknown.delete(sessionId)
+        this.restartPolicy.backgroundUnknown.delete(sessionId)
         this.rememberBackgroundTasks(m)
       }
       // Every window learns it is awake, not only the one that asked (#568)
       this.emit({ type: 'session_live', sessionId, live: true })
       // Why the process came up again, if a restart said so; a wake, a revive or a manual restart otherwise (§6.1)
-      this.cacheLedger.note(sessionId, this.restartReasons.get(sessionId) ?? 'new_process')
-      this.restartReasons.delete(sessionId)
+      this.cacheLedger.note(sessionId, this.restartPolicy.restartReasons.get(sessionId) ?? 'new_process')
+      this.restartPolicy.restartReasons.delete(sessionId)
       this.running.set(sessionId, launched)
       handle.applyRules?.(this.rulesFor(sessionId, m.projectId))
       // The identifier may only now be available — record it for the next resume
@@ -2777,7 +2674,7 @@ export class SessionManager {
          * own level would be; with no record (the previous host predates it), the session is held as unknown until
          * the tool first speaks, rather than read as idle and put to sleep over a running dev server.
          */
-        if (kept === null) this.backgroundUnknown.set(sessionId, Date.now())
+        if (kept === null) this.restartPolicy.backgroundUnknown.set(sessionId, Date.now())
         // Listed through onEvent, which also keeps the record for the host after this one
         else if (kept.length > 0) this.onEvent({ type: 'background_tasks', sessionId, live: kept })
       } else {
@@ -3011,7 +2908,7 @@ export class SessionManager {
       this.handles.delete(sessionId)
     }
     // Its process is gone with it, and a restored session starts a new one (#648)
-    this.forgetBackground(sessionId)
+    this.restartPolicy.forgetBackground(sessionId)
     /*
      * The message being streamed is written out, not dropped (#66 used to drop it, because the rows were about to go).
      * The rows now stay, and a trashed conversation that stops mid-sentence is not the one that was deleted. Written
@@ -3021,12 +2918,12 @@ export class SessionManager {
     let project: { name: string; path: string } | undefined
     if (m.projectId) project = this.store.listProjects().find((p) => p.id === m.projectId)
     this.running.delete(sessionId)
-    this.restartAfterTurn.delete(sessionId)
-    this.trustRestartNotice.delete(sessionId)
+    this.restartPolicy.restartAfterTurn.delete(sessionId)
+    this.restartPolicy.trustRestartNotice.delete(sessionId)
     // A deleted session's branch is never asked about again (#392: one entry per worktree session ever made)
     this.prCheckedAt.delete(sessionId)
     // Kept until its turn ends, which a deleted session's never does (#392)
-    this.appsRestartAfterTurn.delete(sessionId)
+    this.restartPolicy.appsRestartAfterTurn.delete(sessionId)
     this.children.clearReport(sessionId)
     // Nobody is left to tell: the reports its children owed it go too
     for (const [child, caller] of [...this.children.awaitingReport]) if (caller === sessionId) this.children.clearReport(child)
@@ -3254,7 +3151,7 @@ export class SessionManager {
       const recoveryRemoval = await stageWorktreeRecoveryRemoval(sessionId)
       try {
         await this.store.purgeSession(sessionId)
-        this.forgetBackground(sessionId)
+        this.restartPolicy.forgetBackground(sessionId)
         this.store.deleteAppSetting(codeIntelligenceKey(sessionId))
       } catch (e) {
         // Not swallowed: the folder left aside carries the session id, and the next start puts it back (#647)
@@ -3341,17 +3238,6 @@ export class SessionManager {
     )
   }
 
-  /**
-   * Changes model or permissions (FR-7). If the adapter supports it, it applies starting next turn;
-   * if not, only the metadata is updated — it comes up with the new configuration on resume.
-   */
-  /** A settings restart is a model change when the model is what drifted (§6.1); otherwise a plain new process */
-  private restartCause(sessionId: string): RebuildCause | undefined {
-    const live = this.running.get(sessionId)
-    const m = this.meta.get(sessionId)
-    return live && m && live.model !== m.model ? 'model_change' : undefined
-  }
-
   async updateSettings(
     sessionId: string,
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
@@ -3423,7 +3309,7 @@ export class SessionManager {
 
     // The comparison baseline is not the screen's value (meta) but **the configuration the running process
     // actually has**
-    const drifted = this.settingsDrifted(sessionId)
+    const drifted = this.restartPolicy.settingsDrifted(sessionId)
 
     /**
      * Permissions and model are **fixed the moment the tool process is launched.**
@@ -3445,30 +3331,14 @@ export class SessionManager {
        * orchestrator's own settings tool goes through this same path too.
        */
       if (inTurn(m.state)) {
-        this.restartAfterTurn.add(sessionId)
+        this.restartPolicy.restartAfterTurn.add(sessionId)
         applied = 'after_turn'
       } else {
-        applied = (await this.restartSession(sessionId, this.restartCause(sessionId))).resumed ? 'restarted' : 'saved'
+        applied = (await this.restartSession(sessionId, this.restartPolicy.restartCause(sessionId))).resumed ? 'restarted' : 'saved'
       }
     }
 
     return { ...m, live: this.handles.has(sessionId), applied }
-  }
-
-  /** Does the configuration the running process received (running) differ from the current one (meta) — false
-   * if no process is running */
-  private settingsDrifted(sessionId: string): boolean {
-    const m = this.meta.get(sessionId)
-    const live = this.running.get(sessionId)
-    return (
-      !!m &&
-      !!live &&
-      (live.model !== m.model ||
-        live.effort !== m.effort ||
-        live.verbosity !== m.verbosity ||
-        live.serviceTier !== m.serviceTier ||
-        live.permissionPreset !== m.permissionPreset)
-    )
   }
 
   /** Whether a session's process is alive (what the UI uses to know if it can be continued) */
@@ -3565,7 +3435,7 @@ export class SessionManager {
         interruptionBefore = m.interruption ?? null
         this.trackInterruption(e, m, wasBusy && !inTurn(m.state))
         // Heard from: an unknown background state is bounded by quiet, not by age (#648, `backgroundKnown`)
-        if (this.backgroundUnknown.has(m.id)) this.backgroundUnknown.set(m.id, Date.now())
+        if (this.restartPolicy.backgroundUnknown.has(m.id)) this.restartPolicy.backgroundUnknown.set(m.id, Date.now())
         /*
          * A builder session's turn ended (M4 C-4) — this is the moment to relaunch that app from its
          * files. It happens once, right here, rather than every time the app's folder changes: an app
@@ -3655,9 +3525,9 @@ export class SessionManager {
     // so nothing happens
     // A commit call still unanswered when its turn ends never will be: interrupted, or its process gone (#392)
     if (endedTurn && e.sessionId) this.forgetCommits(e.sessionId)
-    if (endedTurn && e.sessionId) this.applyDeferredRestart(e.sessionId)
+    if (endedTurn && e.sessionId) this.restartPolicy.applyDeferredRestart(e.sessionId)
     // A deferred restart also waits for the session's background work (#648): the moment it ends is a boundary too
-    if (e.type === 'background_tasks' && e.sessionId) this.applyDeferredRestart(e.sessionId)
+    if (e.type === 'background_tasks' && e.sessionId) this.restartPolicy.applyDeferredRestart(e.sessionId)
     // A paused report's work may just have ended (#721)
     if (e.type === 'background_tasks' && e.sessionId && this.children.pausedReports.has(e.sessionId)) this.settlePausedReport(e.sessionId)
   }
@@ -3667,73 +3537,6 @@ export class SessionManager {
     if (this.agentRuns.get(sessionId)?.waitingForInputs) return true
     for (const observer of this.turnObservers.get(sessionId) ?? []) if (observer.waitingForInputs) return true
     return false
-  }
-
-  /**
-   * A note receipt follows turn_complete: re-check the same deferred change when the last hold is released.
-   *
-   * Background work (#648). A change of safety (the permission preset, the launch settings, the tool definitions a
-   * profile serves) is applied at the end of the turn whatever runs in the background: another turn under the old
-   * policy is worse than a stopped dev server, and the conversation says what stopped (`noticeBackgroundStopped`). Any
-   * other change (a model, an app set) waits while work the tool listed is running, as a sleep does, and is applied
-   * anyway after `BACKGROUND_HOLD_MAX_MS`.
-   */
-  private applyDeferredRestart(sessionId: string): void {
-    // The same boundaries free a busy session for the request queued for it (#677)
-    if (this.children.queued.has(sessionId)) this.scheduleDrain(sessionId)
-    const session = this.meta.get(sessionId)
-    if (!session || inTurn(session.state) || this.deferredRestarts.has(sessionId) || this.inputsHeld(sessionId) || !this.restartAfterTurn.has(sessionId)) return
-    const hold = this.backgroundHolds.get(sessionId)
-    const holdExpired = !!hold && Date.now() - hold.since >= BACKGROUND_HOLD_MAX_MS
-    if (!holdExpired && !this.safetyRestartPending(sessionId) && this.backgroundRunning(sessionId)) {
-      this.holdForBackground(sessionId)
-      return
-    }
-    this.restartAfterTurn.delete(sessionId)
-    this.clearBackgroundHold(sessionId)
-    // An app attached or detached in this turn (#371 part A) is a reason of its own, settings or not.
-    const apps = this.appsRestartAfterTurn.delete(sessionId)
-    const definitions = this.definitionsRestartAfterTurn.delete(sessionId)
-    const launchSettings = this.launchSettingsRestartAfterTurn.delete(sessionId)
-    if (!(apps || definitions || launchSettings || this.settingsDrifted(sessionId)) || !this.handles.has(sessionId)) return
-    const cause = launchSettings ? 'launch_settings' : apps ? 'thread_restart' : definitions ? 'instructions' : this.restartCause(sessionId)
-    // Publish the barrier before dispose can emit events or the completed wait can hand the parent its answer.
-    const restarting = Promise.resolve().then(() => this.restartSession(sessionId, cause)).then(() => {}).finally(() => {
-      if (this.deferredRestarts.get(sessionId) === restarting) this.deferredRestarts.delete(sessionId)
-      // A drain that met this restart returned: the request queued behind it goes in now (#684 review)
-      if (this.children.queued.has(sessionId)) this.scheduleDrain(sessionId)
-    })
-    this.deferredRestarts.set(sessionId, restarting)
-    void restarting.catch(() => {})
-  }
-
-  /** A deferred restart changes what the process may do (#648): its permission preset, launch settings or tool set */
-  private safetyRestartPending(sessionId: string): boolean {
-    const m = this.meta.get(sessionId)
-    const live = this.running.get(sessionId)
-    return (
-      this.launchSettingsRestartAfterTurn.has(sessionId) ||
-      this.definitionsRestartAfterTurn.has(sessionId) ||
-      (!!m && !!live && live.permissionPreset !== m.permissionPreset)
-    )
-  }
-
-  /** Holds a non-safety restart for background work, at most `BACKGROUND_HOLD_MAX_MS` (#648) */
-  private holdForBackground(sessionId: string): void {
-    if (this.backgroundHolds.has(sessionId)) return
-    const timer = setTimeout(() => {
-      console.error(`[sessions] ${sessionId.slice(0, 8)}: a restart waited ${Math.round(BACKGROUND_HOLD_MAX_MS / 60_000)} min for background work; applying it at the next quiet moment`)
-      this.applyDeferredRestart(sessionId)
-    }, BACKGROUND_HOLD_MAX_MS)
-    timer.unref?.()
-    this.backgroundHolds.set(sessionId, { since: Date.now(), timer })
-  }
-
-  /** The wait is over: the restart was applied, or the session is gone (#648) */
-  private clearBackgroundHold(sessionId: string): void {
-    const hold = this.backgroundHolds.get(sessionId)
-    if (hold) clearTimeout(hold.timer)
-    this.backgroundHolds.delete(sessionId)
   }
 
   /**
@@ -4030,8 +3833,8 @@ export class SessionManager {
          * process holds: a level built from an ending or a `/loop` timer says nothing of a shell this host never saw,
          * and recording it would hand the next host a list it takes as complete.
          */
-        if (e.snapshot) this.backgroundUnknown.delete(m.id)
-        if (!this.backgroundUnknown.has(m.id)) this.rememberBackgroundTasks(m)
+        if (e.snapshot) this.restartPolicy.backgroundUnknown.delete(m.id)
+        if (!this.restartPolicy.backgroundUnknown.has(m.id)) this.rememberBackgroundTasks(m)
         break
       case 'agent_version':
         // What the process says it runs (#297) replaces what was assumed when it started
@@ -4362,7 +4165,7 @@ export class SessionManager {
     fromAppVia: AppMessageVia = 'inline',
     sendInput?: (handle: SessionHandle, text: string) => void,
   ): Promise<void> {
-    const restarting = this.deferredRestarts.get(sessionId)
+    const restarting = this.restartPolicy.deferredRestarts.get(sessionId)
     if (restarting) await restarting
     if (this.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     const m = this.meta.get(sessionId)
@@ -5433,7 +5236,7 @@ export class SessionManager {
     return sessionIdle(m, {
       running: this.handles.has(sessionId),
       // An adopted process whose work the previous host did not record is as silent as a tool that cannot report (#648)
-      reportsBackground: !!this.adapters.get(m.tool)?.capabilities.backgroundTasks && this.backgroundKnown(sessionId),
+      reportsBackground: !!this.adapters.get(m.tool)?.capabilities.backgroundTasks && this.restartPolicy.backgroundKnown(sessionId),
     })
   }
 
@@ -5471,7 +5274,7 @@ export class SessionManager {
    */
   async sleepSession(sessionId: string): Promise<boolean> {
     const h = this.handles.get(sessionId)
-    if (!h || this.resuming.has(sessionId) || this.deferredRestarts.has(sessionId) || this.sleeping.has(sessionId) || this.leaving.has(sessionId)) return false
+    if (!h || this.resuming.has(sessionId) || this.restartPolicy.deferredRestarts.has(sessionId) || this.sleeping.has(sessionId) || this.leaving.has(sessionId)) return false
     if (!this.sessionIdle(sessionId).idle || this.waitsOn(sessionId).length > 0) return false
     this.handles.delete(sessionId)
     this.running.delete(sessionId)
@@ -5517,20 +5320,20 @@ export class SessionManager {
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
     if (this.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
     if (cause) {
-      this.restartReasons.set(sessionId, cause)
+      this.restartPolicy.restartReasons.set(sessionId, cause)
       if (cause === 'launch_settings') console.error(`[sessions] restarting ${sessionId}: launch settings changed or previously unrecorded`)
     }
     // Applying a deferred settings change (#164) is also done by this same restart, and so is an app set's (#371)
-    this.restartAfterTurn.delete(sessionId)
-    this.appsRestartAfterTurn.delete(sessionId)
-    this.definitionsRestartAfterTurn.delete(sessionId)
-    this.launchSettingsRestartAfterTurn.delete(sessionId)
+    this.restartPolicy.restartAfterTurn.delete(sessionId)
+    this.restartPolicy.appsRestartAfterTurn.delete(sessionId)
+    this.restartPolicy.definitionsRestartAfterTurn.delete(sessionId)
+    this.restartPolicy.launchSettingsRestartAfterTurn.delete(sessionId)
     this.noticeTrustRestart(sessionId)
     // A restart for any reason ends a wait for background work: whatever it was holding is applied now (#648)
-    this.clearBackgroundHold(sessionId)
+    this.restartPolicy.clearBackgroundHold(sessionId)
     const h = this.handles.get(sessionId)
     if (h) {
-      this.noticeBackgroundStopped(sessionId, cause)
+      this.restartPolicy.noticeBackgroundStopped(sessionId, cause)
       await h.dispose().catch(() => {})
       // Stamped **after** dispose finishes — so even the outgoing process's last flush falls inside the
       // marker
@@ -5639,8 +5442,8 @@ export class SessionManager {
        * them now, background work or not, and the conversation says what stopped (`noticeBackgroundStopped`).
        */
       if (inTurn(session.state)) {
-        this.restartAfterTurn.add(session.id)
-        this.definitionsRestartAfterTurn.add(session.id)
+        this.restartPolicy.restartAfterTurn.add(session.id)
+        this.restartPolicy.definitionsRestartAfterTurn.add(session.id)
         continue
       }
       await this.restartSession(session.id, 'instructions').catch(() => {})
@@ -5664,11 +5467,11 @@ export class SessionManager {
         this.store.setAppSetting(this.launchSettingsKey(session.id), next)
         continue
       }
-      if (trustChange) this.trustRestartNotice.add(session.id)
+      if (trustChange) this.restartPolicy.trustRestartNotice.add(session.id)
       // A safety change too, so the same rule as the definitions above
       if (inTurn(session.state)) {
-        this.restartAfterTurn.add(session.id)
-        this.launchSettingsRestartAfterTurn.add(session.id)
+        this.restartPolicy.restartAfterTurn.add(session.id)
+        this.restartPolicy.launchSettingsRestartAfterTurn.add(session.id)
         continue
       }
       await this.restartSession(session.id, 'launch_settings').catch(() => {})
@@ -5721,6 +5524,35 @@ export class SessionManager {
     }
   }
 
+  /** What `RestartPolicy` reaches of this manager (#428): its state read when used, its operations called through */
+  private restartHost(): RestartHost {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
+    const self = this
+    return {
+      backgroundTasksKey: (...a) => self.backgroundTasksKey(...a),
+      get children() {
+        return self.children
+      },
+      get handles() {
+        return self.handles
+      },
+      inputsHeld: (...a) => self.inputsHeld(...a),
+      get meta() {
+        return self.meta
+      },
+      onEvent: (...a) => self.onEvent(...a),
+      rememberBackgroundTasks: (...a) => self.rememberBackgroundTasks(...a),
+      restartSession: (...a) => self.restartSession(...a),
+      get running() {
+        return self.running
+      },
+      scheduleDrain: (...a) => self.scheduleDrain(...a),
+      get store() {
+        return self.store
+      },
+    }
+  }
+
   /** What `DelegationFlow` reaches of this manager (#428): its state read when used, its operations called through */
   private delegationHost(): DelegationHost {
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
@@ -5733,7 +5565,7 @@ export class SessionManager {
         return self.agentRuns
       },
       answerRoutedCard: (...a) => self.answerRoutedCard(...a),
-      applyDeferredRestart: (...a) => self.applyDeferredRestart(...a),
+      applyDeferredRestart: (...a) => self.restartPolicy.applyDeferredRestart(...a),
       askHost: (...a) => self.askHost(...a),
       autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
       builderRefOf: (...a) => self.builderRefOf(...a),
@@ -6201,7 +6033,7 @@ export class SessionManager {
       return { ok: false, error: `Cannot reach the worktree folder for "${target.name}" (${target.worktree.path}): ${folder.unreachable}. Nothing was removed; try again once the folder can be read.` }
     }
     const folderGone = folder === 'gone'
-    if (this.resuming.has(target.id) || this.deferredRestarts.has(target.id)) return { ok: false, error: `"${target.name}" is waking or restarting — wait for it first` }
+    if (this.resuming.has(target.id) || this.restartPolicy.deferredRestarts.has(target.id)) return { ok: false, error: `"${target.name}" is waking or restarting — wait for it first` }
     if (this.worktreeCleanup.has(target.id)) return { ok: false, error: 'This worktree is already being removed' }
     // A sidebar delete already under way keeps the worktree in place; it is not taken away behind it (#647)
     if (this.trashing.has(target.id)) return { ok: false, error: `"${target.name}" is already being deleted; its worktree stays in place` }
@@ -7492,8 +7324,8 @@ export class SessionManager {
     }
     const m = this.meta.get(sessionId)
     if (m && inTurn(m.state)) {
-      this.restartAfterTurn.add(sessionId)
-      this.appsRestartAfterTurn.add(sessionId)
+      this.restartPolicy.restartAfterTurn.add(sessionId)
+      this.restartPolicy.appsRestartAfterTurn.add(sessionId)
     } else {
       void this.restartSession(sessionId, 'thread_restart').catch(() => {})
     }
