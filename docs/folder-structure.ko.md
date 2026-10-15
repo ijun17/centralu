@@ -77,6 +77,7 @@ centralu/
 │  │     │     events/(`dispatchEvent`는 index.ts, 이벤트 계열마다 처리 파일 하나)
 │  │     │     projects.ts(프로젝트, git 요약과 명령)  patch.ts(상태를 쓰는 보조 함수)
 │  │     │     sessions/(세션 액션: 포커스, 보내기, 응답, 프로세스, 생애주기, 인계)
+│  │     │     connection.ts(호스트에 붙기, 재연결 복구, 작업 공간 스냅숏)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)

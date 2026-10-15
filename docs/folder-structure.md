@@ -75,6 +75,7 @@ centralu/
 │  │     │     events/ (`dispatchEvent` in index.ts, one handler file per event family)
 │  │     │     projects.ts (projects, their git summary and commands)  patch.ts (helpers for writing state)
 │  │     │     sessions/ (a session's actions: focus, send, answers, process, lifecycle, handoff)
+│  │     │     connection.ts (attaching to the host, reconnect recovery, the workspace snapshot)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)
