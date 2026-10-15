@@ -63,30 +63,75 @@ describe('worktree recovery follow-ups (#608)', () => {
   /*
    * Every read before trust used to list the folder's filter drivers in a git process of its own first, so a save was
    * about thirty git processes for one repository. On windows-2022 at 100 ms or more each, a test that deleted two
-   * worktrees ran past 15 s (#368). The save lists them once per repository and still turns off every one of them.
+   * worktrees ran past 15 s (#368). The save's reads share one listing per repository, and the `add -A` that runs
+   * clean filters takes its own right before it; every driver is still turned off.
    */
-  it('lists the filter drivers once per repository, and every call of the save still runs none of them (#368)', async () => {
-    git(repo, ['worktree', 'add', '-b', branch, child])
-    commit(child, 'committed work\n')
-    const ran = join(dir, 'filter-ran')
-    git(repo, ['config', 'filter.planted.clean', `sh -c 'echo clean >> "${gitPath(ran)}"; cat'`])
-    git(repo, ['config', 'filter.planted.smudge', `sh -c 'echo smudge >> "${gitPath(ran)}"; cat'`])
-    writeFileSync(join(child, '.gitattributes'), '* filter=planted\n')
-    writeFileSync(join(child, 'new.txt'), 'uncommitted work\n')
+  const plantFilter = (name: string, ran: string) => {
+    git(repo, ['config', `filter.${name}.clean`, `sh -c 'echo clean >> "${gitPath(ran)}"; cat'`])
+    git(repo, ['config', `filter.${name}.smudge`, `sh -c 'echo smudge >> "${gitPath(ran)}"; cat'`])
+  }
+  const traced = async <T>(run: () => Promise<T>): Promise<{ result: T; listings: number; starts: number }> => {
     const trace = join(dir, 'trace')
     mkdirSync(trace)
-    vi.stubEnv('GIT_TRACE2_EVENT', trace)
-    const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
-    vi.unstubAllEnvs()
+    process.env.GIT_TRACE2_EVENT = trace
+    let result: T
+    try {
+      result = await run()
+    } finally {
+      delete process.env.GIT_TRACE2_EVENT
+    }
     const starts = readdirSync(trace).flatMap((name) => readFileSync(join(trace, name), 'utf8').split('\n'))
       .filter(Boolean).map((line) => JSON.parse(line) as { event: string; argv?: string[] })
       .filter((e) => e.event === 'start')
-    const listings = starts.filter((e) => e.argv!.includes('--get-regexp') && e.argv!.includes('^filter\\.'))
-    expect(starts.length).toBeGreaterThan(10)
-    expect(listings).toHaveLength(1)
+    const listings = starts.filter((e) => e.argv!.includes('--get-regexp') && e.argv!.includes('^filter\\.')).length
+    return { result, listings, starts: starts.length }
+  }
+
+  it('lists the filter drivers twice per repository, and every call of the save still runs none of them (#368)', async () => {
+    git(repo, ['worktree', 'add', '-b', branch, child])
+    commit(child, 'committed work\n')
+    const ran = join(dir, 'filter-ran')
+    plantFilter('planted', ran)
+    writeFileSync(join(child, '.gitattributes'), '* filter=planted\n')
+    writeFileSync(join(child, 'new.txt'), 'uncommitted work\n')
+    const { result, listings, starts } = await traced(() => saveWorktreeRecovery(sessionId, child, 'main', branch))
+    expect(starts).toBeGreaterThan(10)
+    // One shared by the reads, one made right before `add -A`
+    expect(listings).toBe(2)
     expect(existsSync(ran)).toBe(false)
-    expect(recovery).toMatchObject({ changedFiles: 2, commits: 1 })
-  }, process.platform === 'win32' ? 90_000 : 30_000)
+    expect(result).toMatchObject({ changedFiles: 2, commits: 1 })
+  })
+
+  /*
+   * The save runs while the project's other sessions go on, and one of them can write a driver into the configuration
+   * the worktree shares, after the reads listed theirs. The worktree's .gitattributes names it here from the start.
+   */
+  it('turns off for add -A a filter driver written after the save listed its drivers (#368)', async () => {
+    git(repo, ['worktree', 'add', '-b', branch, child])
+    commit(child, 'committed work\n')
+    const ran = join(dir, 'filter-ran')
+    writeFileSync(join(child, '.gitattributes'), '* filter=late\n')
+    writeFileSync(join(child, 'new.txt'), 'uncommitted work\n')
+    const run = gitModule.runGit
+    let written = false
+    const calls = vi.spyOn(gitModule, 'runGit').mockImplementation(async (cwd, args, opts) => {
+      // During the history scan: after the reads' listing, before `add -A`
+      if (!written && args[0] === 'log') {
+        plantFilter('late', ran)
+        written = true
+      }
+      return run(cwd, args, opts)
+    })
+    try {
+      const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+      expect(written).toBe(true)
+      expect(calls.mock.calls.some(([, args]) => args[0] === 'add')).toBe(true)
+      expect(recovery).toMatchObject({ changedFiles: 2, commits: 1 })
+    } finally {
+      calls.mockRestore()
+    }
+    expect(existsSync(ran)).toBe(false)
+  })
 
   it.each(['history', 'index', 'stored branch'])(
     'bundles a gitlink-only module commit from the %s after module HEAD moves away', async (location) => {

@@ -112,7 +112,13 @@ async function* gitRecords(repo: string, args: string[], input?: string, filters
 
 /** Preflight every repository before any private index is populated or objects are written. */
 export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk: string, branch?: string): Promise<WorktreeRecovery> {
-  // About fifteen git calls per repository, each of which would list its filter drivers again (#368)
+  /*
+   * About fifteen git calls per repository, each of which would list its filter drivers again (#368). The listing is
+   * shared by the reads, none of which runs a filter: they read refs, history, trees and the index. The one call that
+   * runs clean filters, `add -A`, comes after the history scans and the bundle, which can take minutes, while other
+   * sessions of the project keep running and can write a driver into the shared configuration. So that pair takes a
+   * listing of its own, made right before it.
+   */
   const filters = gitFilterListings()
   const git = (repo: string, args: string[], opts: RunGitOptions = {}) => runGit(repo, args, { ...opts, filters })
   const plans: { repo: string; path: string; tip: string; refs: string[]; commits: number }[] = []
@@ -291,8 +297,9 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
       const stagedNames = await git(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip], { timeout: RECOVERY_TIMEOUT })
       const env = { GIT_INDEX_FILE: join(dir, `${n}.index`) }
       try {
-        await git(repo, ['read-tree', tip], { env })
-        await git(repo, ['add', '-A', '--', '.'], { env, timeout: RECOVERY_TIMEOUT })
+        const adding = gitFilterListings()
+        await runGit(repo, ['read-tree', tip], { env, filters: adding })
+        await runGit(repo, ['add', '-A', '--', '.'], { env, timeout: RECOVERY_TIMEOUT, filters: adding })
         const names = await git(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip], { env, timeout: RECOVERY_TIMEOUT })
         snapshot.changedFiles += new Set([...names.split('\0'), ...stagedNames.split('\0')].filter(Boolean)).size
         entry.patch = await patchFile(repo, tip, join(dir, `${n}.patch`), env)

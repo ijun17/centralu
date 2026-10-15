@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -90,6 +90,29 @@ describe('git output written directly to a file', () => {
 })
 
 describe('one listing of the filter drivers for one operation (#368)', () => {
+  it('keeps a listing per folder: a superproject and a module inside it each get their own drivers', async () => {
+    const repo = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-git-filters-')))
+    const module = join(repo, 'module')
+    try {
+      await runGit(repo, ['init', '-q'])
+      await runGit(repo, ['config', 'filter.outer.clean', 'outer-clean'])
+      mkdirSync(module)
+      // A module checked out inside its superproject has a repository and a configuration of its own
+      await runGit(module, ['init', '-q'])
+      await runGit(module, ['config', 'filter.inner.clean', 'inner-clean'])
+      const shared = gitFilterListings()
+      const outer = await gitArgv(repo, ['status'], false, shared)
+      const inner = await gitArgv(module, ['status'], false, shared)
+      expect(outer).toContain('filter.outer.clean=')
+      expect(outer).not.toContain('filter.inner.clean=')
+      expect(inner).toContain('filter.inner.clean=')
+      expect(inner).not.toContain('filter.outer.clean=')
+      expect([...shared.keys()]).toEqual([repo, module])
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
+
   it('lists once for the calls that share it, and lists again after a listing that failed', async () => {
     const repo = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-git-filters-')))
     try {

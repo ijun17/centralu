@@ -62,7 +62,11 @@ export type RunGitOptions = {
   outputFile?: string
   /** Added to the host's environment for this call (a clone's non-interactive settings, #515) */
   env?: Record<string, string>
-  /** Shares one listing of each folder's filter drivers among the calls of one operation (`gitFilterListings`) */
+  /**
+   * Shares one listing of each folder's filter drivers among the calls of one operation (`gitFilterListings`). The
+   * listing is keyed by folder alone and made without this call's `env`: calls that change which configuration git
+   * reads (`GIT_DIR`, `GIT_CONFIG_*`, `GIT_CONFIG_GLOBAL`, `HOME`) must not share one. `GIT_INDEX_FILE` does not.
+   */
   filters?: GitFilterListings
 }
 
@@ -75,10 +79,13 @@ export type RunGitOptions = {
  * calls in a row creates one of these and passes it to each call; the first call in a folder lists the drivers, and
  * the rest reuse what it found.
  *
- * What this gives up is narrow. The listing and the read were already two processes, so a configuration written
- * between them was never kept out; sharing the listing widens that window from one call to one operation the host
- * itself runs. A planted repository's configuration is on disk before the operation starts, and is turned off as
- * before. A listing that fails is not kept: the next call lists again.
+ * What this gives up: the listing and the read were already two processes, so a configuration written between them
+ * was never kept out, and sharing the listing widens that window from one call to the calls that share it. A planted
+ * repository's configuration is on disk before the operation starts and is turned off as before. The project's other
+ * sessions keep running meanwhile, though, and can write a driver into the configuration a worktree shares. So only
+ * calls that run no filter share a listing (refs, history, trees, the index); a call that reads the working tree
+ * through the filters (`add`, a working-tree `diff`, a checkout) takes a listing made right before it. A listing that
+ * fails is not kept: the next call lists again.
  */
 export type GitFilterListings = Map<string, Promise<string[]>>
 
