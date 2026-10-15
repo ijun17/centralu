@@ -124,13 +124,16 @@ with them set for that Vite only (`VITE_HOST_URL`, `VITE_HOST_TOKEN`). It reads 
 folder and never writes there, and it never prints the token. Open the address it prints
 with `127.0.0.1`, not `localhost`: the host accepts browser connections only from
 `http://127.0.0.1:5173` and `:5174`, so the port is strict and a taken port is an error, not a
-move to another one. The token changes when the app restarts or updates; run it again then.
+move to another one. The token stays the same across host swaps and updates and changes only when the app is
+fully quit and opened again; run it again then.
 It says in one line when no app is running, when the keeper has no host yet, and when the
 port is taken. Windows has no keeper (the app runs the host directly there), so use the
 shell recipe above.
 
-That page carries the real host's token, so everything the app can do, the page can do. It
-is loopback only; see [security boundaries](docs/security-boundaries.md#local-transport).
+That page carries the real host's token, so everything the app can do, the page can do. A
+loopback port is not per user: on a machine with other users, any of them can read the token
+from the page, so use this on a single-user machine only. See
+[security boundaries](docs/security-boundaries.md#local-transport).
 
 For the real app rather than the browser:
 

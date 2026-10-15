@@ -13,8 +13,12 @@
  *
  * Vite listens on 127.0.0.1, not `localhost`, which may resolve to `::1` held by another server:
  * the host accepts browser connections from `http://127.0.0.1:5173` and `:5174` only
- * (`transport/server.ts`), so the port is strict. The token changes when the app restarts or
- * updates, so the script has to be run again then.
+ * (`transport/server.ts`), so the port is strict. The token is the front door's: the keeper makes
+ * it once per keeper lifetime (`front_door.rs`), so it survives host swaps and changes only when
+ * the app is fully quit and opened again, and the script has to be run again then.
+ *
+ * The page carries that token, and a loopback port is not per user, so this is for single-user
+ * machines (docs/security-boundaries.md, "Local transport").
  *
  * The keeper is built on unix sockets, so there is nothing to read on Windows (the app runs the
  * host directly there); the script says so instead of looking for a pipe that does not exist.
@@ -22,7 +26,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createRequire } from 'node:module'
 import net from 'node:net'
-import { homedir } from 'node:os'
+import { constants as osConstants, homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { readFileSync } from 'node:fs'
@@ -56,7 +60,7 @@ function ask(sock: string, request: unknown, timeoutMs: number): Promise<unknown
   return new Promise((done, fail) => {
     const conn = net.connect(sock)
     let buf = ''
-    const timer = setTimeout(() => finish(new LiveError('The keeper did not answer in time; is the Centralu app stuck?')), timeoutMs)
+    const timer = setTimeout(() => finish(new LiveError('The keeper did not answer in time; it may be updating. Try again in a moment.')), timeoutMs)
     const finish = (result: unknown) => {
       clearTimeout(timer)
       conn.destroy()
@@ -144,18 +148,35 @@ export type Launch = { args: string[]; cwd: string; env: Env }
 /** Starts Vite and resolves with its exit code. Replaceable in tests. */
 export type StartVite = (launch: Launch) => Promise<number>
 
-const startVite: StartVite = ({ args, cwd, env }) =>
-  new Promise((done) => {
-    const child: ChildProcess = spawn(process.execPath, [viteEntry(), ...args], { cwd, env: env as NodeJS.ProcessEnv, stdio: 'inherit' })
-    const forward = (sig: NodeJS.Signals) => () => child.kill(sig)
-    process.on('SIGINT', forward('SIGINT'))
-    process.on('SIGTERM', forward('SIGTERM'))
-    child.on('exit', (code, signal) => done(code ?? (signal ? 1 : 0)))
+/** The exit code a shell reports for a process a signal ended: 128 plus the signal number. */
+function codeAfter(code: number | null, signal: NodeJS.Signals | null): number {
+  if (code !== null) return code
+  return 128 + (signal ? (osConstants.signals[signal] ?? 1) : 0)
+}
+
+/** Signals a person or a terminal sends to stop the command; Vite gets each one too. */
+const FORWARDED: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP']
+
+/** Runs Vite from `entry` with `launch`, passes the stop signals on to it, and resolves with its exit code. */
+export function launchVite({ args, cwd, env }: Launch, entry: string = viteEntry()): Promise<number> {
+  return new Promise((done) => {
+    const child: ChildProcess = spawn(process.execPath, [entry, ...args], { cwd, env: env as NodeJS.ProcessEnv, stdio: 'inherit' })
+    const handlers = FORWARDED.map((sig) => {
+      const forward = () => child.kill(sig)
+      process.on(sig, forward)
+      return [sig, forward] as const
+    })
+    const release = () => { for (const [sig, forward] of handlers) process.off(sig, forward) }
+    child.on('exit', (code, signal) => { release(); done(codeAfter(code, signal)) })
     child.on('error', (e) => {
-      console.error(`Could not start Vite: ${e.message}`)
+      release()
+      console.error(`dev:live: Could not start Vite: ${e.message}`)
       done(1)
     })
   })
+}
+
+const startVite: StartVite = (launch) => launchVite(launch)
 
 export type Deps = { startVite?: StartVite; log?: (line: string) => void; err?: (line: string) => void; platform?: string; home?: string }
 
@@ -170,7 +191,8 @@ export async function run(env: Env = process.env, deps: Deps = {}): Promise<numb
       throw new LiveError(`Port ${port} on 127.0.0.1 is already in use. The host accepts only 5173 and 5174: free it, or use PORT=${port === 5173 ? 5174 : 5173}.`)
     }
     log(`Open http://127.0.0.1:${port}/  (127.0.0.1, not localhost)`)
-    log('The page carries this app\'s host token. The token changes when the app restarts or updates: run this again then.')
+    log('Warning: the page carries this app\'s host token, and any user of this machine can read it from there. Use this on a single-user machine only.')
+    log('The token stays the same until the app is fully quit and opened again: run this again then.')
     return await (deps.startVite ?? startVite)({
       args: ['--config', 'vite.config.ts', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
       cwd: WEB,
