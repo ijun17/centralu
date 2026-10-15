@@ -56,6 +56,8 @@ centralu/
 │  │     ├─ web/                # browser implementation (WS/HTTP → agent-host)
 │  │     ├─ tauri/              # Tauri implementation (invoke/event) — after M1
 │  │     └─ mock/               # in-memory implementation for tests and stories
+│  │                            #   index.ts: MockPlatform composes one module per concept (sessions.ts, apps.ts,
+│  │                            #   projects.ts, updates.ts…) and keeps every field tests reach; demo.ts seeds a scene
 │  │
 │  ├─ ui/                       # the whole React app (except the entry point)
 │  │  └─ src/
