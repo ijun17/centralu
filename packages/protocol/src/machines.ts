@@ -175,6 +175,8 @@ export const MachineInstallResult = z.object({
   previous: InstalledVersion.nullable(),
   removed: z.array(z.string()).default([]),
   left: z.array(z.string()).default([]),
+  /** Why the version installed is not this computer's own (a local build installs its release; #689). Additive */
+  note: z.string().optional(),
 })
 export type MachineInstallResult = z.infer<typeof MachineInstallResult>
 

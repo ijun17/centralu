@@ -21,6 +21,7 @@
     "windows",
     "desktop"
   ],
+  "protocolVersion": 1,
   "type": "module",
   "bin": {
     "centralu": "bin/centralu.mjs"

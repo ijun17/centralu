@@ -204,7 +204,7 @@ back is the next PR.
 {"kind":"res","id":"0","ok":false,"error":{"code":"version_mismatch","message":"Protocol version mismatch: Centralu 0.1.0-beta.11 speaks protocol 1, the app speaks protocol 2. The host is older: update Centralu where the host runs (npm i -g centralu), then restart it.","retryable":false}}
 ```
 
-Same protocol with different versions connects, and `hello_ok.build.version` names the remote's.
+Same protocol with different versions connects, and `hello_ok.build.version` names the remote's (the link no longer waits for the person to accept the pair, #689: it connects and offers the update).
 So the hub needs nothing new from the handshake: `centralu serve --connection` already reports the
 running host's `version` and `protocolVersion` (read from its `hello_ok`, or from that refusal), so
 the hub compares before it opens the socket and holds the link at `versions_differ` with both sides

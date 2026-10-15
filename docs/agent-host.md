@@ -1968,7 +1968,7 @@ machine. Only the lookup crosses ssh, as short as `--connection`'s, so it fits c
 
 What would stop is asked of the remote first: `machines.activity` calls the remote's `host.activity` (additive), which
 counts what `hostBusy` counts (`activityCounts`, idle.ts): working sessions, approvals and questions waiting,
-background work, terminals and running commands. While the link is held at `versions_differ` on one protocol it asks
+background work, terminals and running commands. While the link is held at `versions_differ` on one protocol (before #689) it asked
 over a short connection of its own. A remote that predates the call answers nothing, and the prompt says "anything
 running". No remote runs a keeper today (plan §10.4), so on Linux and Windows an update ends the agents there; their
 sessions resume on the new host through their stored ids, as after any restart.
@@ -1994,10 +1994,10 @@ it restarts).
 
 **Versions are checked before connecting** (plan §4). The connection line carries the running remote host's `version`
 and `protocolVersion`, and the hub compares them with its own before it opens the socket, and again with
-`hello_ok.build` once it does. Another protocol never connects. Another version of the same channel holds the link at
-`versions_differ`, naming the older side, until the two match or the person declines (`machines.acceptVersions`,
-remembered for that pair only, so either side moving asks again). A dev build has no older side and connects on one
-protocol. The update itself is the next step: the hub's through its own update, the remote's by hand in phase 1
+`hello_ok.build` once it does. Another protocol never connects and holds the link at `versions_differ`. One protocol
+connects whatever the app versions (#689): a different version of the same channel only names the older side, and the
+row *offers* the update (the hub's through its own update, the remote's over ssh by `machines.update`) without
+holding anything. A dev build has no older side. A local build (`<base>.local.N`) is compared as `<base>`. The update itself is the next step: the hub's through its own update, the remote's by hand in phase 1
 (`npm i -g centralu` there) and over ssh in phase 3.
 
 **After connecting**, the link reads the remote's `sessions.list` and `projects.list` into the mirror, notes which
@@ -2048,7 +2048,7 @@ to the remote host. The 64 MiB slow-reader cut was not reached.
 |---|---|
 | Sidebar | Once there is a linked machine, groups by `machine`: this computer first (with "Your apps"), then each machine with its name and link state (`connected`, `connecting`, `away`, `version mismatch`, …), its projects and its user-folder apps. A project or session of a machine that is not connected stays listed, dimmed (`data-away`), and is never woken. A machine's + adds a folder there by its path (`projects.add {path, machine}`) or makes a new, empty one, in that machine's `~/Centralu` by default (`projects.create {name, parent?, machine}`, §1.3); its name opens Settings → Machines |
 | Settings → Machines | `machines.list/add/remove/reconnect`. Add a machine lists the hosts of this computer's ssh config (`machines.sshHosts`, read again each time it opens), each with what `ssh -G` resolves and "linked as …"; picking one probes it (`machines.probe`) and offers ready rows, "Windows" (with the shell that answers ssh), "WSL (<distro>)" (the default marked) or "Linux or macOS", with a name, the first row not linked yet chosen (`probeChoices` in `@cc/core`). A row already linked through that alias is shown but not offered. A probe that cannot tell says why in one sentence (`probeProblem`), and "Enter a target by hand" keeps the typed fields, prefilled from the host picked; with no hosts in the config, the dialog opens on them. A probe answering after another host was picked is dropped. Each row says the last error as what to do (`machineProblem` in `@cc/core`: a key not loaded, a host key never accepted, Centralu not installed or not serving there), and holds the version prompt. Where the machine offers it, a "Start Centralu when <machine> starts" switch (`machines.autostart`, `autostartRow` in `@cc/core`), with a line where it falls short of boot: a systemd manager that starts only at login, a Windows sign-in |
-| Version prompt | From `MachineInfo.versions`: an older hub gets the existing update path; an older remote gets the exact `npm i -g centralu@<hub version>` to run there (phase 1 cannot update it); "Connect anyway" is `machines.acceptVersions`, offered only on one protocol |
+| Version prompt | From `MachineInfo.versions`: an older hub gets the existing update path; an older remote gets the exact `npm i -g centralu@<hub version>` to run there (phase 1 cannot update it); one protocol connects and the update is offered on the connected row (#689); "Connect anyway" (`machines.acceptVersions`) remains for a link held at `versions_differ`. A hub running a local build installs and updates a remote at `<base>`, else the newest earlier release with its `protocolVersion` (`installVersion` in `links/registry.ts`; a release declares it in its `package.json`), and the result's `note` says so |
 | New-session dialog, session menu | `agents.detect`, `agents.models`, `agents.capabilities` with the project's `machine` |
 | Session header | Names the machine (also every grid panel's header, and where approvals and questions are answered); "older CLI" compares with `agents.versions {machine}` |
 | Inbox, notice cards, OS notifications | Name the machine of a remote session |

@@ -82,6 +82,11 @@ export function isLocalBuildVersion(v: string | null | undefined): boolean {
   return typeof v === 'string' && v.length <= 64 && LOCAL_BUILD.test(v)
 }
 
+/** The release a local build was cut from: `0.3.0-beta.7.local.2` is `0.3.0-beta.7`; any other version is itself (#689) */
+export function releaseOf(v: string): string {
+  return isLocalBuildVersion(v) ? v.slice(0, v.lastIndexOf('.local.')) : v
+}
+
 /**
  * Whether the copy `centralu install` made is kept rather than replaced by `target` (#645).
  *

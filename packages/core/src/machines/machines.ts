@@ -1,4 +1,4 @@
-import type { HostActivity, MachineInfo, MachineStatus } from '@cc/protocol'
+import { releaseOf, type HostActivity, type MachineInfo, type MachineStatus } from '@cc/protocol'
 
 /**
  * Linked machines on the screen (#82, docs/plans/remote-hub.md): which rows are away, what a link's
@@ -127,28 +127,39 @@ export type VersionPrompt = {
   updateHere: boolean
   /** One sentence for the person */
   text: string
+  /**
+   * The link waits for the person (`versions_differ`: another protocol). False when it is connected
+   * and the update is only offered: one protocol connects whatever the app versions (#689)
+   */
+  held: boolean
 }
 
 export function versionPrompt(m: Pick<MachineInfo, 'name' | 'status' | 'versions'> & Partial<Pick<MachineInfo, 'command'>>): VersionPrompt | null {
   const v = m.versions
-  if (!v || m.status !== 'versions_differ') return null
+  if (!v) return null
+  const held = m.status === 'versions_differ'
+  // Connected on one protocol with an older side: the update is offered, not required
+  if (!held && !(m.status === 'connected' && v.compatible && v.older)) return null
   const hub = v.hub.version
+  // A local build installs the release it was cut from (#689), so that is what the other side is brought to
+  const hubRelease = releaseOf(hub)
   const remote = v.remote.version
-  const target = v.older === 'hub' ? remote : v.older === 'remote' ? hub : null
-  const remoteCommand = v.older === 'remote' ? `npm i -g centralu@${hub}` : null
+  const target = v.older === 'hub' ? remote : v.older === 'remote' ? hubRelease : null
+  const remoteCommand = v.older === 'remote' ? `npm i -g centralu@${hubRelease}` : null
   const updateHere = v.older === 'remote' && !v.hub.dev && !m.command
+  const or = held ? 'connect anyway' : 'keep it as it is'
   let text: string
   if (!v.compatible) {
     const side = v.older === 'hub' ? 'this computer' : v.older === 'remote' ? m.name : 'one side'
     text = `${m.name} runs Centralu ${remote} (protocol ${v.remote.protocolVersion}) and this computer runs ${hub} (protocol ${v.hub.protocolVersion}). They cannot talk to each other until ${side} is updated.`
   } else if (v.older === 'hub') {
-    text = `${m.name} runs Centralu ${remote}, newer than this computer's ${hub}. Update this computer, or connect anyway.`
+    text = `${m.name} runs Centralu ${remote}, newer than this computer's ${hub}. Update this computer, or ${or}.`
   } else if (v.older === 'remote') {
-    text = `${m.name} runs Centralu ${remote}, older than this computer's ${hub}. Update it${updateHere ? '' : ' there'}, or connect anyway.`
+    text = `${m.name} runs Centralu ${remote}, older than this computer's ${hub}${hubRelease === hub ? '' : ` (a local build; ${hubRelease} is what gets installed there)`}. Update it${updateHere ? '' : ' there'}, or ${or}.`
   } else {
-    text = `${m.name} runs Centralu ${remote} and this computer runs ${hub}${v.sameChannel ? '' : ', from another release channel'}. Align them, or connect anyway.`
+    text = `${m.name} runs Centralu ${remote} and this computer runs ${hub}${v.sameChannel ? '' : ', from another release channel'}. Align them, or ${or}.`
   }
-  return { compatible: v.compatible, older: v.older, target, remoteCommand, updateHere, text }
+  return { compatible: v.compatible, older: v.older, target, remoteCommand, updateHere, text, held }
 }
 
 /** Plural for counts in a sentence: "1 terminal", "2 terminals" */

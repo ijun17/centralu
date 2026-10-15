@@ -376,7 +376,7 @@ function VersionPrompt({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: 
           </div>
         </div>
       )}
-      {p.compatible ? (
+      {!p.held ? null : p.compatible ? (
         <button
           type="button"
           className="mt-2 rounded-md border border-line px-2 py-0.5 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink"

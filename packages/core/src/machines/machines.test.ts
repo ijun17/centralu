@@ -136,8 +136,23 @@ describe('the version prompt (#82, plan §4)', () => {
     expect(p?.text).toMatch(/cannot talk to each other until this computer is updated/)
   })
 
-  it('no prompt while the link is not held on versions', () => {
-    expect(versionPrompt(machine({ status: 'connected', versions: versions({ accepted: true }) }))).toBeNull()
+  it('a connected link on one protocol is offered the update, not held for it (#689)', () => {
+    const p = versionPrompt(machine({ status: 'connected', versions: versions({}) }))!
+    expect(p).toMatchObject({ held: false, older: 'remote', updateHere: true })
+    expect(p.text).toMatch(/Update it, or keep it as it is\.$/)
+    expect(versionPrompt(machine({ status: 'versions_differ', versions: versions({}) }))!.held).toBe(true)
+  })
+
+  it('a local build brings the remote to the release it was cut from', () => {
+    const v = versions({})
+    const p = versionPrompt(machine({ status: 'connected', versions: { ...v, hub: { ...v.hub, version: '0.1.0-beta.13.local.2' }, remote: { ...v.remote, version: '0.1.0-beta.12' } } }))!
+    expect(p).toMatchObject({ target: '0.1.0-beta.13', remoteCommand: 'npm i -g centralu@0.1.0-beta.13' })
+    expect(p.text).toMatch(/a local build; 0\.1\.0-beta\.13 is what gets installed there/)
+  })
+
+  it('no prompt while a connected link has nothing to align', () => {
+    expect(versionPrompt(machine({ status: 'connected', versions: versions({ older: null }) }))).toBeNull()
+    expect(versionPrompt(machine({ status: 'unreachable', versions: versions({}) }))).toBeNull()
   })
 })
 

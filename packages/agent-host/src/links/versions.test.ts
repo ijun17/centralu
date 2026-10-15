@@ -10,15 +10,19 @@ describe('the version check before a link connects (docs/plans/remote-hub.md §4
     expect(mayConnect(v)).toBe(true)
   })
 
-  it('names the older side and holds the link until the person declines to align', () => {
+  it('connects on one protocol whatever the app versions, and names the older side so an update is offered (#689)', () => {
     const remoteOlder = compareVersions(side('0.1.0-beta.11'), side('0.1.0-beta.10'), false)
     expect(remoteOlder.older).toBe('remote')
-    expect(mayConnect(remoteOlder)).toBe(false)
+    expect(mayConnect(remoteOlder)).toBe(true)
     const hubOlder = compareVersions(side('0.1.0-beta.10'), side('0.1.0-beta.11'), false)
     expect(hubOlder.older).toBe('hub')
-    expect(mayConnect(hubOlder)).toBe(false)
-    // Declined: connects as it is
-    expect(mayConnect(compareVersions(side('0.1.0-beta.10'), side('0.1.0-beta.11'), true))).toBe(true)
+    expect(mayConnect(hubOlder)).toBe(true)
+  })
+
+  it('compares a local build as the release it was cut from, so the base release is not "older"', () => {
+    expect(compareVersions(side('0.3.0-beta.7.local.2'), side('0.3.0-beta.7'), false).older).toBeNull()
+    expect(compareVersions(side('0.3.0-beta.7.local.2'), side('0.3.0-beta.6'), false).older).toBe('remote')
+    expect(mayConnect(compareVersions(side('0.3.0-beta.7.local.2'), side('0.3.0-beta.7'), false))).toBe(true)
   })
 
   it('never connects across protocols, accepted or not', () => {
@@ -37,7 +41,7 @@ describe('the version check before a link connects (docs/plans/remote-hub.md §4
   it('does not rank a beta against a stable release', () => {
     const v = compareVersions(side('0.1.0'), side('0.2.0-beta.1'), false)
     expect(v).toMatchObject({ sameChannel: false, older: null })
-    expect(mayConnect(v)).toBe(false)
+    expect(mayConnect(v)).toBe(true)
   })
 
   it('keeps what the person accepted per pair: either side moving asks again', () => {

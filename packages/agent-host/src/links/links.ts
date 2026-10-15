@@ -17,7 +17,7 @@ import { probeTarget } from './probe.js'
 import { listSshHosts } from './ssh-config.js'
 import { installRemote, type InstallResult, type RemoteRuntime } from './install.js'
 import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
-import type { RegistryOptions } from './registry.js'
+import { installVersion, type InstallVersion, type RegistryOptions } from './registry.js'
 import { newMachineId, splitQualified } from './machine-ids.js'
 import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteClientOptions, type RemoteHello } from './remote-client.js'
@@ -250,13 +250,15 @@ export class LinkedMachine implements RoutedMachine {
    * there keeps running; a link that is not connected (nothing was installed, or nothing runs) opens
    * again at once, and finds the managed launcher first
    */
-  install(): Promise<MachineInstallResult> {
-    return this.operate('install', this.deps.hub.version, async (c, installer) => {
+  async install(): Promise<MachineInstallResult> {
+    const pick = await this.versionToInstall()
+    return this.operate('install', pick.version, async (c, installer) => {
+      if (pick.note) this.deps.log?.(`[links] ${this.name}: ${pick.note}`)
       const r = await installRemote({
         exec: c.exec,
         spec: c.spec,
         target: c.target,
-        version: this.deps.hub.version,
+        version: pick.version,
         runtime: installer.runtime(),
         script: c.script,
         registry: installer.registry,
@@ -264,22 +266,39 @@ export class LinkedMachine implements RoutedMachine {
         onStep: c.step,
       })
       this.deps.log?.(`[links] ${this.name}: installed Centralu ${r.current.version} on Node ${r.current.node}${r.previous ? `; ${r.previous.version} kept to roll back to` : ''}`)
-      return this.installedNow(r)
+      return { ...this.installedNow(r), ...(pick.note ? { note: pick.note } : {}) }
     })
   }
 
   /** `machines.update` (update.ts, plan §10.5): install beside, stop, switch, start, check, or put back */
-  update(): Promise<MachineInstallResult> {
-    return this.operate('update', this.deps.hub.version, async (c, installer) => {
+  async update(): Promise<MachineInstallResult> {
+    const pick = await this.versionToInstall()
+    return this.operate('update', pick.version, async (c, installer) => {
+      if (pick.note) this.deps.log?.(`[links] ${this.name}: ${pick.note}`)
       const r = await updateRemote(c, {
-        version: this.deps.hub.version,
+        version: pick.version,
         runtime: installer.runtime(),
         registry: installer.registry,
         nodeDist: installer.nodeDist,
       })
       this.deps.log?.(`[links] ${this.name}: updated to Centralu ${r.current.version}${r.previous ? `; ${r.previous.version} kept to roll back to` : ''}`)
-      return this.installedNow(r)
+      return { ...this.installedNow(r), ...(pick.note ? { note: pick.note } : {}) }
     })
+  }
+
+  /**
+   * The version `install` and `update` put on the remote: this hub's own, or for a local build the
+   * release it was cut from (registry.ts `installVersion`, #689). Where this hub installs nothing
+   * (no installer, a development build) its own version is returned and `operate` refuses
+   */
+  private async versionToInstall(): Promise<InstallVersion> {
+    const hub = this.deps.hub
+    if (!this.deps.installer || hub.dev) return { version: hub.version, note: null }
+    try {
+      return await installVersion(hub.version, hub.protocolVersion, this.deps.installer.registry)
+    } catch (err) {
+      throw linkError((err as Error).message)
+    }
   }
 
   /** `machines.rollback`: back to `previous`, one step */
@@ -546,7 +565,7 @@ export class LinkedMachine implements RoutedMachine {
     return endpoint
   }
 
-  /** Records the versions, and holds the link at `versions_differ` when they do not allow connecting */
+  /** Records the versions, and holds the link at `versions_differ` when the protocols differ (versions alone never hold it, #689) */
   private check(remote: MachineSide): MachineVersions {
     const pending = compareVersions(this.deps.hub, remote, false)
     const accepted = this.record.acceptedVersions === acceptanceKey(pending.hub, pending.remote)
@@ -558,9 +577,7 @@ export class LinkedMachine implements RoutedMachine {
       const which = v.older === 'hub' ? 'this computer' : v.older === 'remote' ? this.name : null
       this.setStatus(
         'versions_differ',
-        !v.compatible
-          ? `${this.name} runs Centralu ${v.remote.version} (protocol ${v.remote.protocolVersion}); this computer runs ${v.hub.version} (protocol ${v.hub.protocolVersion}). Update ${which ?? 'one side'} to connect`
-          : `${this.name} runs Centralu ${v.remote.version}; this computer runs ${v.hub.version}${which ? `. Update ${which}, or connect anyway` : ''}`,
+        `${this.name} runs Centralu ${v.remote.version} (protocol ${v.remote.protocolVersion}); this computer runs ${v.hub.version} (protocol ${v.hub.protocolVersion}). Update ${which ?? 'one side'} to connect`,
       )
       // A later update on either side is noticed by asking again now and then (§4: the prompt comes again)
       this.retryLater(60_000)

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { fakeRegistry, sha512, type FakeRegistry } from './fake-registry.test-helpers.js'
-import { verifiedPackage } from './registry.js'
+import { installVersion, verifiedPackage } from './registry.js'
 
 /**
  * The hub's half of the trust in plan §10.3: the integrity the remote checks the tarball against
@@ -45,5 +45,52 @@ describe('verifiedPackage (#82, plan §10.3)', () => {
   it('refuses a name or version that is not a plain word, before asking anything', async () => {
     await expect(verifiedPackage('centralu', '../../x')).rejects.toThrow(/Not a package to install/)
     await expect(verifiedPackage('a b', '1.0.0')).rejects.toThrow(/Not a package to install/)
+  })
+})
+
+describe('installVersion: what a hub puts on a remote (#689)', () => {
+  /** A registry that knows these versions of `centralu`, each with the protocol it declares (none: the field did not exist yet) */
+  const registry = (versions: Record<string, number | undefined>): { registry: string; fetch: typeof fetch; asked: string[] } => {
+    const asked: string[] = []
+    const f: typeof fetch = async (url) => {
+      const path = new URL(String(url)).pathname
+      asked.push(path)
+      const v = /^\/centralu\/(.+)$/.exec(path)?.[1]
+      if (v) return v in versions ? Response.json({ name: 'centralu', version: v }) : new Response('{}', { status: 404 })
+      if (path === '/centralu') return Response.json({ versions: Object.fromEntries(Object.entries(versions).map(([k, p]) => [k, p === undefined ? {} : { protocolVersion: p }])) })
+      return new Response('{}', { status: 404 })
+    }
+    return { registry: 'https://registry.test', fetch: f, asked }
+  }
+
+  it('a published release is installed as it is, with no question to the registry', async () => {
+    const r = registry({})
+    expect(await installVersion('0.3.0-beta.7', 1, r)).toEqual({ version: '0.3.0-beta.7', note: null })
+    expect(r.asked).toEqual([])
+  })
+
+  it('a local build installs its base release, and the note says so', async () => {
+    const r = registry({ '0.3.0-beta.7': undefined, '0.3.0-beta.6': undefined })
+    const got = await installVersion('0.3.0-beta.7.local.2', 1, r)
+    expect(got.version).toBe('0.3.0-beta.7')
+    expect(got.note).toMatch(/local build 0\.3\.0-beta\.7\.local\.2.*not published.*0\.3\.0-beta\.7/)
+  })
+
+  it('with the base unpublished, takes the newest earlier release with the hub’s protocol', async () => {
+    const r = registry({ '0.3.0-beta.5': 1, '0.3.0-beta.6': 1, '0.3.0-beta.4': 1, '0.3.0-beta.8': 1, '0.3.0-beta.7.local.1': 1 })
+    const got = await installVersion('0.3.0-beta.7.local.2', 1, r)
+    // beta.23 is newer than the base, and a local build is never on the registry's list of releases to use
+    expect(got.version).toBe('0.3.0-beta.6')
+    expect(got.note).toMatch(/0\.3\.0-beta\.7 is not published; installing 0\.3\.0-beta\.6/)
+  })
+
+  it('skips releases that speak another protocol, and refuses when none is left', async () => {
+    expect((await installVersion('0.2.0-beta.3.local.1', 2, registry({ '0.2.0-beta.2': 2, '0.2.0-beta.1': 1 }))).version).toBe('0.2.0-beta.2')
+    await expect(installVersion('0.2.0-beta.3.local.1', 2, registry({ '0.2.0-beta.2': 1, '0.2.0-beta.1': undefined }))).rejects.toThrow(/neither 0\.2\.0-beta\.3 nor an earlier release with protocol 2 is published/)
+  })
+
+  it('a registry failure other than "not published" is passed on', async () => {
+    const down: typeof fetch = async () => new Response('', { status: 503 })
+    await expect(installVersion('0.3.0-beta.7.local.2', 1, { registry: 'https://registry.test', fetch: down })).rejects.toThrow(/answered 503/)
   })
 })

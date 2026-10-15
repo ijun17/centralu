@@ -313,26 +313,21 @@ describe('a hub linked to another host (#82)', () => {
     expect(await u.call('sessions.list')).toEqual([expect.objectContaining({ id: 'm1.w1', unreachable: true })])
   })
 
-  it('holds the link at versions_differ until the person declines to align, and never across protocols', async () => {
-    const remote = await remoteHost()
+  it('connects to a remote on another app version when the protocol matches, naming the older side so an update is offered; another protocol is held (#689)', async () => {
+    const remote = await remoteHost(0, new Store(), { version: '0.1.0-beta.1' })
     let line = lineFor(remote.port, { version: '0.1.0-beta.1' })
     const hub = await hubHost(() => line)
-    await until(() => status(hub) === 'versions_differ')
+    await until(() => status(hub) === 'connected')
     const info = hub.links.list()[0]!
     expect(info.versions).toMatchObject({ older: 'remote', compatible: true, remote: { version: '0.1.0-beta.1' } })
-    expect(info.error).toMatch(/Update Remote box, or connect anyway/)
     const u = await ui(hub.port)
     await expect(u.call('sessions.list')).resolves.toEqual([])
-
-    const accepted: MachineInfo = await u.call('machines.acceptVersions', { machineId: 'm1' })
-    expect(accepted.versions?.accepted).toBe(true)
-    // The remote's own hello names its real version, which differs from what was accepted: asked again
-    await until(() => status(hub) === 'connected' || status(hub) === 'versions_differ')
 
     line = lineFor(remote.port, { protocolVersion: PROTOCOL_VERSION + 1 })
     await u.call('machines.reconnect', { machineId: 'm1' })
     await until(() => hub.links.list()[0]!.versions?.compatible === false)
     expect(status(hub)).toBe('versions_differ')
+    expect(hub.links.list()[0]!.error).toMatch(/protocol/)
     await expect(u.call('machines.acceptVersions', { machineId: 'm1' })).rejects.toThrow(/different protocols/)
   })
 
@@ -541,6 +536,35 @@ describe('machines.install (#82, plan §10.2)', () => {
   })
 })
 
+describe('machines.install from a hub running a local build (#689)', () => {
+  it('installs the release the local build was cut from, and says so; the row it leaves connects although the versions differ', async () => {
+    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: APP_VERSION, files: { 'package.json': '{}' } })))
+    cleanups.push(() => reg.close())
+    const remote = await remoteHost()
+    const runs: string[] = []
+    const answers = [
+      'CENTRALU-PREFLIGHT os=Linux arch=x86_64 glibc=2.39 musl=0 freeKb=99999999 tar=1 gzip=1 fetch=curl sha=sha256sum\n',
+      'CENTRALU-INSTALL node ok\n',
+      `CENTRALU-INSTALL done ${JSON.stringify({ current: { version: APP_VERSION, node: '24.21.0' }, previous: null, removed: [], left: [] })}\n`,
+    ]
+    const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port)), { exec: async (cmd: string) => ({ code: 0, stderr: '', stdout: answers[runs.push(cmd) - 1] ?? '' }) })
+    const installer = { runtime: () => ({ node: { version: '24.21.0', archives: { 'linux-x64': { file: 'node-v24.21.0-linux-x64.tar.gz', sha256: 'a'.repeat(64) } } } }), script: () => '// the installer', registry: { registry: reg.url } }
+    const local = `${APP_VERSION}.local.2`
+    const logs: string[] = []
+    const hub = await hubHost(() => lineFor(remote.port), new Store(), true, { tunnelFor: () => tunnel, installer, log: (l) => logs.push(l), hub: { version: local, protocolVersion: PROTOCOL_VERSION, dev: false } })
+    const u = await ui(hub.port)
+    const r = await u.call('machines.install', { machineId: 'm1' })
+    expect(r).toMatchObject({ current: { version: APP_VERSION }, note: expect.stringContaining(`local build ${local}`) })
+    const script = Buffer.from(runs[2]!.split(' ')[2]!, 'base64').toString('utf8')
+    const params = JSON.parse(Buffer.from(/"\$f" "([A-Za-z0-9+/=]+)"/.exec(script)![1]!, 'base64').toString('utf8')) as { version: string; hub: string }
+    expect(params.version).toBe(APP_VERSION)
+    expect(logs.some((l) => l.includes(`installing the release it was cut from, ${APP_VERSION}`))).toBe(true)
+    // The remote now runs the base release, not the hub's exact version, and the link takes it
+    await until(() => status(hub) === 'connected')
+    expect(hub.links.list()[0]!.versions).toMatchObject({ older: null, compatible: true })
+  })
+})
+
 describe('machines.update through the link (#82, plan §10.5)', () => {
   const NODE = '24.21.0'
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -617,7 +641,8 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     const installer = { runtime: () => ({ node: { version: NODE, archives: { 'linux-x64': { file: `node-v${NODE}-linux-x64.tar.gz`, sha256: 'a'.repeat(64) } } } }), script: () => '// the installer', registry: { registry: reg.url } }
     hub = await hubHost(() => line, new Store(), true, { tunnelFor: () => tunnel, installer, checkMs: 1_500 })
     const u = await ui(hub.port)
-    await until(() => status(hub!) === 'versions_differ')
+    // An older remote on one protocol connects (#689); the update is offered, not required
+    await until(() => status(hub!) === 'connected')
     return { hub, u, runs, activity, setStarts: (v: string) => (starts = v) }
   }
 
@@ -630,8 +655,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     setStarts('0.0.1')
     const r = await u.call('machines.rollback', { machineId: 'm1' })
     expect(r).toMatchObject({ current: { version: '0.0.1' } })
-    await until(() => status(hub) === 'versions_differ')
-    expect(hub.links.list()[0]!.versions?.remote.version).toBe('0.0.1')
+    await until(() => hub.links.list()[0]!.versions?.remote.version === '0.0.1' && status(hub) === 'connected')
   })
 
   it('says what would stop, holds the link while the host is down, reports each step, and answers once the new version said hello', async () => {
@@ -665,8 +689,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
     )
     expect(runs.filter((k) => k !== 'open')).toEqual(['preflight', 'node', 'install_beside', 'stop', 'pointers', 'start', 'tail', 'stop', 'pointers', 'start'])
     // Back on the old version, the prompt is there again
-    await until(() => status(hub) === 'versions_differ')
-    expect(hub.links.list()[0]!.versions?.remote.version).toBe('0.0.1')
+    await until(() => hub.links.list()[0]!.versions?.remote.version === '0.0.1' && status(hub) === 'connected')
   })
 })
 
