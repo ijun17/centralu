@@ -1,22 +1,22 @@
 import { expect, test, type Page } from '@playwright/test'
 
 /**
- * The border of a panel that is mid-response shows **on all four sides**, no matter the window
- * width (#208).
+ * The border of a panel that is answering shows **on all four sides**, no matter the window width
+ * (#208, #736).
  *
  * Depending on window width, a panel's width and position can land on fractional pixels, and on
- * such a panel one side of the ring used to disappear. Measured by sweeping the width 1px at a
- * time (3, 4, 6, and 9 panels; 1x and 2x device scale; text scale 1 and 1.1):
+ * such a panel one side of a ring drawn on top of it used to disappear. Measured by sweeping the
+ * width 1px at a time (3, 4, 6, and 9 panels; 1x and 2x device scale; text scale 1 and 1.1):
  *  - Chromium never dimmed, not once.
  *  - At 1x on WebKit, for the middle-column panel of a three-column grid, at every width where
  *    that panel starts at x.328 — one window width in three (1401, 1404, …, 1500, 1701, …) —
- *    **the entire right side vanished.** Not dimmed, zero: only the panel's gray border and the
- *    panel floor were left in its place. Both the spinning rainbow and the stationary gray broke
- *    at the same spot (both use the same mask).
+ *    **the entire right side vanished.** Not dimmed, zero.
+ * The ring is the panel's own border now (a session says its state by the four looks, #736), which
+ * the browser draws on the same pixel as the panel, so this keeps holding it to that.
  * Hence measuring with WebKit — the real app is WKWebView too (same reason as perf-idle.spec.ts).
  *
- * What is checked is **pixels**, not values. A panel's class or z-index only says the ring is
- * supposed to be there; only the rendered screen knows whether the mask actually left that pixel lit.
+ * What is checked is **pixels**, not values. A panel's attribute only says the border is supposed
+ * to be there; only the rendered screen knows whether the pixel is lit.
  */
 test.use({ browserName: 'webkit', deviceScaleFactor: 1 })
 
@@ -26,14 +26,14 @@ test.use({ browserName: 'webkit', deviceScaleFactor: 1 })
  */
 const WIDTHS = [1280, 1281, 1333, 1366, 1401, 1404, 1437, 1500]
 
-/** --color-ink-muted. The stationary ring's color; the test below also paints the spinning ring's layer this color to check only its shape */
-const ASH = 144
+/** --color-ink-signal, the white of the answering look's border */
+const WHITE = 255
 /**
- * The threshold for a lit side. A side where the ring vanished reads as only the panel's border
- * (line-strong 53) or floor (surface-floor 29); a side dimmed to a half pixel sits in between (~86). A lit
- * side reads as ASH itself.
+ * The threshold for a lit side. A side where the border vanished reads as only the floor
+ * (surface-floor 15) or the grey of a resting panel (line-strong 77); a side dimmed to a half pixel sits
+ * in between. A lit side reads as WHITE itself.
  */
-const LIT = ASH - 8
+const LIT = WHITE - 8
 
 const EDGES = ['top', 'right', 'bottom', 'left'] as const
 type Dim = { width: number; panel: number; edge: (typeof EDGES)[number]; peak: number }
@@ -63,7 +63,7 @@ async function newSession(page: Page, prompt: string): Promise<string> {
   return page.evaluate(() => (window as never as { __store: any }).__store.getState().focusedSessionId)
 }
 
-/** Sets up three panels mid-response in the grid — it becomes three columns from 1400px */
+/** Sets up three panels answering in the grid — it becomes three columns from 1400px */
 async function workingGrid(page: Page): Promise<string[]> {
   await page.setViewportSize({ width: 1280, height: 800 })
   await setup(page)
@@ -78,7 +78,7 @@ async function workingGrid(page: Page): Promise<string[]> {
     })
   }, ids)
   await page.getByTestId('grid-button').click()
-  for (const id of ids) await expect(page.getByTestId(`grid-panel-${id}`)).toHaveClass(/cc-orbit-ring/)
+  for (const id of ids) await expect(page.getByTestId(`grid-panel-${id}`)).toHaveAttribute('data-look', 'answering')
   // If the prompt field is focused, the composer rises and covers the area near the bottom edge — blur it and move the cursor off the panel
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   await page.mouse.move(1, 1)
@@ -195,13 +195,11 @@ async function dimEdges(page: Page, ids: string[], before?: () => Promise<void>)
 const offPixel = (b: { left: number; top: number; right: number; bottom: number }) =>
   [b.left, b.top, b.right, b.bottom].some((v) => v % 1 !== 0)
 
-test('the stationary ring (gray) shows on all four sides of a panel no matter the window width — even when the panel lands on a fractional pixel', async ({
+test("an answering panel's border shows on all four sides no matter the window width — even when the panel lands on a fractional pixel", async ({
   page,
 }) => {
   test.setTimeout(60_000)
   const ids = await workingGrid(page)
-  await page.evaluate(() => (window as never as { __store: any }).__store.getState().setSpinGrid(false))
-  await expect(page.locator('html')).toHaveAttribute('data-spin-grid', 'off')
 
   // As the grid lays it out by default
   expect((await dimEdges(page, ids)).dim).toEqual([])
@@ -210,7 +208,7 @@ test('the stationary ring (gray) shows on all four sides of a panel no matter th
    * And also checked with panels **deliberately** placed on fractional pixels. The grid now
    * places panels on whole pixels (GridView's wholePixelTracks), but changing the text scale
    * makes one CSS pixel fall out of alignment with a screen pixel, and the panel lands on a
-   * fraction again. The stationary ring is the panel's border, so it must not depend on
+   * fraction again. The ring is the panel's border, so it must not depend on
    * alignment — so the old 1fr grid is overlaid to put the panel back at its old position
    * (x.328) and the same thing is measured.
    */
@@ -242,25 +240,4 @@ test('the stationary ring (gray) shows on all four sides of a panel no matter th
   // Whether the overlay actually put the panel on a fraction — otherwise this half of the test measured nothing
   expect(forced.boxes.some(offPixel)).toBe(true)
   expect(forced.dim).toEqual([])
-})
-
-test('the spinning ring\'s (rainbow) shape leaves all four sides intact no matter the window width — panels land on whole pixels', async ({
-  page,
-}) => {
-  test.setTimeout(60_000)
-  const ids = await workingGrid(page)
-  /*
-   * The spinning layer's color varies by angle, and one slice (300°–360°) is transparent. A plain
-   * screenshot cannot tell "it broke" apart from "that angle happens to be transparent right now."
-   * So the layer is instead **painted a single solid color** — the ring's shape (the mask) is left
-   * untouched, and only which pixels that mask leaves lit is checked.
-   */
-  await page.addStyleTag({
-    content: `.cc-orbit-ring-layer::before { animation: none !important; background: rgb(${ASH}, ${ASH}, ${ASH}) !important; }`,
-  })
-
-  const { dim, boxes } = await dimEdges(page, ids)
-  expect(dim).toEqual([])
-  // And why: the panels land on whole pixels — the condition under which this mask leaves all four sides intact
-  expect(boxes.filter(offPixel)).toEqual([])
 })

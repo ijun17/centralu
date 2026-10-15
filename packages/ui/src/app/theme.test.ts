@@ -40,7 +40,7 @@ describe('resolving a side', () => {
 })
 
 describe('the accent', () => {
-  it('colours focus, selection and the orbit, and never the signal', () => {
+  it('colours focus and selection, and never the signal', () => {
     const tokens = accentTokens('#6ea8fe')
     expect(Object.keys(tokens).sort()).toEqual([...ACCENT_TOKENS].sort())
     expect(tokens).not.toHaveProperty('--color-ink-signal')

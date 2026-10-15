@@ -140,26 +140,6 @@ export function App({
     cacheTypography(typography)
   }, [prefsArrived, bodyFont, codeFont, lineHeight, textSize])
 
-  /*
-   * Where the spinning indicator gets stopped (user request, 2026-09-13).
-   *
-   * Export the switch as an attribute on the root, and let CSS do the actual stopping. There are
-   * two places where something spins today (the grid panel border, the sidebar icon) and there
-   * could be more later; if each place read the setting itself, every new spinning element would
-   * have to remember this setting. Writing it once on the root means it applies even if it is
-   * forgotten.
-   *
-   * Why this setting is about battery life rather than taste, with measurements, is in the
-   * `spinGrid` comment in store.ts.
-   */
-  const spinGrid = useStore((s) => s.spinGrid)
-  const spinSessionIcon = useStore((s) => s.spinSessionIcon)
-  useEffect(() => {
-    const root = document.documentElement
-    root.dataset.spinGrid = spinGrid ? 'on' : 'off'
-    root.dataset.spinIcon = spinSessionIcon ? 'on' : 'off'
-  }, [spinGrid, spinSessionIcon])
-
   // The notification policy is "do not notify while the app is in front of the person", so track
   // focus state
   /*

@@ -642,21 +642,6 @@ export type AppState = {
    * stays expanded at all times, as before.
    */
   foldComposer: boolean
-  /**
-   * Whether to **let the spinning marker move** (user request, 2026-09-13). The grid panel border
-   * and the sidebar session icon are independent of each other — they differ in size and position,
-   * so they are distracting in different ways.
-   *
-   * When off, the marker does not disappear, it **stops**: the same rainbow stays, only the angle
-   * is fixed. The message "this is currently running" is kept; only the motion is removed.
-   *
-   * The reason this setting exists is power draw, not taste. Measured (2026-09-13, WKWebView):
-   * while one session was spinning, Centralu's total CPU usage dropped from 7.0% to 2.9%. Motion
-   * that never rests pins the screen at its maximum refresh rate, and that cost is set not by *what*
-   * is moving but by **whether anything is moving at all**.
-   */
-  spinGrid: boolean
-  spinSessionIcon: boolean
   focusedSessionId: string | null
   /** Git, files and the viewer belong to the project — they must be viewable without a session */
   focusedProjectId: string | null
@@ -1208,8 +1193,6 @@ export type AppState = {
   /** Show or hide what .gitignore hides (#17) */
   setShowIgnored(show: boolean): void
   setFoldComposer(fold: boolean): void
-  setSpinGrid(on: boolean): void
-  setSpinSessionIcon(on: boolean): void
   setToast(msg: string | null): void
   /** Opens/closes the session-creation window (`null` closes it) */
   openNewSession(projectId: string | null, opts?: { worktree?: boolean }): void
@@ -2877,8 +2860,6 @@ export const useStore = create<AppState>((set, get) => ({
   showIgnored: true,
   // Defaults to folded — the reason this feature exists at all is that a two-row grid leaves little room to read
   foldComposer: true,
-  spinGrid: true,
-  spinSessionIcon: true,
   focusedSessionId: null,
   focusedProjectId: null,
   newSessionFor: null,
@@ -3234,11 +3215,6 @@ export const useStore = create<AppState>((set, get) => ({
         // Same `typeof` guard — a stored `false` was the person's decision, and outranks the default
         const savedFold = (snap as { foldComposer?: boolean }).foldComposer
         if (typeof savedFold === 'boolean') set({ foldComposer: savedFold })
-        // Same rule: a stored `false` means the person turned it off, so it outranks the default (on)
-        const savedSpinGrid = (snap as { spinGrid?: boolean }).spinGrid
-        if (typeof savedSpinGrid === 'boolean') set({ spinGrid: savedSpinGrid })
-        const savedSpinIcon = (snap as { spinSessionIcon?: boolean }).spinSessionIcon
-        if (typeof savedSpinIcon === 'boolean') set({ spinSessionIcon: savedSpinIcon })
         migratedProjectPanels = Object.values(arrangements).some((saved) => saved.panels === undefined)
       }
     } catch {
@@ -3296,8 +3272,6 @@ export const useStore = create<AppState>((set, get) => ({
       notifyPolicy: s.notifyPolicy,
       showIgnored: s.showIgnored,
       foldComposer: s.foldComposer,
-      spinGrid: s.spinGrid,
-      spinSessionIcon: s.spinSessionIcon,
       introSeen: s.introSeen,
     } as never
     flushWorkspace(get)
@@ -4825,16 +4799,6 @@ export const useStore = create<AppState>((set, get) => ({
   },
   setFoldComposer(fold) {
     set({ foldComposer: fold })
-    get().saveWorkspace()
-  },
-
-  setSpinGrid(on) {
-    set({ spinGrid: on })
-    get().saveWorkspace()
-  },
-
-  setSpinSessionIcon(on) {
-    set({ spinSessionIcon: on })
     get().saveWorkspace()
   },
 

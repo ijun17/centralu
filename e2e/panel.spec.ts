@@ -302,24 +302,26 @@ test('a raised composer neither covers nor pushes the last line', async ({ page 
 })
 
 /**
- * The rainbow ring around a panel mid-response is the **panel's border**. It must not break no
- * matter what is floating inside the panel, but the collapsed composer was covering its bottom
- * edge (user finding, 2026-09-10).
+ * The border of a panel that is answering is the **panel's own border** (#736). It must not break no
+ * matter what is floating inside the panel; the collapsed composer once covered the bottom edge of a ring drawn
+ * on top (user finding, 2026-09-10). A border the browser draws belongs to the panel, and what is inside it is
+ * clipped by the panel, so the pixel on the bottom edge hits the panel itself and never the composer.
  */
-test('the collapsed composer does not cover the response ring — the ring sits above it', async ({ page }) => {
+test('the collapsed composer does not cover the answering border of a panel', async ({ page }) => {
   await setup(page)
   const a = await newSession(page, 'alpha', 'claude', 'one')
   await openGrid(page, [a])
   const panel = page.getByTestId(`grid-panel-${a}`)
-  await expect(panel.locator('.cc-orbit-ring-layer')).toBeVisible()
+  await expect(panel).toHaveAttribute('data-look', 'answering')
+  await expect(panel).toHaveCSS('border-bottom-width', '1px')
+  await expect(panel).toHaveCSS('border-bottom-color', 'rgb(255, 255, 255)')
 
-  // Two layers in the same stacking context — the ring has to be higher for the bottom edge to survive
-  const z = await panel.evaluate((el) => {
-    const ring = el.querySelector('.cc-orbit-ring-layer')!
-    const shell = el.querySelector('[data-testid="composer-shell"]')!
-    return [getComputedStyle(ring).zIndex, getComputedStyle(shell).zIndex].map(Number)
+  // The middle of the bottom edge, where the folded composer sits: half a pixel in is inside the 1px border
+  const hit = await panel.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    return document.elementFromPoint(r.left + r.width / 2, r.bottom - 0.5) === el
   })
-  expect(z[0]!).toBeGreaterThan(z[1]!)
+  expect(hit).toBe(true)
 })
 
 /**
@@ -1245,40 +1247,6 @@ test('the × on a command terminal means stop — the resulting exit takes the t
   // Only the command panel goes down — the shell terminal survives untouched
   const shells = page.getByTestId('terminal-stack').locator('[data-testid^="terminal-mock-term-"]')
   await expect(shells.first()).toBeVisible()
-})
-
-/*
- * ── Things that spin watch one clock ──────────────────────────────────────
- *
- * The sidebar marker and the grid panel border spin the same orbit at the same 1.4 seconds. But a
- * CSS animation counts from **the moment the element is created**, so bringing a spinning session
- * into the grid late means the panel's orbit alone starts over from 0. Measured at 758ms out of
- * phase — nearly the exact opposite. Even with the same period, a different phase looks to the eye
- * like two things spinning independently.
- */
-test('the grid panel border and the sidebar marker spin at the same angle — even joining late', async ({ page }) => {
-  await setup(page)
-  const id = await newSession(page, 'alpha', 'claude', 'task')
-
-  // Start spinning first in the focus view — this is where the sidebar marker's orbit is born
-  await page.getByTestId('prompt-input').fill('something that takes a while')
-  await page.getByTestId('send').click()
-  await expect(page.getByTestId('tool-mark-claude')).toHaveClass(/cc-orbit/)
-
-  // ...the panel is created much later. Before the fix, this gap was exactly the angle difference
-  await page.waitForTimeout(700)
-  await openGrid(page, [id])
-  await expect(page.getByTestId(`grid-panel-${id}`)).toHaveClass(/cc-orbit-ring/)
-
-  const phases = await page.evaluate(() =>
-    document
-      .getAnimations()
-      .filter((a) => (a as CSSAnimation).animationName === 'cc-orbit-spin')
-      .map((a) => Math.round(Number(a.currentTime))),
-  )
-  expect(phases).toHaveLength(2)
-  // The same angle. Within one frame (16.7ms), it looks the same to the eye
-  expect(Math.abs(phases[0]! - phases[1]!)).toBeLessThan(17)
 })
 
 /*

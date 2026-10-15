@@ -125,16 +125,6 @@
   /* The light around the signal, see .signal */
   --color-signal-glow: rgb(255 255 255 / 0.45);
 
-  /*
-   * Activity — the galaxy palette of the orbit (something is working) and the gust (it just
-   * finished), see .cc-orbit and .cc-gust. The one place where colour speaks state, and still
-   * never brighter than pure white.
-   */
-  --color-activity-1: #2d6cf0;
-  --color-activity-2: #7b3fe4;
-  --color-activity-3: #d63aa8;
-  --color-activity-4: #ff8a3d;
-  --color-activity-5: #4ad6d0;
 
   /*
    * The terminal (xterm). xterm paints with its own theme object, read from these when a terminal
@@ -359,12 +349,6 @@
   /* A halo does not make black text stand out; it only blurs it */
   --color-signal-glow: transparent;
 
-  /* The galaxy, a step deeper so it holds on white (the gust multiplies instead of screening, below) */
-  --color-activity-1: #2d6cf0;
-  --color-activity-2: #7b3fe4;
-  --color-activity-3: #d63aa8;
-  --color-activity-4: #e8701f;
-  --color-activity-5: #13a8a2;
 
   /* The terminal: GitHub's light palette, on the light grey the rest of the preset uses */
   --color-term-bg: #f0f0f0;
@@ -479,11 +463,6 @@
   --color-keycap-border: #4a4a4a;
   --color-signal-glow: transparent;
 
-  --color-activity-1: #1f5ad6;
-  --color-activity-2: #6a2fd0;
-  --color-activity-3: #b81f8c;
-  --color-activity-4: #c25400;
-  --color-activity-5: #00807a;
 
   --color-term-bg: #ffffff;
   --color-term-log-bg: #ffffff;
@@ -702,8 +681,8 @@
    * keyboard keycap, so the screen reads as one consistent set.
    *
    * One more very faint inner shadow is layered on top to make the surface look slightly
-   * recessed. The rotating orbit wraps around this chip, so the chip needs to recede for the
-   * orbit to sit in front of it.
+   * recessed. The ring of a session's look wraps around this chip, so the chip needs to recede for
+   * the ring to sit in front of it.
    */
   .cc-chip {
     box-shadow: var(--shadow-chip);
@@ -922,7 +901,7 @@
  * nothing appeared to happen on screen — so the person pressed again, killing the process that
  * had just come back up. The spinning icon is not decoration, it is the response "received, and
  * working on it".
- * (Same clock: everything that spins uses 1.4s — the same period as cc-orbit-spin.)
+ * (Same clock: everything that spins uses 1.4s.)
  */
 @keyframes cc-spin {
   from {
@@ -1053,200 +1032,75 @@
 }
 
 /*
- * The galaxy orbit — the rotating border wrapped around a session's tool marker while it is
- * "working".
+ * The four looks of a session (#736): how a session's mark in the sidebar and its panel on the grid
+ * say what it is doing, by line and fill alone. Colour and motion are not used, so the looks read the
+ * same in a still frame, in grayscale and for someone sensitive to motion; the exact state is always
+ * in the tooltip. `lookOf` (features/session/look.ts) maps a session to one of them, and writes it
+ * as `data-look`.
  *
- * Rotation reads far more clearly than a single dot blinking. A blink can be imitated even by a
- * frozen screen, but rotation has to be different every frame, so the instant it is seen, "it is
- * alive" is settled.
+ *   idle       nothing around the chip (the chip's own thin grey border)
+ *   answering  a white ring
+ *   stopped    a white dashed ring on a grey chip: the turn broke off (error, interruption, limit)
+ *   waiting    a white ring on a grey chip: the person has to act (approval, a question)
  *
- * The color goes to an actual galaxy palette. It was originally held down to almost white —
- * back then the app was fully achromatic, so that was the only way to keep "the most eye-catching
- * thing = what is waiting for me". That decision was never revisited after the color policy
- * changed to "add conservatively", so it was left standing on a stale premise (found when the
- * user asked "did you take the color out?").
- *
- * There is still one line held: it never gets brighter than pure white. The rotating orbit speaks
- * state, so it lives inside the brightness hierarchy, and the top of that hierarchy is still
- * reserved for "what is waiting for me". So saturation is raised while lightness is held down,
- * to stand out through color without winning on brightness.
+ * The mark keeps the structure it had with the orbit: a 1.5px ring painted as the background behind a
+ * 14px chip, 17px in all. A background cannot be dashed, so the stopped look draws the same 1.5px as a
+ * dashed border instead of padding, which keeps the size.
  */
-/*
- * What rotates is a plate, not a gradient.
- *
- * It originally rotated the angle of a conic-gradient through a registered custom property
- * (--cc-orbit). An angle animation cannot escape to the compositor, so it costs a style
- * recalculation plus a gradient repaint every frame — measured on WebKit, merely having a
- * "working" session was billing 24-33% CPU continuously, and on a laptop that came straight out
- * of battery (perf-idle.spec.ts).
- *
- * So the gradient is painted once, and that plate is rotated with transform instead. Rotation is
- * then handled by the compositor, so the main thread does nothing per frame. The plate is made
- * larger than its parent (enough to cover the diagonal), so no corner goes empty while rotating.
- */
-/*
- * Why scale(5) is also folded into the transform: the plate is rasterized once at its own size
- * and the GPU enlarges it. Growing the size via inset (-200%) instead would build and composite a
- * bitmap 25 times the area, which left only 9% CPU headroom with 4 grid panels — scaling up
- * preserves the angle, and no degradation is visible on a 1px ring. 5x covers the diagonal up to
- * a 4.9:1 aspect ratio (panels stretch up to 4:1).
- */
-@keyframes cc-orbit-spin {
-  from {
-    transform: rotate(0deg) scale(5);
-  }
-  to {
-    transform: rotate(360deg) scale(5);
-  }
-}
-
-.cc-orbit {
-  position: relative;
-  /* Clips the rotating plate to the badge's rounded corners */
-  overflow: hidden;
-  /* Contains the stacking so the z-index: -1 plate does not sink outside the badge (behind an
-     ancestor's background) */
-  isolation: isolate;
-}
-
-.cc-orbit::before,
-.cc-orbit-ring-layer::before {
-  content: '';
-  position: absolute;
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    var(--color-activity-1) 45deg,
-    var(--color-activity-2) 95deg,
-    var(--color-activity-3) 140deg,
-    var(--color-activity-4) 180deg,
-    var(--color-activity-5) 225deg,
-    transparent 300deg
-  );
-  animation: cc-orbit-spin 1.4s linear infinite;
-}
-
-/* Laid behind the icon chip — sizing is scale's job, so the plate itself stays badge-sized */
-.cc-orbit::before {
-  inset: 0;
-  z-index: -1;
-}
-
-/*
- * Wraps the same orbit around a panel's border (a panel that is responding, in the grid).
- *
- * With just one small marker, the eye cannot track which panel is spinning when there are
- * several. A border points at the whole panel, so it is caught even in peripheral vision — the
- * grid is a screen to be looked at, not one to be read.
- *
- * This does not touch the panel's size. Just changing the border's color cannot draw rotation,
- * and adding thickness would push the whole grid (the same problem hit in the sidebar). So it is
- * painted on top instead: an absolutely positioned layer is painted with the orbit, and a mask
- * leaves only the outer 1px. Layout does not move by a single pixel.
- *
- * Why this is a real child rather than a pseudo-element: if a mask (axis-aligned) and a rotation
- * (per frame) live on the same element, the mask ends up rotating too. This layer holds the mask,
- * and only the ::before plate inside it rotates — since the mask also clips children, nothing
- * leaks outside the ring.
- *
- * This mask keeps all four sides only when the panel sits on a whole pixel. When a panel's
- * position is fractional, WebKit snaps the mask to a different pixel than the panel and loses one
- * whole side — so the grid places panels on integer pixels (wholePixelTracks in GridView, #208).
- */
-.cc-orbit-ring-layer {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  /* Carves out the inside, leaving only the ring — the difference of the two masks */
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  overflow: hidden;
+.cc-mark {
   /*
-   * Sits on top of the conversation and the composer, while letting clicks pass through.
-   *
-   * When z was 1, the collapsed composer (z-20) covered the bottom edge of this ring (user's
-   * observation, 2026-09-10). The ring is the panel's border — whatever is floating inside the
-   * panel, the border must not be broken. So it sits above every layer inside the panel.
+   * A fixed box: a border is snapped to whole device pixels (1.5px is drawn as 1px at 1x) while padding is
+   * not, so the dashed look would otherwise be smaller than the others. The chip sits centred inside.
    */
-  pointer-events: none;
-  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 17px;
+  min-width: 17px;
+  padding: 1.5px;
 }
-
-/* Sizing is scale's job — the plate is rasterized at panel size */
-.cc-orbit-ring-layer::before {
-  inset: 0;
+.cc-mark[data-look='answering'],
+.cc-mark[data-look='waiting'] {
+  background: var(--color-ink-signal);
+}
+.cc-mark[data-look='stopped'] {
+  padding: 0;
+  border: 1.5px dashed var(--color-ink-signal);
+}
+.cc-mark > .cc-chip {
+  background-color: var(--color-surface-floor);
+}
+/* The grey chip of the two looks that stopped or wait */
+.cc-mark[data-look='stopped'] > .cc-chip,
+.cc-mark[data-look='waiting'] > .cc-chip {
+  background-color: var(--color-surface-selected);
 }
 
 /*
- * The marker when it is not spinning — only brightness is kept.
- *
- * Freezing the rainbow at a fixed angle was also an option, but a stopped rainbow reads as
- * "something happened here and it is over". A single layer of gray is more honest: it is
- * brightening, not color, that says "this is spinning right now", and that grammar already
- * matches this app's other states.
- *
- * Two cases share the same picture:
- *  - someone sensitive to motion (prefers-reduced-motion)
- *  - the person turned it off themselves, for battery (Settings → Appearance, 2026-09-13)
- * The reasons differ and the outcome is the same — so there is one declaration for both.
- *
- * The grid and the sidebar are turned off separately. Their sizes and placements differ, so what
- * feels distracting differs too.
- *
- * The gray on a grid panel is not a ring painted on top, it is the panel's own border (#208). A
- * stopped ring has no rotating plate, so there is no reason to carve it with a mask either. But
- * leaving the mask in place made WebKit snap it to a different pixel than a fractional-width
- * panel, losing one whole side (measured: at 1x zoom, three columns, the right side of the middle
- * panel). A panel's own border is drawn by the browser on the same pixel as the panel, so all four
- * sides show regardless of the width. A layer inside the panel (the collapsed composer, z-20) is
- * clipped by the panel's overflow-hidden and cannot reach the border, and a layer outside the
- * panel (the files/git screen) still sits above the panel — the two things the ring protected
- * with z-30 are protected by the border with placement alone.
+ * The same looks on a panel (the grid, and a project screen): only the colour and dash of the panel's
+ * own 1px border, drawn by the browser on the same pixel as the panel (#208), so all four sides show at
+ * any width and the content box does not move. No fill: a panel is a screen to read.
  */
-@media (prefers-reduced-motion: reduce) {
-  .cc-orbit::before {
-    animation: none;
-    background: var(--color-ink-muted);
-  }
-  .cc-orbit-ring {
-    border-color: var(--color-ink-muted);
-  }
-  .cc-orbit-ring-layer {
-    display: none;
-  }
+.cc-panel[data-look='answering'],
+.cc-panel[data-look='stopped'],
+.cc-panel[data-look='waiting'] {
+  border-color: var(--color-ink-signal);
 }
-
-[data-spin-icon='off'] .cc-orbit::before {
-  animation: none;
-  background: var(--color-ink-muted);
-}
-
-[data-spin-grid='off'] .cc-orbit-ring {
-  border-color: var(--color-ink-muted);
-}
-
-[data-spin-grid='off'] .cc-orbit-ring-layer {
-  display: none;
+.cc-panel[data-look='stopped'] {
+  border-style: dashed;
 }
 
 /*
  * The gust that sweeps across the screen once, when a response finishes.
  *
- * Uses the exact same color as the galaxy orbit on the session icon. If the rotating orbit means
- * "in progress", this band drifting sideways means "finished" — they have to share the same paint
- * to read as one object.
+ * A neutral band: the ink colour, no hue (the galaxy palette it shared with the session icon's
+ * orbit left with the orbit, #736).
  *
  * Why screen blending: instead of painting over the dark background, this lays light on top of
  * it. Paint would obscure the screen for that instant, but light leaves nothing behind once it
- * passes. The line held is the same as the orbit — it never gets brighter than pure white
- * (opacity is kept down).
+ * passes.
+ * It never gets brighter than pure white (opacity is kept down).
  */
 @keyframes cc-gust {
   0% {
@@ -1292,11 +1146,8 @@
   background: linear-gradient(
     100deg,
     transparent 0%,
-    var(--color-activity-1) 20%,
-    var(--color-activity-2) 36%,
-    var(--color-activity-3) 50%,
-    var(--color-activity-4) 64%,
-    var(--color-activity-5) 80%,
+    var(--color-ink) 36%,
+    var(--color-ink) 64%,
     transparent 100%
   );
   /* The blur is also part of the spread — the band's edges fade all the way to the screen edge
@@ -1308,7 +1159,7 @@
 
 /*
  * For someone sensitive to motion, a band sweeping across the screen is distracting.
- * The same rule as the orbit — remove the motion and leave only a brief flash of brightness.
+ * Remove the motion and leave only a brief flash of brightness.
  */
 @media (prefers-reduced-motion: reduce) {
   .cc-gust {

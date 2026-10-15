@@ -199,31 +199,6 @@
           "maxLength": 400,
           "description": "Keycap: Border. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
         },
-        "activity-1": {
-          "type": "string",
-          "maxLength": 400,
-          "description": "Activity: Activity 1. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
-        },
-        "activity-2": {
-          "type": "string",
-          "maxLength": 400,
-          "description": "Activity: Activity 2. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
-        },
-        "activity-3": {
-          "type": "string",
-          "maxLength": 400,
-          "description": "Activity: Activity 3. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
-        },
-        "activity-4": {
-          "type": "string",
-          "maxLength": 400,
-          "description": "Activity: Activity 4. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
-        },
-        "activity-5": {
-          "type": "string",
-          "maxLength": 400,
-          "description": "Activity: Activity 5. A CSS colour: #rrggbb, rgb(), oklch(), color-mix() …"
-        },
         "term-bg": {
           "type": "string",
           "maxLength": 400,

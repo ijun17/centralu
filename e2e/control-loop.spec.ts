@@ -1857,66 +1857,6 @@ test('Top bar: the count is the signal, not a shortcut chip (#33)', async ({ pag
  * it off does not remove the indicator, it stops it: a plain bright-gray layer remains, still
  * saying "this is currently working".
  */
-test('Settings: turning off the spinning indicator stops it, leaving only a brightness cue', async ({
-  page,
-}) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
-  await newSession(page, 'alpha', 'task')
-  const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
-  await page.evaluate((sid) => {
-    ;(window as any).__mock.emit({ type: 'state_change', sessionId: sid, state: 'working' })
-  }, id)
-  await page.dragAndDrop(`[data-testid="session-row-${id}"]`, '[data-testid="grid-button"]')
-  const panel = page.getByTestId(`grid-panel-${id}`)
-  await expect(panel).toBeVisible()
-
-  /** The number of orbits actually spinning right now — counts animations, not classes */
-  const spinning = () =>
-    page.evaluate(
-      () =>
-        document
-          .getAnimations()
-          .filter((a) => (a as CSSAnimation).animationName === 'cc-orbit-spin' && a.playState === 'running')
-          .length,
-    )
-  /** What the ring is painted with (::before is the actual layer) */
-  const ringPaint = () =>
-    page.evaluate(() => {
-      const el = document.querySelector('.cc-orbit-ring-layer')!
-      const s = getComputedStyle(el, '::before')
-      return { image: s.backgroundImage, color: s.backgroundColor }
-    })
-
-  expect(await spinning()).toBeGreaterThan(0)
-  expect((await ringPaint()).image).toContain('conic-gradient')
-
-  await page.keyboard.press('Meta+k')
-  await page.getByTestId('palette-input').fill('settings')
-  await page.getByTestId('palette-item-action').click()
-  await page.getByTestId('settings-tab-appearance').click()
-  await page.getByTestId('settings-spin-grid').uncheck()
-  await page.getByTestId('settings-spin-icon').uncheck()
-  await page.keyboard.press('Escape')
-
-  // Nothing is spinning — this is the condition that saves power
-  await expect.poll(spinning).toBe(0)
-  // The indicator still remains: a plain bright-gray layer instead of the rainbow — this is the
-  // panel's own border, not a drawn-on ring (#208)
-  await expect(page.locator('.cc-orbit-ring-layer')).toBeHidden()
-  await expect(panel).toHaveCSS('border-top-color', 'rgb(168, 168, 168)')
-  // The fact that the panel is working is still readable as a value (for tests and assistive technology)
-  await expect(panel).toHaveClass(/cc-orbit-ring/)
-
-  // Turning it back on brings it back — and it survives a restart too (workspace snapshot)
-  await page.keyboard.press('Meta+k')
-  await page.getByTestId('palette-input').fill('settings')
-  await page.getByTestId('palette-item-action').click()
-  await page.getByTestId('settings-tab-appearance').click()
-  await page.getByTestId('settings-spin-grid').check()
-  await page.keyboard.press('Escape')
-  await expect.poll(spinning).toBeGreaterThan(0)
-})
-
 /*
  * The send key (setting: Send with ⌘/Ctrl+Enter).
  *
@@ -2510,11 +2450,12 @@ test("Sidebar: a marker appears on the name row when a folded project's session 
 
   await injectApproval(page, 0, { kind: 'command', command: 'ls -la', cwd: '/tmp/alpha' })
 
-  // The same chip shape as the session row marker — an approval is a pure-white (ink-signal) ring,
-  // with a count where the label would be
+  // The same chip and look as the session row marker (#736): an approval wears the waiting look, a pure-white
+  // (ink-signal) ring, with a count where the label would be
   const mark = page.getByTestId('fold-summary-alpha').locator('[data-state="waiting_approval"]')
   await expect(mark).toHaveText('1')
-  await expect(mark).toHaveAttribute('style', /--color-ink-signal/)
+  await expect(mark).toHaveAttribute('data-look', 'waiting')
+  await expect(mark).toHaveCSS('background-color', 'rgb(255, 255, 255)')
   await page.getByTestId('fold-summary-alpha').hover()
   await expect(page.getByTestId('fold-summary-tip-alpha')).toContainText('1 awaiting approval')
   // An expanded project has no summary — each row's own marker already says it
@@ -4658,7 +4599,7 @@ test('Git history connects commits with lines', async ({ page }) => {
  * A single session marker states both the tool and the state.
  * A separate dot right next to the marker would overlap in reading and blur both.
  */
-test('A working session has a spinning marker border', async ({ page }) => {
+test('A working session has the answering look on its marker', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'task')
 
@@ -4669,7 +4610,7 @@ test('A working session has a spinning marker border', async ({ page }) => {
   await page.getByTestId('send').click()
 
   await expect(mark).toHaveAttribute('data-state', 'working')
-  await expect(mark).toHaveClass(/cc-orbit/)
+  await expect(mark).toHaveAttribute('data-look', 'answering')
 })
 
 /**
@@ -7574,13 +7515,13 @@ test('Deleting a non-worktree session never mentions worktrees', async ({ page }
 })
 
 /**
- * In the grid, a panel that is responding has a **spinning border.**
+ * In the grid, a panel that is responding has a **thick white border** (#736).
  *
  * With several panels, a small marker in the header alone is too small for the eye to track
  * which one is working. The grid is a screen to glance at, not read, so the signal has to be the
  * size of the whole panel to catch peripheral vision.
  */
-test('Grid: only the responding panel has a spinning border', async ({ page }) => {
+test('Grid: only the responding panel has the answering border', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'first')
   const a = await page.evaluate(() => (window as any).__store.getState().focusedSessionId)
@@ -7595,17 +7536,17 @@ test('Grid: only the responding panel has a spinning border', async ({ page }) =
 
   // Both are working from their first prompt — compare only after they finish
   for (const idx of [0, 1]) await emitEvent(page, idx, { type: 'turn_complete' })
-  await expect(panelA).not.toHaveClass(/cc-orbit-ring/)
-  await expect(panelB).not.toHaveClass(/cc-orbit-ring/)
+  await expect(panelA).toHaveAttribute('data-look', 'idle')
+  await expect(panelB).toHaveAttribute('data-look', 'idle')
 
   // Only give work to a
   await page.getByTestId(`grid-panel-${a}`).getByTestId('prompt-input').fill('something that takes a while')
   await page.getByTestId(`grid-panel-${a}`).getByTestId('send').click()
 
-  await expect(panelA).toHaveClass(/cc-orbit-ring/)
-  // If the neighboring panel spins too, "which one is busy" cannot be read — it becomes
+  await expect(panelA).toHaveAttribute('data-look', 'answering')
+  // If the neighboring panel lights up too, "which one is busy" cannot be read — it becomes
   // decoration, not a signal
-  await expect(panelB).not.toHaveClass(/cc-orbit-ring/)
+  await expect(panelB).toHaveAttribute('data-look', 'idle')
 })
 
 /**
@@ -9239,19 +9180,17 @@ test('Opening a coordinator session shows an empty evidence panel — it does no
 })
 
 /**
- * A spinning panel's rotating border is **the panel's own border** — it must never cover
- * anything outside the panel.
+ * A panel's thick border is **the panel's own border** — it must never cover anything outside the panel.
  *
- * The ring sits at z-30, a value raised because the collapsed composer (z-20) inside the panel
- * once covered its bottom edge. But if the panel does not establish its own stacking context,
- * that 30 is still 30 outside the panel too, and a rainbow line got drawn over the files/git
- * screen (z-20) (pointed out by the person).
+ * The ring used to be a layer at z-30, raised because the collapsed composer (z-20) inside the panel once
+ * covered its bottom edge; when the panel did not establish its own stacking context, that 30 was still 30
+ * outside the panel too, and a line got drawn over the files/git screen (z-20) (pointed out by the person).
+ * It is a real border now (#736), and this keeps it that way.
  *
  * Rather than comparing numbers, this checks **what actually sits on top of that pixel**. A z
- * value means something different in every stacking context, so the bare fact that 30 > 20 says
- * nothing about what is actually visible.
+ * value means something different in every stacking context.
  */
-test("A spinning panel's border does not leak over the files/git screen", async ({ page }) => {
+test("An answering panel's border does not leak over the files/git screen", async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   const id = await page.evaluate(() => (window as any).__store.getState().focusedSessionId as string)
@@ -9264,29 +9203,20 @@ test("A spinning panel's border does not leak over the files/git screen", async 
     }))
   }, id)
   await page.getByTestId('grid-button').click()
-  await expect(page.locator('.cc-orbit-ring-layer')).toBeVisible()
+  await expect(page.getByTestId(`grid-panel-${id}`)).toHaveAttribute('data-look', 'answering')
 
   await page.evaluate(() => (window as any).__store.getState().openGit())
   await expect(page.getByTestId('overlay')).toBeVisible()
 
-  const topAtRing = await page.evaluate(() => {
-    const ring = document.querySelector('.cc-orbit-ring-layer') as HTMLElement | null
-    if (!ring) return { found: false, inOverlay: false }
-    /*
-     * The ring lets clicks pass through it (pointer-events: none), so it is normally invisible to
-     * a hit-test. Asking directly would measure "does a click land" instead of "is it covered",
-     * and that passes even while the ring is spilling over the screen. This turns pointer events
-     * on only while measuring, to ask about **paint order** instead.
-     */
-    const before = ring.style.pointerEvents
-    ring.style.pointerEvents = 'auto'
-    const r = ring.getBoundingClientRect()
+  const topAtBorder = await page.evaluate((sid) => {
+    const panel = document.querySelector(`[data-testid="grid-panel-${sid}"]`) as HTMLElement | null
+    if (!panel) return { found: false, inOverlay: false }
+    const r = panel.getBoundingClientRect()
     const el = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + 1))
-    ring.style.pointerEvents = before
     return { found: true, inOverlay: !!el?.closest('[data-testid="overlay"]') }
-  })
-  expect(topAtRing.found).toBe(true)
-  expect(topAtRing.inOverlay).toBe(true)
+  }, id)
+  expect(topAtBorder.found).toBe(true)
+  expect(topAtBorder.inOverlay).toBe(true)
 })
 
 /**

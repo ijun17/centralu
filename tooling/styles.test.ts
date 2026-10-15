@@ -37,7 +37,8 @@ const REQUIRED = [
   { needle: '--color-term-bg', why: 'a token only script reads (the terminal theme)' },
   { needle: '--color-term-bright-white', why: 'the last ANSI colour, the same' },
   { needle: '--shadow-modal', why: 'a shadow token reached through shadow-(--shadow-modal)' },
-  { needle: 'cc-orbit', why: 'the spinning working-state border (@property + @keyframes)' },
+  { needle: 'cc-mark', why: 'the four looks of a session mark (data-look on .cc-mark)' },
+  { needle: 'cc-panel', why: 'the four looks of a panel border (data-look on .cc-panel)' },
   { needle: 'cc-chip', why: 'the inner shadow on a session marker chip (@layer components)' },
 ]
 
@@ -106,17 +107,14 @@ describe('the built CSS actually contains styles', () => {
    *   - the terminal's 16 ANSI colours (term-*): a program's own output, xterm's default palette.
    *     They were always in the app inside xterm's script; they are written out as tokens so a
    *     theme can change them, and they never leave the terminal.
-   *   - the orbit ring (cc-orbit): the border that speaks "working" through rotation.
-   *     Saturation is raised, but lightness is held down so it **never gets brighter than pure
-   *     white (ink-signal)** — the top of the brightness scale belongs to waiting.
    *
    * A chromatic color not on this list fails the build — widening the exception means writing
    * the reason here.
    *
-   * **If the policy changes, revisit the decisions recorded here.** The orbit color is the
-   * example: it was held down for a reason that belonged to the monochrome era, and after the
-   * policy changed nobody went back to look, until the person asked "did you take the color
-   * out?" That is how it was found. This list is both a record of what is allowed and **a list
+   * **If the policy changes, revisit the decisions recorded here.** The session orbit's colour was
+   * the example: it was held down for a reason that belonged to the monochrome era, and after the
+   * policy changed nobody went back to look. It is gone now (#736: a session says its state by line
+   * and fill, in grey and white). This list is both a record of what is allowed and **a list
    * of things to revisit.**
    */
   it('the palette is monochrome (R=G=B) outside the allowed exceptions', () => {
@@ -126,26 +124,20 @@ describe('the built CSS actually contains styles', () => {
       // The terminal's ANSI palette (xterm's defaults, see --color-term-* in index.css)
       '2e3436', 'cc0000', '4e9a06', 'c4a000', '3465a4', '75507b', '06989a', 'd3d7cf',
       '555753', 'ef2929', '8ae234', 'fce94f', '729fcf', 'ad7fa8', '34e2e2', 'eeeeec',
-      // The orbit ring — the border that speaks "working" through rotation.
-      // It was first held down to almost pure white, then raised to a real color once the
-      // color policy changed to "add conservatively". The line it keeps: **never brighter
-      // than pure white** (the spinning ring speaks to state, so it lives inside the
-      // brightness hierarchy, and the top of that hierarchy belongs to waiting).
-      '2d6cf0', '7b3fe4', 'd63aa8', 'ff8a3d', '4ad6d0',
       /*
-       * The light and high-contrast presets (#312 step 4) carry the same three exceptions, each
-       * re-tuned for its floor: the diff's green and red (and danger, which borrows the red), the
-       * orbit's galaxy a step deeper so it holds on white, and the terminal's ANSI palette. They are
+       * The light and high-contrast presets (#312 step 4) carry the same exceptions, each
+       * re-tuned for its floor: the diff's green and red (and danger, which borrows the red), and the
+       * terminal's ANSI palette. They are
        * listed by preset so a value that is no longer used can be found and removed.
        */
-      // light: diff and danger, activity, terminal
-      '1a7f37', 'dafbe1', 'cf222e', 'ffebe9', 'e8701f', '13a8a2',
+      // light: diff and danger, terminal
+      '1a7f37', 'dafbe1', 'cf222e', 'ffebe9',
       '24292f', '116329', '4d2d00', '0969da', '8250df', '1b7c83', '6e7781',
       '57606a', 'a40e26', '633c01', '218bff', 'a475f9', '3192aa', '8c959f',
       // high contrast dark: diff and danger
       '8af59a', '0a2e14', 'ff9a90', '3a0e0e',
-      // high contrast light: diff and danger, activity, terminal
-      '0b5a1f', 'd1f5d8', 'a1001f', 'ffe1e1', '1f5ad6', '6a2fd0', 'b81f8c', 'c25400', '00807a',
+      // high contrast light: diff and danger, terminal
+      '0b5a1f', 'd1f5d8', 'a1001f', 'ffe1e1',
       '0550ae', '6639ba', '135e65', '3d444d', '82071e', '044f1e', '3b2300', '033d8b', '512a97', '0b4a4f', '424a53',
     ])
     const hexes = [...css.matchAll(/#([0-9a-f]{6})\b/gi)].map((m) => m[1]!.toLowerCase())
@@ -169,7 +161,7 @@ describe('the built CSS actually contains styles', () => {
  * "Applied" only holds once both are true: it is in the build output, and the source uses it.
  */
 describe('our own classes are actually used', () => {
-  const OURS = ['cc-chip', 'cc-orbit']
+  const OURS = ['cc-chip', 'cc-mark', 'cc-panel']
   // Read in Node, not with `grep`, which a Windows machine without Git's usr/bin on PATH does not have (#14)
   const uiSrc = join(ROOT, 'packages/ui/src')
   const src = readdirSync(uiSrc, { recursive: true, encoding: 'utf8' })
