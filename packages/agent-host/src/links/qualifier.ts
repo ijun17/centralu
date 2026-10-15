@@ -205,6 +205,26 @@ export class Qualifier {
       : r
   }
 
+  /**
+   * The `agents.listExternalSessions` answer. `externalId` is the tool's own id for the conversation, so it stays as it is;
+   * `importedAs` is the id of the Centralu session already open for it, which the window focuses (#701)
+   */
+  externalSessions(r: unknown): unknown {
+    if (!isObj(r) || !Array.isArray(r.sessions)) return r
+    return { ...r, sessions: r.sessions.map((s) => (isObj(s) ? { ...s, importedAs: this.maybeId(s.importedAs) } : s)) }
+  }
+
+  /**
+   * The `apps.errors` answer: the app a declined request named is compared with the app on screen, whose project is
+   * qualified, to decide which of the two wordings applies. `runId` is a run's own id and stays as `apps.runs` leaves it
+   */
+  errorBundles(r: unknown): unknown {
+    if (!isObj(r)) return r
+    const bundle = (b: unknown): unknown =>
+      isObj(b) && isObj(b.denied) ? { ...b, denied: { ...b.denied, projectId: this.maybeId(b.denied.projectId) } } : b
+    return { ...r, latest: bundle(r.latest), recent: Array.isArray(r.recent) ? r.recent.map(bundle) : r.recent }
+  }
+
   /** The `apps.openView` answer: the pinned view's instance */
   openedView(v: unknown): unknown {
     return isObj(v) ? { ...v, instanceId: this.maybeId(v.instanceId) } : v

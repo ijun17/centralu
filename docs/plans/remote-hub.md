@@ -811,6 +811,9 @@ is its own user-folder app; without `machine` it stays the hub's, as before; wit
 machine (route `app` in `links/routes.ts`). `apps.askBuilder` may also name the view it came from: it routes as a view
 call, and an instance of one machine with a `machine` of another is refused. The rows of `apps.runs` come back
 qualified (`projectId`, `callerSessionId`, `sessionId`), so the panel's link reaches the agent session on that machine.
+So do the `denied.projectId` of an `apps.errors` bundle (the screen compares it with its own app's qualified project) and the
+`importedAs` of an `agents.listExternalSessions` row (the session the new-session dialog jumps to; `externalId` is the tool's
+own id and stays as it is).
 
 In the window, every one of those calls passes the machine of a machine's user-folder app (`userAppMachine`), the
 pinned view shows all its panels, and Restart restarts it there. Remove was left out of this step: `apps.remove` named no

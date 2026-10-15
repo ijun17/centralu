@@ -122,7 +122,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   ),
 
   // ── Projects, git, files, terminals, commands ───────────────────────────────────────────
-  'agents.listExternalSessions': project(),
+  'agents.listExternalSessions': project((r, q) => q.externalSessions(r)),
   'projects.delete': project(),
   'projects.setTrusted': project(),
   'projects.setCommands': project(),
@@ -218,7 +218,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   ),
   'apps.builder': app(sessionInfo),
   'apps.createBuilder': app(sessionInfo),
-  'apps.errors': app(),
+  'apps.errors': app((r, q) => q.errorBundles(r)),
   'apps.permissions': app(),
   'apps.forgetPermission': app(),
   'apps.usage': app(),

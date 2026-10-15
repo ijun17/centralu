@@ -119,6 +119,40 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     ])
   })
 
+  it('qualifies the id of the open session a past conversation is already imported as (#701)', async () => {
+    const { router, m1 } = rig()
+    m1.answers['agents.listExternalSessions'] = {
+      supported: true,
+      sessions: [
+        { externalId: 'tool-1', tool: 'claude', title: 'open', updatedAt: 1, imported: true, importedAs: 'abc' },
+        { externalId: 'tool-2', tool: 'claude', title: 'closed', updatedAt: 2, imported: false, importedAs: null },
+      ],
+    }
+    const r = await router.handle('agents.listExternalSessions', { projectId: 'm1.p1', tool: 'claude' })
+    expect(m1.calls).toEqual([{ method: 'agents.listExternalSessions', params: { projectId: 'p1', tool: 'claude' } }])
+    // The tool's own conversation id stays; only the Centralu session id is the hub's to jump to
+    expect(r).toMatchObject({
+      sessions: [
+        { externalId: 'tool-1', importedAs: 'm1.abc' },
+        { externalId: 'tool-2', importedAs: null },
+      ],
+    })
+  })
+
+  it('qualifies the project a declined request names, so the screen can tell its own app from another (apps.errors)', async () => {
+    const { router, m1 } = rig()
+    const bundle = (denied: unknown) => ({ kind: 'tool', at: 1, message: 'm', stderr: [], tool: 't', args: null, runId: 'run-1', denied, text: 't' })
+    const denied = { appId: 'todo', projectId: 'p1', name: 'Todo', capability: 'run_agent', text: 'start an agent' }
+    m1.answers['apps.errors'] = { latest: bundle(denied), recent: [bundle(denied), bundle(null)] }
+    const r = (await router.handle('apps.errors', { appId: 'todo', projectId: 'm1.p1' })) as {
+      latest: { denied: { projectId: string }; runId: string }
+      recent: { denied: { projectId: string } | null }[]
+    }
+    expect(r.latest.denied.projectId).toBe('m1.p1')
+    expect(r.latest.runId).toBe('run-1')
+    expect(r.recent.map((b) => b.denied?.projectId ?? null)).toEqual(['m1.p1', null])
+  })
+
   it('a per-machine question goes where `machine` says, and the parameter does not travel', async () => {
     const { router, local, m2 } = rig()
     m2.answers['agents.detect'] = [{ name: 'claude', installed: true }]
