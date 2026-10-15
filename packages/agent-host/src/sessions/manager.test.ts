@@ -29,6 +29,7 @@ import { WORKTREE_RECOVERY_MAX_BYTES, worktreeRecoveryDir } from '../dev-service
 import { Store } from '../dev-services/store.js'
 import { plantedRepo } from '../dev-services/planted-repo.test-helpers.js'
 import { SessionManager } from './manager.js'
+import type { ChildOwnership } from './child-ownership.js'
 import { DEFAULT_RARE_TIER, setRareTier } from './orchestrator-tools.js'
 import { orchestratorPreamble, setOrchestratorPreamble } from './orchestrator-home.js'
 import { plantOldCoordinator } from './old-coordinator.test-helpers.js'
@@ -905,7 +906,7 @@ describe('approvals, read state, and messages', () => {
   it('keeps nothing per session for a turn that ended or a session deleted mid-turn (#392)', async () => {
     const internals = mgr as unknown as {
       pendingCommits: Map<string, string>
-      awaitingReport: Map<string, string>
+      children: ChildOwnership
       appsRestartAfterTurn: Set<string>
     }
     const p = await addProject()
@@ -921,11 +922,11 @@ describe('approvals, read state, and messages', () => {
     await rpc('agents.send', { sessionId: gone.id, text: 'commit it' })
     adapter.last!.emitToolCall('Bash', 'git commit -m "wip"')
     // What its turn's end would have consumed: an orchestrator's report, a restart for an app change
-    internals.awaitingReport.set(gone.id, 'orchestrator')
+    internals.children.adoptReport(gone.id, 'orchestrator', null)
     internals.appsRestartAfterTurn.add(gone.id)
     await rpc('agents.deleteSession', { sessionId: gone.id })
     expect(internals.pendingCommits.size).toBe(0)
-    expect(internals.awaitingReport.has(gone.id)).toBe(false)
+    expect(internals.children.awaitingReport.has(gone.id)).toBe(false)
     expect(internals.appsRestartAfterTurn.has(gone.id)).toBe(false)
   })
 

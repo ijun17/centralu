@@ -876,6 +876,12 @@ new session now takes over the original's **live** work as it is created, before
   `delegated_turns`, `queued_requests` and `agent_start_requests` are read at startup as before). If the store refuses,
   nothing moves and the note lists nothing. A delegation's end releases its turn by the delegation's owner at that
   time, not the one that started it.
+- **Where the state lives**: `ChildOwnership` (`sessions/child-ownership.ts`, #428) holds who owns a child's work:
+  report marks and paused reports, delegated turns, queued requests and the one being delivered, delegations and
+  observer notes, start_agent requests, linked machines' reports, and what a handoff gave away. Each change with a
+  store mirror writes it there; the manager reads through read-only maps. The memory side of the move is one call,
+  `moveOwner`, which runs the manager's card move for the moving start requests in the middle, in the order above.
+  What moves, the store's transaction, and `askedBy` / `parentSessionId` stay with the manager.
 - **The windows** hear `session_owner` (the session's `askedBy` and `parentSessionId` now) and hang the child under
   its new owner; a linked machine's event is qualified (`Qualifier.event`) and patched into the hub's mirror.
 
