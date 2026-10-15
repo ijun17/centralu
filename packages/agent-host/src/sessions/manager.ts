@@ -826,6 +826,8 @@ export class SessionManager {
    * many. Counted by `agentCeilingError` with the running children, so starts at once cannot pass the ceiling together.
    */
   private agentStartReserved = new Map<string, number>()
+  /** Turns a quit cut, and who to tell, waiting for the start to finish (#698, `tellQuitNotices`) */
+  private quitNotices: { sessionId: string; requester: string }[] = []
   /** Sessions whose tool is `retrying`, and since when (#698): flagged `reconnecting` once it lasts `RECONNECTING_FLAG_MS` */
   private reconnecting = new Map<string, { since: number; timer: ReturnType<typeof setTimeout> }>()
   /** `disposeAll` has begun (#673): a card it withdraws is not the person's answer, and its request stays stored */
@@ -901,6 +903,8 @@ export class SessionManager {
      * again once something addresses it — that is better than showing a state that is not true.
      */
     const LIVE_ONLY: SessionState[] = ['working', 'waiting_approval']
+    /** Sessions this start found mid-turn with no process (#698): whoever gave them the turn is told once */
+    const stoppedByQuit: SessionInfo[] = []
     const storedSessions = store.listSessions()
     const storedProjects = new Map(storedSessions.map((s) => [s.id, s.projectId]))
     for (const s of storedSessions) {
@@ -924,7 +928,19 @@ export class SessionManager {
         // No window is attached yet: the marker and the interruption are read with the conversation and the list
         this.markStoppedByQuit(fixed, false)
         store.upsertSession(fixed)
+        stoppedByQuit.push(fixed)
       }
+    }
+    /*
+     * Who to tell of a turn a quit cut (#698): the session owed its report, else the one that gave the running turn
+     * (an ask_project or a send), else the one that started it. Read before the loops below clear those rows. An asker
+     * that delegated without waiting was at rest, not cut, and would otherwise never hear: its mark used to be dropped.
+     */
+    const marks = new Map(store.listReportMarks().map((r) => [r.sessionId, r.callerSessionId]))
+    const turnGivers = new Map(store.listDelegatedTurns().map((r) => [r.sessionId, r.callerSessionId]))
+    for (const s of stoppedByQuit) {
+      const requester = marks.get(s.id) ?? turnGivers.get(s.id) ?? s.askedBy ?? undefined
+      if (requester && requester !== s.id && this.meta.has(requester)) this.quitNotices.push({ sessionId: s.id, requester })
     }
     /*
      * "You will be told when it ends" survives a host swap (#646): the keeper kept the child's process and its turn is
@@ -992,6 +1008,8 @@ export class SessionManager {
         for (const id of this.queued.keys()) if (!keeperOpts.keptSessions?.has(id)) this.scheduleDrain(id)
       }, 0)
     }
+    // A requester the keeper kept is told once it is adopted (`adoptKept`), so the note does not start a second process
+    if (this.quitNotices.length) setTimeout(() => this.tellQuitNotices((id) => !keeperOpts.keptSessions?.has(id)), 0)
     /*
      * Sweeps orphaned handoff notes (#106). **Why startup is a safe moment for this**: no handoff is
      * in progress right now — a note being read mid-flight cannot be cleaned up out from under
@@ -2518,10 +2536,23 @@ export class SessionManager {
             this.markStoppedByQuit(m, true)
             this.store.upsertSession(m)
             this.emit({ type: 'state_change', sessionId: m.id, state: 'idle', reason: 'reattach_failed' })
+            // Its turn is over: the report it owed says so now, rather than naming a later turn (#698)
+            if (this.awaitingReport.has(m.id)) void this.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' })
+            else void this.tellAskerOfInterruption(m.id, this.turnOwners.get(m.id)?.callerId)
           }
         }
       }),
     )
+    this.tellQuitNotices(() => true)
+  }
+
+  /** Tells each requester of a turn a quit cut, once (#698); `ready` holds back one the keeper still has to hand over */
+  private tellQuitNotices(ready: (requester: string) => boolean): void {
+    // A host stopping before its first moment tells nobody; the next start does not repeat it either (the reset is done)
+    if (this.disposing || this.handingOver) return
+    const now = this.quitNotices.filter((n) => ready(n.requester))
+    this.quitNotices = this.quitNotices.filter((n) => !ready(n.requester))
+    for (const n of now) void this.tellAskerOfInterruption(n.sessionId, n.requester)
   }
 
   private async doResumeSession(
@@ -3042,6 +3073,8 @@ export class SessionManager {
     for (const [child, owner] of [...this.turnOwners]) if (owner.callerId === sessionId) this.releaseTurn(child)
     for (const key of [...this.observerNotes.keys()]) if (key.startsWith(`${sessionId}>`) || key.endsWith(`>${sessionId}`)) this.observerNotes.delete(key)
     this.forgetCommits(sessionId)
+    this.stopWatchingReconnect(sessionId)
+    this.quitNotices = this.quitNotices.filter((n) => n.sessionId !== sessionId && n.requester !== sessionId)
     this.meta.delete(sessionId)
     await this.store.trashSession(sessionId, {
       projectId: m.projectId,
@@ -3538,7 +3571,7 @@ export class SessionManager {
         const wasBusy = inTurn(m.state)
         this.applyStateHint(e, m)
         interruptionBefore = m.interruption ?? null
-        this.trackInterruption(e, m)
+        this.trackInterruption(e, m, wasBusy && !inTurn(m.state))
         // Heard from: an unknown background state is bounded by quiet, not by age (#648, `backgroundKnown`)
         if (this.backgroundUnknown.has(m.id)) this.backgroundUnknown.set(m.id, Date.now())
         /*
@@ -3589,6 +3622,12 @@ export class SessionManager {
     const run = e.sessionId ? this.agentRuns.get(e.sessionId) : undefined
     // A wait still reading this turn is owed its end (#698); one that settled earlier is left from a turn before
     const runOpen = !!run && !run.finished
+    /*
+     * A delegation nobody is waiting on now (ask_project or start_agent past its bound) owes its caller nothing until
+     * it asks again; that caller is who hears of a stop. A call still waiting reads the stop itself.
+     */
+    const delegation = runOpen ? [...this.delegations.values()].find((d) => d.wait === run) : undefined
+    const waited = runOpen && (!delegation || (delegation.waiters ?? 0) > 0)
     run?.onEvent(e)
     if (e.sessionId) for (const observer of this.turnObservers.get(e.sessionId) ?? []) observer.onEvent(e)
     this.emit(seq != null ? ({ ...e, seq } as NormalizedEvent) : e)
@@ -3598,7 +3637,7 @@ export class SessionManager {
       this.emit({ type: 'interruption', sessionId: e.sessionId, interruption: nowInterrupted })
     }
     // Whether anyone is owed this turn's end: a report mark, or a delegation reading it (#698). Read before the report clears the mark
-    const owed = endedTurn && !!e.sessionId && (this.awaitingReport.has(e.sessionId) || runOpen)
+    const owed = endedTurn && !!e.sessionId && (this.awaitingReport.has(e.sessionId) || waited)
     /*
      * Reporting happens **no matter how the turn ends** (#166). It used to only consume the marker on
      * turn_complete, but two adapters do not emit turn_complete for a failed turn (emitting it there
@@ -3606,7 +3645,7 @@ export class SessionManager {
      * reported, the marker stayed set, and a later, unrelated turn ended up reported as "it finished".
      */
     if (endedTurn && e.sessionId && !run?.tracksInputs) void this.reportBackIfAwaited(e.sessionId, e, run?.completedAnswer)
-    if (endedTurn && e.sessionId && !owed) void this.tellAskerOfInterruption(e.sessionId)
+    if (endedTurn && e.sessionId && !owed) void this.tellAskerOfInterruption(e.sessionId, delegation?.callerId)
     // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
     if (endedTurn && e.sessionId && this.turnOwners.get(e.sessionId)?.untilTurnEnd) this.releaseTurn(e.sessionId)
@@ -3741,15 +3780,16 @@ export class SessionManager {
    * sent "continue" by hand. The asker is told once per stopped turn, through the same report: a further report needs
    * another turn, so two sessions cannot wake each other in a loop.
    */
-  private async tellAskerOfInterruption(sessionId: string): Promise<void> {
+  private async tellAskerOfInterruption(sessionId: string, requester?: string): Promise<void> {
     const m = this.meta.get(sessionId)
     const stop = m?.interruption
-    if (!m?.askedBy || !stop || (stop.reason !== 'network' && stop.reason !== 'interrupted') || this.handingOver) return
-    const asker = m.askedBy
+    // The session that gave the turn (an ask_project, a delegation past its bound), else the one that started it
+    const asker = requester ?? m?.askedBy ?? undefined
+    if (!m || !asker || asker === sessionId || !stop || stop.reason === 'reconnecting' || this.handingOver) return
     if (!this.meta.has(asker)) return
     console.error(`[sessions] ${sessionId.slice(0, 8)} stopped (${stop.reason}) in a turn no report was owed for; telling ${asker.slice(0, 8)}, which started it`)
     const project = m.projectId ? (this.store.listProjects().find((p) => p.id === m.projectId)?.name ?? '(project no longer exists)') : '(none)'
-    await this.deliverReport(asker, sessionId, m.name, project, previewOf(this.store, sessionId, 600), { type: stop.reason === 'network' ? 'error' : 'state_change' })
+    await this.deliverReport(asker, sessionId, labelOf(this.store, m), project, previewOf(this.store, sessionId, 600), { type: stop.reason === 'network' ? 'error' : 'state_change' })
   }
 
   /**
@@ -3757,8 +3797,8 @@ export class SessionManager {
    * for a tool that has been `retrying` past `RECONNECTING_FLAG_MS`. Only `retrying` starts the clock: a quiet session
    * is not a stuck one.
    */
-  private trackInterruption(e: NormalizedEvent, m: SessionInfo): void {
-    const next = interruptionAfter(e, Date.now())
+  private trackInterruption(e: NormalizedEvent, m: SessionInfo, endedTurn: boolean): void {
+    const next = interruptionAfter(e, Date.now(), endedTurn)
     // The reconnecting flag stands while the tool still retries, whatever else the turn says meanwhile
     const stillReconnecting = m.interruption?.reason === 'reconnecting' && m.state === 'working' && m.activity === 'retrying'
     if (next !== undefined && !stillReconnecting) m.interruption = next
@@ -3767,10 +3807,15 @@ export class SessionManager {
       if (!this.reconnecting.has(m.id)) this.watchReconnecting(m.id)
       return
     }
-    const timer = this.reconnecting.get(m.id)
-    if (timer) clearTimeout(timer.timer)
-    this.reconnecting.delete(m.id)
+    this.stopWatchingReconnect(m.id)
     if (m.interruption?.reason === 'reconnecting') m.interruption = null
+  }
+
+  /** Ends a reconnect episode's clock: the tool stopped retrying, the turn ended, or the session is gone */
+  private stopWatchingReconnect(sessionId: string): void {
+    const watch = this.reconnecting.get(sessionId)
+    if (watch) clearTimeout(watch.timer)
+    this.reconnecting.delete(sessionId)
   }
 
   private watchReconnecting(sessionId: string): void {
@@ -3828,17 +3873,20 @@ export class SessionManager {
      * once it is sent a message, and nothing else will continue it. Said first, so the caller does not redo the work.
      */
     const stop = this.meta.get(sessionId)?.interruption
-    const cutShort = stop?.reason === 'network' || stop?.reason === 'interrupted'
+    const cutShort = stop?.reason === 'network' || stop?.reason === 'interrupted' || stop?.reason === 'quit'
     const outcome =
       stop?.reason === 'network' ? `[Centralu] The assigned work stopped before finishing: a network error ended its turn.\n`
       : stop?.reason === 'interrupted' ? `[Centralu] The assigned work stopped before finishing: its tool interrupted the turn.\n`
+      : stop?.reason === 'quit' ? `[Centralu] The assigned work stopped before finishing: Centralu quit or restarted during its turn.\n`
       : ending.type === 'error' ? `[Centralu] The assigned work failed.\n`
       : ending.type === 'limit_reached' ? `[Centralu] The assigned work stopped after hitting a usage limit.\n`
       : ending.type === 'turn_complete' ? `[Centralu] The assigned work finished.\n`
       : `[Centralu] The assigned work stopped before finishing.\n`
     const message = stop?.detail ?? (ending.type === 'error' ? String(ending.error?.message ?? '') : '')
     const failure = message ? `Error: ${message.slice(0, 600)}\n\n` : ''
-    const resume = cutShort ? 'It keeps its conversation: send it a message (for example "Continue where you stopped.") to go on, once the network is back.\n' : ''
+    const resume = cutShort
+      ? `It keeps its conversation: send it a message (for example "Continue where you stopped.") to go on${stop?.reason === 'network' ? ', once the network is back' : ''}.\n`
+      : ''
     try {
       await this.deliver(
         orchestratorId,
@@ -8755,12 +8803,13 @@ export class SessionManager {
     this.agentRuns.set(id, wait)
     const onAbort = () => {
       if (this.agentRuns.get(id) !== wait) return
+      // Failed first: Claude's interrupt ends the turn at once, and the wait would read that as "stopped" (#698)
+      wait.fail(new Error('the request was cancelled, so the agent was stopped'))
       try {
         this.handles.get(id)?.interrupt()
       } catch {
         // The session has already gone down — there is nothing left to stop
       }
-      wait.fail(new Error('the request was cancelled, so the agent was stopped'))
     }
     ctx.signal.addEventListener('abort', onAbort, { once: true })
     try {
@@ -9445,6 +9494,8 @@ export class SessionManager {
   async disposeAll(): Promise<void> {
     // The cards it closes below are not the person's answers: a standing start_agent request stays stored (#673)
     this.disposing = true
+    // Reconnect clocks die with the host (#698)
+    for (const id of [...this.reconnecting.keys()]) this.stopWatchingReconnect(id)
     // So does a start waiting for memory (#686)
     this.memoryGate?.close()
     this.watchers.close()

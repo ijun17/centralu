@@ -488,6 +488,23 @@ describe('asking another project', () => {
     expect(handleOf(d)!.sent).toHaveLength(1)
   })
 
+  it('a turn the network stopped past the bound is told to the session that asked, which waits on nothing now (#698)', async () => {
+    const s = await w.callerSession()
+    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const first = w.mgr.askProject(s, { project: w.target.name, task: 'export' })
+    for (let i = 0; i < 50 && !delegatedIn(s)[0]; i++) await vi.advanceTimersByTimeAsync(0)
+    const d = delegatedIn(s)[0]!.id
+    await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
+    expect(await first).toMatchObject({ ok: true, state: 'working', sessionId: d })
+    vi.useRealTimers()
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    handleOf(d)!.event({ type: 'error', sessionId: d, error: { code: 'internal', message: "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)", retryable: true } })
+    const told = () => w.store.loadMessages(s, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(d))
+    await w.until(() => told().length === 1)
+    expect(told()[0]).toContain('stopped before finishing: a network error ended its turn')
+  })
+
   /*
    * Owner decision 2026-10-11 (#382, questions 2 and 3): an untrusted project cannot ask (attach_app's rule), and an
    * untrusted one can be asked, with the card saying so — the session opened there follows that trust.

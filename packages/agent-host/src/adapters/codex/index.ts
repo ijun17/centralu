@@ -1374,6 +1374,8 @@ class CodexSession implements SessionHandle {
     }
     // Stop can arrive while turn/start is in flight, before the next turn is named.
     if (receipts.some((r) => r.cancelled) && !this.endedTurns.includes(id)) {
+      // Ours: the person's Stop, so its ending is not Codex's own interrupt (#698)
+      this.noteInterruptSent(id)
       void this.client.request('turn/interrupt', { threadId: this.threadId, turnId: id }).catch(() => {})
     }
     if (receipts.some((r) => r.cancelled)) return

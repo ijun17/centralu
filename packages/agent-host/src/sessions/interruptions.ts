@@ -20,23 +20,30 @@ import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
  *                 (host.log, the reasons of `Reconnecting... n/5`; a turn that gives up ends with the last one)
  *
  * A 401, a 400 for a model, a usage limit and the like are not here: continuing would only fail again the same way.
+ * The words are the API's own sentences, so a generic phrase ("connection closed", "network error") is matched only
+ * inside one: a tool's own failure can say it about something else (an MCP server, a dev server it ran).
  */
 const NETWORK_WORDS = [
-  /\b(ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ENETDOWN|ECONNABORTED)\b/,
-  /No response from API/i,
-  /Can't reach the API server/i,
-  /Connection (refused|lost|reset|failed|error|closed)/i,
+  /\b(ECONNREFUSED|ENOTFOUND|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENETUNREACH|EHOSTUNREACH|ENETDOWN)\b/,
+  /API Error: (No response from API|Can't reach the API server|Connection (refused|lost|reset|error)|Request timed out)/i,
   /computer (went to sleep|was asleep)/i,
   /stream disconnected before completion/i,
-  /failed to lookup address/i,
-  /error sending request/i,
-  /Transport error/i,
-  /network error|waiting for network/i,
-  /socket hang up|fetch failed/i,
+  /failed to lookup address information/i,
+  /Connection failed: error sending request/i,
+  /waiting for network/i,
 ]
 
+/**
+ * The tool's own sentence, without the end of the CLI's stderr a crash carries (`. stderr: …`, the SDK's and
+ * `withStderrTail`'s): that tail is whatever the process printed last, and a word in it says nothing of this turn.
+ */
+export function failureSentence(message: string): string {
+  return message.split(/(?:^|[.\s])stderr:/)[0]!.trim()
+}
+
 export function isNetworkFailure(message: string): boolean {
-  return NETWORK_WORDS.some((w) => w.test(message))
+  const sentence = failureSentence(message)
+  return NETWORK_WORDS.some((w) => w.test(sentence))
 }
 
 /**
@@ -44,16 +51,22 @@ export function isNetworkFailure(message: string): boolean {
  * own state hint (`applyStateHint`); this reads only the reason.
  *
  *   a new turn (working)                       cleared
- *   an error the network caused                network, with the tool's words
+ *   an error the network caused that ended a   network, with the tool's words
+ *   running turn (`endedTurn`)
  *   any other error, a finished turn           cleared: what shows is the error itself, or nothing to tell
  *   an interrupt nobody here asked for         interrupted
  *   a Stop of ours                             cleared: the person or the orchestrator knows
  */
-export function interruptionAfter(e: NormalizedEvent, now: number): Interruption | null | undefined {
+export function interruptionAfter(e: NormalizedEvent, now: number, endedTurn: boolean): Interruption | null | undefined {
   switch (e.type) {
     case 'error':
-      if (!e.sessionId) return undefined
-      return isNetworkFailure(e.error.message) ? { reason: 'network', at: now, detail: e.error.message.slice(0, 600) } : null
+      /*
+       * Only an error that ended a running turn: one at rest (a failed resume, "Could not stop") stopped nothing, and
+       * a crash is the process going away, which the screen already says (asleep, `restart_failed`), with no turn to
+       * continue that a message would not start anyway.
+       */
+      if (!e.sessionId || !endedTurn || e.error.code === 'adapter_crashed') return undefined
+      return isNetworkFailure(e.error.message) ? { reason: 'network', at: now, detail: failureSentence(e.error.message).slice(0, 600) } : null
     case 'turn_complete':
       return null
     case 'state_change':

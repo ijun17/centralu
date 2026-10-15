@@ -128,6 +128,20 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     expect(h.opts.permissionPreset).toBe('safe')
   })
 
+  it("a cancelled request says it was cancelled, though Claude's interrupt ends the turn at once (#698)", async () => {
+    claude.onSend = (h) => {
+      // Claude's adapter says the turn stopped the moment it is interrupted, before the CLI's own result
+      h.interrupt = () => h.emit({ type: 'state_change', sessionId: h.sessionId, state: 'waiting_input', reason: 'interrupted' })
+      h.emit({ type: 'state_change', sessionId: h.sessionId, state: 'working' })
+    }
+    const controller = new AbortController()
+    const run = mgr.runAppAgent({ app: { appId: 'notes', projectId }, appName: 'App notes', tool: 'claude', prompt: 'Summarize.' }, { signal: controller.signal, progress: () => {} })
+    run.catch(() => {})
+    await until(() => agentSessions(), (sessions) => sessions.some((s) => s.state === 'working'))
+    controller.abort()
+    await expect(run).rejects.toThrow('the request was cancelled, so the agent was stopped')
+  })
+
   it('given a schema, Claude receives it as the query\'s outputFormat, and the answer is taken from the turn\'s outcome and validated', async () => {
     plant('project', 'notes', { agent: true })
     rt.refresh()

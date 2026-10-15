@@ -242,6 +242,26 @@ describe('codex: how an interrupted turn ends (#698)', () => {
     log.mockRestore()
   })
 
+  it("a Stop while a note's turn/start is in flight interrupts that turn as ours, not Codex's", async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const events: NormalizedEvent[] = []
+    const h = await session(events)
+    let release: (() => void) | undefined
+    state.startTurnId = 'turn-n'
+    state.holdStart = (r) => { release = r }
+    void h.sendTracked!('a parent note').catch(() => {})
+    await tick()
+    expect(release).toBeDefined()
+    h.interrupt()
+    release!()
+    await tick()
+    expect(interrupts().map((r) => r.params?.turnId)).toContain('turn-n')
+    ended('turn-n')
+    expect(events.some((e) => e.type === 'state_change' && e.reason === 'interrupted_by_tool')).toBe(false)
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('turn turn-n interrupted by a stop from Centralu'))
+    log.mockRestore()
+  })
+
   it("a Stop of ours ends it as the person's stop, which the screen and the orchestrator already know", async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const events: NormalizedEvent[] = []

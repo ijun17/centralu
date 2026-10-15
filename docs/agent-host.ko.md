@@ -1256,21 +1256,22 @@ host.log에 그렇다는 줄 하나를 쓴다. 탐침은 여기에 꽂힌다.
 
 | 이유 | 정해지는 때 | 지워지는 때 |
 |---|---|---|
-| `network` | 네트워크가 원인인 메시지로 턴이 오류로 끝날 때: 오류 코드(`ECONNREFUSED`, `ENOTFOUND` 등), "No response from API", "Can't reach the API server", "Connection refused/lost", 컴퓨터 잠자기, Codex의 "stream disconnected", "failed to lookup address", "error sending request", "Transport error"(`isNetworkFailure`. 실제 저장소와 host.log에서 측정한 문장들) | 세션이 다시 일할 때(`working`, 출력), 또는 턴이 다른 식으로 끝날 때 |
+| `network` | 돌던 턴이 네트워크 때문에 오류로 끝날 때(`endedTurn`과 함께 `interruptionAfter`. 충돌 `adapter_crashed`와 쉬는 동안의 오류는 해당하지 않는다): 오류 코드(`ECONNREFUSED`, `ENOTFOUND` 등), Claude의 "API Error: No response from API / Can't reach the API server / Connection refused, lost, reset, error / Request timed out", 컴퓨터 잠자기, Codex의 "stream disconnected before completion", "failed to lookup address information", "Connection failed: error sending request", "waiting for network"(`isNetworkFailure`. 실제 저장소와 host.log에서 측정한 문장들). 도구의 문장만 보고 충돌에 붙는 stderr 끝부분은 보지 않는다(`failureSentence`). "connection closed", "network error" 같은 일반적인 말은 그 문장들 안에서만 센다. MCP 서버나 개발 서버도 그런 말을 할 수 있기 때문이다 | 세션이 다시 일할 때(`working`, 출력), 또는 턴이 다른 식으로 끝날 때 |
 | `quit` | 시작할 때 프로세스 없이 `working`이나 `waiting_approval`인 세션을 찾았을 때(완전 종료, 재부팅, 키퍼가 살아남지 못한 충돌), 또는 키퍼가 쥔 프로세스를 다시 붙이지 못했을 때. 대화에 Centralu의 경고 줄을 쓴다("Centralu quit or restarted while this turn was running …") | 같음 |
 | `interrupted` | 턴이 `interrupted_by_tool` 이유(`INTERRUPTED_BY_TOOL`)로 `waiting_input`에서 끝날 때: 우리가 `turn/interrupt`를 보내지 않은 턴에 온 Codex의 `turn/completed {status: "interrupted"}` | 같음 |
 | `reconnecting` | 도구가 `RECONNECTING_FLAG_MS`(5분) 동안 `retrying`에 머물 때: Codex는 네트워크를 끝없이 기다린다. 살아 있는 동안만이며 저장하지 않는다 | 활동이 `retrying`에서 벗어나거나 턴이 끝날 때 |
 
 | 결정 | 이유 |
 |---|---|
+| 턴 도중 취소된 앱 요청은 세션을 중단하기 전에 기다림을 실패로 끝낸다 | Claude 어댑터는 중단되는 순간 턴을 끝내므로, 기다림이 취소를 "끝나기 전에 멈춤"으로 읽었다 |
 | 분류해서 보여 주고, 스스로 다시 보내지 않는다 | 다시 보낸 턴은 부작용(push, 댓글, 출시)을 되풀이할 수 있다. 이어 가는 일은 사람이나 요청한 세션이 보내는 메시지 하나다: "Continue where you stopped." 다시 연결될 때 자동으로 보내는 기능은 나중에 선택 사항으로 더할 수 있다 |
 | Codex의 `interrupted` 턴은 `turn_complete`가 아니라 Stop처럼(`state_change waiting_input`) 끝난다 | `turn_complete`는 "끝났다"는 뜻이어서 오케스트레이터는 일이 끝났다고 들었다. 이제 중단 뒤에 `turn_complete`가 오지 않으므로, 턴을 기다리는 쪽(`AgentRunWait`)은 중단에서 기다림을 끝낸다 |
-| Codex 어댑터는 자기가 보낸 중단과 Codex가 보낸 중단을 구별해 로그에 남긴다(`interruptsSent`, "interrupted by a stop from Centralu" / "by Codex") | 실제 사례에서는 사람의 Stop, 호스트, CLI 중 누가 보냈는지 알 수 없었다 |
+| Codex 어댑터는 자기가 보낸 중단과 Codex가 보낸 중단을 구별해 로그에 남긴다(`interruptsSent`, "interrupted by a stop from Centralu" / "by Codex"). 메모의 `turn/start`가 오가는 사이에 누른 Stop은 답이 알려 준 턴을 중단하고, 이것도 우리 것으로 센다(`takeInputTurn`) | 실제 사례에서는 사람의 Stop, 호스트, CLI 중 누가 보냈는지 알 수 없었다 |
 | 사람의 Stop과 오케스트레이터의 `agent_session stop`은 아무것도 정하지 않는다 | 본인이 알고 있다. 자기 행동을 표시하면 소음이 된다 |
 | `reconnecting` 시계는 `retrying`만 시작하고, 조용함은 시작하지 않는다 | 15–40초씩 쉬며 CI를 기다리던 세션은 멈춘 것처럼 보였지만 멈추지 않았다. 긴 빌드도 똑같이 보인다 |
 | 그 턴에 빚진 보고는 이유를 먼저 말하고("stopped before finishing: a network error ended its turn", "its tool interrupted the turn") 이어 가는 방법을 덧붙인다 | "The assigned work failed"를 들은 쪽은 "continue" 한 번이면 될 일을 다시 하거나 버렸다 |
-| 빚진 보고가 없고(보고 표시도, 턴을 읽는 대기도 없음) 세션에 요청한 세션(`askedBy`)이 있으면, `network`나 `interrupted`로 멈출 때 그 세션에 같은 보고를 한 번 보낸다(`tellAskerOfInterruption`) | 2026-10-15 사례. 멈춘 턴마다 보고는 하나이고, 다음 보고에는 다음 턴이 필요하므로 두 세션이 서로를 깨우는 고리가 생기지 않는다 |
-| `quit`은 아무도 깨우지 않는다: 요청한 세션의 보고 표시는 전처럼 버린다(§1.2.1) | 종료 뒤에는 요청한 세션의 턴도 잘렸다. 다음 시작 때 턴을 스스로 시작하면 사람이 청하지 않은 토큰을 쓴다. 표시 줄, 인박스, 목록이 그 사실을 말한다 |
+| 빚진 보고가 없으면(보고 표시도, 지금 그 턴을 기다리는 호출도 없음), 턴을 맡긴 세션이 `network`, `interrupted`, `quit` 중단을 한 번 듣는다(`tellAskerOfInterruption`): 지금 아무도 기다리지 않는 위임의 호출자(한도를 넘긴 `ask_project`나 `start_agent`), 없으면 그 세션을 시작한 세션(`askedBy`). 아직 기다리는 호출은 자기 답에서 중단을 읽는다 | 2026-10-15 사례, 그리고 `askedBy`가 없는 `ask_project` 턴. 멈춘 턴마다 보고는 하나이고, 다음 보고에는 다음 턴이 필요하므로 두 세션이 서로를 깨우는 고리가 생기지 않는다 |
+| `quit`은 다음 시작 때 하위 세션마다 한 번 알린다. 대상은 보고를 받을 세션, 없으면 턴을 맡긴 세션(`delegated_turns`), 없으면 `askedBy`이고, 그 세션이 아직 있을 때만이다(`quitNotices`, 키퍼가 쥔 세션이면 넘겨받은 뒤). 키퍼가 쥔 프로세스를 다시 붙이지 못하면 그 보고도 같은 식으로 정리한다 | 기다리지 않고 위임한 세션은 잘린 것이 아니라 쉬고 있었고, 그 보고 표시는 버려졌다: 아무것도 듣지 못했다. 한 번 깨우는 비용은 턴 하나이고, 듣지 못하는 비용은 그 일 전체다 |
 | 오케스트레이터의 목록(`list_sessions`, reader에게는 id 없는 `read_session`)과 `agent_session status`는 줄에 "stopped: network error", "stopped: Centralu quit during its turn", "stopped: its tool interrupted the turn", "reconnecting to its API for N min"을 붙인다. 거르는 인자는 두지 않는다 | 줄이 이미 말하고, 인자는 모든 요청의 도구 정의에 실린다(docs/tool-cost.md). `agent_session`의 목록(#690)은 아직 없다 |
 | `CLAUDE_CODE_MAX_RETRIES`는 CLI가 정한 대로 둔다 | 3분이면 대부분의 끊김을 넘긴다. 예산을 늘리면 긴 장애 동안 턴을 붙잡아 둔다 |
 

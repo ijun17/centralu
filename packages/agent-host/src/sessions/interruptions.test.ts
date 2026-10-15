@@ -25,6 +25,7 @@ describe('which failures the network caused', () => {
     'API Error: No response from API (waited 3m). If a proxy or gateway on your network holds responses until they complete, raise API_TIMEOUT_MS',
     'API Error: Connection lost while your computer was asleep',
     'API Error: Your computer went to sleep mid-response. The response above may be incomplete.',
+    'API Error: Request timed out.',
     // Codex, the reasons host.log recorded for its reconnects
     'stream disconnected before completion: failed to lookup address information: nodename nor servname provided, or not known',
     'stream disconnected before completion: Transport error: network error: error decoding response body',
@@ -38,6 +39,11 @@ describe('which failures the network caused', () => {
     "The 'opus[1m]' model is not supported",
     'Turn failed: error_max_turns',
     'Could not stop: the turn already ended',
+    // A crash's message ends with whatever the process printed last: a word there says nothing of the turn
+    'Claude Code process exited with code 1. stderr: TypeError: fetch failed (ECONNREFUSED)',
+    // Generic words outside the API's own sentences: an MCP server, a dev server the agent ran
+    'MCP error -32000: Connection closed',
+    'Bash failed: network error while installing packages',
   ])('not the network, since continuing would fail the same way: %s', (message) => {
     expect(isNetworkFailure(message)).toBe(false)
   })
@@ -151,6 +157,8 @@ async function parentAndChild(h: ReturnType<typeof host>) {
 /** The report texts stored in the parent's conversation that name the child */
 const reportsTo = (parent: string, child: string) =>
   store.loadMessages(parent, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(child))
+/** The host.log lines saying an asker is told of a stop; the decision is taken with the event that ended the turn */
+const toldLines = (log: { mock: { calls: unknown[][] } }) => log.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('no report was owed for; telling'))
 const info = (h: ReturnType<typeof host>, id: string) => h.mgr.listSessions().find((s) => s.id === id)!
 const interruptions = (id: string) => events.filter((e) => e.type === 'interruption' && e.sessionId === id)
 
@@ -209,9 +217,11 @@ describe('a turn the network stopped (#698)', () => {
     const kid = a.claude.handles.get(child)!
     kid.answer('done')
     await until(() => reportsTo(parent, child).length === 1)
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     kid.ownTurnFails('unexpected status 401 Unauthorized')
     expect(info(a, child)).toMatchObject({ state: 'error', interruption: null })
-    await new Promise((r) => setTimeout(r, 50))
+    // The decision to tell is taken with the event: nothing was decided now, so nothing is on its way
+    expect(toldLines(log)).toEqual([])
     expect(reportsTo(parent, child)).toHaveLength(1)
   })
 })
@@ -233,10 +243,11 @@ describe('a caller waiting on the turn (#698)', () => {
   it('reads the network failure from its own wait, and is not told a second time', async () => {
     const a = host()
     const { parent, child, call } = await waitingParent(a)
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     a.claude.handles.get(child)!.emit({ type: 'error', sessionId: child, error: { code: 'internal', message: ECONNREFUSED, retryable: true } })
+    expect(toldLines(log)).toEqual([])
     const r = await call
     expect(JSON.stringify(r)).toContain('ECONNREFUSED')
-    await new Promise((r) => setTimeout(r, 50))
     expect(reportsTo(parent, child)).toEqual([])
   })
 
@@ -249,6 +260,29 @@ describe('a caller waiting on the turn (#698)', () => {
   })
 })
 
+describe('errors that did not end a running turn (#698)', () => {
+  it('a crash is not a network stop, whatever its stderr says', async () => {
+    const a = host()
+    const project = await a.mgr.addProject(root)
+    const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
+    await a.mgr.send(s.id, 'go')
+    a.claude.handles.get(s.id)!.emit({ type: 'error', sessionId: s.id, error: { code: 'adapter_crashed', message: `${ECONNREFUSED}. stderr: fetch failed`, retryable: true } })
+    expect(info(a, s.id).interruption ?? null).toBeNull()
+    expect(interruptions(s.id)).toEqual([])
+  })
+
+  it('an error at rest stops no turn, so it offers nothing to continue', async () => {
+    const a = host()
+    const project = await a.mgr.addProject(root)
+    const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
+    await a.mgr.send(s.id, 'go')
+    a.claude.handles.get(s.id)!.answer('done')
+    a.claude.handles.get(s.id)!.emit({ type: 'error', sessionId: s.id, error: { code: 'internal', message: ECONNREFUSED, retryable: true } })
+    expect(info(a, s.id)).toMatchObject({ state: 'error', interruption: null })
+    expect(interruptions(s.id)).toEqual([])
+  })
+})
+
 describe('a turn its tool interrupted (#698)', () => {
   it('is reported to the orchestrator as stopped before finishing, never as finished', async () => {
     const a = host()
@@ -256,6 +290,9 @@ describe('a turn its tool interrupted (#698)', () => {
     a.claude.handles.get(child)!.emit({ type: 'state_change', sessionId: child, state: 'waiting_input', reason: INTERRUPTED_BY_TOOL })
     await until(() => reportsTo(parent, child).length === 1)
     expect(reportsTo(parent, child)[0]).toContain('stopped before finishing: its tool interrupted the turn')
+    // Nothing to do with the network: no waiting for it
+    expect(reportsTo(parent, child)[0]).toContain('to go on.')
+    expect(reportsTo(parent, child)[0]).not.toContain('network')
     expect(info(a, child).interruption).toMatchObject({ reason: 'interrupted' })
   })
 
@@ -299,6 +336,27 @@ describe('a turn a quit stopped (#698)', () => {
     expect(store.loadMessages(s.id, 10)).toHaveLength(before)
   })
 
+  it('the next start tells an asker that delegated without waiting, once per child, and only while the asker exists', async () => {
+    const a = host()
+    const { parent, child, project } = await parentAndChild(a)
+    // A second child whose asker is deleted before the quit: nobody is left to tell
+    const gone = (await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
+    const orphan = await a.mgr.startAgent(gone, { task: 'other work', wait: false })
+    if (!orphan.ok) throw new Error(orphan.error)
+    await a.mgr.trashSession(gone)
+
+    const b = host()
+    await until(() => reportsTo(parent, child).length === 1)
+    expect(reportsTo(parent, child)[0]).toContain('stopped before finishing: Centralu quit or restarted during its turn')
+    expect(reportsTo(parent, child)[0]).not.toContain('network')
+    expect(info(b, orphan.sessionId).interruption).toMatchObject({ reason: 'quit' })
+
+    // The child is at rest now: the start after that tells nobody again
+    const c = host()
+    expect((c.mgr as unknown as { quitNotices: unknown[] }).quitNotices).toEqual([])
+    expect(reportsTo(parent, child)).toHaveLength(1)
+  })
+
   it("the orchestrator's list says which children stopped and why", async () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
@@ -335,11 +393,22 @@ describe('a tool reconnecting for too long (#698)', () => {
     h.emit({ type: 'usage_update', sessionId: id, tokens: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 } })
     vi.advanceTimersByTime(RECONNECTING_FLAG_MS * 2)
     expect(interruptions(id)).toHaveLength(1)
-    expect(info(a, id).interruption?.at).toBe(interruptions(id)[0]!.type === 'interruption' && interruptions(id)[0]!.interruption?.at)
+    const flagged = interruptions(id)[0]
+    expect(flagged?.type === 'interruption' ? flagged.interruption?.at : undefined).toBe(info(a, id).interruption?.at)
 
     h.emit({ type: 'activity', sessionId: id, activity: null })
     expect(info(a, id).interruption).toBeNull()
     expect(interruptions(id).map((e) => e.type === 'interruption' && e.interruption?.reason)).toEqual(['reconnecting', undefined])
+  })
+
+  it('a deleted session leaves no reconnect clock behind', async () => {
+    const a = host()
+    const { id, h } = await working(a)
+    h.emit({ type: 'activity', sessionId: id, activity: 'retrying' })
+    const clocks = () => (a.mgr as unknown as { reconnecting: Map<string, unknown> }).reconnecting
+    expect(clocks().has(id)).toBe(true)
+    await a.mgr.trashSession(id)
+    expect(clocks().has(id)).toBe(false)
   })
 
   it('silence alone is not flagged: a long build or a sleep looks the same', async () => {
