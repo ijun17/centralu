@@ -69,7 +69,8 @@ centralu/
 │  │     │  └─ usage/  settings/  onboarding/
 │  │     ├─ components/         # feature-agnostic shared (Button, Kbd, VirtualList…)
 │  │     ├─ store/              # zustand store + selectors (reducers are imported from core)
-│  │     │                      #   store.ts가 스토어 하나를 만든다. 거기서 떼어 낸 부분(#428): state.ts(타입)
+│  │     │                      #   store.ts가 스토어 하나를 만들고 액션을 담는다. 거기서 떼어 낸 부분(#428):
+│  │     │  └─ state.ts(타입)  historyPages.ts(히스토리 페이지와 화면 병합)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)

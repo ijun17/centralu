@@ -67,7 +67,8 @@ centralu/
 │  │     │  └─ usage/  settings/  onboarding/
 │  │     ├─ components/         # feature-agnostic shared (Button, Kbd, VirtualList…)
 │  │     ├─ store/              # zustand store + selectors (reducers are imported from core)
-│  │     │                      #   store.ts builds the one store; the parts moved out of it (#428): state.ts (its types)
+│  │     │                      #   store.ts builds the one store and keeps its actions; what moved out of it (#428):
+│  │     │  └─ state.ts (the types)  historyPages.ts (history pages merged with the screen)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)
