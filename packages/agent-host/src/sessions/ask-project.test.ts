@@ -613,8 +613,12 @@ describe('asking another project', () => {
       // Trust taken away at the store, so only the read after the answer can see it
       w.store.setProjectTrusted(w.caller.id, false)
       w.mgr.respondApproval(s, w.card(s)!.requestId, 'allow')
-      expect(await p).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
+      // Either the call settles or the task reaches the target, whichever comes first
+      let settled = false
+      void p.then(() => (settled = true))
+      await w.until(() => settled || handleOf(targetSession)!.sent.length > 0)
       expect(handleOf(targetSession)!.sent).toEqual([])
+      expect(await p).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
     })
 
     it('withdraws the card when the asked project is removed, and the call reads a clean refusal', async () => {

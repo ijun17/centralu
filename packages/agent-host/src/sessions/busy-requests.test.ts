@@ -158,10 +158,10 @@ describe('requests to a busy session (#677)', () => {
     }
     const toldNotDelivered = (asker: string) =>
       w.store.loadMessages(asker, 50).some((m) => JSON.stringify(m.payload).includes('was not delivered'))
-    /** The person's turn ends, and a queued request would go in now */
+    /** The person's turn ends, and the queue empties: a request still in it is delivered or refused now */
     const turnEnds = async (target: string) => {
       handleOf(target).answer("the person's answer")
-      await new Promise((r) => setTimeout(r, 50))
+      await w.until(() => w.store.listQueuedRequests().length === 0)
     }
 
     it("is withdrawn when the caller's project loses trust, and the caller is told", async () => {
@@ -182,6 +182,23 @@ describe('requests to a busy session (#677)', () => {
       await w.until(() => toldNotDelivered(asker))
     })
 
+    it('is withdrawn when the asked project is removed, and the caller is told', async () => {
+      const { asker } = await queuedAsk()
+      const removing = w.mgr.deleteProject(w.target.id)
+      expect(w.store.listQueuedRequests()).toEqual([])
+      await removing
+      await w.until(() => toldNotDelivered(asker))
+    })
+
+    it("stays for an auto caller when its project loses trust, as auto's reach does", async () => {
+      const { target, asker } = await queuedAsk()
+      await w.mgr.updateSettings(asker, { permissionPreset: 'auto' })
+      void w.mgr.setProjectTrusted(w.caller.id, false)
+      expect(w.store.listQueuedRequests()).toHaveLength(1)
+      await turnEnds(target)
+      expect(handleOf(target).sent[1]).toContain('export it')
+    })
+
     it('is not delivered when the trust is gone by the time the turn ends', async () => {
       const { target, asker } = await queuedAsk()
       // Taken away at the store (as another host would), so only the read at delivery can see it
@@ -190,6 +207,77 @@ describe('requests to a busy session (#677)', () => {
       expect(handleOf(target).sent).toEqual(["the person's own work"])
       expect(w.store.listQueuedRequests()).toEqual([])
       await w.until(() => toldNotDelivered(asker))
+    })
+  })
+
+  describe('a request only auto let through, once the caller is no longer auto', () => {
+    const lower = (id: string) => w.mgr.updateSettings(id, { permissionPreset: 'normal' })
+    /** Lowered where only the read at delivery can see it, as if no settings change had run on this host */
+    const lowerQuietly = (id: string) => {
+      ;(w.mgr as unknown as { meta: Map<string, { permissionPreset: PermissionPreset }> }).meta.get(id)!.permissionPreset = 'normal'
+    }
+    const told = (id: string) => w.store.loadMessages(id, 50).some((m) => JSON.stringify(m.payload).includes('was not delivered'))
+    /** An auto asker queues an ask to a busy session of the other project, with no consent remembered for the pair */
+    const autoAsk = async () => {
+      const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
+      const asker = await w.callerSession()
+      await w.mgr.updateSettings(asker, { permissionPreset: 'auto' })
+      await w.mgr.send(target, "the person's own work")
+      expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
+      return { target, asker }
+    }
+    /** An auto session queues a send to a busy session of its project it did not start */
+    const autoSend = async () => {
+      const other = await session()
+      const sender = await session('auto')
+      await w.mgr.send(other, "the person's own work")
+      expect(await w.mgr.agentSession(sender, { sessionId: other, action: 'send', text: 'tidy up', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
+      return { other, sender }
+    }
+    const endsWithNothingDelivered = async (target: string) => {
+      handleOf(target).answer("the person's answer")
+      await w.until(() => w.store.listQueuedRequests().length === 0)
+      expect(handleOf(target).sent).toEqual(["the person's own work"])
+    }
+
+    it('an ask with no consent for the pair is dropped when the caller is moved off auto', async () => {
+      const { target, asker } = await autoAsk()
+      await lower(asker)
+      expect(w.store.listQueuedRequests()).toEqual([])
+      await endsWithNothingDelivered(target)
+      await w.until(() => told(asker))
+    })
+
+    it('an ask with no consent for the pair is refused at delivery when the caller is no longer auto', async () => {
+      const { target, asker } = await autoAsk()
+      lowerQuietly(asker)
+      await endsWithNothingDelivered(target)
+      await w.until(() => told(asker))
+    })
+
+    it('an ask the pair has consent for still goes in', async () => {
+      const { target, asker } = await autoAsk()
+      w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+      await lower(asker)
+      expect(w.store.listQueuedRequests()).toHaveLength(1)
+      handleOf(target).answer("the person's answer")
+      await w.until(() => handleOf(target).sent.length === 2)
+      expect(handleOf(target).sent[1]).toContain('export it')
+    })
+
+    it('a send to a session it did not start is dropped when the caller is moved off auto', async () => {
+      const { other, sender } = await autoSend()
+      await lower(sender)
+      expect(w.store.listQueuedRequests()).toEqual([])
+      await endsWithNothingDelivered(other)
+      await w.until(() => told(sender))
+    })
+
+    it('a send to a session it did not start is refused at delivery when the caller is no longer auto', async () => {
+      const { other, sender } = await autoSend()
+      lowerQuietly(sender)
+      await endsWithNothingDelivered(other)
+      await w.until(() => told(sender))
     })
   })
 
@@ -308,6 +396,61 @@ describe('requests to a busy session (#677)', () => {
       expect(await forking).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
       expect(forks).toEqual([])
       expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
+    })
+
+    it("refuses an approval of a fork's card that comes after the project's trust is gone", async () => {
+      const { a, b } = await busyChild('safe')
+      w.mgr.revokeProjectConsent(w.caller.id, w.caller.id, 'agents')
+      const forking = w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'x', ifBusy: 'fork_read' })
+      await w.until(() => info(b).pendingApproval?.detail.kind === 'agent_start')
+      // Taken away at the store, so only the read after the answer can see it
+      w.store.setProjectTrusted(w.caller.id, false)
+      w.mgr.respondApproval(b, info(b).pendingApproval!.requestId, 'allow')
+      expect(await forking).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
+      expect(forks).toEqual([])
+      expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
+    })
+
+    /** The fake CLI's copy waits until the test lets it finish, so something can change while the fork is being made */
+    const slowCopy = () => {
+      const fake = claude() as CrossAdapter & { forkConversation?: (id: string, cwd: string) => Promise<string> }
+      const copy = fake.forkConversation!
+      let release!: () => void
+      const gate = new Promise<void>((r) => (release = r))
+      const state = { started: false, release: () => release() }
+      fake.forkConversation = async (id, cwd) => {
+        state.started = true
+        await gate
+        return copy(id, cwd)
+      }
+      return state
+    }
+    const taskReached = (words: string) => [...claude().handles.values()].filter((h) => h.sent.some((t) => t.includes(words)))
+
+    it('gives no task to a fork whose requester was lowered below it while it was being made', async () => {
+      git(w.caller.path)
+      const { a, b } = await busyChild()
+      const copy = slowCopy()
+      const forking = w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'review it', ifBusy: 'fork' })
+      await w.until(() => copy.started)
+      // The fork is made at normal, the lower of the two presets when it was asked for; the requester is now safe
+      await w.mgr.updateSettings(b, { permissionPreset: 'safe' })
+      copy.release()
+      expect(await forking).toMatchObject({ ok: false, error: expect.stringContaining('lowered to safe') })
+      expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
+      expect(taskReached('review it')).toEqual([])
+    })
+
+    it("gives no task to a fork whose project lost trust while it was being made", async () => {
+      const { a, b } = await busyChild()
+      const copy = slowCopy()
+      const forking = w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'read it', ifBusy: 'fork_read' })
+      await w.until(() => copy.started)
+      w.store.setProjectTrusted(w.caller.id, false)
+      copy.release()
+      expect(await forking).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
+      expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
+      expect(taskReached('read it')).toEqual([])
     })
 
     it('two forks at once take one place under a ceiling of one', async () => {

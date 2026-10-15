@@ -275,6 +275,27 @@ describe('starting another agent in the same project', () => {
       expect(childrenOf(s)).toEqual([])
     })
 
+    it('trust taken away while the child session is being made: it gets no task, and the call reads why', async () => {
+      const s = await session()
+      const make = w.mgr.createSession.bind(w.mgr)
+      let release!: () => void
+      const gate = new Promise<void>((r) => (release = r))
+      let making = false
+      vi.spyOn(w.mgr, 'createSession').mockImplementation(async (...args) => {
+        making = true
+        await gate
+        return make(...args)
+      })
+      const starting = w.mgr.startAgent(s, { task: 'write the parser', wait: false })
+      await w.until(() => making)
+      w.store.setProjectTrusted(w.caller.id, false)
+      release()
+      expect(await starting).toMatchObject({ ok: false, error: expect.stringContaining('no longer trusted') })
+      expect(childrenOf(s)).toEqual([])
+      const reached = [...w.adapters.get('claude')!.handles.values()].filter((h) => h.sent.some((t) => t.includes('write the parser')))
+      expect(reached).toEqual([])
+    })
+
     it('a preset raised while the card stood: the approval for the lower one starts nothing', async () => {
       const { s, requestId } = await pendingCard()
       expect(agentCard(s)!.detail).toMatchObject({ preset: 'safe' })
