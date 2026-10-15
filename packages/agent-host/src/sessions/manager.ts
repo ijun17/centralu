@@ -2031,39 +2031,20 @@ export class SessionManager {
     this.unborn.set(id, [])
     try {
       handle = await adapter.createSession(
-        {
-          sessionId: id, cwd, model: params.model, effort: params.effort,
-          ...this.processSourceFor(id, params.tool, undefined, info.agentVersion),
+        this.launchOptions(info, {
+          tool: params.tool, cwd, model: params.model, effort: params.effort,
           verbosity: params.verbosity,
           serviceTier: params.serviceTier,
           permissionPreset: params.permissionPreset, resumeExternalId: params.resumeExternalId,
-          // Which settings files reach this session (decision 3, #92, #152) — what the session is,
-          // and the trust at this exact moment of launch. If this is a builder session, the
-          // directory above already points at this session (setBuilder)
-          ...this.settingFilesFor(info),
-          ...(noCodeIntelligence ? { noCodeIntelligence: true } : {}),
-          // Reads an inherited note without asking (#142). No marker exists yet — it is stamped once this
-          // session comes up
-          ...this.handoffReadDirs(params.projectId, !!params.handoff?.fromSessionId),
-          // Paths another project handed back to this session (#371), asked on every read
-          mayRead: (path: string) => this.mayRead(id, path, cwd),
-          // An orchestrator gets all of them, a builder session (M4 C-3) just its own app's check (the bundle blocks
-          // the rest), an ordinary session its own project, read-only (#320, #561)
-          orchestratorTools: tools(),
-          toolProfile: profile ?? undefined,
-          systemPromptAppend:
-            info.kind === 'orchestrator' ? orchestratorRole() + this.skillsPrompt()
-            // A builder session's (M4 C-2) role is entirely the roleAppend fixed at creation
-            : (info.roleAppend ?? undefined),
-          // The path back to the host — used by the orchestrator tools' bridge and an external app's bridge
-          // (M4 A-5)
-          orchestratorBridge: profile || apps ? (this.endpoint?.(id) ?? undefined) : undefined,
-          // An MCP server the person approved is loaded here as a user-folder app (M4 A-7, decision 4)
+          noCodeIntelligence,
+          inheritsHandoff: !!params.handoff?.fromSessionId,
+          choice: { profile, tools },
           apps,
+          memory: false,
           // The answer schema an app supplied when it asked for this (M4 D-1) — Claude gets it on this
           // session's query, Codex gets it on every turn of this session
           ...(params.appAgent?.outputSchema ? { outputSchema: params.appAgent.outputSchema } : {}),
-        },
+        }),
         from.sink,
       )
       from.own(handle)
@@ -2459,6 +2440,97 @@ export class SessionManager {
   }
 
   /**
+   * The options a session's process starts with (#428), the same for a new session (`createSession`) and a wake
+   * (`doResumeSession`): what differs between the two is passed in, and the rest is read here, in the order both
+   * used to read it. `memory`: the orchestrator's memory handoff rides along (a genuinely new process on a wake).
+   */
+  private launchOptions(
+    m: SessionInfo,
+    o: Pick<CreateSessionOpts, 'model' | 'effort' | 'verbosity' | 'serviceTier' | 'permissionPreset' | 'resumeExternalId' | 'knownGoal' | 'outputSchema'> & {
+      tool: ToolName
+      cwd: string
+      adopt?: AgentProcess
+      kept?: readonly BackgroundTask[] | null
+      noCodeIntelligence: boolean
+      inheritsHandoff: boolean
+      choice: { profile: ToolProfile | null; tools: () => OrchestratorTools | undefined }
+      apps: SessionApps | undefined
+      memory: boolean
+    },
+  ): CreateSessionOpts {
+    const { profile, tools } = o.choice
+    return {
+      sessionId: m.id,
+      cwd: o.cwd,
+      ...this.processSourceFor(m.id, o.tool, o.adopt, m.agentVersion, o.kept),
+      model: o.model,
+      effort: o.effort,
+      verbosity: o.verbosity,
+      serviceTier: o.serviceTier,
+      permissionPreset: o.permissionPreset,
+      resumeExternalId: o.resumeExternalId,
+      ...(o.knownGoal ? { knownGoal: o.knownGoal } : {}),
+      // Which settings files reach this session (decision 3, #92, #152) — what the session is,
+      // and the trust at this exact moment of launch. If this is a builder session, the
+      // directory above already points at this session (setBuilder)
+      /*
+       * Trust is **re-read every time it wakes** (decision 3, #92). Even if trust is changed
+       * while a session is running, the tool process already read its files and stays as it was
+       * — it picks up the changed value the next time it comes up (restart, resume). What it
+       * trusts is decided by the same check used at creation (settingFilesFor) — a session waking
+       * as a manager and a builder session both get the same answer here.
+       */
+      ...this.settingFilesFor(m),
+      ...(o.noCodeIntelligence ? { noCodeIntelligence: true } : {}),
+      // Reads an inherited note without asking (#142). No marker exists yet — it is stamped once this
+      // session comes up
+      // An inherited note must still be readable after waking up (#142) — the first message still points
+      // at that path
+      ...this.handoffReadDirs(m.projectId, o.inheritsHandoff),
+      // Paths another project handed back to this session (#371), asked on every read
+      mayRead: (path: string) => this.mayRead(m.id, path, o.cwd),
+      // An orchestrator gets all of them, a builder session (M4 C-3) just its own app's check (the bundle blocks
+      // the rest), an ordinary session its own project, read-only (#320, #561)
+      /*
+       * **Tool and role must carry over on resume too.**
+       *
+       * Attaching them only at creation would mean a freshly woken orchestrator becomes an
+       * ordinary session with neither tools nor a role — sitting in an empty folder able to do
+       * nothing, while looking perfectly fine on the outside, which is the worst possible state.
+       *
+       * And this is exactly **where a manager becomes real** (#69): a session whose first child
+       * has just been attached passes this check the next time it wakes and receives the
+       * child-only tools and role.
+       */
+      orchestratorTools: tools(),
+      toolProfile: profile ?? undefined,
+      /*
+       * This is **where memory is handed over.** Switching tools breaks externalId, which routes
+       * things down this path (a new process), and that is when the past conversation rides along
+       * with it. A session that came in through resume already has the tool holding its context,
+       * so the same text is never inserted twice.
+       */
+      systemPromptAppend:
+        m.kind === 'orchestrator'
+          ? // Skills (#71) always ride along; the memory handoff only for a genuinely new process
+            // (unchanged rule)
+            orchestratorRole() + this.skillsPrompt() + (o.memory ? this.orchestratorMemory(m.id) : '')
+          : // A builder session's (M4 C-2) role is entirely the roleAppend fixed at creation
+            // Reapplying the fixed role text — for a coordinator session an older build left (#372), and
+            // for a builder session (C-2) even if the app is broken
+            (m.roleAppend ?? undefined),
+      // The path back to the host — used by the orchestrator tools' bridge and an external app's bridge
+      // (M4 A-5)
+      orchestratorBridge: profile || o.apps ? (this.endpoint?.(m.id) ?? undefined) : undefined,
+      // An MCP server the person approved is loaded here as a user-folder app (M4 A-7, decision 4)
+      // An approved MCP server is a user-folder app — an orchestrator receives those apps right here (M4
+      // A-7)
+      apps: o.apps,
+      ...(o.outputSchema ? { outputSchema: o.outputSchema } : {}),
+    }
+  }
+
+  /**
    * The keeper as a `ProcessSource` for one session, when this host runs under one (#280 step 2). `version` is the CLI
    * version a process spawned now is started from, written on its keeper tag (#297).
    */
@@ -2770,10 +2842,11 @@ export class SessionManager {
     const kept = adopt ? this.keptBackgroundTasks(sessionId) : null
     try {
       const creating = adapter.createSession(
-        {
-          sessionId,
+        this.launchOptions(m, {
+          tool,
           cwd,
-          ...this.processSourceFor(sessionId, tool, adopt, m.agentVersion, kept),
+          adopt,
+          kept,
           model: launched.model ?? undefined,
           effort: launched.effort ?? undefined,
           verbosity: launched.verbosity ?? undefined,
@@ -2782,51 +2855,12 @@ export class SessionManager {
           resumeExternalId: resumeId ?? undefined,
           // The goal survives in the tool's conversation, not in a new one (see CreateSessionOpts.knownGoal)
           ...(resumeId && m.goal ? { knownGoal: m.goal } : {}),
-          /*
-           * Trust is **re-read every time it wakes** (decision 3, #92). Even if trust is changed
-           * while a session is running, the tool process already read its files and stays as it was
-           * — it picks up the changed value the next time it comes up (restart, resume). What it
-           * trusts is decided by the same check used at creation (settingFilesFor) — a session waking
-           * as a manager and a builder session both get the same answer here.
-           */
-          ...this.settingFilesFor(m),
-          ...(this.codeIntelligenceOffFor(sessionId) ? { noCodeIntelligence: true } : {}),
-          // An inherited note must still be readable after waking up (#142) — the first message still points
-          // at that path
-          ...this.handoffReadDirs(m.projectId, this.store.inheritsHandoff(sessionId)),
-          mayRead: (path: string) => this.mayRead(sessionId, path, cwd),
-          /*
-           * **Tool and role must carry over on resume too.**
-           *
-           * Attaching them only at creation would mean a freshly woken orchestrator becomes an
-           * ordinary session with neither tools nor a role — sitting in an empty folder able to do
-           * nothing, while looking perfectly fine on the outside, which is the worst possible state.
-           *
-           * And this is exactly **where a manager becomes real** (#69): a session whose first child
-           * has just been attached passes this check the next time it wakes and receives the
-           * child-only tools and role.
-           */
-          orchestratorTools: tools(),
-          toolProfile: profile ?? undefined,
-          /*
-           * This is **where memory is handed over.** Switching tools breaks externalId, which routes
-           * things down this path (a new process), and that is when the past conversation rides along
-           * with it. A session that came in through resume already has the tool holding its context,
-           * so the same text is never inserted twice.
-           */
-          systemPromptAppend:
-            m.kind === 'orchestrator'
-              ? // Skills (#71) always ride along; the memory handoff only for a genuinely new process
-                // (unchanged rule)
-                orchestratorRole() + this.skillsPrompt() + (resumeId ? '' : this.orchestratorMemory(m.id))
-              : // Reapplying the fixed role text — for a coordinator session an older build left (#372), and
-                // for a builder session (C-2) even if the app is broken
-                (m.roleAppend ?? undefined),
-          orchestratorBridge: profile || apps ? (this.endpoint?.(sessionId) ?? undefined) : undefined,
-          // An approved MCP server is a user-folder app — an orchestrator receives those apps right here (M4
-          // A-7)
+          noCodeIntelligence: this.codeIntelligenceOffFor(sessionId),
+          inheritsHandoff: this.store.inheritsHandoff(sessionId),
+          choice: { profile, tools },
           apps,
-        },
+          memory: !resumeId,
+        }),
         from.sink,
       )
       /*
