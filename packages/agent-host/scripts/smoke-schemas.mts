@@ -102,6 +102,7 @@ const CASES: Partial<Record<RpcMethodName, unknown>> & Record<string, unknown> =
   'agents.capabilities': { tool: 'claude' },
   'agents.models': { tool: 'claude' },
   'agents.usage': { tool: 'claude' },
+  'agents.account': { tool: 'claude' },
   'agents.commands': { sessionId: S },
   'agents.listExternalSessions': { projectId: P, tool: 'claude', limit: 3 },
   'agents.switchTool': { sessionId: S, tool: 'codex' },

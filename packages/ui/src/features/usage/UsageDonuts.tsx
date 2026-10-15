@@ -4,7 +4,7 @@ import type { CacheStats, MachineInfo, ToolName, UsageSnapshot } from '@cc/proto
 import { MACHINE_STATUS_LABEL, cacheTooltipLine } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore, usageTools } from '../../store/store.js'
-import { useMachineName, useToolMeta, useTools } from '../../store/selectors.js'
+import { useMachineName, useToolMeta } from '../../store/selectors.js'
 import { Tooltip } from '../../components/primitives.jsx'
 import { UsagePanel } from './UsagePanel.jsx'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
@@ -23,6 +23,9 @@ const HERE = ''
 
 /** Which donut's detail is open: a tool, on this computer (`machine` null) or on a linked machine */
 type Open = { machine: string | null; tool: ToolName }
+
+/** How often the limits are asked again while the window is in view */
+const POLL_MS = 5 * 60_000
 
 const EMPTY: Group = { live: null, snap: {} }
 
@@ -78,7 +81,6 @@ export function UsageDonuts() {
   const connectedKey = useStore((s) => connectedIds(s.machines).join(','))
   const [groups, setGroups] = useState<Record<string, Group>>({})
   const [open, setOpen] = useState<Open | null>(null)
-  const tools = useTools()
   // A hook cannot be called conditionally — the value is unused anyway while closed
   const openMeta = useToolMeta(open?.tool ?? '')
   const openMachineName = useMachineName(open?.machine)
@@ -109,19 +111,26 @@ export function UsageDonuts() {
           const g = all[key] ?? EMPTY
           return { ...all, [key]: { ...g, ...(typeof p === 'function' ? p(g) : p) } }
         })
+      /*
+       * Limits are asked only of the tools detect says are usable there (#726): one that is not installed or not logged
+       * in has none to show, and reading it could start a process on that machine for nothing.
+       */
       void platform.agents
         .detect(on)
-        .then((found) => patch({ live: found.filter((t) => t.installed && t.loggedIn).map((t) => t.name) }))
+        .then((found) => {
+          const usable = found.filter((t) => t.installed && t.loggedIn).map((t) => t.name)
+          patch({ live: usable })
+          for (const tool of usable) {
+            const put = (snap: Snap) => patch((g) => ({ snap: { ...g.snap, [tool]: snap } }))
+            void platform.agents
+              .usage(tool, on)
+              .then((r) => put({ usage: r.usage, reason: r.supported ? undefined : r.reason, cache: r.cache, sameAccount: r.sameAccountAsHub }))
+              .catch((e: Error) => put({ usage: null, reason: e.message }))
+          }
+        })
         .catch(() => patch({ live: [] }))
-      for (const { name: tool } of tools) {
-        const put = (snap: Snap) => patch((g) => ({ snap: { ...g.snap, [tool]: snap } }))
-        void platform.agents
-          .usage(tool, on)
-          .then((r) => put({ usage: r.usage, reason: r.supported ? undefined : r.reason, cache: r.cache, sameAccount: r.sameAccountAsHub }))
-          .catch((e: Error) => put({ usage: null, reason: e.message }))
-      }
     },
-    [platform, tools],
+    [platform],
   )
 
   /** The connected machines last asked, so a machine whose link comes back is asked once, and the others are not */
@@ -140,8 +149,23 @@ export function UsageDonuts() {
    */
   useEffect(() => {
     loadAll()
-    const t = setInterval(loadAll, 5 * 60_000)
-    return () => clearInterval(t)
+    let last = Date.now()
+    const poll = () => {
+      // A hidden window shows nothing: asking would start a reading (a process, on a machine with no session) for nobody (#726)
+      if (document.hidden) return
+      last = Date.now()
+      loadAll()
+    }
+    const t = setInterval(poll, POLL_MS)
+    // Back in view after a tick was skipped: asked at once rather than shown stale until the next tick
+    const onVisible = () => {
+      if (!document.hidden && Date.now() - last >= POLL_MS) poll()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      clearInterval(t)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
     // connection: the moment it comes back is when to ask again (a login could have happened meanwhile)
   }, [loadAll, connection])
 

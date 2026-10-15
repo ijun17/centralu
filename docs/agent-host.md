@@ -2427,8 +2427,14 @@ limits are in scope; metered credits are not.
 nobody had a session on (typically a linked machine) used to answer "A running session is required to read usage" and
 its meter stayed blank. `listUsage()` now starts a **probe session** for the read when none is live: a Claude process in
 a temporary folder that is sent no message (nothing is billed), read until it answers (about 1.5 s measured; bounded at
-12 s) and stopped right after. Two askers at once share one probe, and the manager's one-minute cache keeps a refresh
-from starting another. Not logged in: no probe, the reason says so. Codex already reads usage with a short-lived client
+20 s (a loaded machine took 3 to 8 s; the manager gives up at 15 s but the probe goes on and its answer is kept for the next ask); an SDK without the call is final at once) and stopped right after. It reads no settings files, starts no code
+intelligence and, with `strictMcpConfig`, none of the person's MCP servers, and it is never lent to a model-list ask.
+Its folder goes once the process has left (on Windows it holds the folder until then), and a leftover
+(`centralu-usage-probe-*` in the temp folder, older than ten minutes) is swept at the first probe. An answer, and equally
+a failure, stands for five minutes, so the meter's 5-minute polls start one process each at most and a broken CLI is not
+retried on every poll. The meter does not poll while the window is hidden (it asks at once when it is shown again after
+a skipped tick) and asks only the tools `agents.detect` reports usable on that machine. Not logged in: no probe, the
+reason says so. Codex already reads usage with a short-lived client
 and has no such gap.
 
 **Same account on the hub and a linked machine (#726).** Each host answers `agents.account { tool }` with a fingerprint

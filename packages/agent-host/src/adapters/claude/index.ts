@@ -1,6 +1,6 @@
 import { query, resolveSettings, filterEscalatingDefaultMode, type McpServerConfig, type PermissionMode, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { homedir, tmpdir } from 'node:os'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
@@ -53,7 +53,7 @@ import { installedCliVersion } from '../../cli-version.js'
 import { ClaudeLinks, ClaudePlaceholderError, windowsStart, type ExeFs } from './exe-link.js'
 import { StartGate } from './start-gate.js'
 import { deleteClaudeSession, forkClaudeSession, listClaudeSessions, readClaudeHistory, readClaudeTranscriptTail } from './history.js'
-import { accountFingerprint, readUsageFromAny, type UsageQuery } from './usage.js'
+import { accountFingerprint, readUsageFromAny, UNSUPPORTED, type UsageQuery } from './usage.js'
 import { ORCHESTRATOR_MCP_NAME, orchestratorMcp } from './orchestrator-mcp.js'
 import { appProxy, type AppProxy } from './app-proxy.js'
 import { APP_MCP_PREFIX } from '../../apps/contract.js'
@@ -68,9 +68,21 @@ import { withoutCrossSessionMessaging } from './cross-session.js'
 const exec = promisify(execFile)
 
 /** How long a usage probe may take to get its answer, and the wait between its asks (#726) */
-const PROBE_USAGE_MS = 12_000
+const PROBE_USAGE_MS = 20_000
 const PROBE_USAGE_RETRY_MS = 500
 const ACCOUNT_CACHE_MS = 60_000
+/**
+ * How long a probe's answer, or its failure, stands before another process is started for it. The meter asks every 5
+ * minutes, so the manager's minute would start one on every ask; this makes it one per ask at most, and a broken CLI
+ * is not retried for 12 s each time.
+ */
+const PROBE_CACHE_MS = 5 * 60_000
+/** The folder a probe runs in, so a sweep can tell its own leftovers from anyone else's */
+const PROBE_DIR_PREFIX = 'centralu-usage-probe-'
+/** A leftover older than this is no probe's still running */
+const PROBE_DIR_STALE_MS = 10 * 60_000
+/** How long a stopped probe's process may take to leave before its folder is removed anyway */
+const PROBE_EXIT_WAIT_MS = 10_000
 
 /**
  * The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself. One
@@ -396,6 +408,10 @@ class ClaudeSession implements SessionHandle {
   private runKey: string | null = null
   /** Settles once the stream ended: the CLI process is gone, or this host let go of it */
   readonly ended: Promise<void>
+  /** The query this session reads usage from (a usage probe asks its own, #726) */
+  get usageQuery(): UsageQuery | null {
+    return this.query
+  }
   private markEnded: () => void = () => {}
 
   constructor(
@@ -571,6 +587,8 @@ class ClaudeSession implements SessionHandle {
           : {}),
         ...permissionOptions,
         ...codeIntelligence,
+        // A usage probe starts no server of the person's: those in ~/.claude.json would run for a read that needs none (#726)
+        ...(ClaudeAdapter.probeIds.has(this.sessionId) ? { strictMcpConfig: true } : {}),
         /*
          * The agent an app hands a schema and asks for output (M4 D-1). It is a per-query option,
          * so it can only be given when the session starts. Measured (SDK 0.3.263, CLI 2.1.282,
@@ -713,7 +731,8 @@ class ClaudeSession implements SessionHandle {
         },
       }, preset),
     }))
-    ClaudeAdapter.liveQueries.add(q)
+    // A usage probe (#726) is not a session anyone else may borrow: a model list asked meanwhile would use a query about to close
+    if (!ClaudeAdapter.probeIds.has(this.sessionId)) ClaudeAdapter.liveQueries.add(q)
     ClaudeAdapter.querySessions.set(q, this.sessionId)
     this.releaseLostCalls(q)
 
@@ -1511,6 +1530,25 @@ async function claudeLoggedIn(bin: ToolLaunch): Promise<boolean> {
   return typeof flag === 'boolean' ? flag : true // When unknown, pass it through.
 }
 
+/**
+ * Removes the folders usage probes left in the temp folder (#726): a probe whose process was still running on Windows
+ * when its folder was removed, or a host that stopped mid-probe. Only this prefix, and only when old enough that no
+ * probe is still using it.
+ */
+async function sweepProbeDirs(now = Date.now()): Promise<void> {
+  try {
+    const root = tmpdir()
+    for (const name of await readdir(root)) {
+      if (!name.startsWith(PROBE_DIR_PREFIX)) continue
+      const path = join(root, name)
+      const old = await stat(path).then((s) => now - s.mtimeMs > PROBE_DIR_STALE_MS, () => false)
+      if (old) await rm(path, { recursive: true, force: true }).catch(() => {})
+    }
+  } catch {
+    // The temp folder cannot be listed: nothing to sweep
+  }
+}
+
 /** What a test can change about how the adapter starts Claude; the host passes nothing */
 export type ClaudeAdapterOptions = {
   platform?: NodeJS.Platform
@@ -1525,6 +1563,9 @@ export type ClaudeAdapterOptions = {
   retryDelay?: () => number
   /** How long `settle` waits on Windows. Default: 1.5 s, inside the app's 3 s stop grace */
   exitGraceMs?: number
+  /** How long a usage probe is asked, and the wait between two asks. Default: 20 s and 0.5 s (#726) */
+  probeAskMs?: number
+  probeRetryMs?: number
 }
 
 /**
@@ -1539,6 +1580,8 @@ const WINDOWS_START_GAP_MS = 1500
 export class ClaudeAdapter implements AgentAdapter {
   readonly tool = 'claude' as const
   private readonly launch: ClaudeLaunch
+  private readonly probeAskMs: number
+  private readonly probeRetryMs: number
 
   constructor(options: ClaudeAdapterOptions = {}) {
     const platform = options.platform
@@ -1553,6 +1596,8 @@ export class ClaudeAdapter implements AgentAdapter {
       closing: new Set(),
       exitGraceMs: options.exitGraceMs ?? 1500,
     }
+    this.probeAskMs = options.probeAskMs ?? PROBE_USAGE_MS
+    this.probeRetryMs = options.probeRetryMs ?? PROBE_USAGE_RETRY_MS
     /*
      * Host start (Windows): links an earlier run left behind go, except the one the installed Claude
      * Code would start from. Nothing runs from them any more — the processes of the previous host
@@ -1587,6 +1632,8 @@ export class ClaudeAdapter implements AgentAdapter {
    * older session was still alive. Insertion order is the same as start order.
    */
   static readonly liveQueries = new Set<UsageQuery & ModelQuery>()
+  /** The ids of usage probe sessions (#726): they are never in `liveQueries` */
+  static readonly probeIds = new Set<string>()
   /** Which session each live query belongs to, for the log line when one cannot answer (#481) */
   static readonly querySessions = new WeakMap<object, string>()
   /** The most recently started query that is still alive. */
@@ -1710,40 +1757,74 @@ export class ClaudeAdapter implements AgentAdapter {
   async listUsage() {
     const live = [...ClaudeAdapter.liveQueries].reverse()
     if (live.length > 0) return readUsageFromAny(live.map((query) => ({ query, sessionId: ClaudeAdapter.querySessions.get(query) ?? null })))
-    // Asked twice at once, the second waits for the first's probe instead of starting another process
+    // What a probe just found, or failed at, stands for a while; asked twice at once, the second waits for the first's probe
+    if (this.probed && Date.now() - this.probed.at < PROBE_CACHE_MS) {
+      if (this.probed.failure) throw this.probed.failure
+      return this.probed.snapshot!
+    }
     return (this.probing ??= this.probeUsage().finally(() => (this.probing = null)))
   }
   private probing: Promise<UsageSnapshot> | null = null
+  private probed: { at: number; snapshot?: UsageSnapshot; failure?: Error } | null = null
+  private swept = false
 
   private async probeUsage(): Promise<UsageSnapshot> {
+    try {
+      const snapshot = await this.runProbe()
+      this.probed = { at: Date.now(), snapshot }
+      return snapshot
+    } catch (e) {
+      const failure = e instanceof Error ? e : new Error(String(e))
+      this.probed = { at: Date.now(), failure }
+      console.error(`[usage] claude: a probe session could not read usage: ${failure.message}`)
+      throw failure
+    }
+  }
+
+  private async runProbe(): Promise<UsageSnapshot> {
     // Not signed in: a process would only fail to start a reading, and say less than this does
     if ((await this.account()).loggedIn === false) throw new Error('Claude Code is not logged in on this computer')
-    const dir = await mkdtemp(join(tmpdir(), 'cc-usage-'))
-    let probe: SessionHandle | null = null
+    if (!this.swept) {
+      this.swept = true
+      await sweepProbeDirs()
+    }
+    const dir = await mkdtemp(join(tmpdir(), PROBE_DIR_PREFIX))
+    const sessionId = `usage-probe-${randomUUID()}`
+    ClaudeAdapter.probeIds.add(sessionId)
+    let probe: ClaudeSession | null = null
     try {
-      probe = await this.createSession({ sessionId: `usage-probe-${randomUUID()}`, cwd: dir, permissionPreset: 'safe', noSettingFiles: true, noCodeIntelligence: true }, () => {})
+      probe = (await this.createSession({ sessionId, cwd: dir, permissionPreset: 'safe', noSettingFiles: true, noCodeIntelligence: true }, () => {})) as ClaudeSession
       /*
        * The query exists at once but the CLI behind it is still starting; asked too early it fails or stays quiet
-       * (smoke-usage waits 7 s). Asked again until the bound, every ask bounded by readUsageFromAny's.
+       * (smoke-usage waits 7 s). Asked again until the bound, every ask bounded by readUsageFromAny's. An SDK
+       * without the call is final: asking longer cannot change it.
        */
-      const until = Date.now() + PROBE_USAGE_MS
+      const until = Date.now() + this.probeAskMs
       let failure: unknown
       for (;;) {
-        const query = ClaudeAdapter.lastQuery
+        const query = probe.usageQuery
         if (query) {
           try {
-            return await readUsageFromAny([{ query, sessionId: 'usage probe' }], { log: () => {} })
+            return await readUsageFromAny([{ query, sessionId }], { log: () => {} })
           } catch (e) {
             failure = e
+            if (e instanceof Error && e.message === UNSUPPORTED) break
           }
         }
         if (Date.now() >= until) break
-        await new Promise((r) => setTimeout(r, PROBE_USAGE_RETRY_MS))
+        await new Promise((r) => setTimeout(r, this.probeRetryMs))
       }
       throw failure instanceof Error ? failure : new Error('Claude Code did not answer a usage reading in time')
     } finally {
       await probe?.dispose().catch(() => {})
-      await rm(dir, { recursive: true, force: true }).catch(() => {})
+      /*
+       * On Windows the process still holds its folder until it has left (the SDK waits 2 s, then 5 s, before it kills
+       * one), and removing the folder then fails. So the folder goes once the process has ended, or after a bound with
+       * retries, and a leftover is swept by the next run.
+       */
+      if (probe) await Promise.race([probe.ended, new Promise((r) => setTimeout(r, PROBE_EXIT_WAIT_MS).unref())])
+      ClaudeAdapter.probeIds.delete(sessionId)
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 }).catch(() => {})
     }
   }
 

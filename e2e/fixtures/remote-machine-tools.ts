@@ -161,6 +161,36 @@ export function remoteMachineToolsTests(): void {
       })
     })
 
+    test('a hidden window is not polled, a tool that is not logged in is not asked, and the window in view again is asked at once (#726)', async ({ page }) => {
+      await page.clock.install()
+      await setup(page)
+      await page.evaluate(() => {
+        const m = (window as unknown as MockWindow).__mock
+        // Codex is installed but signed out here: it has no limits to read, and reading it could start a process
+        m.detected = m.detected.map((t: any) => (t.name === 'codex' ? { ...t, installed: true, loggedIn: false } : t))
+        // Only what is asked from here on: the first load, before codex was signed out, asked it too
+        m.usageCalls.length = 0
+      })
+      await reconnectHost(page)
+      await expect(page.getByTestId('usage-donut-claude')).toBeVisible()
+      const tools = () =>
+        page.evaluate(() => [...new Set(((window as unknown as MockWindow).__mock.usageCalls as { tool: string }[]).map((c) => c.tool))])
+      expect(await tools()).toEqual(['claude'])
+
+      const hide = (hidden: boolean) =>
+        page.evaluate((h) => {
+          Object.defineProperty(document, 'hidden', { configurable: true, get: () => h })
+          document.dispatchEvent(new Event('visibilitychange'))
+        }, hidden)
+      await hide(true)
+      const before = await usageCalls(page, null)
+      await page.clock.fastForward('10:01')
+      expect(await usageCalls(page, null)).toBe(before)
+
+      await hide(false)
+      await expect.poll(() => usageCalls(page, null)).toBeGreaterThan(before)
+    })
+
     test('a machine with no usable agent says so in its group, and this computer with none still shows the machines', async ({ page }) => {
       await setup(page)
       await page.evaluate(() => {
