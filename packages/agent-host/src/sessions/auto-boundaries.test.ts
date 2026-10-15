@@ -218,46 +218,52 @@ describe('auto Centralu boundaries (#603)', () => {
     },
   )
 
-  it.each(['auto', 'safe', 'normal'] as const)(
-    '%s: dirty and unproven worktree cleanup keeps local work in the trash (#608)',
-    async (preset) => {
-      for (const state of ['dirty', 'unmerged']) {
-        const git = (cwd: string, ...args: string[]) =>
-          execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
-            cwd,
-            encoding: 'utf8',
-          }).trim()
-        if (state === 'dirty') {
-          git(w.caller.path, 'init', '-q', '-b', 'main')
-          writeFileSync(join(w.caller.path, 'README.md'), 'initial')
-          git(w.caller.path, 'add', '.')
-          git(w.caller.path, 'commit', '-qm', 'init')
-        }
-        const caller = await session(preset)
-        const child = await w.mgr.createSession({
-          projectId: w.caller.id,
-          cwd: w.caller.path,
-          tool: 'claude',
-          permissionPreset: 'auto',
-          worktree: true,
-          worktreeBranch: `feat/${state}`,
-          askedBy: caller,
-        })
-        writeFileSync(join(child.worktree!.path, 'wip.txt'), 'new work')
-        if (state === 'unmerged') {
-          git(child.worktree!.path, 'add', '.')
-          git(child.worktree!.path, 'commit', '-qm', 'unmerged')
-        }
-        const result = await w.mgr.agentSession(caller, { sessionId: child.id, action: 'delete' })
-        expect(result).toMatchObject({ ok: true, state: 'deleted', setAside: {
-          changedFiles: state === 'dirty' ? 1 : 0,
-          commits: state === 'unmerged' ? 1 : 0,
-        } })
-        expect(w.store.trashedSession(child.id)?.record.recovery).toBeDefined()
-        expect(existsSync(child.worktree!.path)).toBe(false)
-        expect(git(w.caller.path, 'branch', '--list', child.worktree!.branch)).toBe('')
-        expect(w.mgr.listSessions().some((s) => s.id === child.id)).toBe(false)
-      }
-    },
-  )
+  /*
+   * One worktree per test (#368). Creating a worktree session and deleting it with its work kept is about fifty git
+   * processes, and on windows-2022 each takes 100 ms or more: with both states in one test, the safe preset's ran past
+   * the 15 s Windows limit (run 38775014188). Auto-maintenance is off, as in manager.test.ts (#503): each commit would
+   * start one more git, which goes on working in the repository after the commit returns.
+   */
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'maintenance.auto=false', ...args], {
+      cwd,
+      encoding: 'utf8',
+    }).trim()
+  it.each([
+    ['auto', 'dirty'],
+    ['auto', 'unmerged'],
+    ['safe', 'dirty'],
+    ['safe', 'unmerged'],
+    ['normal', 'dirty'],
+    ['normal', 'unmerged'],
+  ] as const)('%s: %s worktree cleanup keeps local work in the trash (#608)', async (preset, state) => {
+    git(w.caller.path, 'init', '-q', '-b', 'main')
+    writeFileSync(join(w.caller.path, 'README.md'), 'initial')
+    git(w.caller.path, 'add', '.')
+    git(w.caller.path, 'commit', '-qm', 'init')
+    const caller = await session(preset)
+    const child = await w.mgr.createSession({
+      projectId: w.caller.id,
+      cwd: w.caller.path,
+      tool: 'claude',
+      permissionPreset: 'auto',
+      worktree: true,
+      worktreeBranch: `feat/${state}`,
+      askedBy: caller,
+    })
+    writeFileSync(join(child.worktree!.path, 'wip.txt'), 'new work')
+    if (state === 'unmerged') {
+      git(child.worktree!.path, 'add', '.')
+      git(child.worktree!.path, 'commit', '-qm', 'unmerged')
+    }
+    const result = await w.mgr.agentSession(caller, { sessionId: child.id, action: 'delete' })
+    expect(result).toMatchObject({ ok: true, state: 'deleted', setAside: {
+      changedFiles: state === 'dirty' ? 1 : 0,
+      commits: state === 'unmerged' ? 1 : 0,
+    } })
+    expect(w.store.trashedSession(child.id)?.record.recovery).toBeDefined()
+    expect(existsSync(child.worktree!.path)).toBe(false)
+    expect(git(w.caller.path, 'branch', '--list', child.worktree!.branch)).toBe('')
+    expect(w.mgr.listSessions().some((s) => s.id === child.id)).toBe(false)
+  })
 })
