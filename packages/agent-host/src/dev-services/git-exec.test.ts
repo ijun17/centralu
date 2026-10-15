@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { runGit } from './git-exec.js'
+import { gitArgv, gitFilterListings, runGit } from './git-exec.js'
 
 /**
  * Every git the host starts goes through `runGit` (#407), so a new call is locked before trust by
@@ -83,6 +83,33 @@ describe('git output written directly to a file', () => {
       const actual = realpathSync.native(readFileSync(outputFile, 'utf8').trim()).replaceAll('\\', '/')
       const expected = realpathSync.native(join(repo, '.git')).replaceAll('\\', '/')
       expect(actual).toBe(expected)
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('one listing of the filter drivers for one operation (#368)', () => {
+  it('lists once for the calls that share it, and lists again after a listing that failed', async () => {
+    const repo = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-git-filters-')))
+    try {
+      await runGit(repo, ['init', '-q'])
+      await runGit(repo, ['config', 'filter.planted.clean', 'planted-clean'])
+      const config = join(repo, '.git', 'config')
+      const good = readFileSync(config, 'utf8')
+      const shared = gitFilterListings()
+      expect(await gitArgv(repo, ['status'], false, shared)).toContain('filter.planted.clean=')
+      // A driver added later is not seen by calls that share the earlier listing; a new operation sees it
+      await runGit(repo, ['config', 'filter.later.clean', 'later-clean'])
+      expect(await gitArgv(repo, ['ls-files'], false, shared)).not.toContain('filter.later.clean=')
+      expect(await gitArgv(repo, ['ls-files'], false, gitFilterListings())).toContain('filter.later.clean=')
+      expect(await gitArgv(repo, ['ls-files'])).toContain('filter.later.clean=')
+      // A configuration git cannot read fails the listing, and that failure is not kept for the next call
+      const failing = gitFilterListings()
+      writeFileSync(config, '[broken')
+      await expect(gitArgv(repo, ['status'], false, failing)).rejects.toThrow()
+      writeFileSync(config, good)
+      expect(await gitArgv(repo, ['status'], false, failing)).toContain('filter.planted.clean=')
     } finally {
       rmSync(repo, { recursive: true, force: true })
     }

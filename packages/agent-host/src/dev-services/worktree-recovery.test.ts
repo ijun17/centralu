@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -59,6 +59,34 @@ describe('worktree recovery follow-ups (#608)', () => {
     git(repo, ['worktree', 'remove', '--force', '--force', child])
     git(repo, ['branch', '-D', branch])
   }
+
+  /*
+   * Every read before trust used to list the folder's filter drivers in a git process of its own first, so a save was
+   * about thirty git processes for one repository. On windows-2022 at 100 ms or more each, a test that deleted two
+   * worktrees ran past 15 s (#368). The save lists them once per repository and still turns off every one of them.
+   */
+  it('lists the filter drivers once per repository, and every call of the save still runs none of them (#368)', async () => {
+    git(repo, ['worktree', 'add', '-b', branch, child])
+    commit(child, 'committed work\n')
+    const ran = join(dir, 'filter-ran')
+    git(repo, ['config', 'filter.planted.clean', `sh -c 'echo clean >> "${gitPath(ran)}"; cat'`])
+    git(repo, ['config', 'filter.planted.smudge', `sh -c 'echo smudge >> "${gitPath(ran)}"; cat'`])
+    writeFileSync(join(child, '.gitattributes'), '* filter=planted\n')
+    writeFileSync(join(child, 'new.txt'), 'uncommitted work\n')
+    const trace = join(dir, 'trace')
+    mkdirSync(trace)
+    vi.stubEnv('GIT_TRACE2_EVENT', trace)
+    const recovery = await saveWorktreeRecovery(sessionId, child, 'main', branch)
+    vi.unstubAllEnvs()
+    const starts = readdirSync(trace).flatMap((name) => readFileSync(join(trace, name), 'utf8').split('\n'))
+      .filter(Boolean).map((line) => JSON.parse(line) as { event: string; argv?: string[] })
+      .filter((e) => e.event === 'start')
+    const listings = starts.filter((e) => e.argv!.includes('--get-regexp') && e.argv!.includes('^filter\\.'))
+    expect(starts.length).toBeGreaterThan(10)
+    expect(listings).toHaveLength(1)
+    expect(existsSync(ran)).toBe(false)
+    expect(recovery).toMatchObject({ changedFiles: 2, commits: 1 })
+  }, process.platform === 'win32' ? 90_000 : 30_000)
 
   it.each(['history', 'index', 'stored branch'])(
     'bundles a gitlink-only module commit from the %s after module HEAD moves away', async (location) => {

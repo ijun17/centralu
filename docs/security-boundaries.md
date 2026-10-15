@@ -611,6 +611,12 @@ fails if any other source starts git. A read for an untrusted project gets:
 - `--no-textconv --no-ext-diff` on `diff`, `show` and `log`, and `--ignore-submodules=all` on
   `status` and `diff`: a submodule has its own config, whose drivers were not listed.
 
+The listing is its own git process before each read. Saving a worktree's work before its deletion
+(#608) makes about fifteen calls in one folder, so it lists once per repository and passes that
+listing to each of its calls (`gitFilterListings`, #368). That widens a window that already
+existed between the listing and the read from one call to one operation the host runs; a planted
+configuration is on disk before the operation starts and is turned off as before.
+
 Command-line configuration outranks every configuration file and is handed to the git processes
 git starts itself, so an included file or a nested call cannot undo it. The reads this covers are
 the change count and branch (`projects.list`, `projects.gitStatus`, the app broker's status),

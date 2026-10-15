@@ -62,6 +62,40 @@ export type RunGitOptions = {
   outputFile?: string
   /** Added to the host's environment for this call (a clone's non-interactive settings, #515) */
   env?: Record<string, string>
+  /** Shares one listing of each folder's filter drivers among the calls of one operation (`gitFilterListings`) */
+  filters?: GitFilterListings
+}
+
+/**
+ * **One listing of the filter drivers per folder for one operation** (#368).
+ *
+ * Without it, every read before trust is two git processes: the listing, then the read. Saving a worktree's work
+ * before its deletion (#608) makes about fifteen reads in one folder, so thirty processes, and on windows-2022 each
+ * one costs 100 ms or more: a test that deleted two worktrees ran past 15 s there. An operation that makes several
+ * calls in a row creates one of these and passes it to each call; the first call in a folder lists the drivers, and
+ * the rest reuse what it found.
+ *
+ * What this gives up is narrow. The listing and the read were already two processes, so a configuration written
+ * between them was never kept out; sharing the listing widens that window from one call to one operation the host
+ * itself runs. A planted repository's configuration is on disk before the operation starts, and is turned off as
+ * before. A listing that fails is not kept: the next call lists again.
+ */
+export type GitFilterListings = Map<string, Promise<string[]>>
+
+export function gitFilterListings(): GitFilterListings {
+  return new Map()
+}
+
+function listedFilterOverrides(cwd: string, listings: GitFilterListings): Promise<string[]> {
+  let listed = listings.get(cwd)
+  if (!listed) {
+    listed = filterOverrides(cwd)
+    listings.set(cwd, listed)
+    listed.catch(() => {
+      if (listings.get(cwd) === listed) listings.delete(cwd)
+    })
+  }
+  return listed
 }
 
 const DEFAULTS = { timeout: 10_000, maxBuffer: 32 * 1024 * 1024 }
@@ -129,10 +163,11 @@ async function filterOverrides(cwd: string): Promise<string[]> {
 }
 
 /** The full argument list for one call — exported for tests that check what git received */
-export async function gitArgv(cwd: string, args: string[], allowRepoPrograms = false): Promise<string[]> {
+export async function gitArgv(cwd: string, args: string[], allowRepoPrograms = false, filters?: GitFilterListings): Promise<string[]> {
   if (allowRepoPrograms) return [...BASE, ...args]
   const [sub = '', ...rest] = args
-  return [...BASE, ...LOCKED, ...(await filterOverrides(cwd)), sub, ...(LOCKED_SUBCOMMAND[sub] ?? []), ...rest]
+  const overrides = await (filters ? listedFilterOverrides(cwd, filters) : filterOverrides(cwd))
+  return [...BASE, ...LOCKED, ...overrides, sub, ...(LOCKED_SUBCOMMAND[sub] ?? []), ...rest]
 }
 
 /**
@@ -140,7 +175,7 @@ export async function gitArgv(cwd: string, args: string[], allowRepoPrograms = f
  * execFile errors; streamed calls also report the exit code and bounded stderr.
  */
 export async function runGit(cwd: string, args: string[], opts: RunGitOptions = {}): Promise<string> {
-  const argv = await gitArgv(cwd, args, opts.allowRepoPrograms)
+  const argv = await gitArgv(cwd, args, opts.allowRepoPrograms, opts.filters)
   if (opts.outputFile) {
     const output = await open(opts.outputFile, 'w', 0o600)
     try {

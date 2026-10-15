@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { isSessionId } from '@cc/protocol'
 import { dataRoot } from '../data-dir.js'
-import { runGit, type GitTrust } from './git-exec.js'
+import { gitFilterListings, runGit, type GitFilterListings, type GitTrust, type RunGitOptions } from './git-exec.js'
 import { assertExistingPath } from './path-guard.js'
 
 export type WorktreeRecovery = { snapshot: string; tip: string; changedFiles: number; commits: number }
@@ -90,11 +90,11 @@ export async function clearRecoveredBranchMark(repo: string, branch: string): Pr
 }
 
 /** Read NUL records without imposing the subprocess stdout buffer limit on trees/history. */
-async function* gitRecords(repo: string, args: string[], input?: string): AsyncGenerator<string> {
+async function* gitRecords(repo: string, args: string[], input?: string, filters?: GitFilterListings): AsyncGenerator<string> {
   const dir = await mkdtemp(join(tmpdir(), 'cc-recovery-git-'))
   const file = join(dir, 'records')
   try {
-    await runGit(repo, args, { outputFile: file, timeout: RECOVERY_TIMEOUT, input })
+    await runGit(repo, args, { outputFile: file, timeout: RECOVERY_TIMEOUT, input, filters })
     let pending = ''
     for await (const chunk of createReadStream(file, { encoding: 'utf8' })) {
       pending += chunk
@@ -112,6 +112,9 @@ async function* gitRecords(repo: string, args: string[], input?: string): AsyncG
 
 /** Preflight every repository before any private index is populated or objects are written. */
 export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk: string, branch?: string): Promise<WorktreeRecovery> {
+  // About fifteen git calls per repository, each of which would list its filter drivers again (#368)
+  const filters = gitFilterListings()
+  const git = (repo: string, args: string[], opts: RunGitOptions = {}) => runGit(repo, args, { ...opts, filters })
   const plans: { repo: string; path: string; tip: string; refs: string[]; commits: number }[] = []
   let bytes = 0
   const account = (size: number) => {
@@ -121,19 +124,19 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
     }
   }
   const prepare = async (repo: string, path: string, gitlinks: string[] = []): Promise<void> => {
-    const tip = (await runGit(repo, ['rev-parse', '--verify', 'HEAD'])).trim()
+    const tip = (await git(repo, ['rev-parse', '--verify', 'HEAD'])).trim()
     const refs = ['HEAD']
     if (!path && branch) {
       const ref = `refs/heads/${branch}`
-      if (await runGit(repo, ['rev-parse', '--verify', ref]).then(() => true).catch(() => false)) refs.push(ref)
+      if (await git(repo, ['rev-parse', '--verify', ref]).then(() => true).catch(() => false)) refs.push(ref)
     } else if (path) {
       // Removing the worktree also removes its private module repository. Preserve every local
       // branch plus detached HEAD when their commits are absent from that module's remotes.
-      refs.push(...(await runGit(repo, ['for-each-ref', '--format=%(refname)', 'refs/heads/'])).trim().split('\n').filter(Boolean))
+      refs.push(...(await git(repo, ['for-each-ref', '--format=%(refname)', 'refs/heads/'])).trim().split('\n').filter(Boolean))
       // A superproject can name module objects this checkout never fetched. They cannot be
       // lost here, and must not make rev-list or bundle creation refuse the deletion.
       if (gitlinks.length) {
-        const available = await runGit(repo, ['cat-file', '--batch-check=%(objectname) %(objecttype)'], {
+        const available = await git(repo, ['cat-file', '--batch-check=%(objectname) %(objecttype)'], {
           input: gitlinks.map((oid) => `${oid}^{commit}`).join('\n') + '\n', timeout: RECOVERY_TIMEOUT,
           // Older Git ignores the lazy-fetch switch; disallow transports there too.
           env: { GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: '' },
@@ -145,17 +148,17 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
       }
     }
     const baselineOid = !path
-      ? await runGit(repo, ['rev-parse', '--verify', `${trunk}^{commit}`]).then((s) => s.trim()).catch(() => null)
+      ? await git(repo, ['rev-parse', '--verify', `${trunk}^{commit}`]).then((s) => s.trim()).catch(() => null)
       : null
     const exclude = path
-      ? (await runGit(repo, ['for-each-ref', '--format=^%(objectname)', 'refs/remotes/'])).trim().split('\n').filter(Boolean)
+      ? (await git(repo, ['for-each-ref', '--format=^%(objectname)', 'refs/remotes/'])).trim().split('\n').filter(Boolean)
       : baselineOid ? [`^${baselineOid}`] : []
     // Keep both positive and negative revisions on stdin: --not on the command line
     // does not affect stdin revisions, and large module histories exceed Windows argv limits.
     const revisions = [...refs, ...exclude].join('\n') + '\n'
-    const commits = Number((await runGit(repo, ['rev-list', '--count', '--stdin'], { input: revisions, timeout: RECOVERY_TIMEOUT })).trim())
+    const commits = Number((await git(repo, ['rev-list', '--count', '--stdin'], { input: revisions, timeout: RECOVERY_TIMEOUT })).trim())
     plans.push({ repo, path, tip, refs, commits })
-    const stagedNames = new Set((await runGit(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip], { timeout: RECOVERY_TIMEOUT })).split('\0'))
+    const stagedNames = new Set((await git(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip], { timeout: RECOVERY_TIMEOUT })).split('\0'))
     const modules: string[] = []
     const moduleCommits = new Map<string, Set<string>>()
     const keepGitlink = (rel: string, oid: string) => {
@@ -171,7 +174,7 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
     // Raw parent diffs include intermediate and merge-only gitlinks without a process per
     // commit. HEAD's tree also covers unchanged links and the no-unmerged-commits case.
     let change: RegExpMatchArray | null = null
-    for await (const row of gitRecords(repo, ['log', '--raw', '-z', '--no-renames', '--ignore-submodules=none', '--no-abbrev', '--format=', '--root', '--diff-merges=separate', '--stdin'], revisions)) {
+    for await (const row of gitRecords(repo, ['log', '--raw', '-z', '--no-renames', '--ignore-submodules=none', '--no-abbrev', '--format=', '--root', '--diff-merges=separate', '--stdin'], revisions, filters)) {
       if (change) {
         const [, oldMode, newMode, oldOid, newOid] = change
         if (oldMode === '160000') keepGitlink(row, oldOid!)
@@ -181,7 +184,7 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
         change = null
       } else change = row.match(/^\n*:(\d{6}) (\d{6}) ([a-f0-9]+) ([a-f0-9]+) [A-Z]$/)
     }
-    for await (const row of gitRecords(repo, ['ls-tree', '-r', '-z', 'HEAD'])) {
+    for await (const row of gitRecords(repo, ['ls-tree', '-r', '-z', 'HEAD'], undefined, filters)) {
       const tab = row.indexOf('\t')
       const [mode, , oid] = row.slice(0, tab).split(' ')
       const rel = row.slice(tab + 1)
@@ -189,7 +192,7 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
       keepManifest(rel, oid!)
     }
     const stagedObjects: string[] = []
-    for await (const row of gitRecords(repo, ['ls-files', '--stage', '-z'])) {
+    for await (const row of gitRecords(repo, ['ls-files', '--stage', '-z'], undefined, filters)) {
       if (!row) continue
       const tab = row.indexOf('\t')
       const rel = row.slice(tab + 1)
@@ -202,7 +205,7 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
     // once, and associate all historical paths of a name with the initialized checkout.
     const modulePaths = new Map<string, Set<string>>()
     for (const oid of manifests) {
-      const config = await runGit(repo, ['config', '--blob', oid, '-z', '--get-regexp', '^submodule\\..*\\.path$'])
+      const config = await git(repo, ['config', '--blob', oid, '-z', '--get-regexp', '^submodule\\..*\\.path$'])
         .catch((e: { code?: number }) => { if (e.code === 1) return ''; throw e })
       for (const row of config.split('\0').filter(Boolean)) {
         const newline = row.indexOf('\n')
@@ -220,13 +223,13 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
       }
     }
     if (stagedObjects.length) {
-      const sizes = await runGit(repo, ['cat-file', '--batch-check=%(objectsize)'], { input: stagedObjects.join('\n') + '\n' })
+      const sizes = await git(repo, ['cat-file', '--batch-check=%(objectsize)'], { input: stagedObjects.join('\n') + '\n' })
       for (const size of sizes.trim().split('\n')) {
         if (!/^\d+$/.test(size)) throw new Error('Could not measure staged recovery data')
         account(Number(size))
       }
     }
-    const files = new Set((await runGit(repo, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])).split('\0').filter(Boolean))
+    const files = new Set((await git(repo, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])).split('\0').filter(Boolean))
     for (const rel of files) {
       const file = await lstat(join(repo, rel)).catch((e: NodeJS.ErrnoException) => {
         if (e.code !== 'ENOENT') throw e
@@ -250,7 +253,7 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
   const patchFile = async (repo: string, tip: string, file: string, env?: Record<string, string>): Promise<boolean> => {
     // Git writes bytes directly. Decoding stdout as UTF-8 would corrupt CP949/Latin-1 patches,
     // and buffering stdout would fail on large diffs even within the measured input limit.
-    await runGit(repo, ['diff', '--cached', '--binary', '--full-index', '--no-renames', `--output=${file}`, tip], { env, timeout: RECOVERY_TIMEOUT })
+    await git(repo, ['diff', '--cached', '--binary', '--full-index', '--no-renames', `--output=${file}`, tip], { env, timeout: RECOVERY_TIMEOUT })
     await chmod(file, 0o600)
     if ((await stat(file)).size > 0) return true
     await rm(file)
@@ -278,19 +281,19 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
               entry.refs.push(name)
             }
           }
-          if (updates.length) await runGit(repo, ['update-ref', '--stdin'], { input: updates.join('\n') + '\n', timeout: RECOVERY_TIMEOUT })
-          await runGit(repo, ['bundle', 'create', join(dir, `${n}.bundle`), '--stdin'], { input: entry.refs.join('\n') + '\n', timeout: RECOVERY_TIMEOUT })
+          if (updates.length) await git(repo, ['update-ref', '--stdin'], { input: updates.join('\n') + '\n', timeout: RECOVERY_TIMEOUT })
+          await git(repo, ['bundle', 'create', join(dir, `${n}.bundle`), '--stdin'], { input: entry.refs.join('\n') + '\n', timeout: RECOVERY_TIMEOUT })
         } finally {
-          if (temporaryRefs.length) await runGit(repo, ['update-ref', '--stdin'], { input: temporaryRefs.map((ref) => `delete ${ref}`).join('\n') + '\n', timeout: RECOVERY_TIMEOUT })
+          if (temporaryRefs.length) await git(repo, ['update-ref', '--stdin'], { input: temporaryRefs.map((ref) => `delete ${ref}`).join('\n') + '\n', timeout: RECOVERY_TIMEOUT })
         }
       }
       entry.staged = await patchFile(repo, tip, join(dir, `${n}.staged.patch`))
-      const stagedNames = await runGit(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip], { timeout: RECOVERY_TIMEOUT })
+      const stagedNames = await git(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip], { timeout: RECOVERY_TIMEOUT })
       const env = { GIT_INDEX_FILE: join(dir, `${n}.index`) }
       try {
-        await runGit(repo, ['read-tree', tip], { env })
-        await runGit(repo, ['add', '-A', '--', '.'], { env, timeout: RECOVERY_TIMEOUT })
-        const names = await runGit(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip], { env, timeout: RECOVERY_TIMEOUT })
+        await git(repo, ['read-tree', tip], { env })
+        await git(repo, ['add', '-A', '--', '.'], { env, timeout: RECOVERY_TIMEOUT })
+        const names = await git(repo, ['diff', '--cached', '--name-only', '-z', '--no-renames', tip], { env, timeout: RECOVERY_TIMEOUT })
         snapshot.changedFiles += new Set([...names.split('\0'), ...stagedNames.split('\0')].filter(Boolean)).size
         entry.patch = await patchFile(repo, tip, join(dir, `${n}.patch`), env)
       } finally {
