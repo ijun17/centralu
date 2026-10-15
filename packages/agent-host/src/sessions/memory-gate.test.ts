@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { availableMemorySource } from '../os.js'
-import { gigabytes, MemoryGate, parseMemInfo, parseVmStat } from './memory-gate.js'
+import { gigabytes, MemoryGate, parseMemInfo, parseVmStat, readAvailableMemory } from './memory-gate.js'
 
 /**
  * The start gate for new agent sessions (#686): how free plus reclaimable memory is read on each OS, and how starts
@@ -39,6 +39,36 @@ describe('reading free plus reclaimable memory', () => {
     expect(availableMemorySource('darwin')).toMatchObject({ kind: 'command', file: '/usr/bin/vm_stat' })
     expect(availableMemorySource('linux')).toMatchObject({ kind: 'file', path: '/proc/meminfo' })
     expect(availableMemorySource('win32')).toEqual({ kind: 'freemem' })
+  })
+})
+
+describe('a read that fails (#695 review)', () => {
+  afterEach(() => vi.restoreAllMocks())
+  // os.freemem() on the owner's Mac: free pages only, far under the floor although 9 GB were reclaimable
+  const free = () => 0.08 * GB
+  const darwin = availableMemorySource('darwin')
+  const linux = availableMemorySource('linux')
+
+  it('is not replaced by os.freemem() on macOS or Linux: it reads null, says so in one log line, and the gate lets the start go', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const failing = async () => {
+      throw new Error('spawn /usr/bin/vm_stat ENOENT')
+    }
+    expect(await readAvailableMemory({ source: darwin, exec: failing, free })).toBeNull()
+    expect(log).toHaveBeenCalledTimes(1)
+    expect(String(log.mock.calls[0]![0])).toContain('/usr/bin/vm_stat')
+    // Output it cannot parse is a failed read too
+    expect(await readAvailableMemory({ source: darwin, exec: async () => ({ stdout: 'something else' }), free })).toBeNull()
+    expect(await readAvailableMemory({ source: linux, readText: failing, free })).toBeNull()
+    expect(log).toHaveBeenCalledTimes(3)
+    const gate = new MemoryGate({ read: () => readAvailableMemory({ source: darwin, exec: failing, free }) })
+    expect(await gate.short()).toBeNull()
+  })
+
+  it('a successful read is the source\'s, and Windows reads os.freemem()', async () => {
+    const vm = 'Mach Virtual Memory Statistics: (page size of 4096 bytes)\nPages free: 1000.\nPages inactive: 3000.\n'
+    expect(await readAvailableMemory({ source: darwin, exec: async () => ({ stdout: vm }), free })).toBe(4000 * 4096)
+    expect(await readAvailableMemory({ source: availableMemorySource('win32'), free })).toBe(0.08 * GB)
   })
 })
 

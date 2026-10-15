@@ -52,19 +52,36 @@ export function parseMemInfo(text: string): number | null {
 
 const run = promisify(execFile)
 
-/** Free plus reclaimable memory on this machine, in bytes. A read that fails falls back to `os.freemem()`. */
-export async function readAvailableMemory(): Promise<number> {
-  const source = availableMemorySource()
+/** What `readAvailableMemory` reads with; a test passes its own */
+export type MemoryReadDeps = {
+  source?: ReturnType<typeof availableMemorySource>
+  exec?: (file: string, args: string[]) => Promise<{ stdout: string }>
+  readText?: (path: string) => Promise<string>
+  free?: () => number
+}
+
+/**
+ * Free plus reclaimable memory on this machine, in bytes; null when it could not be read, which lets the start go
+ * (`MemoryGate.short`). A failed `vm_stat` or `/proc/meminfo` read is **not** replaced with `os.freemem()`: there it
+ * counts only the free pages (0.08 GB on a 24 GB Mac with 9 GB reclaimable), so the gate would never open and every
+ * child would wait out the bound (#695 review). Only Windows, where `os.freemem()` is the source, reads it.
+ */
+export async function readAvailableMemory(deps: MemoryReadDeps = {}): Promise<number | null> {
+  const source = deps.source ?? availableMemorySource()
+  const free = deps.free ?? freemem
+  if (source.kind === 'freemem') return free()
+  const what = source.kind === 'command' ? source.file : source.path
   try {
-    if (source.kind === 'command') {
-      const { stdout } = await run(source.file, source.args, { timeout: 5_000 })
-      return parseVmStat(stdout) ?? freemem()
-    }
-    if (source.kind === 'file') return parseMemInfo(await readFile(source.path, 'utf8')) ?? freemem()
-  } catch {
-    // vm_stat missing or /proc unreadable (a sandbox): os.freemem() undercounts, which only queues sooner
+    const value =
+      source.kind === 'command'
+        ? parseVmStat((await (deps.exec ?? ((f, a) => run(f, a, { timeout: 5_000 })))(source.file, source.args)).stdout)
+        : parseMemInfo(await (deps.readText ?? ((p) => readFile(p, 'utf8')))(source.path))
+    if (value !== null) return value
+    console.error(`[memory-gate] could not parse ${what}; letting agent starts through`)
+  } catch (e) {
+    console.error(`[memory-gate] could not read ${what} (${(e as Error).message}); letting agent starts through`)
   }
-  return freemem()
+  return null
 }
 
 /** A reading below the floor: what was available, and what is needed */
@@ -87,7 +104,7 @@ type Waiter = { resolve: (o: MemoryWaitOutcome) => void; deadline: number; signa
  * again. The oldest goes, and the next one reads memory again at the next check.
  */
 export class MemoryGate {
-  private readonly read: () => Promise<number>
+  private readonly read: () => Promise<number | null>
   readonly floor: number
   private readonly recheckMs: number
   private readonly maxWaitMs: number
@@ -97,7 +114,7 @@ export class MemoryGate {
   private closed = false
 
   constructor(
-    opts: { read?: () => Promise<number>; floor?: number; recheckMs?: number; maxWaitMs?: number; now?: () => number } = {},
+    opts: { read?: () => Promise<number | null>; floor?: number; recheckMs?: number; maxWaitMs?: number; now?: () => number } = {},
   ) {
     this.read = opts.read ?? readAvailableMemory
     this.floor = opts.floor ?? MEMORY_FLOOR_BYTES
@@ -111,15 +128,18 @@ export class MemoryGate {
     return Math.round(this.maxWaitMs / 60_000)
   }
 
-  /** null when a start may go now; otherwise the reading. A read that throws lets the start go: the gate never blocks on itself */
+  /**
+   * null when a start may go now; otherwise the reading. A read that fails (throws, or answers null) lets the start go:
+   * the gate never blocks on itself
+   */
   async short(): Promise<MemoryShortfall | null> {
-    let available: number
+    let available: number | null
     try {
       available = await this.read()
     } catch {
       return null
     }
-    return available < this.floor ? { available, floor: this.floor } : null
+    return available !== null && available < this.floor ? { available, floor: this.floor } : null
   }
 
   /** Starts waiting now (oldest first), until memory is back, the bound passes, or `signal` aborts */
