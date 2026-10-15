@@ -2598,7 +2598,10 @@ function sameGit(a: ProjectInfo['git'], b: ProjectInfo['git']): boolean {
   )
 }
 
-/** Calls of the orchestrator's proposal tools that have not returned yet: their `tool_result` re-reads the lists (#703) */
+/**
+ * Calls of the orchestrator's proposal tools that have not returned yet, as `sessionId:callId` (a Codex call id may be
+ * unique only within its thread): their `tool_result` re-reads the lists (#703)
+ */
 const proposalCalls = new Set<string>()
 const PROPOSAL_CALLS_MAX = 50
 
@@ -3704,9 +3707,9 @@ export const useStore = create<AppState>((set, get) => ({
      */
     if (e.type === 'tool_call' && /(propose_mcp_server|propose_skill|centralu_run)$/.test(e.summary.tool)) {
       if (proposalCalls.size >= PROPOSAL_CALLS_MAX) proposalCalls.delete(proposalCalls.values().next().value!)
-      proposalCalls.add(e.callId)
+      proposalCalls.add(`${sessionId}:${e.callId}`)
     }
-    if (e.type === 'tool_result' && proposalCalls.delete(e.callId)) {
+    if (e.type === 'tool_result' && proposalCalls.delete(`${sessionId}:${e.callId}`)) {
       void get().refreshMcpProposals()
       void get().refreshSkillProposals()
     }

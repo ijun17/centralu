@@ -3654,9 +3654,10 @@ describe('MCP server suggestions', () => {
     const mock = new MockPlatform()
     mock.sessions.set('mcp-s3', sessionInfo('mcp-s3'))
     await useStore.getState().attach(mock)
-    const call = (tool: string, callId: string) =>
-      mock.emit({ type: 'tool_call', sessionId: 'mcp-s3', callId, summary: { tool, title: tool, readOnly: false, paths: [] } } as NormalizedEvent)
-    const result = (callId: string) => mock.emit({ type: 'tool_result', sessionId: 'mcp-s3', callId, ok: true, summary: '' } as NormalizedEvent)
+    mock.sessions.set('mcp-s3b', sessionInfo('mcp-s3b'))
+    const call = (tool: string, callId: string, sessionId = 'mcp-s3') =>
+      mock.emit({ type: 'tool_call', sessionId, callId, summary: { tool, title: tool, readOnly: false, paths: [] } } as NormalizedEvent)
+    const result = (callId: string, sessionId = 'mcp-s3') => mock.emit({ type: 'tool_result', sessionId, callId, ok: true, summary: '' } as NormalizedEvent)
     const read = vi.spyOn(mock.agents, 'mcpProposals')
 
     // An unrelated call's result reads nothing
@@ -3664,6 +3665,15 @@ describe('MCP server suggestions', () => {
     result('other')
     await Promise.resolve()
     expect(read).not.toHaveBeenCalled()
+
+    // Call ids may repeat between sessions (a Codex id is unique per thread): another session's result is not this call's
+    call('centralu_run', 'same-id')
+    result('same-id', 'mcp-s3b')
+    await Promise.resolve()
+    expect(read).not.toHaveBeenCalled()
+    result('same-id')
+    await vi.waitFor(() => expect(read).toHaveBeenCalled())
+    read.mockClear()
 
     // The old host saved without announcing (the lists change silently), then the call returned
     call('centralu_run', 'run-1')

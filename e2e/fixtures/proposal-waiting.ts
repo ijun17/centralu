@@ -15,6 +15,7 @@ import { newSession, setup } from './project-screen.js'
 type Mock = {
   emit(e: Record<string, unknown>): void
   saveProposal(spec: Record<string, unknown>): void
+  proposalReads: number
 }
 
 /** The orchestrator has a conversation, and the person is looking at another session */
@@ -30,29 +31,41 @@ async function orchestratorAndElsewhere(page: Page) {
   return { orc, other }
 }
 
-/** The order the host really has: the call starts and its event goes out, then the proposal is saved and announced */
-async function proposeAfterToolCall(page: Page, orc: string, spec: Record<string, unknown>, tool: string) {
+/**
+ * The order the host really has: the call starts and its event goes out, then the proposal is saved and announced.
+ *
+ * Between the two the screen must have **handled** the `tool_call`. Events are handled in order, so a title event sent
+ * right after it is on screen only once the `tool_call` was handled: whatever read the screen makes on a `tool_call`
+ * (the old behaviour: a read that finds nothing yet) has been made by then, before anything is saved. Returns how many
+ * list reads happened between the call's start and the save.
+ */
+async function proposeAfterToolCall(page: Page, orc: string, spec: Record<string, unknown>, tool: string): Promise<number> {
+  const before = await page.evaluate(() => ((window as any).__mock as Mock).proposalReads)
   await page.evaluate(
-    ({ sid, t }) =>
-      ((window as any).__mock as Mock).emit({
-        type: 'tool_call', sessionId: sid, callId: `call-${t}`, summary: { tool: t, title: t, readOnly: true, paths: [] },
-      }),
+    ({ sid, t }) => {
+      const m = (window as any).__mock as Mock
+      m.emit({ type: 'tool_call', sessionId: sid, callId: `call-${t}`, summary: { tool: t, title: t, readOnly: true, paths: [] } })
+      m.emit({ type: 'session_title', sessionId: sid, title: `after ${t}`, auto: false })
+    },
     { sid: orc, t: tool },
   )
-  // The screen has read the lists in response to the tool_call, if it ever does, and they are still empty; nothing is saved yet
   await expect
-    .poll(() => page.evaluate(() => { const st = (window as any).__store.getState(); return st.mcpProposals.length + st.skillProposals.length }))
-    .toBe(0)
+    .poll(() => page.evaluate(({ sid }) => (window as any).__store.getState().sessions[sid].name, { sid: orc }))
+    .toBe(`after ${tool}`)
+  const reads = (await page.evaluate(() => ((window as any).__mock as Mock).proposalReads)) - before
   await page.evaluate((s) => ((window as any).__mock as Mock).saveProposal(s), spec)
+  return reads
 }
 
 export function proposalWaitingTests() {
   test('a proposal saved after its tool_call shows the card without a reload', async ({ page }) => {
     const { orc } = await orchestratorAndElsewhere(page)
-    await proposeAfterToolCall(
+    const reads = await proposeAfterToolCall(
       page, orc, { mcp: { name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'], why: 'drive a browser' } },
       'mcp__centralu__propose_mcp_server',
     )
+    // The screen does not read on the call's start: the host's announcement after the save is what it waits for
+    expect(reads).toBe(0)
 
     await page.getByTestId('orchestrator-button').click()
     await expect(page.getByTestId('mcp-proposal-playwright')).toBeVisible()

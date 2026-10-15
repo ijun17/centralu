@@ -77,7 +77,10 @@ visibility is not read as the default: the side that is wrong stays closed.
   `orchestrator_proposals_changed`, sent after the write, and the screen re-reads on it: not on the
   orchestrator's `tool_call`, which arrives before anything is saved (#703). A pending proposal
   counts as waiting on the person: the orchestrator's sidebar row, the top-bar count, the waiting
-  list and the next-waiting jump carry it like an approval.
+  list and the next-waiting jump carry it like an approval. Two re-reads cover a missed broadcast:
+  the reconnect recovery reads both lists (a gap such as sleep or a host swap), and the `tool_result`
+  of a proposal call (`propose_mcp_server`, `propose_skill`, `centralu_run`; matched by session and
+  call id) reads them after the save, for a host that predates the event.
 
 **Data and secrets stay out of the repository.** A project app's folder is committed, so a file the
 app wrote there while running would reach the whole team.

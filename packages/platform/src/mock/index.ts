@@ -232,6 +232,8 @@ export class MockPlatform implements Platform {
     else this.skillProposalList.push(spec.skill)
     this.emit({ type: 'orchestrator_proposals_changed' })
   }
+  /** How many times the screen read a proposal list (either) — for tests that say when it reads (#703) */
+  proposalReads = 0
   /** Approved skills — the observation point for whether approving/deleting was actually delivered */
   readonly skillList: { name: string; content: string }[] = []
   readonly notifications: { title: string; body: string }[] = []
@@ -2051,7 +2053,10 @@ export class MockPlatform implements Platform {
       if (!s?.worktree) return null
       return { ...s.worktree, dirty: this.mockWorktreeDirty, changedFiles: this.mockWorktreeDirty ? 2 : 0 }
     },
-    mcpProposals: async () => ({ proposals: [...this.mcpProposalList] }),
+    mcpProposals: async () => {
+      this.proposalReads++
+      return { proposals: [...this.mcpProposalList] }
+    },
     resolveMcpProposal: async (name: string, approve: boolean) => {
       const at = this.mcpProposalList.findIndex((p) => p.name === name)
       if (at === -1) throw Object.assign(new Error(`No pending proposal named "${name}"`), { code: 'internal' })
@@ -2059,7 +2064,10 @@ export class MockPlatform implements Platform {
       if (approve) this.mcpApproved.push(hit!.name)
       this.emit({ type: 'orchestrator_proposals_changed' })
     },
-    skillProposals: async () => ({ proposals: [...this.skillProposalList] }),
+    skillProposals: async () => {
+      this.proposalReads++
+      return { proposals: [...this.skillProposalList] }
+    },
     resolveSkillProposal: async (name: string, approve: boolean) => {
       const at = this.skillProposalList.findIndex((p) => p.name === name)
       if (at === -1) throw Object.assign(new Error(`No pending skill proposal named "${name}"`), { code: 'internal' })
