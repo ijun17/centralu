@@ -69,6 +69,7 @@ centralu/
 │  │     ├─ store/              # zustand store + selectors (reducers are imported from core)
 │  │     │                      #   store.ts builds the one store and keeps its actions; what moved out of it (#428):
 │  │     │  └─ state.ts (the types)  historyPages.ts (history pages merged with the screen)
+│  │     │     screens.ts (which screen is on)  appKeys.ts (how an app and its views are named)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)

@@ -42,7 +42,6 @@ import {
   sanitizeGridPanels,
   sanitizeArrangements,
   migrateArrangement,
-  arrangePanels,
   withPanel,
   sessionPanelId,
   isAway,
@@ -52,7 +51,7 @@ import {
 import type { AppToolResult, Platform, WorkspaceSnapshot } from '@cc/platform/ports'
 import { isOnScreen } from '../app/onscreen.js'
 import { activateTab, defaultLayout, sanitizeLayout } from './panelLayout.js'
-import { closeLayer, EMPTY_NAV, sameScreen, step, visit, type Screen } from './navHistory.js'
+import { closeLayer, EMPTY_NAV, sameScreen, step, visit } from './navHistory.js'
 import { reloadBudget } from './reloadBudget.js'
 import { agentApplyVerdict } from '../features/settings/apply-offer.js'
 import { viewReconnect } from './viewReconnect.js'
@@ -64,6 +63,20 @@ import { EMPTY_DRAFT, type AppState, type Draft, type InlineView, type Notice, t
 export { EMPTY_DRAFT } from './state.js'
 export type { AppState, Draft, InlineView, Notice, Overlay, PinnedView, SubagentSteps } from './state.js'
 import { HISTORY_PAGE, OFFSCREEN_TRIM_AT, mergePage, prependPage, readBack, trimWindow } from './historyPages.js'
+import { externalAppKey, gridAppViewKey, isApp } from './appKeys.js'
+export { externalAppKey, gridAppViewKey, isApp } from './appKeys.js'
+import { projectScreenSessions, returnsToPanel, screenExists, screenOf } from './screens.js'
+export {
+  gridScreenAppKeys,
+  newSessionProjectOf,
+  openProjectOf,
+  projectScreenAppKeys,
+  projectScreenOf,
+  projectScreenSessions,
+  returnsToPanel,
+  screenExists,
+  screenOf,
+} from './screens.js'
 
 /**
  * The store only does the wiring — all state-change logic lives in core (docs/state-management.md
@@ -138,45 +151,6 @@ function fitWidth(px: number, minReal: number, max: number, otherLane: number, z
   const winW = (typeof window === 'undefined' ? 1280 : window.innerWidth) / zoom
   const available = winW - otherLane - CENTER_MIN / zoom
   return Math.min(max, Math.max(Math.round(minReal / zoom), Math.round(Math.min(px, available))))
-}
-
-/**
- * The key for one external app. An app is identified by (project, id) — the `notes` app of two
- * different projects are two different apps. `_user` is the user-folder app; it matches the
- * host's scope name and never collides with a project id (a UUID).
- */
-export function externalAppKey(projectId: string | null | undefined, appId: string, machine?: string | null): string {
-  /*
-   * A linked machine's user-folder app has no project to tell it from this computer's app of the same id (both read
-   * `_user/<id>`), so its key names the machine (#82). A project app's key already does: its project id is qualified.
-   */
-  return appKeyOf(projectId, appId, machine)
-}
-
-/**
- * Whether an app in the list is the one (project, id, machine) names. `machine` matters only for a user-folder app
- * (#82): absent or null is this computer's, a machine id is that linked machine's.
- */
-export function isApp(a: ExternalAppInfo, projectId: string | null | undefined, appId: string, machine?: string | null): boolean {
-  if (a.appId !== appId || a.projectId !== (projectId ?? null)) return false
-  return projectId ? true : (a.machine ?? null) === (machine ?? null)
-}
-
-/**
- * The key of an app's view on the grid (#288) — a pinned view of its own, apart from the app's
- * pinned view (`externalAppKey`) that the app view and its project screen share.
- *
- * Owner decision (2026-10-04): the same app can stand in more than one place at once, and each
- * place is its own view while the app's process is shared. The grid and the project screen are
- * different screens with different lives — × on the grid must not tear down the view a person left
- * on the project screen, and the other way round — so the grid's entry is keyed apart. Everything
- * else about it is a pinned view's: opened by `home`, laid over its panel (`pinned-app/slots.ts`),
- * hidden rather than unloaded while another screen is looked at, followed to new code, and torn
- * down first whenever it goes. `grid:` cannot begin an app key, whose first segment is a project
- * id or `_user`.
- */
-export function gridAppViewKey(projectId: string | null, appId: string, machine?: string | null): string {
-  return `grid:${appKeyOf(projectId, appId, machine)}`
 }
 
 /** The number assigning the order things came alive — it only ever increases, across all sessions */
@@ -863,117 +837,6 @@ function trackWorkingSince(
  *    the question is dropped.
  *  - `none`: no open question.
  */
-/**
- * The project whose screen is showing (#203), or null. The project screen is the focus lane with no session
- * picked: `focusProject` releases the session focus to open it, and picking a session leaves it.
- */
-export function projectScreenOf(
-  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'projects'>,
-): string | null {
-  const pid = s.view === 'focus' && !s.focusedSessionId ? s.focusedProjectId : null
-  return pid && s.projects[pid] ? pid : null
-}
-
-/**
- * The project the focus lane is showing — its screen, one of its sessions or one of its apps — or null. The sidebar tints that
- * project's group, so the person can see which project they are in as well as which row.
- *
- * Only the focus lane counts: the grid and the orchestrator are views of their own, lit by their own buttons, and a
- * tinted project beside them would be a second answer to "what am I looking at".
- *
- * A focused session answers with **its own** project, not `focusedProjectId`. Opening a session that has no project
- * (a coordinator) leaves `focusedProjectId` on the project looked at last, and reading that would tint a project the
- * screen is not showing.
- */
-export function openProjectOf(
-  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'focusedApp' | 'projects' | 'sessions'>,
-): string | null {
-  /*
-   * An app open in the app view belongs to its project the way a session does: the person is inside that project, so
-   * its group is tinted and the app's own row carries the mark. An app in the user folder belongs to no project and
-   * tints nothing, like a session with no project.
-   */
-  if (s.view === 'app') {
-    const pid = s.focusedApp?.projectId
-    return pid && s.projects[pid] ? pid : null
-  }
-  if (!s.focusedSessionId) return projectScreenOf(s)
-  if (s.view !== 'focus') return null
-  const pid = s.sessions[s.focusedSessionId]?.projectId
-  return pid && s.projects[pid] ? pid : null
-}
-
-/**
- * Where "New session" from the command palette starts one (#529): the project the person is in, by the same answer the
- * sidebar tints (`openProjectOf`); on the grid, the focused panel's session's project; otherwise the project looked at
- * last, then the first one. null only when there is no project at all, and the palette then does not offer it.
- */
-export function newSessionProjectOf(
-  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'focusedApp' | 'projects' | 'sessions'>,
-): string | null {
-  const known = (pid: string | null | undefined) => (pid && s.projects[pid] ? pid : null)
-  return (
-    openProjectOf(s) ??
-    known(s.focusedSessionId ? s.sessions[s.focusedSessionId]?.projectId : null) ??
-    known(s.focusedProjectId) ??
-    Object.keys(s.projects)[0] ??
-    null
-  )
-}
-
-/**
- * The sessions explicitly placed on the project screen right now. The
- * trash (#204) needs no rule here — a trashed session is not in `sessions`.
- */
-export function projectScreenSessions(
-  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'projects' | 'sessions' | 'projectPanels'>,
-): string[] {
-  const pid = projectScreenOf(s)
-  if (!pid) return []
-  const sessions = Object.values(s.sessions).filter((x) => x.projectId === pid)
-  const shown = new Set(arrangePanels(sessions.map((x) => sessionPanelId(x.id)), s.projectPanels[pid]))
-  return sessions.filter((x) => shown.has(sessionPanelId(x.id))).map((x) => x.id)
-}
-
-/**
- * The apps the project screen shows as panels right now, as pinned view keys (#203). PinnedApps lays exactly these
- * over their panels, so it and ProjectView must not decide this separately.
- */
-export function projectScreenAppKeys(
-  s: Pick<AppState, 'view' | 'focusedSessionId' | 'focusedProjectId' | 'projects' | 'externalApps' | 'projectPanels'>,
-): string[] {
-  const pid = projectScreenOf(s)
-  if (!pid) return []
-  const apps = s.externalApps.filter((a) => a.projectId === pid)
-  const shown = new Set(arrangePanels(apps.map((a) => appPanelId(a.appId)), s.projectPanels[pid]))
-  return apps.filter((a) => shown.has(appPanelId(a.appId))).map((a) => externalAppKey(pid, a.appId))
-}
-
-/**
- * The apps the grid shows as panels right now, as their grid view keys (#288, `gridAppViewKey`). PinnedApps lays exactly
- * these over the grid's panels, and GridView opens a view for each, so the two read this one answer. An app the list does
- * not have is not a panel (`visibleGridPanels`), so it gets no view either.
- */
-export function gridScreenAppKeys(s: Pick<AppState, 'view' | 'gridPanels' | 'externalApps'>): string[] {
-  if (s.view !== 'grid') return []
-  const listed = new Set(s.externalApps.map((a) => appKeyOf(a.projectId, a.appId, a.machine)))
-  return s.gridPanels.flatMap((p) =>
-    p.kind === 'app' && listed.has(appKeyOf(p.projectId, p.appId, p.machine)) ? [gridAppViewKey(p.projectId, p.appId, p.machine)] : [],
-  )
-}
-
-/**
- * Whether leaving the app view for this pinned view lands on a screen that shows it in a panel (#203): the view is
- * the one on screen, and the focus lane it goes back to is its project's screen with the app not hidden there.
- */
-export function returnsToPanel(
-  s: Pick<AppState, 'view' | 'focusedApp' | 'focusedSessionId' | 'focusedProjectId' | 'projects' | 'externalApps' | 'projectPanels'>,
-  key: string,
-): boolean {
-  if (s.view !== 'app' || !s.focusedApp || externalAppKey(s.focusedApp.projectId, s.focusedApp.appId, s.focusedApp.machine) !== key) return false
-  return projectScreenAppKeys({ ...s, view: 'focus' }).includes(key)
-}
-
 export function composerTarget(open: SessionSummary['pendingQuestions'], hasAttachments: boolean): 'answer' | 'drops' | 'none' {
   if (open.length === 0) return 'none'
   return open.length === 1 && open[0]!.questions.length === 1 && !hasAttachments ? 'answer' : 'drops'
@@ -5446,53 +5309,6 @@ function goodThemes(prev: Record<string, ThemeFileEntry>, files: readonly ThemeF
 /** The theme files to apply: a broken one stands in as its last clean version, if it ever had one */
 export function usableThemeFiles(s: { themeFiles: ThemeFileEntry[]; lastGoodThemes: Record<string, ThemeFileEntry> }): ThemeFileEntry[] {
   return s.themeFiles.map((f) => (f.broken ? (s.lastGoodThemes[f.id] ?? f) : f))
-}
-
-/**
- * The screen on now, as history records it (#374), or null for one that is not a place to return to (nothing
- * picked yet, the intro). Settings is a layer over the screen under it, and counts as a screen of its own.
- */
-export function screenOf(
-  s: Pick<AppState, 'settingsOpen' | 'view' | 'focusedApp' | 'focusedSessionId' | 'focusedProjectId' | 'projects'>,
-): Screen | null {
-  if (s.settingsOpen) return { kind: 'settings' }
-  return screenUnder(s)
-}
-
-/** The screen under any layer */
-function screenUnder(
-  s: Pick<AppState, 'view' | 'focusedApp' | 'focusedSessionId' | 'focusedProjectId' | 'projects'>,
-): Screen | null {
-  switch (s.view) {
-    case 'grid':
-      return { kind: 'grid' }
-    case 'orchestrator':
-      return { kind: 'orchestrator' }
-    case 'app':
-      return s.focusedApp ? { kind: 'app', projectId: s.focusedApp.projectId, appId: s.focusedApp.appId, ...(s.focusedApp.machine ? { machine: s.focusedApp.machine } : {}) } : null
-    case 'focus': {
-      if (s.focusedSessionId) return { kind: 'session', id: s.focusedSessionId }
-      const pid = projectScreenOf(s)
-      return pid ? { kind: 'project', id: pid } : null
-    }
-  }
-}
-
-/** Whether going back or forward to this screen would still find it (#374): the session, project or app is still here */
-export function screenExists(
-  s: Pick<AppState, 'sessions' | 'projects' | 'externalApps'>,
-  screen: Screen,
-): boolean {
-  switch (screen.kind) {
-    case 'session':
-      return !!s.sessions[screen.id]
-    case 'project':
-      return !!s.projects[screen.id]
-    case 'app':
-      return s.externalApps.some((a) => isApp(a, screen.projectId, screen.appId, screen.machine))
-    default:
-      return true
-  }
 }
 
 /** True while `navigate` puts a recorded screen back, so `recordScreen` does not record it as a new visit */
