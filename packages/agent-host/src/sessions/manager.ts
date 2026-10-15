@@ -694,12 +694,6 @@ export class SessionManager {
    * cannot let a second request in, and a swap or crash mid-delivery leaves the row for the next host.
    */
   private delivering = new Map<string, string>()
-  /**
-   * Queued ask_project requests that passed only because their caller was `auto` (no remembered consent for the pair):
-   * delivered only while it still is (`queuedGateError`). Live only; moving a session off `auto` also drops them
-   * from the store (`dropOpenedByAuto`), so a host swap carries none past a lowered preset.
-   */
-  private queuedUnderAuto = new Set<string>()
   /** The owner's waits on a delegated turn, woken by a card it may read (#676): session -> wakers, each for one caller */
   private cardWakers = new Map<string, Set<{ callerId: string; wake: () => void }>>()
   private ownTurn(sessionId: string, callerId: string, untilTurnEnd: boolean): void {
@@ -1022,7 +1016,9 @@ export class SessionManager {
         console.error(`[agent-host] queued request ${r.id} to ${r.sessionId.slice(0, 8)} was being delivered at the swap; delivering it again`)
         store.markQueuedDelivering(r.id, null)
       }
-      this.queued.set(r.sessionId, [...(this.queued.get(r.sessionId) ?? []), { ...r, deliveringAt: null }])
+      // A row an older build wrote does not say whether only `auto` let it through: an ask with no consent for the pair is read as such
+      const openedByAuto = r.openedByAuto ?? (r.via === 'ask_project' && !this.pairConsented(r.callerSessionId, this.meta.get(r.sessionId)!))
+      this.queued.set(r.sessionId, [...(this.queued.get(r.sessionId) ?? []), { ...r, deliveringAt: null, openedByAuto }])
     }
     if (this.queued.size) {
       setTimeout(() => {
@@ -7307,12 +7303,33 @@ export class SessionManager {
   }
 
   /**
-   * A session made for a child or a fork whose gates no longer pass once it exists: it gets no task and goes to the
-   * trash (a worktree stays, as for any trashed session), and the call reads why
+   * A session made for a child or a fork whose gates no longer pass once it exists: it gets no task, named for what it
+   * was made for, and goes to the trash (a worktree stays, as for any trashed session); the call reads why. A session
+   * the trash refuses has its process stopped instead, and the call says so.
    */
-  private async abandonChild(child: SessionInfo, why: string): Promise<{ ok: false; error: string }> {
-    await this.trashSession(child.id).catch(() => {})
-    return { ok: false, error: `${why} The session "${child.name}" made for it got no task and was moved to the trash.` }
+  private async abandonChild(child: SessionInfo, why: string, name?: string): Promise<{ ok: false; error: string }> {
+    if (name) this.rename(child.id, name)
+    const called = this.meta.get(child.id)?.name ?? child.name
+    try {
+      await this.trashSession(child.id)
+      return { ok: false, error: `${why} The session "${called}" made for it got no task and was moved to the trash.` }
+    } catch (e) {
+      const running = this.handles.has(child.id)
+      let stopped = running && (await this.sleepSession(child.id).catch(() => false))
+      // A fresh session has no turn to wait out: one sleep refuses is stopped all the same
+      const h = this.handles.get(child.id)
+      if (running && !stopped && h) {
+        this.handles.delete(child.id)
+        this.running.delete(child.id)
+        this.emit({ type: 'session_live', sessionId: child.id, live: false, reason: 'asleep' })
+        stopped = await h.dispose().then(() => true, () => false)
+      }
+      const left = !running ? 'no process of its was running' : stopped ? 'its process was stopped' : 'its process could not be stopped'
+      return {
+        ok: false,
+        error: `${why} The session "${called}" [${child.id}] made for it got no task, but could not be moved to the trash (${(e as Error).message}); ${left}. Tell the person.`,
+      }
+    }
   }
 
   /**
@@ -7381,7 +7398,7 @@ export class SessionManager {
       (callerNow && !presetWithin(child.permissionPreset, callerNow.permissionPreset)
         ? `This session's permissions were lowered to ${callerNow.permissionPreset} while the session was being made.`
         : null)
-    if (late) return done(await this.abandonChild(child, late))
+    if (late) return done(await this.abandonChild(child, late, worktree ? undefined : agentName(choice.task)))
     progress.stage = 'created'
     progress.childId = child.id
     // A worktree session is named by its branch, as every worktree session is; otherwise by its job
@@ -8154,6 +8171,8 @@ export class SessionManager {
     const original = this.meta.get(from)
     const heir = this.meta.get(to)
     if (!original || !heir || from === to || original.projectId !== heir.projectId) return []
+    // What only `auto` let the original queue does not go to a successor that is not `auto`; the original is told
+    if (heir.permissionPreset !== 'auto') this.dropOpenedByAuto(from)
     const queuedBy = new Set([...this.queued.values()].flat().filter((r) => r.callerSessionId === from).map((r) => r.sessionId))
     const delegated = [...this.delegations.values()].filter((d) => d.callerId === from)
     const stateOf = (s: SessionInfo): string | null => {
@@ -8579,8 +8598,9 @@ export class SessionManager {
     const held = this.queued.get(target.id) ?? []
     const same = held.findIndex((x) => x.callerSessionId === callerId && x.via === via && x.text === text)
     if (same >= 0) return { state: 'queued', sessionId: target.id, sessionName: target.name, queueId: held[same]!.id, position: same + 1 }
-    const r: QueuedRequest = { id: `qr-${randomUUID()}`, sessionId: target.id, callerSessionId: callerId, via, text, queuedAt: Date.now() }
-    if (via === 'ask_project' && this.meta.get(callerId)?.permissionPreset === 'auto' && !this.pairConsented(callerId, target)) this.queuedUnderAuto.add(r.id)
+    // Marked, and stored with the row, when only `auto` let an ask through: the delivery gate reads it (`queuedGateError`)
+    const openedByAuto = via === 'ask_project' && this.meta.get(callerId)?.permissionPreset === 'auto' && !this.pairConsented(callerId, target)
+    const r: QueuedRequest = { id: `qr-${randomUUID()}`, sessionId: target.id, callerSessionId: callerId, via, text, queuedAt: Date.now(), openedByAuto }
     const list = [...held, r]
     this.queued.set(target.id, list)
     this.store.addQueuedRequest(r)
@@ -8595,7 +8615,7 @@ export class SessionManager {
       const now = this.delivering.get(id)
       if (now && list.some((r) => r.id === now && which(r))) this.delivering.delete(id)
       const keep = list.filter((r) => !which(r))
-      for (const r of list) if (which(r)) { dropped.push(r); this.store.removeQueuedRequest(r.id); this.queuedUnderAuto.delete(r.id) }
+      for (const r of list) if (which(r)) { dropped.push(r); this.store.removeQueuedRequest(r.id) }
       if (keep.length) this.queued.set(id, keep)
       else this.queued.delete(id)
     }
@@ -8672,7 +8692,7 @@ export class SessionManager {
   /**
    * What the tool that queued a request checked before queuing it, read again at delivery, with the caller's preset as
    * it is now. ask_project: the gates on the caller, the target project still registered, and the pair's consent when
-   * only the caller's `auto` let the request pass without it (`queuedUnderAuto`); a consent the person gave once on a
+   * only the caller's `auto` let the request pass without it (`QueuedRequest.openedByAuto`, stored with the row); a consent the person gave once on a
    * card covers the request, and revoking a remembered one drops the queue (`withdrawReaches`). agent_session: the
    * ownership a caller that is not `auto` needs (a session it started) and the preset rule (never work for a session
    * now above the caller). send_to_session queues behind the orchestrator's scope, which no card stands for.
@@ -8683,7 +8703,7 @@ export class SessionManager {
       const project = this.store.listProjects().find((p) => p.id === target.projectId)
       const gate = this.askGateError(caller.id) ?? (project ? null : 'The project asked was removed from Centralu.')
       if (gate) return gate
-      if (!auto && this.queuedUnderAuto.has(r.id) && !this.pairConsented(caller.id, target)) {
+      if (!auto && r.openedByAuto && !this.pairConsented(caller.id, target)) {
         return "The asking session is no longer auto, and the person has not allowed its project to ask this one."
       }
       return null
@@ -8706,22 +8726,23 @@ export class SessionManager {
   }
 
   /**
-   * A session moved off `auto` (#606): the requests it queued that only `auto` let through are dropped, as `auto`'s
-   * attachments stop counting: an ask_project with no remembered consent for the pair, and an agent_session send to a
-   * session it did not start. An ask a card allowed once is dropped too when the session was `auto` in between: the
-   * store does not say which let it through. Its caller is told.
+   * Requests of `sessionId` that only `auto` let through, dropped when they would go on without it (#606), as `auto`'s
+   * attachments stop counting: the session moved off `auto`, or a handoff giving them to a session that is not `auto`
+   * (`moveLiveChildren`). An ask marked `openedByAuto` whose pair still has no remembered consent, and an agent_session
+   * send to a session it did not start. One being delivered now is left to the delivery gate, which reads the mark
+   * again if a swap delivers it once more. `tell` (default: the session itself) is told.
    */
-  private dropOpenedByAuto(sessionId: string): void {
+  private dropOpenedByAuto(sessionId: string, tell = sessionId): void {
     const dropped = this.dropQueued((r) => {
       if (r.callerSessionId !== sessionId || this.delivering.get(r.sessionId) === r.id) return false
       const target = this.meta.get(r.sessionId)
       if (!target) return false
-      if (r.via === 'ask_project') return !this.pairConsented(sessionId, target)
+      if (r.via === 'ask_project') return !!r.openedByAuto && !this.pairConsented(sessionId, target)
       if (r.via === 'agent_session') return target.askedBy !== sessionId
       return false
     })
     for (const r of dropped) {
-      void this.tellQueuedFailed(r.callerSessionId, r.sessionId, 'The asking session is no longer auto, and only auto let this request through.')
+      void this.tellQueuedFailed(tell, r.sessionId, 'The asking session is no longer auto, and only auto let this request through.')
     }
   }
 
@@ -8872,7 +8893,8 @@ export class SessionManager {
           tool: target.tool,
           ...(target.model ? { model: target.model } : {}),
           ...(target.effort ? { effort: target.effort } : {}),
-          permissionPreset: preset,
+          // Never above either preset as they are when it starts, nor above the one the card showed
+          permissionPreset: lowest(preset, this.meta.get(callerId)?.permissionPreset ?? 'safe', this.meta.get(target.id)?.permissionPreset ?? 'safe'),
           // A same-project ordinary session owns it as its agent; the orchestrator, which has no project, through the delegation alone
           ...(caller.projectId === project.id ? { askedBy: callerId } : {}),
           forkedFrom: target.id,
@@ -8891,7 +8913,7 @@ export class SessionManager {
         : cap && !presetWithin(child.permissionPreset, cap)
           ? `No fork of "${target.name}": a preset was lowered to ${cap} while the fork was being made.`
           : null
-      if (late) return this.abandonChild(child, late)
+      if (late) return this.abandonChild(child, late, worktree ? undefined : `Fork of ${target.name}`.slice(0, 48))
       if (!worktree) this.rename(child.id, `Fork of ${target.name}`.slice(0, 48))
       const key = `${callerId}>${child.id}`
       const d = this.startDelegation(key, callerId, child.id, { id: project.id, name: project.name, path: child.worktree?.path ?? this.cwdFor(child) }, true)

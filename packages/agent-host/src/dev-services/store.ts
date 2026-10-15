@@ -131,6 +131,12 @@ export type QueuedRequest = {
   queuedAt: number
   /** When delivery began, until the session's turn starts (#684 review); null while it waits */
   deliveringAt?: number | null
+  /**
+   * An ask_project request that passed only because its requester was `auto`, with no remembered consent for the pair
+   * (v54): delivered only while the requester still is, or the pair has consent by then. Null in a row an older build
+   * wrote, which does not say.
+   */
+  openedByAuto?: boolean | null
 }
 
 export class Store {
@@ -1966,6 +1972,23 @@ export class Store {
           if (!cols.includes('interruption')) this.db.exec(`ALTER TABLE sessions ADD COLUMN interruption TEXT`)
         },
       },
+      {
+        to: 54,
+        breaksOlderReaders: false,
+        /**
+         * `queued_requests.opened_by_auto`: 1 for an ask_project request that passed only because its requester was
+         * `auto` (no remembered consent for the pair), 0 otherwise (`QueuedRequest.openedByAuto`). The delivery gate
+         * reads it when the requester is no longer `auto`, so a host swap carries it with the row.
+         *
+         * **Expand only (#292's rule).** A nullable column; an older host neither reads nor writes it, and a row it
+         * queues during a swap is read as not saying (null), which this build treats as passed by `auto` when the pair
+         * has no remembered consent.
+         */
+        run: () => {
+          const cols = (this.db.prepare(`PRAGMA table_info(queued_requests)`).all() as { name: string }[]).map((c) => c.name)
+          if (!cols.includes('opened_by_auto')) this.db.exec(`ALTER TABLE queued_requests ADD COLUMN opened_by_auto INTEGER`)
+        },
+      },
     ]
   }
 
@@ -3786,19 +3809,20 @@ export class Store {
   // ── Requests held for a busy session (#677) — see migration v52 ──
 
   listQueuedRequests(): QueuedRequest[] {
-    return this.db
+    const rows = this.db
       .prepare(
         `SELECT id, session_id as sessionId, caller_session_id as callerSessionId, via, text, queued_at as queuedAt,
-                delivering_at as deliveringAt
+                delivering_at as deliveringAt, opened_by_auto as openedByAuto
            FROM queued_requests ORDER BY queued_at, rowid`,
       )
-      .all() as QueuedRequest[]
+      .all() as (Omit<QueuedRequest, 'openedByAuto'> & { openedByAuto: number | null })[]
+    return rows.map((r) => ({ ...r, openedByAuto: r.openedByAuto === null ? null : r.openedByAuto === 1 }))
   }
 
   addQueuedRequest(r: QueuedRequest): void {
     this.db
-      .prepare(`INSERT INTO queued_requests (id, session_id, caller_session_id, via, text, queued_at) VALUES (?, ?, ?, ?, ?, ?)`)
-      .run(r.id, r.sessionId, r.callerSessionId, r.via, r.text, r.queuedAt)
+      .prepare(`INSERT INTO queued_requests (id, session_id, caller_session_id, via, text, queued_at, opened_by_auto) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(r.id, r.sessionId, r.callerSessionId, r.via, r.text, r.queuedAt, r.openedByAuto ? 1 : 0)
   }
 
   markQueuedDelivering(id: string, at: number | null): void {

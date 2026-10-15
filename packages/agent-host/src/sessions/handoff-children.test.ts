@@ -242,6 +242,28 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, answer: 'second done' })
   })
 
+  it('drops what only auto let the original queue when the session taking over is not auto, and tells the original', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    await h.mgr.updateSettings(parent, { permissionPreset: 'auto' })
+    // A session of the project the original did not start, busy with the person's work
+    const other = (await h.mgr.createSession({ projectId: project, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
+    await h.mgr.send(other, 'person work')
+    expect(await h.mgr.agentSession(parent, { sessionId: other, action: 'send', text: 'tidy up', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
+    await writeHandoffNote(project, parent, 'NOTE BODY: where things stand')
+    // The session taking over is not auto
+    await h.mgr.createSession({
+      projectId: project, cwd: root, tool: 'claude', permissionPreset: 'normal',
+      initialPrompt: 'You are taking over. Read the note.',
+      handoff: { from: 'Planner', note: 'NOTE BODY: where things stand', fromSessionId: parent },
+    })
+    expect(store.listQueuedRequests()).toEqual([])
+    await until(() => store.loadMessages(parent, 50).some((m) => JSON.stringify(m.payload).includes('was not delivered')))
+    h.claude.handles.get(other)!.answer('person answer')
+    await until(() => h.mgr.listSessions().find((s) => s.id === other)?.state !== 'working')
+    expect(h.claude.handles.get(other)!.sent).toEqual(['person work'])
+  })
+
   it("moves a start_agent card still standing: it stands in the new session, and its approval starts the new session's child", async () => {
     const h = host()
     const { project, parent } = await parentOf(h, 'safe')

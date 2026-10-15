@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 53, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 54, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -177,6 +177,7 @@ erDiagram
     TEXT text
     INTEGER queued_at
     INTEGER delivering_at
+    INTEGER opened_by_auto
   }
   report_marks {
     TEXT session_id PK
@@ -492,6 +493,7 @@ Added in v52.
 | `text` | TEXT | no |  |  | v52 |
 | `queued_at` | INTEGER | no |  |  | v52 |
 | `delivering_at` | INTEGER | yes |  |  | v52 |
+| `opened_by_auto` | INTEGER | yes |  |  | v54 |
 
 ### `report_marks`
 

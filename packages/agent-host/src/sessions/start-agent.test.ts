@@ -296,6 +296,56 @@ describe('starting another agent in the same project', () => {
       expect(reached).toEqual([])
     })
 
+    it('a child the trash refuses has its process stopped, and the call says it was not moved', async () => {
+      const s = await session()
+      const make = w.mgr.createSession.bind(w.mgr)
+      let release!: () => void
+      const gate = new Promise<void>((r) => (release = r))
+      let made: string | undefined
+      vi.spyOn(w.mgr, 'createSession').mockImplementation(async (...args) => {
+        await gate
+        const child = await make(...args)
+        made = child.id
+        return child
+      })
+      vi.spyOn(w.mgr, 'trashSession').mockRejectedValue(new Error('the folder is locked'))
+      const starting = w.mgr.startAgent(s, { task: 'write the parser', wait: false })
+      await w.until(() => vi.mocked(w.mgr.createSession).mock.calls.length > 0)
+      w.store.setProjectTrusted(w.caller.id, false)
+      release()
+      const r = await starting
+      expect(!r.ok && r.error).toContain('could not be moved to the trash (the folder is locked)')
+      expect(!r.ok && r.error).toMatch(/its process was stopped|no process of its was running/)
+      expect(!r.ok && r.error).not.toContain('was moved to the trash')
+      expect(handleOf(made!)?.sent ?? []).toEqual([])
+    })
+
+    it('a preset lowered while the child session is being made: it gets no task, and the call reads why', async () => {
+      const s = await session()
+      const make = w.mgr.createSession.bind(w.mgr)
+      let release!: () => void
+      const gate = new Promise<void>((r) => (release = r))
+      let making = false
+      vi.spyOn(w.mgr, 'createSession').mockImplementation(async (...args) => {
+        making = true
+        await gate
+        return make(...args)
+      })
+      const starting = w.mgr.startAgent(s, { task: 'write the parser', wait: false })
+      await w.until(() => making)
+      // The child is being made at normal, the caller's preset when it was asked for
+      await w.mgr.updateSettings(s, { permissionPreset: 'safe' })
+      release()
+      const r = await starting
+      expect(r).toMatchObject({ ok: false, error: expect.stringContaining('lowered to safe') })
+      // Named for its job before it went to the trash
+      expect(!r.ok && r.error).toContain('moved to the trash')
+      expect(!r.ok && r.error).toContain('write the parser')
+      expect(childrenOf(s)).toEqual([])
+      const reached = [...w.adapters.get('claude')!.handles.values()].filter((h) => h.sent.some((t) => t.includes('write the parser')))
+      expect(reached).toEqual([])
+    })
+
     it('a preset raised while the card stood: the approval for the lower one starts nothing', async () => {
       const { s, requestId } = await pendingCard()
       expect(agentCard(s)!.detail).toMatchObject({ preset: 'safe' })

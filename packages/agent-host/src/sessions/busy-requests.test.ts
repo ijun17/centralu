@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentAdapter, HistoryMessage, OrchestratorTools } from '../adapters/contract.js'
 import type { PermissionPreset, ToolName } from '@cc/protocol'
 import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
@@ -427,16 +427,42 @@ describe('requests to a busy session (#677)', () => {
     }
     const taskReached = (words: string) => [...claude().handles.values()].filter((h) => h.sent.some((t) => t.includes(words)))
 
-    it('gives no task to a fork whose requester was lowered below it while it was being made', async () => {
+    it('starts a fork at the requester\'s preset as it is when the fork is made, lowered while the copy was taken', async () => {
       git(w.caller.path)
       const { a, b } = await busyChild()
       const copy = slowCopy()
       const forking = w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'review it', ifBusy: 'fork' })
       await w.until(() => copy.started)
-      // The fork is made at normal, the lower of the two presets when it was asked for; the requester is now safe
+      // Asked for at normal, the lower of the two presets then; the requester is safe by the time the fork starts
       await w.mgr.updateSettings(b, { permissionPreset: 'safe' })
       copy.release()
+      await w.until(() => taskReached('review it').length === 1)
+      const fork = w.mgr.listSessions().find((s) => s.forkedFrom === a)!
+      expect(fork.permissionPreset).toBe('safe')
+      expect(handleOf(fork.id).opts.permissionPreset).toBe('safe')
+      handleOf(fork.id).answer('reviewed')
+      expect(await forking).toMatchObject({ ok: true, answer: 'reviewed' })
+    })
+
+    it('gives no task to a fork whose requester was lowered below it while its session was being made', async () => {
+      git(w.caller.path)
+      const { a, b } = await busyChild()
+      const make = w.mgr.createSession.bind(w.mgr)
+      let release!: () => void
+      const gate = new Promise<void>((r) => (release = r))
+      let making = false
+      vi.spyOn(w.mgr, 'createSession').mockImplementation(async (...args) => {
+        making = true
+        await gate
+        return make(...args)
+      })
+      const forking = w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'review it', ifBusy: 'fork' })
+      await w.until(() => making)
+      // The session is being made at normal; the requester is now safe
+      await w.mgr.updateSettings(b, { permissionPreset: 'safe' })
+      release()
       expect(await forking).toMatchObject({ ok: false, error: expect.stringContaining('lowered to safe') })
+      expect(await forking).toMatchObject({ ok: false, error: expect.stringContaining('moved to the trash') })
       expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])
       expect(taskReached('review it')).toEqual([])
     })
@@ -460,8 +486,10 @@ describe('requests to a busy session (#677)', () => {
         w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'one', ifBusy: 'fork_read' }),
         w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'two', ifBusy: 'fork_read' }),
       ]
-      await w.until(() => w.mgr.listSessions().some((s) => s.forkedFrom === a && (claude().handles.get(s.id)?.sent.length ?? 0) > 0))
-      await new Promise((r) => setTimeout(r, 30))
+      // One call is refused at once; the other's fork takes its task and waits for its answer
+      let settled = 0
+      for (const c of calls) void c.then(() => settled++)
+      await w.until(() => settled === 1 && w.mgr.listSessions().some((s) => s.forkedFrom === a && (claude().handles.get(s.id)?.sent.length ?? 0) > 0))
       const made = w.mgr.listSessions().filter((s) => s.forkedFrom)
       expect(made).toHaveLength(1)
       handleOf(made[0]!.id).answer('done')
@@ -519,6 +547,29 @@ describe('a queued request across a host swap (#677)', () => {
     expect(claude.handles.get(a)!.sent[0]).toContain('queued work')
     expect(w.store.listQueuedRequests()).toEqual([])
   })
+
+  it.each(['marked by this build', 'written by an older build'] as const)(
+    'an ask only auto let through is not delivered by the next host once its caller is no longer auto (%s)',
+    async (row) => {
+      const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
+      const asker = await w.callerSession()
+      await w.mgr.updateSettings(asker, { permissionPreset: 'auto' })
+      // A conversation the next host can resume
+      w.adapters.get('claude')!.handles.get(target)!.externalId = 'ext-t'
+      await w.mgr.send(target, "the person's own work")
+      expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
+      await w.mgr.detachAll()
+      // Lowered where no settings change ran on a host that held the queue (as when it was lowered mid-delivery)
+      w.store.upsertSession({ ...w.store.listSessions().find((x) => x.id === asker)!, permissionPreset: 'normal' })
+      if (row === 'written by an older build') {
+        ;(w.store as unknown as { db: { prepare(sql: string): { run(): void } } }).db.prepare('UPDATE queued_requests SET opened_by_auto = NULL').run()
+      }
+      const { claude } = next([])
+      await w.until(() => w.store.listQueuedRequests().length === 0)
+      expect(claude.handles.get(target)?.sent ?? []).toEqual([])
+      await w.until(() => w.store.loadMessages(asker, 50).some((m) => JSON.stringify(m.payload).includes('The asking session is no longer auto')))
+    },
+  )
 
   it('is delivered at once by a next host that finds the session at rest', async () => {
     const { a } = await queuedFor()
