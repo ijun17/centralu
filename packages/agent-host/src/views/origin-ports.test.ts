@@ -256,4 +256,27 @@ describe('OriginPorts', () => {
     expect(moved.port).toBe(pB)
     expect(disk.load()).toEqual({ assigned: { 'p1/notes': pB }, retired: [pC, pA] })
   })
+
+  it('retires a different port that another writer recorded for the same key meanwhile, instead of overwriting it silently', async () => {
+    const [theirs, mine] = await freePorts(2)
+    const disk = diskStore()
+    let rival = true
+    const store: PortBookStore = {
+      load: () => disk.load(),
+      save: (book) => disk.save(book),
+      update(fn) {
+        if (rival) {
+          rival = false
+          disk.save({ assigned: { k: theirs! }, retired: [] })
+        }
+        disk.save(fn(disk.load()))
+      },
+    }
+    const lines: string[] = []
+    // No entry for `k` at first, so this serve() allocates; the entry appears just before it records
+    const got = await serve(new OriginPorts(store, { range: RANGE, pick: sequence([mine!]), log: (l) => lines.push(l) }), 'k')
+    expect(got.port).toBe(mine)
+    expect(disk.load()).toEqual({ assigned: { k: mine }, retired: [theirs] })
+    expect(lines.join('\n')).toMatch(new RegExp(`port ${theirs} for k was recorded elsewhere`))
+  })
 })

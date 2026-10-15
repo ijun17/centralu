@@ -167,10 +167,22 @@ export class OriginPorts {
         continue
       }
       let claimed = false
+      let displaced: number | undefined
       try {
         this.commit((book) => {
           claimed = !Object.values(book.assigned).includes(port) && !book.retired.includes(port)
-          if (claimed) book.assigned[key] = port
+          if (!claimed) return
+          /*
+           * Another host recorded a different port for this very key while this one was binding. This
+           * port is the one in use here, so it takes the entry, and the other is retired: it may have
+           * been served under that origin, and it must not be given to a different app later.
+           */
+          const prev = book.assigned[key]
+          if (prev !== undefined && prev !== port) {
+            displaced = prev
+            if (!book.retired.includes(prev)) book.retired.push(prev)
+          }
+          book.assigned[key] = port
         })
       } catch (e) {
         await new Promise<void>((r) => server.close(() => r()))
@@ -180,6 +192,9 @@ export class OriginPorts {
         // Someone recorded this port while it was being bound — it is theirs
         await new Promise<void>((r) => server.close(() => r()))
         continue
+      }
+      if (displaced !== undefined) {
+        this.log(`[agent-host] view origin port ${displaced} for ${key} was recorded elsewhere meanwhile — retired it, ${key} uses ${port}`)
       }
       return { port, server }
     }
