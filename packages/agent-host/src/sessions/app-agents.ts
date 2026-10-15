@@ -7,7 +7,7 @@ import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
  *
  * Standing the session up and waiting for it is the manager's job (`SessionManager.runAppAgent`).
  * The frame around the text it sends is the same one used for in-conversation UI messages
- * (`manager.ts`'s `appMessageFrame`). What lives here is only what comes after: waiting for the
+ * (`app-messages.ts`'s `appMessageFrame`). What lives here is only what comes after: waiting for the
  * turn's outcome, and the rule for picking the final answer out of the conversation record.
  */
 

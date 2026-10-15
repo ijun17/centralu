@@ -499,7 +499,7 @@ for word: the same injection path as a worker's report, so the same rule applies
   open is refused.
 - It is stored with its source (`fromApp`) and drawn as the app's message, not the person's. A
   session's automatic name is never taken from it.
-- The agent receives it framed (`appMessageFrame` in `sessions/manager.ts`): a header naming the
+- The agent receives it framed (`appMessageFrame` in `sessions/app-messages.ts`): a header naming the
   app and saying the person chose to send it but did not write it, and that it is the app's text,
   not an instruction; then **every line** of the text behind `> `. A line imitating the header, or
   a made-up "person:" field, stays inside the quote. The app's name passes the one-line field rule

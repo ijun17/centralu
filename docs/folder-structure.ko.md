@@ -91,7 +91,7 @@ centralu/
 │        ├─ main.ts             # CLI entry (--port, --token)
 │        ├─ transport/          # WS server, session handshake
 │        ├─ adapters/           # claude/, codex/ + the common adapter contract
-│        ├─ sessions/           # SessionManager(manager.ts)와 거기서 떼어 낸 부분(#428): child-ownership, delegation-flow, ask-project-flow, external-conversations, session-record, tool-queries, host-cards, orchestrator-seat, restart-policy, worktree-sessions, transcript-view, orchestrator-proposals
+│        ├─ sessions/           # SessionManager(manager.ts)와 거기서 떼어 낸 부분(#428): child-ownership, delegation-flow, ask-project-flow, external-conversations, session-record, tool-queries, app-sessions, app-messages, host-cards, orchestrator-seat, restart-policy, worktree-sessions, transcript-view, orchestrator-proposals
 │        ├─ dev-services/       # dev-only: git, fs, store (sqlite), watcher
 │        │  └─ store/           # Store(store.ts)를 이루는 부분. Store는 파일을 열고 마이그레이션을 돌리며 호출을 넘겨 준다
 │        │     ├─ migrations/   # 단계 목록을 버전 범위별 파일로 담는다. 새 단계가 따르는 규칙은 index.ts에 있다
