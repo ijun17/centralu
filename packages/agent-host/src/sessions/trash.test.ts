@@ -181,9 +181,12 @@ describe('who can delete for good', () => {
       'dev-services/store.ts: this.trash.purgeSession',
       'rpc.ts: mgr.emptyTrash',
       'rpc.ts: mgr.purgeSession',
+      // The manager passes the two calls on to its trash (session-trash.ts, #428); the same calls, not other callers
+      'sessions/manager.ts: this.trash.emptyTrash',
+      'sessions/manager.ts: this.trash.purgeSession',
       // emptyTrash purges one by one; purgeSession removes the rows through the store
-      'sessions/manager.ts: this.purgeSession',
-      'sessions/manager.ts: this.store.purgeSession',
+      'sessions/session-trash.ts: this.host.store.purgeSession',
+      'sessions/session-trash.ts: this.purgeSession',
     ])
   })
 })

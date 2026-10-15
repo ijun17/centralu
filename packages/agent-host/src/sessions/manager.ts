@@ -1,4 +1,4 @@
-import { restoreWorktreeRecovery, repairWorktreeRecoveryRemovals, stageWorktreeRecoveryRemoval, worktreeRecoveryBytes, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
+import { repairWorktreeRecoveryRemovals } from '../dev-services/worktree-recovery.js'
 import { randomUUID } from 'node:crypto'
 import { residentCost } from './tool-cost.js'
 import { orchestratorHome, orchestratorRole } from './orchestrator-home.js'
@@ -46,7 +46,6 @@ import type {
   SessionState,
   Interruption,
   StoredMessage,
-  TrashedSession,
   ToolName,
   UiPreferences,
   UiPreferencesPatch,
@@ -125,9 +124,8 @@ import {
 } from '../dev-services/fs.js'
 import { DirWatchers } from '../dev-services/watch.js'
 import { invalidateFileIndex } from '../dev-services/file-search.js'
-import { attachmentBytes, clearAttachments } from '../dev-services/attachments.js'
 import { mentions, readMessageImage, resolveWrittenPath, writtenForms } from '../dev-services/message-image.js'
-import { handoffNoteBytes, handoffNoteDir, sweepHandoffNotes, writeHandoffNote, writeHandoffNoteSync } from '../dev-services/handoff-notes.js'
+import { handoffNoteDir, sweepHandoffNotes, writeHandoffNote, writeHandoffNoteSync } from '../dev-services/handoff-notes.js'
 import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
 import { AskProjectFlow, type AskProjectHost } from './ask-project-flow.js'
 import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, HUB_SENDER, agentStartPersonText, taskList } from './delegation-flow.js'
@@ -140,6 +138,7 @@ import { ToolQueries, type ToolQueriesHost } from './tool-queries.js'
 import { withTimeout } from './with-timeout.js'
 import { AppSessions, type AppSessionsHost } from './app-sessions.js'
 import { appMessageFrame, type AppMessageSource, type AppMessageVia, type AppViewPlace } from './app-messages.js'
+import { SessionTrash, type SessionTrashHost, codeIntelligenceKey } from './session-trash.js'
 export { appMessageFrame } from './app-messages.js'
 export type { AppMessageSource, AppMessageVia, AppViewPlace } from './app-messages.js'
 export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './delegation-flow.js'
@@ -186,12 +185,6 @@ function movedLabel(c: Pick<MovedChild, 'name' | 'project' | 'request'>): string
  * value like that lives.
  */
 const freshStartKey = (sessionId: string) => `fresh_start:${sessionId}`
-/**
- * A session created without code intelligence (#686, `codeIntelligenceOff`): `off`. Decided once at creation and read on
- * every wake, so a child keeps what it started with, and a session made before this build keeps the person's setting.
- * A setting rather than a column: it only matters to the adapter's launch, and needs no migration.
- */
-const codeIntelligenceKey = (sessionId: string) => `code_intelligence:${sessionId}`
 
 /**
  * The single app_setting key where the whole set of screen preferences lives.
@@ -287,6 +280,8 @@ export class SessionManager {
   private readonly toolQueries: ToolQueries
   /** The sessions an external app owns: its builder and the agents it asks for (app-sessions.ts) */
   private readonly appSessions: AppSessions
+  /** A session's way to the trash and back: delete, list, restore, purge (session-trash.ts) */
+  private readonly trash: SessionTrash
   /** When a session's process is replaced, and the background work a restart waits for (restart-policy.ts) */
   private readonly restartPolicy: RestartPolicy
   /** A worktree session's worktree: made for a new session, taken apart on cleanup (worktree-sessions.ts) */
@@ -437,6 +432,7 @@ export class SessionManager {
     this.record = new SessionRecord(this.sessionRecordHost())
     this.toolQueries = new ToolQueries(this.toolQueriesHost())
     this.appSessions = new AppSessions(this.appSessionsHost())
+    this.trash = new SessionTrash(this.sessionTrashHost())
     this.restartPolicy = new RestartPolicy(this.restartHost())
     this.worktrees = new WorktreeSessions(this.worktreeHost())
     this.hostCards = new HostCards(this.hostCardsHost())
@@ -2110,167 +2106,9 @@ export class SessionManager {
     }
   }
 
-  private trashing = new Map<string, Promise<void>>()
-
-  /**
-   * Moves a session to the trash (#204) — what deleting a session means now. Nothing is destroyed: the process
-   * stops, and the session leaves every list (sidebar, inbox, palette, grid, search, the agents' session tools and
-   * the apps' `sessions.list`, all of which read `meta` or filter the trash in the store). Its rows, attachments,
-   * handoff note, the tool's conversation file and its worktree stay until the person deletes it for good in
-   * Settings (`purgeSession`).
-   *
-   * @param removeWorktree remove the worktree **when it is purged**. The default is to keep it — hours
-   * of an agent's work can be sitting there. It stays registered with git and in place while the session is
-   * in the trash:
-   * moving a worktree folder leaves git's record pointing at nothing (`git worktree list` calls it prunable, and
-   * `git worktree prune` or a `gc` then drops it), and Claude files a conversation by its working directory, so the
-   * restored session would not find its own history either.
-   * @param removeExternal delete the tool's conversation file **when it is purged**. It stays where the tool keeps
-   * it while the session is in the trash: the file is the tool's, in the tool's layout, and only the tool's own
-   * delete knows that layout (the Claude SDK's `deleteSession`). Left in place it is also a second way back — the
-   * tool, and **+ → Past conversations**, still have it.
-   */
-  async trashSession(sessionId: string, removeWorktree = false, removeExternal = false, recovery?: WorktreeRecovery, fromCleanup = false): Promise<void> {
-    const pending = this.trashing.get(sessionId)
-    if (pending) {
-      /*
-       * A worktree cleanup cannot ride on a delete that started first (#647): that one writes a trash record without
-       * the recovery snapshot, and removing the worktree after it would leave nothing a restore could bring back.
-       */
-      if (recovery || fromCleanup) throw Object.assign(new Error('The session is already being deleted without its recovery snapshot'), { code: 'internal' })
-      return pending
-    }
-    // The first request owns the options; concurrent sidebar/agent deletes share its result.
-    const deleting = this.trashSessionOnce(sessionId, removeWorktree, removeExternal, recovery, fromCleanup)
-    this.trashing.set(sessionId, deleting)
-    try {
-      await deleting
-    } finally {
-      this.trashing.delete(sessionId)
-    }
-  }
-
-  private async trashSessionOnce(sessionId: string, removeWorktree: boolean, removeExternal: boolean, recovery?: WorktreeRecovery, fromCleanup = false): Promise<void> {
-    if (this.worktrees.worktreeCleanup.has(sessionId) && !recovery && !fromCleanup) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
-    const m = this.meta.get(sessionId)
-    if (!m) {
-      // Already in the trash, or never here: nothing to move. Say it is gone anyway, so a screen holding a stale row lets go
-      this.emit({ type: 'session_deleted', sessionId })
-      return
-    }
-    /*
-     * A session with worktree children used to be undeletable while one was unmerged (#69): a worktree whose manager
-     * disappeared was an orphan nobody saw. Since #561 a child is an ordinary session that outlives the session that
-     * started it: deleted, the parent leaves its children in the sidebar on their own, each with its worktree, its
-     * branch and a "started by a session no longer here" mark, so nothing is hidden and nothing pins the parent.
-     */
-    /*
-     * A tool that cannot delete its conversation file is refused now, not when the trash is emptied: the person
-     * choosing it is here, and "the file stays" is worth hearing before the dialog closes rather than as a purge
-     * that fails later.
-     */
-    const externalId = m.externalId ?? m.importedFrom
-    if (removeExternal && externalId && !this.adapters.get(m.tool)?.deleteExternalConversation) {
-      throw Object.assign(new Error(`${m.tool} does not support deleting its conversation file`), { code: 'internal' })
-    }
-    /*
-     * If a wake is in progress, it is withdrawn and this waits for it to finish (#163). It used to
-     * not wait — a wake would place a handle on the deleted session and rewrite the row, the deleted
-     * session would come back on the next startup, and if the wake had started from a send, the
-     * agent would go on to execute the message that had just been sent.
-     */
-    await this.untilWakeWithdrawn(sessionId, 'The session was deleted while waking')
-    /*
-     * A handoff's original that goes (#738): what it still has (settled children, and anything it started after a
-     * handoff that kept it) goes to the session that inherited its handoff, before the teardown below lets go of it. A
-     * handoff whose window said the original goes next moved everything already, and this finds nothing. The move is
-     * its own transaction ahead of the trash's: a crash between them leaves the children on the heir and the original
-     * standing, one owner either way.
-     */
-    const heir = this.handoffHeir(sessionId)
-    if (heir) this.moveChildren(sessionId, heir, 'removed')
-    // A session an app was waiting on an answer from (M4 D-1) — the wait is ended along with a reason.
-    // Leaving it unended would hang the app's call forever with no answer
-    const agentRun = this.agentRuns.get(sessionId)
-    if (agentRun) {
-      agentRun.deleted = true
-      agentRun.fail(new Error('the person deleted the agent session before it answered'))
-    }
-    for (const observer of this.turnObservers.get(sessionId) ?? []) observer.fail(new Error('the person deleted the session before it answered'))
-    // What this session asked other projects to do (#371): nobody is left to read the answer. The delegated session
-    // keeps its turn — it is that project's own session now, and the person may want what it is doing — but the wait
-    // and the grants go
-    for (const [key, d] of this.children.delegations) {
-      if (d.callerId !== sessionId) continue
-      this.children.dropDelegation(key)
-      if (this.agentRuns.get(d.sessionId) === d.wait) this.agentRuns.delete(d.sessionId)
-    }
-    this.readGrants.delete(sessionId)
-    this.delegationFlow.agentConsents.delete(sessionId)
-    // What a handoff gave away from it, or to it, or the given work itself (#693)
-    this.children.forgetHandedOver(sessionId)
-    // Its start_agent requests (#673): a standing card is withdrawn, with a line saying so if the session is restored
-    for (const rec of [...this.children.agentStarts.values()]) {
-      if (rec.req.callerId !== sessionId) continue
-      this.delegationFlow.withdrawAgentStart(rec.req.requestId, 'The session that asked was deleted.', agentStartPersonText(rec.req, 'deleted'))
-      this.children.dropAgentStart(rec.req.requestId)
-    }
-    this.updateConsents.delete(sessionId)
-    this.updateApplyConsents.delete(sessionId)
-    // A capability question raised on this session has nowhere left to be answered (D-4) — it is ended with
-    // no answer (the window does not remember it, just declines)
-    for (const ask of [...this.hostCards.hostAsks.values()]) {
-      if (ask.sessionId !== sessionId) continue
-      this.hostCards.hostAsks.delete(ask.requestId)
-      ask.resolve(null)
-    }
-    const handle = this.handles.get(sessionId)
-    if (handle) {
-      await handle.dispose().catch(() => {})
-      this.handles.delete(sessionId)
-    }
-    // Its process is gone with it, and a restored session starts a new one (#648)
-    this.restartPolicy.forgetBackground(sessionId)
-    /*
-     * The message being streamed is written out, not dropped (#66 used to drop it, because the rows were about to go).
-     * The rows now stay, and a trashed conversation that stops mid-sentence is not the one that was deleted. Written
-     * before the trash step, so its index row is dropped with the rest.
-     */
-    this.record.closeStream(sessionId)
-    let project: { name: string; path: string } | undefined
-    if (m.projectId) project = this.store.listProjects().find((p) => p.id === m.projectId)
-    this.running.delete(sessionId)
-    this.restartPolicy.restartAfterTurn.delete(sessionId)
-    this.restartPolicy.trustRestartNotice.delete(sessionId)
-    // A deleted session's branch is never asked about again (#392: one entry per worktree session ever made)
-    this.prCheckedAt.delete(sessionId)
-    // Kept until its turn ends, which a deleted session's never does (#392)
-    this.restartPolicy.appsRestartAfterTurn.delete(sessionId)
-    this.children.clearReport(sessionId)
-    // Nobody is left to tell: the reports its children owed it go too
-    for (const [child, caller] of [...this.children.awaitingReport]) if (caller === sessionId) this.children.clearReport(child)
-    // Requests held for it, or that it made, go too (#677)
-    this.children.dropQueued((r) => r.sessionId === sessionId || r.callerSessionId === sessionId)
-    // The same for a delegated turn's link (#676), either way
-    this.children.releaseTurn(sessionId)
-    for (const [child, owner] of [...this.children.turnOwners]) if (owner.callerId === sessionId) this.children.releaseTurn(child)
-    this.children.dropObserverNotesOf(sessionId)
-    this.forgetCommits(sessionId)
-    this.stopWatchingReconnect(sessionId)
-    this.quitNotices = this.quitNotices.filter((n) => n.sessionId !== sessionId && n.requester !== sessionId)
-    this.meta.delete(sessionId)
-    await this.store.trashSession(sessionId, {
-      projectId: m.projectId,
-      projectName: project?.name ?? null,
-      projectPath: project?.path ?? null,
-      removeExternal: removeExternal && !!externalId,
-      removeWorktree: removeWorktree && !!m.worktree,
-      ...(recovery ? { recovery } : {}),
-    })
-    // Tears down this session's inline app views (M4 B-1) — releases whatever app it was holding onto. A
-    // restored conversation reopens them from its history
-    this.appsHub?.sessionGone(sessionId)
-    this.emit({ type: 'session_deleted', sessionId })
+  /** `SessionTrash.trashSession` (session-trash.ts), kept on the manager for its callers */
+  trashSession(...a: Parameters<SessionTrash['trashSession']>): ReturnType<SessionTrash['trashSession']> {
+    return this.trash.trashSession(...a)
   }
 
   /**
@@ -2285,7 +2123,7 @@ export class SessionManager {
       while (generation.length) {
         const heirs = generation.flatMap((at) => this.store.handoffHeirs(at)).filter((h) => !seen.has(h.sessionId))
         for (const h of heirs) seen.add(h.sessionId)
-        const live = heirs.find((h) => !h.trashed && this.meta.has(h.sessionId) && !this.trashing.has(h.sessionId))
+        const live = heirs.find((h) => !h.trashed && this.meta.has(h.sessionId) && !this.trash.trashing.has(h.sessionId))
         if (live) return live.sessionId
         generation = heirs.map((h) => h.sessionId)
       }
@@ -2299,212 +2137,29 @@ export class SessionManager {
   /** The startup repair of recovery folders an interrupted purge left aside (#647) */
   private recoveryRepair: Promise<void> = Promise.resolve()
 
-  /** Only one trash operation per session at a time — a purge racing a restore would restore half of a deleted session */
-  private trashBusy = new Set<string>()
-
-  private async trashOp<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
-    if (this.trashBusy.has(sessionId) || this.worktrees.worktreeCleanup.has(sessionId)) {
-      throw Object.assign(new Error('That session is already being restored or deleted'), { code: 'internal' })
-    }
-    this.trashBusy.add(sessionId)
-    try {
-      return await run()
-    } finally {
-      this.trashBusy.delete(sessionId)
-    }
+  /** `SessionTrash.listTrash` (session-trash.ts), kept on the manager for its callers */
+  listTrash(...a: Parameters<SessionTrash['listTrash']>): ReturnType<SessionTrash['listTrash']> {
+    return this.trash.listTrash(...a)
   }
 
-  /** The trash as Settings lists it (#204), with the total it takes on this machine */
-  async listTrash(): Promise<{ sessions: TrashedSession[]; bytes: number }> {
-    const projects = new Map(this.store.listProjects().map((p) => [p.id, p]))
-    const sessions = await Promise.all(
-      this.store.listTrash().map(async (r): Promise<TrashedSession> => {
-        const { record } = r
-        const live = record.projectId ? projects.get(record.projectId) : undefined
-        const files =
-          (await attachmentBytes(r.id).catch(() => 0)) +
-          (await worktreeRecoveryBytes(r.id).catch(() => 0)) +
-          (record.projectId ? await handoffNoteBytes(record.projectId, r.id).catch(() => 0) : 0)
-        return {
-          id: r.id,
-          name: r.name,
-          tool: r.tool,
-          project: record.projectId
-            ? {
-                id: record.projectId,
-                name: live?.name ?? record.projectName ?? record.projectId,
-                path: live?.path ?? record.projectPath,
-                exists: !!live,
-              }
-            : null,
-          deletedAt: r.deletedAt,
-          messages: r.messages,
-          bytes: r.bytes + files,
-          conversationFile: !r.hasConversationFile ? 'none' : record.removeExternal ? 'remove' : 'keep',
-          // Only a worktree still on disk is listed — the merged-worktree cleanup removes the folder before the trash is emptied
-          worktree: r.worktree && existsSync(r.worktree.path) ? { ...r.worktree, remove: record.removeWorktree } : null,
-        }
-      }),
-    )
-    return { sessions, bytes: sessions.reduce((a, s) => a + s.bytes, 0) }
+  /** `SessionTrash.readTrashed` (session-trash.ts), kept on the manager for its callers */
+  readTrashed(...a: Parameters<SessionTrash['readTrashed']>): ReturnType<SessionTrash['readTrashed']> {
+    return this.trash.readTrashed(...a)
   }
 
-  /** A trashed conversation, read-only (#204). Live sessions are read through `loadMessages`, not here */
-  async readTrashed(sessionId: string, limit: number, beforeSeq?: number): Promise<StoredMessage[]> {
-    if (!this.store.isTrashed(sessionId)) {
-      throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
-    }
-    return this.loadMessages(sessionId, limit, beforeSeq)
+  /** `SessionTrash.restoreSession` (session-trash.ts), kept on the manager for its callers */
+  restoreSession(...a: Parameters<SessionTrash['restoreSession']>): ReturnType<SessionTrash['restoreSession']> {
+    return this.trash.restoreSession(...a)
   }
 
-  /**
-   * Brings a session back from the trash as it was (#204): same id, same messages, same rules, its commit links and
-   * app runs still pointing at it, its search index rebuilt.
-   *
-   * Where it goes when its project was deleted meanwhile: the folder is registered again **under the same id**, so
-   * everything keyed by that id lines up again — the worktree folder (`<worktrees>/<project id>/<session id>`), the
-   * handoff notes (`<data>/handoff/<project id>/`), the commit links and app runs that stayed with the session. If
-   * the folder is registered already under another id, it goes there. If the folder is gone too, it refuses and
-   * says where the folder was: a project session without its folder cannot run, and it stays readable in the trash.
-   *
-   * A live-only state (working, waiting for approval) comes back idle, as it does after a restart: there is no
-   * process behind it. Other states come back as they were, so one that was waiting for the person is in the inbox again.
-   */
-  async restoreSession(sessionId: string): Promise<{ session: SessionInfo; project: ProjectInfo | null }> {
-    return this.trashOp(sessionId, async () => {
-      await this.recoveryRepair
-      const t = this.store.trashedSession(sessionId)
-      if (!t) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
-      const { record } = t
-      let projectId: string | null = null
-      let registered: ProjectInfo | null = null
-      if (record.projectId) {
-        const projects = this.store.listProjects()
-        const home =
-          projects.find((p) => p.id === record.projectId) ??
-          (record.projectPath ? projects.find((p) => p.path === record.projectPath) : undefined)
-        if (home) {
-          projectId = home.id
-        } else if (record.projectPath && existsSync(record.projectPath) && statSync(record.projectPath).isDirectory()) {
-          this.store.addProject({
-            id: record.projectId,
-            path: record.projectPath,
-            name: record.projectName ?? basename(record.projectPath),
-          })
-          projectId = record.projectId
-          registered = await this.projectInfo(projectId, record.projectPath)
-        } else {
-          throw Object.assign(
-            new Error(
-              `Its project was deleted and its folder is gone${record.projectPath ? ` (${record.projectPath})` : ''} — put the folder back, then restore`,
-            ),
-            { code: 'internal' },
-          )
-        }
-      } else if (t.session.kind === 'orchestrator' && this.store.orchestratorId()) {
-        // Two central orchestrators would answer the same questions; the app has one (FR-11)
-        throw Object.assign(new Error('Another orchestrator is in place — the app runs one at a time'), { code: 'internal' })
-      }
-      let recovered: { branch: string; notice: string } | undefined
-      if (record.recovery && t.session.worktree && projectId) {
-        const repo = this.store.listProjects().find((p) => p.id === projectId)!.path
-        recovered = await restoreWorktreeRecovery(sessionId, repo, t.session.worktree.path, t.session.worktree.branch, record.recovery, this.gitTrust(projectId))
-      }
-      const back = await this.store.restoreSession(sessionId, projectId)
-      if (!back) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
-      const LIVE_ONLY: SessionState[] = ['working', 'waiting_approval']
-      const fixed = LIVE_ONLY.includes(back.state) ? { ...back, state: 'idle' as const, waitingSince: null } : back
-      if (recovered && fixed.worktree) fixed.worktree = { ...fixed.worktree, branch: recovered.branch }
-      if (fixed !== back || recovered) this.store.upsertSession(fixed)
-      this.meta.set(sessionId, fixed)
-      const session = { ...this.meta.get(sessionId)!, live: false }
-      this.emit({ type: 'session_created', sessionId, session })
-      if (recovered) this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'worktree recovery', text: recovered.notice })
-      return { session, project: registered }
-    })
+  /** `SessionTrash.purgeSession` (session-trash.ts), kept on the manager for its callers */
+  purgeSession(...a: Parameters<SessionTrash['purgeSession']>): ReturnType<SessionTrash['purgeSession']> {
+    return this.trash.purgeSession(...a)
   }
 
-  /**
-   * Deletes a session in the trash for good (#204) — only the person, only from Settings. The agents' tools and the
-   * apps' broker have no path here; the RPC is the only caller.
-   *
-   * Order: the tool's conversation file first, when the person chose it. If that fails the purge stops and the
-   * session stays in the trash — answering "deleted" while the original lives is the worst outcome (a person
-   * believes 550MB is gone). It is skipped when a live session holds the same conversation (it was pulled back
-   * from Past conversations meanwhile): deleting it would take that session's history. Then the worktree, when
-   * chosen (a failure does not stop the purge — its folder is plain files the person can still remove). Then our
-   * rows, and last the recovery files, the attachments and the handoff note, which have to outlive the rows that
-   * point at them.
-   */
-  async purgeSession(sessionId: string): Promise<void> {
-    return this.trashOp(sessionId, async () => {
-      await this.recoveryRepair
-      const t = this.store.trashedSession(sessionId)
-      if (!t) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
-      const { session: s, record } = t
-      const cwd = this.store.sessionCwd(sessionId) ?? s.worktree?.path ?? record.projectPath
-      const externalId = s.externalId ?? s.importedFrom
-      if (record.removeExternal && externalId) {
-        const held = [...this.meta.values()].some(
-          (x) => x.tool === s.tool && (x.externalId === externalId || x.importedFrom === externalId),
-        )
-        if (!held) {
-          const adapter = this.adapters.get(s.tool)
-          if (!adapter?.deleteExternalConversation) {
-            throw Object.assign(new Error(`${s.tool} does not support deleting its conversation file`), { code: 'internal' })
-          }
-          if (!cwd) throw Object.assign(new Error('The folder this conversation ran in is unknown'), { code: 'internal' })
-          await adapter.deleteExternalConversation(externalId, cwd)
-        }
-      }
-      if (record.removeWorktree && s.worktree && record.projectPath) {
-        /*
-         * Removed with force — reaching this point means the person was told "there are uncommitted
-         * changes" and answered delete anyway. Without force, git would refuse and nothing would ever
-         * get removed at all.
-         */
-        await gitWorktreeRemove(record.projectPath, s.worktree.path, true).catch(() => {})
-      }
-      /*
-       * The recovery files go only once the rows are gone (#647): cleared first, a failed database step would leave
-       * a trash entry nothing can restore. Set aside before, so a folder that cannot be removed still stops the
-       * purge while the entry is retryable; put back when the rows stay.
-       */
-      const recoveryRemoval = await stageWorktreeRecoveryRemoval(sessionId)
-      try {
-        await this.store.purgeSession(sessionId)
-        this.restartPolicy.forgetBackground(sessionId)
-        this.store.deleteAppSetting(codeIntelligenceKey(sessionId))
-      } catch (e) {
-        // Not swallowed: the folder left aside carries the session id, and the next start puts it back (#647)
-        await recoveryRemoval.abort().catch((cause: Error) => console.error(`[trash] recovery files of ${sessionId.slice(0, 8)} could not be put back after a failed purge and stay aside until the next start: ${cause.message}`))
-        throw e
-      }
-      await recoveryRemoval.commit().catch(() => {})
-      await clearAttachments(sessionId).catch(() => {})
-      /*
-       * Sweeps up the handoff note that lost its purpose along with this session (#106). It matters
-       * that this runs **after** the row is gone — the session that was just deleted must not still
-       * appear to be holding on to its own note. The note the deleted session had inherited (under its
-       * predecessor's name) is also caught in this same pass.
-       */
-      if (record.projectId) await this.sweepOrphanHandoffNotes(record.projectId).catch(() => {})
-    })
-  }
-
-  /** Deletes everything in the trash for good. One that fails stays and is reported; the rest go on */
-  async emptyTrash(): Promise<{ purged: number; failed: { sessionId: string; name: string; error: string }[] }> {
-    let purged = 0
-    const failed: { sessionId: string; name: string; error: string }[] = []
-    for (const r of this.store.listTrash()) {
-      try {
-        await this.purgeSession(r.id)
-        purged++
-      } catch (e) {
-        failed.push({ sessionId: r.id, name: r.name, error: (e as Error).message })
-      }
-    }
-    return { purged, failed }
+  /** `SessionTrash.emptyTrash` (session-trash.ts), kept on the manager for its callers */
+  emptyTrash(...a: Parameters<SessionTrash['emptyTrash']>): ReturnType<SessionTrash['emptyTrash']> {
+    return this.trash.emptyTrash(...a)
   }
 
   /**
@@ -4311,7 +3966,7 @@ export class SessionManager {
       },
       trashSession: (...a) => self.trashSession(...a),
       get trashing() {
-        return self.trashing
+        return self.trash.trashing
       },
       trunkOf: (...a) => self.trunkOf(...a),
       get worktreeRoot() {
@@ -4345,6 +4000,90 @@ export class SessionManager {
       scheduleDrain: (...a) => self.scheduleDrain(...a),
       get store() {
         return self.store
+      },
+    }
+  }
+
+  /** What `SessionTrash` reaches of this manager (#428): its state read when used, its operations called through */
+  private sessionTrashHost(): SessionTrashHost {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
+    const self = this
+    return {
+      get adapters() {
+        return self.adapters
+      },
+      get agentRuns() {
+        return self.agentRuns
+      },
+      get appsHub() {
+        return self.appsHub
+      },
+      get children() {
+        return self.children
+      },
+      get delegationFlow() {
+        return self.delegationFlow
+      },
+      get emit() {
+        return self.emit
+      },
+      forgetCommits: (...a) => self.forgetCommits(...a),
+      gitTrust: (...a) => self.gitTrust(...a),
+      get handles() {
+        return self.handles
+      },
+      handoffHeir: (...a) => self.handoffHeir(...a),
+      get hostCards() {
+        return self.hostCards
+      },
+      loadMessages: (...a) => self.loadMessages(...a),
+      get meta() {
+        return self.meta
+      },
+      moveChildren: (...a) => self.moveChildren(...a),
+      onEvent: (...a) => self.onEvent(...a),
+      get prCheckedAt() {
+        return self.prCheckedAt
+      },
+      projectInfo: (...a) => self.projectInfo(...a),
+      get quitNotices() {
+        return self.quitNotices
+      },
+      set quitNotices(notices) {
+        self.quitNotices = notices
+      },
+      get readGrants() {
+        return self.readGrants
+      },
+      get record() {
+        return self.record
+      },
+      get recoveryRepair() {
+        return self.recoveryRepair
+      },
+      get restartPolicy() {
+        return self.restartPolicy
+      },
+      get running() {
+        return self.running
+      },
+      stopWatchingReconnect: (...a) => self.stopWatchingReconnect(...a),
+      get store() {
+        return self.store
+      },
+      sweepOrphanHandoffNotes: (...a) => self.sweepOrphanHandoffNotes(...a),
+      get turnObservers() {
+        return self.turnObservers
+      },
+      untilWakeWithdrawn: (...a) => self.untilWakeWithdrawn(...a),
+      get updateApplyConsents() {
+        return self.updateApplyConsents
+      },
+      get updateConsents() {
+        return self.updateConsents
+      },
+      get worktrees() {
+        return self.worktrees
       },
     }
   }
@@ -4580,7 +4319,7 @@ export class SessionManager {
       },
       trashSession: (...a) => self.trashSession(...a),
       get trashing() {
-        return self.trashing
+        return self.trash.trashing
       },
       get turnObservers() {
         return self.turnObservers
@@ -5283,7 +5022,7 @@ export class SessionManager {
     if (!m || !list?.length) return
     const run = this.agentRuns.get(sessionId)
     // A deferred restart is not waited out here: `deliver` waits for it, and its end schedules this again
-    if (inTurn(m.state) || (run && !run.finished) || this.inputsHeld(sessionId) || this.trashing.has(sessionId)) return
+    if (inTurn(m.state) || (run && !run.finished) || this.inputsHeld(sessionId) || this.trash.trashing.has(sessionId)) return
     const r = list[0]!
     const caller = this.meta.get(r.callerSessionId)
     if (!caller) {

@@ -844,7 +844,7 @@ new session now takes over the original's **live** work as it is created, before
     happens before the first turn reads the note. If that deletion then fails, both sessions stand and the children
     are with the session the person works in.
   - **An original removed later** (a handoff that kept it, then a delete; or a window that did not say it would
-    remove it) gives its children to the session that inherited its handoff, in `trashSessionOnce` before the
+    remove it) gives its children to the session that inherited its handoff, in `trashSessionOnce` (`sessions/session-trash.ts`) before the
     teardown lets go of them (scope `removed`): settled ones, and working ones it started after the handoff, with the
     reports, turns and delegations that are theirs, since an orphan is worse. What it asked for and the person never
     answered stays behind and goes as before: its standing start_agent cards are withdrawn and the requests it queued
