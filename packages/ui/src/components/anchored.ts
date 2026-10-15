@@ -11,7 +11,7 @@ import { useLayoutEffect, useState, type RefObject } from 'react'
  * row menu are fixed.
  *
  * All numbers are layout pixels: the caller divides the anchor's screen rect and the window by the zoom
- * (`--text-zoom`) first, for the reason RowMenu in Sidebar.tsx measured (a fixed length gets the zoom multiplied in a
+ * (`--text-zoom`) first, for the reason RowMenu in sidebar/menus/RowMenu.tsx measured (a fixed length gets the zoom multiplied in a
  * second time).
  */
 

@@ -184,7 +184,7 @@ export function backgroundTasksTests(): void {
 
       /*
        * Zoomed in, at the window's right edge, it still hangs right under its badge — the screen rect already has the
-       * zoom in it and a fixed length gets it again (RowMenu's lesson in Sidebar.tsx, #183)
+       * zoom in it and a fixed length gets it again (RowMenu's lesson in sidebar/menus/RowMenu.tsx, #183)
        */
       await page.evaluate(() => (window as any).__store.setState((s: any) => ({ prefs: { ...s.prefs, textSize: 1.25 } })))
       await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-zoom').trim())).toBe('1.25')
