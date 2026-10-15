@@ -79,7 +79,11 @@ let mgr: SessionManager
 let rpc: ReturnType<typeof createRpcHandler>
 
 /** What the manager holds in one of its caches — reached past its interface on purpose: the size is invisible through it */
-const held = (name: 'commandCache' | 'externalIndex') => (mgr as unknown as Record<typeof name, Map<string, unknown>>)[name].size
+const held = (name: 'commandCache' | 'externalIndex') => {
+  // The index lives with the external conversations since #428
+  const owner = name === 'externalIndex' ? (mgr as unknown as { externals: object }).externals : mgr
+  return (owner as unknown as Record<typeof name, Map<string, unknown>>)[name].size
+}
 
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-folder-cache-')))
@@ -126,7 +130,7 @@ describe('the session manager writes its per-folder caches through remember (#39
 
   it("the index of a tool's stored conversations", async () => {
     // Private: it is reached only on the wake path, and the key it caches under is all this asks about
-    const indexOf = (cwd: string) => (mgr as unknown as { externalIndexOf(t: ToolName, c: string): Promise<unknown> }).externalIndexOf('claude', cwd)
+    const indexOf = (cwd: string) => (mgr as unknown as { externals: { externalIndexOf(t: ToolName, c: string): Promise<unknown> } }).externals.externalIndexOf('claude', cwd)
     for (let i = 0; i < FOLDERS; i++) expect(await indexOf(join(root, `f${i}`))).not.toBeNull()
     expect(held('externalIndex')).toBe(FOLDER_CACHE_KEYS)
   })
