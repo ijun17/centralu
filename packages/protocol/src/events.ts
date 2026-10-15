@@ -12,6 +12,7 @@ import {
   RequestInput,
   SessionActivity,
   SessionGoal,
+  Interruption,
   SessionState,
   TokenUsage,
   ToolSummary,
@@ -361,6 +362,13 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * since its last message is the JSON itself.
    */
   z.object({ ...base, type: z.literal('turn_complete'), output: z.unknown().optional() }),
+  /**
+   * Why the session's last turn did not run to its end changed (#698): set when a turn stops for a network failure, a
+   * quit or an interrupt nobody here asked for, or when the tool has been reconnecting for too long; `null` once the
+   * session works again. The host decides it and keeps it on `SessionInfo.interruption`; this event carries the change
+   * to windows already open. Not recorded: the conversation already has the error, or the host's marker for a quit.
+   */
+  z.object({ ...base, type: z.literal('interruption'), interruption: Interruption.nullable() }),
   z.object({ ...base, type: z.literal('state_change'), state: SessionState, reason: z.string().optional() }),
   /**
    * Whether the session's agent process runs (`SessionInfo.live`) changed outside an answer to the screen's own call

@@ -20,12 +20,14 @@ import {
   parseEventLenient,
   parseServerFrame,
   RpcMethods,
+  SessionInfo,
   isProjectId,
   ToolDescriptor,
   ToolName,
   ToolStatus,
   withoutToolRecord,
 } from './index.js'
+import { currentSession } from './test-helpers.js'
 
 const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'message_delta', sessionId: 's1', role: 'assistant', text: 'hi' },
@@ -238,6 +240,9 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // An agent's "Apply now" (#665): the request every window answers, and the go only the ticket's window follows
   { type: 'update_apply_request', requestId: 'r1' },
   { type: 'update_apply_go', requestId: 'r1', ticket: 't1' },
+  // Why a turn did not run to its end (#698), and its clearing
+  { type: 'interruption', sessionId: 's1', interruption: { reason: 'network', at: 1, detail: 'API Error: Connection refused (ECONNREFUSED)' } },
+  { type: 'interruption', sessionId: 's1', interruption: null },
 ]
 
 describe('golden: every v1 event type', () => {
@@ -303,6 +308,17 @@ describe('forward compatibility (docs/protocol.md §4)', () => {
     const r = parseEventLenient({ type: 'notice', sessionId: 's1', level: 'warning', text: 'x', from: 'Codex', audience: 'admin' })
     expect(r).toMatchObject({ type: 'notice', text: 'x', from: 'Codex' })
     expect(r && 'audience' in r ? r.audience : undefined).toBeUndefined()
+  })
+
+  it('reads an interruption reason a newer host invented as interrupted, and an unreadable one as none (#698)', () => {
+    expect(parseEventLenient({ type: 'interruption', sessionId: 's1', interruption: { reason: 'power_cut', at: 5 } })).toMatchObject({
+      interruption: { reason: 'interrupted', at: 5 },
+    })
+    const row = { ...currentSession('s1'), interruption: { reason: 'quit', at: 'yesterday' } }
+    expect(SessionInfo.parse(row).interruption).toBeNull()
+    // A host from before #698 sends no field at all
+    const { interruption: _, ...older } = currentSession('s1')
+    expect(SessionInfo.parse(older).interruption).toBeUndefined()
   })
 
   it('rejects an event missing a required field', () => {

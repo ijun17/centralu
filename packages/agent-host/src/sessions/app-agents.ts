@@ -1,4 +1,5 @@
 import type { NormalizedEvent, StoredMessage } from '@cc/protocol'
+import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
 
 /**
  * An agent an app has assigned (M4 D-1) — what gets sent to the session, and what gets read as
@@ -119,6 +120,14 @@ export class AgentRunWait {
         return this.fail(new Error(this.stoppedByPerson ? 'the person stopped the agent before it finished' : `the agent's turn failed: ${e.error.message}`))
       case 'limit_reached':
         return this.fail(new Error(`the agent reached its usage limit${e.resumeAt ? ` (it resets at ${e.resumeAt})` : ''}`))
+      /*
+       * An interrupted turn ends here (#698). Codex's interrupted turn used to arrive as `turn_complete` and was read as
+       * a finished one; it now ends as a Stop does, with no `turn_complete` after it, so waiting for one would wait
+       * for ever. A Stop of the person's still says so (`fail`).
+       */
+      case 'state_change':
+        if (e.state !== 'waiting_input' || (e.reason !== 'interrupted' && e.reason !== INTERRUPTED_BY_TOOL)) return
+        return this.fail(new Error(e.reason === INTERRUPTED_BY_TOOL ? 'its tool interrupted the turn before it finished' : 'the turn was stopped before it finished'))
       case 'approval_request':
         return this.notify(`waiting for the person to approve a step in "${this.sessionName()}"`)
       case 'question_request':

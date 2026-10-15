@@ -615,10 +615,16 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * A failure is emitted as `error` — **not together with `turn_complete`.** If both events go
      * out, the state machine's last word ends up being "waiting for the person", which repeats
      * exactly the lie we are trying to fix. The same rule the Claude adapter uses for `result`.
+     *
+     * An interrupted turn is not a finished one either (#698). It went out as `turn_complete`, so a turn Codex cut
+     * short told the orchestrator that gave it "The assigned work finished". It ends as the person's Stop ends a turn,
+     * `waiting_input` with `interrupted`; the adapter tells a Stop of ours from an interrupt it did not ask for
+     * (`INTERRUPTED_BY_TOOL`).
      */
     case 'turn/completed': {
       const turn = obj(p.turn)
       const failure = obj(turn.error)
+      if (str(turn.status) === 'interrupted' && !failure.message) return [{ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' }]
       if (str(turn.status) !== 'failed' && !failure.message) return [{ type: 'turn_complete', sessionId }]
       const detail = str(failure.additionalDetails)
       return [

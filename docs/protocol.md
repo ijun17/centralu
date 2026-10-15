@@ -82,6 +82,7 @@ type NormalizedEvent =
   | { type: 'background_tasks'; sessionId, live: BackgroundTask[], ended?: BackgroundTask[], clearEnded? }  // #290: the live set (REPLACE) and what just ended
   | { type: 'agent_version';    sessionId, version }            // #297: the CLI version this process runs, once per process; kept as SessionInfo.agentVersion
   | { type: 'session_live';     sessionId, live, reason? }      // #568: the process ended because the session went to sleep (reason 'asleep'), or a resume brought it back
+  | { type: 'interruption';     sessionId, interruption: Interruption|null }  // #698: why the last turn did not finish (network, quit, interrupted, reconnecting); kept as SessionInfo.interruption
   | { type: 'history_synced';   sessionId, added }              // a conversation continued elsewhere was caught up
   | { type: 'session_deleted';  sessionId }
   | { type: 'session_owner';    sessionId, askedBy|null, parentSessionId|null }  // #693: a handoff moved this live child to the session that took over; the sidebar hangs it there

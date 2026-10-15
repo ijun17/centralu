@@ -211,3 +211,48 @@ describe('codex approval cards close with their request', () => {
     expect(state.responses).toEqual([])
   })
 })
+
+/**
+ * An interrupted turn is not a finished one (#698). A turn Codex ended with `interrupted` went out as `turn_complete`,
+ * and the orchestrator that gave the work was told "The assigned work finished". Which interrupt it was is told apart
+ * too: a Stop from Centralu, or one Codex sent by itself.
+ */
+describe('codex: how an interrupted turn ends (#698)', () => {
+  const ended = (turn: string) =>
+    state.handlers!.onNotification({ method: 'turn/completed', params: { threadId: 't1', turn: { id: turn, status: 'interrupted', error: null } } })
+
+  async function midTurn(events: NormalizedEvent[]) {
+    const h = await session(events)
+    h.send('a long-running task')
+    await tick()
+    state.handlers!.onNotification({ method: 'turn/started', params: { threadId: 't1', turn: { id: 'turn-7' } } })
+    return h
+  }
+
+  it('an interrupt nobody here asked for ends the turn as interrupted by the tool, never as finished, and says so in the log', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const events: NormalizedEvent[] = []
+    await midTurn(events)
+    ended('turn-7')
+    expect(events.filter((e) => e.type === 'turn_complete')).toEqual([])
+    expect(events.filter((e) => e.type === 'state_change' && e.state === 'waiting_input')).toEqual([
+      { type: 'state_change', sessionId: 's1', state: 'waiting_input', reason: 'interrupted_by_tool' },
+    ])
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('turn turn-7 interrupted by Codex, not by a stop from Centralu'))
+    log.mockRestore()
+  })
+
+  it("a Stop of ours ends it as the person's stop, which the screen and the orchestrator already know", async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const events: NormalizedEvent[] = []
+    const h = await midTurn(events)
+    h.interrupt()
+    ended('turn-7')
+    const stops = events.filter((e) => e.type === 'state_change' && e.state === 'waiting_input')
+    expect(stops.length).toBeGreaterThan(0)
+    expect(stops.every((e) => e.type === 'state_change' && e.reason === 'interrupted')).toBe(true)
+    expect(events.filter((e) => e.type === 'turn_complete')).toEqual([])
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('turn turn-7 interrupted by a stop from Centralu'))
+    log.mockRestore()
+  })
+})

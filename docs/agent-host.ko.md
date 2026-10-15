@@ -747,6 +747,7 @@ host restarts   → under the keeper: agents, terminals and commands keep runnin
                   host re-attaches to them mid-turn (§4.3) → a new streamEpoch → UIs resync
                 → without a keeper: session processes die → a new streamEpoch → UIs resync
                   → attempt resume with the externalId from the store (the same path as FR-10)
+                  → a session that was mid-turn is reset to idle with a `quit` marker (§4.6.2)
 host swapped    → the old host drains, the new one takes over behind the same front door (§4.2)
                 → clients reconnect to the same address and resync on the new streamEpoch
 keeper updated  → the old keeper hands every handle to the new build's keeper (§4.4): the host,
@@ -1239,6 +1240,40 @@ host.log에 그렇다는 줄 하나를 쓴다. 탐침은 여기에 꽂힌다.
 
 다루지 않는 것: 키퍼 없이 호스트가 다시 시작하면, 재연결 복구는 여전히 그 전에 살아 있던 세션을 깨운다.
 
+### 4.6.2 아무도 멈추라고 하지 않았는데 멈춘 턴 (#698)
+
+턴은 일이 끝나기 전에 끝날 수 있는데, 세션의 모습은 그것을 알려 주지 않는다. 다른 세션처럼 `error`, `idle`,
+`waiting_input`에 머물러 있을 뿐이다. 2026-10-15에 하위 세션 여러 개가 일하는 동안 인터넷이 두 번 끊겼다. Claude
+하위 세션들은 `error`로 끝났고(CLI가 `api_retry`를 열 번, 약 3분 동안 시도한 뒤 `ECONNREFUSED`와 `ENOTFOUND`로
+실패했다), 사람이 직접 "continue"를 보낼 때까지 그대로 있었다. 그 턴들은 CLI가 스스로 연 턴(Monitor 발동)이어서
+빚진 보고가 없었고, 그들을 시작한 오케스트레이터는 아무것도 듣지 못했다. Codex 하위 세션의 중단된 턴은
+오케스트레이터에게 "The assigned work finished"로 보고되었고, "완전히 종료"는 턴 도중의 세션을 대화에 아무 줄도
+남기지 않은 채 `idle`로 되돌렸다.
+
+이제 호스트는 **마지막 턴이 끝나지 못한 이유**를 세션에 둔다(`SessionInfo.interruption`, 저장은
+`sessions.interruption`, 스토어 v53). 바뀔 때마다 `interruption` 이벤트로 보낸다. 이벤트에서 읽는 방식은 도구에
+묶이지 않는다(`sessions/interruptions.ts`):
+
+| 이유 | 정해지는 때 | 지워지는 때 |
+|---|---|---|
+| `network` | 네트워크가 원인인 메시지로 턴이 오류로 끝날 때: 오류 코드(`ECONNREFUSED`, `ENOTFOUND` 등), "No response from API", "Can't reach the API server", "Connection refused/lost", 컴퓨터 잠자기, Codex의 "stream disconnected", "failed to lookup address", "error sending request", "Transport error"(`isNetworkFailure`. 실제 저장소와 host.log에서 측정한 문장들) | 세션이 다시 일할 때(`working`, 출력), 또는 턴이 다른 식으로 끝날 때 |
+| `quit` | 시작할 때 프로세스 없이 `working`이나 `waiting_approval`인 세션을 찾았을 때(완전 종료, 재부팅, 키퍼가 살아남지 못한 충돌), 또는 키퍼가 쥔 프로세스를 다시 붙이지 못했을 때. 대화에 Centralu의 경고 줄을 쓴다("Centralu quit or restarted while this turn was running …") | 같음 |
+| `interrupted` | 턴이 `interrupted_by_tool` 이유(`INTERRUPTED_BY_TOOL`)로 `waiting_input`에서 끝날 때: 우리가 `turn/interrupt`를 보내지 않은 턴에 온 Codex의 `turn/completed {status: "interrupted"}` | 같음 |
+| `reconnecting` | 도구가 `RECONNECTING_FLAG_MS`(5분) 동안 `retrying`에 머물 때: Codex는 네트워크를 끝없이 기다린다. 살아 있는 동안만이며 저장하지 않는다 | 활동이 `retrying`에서 벗어나거나 턴이 끝날 때 |
+
+| 결정 | 이유 |
+|---|---|
+| 분류해서 보여 주고, 스스로 다시 보내지 않는다 | 다시 보낸 턴은 부작용(push, 댓글, 출시)을 되풀이할 수 있다. 이어 가는 일은 사람이나 요청한 세션이 보내는 메시지 하나다: "Continue where you stopped." 다시 연결될 때 자동으로 보내는 기능은 나중에 선택 사항으로 더할 수 있다 |
+| Codex의 `interrupted` 턴은 `turn_complete`가 아니라 Stop처럼(`state_change waiting_input`) 끝난다 | `turn_complete`는 "끝났다"는 뜻이어서 오케스트레이터는 일이 끝났다고 들었다. 이제 중단 뒤에 `turn_complete`가 오지 않으므로, 턴을 기다리는 쪽(`AgentRunWait`)은 중단에서 기다림을 끝낸다 |
+| Codex 어댑터는 자기가 보낸 중단과 Codex가 보낸 중단을 구별해 로그에 남긴다(`interruptsSent`, "interrupted by a stop from Centralu" / "by Codex") | 실제 사례에서는 사람의 Stop, 호스트, CLI 중 누가 보냈는지 알 수 없었다 |
+| 사람의 Stop과 오케스트레이터의 `agent_session stop`은 아무것도 정하지 않는다 | 본인이 알고 있다. 자기 행동을 표시하면 소음이 된다 |
+| `reconnecting` 시계는 `retrying`만 시작하고, 조용함은 시작하지 않는다 | 15–40초씩 쉬며 CI를 기다리던 세션은 멈춘 것처럼 보였지만 멈추지 않았다. 긴 빌드도 똑같이 보인다 |
+| 그 턴에 빚진 보고는 이유를 먼저 말하고("stopped before finishing: a network error ended its turn", "its tool interrupted the turn") 이어 가는 방법을 덧붙인다 | "The assigned work failed"를 들은 쪽은 "continue" 한 번이면 될 일을 다시 하거나 버렸다 |
+| 빚진 보고가 없고(보고 표시도, 턴을 읽는 대기도 없음) 세션에 요청한 세션(`askedBy`)이 있으면, `network`나 `interrupted`로 멈출 때 그 세션에 같은 보고를 한 번 보낸다(`tellAskerOfInterruption`) | 2026-10-15 사례. 멈춘 턴마다 보고는 하나이고, 다음 보고에는 다음 턴이 필요하므로 두 세션이 서로를 깨우는 고리가 생기지 않는다 |
+| `quit`은 아무도 깨우지 않는다: 요청한 세션의 보고 표시는 전처럼 버린다(§1.2.1) | 종료 뒤에는 요청한 세션의 턴도 잘렸다. 다음 시작 때 턴을 스스로 시작하면 사람이 청하지 않은 토큰을 쓴다. 표시 줄, 인박스, 목록이 그 사실을 말한다 |
+| 오케스트레이터의 목록(`list_sessions`, reader에게는 id 없는 `read_session`)과 `agent_session status`는 줄에 "stopped: network error", "stopped: Centralu quit during its turn", "stopped: its tool interrupted the turn", "reconnecting to its API for N min"을 붙인다. 거르는 인자는 두지 않는다 | 줄이 이미 말하고, 인자는 모든 요청의 도구 정의에 실린다(docs/tool-cost.md). `agent_session`의 목록(#690)은 아직 없다 |
+| `CLAUDE_CODE_MAX_RETRIES`는 CLI가 정한 대로 둔다 | 3분이면 대부분의 끊김을 넘긴다. 예산을 늘리면 긴 장애 동안 턴을 붙잡아 둔다 |
+
 ### 4.7 원격 모드 1단계: `centralu serve` (#82)
 
 앱은 다른 머신(SSH 서버, 나중에는 노트북)에 있는 프로젝트를 다룰 수 있다. 그 머신은 자기만의 독립된 호스트를 돌린다:
@@ -1503,7 +1538,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 
 | 단계 | 하는 일 | 옛 빌드 |
 |---|---|---|
-| 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43 | 열 추가 | 읽는다 (39: 휴지통의 세션을 살아 있는 세션으로 보여 준다; 43: 이전 host의 `grid.set`은 크기를 쓰지 않으므로 앱 패널이 기본값으로 돌아간다, #306) |
+| 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43, 53 | 열 추가 (53: 마지막 턴이 끝나지 못한 이유인 `sessions.interruption`, #698) | 읽는다 (39: 휴지통의 세션을 살아 있는 세션으로 보여 준다; 43: 이전 host의 `grid.set`은 크기를 쓰지 않으므로 앱 패널이 기본값으로 돌아간다, #306; 53: 이전 host는 `sessions.interruption`을 읽지도 쓰지도 않으므로, 그 host가 맡은 줄은 마지막 값을 그대로 둔다, #698) |
 | 3, 6, 9, 16, 19, 34, 36, 41, 42, 49, 50, 51, 52 | 테이블 추가 (3은 색인도 채운다: 무거움; 42는 그리드의 세션 줄을 `grid_layout`에 한 번 옮겨 적고 `grid_panels`는 그대로 둔다, #288; 49는 세션이 일을 준 세션에게 빚진 보고를 적는 `report_marks`를 더한다, #646; 50은 아직 사람의 답을 기다리는 start_agent 카드를 적는 `agent_start_requests`를 더한다, #673; 51은 돌고 있는 턴을 맡긴 세션을 적는 `delegated_turns`를 더한다, #676; 52는 바쁜 세션을 위해 붙잡아 둔 요청을 적는 `queued_requests`와 nullable `sessions.forked_from_session_id`를 더한다, #677) | 읽는다 (42: 이전 host는 그리드를 `grid_panels`에 두므로, 두 빌드의 그리드가 달라질 수 있다) |
 | 10, 11, 40 | 같은 모양으로 다시 짓기 (10: `project_id`를 nullable로 한 `sessions`; 11과 40: 색인 후 `VACUUM`: 무거움) | 읽는다 |
 | 21, 26, 29, 35, 48 | 한 방향 데이터 고쳐 쓰기 (21은 모든 메시지를 고쳐 쓴다: 무거움. 48은 예전 워크트리 매니저의 워크트리 세션에 `askedBy`를 준다, #561) | 읽는다, 되돌릴 수 없다 |

@@ -3,7 +3,7 @@ import Database from 'better-sqlite3'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { GridPanel, ProjectInfo, SavedCommand, SessionInfo, StoredMessage, ToolDefaults } from '@cc/protocol'
-import { GridSpan, ProjectConsentKind as ProjectConsentKindSchema, sessionLiveDefaults } from '@cc/protocol'
+import { GridSpan, Interruption as InterruptionSchema, ProjectConsentKind as ProjectConsentKindSchema, sessionLiveDefaults } from '@cc/protocol'
 
 /**
  * Where the schema lives depends on how the process is running.
@@ -1949,6 +1949,23 @@ export class Store {
           if (!cols.includes('forked_from_session_id')) this.db.exec(`ALTER TABLE sessions ADD COLUMN forked_from_session_id TEXT`)
         },
       },
+      {
+        to: 53,
+        breaksOlderReaders: false,
+        /**
+         * Why a session's last turn did not run to its end (#698): `sessions.interruption`, the JSON of
+         * `SessionInfo.interruption` (`network`, `quit`, `interrupted`), null when nothing stopped it. Stored so the
+         * inbox and the orchestrator's list still say it after a restart: a quit is exactly when it is written, and the
+         * person reads it on the next start.
+         *
+         * **Expand only (#292's rule).** A nullable column; an older host neither reads nor writes it, so a session it
+         * serves during a swap keeps the last value until this build writes the row again.
+         */
+        run: () => {
+          const cols = (this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).map((c) => c.name)
+          if (!cols.includes('interruption')) this.db.exec(`ALTER TABLE sessions ADD COLUMN interruption TEXT`)
+        },
+      },
     ]
   }
 
@@ -2427,8 +2444,8 @@ export class Store {
   upsertSession(s: SessionInfo): void {
     this.db
       .prepare(
-        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, worktree_base, parent_session_id, scope_session_ids, role_append, app_id, asked_by_session_id, forked_from_session_id, context_used, context_window, context_exactness)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @scopeSessionIds, @roleAppend, @appId, @askedBy, @forkedFrom, @contextUsed, @contextWindow, @contextExactness)
+        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, worktree_base, parent_session_id, scope_session_ids, role_append, app_id, asked_by_session_id, forked_from_session_id, context_used, context_window, context_exactness, interruption)
+         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @scopeSessionIds, @roleAppend, @appId, @askedBy, @forkedFrom, @contextUsed, @contextWindow, @contextExactness, @interruption)
          ON CONFLICT(id) DO UPDATE SET
            tool = excluded.tool,
            external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
@@ -2447,7 +2464,8 @@ export class Store {
            asked_by_session_id = excluded.asked_by_session_id,
            forked_from_session_id = excluded.forked_from_session_id,
            context_used = excluded.context_used, context_window = excluded.context_window,
-           context_exactness = excluded.context_exactness`,
+           context_exactness = excluded.context_exactness,
+           interruption = excluded.interruption`,
       )
       .run({
         ...s,
@@ -2477,6 +2495,8 @@ export class Store {
         contextUsed: s.context?.used ?? null,
         contextWindow: s.context?.window ?? null,
         contextExactness: s.context?.exactness ?? null,
+        // `reconnecting` describes the running process and is not kept (#698)
+        interruption: s.interruption && s.interruption.reason !== 'reconnecting' ? JSON.stringify(s.interruption) : null,
       })
   }
 
@@ -2644,6 +2664,7 @@ export class Store {
                 s.forked_from_session_id as forkedFrom,
                 s.context_used as contextUsed, s.context_window as contextWindow,
                 s.context_exactness as contextExactness,
+                s.interruption as interruptionJson,
                 COALESCE((SELECT MAX(seq) FROM messages m WHERE m.session_id = s.id), 0) as lastSeq
          FROM sessions s WHERE ${where} ORDER BY s.sidebar_order, s.created_at`,
       )
@@ -2657,6 +2678,7 @@ export class Store {
       contextWindow: number | null
       contextExactness: string | null
       scopeSessionIdsJson: string | null
+      interruptionJson: string | null
     })[]
     // Live-only fields are not in the database — a restored session correctly has none of them (facts that die with the host)
     return rows.map(
@@ -2669,6 +2691,7 @@ export class Store {
         contextExactness,
         isOrchestrator,
         scopeSessionIdsJson,
+        interruptionJson,
         ...r
       }) => ({
         ...r,
@@ -2720,6 +2743,8 @@ export class Store {
                 exactness: contextExactness === 'exact' ? ('exact' as const) : ('estimate' as const),
               }
             : null,
+        // Why the last turn did not finish (#698); a value this build cannot read is no interruption rather than a lost row
+        interruption: readInterruption(interruptionJson),
       }),
     )
   }
@@ -4117,5 +4142,16 @@ function indexedText(kind: string, payload: string): string {
     return typeof p.text === 'string' ? p.text : ''
   } catch {
     return ''
+  }
+}
+
+/** `sessions.interruption` back as `SessionInfo.interruption` (#698) */
+function readInterruption(json: string | null): SessionInfo['interruption'] {
+  if (!json) return null
+  try {
+    const r = InterruptionSchema.safeParse(JSON.parse(json))
+    return r.success ? r.data : null
+  } catch {
+    return null
   }
 }

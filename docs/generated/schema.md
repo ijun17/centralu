@@ -2,7 +2,7 @@
 
 # Store schema
 
-The tables of the host's store (`store.db`) at schema version 52, as a new store has them once
+The tables of the host's store (`store.db`) at schema version 53, as a new store has them once
 schema.sql and every migration step have run. Generated from a real `Store`
 (`packages/agent-host/src/dev-services/schema-doc.ts`); a test fails when this file and the migrations disagree.
 
@@ -218,6 +218,7 @@ erDiagram
     TEXT trash
     TEXT asked_by_session_id
     TEXT forked_from_session_id
+    TEXT interruption
   }
   subagent_messages {
     TEXT session_id PK, FK
@@ -542,6 +543,7 @@ Added in schema.sql.
 | `trash` | TEXT | yes |  |  | v39 |
 | `asked_by_session_id` | TEXT | yes |  |  | v45 |
 | `forked_from_session_id` | TEXT | yes |  |  | v52 |
+| `interruption` | TEXT | yes |  |  | v53 |
 
 Indexes:
 

@@ -21,6 +21,7 @@ import { remember } from './folder-cache.js'
 import { makeProjectFolder, projectFolderTarget, type ProjectFolderTarget } from '../dev-services/project-folder.js'
 import { cloneInto } from '../dev-services/project-clone.js'
 import { contextAt, labelOf, lastActiveOf, orchestratorMemory, previewOf, timeOf } from './transcript-view.js'
+import { RECONNECTING_FLAG_MS, interruptionAfter } from './interruptions.js'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { existsSync, realpathSync, rmSync, statSync } from 'node:fs'
@@ -51,6 +52,7 @@ import type {
   SavedCommand,
   SessionInfo,
   SessionState,
+  Interruption,
   StoredMessage,
   TrashedSession,
   UsageSnapshot,
@@ -824,6 +826,8 @@ export class SessionManager {
    * many. Counted by `agentCeilingError` with the running children, so starts at once cannot pass the ceiling together.
    */
   private agentStartReserved = new Map<string, number>()
+  /** Sessions whose tool is `retrying`, and since when (#698): flagged `reconnecting` once it lasts `RECONNECTING_FLAG_MS` */
+  private reconnecting = new Map<string, { since: number; timer: ReturnType<typeof setTimeout> }>()
   /** `disposeAll` has begun (#673): a card it withdraws is not the person's answer, and its request stays stored */
   private disposing = false
   /**
@@ -917,6 +921,8 @@ export class SessionManager {
       if (oldAsk) store.upsertSession(fixed)
       if (stale) {
         console.error(`[agent-host] stale state reset: ${s.id.slice(0, 8)} ${s.state} -> idle`)
+        // No window is attached yet: the marker and the interruption are read with the conversation and the list
+        this.markStoppedByQuit(fixed, false)
         store.upsertSession(fixed)
       }
     }
@@ -2509,6 +2515,7 @@ export class SessionManager {
           if (m.state === 'working' || m.state === 'waiting_approval') {
             m.state = 'idle'
             m.waitingSince = null
+            this.markStoppedByQuit(m, true)
             this.store.upsertSession(m)
             this.emit({ type: 'state_change', sessionId: m.id, state: 'idle', reason: 'reattach_failed' })
           }
@@ -3519,6 +3526,8 @@ export class SessionManager {
     /** This event ended the turn — how it ended (completed, error, canceled, limit) is stated by this event
      * itself */
     let endedTurn = false
+    /** The session's interruption before this event (#698); `undefined` when the event belongs to no known session */
+    let interruptionBefore: Interruption | null | undefined
     if (e.sessionId) {
       const m = this.meta.get(e.sessionId)
       if (m) {
@@ -3528,6 +3537,8 @@ export class SessionManager {
         }
         const wasBusy = inTurn(m.state)
         this.applyStateHint(e, m)
+        interruptionBefore = m.interruption ?? null
+        this.trackInterruption(e, m)
         // Heard from: an unknown background state is bounded by quiet, not by age (#648, `backgroundKnown`)
         if (this.backgroundUnknown.has(m.id)) this.backgroundUnknown.set(m.id, Date.now())
         /*
@@ -3576,9 +3587,18 @@ export class SessionManager {
     // unread tracking
     // Capture the answer before an event subscriber can send more input into this conversation.
     const run = e.sessionId ? this.agentRuns.get(e.sessionId) : undefined
+    // A wait still reading this turn is owed its end (#698); one that settled earlier is left from a turn before
+    const runOpen = !!run && !run.finished
     run?.onEvent(e)
     if (e.sessionId) for (const observer of this.turnObservers.get(e.sessionId) ?? []) observer.onEvent(e)
     this.emit(seq != null ? ({ ...e, seq } as NormalizedEvent) : e)
+    // After the event that caused it, so a window reads the error first and the reason for it second (#698)
+    const nowInterrupted = e.sessionId ? this.meta.get(e.sessionId)?.interruption ?? null : null
+    if (e.sessionId && interruptionBefore !== undefined && nowInterrupted !== interruptionBefore) {
+      this.emit({ type: 'interruption', sessionId: e.sessionId, interruption: nowInterrupted })
+    }
+    // Whether anyone is owed this turn's end: a report mark, or a delegation reading it (#698). Read before the report clears the mark
+    const owed = endedTurn && !!e.sessionId && (this.awaitingReport.has(e.sessionId) || runOpen)
     /*
      * Reporting happens **no matter how the turn ends** (#166). It used to only consume the marker on
      * turn_complete, but two adapters do not emit turn_complete for a failed turn (emitting it there
@@ -3586,6 +3606,7 @@ export class SessionManager {
      * reported, the marker stayed set, and a later, unrelated turn ended up reported as "it finished".
      */
     if (endedTurn && e.sessionId && !run?.tracksInputs) void this.reportBackIfAwaited(e.sessionId, e, run?.completedAnswer)
+    if (endedTurn && e.sessionId && !owed) void this.tellAskerOfInterruption(e.sessionId)
     // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
     if (endedTurn && e.sessionId && this.turnOwners.get(e.sessionId)?.untilTurnEnd) this.releaseTurn(e.sessionId)
@@ -3713,6 +3734,81 @@ export class SessionManager {
     await this.deliverReport(orchestratorId, sessionId, target.name, project, answer?.slice(0, 600) ?? previewOf(this.store, sessionId, 600), ending)
   }
 
+  /**
+   * A session start_agent started stopped in a turn nobody was owed a report of (#698): on 2026-10-15 the internet
+   * dropped twice, and children's turns their CLI had opened itself (a Monitor firing) ended in a network error. Their
+   * asker had been told of the work it gave and heard nothing of these; the children sat in `error` until the person
+   * sent "continue" by hand. The asker is told once per stopped turn, through the same report: a further report needs
+   * another turn, so two sessions cannot wake each other in a loop.
+   */
+  private async tellAskerOfInterruption(sessionId: string): Promise<void> {
+    const m = this.meta.get(sessionId)
+    const stop = m?.interruption
+    if (!m?.askedBy || !stop || (stop.reason !== 'network' && stop.reason !== 'interrupted') || this.handingOver) return
+    const asker = m.askedBy
+    if (!this.meta.has(asker)) return
+    console.error(`[sessions] ${sessionId.slice(0, 8)} stopped (${stop.reason}) in a turn no report was owed for; telling ${asker.slice(0, 8)}, which started it`)
+    const project = m.projectId ? (this.store.listProjects().find((p) => p.id === m.projectId)?.name ?? '(project no longer exists)') : '(none)'
+    await this.deliverReport(asker, sessionId, m.name, project, previewOf(this.store, sessionId, 600), { type: stop.reason === 'network' ? 'error' : 'state_change' })
+  }
+
+  /**
+   * Keeps `interruption` with the event (#698): `interruptionAfter` for the turn's ending, and the `reconnecting` flag
+   * for a tool that has been `retrying` past `RECONNECTING_FLAG_MS`. Only `retrying` starts the clock: a quiet session
+   * is not a stuck one.
+   */
+  private trackInterruption(e: NormalizedEvent, m: SessionInfo): void {
+    const next = interruptionAfter(e, Date.now())
+    // The reconnecting flag stands while the tool still retries, whatever else the turn says meanwhile
+    const stillReconnecting = m.interruption?.reason === 'reconnecting' && m.state === 'working' && m.activity === 'retrying'
+    if (next !== undefined && !stillReconnecting) m.interruption = next
+    const retrying = m.state === 'working' && m.activity === 'retrying'
+    if (retrying) {
+      if (!this.reconnecting.has(m.id)) this.watchReconnecting(m.id)
+      return
+    }
+    const timer = this.reconnecting.get(m.id)
+    if (timer) clearTimeout(timer.timer)
+    this.reconnecting.delete(m.id)
+    if (m.interruption?.reason === 'reconnecting') m.interruption = null
+  }
+
+  private watchReconnecting(sessionId: string): void {
+    const since = Date.now()
+    // The entry stays after it fires, so a later event of the same episode does not start the clock again
+    const timer = setTimeout(() => {
+      const m = this.meta.get(sessionId)
+      if (!m || m.state !== 'working' || m.activity !== 'retrying') return
+      console.error(`[sessions] ${sessionId.slice(0, 8)} has been reconnecting to its API for ${Math.round(RECONNECTING_FLAG_MS / 60_000)} min`)
+      m.interruption = { reason: 'reconnecting', at: since }
+      this.emit({ type: 'interruption', sessionId, interruption: m.interruption })
+    }, RECONNECTING_FLAG_MS)
+    timer.unref?.()
+    this.reconnecting.set(sessionId, { since, timer })
+  }
+
+  /**
+   * The turn went with its process (#698): a start found the session mid-turn with no process left (a full quit, a
+   * reboot, a crash the keeper did not survive), or a kept process could not be re-attached. The session is reset to
+   * `idle`, which used to leave no mark at all: the conversation simply stopped. A line now says so, and the
+   * interruption puts the session in the inbox with a way to continue.
+   */
+  private markStoppedByQuit(m: SessionInfo, announce: boolean): void {
+    m.interruption = { reason: 'quit', at: Date.now() }
+    const notice: NormalizedEvent = {
+      type: 'notice',
+      sessionId: m.id,
+      level: 'warning',
+      from: 'Centralu',
+      label: 'stopped',
+      text: 'Centralu quit or restarted while this turn was running, so the turn stopped before it finished. Send a message to continue.',
+    }
+    const seq = this.persistMessage(notice, m)
+    if (!announce) return
+    this.emit(seq != null ? ({ ...notice, seq } as NormalizedEvent) : notice)
+    this.emit({ type: 'interruption', sessionId: m.id, interruption: m.interruption })
+  }
+
   /** Reports the end of a turn the orchestrator asked to hear about, as one message in its session (#166) */
   private async deliverReport(
     orchestratorId: string,
@@ -3727,12 +3823,22 @@ export class SessionManager {
      * both the person and the orchestrator read it as a success. On failure, the error message is
      * included too. The error is not the agent's last response, so it never shows up in the preview.
      */
+    /*
+     * A turn cut short by the network or by its tool is not a failure of the work (#698): it continues where it stopped
+     * once it is sent a message, and nothing else will continue it. Said first, so the caller does not redo the work.
+     */
+    const stop = this.meta.get(sessionId)?.interruption
+    const cutShort = stop?.reason === 'network' || stop?.reason === 'interrupted'
     const outcome =
-      ending.type === 'error' ? `[Centralu] The assigned work failed.\n`
+      stop?.reason === 'network' ? `[Centralu] The assigned work stopped before finishing: a network error ended its turn.\n`
+      : stop?.reason === 'interrupted' ? `[Centralu] The assigned work stopped before finishing: its tool interrupted the turn.\n`
+      : ending.type === 'error' ? `[Centralu] The assigned work failed.\n`
       : ending.type === 'limit_reached' ? `[Centralu] The assigned work stopped after hitting a usage limit.\n`
       : ending.type === 'turn_complete' ? `[Centralu] The assigned work finished.\n`
       : `[Centralu] The assigned work stopped before finishing.\n`
-    const failure = ending.type === 'error' ? `Error: ${String(ending.error?.message ?? '').slice(0, 600)}\n\n` : ''
+    const message = stop?.detail ?? (ending.type === 'error' ? String(ending.error?.message ?? '') : '')
+    const failure = message ? `Error: ${message.slice(0, 600)}\n\n` : ''
+    const resume = cutShort ? 'It keeps its conversation: send it a message (for example "Continue where you stopped.") to go on, once the network is back.\n' : ''
     try {
       await this.deliver(
         orchestratorId,
@@ -3741,6 +3847,7 @@ export class SessionManager {
           `id: ${sessionId}\n` +
           `Project: ${frameField(project)}\n\n` +
           failure +
+          resume +
           `Last response:\n${preview || '(no content)'}\n\n` +
           `If you need more, you can read that session's recent conversation with read_session.`,
         undefined,
@@ -5589,6 +5696,7 @@ export class SessionManager {
             tool: s.tool,
             preview: previewOf(this.store, s.id),
             lastActive: lastActiveOf(this.store, s.id),
+            ...(s.interruption ? { interruption: s.interruption } : {}),
           }))
         const reader = linked()
         return reader ? [...mine, ...(await reader.list())] : mine
@@ -8285,6 +8393,7 @@ export class SessionManager {
       tool: child.tool,
       answer: clipAnswer(finalAnswer(this.store.loadMessages(child.id, 50)), child.name),
       sessionState: child.state,
+      ...(child.interruption ? { interruption: child.interruption } : {}),
     }
   }
 

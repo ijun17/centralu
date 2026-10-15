@@ -6,6 +6,7 @@ import type {
   ApprovalDecision,
   ApprovalScope,
   GitSource,
+  Interruption,
   NormalizedEvent,
   ApprovalDetail,
   Question,
@@ -45,6 +46,13 @@ import type { ToolProfile } from '../apps/contract.js'
  * Kept tool-neutral. Claude exposes it through an in-process MCP server; other tools can expose
  * it their own way — SDK types must not step even one foot outside adapters/<tool>/.
  */
+/**
+ * The `state_change` reason an adapter gives a turn the tool interrupted when nobody here asked it to (#698): Codex's
+ * `turn/completed` with `interrupted` that no `turn/interrupt` of ours preceded. The manager reads it as an
+ * interruption the person and the orchestrator are told of. A Stop of ours ends a turn with `interrupted`.
+ */
+export const INTERRUPTED_BY_TOOL = 'interrupted_by_tool'
+
 export type OrchestratedSession = {
   sessionId: string
   name: string
@@ -64,6 +72,8 @@ export type OrchestratedSession = {
   machine?: string
   /** Why that machine could not be asked just now, so the row is what the hub last knew of it */
   away?: string
+  /** Why its last turn did not run to its end (#698), until it works again */
+  interruption?: Interruption
 }
 
 /** One `recall` hit: where it was said, and the seq that opens it with read_session */
@@ -223,7 +233,7 @@ export type ChildRunResult =
     } & (
       | { state: 'done'; answer: string; readable: string[]; outside: string[] }
       | { state: 'working'; reported: boolean }
-      | { state: 'at_rest'; answer: string; sessionState: string }
+      | { state: 'at_rest'; answer: string; sessionState: string; interruption?: Interruption }
       | { state: 'asking'; cards: RoutedCard[] }
       | { state: 'answered'; card: string }
       | { state: 'busy'; sessionState: string; choices: BusyChoice[] }

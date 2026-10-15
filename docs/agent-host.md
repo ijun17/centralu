@@ -1113,6 +1113,7 @@ host restarts   → under the keeper: agents, terminals and commands keep runnin
                   host re-attaches to them mid-turn (§4.3) → a new streamEpoch → UIs resync
                 → without a keeper: session processes die → a new streamEpoch → UIs resync
                   → attempt resume with the externalId from the store (the same path as FR-10)
+                  → a session that was mid-turn is reset to idle with a `quit` marker (§4.6.2)
 host swapped    → the old host drains, the new one takes over behind the same front door (§4.2)
                 → clients reconnect to the same address and resync on the new streamEpoch
 keeper updated  → the old keeper hands every handle to the new build's keeper (§4.4): the host,
@@ -1753,6 +1754,40 @@ awake until they end. A Codex session is never put to sleep, so its own scheduli
 
 Not covered: the reconnect recovery still wakes the sessions that were live before a host restart without a keeper.
 
+### 4.6.2 Turns that stopped without anyone asking (#698)
+
+A turn can end before its work does, and nothing about the session says so: it rests in `error`, `idle` or
+`waiting_input` like any other. On 2026-10-15 the internet dropped twice while several child sessions worked. The
+Claude children ended in `error` (the CLI retried `api_retry` ten times, about three minutes, then failed with
+`ECONNREFUSED` and `ENOTFOUND`) and sat there until the person sent "continue" by hand; the turns had been opened by
+the CLI itself (a Monitor firing), so no report was owed and the orchestrator that started them heard nothing. A Codex
+child's interrupted turn was reported to its orchestrator as "The assigned work finished", and "Quit completely" reset
+sessions mid-turn to `idle` with no line in their conversation.
+
+The host now keeps **why the last turn did not finish** on the session (`SessionInfo.interruption`, stored as
+`sessions.interruption`, store v53) and sends each change as an `interruption` event. Reading it from the events is
+tool-neutral (`sessions/interruptions.ts`):
+
+| Reason | Set when | Cleared when |
+|---|---|---|
+| `network` | a turn ends in an error whose message the network caused: the error codes (`ECONNREFUSED`, `ENOTFOUND`, ...), "No response from API", "Can't reach the API server", "Connection refused/lost", the computer sleeping, Codex's "stream disconnected", "failed to lookup address", "error sending request", "Transport error" (`isNetworkFailure`; the sentences measured in the real store and host.log) | the session works again (`working`, output), or a turn ends otherwise |
+| `quit` | a start finds the session `working` or `waiting_approval` with no process (a full quit, a reboot, a crash the keeper did not survive), or a kept process cannot be re-attached. A warning line from Centralu is written into the conversation ("Centralu quit or restarted while this turn was running …") | the same |
+| `interrupted` | a turn ends `waiting_input` with the reason `interrupted_by_tool` (`INTERRUPTED_BY_TOOL`): Codex's `turn/completed {status: "interrupted"}` for a turn no `turn/interrupt` of ours preceded | the same |
+| `reconnecting` | the tool has stayed `retrying` for `RECONNECTING_FLAG_MS` (5 minutes): Codex waits for the network without end. Live only, never stored | the activity moves off `retrying` or the turn ends |
+
+| Decision | Why |
+|---|---|
+| Classify and surface; never resend by itself | A resent turn can repeat side effects (a push, a comment, a release). Continuing is one message from the person or the asker: "Continue where you stopped." Auto-resend on reconnect could come later as an opt-in |
+| A Codex `interrupted` turn ends as a Stop does (`state_change waiting_input`), not as `turn_complete` | `turn_complete` is "finished": the orchestrator was told the work was done. A wait on the turn (`AgentRunWait`) ends on the interrupt, since no `turn_complete` follows it now |
+| The Codex adapter tells its own interrupts from Codex's and logs which (`interruptsSent`, "interrupted by a stop from Centralu" / "by Codex") | The real case could not tell whether the person's Stop, the host or the CLI sent it |
+| The person's Stop, and an orchestrator's `agent_session stop`, set nothing | They know; flagging their own act would be noise |
+| Only `retrying` starts the `reconnecting` clock, never silence | A session polling CI with 15–40 s sleeps looked frozen and was not; long builds look the same |
+| A report owed for the turn names the reason first ("stopped before finishing: a network error ended its turn", "its tool interrupted the turn") and how to go on | "The assigned work failed" made the asker redo or abandon work that only needed a "continue" |
+| When no report is owed (no report mark, no wait reading the turn) and the session has an asker (`askedBy`), the asker gets the same report once for a `network` or `interrupted` stop (`tellAskerOfInterruption`) | The 2026-10-15 case. One report per stopped turn; another needs another turn, so two sessions cannot wake each other in a loop |
+| A `quit` wakes nobody: the asker's report mark is dropped as before (§1.2.1) | After a quit the asker's own turn was cut too; starting turns by themselves at the next start would spend tokens the person did not ask for. The marker, the inbox and the list say it |
+| The orchestrator's list (`list_sessions`, and `read_session` with no id for a reader) and `agent_session status` add "stopped: network error", "stopped: Centralu quit during its turn", "stopped: its tool interrupted the turn" or "reconnecting to its API for N min" to the row. No filter argument | The row already says it, and an argument rides in every request's tool definitions (docs/tool-cost.md). `agent_session`'s list (#690) does not exist yet |
+| `CLAUDE_CODE_MAX_RETRIES` is left as the CLI sets it | Its three minutes outlast most drops; a longer budget would hold a turn hostage through a long outage |
+
 ### 4.7 Remote mode, phase 1: `centralu serve` (#82)
 
 The app can work with a project on another machine (an SSH server, later a laptop). That machine runs its own,
@@ -2215,7 +2250,7 @@ step against:
 
 | Steps | What they do | Older build |
 |---|---|---|
-| 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43 | add a column | reads it (39: shows sessions in the trash as live ones; 43: an older host's `grid.set` writes no span, so app panels fall back to their defaults, #306) |
+| 2, 4, 5, 7, 8, 12, 14, 15, 17, 18, 20, 22, 23, 24, 25, 27, 30, 31, 33, 37, 38, 39, 43, 53 | add a column (53: `sessions.interruption`, why the last turn did not finish, #698) | reads it (39: shows sessions in the trash as live ones; 43: an older host's `grid.set` writes no span, so app panels fall back to their defaults, #306; 53: an older host neither reads nor writes `sessions.interruption`, so a row it serves keeps the last value, #698) |
 | 3, 6, 9, 16, 19, 34, 36, 41, 42, 49, 50, 51, 52 | add a table (3 also backfills the index: heavy; 42 copies the grid's session rows into `grid_layout` once and leaves `grid_panels` as it was, #288; 49 adds `report_marks`, the report a session owes the session that gave it work, #646; 50 adds `agent_start_requests`, a start_agent card still waiting for the person, #673; 51 adds `delegated_turns`, the session that gave a running turn, #676; 52 adds `queued_requests`, a request held for a busy session, and the nullable `sessions.forked_from_session_id`, #677) | reads it (42: an older host keeps its grid in `grid_panels`, so the two builds' grids can differ) |
 | 10, 11, 40 | rebuild with the same shape (10: `sessions` with `project_id` nullable; 11 and 40: the index, then `VACUUM`: heavy) | reads it |
 | 21, 26, 29, 35, 48 | rewrite data one way (21 rewrites every message: heavy; 48 gives a former worktree manager's worktree sessions `askedBy`, #561) | reads it, cannot be undone |

@@ -5,6 +5,7 @@ import type { BusyChoice, ChildRunResult, AskProjectResult, IfBusy, Orchestrator
 const IF_BUSY: readonly IfBusy[] = ['note', 'queue', 'fork', 'fork_read']
 import { ORCHESTRATOR_MCP_NAME, type ToolCaller, type ToolOutput, type ToolProfile } from '../apps/contract.js'
 import { appGuide, APP_GUIDE_TOPICS, type GuideSeats, type GuideTool } from './app-guide.js'
+import { interruptionWords } from './interruptions.js'
 
 /**
  * Someone else's text as one JSON string on one line (#121). JSON.stringify escapes every control character but
@@ -544,6 +545,8 @@ async function listSessionsText(tools: OrchestratorTools, caller: ToolCaller): P
           // A linked machine's session says where it runs (#82 phase 4), and why the row is only what was last known
           `- ${s.name} [${s.sessionId}] · project ${s.project}${s.machine ? ` on ${s.machine}` : ''} · ${s.tool} · ${s.state}` +
           (s.away ? ` · ${s.away}` : '') +
+          // A turn cut short by the network or a quit looks like any session at rest (#698)
+          (s.interruption ? ` · ${interruptionWords(s.interruption)}` : '') +
           // If merge status is not shown, the manager keeps assigning work to a finished branch (#69, dogfooding)
           (s.merged ? ' · merged' : '') +
           // PR status (#76 stage 3) — assigning new work to a branch awaiting review pollutes the PR
@@ -695,7 +698,7 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
     case 'at_rest':
       return {
         text:
-          `${who} is not working on anything you gave it (${r.sessionState}). Its last answer, as JSON:\n${trustedJsonText(r.answer || '(no final text)')}\n` +
+          `${who} is not working on anything you gave it (${r.sessionState}${r.interruption ? `, ${interruptionWords(r.interruption)}` : ''}). Its last answer, as JSON:\n${trustedJsonText(r.answer || '(no final text)')}\n` +
           `agent_session(sessionId="${r.sessionId}", action="send", text=…) gives it more.`,
       }
     case 'done': {

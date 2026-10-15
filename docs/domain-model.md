@@ -56,6 +56,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Term | Meaning | Defined in | Avoid |
 |---|---|---|---|
 | Turn | One run of the agent, from a message to `turn_complete` | `turn_complete`, `events.ts` | |
+| Interruption | Why the last turn did not run to its end when nobody here chose to stop it: `network` (the model's API could not be reached), `quit` (Centralu quit or the computer restarted mid-turn), `interrupted` (the tool interrupted it), `reconnecting` (still working, but reconnecting for over 5 minutes). Independent of state; cleared when the session works again. The person's own Stop is not one (#698) | `SessionInfo.interruption`, `interruption` event; `sessions.interruption` (store v53); `sessions/interruptions.ts`; [agent-host.md](agent-host.md) §4.6.2 | stopped, stalled |
 | Normalized event | What an adapter turns the tool's output into: deltas, tool calls and results, approvals, questions, state changes. The one stream the UI and the store read | `NormalizedEvent`, `packages/protocol/src/events.ts` | |
 | Message | One stored row of a conversation, numbered (`seq`) within its session. Kinds: text, tool call, tool result, approval, marker, image, reasoning, app view | `StoredMessage`, `commands.ts` | |
 | Tool call / tool result | The agent using a tool, and what came back. Paired by `callId`; drawn as one tool card | `tool_call`, `tool_result`, `events.ts` | |
@@ -424,6 +425,9 @@ except `error` itself, and every state but `idle` may go to `idle` when the proc
   that card (the reducer). In any other state it moves nothing (`transition`), because the host releases requests
   late: a disposed handle resolves every request it still held, after the turn may already have ended.
 - The last state is stored on the session row (`sessions.state`); whether a process is alive (`live`) is not.
+- A state at rest does not say whether the turn finished: `error`, `idle` and `waiting_input` look the same after a
+  network failure, a quit or an interrupt. That is the interruption's job, beside the state (#698). A start that resets
+  `working` or `waiting_approval` to `idle` sets it to `quit` and writes a line in the conversation.
 
 ## 4. Process topology
 

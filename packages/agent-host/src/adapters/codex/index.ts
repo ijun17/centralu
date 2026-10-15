@@ -23,7 +23,7 @@ import { whichTool } from '../../env-path.js'
 import { launchFor } from '../../tool-launch.js'
 import { codexLaunch } from './native.js'
 import { installedCliVersion } from '../../cli-version.js'
-import type { AgentAdapter, AgentProcess, CreateSessionOpts, DetectResult, EventSink, ProcessSource, SessionHandle } from '../contract.js'
+import { INTERRUPTED_BY_TOOL, type AgentAdapter, type AgentProcess, type CreateSessionOpts, type DetectResult, type EventSink, type ProcessSource, type SessionHandle } from '../contract.js'
 import { CodexClient, type ServerRequest } from './client.js'
 import { lastCompactSummary as rolloutLastCompactSummary } from './rollout.js'
 import type { Verbosity } from './generated/Verbosity.js'
@@ -276,6 +276,11 @@ class CodexSession implements SessionHandle {
    * "Could not stop". Bounded: only a response still in flight can name one of these.
    */
   private endedTurns: string[] = []
+  /**
+   * Turns we asked Codex to interrupt (#698), the latest few: a Stop, a delegation withdrawn, a parent's note cancelled.
+   * A `turn/completed` with `interrupted` for any other turn was not asked for here, and says so (`INTERRUPTED_BY_TOOL`).
+   */
+  private interruptsSent: string[] = []
   /**
    * Our requestId to the Codex server's request, with the thread and turn it was asked in. Codex ends a request
    * itself when its turn ends or is interrupted (and says so with `serverRequest/resolved`); the card has to close
@@ -898,8 +903,20 @@ class CodexSession implements SessionHandle {
         if (e.activity === 'retrying') this.retrying = true
         else this.activityBefore = e.activity
       }
-      this.emit(e)
-      if (e.type === 'turn_complete') {
+      /*
+       * Who interrupted the turn is logged (#698): a real one ended a delegated turn as "finished" seven seconds before
+       * the person quit, and nothing said whether the person's Stop, the host or Codex itself had sent it.
+       */
+      const interrupted = e.type === 'state_change' && e.reason === 'interrupted' && n.method === 'turn/completed'
+      if (interrupted) {
+        const turn = turnIdOf(n.params)
+        const ours = !!turn && this.interruptsSent.includes(turn)
+        console.error(`[codex] ${this.sessionId.slice(0, 8)} turn ${turn ?? '?'} interrupted ${ours ? 'by a stop from Centralu' : 'by Codex, not by a stop from Centralu'}`)
+        this.emit(ours ? e : { ...e, reason: INTERRUPTED_BY_TOOL })
+      } else {
+        this.emit(e)
+      }
+      if (e.type === 'turn_complete' || interrupted) {
         const ended = turnIdOf(n.params)
         if (ended) this.inputReceipts.endTurn(ended)
       }
@@ -1459,6 +1476,7 @@ class CodexSession implements SessionHandle {
     this.pendingInputs = this.pendingInputs.filter((p) => !p.receipt)
     for (const turnId of turns) {
       if (!this.threadId || turnId === this.turnId || this.endedTurns.includes(turnId)) continue
+      this.noteInterruptSent(turnId)
       void this.client.request('turn/interrupt', { threadId: this.threadId, turnId }).catch(() => {})
     }
     /*
@@ -1491,6 +1509,7 @@ class CodexSession implements SessionHandle {
     }
     // Nothing to stop if no turn is running (this is the case of a stop pressed right after a turn just ended)
     if (!this.threadId || !this.turnId) return
+    this.noteInterruptSent(this.turnId)
     // Swallowing a failure here would leave us assuming it stopped and waiting — if it did not stop, say so
     void this.client
       .request('turn/interrupt', { threadId: this.threadId, turnId: this.turnId })
@@ -1501,6 +1520,10 @@ class CodexSession implements SessionHandle {
           error: { code: 'internal', message: `Could not stop: ${err.message}`, retryable: true },
         })
       })
+  }
+
+  private noteInterruptSent(turnId: string): void {
+    if (!this.interruptsSent.includes(turnId)) this.interruptsSent = [...this.interruptsSent.slice(-(ENDED_TURNS_KEPT - 1)), turnId]
   }
 
   /**

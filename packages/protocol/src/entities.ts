@@ -84,6 +84,35 @@ export type SessionState = z.infer<typeof SessionState>
 export const SessionActivity = z.enum(['compacting', 'reviewing', 'retrying'])
 
 /**
+ * Why a session's turn did not run to its end, when nobody here chose to stop it (#698). A session in this state
+ * looks like any other at rest (`error`, `idle`, `waiting_input`), and on 2026-10-15 several child sessions sat in
+ * `error` for most of a day after the internet dropped twice, with neither the person nor the orchestrator told.
+ *
+ *   network       the turn failed because the model's API could not be reached (ECONNREFUSED, ENOTFOUND, no
+ *                 response, the computer slept), after the tool's own retries
+ *   quit          Centralu quit or the computer restarted while the turn ran, and the process went with it: a start
+ *                 found the session `working` with no process left and reset it to `idle`
+ *   interrupted   the tool interrupted the turn, and neither the person nor Centralu asked it to (Codex's
+ *                 `turn/completed` with `interrupted` that no Stop of ours preceded)
+ *   reconnecting  still `working`, but the tool has been reconnecting to its API for longer than the host's bound
+ *                 (`retrying` past it). Live only: the turn may still go on by itself
+ *
+ * The person's own Stop is none of these: they know. Cleared when the session works again. An unknown word from a
+ * newer host reads as `interrupted`, which still says "this turn did not finish".
+ */
+export const InterruptionReason = z.enum(['network', 'quit', 'interrupted', 'reconnecting']).catch('interrupted')
+export type InterruptionReason = z.infer<typeof InterruptionReason>
+
+export const Interruption = z.object({
+  reason: InterruptionReason,
+  /** When it happened (ms); for `reconnecting`, when the reconnecting began */
+  at: z.number(),
+  /** The tool's own words, where it gave some (the error's message) */
+  detail: z.string().optional(),
+})
+export type Interruption = z.infer<typeof Interruption>
+
+/**
  * The goal set on a session (2026-09-07 — claude's `/goal`, and codex's thread/goal/*).
  *
  * This is the union of both tools: objective/status are shared, iterations/reason are claude's

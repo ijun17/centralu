@@ -82,6 +82,7 @@ type NormalizedEvent =
   | { type: 'background_tasks'; sessionId, live: BackgroundTask[], ended?: BackgroundTask[], clearEnded? }  // #290: 살아 있는 집합(REPLACE)과 방금 끝난 것
   | { type: 'agent_version';    sessionId, version }            // #297: 이 프로세스가 돌리는 CLI 버전, 프로세스마다 한 번. SessionInfo.agentVersion으로 남는다
   | { type: 'session_live';     sessionId, live, reason? }      // #568: 세션이 잠들어 프로세스가 끝났거나(reason 'asleep'), 재개가 다시 띄웠다
+  | { type: 'interruption';     sessionId, interruption: Interruption|null }  // #698: 마지막 턴이 끝까지 가지 못한 이유(network, quit, interrupted, reconnecting). SessionInfo.interruption으로 남는다
   | { type: 'history_synced';   sessionId, added }              // 밖에서 이어간 대화를 따라잡았다
   | { type: 'session_deleted';  sessionId }
   | { type: 'session_owner';    sessionId, askedBy|null, parentSessionId|null }  // #693: 인계가 이 살아 있는 자식을 넘겨받은 세션으로 옮겼다. 사이드바는 그 아래에 둔다

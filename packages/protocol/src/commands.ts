@@ -32,6 +32,7 @@ import {
   Question,
   QuestionAnswer,
   SessionActivity,
+  Interruption,
   SessionGoal,
   BackgroundTask,
   SessionId,
@@ -351,6 +352,12 @@ export const SessionInfo = z.object({
    * default (null/[]) is correct.
    */
   pendingApproval: z.object({ requestId: z.string(), detail: ApprovalDetail }).nullable().default(null),
+  /**
+   * Why the last turn did not run to its end (#698), until the session works again. Stored (`sessions.interruption`,
+   * store v53) except for `reconnecting`, which describes the running process. Absent from a host that predates it;
+   * a value this build cannot read is dropped rather than failing the whole row.
+   */
+  interruption: Interruption.nullable().optional().catch(null),
   pendingQuestions: z.array(z.object({ requestId: z.string(), questions: z.array(Question) })).default([]),
   activity: SessionActivity.nullable().default(null),
   limit: z

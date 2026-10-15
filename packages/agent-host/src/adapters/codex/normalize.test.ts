@@ -355,9 +355,9 @@ describe('state and gauges', () => {
     spy.mockRestore()
   })
 
-  it('an interrupted turn is not a failure — the person stopped it, and the conversation continues', () => {
+  it('an interrupted turn is not a failure, and not a finished turn either: it ends as a stop does (#698)', () => {
     expect(n('turn/completed', { turn: { id: 't', status: 'interrupted', error: null } })).toEqual([
-      { type: 'turn_complete', sessionId: S },
+      { type: 'state_change', sessionId: S, state: 'waiting_input', reason: 'interrupted' },
     ])
   })
 
