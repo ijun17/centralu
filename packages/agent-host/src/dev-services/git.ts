@@ -597,18 +597,37 @@ export type BranchPr = {
 export async function gitBranchPr(projectCwd: string, branch: string, signal?: AbortSignal): Promise<BranchPr | 'unavailable' | null> {
   const run = exec(programPath('gh'), ['pr', 'view', branch, '--json', 'number,state,url,headRefOid'], { cwd: projectCwd, ...OK })
   const closed = new Promise<void>((done) => run.child.once('close', () => done()))
+  const exited = new Promise<void>((done) => run.child.once('exit', () => done()))
   /*
-   * **An abort ends gh with the processes it started, and returns once they are gone** (the host stopping, #368).
+   * **An abort ends gh with the processes it started, and returns once gh is gone** (the host stopping, #368).
    * They work in the project's folder, and Windows refuses to remove a folder a running process works in (EBUSY).
    * execFile's own `signal` is not enough: it ends gh alone (gh runs git to read the remotes) and rejects at the
-   * kill, before gh has exited. `killTree` ends the tree (`taskkill /T /F` on Windows), and `close` comes once
-   * every process holding gh's output has ended.
+   * kill, before gh has exited. `killTree` ends the tree (`taskkill /T /F` on Windows). The wait is for gh's `exit`,
+   * then for `close` (every process holding gh's output has ended) for at most a second: on macOS and Linux the tree
+   * kill does not reach a child that left gh's process group, and that child can hold the output open for as long as
+   * it runs, which must not hold the host's shutdown (nor does it hold the folder there: those systems remove a
+   * folder a process works in).
    */
-  const stop = () => killTree({ pid: run.child.pid, kill: (signal) => void run.child.kill(signal as NodeJS.Signals | undefined) }, 'SIGKILL')
-  if (signal?.aborted) stop()
-  else signal?.addEventListener('abort', stop, { once: true })
+  const stop = () => {
+    killTree({ pid: run.child.pid, kill: (signal) => void run.child.kill(signal as NodeJS.Signals | undefined) }, 'SIGKILL')
+    // gh itself as well: elsewhere than Windows it shares the host's process group, which the tree kill spares, and
+    // once that kill has hit a group of gh's children it does not fall back to gh
+    run.child.kill('SIGKILL')
+  }
+  let onAbort: (() => void) | undefined
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => {
+      stop()
+      void exited
+        .then(() => Promise.race([closed, new Promise<void>((done) => setTimeout(done, 1000).unref?.())]))
+        .then(() => reject(Object.assign(new Error('gh was stopped'), { code: 'ABORT_ERR' })))
+    }
+  })
+  aborted.catch(() => {})
+  if (signal?.aborted) onAbort!()
+  else signal?.addEventListener('abort', onAbort!, { once: true })
   try {
-    const { stdout } = await run
+    const { stdout } = await Promise.race([run, aborted])
     const j = JSON.parse(stdout) as { number?: unknown; state?: unknown; url?: unknown; headRefOid?: unknown }
     if (typeof j.number !== 'number' || typeof j.state !== 'string' || typeof j.url !== 'string') return null
     return {
@@ -619,10 +638,9 @@ export async function gitBranchPr(projectCwd: string, branch: string, signal?: A
     }
   } catch (e) {
     // Not started at all (ENOENT) has nothing to wait for
-    if (signal?.aborted && run.child.pid !== undefined) await closed
     return (e as NodeJS.ErrnoException).code === 'ENOENT' ? 'unavailable' : null
   } finally {
-    signal?.removeEventListener('abort', stop)
+    if (onAbort) signal?.removeEventListener('abort', onAbort)
   }
 }
 
