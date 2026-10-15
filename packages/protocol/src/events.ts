@@ -593,6 +593,16 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...base, type: z.literal('session_created'), session: z.unknown() }),
   /**
+   * Who a session belongs to changed (#693): a handoff moved the original's live children to the session that took
+   * over, so the sidebar hangs them under it. Carries the session's `askedBy` and `parentSessionId` as they are now.
+   */
+  z.object({
+    ...base,
+    type: z.literal('session_owner'),
+    askedBy: z.string().nullable(),
+    parentSessionId: z.string().nullable(),
+  }),
+  /**
    * A worktree branch's work has fully landed in the project trunk (#69). Detection is done by
    * the host (at startup, and on a project git refresh), and the screen turns on a badge.
    * Cleanup (removing the tree) is done by the person, through the delete conversation — this

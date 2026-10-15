@@ -3576,6 +3576,19 @@ export const useStore = create<AppState>((set, get) => ({
     }
 
     /*
+     * A handoff moved a live child to the session that took over (#693): the sidebar hangs it there now. A session
+     * not known here comes with its owner in the list, so the event is not held for it.
+     */
+    if (e.type === 'session_owner') {
+      set((s) => {
+        const cur = s.sessions[sessionId]
+        if (!cur) return {}
+        return { sessions: { ...s.sessions, [sessionId]: { ...cur, askedBy: e.askedBy, parentSessionId: e.parentSessionId } } }
+      })
+      return
+    }
+
+    /*
      * An in-conversation app view (M4 B-1). Lives separate from cards — the view finds its own spot
      * by the card's id. Recorded even before the session is registered: it takes its place under the
      * card the instant the card is drawn.

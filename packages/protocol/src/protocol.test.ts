@@ -169,6 +169,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // An announcement for a session the host created on its own (#69) — session is a SessionInfo, but the
   // event schema carries it as unknown (so events never depends on commands). The receiving side parses it.
   { type: 'session_created', sessionId: 's-new', session: { id: 's-new', projectId: 'p1', name: 'Worktrees' } },
+  // A handoff moved a live child to the session that took over (#693)
+  { type: 'session_owner', sessionId: 's1', askedBy: 's-heir', parentSessionId: null },
   { type: 'worktree_merged', sessionId: 's1' },
   // An external app's call finished (M4 A-4) — an app is unique per (project, id), so both are carried. null means a user-folder app
   { type: 'external_app_state_changed', appId: 'notes', projectId: 'p1' },

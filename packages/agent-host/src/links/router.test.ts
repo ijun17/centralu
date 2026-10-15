@@ -403,6 +403,13 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
         payload: { instanceId: 'm1.inst', projectId: null },
       })
     })
+
+    it('qualifies the new owner a handoff on that machine gave a session (#693), so the sidebar hangs it there', () => {
+      const q = new Qualifier('m1', 1)
+      expect(q.event({ type: 'session_owner', sessionId: 's1', askedBy: 'heir', parentSessionId: null })).toEqual({
+        type: 'session_owner', sessionId: 'm1.s1', askedBy: 'm1.heir', parentSessionId: null,
+      })
+    })
   })
 
   it("qualifies the sessions a machine's prompt cache figures name, so the hub's screen can open them", async () => {

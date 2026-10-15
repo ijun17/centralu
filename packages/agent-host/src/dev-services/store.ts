@@ -3779,6 +3779,35 @@ export class Store {
     this.db.prepare(`DELETE FROM delegated_turns WHERE session_id = ?`).run(sessionId)
   }
 
+  /**
+   * A handoff's move of the original session's live children to the session that took over (#693), in one
+   * transaction: each moved session's `asked_by_session_id` and `parent_session_id` where they name the original, the
+   * report each owes it (`report_marks`), the delegated turn it gave each (`delegated_turns`), every request it queued
+   * (`queued_requests`), and its start_agent requests still waiting for the person (`agent_start_requests`, whose
+   * stored request names its caller too). A crash before the commit leaves every row on the original; after it, every
+   * row on the new session, so the next host (a swap or a restart) reads one owner either way.
+   */
+  moveChildren(from: string, to: string, move: { sessions: readonly string[]; startRequests: readonly { requestId: string; request: unknown }[] }): void {
+    this.db.transaction(() => {
+      const owner = this.db.prepare(
+        `UPDATE sessions SET
+           asked_by_session_id = CASE WHEN asked_by_session_id = @from THEN @to ELSE asked_by_session_id END,
+           parent_session_id = CASE WHEN parent_session_id = @from THEN @to ELSE parent_session_id END
+         WHERE id = @id`,
+      )
+      const mark = this.db.prepare(`UPDATE report_marks SET caller_session_id = @to WHERE session_id = @id AND caller_session_id = @from`)
+      const turn = this.db.prepare(`UPDATE delegated_turns SET caller_session_id = @to WHERE session_id = @id AND caller_session_id = @from`)
+      for (const id of move.sessions) {
+        owner.run({ from, to, id })
+        mark.run({ from, to, id })
+        turn.run({ from, to, id })
+      }
+      this.db.prepare(`UPDATE queued_requests SET caller_session_id = ? WHERE caller_session_id = ?`).run(to, from)
+      const start = this.db.prepare(`UPDATE agent_start_requests SET caller_session_id = ?, request = ? WHERE request_id = ? AND caller_session_id = ?`)
+      for (const r of move.startRequests) start.run(to, JSON.stringify(r.request), r.requestId, from)
+    })()
+  }
+
   // ── Linked machines (#82, v46) ─────────────────────────────────────────────────────────────
 
   listLinkedMachines(): LinkedMachineRow[] {

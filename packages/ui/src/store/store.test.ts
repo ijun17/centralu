@@ -4386,6 +4386,27 @@ describe('a failed send returns what was written (#180)', () => {
 })
 
 /*
+ * A handoff moves the original's live children to the session that took over (#693); the host says so with
+ * `session_owner`, and the sidebar hangs the child under its new owner without waiting for a reconnect.
+ */
+describe('a child that changed owner (#693)', () => {
+  it('takes the owner the host names', async () => {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/owner-a')
+    await useStore.getState().attach(mock)
+    const child = await mock.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
+    useStore.getState().dispatchEvent({ type: 'session_created', sessionId: child.id, session: child } as NormalizedEvent)
+    useStore.setState((st) => ({ sessions: { ...st.sessions, [child.id]: { ...st.sessions[child.id]!, askedBy: 'old-parent', parentSessionId: 'old-parent' } } }))
+    expect(useStore.getState().sessions[child.id]).toMatchObject({ askedBy: 'old-parent', parentSessionId: 'old-parent' })
+    useStore.getState().dispatchEvent({ type: 'session_owner', sessionId: child.id, askedBy: 'heir', parentSessionId: null } as NormalizedEvent)
+    expect(useStore.getState().sessions[child.id]).toMatchObject({ askedBy: 'heir', parentSessionId: null })
+    // A session this window does not know is not created by it
+    useStore.getState().dispatchEvent({ type: 'session_owner', sessionId: 'unknown', askedBy: 'heir', parentSessionId: null } as NormalizedEvent)
+    expect(useStore.getState().sessions.unknown).toBeUndefined()
+  })
+})
+
+/*
  * The trash (#204) from the screen's side. Deleting says where the session went; restoring puts it back in the
  * sidebar, and a project its restore registered again arrives with it — the screen has not heard of that project,
  * and a session row under a project the sidebar does not have is drawn nowhere.

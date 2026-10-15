@@ -84,6 +84,7 @@ type NormalizedEvent =
   | { type: 'session_live';     sessionId, live, reason? }      // #568: 세션이 잠들어 프로세스가 끝났거나(reason 'asleep'), 재개가 다시 띄웠다
   | { type: 'history_synced';   sessionId, added }              // 밖에서 이어간 대화를 따라잡았다
   | { type: 'session_deleted';  sessionId }
+  | { type: 'session_owner';    sessionId, askedBy|null, parentSessionId|null }  // #693: 인계가 이 살아 있는 자식을 넘겨받은 세션으로 옮겼다. 사이드바는 그 아래에 둔다
   // 앱 스코프 (sessionId optional — 모든 사실이 대화의 소유물은 아니다)
   | { type: 'update_status';    status: UpdateStatus }          // #43; autoApply (#352)는 기본값 false
   | { type: 'agent_versions';   status: AgentVersions }         // #297: { installed: {tool: version|null}, autoApply (기본값 true), checkedAt }

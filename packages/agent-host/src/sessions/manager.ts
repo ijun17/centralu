@@ -144,7 +144,7 @@ import { DirWatchers } from '../dev-services/watch.js'
 import { invalidateFileIndex } from '../dev-services/file-search.js'
 import { attachmentBytes, saveAttachment, clearAttachments, sweepAttachments } from '../dev-services/attachments.js'
 import { mentions, readMessageImage, resolveWrittenPath, writtenForms } from '../dev-services/message-image.js'
-import { handoffNoteBytes, handoffNoteDir, sweepHandoffNotes, writeHandoffNote } from '../dev-services/handoff-notes.js'
+import { handoffNoteBytes, handoffNoteDir, sweepHandoffNotes, writeHandoffNote, writeHandoffNoteSync } from '../dev-services/handoff-notes.js'
 import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
 
 /**
@@ -286,6 +286,32 @@ function agentStartPersonText(req: Pick<AgentStartRequest, 'detail'>, how: 'deni
     default:
       return `${what} was withdrawn before you answered. No agent was started.`
   }
+}
+
+/**
+ * One piece of the original's live work a handoff moved to the session that took over (#693), as the handoff note
+ * lists it: a session (started with start_agent, forked, or asked in another project), or a start_agent request still
+ * waiting for the person, whose handle is the request id.
+ */
+type MovedChild = { handle: string; name: string; state: string; project?: string; request?: boolean }
+
+/** The section a handoff note opens with when live children moved (#693): what they are, and how to reach them */
+function movedChildrenNote(moved: readonly MovedChild[]): string {
+  const line = (c: MovedChild) =>
+    `- ${c.request ? 'start_agent request' : `"${c.name.replace(/\s+/g, ' ').slice(0, 120)}"`}` +
+    `${c.project ? ` (project ${c.project}, through ask_project)` : ''} — ${c.state} — handle: ${c.handle}`
+  return [
+    '## Sessions handed over with this note (added by Centralu)',
+    '',
+    'The previous session started or asked these, and they were not finished. They are yours now: their reports come to',
+    'you, and agent_session (or ask_project, for another project) works on them with the handle below.',
+    '',
+    ...moved.map(line),
+    '',
+    '---',
+    '',
+    '',
+  ].join('\n')
 }
 
 /** The answer when start_agent's setup outlasts its bound: it states whether a session exists, and what to do next */
@@ -2038,8 +2064,23 @@ export class SessionManager {
      * line, and the note is megabytes.
      */
     if (params.handoff) {
+      const { from, fromSessionId } = params.handoff
+      let { note } = params.handoff
+      /*
+       * The original's live children become this session's (#693), before its first turn reads the note: the note
+       * opens with them, in the file the opening message points at and in the marker that keeps the note's original.
+       * Nothing here awaits until the first message is sent, so a moved child's report cannot reach this session first.
+       */
+      const moved = fromSessionId ? this.moveLiveChildren(fromSessionId, id) : []
+      if (moved.length) {
+        note = movedChildrenNote(moved) + note
+        try {
+          if (fromSessionId && params.projectId) writeHandoffNoteSync(params.projectId, fromSessionId, note)
+        } catch (e) {
+          console.error(`[agent-host] handoff note not rewritten with the moved children: ${(e as Error).message}`)
+        }
+      }
       const seq = this.store.nextSeq(id)
-      const { from, note, fromSessionId } = params.handoff
       this.store.appendMessages([
         {
           sessionId: id,
@@ -6142,12 +6183,13 @@ export class SessionManager {
     return new Promise<HostAskAnswer>((resolve) => {
       if (signal?.aborted) return resolve(null)
       const requestId = card.requestId ?? `${detail.kind === 'project_access' ? 'xp' : detail.kind === 'agent_start' ? 'ag' : detail.kind === 'centralu_update' || isCentraluApply(detail) ? 'up' : 'mk'}-${randomUUID()}`
-      this.hostAsks.set(requestId, { requestId, sessionId, detail, shown: card.shown ?? false, resolve })
+      const ask: HostAsk = { requestId, sessionId, detail, shown: card.shown ?? false, resolve }
+      this.hostAsks.set(requestId, ask)
       signal?.addEventListener('abort', () => {
         if (!this.hostAsks.delete(requestId)) return
-        // An unanswerable card is never left behind
-        const m = this.meta.get(sessionId)
-        if (m?.pendingApproval?.requestId === requestId) this.onEvent({ type: 'approval_resolved', sessionId, requestId, decision: 'deny' })
+        // An unanswerable card is never left behind, in the session it stands in now (a handoff moves it, #693)
+        const m = this.meta.get(ask.sessionId)
+        if (m?.pendingApproval?.requestId === requestId) this.onEvent({ type: 'approval_resolved', sessionId: ask.sessionId, requestId, decision: 'deny' })
         resolve(null)
       }, { once: true })
       this.raiseHostAsks(sessionId)
@@ -6373,7 +6415,8 @@ export class SessionManager {
     void d.outcome.then((r) => {
       if (this.agentRuns.get(sessionId) === wait) this.agentRuns.delete(sessionId)
       // A swap's failed waits are not the turn's end: the next host keeps the link while the kept turn runs
-      if (!joinedTurn && !this.handingOver) this.releaseTurn(sessionId, callerId)
+      // The delegation's owner now: a handoff may have moved it (#693)
+      if (!joinedTurn && !this.handingOver) this.releaseTurn(sessionId, d.callerId)
       // Queued notes can finish after the original turn. Report only the whole delegation's ending.
       if (agent || wait.tracksInputs) void this.reportBackIfAwaited(sessionId, r.ok
         ? { type: 'turn_complete', sessionId }
@@ -6676,7 +6719,8 @@ export class SessionManager {
       const req = request ?? { requestId: `ag-${randomUUID()}`, callerId, projectId: project.id, ...choice, detail }
       return done(this.queueAgentStart(req, short))
     }
-    const r = await this.createAgentChild(callerId, { id: project.id, name: project.name, path: project.path }, choice, progress, request?.detail.preset)
+    // A handoff while the card stood moved the request to the session that took over (#693): the child is that session's
+    const r = await this.createAgentChild(request?.callerId ?? callerId, { id: project.id, name: project.name, path: project.path }, choice, progress, request?.detail.preset)
     if (request) {
       if ('key' in r) this.endAgentStart(request.requestId, { childId: r.d.sessionId })
       else {
@@ -7531,6 +7575,116 @@ export class SessionManager {
       const error = r.done.ok ? 'No session was created.' : r.done.error
       this.endAgentStart(req.requestId, { error, person: agentStartPersonText(req, 'failed', error) })
     }
+  }
+
+  /**
+   * A handoff moves the original's **live** children to the session that took over (#693). Left with the original,
+   * their reports woke a session the person no longer works in, the new session could not reach them with
+   * agent_session (only the starter can), and once the original was deleted they had nobody at all.
+   *
+   * Live is anything still owed: a session working or waiting on the person (approval or question), a request the
+   * original queued, a report not yet delivered, an ask_project answer not yet read, and a start_agent request whose
+   * card still stands. A settled child (finished, reported or read, nothing pending) stays with the original, so the
+   * history stays where it happened.
+   *
+   * Everything stored moves in one transaction (`Store.moveChildren`), and only then the host's memory, all without an
+   * await, so no event lands between the two. A crash before the commit leaves every link on the original, after it
+   * every link on the new session; a host that takes over after a swap reads one owner either way. If the store
+   * refuses, nothing moves and the original keeps them. Returns what moved, for the handoff note.
+   */
+  private moveLiveChildren(from: string, to: string): MovedChild[] {
+    const original = this.meta.get(from)
+    const heir = this.meta.get(to)
+    if (!original || !heir || from === to || original.projectId !== heir.projectId) return []
+    const queuedBy = new Set([...this.queued.values()].flat().filter((r) => r.callerSessionId === from).map((r) => r.sessionId))
+    const delegated = [...this.delegations.values()].filter((d) => d.callerId === from)
+    const stateOf = (s: SessionInfo): string | null => {
+      if (s.pendingApproval || s.state === 'waiting_approval') return 'waiting for an approval'
+      if (s.pendingQuestions.length) return 'waiting on a question'
+      const run = this.agentRuns.get(s.id)
+      if (inTurn(s.state) || (run && !run.finished)) return queuedBy.has(s.id) && this.turnOwners.get(s.id)?.callerId !== from ? 'busy; your request is queued' : 'working'
+      if (queuedBy.has(s.id)) return 'your request is queued'
+      if (this.awaitingReport.get(s.id) === from) return 'finished; its report has not been delivered yet'
+      // ask_project tells nobody when it ends: an answer the original never came back for is still owed
+      if (delegated.some((d) => d.sessionId === s.id && d.settled && !d.agent)) return 'finished; its answer has not been read yet'
+      return null
+    }
+    const linked = new Set<string>([
+      ...queuedBy,
+      ...delegated.map((d) => d.sessionId),
+      ...[...this.awaitingReport].filter(([, caller]) => caller === from).map(([child]) => child),
+      ...[...this.turnOwners].filter(([, owner]) => owner.callerId === from).map(([child]) => child),
+      ...[...this.meta.values()].filter((s) => s.id !== from && s.id !== to && (s.askedBy === from || s.parentSessionId === from)).map((s) => s.id),
+    ])
+    const moved: MovedChild[] = []
+    const sessions: string[] = []
+    const projects = new Map(this.store.listProjects().map((p) => [p.id, p.name]))
+    for (const id of linked) {
+      const s = this.meta.get(id)
+      const state = s && id !== to ? stateOf(s) : null
+      if (!s || !state) continue
+      sessions.push(id)
+      moved.push({ handle: id, name: s.name, state, ...(s.projectId !== original.projectId ? { project: projects.get(s.projectId ?? '') ?? s.projectId ?? '' } : {}) })
+    }
+    const starts = [...this.agentStarts.values()].filter((r) => r.req.callerId === from && !r.ended)
+    for (const r of starts) moved.push({ handle: r.req.requestId, name: r.req.detail.text, state: `waiting for the person to allow starting ${r.req.detail.tool}: “${r.req.detail.text}”`, request: true })
+    if (!moved.length) return []
+    try {
+      this.store.moveChildren(from, to, { sessions, startRequests: starts.map((r) => ({ requestId: r.req.requestId, request: { ...r.req, callerId: to } })) })
+    } catch (e) {
+      console.error(`[agent-host] handoff left the live children with ${from.slice(0, 8)}: ${(e as Error).message}`)
+      return []
+    }
+
+    const moving = new Set(sessions)
+    for (const id of sessions) {
+      const s = this.meta.get(id)!
+      if (s.askedBy !== from && s.parentSessionId !== from) continue
+      if (s.askedBy === from) s.askedBy = to
+      if (s.parentSessionId === from) s.parentSessionId = to
+      this.emit({ type: 'session_owner', sessionId: id, askedBy: s.askedBy ?? null, parentSessionId: s.parentSessionId ?? null })
+    }
+    for (const id of sessions) if (this.awaitingReport.get(id) === from) this.awaitingReport.set(id, to)
+    for (const [id, owner] of this.turnOwners) if (moving.has(id) && owner.callerId === from) owner.callerId = to
+    // A delegation's key names its caller (`<caller>><child>`, `<caller>><project>><child>`)
+    for (const [key, d] of [...this.delegations]) {
+      if (d.callerId !== from || !moving.has(d.sessionId)) continue
+      this.delegations.delete(key)
+      d.callerId = to
+      this.delegations.set(to + key.slice(from.length), d)
+    }
+    for (const [key, n] of [...this.observerNotes]) {
+      if (!key.startsWith(`${from}>`) || !moving.has(key.slice(from.length + 1))) continue
+      this.observerNotes.delete(key)
+      this.observerNotes.set(`${to}>${key.slice(from.length + 1)}`, n)
+    }
+    for (const list of this.queued.values()) for (const r of list) if (r.callerSessionId === from) r.callerSessionId = to
+    for (const [id, wait] of this.linkedReports) if (wait.orchestratorId === from && moving.has(id)) wait.orchestratorId = to
+    // A start that already made its child: its handle follows the child
+    for (const r of this.agentStarts.values()) if (r.req.callerId === from && r.ended && 'childId' in r.ended && moving.has(r.ended.childId)) r.req.callerId = to
+    /*
+     * A start_agent card still standing (#673) moves with its request: the request object is the one the waiting setup
+     * holds, so an approval starts the child for the new session. The card closes in the original and stands in the
+     * new session as a card raised between turns, back again after any turn that clears it.
+     */
+    for (const r of starts) {
+      r.req.callerId = to
+      const ask = this.hostAsks.get(r.req.requestId)
+      if (!ask || ask.sessionId !== from) continue
+      const standing = this.meta.get(from)?.pendingApproval?.requestId === ask.requestId
+      if (standing) this.restAfterCard(ask)
+      // Moved before the original's slot empties: closing it raises the next card waiting there, never this one again
+      ask.sessionId = to
+      ask.shown = true
+      ask.restState = undefined
+      if (standing) this.onEvent({ type: 'approval_resolved', sessionId: from, requestId: ask.requestId, decision: 'deny' })
+      this.raiseHostAsks(to)
+    }
+    if (starts.length) {
+      this.onEvent({ type: 'notice', sessionId: from, level: 'info', from: 'Centralu', label: 'handoff', text: `Its start_agent ${starts.length === 1 ? 'request moved' : 'requests moved'} to the session that took over, “${heir.name}”.` })
+    }
+    console.error(`[agent-host] handoff ${from.slice(0, 8)} -> ${to.slice(0, 8)}: moved ${sessions.length} session(s), ${starts.length} start request(s)`)
+    return moved
   }
 
   /**

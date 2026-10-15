@@ -670,6 +670,9 @@ export class LinkedMachine implements RoutedMachine {
         this.deps.mirror.patchSession(this.id, sid, { name: raw.title })
       } else if (raw.type === 'state_change' && typeof raw.state === 'string') {
         this.deps.mirror.patchSession(this.id, sid, { state: raw.state })
+      } else if (raw.type === 'session_owner') {
+        // A handoff there moved this session to the session that took over (#693)
+        this.deps.mirror.patchSession(this.id, sid, { askedBy: raw.askedBy ?? null, parentSessionId: raw.parentSessionId ?? null })
       }
     }
     const out = this.q.event(raw)

@@ -252,6 +252,8 @@ export class Qualifier {
       }
       case 'handoff':
         return { ...base, fromSessionId: this.maybeId(e.fromSessionId) }
+      case 'session_owner':
+        return { ...base, askedBy: this.maybeId(e.askedBy), parentSessionId: this.maybeId(e.parentSessionId) }
       case 'approval_request':
         return { ...base, detail: this.approvalDetail(e.detail) }
       // The view's instance, which the window opens, calls and closes it by (plan §11)

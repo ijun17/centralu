@@ -1,3 +1,4 @@
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { lstat, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isProjectId, isSessionId } from '@cc/protocol'
@@ -62,6 +63,19 @@ export async function writeHandoffNote(projectId: string, sessionId: string, tex
   // Whatever is already there is removed first (#104) — a link sitting at that spot would have the write follow it
   await rm(path, { force: true })
   await writeFile(path, text, 'utf8')
+  return path
+}
+
+/**
+ * The same write without an await (#693): a handoff rewrites the note with the children it moved between the move and
+ * the successor's first message, and no other event may land in between (a moved child's report would reach the
+ * successor before its opening). The note is one small file in the host's own folder.
+ */
+export function writeHandoffNoteSync(projectId: string, sessionId: string, text: string): string {
+  const path = handoffNotePath(projectId, sessionId)
+  mkdirSync(handoffNoteDir(projectId), { recursive: true })
+  rmSync(path, { force: true })
+  writeFileSync(path, text, 'utf8')
   return path
 }
 

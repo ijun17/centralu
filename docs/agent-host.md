@@ -731,6 +731,40 @@ memory. It gives up after 30 minutes (`MEMORY_WAIT_MAX_MS`): the caller is told 
 notice. A withdrawn request, a deleted caller, or a host leaving (`disposeAll`, `detachAll` close the gate; the stored
 request goes to the next host) ends the wait without a start. Sessions the person starts are never gated.
 
+### 1.2.5 A handoff takes the live children along (#693)
+
+A handoff (`createSession` with `handoff.fromSessionId`, the session handoff of domain-model §1.1) used to leave the
+original's children where they were: their reports woke the original, which the person had stopped working in (and
+usually deleted next), and the new session could not reach them, since `agent_session` works only for the starter. The
+new session now takes over the original's **live** work as it is created, before its first turn reads the note
+(`moveLiveChildren`, owner decision on #693):
+
+- **What is live**: a session working or waiting on the person (approval or question), one holding a request the
+  original queued (§1.2.3), one whose report to the original is not delivered yet, an `ask_project` answer the
+  original never came back for (that tool tells nobody when it ends), and a start_agent request whose card still
+  stands (#673). Same-project children (`askedBy` or `parentSessionId` naming the original) and the original's
+  delegations in another project both count.
+- **What moves**: `askedBy` and `parentSessionId` where they name the original (another project's session keeps its
+  own row), the report mark (`report_marks`), the delegated turn's link (`delegated_turns`) and the delegation the
+  host holds for it (its key names the caller), the requests the original queued (`queued_requests`), and its standing
+  start requests (`agent_start_requests`, whose stored request names its caller too). A standing card closes in the
+  original and stands in the new session as a card raised between turns, so the new session's first turn hides it and
+  its end raises it again; an approval starts the child for the new session (the waiting setup reads the request's
+  caller after the card). A start that already made a moved child hands its handle over too.
+- **What stays**: a settled child (finished and reported or read, nothing pending) stays with the original, so its
+  history stays where it happened, and is deleted with it or left on its own as before.
+- **The note**: the note file the opening message points at, and the marker that keeps its original, open with a
+  section listing what moved (name, state, handle; the project for another project's session). Nothing moved, nothing
+  added. The opening message itself is the window's and is not changed (the window confirms it by its text).
+- **Atomic**: everything stored moves in one transaction (`Store.moveChildren`); the host's memory follows after the
+  commit, with no await in between. A crash before the commit leaves every link on the original, after it every
+  link on the new session, so a host taking over after a swap or a restart reads one owner (`report_marks`,
+  `delegated_turns`, `queued_requests` and `agent_start_requests` are read at startup as before). If the store refuses,
+  nothing moves and the note lists nothing. A delegation's end releases its turn by the delegation's owner at that
+  time, not the one that started it.
+- **The windows** hear `session_owner` (the session's `askedBy` and `parentSessionId` now) and hang the child under
+  its new owner; a linked machine's event is qualified (`Qualifier.event`) and patched into the hub's mirror.
+
 ### 1.3 Making a new project (`projects.create`, `create_project`, #515)
 
 A project used to need a folder that already existed (`projects.add` refuses one that does not). Now

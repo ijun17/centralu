@@ -84,6 +84,7 @@ type NormalizedEvent =
   | { type: 'session_live';     sessionId, live, reason? }      // #568: the process ended because the session went to sleep (reason 'asleep'), or a resume brought it back
   | { type: 'history_synced';   sessionId, added }              // a conversation continued elsewhere was caught up
   | { type: 'session_deleted';  sessionId }
+  | { type: 'session_owner';    sessionId, askedBy|null, parentSessionId|null }  // #693: a handoff moved this live child to the session that took over; the sidebar hangs it there
   // app-scoped (sessionId optional — not every fact belongs to a conversation)
   | { type: 'update_status';    status: UpdateStatus }          // #43; autoApply (#352) defaults to false
   | { type: 'update_apply_request'; requestId }                 // #665: an agent's "Apply now"; each window answers with updates.answerApply
