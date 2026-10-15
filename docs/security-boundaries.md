@@ -664,6 +664,16 @@ header still needs the token; Origin is a browser defense, not native-client ide
 Literal `Origin: null` is rejected. A rejected upgrade is logged by the host, because the
 browser does not hand the 403 to the page. Development tokens should be generated per launch and shared
 only with the intended local client. Mock/demo modes do not connect to the host.
+
+`pnpm dev:live` (#739) is the exception that carries a real token: it reads the running app's front door
+port and token from the keeper's `status` and gives them to the Vite it starts, as `VITE_HOST_URL` and
+`VITE_HOST_TOKEN` in that child's environment only (not printed, not written anywhere). Vite bundles
+`VITE_*` values into the page, so the page it serves, on `http://127.0.0.1:5173` or `:5174`, holds the real
+token and can do anything the app's window can. That is the same trust as the keeper socket, which only
+this user can read (next section), and the dev server listens on loopback only (`127.0.0.1`, never
+`0.0.0.0`). The residual limit: another local process of this user could fetch that page and read the
+token from it, which it could already read from the keeper. Do not expose the dev server (no `--host`
+other than `127.0.0.1`, no tunnel), and rerun the script after the app restarts, since the token changes.
 A socket that has not sent a valid hello within 10 seconds is closed, and a socket whose undrained
 outbound backlog passes 64 MiB is cut, so a connection cannot make the host hold unbounded memory or
 an endless slot (#82; `transport/server.ts`, `TRANSPORT_LIMITS`). Before its hello a socket may send

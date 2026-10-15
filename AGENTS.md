@@ -24,6 +24,7 @@ behind each line live in the linked documents.
 | UI scenarios as CI runs them (one engine at a time) | the same, with `CI=1 E2E_BROWSER=webkit pnpm e2e` (or `=chromium`) |
 | Tests while other agents run tests | `pnpm exec vitest run --maxWorkers=4 <files>` |
 | Rust shell and keeper | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib` (run `pnpm bundle:host` first if `resources/host` is missing) |
+| The UI against the app already running (real sessions, live reload; rerun after the app restarts) | `pnpm dev:live` (`PORT=5174` to choose), then open the printed `127.0.0.1` address |
 | The UI without a host | `pnpm dev`, then `?mock=1` (empty) or `?demo` / `?demo=grid` (a seeded scene) |
 
 Inside Codex's macOS sandbox, run local `pnpm e2e`, `pnpm ux` and `pnpm perf` with

@@ -83,6 +83,7 @@ export const useCapability = (k: keyof PlatformCapabilities) => usePlatform().ca
 
 - 환경 감지(`window.__TAURI__` 존재 여부)로 자동 분기하지 **않는다** — 진입점이 다르므로 감지는 불필요하고, 감지 로직은 숨은 의존성이 된다.
 - 브라우저 개발은 host를 띄울 때마다 임시 토큰을 새로 만든다. host와 Vite를 같은 셸에서 시작해 `CC_HOST_TOKEN`을 `VITE_HOST_TOKEN`으로 넘긴다. mock/demo 모드(`?mock=1`, `?demo`)는 호스트 토큰을 쓰지 않는다. 실제 호스트 모드에서 토큰이 없거나 비어 있으면 대체 토큰으로 연결하지 않고 시작 오류를 화면에 표시한다. 난수 토큰 생성이 실패하면 시작을 중단한다. 위협 모델과 잔여 한계는 [보안 경계](security-boundaries.md)를 참고한다.
+- `pnpm dev:live`(`scripts/dev-live.mts`)는 이미 실행 중인 앱의 호스트에 같은 브라우저 진입점을 붙인다. keeper의 `status`(`<data>/keeper.sock`, 읽기 전용)에서 front door의 포트와 토큰을 읽어 자식 프로세스의 환경에만 `VITE_HOST_URL`, `VITE_HOST_TOKEN`으로 넘기며 토큰을 출력하지 않는다. Vite는 `127.0.0.1:5173`에서 열리고(호스트가 허용하는 다른 출처는 `PORT=5174`), `--strictPort`를 쓴다. 토큰은 앱의 실제 토큰이고 앱이 다시 시작되면 바뀌므로 그때 다시 실행한다. Windows에는 keeper가 없어 스크립트가 안내 메시지를 내고 멈춘다.
 - 컴포넌트가 `usePlatform()`을 직접 쓰는 일조차 드물어야 한다. 스토어 액션(스토어가 포트를 호출)과 셀렉터로 대부분 충분하다.
 
 ## 5. 이전 플레이북 (C1, C2의 실행 순서)

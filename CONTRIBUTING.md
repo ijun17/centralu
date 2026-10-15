@@ -108,6 +108,30 @@ issues, logs, screenshots, or test artifacts. The command above discards the hos
 stdout handshake because it contains the token; diagnostic stderr stays visible. If you change the host port, pass the same
 explicit URL to the UI with `VITE_HOST_URL=ws://127.0.0.1:<port>`.
 
+### The browser UI against the Centralu app already running
+
+To work on the UI while looking at real sessions, run the browser UI against the host of the
+app that is open on this machine, with one command and no host of your own:
+
+```bash
+pnpm dev:live             # http://127.0.0.1:5173/
+PORT=5174 pnpm dev:live   # the other origin the host accepts
+```
+
+It reads the front door's port and token from the keeper (`<data folder>/keeper.sock`, op
+`status`; the data folder is `CC_DATA_DIR`, or `~/.centralu`) and starts Vite for `apps/web`
+with them set for that Vite only (`VITE_HOST_URL`, `VITE_HOST_TOKEN`). It reads the data
+folder and never writes there, and it never prints the token. Open the address it prints
+with `127.0.0.1`, not `localhost`: the host accepts browser connections only from
+`http://127.0.0.1:5173` and `:5174`, so the port is strict and a taken port is an error, not a
+move to another one. The token changes when the app restarts or updates; run it again then.
+It says in one line when no app is running, when the keeper has no host yet, and when the
+port is taken. Windows has no keeper (the app runs the host directly there), so use the
+shell recipe above.
+
+That page carries the real host's token, so everything the app can do, the page can do. It
+is loopback only; see [security boundaries](docs/security-boundaries.md#local-transport).
+
 For the real app rather than the browser:
 
 ```bash
