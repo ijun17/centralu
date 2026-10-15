@@ -48,7 +48,7 @@ export type MachineProblem = {
  * (`links/tunnel.ts`); these are the failures a person meets when linking a machine for the first
  * time, each with the one step that fixes it. Anything not recognised is shown as the host said it.
  */
-export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' | 'sshTarget'>): MachineProblem | null {
+export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' | 'sshTarget'> & Partial<Pick<MachineInfo, 'shell'>>): MachineProblem | null {
   if (m.status === 'connected') return null
   const e = m.error ?? ''
   if ((m.status === 'connecting' || m.status === 'starting') && !e) return null
@@ -57,11 +57,11 @@ export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' 
     // This computer tried to start it and says why; an older hub only said it was not serving
     return {
       title: e || `Centralu is installed on ${m.name}, but it is not serving`,
-      fix: `Run \`centralu serve --detach\` on ${m.name} (it keeps running after you log out), then reconnect`,
+      fix: `Run \`${shims(m).centralu} serve --detach\` on ${m.name} (it keeps running after you log out), then reconnect`,
     }
   }
   if (/not installed on/i.test(e)) {
-    return { title: `Centralu is not installed on ${m.name}`, fix: `Install it there with \`npm i -g centralu\`, then run \`centralu serve\` once` }
+    return { title: `Centralu is not installed on ${m.name}`, fix: `Install it there with \`${shims(m).npm} i -g centralu\`, then run \`${shims(m).centralu} serve\` once` }
   }
   if (/Permission denied/i.test(e)) {
     return {
@@ -90,7 +90,7 @@ export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' 
   if (/timed out|No route to host|Network is unreachable|Host is down/i.test(e)) {
     return { title: `${m.name} does not answer`, fix: 'It may be asleep, off or on another network. Centralu keeps trying' }
   }
-  if (m.status === 'refused') return { title: e || `${m.name} refused the link`, fix: 'Restart `centralu serve` there, then reconnect' }
+  if (m.status === 'refused') return { title: e || `${m.name} refused the link`, fix: `Restart \`${shims(m).centralu} serve\` there, then reconnect` }
   return e ? { title: e, fix: null } : { title: `${m.name} is away`, fix: 'Centralu keeps trying' }
 }
 
@@ -206,6 +206,14 @@ export function operationNote(m: Pick<MachineInfo, 'operation'>): string | null 
           ? `Rolling back to ${o.target ?? 'the earlier version'}`
           : 'Removing Centralu'
   return `${what}: ${STEP_TEXT[o.step] ?? o.step}…`
+}
+
+/**
+ * What to tell a person to type on the machine: a Windows PowerShell gets the `.cmd` shims, as the bare
+ * names resolve to the `.ps1` ones a default execution policy blocks (#688)
+ */
+function shims(m: Partial<Pick<MachineInfo, 'shell'>>): { npm: string; centralu: string } {
+  return m.shell === 'powershell' ? { npm: 'npm.cmd', centralu: 'centralu.cmd' } : { npm: 'npm', centralu: 'centralu' }
 }
 
 /** What the row says about the Centralu this computer installed there; null when it installed none */

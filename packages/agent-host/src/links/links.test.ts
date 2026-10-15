@@ -336,6 +336,21 @@ describe('a hub linked to another host (#82)', () => {
     await expect(u.call('machines.acceptVersions', { machineId: 'm1' })).rejects.toThrow(/different protocols/)
   })
 
+  it('tells a PowerShell machine’s person to type centralu.cmd and npm.cmd, never the bare names a default execution policy blocks (#688)', async () => {
+    const remote = await remoteHost()
+    const store = new Store()
+    storeRegistry(store).add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: { shell: 'powershell' }, addedAt: 1, acceptedVersions: null })
+    const hub = await hubHost(() => lineFor(remote.port, { token: 'rotated-but-serve-keeps-the-old-one' }), store, false)
+    await until(() => status(hub) === 'refused')
+    expect(hub.links.list()[0]!.error).toMatch(/restart `centralu\.cmd serve` there/)
+    const dev = await hubHost(() => lineFor(1), store, false, {
+      installer: { runtime: () => ({ node: { version: '24.21.0', archives: {} } }), script: () => '', registry: {} },
+      tunnelFor: () => Object.assign(new DirectTunnel(() => lineFor(1)), { exec: async () => ({ code: 0, stderr: '', stdout: '' }) }),
+      hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: true },
+    })
+    await expect((await ui(dev.port)).call('machines.install', { machineId: 'm1' })).rejects.toThrow(/\(npm\.cmd i -g centralu\)/)
+  })
+
   it('a refused token asks the remote again once, then reports and backs off instead of looping', async () => {
     const remote = await remoteHost()
     let asked = 0

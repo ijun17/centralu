@@ -22,7 +22,7 @@ import { newMachineId, splitQualified } from './machine-ids.js'
 import { Qualifier } from './qualifier.js'
 import { RemoteClient, type RemoteClientOptions, type RemoteHello } from './remote-client.js'
 import type { RoutedMachine } from './router.js'
-import type { Endpoint, HostStart, RemoteAutostart, RemoteCommand, RemoteInstall, RemoteRun, RemoteSpec, Tunnel } from './tunnel.js'
+import { shimNames, type Endpoint, type HostStart, type RemoteAutostart, type RemoteCommand, type RemoteInstall, type RemoteRun, type RemoteSpec, type Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 
 /**
@@ -380,7 +380,7 @@ export class LinkedMachine implements RoutedMachine {
     const tunnelExec = this.tunnel.exec?.bind(this.tunnel)
     if (!installer || !tunnelExec) throw linkError(`This computer cannot install on ${this.name}`)
     if (this.deps.hub.dev && (kind === 'install' || kind === 'update')) {
-      throw linkError(`A development build is not published, so it cannot be installed on ${this.name}; install the latest release there (npm i -g centralu)`)
+      throw linkError(`A development build is not published, so it cannot be installed on ${this.name}; install the latest release there (${shimNames(this.record.remote).npm} i -g centralu)`)
     }
     if (this.record.remote.command) throw linkError(`${this.name} runs a command of its own in place of centralu; clear it to use an installed one`)
     if (this.busy) throw linkError(`${this.name} is busy with ${this.operation?.kind ?? 'another change'}; wait until it is done`)
@@ -486,7 +486,7 @@ export class LinkedMachine implements RoutedMachine {
     if (!endpoint.line.hostRunning && this.tunnel.startHost) {
       if (this.held) return
       this.setStatus('starting', null)
-      this.deps.log?.(`[links] ${this.name}: no Centralu host is running there; starting one (centralu serve --detach)`)
+      this.deps.log?.(`[links] ${this.name}: no Centralu host is running there; starting one (${shimNames(this.record.remote).centralu} serve --detach)`)
       let started: HostStart
       try {
         started = await this.tunnel.startHost()
@@ -511,7 +511,7 @@ export class LinkedMachine implements RoutedMachine {
     if (this.held) return
     this.endpoint = endpoint
     if (!endpoint.line.hostRunning) {
-      this.setStatus('not_running', `Centralu is installed on ${this.name}, but no \`centralu serve\` is running there`)
+      this.setStatus('not_running', `Centralu is installed on ${this.name}, but no \`${shimNames(this.record.remote).centralu} serve\` is running there`)
       return this.retryLater()
     }
     /*
@@ -595,7 +595,7 @@ export class LinkedMachine implements RoutedMachine {
             this.setStatus('connecting', why)
             return this.retryLater(0)
           }
-          this.setStatus('refused', `${why}. If its token was rotated, restart \`centralu serve\` there`)
+          this.setStatus('refused', `${why}. If its token was rotated, restart \`${shimNames(this.record.remote).centralu} serve\` there`)
           this.retryLater()
         },
       },

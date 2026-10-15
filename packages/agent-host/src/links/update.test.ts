@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { fakeRegistry, sha256, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installRemote, installScript, type RemoteRuntime } from './install.js'
 import { SshTunnel } from './tunnel.js'
-import { parseStopLine, rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
+import { parseStopLine, rollbackRemote, stopRemoteHost, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 
 /**
  * Update, rollback and uninstall (plan §10.5, phase 3 step 4) against the installer's harness: a fake
@@ -59,6 +59,16 @@ describe('parseStopLine', () => {
     expect(parseStopLine('motd\n{"v":1,"stop":{"ok":true,"wasRunning":true,"how":"asked"}}\n')).toEqual({ ok: true, wasRunning: true, message: null })
     expect(parseStopLine('{"v":1,"stop":{"ok":false,"wasRunning":true,"message":"still running"}}')).toEqual({ ok: false, wasRunning: true, message: 'still running' })
     expect(parseStopLine('{"v":1,"port":1}\nCENTRALU-NOT-FOUND\n')).toBeNull()
+  })
+})
+
+describe('stopRemoteHost tells a person which shim to type (#688)', () => {
+  const tooOld = (shell: 'posix' | 'powershell') =>
+    stopRemoteHost({ exec: async () => ({ code: 2, stderr: 'unknown option for serve: --stop', stdout: '' }), spec: { shell }, target: 'box' })
+
+  it('names centralu.cmd on a PowerShell machine and centralu elsewhere', async () => {
+    await expect(tooOld('powershell')).rejects.toThrow(/stop `centralu\.cmd serve` there/)
+    await expect(tooOld('posix')).rejects.toThrow(/stop `centralu serve` there/)
   })
 })
 

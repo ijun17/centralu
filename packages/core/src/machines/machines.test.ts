@@ -84,6 +84,14 @@ describe('a link error in plain words (#82)', () => {
     expect(problem('unreachable', 'something new')).toEqual({ title: 'something new', fix: null })
   })
 
+  it('names the .cmd shims for a PowerShell machine, and the plain names elsewhere (#688)', () => {
+    const win = (status: MachineInfo['status'], error: string | null) => machineProblem(machine({ status, error, shell: 'powershell' }))
+    expect(win('unreachable', 'Centralu is not installed on Box')?.fix).toBe('Install it there with `npm.cmd i -g centralu`, then run `centralu.cmd serve` once')
+    expect(win('not_running', null)?.fix).toMatch(/^Run `centralu\.cmd serve --detach`/)
+    expect(win('refused', null)?.fix).toBe('Restart `centralu.cmd serve` there, then reconnect')
+    expect(problem('unreachable', 'Centralu is not installed on Box')?.fix).toBe('Install it there with `npm i -g centralu`, then run `centralu serve` once')
+  })
+
   it('a connected link has no problem', () => {
     expect(problem('connected', null)).toBeNull()
   })
