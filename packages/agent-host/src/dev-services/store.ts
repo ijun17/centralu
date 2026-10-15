@@ -129,6 +129,8 @@ export type QueuedRequest = {
   via: 'ask_project' | 'agent_session' | 'send_to_session'
   text: string
   queuedAt: number
+  /** When delivery began, until the session's turn starts (#684 review); null while it waits */
+  deliveringAt?: number | null
 }
 
 export class Store {
@@ -1919,6 +1921,9 @@ export class Store {
          *   via                the tool it came through: `ask_project`, `agent_session` or `send_to_session`
          *   text               the requester's words, framed as that tool frames them when delivered
          *   queued_at          the order it is delivered in
+         *   delivering_at      set when delivery began; the row goes only once the session's turn has started, so a
+         *                      swap or crash while the session wakes leaves it for the next host, which delivers it
+         *                      again (at least once: an input the old process took without a word may run twice)
          *
          * Kept in the store so a host swap (#280) does not lose it: the next host delivers it when the session's turn
          * ends, or at once for a session already at rest. Not foreign keys; purging either session deletes the rows.
@@ -1936,7 +1941,8 @@ export class Store {
               caller_session_id TEXT NOT NULL,
               via               TEXT NOT NULL,
               text              TEXT NOT NULL,
-              queued_at         INTEGER NOT NULL
+              queued_at         INTEGER NOT NULL,
+              delivering_at     INTEGER
             )
           `)
           const cols = (this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[]).map((c) => c.name)
@@ -3748,7 +3754,8 @@ export class Store {
   listQueuedRequests(): QueuedRequest[] {
     return this.db
       .prepare(
-        `SELECT id, session_id as sessionId, caller_session_id as callerSessionId, via, text, queued_at as queuedAt
+        `SELECT id, session_id as sessionId, caller_session_id as callerSessionId, via, text, queued_at as queuedAt,
+                delivering_at as deliveringAt
            FROM queued_requests ORDER BY queued_at, rowid`,
       )
       .all() as QueuedRequest[]
@@ -3758,6 +3765,10 @@ export class Store {
     this.db
       .prepare(`INSERT INTO queued_requests (id, session_id, caller_session_id, via, text, queued_at) VALUES (?, ?, ?, ?, ?, ?)`)
       .run(r.id, r.sessionId, r.callerSessionId, r.via, r.text, r.queuedAt)
+  }
+
+  markQueuedDelivering(id: string, at: number | null): void {
+    this.db.prepare(`UPDATE queued_requests SET delivering_at = ? WHERE id = ?`).run(at, id)
   }
 
   removeQueuedRequest(id: string): void {

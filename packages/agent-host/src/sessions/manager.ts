@@ -622,6 +622,13 @@ export class SessionManager {
    * `queued_requests` (v52), so a host swap keeps them.
    */
   private queued = new Map<string, QueuedRequest[]>()
+  /**
+   * The queued request being delivered now, per session (#684 review): it stays first in its queue, and its row stays
+   * in the store marked `delivering_at`, until the session's turn actually starts (`onEvent`); only then is it taken
+   * off. While it is here the session counts as busy and no other drain runs for it, so waking a sleeping session
+   * cannot let a second request in, and a swap or crash mid-delivery leaves the row for the next host.
+   */
+  private delivering = new Map<string, string>()
   /** The owner's waits on a delegated turn, woken by a card it may read (#676): session -> wakers, each for one caller */
   private cardWakers = new Map<string, Set<{ callerId: string; wake: () => void }>>()
   private ownTurn(sessionId: string, callerId: string, untilTurnEnd: boolean): void {
@@ -905,7 +912,12 @@ export class SessionManager {
         store.removeQueuedRequest(r.id)
         continue
       }
-      this.queued.set(r.sessionId, [...(this.queued.get(r.sessionId) ?? []), r])
+      // A delivery the old host began and never saw start is delivered again (#684 review)
+      if (r.deliveringAt) {
+        console.error(`[agent-host] queued request ${r.id} to ${r.sessionId.slice(0, 8)} was being delivered at the swap; delivering it again`)
+        store.markQueuedDelivering(r.id, null)
+      }
+      this.queued.set(r.sessionId, [...(this.queued.get(r.sessionId) ?? []), { ...r, deliveringAt: null }])
     }
     if (this.queued.size) {
       setTimeout(() => {
@@ -3421,6 +3433,8 @@ export class SessionManager {
          * mid-turn is code that is only half fixed. The runtime itself decides whether it actually
          * changed or whether a call is still in flight.
          */
+        // The queued request being delivered started its turn (#684 review): only now is it off the queue and the store
+        if (!wasBusy && inTurn(m.state)) this.queuedTurnStarted(m.id)
         if (wasBusy && !inTurn(m.state)) {
           endedTurn = true
           const ref = this.builderRefOf(m)
@@ -3528,6 +3542,8 @@ export class SessionManager {
     // Publish the barrier before dispose can emit events or the completed wait can hand the parent its answer.
     const restarting = Promise.resolve().then(() => this.restartSession(sessionId, cause)).then(() => {}).finally(() => {
       if (this.deferredRestarts.get(sessionId) === restarting) this.deferredRestarts.delete(sessionId)
+      // A drain that met this restart returned: the request queued behind it goes in now (#684 review)
+      if (this.queued.has(sessionId)) this.scheduleDrain(sessionId)
     })
     this.deferredRestarts.set(sessionId, restarting)
     void restarting.catch(() => {})
@@ -6803,7 +6819,7 @@ export class SessionManager {
           return d ? await this.awaitAgent(key, d, signal, observing) : this.agentAtRest(child)
         case 'stop': {
           // A queued request is withdrawn before it is delivered (#677)
-          if ((!d || d.settled) && this.dropQueued((r) => r.sessionId === child.id && r.callerSessionId === callerId).length) {
+          if ((!d || d.settled) && this.dropQueued((r) => r.sessionId === child.id && r.callerSessionId === callerId && this.delivering.get(child.id) !== r.id).length) {
             return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool }
           }
           if (!d || d.settled) return { ok: false, error: `Nothing you gave "${child.name}" is running.` }
@@ -7576,7 +7592,7 @@ export class SessionManager {
   private busyForCaller(callerId: string, sessionId: string): boolean {
     const m = this.meta.get(sessionId)
     if (!m) return false
-    if (this.queued.get(sessionId)?.length) return true
+    if (this.queued.get(sessionId)?.length || this.delivering.has(sessionId)) return true
     const run = this.agentRuns.get(sessionId)
     const running = inTurn(m.state) || (!!run && !run.finished)
     if (!running) return false
@@ -7637,8 +7653,12 @@ export class SessionManager {
 
   /** Holds a request for a busy session until its turn ends (#677); the handle and the place in its queue */
   private enqueue(callerId: string, target: SessionInfo, via: QueuedRequest['via'], text: string): Extract<BusyAnswer, { state: 'queued' }> {
+    // A retry of the same request (same requester, tool and words) is the one already held, not a second (#684 review)
+    const held = this.queued.get(target.id) ?? []
+    const same = held.findIndex((x) => x.callerSessionId === callerId && x.via === via && x.text === text)
+    if (same >= 0) return { state: 'queued', sessionId: target.id, sessionName: target.name, queueId: held[same]!.id, position: same + 1 }
     const r: QueuedRequest = { id: `qr-${randomUUID()}`, sessionId: target.id, callerSessionId: callerId, via, text, queuedAt: Date.now() }
-    const list = [...(this.queued.get(target.id) ?? []), r]
+    const list = [...held, r]
     this.queued.set(target.id, list)
     this.store.addQueuedRequest(r)
     // The turn may have ended while the caller chose
@@ -7649,6 +7669,8 @@ export class SessionManager {
   private dropQueued(which: (r: QueuedRequest) => boolean): QueuedRequest[] {
     const dropped: QueuedRequest[] = []
     for (const [id, list] of [...this.queued]) {
+      const now = this.delivering.get(id)
+      if (now && list.some((r) => r.id === now && which(r))) this.delivering.delete(id)
       const keep = list.filter((r) => !which(r))
       for (const r of list) if (which(r)) { dropped.push(r); this.store.removeQueuedRequest(r.id) }
       if (keep.length) this.queued.set(id, keep)
@@ -7669,16 +7691,22 @@ export class SessionManager {
    * one delivers it.
    */
   private async drainQueue(sessionId: string): Promise<void> {
-    if (this.disposing || this.handingOver) return
+    if (this.disposing || this.handingOver || this.delivering.has(sessionId)) return
     const m = this.meta.get(sessionId)
     const list = this.queued.get(sessionId)
     if (!m || !list?.length) return
     const run = this.agentRuns.get(sessionId)
-    if (inTurn(m.state) || (run && !run.finished) || this.inputsHeld(sessionId) || this.deferredRestarts.has(sessionId) || this.trashing.has(sessionId)) return
+    // A deferred restart is not waited out here: `deliver` waits for it, and its end schedules this again
+    if (inTurn(m.state) || (run && !run.finished) || this.inputsHeld(sessionId) || this.trashing.has(sessionId)) return
     const r = list[0]!
-    this.dropQueued((x) => x.id === r.id)
     const caller = this.meta.get(r.callerSessionId)
-    if (!caller) return this.scheduleDrain(sessionId)
+    if (!caller) {
+      this.dropQueued((x) => x.id === r.id)
+      return this.scheduleDrain(sessionId)
+    }
+    // Reserved before the first await: the session is busy from here, and this is the only drain for it
+    this.delivering.set(sessionId, r.id)
+    this.store.markQueuedDelivering(r.id, Date.now())
     const from = { sessionId: caller.id, name: labelOf(this.store, caller) }
     const project = this.store.listProjects().find((p) => p.id === m.projectId)
     const target = { id: m.projectId ?? '', name: project?.name ?? '', path: this.store.sessionCwd(m.id) ?? m.worktree?.path ?? project?.path ?? '' }
@@ -7697,13 +7725,26 @@ export class SessionManager {
       }
       // The requester is told when the turn ends, as for work it did not wait on
       this.markReport(sessionId, caller.id)
+      // Its turn may have started without this host seeing the step into it
+      if (inTurn(this.meta.get(sessionId)?.state ?? 'idle')) this.queuedTurnStarted(sessionId)
     } catch (e) {
+      // Leaving: the row stays, marked, and the next host delivers it
+      if (this.handingOver || this.disposing) return
       if (d) {
         d.wait.fail(e as Error)
       } else this.releaseTurn(sessionId, caller.id)
+      this.dropQueued((x) => x.id === r.id)
       void this.tellQueuedFailed(caller.id, sessionId, (e as Error).message)
       this.scheduleDrain(sessionId)
     }
+  }
+
+  /** The session's turn started while a queued request was being delivered to it: that request is delivered (#684 review) */
+  private queuedTurnStarted(sessionId: string): void {
+    const id = this.delivering.get(sessionId)
+    if (!id) return
+    this.delivering.delete(sessionId)
+    this.dropQueued((x) => x.id === id)
   }
 
   /** A queued request could not be delivered (#677): said in the requester's session, as a report is */

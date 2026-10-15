@@ -176,6 +176,7 @@ erDiagram
     TEXT via
     TEXT text
     INTEGER queued_at
+    INTEGER delivering_at
   }
   report_marks {
     TEXT session_id PK
@@ -489,6 +490,7 @@ Added in v52.
 | `via` | TEXT | no |  |  | v52 |
 | `text` | TEXT | no |  |  | v52 |
 | `queued_at` | INTEGER | no |  |  | v52 |
+| `delivering_at` | INTEGER | yes |  |  | v52 |
 
 ### `report_marks`
 

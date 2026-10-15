@@ -308,3 +308,104 @@ describe('a queued request across a host swap (#677)', () => {
     expect(claude.handles.get(a)!.sent[0]).toContain('queued work')
   })
 })
+
+describe('the queue delivers each request once, in turn, through restarts and swaps (#684 review)', () => {
+  let w: CrossWorld
+  const hosts: SessionManager[] = []
+  beforeEach(async () => {
+    w = await crossWorld()
+  })
+  afterEach(async () => {
+    for (const h of hosts.splice(0)) await h.disposeAll()
+    await w.dispose()
+  })
+
+  const claude = () => w.adapters.get('claude')!
+  const handleOf = (id: string) => claude().handles.get(id)!
+  /** A next host whose Claude takes as long to start a process as the test lets it (a sleeping session waking) */
+  const nextHost = (gated: boolean) => {
+    const adapter = new CrossAdapter('claude')
+    let release!: () => void
+    const gate = gated ? new Promise<void>((r) => (release = r)) : Promise.resolve()
+    const starts: string[] = []
+    const create = adapter.createSession.bind(adapter)
+    adapter.createSession = async (opts, emit) => {
+      starts.push(opts.sessionId)
+      await gate
+      return create(opts, emit)
+    }
+    const host = new SessionManager(w.store, new Map<ToolName, AgentAdapter>([['claude', adapter], ['codex', new CrossAdapter('codex')]]), () => {}, undefined, undefined, {})
+    hosts.push(host)
+    return { host, adapter, starts, release: () => release() }
+  }
+  const toolsOf = (mgr: SessionManager, id: string) => (mgr as unknown as { orchestratorToolsFor(id: string): OrchestratorTools }).orchestratorToolsFor(id)
+  /** A session the person is using, with a conversation to resume, and the orchestrator's request queued behind its turn */
+  const queuedBehindThePerson = async () => {
+    const a = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })).id
+    handleOf(a).externalId = 'ext-a'
+    await w.mgr.send(a, "the person's own work")
+    const orch = await w.mgr.orchestrator()
+    expect(await toolsOf(w.mgr, orch.id).sendToSession(a, 'first', false, 'queue')).toMatchObject({ ok: true, busy: { state: 'queued', position: 1 } })
+    return { a, orch: orch.id }
+  }
+
+  it('does not stall behind a restart the turn\'s end set off', async () => {
+    const { a } = await queuedBehindThePerson()
+    // A setting changed during the turn restarts the process when the turn ends
+    expect(await w.mgr.updateSettings(a, { effort: 'high' })).toMatchObject({ applied: 'after_turn' })
+    // The new process takes a moment to start, as a real one does: the drain the turn's end scheduled runs meanwhile
+    const create = claude().createSession.bind(claude())
+    claude().createSession = async (opts, emit) => {
+      await new Promise((r) => setTimeout(r, 50))
+      return create(opts, emit)
+    }
+    const before = handleOf(a)
+    before.answer("the person's answer")
+    await w.until(() => handleOf(a) !== before && handleOf(a).sent.includes('first'))
+    expect(w.store.listQueuedRequests()).toEqual([])
+  })
+
+  it('keeps the session busy while it wakes for a queued request, and lets one request in at a time', async () => {
+    const { a, orch } = await queuedBehindThePerson()
+    await w.mgr.detachAll()
+    // The next host finds the session asleep, with the request still queued: waking it takes a while
+    const next = nextHost(true)
+    await w.until(() => next.starts.includes(a))
+    expect(w.store.listQueuedRequests()).toEqual([expect.objectContaining({ text: 'first', deliveringAt: expect.any(Number) })])
+    const tools = toolsOf(next.host, orch)
+    // Busy while it wakes: another request is not let in beside the one being delivered
+    expect(await tools.sendToSession(a, 'second', false)).toMatchObject({ ok: true, busy: { state: 'busy' } })
+    expect(await tools.sendToSession(a, 'second', false, 'queue')).toMatchObject({ ok: true, busy: { state: 'queued', position: 2 } })
+    next.release()
+    await w.until(() => next.adapter.handles.get(a)?.sent.includes('first') ?? false)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(next.adapter.handles.get(a)!.sent).toEqual(['first'])
+    // Delivered once its turn started; the second waits for that turn to end
+    expect(w.store.listQueuedRequests().map((r) => r.text)).toEqual(['second'])
+    next.adapter.handles.get(a)!.answer('first done')
+    await w.until(() => next.adapter.handles.get(a)!.sent.length === 2)
+    expect(next.adapter.handles.get(a)!.sent).toEqual(['first', 'second'])
+  })
+
+  it('is delivered by the next host when a swap comes while the session wakes for it', async () => {
+    const { a } = await queuedBehindThePerson()
+    await w.mgr.detachAll()
+    const waking = nextHost(true)
+    await w.until(() => waking.starts.includes(a))
+    // The host leaves before the session took the request
+    await waking.host.detachAll()
+    expect(w.store.listQueuedRequests()).toEqual([expect.objectContaining({ text: 'first' })])
+    const after = nextHost(false)
+    await w.until(() => after.adapter.handles.get(a)?.sent.includes('first') ?? false)
+    expect(w.store.listQueuedRequests()).toEqual([])
+  })
+
+  it('holds a retried request once', async () => {
+    const { a, orch } = await queuedBehindThePerson()
+    const tools = toolsOf(w.mgr, orch)
+    const first = w.store.listQueuedRequests()[0]!.id
+    expect(await tools.sendToSession(a, 'first', false, 'queue')).toMatchObject({ busy: { state: 'queued', queueId: first, position: 1 } })
+    expect(await tools.sendToSession(a, 'another', false, 'queue')).toMatchObject({ busy: { state: 'queued', position: 2 } })
+    expect(w.store.listQueuedRequests().map((r) => r.text)).toEqual(['first', 'another'])
+  })
+})
