@@ -271,6 +271,14 @@ export const MANAGED_SH = 'm="${CC_DATA_DIR:-$HOME/.centralu}/remote/bin/central
 export const MANAGED_PS =
   "$d = if ($env:CC_DATA_DIR) { $env:CC_DATA_DIR } else { Join-Path $env:USERPROFILE '.centralu' }; $m = Join-Path $d 'remote\\bin\\centralu.cmd'"
 
+/**
+ * The npm and centralu commands to tell a person to type on the remote: PowerShell gets the `.cmd`
+ * shims, as the bare names resolve to the `.ps1` ones a default execution policy blocks
+ */
+export function shimNames(spec: RemoteSpec | undefined): { npm: string; centralu: string } {
+  return spec?.shell === 'powershell' ? { npm: 'npm.cmd', centralu: 'centralu.cmd' } : { npm: 'npm', centralu: 'centralu' }
+}
+
 /** What the remote command prints when it finds no Centralu to run (`connectionCommand`) */
 export const NOT_FOUND = 'CENTRALU-NOT-FOUND'
 
@@ -287,6 +295,12 @@ export const NOT_FOUND = 'CENTRALU-NOT-FOUND'
  * Exit codes do not survive the way there (measured on a Windows laptop, 2026-10-05): Windows
  * OpenSSH runs the command under PowerShell, which turns any failing command into 1, so a 127 from
  * WSL or from PowerShell itself arrives as 1, and a missing command can even arrive as 0.
+ *
+ * **PowerShell runs the `.cmd` shim, never the bare name.** npm installs three shims, `centralu`,
+ * `centralu.cmd` and `centralu.ps1`, and a bare `centralu` in PowerShell resolves to the `.ps1`, which
+ * Windows' default `Restricted` execution policy refuses ("running scripts is disabled on this
+ * system"; measured on Windows 11, 2026-10-15). `centralu.cmd` is a batch file, which no policy
+ * blocks, so the lookup names it. The same goes for `npm` (`shimNames`).
  *
  * **A WSL distro does not look on Windows' drives.** WSL puts Windows' PATH after its own, and
  * Windows' npm folder holds a `centralu` shim: measured, `command -v centralu` in the distro named
@@ -339,7 +353,7 @@ function remoteCommand(
     if (custom) return powershell(`${custom} ${args}`)
     return powershell(
       `${MANAGED_PS}; if (Test-Path $m) { & $m ${args} } ` +
-        `elseif (Get-Command centralu -ErrorAction SilentlyContinue) { & centralu ${args} } ` +
+        `elseif (Get-Command centralu.cmd -ErrorAction SilentlyContinue) { & centralu.cmd ${args} } ` +
         "else { $l = Join-Path $env:USERPROFILE '.centralu\\bin\\centralu.cmd'; " +
         `if (Test-Path $l) { & $l ${args} } else { '${NOT_FOUND}' } }`,
     )
@@ -495,14 +509,16 @@ export class SshTunnel implements Tunnel {
     this.ifClosed()
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
     if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) {
-      throw new Error(`Centralu is not installed ${this.where} (run \`npm i -g centralu\` there, then \`centralu serve\` once)`)
+      const n = shimNames(remote)
+      throw new Error(`Centralu is not installed ${this.where} (run \`${n.npm} i -g centralu\` there, then \`${n.centralu} serve\` once)`)
     }
     let answer: DetachAnswer
     try {
       answer = parseDetachLine(r.stdout)
     } catch (err) {
       if (/unknown option for serve: --detach/.test(r.stderr)) {
-        throw new Error(`Centralu on ${this.opts.target} is too old to be started from here: run \`centralu serve\` there, or update it (npm i -g centralu)`)
+        const n = shimNames(remote)
+        throw new Error(`Centralu on ${this.opts.target} is too old to be started from here: run \`${n.centralu} serve\` there, or update it (${n.npm} i -g centralu)`)
       }
       const why = lastLine(r.stderr)
       throw new Error(`${(err as Error).message}${why ? `: ${why}` : r.code ? ` (exit ${r.code})` : ''}`)
@@ -594,7 +610,8 @@ export class SshTunnel implements Tunnel {
     const r = await this.run([...base, connectionCommand(remote)])
     if (r.code === 255) throw new Error(`ssh could not reach ${this.opts.target}: ${lastLine(r.stderr) || 'no answer'}`)
     if (r.stdout.includes(NOT_FOUND) || (r.code === 127 && !remote.command)) {
-      throw new Error(`Centralu is not installed ${this.where} (run \`npm i -g centralu\` there, then \`centralu serve\` once)`)
+      const n = shimNames(remote)
+      throw new Error(`Centralu is not installed ${this.where} (run \`${n.npm} i -g centralu\` there, then \`${n.centralu} serve\` once)`)
     }
     try {
       return parseConnectionLine(r.stdout)

@@ -1230,7 +1230,7 @@ ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o
 | 셸 | 연결 명령 | 잰 곳 |
 |---|---|---|
 | `posix` | `sh -c 'if command -v centralu …; then exec centralu serve --connection; elif [ -x "$HOME/.centralu/bin/centralu" ]; then exec …; else echo CENTRALU-NOT-FOUND; exit 127; fi'` | `tunnel.test.ts`의 가짜 ssh |
-| `powershell` | 같은 찾기(`Get-Command centralu`, 다음 `%USERPROFILE%\.centralu\bin\centralu.cmd`)를 `powershell -NoProfile -NonInteractive -EncodedCommand <UTF-16LE base64>`로 | Windows 11, OpenSSH, PowerShell 5.1 |
+| `powershell` | 같은 찾기(`Get-Command centralu.cmd`, 다음 `%USERPROFILE%\.centralu\bin\centralu.cmd`)를 `powershell -NoProfile -NonInteractive -EncodedCommand <UTF-16LE base64>`로 | Windows 11, OpenSSH, PowerShell 5.1 |
 | `wsl` | 같은 PowerShell 감싸기 안에 `wsl.exe -d '<distro>' -- bash -lc 'echo <base64> \| base64 -d \| bash -l'`. 스크립트는 PATH에서 `/mnt/*`를 뺀 POSIX 찾기 | 그 노트북의 WSL2 Ubuntu 24.04 |
 
 기기마다 `centralu` 대신 돌릴 명령을 적을 수 있다(`MachineInfo.command`): 소스 체크아웃, `~/.centralu`가 아닌 데이터

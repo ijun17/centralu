@@ -137,6 +137,17 @@ describe('what a machine starts its host at boot with (plan §10.4)', () => {
     writeFileSync(join(d, 'remote', 'bin', 'centralu.cmd'), '')
     expect(autostartLauncher(d, 'win32')).toBe(join(d, 'remote', 'bin', 'centralu.cmd'))
   })
+
+  it('on Windows the scheduled task runs a .cmd launcher, never the .ps1 shim a default execution policy blocks (#688)', () => {
+    const d = home()
+    mkdirSync(join(d, 'bin'))
+    // The extension-less `centralu` (a shell script on npm's side) and a stray .ps1 are not what a Windows task may run
+    writeFileSync(join(d, 'bin', 'centralu'), '')
+    writeFileSync(join(d, 'bin', 'centralu.ps1'), '')
+    expect(autostartLauncher(d, 'win32')).toBeNull()
+    writeFileSync(join(d, 'bin', 'centralu.cmd'), '')
+    expect(autostartLauncher(d, 'win32')).toBe(join(d, 'bin', 'centralu.cmd'))
+  })
 })
 
 describe('the systemd user unit', () => {

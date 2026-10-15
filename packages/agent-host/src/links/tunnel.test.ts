@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
-import { connectionCommand, lastLine, parseConnectionLine, SshTunnel, type RemoteSpec } from './tunnel.js'
+import { autostartCommand, connectionCommand, detachCommand, lastLine, parseConnectionLine, serveCommand, shimNames, SshTunnel, stopCommand, type RemoteSpec } from './tunnel.js'
 
 /**
  * The ssh transport (#82, docs/plans/remote-hub.md §2) against a fake `ssh` on PATH: a Node script
@@ -302,7 +302,7 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
     await tunnel({ FAKE_SSH_LINE: line({ port: await freePort() }) }, { shell: 'wsl', wslDistro: 'Ubuntu-24.04' }).open()
     const runs = (logged() as { shell?: string; run?: string }[]).filter((x) => x.shell)
     expect(runs[0]!.shell).toBe('powershell')
-    expect(runs[0]!.run).toContain("elseif (Get-Command centralu -ErrorAction SilentlyContinue) { & centralu serve --connection } else { $l = Join-Path $env:USERPROFILE '.centralu\\bin\\centralu.cmd'")
+    expect(runs[0]!.run).toContain("elseif (Get-Command centralu.cmd -ErrorAction SilentlyContinue) { & centralu.cmd serve --connection } else { $l = Join-Path $env:USERPROFILE '.centralu\\bin\\centralu.cmd'")
     expect(runs[1]!.shell).toBe('wsl:Ubuntu-24.04')
     // Windows' drives are off PATH inside the distro: its npm shim must not answer for the distro
     expect(runs[1]!.run).toMatch(/^PATH=\$\(printf %s "\$PATH" \| tr : '\\n' \| grep -v '\^\/mnt\/' \| paste -sd: -\); m=.*; if \[ -x "\$m" \]; then .*elif command -v centralu/)
@@ -338,7 +338,7 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
       const detaches = runs().filter((r) => r.run!.includes('serve --detach'))
       expect(detaches.map((r) => r.shell)).toEqual(['posix', 'powershell', 'wsl:Ubuntu-24.04'])
       expect(detaches[0]!.run).toMatch(/^sh -c .m=.*if \[ -x "\$m" \]; then exec "\$m" serve --detach; elif command -v centralu .*then exec centralu serve --detach; elif .* exec "\$HOME\/.centralu\/bin\/centralu" serve --detach; else echo CENTRALU-NOT-FOUND/)
-      expect(detaches[1]!.run).toContain('{ & centralu serve --detach }')
+      expect(detaches[1]!.run).toContain('{ & centralu.cmd serve --detach }')
       // A detached host needs nothing from the forward: a plain -N (and the distro keep-alive for WSL)
       const forwards = (logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L'))
       expect(forwards[0]).toContain('-N')
@@ -356,7 +356,7 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
       const hosting = (logged() as { hosting?: string; run?: string }[]).filter((x) => x.hosting)
       expect(hosting).toHaveLength(1)
       expect(hosting[0]!.hosting).toBe('powershell')
-      expect(hosting[0]!.run).toContain('{ & centralu serve }')
+      expect(hosting[0]!.run).toContain('{ & centralu.cmd serve }')
       const forward = (logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L')).at(-1)!
       expect(forward).toContain('-T')
       expect(forward).not.toContain('-N')
@@ -416,8 +416,25 @@ describe('the remote command per shell (#82)', () => {
     const ps = decode(connectionCommand({ shell: 'powershell' }))
     const managed = ps.indexOf("$m = Join-Path $d 'remote\\bin\\centralu.cmd'; if (Test-Path $m) { & $m serve --connection }")
     expect(managed).toBeGreaterThan(-1)
-    expect(ps.indexOf('elseif (Get-Command centralu')).toBeGreaterThan(managed)
+    expect(ps.indexOf('elseif (Get-Command centralu.cmd')).toBeGreaterThan(managed)
     expect(ps).toContain("$d = if ($env:CC_DATA_DIR) { $env:CC_DATA_DIR } else { Join-Path $env:USERPROFILE '.centralu' }")
+  })
+
+  it('a Windows remote never runs a bare centralu: PowerShell would resolve it to the .ps1 shim a default execution policy blocks (#688)', () => {
+    for (const cmd of [connectionCommand, detachCommand, stopCommand, serveCommand, (s: RemoteSpec) => autostartCommand(s, 'on'), (s: RemoteSpec) => autostartCommand(s, 'status')]) {
+      const ps = decode(cmd({ shell: 'powershell' }))
+      expect(ps).not.toMatch(/(?:&|Get-Command)\s+centralu(?!\.cmd)\b/)
+      expect(ps).toMatch(/& centralu\.cmd /)
+    }
+    // posix and wsl keep the bare name, which is the right one there
+    expect(connectionCommand({ shell: 'posix' })).toContain('exec centralu serve --connection')
+    expect(decode(connectionCommand({ shell: 'wsl', wslDistro: 'Ubuntu' }))).not.toContain('centralu.cmd')
+  })
+
+  it('tells a Windows person to type the .cmd shims, and anyone else the plain names', () => {
+    expect(shimNames({ shell: 'powershell' })).toEqual({ npm: 'npm.cmd', centralu: 'centralu.cmd' })
+    expect(shimNames({ shell: 'posix' })).toEqual({ npm: 'npm', centralu: 'centralu' })
+    expect(shimNames({ shell: 'wsl', wslDistro: 'Ubuntu' })).toEqual({ npm: 'npm', centralu: 'centralu' })
   })
 
   it('nothing that is not base64 crosses PowerShell, so no quote is re-parsed on the way', () => {
