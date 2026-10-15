@@ -168,7 +168,8 @@ applied the way a theme is — as values for tokens, written on `<html>` (`packa
 The defaults are bundled with the UI (#731, `packages/ui/src/assets/fonts/`): **Pretendard** leads
 `--font-sans` and **D2Coding** leads `--font-mono`, so the desktop app, the browser and Windows show
 the same type; the system fonts stay behind them. Both are under the SIL Open Font License 1.1, with
-the licence next to the files and inside them. They load with `font-display: block` and start loading
+the licence next to the files and inside them. Pretendard is a static file per weight the UI uses,
+not the variable font, which WebKit on Linux lays out several times slower (#746). They load with `font-display: block` and start loading
 before the first frame (`apps/web/src/main.tsx`); a terminal opened before D2Coding finished measures
 its cell again when it does. App views receive the same stacks but not the font files, so a view
 shows its system fallback until it bundles the fonts itself.

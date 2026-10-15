@@ -12,11 +12,30 @@
  * The bundled fonts (#731, assets/fonts/README.md): Pretendard for what a person or a model says,
  * D2Coding for what a machine wrote. They load from the app bundle, so `block` costs no visible wait
  * and keeps the first frame from painting in a system font that then swaps (the text would jump).
+ *
+ * Pretendard is one static file per weight the UI uses (400, 500, 600; a bold 700 takes the 600),
+ * not the variable font: WebKit on Linux (WebKitGTK, and Playwright's WebKit in CI) lays out text
+ * in a variable font about seven times slower than in a static one, which kept the main thread busy
+ * enough to fail e2e scenarios there (#746).
  */
 @font-face {
-  font-family: 'Pretendard Variable';
-  src: url('../assets/fonts/PretendardVariable.woff2') format('woff2-variations');
-  font-weight: 45 920;
+  font-family: 'Pretendard';
+  src: url('../assets/fonts/Pretendard-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'Pretendard';
+  src: url('../assets/fonts/Pretendard-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'Pretendard';
+  src: url('../assets/fonts/Pretendard-SemiBold.woff2') format('woff2');
+  font-weight: 600;
   font-style: normal;
   font-display: block;
 }
@@ -200,8 +219,7 @@
      of both stacks, and a test keeps the copies equal). */
   --font-mono: D2Coding, ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   --font-sans:
-    'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
-    system-ui, sans-serif;
+    Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif;
 
   /*
    * Type, line height and radius scales (#312 step 2). Tailwind's own scales are cleared, so

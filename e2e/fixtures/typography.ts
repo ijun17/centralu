@@ -7,7 +7,7 @@ import { expect, test, type Page } from '@playwright/test'
  */
 
 // The bundled fonts lead the stacks (#731); an engine may or may not quote a family name it reports
-const DEFAULT_SANS_START = `["']?Pretendard Variable["']?,`
+const DEFAULT_SANS_START = `["']?Pretendard["']?,`
 const DEFAULT_MONO_START = `["']?D2Coding["']?,`
 
 const computed = (page: Page, testId: string, prop: 'fontFamily' | 'lineHeight' | 'fontSize') =>
@@ -45,10 +45,10 @@ export function typographyTests() {
   test('the bundled fonts load from the app and lead the body and code stacks (#731)', async ({ page }) => {
     await openDemo(page)
     const loaded = await page.evaluate(async () => {
-      await Promise.all([document.fonts.load("13px 'Pretendard Variable'"), document.fonts.load('12px D2Coding')])
+      await Promise.all([document.fonts.load('13px Pretendard'), document.fonts.load('12px D2Coding')])
       return [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family.replace(/["']/g, ''))
     })
-    expect(loaded).toEqual(expect.arrayContaining(['Pretendard Variable', 'D2Coding']))
+    expect(loaded).toEqual(expect.arrayContaining(['Pretendard', 'D2Coding']))
     expect(await computed(page, 'markdown', 'fontFamily')).toMatch(new RegExp(`^${DEFAULT_SANS_START}`))
     // Hangul in the code font is drawn by the code font itself, at twice the width of a Latin cell
     const widths = await page.evaluate(() => {
@@ -89,7 +89,7 @@ export function typographyTests() {
 
     await openAppearance(page)
     await page.getByTestId('settings-font-body').selectOption('Inter')
-    await expect.poll(() => rootToken(page, '--font-sans')).toMatch(/^"Inter", ["']Pretendard Variable["']/)
+    await expect.poll(() => rootToken(page, '--font-sans')).toMatch(/^"Inter", ["']?Pretendard["']?,/)
     // The app's own stack stays behind it: Korean still has a font
     expect(await rootToken(page, '--font-sans')).toMatch(/["']Apple SD Gothic Neo["']/)
     expect(await computed(page, 'settings-font-body-sample', 'fontFamily')).toMatch(/^"?Inter"?,/)

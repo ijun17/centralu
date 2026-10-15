@@ -153,7 +153,8 @@ Dark는 어두운 바닥(`#0f0f0f`) 위에 떠 있는 상자(`#242424`, 바닥�
 기본 글꼴은 UI와 함께 들어 있다(#731, `packages/ui/src/assets/fonts/`). `--font-sans`의 맨 앞은
 **Pretendard**, `--font-mono`의 맨 앞은 **D2Coding**이어서 데스크톱 앱, 브라우저, Windows가 같은 글꼴을
 보여 준다. 시스템 글꼴은 그 뒤에 남는다. 둘 다 SIL Open Font License 1.1이고, 라이선스는 파일 옆과 파일
-안에 있다. `font-display: block`으로 불러오고, 첫 프레임 전에 불러오기를 시작한다(`apps/web/src/main.tsx`).
+안에 있다. Pretendard는 가변 글꼴이 아니라 UI가 쓰는 굵기마다 고정 글꼴 파일 하나다. Linux의 WebKit은 가변 글꼴의
+글자 배치가 몇 배 느리다(#746). `font-display: block`으로 불러오고, 첫 프레임 전에 불러오기를 시작한다(`apps/web/src/main.tsx`).
 D2Coding이 다 오기 전에 열린 터미널은 다 온 뒤에 칸 크기를 다시 잰다. 앱 화면은 같은 글꼴 목록을 받지만
 글꼴 파일은 받지 않으므로, 앱이 글꼴을 직접 담기 전까지는 시스템 대체 글꼴로 보인다.
 

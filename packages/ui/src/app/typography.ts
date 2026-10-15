@@ -18,7 +18,7 @@ import { DEFAULT_UI_PREFERENCES, LineHeight, nearestTextSize, type UiPreferences
  * inline value replaces the stylesheet's. Appending them is what keeps the Korean fallback: a Latin
  * font has no Hangul, and the browser takes each missing glyph from the next family in the list.
  */
-export const DEFAULT_SANS = "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif"
+export const DEFAULT_SANS = "Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif"
 export const DEFAULT_MONO = "D2Coding, ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace"
 
 /** The body line height and the code one at Normal — copies of `@theme`'s, kept equal by the same test */

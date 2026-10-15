@@ -34,7 +34,7 @@ applyCachedTypography()
  * first path or terminal blank for its load (font-display: block).
  */
 const fontsReady = Promise.race([
-  Promise.all([document.fonts?.load("13px 'Pretendard Variable'"), document.fonts?.load('12px D2Coding')]).catch(() => {}),
+  Promise.all([document.fonts?.load('13px Pretendard'), document.fonts?.load('12px D2Coding')]).catch(() => {}),
   // A font that cannot load must not keep the window blank: after this the app draws with the fallback
   new Promise((resolve) => setTimeout(resolve, 3000)),
 ])
