@@ -16,6 +16,7 @@ import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomple
 import { guiCommandFor } from './guiCommands.js'
 import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js'
 import { onFirstVisualLine, onLastVisualLine } from './caret.js'
+import { fitHeight } from './composerFit.js'
 import { isComposerSendKey } from './composerKeys.js'
 import { composerFocusAnswer } from './composerFocus.js'
 import { composingKey } from '../../app/keys.js'
@@ -270,8 +271,10 @@ export const Composer = memo(function Composer({
   useLayoutEffect(() => {
     const el = inputRef.current
     if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_H)}px`
+    // Not off the box's own scrollHeight, which can come out a row too many in WebKit (#744)
+    const wanted = fitHeight(el)
+    if (wanted === null) el.style.height = 'auto'
+    el.style.height = `${Math.min(wanted ?? el.scrollHeight, COMPOSER_MAX_H)}px`
   }, [text])
 
   // Apply the requested caret with its value, before another input event. A next-frame move

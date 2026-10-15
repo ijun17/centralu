@@ -189,8 +189,7 @@ export function typographyTests() {
       await input.press('Enter')
       await expect(input).toHaveValue('')
 
-      // 55 words: clear of the lengths where WebKit's textarea starts a row the composer's mirror does not (#744)
-      const long = Array.from({ length: 55 }, (_, i) => `word${i}`).join(' ')
+      const long = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ')
       await input.fill(long)
       const rows = await input.evaluate((el: HTMLTextAreaElement) => Math.round(el.scrollHeight / parseFloat(getComputedStyle(el).lineHeight)))
       expect(rows).toBeGreaterThan(2)
