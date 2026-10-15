@@ -41,8 +41,9 @@ adapter — in-process for claude, over a stdio bridge for codex.
 
 Every session gets one bundle of the `centralu` server's tools, or none. One pure rule decides which
 (`toolProfileFor` in `sessions/tool-profiles.ts`, from the row's kind, its app and builder slot and
-the Settings switch; `toolBundleFor` names the object behind each profile). The manager asks it at
-create, at every wake and on every bridge call (`toolProfileOf`), so the three cannot drift apart;
+the Settings switch; `toolBundleFor` names the object behind each profile). The manager asks it in one
+place (`toolChoice`: the profile, and the bundle built when the adapter's options are), used at create, at
+every wake, on every bridge call and by `toolProfileOf`, so they cannot drift apart;
 `profileAllows` decides both what the bundle exposes and what its calls may run, so a name the
 bundle leaves out is refused even through the Codex bridge.
 

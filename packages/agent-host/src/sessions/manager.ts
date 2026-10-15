@@ -2020,7 +2020,7 @@ export class SessionManager {
     const apps = this.appsFor(info)
     // The same rule runs again on every wake (toolProfileOf). The builder slot was just written (setBuilder), so the
     // flag says what the row's slot already says
-    const profile = toolProfileFor(this.profileFacts(info, !!params.builderOf))
+    const { profile, tools } = this.toolChoice(info, !!params.builderOf)
     // Code intelligence (#686): decided once, here, from what the session is, and recorded below for every wake
     const noCodeIntelligence = codeIntelligenceOff({
       kind: info.kind,
@@ -2052,7 +2052,7 @@ export class SessionManager {
           mayRead: (path: string) => this.mayRead(id, path, cwd),
           // An orchestrator gets all of them, a builder session (M4 C-3) just its own app's check (the bundle blocks
           // the rest), an ordinary session its own project, read-only (#320, #561)
-          orchestratorTools: this.toolBundleOf(id, profile, info),
+          orchestratorTools: tools(),
           toolProfile: profile ?? undefined,
           systemPromptAppend:
             info.kind === 'orchestrator' ? orchestratorRole() + this.skillsPrompt()
@@ -2748,7 +2748,7 @@ export class SessionManager {
     // If this is a builder session, it gets its own app's check (C-3) — the directory is re-checked right now
     // (a different session could have taken over in between)
     const builds = this.builderRefOf(m) !== null
-    const profile = toolProfileFor(this.profileFacts(m, builds))
+    const { profile, tools } = this.toolChoice(m, builds)
     const from = this.handleSink()
     /*
      * **The configuration the process will receive is read here, exactly once** (#162). If the
@@ -2809,7 +2809,7 @@ export class SessionManager {
            * has just been attached passes this check the next time it wakes and receives the
            * child-only tools and role.
            */
-          orchestratorTools: this.toolBundleOf(sessionId, profile, m),
+          orchestratorTools: tools(),
           toolProfile: profile ?? undefined,
           /*
            * This is **where memory is handed over.** Switching tools breaks externalId, which routes
@@ -9638,7 +9638,7 @@ export class SessionManager {
    */
   async runOrchestratorTool(sessionId: string, name: string, args: Record<string, unknown>) {
     const m = this.meta.get(sessionId)
-    const profile = this.toolProfileOf(sessionId)
+    const { profile, tools } = m ? this.toolChoice(m) : { profile: null, tools: () => undefined }
     if (!m || !profile) {
       throw Object.assign(new Error('Only the orchestrator can use this tool'), { code: 'internal' })
     }
@@ -9650,7 +9650,7 @@ export class SessionManager {
     if (!profileAllows(profile, name)) {
       throw Object.assign(new Error(`Not a tool of this session: ${name}`), { code: 'internal' })
     }
-    return runOrchestratorTool(this.toolBundleOf(sessionId, profile, m), name, args, { sessionId, profile })
+    return runOrchestratorTool(tools()!, name, args, { sessionId, profile })
   }
 
   /**
@@ -9880,12 +9880,24 @@ export class SessionManager {
    */
   toolProfileOf(sessionId: string): ToolProfile | null {
     const m = this.meta.get(sessionId)
-    return m ? toolProfileFor(this.profileFacts(m)) : null
+    return m ? this.toolChoice(m).profile : null
+  }
+
+  /**
+   * The one place a session's tools are chosen (#428): its profile by `toolProfileFor`, and the bundle that goes with
+   * it, for creation, every wake, every bridge call and `toolProfileOf`. `builder` is passed by a caller that has just
+   * read or written the app's builder slot, and looked up otherwise. The bundle is built only when `tools` is called,
+   * where the adapter's options are put together.
+   */
+  private toolChoice(
+    m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId' | 'scopeSessionIds'>,
+    builder?: boolean,
+  ): { profile: ToolProfile | null; tools: () => OrchestratorTools | undefined } {
+    const profile = toolProfileFor(this.profileFacts(m, builder))
+    return { profile, tools: () => this.toolBundleOf(m.id, profile, m) }
   }
 
   /** The object behind a profile's bundle: the full set, a coordinator's scope, or the reader's view of its own project */
-  private toolBundleOf(sessionId: string, profile: ToolProfile, m: Pick<SessionInfo, 'scopeSessionIds'>): OrchestratorTools
-  private toolBundleOf(sessionId: string, profile: ToolProfile | null, m: Pick<SessionInfo, 'scopeSessionIds'>): OrchestratorTools | undefined
   private toolBundleOf(sessionId: string, profile: ToolProfile | null, m: Pick<SessionInfo, 'scopeSessionIds'>): OrchestratorTools | undefined {
     return toolBundleFor(profile, m.scopeSessionIds, {
       orchestrator: () => this.orchestratorToolsFor(sessionId),
