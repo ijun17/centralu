@@ -3414,6 +3414,15 @@ export class Store {
       .run(key, value)
   }
 
+  /**
+   * Reads a setting, computes its next value from it and writes that, as one transaction that takes the write lock
+   * first. Another process on the same file (the old and new host of a swap) cannot change the value between the
+   * read and the write, which a separate appSetting and setAppSetting cannot promise.
+   */
+  updateAppSetting(key: string, next: (current: string | null) => string): void {
+    this.db.transaction(() => this.setAppSetting(key, next(this.appSetting(key)))).immediate()
+  }
+
   /** Deletes a setting — reading it back afterward is "never written" (null). Where an old key is cleaned up once everything is migrated off it (M4 A-7) */
   deleteAppSetting(key: string): void {
     this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(key)

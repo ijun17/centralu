@@ -420,21 +420,22 @@ const allowedOrigins = parseAllowedOrigins(process.env.CC_HOST_ALLOWED_ORIGINS) 
  * a different app would let that app read someone else's browser storage.
  */
 const VIEW_PORTS_KEY = 'apps.viewPorts'
+function parseStoredPortBook(raw: string | null): PortBook | null {
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as PortBook
+  } catch {
+    return null
+  }
+}
 const views: ViewHost = new ViewHost({
   secret: httpSecret,
   allowedOrigins,
   source: runtimeViewSource(externalApps),
   ports: new OriginPorts({
-    load: () => {
-      const raw = store.appSetting(VIEW_PORTS_KEY)
-      if (!raw) return null
-      try {
-        return JSON.parse(raw) as PortBook
-      } catch {
-        return null
-      }
-    },
+    load: () => parseStoredPortBook(store.appSetting(VIEW_PORTS_KEY)),
     save: (book) => store.setAppSetting(VIEW_PORTS_KEY, JSON.stringify(book)),
+    update: (fn) => store.updateAppSetting(VIEW_PORTS_KEY, (raw) => JSON.stringify(fn(parseStoredPortBook(raw)))),
   }),
   // Under the keeper, the front door's port: the address outlives this host (swap-control.ts)
   hostPort: () => viewPort(launch.frontDoor, port),

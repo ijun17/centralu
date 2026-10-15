@@ -1170,7 +1170,9 @@ the host port's, not our UI's, so it cannot touch our window.
 port is fixed per (project, app) and never given to another app, because WebKit keeps storage per
 origin and a reused port would hand one app another's storage. The port book (`views/origin-ports.ts`,
 kept in app settings under `apps.viewPorts`) only grows; a port another program holds is retired
-for good and the app moves, losing what it stored there. Ports come from 20000–32767, clear of the
+for good and the app moves, losing what it stored there. Every change re-reads the book and
+writes it in one transaction, so apps starting at once, or the old and new host of a swap, each keep
+their own entry; a port another entry claimed while it was being bound is given up. Ports come from 20000–32767, clear of the
 macOS and Linux ephemeral ranges, and listen on 127.0.0.1 only. The port serves only that app's
 instances, behind a secret derived per app from the host secret (HMAC), so a view reading its own
 `location.href` learns nothing that opens another app's route; the proxy page there allows only

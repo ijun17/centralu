@@ -1095,6 +1095,23 @@ describe('v16 migration — the host settings survive a restart', () => {
     second.close()
     rmSync(dir, { recursive: true, force: true })
   })
+
+  it('updateAppSetting computes the next value from the stored one, and keeps the old value when that fails', () => {
+    const s = new Store()
+    s.updateAppSetting('k', (cur) => {
+      expect(cur).toBeNull()
+      return 'a'
+    })
+    s.updateAppSetting('k', (cur) => `${cur}b`)
+    expect(s.appSetting('k')).toBe('ab')
+    expect(() =>
+      s.updateAppSetting('k', () => {
+        throw new Error('nope')
+      }),
+    ).toThrow('nope')
+    expect(s.appSetting('k')).toBe('ab')
+    s.close()
+  })
 })
 
 /**

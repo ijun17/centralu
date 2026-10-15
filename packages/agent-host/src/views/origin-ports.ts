@@ -41,6 +41,13 @@ export type PortBook = {
 export interface PortBookStore {
   load(): PortBook | null
   save(book: PortBook): void
+  /**
+   * Reads the stored book, applies `fn` and writes the result back as one step, so a writer in
+   * another process (the old and new host of a swap share the store) cannot slip in between the
+   * read and the write. Without it, the same steps run as a plain load and save, which is
+   * already one step inside a single process because none of them waits.
+   */
+  update?(fn: (current: PortBook | null) => PortBook): void
 }
 
 export type OriginPortsOptions = {
@@ -99,14 +106,35 @@ export class OriginPorts {
   }
 
   /**
+   * Reads the current book, lets `change` edit it and stores the result with no wait in between.
+   * Every change to the table goes through here, so what another serve() recorded while this one
+   * was binding a port is kept instead of being overwritten with an older copy.
+   */
+  private commit(change: (book: PortBook) => void): void {
+    if (this.store.update) {
+      this.store.update((current) => {
+        const book = readBook(current)
+        change(book)
+        return book
+      })
+      return
+    }
+    const book = this.book()
+    change(book)
+    this.store.save(book)
+  }
+
+  /**
    * Starts a server with the handler attached at this key's port. For a key seen for the first
    * time, a new port is chosen and returned only **after it is recorded**. If it cannot be
    * recorded, the server is closed and this throws. Using an unrecorded port risks that port going
    * to a different app on the next run.
+   *
+   * Several keys can be served at once. The table is read again once a port is bound, and a port
+   * that another key or the retired list holds by then is given up and another one is tried.
    */
   async serve(key: string, handler: RequestListener): Promise<{ port: number; server: Server }> {
-    const book = this.book()
-    const own = book.assigned[key]
+    const own = this.book().assigned[key]
     if (own !== undefined) {
       try {
         return { port: own, server: await listenOn(own, handler) }
@@ -116,30 +144,42 @@ export class OriginPorts {
           `[agent-host] view origin port ${own} for ${key} is taken by another program — ` +
             `moving it to a new port; storage the view kept under the old origin is no longer visible`,
         )
-        book.retired.push(own)
-        delete book.assigned[key]
+        this.commit((book) => {
+          if (book.assigned[key] === own) delete book.assigned[key]
+          if (!book.retired.includes(own)) book.retired.push(own)
+        })
       }
     }
-    const taken = new Set<number>([...Object.values(book.assigned), ...book.retired])
+    const busy = new Set<number>()
     const [lo, hi] = this.range
     for (let i = 0; i < this.attempts; i++) {
       const port = this.pick(lo, hi)
-      if (port < lo || port > hi || taken.has(port)) continue
+      if (port < lo || port > hi || busy.has(port)) continue
+      const known = this.book()
+      if (Object.values(known.assigned).includes(port) || known.retired.includes(port)) continue
       let server: Server
       try {
         server = await listenOn(port, handler)
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw e
         // A port currently held belongs to no one — it is only skipped for this attempt
-        taken.add(port)
+        busy.add(port)
         continue
       }
-      book.assigned[key] = port
+      let claimed = false
       try {
-        this.store.save(book)
+        this.commit((book) => {
+          claimed = !Object.values(book.assigned).includes(port) && !book.retired.includes(port)
+          if (claimed) book.assigned[key] = port
+        })
       } catch (e) {
         await new Promise<void>((r) => server.close(() => r()))
         throw e
+      }
+      if (!claimed) {
+        // Someone recorded this port while it was being bound — it is theirs
+        await new Promise<void>((r) => server.close(() => r()))
+        continue
       }
       return { port, server }
     }
