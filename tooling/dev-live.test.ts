@@ -7,6 +7,8 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DEFAULT_PORT, dataDir, keeperSocketPath, readHostDoor, run, servePort, type Launch } from '../scripts/dev-live.mjs'
 
+// The keeper is a unix socket: there is none on Windows, and a fake one cannot be made there (listen EACCES).
+const unixIt = it.skipIf(process.platform === 'win32')
 const TOKEN = 'secret-token-0123456789abcdef'
 const cleanups: (() => void)[] = []
 afterEach(() => { for (const c of cleanups.splice(0).reverse()) c() })
@@ -77,20 +79,20 @@ describe('dev:live: where the keeper is', () => {
 })
 
 describe('dev:live: reading the keeper', () => {
-  it('asks for `status` and returns the front door\'s port and token', async () => {
+  unixIt('asks for `status` and returns the front door\'s port and token', async () => {
     const k = await fakeKeeper(() => ready(41234))
     await expect(readHostDoor(k.env, { platform: 'darwin' })).resolves.toEqual({ port: 41234, token: TOKEN })
     expect(k.requests).toEqual([{ op: 'status' }])
   })
 
-  it('says no app is running when there is no keeper socket', async () => {
+  unixIt('says no app is running when there is no keeper socket', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-live-'))
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
     await expect(readHostDoor({ CC_DATA_DIR: dir }, { platform: 'darwin' })).rejects.toThrow(/No Centralu app is running: no keeper socket/)
     expect(readdirSync(dir)).toEqual([]) // read only: nothing was written to the data folder
   })
 
-  it('says no app is running for a leftover socket nobody listens on', async () => {
+  unixIt('says no app is running for a leftover socket nobody listens on', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-live-'))
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
     // A keeper killed hard leaves its socket file behind: the connect is refused rather than missing.
@@ -100,7 +102,7 @@ describe('dev:live: reading the keeper', () => {
     await expect(readHostDoor({ CC_DATA_DIR: dir }, { platform: 'darwin' })).rejects.toThrow(/No Centralu app is running: nothing answers/)
   })
 
-  it.each([
+  unixIt.each([
     [{ state: 'starting' }, /no host yet \(starting\)/],
     [{ state: 'restarting', attempt: 2 }, /no host yet \(restarting\)/],
     [{ state: 'failed', message: 'node missing' }, /gave up starting it \(node missing\)/],
@@ -109,7 +111,7 @@ describe('dev:live: reading the keeper', () => {
     await expect(readHostDoor(k.env, { platform: 'darwin' })).rejects.toThrow(message)
   })
 
-  it('reports a refusal and a silent keeper in one line, without a token', async () => {
+  unixIt('reports a refusal and a silent keeper in one line, without a token', async () => {
     const refusing = await fakeKeeper(() => ({ ok: false, error: 'the keeper is handing over to a new build; try again in a moment' }))
     await expect(readHostDoor(refusing.env, { platform: 'darwin' })).rejects.toThrow(/refused the status request: the keeper is handing over/)
     const silent = await fakeKeeper(() => undefined)
@@ -122,7 +124,7 @@ describe('dev:live: reading the keeper', () => {
 })
 
 describe('dev:live: the command', () => {
-  it('starts Vite on 127.0.0.1 with the host in the child\'s env only, and never prints the token', async () => {
+  unixIt('starts Vite on 127.0.0.1 with the host in the child\'s env only, and never prints the token', async () => {
     const k = await fakeKeeper(() => ready(41234))
     const port = await freePort()
     const r = recorder()
@@ -141,7 +143,7 @@ describe('dev:live: the command', () => {
     expect(process.env.VITE_HOST_TOKEN).toBeUndefined()
   })
 
-  it('stops with one line when no app is running, and starts no Vite', async () => {
+  unixIt('stops with one line when no app is running, and starts no Vite', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-live-'))
     cleanups.push(() => rmSync(dir, { recursive: true, force: true }))
     const r = recorder()
@@ -151,7 +153,7 @@ describe('dev:live: the command', () => {
     expect(r.errs[0]).toMatch(/^dev:live: No Centralu app is running/)
   })
 
-  it('stops with one line when the keeper has no host yet, and starts no Vite', async () => {
+  unixIt('stops with one line when the keeper has no host yet, and starts no Vite', async () => {
     const k = await fakeKeeper(() => view({ state: 'starting' }))
     const r = recorder()
     expect(await run(k.env, { ...r.deps, platform: 'darwin' })).toBe(1)
@@ -159,7 +161,7 @@ describe('dev:live: the command', () => {
     expect(r.errs).toEqual([expect.stringMatching(/^dev:live: The keeper has no host yet/)])
   })
 
-  it('stops with one line when the port is taken, and starts no Vite', async () => {
+  unixIt('stops with one line when the port is taken, and starts no Vite', async () => {
     const k = await fakeKeeper(() => ready())
     const held = await heldPort()
     const r = recorder()
