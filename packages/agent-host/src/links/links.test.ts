@@ -565,6 +565,21 @@ describe('machines.install from a hub running a local build (#689)', () => {
   })
 })
 
+describe('machines.update never installs an older release than the remote runs (#689)', () => {
+  it('refuses with the two versions named, and touches nothing there', async () => {
+    const remote = await remoteHost(0, new Store(), { version: '9.0.0' })
+    const ran: string[] = []
+    const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { version: '9.0.0' })), { exec: async (cmd: string) => (ran.push(cmd), { code: 0, stderr: '', stdout: '' }) })
+    const installer = { runtime: () => ({ node: { version: '24.21.0', archives: {} } }), script: () => '// the installer', registry: {} }
+    const hub = await hubHost(() => lineFor(remote.port, { version: '9.0.0' }), new Store(), true, { tunnelFor: () => tunnel, installer })
+    await until(() => status(hub) === 'connected' && hub.links.list()[0]!.versions?.remote.version === '9.0.0')
+    const u = await ui(hub.port)
+    await expect(u.call('machines.update', { machineId: 'm1' })).rejects.toThrow(new RegExp(`Remote box runs Centralu 9\\.0\\.0, newer than ${APP_VERSION.replaceAll('.', '\\.')}.*would downgrade`))
+    expect(ran).toEqual([])
+    expect(hub.links.list()[0]!.operation).toBeNull()
+  })
+})
+
 describe('machines.update through the link (#82, plan §10.5)', () => {
   const NODE = '24.21.0'
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))

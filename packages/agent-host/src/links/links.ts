@@ -1,4 +1,4 @@
-import { HostActivity } from '@cc/protocol'
+import { HostActivity, isNewerVersion } from '@cc/protocol'
 import type {
   MachineAutostartResult,
   MachineInfo,
@@ -273,6 +273,11 @@ export class LinkedMachine implements RoutedMachine {
   /** `machines.update` (update.ts, plan §10.5): install beside, stop, switch, start, check, or put back */
   async update(): Promise<MachineInstallResult> {
     const pick = await this.versionToInstall()
+    // Never down: a local build whose base is unpublished may be handed an older release than the remote runs
+    const there = this.versions?.remote.version
+    if (there && isNewerVersion(there, pick.version)) {
+      throw linkError(`${this.name} runs Centralu ${there}, newer than ${pick.version}, the version this computer would install; updating would downgrade it, so nothing was changed`)
+    }
     return this.operate('update', pick.version, async (c, installer) => {
       if (pick.note) this.deps.log?.(`[links] ${this.name}: ${pick.note}`)
       const r = await updateRemote(c, {

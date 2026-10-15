@@ -38,7 +38,14 @@ export class NotPublished extends Error {
 }
 
 async function getJson(url: string, f: typeof globalThis.fetch, id?: string): Promise<unknown> {
-  const res = await f(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(30_000) })
+  let res: Response
+  try {
+    res = await f(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(30_000) })
+  } catch (err) {
+    // `fetch failed` and `The operation was aborted` say nothing to the person: name what could not be reached
+    const why = (err as { cause?: { message?: string } })?.cause?.message ?? (err as Error)?.message ?? 'no answer'
+    throw new Error(`Could not reach the npm registry (${new URL(url).origin}); check this computer’s network connection: ${why}`)
+  }
   if (res.status === 404 && id) throw new NotPublished(id)
   if (!res.ok) throw new Error(`The npm registry answered ${res.status} for ${url}`)
   return res.json()
@@ -93,30 +100,37 @@ export type InstallVersion = { version: string; note: string | null }
  * The version a hub puts on a remote (#689). A published release is installed as it is. A local
  * build (`<base>.local.N`) was never published, so the remote gets what it was cut from:
  *
- *   1. `<base>`, when the registry has it;
- *   2. else the newest published release that is not newer than `<base>` and has the hub's protocol
- *      (`protocolVersion` in the package's `package.json`; releases before the field existed spoke
- *      protocol 1, the only one so far).
+ *   1. `<base>`, when the registry has it *and* it speaks the hub's protocol (`protocolVersion` in
+ *      the package's `package.json`; releases before the field existed spoke protocol 1, the only
+ *      one so far). A local build that raised the protocol is not the same protocol as its base,
+ *      and a remote installed at the base would be refused by the link;
+ *   2. else the newest published release that is not newer than `<base>` and has the hub's protocol.
  *
- * Nothing that speaks another protocol is offered: the link would refuse it. With no such release
- * this throws, saying why.
+ * Nothing that speaks another protocol is offered. With no such release this throws, saying why.
  */
 export async function installVersion(hubVersion: string, protocolVersion: number, opts: RegistryOptions = {}): Promise<InstallVersion> {
   if (!isLocalBuildVersion(hubVersion)) return { version: hubVersion, note: null }
   const base = releaseOf(hubVersion)
   const registry = (opts.registry ?? NPM_REGISTRY).replace(/\/+$/, '')
   const f = opts.fetch ?? globalThis.fetch
+  const protocolOf = (m: { protocolVersion?: unknown } | undefined) => (typeof m?.protocolVersion === 'number' ? m.protocolVersion : 1)
+  let baseProtocol: number | null = null
   try {
-    await getJson(`${registry}/centralu/${base}`, f, `centralu@${base}`)
-    return { version: base, note: `This computer runs the local build ${hubVersion}, which is not published; installing the release it was cut from, ${base}` }
+    baseProtocol = protocolOf((await getJson(`${registry}/centralu/${base}`, f, `centralu@${base}`)) as { protocolVersion?: unknown })
+    if (baseProtocol === protocolVersion) {
+      return { version: base, note: `This computer runs the local build ${hubVersion}, which is not published; installing the release it was cut from, ${base}` }
+    }
   } catch (err) {
     if (!(err instanceof NotPublished)) throw err
   }
   const doc = (await getJson(`${registry}/centralu`, f)) as { versions?: Record<string, { protocolVersion?: unknown }> }
   const found = Object.entries(doc?.versions ?? {})
-    .filter(([v, m]) => !isLocalBuildVersion(v) && v !== base && !isNewerVersion(v, base) && (typeof m?.protocolVersion === 'number' ? m.protocolVersion : 1) === protocolVersion)
+    .filter(([v, m]) => !isLocalBuildVersion(v) && v !== base && !isNewerVersion(v, base) && protocolOf(m) === protocolVersion)
     .map(([v]) => v)
     .sort((a, b) => (isNewerVersion(a, b) ? -1 : isNewerVersion(b, a) ? 1 : 0))[0]
-  if (!found) throw new Error(`This computer runs the local build ${hubVersion}; neither ${base} nor an earlier release with protocol ${protocolVersion} is published, so there is nothing to install`)
-  return { version: found, note: `This computer runs the local build ${hubVersion}, and ${base} is not published; installing ${found}, the newest release before it with protocol ${protocolVersion}` }
+  const why = baseProtocol === null ? `${base} is not published` : `${base} speaks protocol ${baseProtocol}, not this computer’s ${protocolVersion}`
+  if (!found) {
+    throw new Error(`This computer runs the local build ${hubVersion}, and ${why}; no earlier release with protocol ${protocolVersion} is published either, so there is nothing to install`)
+  }
+  return { version: found, note: `This computer runs the local build ${hubVersion}, and ${why}; installing ${found}, the newest release before it with protocol ${protocolVersion}` }
 }

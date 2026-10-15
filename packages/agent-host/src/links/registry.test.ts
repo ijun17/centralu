@@ -56,7 +56,7 @@ describe('installVersion: what a hub puts on a remote (#689)', () => {
       const path = new URL(String(url)).pathname
       asked.push(path)
       const v = /^\/centralu\/(.+)$/.exec(path)?.[1]
-      if (v) return v in versions ? Response.json({ name: 'centralu', version: v }) : new Response('{}', { status: 404 })
+      if (v) return v in versions ? Response.json({ name: 'centralu', version: v, ...(versions[v] === undefined ? {} : { protocolVersion: versions[v] }) }) : new Response('{}', { status: 404 })
       if (path === '/centralu') return Response.json({ versions: Object.fromEntries(Object.entries(versions).map(([k, p]) => [k, p === undefined ? {} : { protocolVersion: p }])) })
       return new Response('{}', { status: 404 })
     }
@@ -86,10 +86,29 @@ describe('installVersion: what a hub puts on a remote (#689)', () => {
 
   it('skips releases that speak another protocol, and refuses when none is left', async () => {
     expect((await installVersion('0.2.0-beta.3.local.1', 2, registry({ '0.2.0-beta.2': 2, '0.2.0-beta.1': 1 }))).version).toBe('0.2.0-beta.2')
-    await expect(installVersion('0.2.0-beta.3.local.1', 2, registry({ '0.2.0-beta.2': 1, '0.2.0-beta.1': undefined }))).rejects.toThrow(/neither 0\.2\.0-beta\.3 nor an earlier release with protocol 2 is published/)
+    await expect(installVersion('0.2.0-beta.3.local.1', 2, registry({ '0.2.0-beta.2': 1, '0.2.0-beta.1': undefined }))).rejects.toThrow(/0\.2\.0-beta\.3 is not published; no earlier release with protocol 2 is published either/)
   })
 
-  it('a registry failure other than "not published" is passed on', async () => {
+  it('a published base that speaks another protocol is not installed: the newest earlier release with the hub’s protocol is, or the refusal says why (#689)', async () => {
+    // The local build raised the protocol; the base release (2.x) still speaks the old one
+    const got = await installVersion('0.3.0-beta.7.local.2', 2, registry({ '0.3.0-beta.7': 1, '0.3.0-beta.6': 2, '0.3.0-beta.5': 1 }))
+    expect(got.version).toBe('0.3.0-beta.6')
+    expect(got.note).toMatch(/0\.3\.0-beta\.7 speaks protocol 1, not this computer’s 2; installing 0\.3\.0-beta\.6/)
+    await expect(installVersion('0.3.0-beta.7.local.2', 2, registry({ '0.3.0-beta.7': 1, '0.3.0-beta.6': 1 }))).rejects.toThrow(/0\.3\.0-beta\.7 speaks protocol 1, not this computer’s 2; no earlier release with protocol 2/)
+    // A base that declares the hub’s protocol is taken as it is
+    expect((await installVersion('0.3.0-beta.7.local.2', 2, registry({ '0.3.0-beta.7': 2, '0.3.0-beta.6': 2 }))).version).toBe('0.3.0-beta.7')
+  })
+
+  it('a registry that cannot be reached says so, with the address and what to check', async () => {
+    const offline: typeof fetch = async () => {
+      throw Object.assign(new TypeError('fetch failed'), { cause: new Error('getaddrinfo ENOTFOUND registry.test') })
+    }
+    const err = await installVersion('0.3.0-beta.7.local.2', 1, { registry: 'https://registry.test', fetch: offline }).catch((e: Error) => e)
+    expect((err as Error).message).toBe('Could not reach the npm registry (https://registry.test); check this computer’s network connection: getaddrinfo ENOTFOUND registry.test')
+    await expect(verifiedPackage('centralu', '9.9.9', { registry: 'https://registry.test', fetch: offline })).rejects.toThrow(/Could not reach the npm registry/)
+  })
+
+  it('a registry that answers an error status is passed on', async () => {
     const down: typeof fetch = async () => new Response('', { status: 503 })
     await expect(installVersion('0.3.0-beta.7.local.2', 1, { registry: 'https://registry.test', fetch: down })).rejects.toThrow(/answered 503/)
   })
