@@ -91,11 +91,10 @@ export function sidebarGroupTests(): void {
     test('sessions stand one level under the project, children and app sessions one level further', async ({ page }) => {
       const { plain, appKey } = await seed(page)
 
-      // Level 1 is 16px in from the project row's section; every further level is 16px more (plus the guide line's 1px)
+      // Every level's band starts 16px after its parent's (the column grid itself is measured in the next test)
       const sectionX = (await page.getByTestId('project-alpha').boundingBox())!.x
       const level1 = (await page.getByTestId(`session-row-${plain}`).locator('xpath=ancestor::li[1]').boundingBox())!.x - sectionX
       const level2 = (await page.getByTestId(`session-row-${KIDS[0]}`).locator('xpath=ancestor::li[1]').boundingBox())!.x - sectionX
-      expect(level1).toBeCloseTo(16, 0)
       expect(level2 - level1).toBeCloseTo(16, 0)
       await expect(page.locator(`li[data-level="1"]`).filter({ has: page.getByTestId(`session-row-${plain}`) })).toHaveCount(1)
       await expect(page.locator(`li[data-level="2"]`).filter({ has: page.getByTestId(`session-row-${KIDS[0]}`) })).toHaveCount(1)
@@ -117,6 +116,97 @@ export function sidebarGroupTests(): void {
       })
       expect(spill).toBeLessThanOrEqual(0)
     })
+
+    /*
+     * #685: after #667 a session's chip stood left of its project's name, and the app level did not line up with the
+     * session level. Each level's content (tool mark or app icon, then the name) starts one 16px step right of its
+     * parent's content, and a fold chevron stands in the gutter just left of the content it belongs to.
+     */
+    for (const [label, width] of [['narrow', 0], ['wide', 420]] as const) {
+      test(`each level's content starts one step right of its parent's content, ${label} sidebar`, async ({ page }) => {
+        const { plain, appKey } = await seed(page)
+        // 0 asks for the narrowest the sidebar goes (it clamps), and the names get long enough to truncate there
+        await page.evaluate((w) => (window as any).__store.getState().setSidebarWidth(w), width)
+        await page.evaluate(
+          ([ids]) => {
+            const store = (window as any).__store
+            const long = 'a session name far too long to fit in a narrow sidebar on one line'
+            store.setState((s: any) => ({
+              sessions: Object.fromEntries(
+                Object.entries(s.sessions).map(([id, v]: [string, any]) => [id, ids.includes(id) ? { ...v, name: long } : v]),
+              ),
+            }))
+          },
+          [[PARENT, KIDS[0], APP_SESSION, APP_KID]] as const,
+        )
+        await expect(page.getByTestId(`session-row-${PARENT}`)).toContainText('a session name far too long')
+
+        const left = async (locator: ReturnType<Page['locator']>) => (await locator.first().boundingBox())!.x
+        const name = await left(page.getByTestId('project-header-alpha'))
+        const plainMark = await markX(page, `session-row-${plain}`)
+        const parentMark = await markX(page, `session-row-${PARENT}`)
+        const kidMark = await markX(page, `session-row-${KIDS[0]}`)
+        const appIcon = await left(page.getByTestId(`app-row-${appKey}`).locator('> span').first())
+        const appSessionMark = await markX(page, `app-session-row-${APP_SESSION}`)
+        const appKidMark = await markX(page, `app-session-row-${APP_KID}`)
+        const userAppIcon = await left(page.getByTestId('app-row-_user/tool').locator('> span').first())
+        const userAppTitle = await left(page.getByText('Your apps', { exact: true }))
+
+        // project name < session chip < child chip, one 16px step each
+        expect(plainMark - name).toBeCloseTo(16, 0)
+        expect(kidMark - parentMark).toBeCloseTo(16, 0)
+        // a sibling with a chevron and one without start at the same column
+        expect(parentMark).toBeCloseTo(plainMark, 0)
+        // the app level lines up with the session level: icon = a session's chip, its session = a child's chip
+        expect(appIcon).toBeCloseTo(plainMark, 0)
+        expect(appSessionMark).toBeCloseTo(kidMark, 0)
+        expect(appKidMark - appSessionMark).toBeCloseTo(16, 0)
+        // a user-folder app stands one step in from its group's title the way a session does from its project's name
+        expect(userAppIcon - userAppTitle).toBeCloseTo(16, 0)
+
+        // Chevrons hang in the gutter: the project's ends where its name starts, a row's where its own content starts
+        const gutter = async (testId: string, contentX: number) => {
+          const box = (await page.getByTestId(testId).boundingBox())!
+          return { right: box.x + box.width, contentX }
+        }
+        const project = (await page.getByTestId('project-fold-alpha').boundingBox())!
+        expect(project.x + project.width / 2).toBeLessThan(name)
+        expect(project.x + project.width / 2).toBeGreaterThan(name - 16)
+        for (const [id, mark] of [[`children-fold-${PARENT}`, parentMark], [`app-fold-${appKey}`, appIcon], [`children-fold-${APP_SESSION}`, appSessionMark]] as const) {
+          const { right, contentX } = await gutter(id, mark)
+          expect(right).toBeLessThanOrEqual(contentX)
+          expect(contentX - right).toBeLessThan(16)
+        }
+
+        // Long names truncate instead of widening the sidebar or wrapping onto a second line
+        const fit = await page.evaluate((id) => {
+          const bar = document.querySelector('[data-testid="sidebar"]')!
+          const row = document.querySelector(`[data-testid="app-session-row-${id}"]`)!
+          return { spill: bar.scrollWidth - bar.clientWidth, height: row.getBoundingClientRect().height }
+        }, APP_KID)
+        expect(fit.spill).toBeLessThanOrEqual(0)
+        const plainHeight = (await page.getByTestId(`session-row-${plain}`).boundingBox())!.height
+        expect(fit.height).toBeCloseTo(plainHeight, 0)
+
+        // A drop line sits on its own row's band, not out in the gutter or across the level above
+        for (const id of [plain, KIDS[0]]) {
+          const line = await page.getByTestId(`session-row-${id}`).locator('xpath=ancestor::li[1]').evaluate((li) => {
+            const dt = new DataTransfer()
+            dt.setData('application/x-cc-session', 'someone-else')
+            const r = li.getBoundingClientRect()
+            li.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 5, clientY: r.top + 2 }))
+            return new Promise<{ left: number; width: number; band: number; bandWidth: number }>((resolve) =>
+              requestAnimationFrame(() => {
+                const cs = getComputedStyle(li, '::after')
+                resolve({ left: li.getBoundingClientRect().left, width: parseFloat(cs.width), band: r.left, bandWidth: r.width })
+              }),
+            )
+          })
+          expect(line.width).toBeCloseTo(line.bandWidth, 0)
+          expect(line.left).toBeCloseTo(line.band, 0)
+        }
+      })
+    }
 
     test('folding a session’s children hides them behind a count; unfolding drops it', async ({ page }) => {
       await seed(page)

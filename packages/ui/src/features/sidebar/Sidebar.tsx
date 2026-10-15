@@ -76,20 +76,33 @@ function useDropLine(mime: string, onDrop: (draggedId: string, before: boolean) 
   }
 }
 
-/** One level in is 16px (ml-4): the width of the gutter a chevron sits in, and a literal class so Tailwind finds it */
-const INDENT = { 1: 'ml-4', 2: 'ml-8', 3: 'ml-12' } as const
+/*
+ * One column grid for the whole tree (#685). A row's content (the tool mark or app icon, then the name) starts at
+ * x = NAME_X + 16 * level, where NAME_X is the project name's own column (24px). So every level starts one 16px step
+ * right of its parent's **content**, not of its parent's chevron.
+ *
+ * A row is its band: a 2px bar, then the 16px gutter its chevron stands in (GroupToggle), then the content. The band
+ * therefore starts 18px before the content, which is the margin below: 24 + 16 * level - 18. The gutter is part of the
+ * row at every level, so a sibling with no chevron keeps the same column, and the project's own chevron stands in the
+ * 16px left of its name the same way. The values are literal classes so Tailwind finds them.
+ */
+const INDENT = { 1: 'ml-[22px]', 2: 'ml-[38px]', 3: 'ml-[54px]' } as const
+/** The guide line a nested row hangs from: 1px just outside its band, so it adds nothing to the row's width */
+const GUIDE = 'before:absolute before:inset-y-0 before:-left-px before:w-px before:bg-line/60 before:content-[""]'
+/** What a row's button stands in front of its content: the 2px bar (border-l-2) and, after it, this 16px gutter */
+const ROW_PAD = 'pl-4'
 
 /**
  * The chevron of a group that folds (#666): the children a session started, the sessions an app owns.
  *
- * It stands in the **gutter to the left of its row**, the 16px the row's level leaves free, so the row's own content
- * (tool mark, name) starts in the same column whether or not the row has a group. It is faint ink: a state, not a
+ * It stands in the **gutter to the left of its row's content**, the 16px every row keeps free after its bar, so the
+ * content (tool mark, name) starts in the same column whether or not the row has a group. It is faint ink: a state, not a
  * call to act, so it spends no brightness (the project row's arrow is the same). The project row keeps its own
  * arrow; this one is for what stands under it.
  */
 function GroupToggle({ folded, label, testId, onToggle }: { folded: boolean; label: string; testId: string; onToggle: () => void }) {
   return (
-    <span className="absolute inset-y-0 -left-4 flex w-4 items-center justify-center">
+    <span className="absolute inset-y-0 left-0.5 flex w-4 items-center justify-center">
       <Tooltip content={label} testId={`${testId}-tip`}>
         <button
           type="button"
@@ -209,7 +222,7 @@ function SessionRow({
     <li
       data-nested={nested === true ? true : typeof nested === 'number' && nested > 0 ? nested : undefined}
       data-level={level}
-      className={`group/row relative ${INDENT[level]} ${level > 1 ? 'border-l border-line/60' : ''} ${dropLine(drop.edge)}`}
+      className={`group/row relative ${INDENT[level]} ${level > 1 ? GUIDE : ''} ${dropLine(drop.edge)}`}
       draggable={draggable}
       onDragStart={(e) => {
         e.dataTransfer.setData(SESSION_MIME, id)
@@ -698,11 +711,11 @@ function ProjectBlock({ projectId }: { projectId: string }) {
         **The band must not move anything.** A session row is 31.5px tall (py-1.5 around a 13px line); this line
         is only its text. The padding that makes the band a row's height is cancelled by an equal negative margin,
         so every row below stands exactly where it did, and both are always on, so selecting it changes nothing
-        but colour. The bar is always there too, transparent until selected, with pl-2 + 2px keeping the arrow at
-        the old pl-2.5.
+        but colour. The bar is always there too, transparent until selected. The name starts at 24px, the column every
+        level below is measured from (INDENT), with the chevron's 16px gutter just before it (#685).
       */}
       <header
-        className={`group -my-1.5 flex items-baseline gap-2 border-l-2 py-1.5 pl-2 pr-3 transition-colors ${
+        className={`group -my-1.5 flex items-baseline gap-2 border-l-2 py-1.5 pl-1.5 pr-3 transition-colors ${
           selected ? 'border-l-ink-muted bg-surface-hover/40' : 'border-l-transparent'
         }`}
         draggable
@@ -720,12 +733,12 @@ function ProjectBlock({ projectId }: { projectId: string }) {
 
           Unlike that, it is **always visible.** Being folded is a state, not an action, and if it
           only shows on hover there is nowhere to ask why a row is missing. The arrow stands in the
-          same vertical column as a session row's tool mark (the header's 2px bar + pl-2 + button), so the name also
-          starts at the same spot as a session name — the tree reads as a tree. Since the name line
-          aligns on the text baseline, the button with no text is centered separately inside a
-          wrapping box.
+          same gutter a session row's chevron stands in, one level out: a 16px box that ends where the name begins (the
+          button is 20px and centred in it, and the box cancels the row's gap), so a session's tool mark starts one
+          step right of the name (#685). Since the name line aligns on the text baseline, the button with no text is
+          centered separately inside a wrapping box.
         */}
-        <span className="-my-1 flex shrink-0 self-center">
+        <span className="-my-1 -mr-2 flex w-4 shrink-0 justify-center self-center">
           <IconButton
             label={folded ? `Expand ${project.name}` : `Collapse ${project.name}`}
             onClick={() => toggleFold(projectId)}
@@ -952,7 +965,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                         long name would run in underneath the buttons — text hidden under a button
                         is worse than text truncated.
                       */
-                      className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-14 text-left text-md transition-colors ${
+                      className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} pr-14 text-left text-md transition-colors ${
                         focused
                           ? 'border-l-ink-muted bg-surface-hover/40 text-ink'
                           : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
@@ -1240,7 +1253,7 @@ function ProjectAppSessions({ sessions, projectId, folded }: { sessions: Session
               data-testid={`app-session-row-${s.id}`}
               aria-current={focused ? 'page' : undefined}
               data-unread={(unread && !focused) || undefined}
-              className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-14 text-left text-md transition-colors ${
+              className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} pr-14 text-left text-md transition-colors ${
                 focused
                   ? 'border-l-ink-muted bg-surface-hover/40 text-ink'
                   : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
@@ -1347,7 +1360,7 @@ function UserAppSessions({ sessions: own }: { sessions: SessionSummary[] }) {
       <li
         key={s.id}
         data-level={2}
-        className="relative ml-8 border-l border-line/60"
+        className={`relative ${INDENT[2]} ${GUIDE}`}
         // Onto the grid like any session row; it carries no project, so no project screen takes it
         draggable
         onDragStart={(e) => {
@@ -1361,7 +1374,7 @@ function UserAppSessions({ sessions: own }: { sessions: SessionSummary[] }) {
           data-testid={`app-session-row-${s.id}`}
           aria-current={focused ? 'page' : undefined}
           data-unread={(unread && !focused) || undefined}
-          className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-3 text-left text-md transition-colors ${
+          className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} pr-3 text-left text-md transition-colors ${
             focused ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
           }`}
         >
@@ -1418,7 +1431,7 @@ function AppRow({
   const projectId = app.projectId
   return (
     <li
-      className="relative ml-4"
+      className={`relative ${INDENT[1]}`}
       data-level={1}
       data-folded={folded || undefined}
       /*
@@ -1452,7 +1465,7 @@ function AppRow({
         data-status={app.info.status}
         aria-current={active ? 'page' : undefined}
         title={app.status.reason ?? app.info.description ?? undefined}
-        className={`flex w-full items-center gap-2 border-l-2 py-1.5 pl-2.5 pr-3 text-left text-md transition-colors ${
+        className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} pr-3 text-left text-md transition-colors ${
           active ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
         }`}
       >
@@ -1496,7 +1509,8 @@ function UserApps() {
   const openImport = useStore((s) => s.openImport)
   return (
     <section className="border-b border-line/70 py-2.5" data-testid="user-apps">
-      <header className="flex items-center gap-2 px-3">
+      {/* Its title stands in the column a project's name does (24px), so its apps are one step in from it like a project's rows */}
+      <header className="flex items-center gap-2 pl-6 pr-3">
         <span className={`text-md font-medium tracking-tight ${apps.length ? 'text-ink' : 'text-ink-faint'}`}>Your apps</span>
         <span className="-my-1 ml-auto shrink-0">
           <IconButton label="Import an app from a folder, a .zip, or a link" onClick={() => openImport()} testId="user-apps-import" align="right">
@@ -1844,7 +1858,7 @@ function SessionNameInput({
   return (
     <input
       autoFocus
-      className="w-full border-l-2 border-l-ink-muted bg-surface-hover/40 py-1.5 pl-2.5 pr-3 text-md text-ink outline-none"
+      className={`w-full border-l-2 border-l-ink-muted bg-surface-hover/40 py-1.5 ${ROW_PAD} pr-3 text-md text-ink outline-none`}
       value={text}
       onChange={(e) => setText(e.target.value)}
       // An auto-generated name is usually replaced wholesale, so the whole text is selected (press → once to append instead)
