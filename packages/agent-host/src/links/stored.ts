@@ -2,7 +2,7 @@ import type { Store } from '../dev-services/store.js'
 import type { HeadersMirror, MachineRecord, MachineRegistry } from './links.js'
 
 /**
- * The registry and the headers mirror in the hub's own store (v46, store.ts). One writer per store
+ * The registry and the headers mirror in the hub's own store (v46, store/linked-machines.ts). One writer per store
  * (docs/plans/remote-hub.md §1): the hub writes what it heard about other machines into its own
  * store and nothing else; each machine stays authoritative for its own data.
  */

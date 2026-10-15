@@ -5214,7 +5214,7 @@ export class SessionManager {
    * the rule itself.
    *
    * Rows written before v14 have no stored path — the migration deliberately leaves the
-   * orchestrator NULL rather than touching the user's home (see store.ts step 14). Derive
+   * orchestrator NULL rather than touching the user's home (see step 14 in store/migrations/v13-v27.ts). Derive
    * theirs once, here, and write it down; from then on the next rename cannot move them either.
    */
   private cwdFor(m: SessionInfo): string {

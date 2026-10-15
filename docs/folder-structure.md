@@ -75,7 +75,11 @@ centralu/
 │        ├─ transport/          # WS server, session handshake
 │        ├─ adapters/           # claude/, codex/ + the common adapter contract
 │        ├─ dev-services/       # dev-only: git, fs, store (sqlite), watcher
-│        │  └─ store/           # what `Store` (store.ts) is made of; migrations/ holds the step list in files by version range
+│        │  └─ store/           # what `Store` (store.ts) is made of; it opens the file, runs migrations and passes each call on
+│        │     ├─ migrations/   # the step list, in files by version range; index.ts holds the rule a new step follows
+│        │     ├─ projects.ts  sessions.ts  grid.ts  messages.ts  handoff-markers.ts  trash.ts
+│        │     ├─ settings.ts  permissions.ts  app-runs.ts  child-ownership.ts  linked-machines.ts
+│        │     └─ search-index.ts  vacuum.ts   # shared by the steps and the tables above
 │        ├─ keeper/             # the keeper's child service: agents and ptys spawned there, re-attach (#280)
 │        ├─ usage/              # incremental parser for ~/.claude, ~/.codex logs
 │        └─ mcp/                # MCP server for the orchestrator (M3)

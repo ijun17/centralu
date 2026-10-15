@@ -24,15 +24,14 @@ export interface MigrationStep {
   run: () => void
 }
 
-/** What the steps need from the store that runs them: its connection and the two things a step leaves for after it */
+/** What the steps need from the store that runs them: its connection and the vacuum a step leaves for after it */
 export interface MigrationHost {
   /** The connection, read when a step runs: a probe store gets its connection after its list is made */
   getDb(): Database.Database
   vacuumAfterStep(report?: (done: VacuumDone) => void): void
-  checkpoint(): boolean
 }
 
-/** What every file of steps stands on: `this.db`, and the store's own `vacuumAfterStep` and `checkpoint` */
+/** What every file of steps stands on: `this.db` and the store's own `vacuumAfterStep` */
 export abstract class MigrationRange {
   constructor(private readonly host: MigrationHost) {}
 
@@ -42,10 +41,6 @@ export abstract class MigrationRange {
 
   protected vacuumAfterStep(report?: (done: VacuumDone) => void): void {
     this.host.vacuumAfterStep(report)
-  }
-
-  protected checkpoint(): boolean {
-    return this.host.checkpoint()
   }
 
   abstract steps(): MigrationStep[]

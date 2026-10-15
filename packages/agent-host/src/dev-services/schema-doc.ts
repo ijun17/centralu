@@ -119,6 +119,7 @@ function provenance(): { tables: Map<string, string>; columns: Map<string, strin
   const db = new Database(':memory:')
   try {
     db.pragma('foreign_keys = ON')
+    // A probe has no concept modules (store/*.ts): it may only call the migration methods
     const probe = Object.create(Store.prototype) as StoreInternals
     probe.db = db
     probe.dbPath = ':memory:'

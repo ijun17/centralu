@@ -77,7 +77,11 @@ centralu/
 │        ├─ transport/          # WS server, session handshake
 │        ├─ adapters/           # claude/, codex/ + the common adapter contract
 │        ├─ dev-services/       # dev-only: git, fs, store (sqlite), watcher
-│        │  └─ store/           # Store(store.ts)를 이루는 부분. migrations/는 단계 목록을 버전 범위별 파일로 담는다
+│        │  └─ store/           # Store(store.ts)를 이루는 부분. Store는 파일을 열고 마이그레이션을 돌리며 호출을 넘겨 준다
+│        │     ├─ migrations/   # 단계 목록을 버전 범위별 파일로 담는다. 새 단계가 따르는 규칙은 index.ts에 있다
+│        │     ├─ projects.ts  sessions.ts  grid.ts  messages.ts  handoff-markers.ts  trash.ts
+│        │     ├─ settings.ts  permissions.ts  app-runs.ts  child-ownership.ts  linked-machines.ts
+│        │     └─ search-index.ts  vacuum.ts   # 단계와 위의 테이블 모듈이 함께 쓴다
 │        ├─ keeper/             # 키퍼의 자식 서비스: 거기서 띄우는 에이전트와 pty, 다시 붙기 (#280)
 │        ├─ usage/              # incremental parser for ~/.claude, ~/.codex logs
 │        └─ mcp/                # MCP server for the orchestrator (M3)
