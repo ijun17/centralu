@@ -841,11 +841,16 @@ new session now takes over the original's **live** work as it is created, before
     happens before the first turn reads the note. If that deletion then fails, both sessions stand and the children
     are with the session the person works in.
   - **An original removed later** (a handoff that kept it, then a delete; or a window that did not say it would
-    remove it) gives what it still has to the session that inherited its handoff, in `trashSessionOnce` before the
-    teardown lets go of it (scope `removed`): settled children, and anything it started after the handoff. The heir is
-    the newest live session whose handoff marker names it (`Store.handoffHeirs`, trashed successors pass on to their
-    own successor). Its note was read long ago, so it is told in its conversation (a `notice`); the original, about to
-    go, is told nothing. The move is its own transaction ahead of the trash's: a crash between them leaves the children
+    remove it) gives its children to the session that inherited its handoff, in `trashSessionOnce` before the
+    teardown lets go of them (scope `removed`): settled ones, and working ones it started after the handoff, with the
+    reports, turns and delegations that are theirs, since an orphan is worse. What it asked for and the person never
+    answered stays behind and goes as before: its standing start_agent cards are withdrawn and the requests it queued
+    are dropped, so no card appears in another session because this one was deleted. A call of its own still waiting
+    on a moved child ends with a fixed answer (`handedOverReply`), since the trash drops the `handedOver` entries
+    before the woken call reads them. The heir is the newest live session whose handoff marker names it
+    (`Store.handoffHeirs`, filtered in SQL); successors that were removed, or are being removed at the same time
+    (`trashing`), pass on to their own successors, the nearest generation first. Its note was read long ago, so it is
+    told in its conversation (a `notice`); the original, about to go, is told nothing. The move is its own transaction ahead of the trash's: a crash between them leaves the children
     on the heir and the original standing. A removed session that never handed over leaves its children on their own,
     as before.
 - **The note**: the note file the opening message points at, and the marker that keeps its original, open with a

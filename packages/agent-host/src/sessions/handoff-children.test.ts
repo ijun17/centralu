@@ -654,6 +654,97 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     expect(owner(child)).toBe(second)
   })
 
+  it('gives a removed original\'s working child to the new session, its report included', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const heir = await handOff(h, project, parent, false)
+    // Started after a handoff that kept the original
+    const child = await startChild(h, parent, 'long work')
+    await h.mgr.trashSession(parent)
+
+    expect(owner(child)).toBe(heir)
+    expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: heir }])
+    h.claude.handles.get(child)!.answer('done here')
+    await until(() => reports(h.claude.handles.get(heir), child).length === 1)
+    expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, answer: 'done here' })
+  })
+
+  it('withdraws a removed original\'s standing start card instead of raising it in the new session', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h, 'safe')
+    const heir = await handOff(h, project, parent, false)
+    const call = h.mgr.startAgent(parent, { task: 'needs a yes', wait: false })
+    await until(() => h.mgr.listSessions().find((s) => s.id === parent)?.pendingApproval?.detail.kind === 'agent_start')
+    await h.mgr.trashSession(parent)
+
+    expect(await call).toMatchObject({ ok: false })
+    expect(store.listAgentStartRequests()).toEqual([])
+    expect(h.mgr.listSessions().find((s) => s.id === heir)?.pendingApproval ?? null).toBeNull()
+    expect(events.filter((e) => e.type === 'approval_request' && e.sessionId === heir)).toEqual([])
+  })
+
+  it('drops a request a removed original queued instead of delivering it for the new session', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const heir = await handOff(h, project, parent, false)
+    const child = await settledChild(h, parent)
+    await h.mgr.send(child, 'person work')
+    expect(await h.mgr.agentSession(parent, { sessionId: child, action: 'send', text: 'second job', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
+    await h.mgr.trashSession(parent)
+
+    expect(owner(child)).toBe(heir)
+    expect(store.listQueuedRequests()).toEqual([])
+    const ch = h.claude.handles.get(child)!
+    ch.answer('person answer')
+    await until(() => h.mgr.listSessions().find((s) => s.id === child)?.state !== 'working')
+    await new Promise((r) => setTimeout(r, 50))
+    expect(ch.sent.some((t) => t.includes('second job'))).toBe(false)
+  })
+
+  it('answers a call the removed original was still waiting in, and owes the report to the new session', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const heir = await handOff(h, project, parent, false)
+    const child = await startChild(h, parent, 'long work')
+    const waiting = h.mgr.agentSession(parent, { sessionId: child, action: 'wait' })
+    await until(() => store.listReportMarks().length === 0)
+    await h.mgr.trashSession(parent)
+
+    expect(await waiting).toMatchObject({ ok: false, error: expect.stringContaining(`[${child}]`) })
+    expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: heir }])
+  })
+
+  it('does not choose a successor that is being deleted at the same time', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await settledChild(h, parent)
+    const heir = await handOff(h, project, parent, false)
+    const both = Promise.all([h.mgr.trashSession(heir), h.mgr.trashSession(parent)])
+    await both
+    expect(owner(child)).toBe(parent)
+  })
+
+  it('tries an older successor when the newest is gone with no successor of its own', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await settledChild(h, parent)
+    // Older: handed over in turn, then deleted; its successor is still here
+    const older = await handOff(h, project, parent, false)
+    await writeHandoffNote(project, older, 'SECOND NOTE')
+    const olderHeir = (await h.mgr.createSession({
+      projectId: project, cwd: root, tool: 'claude', permissionPreset: 'normal', initialPrompt: 'Take over.',
+      handoff: { from: 'Planner', note: 'SECOND NOTE', fromSessionId: older },
+    })).id
+    await h.mgr.trashSession(older)
+    // Newer: deleted with no successor of its own
+    await new Promise((r) => setTimeout(r, 5))
+    const newer = await handOff(h, project, parent, false)
+    await h.mgr.trashSession(newer)
+
+    await h.mgr.trashSession(parent)
+    expect(owner(child)).toBe(olderHeir)
+  })
+
   it('leaves the children of a removed session that never handed over where they are', async () => {
     const h = host()
     const { parent } = await parentOf(h)
