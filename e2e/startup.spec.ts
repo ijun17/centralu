@@ -20,5 +20,5 @@ test('?demo remains browser-only mock mode without a host token', async ({ page 
   await page.goto('/?demo')
 
   await expect(page.getByTestId('startup-error')).toHaveCount(0)
-  await expect(page.getByTestId('app-title')).toBeVisible()
+  await expect(page.getByTestId('app-header')).toBeVisible()
 })

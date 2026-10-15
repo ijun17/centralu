@@ -90,9 +90,9 @@ export function composerFocusTests(): void {
 
     test('after the window is moved by its top bar', async ({ page }) => {
       const input = await typing(page)
-      const bar = (await page.getByTestId('app-header').boundingBox())!
-      // An empty spot of the bar: between the title and the counter
-      await page.mouse.move(bar.x + bar.width / 2, bar.y + bar.height / 2)
+      const field = (await page.getByTestId('search-button').boundingBox())!
+      // An empty spot of the bar: the gap between the counter and the search field in the middle
+      await page.mouse.move(field.x - 8, field.y + field.height / 2)
       await page.mouse.down()
       await page.mouse.up()
       // The press did start a window drag, so this is the path the bar takes, not a missed click

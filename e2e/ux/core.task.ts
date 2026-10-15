@@ -390,7 +390,7 @@ uxTask({
   task: 'Find a past conversation by something said in it',
   path: 'mixed',
   access: 'discoverable',
-  notes: ["The Search button at the top of the sidebar (#529); Enter opens the highlighted hit, as the palette's footer says"],
+  notes: ["The search field in the middle of the top bar (#529, #727); Enter opens the highlighted hit, as the palette's footer says"],
   start: searchable,
   run: async (u, page) => {
     await u.click(page.getByTestId('search-button'))

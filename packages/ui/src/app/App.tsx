@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { nextWaitingSession } from '@cc/core'
 import { parseAppLink } from '@cc/protocol'
 import type { Platform } from '@cc/platform/ports'
@@ -24,6 +24,8 @@ import { ProjectView } from '../features/project/ProjectView.jsx'
 import { Inbox } from '../features/inbox/Inbox.jsx'
 import { Intro } from '../features/onboarding/Intro.jsx'
 import { CommandPalette } from '../features/palette/CommandPalette.jsx'
+import { SearchField } from '../features/palette/SearchField.jsx'
+import { useSearchReserve } from './useSearchReserve.js'
 import { ImportAppDialog } from '../features/app-share/ImportAppDialog.jsx'
 import { UpdateLine } from '../features/settings/UpdateLine.jsx'
 import { useAutoApplyUpdate } from '../features/settings/apply-update.js'
@@ -434,6 +436,8 @@ function Body() {
  */
 /** The bar's edge margin. Same value as `pr-4` on the right, and also the floor for the left padding */
 const EDGE_PADDING = 16
+/** The widest the top bar's search field gets */
+const SEARCH_MAX = 560
 
 function TopBar() {
   const counts = useCounts()
@@ -451,6 +455,10 @@ function TopBar() {
   // same padding is just a hole at the left edge with nothing in it.
   const controlsInset = useCapability('windowControlsInset')
   const sc = useShortcut()
+  // The search field stands in the middle of the window and takes its width from what the two sides leave (useSearchReserve)
+  const counterRef = useRef<HTMLSpanElement>(null)
+  const rightRef = useRef<HTMLSpanElement>(null)
+  const reserve = useSearchReserve(counterRef, rightRef)
   /*
    * Top bar.
    *
@@ -469,11 +477,11 @@ function TopBar() {
    */
   return (
     <DragRegion
-      className="flex h-9 shrink-0 items-center gap-4 border-b border-line bg-surface-side pr-4"
+      className="flex h-9 shrink-0 items-center gap-4 border-b border-line bg-surface-side pr-4 relative"
       /*
        * Inset is 0 wherever there are no traffic lights (web and mock report it that way —
        * correct, since there is no button to make room for). But using it as-is would remove the
-       * left margin entirely and the name would sit flush against the window corner. The right
+       * left margin entirely and the first control would sit flush against the window corner. The right
        * side has pr-4 while the left had nothing, so the bar looked lopsided (caught in
        * dogfooding). So there is a floor: make room for whatever there is to make room for, and
        * otherwise use the same margin as the other corners.
@@ -481,23 +489,6 @@ function TopBar() {
       style={{ paddingLeft: Math.max(controlsInset, EDGE_PADDING) }}
       testId="app-header"
     >
-      <span
-        /*
-         * No tracking at all — the name is set like ordinary text.
-         *
-         * It went 0.16em (wider than anything else on screen) → 0.12em, the app's uppercase
-         * label tracking → 0.06em → none, and every step read better than the one before.
-         * That direction is the answer: this is a name, not a label. A label is scanned
-         * letter by letter and tracking is what pays for that; a name is taken in as one
-         * shape, and this one is read least of anything here — you already opened the app.
-         * Set flush it stops being spelled out and just sits there being the title.
-         */
-        className="pointer-events-none text-sm font-semibold text-ink"
-        data-testid="app-title"
-      >
-        CENTRALU
-      </span>
-
       <NavButtons />
 
       {/*
@@ -508,7 +499,7 @@ function TopBar() {
         from #4).
       */}
       {/* flex, not inline — an inline span's box is a text line, so top-full lands wrong */}
-      <span className="relative flex">
+      <span className="relative flex" ref={counterRef}>
         <button
           className="group flex items-center gap-2.5 rounded-md px-2 py-0.5 transition-colors hover:bg-surface-hover/50"
           onClick={() => toggleInbox()}
@@ -547,7 +538,23 @@ function TopBar() {
         the command palette (⌘K). Deleting the only visible mention was the failure to avoid,
         so the palette gained both entries in the same change.
       */}
-      <span className="ml-auto flex items-center gap-3">
+      {/*
+        The search field (#727), centred in the window like an editor's command bar. Absolutely placed, so the
+        controls on either side keep their own layout, and its width is what the window leaves once both sides
+        (the wider of them, twice) have what they need: it shrinks as the window narrows and never reaches under
+        the traffic lights or the right-hand controls. pointer-events-none here and back on for the field itself:
+        the strip around the field is empty bar and must still drag the window and zoom it on a double press.
+      */}
+      <div
+        className="pointer-events-none absolute inset-y-0 left-1/2 flex -translate-x-1/2 items-center"
+        style={{ width: `min(${SEARCH_MAX}px, calc(100% - ${2 * reserve}px))` }}
+        data-testid="search-slot"
+      >
+        <SearchField />
+      </div>
+
+      {/* data-tauri-drag-region: a double press on the gap inside this wrapper zooms the window, as on the bar itself */}
+      <span className="ml-auto flex items-center gap-3" ref={rightRef} data-tauri-drag-region>
         {/*
           "A new version is available" — a line that appears only when there is one (issue #43).
 

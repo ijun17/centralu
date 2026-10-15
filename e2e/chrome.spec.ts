@@ -12,7 +12,7 @@ import { expect, test } from '@playwright/test'
  * exists. Hardcoding a number like 86px would be right where traffic lights exist and wrong
  * where they do not, and it would rot again the moment the window decoration changes.
  */
-test('the title never sits closer to the edge than the right side does', async ({ page }) => {
+test('the first control never sits closer to the edge than the right side does', async ({ page }) => {
   await page.goto('/?mock=1')
   const header = page.getByTestId('app-header')
   await expect(header).toBeVisible()

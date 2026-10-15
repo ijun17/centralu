@@ -218,7 +218,7 @@ the keyboard. Since #529 every core task has a discoverable path, and the paths 
 | Switch to another session by name | mouse | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 2.92 | 525 |
 | Switch back to the session you were just in | mouse (the top bar's back arrow) | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.21 | 663 |
 | Send a message to another session | mouse | `H M P B B P B B H 25K M K` | 26 | 2 | 4 | 2 | 2 | 36 | 13.39 | 1141 |
-| Find a past conversation | mixed (the Search button, #529) | `H M P B B H 4K M K` | 5 | 1 | 2 | 2 | 2 | 12 | 6.26 | 633 |
+| Find a past conversation | mixed (the search field in the top bar, #529, #727) | `H M P B B H 4K M K` | 5 | 1 | 2 | 2 | 2 | 12 | 6.26 | 633 |
 | Open an app on another machine | mouse (its sidebar row) | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.01 | 544 |
 | Link another machine | mouse (picked from the ssh config, #514) | `H M P B B M P B B M P B B M P B B` | 0 | 4 | 8 | 1 | 4 | 17 | 11.05 | 2240 |
 |  | mouse (typed by hand) | `H M P B B M P B B H 10K H P B B H 13K H M P B B` | 23 | 4 | 8 | 5 | 3 | 43 | 17.71 | 2161 |
@@ -253,7 +253,7 @@ What the baseline shows:
   palette's New session saves about a second more, an expert's number that does not stand for the
   task.
 - **Finding a past conversation had no path anyone could see**: the palette, the only search,
-  opened only by ⌘K / Ctrl+K. The Search button at the top of the sidebar (#529) opens it and prints
+  opened only by ⌘K / Ctrl+K. The search field in the middle of the top bar (#529, #727) opens it and prints
   the key, so the button also teaches the shortcut.
 - **Opening an app was already one click** on its sidebar row; the palette now lists apps too, for
   an app scrolled out of sight or on a folded project.

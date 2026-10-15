@@ -2575,7 +2575,8 @@ test('Window drag regions and blocked overscroll (M2.5 window issue)', async ({ 
   // evidence)
   // Each lane's header is the window-move handle (top bar, session, evidence).
   // The attribute alone breaks when text 'inside' the header is grabbed, so mousedown is also handled
-  await expect(page.locator('[data-tauri-drag-region]')).toHaveCount(3)
+  // The top bar carries it twice (the bar and its right-hand controls, whose own gaps are bar too, #727)
+  await expect(page.locator('[data-tauri-drag-region]')).toHaveCount(4)
 
   // The window itself does not scroll (must not rubber-band like a web page)
   const overscroll = await page.evaluate(() => getComputedStyle(document.body).overscrollBehaviorY)
@@ -4839,10 +4840,11 @@ test('The file tree folder arrow changes direction when opened and closed', asyn
  *
  * The button position is set by us via trafficLightPosition in tauri.conf.json, and its
  * **relationship to the bar's height** is checked by tooling/styles.test.ts. What is checked
- * here is only what the browser can see: whether the title is vertically centered in the bar.
- * Adding inner padding can silently throw this off, and that is what this test catches.
+ * here is only what the browser can see: whether the search field (the bar's one tall piece
+ * since the title went, #727) is vertically centered in the bar. Adding inner padding can
+ * silently throw this off, and that is what this test catches.
  */
-test('The title sits vertically centered inside the top bar', async ({ page }) => {
+test('The search field sits vertically centered inside the top bar', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const bar = page.getByTestId('app-header')
   const box = (await bar.boundingBox())!
@@ -4850,10 +4852,10 @@ test('The title sits vertically centered inside the top bar', async ({ page }) =
   expect(box.height).toBeLessThanOrEqual(37)
   expect(box.y).toBe(0)
 
-  // The text must also be centered within it (top/bottom margin difference within 1px)
-  const text = (await page.getByTestId('app-title').boundingBox())!
-  const top = text.y - box.y
-  const bottom = box.y + box.height - (text.y + text.height)
+  // The field must also be centered within it (top/bottom margin difference within 1px)
+  const field = (await page.getByTestId('search-button').boundingBox())!
+  const top = field.y - box.y
+  const bottom = box.y + box.height - (field.y + field.height)
   expect(Math.abs(top - bottom)).toBeLessThanOrEqual(1.5)
 })
 

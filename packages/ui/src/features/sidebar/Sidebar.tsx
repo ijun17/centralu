@@ -21,11 +21,10 @@ import {
   useToolMeta,
   useTools,
 } from '../../store/selectors.js'
-import { Kbd, StateDot, Tooltip, interruptionLabel, stateLabel } from '../../components/primitives.jsx'
-import { useShortcut } from '../../app/shortcut.js'
+import { StateDot, Tooltip, interruptionLabel, stateLabel } from '../../components/primitives.jsx'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
-import { AppIcon, ChevronIcon, CrownIcon, DotsIcon, ImportIcon, PlusIcon, SearchIcon } from '../../components/icons.jsx'
+import { AppIcon, ChevronIcon, CrownIcon, DotsIcon, ImportIcon, PlusIcon } from '../../components/icons.jsx'
 import { isRemoteUserApp, useMachineApps, useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { isAway } from '@cc/core'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
@@ -342,7 +341,6 @@ export function Sidebar() {
         onReset={() => setSidebarWidth(SIDEBAR_DEFAULT)}
         testId="sidebar-resize"
       />
-      <SearchButton />
       <OrchestratorButton />
       <GridButton />
       {grouped ? (
@@ -436,38 +434,6 @@ export function Sidebar() {
 }
 
 /**
- * The door to search (#529): sessions, projects, apps, actions and what was said in past
- * conversations, all in the command palette.
- *
- * The palette used to open only by ⌘K / Ctrl+K, so a person who had not been told the key had no
- * way to search at all: finding a past conversation had no path anyone could see (the task-cost
- * baseline, docs/ux-metrics.md). This is that path, at the top of the lane the results land in, and
- * it says its key out loud, so the shortcut is learned by using the button rather than by being told.
- *
- * Field-shaped and faint, like the Add project button: it is a door used now and then, and must not
- * compete with the rows being read below it.
- */
-function SearchButton() {
-  const sc = useShortcut()
-  return (
-    <div className="px-2 pt-2">
-      <button
-        className="flex w-full items-center gap-2 rounded-lg border border-line px-2.5 py-1.5 text-left text-sm text-ink-faint transition-colors hover:border-line-strong hover:text-ink"
-        onClick={() => useStore.getState().togglePalette(true)}
-        data-testid="search-button"
-        title="Search sessions, projects, apps and past conversations"
-      >
-        <SearchIcon />
-        <span className="truncate">Search</span>
-        <span className="ml-auto shrink-0 text-2xs">
-          <Kbd>{sc('mod', 'K')}</Kbd>
-        </span>
-      </button>
-    </div>
-  )
-}
-
-/**
  * The door to the orchestrator — **directing by talking**.
  *
  * Placed directly above the grid. The two are two ways of looking at the same thing, so they
@@ -502,9 +468,9 @@ function OrchestratorButton() {
   // A proposal card waits in the orchestrator's screen (#703): the row says so like a session waiting on an approval
   const proposalWaits = useHasPendingProposal()
 
-  // pt-1.5, the grid's own gap: Search stands above it now (#529) and takes the lane's top margin
+  // pt-2: the lane's top margin. Search used to stand above this row (#529); it moved to the top bar (#727)
   return (
-    <div className="px-2 pt-1.5">
+    <div className="px-2 pt-2">
       <button
         className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-sm transition-colors ${
           active

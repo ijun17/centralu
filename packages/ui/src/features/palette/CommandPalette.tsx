@@ -19,8 +19,8 @@ type Item =
 /**
  * Command palette (E-2) — finds projects, sessions, apps, actions and **conversation content** from
  * one search box. Since "where did we talk about that" is the real question in this app, search
- * results are mixed into the same list. Opened by ⌘K / Ctrl+K, or by the Search button at the top of
- * the sidebar (#529), which is how a person who was never told the key finds it.
+ * results are mixed into the same list. Opened by ⌘K / Ctrl+K, or by the search field in the top bar
+ * (#529, #727), which is how a person who was never told the key finds it.
  */
 export function CommandPalette() {
   const open = useStore((s) => s.paletteOpen)
@@ -248,15 +248,21 @@ export function CommandPalette() {
 
   if (!open) return null
 
+  /*
+   * A popover hanging from the top bar's search field (#727), not a dialog in the middle of the
+   * window. The catcher covers the whole window, the top bar included, so a press anywhere but the
+   * panel closes it, as it did; only the dimming starts below the bar (top-9 is the bar's h-9,
+   * App's TopBar), so the field the person pressed stays in view over the panel that came from it.
+   * The catcher sits outside the bar's drag region in the tree, so a press on it never moves the
+   * window. The panel is centred in the window like the field, and opens at the bar's edge.
+   */
   return (
-    <div
-      className="absolute inset-0 z-40 flex items-start justify-center bg-scrim pt-[calc(14vh/var(--text-zoom))] backdrop-blur-[2px]"
-      onClick={() => toggle(false)}
-      data-testid="command-palette"
-    >
+    <div className="absolute inset-0 z-40 flex items-start justify-center pt-10" onClick={() => toggle(false)} data-testid="command-palette">
+      <div className="absolute inset-x-0 bottom-0 top-9 bg-scrim backdrop-blur-[2px]" />
       <div
-        className="w-[600px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
+        className="relative w-[600px] max-w-[calc(92vw/var(--text-zoom))] overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
         onClick={(e) => e.stopPropagation()}
+        data-testid="palette-panel"
       >
         <input
           ref={inputRef}
