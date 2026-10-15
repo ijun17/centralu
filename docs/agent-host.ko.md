@@ -38,7 +38,9 @@ claude는 인프로세스, codex는 stdio 다리.
 순수한 규칙 하나가 정한다(`sessions/tool-profiles.ts`의 `toolProfileFor`: 행의 종류, 앱과 빌더
 자리, 설정 스위치로부터. `toolBundleFor`는 프로필마다 뒤에 서는 객체를 댄다). 매니저는 그 규칙에 한
 곳에서 묻는다(`toolChoice`: 프로필, 그리고 어댑터 옵션을 만들 때 함께 만드는 묶음). 생성, 깨울 때마다,
-다리 호출마다, `toolProfileOf`가 모두 이것을 쓴다. 그래서 서로 어긋날 수 없다. 묶음이
+다리 호출마다, `toolProfileOf`가 모두 이것을 쓴다. 그래서 서로 어긋날 수 없다. 오케스트레이터, 코디네이터,
+읽기 세션의 객체는 함수 하나(`sessions/orchestrator-seat.ts`의 `orchestratorToolsFor`)가 만들고, 이 함수는
+매니저를 좁게 보여 주는 `OrchestratorSeatHost`만 받는다. 묶음이
 무엇을 노출하는지와 그 호출이 무엇을 실행할 수 있는지는 둘 다 `profileAllows`가 정하므로,
 묶음에 없는 이름은 Codex 다리를 거쳐도 거절된다.
 

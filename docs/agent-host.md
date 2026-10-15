@@ -43,7 +43,9 @@ Every session gets one bundle of the `centralu` server's tools, or none. One pur
 (`toolProfileFor` in `sessions/tool-profiles.ts`, from the row's kind, its app and builder slot and
 the Settings switch; `toolBundleFor` names the object behind each profile). The manager asks it in one
 place (`toolChoice`: the profile, and the bundle built when the adapter's options are), used at create, at
-every wake, on every bridge call and by `toolProfileOf`, so they cannot drift apart;
+every wake, on every bridge call and by `toolProfileOf`, so they cannot drift apart. The orchestrator's,
+a coordinator's and the reader's objects are one function, `orchestratorToolsFor` (`sessions/orchestrator-seat.ts`),
+over the narrow view of the manager it is handed (`OrchestratorSeatHost`);
 `profileAllows` decides both what the bundle exposes and what its calls may run, so a name the
 bundle leaves out is refused even through the Codex bridge.
 

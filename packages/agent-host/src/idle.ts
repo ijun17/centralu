@@ -25,6 +25,10 @@ import { liveBackgroundTasks, type HostActivity, type SessionInfo, type SessionS
  */
 const BUSY_STATES: ReadonlySet<SessionState> = new Set(['working', 'waiting_approval'])
 
+/** In a turn — producing an answer or waiting for approval. Anything else (awaiting input, idle,
+ * limit hit, error) means the turn is over (C-4) */
+export const inTurn = (state: SessionState): boolean => state === 'working' || state === 'waiting_approval'
+
 /**
  * One session as the idle rule reads it. The fields past `state` and `live` are optional so a
  * snapshot that does not carry them still reads (as nothing pending); the host's (`main.ts`,

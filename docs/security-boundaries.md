@@ -282,7 +282,7 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 <!-- tool-matrix:end -->
 
 A reader's `read_session` without an id lists its project's sessions; that is why it has no
-`list_sessions`. Its read tools see only its own project (`orchestratorToolsFor(…, ownProject)`), and
+`list_sessions`. Its read tools see only its own project (`orchestratorToolsFor(…, ownProject)` in `sessions/orchestrator-seat.ts`), and
 the object behind them refuses directing calls (`readerToolsFor`).
 
 An ordinary reader's `update_centralu` reaches the host's existing update service only after a host-owned consent card. “Always”
