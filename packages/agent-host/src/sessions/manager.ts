@@ -1675,80 +1675,7 @@ export class SessionManager {
      */
     let worktree: Worktree | null = null
     if (params.worktree && params.projectId) {
-      const summary = await gitSummary(params.cwd, this.gitTrust(params.projectId))
-      if (!summary.isRepo || summary.denied) {
-        throw Object.assign(
-          new Error(
-            summary.denied
-              ? 'Cannot read this git repository — grant folder access and try again'
-              : 'Worktrees need a git repository. This directory is not one.',
-          ),
-          { code: 'internal' },
-        )
-      }
-      const path = this.worktreePathFor(params.projectId, id)
-      /*
-       * **Only in a trusted project (#407).** `git worktree add` checks every file out through the
-       * repository's smudge filters and fires its `post-checkout` hook: the repository's own code,
-       * before the person said the repository may run any. Why this refuses instead of checking
-       * out with those turned off: `gitWorktreeAdd`. Nothing before this point ran the
-       * repository's programs (the read above is locked for an untrusted project).
-       */
-      if (!this.projectTrusted(params.projectId) && !(params.askedBy && this.autoBoundaryOpen(params.askedBy, 'worktree in an untrusted project'))) {
-        throw Object.assign(
-          new Error("Worktree sessions need a trusted project: checking out runs the repository's hooks and filters. Trust the project first."),
-          { code: 'internal' },
-        )
-      }
-      /*
-       * The person can set the branch name (#69) — because the branch name doubles as the session
-       * name, it is effectively permanent. If not set, the session id's leading characters are used
-       * (the session has no name yet, or the auto-name is applied later, and it can contain spaces
-       * and unicode that would not work as a branch name). Validation is left to git itself — we do
-       * not re-implement ref naming rules.
-       */
-      const requested = params.worktreeBranch?.trim()
-      if (requested && !(await gitValidBranchName(requested))) {
-        throw Object.assign(new Error(`Not a valid branch name: ${requested}`), { code: 'internal' })
-      }
-      const branch = requested || `${APP_SLUG}/${id.slice(0, 8)}`
-      /*
-       * Where it forks from (#76). Order: **what was asked for -> the project's trunk -> HEAD**.
-       *
-       * Why what was asked for comes first (user feedback, 2026-09-07: "there is no way to say
-       * where to fork a new worker from"): the trunk is the project's default, not the answer for
-       * every case. Without a way to say "just this one, from that branch", the only path left is
-       * swapping the branch in the original folder, which gives up the whole reason for using
-       * worktrees in the first place.
-       *
-       * If asked for something that does not exist, it is **rejected.** Silently falling back to
-       * HEAD would let the person think it forked from that branch, and the mistake would not show
-       * up until commits had already piled up. A trunk that has disappeared is a different case —
-       * that is stale configuration, not something asked for right now, so it falls back to HEAD but
-       * logs it.
-       */
-      const asked = params.worktreeBase?.trim()
-      if (asked && !(await gitRevParse(params.cwd, asked))) {
-        throw Object.assign(new Error(`Not a branch in this repository: ${asked}`), { code: 'internal' })
-      }
-      const trunk = params.projectId ? this.trunkOf(params.projectId) : null
-      const fromTrunk = trunk && (await gitRevParse(params.cwd, trunk)) ? trunk : null
-      if (trunk && !fromTrunk) console.error(`[worktree] trunk not found, forking from HEAD instead: ${trunk}`)
-      const from = asked ?? fromTrunk
-      // The baseline for merge detection (#69): the point where the branch forked off. Without it, a
-      // freshly created branch would read as "merged" for no reason other than being an ancestor of
-      // the trunk.
-      const baseSha = from ? await gitRevParse(params.cwd, from) : await gitHeadSha(params.cwd)
-      try {
-        worktree = await gitWorktreeAdd(params.cwd, path, branch, from ?? undefined, { trusted: true })
-        if (baseSha) worktree = { ...worktree, base: baseSha }
-      } catch (err) {
-        const msg = (err as { stderr?: string; message?: string }).stderr ?? (err as Error).message
-        throw Object.assign(new Error(`Could not create the worktree: ${String(msg).trim()}`), { code: 'internal' })
-      }
-      // Sets up the empty workspace (#69): copy files -> run the setup command. This order is exactly what VK
-      // verified
-      await this.provisionWorktree(params.cwd, worktree, params.projectId)
+      worktree = await this.createWorktree({ ...params, projectId: params.projectId }, id)
     }
 
     /*
@@ -4737,6 +4664,89 @@ export class SessionManager {
    */
   folderRoots(): string[] {
     return [...this.store.listProjects().map((p) => p.path), this.worktreeRoot]
+  }
+
+  /** The worktree of a new worktree session (FR-2 option), checked out and set up before its adapter starts */
+  private async createWorktree(
+    params: { cwd: string; projectId: string; askedBy?: string; worktreeBranch?: string; worktreeBase?: string },
+    id: string,
+  ): Promise<Worktree> {
+    let worktree: Worktree
+    const summary = await gitSummary(params.cwd, this.gitTrust(params.projectId))
+    if (!summary.isRepo || summary.denied) {
+      throw Object.assign(
+        new Error(
+          summary.denied
+            ? 'Cannot read this git repository — grant folder access and try again'
+            : 'Worktrees need a git repository. This directory is not one.',
+        ),
+        { code: 'internal' },
+      )
+    }
+    const path = this.worktreePathFor(params.projectId, id)
+    /*
+     * **Only in a trusted project (#407).** `git worktree add` checks every file out through the
+     * repository's smudge filters and fires its `post-checkout` hook: the repository's own code,
+     * before the person said the repository may run any. Why this refuses instead of checking
+     * out with those turned off: `gitWorktreeAdd`. Nothing before this point ran the
+     * repository's programs (the read above is locked for an untrusted project).
+     */
+    if (!this.projectTrusted(params.projectId) && !(params.askedBy && this.autoBoundaryOpen(params.askedBy, 'worktree in an untrusted project'))) {
+      throw Object.assign(
+        new Error("Worktree sessions need a trusted project: checking out runs the repository's hooks and filters. Trust the project first."),
+        { code: 'internal' },
+      )
+    }
+    /*
+     * The person can set the branch name (#69) — because the branch name doubles as the session
+     * name, it is effectively permanent. If not set, the session id's leading characters are used
+     * (the session has no name yet, or the auto-name is applied later, and it can contain spaces
+     * and unicode that would not work as a branch name). Validation is left to git itself — we do
+     * not re-implement ref naming rules.
+     */
+    const requested = params.worktreeBranch?.trim()
+    if (requested && !(await gitValidBranchName(requested))) {
+      throw Object.assign(new Error(`Not a valid branch name: ${requested}`), { code: 'internal' })
+    }
+    const branch = requested || `${APP_SLUG}/${id.slice(0, 8)}`
+    /*
+     * Where it forks from (#76). Order: **what was asked for -> the project's trunk -> HEAD**.
+     *
+     * Why what was asked for comes first (user feedback, 2026-09-07: "there is no way to say
+     * where to fork a new worker from"): the trunk is the project's default, not the answer for
+     * every case. Without a way to say "just this one, from that branch", the only path left is
+     * swapping the branch in the original folder, which gives up the whole reason for using
+     * worktrees in the first place.
+     *
+     * If asked for something that does not exist, it is **rejected.** Silently falling back to
+     * HEAD would let the person think it forked from that branch, and the mistake would not show
+     * up until commits had already piled up. A trunk that has disappeared is a different case —
+     * that is stale configuration, not something asked for right now, so it falls back to HEAD but
+     * logs it.
+     */
+    const asked = params.worktreeBase?.trim()
+    if (asked && !(await gitRevParse(params.cwd, asked))) {
+      throw Object.assign(new Error(`Not a branch in this repository: ${asked}`), { code: 'internal' })
+    }
+    const trunk = params.projectId ? this.trunkOf(params.projectId) : null
+    const fromTrunk = trunk && (await gitRevParse(params.cwd, trunk)) ? trunk : null
+    if (trunk && !fromTrunk) console.error(`[worktree] trunk not found, forking from HEAD instead: ${trunk}`)
+    const from = asked ?? fromTrunk
+    // The baseline for merge detection (#69): the point where the branch forked off. Without it, a
+    // freshly created branch would read as "merged" for no reason other than being an ancestor of
+    // the trunk.
+    const baseSha = from ? await gitRevParse(params.cwd, from) : await gitHeadSha(params.cwd)
+    try {
+      worktree = await gitWorktreeAdd(params.cwd, path, branch, from ?? undefined, { trusted: true })
+      if (baseSha) worktree = { ...worktree, base: baseSha }
+    } catch (err) {
+      const msg = (err as { stderr?: string; message?: string }).stderr ?? (err as Error).message
+      throw Object.assign(new Error(`Could not create the worktree: ${String(msg).trim()}`), { code: 'internal' })
+    }
+    // Sets up the empty workspace (#69): copy files -> run the setup command. This order is exactly what VK
+    // verified
+    await this.provisionWorktree(params.cwd, worktree, params.projectId)
+    return worktree
   }
 
   /** A worktree is created **outside the repository** — the person's repository is never touched with it (not
