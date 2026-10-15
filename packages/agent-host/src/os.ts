@@ -58,6 +58,11 @@ export function rustTarget(platform: Platform = HOST_PLATFORM, arch: string = pr
   return null
 }
 
+/** File names that differ only by case are one file (Windows): comparing two spellings of a path folds case first. */
+export function foldsPathCase(platform: Platform = HOST_PLATFORM): boolean {
+  return platform === 'win32'
+}
+
 /** The path rules of `platform`: backslashes and drive letters on Windows, slashes elsewhere. */
 export function pathsOf(platform: Platform = HOST_PLATFORM): PlatformPath {
   return platform === 'win32' ? win32 : posix

@@ -23,7 +23,8 @@ import { cloneInto } from '../dev-services/project-clone.js'
 import { contextAt, labelOf, lastActiveOf, orchestratorMemory, previewOf, timeOf } from './transcript-view.js'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { existsSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { foldsPathCase } from '../os.js'
+import { existsSync, lstatSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { exec } from 'node:child_process'
 import type {
   CacheStats,
@@ -128,6 +129,8 @@ import {
   gitWorktreeDirty,
   gitWorktreeRemove,
   gitWorktreePrune,
+  gitWorktreePaths,
+  gitWorktreeList,
   gitBranchAhead,
 } from '../dev-services/git.js'
 import {
@@ -490,6 +493,34 @@ function canonicalPath(path: string): string {
   } catch {
     const parent = dirname(full)
     return parent === full ? full : join(canonicalPath(parent), basename(full))
+  }
+}
+
+/** A path as a comparison key: real long name, forward slashes, no trailing slash, case-folded on Windows (git prints its own spelling) */
+function pathKey(path: string): string {
+  const key = canonicalPath(path).replace(/\\/g, '/').replace(/\/+$/, '')
+  return foldsPathCase() ? key.toLowerCase() : key
+}
+
+/**
+ * Whether a worktree folder is there, gone, or cannot be judged (#715). Gone means `lstat` failed with ENOENT and
+ * the folder above it is there: an error of any other kind (EACCES, EIO), or a missing parent (a volume not mounted),
+ * says nothing about the work inside, so the caller must not treat the folder as gone.
+ */
+function worktreeFolderState(path: string): 'present' | 'gone' | { unreachable: string } {
+  try {
+    lstatSync(path)
+    return 'present'
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT') return { unreachable: `${code ?? 'error'}: ${(e as Error).message}` }
+  }
+  const parent = dirname(path)
+  try {
+    if (statSync(parent).isDirectory()) return 'gone'
+    return { unreachable: `${parent} is not a folder` }
+  } catch (e) {
+    return { unreachable: `${parent} cannot be read (${(e as NodeJS.ErrnoException).code ?? 'error'}), so the folder may be on a volume that is not mounted` }
   }
 }
 
@@ -7117,7 +7148,11 @@ export class SessionManager {
       return { ok: false, error: `"${target.name}" is still working — stop it or wait first` }
     }
     // A folder that is already gone holds no work to lose (#715): cleanup goes on without a snapshot
-    const folderGone = !existsSync(target.worktree.path)
+    const folder = worktreeFolderState(target.worktree.path)
+    if (typeof folder === 'object') {
+      return { ok: false, error: `Cannot reach the worktree folder for "${target.name}" (${target.worktree.path}): ${folder.unreachable}. Nothing was removed; try again once the folder can be read.` }
+    }
+    const folderGone = folder === 'gone'
     if (this.resuming.has(target.id) || this.deferredRestarts.has(target.id)) return { ok: false, error: `"${target.name}" is waking or restarting — wait for it first` }
     if (this.worktreeCleanup.has(target.id)) return { ok: false, error: 'This worktree is already being removed' }
     // A sidebar delete already under way keeps the worktree in place; it is not taken away behind it (#647)
@@ -7188,25 +7223,36 @@ export class SessionManager {
     const setAside = { changedFiles: 0, commits: 0 }
     const gone = `The worktree folder was already gone (${path})`
     await this.trashSession(target.id, false, false, undefined, true)
+    const key = pathKey(path)
+    const listedNow = async () => (await gitWorktreePaths(cwd)).some((p) => pathKey(p) === key)
+    const had = await listedNow().catch(() => false)
+    let entry: string
     try {
       await gitWorktreePrune(cwd)
+      // Said only when git no longer lists it afterwards (a locked entry stays)
+      entry = !had ? "git had no entry for it" : (await listedNow().catch(() => true)) ? "git's entry for it is still listed" : "git's entry was pruned"
     } catch (e) {
       return { ok: true, branch, setAside, note: `${gone}, but git's entry for it could not be pruned (${(e as Error).message}); branch ${branch} was left.` }
     }
+    const head = `${gone}; the session is in the trash and ${entry}.`
     if ((await gitRevParse(cwd, `refs/heads/${branch}`)) === null) {
-      return { ok: true, branch, setAside, note: `${gone}; the session is in the trash and git's entry was pruned. Branch ${branch} was already gone.` }
+      return { ok: true, branch, setAside, note: `${head} Branch ${branch} was already gone.` }
+    }
+    const elsewhere = (await gitWorktreeList(cwd).catch(() => [])).find((w) => w.branch === branch)
+    if (elsewhere) {
+      return { ok: true, branch, setAside, note: `${head} Branch ${branch} was kept: it is checked out at ${elsewhere.path}.` }
     }
     const ahead = await gitBranchAhead(cwd, branch, this.trunkOf(target.projectId!) ?? 'HEAD')
     if (ahead === null || ahead > 0) {
-      return { ok: true, branch, setAside, note: `${gone}; the session is in the trash and git's entry was pruned. Branch ${branch} was kept${ahead ? ` because it has ${ahead} commit${ahead === 1 ? '' : 's'} the trunk lacks` : ''}.` }
+      return { ok: true, branch, setAside, note: `${head} Branch ${branch} was kept${ahead ? ` because it has ${ahead} commit${ahead === 1 ? '' : 's'} the trunk lacks` : ''}.` }
     }
     try {
       await gitBranchDelete(cwd, branch, this.gitTrust(target.projectId!))
       await clearRecoveredBranchMark(cwd, branch).catch(() => {})
     } catch (e) {
-      return { ok: true, branch, setAside, note: `${gone}; the session is in the trash and git's entry was pruned, but branch ${branch} was left: ${(e as Error).message}.` }
+      return { ok: true, branch, setAside, note: `${head} Branch ${branch} was left: ${(e as Error).message}.` }
     }
-    return { ok: true, branch, setAside, note: `${gone}; the session is in the trash, git's entry was pruned and the merged branch ${branch} was removed.` }
+    return { ok: true, branch, setAside, note: `${head} The merged branch ${branch} was removed.` }
   }
 
   /**

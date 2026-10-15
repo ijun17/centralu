@@ -694,6 +694,13 @@ export async function gitWorktreeList(repoCwd: string): Promise<Worktree[]> {
   return list
 }
 
+/** Every path git lists as a worktree of this repository, detached ones too (#715). */
+export async function gitWorktreePaths(repoCwd: string): Promise<string[]> {
+  if (!(await isRepo(repoCwd))) return []
+  const out = await git(repoCwd, ['worktree', 'list', '--porcelain'])
+  return out.split('\n').filter((line) => line.startsWith('worktree ')).map((line) => line.slice('worktree '.length).trim())
+}
+
 /** Cleans up only the registration of a worktree that is gone (does not delete the directory) */
 export async function gitWorktreePrune(repoCwd: string): Promise<void> {
   await git(repoCwd, ['worktree', 'prune'])

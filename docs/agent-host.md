@@ -474,8 +474,11 @@ unowned session, a session in another project, and self-deletion are refused.
 to remove its child: neither uncommitted files nor an unproven merge refuses deletion. A working child must
 finish or be stopped first. A worktree folder that is already gone (#715) holds no work to lose, so deletion
 goes ahead without a snapshot: the session goes to the trash, `git worktree prune` drops git's stale entry, and
-the branch is kept when it has commits the trunk lacks (or when that cannot be told) and removed when it has
-none. The answer carries a `note` saying so in one line. A merge run as `gh pr merge --delete-branch` beside a
+the branch is kept when it has commits the trunk lacks (or when that cannot be told) or when another
+worktree has it checked out, and removed when it has none. "Gone" means `lstat` failed with ENOENT and the folder
+above it is there; any other error, or a missing parent (a volume not mounted), is refused with "Cannot reach the
+worktree folder" and nothing is removed. The note says git's entry was pruned only when `git worktree list` no
+longer shows it. The answer carries a `note` saying so in one line. A merge run as `gh pr merge --delete-branch` beside a
 worktree removes that folder this way (gh deletes the local branch, so it removes the worktree that holds it),
 which is why the project board's `merge_when_green` deletes the branch on GitHub only. The session never
 becomes a same-folder deletion: it keeps its worktree metadata. Cleanup refuses a child still waking/restarting, blocks sends/resumes, and requires
