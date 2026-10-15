@@ -183,7 +183,7 @@ It never creates a session in another project (#614, owner decision 2026-10-13).
 person's action in that project; `start_agent` creates only within its caller's own project. The global
 orchestrator, which belongs to no project, retains its own create-session tool.
 
-What one call does (`SessionManager.askProject`, which runs `DelegationFlow` in `sessions/delegation-flow.ts`, #428):
+What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in `sessions/ask-project-flow.ts`, #428):
 
 1. **The project.** Name or id of another registered project, on this computer or on a linked machine
    (§1.2.4). Its own project is refused; an unknown name lists the other projects, each with the machine
@@ -885,7 +885,8 @@ new session now takes over the original's **live** work as it is created, before
   store mirror writes it there; the manager reads through read-only maps. The memory side of the move is one call,
   `moveOwner`, which runs the manager's card move for the moving start requests in the middle, in the order above.
   What moves, the store's transaction, and `askedBy` / `parentSessionId` stay with the manager. At startup it reads
-  its own rows back (`restoreReports`, `restoreTurns`, `restoreQueued`), as the manager's constructor did.
+  its own rows back (`restoreReports`, `restoreTurns`, `restoreQueued`), as the manager's constructor did; the
+  standing start_agent requests are `DelegationFlow.restoreAgentStarts`, called between the reports and the turns.
 - **The windows** hear `session_owner` (the session's `askedBy` and `parentSessionId` now) and hang the child under
   its new owner; a linked machine's event is qualified (`Qualifier.event`) and patched into the hub's mirror.
 

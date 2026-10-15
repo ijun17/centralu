@@ -11,7 +11,7 @@ import {
   isCentraluApply,
 } from '@cc/protocol'
 import type { SessionHandle } from '../adapters/contract.js'
-import { Store } from '../dev-services/store.js'
+import type { Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
 
 /** A card the host raised in a session's approval slot (M4 D-4, #371) — see `HostCards.hostAsks` */
@@ -59,7 +59,7 @@ export class HostCards {
    * `pendingApproval`), so if the adapter's card is already up, this one is raised only after that one closes
    * (`raiseHostAsks`). The answer (`respondApproval`) never reaches the adapter — it is resolved right here.
    */
-  hostAsks = new Map<string, HostAsk>()
+  readonly hostAsks = new Map<string, HostAsk>()
 
   /**
    * requestId of an approval response that reached the adapter (#158) — request id -> session id. If
@@ -70,13 +70,13 @@ export class HostCards {
    * answered, so it is left alone quietly. Entries are evicted oldest first (a request id is never
    * reused, so only the recent ones need remembering).
    */
-  answeredApprovals = new Map<string, string>()
+  readonly answeredApprovals = new Map<string, string>()
 
   /**
    * Capability question for a chain started from the screen (M4 D-4) — drawn by that app's pinned
    * view and the sidebar's app row (`apps.questions`). id -> question.
    */
-  appQuestions = new Map<string, { question: AppQuestion; resolve: (d: 'allow' | 'deny' | null) => void }>()
+  readonly appQuestions = new Map<string, { question: AppQuestion; resolve: (d: 'allow' | 'deny' | null) => void }>()
 
   /**
    * Auto allows and logs; other presets raise a host card, withdrawn if the signal fires. `requestId` is given when the

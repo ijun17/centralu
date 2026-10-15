@@ -163,7 +163,7 @@ It never creates a session in another project (#614, owner decision 2026-10-13).
 person's action in that project; `start_agent` creates only within its caller's own project. The global
 orchestrator, which belongs to no project, retains its own create-session tool.
 
-호출 한 번이 하는 일(`SessionManager.askProject`, 실제로는 `sessions/delegation-flow.ts`의 `DelegationFlow`, #428):
+호출 한 번이 하는 일(`SessionManager.askProject`, 실제로는 `sessions/ask-project-flow.ts`의 `AskProjectFlow`, #428):
 
 1. **The project.** Name or id of another registered project. Its own project is refused; an unknown
    name lists the other projects. Under `safe`/`normal`, an untrusted caller cannot ask, and a child
@@ -530,7 +530,8 @@ Centralu는 작업의 종류를 문장에서 추측하지 않는다. 결정은 `
   머신의 보고, 인계가 넘긴 것이 여기에 있다. 저장소 사본이 있는 변경은 여기서 저장소에도 쓰고, 매니저는 읽기 전용
   Map으로 읽는다. 옮기기의 메모리 쪽은 `moveOwner` 한 번의 호출이고, 옮기는 시작 요청의 카드는 그 중간에 매니저가
   위 순서대로 옮긴다. 무엇을 옮길지, 저장소 트랜잭션, `askedBy`와 `parentSessionId`는 매니저에 남는다. 시작할 때는 자기 행을 직접
-  다시 읽는다(`restoreReports`, `restoreTurns`, `restoreQueued`). 예전에는 매니저 생성자가 하던 일이다.
+  다시 읽는다(`restoreReports`, `restoreTurns`, `restoreQueued`). 예전에는 매니저 생성자가 하던 일이다. 서 있는
+  start_agent 요청은 `DelegationFlow.restoreAgentStarts`가 읽으며, 보고 표시와 턴 사이에 불린다.
 - **창**은 `session_owner`(그 세션의 지금 `askedBy`와 `parentSessionId`)를 듣고 자식을 새 소유자 아래에 둔다. 연결된
   머신의 이벤트는 `Qualifier.event`가 이름을 붙이고, 허브의 미러에도 반영한다.
 

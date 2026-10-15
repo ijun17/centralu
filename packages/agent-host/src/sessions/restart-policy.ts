@@ -1,4 +1,4 @@
-import { ChildOwnership } from './child-ownership.js'
+import type { ChildOwnership } from './child-ownership.js'
 import type {
   RebuildCause,
   NormalizedEvent,
@@ -9,7 +9,7 @@ import {
   liveBackgroundTasks,
 } from '@cc/protocol'
 import type { SessionHandle } from '../adapters/contract.js'
-import { Store } from '../dev-services/store.js'
+import type { Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
 
 /**
@@ -59,19 +59,19 @@ export class RestartPolicy {
    * (#164). It used to be swapped on the spot, which made the running turn vanish (Codex closes its
    * app-server), even though the screen said "starting next turn".
    */
-  restartAfterTurn = new Set<string>()
+  readonly restartAfterTurn = new Set<string>()
 
   /** Input arriving after a note completes waits for its deferred process replacement, including disposal. */
-  deferredRestarts = new Map<string, Promise<void>>()
+  readonly deferredRestarts = new Map<string, Promise<void>>()
 
   /** A new host served a different Centralu tool prefix; replace the old agent at its safe boundary. */
-  definitionsRestartAfterTurn = new Set<string>()
+  readonly definitionsRestartAfterTurn = new Set<string>()
 
   /** A kept process was started with adapter settings from an older host build (#589). */
-  launchSettingsRestartAfterTurn = new Set<string>()
+  readonly launchSettingsRestartAfterTurn = new Set<string>()
 
   /** Sessions whose pending launch-settings restart comes from a change of their project's trust (#663): the restart says so */
-  trustRestartNotice = new Set<string>()
+  readonly trustRestartNotice = new Set<string>()
 
   /**
    * Sessions whose adopted process may hold background work this host knows nothing of (#648) -> when the session was
@@ -81,7 +81,7 @@ export class RestartPolicy {
    * `BACKGROUND_UNKNOWN_MAX_MS` without a word it is taken as holding nothing (`backgroundKnown`). A safety restart does
    * not wait for it (`applyDeferredRestart`). A fresh process starts known: it holds nothing yet.
    */
-  backgroundUnknown = new Map<string, number>()
+  readonly backgroundUnknown = new Map<string, number>()
 
   /**
    * A deferred restart that changes nothing about safety, waiting for the session's background work to end (#648) ->
@@ -89,14 +89,14 @@ export class RestartPolicy {
    * timer until the restart is applied: a timer that fires mid-turn finds the turn running, and the turn's end applies
    * the restart then, counting from `since` rather than starting a new hour.
    */
-  private backgroundHolds = new Map<string, { since: number; timer: ReturnType<typeof setTimeout> }>()
+  private readonly backgroundHolds = new Map<string, { since: number; timer: ReturnType<typeof setTimeout> }>()
 
   /**
    * Codex sessions whose attached apps changed mid-turn (#371 part A) — restarted through resume when
    * the turn ends, beside `restartAfterTurn`'s settings drift: a Codex thread keeps the MCP servers it
    * started with, so the restart is what gives it (or takes away) an app it attached or detached.
    */
-  appsRestartAfterTurn = new Set<string>()
+  readonly appsRestartAfterTurn = new Set<string>()
 
   /** Background work the session's process holds that ending it would end (#648): what its tool listed as running */
   private backgroundRunning(sessionId: string): boolean {

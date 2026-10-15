@@ -82,7 +82,7 @@ import type { AgentAdapter, AgentProcess, AgentSpawnSpec, BusyAnswer, BusyChoice
 import type { LaunchSettings } from '../adapters/contract.js'
 import { registeredTool } from '../adapters/registry.js'
 import { codeIntelligenceOff, isAppAgent, toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
-import { type MemoryGate } from './memory-gate.js'
+import type { MemoryGate } from './memory-gate.js'
 
 /**
  * Where agent processes live when not with this host (#280 step 2 — the keeper). `spawn` starts a
@@ -137,11 +137,11 @@ import { attachmentBytes, saveAttachment, clearAttachments, sweepAttachments } f
 import { mentions, readMessageImage, resolveWrittenPath, writtenForms } from '../dev-services/message-image.js'
 import { handoffNoteBytes, handoffNoteDir, sweepHandoffNotes, writeHandoffNote, writeHandoffNoteSync } from '../dev-services/handoff-notes.js'
 import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
+import { AskProjectFlow, type AskProjectHost } from './ask-project-flow.js'
 import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, HUB_SENDER, agentStartPersonText, taskList } from './delegation-flow.js'
-import { type HostAsk } from './host-cards.js'
 import { RestartPolicy, type RestartHost } from './restart-policy.js'
 import { WorktreeSessions, type WorktreeHost, canonicalPath, insideFolder } from './worktree-sessions.js'
-import { HostCards, type HostCardsHost } from './host-cards.js'
+import { HostCards, type HostAsk, type HostCardsHost } from './host-cards.js'
 export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './delegation-flow.js'
 
 /**
@@ -478,6 +478,8 @@ export class SessionManager {
   private readonly children: ChildOwnership
   /** The work one session gives another: ask_project, start_agent, agent_session (delegation-flow.ts) */
   private readonly delegationFlow: DelegationFlow
+  /** ask_project, here or on a linked machine (ask-project-flow.ts) */
+  private readonly askProjectFlow: AskProjectFlow
   /** When a session's process is replaced, and the background work a restart waits for (restart-policy.ts) */
   private readonly restartPolicy: RestartPolicy
   /** A worktree session's worktree: made for a new session, taken apart on cleanup (worktree-sessions.ts) */
@@ -623,6 +625,7 @@ export class SessionManager {
   ) {
     this.children = new ChildOwnership(store)
     this.delegationFlow = new DelegationFlow(this.delegationHost())
+    this.askProjectFlow = new AskProjectFlow(this.askProjectHost())
     this.restartPolicy = new RestartPolicy(this.restartHost())
     this.worktrees = new WorktreeSessions(this.worktreeHost())
     this.hostCards = new HostCards(this.hostCardsHost())
@@ -1270,10 +1273,10 @@ export class SessionManager {
    * however the turn ended (#166), once, and then the watch is cleared.
    */
   observeLinked(e: { type: string; sessionId?: unknown; state?: unknown; error?: { message?: string }; machine?: unknown }): void {
-    if (e.type === 'machine_status') return this.delegationFlow.observeLinkLoss(e.machine)
+    if (e.type === 'machine_status') return this.askProjectFlow.observeLinkLoss(e.machine)
     if (typeof e.sessionId !== 'string') return
-    const ask = this.delegationFlow.linkedAsks.get(e.sessionId)
-    if (ask) this.delegationFlow.observeLinkedAsk(ask, e)
+    const ask = this.askProjectFlow.linkedAsks.get(e.sessionId)
+    if (ask) this.askProjectFlow.observeLinkedAsk(ask, e)
     const wait = this.children.linkedReports.get(e.sessionId)
     if (!wait) return
     const busy = e.state === 'working' || e.state === 'waiting_approval'
@@ -5262,6 +5265,48 @@ export class SessionManager {
     }
   }
 
+  /** What `AskProjectFlow` reaches (#428): this manager's state read when used, its and the delegation flow's operations */
+  private askProjectHost(): AskProjectHost {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
+    const self = this
+    return {
+      get agentRuns() {
+        return self.agentRuns
+      },
+      applyDeferredRestart: (...a) => self.restartPolicy.applyDeferredRestart(...a),
+      askHost: (...a) => self.hostCards.askHost(...a),
+      autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
+      builderRefOf: (...a) => self.builderRefOf(...a),
+      busyAnswer: (...a) => self.busyAnswer(...a),
+      busyChoices: (...a) => self.busyChoices(...a),
+      busyForCaller: (...a) => self.busyForCaller(...a),
+      get children() {
+        return self.children
+      },
+      deliver: (...a) => self.deliver(...a),
+      enqueue: (...a) => self.enqueue(...a),
+      ensureProjectAccess: (...a) => self.ensureProjectAccess(...a),
+      handedOverReply: (...a) => self.delegationFlow.handedOverReply(...a),
+      get linkedReader() {
+        return self.linkedReader
+      },
+      get meta() {
+        return self.meta
+      },
+      queuedOf: (...a) => self.queuedOf(...a),
+      get readGrants() {
+        return self.readGrants
+      },
+      routedCards: (...a) => self.routedCards(...a),
+      startDelegation: (...a) => self.delegationFlow.startDelegation(...a),
+      get store() {
+        return self.store
+      },
+      untilCard: (...a) => self.untilCard(...a),
+      untilHandedOver: (...a) => self.delegationFlow.untilHandedOver(...a),
+    }
+  }
+
   /** What `DelegationFlow` reaches of this manager (#428): its state read when used, its operations called through */
   private delegationHost(): DelegationHost {
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
@@ -5670,9 +5715,9 @@ export class SessionManager {
     return !!grants && grants.size > 0 && underGrant(path, grants, cwd)
   }
 
-  /** `DelegationFlow.askProject` (delegation-flow.ts), kept on the manager for its callers */
-  askProject(...a: Parameters<DelegationFlow['askProject']>): ReturnType<DelegationFlow['askProject']> {
-    return this.delegationFlow.askProject(...a)
+  /** `AskProjectFlow.askProject` (ask-project-flow.ts), kept on the manager for its callers */
+  askProject(...a: Parameters<AskProjectFlow['askProject']>): ReturnType<AskProjectFlow['askProject']> {
+    return this.askProjectFlow.askProject(...a)
   }
 
   /** `DelegationFlow.startAgent` (delegation-flow.ts), kept on the manager for its callers */
@@ -6205,7 +6250,7 @@ export class SessionManager {
     const auto = caller.permissionPreset === 'auto'
     if (r.via === 'ask_project') {
       const project = this.store.listProjects().find((p) => p.id === target.projectId)
-      const gate = this.delegationFlow.askGateError(caller.id) ?? (project ? null : 'The project asked was removed from Centralu.')
+      const gate = this.askProjectFlow.askGateError(caller.id) ?? (project ? null : 'The project asked was removed from Centralu.')
       if (gate) return gate
       if (!auto && r.openedByAuto && !this.pairConsented(caller.id, target)) {
         return "The asking session is no longer auto, and the person has not allowed its project to ask this one."

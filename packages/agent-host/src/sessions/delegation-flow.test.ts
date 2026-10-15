@@ -42,27 +42,6 @@ beforeEach(() => {
 afterEach(() => store.close())
 
 describe('the gates read before anything is started', () => {
-  it('a session with no project cannot ask another project', async () => {
-    meta.set('loose', session('loose', { projectId: null }))
-    const flow = new DelegationFlow(hostWith({ meta }))
-    expect(await flow.askProject('loose', { project: 'p2', task: 'x' })).toEqual({ ok: false, error: 'This session belongs to no project, so it cannot ask another one' })
-  })
-
-  it('a session that was itself asked cannot ask again, unless auto opens that boundary', () => {
-    meta.set('asked', session('asked', { askedBy: 'caller' }))
-    const opened: string[] = []
-    let open = false
-    const flow = new DelegationFlow(hostWith({
-      meta, children, store,
-      autoBoundaryOpen: (id, boundary) => (opened.push(`${id}:${boundary ?? ''}`), open),
-    }))
-    expect(flow.askGateError('asked')).toMatch(/^This session was itself started or asked by another session/)
-    open = true
-    // Past the depth boundary, the project's trust is the next gate (the store has no such project: not trusted)
-    expect(flow.askGateError('asked')).toBeNull()
-    expect(opened).toEqual(['asked:delegation depth', 'asked:delegation depth', 'asked:delegate from an untrusted project'])
-  })
-
   it('agent_session never acts on its own calling session', async () => {
     const flow = new DelegationFlow(hostWith({}))
     expect(await flow.agentSession('caller', { sessionId: 'caller', action: 'stop' })).toEqual({

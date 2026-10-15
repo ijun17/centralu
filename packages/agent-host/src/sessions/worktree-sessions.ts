@@ -15,7 +15,7 @@ import {
   isSessionId,
 } from '@cc/protocol'
 import type { SessionHandle } from '../adapters/contract.js'
-import { Store } from '../dev-services/store.js'
+import type { Store } from '../dev-services/store.js'
 import { sessionBusy } from '../idle.js'
 import {
   gitSummary,
@@ -335,7 +335,7 @@ export class WorktreeSessions {
   }
 
   /** Prevent a send/resume from racing the snapshot and worktree removal: the child, by id, and its worktree folder */
-  worktreeCleanup = new Map<string, string>()
+  readonly worktreeCleanup = new Map<string, string>()
 
   /**
    * Whether a cleanup under way holds this session still (#647): the child whose worktree goes, and every session whose
