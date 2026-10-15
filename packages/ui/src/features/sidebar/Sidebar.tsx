@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 import { appSessionsNeedAttention, groupProjectAppSessions, treeRows } from './tree.js'
@@ -93,8 +93,24 @@ function useDropLine(mime: string, onDrop: (draggedId: string, before: boolean) 
 const INDENT = { 1: 'ml-[18px]', 2: 'ml-[34px]', 3: 'ml-[50px]' } as const
 /** The guide line a nested row hangs from: 1px just outside its band, so it adds nothing to the row's width */
 const GUIDE = 'before:absolute before:inset-y-0 before:-left-px before:w-px before:bg-line/60 before:content-[""]'
+/**
+ * The chevron gutter, written once: every place that stands in it or starts after it reads this variable, which the
+ * sidebar sets on its root, so a change cannot leave one of them behind. The margins in INDENT do not depend on it
+ * (the gutter is both inside the band and subtracted from the name column).
+ */
+const GUTTER = 28
+const SIDEBAR_VARS = { '--sidebar-gutter': `${GUTTER}px` } as CSSProperties
+const GUTTER_WIDTH = 'w-(--sidebar-gutter)'
+/** The project name's own column, which "Your apps" title shares: the 2px bar, 2px of padding, then the gutter */
+const NAME_PAD = 'pl-[calc(var(--sidebar-gutter)+4px)]'
+/**
+ * What a row with a hover menu keeps clear at its right: the ⋯ button (22px) and its 12px margin (right-3) is 34px,
+ * so 40px. It was 56px from when a row had two buttons; at the narrowest sidebar the 16px it gives back is what a
+ * level-3 name has to show more than its first letter.
+ */
+const ROW_MENU_PAD = 'pr-10'
 /** What a row's button stands in front of its content: the 2px bar (border-l-2) and, after it, this 28px gutter */
-const ROW_PAD = 'pl-7'
+const ROW_PAD = 'pl-(--sidebar-gutter)'
 /** The fold chevron's button, and its glyph: one size for the project row and for every row that folds a group */
 const DISCLOSURE_BUTTON = 'size-6'
 const DISCLOSURE_ICON = 14
@@ -109,7 +125,7 @@ const DISCLOSURE_ICON = 14
  */
 function GroupToggle({ folded, label, testId, onToggle }: { folded: boolean; label: string; testId: string; onToggle: () => void }) {
   return (
-    <span className="absolute inset-y-0 left-0.5 flex w-7 items-center justify-center">
+    <span className={`absolute inset-y-0 left-0.5 flex ${GUTTER_WIDTH} items-center justify-center`}>
       <Tooltip content={label} testId={`${testId}-tip`}>
         <button
           type="button"
@@ -314,7 +330,7 @@ export function Sidebar() {
   return (
     <aside
       className="relative flex h-full shrink-0 flex-col overflow-y-auto border-r border-line bg-surface-side"
-      style={{ width }}
+      style={{ width, ...SIDEBAR_VARS }}
       data-testid="sidebar"
     >
       <ResizeHandle
@@ -747,7 +763,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
           button is 24px and centred in it, and the box cancels the row's gap), so a session's tool mark starts one
           step right of the name (#685).
         */}
-        <span className="-my-1 -mr-2 flex w-7 shrink-0 justify-center self-center">
+        <span className={`-my-1 -mr-2 flex ${GUTTER_WIDTH} shrink-0 justify-center self-center`}>
           <IconButton
             label={folded ? `Expand ${project.name}` : `Collapse ${project.name}`}
             onClick={() => toggleFold(projectId)}
@@ -970,12 +986,11 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                       */
                       data-unread={(unread && !focused) || undefined}
                       /*
-                        The right padding has to clear **two** buttons that appear on hover.
-                        pr-8 is a value from when only delete existed; once the pencil was added, a
-                        long name would run in underneath the buttons — text hidden under a button
-                        is worse than text truncated.
+                        The right padding has to clear the menu button that appears on hover
+                        (ROW_MENU_PAD): a long name that ran in underneath it would be text hidden
+                        under a button, which is worse than text truncated.
                       */
-                      className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} pr-14 text-left text-md transition-colors ${
+                      className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} ${ROW_MENU_PAD} text-left text-md transition-colors ${
                         focused
                           ? 'border-l-ink-muted bg-surface-hover/40 text-ink'
                           : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
@@ -1263,7 +1278,7 @@ function ProjectAppSessions({ sessions, projectId, folded }: { sessions: Session
               data-testid={`app-session-row-${s.id}`}
               aria-current={focused ? 'page' : undefined}
               data-unread={(unread && !focused) || undefined}
-              className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} pr-14 text-left text-md transition-colors ${
+              className={`flex w-full items-center gap-2 border-l-2 py-1.5 ${ROW_PAD} ${ROW_MENU_PAD} text-left text-md transition-colors ${
                 focused
                   ? 'border-l-ink-muted bg-surface-hover/40 text-ink'
                   : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
@@ -1520,7 +1535,7 @@ function UserApps() {
   return (
     <section className="border-b border-line/70 py-2.5" data-testid="user-apps">
       {/* Its title stands in the column a project's name does (32px), so its apps are one step in from it like a project's rows */}
-      <header className="flex items-center gap-2 pl-8 pr-3">
+      <header className={`flex items-center gap-2 ${NAME_PAD} pr-3`}>
         <span className={`text-md font-medium tracking-tight ${apps.length ? 'text-ink' : 'text-ink-faint'}`}>Your apps</span>
         <span className="-my-1 flex items-center ml-auto shrink-0">
           <IconButton label="Import an app from a folder, a .zip, or a link" onClick={() => openImport()} testId="user-apps-import" align="right">

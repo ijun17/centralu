@@ -13,13 +13,13 @@ import { newSession, setup } from './project-screen.js'
  * keeps the folds. Sessions are therefore emitted with fixed ids, and a reload test emits them again.
  */
 
-export const PARENT = 'g-parent'
-export const KIDS = ['g-kid-1', 'g-kid-2']
+const PARENT = 'g-parent'
+const KIDS = ['g-kid-1', 'g-kid-2']
 const APP_SESSION = 'g-app-session'
 const APP_KID = 'g-app-kid'
 
 /** One session of the project, a parent with two children, and an app with a session and a child of it */
-export async function seed(page: Page): Promise<{ plain: string; projectId: string; appKey: string }> {
+async function seed(page: Page): Promise<{ plain: string; projectId: string; appKey: string }> {
   const plain = await newSession(page, 'alpha')
   const projectId = await page.evaluate(
     () => (Object.values((window as any).__store.getState().projects) as { id: string; name: string }[]).find((p) => p.name === 'alpha')!.id,
@@ -326,20 +326,33 @@ export function sidebarGroupTests(): void {
           expect(box.height, id).toBeGreaterThanOrEqual(24)
           const glyph = (await button.locator('svg').boundingBox())!
           expect(glyph.width, `${id} glyph`).toBeGreaterThanOrEqual(14)
-          // The whole button answers a press, down to its corners, not only the glyph
-          const corners: [number, number][] = [[2, 2], [box.width - 2, 2], [2, box.height - 2], [box.width - 2, box.height - 2]]
-          for (const [dx, dy] of corners) {
+          // The whole button answers a press, out to its edges, not only the glyph: the four corners and the edge midpoints,
+          // each 3px inside so a rounder corner does not count as a miss
+          const inset = 3
+          const probes: [number, number][] = [
+            [inset, inset],
+            [box.width - inset, inset],
+            [inset, box.height - inset],
+            [box.width - inset, box.height - inset],
+            [box.width / 2, inset],
+            [box.width / 2, box.height - inset],
+            [inset, box.height / 2],
+            [box.width - inset, box.height / 2],
+          ]
+          for (const [dx, dy] of probes) {
             const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('button')?.getAttribute('data-testid'), [box.x + dx, box.y + dy])
-            expect(hit, `${id} corner ${dx},${dy}`).toBe(id)
+            expect(hit, `${id} at ${dx},${dy}`).toBe(id)
           }
-          // The title it belongs to starts 6px or more after the glyph
-          const titleX = id === 'project-fold-alpha'
+          // What follows the glyph starts 6px or more after it: the project's name, or the tool mark / app icon of a row
+          // (a row's own name stands one gap further, 8px, after that mark)
+          const isProject = id === 'project-fold-alpha'
+          const nextX = isProject
             ? (await page.getByTestId('project-header-alpha').boundingBox())!.x
             : await page.evaluate((fold) => {
                 const li = document.querySelector(`[data-testid="${fold}"]`)!.closest('li')!
                 return li.querySelector('[data-testid^="tool-mark"], [data-testid^="app-row-"] > span')!.getBoundingClientRect().left
               }, id)
-          expect(titleX - (glyph.x + glyph.width), `${id} gap to its title`).toBeGreaterThanOrEqual(6)
+          expect(nextX - (glyph.x + glyph.width), `${id} gap to the ${isProject ? "project's name" : "row's mark"}`).toBeGreaterThanOrEqual(6)
         }
 
         // The deeper rows keep their steps with the bigger gutter, and nothing overflows or wraps
