@@ -62,7 +62,7 @@ claude는 인프로세스, codex는 stdio 다리.
 하나씩 워크트리 세션을 지켜보고, 새 세션을 제안하고(`propose_worktree_session`, 만드는 건 사람), 병합된 것을 엄격한
 관문 뒤에서 지우던(`delete_worktree_session`) 자리였다. 이제 세션이 직접 워크트리 에이전트를 띄우고(`start_agent`의
 `worktree`, §1.2.1), 다루고(`agent_session`), 병합되고 깨끗한 것을 같은 관문 뒤에서 `agent_session` `delete`로
-치운다(`cleanUpWorktreeChild`). 남은 것: 사람이 만드는 워크트리 세션(새 세션 창의 선택. 이제 매니저 밑이 아니라
+치운다(`sessions/worktree-sessions.ts`의 `cleanUpWorktreeChild`). 남은 것: 사람이 만드는 워크트리 세션(새 세션 창의 선택. 이제 매니저 밑이 아니라
 홀로 선다), 모든 워크트리 세션의 병합·PR 감지, 프로젝트의 줄기(`worktrees.setTrunk`, 프로젝트 메뉴의 "Worktree
 trunk", 예전 자리의 줄에 보관). 오케스트레이터에는 `propose_worktree_session`을 대신할 것을 주지 않는다: 사람의
 저장소에 가지와 폴더를 만드는 일은 이제 프로젝트 세션의 동의 카드를 거치고, 오케스트레이터는 `send_to_session`으로 그

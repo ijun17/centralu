@@ -68,7 +68,7 @@ new thread.
 a project's seat that watched its worktree sessions, proposed new ones (`propose_worktree_session`, which the person
 then created) and deleted a merged one behind a hard gate (`delete_worktree_session`). Now a session starts worktree
 agents itself (`start_agent` with `worktree`, §1.2.1), works with them (`agent_session`) and removes an idle child
-with `agent_session` `delete`, keeping local work with the session in the trash (#608, `cleanUpWorktreeChild`). What stayed: the person's own worktree
+with `agent_session` `delete`, keeping local work with the session in the trash (#608, `cleanUpWorktreeChild` in `sessions/worktree-sessions.ts`). What stayed: the person's own worktree
 sessions (the new-session window's option; they now stand alone instead of under a manager made for them), merge and
 pull-request detection on every worktree session, and the project's trunk (`worktrees.setTrunk`, kept in the former slot's row;
 the project menu's "Worktree trunk" entry was removed in #733, so the trunk is detected and used but no screen sets it) The orchestrator gets no replacement for `propose_worktree_session`:
