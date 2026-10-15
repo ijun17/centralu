@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PermissionPreset } from '@cc/protocol'
@@ -1123,27 +1123,40 @@ describe('starting another agent in the same project', () => {
           git(c.worktree!.path, 'add', '.')
           git(c.worktree!.path, 'commit', '-qm', 'work')
         }
+        const real = same(c.worktree!.path)
         rmSync(c.worktree!.path, { recursive: true, force: true })
-        return { s, c }
+        return { s, c, real }
       }
+      // git prints forward slashes and long names; the test's temp path may be a Windows 8.3 short name with backslashes
+      const same = (path: string) => {
+        const real = realpathSync.native(path).replace(/\\/g, '/')
+        return process.platform === 'win32' ? real.toLowerCase() : real
+      }
+      const listed = () =>
+        git(w.caller.path, 'worktree', 'list', '--porcelain')
+          .split('\n')
+          .filter((line) => line.startsWith('worktree '))
+          .map((line) => line.slice('worktree '.length).trim().replace(/\\/g, '/'))
+          .map((path) => (process.platform === 'win32' ? path.toLowerCase() : path))
       const branches = () => git(w.caller.path, 'branch', '--format=%(refname:short)').split('\n')
 
       it('trashes the session, prunes git\'s entry and keeps a branch with commits the trunk lacks', async () => {
-        const { s, c } = await startGone('feat/gone-ahead', true)
-        expect(git(w.caller.path, 'worktree', 'list', '--porcelain')).toContain(c.worktree!.path)
+        const { s, c, real } = await startGone('feat/gone-ahead', true)
+        expect(listed()).toContain(real)
         const r = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
         expect(r).toMatchObject({ ok: true, state: 'deleted', branch: 'feat/gone-ahead', note: expect.stringMatching(/already gone.*kept/) })
         expect(w.store.trashedSession(c.id)).not.toBeNull()
-        expect(git(w.caller.path, 'worktree', 'list', '--porcelain')).not.toContain(c.worktree!.path)
+        expect(listed()).not.toContain(real)
         expect(branches()).toContain('feat/gone-ahead')
       })
 
       it('removes a branch that holds nothing the trunk lacks', async () => {
-        const { s, c } = await startGone('feat/gone-merged', false)
+        const { s, c, real } = await startGone('feat/gone-merged', false)
+        expect(listed()).toContain(real)
         const r = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
         expect(r).toMatchObject({ ok: true, state: 'deleted', note: expect.stringContaining('already gone') })
         expect(w.store.trashedSession(c.id)).not.toBeNull()
-        expect(git(w.caller.path, 'worktree', 'list', '--porcelain')).not.toContain(c.worktree!.path)
+        expect(listed()).not.toContain(real)
         expect(branches()).not.toContain('feat/gone-merged')
       })
     })
