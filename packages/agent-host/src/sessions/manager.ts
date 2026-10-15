@@ -6541,7 +6541,10 @@ export class SessionManager {
   async askProject(callerId: string, opts: { project: string; session?: string; task?: string; ifBusy?: 'note' | 'queue' }, signal?: AbortSignal): Promise<AskProjectResult> {
     const refused = this.askGateError(callerId)
     if (refused) return { ok: false, error: refused }
-    const caller = this.meta.get(callerId)!
+    // The gate read both; read here once more, with no wait in between, so the caller's project is known for what follows
+    const caller = this.meta.get(callerId)
+    const callerProjectId = caller?.projectId
+    if (!caller || !callerProjectId) return { ok: false, error: 'This session belongs to no project, so it cannot ask another one' }
     const projects = this.store.listProjects()
     const wanted = opts.project.trim()
     /*
@@ -6583,7 +6586,7 @@ export class SessionManager {
     const remoteTarget = there.projects.find((p) => p.id === found[0]!.id)
     if (reader && remoteTarget) {
       const callerProject = projects.find((p) => p.id === caller.projectId)?.name ?? 'another project'
-      return this.askLinkedProject(callerId, caller.projectId, callerProject, remoteTarget, reader, opts, signal)
+      return this.askLinkedProject(callerId, callerProjectId, callerProject, remoteTarget, reader, opts, signal)
     }
     const target = projects.find((p) => p.id === found[0]!.id)!
     if (target.id === caller.projectId) return { ok: false, error: `${target.name} is this session's own project — do the work here.` }
@@ -6772,6 +6775,9 @@ export class SessionManager {
       },
       signal,
     )
+    // The card may have stood a while: what the ask rests on in the caller is read again, and its reason comes first
+    const after = this.askGateError(callerId)
+    if (after) return { ok: false, error: after }
     if (decision === 'deny') return { ok: false, error: `The person did not allow ${callerProject} to reach ${label} this way. Do not ask again unless they tell you to.` }
     if (decision === null) return { ok: false, error: `The question to the person was withdrawn before they answered, so ${label} was not reached.` }
     if (signal?.aborted) return { ok: false, error: 'The call was cancelled before delivery' }
@@ -6789,6 +6795,9 @@ export class SessionManager {
     }
     const taken = this.linkedAsks.get(chosen.id)
     if (taken && !taken.settled) return { ok: false, error: `The session "${chosen.name}" in ${label} was given another task while the question stood; nothing was sent. Name another session, or ask again later.` }
+    // Asking the machine again took a moment: the caller's gates once more, with no wait from here to the send
+    const late = this.askGateError(callerId)
+    if (late) return { ok: false, error: late }
 
     let settle!: LinkedAsk['settle']
     const outcome = new Promise<{ ok: true } | { ok: false; error: string }>((resolve) => (settle = resolve))

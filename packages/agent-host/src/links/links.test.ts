@@ -1300,6 +1300,27 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     expect(remote.store.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes("through Centralu's ask_project"))).toBe(false)
   })
 
+  it("withdraws the card when the caller's project loses trust, and sends nothing to the machine", async () => {
+    const { remote, hub, name, ask, card } = await rig()
+    const call = ask({ project: name, task: 'say hello' })
+    await until(() => !!card())
+    void hub.mgr.setProjectTrusted('p-hub', false)
+    expect(card()).toBeFalsy()
+    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
+    expect(remote.store.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
+  })
+
+  it('refuses an approval that comes after the trust it rested on is gone, and sends nothing to the machine', async () => {
+    const { remote, hub, name, ask, answer, card } = await rig()
+    const call = ask({ project: name, task: 'say hello' })
+    await until(() => !!card())
+    // Taken away at the store, so only the read after the answer can see it
+    hub.store.setProjectTrusted('p-hub', false)
+    await answer('allow')
+    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
+    expect(remote.store.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
+  })
+
   it('ends the wait with a sentence when the link drops after the task was sent, instead of "still working" for good', async () => {
     const { remote, name, ask, answer } = await rig()
     const first = ask({ project: name, task: 'please approve the command' })
