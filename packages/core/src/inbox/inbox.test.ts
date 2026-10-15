@@ -137,9 +137,10 @@ describe('stopped turns in the inbox (#698)', () => {
     expect(buildInbox([s('r', 'working', { waitingSince: null, interruption: r, lastSeq: 3, lastReadSeq: 3 })], NOW).map((i) => i.id)).toEqual(['r'])
   })
 
-  it('counts them with the errors, so the counters and the list agree', () => {
-    expect(countWaiting([s('quit', 'idle', { waitingSince: null, interruption: quit }), s('net', 'error', { interruption: { reason: 'network', at: NOW } })])).toEqual({
-      approval: 0, error: 2, input: 0,
-    })
+  it('counts them with the errors, as the list orders them, a turn its tool interrupted included', () => {
+    const interrupted = s('codex', 'waiting_input', { interruption: { reason: 'interrupted', at: NOW } })
+    const all = [s('quit', 'idle', { waitingSince: null, interruption: quit }), s('net', 'error', { interruption: { reason: 'network', at: NOW } }), interrupted]
+    expect(countWaiting(all)).toEqual({ approval: 0, error: 3, input: 0 })
+    expect(buildInbox([interrupted], NOW)[0]).toMatchObject({ urgency: 1 })
   })
 })

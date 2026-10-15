@@ -2782,7 +2782,7 @@ function InterruptedNote({ sessionId, interruption }: { sessionId: string; inter
   const send = useStore((s) => s.send)
   const why =
     interruption.reason === 'network' ? 'A network error ended the last turn before it finished.'
-    : interruption.reason === 'quit' ? 'Centralu quit while the last turn was running, so it did not finish.'
+    : interruption.reason === 'quit' ? 'Centralu quit or restarted while the last turn was running, so it did not finish.'
     : 'The agent tool interrupted the last turn before it finished.'
   return (
     <p

@@ -29,7 +29,7 @@ export function interruptionLabel(i: Interruption): string {
     case 'network':
       return 'Stopped: network'
     case 'quit':
-      return 'Stopped: Centralu quit'
+      return 'Stopped: Centralu quit or restarted'
     case 'interrupted':
       return 'Stopped: interrupted'
     case 'reconnecting':
@@ -40,8 +40,11 @@ export function interruptionLabel(i: Interruption): string {
 /** A stopped turn the person can continue with one message (#698); reconnecting goes on by itself */
 export const canContinue = (i: Interruption | null | undefined): i is Interruption => !!i && i.reason !== 'reconnecting'
 
-/** What Continue sends: short, and the agent still has its whole conversation */
-export const CONTINUE_TEXT = 'Continue where you stopped.'
+/**
+ * What Continue sends: short, since the agent still has its whole conversation. The second sentence is there because a
+ * turn cut short may have done part of a step already (a push, a comment) that its record does not show as finished.
+ */
+export const CONTINUE_TEXT = 'Continue where you stopped. Check what already happened before repeating a step.'
 
 export function StateDot({ state }: { state: SessionState }) {
   const s = SIGNAL[state]

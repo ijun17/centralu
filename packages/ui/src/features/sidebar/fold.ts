@@ -31,7 +31,7 @@ export function foldSummary(
     // Waiting states follow the inbox rule (#669): a read `waiting_input` session is not "waiting on me"
     if (s.state === 'waiting_input' && !isListedWaiting(s)) continue
     // A stopped turn the inbox lists counts with the errors, as the inbox's counters count it (#698)
-    const counted = s.interruption && (s.state === 'idle' || s.state === 'working') && isListedWaiting(s) ? 'error' : s.state
+    const counted = s.interruption && isListedWaiting(s) ? 'error' : s.state
     counts.set(counted, (counts.get(counted) ?? 0) + 1)
   }
   return FOLD_SUMMARY_STATES.flatMap((state) => {

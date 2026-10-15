@@ -58,7 +58,7 @@ export function interruptedSessionTests() {
           child,
         ),
       )
-      .toEqual(['Continue where you stopped.'])
+      .toEqual(['Continue where you stopped. Check what already happened before repeating a step.'])
     await expect(item(page, child)).toHaveCount(0)
     await expect(mark(page, child)).not.toHaveAttribute('data-interruption', /.+/)
   })
@@ -86,7 +86,7 @@ export function interruptedSessionTests() {
     ])
 
     await openInbox(page)
-    await expect(item(page, s)).toContainText('Stopped: Centralu quit')
+    await expect(item(page, s)).toContainText('Stopped: Centralu quit or restarted')
     await expect(page.getByTestId(`inbox-continue-${s}`)).toBeVisible()
     await page.getByTestId(`inbox-done-${s}`).click()
     await expect(item(page, s)).toHaveCount(0)

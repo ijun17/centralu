@@ -77,8 +77,8 @@ export function countWaiting(sessions: readonly InboxCandidate[]): WaitingCounts
   for (const s of sessions) {
     if (!isListedWaiting(s)) continue
     if (s.state === 'waiting_approval') c.approval++
-    // A stopped turn at rest, or a tool reconnecting for too long, counts with the errors (#698), as it is ordered
-    else if (s.state === 'error' || (s.interruption && (s.state === 'idle' || s.state === 'working'))) c.error++
+    // A stopped turn, or a tool reconnecting for too long, counts with the errors (#698), as `urgencyOf` orders it
+    else if (s.state === 'error' || s.interruption) c.error++
     else if (s.state === 'waiting_input') c.input++
   }
   return c
