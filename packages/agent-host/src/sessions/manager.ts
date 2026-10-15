@@ -1261,6 +1261,14 @@ export class SessionManager {
    * So deletion goes **leaves first**.
    */
   async deleteProject(projectId: string): Promise<void> {
+    // Cards and queued asks that reach into it or out of it end first, before any wait: none outlives the project
+    this.withdrawReaches(
+      (ask) => ask.detail.kind === 'project_access'
+        ? ask.detail.from.id === projectId || ask.detail.to.id === projectId
+        : ask.detail.kind === 'agent_start' && ask.detail.project.id === projectId,
+      (_r, from, to) => from === projectId || to === projectId,
+      'The project was removed from Centralu.',
+    )
     const mine = [...this.meta.values()].filter((s) => s.projectId === projectId)
     const leavesFirst = [...mine].sort(
       (a, b) => Number(!!b.parentSessionId) - Number(!!a.parentSessionId),
@@ -1302,6 +1310,12 @@ export class SessionManager {
           agentStartPersonText(rec.req, 'untrusted'),
         )
       }
+      // So do its sessions' cards to reach another project, a fork's card for a session in it, and its queued asks
+      this.withdrawReaches(
+        (ask) => ask.detail.kind === 'project_access' ? ask.detail.from.id === projectId : ask.detail.kind === 'agent_start' && ask.detail.project.id === projectId,
+        (_r, from) => from === projectId,
+        "The person stopped trusting the asking session's project.",
+      )
     }
     return this.refreshLaunchSettings(projectId, true)
   }
@@ -6389,6 +6403,11 @@ export class SessionManager {
       },
       signal,
     )
+    // Either project may have been removed while the card stood: nothing is remembered for a pair that no longer exists
+    const both = this.store.listProjects()
+    if (decision !== null && (!both.some((p) => p.id === fromId) || !both.some((p) => p.id === toProjectId))) {
+      return { ok: false, error: 'That project is no longer registered' }
+    }
     if (decision === 'always') {
       this.store.setProjectConsent(fromId, toProjectId, access)
       this.emit({ type: 'project_consents_changed' })
@@ -6443,10 +6462,20 @@ export class SessionManager {
     }))
   }
 
-  /** Revokes one remembered consent (#371) — the next reach asks again. A delegation already running is left to finish */
+  /**
+   * Revokes one remembered consent (#371) — the next reach asks again. A delegation already running is left to finish;
+   * an ask for the pair still queued is not delivered (`withdrawReaches`)
+   */
   revokeProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): void {
     if (!this.store.forgetProjectConsent(fromProjectId, toProjectId, kind)) return
     this.emit({ type: 'project_consents_changed' })
+    if (kind === 'delegate') {
+      this.withdrawReaches(
+        () => false,
+        (_r, from, to) => from === fromProjectId && to === toProjectId,
+        'The person revoked the consent for the asking project to ask this one.',
+      )
+    }
     // Apps attached under that "always" step back now (#371 part A): the sessions recount, and the app is gone from them
     if (kind === 'apps') this.appsHub?.rt.sharingChanged()
   }
@@ -6455,6 +6484,34 @@ export class SessionManager {
   private mayRead(sessionId: string, path: string, cwd: string): boolean {
     const grants = this.readGrants.get(sessionId)
     return !!grants && grants.size > 0 && underGrant(path, grants, cwd)
+  }
+
+  /**
+   * What ask_project rests on in the caller, read before its card, again once the person answered it, and again before a
+   * queued ask goes in (`drainQueue`): a card or a queue can outlast any of it.
+   */
+  private askGateError(callerId: string): string | null {
+    const caller = this.meta.get(callerId)
+    if (!caller?.projectId) return 'This session belongs to no project, so it cannot ask another one'
+    if ((caller.askedBy || [...this.delegations.values()].some((d) => d.sessionId === callerId && !d.agent && !d.settled)) && !this.autoBoundaryOpen(callerId, 'delegation depth')) {
+      // `askedBy` marks a child of start_agent too (#561): depth one for both reaches
+      return 'This session was itself started or asked by another session, so it cannot ask a project — say in your answer what is needed instead.'
+    }
+    /*
+     * Not from an untrusted project (owner decision 2026-10-11, #382), the rule attach_app already follows
+     * (`AppAccess.gate`): text in a repository the person has not trusted could be what is asking, and the consent card
+     * alone would then be the only thing between a planted instruction and another project's session.
+     */
+    if (this.store.listProjects().find((p) => p.id === caller.projectId)?.trusted !== true && !this.autoBoundaryOpen(callerId, 'delegate from an untrusted project')) {
+      return "This session's project is not trusted, so it cannot ask another project — the person can trust it from the project menu."
+    }
+    return null
+  }
+
+  /** The project asked is still registered: the person may remove it while its card stands */
+  private projectGoneError(target: { id: string; name: string }): string | null {
+    if (this.store.listProjects().some((p) => p.id === target.id)) return null
+    return `${target.name} was removed from Centralu, so it was not reached.`
   }
 
   /**
@@ -6475,21 +6532,10 @@ export class SessionManager {
    * stop an assigned idle target only while waiting; a task that joined the person's turn only ends the wait.
    */
   async askProject(callerId: string, opts: { project: string; session?: string; task?: string; ifBusy?: 'note' | 'queue' }, signal?: AbortSignal): Promise<AskProjectResult> {
-    const caller = this.meta.get(callerId)
-    if (!caller?.projectId) return { ok: false, error: 'This session belongs to no project, so it cannot ask another one' }
-    if ((caller.askedBy || [...this.delegations.values()].some((d) => d.sessionId === callerId && !d.agent && !d.settled)) && !this.autoBoundaryOpen(callerId, 'delegation depth')) {
-      // `askedBy` marks a child of start_agent too (#561): depth one for both reaches
-      return { ok: false, error: 'This session was itself started or asked by another session, so it cannot ask a project — say in your answer what is needed instead.' }
-    }
+    const refused = this.askGateError(callerId)
+    if (refused) return { ok: false, error: refused }
+    const caller = this.meta.get(callerId)!
     const projects = this.store.listProjects()
-    /*
-     * Not from an untrusted project (owner decision 2026-10-11, #382), the rule attach_app already follows
-     * (`AppAccess.gate`): text in a repository the person has not trusted could be what is asking, and the consent card
-     * alone would then be the only thing between a planted instruction and another project's session.
-     */
-    if (projects.find((p) => p.id === caller.projectId)?.trusted !== true && !this.autoBoundaryOpen(callerId, 'delegate from an untrusted project')) {
-      return { ok: false, error: "This session's project is not trusted, so it cannot ask another project — the person can trust it from the project menu." }
-    }
     const wanted = opts.project.trim()
     /*
      * The projects on linked machines count too (#700): a unique bare name works, `<machine>/<name>` or a qualified id
@@ -6596,6 +6642,9 @@ export class SessionManager {
     const consent = await this.ensureProjectAccess(callerId, target.id, 'delegate', {
       text: taskLine(opts.task), session: { id: chosen.id, name: chosen.name },
     }, signal)
+    // The card may have stood a while: what the ask rests on is read again, and its reason comes before the card's
+    const after = this.askGateError(callerId) ?? this.projectGoneError(target)
+    if (after) return { ok: false, error: after }
     if (!consent.ok) return consent
     // Consent can wait while the person deletes or starts work in the chosen session.
     const changed = available()
@@ -7218,17 +7267,9 @@ export class SessionManager {
     const { tool, model, effort, unchecked } = choice
     const worktree = choice.worktreeBranch ? { branch: choice.worktreeBranch } : null
     // The card may have stood a while: counted again, and the place taken now
-    const fullNow = this.agentCeilingError(callerId, project.id)
-    if (fullNow) return done({ ok: false, error: fullNow })
-    this.agentStartReserved.set(project.id, (this.agentStartReserved.get(project.id) ?? 0) + 1)
-    let reserved = true
-    const release = () => {
-      if (!reserved) return
-      reserved = false
-      const left = (this.agentStartReserved.get(project.id) ?? 1) - 1
-      if (left > 0) this.agentStartReserved.set(project.id, left)
-      else this.agentStartReserved.delete(project.id)
-    }
+    const place = this.reservePlace(callerId, project.id)
+    if ('error' in place) return done({ ok: false, error: place.error })
+    const { release } = place
     try {
       return await this.createReservedChild(
         callerId,
@@ -7241,6 +7282,27 @@ export class SessionManager {
       )
     } finally {
       release()
+    }
+  }
+
+  /**
+   * A place under the per-project ceiling, checked and taken in one synchronous step (`agentStartReserved`), for a start
+   * (`createAgentChild`) or a fork (`forkFor`) that waits on something before its delegation counts the child.
+   * `release` once the delegation counts it, or when the start fails; a second call does nothing.
+   */
+  private reservePlace(callerId: string, projectId: string): { release: () => void } | { error: string } {
+    const full = this.agentCeilingError(callerId, projectId)
+    if (full) return { error: full }
+    this.agentStartReserved.set(projectId, (this.agentStartReserved.get(projectId) ?? 0) + 1)
+    let reserved = true
+    return {
+      release: () => {
+        if (!reserved) return
+        reserved = false
+        const left = (this.agentStartReserved.get(projectId) ?? 1) - 1
+        if (left > 0) this.agentStartReserved.set(projectId, left)
+        else this.agentStartReserved.delete(projectId)
+      },
     }
   }
 
@@ -7912,14 +7974,7 @@ export class SessionManager {
     const rec = this.agentStarts.get(requestId)
     if (!rec || rec.ended) return
     this.endAgentStart(requestId, { error, person })
-    const ask = this.hostAsks.get(requestId)
-    if (!ask) return
-    this.hostAsks.delete(requestId)
-    if (this.meta.get(ask.sessionId)?.pendingApproval?.requestId === requestId) {
-      this.restAfterCard(ask)
-      this.onEvent({ type: 'approval_resolved', sessionId: ask.sessionId, requestId, decision: 'deny' })
-    }
-    ask.resolve(null)
+    this.withdrawHostAsk(requestId)
   }
 
   /**
@@ -8464,15 +8519,21 @@ export class SessionManager {
    * trust and the per-project ceiling here; the person's consent when the fork is made (`ensureAgentConsent`).
    */
   private forkGateError(callerId: string, target: SessionInfo): string | null {
+    return this.forkTrustError(callerId, target) ?? this.agentCeilingError(callerId, target.projectId ?? '')
+  }
+
+  /** `forkGateError` without the ceiling: read before the card and again once it is answered (`forkFor`) */
+  private forkTrustError(callerId: string, target: SessionInfo): string | null {
     const caller = this.meta.get(callerId)
     if (!caller) return 'the requesting session is gone'
+    if (!this.meta.has(target.id)) return 'it is no longer here'
     if (this.agentDepthBlocked(caller) && !this.autoBoundaryOpen(callerId)) {
       return 'this session was itself started or asked by another session, so it cannot start a sub-session'
     }
     const project = this.store.listProjects().find((p) => p.id === target.projectId)
     if (!project) return 'its project is no longer registered'
     if (project.trusted !== true && !this.autoBoundaryOpen(callerId)) return "its project is not trusted (the person can trust it from the project menu)"
-    return this.agentCeilingError(callerId, project.id)
+    return null
   }
 
   /** Holds a request for a busy session until its turn ends (#677); the handle and the place in its queue */
@@ -8528,6 +8589,13 @@ export class SessionManager {
       this.dropQueued((x) => x.id === r.id)
       return this.scheduleDrain(sessionId)
     }
+    // It may have waited hours, or a host swap: the request tool's gates are read again before it goes in
+    const refused = this.queuedGateError(r, caller, m)
+    if (refused) {
+      this.dropQueued((x) => x.id === r.id)
+      void this.tellQueuedFailed(caller.id, sessionId, refused)
+      return this.scheduleDrain(sessionId)
+    }
     // Reserved before the first await: the session is busy from here, and this is the only drain for it
     this.delivering.set(sessionId, r.id)
     this.store.markQueuedDelivering(r.id, Date.now())
@@ -8561,6 +8629,58 @@ export class SessionManager {
       void this.tellQueuedFailed(caller.id, sessionId, (e as Error).message)
       this.scheduleDrain(sessionId)
     }
+  }
+
+  /**
+   * What the tool that queued a request checked before queuing it, read again at delivery: ask_project's gates on the
+   * caller and its target still registered; agent_session's preset rule (never work for a session now above the caller).
+   * The pair's consent is not read here: one given once covers the request, and revoking it drops the queue
+   * (`withdrawReaches`). send_to_session queues behind the orchestrator's scope, which no card stands for.
+   */
+  private queuedGateError(r: QueuedRequest, caller: SessionInfo, target: SessionInfo): string | null {
+    if (r.via === 'ask_project') {
+      const project = this.store.listProjects().find((p) => p.id === target.projectId)
+      return this.askGateError(caller.id) ?? (project ? null : 'The project asked was removed from Centralu.')
+    }
+    if (r.via === 'agent_session' && !presetWithin(target.permissionPreset, caller.permissionPreset)) {
+      return `"${target.name}" now has more permissions (${target.permissionPreset}) than the session that queued the request (${caller.permissionPreset}).`
+    }
+    return null
+  }
+
+  /**
+   * Withdraws what rests on a project's trust, on a pair's consent, or on the project itself, when the person takes it
+   * away: the cards a session raised to reach another project (`project_access`) or to fork (start_agent cards with no
+   * request of their own, `forkFor`), and the ask_project requests still queued. A call waiting on a card reads the gate
+   * that now refuses it; a queued request's caller is told, as for one that could not be delivered.
+   */
+  private withdrawReaches(
+    cards: (ask: HostAsk) => boolean,
+    queued: (r: QueuedRequest, callerProjectId: string | null | undefined, targetProjectId: string | null | undefined) => boolean,
+    why: string,
+  ): void {
+    for (const ask of [...this.hostAsks.values()]) {
+      const reach = ask.detail.kind === 'project_access' || (ask.detail.kind === 'agent_start' && !this.agentStarts.has(ask.requestId))
+      if (reach && cards(ask)) this.withdrawHostAsk(ask.requestId)
+    }
+    const dropped = this.dropQueued((r) =>
+      r.via === 'ask_project' &&
+      this.delivering.get(r.sessionId) !== r.id &&
+      queued(r, this.meta.get(r.callerSessionId)?.projectId, this.meta.get(r.sessionId)?.projectId),
+    )
+    for (const r of dropped) void this.tellQueuedFailed(r.callerSessionId, r.sessionId, why)
+  }
+
+  /** A card the host raised closes unanswered: out of the session's slot, and whatever waits on it hears no answer */
+  private withdrawHostAsk(requestId: string): void {
+    const ask = this.hostAsks.get(requestId)
+    if (!ask) return
+    this.hostAsks.delete(requestId)
+    if (this.meta.get(ask.sessionId)?.pendingApproval?.requestId === requestId) {
+      this.restAfterCard(ask)
+      this.onEvent({ type: 'approval_resolved', sessionId: ask.sessionId, requestId, decision: 'deny' })
+    }
+    ask.resolve(null)
   }
 
   /** The session's turn started while a queued request was being delivered to it: that request is delivered (#684 review) */
@@ -8635,56 +8755,68 @@ export class SessionManager {
       },
       signal,
     )
+    // The card may have stood a while: the gates are read again, and their reason comes before the card's
+    const refused = this.forkTrustError(callerId, target)
+    if (refused) return { ok: false, error: `No fork of "${target.name}": ${refused}.` }
     if (!consent.ok) return consent
-    const full = this.agentCeilingError(callerId, project.id)
-    if (full) return { ok: false, error: full }
-    /*
-     * Memory (#686): no room for another agent now. The request is queued for the busy session instead (#677's queue,
-     * `enqueue`), which starts no process: it goes in as a new turn there when the running one ends. Queued, not refused
-     * (owner decision 2026-10-15); the requester reads that it was queued instead of forked, and why.
-     */
-    const short = await this.memoryShort()
-    if (short) {
-      const low = this.lowMemory(short)
-      const queued = this.enqueue(callerId, target, via, text)
-      return { ok: true, queued: { ...queued, lowMemory: `${low.available} free, ${low.floor} needed for a fork` } }
-    }
-    let forked: string
+    // Never above either preset as they are now, nor above the one the card showed
+    const now = lowest(preset, this.meta.get(callerId)!.permissionPreset, this.meta.get(target.id)!.permissionPreset)
+    // Counted and the place taken before the first wait, as for start_agent's child
+    const place = this.reservePlace(callerId, project.id)
+    if ('error' in place) return { ok: false, error: place.error }
     try {
-      forked = await adapter.forkConversation!(target.externalId ?? target.importedFrom!, this.cwdFor(target))
-    } catch (e) {
-      return { ok: false, error: `Could not copy "${target.name}"'s conversation: ${(e as Error).message}` }
+      /*
+       * Memory (#686): no room for another agent now. The request is queued for the busy session instead (#677's queue,
+       * `enqueue`), which starts no process: it goes in as a new turn there when the running one ends. Queued, not refused
+       * (owner decision 2026-10-15); the requester reads that it was queued instead of forked, and why.
+       */
+      const short = await this.memoryShort()
+      if (short) {
+        const low = this.lowMemory(short)
+        const queued = this.enqueue(callerId, target, via, text)
+        return { ok: true, queued: { ...queued, lowMemory: `${low.available} free, ${low.floor} needed for a fork` } }
+      }
+      let forked: string
+      try {
+        forked = await adapter.forkConversation!(target.externalId ?? target.importedFrom!, this.cwdFor(target))
+      } catch (e) {
+        return { ok: false, error: `Could not copy "${target.name}"'s conversation: ${(e as Error).message}` }
+      }
+      let child: SessionInfo
+      try {
+        child = await this.createSession({
+          projectId: project.id,
+          cwd: readOnly ? this.cwdFor(target) : project.path,
+          tool: target.tool,
+          ...(target.model ? { model: target.model } : {}),
+          ...(target.effort ? { effort: target.effort } : {}),
+          permissionPreset: now,
+          // A same-project ordinary session owns it as its agent; the orchestrator, which has no project, through the delegation alone
+          ...(caller.projectId === project.id ? { askedBy: callerId } : {}),
+          forkedFrom: target.id,
+          resumeExternalId: forked,
+          importHistory: true,
+          ...(worktree ? { worktree: true, worktreeBranch: worktree.branch, ...(target.worktree ? { worktreeBase: target.worktree.branch } : {}) } : {}),
+        })
+      } catch (e) {
+        return { ok: false, error: `Could not start the fork of "${target.name}": ${(e as Error).message}` }
+      }
+      if (!worktree) this.rename(child.id, `Fork of ${target.name}`.slice(0, 48))
+      const key = `${callerId}>${child.id}`
+      const d = this.startDelegation(key, callerId, child.id, { id: project.id, name: project.name, path: child.worktree?.path ?? this.cwdFor(child) }, true)
+      // The delegation counts the fork now
+      place.release()
+      try {
+        await this.deliver(child.id, agentFrame(labelOf(this.store, caller), text), undefined, { sessionId: callerId, name: labelOf(this.store, caller) }, false)
+      } catch (e) {
+        d.wait.fail(e as Error)
+        this.delegations.delete(key)
+        return { ok: false, error: `The fork "${child.name}" [${child.id}] was made but did not take the request: ${(e as Error).message}` }
+      }
+      return { ok: true, key, d, fork: child }
+    } finally {
+      place.release()
     }
-    let child: SessionInfo
-    try {
-      child = await this.createSession({
-        projectId: project.id,
-        cwd: readOnly ? this.cwdFor(target) : project.path,
-        tool: target.tool,
-        ...(target.model ? { model: target.model } : {}),
-        ...(target.effort ? { effort: target.effort } : {}),
-        permissionPreset: preset,
-        // A same-project ordinary session owns it as its agent; the orchestrator, which has no project, through the delegation alone
-        ...(caller.projectId === project.id ? { askedBy: callerId } : {}),
-        forkedFrom: target.id,
-        resumeExternalId: forked,
-        importHistory: true,
-        ...(worktree ? { worktree: true, worktreeBranch: worktree.branch, ...(target.worktree ? { worktreeBase: target.worktree.branch } : {}) } : {}),
-      })
-    } catch (e) {
-      return { ok: false, error: `Could not start the fork of "${target.name}": ${(e as Error).message}` }
-    }
-    if (!worktree) this.rename(child.id, `Fork of ${target.name}`.slice(0, 48))
-    const key = `${callerId}>${child.id}`
-    const d = this.startDelegation(key, callerId, child.id, { id: project.id, name: project.name, path: child.worktree?.path ?? this.cwdFor(child) }, true)
-    try {
-      await this.deliver(child.id, agentFrame(labelOf(this.store, caller), text), undefined, { sessionId: callerId, name: labelOf(this.store, caller) }, false)
-    } catch (e) {
-      d.wait.fail(e as Error)
-      this.delegations.delete(key)
-      return { ok: false, error: `The fork "${child.name}" [${child.id}] was made but did not take the request: ${(e as Error).message}` }
-    }
-    return { ok: true, key, d, fork: child }
   }
 
   /** A child with nothing of the caller's running: its last final answer (#561) */

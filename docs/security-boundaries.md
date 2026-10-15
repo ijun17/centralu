@@ -55,8 +55,9 @@ boundaries (#603), with a log line instead of a card or refusal:
   cannot carry it onto another card. The link ends with the turn, so the person's later turns stay theirs.
 - **Requests to a busy session** (#677): a turn that is not the requester's is never joined without the requester
   choosing it. A note into it needs the requester's own `auto` (#606); a queue waits for the turn to end and is
-  then the requester's turn; a fork starts an agent, so it takes start_agent's gates (depth, trust, ceiling, the
-  consent card), runs at the lower of the two presets, and gets a worktree of its own unless it is read-only work,
+  then the requester's turn, whose tool's gates are read again when it goes in; a fork starts an agent, so it takes
+  start_agent's gates (depth, trust, ceiling, the consent card, with the gates read again once the card is answered
+  and a place under the ceiling taken before the fork is made), runs at the lower of the two presets, and gets a worktree of its own unless it is read-only work,
   which shares the folder under at most `safe`, so two agents never write one folder.
 - **A ceiling**: Settings → Orchestrator → Running agents per project (`prefs.agentCeiling`).
   Empty uses the preset default: no ceiling under `auto`, 4 otherwise (`AGENT_CEILING`); zero
@@ -158,7 +159,8 @@ and `normal` it has these controls ([agent-host.md](agent-host.md) §1.2):
   project *can* be asked, and the card says so ("Let X ask Y (not trusted) to …", and a line on what
   that means): the selected session there reads none of its settings or instruction files and runs none
   of its apps, but works on its files under the person's own permission settings. A remembered
-  "always" for the pair still skips the card, also after the target loses trust.
+  "always" for the pair still skips the card, also after the target loses trust. Trust and depth are read
+  again once the card is answered, and again before a queued ask goes in.
 - **Existing sessions only** (#614). Selection by name or id is confined to ordinary sessions in the
   named target project. Without a selector, exactly one is required; ambiguity lists names, states
   and last activity, and no session refuses until the person opens one. Builders, app agents and
@@ -350,7 +352,7 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `agent_session` delete without a worktree, a session the caller did not start | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (#637): requires `askedBy` or `parentSessionId` equal to the caller in the same project. An owned child is moved to the sidebar trash; mid-turn deletion requires the caller's own unsettled delegation and otherwise protects the person's turn/cards. |
 | `agent_session` delete, an idle worktree child with uncommitted changes or commits absent from the trunk | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `cleanUpWorktreeChild` (#608): the parent decides; patches and bundles follow the session into the trash before the worktree and branch are removed. Working children are refused; an idle process must be disposed successfully first. |
 | A request (`agent_session` send, `ask_project`, `send_to_session`) to a session busy with a turn that is not the caller's, `ifBusy` `note` (#677) | refused | refused | refused | open | refused | refused | refused | open | `busyChoices`: the caller's own preset; a target CLI that takes mid-turn input; never into another caller's `ask_project` task. Without `ifBusy` the choices come back and nothing is sent |
-| The same, `ifBusy` `queue` | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `enqueue` / `drainQueue`: behind the request tool's own gates (ownership, the project-pair consent); delivered as the caller's new turn when the running one ends |
+| The same, `ifBusy` `queue` | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `enqueue` / `drainQueue`: behind the request tool's own gates (ownership, the project-pair consent), read again at delivery (`queuedGateError`); delivered as the caller's new turn when the running one ends |
 | The same, `ifBusy` `fork` / `fork_read` (not `ask_project`) | asks (start_agent's consent card) | asks | asks | open | asks | asks | asks | open | `forkFor`, `forkGateError`: start_agent's depth, trust and ceiling; the lower of the two presets, `fork_read` at most `safe`; `fork` in a worktree of its own |
 | `agent_session` answer / `answer_question`, a question in a turn the caller gave (#676) | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `answerRoutedCard`: only while the caller owns the session's running turn (`turnOwners`) and the card stands; the person may answer first |
 | `agent_session` answer / `answer_question`, an approval in a turn the caller gave (#676), target `normal` or `auto` | refused | refused | refused | open | refused | refused | refused | open | `answersApproval`: the caller's own preset at the answer; never an app agent or a host-raised card; allow or deny, never always |
@@ -422,9 +424,9 @@ downgrade. The session-tools switch and app-sharing switch still apply to every 
 | Change | orchestrator | scoped | builder | reader |
 |---|---|---|---|---|
 | "Let sessions look at their own project" off | — | — | — | Becomes none. Calls refused at once (`readerToolsFor`; the bridge through `toolProfileOf`); apps it attached leave at once (`onDemand.allowed` in `useExternalApps`, recounted by `setUiPreferences`). Ones allowed "once" are forgotten (`AppAccess.dropOnce`); the rest come back if it is turned on again (#382); the schemas leave Claude at the next start |
-| Its project loses trust | No change (reads no project files) | No change (reads no project files) | Its app stops, so `check` cannot start it | Settings files at the next start; its project's apps stop and leave at once; `find_apps` and `attach_app` refused; apps it attached leave at once. `ask_project` and `start_agent` refused (#382, #561); its standing `start_agent` cards are withdrawn and their callers told (#673) |
+| Its project loses trust | No change (reads no project files) | No change (reads no project files) | Its app stops, so `check` cannot start it | Settings files at the next start; its project's apps stop and leave at once; `find_apps` and `attach_app` refused; apps it attached leave at once. `ask_project` and `start_agent` refused (#382, #561); its standing `start_agent` cards, its sessions' `ask_project` and fork cards, and its queued `ask_project` requests are withdrawn and their callers told (#673) |
 | The other project loses trust | — | — | — | Apps attached from it leave at once; `ask_project` to it still runs, its card says it is not trusted, and the existing target session follows its trust |
-| The person revokes a pair in Settings | — | — | — | Apps attached under "always" leave at once; the next `ask_project` or `attach_app` asks again; for a project's `agents` row, the next `start_agent` of a `safe` session asks again (a child already running is left to finish; a `normal` session needs no row in a trusted project, #673) |
+| The person revokes a pair in Settings | — | — | — | Apps attached under "always" leave at once; the next `ask_project` or `attach_app` asks again, and an `ask_project` request for the pair still queued is withdrawn; for a project's `agents` row, the next `start_agent` of a `safe` session asks again (a child already running is left to finish; a `normal` session needs no row in a trusted project, #673) |
 | Sharing of an app turned off | — | — | — | Leaves every session that attached it |
 
 ## Tool output in the store

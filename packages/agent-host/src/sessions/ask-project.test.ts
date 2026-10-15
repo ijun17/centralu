@@ -594,4 +594,49 @@ describe('asking another project', () => {
     handleOf(d)!.answer('done')
     await p
   })
+
+  describe('what an ask rests on, read again once its card is answered', () => {
+    it("withdraws the card when the caller's project loses trust: nothing is delivered, and the call reads why", async () => {
+      const s = await w.callerSession()
+      const p = w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
+      await w.until(() => !!w.card(s))
+      void w.mgr.setProjectTrusted(w.caller.id, false)
+      expect(w.card(s)).toBeUndefined()
+      expect(await p).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
+      expect(handleOf(targetSession)!.sent).toEqual([])
+    })
+
+    it('refuses an approval that comes after the trust it rested on is gone', async () => {
+      const s = await w.callerSession()
+      const p = w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
+      await w.until(() => !!w.card(s))
+      // Trust taken away at the store, so only the read after the answer can see it
+      w.store.setProjectTrusted(w.caller.id, false)
+      w.mgr.respondApproval(s, w.card(s)!.requestId, 'allow')
+      expect(await p).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
+      expect(handleOf(targetSession)!.sent).toEqual([])
+    })
+
+    it('withdraws the card when the asked project is removed, and the call reads a clean refusal', async () => {
+      const s = await w.callerSession()
+      const p = w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
+      await w.until(() => !!w.card(s))
+      const removing = w.mgr.deleteProject(w.target.id)
+      expect(w.card(s)).toBeUndefined()
+      await removing
+      expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('was not reached') })
+      expect(w.store.listProjectConsents()).toEqual([])
+    })
+
+    it('remembers nothing for a pair whose project was removed while "always" was being answered', async () => {
+      const s = await w.callerSession()
+      const p = w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
+      await w.until(() => !!w.card(s))
+      // Removed at the store, so the card is still up when the person answers it
+      w.store.deleteProject(w.target.id)
+      w.mgr.respondApproval(s, w.card(s)!.requestId, 'always')
+      expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('removed') })
+      expect(w.store.listProjectConsents()).toEqual([])
+    })
+  })
 })
