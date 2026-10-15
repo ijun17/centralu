@@ -50,7 +50,8 @@ export function useChatScroll({
   virtualizer,
   stickToBottom,
   searchTarget,
-  sticky,
+  syncSticky,
+  scheduleStickyOverlap,
   pending,
   working,
   bottomPad,
@@ -62,7 +63,8 @@ export function useChatScroll({
   /** ChatStream's copy of "was I at the bottom" (see its comment there); the virtualizer reads it too */
   stickToBottom: RefObject<boolean>
   searchTarget: { seq: number; at: number } | null
-  sticky: StickyUserState
+  syncSticky: StickyUserState['syncSticky']
+  scheduleStickyOverlap: StickyUserState['scheduleStickyOverlap']
   pending: SessionSummary['pendingApproval']
   working: boolean
   bottomPad: number | undefined
@@ -72,7 +74,6 @@ export function useChatScroll({
   // not a pixel, to survive re-measurement
   const setScrollAnchor = useStore((s) => s.setScrollAnchor)
   const clearSearchTarget = useStore((s) => s.clearSearchTarget)
-  const { syncSticky, scheduleStickyOverlap } = sticky
 
   /**
    * The last scroll position this component is aware of — while following, the highest one
@@ -343,7 +344,7 @@ export function useChatScroll({
    * newest.
    *
    * It ends early two ways: the reader touches the conversation (`endLanding` on the
-   * scroller below), or something drags the view up and away from the end. Both are needed.
+   * scroller in ChatStream.tsx), or something drags the view up and away from the end. Both are needed.
    * The first catches the wheel before any number has moved; the second catches everything
    * that scrolls without a gesture to announce it.
    */

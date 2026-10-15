@@ -151,7 +151,8 @@ export function ChatStream({
     virtualizer,
     stickToBottom,
     searchTarget,
-    sticky,
+    syncSticky: sticky.syncSticky,
+    scheduleStickyOverlap: sticky.scheduleStickyOverlap,
     pending,
     working,
     bottomPad,
@@ -165,7 +166,7 @@ export function ChatStream({
         The moment a person touches the conversation, "settling at the bottom" ends right there
         (#31). The same touch is what lets the follow effect read a drop as theirs — a wheel only
         when it turns upward, a pointer (the scrollbar) or a finger for as long as it is held;
-        keys are watched on the window, above.
+        keys are watched on the window, in useChatScroll.ts.
       */
       onWheel={(e) => {
         endLanding()
@@ -183,7 +184,7 @@ export function ChatStream({
       /* min-h-0: even with overflow-y-auto set, this would stretch itself if it could not shrink */
       /*
        * invisible (visibility:hidden) is only for while it settles into position (see the
-       * comment above #61). Measuring has to keep happening, so this hides only the picture,
+       * `settling` comment in useChatScroll.ts, #61). Measuring has to keep happening, so this hides only the picture,
        * not the layout.
        */
       className={`min-h-0 flex-1 overflow-y-auto px-4 pt-4 text-md leading-body ${
