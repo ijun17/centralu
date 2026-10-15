@@ -190,20 +190,18 @@ export function sidebarGroupTests(): void {
 
         // A drop line sits on its own row's band, not out in the gutter or across the level above
         for (const id of [plain, KIDS[0]]) {
-          const line = await page.getByTestId(`session-row-${id}`).locator('xpath=ancestor::li[1]').evaluate((li) => {
+          const li = page.getByTestId(`session-row-${id}`).locator('xpath=ancestor::li[1]')
+          await li.evaluate((el) => {
             const dt = new DataTransfer()
             dt.setData('application/x-cc-session', 'someone-else')
-            const r = li.getBoundingClientRect()
-            li.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 5, clientY: r.top + 2 }))
-            return new Promise<{ left: number; width: number; band: number; bandWidth: number }>((resolve) =>
-              requestAnimationFrame(() => {
-                const cs = getComputedStyle(li, '::after')
-                resolve({ left: li.getBoundingClientRect().left, width: parseFloat(cs.width), band: r.left, bandWidth: r.width })
-              }),
-            )
+            const r = el.getBoundingClientRect()
+            el.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 5, clientY: r.top + 2 }))
           })
-          expect(line.width).toBeCloseTo(line.bandWidth, 0)
-          expect(line.left).toBeCloseTo(line.band, 0)
+          // The line is the row's ::after, drawn once React has the edge; its width is "auto" (not a number) until then
+          await expect
+            .poll(() => li.evaluate((el) => parseFloat(getComputedStyle(el, '::after').width) - el.getBoundingClientRect().width))
+            .toBeCloseTo(0, 0)
+          await li.evaluate((el) => el.dispatchEvent(new DragEvent('dragleave', { bubbles: true })))
         }
       })
     }
