@@ -79,8 +79,23 @@ export type RecallHit = {
   machine?: string
 }
 
+/** Why a machine that is not connected cannot be asked, in the words every tool uses for it */
+export const NOT_REACHABLE = 'not reachable right now'
+
 /** A project on a linked machine, as the hub's orchestrator names it (#82 phase 4) */
-export type LinkedProject = { id: string; name: string; path: string; defaultTool: ToolName | null; machine: string }
+export type LinkedProject = {
+  id: string
+  name: string
+  path: string
+  defaultTool: ToolName | null
+  /** The machine's name as the person gave it, and its id (what a qualified project name starts with) */
+  machine: string
+  machineId: string
+  /** Whether the person trusts the project on that machine (#382). Not said by a machine that predates it */
+  trusted: boolean
+  /** Set when the machine cannot be asked just now: why. The project is then what the headers mirror last held */
+  away?: string
+}
 
 /** Failed with a sentence the model reads, or done */
 type Outcome<T = object> = ({ ok: true } & T) | { ok: false; error: string }
@@ -100,6 +115,14 @@ export type LinkedSessions = {
   ): Promise<Outcome<{ info: SessionInfo & { applied?: string } }>>
   /** The reachable machines' projects whose name or qualified id is `ref` */
   findProjects(ref: string): Promise<LinkedProject[]>
+  /**
+   * Every linked machine's projects (ask_project, #700). A machine that cannot be asked contributes what the headers
+   * mirror last held, each project marked `away` with why, and is named in `away` whether or not the mirror held
+   * anything: a project there is reported as unreachable, never as missing
+   */
+  projects(): Promise<{ projects: LinkedProject[]; away: { machine: string; machineId: string; why: string }[] }>
+  /** A machine project's ordinary sessions (its workers, not an app's) as that machine reports them now; ids qualified */
+  projectSessions(project: LinkedProject): Promise<Outcome<{ sessions: { id: string; name: string; state: string }[] }>>
   /** A new session in a machine's project, under `normal`, named if a name is given */
   createSession(project: LinkedProject, opts: { tool?: ToolName; name?: string }): Promise<Outcome<{ sessionId: string; name: string }>>
   /** A linked machine by its id or the name the person gave it, case aside */

@@ -658,6 +658,12 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
        * follows that trust. Absent from a host that predates it, read as not saying.
        */
       trusted: z.boolean().optional(),
+      /**
+       * The linked machine the target project is on (#700), by the name the person gave it. Absent: a project on this
+       * computer. A card that names a machine has no "always": the consent is for this call only (nothing is
+       * remembered for a project of another machine).
+       */
+      machine: z.string().optional(),
     }),
     /** One line for a person to read: what the caller wants done there (the task, cut short; or the app's use) */
     text: z.string(),

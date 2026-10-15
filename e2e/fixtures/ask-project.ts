@@ -85,6 +85,35 @@ export function askProjectTests(): void {
       await expect(card.getByTestId('approval-untrusted')).toHaveCount(0)
     })
 
+    // #700: a project on a linked machine is named with its machine, and nothing is remembered for it
+    test('a card for a project on a linked machine names the machine and has no "always"', async ({ page }) => {
+      const { caller, consumer } = await start(page)
+      await emit(page, caller, { type: 'state_change', state: 'working' })
+      await emit(page, caller, {
+        type: 'approval_request',
+        requestId: 'xp-m',
+        detail: {
+          kind: 'project_access',
+          access: 'delegate',
+          from: { id: consumer, name: 'consumer' },
+          to: { id: 'ijun1.p-cc', name: 'cc', machine: 'Windows PC', trusted: true },
+          session: { id: 'ijun1.w1', name: 'Sprites' },
+          text: 'export the sprites',
+        },
+      })
+      const card = page.locator('[data-testid="approval-card"][data-kind="project_access"]')
+      await expect(card.getByTestId('approval-detail')).toHaveText('Let consumer ask cc on Windows PC / Sprites to export the sprites?')
+      await expect(card.getByTestId('approve-always')).toHaveCount(0)
+      await expect(card).toContainText('Nothing is remembered for a project on another machine')
+      // The letter that answers "always" does nothing on this card
+      await page.keyboard.press('a')
+      await expect(card).toBeVisible()
+      await page.keyboard.press('y')
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__mock.approvalAnswers))
+        .toEqual([{ sessionId: caller, requestId: 'xp-m', decision: 'allow' }])
+    })
+
     test('the caller\'s card opens the existing session and the task shows its caller', async ({ page }) => {
       const { caller, toolkit } = await start(page)
       await emit(page, caller, { type: 'state_change', state: 'working' })

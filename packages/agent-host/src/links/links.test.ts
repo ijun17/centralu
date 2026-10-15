@@ -981,3 +981,111 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(read).toMatchObject({ isError: true, text: expect.stringContaining('Remote box is not reachable right now') })
   })
 })
+
+describe('ask_project reaches the projects of linked machines (#700)', () => {
+  /** A remote with one project and one worker; a hub with a trusted project and an ordinary session in it (the caller) */
+  async function rig() {
+    const { store: remoteStore } = seeded([['w1', 'worker', true]])
+    // A conversation the agent can resume, so a task reaches it
+    seedSession(remoteStore, 'p-remote', 'w1', 'worker', 'ext-w1')
+    const remote = await remoteHost(0, remoteStore)
+    const hubStore = new Store()
+    hubStore.addProject({ id: 'p-hub', path: folder(), name: 'hub-project' })
+    seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
+    const hub = await hubHost(() => lineFor(remote.port), hubStore)
+    hub.mgr.setProjectTrusted('p-hub', true)
+    await until(() => status(hub) === 'connected')
+    const name = (await remote.mgr.listProjects()).find((p) => p.id === 'p-remote')!.name
+    const ask = (opts: { project: string; session?: string; task?: string }) => hub.mgr.askProject('h1', opts)
+    const card = () => hub.mgr.listSessions().find((s) => s.id === 'h1')?.pendingApproval
+    const answer = async (decision: 'allow' | 'always' | 'deny') => {
+      await until(() => !!card())
+      const c = card()!
+      await hub.mgr.respondApproval('h1', c.requestId, decision)
+      // The next card is a new one: this one is gone before the caller asks again
+      await until(() => card()?.requestId !== c.requestId)
+      return c
+    }
+    return { remote, hub, name, ask, card, answer }
+  }
+
+  it('asks a session of a project on a linked machine: it runs there, and its answer comes back (unique bare name)', async () => {
+    const { remote, name, ask, answer, hub } = await rig()
+    const call = ask({ project: name, task: 'say hello' })
+    const c = await answer('allow')
+    // The card names the machine, and the target as that machine's own
+    expect(c.detail).toMatchObject({ kind: 'project_access', access: 'delegate', to: { id: 'm1.p-remote', name, machine: 'Remote box', trusted: false }, session: { id: 'm1.w1' } })
+    const r = await call
+    expect(r).toMatchObject({ ok: true, state: 'done', project: `m1/${name}`, sessionId: 'm1.w1' })
+    expect((r as { answer: string }).answer).toContain('echo: [A session in the project "hub-project" asks this project')
+    // It ran on the machine, as an instruction from the hub's session, and the answer is that machine's last words
+    const there = remote.store.loadMessages('w1', 10).find((m) => (m.payload as { text?: string }).text?.includes('say hello'))!
+    expect(there.payload).toMatchObject({ from: { name: expect.stringContaining('on Hub mac') } })
+    expect(hub.mgr.listSessions().find((s) => s.id === 'h1')!.state).not.toBe('error')
+  })
+
+  it('finds the project by machine/name, by the machine’s name, and by qualified id; "always" is read as once', async () => {
+    const { name, ask, answer, hub } = await rig()
+    for (const project of [`m1/${name}`, `Remote box/${name}`, `remote BOX/${name.toUpperCase()}`, 'm1.p-remote']) {
+      const call = ask({ project, task: 'x' })
+      await answer('deny')
+      expect(await call).toMatchObject({ ok: false, error: expect.stringContaining(`${name} on Remote box`) })
+    }
+    // Nothing is remembered for a project of another machine: the next ask raises its card again
+    const again = ask({ project: name, task: 'x' })
+    await answer('always')
+    await again
+    expect(hub.store.listProjectConsents()).toEqual([])
+    const third = ask({ project: name, task: 'x' })
+    await answer('deny')
+    await third
+  })
+
+  it('refuses a name that is on two machines with both choices, and a machine-qualified name settles it', async () => {
+    const { name, ask, hub, answer } = await rig()
+    hub.store.addProject({ id: 'p-dup', path: folder(), name })
+    const refused = await ask({ project: name, task: 'x' })
+    expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('More than one project is called') })
+    const text = (refused as { error: string }).error
+    expect(text).toContain(`${name} [p-dup] on this computer`)
+    expect(text).toContain(`${name} [m1.p-remote] on Remote box`)
+    // Either choice then works: the id of this computer's, the qualified name of the machine's
+    expect(await ask({ project: 'p-dup', task: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('no ordinary session') })
+    const call = ask({ project: `m1/${name}`, task: 'x' })
+    await answer('deny')
+    expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('on Remote box') })
+  })
+
+  it('lists the other projects with the machine each is on, and names a machine it cannot reach instead of dropping its projects', async () => {
+    const { remote, hub, name, ask } = await rig()
+    const missing = await ask({ project: 'no-such-project', task: 'x' })
+    expect((missing as { error: string }).error).toBe(`No project named "no-such-project". The other projects are: ${name} (on Remote box).`)
+
+    await remote.close()
+    await until(() => status(hub) !== 'connected')
+    // The project is known from the headers mirror, so the refusal says why it cannot be asked
+    for (const project of [name, `m1/${name}`]) {
+      expect(await ask({ project, task: 'x' })).toMatchObject({
+        ok: false,
+        error: `Remote box is not reachable right now, so ${name} on Remote box cannot be asked. Try again once its link is back.`,
+      })
+    }
+    expect(((await ask({ project: 'no-such-project', task: 'x' })) as { error: string }).error).toBe(
+      `No project named "no-such-project". The other projects are: ${name} (on Remote box, not reachable right now). Not asked, and its projects may be missing: Remote box (not reachable right now).`,
+    )
+    // A project the hub never saw, on a machine that is down
+    expect(await ask({ project: 'm1/never-seen', task: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('Remote box is not reachable right now, so "m1/never-seen" cannot be asked there') })
+  })
+
+  it('says the session is waiting on the person there, and waits again for the answer once it is given', async () => {
+    const { remote, name, ask, answer } = await rig()
+    const first = ask({ project: name, task: 'please approve the command' })
+    await answer('allow')
+    expect(await first).toMatchObject({ ok: true, state: 'working', sessionId: 'm1.w1', notice: expect.stringContaining('approval there') })
+    // The same caller asking again with a task is told to wait, not to start a second one
+    expect(await ask({ project: name, task: 'again' })).toMatchObject({ ok: false, error: expect.stringContaining('still working on your last task') })
+    await until(() => !!remote.mgr.listSessions().find((s) => s.id === 'w1')?.pendingApproval)
+    await remote.mgr.respondApproval('w1', remote.mgr.listSessions().find((s) => s.id === 'w1')!.pendingApproval!.requestId, 'allow')
+    expect(await ask({ project: name })).toMatchObject({ ok: true, state: 'done', answer: 'approved' })
+  })
+})

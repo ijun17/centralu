@@ -142,7 +142,7 @@ wakes sessions that were live. So the hub must:
 | App views | Off for remote projects | **Built (§11):** the hub serves them from its own door with the machine's document, and its apps stand on the grid (§11.8) |
 | Attachments | Work: saved and read on the same machine as the session | Upload through the hub |
 | Usage gauges | Hub machine only | Done (phase 2): the top bar shows this computer's donuts, then each linked machine's behind its name (`agents.usage {machine}`, `agents.detect {machine}`). A machine that is not connected shows its state and is not asked; it is asked when its link comes back, and every connected machine on the 5-minute refresh |
-| Orchestrator and Centralu tools (`list_sessions`, `read_session`, `recall`, `ask_project`) | Local only, documented | Phase 4 (§12): the orchestrator's `list_sessions`, `read_session` and `recall` reach every machine (built, §12.3), and it directs them (`send_to_session` with `reportBack`, `update_session_settings`, `create_session`, `create_project` with a machine; built, §12.4); `ask_project` across machines is next |
+| Orchestrator and Centralu tools (`list_sessions`, `read_session`, `recall`, `ask_project`) | Local only, documented | Phase 4 (§12): the orchestrator's `list_sessions`, `read_session` and `recall` reach every machine (built, §12.3), and it directs them (`send_to_session` with `reportBack`, `update_session_settings`, `create_session`, `create_project` with a machine; built, §12.4); `ask_project` across machines is built (§12.6) |
 | Attaching a hub app to a remote session | No | The app process and the session are on different machines |
 
 ## 7. Phases
@@ -840,7 +840,7 @@ this computer's folder, row, pinned view and grid panel as they were, while the 
 
 ## 12. Phase 4: the orchestrator and Centralu tools across machines (plan, 2026-10-12)
 
-> **Status: planned; steps 1 and 2 built (§12.3, §12.4).** Steps 1 to 3 follow from decisions already made (§9: the hub's one
+> **Status: planned; steps 1, 2 and 3 built (§12.3, §12.4, §12.6).** Steps 1 to 3 follow from decisions already made (§9: the hub's one
 > orchestrator, consent on the connecting side). Step 4, the reverse direction, waits on the owner's answers in §12.5.
 
 Phase 1 left the orchestrator and the Centralu tools local (§6): the hub's orchestrator lists, reads, searches and
@@ -870,7 +870,7 @@ takes them across the links.
 |---|---|---|
 | 1 | **Read.** The hub's orchestrator's `list_sessions`, `read_session` and `recall` include every linked machine. Each machine answers for its own sessions through three host-to-host calls (additive): `host.sessions`, `host.readSession`, `host.recall`, made by the orchestrator's own code there, over the same view the hub's window has (everything but its orchestrator and coordinators). The hub qualifies the ids, names the machine on each row and hit, lists an unreachable machine's sessions from the headers mirror marked as not reachable, and says which machines it could not search (decided on #82, 2026-10-03: a host that is off says so instead of returning nothing). `send_to_session` and the other acting tools refuse a linked machine's session with a reason, until step 2. **Built** (§12.3) | Nothing |
 | 2 | **Direct.** `send_to_session`, `update_session_settings` and `create_session` reach a linked machine's sessions and projects through the router, and `create_project` takes a machine. `reportBack` across machines: the hub already relays the machine's events into its own log, qualified; the manager watches those for the end of the turn it waits on. The instruction is recorded on the machine as sent by the hub's orchestrator (`agents.send` gains an optional `from`, additive), so the machine's conversation says who sent it. The machine's session keeps its own approval settings, and its cards reach the hub's window as every remote card does. **Built** (§12.4) | Nothing (decision 3) |
-| 3 | **`ask_project` to a linked machine's project.** An ordinary session on the hub asks a project on another machine: the consent card for the pair names the machine; the delegated session runs on that machine, its own logins and folder, under `normal`, as an ordinary visible session there; the answer comes back fenced as today. Paths in the answer name that machine's files, so none is opened to the asking session: they are listed as the machine's, and the person reaches them through the file tree or "Open in VS Code" (phase 2). A session on a machine asking a project on that same machine already works there, its card routed to the hub's window | Nothing new, unless the owner wants a cross-machine ask to need more than the pair's card (§12.5, question 4) |
+| 3 | **`ask_project` to a linked machine's project.** An ordinary session on the hub asks a project on another machine: the consent card for the pair names the machine; the delegated session runs on that machine, its own logins and folder, under `normal`, as an ordinary visible session there; the answer comes back fenced as today. Paths in the answer name that machine's files, so none is opened to the asking session: they are listed as the machine's, and the person reaches them through the file tree or "Open in VS Code" (phase 2). A session on a machine asking a project on that same machine already works there, its card routed to the hub's window. **Built** (§12.6) | Nothing new, unless the owner wants a cross-machine ask to need more than the pair's card (§12.5, question 4) |
 | 4 | **The reverse direction** (decision 3: off by default, only the connecting side turns it on). A machine's sessions reach the hub: what they may do is §12.5. Mechanically: a per-link switch on the hub (Settings → Machines, stored in the hub's registry, additive), the hub's end of the link answering an allowlist of requests from the machine (today `RemoteClient` never answers one), and the machine naming the hub to its sessions | The answers in §12.5 |
 
 Not in phase 4: attaching one machine's app to a session on another (§6: the app process and the session would live on
@@ -956,3 +956,29 @@ error says so, one report, none unasked, none after a failed send), `core/approv
 4. **A cross-machine `ask_project` (step 3): is the pair's card enough?** Recommendation: **yes**, with the machine
    named on the card. The work then runs on that machine under its own logins and credits; the card is where the
    person sees that.
+
+### 12.6 Step 3, as built (#700)
+
+`ask_project` finds the projects of every linked machine, and gives the task to one of their ordinary sessions (agent-host.md
+§1.2.4 has the lookup rules and the choices). An agent on the hub had been told "No project named …" for a project
+that existed on a linked machine and listed only this computer's.
+
+- **Lookup.** A unique bare name works; `<machine>/<name>` or a qualified id always does; the same name on two machines
+  is refused with both listed; a machine that is not connected is named, with its projects from the headers mirror.
+  The "other projects" list says which machine each is on once a machine is linked.
+- **Delivery.** `host.send` (step 2's call), waited on through the machine's relayed events and answered with the
+  session's last words (`host.readSession`). No new host-to-host call and no store change.
+- **Consent.** The card names the machine; the answer "always" is read as once and nothing is remembered. Remembering
+  needs a store step (`project_consents` has foreign keys to `projects`), which this does not take (§12.5, question 4
+  stays open for a remembered form).
+- **Not built**: `ifBusy` (a note or a queue into a busy session there), the caller answering the machine's cards
+  (`asking`; they stand in the hub's window and the call reports the wait), and stopping the machine's turn when the
+  call is cancelled.
+- **`find_apps` is unchanged.** It lists apps another project shares, and attaching one needs the app process and the
+  session on one machine (§6, Attaching a hub app to a remote session).
+
+Tested: `links/links.test.ts` (two real hosts: by bare name, `machine/name`, the machine's name, qualified id; the
+card naming the machine and "always" read as once; the same name on two machines; the machine down, from the
+mirror and unseen; a session waiting on an approval there, then asked again), `sessions/ask-project.test.ts`
+(`matchProjects`), `core/approval/approval.test.ts` and `e2e/fixtures/ask-project.ts` (the card). No live model, no real
+ssh link, no Windows machine.

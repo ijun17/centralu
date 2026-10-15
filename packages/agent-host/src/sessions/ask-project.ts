@@ -44,6 +44,54 @@ export function askFrame(callerProject: string, task: string): string {
   ].join('\n')
 }
 
+/**
+ * A project ask_project may name: one of this computer's (`machine` null) or one on a linked machine (#700), whose `id`
+ * is machine-qualified (`<machine id>.<project id>`) as everywhere the hub names a remote id.
+ */
+export type AskableProject = { id: string; name: string; machine: string | null; machineId: string | null }
+
+/** How a project is told apart from one of the same name, in a refusal: `cc [m1.p-1] on Remote box` */
+export function projectChoice(p: AskableProject): string {
+  return `${p.name} [${p.id}] on ${p.machine ?? 'this computer'}`
+}
+
+/**
+ * The projects a name, an id or a machine-qualified name points at (#700). The first of these that finds anything wins:
+ *
+ *   1. the id (a qualified id for a linked machine's project, which is always unambiguous)
+ *   2. the name as written
+ *   3. `<machine>/<name>`, the machine by its id or the name the person gave it, case aside
+ *   4. the name, case aside
+ *
+ * One project per machine counts: two projects of one name on this computer were never refused (the first is taken), and
+ * a machine's two are no different. What is left is more than one only when the same name is on two machines, and the
+ * caller then refuses and lists them, because guessing would send the work to the wrong disk.
+ */
+export function matchProjects(wanted: string, projects: readonly AskableProject[]): AskableProject[] {
+  const firstPerMachine = (found: AskableProject[]): AskableProject[] => {
+    const seen = new Set<string | null>()
+    return found.filter((p) => !seen.has(p.machineId) && !!seen.add(p.machineId))
+  }
+  const tiers: (() => AskableProject[])[] = [
+    () => projects.filter((p) => p.id === wanted),
+    () => projects.filter((p) => p.name === wanted),
+    () => {
+      const slash = wanted.indexOf('/')
+      if (slash <= 0) return []
+      const machine = wanted.slice(0, slash).trim().toLowerCase()
+      const name = wanted.slice(slash + 1).trim()
+      const there = projects.filter((p) => p.machineId !== null && (p.machineId === machine || p.machine?.toLowerCase() === machine))
+      return there.some((p) => p.name === name) ? there.filter((p) => p.name === name) : there.filter((p) => p.name.toLowerCase() === name.toLowerCase())
+    },
+    () => projects.filter((p) => p.name.toLowerCase() === wanted.toLowerCase()),
+  ]
+  for (const tier of tiers) {
+    const found = firstPerMachine(tier())
+    if (found.length) return found
+  }
+  return []
+}
+
 /** A long answer cut in the middle, with the session that holds the whole of it */
 export function clipAnswer(answer: string, sessionName: string): string {
   if (answer.length <= ANSWER_MAX_CHARS) return answer

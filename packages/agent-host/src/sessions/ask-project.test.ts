@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ASK_WAIT_MS, askFrame, clipAnswer, pathsIn, readableGrants, underGrant } from './ask-project.js'
+import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, readableGrants, underGrant, type AskableProject } from './ask-project.js'
 import { SessionManager } from './manager.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 
@@ -11,6 +11,35 @@ import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
  * back — through the person's consent for the pair, in a visible session of the target project, with the files the
  * answer names made readable to the caller and nothing broader.
  */
+
+describe('the projects a name points at, here and on linked machines (#700)', () => {
+  const here = (id: string, name: string): AskableProject => ({ id, name, machine: null, machineId: null })
+  const there = (machineId: string, machine: string, id: string, name: string): AskableProject => ({ id: `${machineId}.${id}`, name, machine, machineId })
+  const all = [here('p1', 'vibe'), here('p2', 'cc'), there('ijun1', 'Windows PC', 'p9', 'cc'), there('ijun1', 'Windows PC', 'p8', 'solo'), there('box', 'Linux box', 'p3', 'Solo')]
+
+  it('takes a name that exists once, wherever it is, and an id or a machine-qualified form always', () => {
+    expect(matchProjects('vibe', all).map((p) => p.id)).toEqual(['p1'])
+    expect(matchProjects('solo', all).map((p) => p.id)).toEqual(['ijun1.p8'])
+    expect(matchProjects('ijun1.p9', all).map((p) => p.id)).toEqual(['ijun1.p9'])
+    expect(matchProjects('p2', all).map((p) => p.id)).toEqual(['p2'])
+    // The machine by its id or by the name the person gave it, case aside; the project by its name, case aside last
+    for (const wanted of ['ijun1/cc', 'Windows PC/cc', 'windows pc/CC']) expect(matchProjects(wanted, all).map((p) => p.id)).toEqual(['ijun1.p9'])
+    expect(matchProjects('box/solo', all).map((p) => p.id)).toEqual(['box.p3'])
+  })
+
+  it('returns every machine that has the name, so the caller can refuse and list them; two on one machine count once', () => {
+    expect(matchProjects('cc', all).map((p) => p.id)).toEqual(['p2', 'ijun1.p9'])
+    expect(matchProjects('cc', [here('a', 'cc'), here('b', 'cc')]).map((p) => p.id)).toEqual(['a'])
+    expect(matchProjects('nothing', all)).toEqual([])
+    expect(matchProjects('ijun1/nothing', all)).toEqual([])
+    expect(matchProjects('nowhere/cc', all)).toEqual([])
+  })
+
+  it('tells the choices apart by id and machine', () => {
+    expect(projectChoice(here('p2', 'cc'))).toBe('cc [p2] on this computer')
+    expect(projectChoice(there('ijun1', 'Windows PC', 'p9', 'cc'))).toBe('cc [ijun1.p9] on Windows PC')
+  })
+})
 
 describe('the paths an answer names', () => {
   it('finds absolute paths around quotes, backticks and punctuation, and nothing that names no file', () => {

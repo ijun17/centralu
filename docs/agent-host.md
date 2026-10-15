@@ -182,8 +182,9 @@ orchestrator, which belongs to no project, retains its own create-session tool.
 
 What one call does (`SessionManager.askProject`):
 
-1. **The project.** Name or id of another registered project. Its own project is refused; an unknown
-   name lists the other projects. Under `safe`/`normal`, an untrusted caller cannot ask, and a child
+1. **The project.** Name or id of another registered project, on this computer or on a linked machine
+   (§1.2.4). Its own project is refused; an unknown name lists the other projects, each with the machine
+   it is on once a machine is linked. Under `safe`/`normal`, an untrusted caller cannot ask, and a child
    started by another session or a session currently handling a cross-project task cannot delegate
    again (depth one). Under `auto` (#603), the caller's own preset opens and logs those boundaries.
 2. **The session.** `session` names an ordinary session by name or id. Orchestrators, builders and
@@ -244,6 +245,41 @@ control rail's tasks (#372). Two other wordings did no better (0 and 3 in 5).
 `packages/agent-host/scripts/smoke-ask-project.mts` runs it end to end on a temp store and data folder: a haiku session
 in one scratch project has the other write a file with a number only it knows and reads it back
 (`CALLER`/`CALLEE` = `claude` or `codex`).
+
+### 1.2.4 A project on a linked machine (#700)
+
+`ask_project` reaches the projects of linked machines the way the orchestrator's `create_session` does
+(docs/plans/remote-hub.md §12.6). `SessionManager.askProject` resolves `project` over this computer's
+projects and `LinkedSessions.projects()` (each reachable machine's `projects.list`) with `matchProjects`
+(`sessions/ask-project.ts`). In order, the first step that finds anything wins:
+
+| Written as | Finds |
+|---|---|
+| a project id, or a machine-qualified id (`m1.p-12`) | that project, always |
+| the name | the project of that name, on this computer or on a machine |
+| `<machine>/<name>` (the machine by its id or the name the person gave it) | that machine's project |
+| the name, case aside | as above |
+
+The same name on two machines is refused with every choice listed as `name [id] on <machine>`, since
+guessing would send the work to the wrong disk. A machine that is not connected is named instead of
+leaving its projects out: its projects come from the headers mirror and are refused as "not reachable
+right now", a name found nowhere says which machines were not asked, and `<machine>/<name>` for a machine
+that is down says so.
+
+For a machine's project the call runs through the links, not the manager's own sessions
+(`askLinkedProject`): the machine's ordinary sessions are listed with `sessions.list` there (same
+exclusions as here), the person's consent is asked for this call, the task goes as `host.send` (recorded
+there as sent by the asking session, named with this computer), and the turn is waited on through the
+machine's own events, which the hub relays qualified (`observeLinked`). The answer is the session's last
+words, read there. It runs on that machine with its own logins, folder and preset.
+
+| Choice | Reason |
+|---|---|
+| The card names the machine, and "always" is not offered (`ProjectAccess.to.machine`) | A remembered consent is a row tied to two projects of this computer (foreign keys on `projects`); a machine's project has no row. The plan (§12.5, question 4) recommended the pair's card with the machine named; it asks each time until the owner wants a remembered form |
+| Paths in the answer are listed under "outside", none opened | They name the machine's files, not this computer's |
+| A session busy with a turn, or `ifBusy`, is refused with a reason | A note or a queue into a session on another machine needs the machine to take them; not built |
+| Cancelling the call stops the wait, not the machine's turn | This host asks the machine to run a task but has no interrupt of its own turn there |
+| The machine's own cards are answered by the person in the hub's window | `asking` (the caller answering them) is not built across machines; the call says it waits on the person |
 
 ### 1.2.1 Starting other agents in the same project (`start_agent`, `agent_session`, #561)
 

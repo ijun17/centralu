@@ -39,6 +39,11 @@ describe('the cross-project consent question (#371)', () => {
     const untrusted = { ...base, to: { ...base.to, trusted: false } }
     expect(projectAccessQuestion({ ...untrusted, access: 'delegate', text: 'extract the assets' })).toBe('Let Consumer ask Toolkit (not trusted) to extract the assets?')
     expect(projectAccessQuestion({ ...base, to: { ...base.to, trusted: true }, access: 'delegate', text: 'x' })).toBe('Let Consumer ask Toolkit to x?')
+    // A project on a linked machine says whose it is (#700)
+    expect(projectAccessQuestion({ ...base, to: { ...base.to, machine: 'Win box' }, access: 'delegate', session: { id: 's', name: 'Sprites' }, text: 'x' })).toBe(
+      'Let Consumer ask Toolkit on Win box / Sprites to x?',
+    )
+    expect(projectAccessQuestion({ ...untrusted, to: { ...untrusted.to, machine: 'Win box' }, access: 'delegate', text: 'x' })).toBe('Let Consumer ask Toolkit on Win box (not trusted) to x?')
   })
 })
 

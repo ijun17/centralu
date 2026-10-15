@@ -48,6 +48,8 @@ export function ApprovalCard({
       // A capability question (M4 D-4) has no "always allow" — the answer gets remembered either way. `a` does nothing on this card
       // Nor does a new project (#515): it is one folder, made once — there is nothing to always allow
       if ((detail.kind === 'capability' || detail.kind === 'project_create') && action.decision === 'always') return
+      // Nor does a project of another machine (#700): the consent is for this call, nothing is remembered for it
+      if (detail.kind === 'project_access' && detail.to.machine && action.decision === 'always') return
       // A cross-project consent's "always" is for the pair (#371) — there is no session or project scope to pick
       if (detail.kind === 'project_access') {
         void respond(sessionId, requestId, action.decision)
@@ -243,9 +245,11 @@ function ProjectAccessCard({
       </p>
       <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
         {detail.access === 'delegate'
-          ? `A session opens in ${detail.to.name} with its own folder, instructions and permissions, and its answer comes back here.`
+          ? `The task goes to an existing session in ${detail.to.name}${detail.to.machine ? ` on ${detail.to.machine}, which works with its own logins and folder there` : ', with its own folder, instructions and permissions'}, and its answer comes back here.`
           : `The app's tools attach to this session while it uses them.`}{' '}
-        Always is remembered for {detail.from.name} → {detail.to.name}; revoke it in Settings.
+        {detail.to.machine
+          ? 'Nothing is remembered for a project on another machine: it asks each time.'
+          : `Always is remembered for ${detail.from.name} → ${detail.to.name}; revoke it in Settings.`}
       </p>
       {detail.to.trusted === false && (
         <p className="mt-1 px-3 text-xs leading-body text-ink-signal" data-testid="approval-untrusted">
@@ -255,7 +259,9 @@ function ProjectAccessCard({
       )}
       <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
         <ActionKey k={keys.allow} label="Allow once" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
-        <ActionKey k={keys.always} label="Always for this pair" onClick={() => onAnswer('always')} testId="approve-always" disabled={busy} />
+        {!detail.to.machine && (
+          <ActionKey k={keys.always} label="Always for this pair" onClick={() => onAnswer('always')} testId="approve-always" disabled={busy} />
+        )}
         <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
       </div>
     </div>
