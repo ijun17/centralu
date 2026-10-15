@@ -150,7 +150,7 @@ reached nobody. Three shapes carry them:
 - A per-project setting saved through RPC is announced with `projects_changed` (#719): `projects.setTrusted`, `projects.setCommands`,
   `projects.setWorktreeSetup`, `worktrees.setTrunk`, and the default tool and per-tool model and effort a session records. Every
   window re-reads the project list and takes the host's value of those fields (a listed row keeps its place and its `git`), so the
-  ⋯ menu, the trust mark and the project's apps agree with the host. The hub forwards the event of a linked machine.
+  ⋯ menu, the trust mark and the project's apps agree with the host. The hub forwards the event of a linked machine. It is sent when the saved value changed, not on every write; a window leaves a project alone while its own write to it is in flight and reads it again afterwards, and reads the list one at a time.
 
 | Decision | Why |
 |---|---|

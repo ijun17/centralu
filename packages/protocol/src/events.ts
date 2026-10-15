@@ -745,8 +745,11 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('project_consents_changed') }),
   /**
-   * The host made a project of its own accord (#515): the orchestrator's create_project, once the person approved it,
-   * or `projects.create` from another window. Carries nothing; the list is re-read and new projects join it.
+   * A project changed on the host without this window asking (#515, #719): the host made one of its own accord (the
+   * orchestrator's create_project, once the person approved it, or `projects.create` from another window), or a
+   * setting of a project was saved: trust, saved commands, worktree setup, worktree trunk, the default tool, or the
+   * model and effort last chosen for a tool. Carries nothing; the list is re-read, new projects join it and a listed
+   * project takes the host's value of those settings. Sent when the saved value changed, not on every write.
    */
   z.object({ ...appScoped, type: z.literal('projects_changed') }),
   /**

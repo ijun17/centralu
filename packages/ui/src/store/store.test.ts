@@ -3615,6 +3615,88 @@ describe('new projects', () => {
     expect(Object.keys(useStore.getState().projects)).toEqual([p.id, other.id])
   })
 
+  /** A list read that answers late: it is taken when called (the host's value then) and handed back when the gate opens */
+  function gatedList(mock: MockPlatform) {
+    const real = mock.projects.list.bind(mock.projects)
+    const gates: (() => void)[] = []
+    let calls = 0
+    mock.projects.list = async () => {
+      calls++
+      const answer = structuredClone(await real())
+      await new Promise<void>((open) => gates.push(open))
+      return answer
+    }
+    return { host: real, calls: () => calls, open: () => gates.splice(0).forEach((g) => g()), waiting: () => gates.length }
+  }
+
+  it('a list read that began before this window saved commands does not take the old list back over them (#719)', async () => {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/old')
+    await useStore.getState().attach(mock)
+    const list = gatedList(mock)
+    const reading = useStore.getState().refreshProjects()
+    await vi.waitFor(() => expect(list.waiting()).toBe(1))
+    // The person's edit lands while that read is out, and the read comes back with the list from before it
+    await useStore.getState().setProjectCommands(p.id, [{ command: 'pnpm dev' }])
+    list.open()
+    await vi.waitFor(() => expect(list.waiting()).toBe(1))
+    expect(useStore.getState().projects[p.id]?.commands).toEqual([{ command: 'pnpm dev' }])
+    // The withheld project is read again, and the host's value then is the one kept
+    list.open()
+    await reading
+    expect(list.calls()).toBe(2)
+    expect(useStore.getState().projects[p.id]?.commands).toEqual([{ command: 'pnpm dev' }])
+    expect((await list.host()).find((x) => x.id === p.id)?.commands).toEqual([{ command: 'pnpm dev' }])
+  })
+
+  it('a list read answering while this window\'s save is still out leaves the project alone, then reads it when the save is done (#719)', async () => {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/old')
+    await useStore.getState().attach(mock)
+    const realSet = mock.projects.setCommands.bind(mock.projects)
+    let finishSave!: () => void
+    mock.projects.setCommands = async (id, commands) => {
+      await new Promise<void>((done) => (finishSave = done))
+      return realSet(id, commands)
+    }
+    const saving = useStore.getState().setProjectCommands(p.id, [{ command: 'pnpm dev' }])
+    await vi.waitFor(() => expect(finishSave).toBeTypeOf('function'))
+    // A read that starts and ends inside the save, from a host that has not answered the save yet
+    const list = gatedList(mock)
+    const reading = useStore.getState().refreshProjects()
+    await vi.waitFor(() => expect(list.waiting()).toBe(1))
+    list.open()
+    await reading
+    expect(useStore.getState().projects[p.id]?.commands).toEqual([{ command: 'pnpm dev' }])
+    const callsBefore = list.calls()
+    finishSave()
+    await saving
+    await vi.waitFor(() => expect(list.calls()).toBe(callsBefore + 1))
+    list.open()
+    await vi.waitFor(() => expect(list.waiting()).toBe(0))
+    expect(useStore.getState().projects[p.id]?.commands).toEqual([{ command: 'pnpm dev' }])
+  })
+
+  it('reads of the project list run one at a time, so an older answer cannot land after a newer one (#719)', async () => {
+    const mock = new MockPlatform()
+    const p = await mock.projects.add('/tmp/old')
+    await useStore.getState().attach(mock)
+    const list = gatedList(mock)
+    const first = useStore.getState().refreshProjects()
+    await vi.waitFor(() => expect(list.waiting()).toBe(1))
+    // Another client trusts the project, then a second read is asked for while the first is out
+    await mock.projects.setTrusted(p.id, true)
+    const second = useStore.getState().refreshProjects()
+    await new Promise((r) => setTimeout(r, 30))
+    expect(list.calls()).toBe(1)
+    list.open()
+    await vi.waitFor(() => expect(list.waiting()).toBe(1))
+    expect(list.calls()).toBe(2)
+    list.open()
+    await Promise.all([first, second])
+    expect(useStore.getState().projects[p.id]?.trusted).toBe(true)
+  })
+
   it('createProject registers what the host made and asks about trust once, as adding a folder does', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)

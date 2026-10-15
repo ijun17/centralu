@@ -126,6 +126,21 @@ describe('a project setting another client wrote is announced (#719)', () => {
     expect(b.changes()).toBe(settled)
   })
 
+  it('says nothing when a write saves what was already there', async () => {
+    const { port, project } = await host()
+    const [a, b] = [await client(port), await client(port)]
+    await a.call('projects.setTrusted', { projectId: project.id, trusted: true })
+    await a.call('projects.setCommands', { projectId: project.id, commands: [{ command: 'pnpm dev' }] })
+    await a.call('projects.setWorktreeSetup', { projectId: project.id, setup: { command: 'pnpm i', copyFiles: [] } })
+    await until(() => b.changes() >= 3)
+    const settled = b.changes()
+    await a.call('projects.setTrusted', { projectId: project.id, trusted: true })
+    await a.call('projects.setCommands', { projectId: project.id, commands: [{ command: ' pnpm dev ' }] })
+    await a.call('projects.setWorktreeSetup', { projectId: project.id, setup: { command: 'pnpm i', copyFiles: [''] } })
+    await new Promise((r) => setTimeout(r, 150))
+    expect(b.changes()).toBe(settled)
+  })
+
   it('says nothing for a project that does not exist', async () => {
     const { port } = await host()
     const [a, b] = [await client(port), await client(port)]

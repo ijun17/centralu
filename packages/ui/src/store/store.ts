@@ -1743,6 +1743,67 @@ const APPLY_TICKET_MS = 5 * 60_000
 /** What a project carries that any client may change through the host (#719); `git` and the identity stay as the window has them */
 const PROJECT_SETTING_KEYS = ['trusted', 'commands', 'worktreeSetup', 'worktreeManager', 'defaultTool', 'defaultModels'] as const satisfies readonly (keyof ProjectInfo)[]
 
+/*
+ * The writes this window has made to a project and not seen settle (#719). A list read that began before a write
+ * finished may carry the value from before it, and taking that over the window's own newer value would hide a command
+ * just added: the next whole-list save would then drop it on the host. So a read leaves a project alone while a write
+ * of its own is in flight or finished after the read began, and reads it again once the write is done.
+ */
+const projectWrites = { clock: 0, flying: new Map<string, number>(), last: new Map<string, number>(), held: new Set<string>() }
+
+async function writingProject<T>(projectId: string, refresh: () => void, run: () => Promise<T>): Promise<T> {
+  const w = projectWrites
+  w.flying.set(projectId, (w.flying.get(projectId) ?? 0) + 1)
+  w.last.set(projectId, ++w.clock)
+  try {
+    return await run()
+  } finally {
+    const left = (w.flying.get(projectId) ?? 1) - 1
+    if (left) w.flying.set(projectId, left)
+    else w.flying.delete(projectId)
+    w.last.set(projectId, ++w.clock)
+    // A read withheld this project's value meanwhile: the host's value, with this write in it, is read now
+    if (!left && w.held.delete(projectId)) refresh()
+  }
+}
+
+/**
+ * One read of the project list, taken over the rows already listed. New projects join at the end; a listed row keeps
+ * its place and takes the host's value of the settings another client can change (trust, commands, worktree setup,
+ * defaults: #719) and keeps its object when none of them differs. `git` is left alone: it has its own refresh, and a
+ * list read does not carry the freshest count. A project this window is writing is left as it is (`projectWrites`).
+ * @returns whether a project had to be skipped after its write was already done, so one more read is due
+ */
+async function readProjects(platform: NonNullable<AppState['platform']>): Promise<boolean> {
+  const began = projectWrites.clock
+  const list = await platform.projects.list().catch(() => null)
+  if (!list) return false
+  let again = false
+  useStore.setState((s) => {
+    const next = { ...s.projects }
+    let changed = false
+    for (const p of list) {
+      const cur = s.projects[p.id]
+      if (!cur) {
+        next[p.id] = p
+        changed = true
+      } else if (PROJECT_SETTING_KEYS.some((k) => JSON.stringify(cur[k]) !== JSON.stringify(p[k]))) {
+        if (projectWrites.flying.has(p.id)) projectWrites.held.add(p.id)
+        else if ((projectWrites.last.get(p.id) ?? 0) > began) again = true
+        else {
+          next[p.id] = { ...cur, ...Object.fromEntries(PROJECT_SETTING_KEYS.map((k) => [k, p[k]])) }
+          changed = true
+        }
+      }
+    }
+    return changed ? { projects: next } : {}
+  })
+  return again
+}
+
+/** The one project list read at a time: a second ask waits for the first and reads once more, so reads never land out of order */
+let projectsReading: { platform: unknown; done: Promise<void>; again: boolean } | null = null
+
 function joinProject(s: Pick<AppState, 'projects' | 'trustAsk'>, p: ProjectInfo): Pick<AppState, 'projects' | 'trustAsk'> {
   return { projects: { ...s.projects, [p.id]: p }, trustAsk: p.trusted ? s.trustAsk : p.id }
 }
@@ -4772,17 +4833,19 @@ export const useStore = create<AppState>((set, get) => ({
   async setWorktreeTrunk(projectId, baseBranch) {
     const platform = get().platform
     if (!platform) return
-    try {
-      await platform.projects.setWorktreeTrunk(projectId, baseBranch)
-    } catch (e) {
-      // Returned to the dialog, which keeps the typed branch and the reason in place (#180)
-      throw new Error(`Could not set the trunk: ${(e as Error).message}`)
-    }
-    set((s) => {
-      const p = s.projects[projectId]
-      return p
-        ? { projects: { ...s.projects, [projectId]: { ...p, worktreeManager: { sessionId: p.worktreeManager?.sessionId ?? '', baseBranch } } } }
-        : {}
+    await writingProject(projectId, () => void get().refreshProjects(), async () => {
+      try {
+        await platform.projects.setWorktreeTrunk(projectId, baseBranch)
+      } catch (e) {
+        // Returned to the dialog, which keeps the typed branch and the reason in place (#180)
+        throw new Error(`Could not set the trunk: ${(e as Error).message}`)
+      }
+      set((s) => {
+        const p = s.projects[projectId]
+        return p
+          ? { projects: { ...s.projects, [projectId]: { ...p, worktreeManager: { sessionId: p.worktreeManager?.sessionId ?? '', baseBranch } } } }
+          : {}
+      })
     })
   },
 
@@ -4798,32 +4861,27 @@ export const useStore = create<AppState>((set, get) => ({
     return p
   },
 
-  async refreshProjects() {
+  refreshProjects() {
     const platform = get().platform
-    if (!platform) return
-    const list = await platform.projects.list().catch(() => null)
-    if (!list) return
-    /*
-     * New projects join at the end; the rows already listed keep their place. A listed row takes the host's value of
-     * the settings another client can change (trust, commands, worktree setup, defaults: #719) and keeps its object
-     * when none of them differs. `git` is left alone: it has its own refresh, and a list read does not carry the
-     * freshest count.
-     */
-    set((s) => {
-      const next = { ...s.projects }
-      let changed = false
-      for (const p of list) {
-        const cur = s.projects[p.id]
-        if (!cur) {
-          next[p.id] = p
-          changed = true
-        } else if (PROJECT_SETTING_KEYS.some((k) => JSON.stringify(cur[k]) !== JSON.stringify(p[k]))) {
-          next[p.id] = { ...cur, ...Object.fromEntries(PROJECT_SETTING_KEYS.map((k) => [k, p[k]])) }
-          changed = true
-        }
+    if (!platform) return Promise.resolve()
+    const running = projectsReading
+    if (running && running.platform === platform) {
+      running.again = true
+      return running.done
+    }
+    const mine: NonNullable<typeof projectsReading> = { platform, again: false, done: Promise.resolve() }
+    mine.done = (async () => {
+      try {
+        do {
+          mine.again = false
+          if (await readProjects(platform)) mine.again = true
+        } while (mine.again)
+      } finally {
+        if (projectsReading === mine) projectsReading = null
       }
-      return changed ? { projects: next } : {}
-    })
+    })()
+    projectsReading = mine
+    return mine.done
   },
 
   async answerTrustAsk(trust) {
@@ -4836,17 +4894,19 @@ export const useStore = create<AppState>((set, get) => ({
   async setProjectTrusted(projectId, trusted) {
     const platform = get().platform
     if (!platform || !get().projects[projectId]) return
-    try {
-      await platform.projects.setTrusted(projectId, trusted)
-      set((s) => {
-        const p = s.projects[projectId]
-        return p ? { projects: { ...s.projects, [projectId]: { ...p, trusted } } } : {}
-      })
-      const running = Object.values(get().sessions).some((x) => x.projectId === projectId && x.live)
-      if (running) set({ toast: 'Running sessions here pick up the new trust when they restart or resume.' })
-    } catch (e) {
-      set({ toast: `Could not change trust: ${(e as Error).message}` })
-    }
+    await writingProject(projectId, () => void get().refreshProjects(), async () => {
+      try {
+        await platform.projects.setTrusted(projectId, trusted)
+        set((s) => {
+          const p = s.projects[projectId]
+          return p ? { projects: { ...s.projects, [projectId]: { ...p, trusted } } } : {}
+        })
+        const running = Object.values(get().sessions).some((x) => x.projectId === projectId && x.live)
+        if (running) set({ toast: 'Running sessions here pick up the new trust when they restart or resume.' })
+      } catch (e) {
+        set({ toast: `Could not change trust: ${(e as Error).message}` })
+      }
+    })
   },
 
   async deleteProject(projectId, deleteFiles) {
@@ -4980,12 +5040,14 @@ export const useStore = create<AppState>((set, get) => ({
     const platform = get().platform
     const before = get().projects[projectId]
     if (!platform || !before) return
-    await platform.projects.setWorktreeSetup(projectId, setup)
-    // The summary line must match the next time it opens — follows the host's own normalizing rule (an empty setup means `null`)
-    const clean = setup && (setup.command || setup.copyFiles.length) ? setup : null
-    set((s) => {
-      const now = s.projects[projectId]
-      return now ? { projects: { ...s.projects, [projectId]: { ...now, worktreeSetup: clean } } } : {}
+    await writingProject(projectId, () => void get().refreshProjects(), async () => {
+      await platform.projects.setWorktreeSetup(projectId, setup)
+      // The summary line must match the next time it opens — follows the host's own normalizing rule (an empty setup means `null`)
+      const clean = setup && (setup.command || setup.copyFiles.length) ? setup : null
+      set((s) => {
+        const now = s.projects[projectId]
+        return now ? { projects: { ...s.projects, [projectId]: { ...now, worktreeSetup: clean } } } : {}
+      })
     })
   },
 
@@ -4993,27 +5055,29 @@ export const useStore = create<AppState>((set, get) => ({
     const platform = get().platform
     const before = get().projects[projectId]
     if (!platform || !before) return
-    // Draw it first. This is a list being edited by hand, and a row that appears only after
-    // a round trip reads as a click that missed.
-    set((s) => ({ projects: { ...s.projects, [projectId]: { ...before, commands } } }))
-    try {
-      const saved = await platform.projects.setCommands(projectId, commands)
-      set((s) => {
-        const now = s.projects[projectId]
-        // The project could have gone while we were away; nothing to correct if so
-        return now ? { projects: { ...s.projects, [projectId]: { ...now, commands: saved } } } : {}
-      })
-    } catch (e) {
-      /*
-       * Put the old list back and say so. A command that looks saved and is gone at the
-       * next launch is the worse half of this: the menu would then say "nothing saved yet",
-       * which reads as never having added it rather than as having lost it.
-       */
-      set((s) => ({
-        projects: { ...s.projects, [projectId]: before },
-        toast: `Could not save commands: ${(e as Error).message}`,
-      }))
-    }
+    await writingProject(projectId, () => void get().refreshProjects(), async () => {
+      // Draw it first. This is a list being edited by hand, and a row that appears only after
+      // a round trip reads as a click that missed.
+      set((s) => ({ projects: { ...s.projects, [projectId]: { ...before, commands } } }))
+      try {
+        const saved = await platform.projects.setCommands(projectId, commands)
+        set((s) => {
+          const now = s.projects[projectId]
+          // The project could have gone while we were away; nothing to correct if so
+          return now ? { projects: { ...s.projects, [projectId]: { ...now, commands: saved } } } : {}
+        })
+      } catch (e) {
+        /*
+         * Put the old list back and say so. A command that looks saved and is gone at the
+         * next launch is the worse half of this: the menu would then say "nothing saved yet",
+         * which reads as never having added it rather than as having lost it.
+         */
+        set((s) => ({
+          projects: { ...s.projects, [projectId]: before },
+          toast: `Could not save commands: ${(e as Error).message}`,
+        }))
+      }
+    })
   },
 
   async loadCommandRuns(projectId) {
@@ -5067,7 +5131,8 @@ export const useStore = create<AppState>((set, get) => ({
      * this line filled it right back in.
      */
     const remembered = await usableDefaults(platform, tool, project.defaultModels?.[tool], project.machine)
-    const info = await platform.agents.createSession({
+    // The host records the tool as this project's default while it makes the session (#719): a list read must not undo it
+    const info = await writingProject(projectId, () => void get().refreshProjects(), () => platform.agents.createSession({
       projectId,
       cwd: project.path,
       // The chosen value travels straight to the host — the preset used to be pinned to 'normal' and the model was not even passed
@@ -5085,7 +5150,7 @@ export const useStore = create<AppState>((set, get) => ({
       worktree: opts?.worktree,
       worktreeBranch: opts?.worktreeBranch,
       worktreeBase: opts?.worktreeBase,
-    })
+    }))
     set((s) => ({
       sessions: {
         ...s.sessions,

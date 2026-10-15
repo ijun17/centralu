@@ -1212,11 +1212,12 @@ export class SessionManager {
    * why. The flag is written before this returns; the promise settles when the idle restarts are done.
    */
   setProjectTrusted(projectId: string, trusted: boolean): Promise<void> {
+    const was = this.store.listProjects().find((p) => p.id === projectId)?.trusted
     if (!this.store.setProjectTrusted(projectId, trusted)) {
       throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
     }
     // Every window re-reads the project: the trust mark, the ⋯ menu and the project's apps follow the host (#719)
-    this.emit({ type: 'projects_changed' })
+    if (was !== trusted) this.emit({ type: 'projects_changed' })
     // A start_agent card standing in that project rests on the trust just taken away (#673 review): withdrawn, and told
     if (!trusted) {
       for (const rec of [...this.agentStarts.values()]) {
@@ -1355,9 +1356,10 @@ export class SessionManager {
       const label = c.label?.trim()
       return [{ command, ...(label ? { label } : {}) }]
     })
+    const was = JSON.stringify(this.store.projectCommands(projectId))
     this.store.setProjectCommands(projectId, clean)
     // The Run menu of every other window reads the project's commands (#719)
-    this.emit({ type: 'projects_changed' })
+    if (was !== JSON.stringify(clean)) this.emit({ type: 'projects_changed' })
     return clean
   }
 
@@ -1369,8 +1371,10 @@ export class SessionManager {
     const clean = setup
       ? { command: setup.command.trim(), copyFiles: setup.copyFiles.map((f) => f.trim()).filter(Boolean) }
       : null
-    this.store.setWorktreeSetup(projectId, clean && (clean.command || clean.copyFiles.length) ? clean : null)
-    this.emit({ type: 'projects_changed' })
+    const saved = clean && (clean.command || clean.copyFiles.length) ? clean : null
+    const was = JSON.stringify(this.store.worktreeSetup(projectId))
+    this.store.setWorktreeSetup(projectId, saved)
+    if (was !== JSON.stringify(this.store.worktreeSetup(projectId))) this.emit({ type: 'projects_changed' })
   }
 
   /**
