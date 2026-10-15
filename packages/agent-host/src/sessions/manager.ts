@@ -9932,8 +9932,10 @@ export class SessionManager {
    * **The merge checks nobody awaits, so `disposeAll` can end them** (#368). Started at startup and on every project
    * refresh, each runs git, and gh where it is installed, in the project's folder. They used to outlive the manager:
    * a test that disposed a manager and removed its temporary project right away met a gh still running in that folder,
-   * which Windows refuses to remove (EPERM on windows-2022, #368). `disposeAll` and `detachAll` abort the gh call
-   * and wait for the rest; a check stops at its next session once either has begun.
+   * which Windows refuses to remove (EPERM on windows-2022, #368). `disposeAll` and `detachAll` abort the checks and
+   * wait for them: an aborted `gitBranchPr` ends gh with the processes it started and returns once gh has exited,
+   * and a check stops at its next session once either has begun, so what is left to wait for is at most one git read
+   * (its own 10 s limit). A `prLookup` swapped in by a test is waited for as it is.
    */
   private mergeChecks = new Set<Promise<void>>()
   private mergeChecksStop = new AbortController()
@@ -10241,7 +10243,7 @@ export class SessionManager {
     for (const [id, run] of this.streams) this.flushStream(id, run)
     // Even if one fails, the rest are still cleaned up — one rejection blocking the whole cleanup during
     // shutdown would leave orphans behind
-    // No merge check's git or gh is left working in a project's folder once this returns (#368)
+    // No merge check's git or gh is still running once this returns (#368)
     await Promise.allSettled([...[...this.handles.values()].map((h) => h.dispose()), ...this.mergeChecks])
     // The closed processes get a moment to leave on their own before the host's exit takes them along (#353)
     await Promise.allSettled([...this.adapters.values()].map((a) => a.settle?.()))

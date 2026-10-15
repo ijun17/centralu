@@ -3,6 +3,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { assertExistingPath, isMissingPathError } from './path-guard.js'
 import { runGit, type GitTrust } from './git-exec.js'
+import { killTree } from './kill-tree.js'
 import { programPath } from '../tool-launch.js'
 
 const exec = promisify(execFile)
@@ -594,9 +595,20 @@ export type BranchPr = {
  * session list.
  */
 export async function gitBranchPr(projectCwd: string, branch: string, signal?: AbortSignal): Promise<BranchPr | 'unavailable' | null> {
+  const run = exec(programPath('gh'), ['pr', 'view', branch, '--json', 'number,state,url,headRefOid'], { cwd: projectCwd, ...OK })
+  const closed = new Promise<void>((done) => run.child.once('close', () => done()))
+  /*
+   * **An abort ends gh with the processes it started, and returns once they are gone** (the host stopping, #368).
+   * They work in the project's folder, and Windows refuses to remove a folder a running process works in (EBUSY).
+   * execFile's own `signal` is not enough: it ends gh alone (gh runs git to read the remotes) and rejects at the
+   * kill, before gh has exited. `killTree` ends the tree (`taskkill /T /F` on Windows), and `close` comes once
+   * every process holding gh's output has ended.
+   */
+  const stop = () => killTree({ pid: run.child.pid, kill: (signal) => void run.child.kill(signal as NodeJS.Signals | undefined) }, 'SIGKILL')
+  if (signal?.aborted) stop()
+  else signal?.addEventListener('abort', stop, { once: true })
   try {
-    // An abort ends gh (the host stopping, #368): it works in the project's folder, which a test removes right after
-    const { stdout } = await exec(programPath('gh'), ['pr', 'view', branch, '--json', 'number,state,url,headRefOid'], { cwd: projectCwd, ...OK, signal })
+    const { stdout } = await run
     const j = JSON.parse(stdout) as { number?: unknown; state?: unknown; url?: unknown; headRefOid?: unknown }
     if (typeof j.number !== 'number' || typeof j.state !== 'string' || typeof j.url !== 'string') return null
     return {
@@ -606,7 +618,11 @@ export async function gitBranchPr(projectCwd: string, branch: string, signal?: A
       ...(typeof j.headRefOid === 'string' && j.headRefOid ? { headOid: j.headRefOid } : {}),
     }
   } catch (e) {
+    // Not started at all (ENOENT) has nothing to wait for
+    if (signal?.aborted && run.child.pid !== undefined) await closed
     return (e as NodeJS.ErrnoException).code === 'ENOENT' ? 'unavailable' : null
+  } finally {
+    signal?.removeEventListener('abort', stop)
   }
 }
 
