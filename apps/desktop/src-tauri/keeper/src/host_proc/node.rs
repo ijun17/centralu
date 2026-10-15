@@ -80,17 +80,56 @@ fn nvm_windows_versions(home: &str) -> Vec<String> {
 /// being present but not found, and the version being too low.
 pub(super) fn node_missing_message(looked: &[String]) -> String {
     format!(
-        "Could not find Node.js. Centralu requires Node {MIN_NODE_MAJOR} or newer.\n\
+        "Could not find Node.js. Centralu requires Node {} or newer.\n\
          Check with `node --version` in a terminal, and if it is missing, install it with \
          {} or from https://nodejs.org, then restart the app.\n\
          Looked in: {}",
+        min_node_text(),
         install_node_hint(Os::current()),
         looked.join(", ")
     )
 }
 
-/// The host bundle's esbuild target is node22 — below that, even the syntax breaks.
-pub(super) const MIN_NODE_MAJOR: u32 = 22;
+/// The npm package's own manifest, read at compile time: its `engines.node` is the one place the
+/// floor lives (#699). The launcher and the hub read the same value, and a change to the file
+/// rebuilds this crate.
+const LAUNCHER_PACKAGE: &str = include_str!("../../../../../../packaging/npm/centralu/package.json");
+
+/// The oldest Node the host runs on, `[major, minor, patch]`, from `engines.node` (`>=22.14.0`).
+///
+/// The bundled database module declares Node-API 10, which Node has from 22.14.0; under 22.12.0 it
+/// loads and then crashes on its first use, before the host logs a line (#699). The host bundle's
+/// esbuild target is node22 as well, so below 22 even the syntax breaks.
+pub(super) fn min_node() -> [u32; 3] {
+    let manifest: serde_json::Value = serde_json::from_str(LAUNCHER_PACKAGE).expect("packaging/npm/centralu/package.json is JSON");
+    let range = manifest["engines"]["node"].as_str().expect("engines.node is a string");
+    floor_of(range).unwrap_or_else(|| panic!("engines.node must be a plain floor like \">=22.14.0\", not {range:?}"))
+}
+
+/// `>=22.14.0` or `>=22.14` → `[22, 14, 0]`; None for any other shape of range
+pub(super) fn floor_of(range: &str) -> Option<[u32; 3]> {
+    let rest = range.trim().strip_prefix(">=")?.trim();
+    let parts: Vec<u32> = rest.split('.').map(|p| p.parse().ok()).collect::<Option<_>>()?;
+    match parts[..] {
+        [a, b] => Some([a, b, 0]),
+        [a, b, c] => Some([a, b, c]),
+        _ => None,
+    }
+}
+
+/// The floor as the person reads it: `22.14.0`
+pub(super) fn min_node_text() -> String {
+    min_node().map(|n| n.to_string()).join(".")
+}
+
+/// Whether a version (`v22.12.0`, as `node --version` prints it) is older than the floor
+pub(super) fn below_floor(parts: &[u32]) -> bool {
+    let mut padded = [0u32; 3];
+    for (slot, n) in padded.iter_mut().zip(parts) {
+        *slot = *n;
+    }
+    padded < min_node()
+}
 
 /// Finding Node takes around one second because it launches the whole login shell. Since the
 /// restart loop calls this every time, a successful find is cached. **A failed find is never
@@ -272,13 +311,16 @@ pub(super) fn check_node_version(path: &str) -> Result<String, String> {
         return Ok(path.to_string());
     };
     let raw = String::from_utf8_lossy(&out.stdout);
-    let Some(&major) = version_parts(raw.trim()).first() else {
+    let parts = version_parts(raw.trim());
+    if parts.is_empty() {
         return Ok(path.to_string());
-    };
-    if major < MIN_NODE_MAJOR {
+    }
+    if below_floor(&parts) {
+        let floor = min_node_text();
         return Err(format!(
-            "Node {MIN_NODE_MAJOR} or newer is required, but {path} is {}.\n\
-             {}, or switch to {MIN_NODE_MAJOR} or newer with nvm or mise, then restart the app.",
+            "Node {floor} or newer is required, but {path} is {}: older than that, the bundled database \
+             crashes on its first use.\n\
+             {}, or switch to {floor} or newer with nvm or mise, then restart the app.",
             raw.trim(),
             upgrade_node_hint(Os::current())
         ));

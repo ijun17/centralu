@@ -59,4 +59,13 @@ describe('Node version floor stays declared and consistent (#24)', () => {
     expect(hub).toContain("bundled('centralu-package.json'")
     expect(shim.engines.node).toMatch(/^>=22\.14\.\d+$/)
   })
+
+  it('the desktop keeper reads the same package.json at compile time instead of keeping a number of its own', () => {
+    const node = readFileSync(new URL('../apps/desktop/src-tauri/keeper/src/host_proc/node.rs', import.meta.url), 'utf8')
+    expect(node).toContain('include_str!("../../../../../../packaging/npm/centralu/package.json")')
+    expect(node).not.toMatch(/MIN_NODE_MAJOR/)
+    // The path in the source really is that file
+    const target = new URL('../apps/desktop/src-tauri/keeper/src/host_proc/', import.meta.url)
+    expect(JSON.parse(readFileSync(new URL('../../../../../../packaging/npm/centralu/package.json', target), 'utf8')).engines.node).toBe('>=22.14.0')
+  })
 })

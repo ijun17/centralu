@@ -573,7 +573,7 @@ Option 4 of the question to the owner was taken: **keep the floor at 22.14.0, an
 | 3 | The hub switches a below-floor machine to the managed install by itself (on the connection line's `install.node`, on `node_too_old`, or on a start that exited with 3221225477 or SIGSEGV) and says so once in the row; it is tried once until the link next connects | Adding the machine was the consent (decision 7); the install is the one a person's click runs, SHA-256 checked. Looping on a host that still fails would hide the real cause |
 | 4 | Not switched, but named in a sentence with the floor: a development hub (its version is not published), a machine running a command of the person's own, a hub with no installer | There is nothing to install, or the person chose what runs there |
 
-The app's own host (the keeper, `node.rs` `MIN_NODE_MAJOR`) still checks the major only; moving it to 22.14 is separate work.
+The app's own host is held to the same floor: the keeper (`host_proc/node.rs` `min_node()`) reads the same `package.json` with `include_str!` at compile time, and refuses a system Node below it with a sentence that names the floor, the Node found and the upgrade command.
 
 ### 10.9a Real run on a Windows 11 PC (2026-10-11)
 

@@ -400,8 +400,36 @@ fn rejects_a_node_that_is_too_old() {
 
 #[test]
 fn accepts_a_node_that_is_new_enough() {
-    let path = fake_node("v22.3.1", "cc-test-node-ok");
+    let path = fake_node("v22.14.0", "cc-test-node-ok");
     assert_eq!(check_node_version(&path), Ok(path));
+}
+
+#[test]
+fn rejects_a_22_below_the_floor_and_names_it() {
+    // 22.12.0 is the Node on which the bundled database module loads and then crashes on its first
+    // use (#699): the major alone said it was fine.
+    for old in ["v22.12.0", "v22.13.1", "v22.0.0"] {
+        let path = fake_node(old, "cc-test-node-22-old");
+        let err = check_node_version(&path).unwrap_err();
+        assert!(err.contains(&format!("Node {} or newer is required", min_node_text())), "{err}");
+        assert!(err.contains(old), "{err}");
+        assert!(err.contains("crashes on its first use"), "{err}");
+    }
+}
+
+#[test]
+fn the_floor_is_the_npm_packages_engines_and_nothing_else() {
+    // `min_node` reads packaging/npm/centralu/package.json at compile time; this pins the reading
+    // and what it must refuse, so a different shape of range cannot slip in unseen.
+    assert_eq!(floor_of(">=22.14.0"), Some([22, 14, 0]));
+    assert_eq!(floor_of(">=22.14"), Some([22, 14, 0]));
+    assert_eq!(floor_of(">=22"), None);
+    assert_eq!(floor_of("^22.14.0"), None);
+    assert!(min_node()[0] >= 22);
+    assert_eq!(min_node_text().split('.').count(), 3);
+    assert!(below_floor(&[min_node()[0], min_node()[1] - 1, 99]));
+    assert!(!below_floor(&min_node()));
+    assert!(!below_floor(&[min_node()[0] + 2]));
 }
 
 #[test]
@@ -439,7 +467,7 @@ fn moves_on_when_the_shell_node_is_too_old() {
     // A Mac where nvm defaults to v18 but Homebrew has v22 — stopping here would fail to
     // launch even though a usable Node exists.
     let old = fake_node("v18.20.4", "cc-test-node-shell-old");
-    let new = fake_node("v22.9.0", "cc-test-node-brew-new");
+    let new = fake_node("v22.15.0", "cc-test-node-brew-new");
     assert_eq!(pick_node(Some(old), vec![new.clone()]), Ok(new));
 }
 
@@ -510,7 +538,7 @@ fn a_relative_path_entry_is_never_searched() {
 
 #[test]
 fn falls_back_to_a_real_path_when_the_shell_says_nothing() {
-    let ok = fake_node("v22.0.0", "cc-test-node-fallback");
+    let ok = fake_node("v22.14.0", "cc-test-node-fallback");
     assert_eq!(pick_node(None, vec!["/nope/node".into(), ok.clone()]), Ok(ok));
 }
 
