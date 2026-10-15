@@ -5,7 +5,7 @@ import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '
 import type { ToolProfile } from '../apps/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
-import { isAppAgent, readsOwnProject, toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
+import { codeIntelligenceOff, isAppAgent, readsOwnProject, toolBundleFor, toolProfileFor, type CodeIntelligenceFacts, type ToolProfileFacts } from './tool-profiles.js'
 
 /** An ordinary session in a project, with the reader set on; each case overrides what makes it different */
 const facts = (over: Partial<ToolProfileFacts> = {}): ToolProfileFacts => ({
@@ -163,5 +163,32 @@ describe('through the manager: the same profile under either tool and any preset
       expect(adapters[tool].handed.at(-1)?.toolProfile).toBe('orchestrator')
       expect(mgr.toolProfileOf(o.id)).toBe('orchestrator')
     }
+  })
+})
+
+describe('codeIntelligenceOff — which sessions start without a language server (#686)', () => {
+  const ci = (over: Partial<CodeIntelligenceFacts> = {}): CodeIntelligenceFacts => ({ kind: 'worker', appId: null, builder: false, askedBy: null, forkedFrom: null, ...over })
+
+  it('a child starts without it: one start_agent started, a fork, an agent an app asked for', () => {
+    expect(codeIntelligenceOff(ci({ askedBy: 'parent' }))).toBe(true)
+    expect(codeIntelligenceOff(ci({ forkedFrom: 'busy', askedBy: 'requester' }))).toBe(true)
+    // The orchestrator's fork has no askedBy (no project of its own): the copy alone makes it a child
+    expect(codeIntelligenceOff(ci({ forkedFrom: 'busy' }))).toBe(true)
+    expect(codeIntelligenceOff(ci({ appId: 'app-notes' }))).toBe(true)
+  })
+
+  it("its caller can keep it on for the task (start_agent's lsp: true); false is the default said aloud", () => {
+    expect(codeIntelligenceOff(ci({ askedBy: 'parent', lsp: true }))).toBe(false)
+    expect(codeIntelligenceOff(ci({ askedBy: 'parent', lsp: false }))).toBe(true)
+  })
+
+  it("sessions the person starts keep the person's own setting, whatever else they are", () => {
+    expect(codeIntelligenceOff(ci())).toBe(false)
+    expect(codeIntelligenceOff(ci({ lsp: false }))).toBe(false)
+    expect(codeIntelligenceOff(ci({ kind: 'orchestrator' }))).toBe(false)
+    // A builder session is the person's own work on their app, not an app's agent
+    expect(codeIntelligenceOff(ci({ appId: 'app-notes', builder: true }))).toBe(false)
+    // The removed control app's stamp is not an external app's agent (#372)
+    expect(codeIntelligenceOff(ci({ appId: RESERVED_APP_IDS[0]! }))).toBe(false)
   })
 })

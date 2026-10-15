@@ -111,3 +111,18 @@ export function installedCopyVersionSource(
   if (platform === 'win32') return { kind: 'file', name: 'centralu-version.txt' }
   return null
 }
+
+/**
+ * Where free memory plus what the OS can reclaim at once is read (#686): the start gate for new agent sessions asks.
+ * `os.freemem()` alone undercounts badly on macOS and Linux, where caches hold most of the "used" memory and give it
+ * back on demand (a 24 GB Mac read 0.2 GB free with 9 GB inactive). macOS: `vm_stat`'s pages; Linux: `MemAvailable`
+ * in `/proc/meminfo`, the kernel's own estimate; elsewhere (Windows), `os.freemem()`, which there already counts the
+ * standby list.
+ */
+export function availableMemorySource(
+  platform: Platform = HOST_PLATFORM,
+): { kind: 'command'; file: string; args: string[]; parse: 'vm_stat' } | { kind: 'file'; path: string; parse: 'meminfo' } | { kind: 'freemem' } {
+  if (platform === 'darwin') return { kind: 'command', file: '/usr/bin/vm_stat', args: [], parse: 'vm_stat' }
+  if (platform === 'linux' || platform === 'android') return { kind: 'file', path: '/proc/meminfo', parse: 'meminfo' }
+  return { kind: 'freemem' }
+}

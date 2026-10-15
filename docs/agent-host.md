@@ -254,7 +254,7 @@ own budget (`AGENT_TOOLS`, `AGENT_BUDGET_CHARS`).
 
 | Tool | Arguments → what comes back |
 |---|---|
-| `start_agent` | `{ task, tool?: string, model?, effort?, wait?, worktree?, branch? }` → the child's id and name, and its answer (`done`) or `working`; or `pending` with a request handle while the person's card stands (#673) |
+| `start_agent` | `{ task, tool?: string, model?, effort?, wait?, worktree?, branch?, lsp? }` → the child's id and name, and its answer (`done`) or `working`; or `pending` with a request handle while the person's card stands (#673), or, with `lowMemory`, while an allowed start waits for memory (§1.2.4, #686). `lsp: true` keeps the child's code intelligence (§1.2.4) |
 | `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete\|answer, text?, card?, ifBusy? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, §1.2.2, #676), `busy` and `queued` (a send to a session busy with a turn that is not the caller's, §1.2.3, #677), `stopped` and `deleted` (a child moved to the trash; worktree cleanup also preserves local work, #608/#637) |
 
 The optional `tool` is a registry name, accepted as a string by the schema and checked against the
@@ -558,7 +558,7 @@ must use `purgeSession` if added. Gitlinks found only in older merged superproje
 follow-up ([#623](https://github.com/ijun17/centralu/issues/623)); a superproject merge does not prove
 that module commits were pushed. Writes by other programs during capture are outside this session's lock.
 
-**Size.** The two definitions are 1,060 characters (`AGENT_BUDGET_CHARS` 1,100; 990 before #677's `ifBusy`, 956 before #676's `answer` action and `card`, 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
+**Size.** The two definitions are 1,085 characters (`AGENT_BUDGET_CHARS` 1,100; 1,060 before #686's `lsp`, which carries no description; 990 before #677's `ifBusy`, 956 before #676's `answer` action and `card`, 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
 made in words, like ask_project's, which deferred was not found) and defers `agent_session`, which every
 `start_agent` answer names; Codex reaches both through its `exec` tool. Measured in tool-cost.md §10: +170 tokens per ordinary Claude request (412 → 582); "Have Codex …" reached `start_agent` 3 of 3 on Claude, "another agent" went to each CLI's own sub-agents. No `name` argument: the child
 is named from its task and the person renames it.
@@ -687,6 +687,49 @@ the person sends are unchanged. The answer says which choice ran and its handle.
 bare string (the enum would put the reader's Claude request over its 2,300), and the runner refuses other values;
 `DELEGATE_BUDGET_CHARS` rises from 400 to 450, `AGENT_BUDGET_CHARS` from 1,000 to 1,100 (the agent set is 1,060 with
 #676's `answer` and `card`), and the scoped seat's from 2,350 to 2,400 for `send_to_session`'s.
+
+### 1.2.4 What a child costs the machine: code intelligence and the memory gate (#686)
+
+Parallel children are bounded by memory before usage. Measured on the owner's 24 GB Mac (2026-10-14): a Claude child
+that used code navigation ran its own `tsserver` at 0.5–1.1 GB in this monorepo, beside 0.3–0.5 GB for the CLI;
+Codex starts no language server. The owner decided (2026-10-15) two things.
+
+**Code intelligence is off for a child unless its caller asks.** `codeIntelligenceOff` (tool-profiles.ts) is the rule:
+a child (`isChildSession`: a `start_agent` child, a fork, an app's agent) starts without it unless `start_agent` passed
+`lsp: true`; sessions the person starts, the orchestrator and builder sessions keep the person's own setting. The
+caller chooses per task (on for refactors and wide cross-file changes; research, docs, small fixes and tests do well
+with search and a final typecheck); Centralu does not guess the task's kind from its words. The decision is made once,
+in `createSession`, and recorded as the app setting `code_intelligence:<id>` = `off` (no column, so no migration), so
+every wake, restart and host resume launches the child as it was created, and a session made before this build keeps
+the person's setting. The adapter receives `noCodeIntelligence` and decides what it means: Claude disables, in the
+SDK's `settings` option (the CLI's `--settings` flag layer, highest of the layers the person controls), every enabled
+plugin that declares `lspServers` (adapters/claude/lsp-plugins.ts). The person's settings files are never written.
+Which plugins: the enabled ids come from the SDK's own merge (`resolveSettings`, over the layers that session reads),
+and a plugin counts when its installed copy's `.claude-plugin/plugin.json` declares `lspServers`, its root has a
+`.lsp.json`, or its marketplace entry (`.claude-plugin/marketplace.json`, as Anthropic's official LSP plugins do with
+`strict: false`) declares them, found through `plugins/installed_plugins.json` and `plugins/known_marketplaces.json`
+under `CLAUDE_CONFIG_DIR` (or `~/.claude`). Those files are the CLI's, not a published interface, so the measured
+plugin, `typescript-lsp@claude-plugins-official`, is always disabled as well (`KNOWN_LSP_PLUGINS`): a layout change
+can miss another language's server, never that one. The keeper fingerprint adds `noLsp` only when it is on, so every
+fingerprint stored before reads the same. Codex ignores the option.
+
+**A new child starts only while the machine has room** (`MemoryGate`, sessions/memory-gate.ts, wired in main.ts with
+`useMemoryGate`; tests wire one only where it is the subject). The reading is free plus reclaimable memory
+(`availableMemorySource`, os.ts): macOS `vm_stat`'s free, inactive and speculative pages (`os.freemem()` there read
+0.2 GB with 9 GB inactive); Linux `MemAvailable`; Windows `os.freemem()`. A read that fails lets the start go. Below
+the floor (2 GB, `MEMORY_FLOOR_BYTES`) the start is **queued, not refused**:
+
+| Start | Below the floor |
+|---|---|
+| `start_agent` | After consent (the card or the project's trust), the request (`agent_start_requests`, #673) is marked `allowed` and the call answers `pending` with `lowMemory` and its `ag-…` handle (the model reads "queued: low memory"). A notice in the caller's session says why. agent_session `status`/`wait`/`stop` work on the handle as on a card's; a start that had no card gets a request of its own. Once memory recovers the child starts with its report armed, and the handle leads to it. A host that takes over an `allowed` request waits for memory without raising the card again (an older build raises it again, which only asks twice). |
+| A fork (§1.2.3) | Becomes a place in the busy session's queue instead (`enqueue`), which starts no process; the answer says `queued` with `lowMemory`, read as "Not forked: memory is low … queued instead". |
+| An app's agent | Waits inside the app's call: the run's progress says "waiting for memory", and the agent starts when memory recovers; a cancelled call ends it without a session. |
+
+The wait re-reads memory every 15 s (`MEMORY_RECHECK_MS`) and lets **one** queued start go per check, oldest first:
+a child takes its memory over the first seconds of its turn, so starts released together would all read the same free
+memory. It gives up after 30 minutes (`MEMORY_WAIT_MAX_MS`): the caller is told as a message and the person in a
+notice. A withdrawn request, a deleted caller, or a host leaving (`disposeAll`, `detachAll` close the gate; the stored
+request goes to the next host) ends the wait without a start. Sessions the person starts are never gated.
 
 ### 1.3 Making a new project (`projects.create`, `create_project`, #515)
 

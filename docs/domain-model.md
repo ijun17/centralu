@@ -276,7 +276,7 @@ Where it is stored:
 - `approval_rules`: "always allow" command rules.
 - `project_consents`: one project's remembered consent to reach another.
 - `report_marks`: the report a session owes the session that gave it work, until it is delivered.
-- `agent_start_requests`: a start_agent card the person has not answered yet, so the next host raises it again (#673).
+- `agent_start_requests`: a start_agent card the person has not answered yet, so the next host raises it again (#673); or an allowed start waiting for memory (`allowed`), which the next host starts when memory recovers, without a card (#686).
 - `delegated_turns`: the session that gave a session its running turn, and the cards it was told of, until the turn ends.
 - `queued_requests`: a request held for a busy session, until it is delivered as a new turn.
 

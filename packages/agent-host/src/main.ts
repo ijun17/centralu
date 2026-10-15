@@ -17,6 +17,7 @@ import { ViewHost } from './views/view-host.js'
 import { attachInlineViews } from './inline-views.js'
 import { OriginPorts, type PortBook } from './views/origin-ports.js'
 import { SessionManager } from './sessions/manager.js'
+import { MemoryGate } from './sessions/memory-gate.js'
 import { DEFAULT_RARE_TIER, currentRareTier, rareTierFrom, setRareTier, setReaderInstructions } from './sessions/orchestrator-tools.js'
 import { setOrchestratorPreamble } from './sessions/orchestrator-home.js'
 import { readShared } from './sessions/app-access.js'
@@ -284,6 +285,8 @@ const mgr = new SessionManager(
 )
 // A new project's default home is this machine's ~/Centralu (#515); wired here, never in tests
 mgr.useProjectsHome(() => projectsHome())
+// New agent sessions start only while the machine has memory for them (#686); wired here, in tests only where it is the subject
+mgr.useMemoryGate(new MemoryGate())
 /*
  * The external app runtime (M4 A). Startup **only scans** — an app process starts only the first
  * time it is needed (performance budget: zero app processes at idle, even with 5 apps installed).

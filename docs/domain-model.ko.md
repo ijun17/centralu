@@ -275,7 +275,7 @@ classDiagram
 - `approval_rules`: 명령의 "항상 허용" 규칙.
 - `project_consents`: 한 프로젝트가 다른 프로젝트에 닿도록 기억해 둔 동의.
 - `report_marks`: 세션이 일을 준 세션에게 빚진 보고. 전해질 때까지 남는다.
-- `agent_start_requests`: 사람이 아직 답하지 않은 start_agent 카드. 다음 호스트가 다시 세운다(#673).
+- `agent_start_requests`: 사람이 아직 답하지 않은 start_agent 카드. 다음 호스트가 다시 세운다(#673). 또는 허락되었지만 메모리를 기다리는 시작(`allowed`). 다음 호스트가 카드 없이 메모리가 돌아오면 시작한다(#686).
 - `delegated_turns`: 세션에게 지금 도는 턴을 맡긴 세션과, 그 세션에 이미 알린 카드. 턴이 끝날 때까지 남는다.
 - `queued_requests`: 바쁜 세션을 위해 붙잡아 둔 요청. 새 턴으로 전해질 때까지 남는다.
 

@@ -230,7 +230,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 
 | 도구 | 인자 → 돌아오는 것 |
 |---|---|
-| `start_agent` | `{ task, tool?: string, model?, effort?, wait?, worktree?, branch? }` → 자식의 id와 이름, 그리고 답(`done`) 또는 `working`. 사람의 카드가 서 있는 동안에는 요청 핸들과 함께 `pending`(#673) |
+| `start_agent` | `{ task, tool?: string, model?, effort?, wait?, worktree?, branch?, lsp? }` → 자식의 id와 이름, 그리고 답(`done`) 또는 `working`. 사람의 카드가 서 있는 동안에는 요청 핸들과 함께 `pending`(#673), 허락된 시작이 메모리를 기다리는 동안에는 `lowMemory`가 붙은 `pending`(§1.2.4, #686). `lsp: true`는 자식의 코드 인텔리전스를 켠 채로 둔다(§1.2.4) |
 | `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete\|answer, text?, card?, ifBusy? }` → 같은 상태들, 더해서 `at_rest`(부른 세션이 준 일이 돌지 않음, 마지막 답), `asking`과 `answered`(부른 세션이 준 턴의 카드, §1.2.2, #676), `busy`와 `queued`(부른 세션의 턴이 아닌 턴으로 바쁜 세션에 보낸 것, §1.2.3, #677), `stopped`, `deleted`(병합되고 깨끗한 워크트리 자식을 치움, 3부) |
 
 선택 인자 `tool`은 레지스트리 이름이다. 스키마는 문자열을 받고, 호출할 때 현재 레지스트리에
@@ -310,7 +310,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 턴도 멈춘다. 계속 돌게 둔 자식(`wait: false`, 또는 한도를 넘긴 것)은 자기 세션이라 부모의 멈춤이 닿지 않고 자기
 멈춤 버튼이 있다. 부르는 세션을 지우면 기다림과 세션 동의는 사라지고, 자식은 턴과 링크를 지킨다.
 
-**크기.** 두 정의는 1,060자(`AGENT_BUDGET_CHARS` 1,100. #677의 `ifBusy` 전에는 990자, #676의 `answer` 동작과 `card` 전에는 956자, 레지스트리 이름 스키마 전에는 992자, 작업 트리 인자 전에는 918자, `delete` 전에는 974자). Claude는 `start_agent`를 올려 두고 `agent_session`을 미룬다
+**크기.** 두 정의는 1,085자(`AGENT_BUDGET_CHARS` 1,100. 설명 없이 붙은 #686의 `lsp` 전에는 1,060자, #677의 `ifBusy` 전에는 990자, #676의 `answer` 동작과 `card` 전에는 956자, 레지스트리 이름 스키마 전에는 992자, 작업 트리 인자 전에는 918자, `delete` 전에는 974자). Claude는 `start_agent`를 올려 두고 `agent_session`을 미룬다
 (`start_agent`의 모든 답이 그 이름을 댄다). 잰 값은 tool-cost.md에 있다.
 
 **stdout은 예약되어 있다.** `main.ts`가 딱 한 줄을 찍는다: Tauri 수퍼바이저가 포트와 인증
@@ -413,6 +413,48 @@ B 자신의 턴이 돌고 있으면 B에게는 바쁜 것이 아니다: 자기 �
 문자열이다(열거형이면 reader의 Claude 요청이 2,300자를 넘는다). 다른 값은 실행기가 거절한다. `DELEGATE_BUDGET_CHARS`는
 400에서 450으로, `AGENT_BUDGET_CHARS`는 1,000에서 1,100으로(#676의 `answer`와 `card`까지 더해 agent 묶음은 1,060자),
 scoped 좌석은 `send_to_session`의 것 때문에 2,350에서 2,400으로 올린다.
+
+### 1.2.4 자식 세션이 기계에 드는 비용: 코드 인텔리전스와 메모리 관문 (#686)
+
+병렬 자식 세션의 수는 사용량보다 메모리에 먼저 막힌다. 사장님의 24 GB Mac에서 측정한 값(2026-10-14): 코드 탐색을 쓴 Claude
+자식은 이 모노레포에서 자기 `tsserver`를 0.5–1.1 GB로 돌렸고, CLI 자체가 0.3–0.5 GB를 더 썼다. Codex는 언어 서버를 띄우지
+않는다. 사장님은 두 가지를 정했다(2026-10-15).
+
+**자식의 코드 인텔리전스는 부른 쪽이 요청하지 않으면 꺼진다.** 규칙은 `codeIntelligenceOff`(tool-profiles.ts)다. 자식
+(`isChildSession`: `start_agent`의 자식, 포크, 앱의 에이전트)은 `start_agent`가 `lsp: true`를 넘기지 않는 한 코드
+인텔리전스 없이 시작한다. 사람이 시작한 세션, 오케스트레이터, 빌더 세션은 사람의 설정을 그대로 따른다. 부른 쪽이 작업마다
+고른다(리팩터링과 여러 파일에 걸친 변경에는 켜고, 조사·문서·작은 수정·테스트는 검색과 마지막 typecheck로 충분하다).
+Centralu는 작업의 종류를 문장에서 추측하지 않는다. 결정은 `createSession`에서 한 번 내려지고 앱 설정
+`code_intelligence:<id>` = `off`로 기록된다(열이 아니므로 마이그레이션이 없다). 그래서 깨울 때, 재시작할 때, 호스트가 이어받을
+때마다 자식은 만들어질 때와 같이 실행되고, 이 빌드 이전에 만든 세션은 사람의 설정을 유지한다. 어댑터는
+`noCodeIntelligence`를 받아 그 의미를 정한다. Claude는 SDK의 `settings` 옵션(CLI의 `--settings` 플래그 계층, 사람이
+다루는 계층 중 가장 높다)에서 `lspServers`를 선언한 활성 플러그인을 모두 끈다(adapters/claude/lsp-plugins.ts). 사람의 설정
+파일에는 아무것도 쓰지 않는다. 어떤 플러그인인지: 활성 id는 SDK 자체의 병합(`resolveSettings`, 그 세션이 읽는 계층)에서
+얻고, 설치본의 `.claude-plugin/plugin.json`이 `lspServers`를 선언하거나, 설치본 루트에 `.lsp.json`이 있거나, 마켓플레이스
+항목(`.claude-plugin/marketplace.json`, Anthropic 공식 LSP 플러그인은 `strict: false`로 여기에 선언한다)이 선언하면 해당한다.
+파일은 `CLAUDE_CONFIG_DIR`(없으면 `~/.claude`) 아래의 `plugins/installed_plugins.json`과 `plugins/known_marketplaces.json`으로
+찾는다. 이 파일들은 공개된 인터페이스가 아니라 CLI의 것이므로, 측정한 플러그인
+`typescript-lsp@claude-plugins-official`은 항상 함께 끈다(`KNOWN_LSP_PLUGINS`). 파일 구조가 바뀌면 다른 언어의 서버는
+놓칠 수 있어도 이 서버는 놓치지 않는다. 키퍼 지문은 꺼졌을 때만 `noLsp`를 더하므로, 이전에 저장된 지문은 모두 그대로
+읽힌다. Codex는 이 옵션을 무시한다.
+
+**새 자식은 기계에 여유가 있을 때만 시작한다**(`MemoryGate`, sessions/memory-gate.ts. main.ts가 `useMemoryGate`로
+연결하고, 테스트는 그것이 주제인 곳에서만 연결한다). 읽는 값은 비어 있는 메모리와 회수할 수 있는 메모리의 합이다
+(`availableMemorySource`, os.ts): macOS는 `vm_stat`의 free·inactive·speculative 페이지(여기서 `os.freemem()`은 inactive가
+9 GB인데 0.2 GB로 읽었다), Linux는 `MemAvailable`, Windows는 `os.freemem()`이다. 읽기에 실패하면 시작을 통과시킨다.
+하한(2 GB, `MEMORY_FLOOR_BYTES`)보다 적으면 시작은 **거절되지 않고 대기열에 들어간다**:
+
+| 시작 | 하한 아래일 때 |
+|---|---|
+| `start_agent` | 동의(카드 또는 프로젝트 신뢰) 뒤에 요청(`agent_start_requests`, #673)이 `allowed`로 표시되고, 호출은 `lowMemory`와 `ag-…` 핸들이 붙은 `pending`으로 답한다(모델은 "queued: low memory"로 읽는다). 부른 세션에 이유를 알리는 공지가 뜬다. agent_session의 `status`/`wait`/`stop`은 카드의 핸들과 똑같이 동작하고, 카드가 없던 시작은 자기 요청을 새로 받는다. 메모리가 돌아오면 보고가 걸린 채로 자식이 시작되고, 핸들은 그 자식으로 이어진다. `allowed` 요청을 이어받은 호스트는 카드를 다시 띄우지 않고 메모리만 기다린다(이전 빌드는 카드를 다시 띄우는데, 두 번 묻는 것뿐이다). |
+| 포크(§1.2.3) | 대신 바쁜 세션의 대기열에 들어간다(`enqueue`). 프로세스를 새로 띄우지 않는다. 답은 `lowMemory`가 붙은 `queued`이고, "Not forked: memory is low … queued instead"로 읽힌다. |
+| 앱의 에이전트 | 앱의 호출 안에서 기다린다. 실행 진행 상황에 "waiting for memory"가 뜨고, 메모리가 돌아오면 에이전트가 시작된다. 호출이 취소되면 세션 없이 끝난다. |
+
+대기는 15초마다(`MEMORY_RECHECK_MS`) 메모리를 다시 읽고, 확인 한 번에 대기 중인 시작을 **하나만**, 오래된 것부터 내보낸다.
+자식은 턴의 처음 몇 초 동안 메모리를 차지하므로, 함께 내보낸 시작들은 모두 같은 여유 메모리를 읽게 된다. 30분
+(`MEMORY_WAIT_MAX_MS`)이 지나면 포기하고, 부른 세션에는 메시지로, 사람에게는 공지로 알린다. 요청이 철회되거나, 부른 세션이
+삭제되거나, 호스트가 떠나면(`disposeAll`, `detachAll`이 관문을 닫는다. 저장된 요청은 다음 호스트로 넘어간다) 시작 없이 대기가
+끝난다. 사람이 시작한 세션은 관문을 거치지 않는다.
 
 ### 1.3 새 프로젝트 만들기 (`projects.create`, `create_project`, #515)
 

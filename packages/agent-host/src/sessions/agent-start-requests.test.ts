@@ -8,6 +8,7 @@ import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protoco
 import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager, START_AGENT_SETUP_MS, type AgentProcessHost } from './manager.js'
+import { MemoryGate } from './memory-gate.js'
 
 /**
  * A start_agent card the person has not answered outlives the call and the host (#673): the leaving host keeps the
@@ -218,5 +219,38 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     expect(await b.mgr.agentSession(parent, { sessionId: requestId, action: 'stop' })).toMatchObject({ ok: true, state: 'stopped' })
     expect(card(b.mgr, parent)).toBeUndefined()
     expect(b.mgr.listSessions().find((s) => s.id === parent)!.state).toBe('idle')
+  })
+})
+
+describe('a start allowed but waiting for memory (#686)', () => {
+  it('outlives a host swap without a second card, and the next host starts it when memory recovers', async () => {
+    let free = 1024 ** 3
+    const gate = () => new MemoryGate({ read: async () => free, recheckMs: 20 })
+    const a = host()
+    a.mgr.useMemoryGate(gate())
+    const { parent, call, requestId } = await asking(a)
+    a.mgr.respondApproval(parent, requestId, 'allow')
+    // Allowed on the card, then queued: the same handle, now waiting for memory
+    expect(await call).toMatchObject({ ok: true, state: 'pending', sessionId: requestId, lowMemory: { floor: '2.0 GB' } })
+    expect(store.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId, request: expect.objectContaining({ allowed: true }) })])
+    await a.mgr.detachAll()
+    // Letting go ends the wait without starting anything, and keeps the request for the next host
+    expect(children(a.mgr, parent)).toEqual([])
+    expect(store.listAgentStartRequests()).toHaveLength(1)
+
+    const b = host()
+    b.mgr.useMemoryGate(gate())
+    await new Promise((r) => setTimeout(r, 100))
+    // The person already answered: no card again, and nothing starts while memory is short
+    expect(card(b.mgr, parent)).toBeUndefined()
+    expect(children(b.mgr, parent)).toEqual([])
+    expect(await b.mgr.agentSession(parent, { sessionId: requestId, action: 'status' })).toMatchObject({ state: 'pending', lowMemory: { floor: '2.0 GB' } })
+    free = 4 * 1024 ** 3
+    await until(() => children(b.mgr, parent).length === 1)
+    const child = children(b.mgr, parent)[0]!.id
+    await until(() => store.listReportMarks().length === 1)
+    expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    expect(store.listAgentStartRequests()).toEqual([])
+    expect(b.claude.handles.get(child)!.sent[0]).toContain('long work')
   })
 })

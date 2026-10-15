@@ -1,4 +1,4 @@
-import { query, resolveSettings, filterEscalatingDefaultMode, type McpServerConfig, type PermissionMode } from '@anthropic-ai/claude-agent-sdk'
+import { query, resolveSettings, filterEscalatingDefaultMode, type McpServerConfig, type PermissionMode, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { homedir } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
@@ -58,6 +58,7 @@ import { readClaudeModels, type ModelQuery } from './models.js'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { LocalAgentProcess, spawnLocalAgent, type LocalSpawnSpec } from '../local-process.js'
 import { approvalDetail, ClaudeStreamNormalizer } from './normalize.js'
+import { noCodeIntelligenceSettings } from './lsp-plugins.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { withoutCrossSessionMessaging } from './cross-session.js'
 
@@ -451,6 +452,10 @@ class ClaudeSession implements SessionHandle {
     }
     const servers = this.mcpServers()
     const permissionOptions = await permissionOptionsFor(this.opts)
+    // Code intelligence off for this session alone (#686): its language-server plugins disabled in the flag layer
+    const codeIntelligence = this.opts.noCodeIntelligence
+      ? { settings: await noCodeIntelligenceSettings(this.opts.cwd, settingSourcesFor(this.opts) as { settingSources?: SettingSource[] }) }
+      : {}
 
     /*
      * Spaced out on Windows, so processes started together (the orchestrator waking its sessions, a
@@ -557,6 +562,7 @@ class ClaudeSession implements SessionHandle {
             }
           : {}),
         ...permissionOptions,
+        ...codeIntelligence,
         /*
          * The agent an app hands a schema and asks for output (M4 D-1). It is a per-query option,
          * so it can only be given when the session starts. Measured (SDK 0.3.263, CLI 2.1.282,
@@ -1613,7 +1619,8 @@ export class ClaudeAdapter implements AgentAdapter {
     // Keep this alongside the query option construction. Bump the version when a setting the
     // adapter derives (including cross-session controls) changes without changing these inputs.
     // Normal v2 retires kept processes launched without an explicit mode (#578); safe's flags are unchanged.
-    return JSON.stringify({ v: settings.permissionPreset === 'safe' ? 1 : 2, cwd: settings.cwd, permission: settings.permissionPreset, trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles })
+    // Code intelligence (#686) only when off, so every fingerprint stored before it reads the same
+    return JSON.stringify({ v: settings.permissionPreset === 'safe' ? 1 : 2, cwd: settings.cwd, permission: settings.permissionPreset, trusted: !!settings.projectTrusted, noSettings: !!settings.noSettingFiles, ...(settings.noCodeIntelligence ? { noLsp: true } : {}) })
   }
 
   async detect(): Promise<DetectResult> {

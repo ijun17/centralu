@@ -153,7 +153,8 @@ export type IfBusy = 'note' | 'queue' | 'fork' | 'fork_read'
 export type BusyChoice = { choice: 'note' | 'queue' | 'fork'; available: boolean; why?: string }
 export type BusyAnswer =
   | { state: 'busy'; sessionId: string; sessionName: string; sessionState: string; choices: BusyChoice[] }
-  | { state: 'queued'; sessionId: string; sessionName: string; queueId: string; position: number }
+  /** `lowMemory` (#686): queued instead of the fork asked for, since memory was low; what was read */
+  | { state: 'queued'; sessionId: string; sessionName: string; queueId: string; position: number; lowMemory?: string }
   | { state: 'noted'; sessionId: string; sessionName: string }
   | { state: 'forked'; sessionId: string; sessionName: string; forkedFrom: string }
 
@@ -226,16 +227,23 @@ export type ChildRunResult =
       | { state: 'asking'; cards: RoutedCard[] }
       | { state: 'answered'; card: string }
       | { state: 'busy'; sessionState: string; choices: BusyChoice[] }
-      | { state: 'queued'; queueId: string; position: number }
+      | { state: 'queued'; queueId: string; position: number; lowMemory?: string }
       | { state: 'stopped' }
-      | { state: 'pending' }
+      /**
+       * No session yet (#673): the person has not answered the card; or, with `lowMemory`, the start is allowed and
+       * queued until memory recovers (#686)
+       */
+      | { state: 'pending'; lowMemory?: { available: string; floor: string; maxWaitMinutes: number } }
       | { state: 'deleted'; branch?: undefined; setAside?: undefined; warning?: undefined }
       | { state: 'deleted'; branch: string; warning?: string; setAside: { changedFiles: number; commits: number } }
     ))
   | { ok: false; error: string }
 
-/** start_agent's arguments (#561): the task; the tool, model and effort when the caller picks them; a new worktree (part 2) */
-export type StartAgentOpts = { task: string; tool?: string; model?: string; effort?: string; wait?: boolean; worktree?: boolean; branch?: string }
+/**
+ * start_agent's arguments (#561): the task; the tool, model and effort when the caller picks them; a new worktree (part 2);
+ * and code intelligence (#686), off for a child unless `lsp` is true
+ */
+export type StartAgentOpts = { task: string; tool?: string; model?: string; effort?: string; wait?: boolean; worktree?: boolean; branch?: string; lsp?: boolean }
 
 /** agent_session's arguments (#561) */
 export type AgentSessionOpts = {
@@ -668,6 +676,14 @@ export type CreateSessionOpts = {
    */
   noSettingFiles?: boolean
   /**
+   * Start without code intelligence (#686): the language servers the CLI would start for this session are turned off,
+   * for this session only. The manager sets it for child sessions (start_agent's, a fork, an app's agent) unless their
+   * caller asked for it (`codeIntelligenceOff`); sessions the person starts never get it. What it means is the adapter's:
+   * Claude disables, in this session's flag settings, every enabled plugin that declares `lspServers`; the person's
+   * settings files are not touched. An adapter whose CLI starts no language server (Codex) ignores it.
+   */
+  noCodeIntelligence?: boolean
+  /**
    * Folders outside the working folder that **must be read** (#142) — currently just the one
    * folder holding an inherited handoff note.
    *
@@ -763,7 +779,7 @@ export type CreateSessionOpts = {
  */
 export type LaunchSettings = Pick<
   CreateSessionOpts,
-  'cwd' | 'model' | 'effort' | 'verbosity' | 'serviceTier' | 'permissionPreset' | 'projectTrusted' | 'noSettingFiles' | 'toolProfile' | 'systemPromptAppend'
+  'cwd' | 'model' | 'effort' | 'verbosity' | 'serviceTier' | 'permissionPreset' | 'projectTrusted' | 'noSettingFiles' | 'toolProfile' | 'systemPromptAppend' | 'noCodeIntelligence'
 >
 
 /** A single previous session kept by the tool (a tool's own type never reaches this far) */

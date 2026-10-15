@@ -691,7 +691,8 @@ rises from 1,400 to 1,750, and the reader resident ceiling from 3,700 to 4,050.
 | Codex, all offered tools loaded | 3,540 | 0 | 480 | 4,020 |
 
 Claude's resident definitions stay unchanged; only the 36-character pointer joins every request.
-The resident test also caps Claude at 2,300 characters to guard that deferral. These are serialized
+The resident test also caps Claude at 2,300 characters to guard that deferral (2,350 since #686: start_agent's `lsp`
+argument, name and type only, took the reader's Claude request from 2,288 to 2,313 characters). These are serialized
 character counts, not a new live token or tool-selection measurement.
 
 **The count had to be fixed first.** Claude Code put the servers' instructions on Sonnet in the same block as the

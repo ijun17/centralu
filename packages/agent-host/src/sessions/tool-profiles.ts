@@ -64,6 +64,43 @@ export function toolProfileFor(f: ToolProfileFacts): ToolProfile | null {
 }
 
 /**
+ * What decides a session's code intelligence (#686): whether it is a child, and the caller's choice for it.
+ */
+export type CodeIntelligenceFacts = Pick<ToolProfileFacts, 'kind' | 'appId' | 'builder'> & {
+  /** The session that started it with start_agent (#561), or the requester of a fork (#677) */
+  askedBy: string | null
+  /** The session whose conversation it copies (#677) */
+  forkedFrom: string | null
+  /** start_agent's `lsp`; absent when the caller did not choose */
+  lsp?: boolean
+}
+
+/**
+ * Is this a child session: one an agent or an app started, not the person (#686)? A start_agent child (`askedBy`), a
+ * fork of a busy session (`forkedFrom`), and an agent an app asked for (`isAppAgent`).
+ */
+export function isChildSession(f: CodeIntelligenceFacts): boolean {
+  return !!f.askedBy || !!f.forkedFrom || isAppAgent(f)
+}
+
+/**
+ * Whether this session starts with its code intelligence (the language servers its CLI's plugins declare, LSP) turned
+ * off (#686, owner decision 2026-10-15). Decided once, when the session is created, and kept for every wake.
+ *
+ * Each child with code intelligence may run its own language server: `tsserver` measured 0.5–1.1 GB per child in this
+ * monorepo, about twice the CLI itself. Most children's tasks (research, docs, small fixes, tests) do well with search
+ * and a final typecheck, so a child starts without it unless its caller asks (`lsp: true`, for refactors and large
+ * cross-file changes). The caller chooses per task; Centralu does not guess the kind of task from its words.
+ *
+ * Sessions the person starts keep the person's own setting, whatever they are; so does the orchestrator. Only the
+ * adapter knows what code intelligence is for its CLI (Claude: the plugins that declare `lspServers`); an adapter whose
+ * CLI starts no language server (Codex) has nothing to turn off.
+ */
+export function codeIntelligenceOff(f: CodeIntelligenceFacts): boolean {
+  return isChildSession(f) && f.lsp !== true
+}
+
+/**
  * Where each bundle comes from. The orchestrator and the builder share one object (the builder's
  * profile blocks everything but `check` through `profileAllows`); a coordinator's object sees only
  * its members; the reader's object refuses directing calls.

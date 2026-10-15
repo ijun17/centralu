@@ -83,7 +83,8 @@ import {
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, BusyAnswer, BusyChoice, ChildRunResult, AgentSessionOpts, AskProjectResult, RoutedCard, StartAgentOpts, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, HistoryMessage, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { LaunchSettings } from '../adapters/contract.js'
 import { registeredTool } from '../adapters/registry.js'
-import { isAppAgent, toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
+import { codeIntelligenceOff, isAppAgent, toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
+import { gigabytes, type MemoryGate, type MemoryShortfall } from './memory-gate.js'
 
 /**
  * Where agent processes live when not with this host (#280 step 2 — the keeper). `spawn` starts a
@@ -221,6 +222,13 @@ type AgentStartRequest = {
   worktreeBranch?: string
   task: string
   unchecked?: string
+  /** start_agent's code intelligence choice (#686) */
+  lsp?: boolean
+  /**
+   * The start is allowed (by the card or the project's trust) and waits only for memory (#686): a host that takes it
+   * over starts it when memory allows, without raising the card again
+   */
+  allowed?: true
   detail: Extract<ApprovalDetail, { kind: 'agent_start' }>
 }
 
@@ -242,11 +250,21 @@ type AgentStartRecord = {
   /** Resolves when it ends (agent_session wait on the handle) */
   done: Promise<void>
   end: () => void
+  /** Allowed, and queued until memory recovers (#686): what was read when it was queued */
+  lowMemory?: LowMemory
+  /** Ends the wait for memory, when the request ends another way (withdrawn, the caller deleted) */
+  stopWaiting?: () => void
 }
 
-/** The answer while a start waits on the person (#673): the request's id is the handle agent_session follows */
-function agentStartPending(req: AgentStartRequest): ChildRunResult {
-  return { ok: true, state: 'pending', sessionId: req.requestId, sessionName: '', tool: req.detail.tool }
+/** A start queued for memory (#686), as the caller reads it */
+type LowMemory = { available: string; floor: string; maxWaitMinutes: number }
+
+/**
+ * The answer while a start waits on the person (#673), or on memory (#686): the request's id is the handle agent_session
+ * follows
+ */
+function agentStartPending(req: AgentStartRequest, lowMemory?: LowMemory): ChildRunResult {
+  return { ok: true, state: 'pending', sessionId: req.requestId, sessionName: '', tool: req.detail.tool, ...(lowMemory ? { lowMemory } : {}) }
 }
 
 /** What the person reads in the caller's session when a start_agent request ends without a session (#673) */
@@ -334,6 +352,12 @@ const STREAM_FLUSH_MS = 2000
  * value like that lives.
  */
 const freshStartKey = (sessionId: string) => `fresh_start:${sessionId}`
+/**
+ * A session created without code intelligence (#686, `codeIntelligenceOff`): `off`. Decided once at creation and read on
+ * every wake, so a child keeps what it started with, and a session made before this build keeps the person's setting.
+ * A setting rather than a column: it only matters to the adapter's launch, and needs no migration.
+ */
+const codeIntelligenceKey = (sessionId: string) => `code_intelligence:${sessionId}`
 /**
  * **Up to what point** this session's external transcript has been read (exactly the `updatedAt`
  * the tool gave us).
@@ -1008,6 +1032,15 @@ export class SessionManager {
   }
 
   /**
+   * The start gate for new agent sessions (#686, `memory-gate.ts`): wired by main.ts, and by the tests that are about
+   * it. Without one every start goes ahead, so a test machine short of memory does not queue unrelated tests' children.
+   */
+  private memoryGate: MemoryGate | null = null
+  useMemoryGate(gate: MemoryGate | null): void {
+    this.memoryGate = gate
+  }
+
+  /**
    * The folder a new project would get, and whether a clone source is one this host clones (#515) — checked, nothing
    * made. With a source and no name, the folder is named after the repository.
    */
@@ -1677,6 +1710,8 @@ export class SessionManager {
       askedBy?: string
       /** The session whose conversation this one is a copy of (#677, a fork of a busy session) */
       forkedFrom?: string
+      /** start_agent's choice of code intelligence for its child (#686); absent: a child starts without it */
+      lsp?: boolean
     },
   ): Promise<SessionInfo> {
     if (params.askedBy && this.meta.get(params.askedBy)?.projectId !== params.projectId) {
@@ -1844,6 +1879,15 @@ export class SessionManager {
     // The same rule runs again on every wake (toolProfileOf). The builder slot was just written (setBuilder), so the
     // flag says what the row's slot already says
     const profile = toolProfileFor(this.profileFacts(info, !!params.builderOf))
+    // Code intelligence (#686): decided once, here, from what the session is, and recorded below for every wake
+    const noCodeIntelligence = codeIntelligenceOff({
+      kind: info.kind,
+      appId: info.appId ?? null,
+      builder: !!params.builderOf,
+      askedBy: info.askedBy ?? null,
+      forkedFrom: info.forkedFrom ?? null,
+      ...(params.lsp !== undefined ? { lsp: params.lsp } : {}),
+    })
     const from = this.handleSink()
     this.unborn.set(id, [])
     try {
@@ -1858,6 +1902,7 @@ export class SessionManager {
           // and the trust at this exact moment of launch. If this is a builder session, the
           // directory above already points at this session (setBuilder)
           ...this.settingFilesFor(info),
+          ...(noCodeIntelligence ? { noCodeIntelligence: true } : {}),
           // Reads an inherited note without asking (#142). No marker exists yet — it is stamped once this
           // session comes up
           ...this.handoffReadDirs(params.projectId, !!params.handoff?.fromSessionId),
@@ -1908,6 +1953,7 @@ export class SessionManager {
 
     this.meta.set(id, info)
     this.store.upsertSession(info)
+    if (noCodeIntelligence) this.store.setAppSetting(codeIntelligenceKey(id), 'off')
     this.rememberToolPrefix(id)
     this.rememberLaunchSettings(info, cwd)
     this.store.setSessionCwd(id, cwd)
@@ -2568,6 +2614,7 @@ export class SessionManager {
            * as a manager and a builder session both get the same answer here.
            */
           ...this.settingFilesFor(m),
+          ...(this.codeIntelligenceOffFor(sessionId) ? { noCodeIntelligence: true } : {}),
           // An inherited note must still be readable after waking up (#142) — the first message still points
           // at that path
           ...this.handoffReadDirs(m.projectId, this.store.inheritsHandoff(sessionId)),
@@ -3126,6 +3173,7 @@ export class SessionManager {
       try {
         await this.store.purgeSession(sessionId)
         this.forgetBackground(sessionId)
+        this.store.deleteAppSetting(codeIntelligenceKey(sessionId))
       } catch (e) {
         // Not swallowed: the folder left aside carries the session id, and the next start puts it back (#647)
         await recoveryRemoval.abort().catch((cause: Error) => console.error(`[trash] recovery files of ${sessionId.slice(0, 8)} could not be put back after a failed purge and stay aside until the next start: ${cause.message}`))
@@ -5295,7 +5343,13 @@ export class SessionManager {
       ...this.settingFilesFor(session),
       toolProfile: this.toolProfileOf(session.id) ?? undefined,
       systemPromptAppend: session.roleAppend ?? undefined,
+      ...(this.codeIntelligenceOffFor(session.id) ? { noCodeIntelligence: true } : {}),
     }
+  }
+
+  /** Whether this session was created without code intelligence (#686, `codeIntelligenceKey`) */
+  private codeIntelligenceOffFor(sessionId: string): boolean {
+    return this.store.appSetting(codeIntelligenceKey(sessionId)) === 'off'
   }
 
   private launchSettingsKey(sessionId: string): string {
@@ -5737,8 +5791,9 @@ export class SessionManager {
           if (!ifBusy) return { ok: true, busy: this.busyAnswer(orchestratorId, target, 'send_to_session') }
           if (ifBusy === 'queue') return { ok: true, busy: this.enqueue(orchestratorId, target, 'send_to_session', text) }
           if (ifBusy === 'fork' || ifBusy === 'fork_read') {
-            const f = await this.forkFor(orchestratorId, target, text, ifBusy === 'fork_read')
+            const f = await this.forkFor(orchestratorId, target, text, ifBusy === 'fork_read', 'send_to_session')
             if (!f.ok) return f
+            if ('queued' in f) return { ok: true, busy: f.queued }
             this.markReport(f.fork.id, orchestratorId)
             return { ok: true, busy: { state: 'forked', sessionId: f.fork.id, sessionName: this.meta.get(f.fork.id)?.name ?? f.fork.name, forkedFrom: target.id } }
           }
@@ -6486,7 +6541,7 @@ export class SessionManager {
         const standing = progress.stage === 'asking' && progress.requestId ? this.agentStarts.get(progress.requestId) : undefined
         if (standing && !standing.ended) {
           standing.detached = true
-          resolve(agentStartPending(standing.req))
+          resolve(agentStartPending(standing.req, standing.lowMemory))
           return
         }
         ctl.abort()
@@ -6545,7 +6600,7 @@ export class SessionManager {
     const waiting = [...this.agentStarts.values()].find(
       (r) => !r.ended && r.req.callerId === callerId && r.req.task === opts.task && (!opts.tool || r.req.tool === opts.tool),
     )
-    if (waiting) return done(agentStartPending(waiting.req))
+    if (waiting) return done(agentStartPending(waiting.req, waiting.lowMemory))
     const tool = opts.tool ?? this.firstTool(project.defaultTool)
     if (!tool) return done({ ok: false, error: 'No agent adapter is available. Install and configure an agent CLI before starting an agent.' })
     const adapter = this.adapters.get(tool)
@@ -6584,6 +6639,7 @@ export class SessionManager {
       ...(worktree ? { worktreeBranch: worktree.branch } : {}),
       task: opts.task,
       ...(unchecked ? { unchecked } : {}),
+      ...(opts.lsp !== undefined ? { lsp: opts.lsp } : {}),
     }
     let request: AgentStartRequest | undefined
     const consent = await this.ensureAgentConsent(callerId, detail, signal, (requestId) => {
@@ -6610,6 +6666,16 @@ export class SessionManager {
       if (request) this.endAgentStart(request.requestId, { error, person: agentStartPersonText(request, 'cancelled') })
       return done({ ok: false, error })
     }
+    /*
+     * Memory (#686): allowed, but the machine has no room for another agent now. Queued, not refused (owner decision
+     * 2026-10-15): the call answers "pending" with a handle at once, the person reads why in this session, and the
+     * child starts when memory recovers, with its report armed. A start that had no card gets a request of its own here.
+     */
+    const short = await this.memoryShort()
+    if (short) {
+      const req = request ?? { requestId: `ag-${randomUUID()}`, callerId, projectId: project.id, ...choice, detail }
+      return done(this.queueAgentStart(req, short))
+    }
     const r = await this.createAgentChild(callerId, { id: project.id, name: project.name, path: project.path }, choice, progress, request?.detail.preset)
     if (request) {
       if ('key' in r) this.endAgentStart(request.requestId, { childId: r.d.sessionId })
@@ -6634,7 +6700,7 @@ export class SessionManager {
   private async createAgentChild(
     callerId: string,
     project: { id: string; name: string; path: string },
-    choice: Pick<AgentStartRequest, 'tool' | 'model' | 'effort' | 'worktreeBranch' | 'task' | 'unchecked'>,
+    choice: Pick<AgentStartRequest, 'tool' | 'model' | 'effort' | 'worktreeBranch' | 'task' | 'unchecked' | 'lsp'>,
     progress: StartProgress,
     approvedPreset?: PermissionPreset,
   ): Promise<{ done: ChildRunResult } | { key: string; d: Delegation; notice: string | undefined }> {
@@ -6671,7 +6737,15 @@ export class SessionManager {
       else this.agentStartReserved.delete(project.id)
     }
     try {
-      return await this.createReservedChild(callerId, caller, project, { tool, model, effort, unchecked, task: choice.task }, worktree, progress, release)
+      return await this.createReservedChild(
+        callerId,
+        caller,
+        project,
+        { tool, model, effort, unchecked, task: choice.task, ...(choice.lsp !== undefined ? { lsp: choice.lsp } : {}) },
+        worktree,
+        progress,
+        release,
+      )
     } finally {
       release()
     }
@@ -6682,7 +6756,7 @@ export class SessionManager {
     callerId: string,
     caller: SessionInfo,
     project: { id: string; name: string; path: string },
-    choice: { tool: string; model?: string; effort?: string; unchecked?: string; task: string },
+    choice: { tool: string; model?: string; effort?: string; unchecked?: string; task: string; lsp?: boolean },
     worktree: { branch: string } | null,
     progress: StartProgress,
     release: () => void,
@@ -6705,6 +6779,8 @@ export class SessionManager {
         // Never above the caller (#561): the caller's own preset, which the caller cannot change for it afterwards
         permissionPreset: caller.permissionPreset,
         askedBy: callerId,
+        // Code intelligence (#686): off for a child unless its caller asked for it
+        ...(choice.lsp !== undefined ? { lsp: choice.lsp } : {}),
         /*
          * A worktree forks from what the caller works on: its own branch when it is a worktree session itself, so
          * the child starts from the caller's work; otherwise the project's trunk, as the new-session window does
@@ -6865,8 +6941,9 @@ export class SessionManager {
             if (!opts.ifBusy) return { ok: true, tool: child.tool, ...this.busyAnswer(callerId, child, 'agent_session') }
             if (opts.ifBusy === 'queue') return { ok: true, tool: child.tool, ...this.enqueue(callerId, child, 'agent_session', opts.text ?? '') }
             if (opts.ifBusy === 'fork' || opts.ifBusy === 'fork_read') {
-              const f = await this.forkFor(callerId, child, opts.text ?? '', opts.ifBusy === 'fork_read', signal)
+              const f = await this.forkFor(callerId, child, opts.text ?? '', opts.ifBusy === 'fork_read', 'agent_session', signal)
               if (!f.ok) return f
+              if ('queued' in f) return { ok: true, tool: child.tool, ...f.queued }
               const r = await this.awaitAgent(f.key, f.d, signal)
               return r.ok ? { ...r, via: 'fork', forkedFrom: child.id } : r
             }
@@ -6968,7 +7045,10 @@ export class SessionManager {
         this.withdrawAgentStart(id, 'The session that asked withdrew the request.', agentStartPersonText(rec.req, 'stopped'))
         return { ok: true, state: 'stopped', sessionId: id, sessionName: '', tool: rec.req.detail.tool }
       }
-      if (action === 'send') return { ok: false, error: `No session yet: request ${id} is still waiting for the person's answer. Send once it has started.` }
+      if (action === 'send') {
+        const on = rec.lowMemory ? 'memory to start' : "the person's answer"
+        return { ok: false, error: `No session yet: request ${id} is still waiting for ${on}. Send once it has started.` }
+      }
       if (action === 'wait') {
         let timer: ReturnType<typeof setTimeout> | undefined
         let onAbort: (() => void) | undefined
@@ -6988,7 +7068,7 @@ export class SessionManager {
         const ended = rec.ended as AgentStartRecord['ended']
         if (ended && 'childId' in ended) return { childId: ended.childId, action: 'status' }
       }
-      if (!rec.ended) return agentStartPending(rec.req)
+      if (!rec.ended) return agentStartPending(rec.req, rec.lowMemory)
     }
     const ended = rec.ended!
     if ('error' in ended) return { ok: false, error: `Request ${id} started no session: ${ended.error}` }
@@ -7292,6 +7372,7 @@ export class SessionManager {
     if (!rec || rec.ended) return
     rec.ended = 'childId' in ended ? { childId: ended.childId } : { error: ended.error }
     rec.end()
+    rec.stopWaiting?.()
     this.store.deleteAgentStartRequest(rec.req.requestId)
     if ('childId' in ended) return
     const { callerId } = rec.req
@@ -7351,6 +7432,14 @@ export class SessionManager {
     }
     const rec = this.openAgentStart(req)
     rec.detached = true
+    /*
+     * Allowed already and waiting for memory (#686): no card again, only the wait. Begun on the next turn of the event
+     * loop: this runs inside the constructor, and the gate is wired just after it (`useMemoryGate`, main.ts)
+     */
+    if (req.allowed) {
+      setImmediate(() => void this.startWhenMemory(rec))
+      return
+    }
     void (async () => {
       const decision = await this.askHost(req.callerId, req.detail, undefined, { requestId: req.requestId, shown: true })
       // The host is leaving again: the row stays for the next one
@@ -7360,18 +7449,88 @@ export class SessionManager {
         this.endAgentStart(req.requestId, { error: consent.error, person: agentStartPersonText(req, consent.why === 'denied' ? 'denied' : 'withdrawn'), denied: consent.why === 'denied' })
         return
       }
-      const project = this.store.listProjects().find((p) => p.id === req.projectId)
-      const r = project
-        ? await this.createAgentChild(req.callerId, { id: project.id, name: project.name, path: project.path }, req, { stage: 'creating' }, req.detail.preset)
-        : { done: { ok: false as const, error: "This session's project is no longer registered." } }
-      if ('key' in r) {
-        this.endAgentStart(req.requestId, { childId: r.d.sessionId })
-        this.agentWorking(r.d)
-      } else {
-        const error = r.done.ok ? 'No session was created.' : r.done.error
-        this.endAgentStart(req.requestId, { error, person: agentStartPersonText(req, 'failed', error) })
-      }
+      await this.startWhenMemory(rec)
     })()
+  }
+
+  /** Whether the machine has no room for another agent now (#686): null when it has, or when no gate is wired (tests) */
+  private async memoryShort(): Promise<MemoryShortfall | null> {
+    return this.memoryGate ? this.memoryGate.short() : null
+  }
+
+  /** A shortfall in the words the caller and the person read (#686) */
+  private lowMemory(short: MemoryShortfall): LowMemory {
+    return { available: gigabytes(short.available), floor: gigabytes(short.floor), maxWaitMinutes: this.memoryGate?.maxWaitMinutes ?? 0 }
+  }
+
+  /**
+   * Queues an allowed start until memory recovers (#686): the request is kept (stored, so a host swap carries it), marked
+   * allowed, and answered "pending" with its handle; the wait goes on in the background (`startWhenMemory`).
+   */
+  private queueAgentStart(req: AgentStartRequest, short: MemoryShortfall): ChildRunResult {
+    req.allowed = true
+    const rec = this.agentStarts.get(req.requestId) ?? this.openAgentStart(req)
+    this.store.putAgentStartRequest(req.requestId, req.callerId, req)
+    rec.detached = true
+    rec.lowMemory = this.lowMemory(short)
+    void this.startWhenMemory(rec, short)
+    return agentStartPending(req, rec.lowMemory)
+  }
+
+  /**
+   * An allowed start (#673, #686): started now when memory allows; otherwise the person is told in the caller's session,
+   * and it waits (oldest first, re-read every `MEMORY_RECHECK_MS`, at most `MEMORY_WAIT_MAX_MS`). It ends without a
+   * session when withdrawn, when the caller goes, or when the bound passes; a host leaving keeps it stored for the next.
+   * Once started, the caller is told when the child's turn ends, as for any start whose call already answered.
+   */
+  private async startWhenMemory(rec: AgentStartRecord, known?: MemoryShortfall): Promise<void> {
+    const { req } = rec
+    const short = known ?? (await this.memoryShort())
+    if (short && this.memoryGate && !rec.ended) {
+      if (!req.allowed) {
+        req.allowed = true
+        this.store.putAgentStartRequest(req.requestId, req.callerId, req)
+      }
+      rec.lowMemory = this.lowMemory(short)
+      if (this.meta.has(req.callerId)) {
+        this.onEvent({
+          type: 'notice',
+          sessionId: req.callerId,
+          level: 'info',
+          from: 'Centralu',
+          label: 'waiting for memory',
+          audience: 'you',
+          text:
+            `Starting ${req.detail.tool} (“${req.detail.text}”) waits for memory: ${rec.lowMemory.available} free, ${rec.lowMemory.floor} needed. ` +
+            `It starts when memory frees up, or gives up after ${rec.lowMemory.maxWaitMinutes} minutes.`,
+        })
+      }
+      const ctl = new AbortController()
+      rec.stopWaiting = () => ctl.abort()
+      const outcome = await this.memoryGate.wait(ctl.signal)
+      rec.stopWaiting = undefined
+      // Withdrawn while it waited, or the host is leaving: the stored request goes to the next host
+      if (rec.ended || outcome === 'aborted' || this.handingOver || this.disposing) return
+      if (outcome === 'timeout') {
+        const error =
+          `Memory stayed below ${rec.lowMemory.floor} for ${rec.lowMemory.maxWaitMinutes} minutes, so no agent was started. ` +
+          `Close something or wait for other agents to finish, then call start_agent again. ${ASK_THE_PERSON}`
+        this.endAgentStart(req.requestId, { error, person: agentStartPersonText(req, 'failed', `memory stayed below ${rec.lowMemory.floor} for ${rec.lowMemory.maxWaitMinutes} minutes`) })
+        return
+      }
+    }
+    if (rec.ended) return
+    const project = this.store.listProjects().find((p) => p.id === req.projectId)
+    const r = project
+      ? await this.createAgentChild(req.callerId, { id: project.id, name: project.name, path: project.path }, req, { stage: 'creating' }, req.detail.preset)
+      : { done: { ok: false as const, error: "This session's project is no longer registered." } }
+    if ('key' in r) {
+      this.endAgentStart(req.requestId, { childId: r.d.sessionId })
+      this.agentWorking(r.d)
+    } else {
+      const error = r.done.ok ? 'No session was created.' : r.done.error
+      this.endAgentStart(req.requestId, { error, person: agentStartPersonText(req, 'failed', error) })
+    }
   }
 
   /**
@@ -7780,7 +7939,14 @@ export class SessionManager {
    * under at most `safe`, so two agents never write one folder; otherwise it gets a worktree of its own, branched from
    * that session's branch when it has one.
    */
-  private async forkFor(callerId: string, target: SessionInfo, text: string, readOnly: boolean, signal?: AbortSignal): Promise<{ ok: false; error: string } | { ok: true; key: string; d: Delegation; fork: SessionInfo }> {
+  private async forkFor(
+    callerId: string,
+    target: SessionInfo,
+    text: string,
+    readOnly: boolean,
+    via: QueuedRequest['via'],
+    signal?: AbortSignal,
+  ): Promise<{ ok: false; error: string } | { ok: true; key: string; d: Delegation; fork: SessionInfo } | { ok: true; queued: Extract<BusyAnswer, { state: 'queued' }> }> {
     const fork = this.busyChoices(callerId, target, 'agent_session').find((c) => c.choice === 'fork')!
     if (!fork.available) return { ok: false, error: `No fork of "${target.name}": ${fork.why}.` }
     const caller = this.meta.get(callerId)!
@@ -7807,6 +7973,17 @@ export class SessionManager {
     if (!consent.ok) return consent
     const full = this.agentCeilingError(callerId, project.id)
     if (full) return { ok: false, error: full }
+    /*
+     * Memory (#686): no room for another agent now. The request is queued for the busy session instead (#677's queue,
+     * `enqueue`), which starts no process: it goes in as a new turn there when the running one ends. Queued, not refused
+     * (owner decision 2026-10-15); the requester reads that it was queued instead of forked, and why.
+     */
+    const short = await this.memoryShort()
+    if (short) {
+      const low = this.lowMemory(short)
+      const queued = this.enqueue(callerId, target, via, text)
+      return { ok: true, queued: { ...queued, lowMemory: `${low.available} free, ${low.floor} needed for a fork` } }
+    }
     let forked: string
     try {
       forked = await adapter.forkConversation!(target.externalId ?? target.importedFrom!, this.cwdFor(target))
@@ -8128,6 +8305,19 @@ export class SessionManager {
       cwd = orchestratorHome()
     }
     if (ctx.signal.aborted) throw new Error('the request was cancelled before the agent started')
+    /*
+     * Memory (#686): no room for another agent now. The app's call already waits for its answer, so the start is
+     * queued inside it: the app's run reads "waiting for memory" as progress (the person sees it in the run log), and the
+     * agent starts when memory recovers. Past the gate's bound, or when the call is cancelled, it ends without a session.
+     */
+    const short = await this.memoryShort()
+    if (short && this.memoryGate) {
+      const low = this.lowMemory(short)
+      ctx.progress(`waiting for memory: ${low.available} free, ${low.floor} needed to start the agent`)
+      const outcome = await this.memoryGate.wait(ctx.signal)
+      if (outcome === 'aborted' || ctx.signal.aborted) throw new Error('the request was cancelled before the agent started (it was waiting for memory)')
+      if (outcome === 'timeout') throw new Error(`memory stayed below ${low.floor} for ${low.maxWaitMinutes} minutes, so the agent was not started`)
+    }
 
     /*
      * **The preset is `safe`** — regardless of the calling session and regardless of the person's own
@@ -8862,6 +9052,8 @@ export class SessionManager {
   async disposeAll(): Promise<void> {
     // The cards it closes below are not the person's answers: a standing start_agent request stays stored (#673)
     this.disposing = true
+    // So does a start waiting for memory (#686)
+    this.memoryGate?.close()
     this.watchers.close()
     for (const readers of this.turnObservers.values()) for (const observer of readers) observer.fail(new Error('Centralu is stopping'))
     this.appsHub?.rt.attachBrokerHost(null)
@@ -8905,6 +9097,8 @@ export class SessionManager {
     this.appsHub?.rt.attachBrokerHost(null)
     // The kept turns go on under the next host, which owes their reports (#646); failing the waits here must not report
     this.handingOver = true
+    // A start waiting for memory stays stored for the next host (#686)
+    this.memoryGate?.close()
     for (const run of [...this.agentRuns.values()]) run.fail(new Error('Centralu is restarting'))
     for (const readers of this.turnObservers.values()) for (const observer of readers) observer.fail(new Error('Centralu is restarting'))
     for (const ask of [...this.hostAsks.values()]) ask.resolve(null)

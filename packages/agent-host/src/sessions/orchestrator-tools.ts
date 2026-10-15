@@ -348,6 +348,12 @@ export const AGENT_TOOLS = [
       // enough (a branch implies the worktree; without one the branch is named from the job)
       worktree: z.boolean().optional(),
       branch: z.string().optional(),
+      /*
+       * Code intelligence (#686): a child starts without its CLI's language server unless this is true. No description:
+       * each word rides in every request (AGENT_BUDGET_CHARS), and the answer that matters, when to ask for it, is the
+       * caller's call per task (refactors and wide cross-file changes)
+       */
+      lsp: z.boolean().optional(),
     }),
   },
   {
@@ -577,8 +583,10 @@ function busyText(b: { sessionName: string; sessionId: string; sessionState: str
   return `"${b.sessionName}" [${b.sessionId}] is busy (${b.sessionState}) with a turn that is not yours, so nothing was sent. Choose:\n${lines.join('\n')}`
 }
 
-function queuedText(q: { sessionName: string; sessionId: string; queueId: string; position: number }): string {
-  return `Queued for "${q.sessionName}" [${q.sessionId}] as ${q.queueId}, number ${q.position} in its queue: it goes in as a new turn when the running one ends, and you are told when that turn ends.`
+function queuedText(q: { sessionName: string; sessionId: string; queueId: string; position: number; lowMemory?: string }): string {
+  // A fork turned into a place in the queue (#686): said first, so the caller does not wait for a fork that never came
+  const instead = q.lowMemory ? `Not forked: memory is low (${q.lowMemory}), so it was queued instead, which starts no new process. ` : ''
+  return `${instead}Queued for "${q.sessionName}" [${q.sessionId}] as ${q.queueId}, number ${q.position} in its queue: it goes in as a new turn when the running one ends, and you are told when that turn ends.`
 }
 
 const ANSWER_FORM = 'Answer a question with its option label, or your own words; one line per question; several choices of one question separated by ";". The person may answer first; the first answer counts.'
@@ -622,6 +630,17 @@ function askProjectText(r: AskProjectResult): ToolOutput {
 function agentRunText(r: ChildRunResult): ToolOutput {
   if (!r.ok) return { text: r.error, isError: true }
   // No session yet (#673): the handle is the request's, and the card stays up for the person
+  if (r.state === 'pending' && r.lowMemory) {
+    // Allowed, but queued until memory recovers (#686): the caller is told the start is coming, not refused
+    return {
+      text:
+        `queued: low memory. No session yet: starting ${r.tool} is allowed and waits for memory (${r.lowMemory.available} free, ` +
+        `${r.lowMemory.floor} needed; request ${r.sessionId}). It starts when memory frees up, and you will be told when its turn ends; ` +
+        `if memory stays low for ${r.lowMemory.maxWaitMinutes} minutes it gives up and you will be told. Carry on with other work, and do not ` +
+        'do this with your own subagents instead. ' +
+        `agent_session(sessionId="${r.sessionId}", action="status") shows where it stands, action="wait" waits, action="stop" withdraws it.`,
+    }
+  }
   if (r.state === 'pending') {
     return {
       text:
@@ -768,6 +787,7 @@ export async function runOrchestratorTool(
             ...(args.wait === false ? { wait: false } : {}),
             ...(args.worktree === true || branch ? { worktree: true } : {}),
             ...(branch ? { branch } : {}),
+            ...(typeof args.lsp === 'boolean' ? { lsp: args.lsp } : {}),
           },
           signal,
         ),
