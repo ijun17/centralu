@@ -52,7 +52,6 @@ export function ProjectSessionRow({
   const groupKey = childrenGroupKey(s.id)
   return (
     <SessionRow
-      key={s.id}
       id={s.id}
       projectId={projectId}
       nested={nested}
