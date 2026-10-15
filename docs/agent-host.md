@@ -1715,7 +1715,7 @@ The app installing the host over SSH is phase 3, after its lifecycle contract is
 
 **On the remote machine:**
 
-1. Install Node 22 or later, then `npm i -g centralu`. On Linux the platform package carries the bundled host
+1. Install Node 22.14 or later, then `npm i -g centralu`. On Linux the platform package carries the bundled host
    unpacked beside the AppImage (`host/`, [releasing.md](releasing.md)), so running it needs no display, no FUSE and
    no desktop libraries.
 2. Install Claude Code and/or Codex there and sign in (`claude`, then `/login`; `codex login`). The host uses that
@@ -1825,6 +1825,16 @@ created a process that never ran (no `serve.log` within 10 s, or the process gon
 Defender's attack surface reduction rule "Block process creations originating from PSExec and WMI commands", off by
 default and turned on by some managed machines. The hub then runs the host bound to its link (§4.8).
 
+**A Node below the floor is refused before any host starts** (#699). The floor is `engines.node` of the npm package
+(22.14.0), read by `bin/node-floor.mjs` and nowhere restated. The bundled better-sqlite3 declares Node-API 10, which
+Node has from 22.14.0; under 22.12.0 (measured on Windows and on macOS) the module loads and then crashes on its first
+`new Database`, with an access violation (exit 3221225477) or SIGSEGV, before the host writes a line. `centralu serve`
+(foreground) and `--detach` therefore print one sentence on stderr that names the Node found, the floor and the two ways
+out (update Node, or link the machine from a Centralu window, which installs a Node of its own there), and exit 1; they
+download nothing. `--detach` also answers in its JSON line with `reason: "node_too_old"` and the `node` and `floor`
+it found, which the hub reads (§4.8). `--connection`, `--stop`, `--rotate-token` and `--autostart` start no host and keep
+working, so the hub can still read `install.node` from a machine whose Node is too old.
+
 `--stop` asks the running host to stop over its own socket with the token (`host.stop`, [protocol.md](protocol.md)
 §3), then waits up to 30 s for the port to close and the host's pid (from `host.lock`) to end. Only the host does its
 shutdown that way on Windows: killing the WMI-started launcher ended the host 143 ms later with no "shutting down"
@@ -1913,6 +1923,18 @@ instead of `-N`, and the link reads the connection line until that host answers.
 (Windows' OpenSSH ends the session's processes, and on posix the launcher takes the hangup as a stop), and the row
 says so. A start that fails (Centralu too old for `--detach`, the host exiting while it starts) is `not_running`
 with the reason, retried with the backoff.
+
+**A machine whose Node is below the floor is switched to the hub's own** (#699). Before it starts a host, the link
+reads `install.node` from the connection line; a machine that is not on a managed install and runs a Node below the
+floor (§4.7) is installed on first, with the same `machines.install` path as a person's click: the pinned Node of
+`remote-runtime.json`, checked against its SHA-256, and the hub's version from the registry. The same happens when
+`--detach` answers `node_too_old`, or when it quotes a host that exited with 3221225477, `-1073741819` or SIGSEGV (a
+launcher from before the floor existed). The link then opens again and finds the managed launcher first. The row says
+so once, in `hostStarted.note`: "Centralu installed its own Node 24.21.0 on Box, because the Node on Box (22.12.0) is
+older than 22.14.0, the oldest Centralu runs on." It is tried **once** until the link next connects: a host that still
+fails on the Node the hub installed is reported as it is. Where the hub may not install (a development build, which is
+not published; a machine that runs a command of the person's own; no installer), the row is `not_running` with the
+floor named and a request to update Node there.
 
 The connection command depends on the remote's shell (`MachineInfo.shell`), because `ssh <target> <command>` hands the
 command to whatever login shell the remote account has:

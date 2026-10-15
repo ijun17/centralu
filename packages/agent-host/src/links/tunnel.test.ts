@@ -64,6 +64,8 @@ const answer = () => {
     const how = process.env.FAKE_SSH_DETACH
     if (how === 'old') { process.stderr.write('unknown option for serve: --detach\n'); process.exit(2) }
     if (how === 'blocked') return process.stdout.write(JSON.stringify({ v: 1, detach: { ok: false, how: 'wmi', reason: 'wmi_blocked', message: 'Windows did not start Centralu through WMI (returned 2).' } }) + '\n')
+    if (how === 'old_node') return process.stdout.write(JSON.stringify({ v: 1, detach: { ok: false, how: null, reason: 'node_too_old', message: 'centralu serve needs Node 22.14.0 or newer and this is Node 22.12.0: update Node.', node: '22.12.0', floor: '22.14.0' } }) + '\n')
+    if (how === 'crashed') return process.stdout.write(JSON.stringify({ v: 1, detach: { ok: false, how: 'setsid', reason: 'exited', message: 'centralu serve exited (3221225477) before its host answered' } }) + '\n')
     if (how === 'exited') return process.stdout.write(JSON.stringify({ v: 1, detach: { ok: false, how: 'setsid', reason: 'exited', message: 'centralu serve exited (1) before its host answered' } }) + '\n')
     if (state) fs.writeFileSync(state, 'detached')
     return process.stdout.write(line({ hostRunning: true, detach: { ok: true, how: 'setsid', already: false } }) + '\n')
@@ -372,6 +374,17 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
       await expect(at('exited')).rejects.toThrow(/exited \(1\) before its host answered/)
       await expect(at('old')).rejects.toThrow(/too old to be started from here: run `centralu serve` there/)
       await expect(tunnel({ FAKE_SSH_HAS: '' }).startHost()).rejects.toThrow(/not installed on box/)
+    }, 30_000)
+
+    it('tells a Node below the floor from other failures: the launcher’s refusal, and a host that crashed at startup (#699)', async () => {
+      const at = async (how: string) => {
+        const t = tunnel({ FAKE_SSH_STATE: stateFile(), FAKE_SSH_DETACH: how, FAKE_SSH_LINE: line({ port: await freePort() }) })
+        return t.startHost().catch((e: unknown) => e)
+      }
+      expect(await at('old_node')).toMatchObject({ name: 'NodeTooOld', kind: 'refused', found: '22.12.0', message: expect.stringContaining('needs Node 22.14.0 or newer') })
+      expect(await at('crashed')).toMatchObject({ name: 'NodeTooOld', kind: 'crashed', found: null })
+      // Any other exit stays an ordinary failure
+      expect(await at('exited')).not.toMatchObject({ name: 'NodeTooOld' })
     }, 30_000)
   })
 })

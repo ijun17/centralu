@@ -207,7 +207,7 @@ terminal.
 
 This app cannot run on its own. These are things that, missing, mean it **just does not work, with no explanation**:
 
-- [ ] Node 22 or newer (the `system-node` runtime — without it the host cannot start at all)
+- [ ] Node 22.14 or newer (the `system-node` runtime — without it the host cannot start at all)
 - [ ] The `claude` CLI installed and logged in
 - [ ] The `codex` CLI installed and logged in (if codex sessions are used)
 - [x] **What the app says** when Node is missing — the startup screen states what is

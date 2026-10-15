@@ -173,6 +173,10 @@ describe('a remote host this computer started (remote-hub.md §10.9, decision 7)
   it('says whether it outlives the link, and why not when it does not', () => {
     expect(hostStartNote(machine())).toBeNull()
     expect(hostStartNote(machine({ hostStarted: { how: 'detached', at: 1, note: null } }))).toMatch(/keeps running when this computer disconnects/)
+    // What the hub did on the way (its own Node, #699) follows
+    expect(hostStartNote(machine({ hostStarted: { how: 'detached', at: 1, note: 'Centralu installed its own Node 24.21.0 on Box, because the Node there is old.' } }))).toBe(
+      'This computer started Centralu there. It keeps running when this computer disconnects. Centralu installed its own Node 24.21.0 on Box, because the Node there is old.',
+    )
     expect(hostStartNote(machine({ hostStarted: { how: 'link_bound', at: 1, note: 'Windows did not start Centralu through WMI.' } }))).toBe(
       'Centralu runs there only while this computer is linked, and stops with the link. Windows did not start Centralu through WMI.',
     )

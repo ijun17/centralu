@@ -1206,7 +1206,7 @@ host.log에 그렇다는 줄 하나를 쓴다. 탐침은 여기에 꽂힌다.
 
 **원격 머신에서:**
 
-1. Node 22 이상을 설치하고 `npm i -g centralu`. Linux에서는 플랫폼 패키지가 번들 호스트를 AppImage 옆에 풀린 채로
+1. Node 22.14 이상을 설치하고 `npm i -g centralu`. Linux에서는 플랫폼 패키지가 번들 호스트를 AppImage 옆에 풀린 채로
    싣고 있으므로(`host/`, [releasing.ko.md](releasing.ko.md)) 돌리는 데 디스플레이도 FUSE도 데스크톱 라이브러리도
    필요 없다.
 2. 그 머신에 Claude Code 및/또는 Codex를 설치하고 로그인한다 (`claude` 후 `/login`, `codex login`). 호스트는 그

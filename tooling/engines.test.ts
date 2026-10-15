@@ -27,19 +27,36 @@ describe('Node version floor stays declared and consistent (#24)', () => {
     const agentHost = readJson('packages/agent-host/package.json')
     const shim = readJson('packaging/npm/centralu/package.json')
 
-    expect(root.engines, 'root package.json').toEqual({ node: '>=22' })
-    expect(agentHost.engines, 'packages/agent-host/package.json').toEqual({ node: '>=22' })
-    expect(shim.engines, 'packaging/npm/centralu/package.json').toEqual({ node: '>=22' })
+    expect(root.engines, 'root package.json').toEqual({ node: '>=22.14.0' })
+    expect(agentHost.engines, 'packages/agent-host/package.json').toEqual({ node: '>=22.14.0' })
+    expect(shim.engines, 'packaging/npm/centralu/package.json').toEqual({ node: '>=22.14.0' })
   })
 
-  it('the declared floor still matches what better-sqlite3 actually requires', () => {
+  it('the declared floor is not below what better-sqlite3 actually needs', () => {
     // better-sqlite3 is the dependency that set the floor in the first place (see issue #24's
     // measurements). Resolve it live from packages/agent-host so a future version bump that
-    // changes its own `engines.node` is caught here instead of silently drifting from ours.
+    // raises its own `engines.node` above ours is caught here instead of silently drifting.
+    //
+    // Ours is higher than its declared `>=22` on purpose (#699): it builds against Node-API 10
+    // (`NAPI_VERSION=10` in its binding.gyp), which Node has from 22.14.0, and under 22.12.0 the
+    // prebuilt module loads and then crashes on its first `new Database` (an access violation on
+    // Windows, SIGSEGV on macOS; measured). Its `engines` never said so.
     const require = createRequire(new URL('../packages/agent-host/package.json', import.meta.url))
-    const betterSqlite3 = require('better-sqlite3/package.json') as { engines?: { node?: string } }
+    const betterSqlite3 = require('better-sqlite3/package.json') as { version: string; engines?: { node?: string } }
     const agentHost = readJson('packages/agent-host/package.json') as { engines: { node: string } }
+    const major = (range: string | undefined) => Number(/(\d+)/.exec(range ?? '')?.[1])
 
-    expect(betterSqlite3.engines?.node, 'better-sqlite3 engines.node').toBe(agentHost.engines.node)
+    expect(betterSqlite3.engines?.node, 'better-sqlite3 engines.node').toBeDefined()
+    expect(major(agentHost.engines.node)).toBeGreaterThanOrEqual(major(betterSqlite3.engines?.node))
+    // If better-sqlite3 moves to another Node-API level, the floor has to be measured again
+    expect(betterSqlite3.version.split('.')[0], 'better-sqlite3 major: re-measure the floor (#699) before moving it').toBe('13')
+  })
+
+  it('names the Node-API level the floor comes from, and the launcher and the hub read the one value', () => {
+    const shim = readJson('packaging/npm/centralu/package.json') as { engines: { node: string } }
+    const hub = readFileSync(new URL('../packages/agent-host/src/links/install.ts', import.meta.url), 'utf8')
+    // The hub reads the npm package's own engines through the bundle's copy; no second number
+    expect(hub).toContain("bundled('centralu-package.json'")
+    expect(shim.engines.node).toMatch(/^>=22\.14\.\d+$/)
   })
 })

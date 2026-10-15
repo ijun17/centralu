@@ -48,7 +48,7 @@
 |---|---|---|
 | 스키마 | **zod v4** | 타입 추론 = 런타임 검증, 단일 소스. 비용을 통제하기 위해 경계(WS 수신, invoke 응답)에서만 검증 |
 
-## 3. Agent Host (packages/agent-host — Node 22+)
+## 3. Agent Host (packages/agent-host — Node 22.14+)
 
 | 영역 | 선택 | 이유 | 기각한 대안 |
 |---|---|---|---|

@@ -12,6 +12,7 @@ import { linkedSessions } from './linked-sessions.js'
 import { fakeRegistry } from './fake-registry.test-helpers.js'
 import { Router } from './router.js'
 import { DirectTunnel, type ConnectionLine, type HostStart, type Tunnel } from './tunnel.js'
+import { NodeTooOld } from './node-floor.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
 
@@ -533,6 +534,128 @@ describe('machines.install (#82, plan §10.2)', () => {
     const dev = await hubHost(() => lineFor(1), new Store(), true, { tunnelFor: () => tunnel, installer, hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: true } })
     await expect((await ui(dev.port)).call('machines.install', { machineId: 'm1' })).rejects.toThrow(/development build is not published/)
     expect(runs).toHaveLength(3)
+  })
+})
+
+describe('a machine whose Node is below the floor (#699)', () => {
+  const PINNED = '24.21.0'
+  const OLD = { managed: false, current: null, previous: null, node: '22.12.0' }
+  const MANAGED = { managed: true, current: { version: APP_VERSION, node: PINNED }, previous: null, node: PINNED }
+
+  /**
+   * A machine on Node 22.12.0 (what its connection line reports), linked from a hub that can install.
+   * `startHost` is what the machine's launcher answers; the scripted install steps switch the line to
+   * the managed install, the way the machine's own launcher would then answer
+   */
+  async function linkTo(o: { startHost: (n: number) => Promise<HostStart>; line?: Partial<ConnectionLine>; dev?: boolean; remote?: { shell: 'posix'; command?: string } }) {
+    const reg = await fakeRegistry(['centralu', '@centralu/linux-x64'].map((name) => ({ name, version: APP_VERSION, files: { 'package.json': '{}' } })))
+    cleanups.push(() => reg.close())
+    const remote = await remoteHost()
+    const runs: string[] = []
+    const calls: string[] = []
+    let installed = false
+    let running = false
+    let starts = 0
+    const answers = [
+      'CENTRALU-PREFLIGHT os=Linux arch=x86_64 glibc=2.39 musl=0 freeKb=99999999 tar=1 gzip=1 fetch=curl sha=sha256sum\n',
+      'CENTRALU-INSTALL node ok\n',
+      `CENTRALU-INSTALL done ${JSON.stringify({ current: { version: APP_VERSION, node: PINNED }, previous: null, removed: [], left: [] })}\n`,
+    ]
+    const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { hostRunning: running, install: installed ? MANAGED : OLD, ...o.line })), {
+      exec: async (cmd: string) => {
+        runs.push(cmd)
+        installed = runs.length >= 3
+        return { code: 0, stderr: '', stdout: answers[runs.length - 1] ?? '' }
+      },
+      startHost: async () => {
+        calls.push(installed ? 'managed' : 'system')
+        const r = await o.startHost(++starts)
+        running = true
+        return r
+      },
+    })
+    const store = new Store()
+    storeRegistry(store).add({ id: 'm1', name: 'Remote box', sshTarget: 'box', remote: o.remote ?? { shell: 'posix' }, addedAt: 1, acceptedVersions: null })
+    const logs: string[] = []
+    const links = new Links({
+      hub: { version: APP_VERSION, protocolVersion: PROTOCOL_VERSION, dev: o.dev === true },
+      broadcast: () => {},
+      terminal: () => {},
+      mirror: storeMirror(store),
+      registry: storeRegistry(store),
+      tunnelFor: () => tunnel,
+      log: (l) => void logs.push(l),
+      retryMs: [50, 200],
+      client: { maxBackoffMs: 100 },
+      installer: { runtime: () => ({ node: { version: PINNED, archives: { 'linux-x64': { file: `node-v${PINNED}-linux-x64.tar.gz`, sha256: 'a'.repeat(64) } } } }), script: () => '// the installer', registry: { registry: reg.url } },
+    })
+    cleanups.push(() => links.stop())
+    links.start()
+    return { links, runs, calls, logs, row: () => links.list()[0]! }
+  }
+
+  it('installs the pinned Node before it tries to start a host under the old one, and says so in one sentence', async () => {
+    const l = await linkTo({ startHost: async () => ({ how: 'detached', note: null }) })
+    await until(() => l.row().status === 'connected')
+    // The system Node is never asked to start the host: preflight, Node, Centralu, then the managed launcher starts it
+    expect(l.calls).toEqual(['managed'])
+    expect(l.runs).toHaveLength(3)
+    const note = 'Centralu installed its own Node 24.21.0 on Remote box, because the Node on Remote box (22.12.0) is older than 22.14.0, the oldest Centralu runs on.'
+    expect(l.row().hostStarted?.note).toBe(note)
+    expect(l.logs.join('\n')).toContain(note)
+  })
+
+  it('does the same when the machine’s launcher refuses its Node, naming the one it found', async () => {
+    const l = await linkTo({
+      line: { install: undefined },
+      startHost: async (n) => {
+        if (n === 1) throw new NodeTooOld('centralu serve needs Node 22.14.0 or newer and this is Node 22.13.1', 'refused', '22.13.1')
+        return { how: 'detached', note: null }
+      },
+    })
+    await until(() => l.row().status === 'connected')
+    expect(l.calls).toEqual(['system', 'managed'])
+    expect(l.row().hostStarted?.note).toBe('Centralu installed its own Node 24.21.0 on Remote box, because the Node on Remote box (22.13.1) is older than 22.14.0, the oldest Centralu runs on.')
+  })
+
+  it('switches too when the host crashed at startup (exit 3221225477) under a Node it cannot name', async () => {
+    let n = 0
+    const l = await linkTo({
+      line: { install: undefined },
+      startHost: async () => {
+        if (++n === 1) throw new NodeTooOld('centralu serve exited (3221225477) before its host answered', 'crashed', null)
+        return { how: 'detached', note: null }
+      },
+    })
+    await until(() => l.row().status === 'connected')
+    expect(l.calls).toEqual(['system', 'managed'])
+    expect(l.row().hostStarted?.note).toBe('Centralu installed its own Node 24.21.0 on Remote box, because Centralu crashed on start under the Node on Remote box, and 22.14.0 is the oldest Centralu runs on.')
+  })
+
+  it('installs once: a host that still fails under the Node it installed is reported as it is', async () => {
+    const l = await linkTo({
+      startHost: async () => {
+        throw new NodeTooOld('centralu serve exited (3221225477) before its host answered', 'crashed', null)
+      },
+    })
+    await until(() => l.calls.length >= 2 && l.row().status === 'not_running')
+    await new Promise((r) => setTimeout(r, 400))
+    expect(l.runs).toHaveLength(3)
+    expect(l.row().error).toBe('Centralu could not be started on Remote box: centralu serve exited (3221225477) before its host answered')
+  })
+
+  it('names the floor and asks for a Node update where it may not install: a development hub, or a command of the person’s own', async () => {
+    const dev = await linkTo({ dev: true, startHost: async () => ({ how: 'detached', note: null }) })
+    await until(() => dev.row().status === 'not_running')
+    expect(dev.row().error).toBe(
+      'The Node on Remote box (22.12.0) is older than 22.14.0, the oldest Centralu runs on, and this computer did not install its own Node there (this development build is not published): update Node there, and Centralu starts again.',
+    )
+    expect(dev.runs).toHaveLength(0)
+    expect(dev.calls).toEqual([])
+    const own = await linkTo({ remote: { shell: 'posix', command: 'my-centralu' }, startHost: async () => ({ how: 'detached', note: null }) })
+    await until(() => own.row().status === 'not_running')
+    expect(own.row().error).toMatch(/older than 22\.14\.0[\s\S]*it runs a command of its own in place of centralu/)
+    expect(own.runs).toHaveLength(0)
   })
 })
 

@@ -359,7 +359,7 @@ works as before.
   on it: the host, the Codex bridge (`process.execPath`, `adapters/codex`), and on Windows the `.js` entry of an
   npm-installed agent CLI, which `tool-launch.ts` starts through the host's own Node rather than through `cmd.exe`.
 - **The native modules are not tied to one Node.** better-sqlite3 13 is built on node-addon-api and node-pty on
-  Node-API, so any Node 22 or later loads the published bundles (better-sqlite3's own floor). Measured on Node 24.21.0
+  Node-API, so any Node 22.14 or later loads the published bundles (the floor is Node-API 10, #699; better-sqlite3's own `engines` says only `>=22`, and 22.12.0 crashes, §10.9b). Measured on Node 24.21.0
   (ABI 137, Node-API 10): better-sqlite3 opened a database (SQLite 3.53.4), and node-pty spawned a shell through ConPTY
   on Windows and a pty in WSL. Pinning Node is about having one at all, and the same one everywhere.
 - **glibc 2.34 or later on Linux.** Both native modules in `@centralu/linux-x64` reference `GLIBC_2.34` symbols
@@ -547,13 +547,33 @@ The owner took every recommendation of the design. Each line keeps the question,
 
 | # | Question | Decided | Why |
 |---|---|---|---|
-| 1 | Which Node the remote pins | **Node 24 LTS**, one exact version (24.21.0 at first) in `packaging/remote-runtime.json`, and CI runs the host's tests on it beside the jobs on 22 | Supported to April 2028, and measured working with beta.12's bundles (§10.2). 22 LTS ends in April 2027, so pinning it would force a Node change on every remote within six months. The app's own host keeps running on whatever Node 22 or later the person has, so CI keeps 22 too |
+| 1 | Which Node the remote pins | **Node 24 LTS**, one exact version (24.21.0 at first) in `packaging/remote-runtime.json`, and CI runs the host's tests on it beside the jobs on 22 | Supported to April 2028, and measured working with beta.12's bundles (§10.2). 22 LTS ends in April 2027, so pinning it would force a Node change on every remote within six months. The app's own host keeps running on whatever Node 22.14 or later the person has, so CI keeps 22 too |
 | 2 | Host-only npm packages | **The existing platform packages first**; `@centralu/host-<platform>` (about 4 MB) later, in a release change, which the installer prefers for the versions that have one | The platform packages already carry the host and work for every published version; the cost is Linux downloading 88 MB to keep 12, which a host-only package removes without blocking anything now |
 | 3 | How a Windows (and WSL) remote host outlives the link | **Started detached through WMI** (`serve --detach`); when WMI process creation is blocked, the hub says so and **falls back to a link-bound host** that runs while the link is up | WMI was the only measured start that survives the ssh session on Windows, and leaves nothing behind (no task, no service). Some managed machines block it (Defender's attack surface reduction rule for PSExec and WMI commands, off by default); the link-bound start still works there, only without outliving the link. A scheduled task is the opt-in of 4 |
 | 4 | Start the remote host at boot | **Offered per machine, off by default** (a systemd user unit and linger on Linux; a per-user scheduled task on Windows and for WSL) | After a reboot the next link starts the host anyway (7); autostart matters only for agents that should run with no hub around, and linger may need an administrator |
 | 5 | A keeper on Linux remotes | **Right after phase 3's first four steps and runtime-unification step 4b** (#350 itself is fixed, #458) | Without it §4's prompt says "this stops N agents" on every Linux update. Windows stays without one |
 | 6 | Sign the Linux and Windows host folders | **npm's integrity and registry signatures now; signing comes with the Linux keeper (5)** | Integrity checked on the remote plus registry signatures checked by the hub is what every npm user gets today; signing pays off once a Linux keeper starts from verified content as the macOS one does |
 | 7 | Start a remote host the link finds not running | **Automatically**, and say so in the machine's row and in `host.log` | Adding the machine was the consent (§3.2); asking each time would turn every reboot of the remote into a prompt |
+
+### 10.9b A Node below the floor (#699, 2026-10-15)
+
+A Windows 11 PC on Node 22.12.0 never connected: `centralu serve` started the host, which exited with 3221225477
+(`0xC0000005`) before its migration line. The bundled better-sqlite3 13 is built with `NAPI_VERSION=10`; Node-API 10 came
+with Node 22.14.0, and under an older Node the module loads and crashes on `new Database`. Measured with the published
+`@centralu/win32-x64` host and portable Node zips: 22.14.0, 22.23.3 and 24.21.0 open a database; 22.13.1, 22.13.0,
+22.12.0, 22.0.0 and 20.19.0 crash. The same module crashes on macOS (arm64) under 22.12.0 (SIGSEGV) and works under 22.14.0,
+so the floor is one for every platform. Rebuilding with `NAPI_VERSION=9` does not work as it is (its `StatementIterator`
+setup fails on every Node), so a lower floor would mean patching and building the module ourselves on four platforms.
+Option 4 of the question to the owner was taken: **keep the floor at 22.14.0, and do not make the person fix it**.
+
+| # | Decided | Why |
+|---|---|---|
+| 1 | The floor is `engines.node` of the npm package (`>=22.14.0`), read by the launcher (`bin/node-floor.mjs`) and, from the bundle's copy `centralu-package.json`, by the hub (`links/install.ts` `nodeFloor()`). The root and `agent-host` `engines` equal it (`tooling/engines.test.ts`) | One number; npm itself warns on an install under it |
+| 2 | `centralu serve` and `--detach` refuse a Node below it in one sentence (the Node found, the floor, update Node or link the machine from a Centralu window) before any host starts, and download nothing | A CLI that fetches a runtime on its own is a new download path, with none of the hub's checks (§10.3) |
+| 3 | The hub switches a below-floor machine to the managed install by itself (on the connection line's `install.node`, on `node_too_old`, or on a start that exited with 3221225477 or SIGSEGV) and says so once in the row; it is tried once until the link next connects | Adding the machine was the consent (decision 7); the install is the one a person's click runs, SHA-256 checked. Looping on a host that still fails would hide the real cause |
+| 4 | Not switched, but named in a sentence with the floor: a development hub (its version is not published), a machine running a command of the person's own, a hub with no installer | There is nothing to install, or the person chose what runs there |
+
+The app's own host (the keeper, `node.rs` `MIN_NODE_MAJOR`) still checks the major only; moving it to 22.14 is separate work.
 
 ### 10.9a Real run on a Windows 11 PC (2026-10-11)
 

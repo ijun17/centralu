@@ -1365,8 +1365,8 @@ Platforms: Windows.
 **FI13. Native modules ship as files, not inside a single executable.**
 Happened: Node SEA cannot embed better-sqlite3's `.node`, and injecting into a signed binary needs re-signing on macOS;
 system Node was adopted and Bun compile put on hold (m2-f0-bundling.md "Decision (F-0a)").
-Rule: native addons sit beside `main.mjs`; nothing is injected into a binary after signing; any Node 22 or later loads
-the shipped modules (Node-API, measured on 24.21.0); remotes run a pinned Node.
+Rule: native addons sit beside `main.mjs`; nothing is injected into a binary after signing; any Node 22.14 or later loads
+the shipped modules (Node-API 10, measured on 24.21.0; 22.12.0 crashes, #699); remotes run a pinned Node.
 Guard: `tooling/node-pin.test.ts` "is an exact 24.x release with a hash for every platform the installer serves";
 `tooling/node-pin.test.ts` "CI runs the host’s tests on the pinned Node, on Linux and Windows, beside the jobs on 22".
 Platforms: all. *Changed by #457.*

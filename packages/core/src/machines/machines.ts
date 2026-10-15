@@ -97,12 +97,14 @@ export function machineProblem(m: Pick<MachineInfo, 'status' | 'error' | 'name' 
 /**
  * What the machine's row says about a host this computer started there (plan §10.9, decision 7):
  * started in the background, or, where Windows blocks starting it that way, only while linked.
+ * `note` adds what the hub did on the way: why it is linked only while linked, or that it installed its
+ * own Node there because the machine's was too old (#699).
  * Null when the host was already running.
  */
 export function hostStartNote(m: Pick<MachineInfo, 'hostStarted' | 'status'>): string | null {
   const s = m.hostStarted
   if (!s) return null
-  if (s.how === 'detached') return 'This computer started Centralu there. It keeps running when this computer disconnects.'
+  if (s.how === 'detached') return `This computer started Centralu there. It keeps running when this computer disconnects.${s.note ? ` ${s.note}` : ''}`
   return `Centralu runs there only while this computer is linked, and stops with the link.${s.note ? ` ${s.note}` : ''}`
 }
 

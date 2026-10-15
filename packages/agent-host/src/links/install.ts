@@ -3,6 +3,7 @@ import { hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { NotPublished, verifiedPackage, type RegistryOptions, type VerifiedPackage } from './registry.js'
+import { floorOf } from './node-floor.js'
 import { lastLine, remoteScript, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
 
 /**
@@ -346,7 +347,7 @@ export async function installRemote(o: InstallOptions): Promise<InstallResult> {
 }
 
 /** A file the host bundle carries beside `main.mjs` (bundle.mjs), or the source tree's copy while developing */
-function bundled(name: string, source: string): string {
+export function bundled(name: string, source: string): string {
   for (const url of [new URL(`./${name}`, import.meta.url), new URL(source, import.meta.url)]) {
     const file = fileURLToPath(url)
     if (existsSync(file)) return readFileSync(file, 'utf8')
@@ -362,4 +363,13 @@ export function installScript(): string {
 /** The Node remotes run, pinned by the release (plan §10.3) */
 export function remoteRuntime(): RemoteRuntime {
   return JSON.parse(bundled('remote-runtime.json', '../../../../packaging/remote-runtime.json')) as RemoteRuntime
+}
+
+/**
+ * The oldest Node the host runs on: `engines.node` of the npm package, which the bundle carries as
+ * `centralu-package.json`. The launcher checks the same value (`packaging/npm/centralu/bin/node-floor.mjs`)
+ */
+export function nodeFloor(): string {
+  const pkg = JSON.parse(bundled('centralu-package.json', '../../../../packaging/npm/centralu/package.json')) as { engines?: { node?: string } }
+  return floorOf(pkg.engines?.node ?? '')
 }

@@ -36,7 +36,7 @@ Centralu는 에이전트를 직접 돌리지 않고, 이미 쓰고 계신 CLI를
 
 | | |
 |---|---|
-| **Node 22 이상** | 호스트 사이드카가 이 위에서 돕니다. 없거나 낡았으면 켤 때 무엇이 필요한지 앱이 말해줍니다 |
+| **Node 22.14 이상** | 호스트 사이드카가 이 위에서 돕니다. 없거나 낡았으면 켤 때 무엇이 필요한지 앱이 말해줍니다 |
 | **`claude` CLI** + 로그인 | Claude Code 세션용 — `npm i -g @anthropic-ai/claude-code` |
 | **`codex` CLI** + 로그인 | Codex 세션용 — `npm i -g @openai/codex`. 안 쓰면 없어도 됩니다 |
 

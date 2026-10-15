@@ -15,7 +15,8 @@ import type {
 import { autostartRemote } from './autostart.js'
 import { probeTarget } from './probe.js'
 import { listSshHosts } from './ssh-config.js'
-import { installRemote, type InstallResult, type RemoteRuntime } from './install.js'
+import { installRemote, nodeFloor, type InstallResult, type RemoteRuntime } from './install.js'
+import { belowFloor, NodeTooOld, switchedSentence, updateNodeSentence } from './node-floor.js'
 import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import { installVersion, type InstallVersion, type RegistryOptions } from './registry.js'
 import { newMachineId, splitQualified } from './machine-ids.js'
@@ -153,6 +154,12 @@ export class LinkedMachine implements RoutedMachine {
   private installed: MachineInfo['install'] = null
   /** Whether it starts its host at boot, from the last connection line or `machines.autostart` (plan §10.4) */
   private bootStart: MachineInfo['autostart'] = null
+  /**
+   * The hub switched this machine to its own Node since the link last connected, and says so in `note`
+   * (#699). Once: a host that still fails under the Node it installed is reported as it is, not
+   * installed over again
+   */
+  private switched: { note: string } | null = null
 
   constructor(
     private record: MachineRecord,
@@ -509,6 +516,12 @@ export class LinkedMachine implements RoutedMachine {
     this.bootStart = autostartOf(endpoint.line.autostart)
     if (!endpoint.line.hostRunning && this.tunnel.startHost) {
       if (this.held) return
+      // A Node below the floor crashes the host on its first database call; the connection line says which Node answered (#699)
+      const there = endpoint.line.install
+      if (there && !there.managed && belowFloor(there.node, nodeFloor())) {
+        if (await this.switchNode(new NodeTooOld(`Node ${there.node} is below ${nodeFloor()}`, 'refused', there.node))) return this.doOpen()
+        return
+      }
       this.setStatus('starting', null)
       this.deps.log?.(`[links] ${this.name}: no Centralu host is running there; starting one (${shimNames(this.record.remote).centralu} serve --detach)`)
       let started: HostStart
@@ -516,11 +529,16 @@ export class LinkedMachine implements RoutedMachine {
         started = await this.tunnel.startHost()
       } catch (err) {
         if (this.stopped) return
+        if (err instanceof NodeTooOld) {
+          if (await this.switchNode(err, endpoint.line.install?.node ?? null)) return this.doOpen()
+          return
+        }
         this.setStatus('not_running', `Centralu could not be started on ${this.name}: ${(err as Error).message}`)
         return this.retryLater()
       }
       if (this.stopped) return
-      this.hostStarted = { ...started, at: Date.now() }
+      const note = [started.note, this.switched?.note].filter(Boolean).join(' ') || null
+      this.hostStarted = { ...started, note, at: Date.now() }
       this.deps.log?.(
         started.how === 'detached'
           ? `[links] ${this.name}: started its host; it keeps running after this link ends`
@@ -549,6 +567,39 @@ export class LinkedMachine implements RoutedMachine {
     const versions = this.check({ version: endpoint.line.version, protocolVersion: endpoint.line.protocolVersion, dev: false })
     if (!mayConnect(versions)) return
     this.connectClient(endpoint)
+  }
+
+  /**
+   * The Node there is below the floor, or the host crashed the way that makes it crash (#699): the
+   * hub installs its own (the pinned Node of `machines.install`, SHA-256 checked) and says so in one
+   * sentence. True when it did, so the caller opens again and finds the managed launcher first. False
+   * after reporting why not and scheduling a retry: no installer, a development build (not published),
+   * a command of the person's own, an install that failed, or a machine that already runs on the Node
+   * the hub installed or was switched once since the link last connected
+   */
+  private async switchNode(problem: NodeTooOld, nodeThere: string | null = null): Promise<boolean> {
+    const found = problem.found ?? nodeThere
+    const why = { name: this.name, found, floor: nodeFloor(), kind: problem.kind }
+    const report = (reason: string | null) => {
+      this.setStatus('not_running', reason === null ? `Centralu could not be started on ${this.name}: ${problem.message}` : updateNodeSentence({ ...why, reason }))
+      this.retryLater()
+      return false
+    }
+    const installer = this.deps.installer
+    if (this.switched || this.installed?.managed) return report(null)
+    if (!installer || !this.tunnel.exec) return report('this computer installs nothing')
+    if (this.deps.hub.dev) return report('this development build is not published')
+    if (this.record.remote.command) return report('it runs a command of its own in place of centralu')
+    this.deps.log?.(`[links] ${this.name}: ${problem.message}; installing the pinned Node there`)
+    let result: MachineInstallResult
+    try {
+      result = await this.install()
+    } catch (err) {
+      return report(`installing it failed: ${(err as Error).message}`)
+    }
+    this.switched = { note: switchedSentence({ ...why, node: result.current.node }) }
+    this.deps.log?.(`[links] ${this.name}: ${this.switched.note}`)
+    return !this.stopped
   }
 
   /** The tunnel's `open`, or null after reporting why not (and when the link was stopped meanwhile) */
@@ -644,6 +695,7 @@ export class LinkedMachine implements RoutedMachine {
     if (this.client !== client) return
     this.attempt = 0
     this.refusedOnce = false
+    this.switched = null
     this.lastConnectedAt = Date.now()
     this.setStatus('connected', null)
     /*

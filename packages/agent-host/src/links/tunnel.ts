@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createConnection, createServer } from 'node:net'
 import type { RemoteShell } from '@cc/protocol'
+import { isHostCrash, NodeTooOld } from './node-floor.js'
 
 /**
  * The way from the hub to a linked machine's host (docs/plans/remote-hub.md §2).
@@ -151,7 +152,7 @@ export function parseAutostart(raw: unknown): RemoteAutostart | null {
 /** What `centralu serve --detach` answered (`serve.mjs`'s `runDetach`) */
 export type DetachAnswer =
   | { ok: true; line: ConnectionLine; how: string | null }
-  | { ok: false; reason: string; message: string }
+  | { ok: false; reason: string; message: string; node?: string }
 
 /** Reads the one JSON line `--detach` prints; throws when there is none (a remote older than `--detach`) */
 export function parseDetachLine(stdout: string): DetachAnswer {
@@ -163,10 +164,15 @@ export function parseDetachLine(stdout: string): DetachAnswer {
     } catch {
       continue
     }
-    const d = (raw as { detach?: { ok?: unknown; how?: unknown; reason?: unknown; message?: unknown } } | null)?.detach
+    const d = (raw as { detach?: { ok?: unknown; how?: unknown; reason?: unknown; message?: unknown; node?: unknown } } | null)?.detach
     if (!d || typeof d !== 'object') continue
     if (d.ok === true) return { ok: true, line: parseConnectionLine(lines[i]!), how: typeof d.how === 'string' ? d.how : null }
-    return { ok: false, reason: typeof d.reason === 'string' ? d.reason : 'failed', message: typeof d.message === 'string' ? d.message : 'centralu serve --detach failed' }
+    return {
+      ok: false,
+      reason: typeof d.reason === 'string' ? d.reason : 'failed',
+      message: typeof d.message === 'string' ? d.message : 'centralu serve --detach failed',
+      ...(typeof d.node === 'string' ? { node: d.node } : {}),
+    }
   }
   throw new Error('The remote did not say whether it started')
 }
@@ -531,6 +537,9 @@ export class SshTunnel implements Tunnel {
       this.linkBound = true
       return { how: 'link_bound', note: answer.message }
     }
+    // The launcher refused a Node below the floor, or its host crashed the way one crashes (#699)
+    if (answer.reason === 'node_too_old') throw new NodeTooOld(answer.message, 'refused', answer.node ?? null)
+    if (answer.reason === 'exited' && isHostCrash(answer.message)) throw new NodeTooOld(answer.message, 'crashed', null)
     throw new Error(answer.message)
   }
 

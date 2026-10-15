@@ -56,6 +56,7 @@ import {
   SERVE_HELP,
 } from './serve.mjs'
 import { swapInto } from './swap.mjs'
+import { belowFloor, floorOf, oldNodeSentence } from './node-floor.mjs'
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
@@ -65,6 +66,8 @@ const require = createRequire(import.meta.url)
 const pkg = require('../package.json')
 
 const APP_NAME = 'Centralu'
+/** The oldest Node the host runs on: this package's own `engines.node` (node-floor.mjs) */
+const NODE_FLOOR = floorOf(pkg.engines.node)
 const BUNDLE = `${APP_NAME}.app`
 /*
  * `CENTRALU_INSTALLED_COPY` points `install` and the copy checks at another bundle path. It exists
@@ -591,7 +594,7 @@ const HELP = `${APP_NAME} ${pkg.version}
                         to reach over SSH (\`centralu serve --help\`)
   centralu --version    Prints the version
 
-Requires: Node 22+, and the claude or codex CLI (the app's first screen reports the status)`
+Requires: Node ${NODE_FLOOR}+, and the claude or codex CLI (the app's first screen reports the status)`
 
 const [cmd, ...rest] = process.argv.slice(2)
 switch (cmd) {
@@ -620,6 +623,23 @@ switch (cmd) {
       if (args.mode === 'rotate') {
         process.exitCode = rotateToken({ env: process.env, home: HOME })
         break
+      }
+      /*
+       * Before anything spawns a host: under a Node below the floor the host crashes on its first
+       * database call, with nothing in its log (issue #699). `--detach` also answers in the line the
+       * hub reads, so it can offer its managed install instead of quoting a crash. `--connection`,
+       * `--stop` and the other modes start no host and keep working, so the hub can still ask this
+       * machine what Node it has.
+       */
+      const startsHost = args.mode === 'serve' || args.mode === 'detach'
+      if (startsHost && belowFloor(process.versions.node, NODE_FLOOR)) {
+        const message = oldNodeSentence(process.versions.node, NODE_FLOOR)
+        console.error(`centralu serve: ${message}`)
+        if (args.mode === 'detach') {
+          const line = { v: 1, detach: { ok: false, how: null, reason: 'node_too_old', message, node: process.versions.node, floor: NODE_FLOOR } }
+          process.stdout.write(`${JSON.stringify(line)}\n`)
+        }
+        process.exit(1)
       }
       // A launcher `--detach` started: what it carried (the data folder, a host entry) applies before
       // anything below reads the environment

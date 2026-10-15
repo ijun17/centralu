@@ -49,7 +49,7 @@ arbitrary size, line height or radius outside a short list of exceptions.
 |---|---|---|
 | Schema | **zod v4** | Type inference = runtime validation, single source. Validated only at the boundary (WS receipt, invoke response) to control the cost |
 
-## 3. Agent Host (packages/agent-host — Node 22+)
+## 3. Agent Host (packages/agent-host — Node 22.14+)
 
 | Area | Choice | Reasoning | Alternatives rejected |
 |---|---|---|---|
