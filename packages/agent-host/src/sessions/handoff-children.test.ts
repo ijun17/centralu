@@ -9,6 +9,7 @@ import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionH
 import { handoffNotePath, writeHandoffNote } from '../dev-services/handoff-notes.js'
 import { Store } from '../dev-services/store.js'
 import { crossWorld } from './cross-project.test-helpers.js'
+import { MemoryGate } from './memory-gate.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
 
 /**
@@ -322,6 +323,32 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const note = readFileSync(handoffNotePath(project.id, parent), 'utf8')
     expect(note).toContain(`"Docs" — working — handle: ${other}. Its report comes to you, and you are told of the cards of the turn you now own. You did not start it, so agent_session works on it only with the auto preset.`)
     expect(owner(other) ?? null).toBeNull()
+  })
+
+  it('moves a start queued for memory (#686): it starts as the new session\'s child when memory recovers', async () => {
+    const h = host()
+    const GB = 1024 ** 3
+    let free = 1 * GB
+    h.mgr.useMemoryGate(new MemoryGate({ read: async () => free, recheckMs: 20, maxWaitMs: 10_000 }))
+    const { project, parent } = await parentOf(h)
+    const queued = await h.mgr.startAgent(parent, { task: 'heavy work', wait: false })
+    expect(queued).toMatchObject({ ok: true, state: 'pending', lowMemory: expect.anything() })
+    const requestId = (queued as { sessionId: string }).sessionId
+    const heir = await handOff(h, project, parent, false)
+
+    expect(store.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId, callerSessionId: heir, request: expect.objectContaining({ callerId: heir, allowed: true }) })])
+    const note = readFileSync(handoffNotePath(project, parent), 'utf8')
+    expect(note).toContain(`allowed, queued until memory frees up, to start Claude Code: “heavy work” — handle: ${requestId}. It starts on its own when memory allows`)
+    expect(note).not.toContain('The card stands in your session')
+    expect(await h.mgr.agentSession(parent, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: false, error: expect.stringContaining(`[${heir}]`) })
+    expect(await h.mgr.agentSession(heir, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: true, state: 'pending' })
+
+    free = 8 * GB
+    await until(() => h.mgr.listSessions().some((s) => s.askedBy === heir))
+    const child = h.mgr.listSessions().find((s) => s.askedBy === heir)!.id
+    expect(h.mgr.listSessions().some((s) => s.askedBy === parent)).toBe(false)
+    await until(() => store.listReportMarks().some((m) => m.sessionId === child))
+    expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: heir }])
   })
 
   it('leaves everything with the original when the store fails mid-move, and a restart reads that one owner', async () => {

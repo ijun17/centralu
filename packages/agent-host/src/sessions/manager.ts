@@ -7698,11 +7698,18 @@ export class SessionManager {
     }
     const starts = [...this.agentStarts.values()].filter((r) => r.req.callerId === from && !r.ended)
     for (const r of starts) {
-      moved.push({
-        handle: r.req.requestId, name: r.req.detail.text, request: true,
-        state: `waiting for the person to allow starting ${r.req.detail.tool}: “${r.req.detail.text}”`,
-        can: 'The card stands in your session; if the person allows it, the session it starts is yours and its report comes to you. agent_session (status, wait, stop) works on the handle meanwhile.',
-      })
+      moved.push(r.req.allowed
+        // Allowed already and queued for memory (#686): no card, it starts on its own when memory frees up
+        ? {
+            handle: r.req.requestId, name: r.req.detail.text, request: true,
+            state: `allowed, queued until memory frees up, to start ${r.req.detail.tool}: “${r.req.detail.text}”`,
+            can: 'It starts on its own when memory allows; the session it starts is yours and its report comes to you. agent_session (status, wait, stop) works on the handle meanwhile.',
+          }
+        : {
+            handle: r.req.requestId, name: r.req.detail.text, request: true,
+            state: `waiting for the person to allow starting ${r.req.detail.tool}: “${r.req.detail.text}”`,
+            can: 'The card stands in your session; if the person allows it, the session it starts is yours and its report comes to you. agent_session (status, wait, stop) works on the handle meanwhile.',
+          })
     }
     if (!moved.length) return []
     try {

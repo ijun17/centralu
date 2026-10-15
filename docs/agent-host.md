@@ -741,8 +741,8 @@ new session now takes over the original's **live** work as it is created, before
 
 - **What is live**: a session working or waiting on the person (approval or question), one holding a request the
   original queued (§1.2.3), one whose report to the original is not delivered yet, an `ask_project` answer the
-  original never came back for (that tool tells nobody when it ends), and a start_agent request whose card still
-  stands (#673). Same-project children (`askedBy` or `parentSessionId` naming the original) and the original's
+  original never came back for (that tool tells nobody when it ends), and a start_agent request still open: its card
+  still standing (#673), or already allowed and queued until memory frees up (§1.2.4, #686). Same-project children (`askedBy` or `parentSessionId` naming the original) and the original's
   delegations in another project both count.
 - **What moves**: `askedBy` and `parentSessionId` where they name the original (another project's session keeps its
   own row), the report mark (`report_marks`), the delegated turn's link (`delegated_turns`) and the delegation the
@@ -759,7 +759,8 @@ new session now takes over the original's **live** work as it is created, before
   Another project's session: `ask_project` with no task waits for the answer, and the cards of the turn it now owns
   are told to it. A same-project session it did not start (a turn it now owns): the report and the cards, while
   `agent_session` works on it only under `auto`. A standing card: the handle for `agent_session` until the person
-  answers. Nothing moved, nothing added. The opening message itself is the window's and is not changed (the window
+  answers. A start queued for memory (`allowed`): no card; it starts on its own as the new session's child when memory
+  allows, with the report armed for it, and the handle works meanwhile. Nothing moved, nothing added. The opening message itself is the window's and is not changed (the window
   confirms it by its text).
 - **An original that stays** (a handoff that keeps it, #694) is told in its conversation what went to whom (a
   `notice`). A call of its own still waiting on one of them (`agent_session` wait or send, `ask_project` with no task,
