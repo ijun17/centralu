@@ -13,13 +13,13 @@ import { newSession, setup } from './project-screen.js'
  * keeps the folds. Sessions are therefore emitted with fixed ids, and a reload test emits them again.
  */
 
-const PARENT = 'g-parent'
-const KIDS = ['g-kid-1', 'g-kid-2']
+export const PARENT = 'g-parent'
+export const KIDS = ['g-kid-1', 'g-kid-2']
 const APP_SESSION = 'g-app-session'
 const APP_KID = 'g-app-kid'
 
 /** One session of the project, a parent with two children, and an app with a session and a child of it */
-async function seed(page: Page): Promise<{ plain: string; projectId: string; appKey: string }> {
+export async function seed(page: Page): Promise<{ plain: string; projectId: string; appKey: string }> {
   const plain = await newSession(page, 'alpha')
   const projectId = await page.evaluate(
     () => (Object.values((window as any).__store.getState().projects) as { id: string; name: string }[]).find((p) => p.name === 'alpha')!.id,
@@ -203,6 +203,157 @@ export function sidebarGroupTests(): void {
             .toBeCloseTo(0, 0)
           await li.evaluate((el) => el.dispatchEvent(new DragEvent('dragleave', { bubbles: true })))
         }
+      })
+    }
+
+    /*
+     * The fold chevron was a 16px button (10px glyph) in a row, a 20px one in the project row, whose glyph ended on the
+     * name's first letter; and the project row aligned its items on the text baseline, which an icon button does not
+     * have, so its `+` and `⋯` stood 2-3px off the name's centre. Every part of a row is centred on the row's line now.
+     */
+    for (const [label, width] of [['narrow', 0], ['wide', 420]] as const) {
+      test(`a row's chevron is a large target clear of its title, and every part of a row is centred on its line, ${label} sidebar`, async ({ page }) => {
+        const { plain, appKey } = await seed(page)
+        // A second project, folded: its row shows the summary of what it hides
+        await page.evaluate(() => ((window as any).__mock.nextPickedDirectory = '/tmp/beta'))
+        await page.getByTestId('add-project').click()
+        await expect(page.getByTestId('project-beta')).toBeVisible()
+        const betaSession = await newSession(page, 'beta')
+        // A working session is one the folded row counts (an idle one is not worth a sign)
+        await page.evaluate((id) => (window as any).__store.setState((s: any) => ({ sessions: { ...s.sessions, [id]: { ...s.sessions[id], state: 'working' } } })), betaSession)
+        await page.getByTestId('project-fold-beta').click()
+        await expect(page.getByTestId('fold-summary-beta')).toBeVisible()
+
+        await page.evaluate((w) => (window as any).__store.getState().setSidebarWidth(w), width)
+        // Every kind of mark a session row carries, and a long name that has to truncate
+        await page.evaluate(
+          ([plainId, parentId, kidId]) => {
+            const long = 'a session name far too long to fit in a narrow sidebar on one line'
+            ;(window as any).__store.setState((s: any) => ({
+              sessions: Object.fromEntries(
+                Object.entries(s.sessions).map(([id, v]: [string, any]) => [
+                  id,
+                  id === plainId
+                    ? { ...v, backgroundTasks: [{ id: 't', status: 'running', description: 'build', ambient: false }] }
+                    : id === kidId
+                      ? { ...v, merged: true }
+                      : id === parentId
+                        ? { ...v, name: long, pr: { number: 12, state: 'open', url: 'https://example.test/pull/12' } }
+                        : v,
+                ]),
+              ),
+            }))
+          },
+          [plain, PARENT, KIDS[0]] as const,
+        )
+        await page.getByTestId(`children-fold-${PARENT}`).click()
+        await expect(page.getByTestId(`children-folded-${PARENT}`)).toBeVisible()
+        await page.getByTestId(`children-fold-${PARENT}`).click()
+        await expect(page.getByTestId(`session-row-${KIDS[0]}`)).toBeVisible()
+        await expect(page.getByTestId(`background-mark-${plain}`)).toBeVisible()
+
+        // The line of a row and the centres of what stands on it, all measured on screen
+        const centres = (rowId: string, partIds: string[]) =>
+          page.evaluate(
+            ([row, parts]) => {
+              const mid = (el: Element) => {
+                const r = el.getBoundingClientRect()
+                return r.top + r.height / 2
+              }
+              const find = (id: string) => {
+                const el = document.querySelector(`[data-testid="${id}"]`)
+                if (!el) throw new Error(`no ${id}`)
+                return el
+              }
+              const rowEl = find(row)
+              const line = rowEl.closest('header') ?? rowEl
+              const out: Record<string, number> = { '(row)': mid(line) }
+              for (const part of parts) {
+                // `title` is the name's text inside the row's button, `mark` the tool chip or the app icon
+                const el = part === 'title' ? rowEl.querySelector('.truncate')! : part === 'mark' ? rowEl.firstElementChild! : find(part)
+                out[part] = mid(el)
+              }
+              return out
+            },
+            [rowId, partIds] as const,
+          )
+        const expectCentred = async (rowId: string, partIds: string[]) => {
+          const c = await centres(rowId, partIds)
+          for (const [part, y] of Object.entries(c)) {
+            if (part !== '(row)') expect(Math.abs(y - c['(row)']!), `${part} on ${rowId}: ${JSON.stringify(c)}`).toBeLessThanOrEqual(1)
+          }
+        }
+
+        // Project rows: the arrow, the name, `+`, its options and `⋯` (and, folded, the summary of what is hidden)
+        await expectCentred('project-header-alpha', [
+          'project-fold-alpha',
+          'project-new-session-alpha',
+          'project-new-session-options-alpha',
+          'project-menu-alpha',
+        ])
+        await expectCentred('project-header-beta', ['project-fold-beta', 'fold-summary-beta', 'project-new-session-beta', 'project-menu-beta'])
+        // Session rows at the three depths, the badges they carry, and the menu at their end
+        await expectCentred(`session-row-${plain}`, ['mark', 'title', `background-mark-${plain}`, `session-menu-${plain}`])
+        await expectCentred(`session-row-${PARENT}`, ['mark', 'title', `pr-badge-${PARENT}`, `children-fold-${PARENT}`, `session-menu-${PARENT}`])
+        await expectCentred(`session-row-${KIDS[0]}`, ['mark', 'title', `merged-badge-${KIDS[0]}`, `session-menu-${KIDS[0]}`])
+        await expectCentred(`app-row-${appKey}`, ['mark', 'title', `app-fold-${appKey}`])
+        await expectCentred(`app-session-row-${APP_SESSION}`, ['mark', 'title', `children-fold-${APP_SESSION}`, `session-menu-${APP_SESSION}`])
+        await expectCentred(`app-session-row-${APP_KID}`, ['mark', 'title', `session-menu-${APP_KID}`])
+        await expectCentred('app-row-_user/tool', ['mark', 'title', 'app-fold-_user/tool'])
+        await expectCentred('app-session-row-g-user-app-session', ['mark', 'title'])
+        // A folded group's count stands on its row's line too
+        await page.getByTestId(`children-fold-${PARENT}`).click()
+        await expectCentred(`session-row-${PARENT}`, ['mark', 'title', `children-folded-${PARENT}`])
+        await page.getByTestId(`app-fold-${appKey}`).click()
+        await expectCentred(`app-row-${appKey}`, ['mark', 'title', `app-folded-${appKey}`])
+        // "Your apps": its title and the two buttons
+        const header = await page.evaluate(() => {
+          const mid = (el: Element) => el.getBoundingClientRect().top + el.getBoundingClientRect().height / 2
+          const section = document.querySelector('[data-testid="user-apps"] > header')!
+          return [...section.children].map((el) => mid(el.querySelector('button') ?? el) - mid(section))
+        })
+        for (const d of header) expect(Math.abs(d)).toBeLessThanOrEqual(1)
+
+        // The chevrons: at least 24px square with a 14px glyph, a hit area that is the button itself, and air before the title
+        await page.getByTestId(`app-fold-${appKey}`).click()
+        await page.getByTestId(`children-fold-${PARENT}`).click()
+        // A chevron turns when its group opens; its box is only the glyph's once the turn is over
+        await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a instanceof CSSTransition).map((a) => a.finished.catch(() => {}))))
+        for (const id of ['project-fold-alpha', `children-fold-${PARENT}`, `app-fold-${appKey}`, `children-fold-${APP_SESSION}`]) {
+          const button = page.getByTestId(id)
+          const box = (await button.boundingBox())!
+          expect(box.width, id).toBeGreaterThanOrEqual(24)
+          expect(box.height, id).toBeGreaterThanOrEqual(24)
+          const glyph = (await button.locator('svg').boundingBox())!
+          expect(glyph.width, `${id} glyph`).toBeGreaterThanOrEqual(14)
+          // The whole button answers a press, down to its corners, not only the glyph
+          const corners: [number, number][] = [[2, 2], [box.width - 2, 2], [2, box.height - 2], [box.width - 2, box.height - 2]]
+          for (const [dx, dy] of corners) {
+            const hit = await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('button')?.getAttribute('data-testid'), [box.x + dx, box.y + dy])
+            expect(hit, `${id} corner ${dx},${dy}`).toBe(id)
+          }
+          // The title it belongs to starts 6px or more after the glyph
+          const titleX = id === 'project-fold-alpha'
+            ? (await page.getByTestId('project-header-alpha').boundingBox())!.x
+            : await page.evaluate((fold) => {
+                const li = document.querySelector(`[data-testid="${fold}"]`)!.closest('li')!
+                return li.querySelector('[data-testid^="tool-mark"], [data-testid^="app-row-"] > span')!.getBoundingClientRect().left
+              }, id)
+          expect(titleX - (glyph.x + glyph.width), `${id} gap to its title`).toBeGreaterThanOrEqual(6)
+        }
+
+        // The deeper rows keep their steps with the bigger gutter, and nothing overflows or wraps
+        const plainMark = await markX(page, `session-row-${plain}`)
+        expect(await markX(page, `session-row-${KIDS[0]}`)).toBeCloseTo(plainMark + 16, 0)
+        // (a tooltip the pointer left open is a popup outside the bar, not a row that overflows)
+        await page.mouse.move(700, 600)
+        await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+        await expect(page.getByTestId(`children-fold-${PARENT}-tip`)).toHaveCount(0)
+        const fit = await page.evaluate(() => {
+          const bar = document.querySelector('[data-testid="sidebar"]')!
+          return bar.scrollWidth - bar.clientWidth
+        })
+        expect(fit).toBeLessThanOrEqual(0)
       })
     }
 
