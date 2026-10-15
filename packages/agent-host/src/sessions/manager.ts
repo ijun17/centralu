@@ -9,7 +9,7 @@ import type { QueuedRequest } from '../dev-services/store.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
-import { ChildOwnership, pausedReportKey, readPausedTasks, type AgentStartRequest, type Delegation } from './child-ownership.js'
+import { ChildOwnership, type Delegation } from './child-ownership.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
 import { SessionAppsHub } from './session-apps.js'
 import { AppAccess, writeShared } from './app-access.js'
@@ -166,15 +166,6 @@ function withTimeout<T>(p: Promise<T>, ms: number, label = 'A call'): Promise<T>
 const MODEL_LIST_READ_MS = 60_000
 /** After a failed read, how long a caller that cannot wait goes without a list before one is tried again (#660) */
 const MODEL_LIST_RETRY_MS = 60_000
-
-/** Reads a stored request back; a row this build cannot read is dropped rather than raised half-formed */
-function readAgentStartRequest(raw: unknown): AgentStartRequest | null {
-  const r = raw as Partial<AgentStartRequest> | null
-  if (!r || typeof r !== 'object') return null
-  if (typeof r.requestId !== 'string' || typeof r.callerId !== 'string' || typeof r.projectId !== 'string') return null
-  if (typeof r.tool !== 'string' || typeof r.task !== 'string' || r.detail?.kind !== 'agent_start') return null
-  return r as AgentStartRequest
-}
 
 /**
  * One piece of the original's live work a handoff moved to the session that took over (#693), as the handoff note
@@ -707,73 +698,10 @@ export class SessionManager {
       const requester = [marks.get(s.id), turnGivers.get(s.id), s.askedBy].find((id): id is string => !!id && id !== s.id && this.meta.has(id))
       if (requester) this.quitNotices.push({ sessionId: s.id, requester })
     }
-    /*
-     * "You will be told when it ends" survives a host swap (#646): the keeper kept the child's process and its turn is
-     * still running, so it ends under this host, and the report it owes goes out from here. Any other mark is dropped
-     * rather than left to name an unrelated later turn as "the assigned work finished" (#166): a session with no
-     * process lost its turn with the old host, and a kept session already at rest finished its turn while the old host
-     * was letting go (`handingOver` held that report back); its answer stays readable through agent_session.
-     * A kept session at rest whose report was paused over its own background work (#721) still owes it: that work runs
-     * on in the kept process, and the turn its ending starts ends under this host.
-     */
-    for (const mark of store.listReportMarks()) {
-      const child = this.meta.get(mark.sessionId)
-      const kept = keeperOpts.keptSessions?.has(mark.sessionId) && !!child && this.meta.has(mark.callerSessionId)
-      const paused = readPausedTasks(store.appSetting(pausedReportKey(mark.sessionId)))
-      if (kept && (inTurn(child.state) || paused)) {
-        this.children.adoptReport(mark.sessionId, mark.callerSessionId, paused)
-        continue
-      }
-      if (child && keeperOpts.keptSessions?.has(mark.sessionId)) {
-        console.error(`[agent-host] report mark dropped: ${mark.sessionId.slice(0, 8)} ended its turn during the swap`)
-      }
-      store.clearReportMark(mark.sessionId)
-      store.deleteAppSetting(pausedReportKey(mark.sessionId))
-    }
-    /*
-     * start_agent requests the previous host left standing (#673): the person has not answered yet, so the card is
-     * raised again in its session and an approval starts the child here. A request whose caller is gone ends.
-     */
-    for (const row of store.listAgentStartRequests()) {
-      const req = readAgentStartRequest(row.request)
-      if (!req || req.requestId !== row.requestId || req.callerId !== row.callerSessionId) {
-        store.deleteAgentStartRequest(row.requestId)
-        continue
-      }
-      this.delegationFlow.resumeAgentStart(req)
-    }
-    /*
-     * A delegated turn's link survives the swap the same way (#676): a kept session still in the turn may be waiting on
-     * a question its caller is to answer, and the kept CLI sends that card again to this host. With no delegation in
-     * this host's memory, the link ends with the turn. Any other row is dropped: that turn is over.
-     */
-    for (const row of store.listDelegatedTurns()) {
-      const s = this.meta.get(row.sessionId)
-      if (keeperOpts.keptSessions?.has(row.sessionId) && !!s && inTurn(s.state) && this.meta.has(row.callerSessionId)) {
-        this.children.adoptTurn(row.sessionId, { callerId: row.callerSessionId, untilTurnEnd: true, told: new Set(row.told), turnId: row.turnId })
-        continue
-      }
-      store.clearDelegatedTurn(row.sessionId)
-    }
-    /*
-     * Queued requests (#677) outlive the host: the next one delivers them when the session's turn ends, or soon after
-     * start for a session already at rest. A kept session waits for its adoption (`adoptKept`), so its first input
-     * does not start a second process. A request whose session or requester is gone is dropped.
-     */
-    for (const r of store.listQueuedRequests()) {
-      if (!this.meta.has(r.sessionId) || !this.meta.has(r.callerSessionId)) {
-        store.removeQueuedRequest(r.id)
-        continue
-      }
-      // A delivery the old host began and never saw start is delivered again (#684 review)
-      if (r.deliveringAt) {
-        console.error(`[agent-host] queued request ${r.id} to ${r.sessionId.slice(0, 8)} was being delivered at the swap; delivering it again`)
-        store.markQueuedDelivering(r.id, null)
-      }
-      // A row an older build wrote does not say whether only `auto` let it through: an ask with no consent for the pair is read as such
-      const openedByAuto = r.openedByAuto ?? (r.via === 'ask_project' && !this.pairConsented(r.callerSessionId, this.meta.get(r.sessionId)!))
-      this.children.adoptQueued({ ...r, deliveringAt: null, openedByAuto })
-    }
+    this.children.restoreReports(this.meta, keeperOpts.keptSessions)
+    this.delegationFlow.restoreAgentStarts()
+    this.children.restoreTurns(this.meta, keeperOpts.keptSessions)
+    this.children.restoreQueued(this.meta, (r) => r.via === 'ask_project' && !this.pairConsented(r.callerSessionId, this.meta.get(r.sessionId)!))
     if (this.children.queued.size) {
       setTimeout(() => {
         for (const id of this.children.queued.keys()) if (!keeperOpts.keptSessions?.has(id)) this.scheduleDrain(id)

@@ -884,7 +884,8 @@ new session now takes over the original's **live** work as it is created, before
   observer notes, start_agent requests, linked machines' reports, and what a handoff gave away. Each change with a
   store mirror writes it there; the manager reads through read-only maps. The memory side of the move is one call,
   `moveOwner`, which runs the manager's card move for the moving start requests in the middle, in the order above.
-  What moves, the store's transaction, and `askedBy` / `parentSessionId` stay with the manager.
+  What moves, the store's transaction, and `askedBy` / `parentSessionId` stay with the manager. At startup it reads
+  its own rows back (`restoreReports`, `restoreTurns`, `restoreQueued`), as the manager's constructor did.
 - **The windows** hear `session_owner` (the session's `askedBy` and `parentSessionId` now) and hang the child under
   its new owner; a linked machine's event is qualified (`Qualifier.event`) and patched into the hub's mirror.
 

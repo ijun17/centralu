@@ -179,6 +179,15 @@ type LinkedAsk = {
   wake: Set<() => void>
 }
 
+/** Reads a stored request back; a row this build cannot read is dropped rather than raised half-formed */
+function readAgentStartRequest(raw: unknown): AgentStartRequest | null {
+  const r = raw as Partial<AgentStartRequest> | null
+  if (!r || typeof r !== 'object') return null
+  if (typeof r.requestId !== 'string' || typeof r.callerId !== 'string' || typeof r.projectId !== 'string') return null
+  if (typeof r.tool !== 'string' || typeof r.task !== 'string' || r.detail?.kind !== 'agent_start') return null
+  return r as AgentStartRequest
+}
+
 /**
  * What the delegation flow reaches of the session manager (#428), typed as the manager declares each member. The
  * manager builds it with getters for its fields, so each is read when used, never kept.
@@ -2194,6 +2203,22 @@ export class DelegationFlow {
       error:
         `A handoff gave "${what}" [${id}] to the session that took over from this one, "${heir?.name ?? h.to}" [${h.to}]. ` +
         'It answers to that session now: this session no longer follows it, and nothing was stopped.',
+    }
+  }
+
+  /** At startup (#673): the start_agent requests the previous host left standing, raised again */
+  restoreAgentStarts(): void {
+    /*
+     * start_agent requests the previous host left standing (#673): the person has not answered yet, so the card is
+     * raised again in its session and an approval starts the child here. A request whose caller is gone ends.
+     */
+    for (const row of this.host.store.listAgentStartRequests()) {
+      const req = readAgentStartRequest(row.request)
+      if (!req || req.requestId !== row.requestId || req.callerId !== row.callerSessionId) {
+        this.host.store.deleteAgentStartRequest(row.requestId)
+        continue
+      }
+      this.resumeAgentStart(req)
     }
   }
 }

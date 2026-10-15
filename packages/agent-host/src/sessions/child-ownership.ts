@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import type { ApprovalDetail } from '@cc/protocol'
+import type { ApprovalDetail, SessionInfo } from '@cc/protocol'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
+import { inTurn } from '../idle.js'
 
 /**
  * A start_agent request waiting on the person's card (#673), as stored in `agent_start_requests`: everything the start
@@ -120,6 +121,10 @@ type OwnershipStore = Pick<
   | 'addQueuedRequest'
   | 'removeQueuedRequest'
   | 'markQueuedDelivering'
+  | 'listReportMarks'
+  | 'appSetting'
+  | 'listDelegatedTurns'
+  | 'listQueuedRequests'
 >
 
 /**
@@ -228,6 +233,73 @@ export class ChildOwnership {
     if (!this.reports.delete(sessionId)) return
     this.store.clearReportMark(sessionId)
   }
+  /** At startup (#646): the report marks of the sessions the keeper kept that still owe them, and nothing else */
+  restoreReports(sessions: ReadonlyMap<string, SessionInfo>, keptSessions: ReadonlySet<string> | undefined): void {
+    /*
+     * "You will be told when it ends" survives a host swap (#646): the keeper kept the child's process and its turn is
+     * still running, so it ends under this host, and the report it owes goes out from here. Any other mark is dropped
+     * rather than left to name an unrelated later turn as "the assigned work finished" (#166): a session with no
+     * process lost its turn with the old host, and a kept session already at rest finished its turn while the old host
+     * was letting go (`handingOver` held that report back); its answer stays readable through agent_session.
+     * A kept session at rest whose report was paused over its own background work (#721) still owes it: that work runs
+     * on in the kept process, and the turn its ending starts ends under this host.
+     */
+    for (const mark of this.store.listReportMarks()) {
+      const child = sessions.get(mark.sessionId)
+      const kept = keptSessions?.has(mark.sessionId) && !!child && sessions.has(mark.callerSessionId)
+      const paused = readPausedTasks(this.store.appSetting(pausedReportKey(mark.sessionId)))
+      if (kept && (inTurn(child.state) || paused)) {
+        this.adoptReport(mark.sessionId, mark.callerSessionId, paused)
+        continue
+      }
+      if (child && keptSessions?.has(mark.sessionId)) {
+        console.error(`[agent-host] report mark dropped: ${mark.sessionId.slice(0, 8)} ended its turn during the swap`)
+      }
+      this.store.clearReportMark(mark.sessionId)
+      this.store.deleteAppSetting(pausedReportKey(mark.sessionId))
+    }
+  }
+
+  /** At startup (#676): the delegated turns of kept sessions still in them; any other row is dropped */
+  restoreTurns(sessions: ReadonlyMap<string, SessionInfo>, keptSessions: ReadonlySet<string> | undefined): void {
+    /*
+     * A delegated turn's link survives the swap the same way (#676): a kept session still in the turn may be waiting on
+     * a question its caller is to answer, and the kept CLI sends that card again to this host. With no delegation in
+     * this host's memory, the link ends with the turn. Any other row is dropped: that turn is over.
+     */
+    for (const row of this.store.listDelegatedTurns()) {
+      const s = sessions.get(row.sessionId)
+      if (keptSessions?.has(row.sessionId) && !!s && inTurn(s.state) && sessions.has(row.callerSessionId)) {
+        this.adoptTurn(row.sessionId, { callerId: row.callerSessionId, untilTurnEnd: true, told: new Set(row.told), turnId: row.turnId })
+        continue
+      }
+      this.store.clearDelegatedTurn(row.sessionId)
+    }
+  }
+
+  /** At startup (#677): every queued request whose session and requester still exist; `legacyOpenedByAuto` reads a row an older build wrote */
+  restoreQueued(sessions: ReadonlyMap<string, SessionInfo>, legacyOpenedByAuto: (r: QueuedRequest) => boolean): void {
+    /*
+     * Queued requests (#677) outlive the host: the next one delivers them when the session's turn ends, or soon after
+     * start for a session already at rest. A kept session waits for its adoption (`adoptKept`), so its first input
+     * does not start a second process. A request whose session or requester is gone is dropped.
+     */
+    for (const r of this.store.listQueuedRequests()) {
+      if (!sessions.has(r.sessionId) || !sessions.has(r.callerSessionId)) {
+        this.store.removeQueuedRequest(r.id)
+        continue
+      }
+      // A delivery the old host began and never saw start is delivered again (#684 review)
+      if (r.deliveringAt) {
+        console.error(`[agent-host] queued request ${r.id} to ${r.sessionId.slice(0, 8)} was being delivered at the swap; delivering it again`)
+        this.store.markQueuedDelivering(r.id, null)
+      }
+      // A row an older build wrote does not say whether only `auto` let it through: an ask with no consent for the pair is read as such
+      const openedByAuto = r.openedByAuto ?? legacyOpenedByAuto(r)
+      this.adoptQueued({ ...r, deliveringAt: null, openedByAuto })
+    }
+  }
+
   /** A mark the previous host left, kept for a session the keeper kept (the store already holds it) */
   adoptReport(sessionId: string, callerId: string, paused: PausedTask[] | null): void {
     this.reports.set(sessionId, callerId)

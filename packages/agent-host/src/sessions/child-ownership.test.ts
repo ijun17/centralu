@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { SessionInfo } from '@cc/protocol'
 import { Store, type QueuedRequest } from '../dev-services/store.js'
 import { ChildOwnership, pausedReportKey, type AgentStartRecord, type Delegation } from './child-ownership.js'
 
@@ -210,5 +211,54 @@ describe('forgetting a session', () => {
     own.setObserverNote('k', { run: b, waiters: 0, told: false })
     own.dropObserverNote('k', note)
     expect(own.observerNotes.has('k')).toBe(true)
+  })
+})
+
+describe('restoring what the previous host left (#646, #676, #677)', () => {
+  const at = (id: string, state: SessionInfo['state']) => ({ id, state }) as SessionInfo
+  const sessions = new Map([
+    ['kept-working', at('kept-working', 'working')],
+    ['kept-paused', at('kept-paused', 'idle')],
+    ['kept-idle', at('kept-idle', 'idle')],
+    ['gone-process', at('gone-process', 'idle')],
+    ['caller', at('caller', 'idle')],
+  ])
+  const kept = new Set(['kept-working', 'kept-paused', 'kept-idle'])
+
+  it("keeps the report marks a kept session still owes, a paused one's too, and drops the rest from the store", () => {
+    for (const id of ['kept-working', 'kept-paused', 'kept-idle', 'gone-process']) store.setReportMark(id, 'caller')
+    store.setReportMark('kept-working-no-caller', 'nobody')
+    store.setAppSetting(pausedReportKey('kept-paused'), JSON.stringify([{ id: 't1', description: 'dev server' }]))
+    store.setAppSetting(pausedReportKey('gone-process'), '[]')
+    own.restoreReports(sessions, kept)
+    expect([...own.awaitingReport].sort()).toEqual([['kept-paused', 'caller'], ['kept-working', 'caller']])
+    expect(own.pausedReports.get('kept-paused')).toEqual([{ id: 't1', description: 'dev server' }])
+    expect(store.listReportMarks().map((r) => r.sessionId).sort()).toEqual(['kept-paused', 'kept-working'])
+    expect(store.appSetting(pausedReportKey('gone-process'))).toBeNull()
+  })
+
+  it('keeps the delegated turn of a kept session still in it, ending with that turn', () => {
+    store.setDelegatedTurn('kept-working', 'caller', 'turn-1')
+    store.setDelegatedTurnTold('kept-working', ['card-1'])
+    store.setDelegatedTurn('kept-idle', 'caller', 'turn-2')
+    own.restoreTurns(sessions, kept)
+    expect(own.turnOwners.get('kept-working')).toEqual({ callerId: 'caller', untilTurnEnd: true, told: new Set(['card-1']), turnId: 'turn-1' })
+    expect(own.turnOwners.has('kept-idle')).toBe(false)
+    expect(store.listDelegatedTurns().map((r) => r.sessionId)).toEqual(['kept-working'])
+  })
+
+  it('keeps every queued request whose sessions exist, delivers a half-delivered one again, and reads an old row', () => {
+    own.enqueue(request('q1', 'kept-idle', 'caller'))
+    own.enqueue(request('q2', 'kept-idle', 'nobody'))
+    own.enqueue({ ...request('q3', 'gone-process', 'caller'), via: 'ask_project' })
+    store.markQueuedDelivering('q1', 5)
+    ;(store as unknown as { db: { prepare(sql: string): { run(): void } } }).db.prepare("UPDATE queued_requests SET opened_by_auto = NULL WHERE id = 'q3'").run()
+    const next = new ChildOwnership(store)
+    const read: string[] = []
+    next.restoreQueued(sessions, (r) => (read.push(r.id), true))
+    expect(next.queued.get('kept-idle')?.map((r) => [r.id, r.deliveringAt])).toEqual([['q1', null]])
+    expect(next.queued.get('gone-process')?.map((r) => [r.id, r.openedByAuto])).toEqual([['q3', true]])
+    expect(read).toEqual(['q3'])
+    expect(store.listQueuedRequests().map((r) => [r.id, r.deliveringAt]).sort()).toEqual([['q1', null], ['q3', null]])
   })
 })
