@@ -75,6 +75,7 @@ centralu/
 │  │     │     sessionList.ts(스토어가 가진 세션: 호스트 목록 병합, 아직 등록되지 않은 세션의 이벤트 보관)
 │  │     │     apps.ts(외부 앱: 목록, 고정 뷰와 대화 속 뷰, 그 액션)
 │  │     │     events/(`dispatchEvent`는 index.ts, 이벤트 계열마다 처리 파일 하나)
+│  │     │     projects.ts(프로젝트, git 요약과 명령)  patch.ts(상태를 쓰는 보조 함수)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)

@@ -73,6 +73,7 @@ centralu/
 │  │     │     sessionList.ts (the sessions it holds: host lists merged in, events held for one not yet listed)
 │  │     │     apps.ts (external apps: the list, pinned and in-conversation views, their actions)
 │  │     │     events/ (`dispatchEvent` in index.ts, one handler file per event family)
+│  │     │     projects.ts (projects, their git summary and commands)  patch.ts (helpers for writing state)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)
