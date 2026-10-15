@@ -93,6 +93,7 @@ type NormalizedEvent =
   | { type: 'agent_versions';   status: AgentVersions }         // #297: { installed: {tool: version|null}, autoApply (defaults to true), checkedAt }
   | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
   | { type: 'themes_changed' }                                // #312: a file in <data>/themes changed — re-read themes.list
+  | { type: 'orchestrator_proposals_changed' }                // #703: an MCP-server or skill proposal was saved, approved or dismissed — re-read agents.mcpProposals and agents.skillProposals
   | { type: 'machine_status';   machine: MachineInfo }          // #82: a linked machine's link changed state; the whole record (§6)
   | { type: 'machine_resync';   machineId }                     // #82: re-read that machine's sessions and projects, wake what died (§6)
   | { type: 'error';            sessionId?, error: ProtocolError }
@@ -363,7 +364,8 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
   those rows and does not wake them. Calls to it fail at once (§5).
 - **Events.** A linked machine's session events reach the UI under the hub's own `seq`, with ids
   qualified; one about the remote host itself (`update_status`, `themes_changed`,
-  `app_state_changed`, `agent_versions`, `external_app_questions_changed`, an `error` with no
+  `app_state_changed`, `agent_versions`, `external_app_questions_changed`,
+  `orchestrator_proposals_changed`, an `error` with no
   session) is dropped. Terminal frames arrive with the qualified terminal id. `machine_status`
   carries a link's whole `MachineInfo` whenever its state changes. `machine_resync` says that what
   the UI holds about one machine has to be read again: it comes on every (re)connect of that link

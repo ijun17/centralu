@@ -12,7 +12,7 @@ import { applyTheme, cacheChoice, pickTheme, resolveChoice, systemPrefersDark } 
 import { applyTypography, cacheTypography, typographyOf } from './typography.js'
 import { projectScreenOf, screenExists, usableThemeFiles, useStore } from '../store/store.js'
 import { canStep } from '../store/navHistory.js'
-import { useCounts, computeInbox } from '../store/selectors.js'
+import { useCounts, computeInbox, currentWaitingId } from '../store/selectors.js'
 import { Sidebar } from '../features/sidebar/Sidebar.jsx'
 import { EvidencePanel } from '../features/evidence/EvidencePanel.jsx'
 import { Overlay } from '../features/evidence/Overlay.jsx'
@@ -649,6 +649,7 @@ function NavButtons() {
 function GlobalKeys() {
   const toggleInbox = useStore((s) => s.toggleInbox)
   const focusSession = useStore((s) => s.focusSession)
+  const openWaiting = useStore((s) => s.openWaiting)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -686,8 +687,8 @@ function GlobalKeys() {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && letter === 'a') {
         e.preventDefault()
         const st = useStore.getState()
-        const next = nextWaitingSession(computeInbox(st), st.focusedSessionId)
-        if (next) focusSession(next)
+        const next = nextWaitingSession(computeInbox(st), currentWaitingId(st))
+        if (next) openWaiting(next)
         return
       }
       // Toggle the evidence panel ⌘B — replaces tab switching (⌘⇧1-4).
@@ -716,8 +717,8 @@ function GlobalKeys() {
     // The global shortcut (⌘⇧A pressed outside the app) comes in through the same action
     const onExternalNext = () => {
       const st = useStore.getState()
-      const next = nextWaitingSession(computeInbox(st), st.focusedSessionId)
-      if (next) focusSession(next)
+      const next = nextWaitingSession(computeInbox(st), currentWaitingId(st))
+      if (next) openWaiting(next)
     }
     /*
      * The mouse's side buttons (#374): back on 3, forward on 4, acting on release as a browser does. The press is
@@ -745,7 +746,7 @@ function GlobalKeys() {
       window.removeEventListener('mouseup', onSideButton)
       window.removeEventListener('cc:next-waiting', onExternalNext)
     }
-  }, [toggleInbox, focusSession])
+  }, [toggleInbox, focusSession, openWaiting])
 
   return null
 }

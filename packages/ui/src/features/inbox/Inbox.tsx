@@ -25,7 +25,7 @@ export function Inbox() {
   // Before any effect below that moves focus, so the composer, not this layer, is what gets it back (#115)
   useFocusReturn(open)
   const toggle = useStore((s) => s.toggleInbox)
-  const focusSession = useStore((s) => s.focusSession)
+  const openWaiting = useStore((s) => s.openWaiting)
   const markRead = useStore((s) => s.markRead)
   const send = useStore((s) => s.send)
   const projects = useStore((s) => s.projects)
@@ -56,7 +56,7 @@ export function Inbox() {
       else if (action === 'up') setCursor((c) => Math.max(c - 1, 0))
       else if (action === 'open') {
         if (item) {
-          focusSession(item.id, { preferGrid: true })
+          openWaiting(item.id, { preferGrid: true })
           toggle(false)
         }
       } else if (action === 'done') {
@@ -77,7 +77,7 @@ export function Inbox() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, items, cursor, focusSession, toggle, markRead])
+  }, [open, items, cursor, openWaiting, toggle, markRead])
 
   if (!open) return null
 
@@ -128,7 +128,7 @@ export function Inbox() {
                   <button
                     className="flex min-w-0 flex-1 items-center gap-2.5 py-2 pl-3 pr-4 text-left"
                     onClick={() => {
-                      focusSession(it.id, { preferGrid: true })
+                      openWaiting(it.id, { preferGrid: true })
                       toggle(false)
                     }}
                     data-testid={`inbox-item-${it.id}`}
@@ -140,18 +140,20 @@ export function Inbox() {
                     <span className="truncate text-xs text-ink-faint">
                       {(it.projectId ? projects[it.projectId]?.name : 'Orchestrator') ?? ''}
                     </span>
-                    {/* Which machine it waits on (#82): an approval answered here acts there */}
-                    <SessionMachineTag sessionId={it.id} testId={`inbox-machine-${it.id}`} />
+                    {/* Which machine it waits on (#82): an approval answered here acts there. A proposal is this host's */}
+                    {!it.proposal && <SessionMachineTag sessionId={it.id} testId={`inbox-machine-${it.id}`} />}
                     <span className="ml-auto flex shrink-0 items-center gap-2.5">
                       <span className="text-xs text-ink-faint">
                         {/* Why the turn stopped says more than the state it stopped in (#698) */}
-                        {it.interruption
-                          ? interruptionLabel(it.interruption)
-                          : it.state === 'waiting_approval'
-                            ? 'Needs approval'
-                            : it.state === 'error'
-                              ? 'Error'
-                              : 'Waiting for input'}
+                        {it.proposal
+                          ? 'Needs your answer'
+                          : it.interruption
+                            ? interruptionLabel(it.interruption)
+                            : it.state === 'waiting_approval'
+                              ? 'Needs approval'
+                              : it.state === 'error'
+                                ? 'Error'
+                                : 'Waiting for input'}
                       </span>
                       {/* The longer the wait, the brighter it gets — time pressure is stated without any new shape */}
                       <WaitingTime since={it.waitingSince} />
@@ -185,14 +187,14 @@ export function Inbox() {
                   )}
                 </div>
                 {/* What the approval asks, and Allow / Deny where the card's question is a plain yes or no (#543) */}
-                {it.state === 'waiting_approval' && (
+                {it.state === 'waiting_approval' && !it.proposal && (
                   <RowApproval
                     sessionId={it.id}
                     place="inbox"
                     keys={i === cursor}
                     settled={settled}
                     onOpen={() => {
-                      focusSession(it.id, { preferGrid: true })
+                      openWaiting(it.id, { preferGrid: true })
                       toggle(false)
                     }}
                   />

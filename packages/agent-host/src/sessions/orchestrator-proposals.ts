@@ -67,6 +67,12 @@ export class OrchestratorProposals {
     private readonly store: Pick<Store, 'appSetting' | 'setAppSetting' | 'deleteAppSetting'>,
     /** The external app runtime, or undefined on a host without one */
     private readonly apps: () => ExternalApps | undefined,
+    /**
+     * Called after a proposal list changed (a proposal saved, approved or dismissed), once the change is saved.
+     * The host turns it into the `orchestrator_proposals_changed` event, so a screen re-reads after the write, not
+     * after a guess about which tool call made it (#703).
+     */
+    private readonly changed: () => void = () => {},
   ) {}
 
   /** MCP server proposals waiting on the person's approval */
@@ -97,6 +103,7 @@ export class OrchestratorProposals {
     const proposals = this.mcpProposals().filter((p) => p.name !== spec.name)
     proposals.push({ name: spec.name, command: spec.command, args: spec.args, why: spec.why })
     this.store.setAppSetting(MCP_PROPOSALS_KEY, JSON.stringify(proposals))
+    this.changed()
     return { ok: true }
   }
 
@@ -118,6 +125,7 @@ export class OrchestratorProposals {
     const proposals = this.skillProposals().filter((p) => p.name !== spec.name)
     proposals.push({ name: spec.name, content: spec.content, why: spec.why })
     this.store.setAppSetting(SKILL_PROPOSALS_KEY, JSON.stringify(proposals))
+    this.changed()
     return { ok: true }
   }
 
@@ -219,6 +227,7 @@ export class OrchestratorProposals {
     const hit = proposals.find((p) => p.name === name)
     if (!hit) return { ok: false, error: `No pending skill proposal named "${name}"`, restart: false }
     this.store.setAppSetting(SKILL_PROPOSALS_KEY, JSON.stringify(proposals.filter((p) => p.name !== name)))
+    this.changed()
     if (!approve) return { ok: true, restart: false }
 
     const skills = this.orchestratorSkills().filter((s) => s.name !== name)
@@ -258,7 +267,10 @@ export class OrchestratorProposals {
     const proposals = this.mcpProposals()
     const hit = proposals.find((p) => p.name === name)
     if (!hit) return { ok: false, error: `No pending proposal named "${name}"`, restart: false }
-    const dropProposal = () => this.store.setAppSetting(MCP_PROPOSALS_KEY, JSON.stringify(proposals.filter((p) => p.name !== name)))
+    const dropProposal = () => {
+      this.store.setAppSetting(MCP_PROPOSALS_KEY, JSON.stringify(proposals.filter((p) => p.name !== name)))
+      this.changed()
+    }
     if (!approve) {
       dropProposal()
       return { ok: true, restart: false }

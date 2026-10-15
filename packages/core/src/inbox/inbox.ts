@@ -16,6 +16,11 @@ import { isUnread, type ReadTracked } from '../unread/unread.js'
  * a state that says nothing of it (`idle` after a quit, `waiting_input` after an interrupt). It is listed like a
  * finished turn, while unread, with the urgency of an error; the line Centralu writes for a quit makes it unread.
  * A tool reconnecting for too long is listed while it lasts, though the session is still working.
+ *
+ * **A pending orchestrator proposal (an MCP server or a skill, #703) is listed like an approval.** It is not a session
+ * state: the orchestrator went on talking, but a card waits for the person's answer. `proposalCandidates` turns the
+ * pending proposals into candidates in the `waiting_approval` state, so every function below counts, orders and cycles
+ * through them without a second rule.
  */
 
 export type InboxCandidate = {
@@ -29,6 +34,41 @@ export type InboxCandidate = {
   lastReadSeq: number
   preview?: string
   interruption?: Interruption | null
+  /** Set on a pending orchestrator proposal (#703): this row is the proposal, not a session, and `id` is not a session id */
+  proposal?: PendingProposal
+}
+
+/** An orchestrator proposal waiting for the person's answer, by the name it was proposed under */
+export type PendingProposal = { kind: 'mcp' | 'skill'; name: string }
+
+/** The id prefix of a row that stands for a pending proposal: `proposal:<kind>:<name>`. No session id has it. */
+export const PROPOSAL_ID_PREFIX = 'proposal:'
+
+export const isProposalId = (id: string): boolean => id.startsWith(PROPOSAL_ID_PREFIX)
+
+/** The pending proposals of the two lists the host keeps, skills, then MCP servers */
+export function pendingProposals(lists: { mcpProposals: readonly { name: string }[]; skillProposals: readonly { name: string }[] }): PendingProposal[] {
+  return [
+    ...lists.skillProposals.map((p) => ({ kind: 'skill' as const, name: p.name })),
+    ...lists.mcpProposals.map((p) => ({ kind: 'mcp' as const, name: p.name })),
+  ]
+}
+
+/**
+ * The pending proposals as inbox candidates (#703). They wait in the `waiting_approval` state. A proposal carries no start
+ * time, so it has no `waitingSince` and sorts after the approvals that do.
+ */
+export function proposalCandidates(pending: readonly PendingProposal[]): InboxCandidate[] {
+  return pending.map((p) => ({
+    id: `${PROPOSAL_ID_PREFIX}${p.kind}:${p.name}`,
+    projectId: null,
+    name: p.kind === 'mcp' ? `Install MCP server ${p.name}` : `Save skill ${p.name}`,
+    state: 'waiting_approval' as const,
+    waitingSince: null,
+    lastSeq: 0,
+    lastReadSeq: 0,
+    proposal: p,
+  }))
 }
 
 export type InboxItem = InboxCandidate & {

@@ -20,7 +20,7 @@ import {
   useToolMeta,
   useTools,
 } from '../../store/selectors.js'
-import { Kbd, Tooltip, interruptionLabel, stateLabel } from '../../components/primitives.jsx'
+import { Kbd, StateDot, Tooltip, interruptionLabel, stateLabel } from '../../components/primitives.jsx'
 import { useShortcut } from '../../app/shortcut.js'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
@@ -498,6 +498,8 @@ function OrchestratorButton() {
   const open = useStore((s) => s.openOrchestrator)
   const id = useStore((s) => s.orchestratorId)
   const active = view === 'orchestrator'
+  // A proposal card waits in the orchestrator's screen (#703): the row says so like a session waiting on an approval
+  const proposalWaits = useHasPendingProposal()
 
   // pt-1.5, the grid's own gap: Search stands above it now (#529) and takes the lane's top margin
   return (
@@ -536,6 +538,11 @@ function OrchestratorButton() {
         <span className="shrink-0 text-2xs text-ink-faint" data-testid="orchestrator-experimental">
           Evolving
         </span>
+        {proposalWaits && (
+          <span className="ml-auto flex shrink-0 items-center" data-testid="orchestrator-proposal-waiting" title="A proposal waits for your answer">
+            <StateDot state="waiting_approval" />
+          </span>
+        )}
       </button>
     </div>
   )

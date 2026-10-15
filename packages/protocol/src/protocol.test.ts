@@ -188,6 +188,8 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // A file in the themes folder changed (#312) — the screen refetches the list
   { type: 'themes_changed' },
   { type: 'external_app_questions_changed' },
+  // An orchestrator proposal list changed (#703): carries nothing, the screen refetches both lists
+  { type: 'orchestrator_proposals_changed' },
   { type: 'project_consents_changed' },
   { type: 'projects_changed' },
   // A linked machine's link changed state, and what the UI holds about it has to be read again (#82)

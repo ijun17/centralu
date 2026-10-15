@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { buildInbox, countWaiting, detectFileConflicts, isAway, isUnread, type InboxItem } from '@cc/core'
+import { buildInbox, countWaiting, detectFileConflicts, isAway, isUnread, pendingProposals, proposalCandidates, type InboxCandidate, type InboxItem } from '@cc/core'
 import { openProjectOf, useStore, type AppState } from './store.js'
 import type { ToolDescriptor, ToolName, ToolStatus } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
@@ -53,14 +53,28 @@ export function useToolMeta(tool: ToolName): ToolDescriptor {
   )
 }
 
+/** Everything that waits on the person (#703): sessions in a waiting state, and the orchestrator's proposals nobody answered */
+function candidates(state: Pick<AppState, 'sessions' | 'mcpProposals' | 'skillProposals'>): InboxCandidate[] {
+  return [...Object.values(state.sessions).map(toCandidate), ...proposalCandidates(pendingProposals(state))]
+}
+
 export function useInbox(now: number): InboxItem[] {
   const sessions = useStore((s) => s.sessions)
-  return useMemo(() => buildInbox(Object.values(sessions).map(toCandidate), now), [sessions, now])
+  const mcpProposals = useStore((s) => s.mcpProposals)
+  const skillProposals = useStore((s) => s.skillProposals)
+  return useMemo(() => buildInbox(candidates({ sessions, mcpProposals, skillProposals }), now), [sessions, mcpProposals, skillProposals, now])
 }
 
 export function useCounts() {
   const sessions = useStore((s) => s.sessions)
-  return useMemo(() => countWaiting(Object.values(sessions).map(toCandidate)), [sessions])
+  const mcpProposals = useStore((s) => s.mcpProposals)
+  const skillProposals = useStore((s) => s.skillProposals)
+  return useMemo(() => countWaiting(candidates({ sessions, mcpProposals, skillProposals })), [sessions, mcpProposals, skillProposals])
+}
+
+/** Is a proposal waiting for the person's answer? The orchestrator's row asks this (#703) */
+export function useHasPendingProposal(): boolean {
+  return useStore((s) => s.mcpProposals.length + s.skillProposals.length > 0)
 }
 
 export function useSessionsOf(projectId: string): SessionSummary[] {
@@ -113,7 +127,19 @@ export function useConflicts() {
 
 /** A pure computation for use outside a hook (e.g. a global shortcut handler) */
 export function computeInbox(state: AppState, now = Date.now()): InboxItem[] {
-  return buildInbox(Object.values(state.sessions).map(toCandidate), now)
+  return buildInbox(candidates(state), now)
+}
+
+/**
+ * Where "next waiting" starts from (#703): the session on screen, or on the orchestrator's screen with a proposal
+ * waiting, the last proposal (its cards stand there), so the jump moves on instead of landing on the same screen.
+ */
+export function currentWaitingId(state: AppState): string | null {
+  if (state.view === 'orchestrator') {
+    const last = computeInbox(state).findLast((i) => i.proposal)
+    if (last) return last.id
+  }
+  return state.focusedSessionId
 }
 
 /**

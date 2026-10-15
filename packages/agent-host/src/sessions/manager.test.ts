@@ -5013,6 +5013,25 @@ describe('orchestrator skills — propose -> approve -> load into prompt (#71)',
     expect(adapter.lastOpts?.systemPromptAppend ?? '').not.toContain('weekly-report')
   })
 
+  /*
+   * #703: a screen re-reads the proposal lists on this event, so it goes out when a list changes (and the unit test in
+   * orchestrator-proposals.test.ts holds that it goes out after the save), or a card stays invisible.
+   */
+  it('broadcasts orchestrator_proposals_changed after each saved change to a proposal list', async () => {
+    const orc = await mgr.orchestrator()
+    const changed = () => events.filter((e) => e.type === 'orchestrator_proposals_changed').length
+    const before = changed()
+
+    await mgr.runOrchestratorTool(orc.id, 'propose_skill', { name: 'notify-skill', content: 'procedure' })
+    expect(changed()).toBe(before + 1)
+
+    await mgr.resolveSkillProposal('notify-skill', false)
+    expect(changed()).toBe(before + 2)
+    // A refused proposal saved nothing, so it announces nothing
+    await mgr.runOrchestratorTool(orc.id, 'propose_skill', { name: 'empty-skill', content: '   ' })
+    expect(changed()).toBe(before + 2)
+  })
+
   it('enforces the budget — content over 2,000 characters and a name already in use are refused at proposal time', async () => {
     const orc = await mgr.orchestrator()
     const long = await mgr.runOrchestratorTool(orc.id, 'propose_skill', {

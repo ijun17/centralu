@@ -878,7 +878,12 @@ export class SessionManager {
       keptSessions?: ReadonlySet<string>
     } = {},
   ) {
-    this.proposals = new OrchestratorProposals(this.store, () => this.appsHub?.rt)
+    this.proposals = new OrchestratorProposals(
+      this.store,
+      () => this.appsHub?.rt,
+      // `this.emit` is wrapped just below; the callback looks it up when a list changes, not now
+      () => this.emit({ type: 'orchestrator_proposals_changed' }),
+    )
     const rawEmit = this.emit
     this.emit = (full) => {
       /*

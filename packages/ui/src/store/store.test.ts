@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExternalAppInfo, MachineInfo, NormalizedEvent, SessionInfo } from '@cc/protocol'
 import { sessionLiveDefaults } from '@cc/protocol'
-import { DEFAULT_NOTIFY_POLICY, arrangePanels, withOrder, withPanel, sessionGridPanel, type NotifyPolicy } from '@cc/core'
+import { DEFAULT_NOTIFY_POLICY, arrangePanels, countWaiting, withOrder, withPanel, sessionGridPanel, type NotifyPolicy } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
 import {
@@ -23,6 +23,7 @@ import {
   useStore,
   type ChatItem,
 } from './store.js'
+import { computeInbox } from './selectors.js'
 
 /**
  * Store regression tests — ports go through `MockPlatform` (no ad-hoc mocking, or the contract falls
@@ -3601,18 +3602,26 @@ describe('new projects', () => {
   })
 })
 
-/** An MCP server suggestion card (option B) — a suggestion event re-reads the list, and clicking approve goes to the host */
+/**
+ * An MCP server suggestion card (option B) — the host says when a list changed, and clicking approve goes to the host.
+ *
+ * The screen never guesses the moment from the orchestrator's `tool_call` (#703): that event arrives when the call
+ * starts, before the host has saved the proposal, so a read on it returns the old list.
+ */
 describe('MCP server suggestions', () => {
-  it('a propose_mcp_server tool call re-reads the suggestion list', async () => {
+  it('the card appears when the host saves the proposal after the tool_call arrived (#703)', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('mcp-s1', sessionInfo('mcp-s1'))
     await useStore.getState().attach(mock)
-    mock.mcpProposalList.push({ name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'], why: 'browser' })
 
+    // The order the host really has: the call starts (the event goes out), and only then is the proposal saved
     mock.emit({
       type: 'tool_call', sessionId: 'mcp-s1', callId: 'c1',
       summary: { tool: 'mcp__centralu__propose_mcp_server', title: 'playwright', readOnly: true, paths: [] },
     } as NormalizedEvent)
+    await Promise.resolve()
+    expect(useStore.getState().mcpProposals).toEqual([])
+    mock.saveProposal({ mcp: { name: 'playwright', command: 'npx', args: ['-y', '@playwright/mcp'], why: 'browser' } })
 
     await vi.waitFor(() => {
       expect(useStore.getState().mcpProposals).toEqual([
@@ -3621,26 +3630,47 @@ describe('MCP server suggestions', () => {
     })
   })
 
-  /*
-   * The commands tier (#512): a Codex call made from inside its exec carries no arguments, so the event names
-   * centralu_run and not the command. It may be either proposal, and both cards must still appear.
-   */
-  it('a centralu_run tool call re-reads both suggestion lists', async () => {
+  it('a tool_call alone does not read the lists: the host broadcast is the signal', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('mcp-s2', sessionInfo('mcp-s2'))
+    await useStore.getState().attach(mock)
+    const read = vi.spyOn(mock.agents, 'mcpProposals')
+
+    for (const tool of ['mcp__centralu__propose_mcp_server', 'mcp__centralu__propose_skill', 'centralu_run']) {
+      mock.emit({
+        type: 'tool_call', sessionId: 'mcp-s2', callId: tool,
+        summary: { tool, title: tool, readOnly: false, paths: [] },
+      } as NormalizedEvent)
+    }
+    await Promise.resolve()
+    expect(read).not.toHaveBeenCalled()
+  })
+
+  it('one broadcast re-reads both lists, whichever tool or command made the change', async () => {
+    const mock = new MockPlatform()
     await useStore.getState().attach(mock)
     mock.mcpProposalList.push({ name: 'playwright', command: 'npx', args: [] })
     mock.skillProposalList.push({ name: 'weekly-report', content: 'a summary every Friday' })
 
-    mock.emit({
-      type: 'tool_call', sessionId: 'mcp-s2', callId: 'c2',
-      summary: { tool: 'centralu_run', title: 'centralu: centralu_run', readOnly: false, paths: [] },
-    } as NormalizedEvent)
+    mock.emit({ type: 'orchestrator_proposals_changed' })
 
     await vi.waitFor(() => {
       expect(useStore.getState().mcpProposals.map((p) => p.name)).toEqual(['playwright'])
       expect(useStore.getState().skillProposals.map((p) => p.name)).toEqual(['weekly-report'])
     })
+  })
+
+  it('a proposal answered elsewhere (another window) leaves the list without a reload', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    mock.saveProposal({ mcp: { name: 'playwright', command: 'npx', args: [] } })
+    await vi.waitFor(() => expect(useStore.getState().mcpProposals).toHaveLength(1))
+
+    // The other window's answer: the host drops the proposal and broadcasts
+    mock.mcpProposalList.splice(0)
+    mock.emit({ type: 'orchestrator_proposals_changed' })
+
+    await vi.waitFor(() => expect(useStore.getState().mcpProposals).toEqual([]))
   })
 
   it('clicking approve is passed to the host and empties the list', async () => {
@@ -3657,18 +3687,19 @@ describe('MCP server suggestions', () => {
   })
 })
 
-/** A skill suggestion (#71) — the same rail as an MCP suggestion: an event wakes the list, and approval goes to the host */
+/** A skill suggestion (#71) — the same rail as an MCP suggestion: the host's broadcast wakes the list, and approval goes to the host */
 describe('skill suggestions', () => {
-  it('a propose_skill tool call re-reads the suggestion list, and approving leads to a save', async () => {
+  it('the card appears when the host saves the proposal after the tool_call, and approving leads to a save', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('sk-s1', sessionInfo('sk-s1'))
     await useStore.getState().attach(mock)
-    mock.skillProposalList.push({ name: 'weekly-report', content: 'a summary every Friday', why: 'a recurring request' })
 
     mock.emit({
       type: 'tool_call', sessionId: 'sk-s1', callId: 'c1',
       summary: { tool: 'mcp__centralu__propose_skill', title: 'weekly-report', readOnly: true, paths: [] },
     } as NormalizedEvent)
+    await Promise.resolve()
+    mock.saveProposal({ skill: { name: 'weekly-report', content: 'a summary every Friday', why: 'a recurring request' } })
     await vi.waitFor(() => {
       expect(useStore.getState().skillProposals).toEqual([
         { name: 'weekly-report', content: 'a summary every Friday', why: 'a recurring request' },
@@ -3679,6 +3710,44 @@ describe('skill suggestions', () => {
     expect(mock.skillList).toEqual([{ name: 'weekly-report', content: 'a summary every Friday' }])
     expect(useStore.getState().skillProposals).toEqual([])
     expect(useStore.getState().toast).toMatch(/Skill saved/)
+  })
+})
+
+/** A pending proposal waits on the person like an approval does (#703): it is counted, listed and jumped to */
+describe('pending proposals wait on the person', () => {
+  it('count and list with the approvals, and a jump lands on the orchestrator screen', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('pw-s1', sessionInfo('pw-s1'))
+    await useStore.getState().attach(mock)
+    expect(computeInbox(useStore.getState())).toEqual([])
+
+    mock.saveProposal({ mcp: { name: 'playwright', command: 'npx', args: [] } })
+    mock.saveProposal({ skill: { name: 'weekly-report', content: 'a summary every Friday' } })
+    await vi.waitFor(() => expect(computeInbox(useStore.getState())).toHaveLength(2))
+
+    const items = computeInbox(useStore.getState())
+    expect(items.map((i) => [i.state, i.proposal])).toEqual([
+      ['waiting_approval', { kind: 'mcp', name: 'playwright' }],
+      ['waiting_approval', { kind: 'skill', name: 'weekly-report' }],
+    ])
+    expect(countWaiting([...items])).toMatchObject({ approval: 2 })
+    // The dock badge counts them too
+    expect(mock.badge).toBe(2)
+
+    await useStore.getState().openWaiting(items[0]!.id)
+    await vi.waitFor(() => expect(useStore.getState().view).toBe('orchestrator'))
+  })
+
+  it('leave the list when answered', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    mock.saveProposal({ mcp: { name: 'playwright', command: 'npx', args: [] } })
+    await vi.waitFor(() => expect(computeInbox(useStore.getState())).toHaveLength(1))
+
+    await useStore.getState().resolveMcpProposal('playwright', false)
+
+    expect(computeInbox(useStore.getState())).toEqual([])
+    expect(mock.badge).toBe(0)
   })
 })
 

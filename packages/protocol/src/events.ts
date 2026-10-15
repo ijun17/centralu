@@ -758,6 +758,13 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    */
   z.object({ ...appScoped, type: z.literal('external_app_questions_changed') }),
   /**
+   * The orchestrator's MCP-server or skill proposal list changed (#703): a proposal was saved, approved or dismissed.
+   * Sent by the place that writes the list, after the write. The same coarseness: this carries nothing, and the
+   * receiving side refetches `agents.mcpProposals` and `agents.skillProposals`. A screen must not guess the moment
+   * from the orchestrator's `tool_call`, which arrives before the host has saved anything.
+   */
+  z.object({ ...appScoped, type: z.literal('orchestrator_proposals_changed') }),
+  /**
    * A remembered cross-project consent was added or revoked (#371). The same coarseness: this carries nothing, and
    * Settings refetches `projectConsents.list`.
    */

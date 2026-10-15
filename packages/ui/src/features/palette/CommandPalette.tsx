@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { nextWaitingSession } from '@cc/core'
 import { newSessionProjectOf, useStore } from '../../store/store.js'
 import { isRemoteUserApp, useAppCatalog } from '../../store/app-catalog.js'
-import { computeInbox } from '../../store/selectors.js'
+import { computeInbox, currentWaitingId } from '../../store/selectors.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
@@ -129,8 +129,8 @@ export function CommandPalette() {
         run: () => {
           // The ordering (approval → error → waiting for input) is known by core — the same path as App's global shortcut
           const st = useStore.getState()
-          const next = nextWaitingSession(computeInbox(st), st.focusedSessionId)
-          if (next) focusSession(next)
+          const next = nextWaitingSession(computeInbox(st), currentWaitingId(st))
+          if (next) st.openWaiting(next)
         },
       },
     ]

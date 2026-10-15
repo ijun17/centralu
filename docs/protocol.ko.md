@@ -91,6 +91,7 @@ type NormalizedEvent =
   | { type: 'agent_versions';   status: AgentVersions }         // #297: { installed: {tool: version|null}, autoApply (기본값 true), checkedAt }
   | { type: 'fs_changed';       projectId, dirs: string[] }     // #34
   | { type: 'themes_changed' }                                // #312: <data>/themes의 파일이 바뀌었다 — themes.list를 다시 읽는다
+  | { type: 'orchestrator_proposals_changed' }                // #703: MCP 서버나 스킬 제안이 저장됐거나 승인·거절됐다 — agents.mcpProposals와 agents.skillProposals를 다시 읽는다
   | { type: 'machine_status';   machine: MachineInfo }          // #82: 링크된 기기의 링크 상태가 바뀌었다. 기록 전체 (§6)
   | { type: 'machine_resync';   machineId }                     // #82: 그 기기의 세션과 프로젝트를 다시 읽고, 죽은 것을 깨운다 (§6)
   | { type: 'error';            sessionId?, error: ProtocolError }
@@ -340,7 +341,7 @@ type ProtocolError = {
   않고 깨우지도 않는다. 그 기기로 가는 호출은 바로 실패한다(§5).
 - **이벤트.** 링크된 기기의 세션 이벤트는 허브 자신의 `seq`로, id에 기기를 붙여 UI에 닿는다. 원격
   호스트 자신에 관한 것(`update_status`, `themes_changed`, `app_state_changed`, `agent_versions`,
-  `external_app_questions_changed`, 세션 없는 `error`)은 버린다. 터미널 프레임은 기기가 붙은 터미널
+  `external_app_questions_changed`, `orchestrator_proposals_changed`, 세션 없는 `error`)은 버린다. 터미널 프레임은 기기가 붙은 터미널
   id로 온다. `machine_status`는 링크 상태가 바뀔 때마다 그 `MachineInfo` 전체를 싣는다.
   `machine_resync`는 UI가 한 기기에 대해 쥔 것을 다시 읽으라는 뜻이다. 그 링크가 (다시) 이어질
   때마다, 그리고 기기를 지울 때 온다. UI는 `sessions.list`와 `projects.list`를 다시 읽고 그 기기의

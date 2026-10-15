@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionState } from '@cc/protocol'
-import { buildInbox, countWaiting, nextWaitingSession, type InboxCandidate } from './inbox.js'
+import { buildInbox, countWaiting, isProposalId, nextWaitingSession, pendingProposals, proposalCandidates, type InboxCandidate } from './inbox.js'
 
 const NOW = 1_000_000
 
@@ -142,5 +142,28 @@ describe('stopped turns in the inbox (#698)', () => {
     const all = [s('quit', 'idle', { waitingSince: null, interruption: quit }), s('net', 'error', { interruption: { reason: 'network', at: NOW } }), interrupted]
     expect(countWaiting(all)).toEqual({ approval: 0, error: 3, input: 0 })
     expect(buildInbox([interrupted], NOW)[0]).toMatchObject({ urgency: 1 })
+  })
+})
+
+/** A pending orchestrator proposal waits on the person like an approval (#703) */
+describe('pending proposals', () => {
+  const proposals = proposalCandidates(pendingProposals({ mcpProposals: [{ name: 'playwright' }], skillProposals: [{ name: 'weekly' }] }))
+
+  it('are listed as approvals, after the approvals that have a start time, and counted with them', () => {
+    const inbox = buildInbox([...proposals, s('a', 'waiting_approval'), s('b', 'error')], NOW)
+    expect(inbox.map((i) => i.id)).toEqual(['a', 'proposal:mcp:playwright', 'proposal:skill:weekly', 'b'])
+    expect(countWaiting([...proposals, s('a', 'waiting_approval')])).toEqual({ approval: 3, error: 0, input: 0 })
+  })
+
+  it('carry what they are, and an id no session has', () => {
+    expect(proposals.map((p) => p.proposal)).toEqual([{ kind: 'skill', name: 'weekly' }, { kind: 'mcp', name: 'playwright' }])
+    expect(proposals.every((p) => isProposalId(p.id))).toBe(true)
+    expect(isProposalId('abc')).toBe(false)
+  })
+
+  it('"next waiting" walks through them and on', () => {
+    const inbox = buildInbox([...proposals, s('a', 'waiting_approval')], NOW)
+    expect(nextWaitingSession(inbox, 'a')).toBe('proposal:mcp:playwright')
+    expect(nextWaitingSession(inbox, 'proposal:skill:weekly')).toBe('a')
   })
 })

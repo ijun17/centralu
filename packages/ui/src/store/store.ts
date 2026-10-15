@@ -34,6 +34,9 @@ import {
   nextStateFor,
   badgeCount,
   countWaiting,
+  isProposalId,
+  pendingProposals,
+  proposalCandidates,
   notificationFor,
   suggestMatcher,
   DEFAULT_NOTIFY_POLICY,
@@ -1068,6 +1071,11 @@ export type AppState = {
    * callers that pass it.
    */
   focusSession(id: string | null, opts?: { preferGrid?: boolean; reveal?: boolean; targetSeq?: number }): void
+  /**
+   * Goes to one thing that waits on the person (#703): a session, or a pending orchestrator proposal (an id from
+   * `isProposalId`), whose card stands on the orchestrator's screen. The waiting list and "next waiting" use it.
+   */
+  openWaiting(id: string, opts?: { preferGrid?: boolean }): void
   /** Opens a search result at its stored conversation row. */
   openSearchHit(sessionId: string, seq: number): void
   /** The search result the conversation is currently holding in sight, by session. */
@@ -2591,6 +2599,17 @@ function sameGit(a: ProjectInfo['git'], b: ProjectInfo['git']): boolean {
 }
 
 /**
+ * Tells the system the number of things that need an answer (the dock badge): approvals and errors among the sessions,
+ * and the orchestrator's pending proposals (#703), which wait like an approval. Called whenever either changes.
+ */
+function syncBadge(get: () => AppState): void {
+  const st = get()
+  if (!st.platform) return
+  const waiting = [...Object.values(st.sessions), ...proposalCandidates(pendingProposals(st))]
+  void st.platform.system.setBadge(badgeCount(countWaiting(waiting)))
+}
+
+/**
  * Replays events held while waiting for registration, in order, **only for sessions now
  * registered**.
  *
@@ -3357,6 +3376,13 @@ export const useStore = create<AppState>((set, get) => ({
       return
     }
 
+    // The host saved a change to a proposal list (#703): both lists are read after the write, whichever tool made it
+    if (e.type === 'orchestrator_proposals_changed') {
+      void get().refreshMcpProposals()
+      void get().refreshSkillProposals()
+      return
+    }
+
     const sessionId = e.sessionId
     if (!sessionId) return
     // A recovery reading the session list keeps what this event says over an older row (`mergeListedSince`)
@@ -3665,13 +3691,10 @@ export const useStore = create<AppState>((set, get) => ({
     const appended = appendChat(had ?? [], e)
     const chat = had === undefined && appended.length === 0 ? undefined : appended
     /*
-     * An MCP server suggestion (`propose_mcp_server`) — the list is re-read because the host holds the truth.
-     * `centralu_run` (#512) is a command whose name the event could not carry (a Codex call from inside its
-     * `exec` has no arguments on it), and it may be either proposal, so it re-reads both.
+     * The MCP-server and skill proposal lists are not re-read here (#703). A `tool_call` arrives when the call starts,
+     * before the host has run it and saved the proposal, so a read on it came back with the old list and the card never
+     * showed. The host broadcasts `orchestrator_proposals_changed` after it writes a list; that is the signal above.
      */
-    if (e.type === 'tool_call' && /(propose_mcp_server|centralu_run)$/.test(e.summary.tool)) void get().refreshMcpProposals()
-    // A skill suggestion (#71) — the same rule
-    if (e.type === 'tool_call' && /(propose_skill|centralu_run)$/.test(e.summary.tool)) void get().refreshSkillProposals()
     /*
      * A worktree suggestion (#69) — the same principle (pointing), carrying one extra value: the
      * branch name. The adapter carries it in the title (there is no other channel). If the title is
@@ -3797,7 +3820,7 @@ export const useStore = create<AppState>((set, get) => ({
           at: Date.now(),
         })
       }
-      void platform.system.setBadge(badgeCount(countWaiting(after)))
+      syncBadge(get)
     }
   },
 
@@ -3836,6 +3859,12 @@ export const useStore = create<AppState>((set, get) => ({
       if (s.searchTargets[sessionId]?.at !== at) return {}
       return { searchTargets: omitKey(s.searchTargets, sessionId) }
     })
+  },
+
+  openWaiting(id, opts) {
+    // A proposal's card only stands on the orchestrator's own screen, so `preferGrid` does not apply to it
+    if (isProposalId(id)) void get().openOrchestrator()
+    else get().focusSession(id, opts)
   },
 
   focusSession(id, opts) {
@@ -5579,6 +5608,7 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const r = await platform.agents.mcpProposals()
       set({ mcpProposals: r.proposals })
+      syncBadge(get)
     } catch {
       /* The app is fine even if the suggestion list fails to load — the next event calls it again */
     }
@@ -5606,6 +5636,7 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const r = await platform.agents.skillProposals()
       set({ skillProposals: r.proposals })
+      syncBadge(get)
     } catch {
       /* The app is fine even if this fails to load — the next event calls it again */
     }
