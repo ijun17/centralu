@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocket } from 'ws'
 import { request, type IncomingHttpHeaders } from 'node:http'
+import { connect as tcpConnect, type Socket } from 'node:net'
 import { ATTACHMENT_MAX_BASE64, PROTOCOL_VERSION, parseServerFrame, type NormalizedEvent } from '@cc/protocol'
 import { HostServer, parseAllowedOrigins, versionMismatchMessage, type HostServerOptions, type RpcHandler } from './server.js'
 import { deriveHttpSecret, sameSecret, secretError, type HttpRoute } from './http.js'
@@ -39,6 +40,40 @@ function connect(port: number, origin?: string) {
       }
     },
   }
+}
+
+/**
+ * A client below the WebSocket library: a TCP socket that does the upgrade by hand and then does only
+ * what the test writes. The library's own client answers a close frame and stops sending, which is
+ * exactly what a peer that is trying to hold a slot does not do.
+ */
+async function rawUpgrade(port: number): Promise<{ sock: Socket; closed: Promise<void>; received: () => Buffer }> {
+  const sock = tcpConnect(port, '127.0.0.1')
+  let got = Buffer.alloc(0)
+  sock.on('data', (d) => (got = Buffer.concat([got, d])))
+  sock.on('error', () => {})
+  const closed = new Promise<void>((r) => sock.once('close', () => r()))
+  await new Promise<void>((r) => sock.once('connect', () => r()))
+  sock.write(
+    `GET / HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+      `Sec-WebSocket-Key: ${Buffer.from('0123456789abcdef').toString('base64')}\r\nSec-WebSocket-Version: 13\r\n\r\n`,
+  )
+  for (let i = 0; i < 500 && !got.toString('latin1').includes('\r\n\r\n'); i++) await new Promise((r) => setTimeout(r, 10))
+  expect(got.toString('latin1')).toContain('101')
+  return { sock, closed, received: () => got }
+}
+
+/** The status the server answers an upgrade with, whichever it is */
+function upgradeStatus(port: number): Promise<number> {
+  return new Promise((resolve) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+    ws.on('unexpected-response', (_req, res) => resolve(res.statusCode ?? 0))
+    ws.on('open', () => {
+      ws.close()
+      resolve(101)
+    })
+    ws.on('error', () => {})
+  })
 }
 
 const ev = (text: string): NormalizedEvent => ({ type: 'message_delta', sessionId: 's1', role: 'assistant', text })
@@ -371,14 +406,38 @@ describe('handshake', () => {
     }
   })
 
-  it('closes a socket that sends a big frame before hello, without reading it', async () => {
+  it('closes a socket whose hello frame is over the size allowed before hello', async () => {
     const { port } = await start()
     const c = connect(port)
     await c.open()
-    // A correct hello, only padded: what makes it refused is its size alone
-    c.ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION, pad: 'x'.repeat(128 * 1024) }))
+    // A correct hello, only padded: what makes it refused is its size alone. Over 64 KiB, under what the byte count allows
+    c.ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION, pad: 'x'.repeat(65 * 1024) }))
     expect(await c.closed()).toBe(4001)
     expect(c.frames).toEqual([])
+  })
+
+  it('cuts a socket that is still sending a big frame before hello, long before the frame ends', async () => {
+    const { port } = await start()
+    const { sock, closed } = await rawUpgrade(port)
+    const total = 30 * 1024 * 1024
+    // A masked text frame that announces 30 MiB, then the 30 MiB
+    const header = Buffer.alloc(14)
+    header[0] = 0x81
+    header[1] = 0xff
+    header.writeBigUInt64BE(BigInt(total), 2)
+    let gone = false
+    void closed.then(() => (gone = true))
+    sock.write(header)
+    const chunk = Buffer.alloc(64 * 1024, 0x61)
+    let sent = 0
+    while (!gone && sent < total) {
+      const room = sock.write(chunk)
+      sent += chunk.length
+      if (!room) await Promise.race([new Promise((r) => sock.once('drain', r)), closed])
+    }
+    await closed
+    // Loopback buffers hold some of it on the way, so the bound is loose: far under the frame
+    expect(sent).toBeLessThan(total / 4)
   })
 
   it('still answers a malformed frame with an error once the socket is in', async () => {
@@ -418,6 +477,28 @@ describe('handshake', () => {
     for (const c of waiting) c.ws.close()
   })
 
+  it('gives a waiting slot back when its socket is gone, and not when the handshake deadline only starts closing it', async () => {
+    const { port } = await start(undefined, { maxPendingHandshakes: 1, handshakeTimeoutMs: 100, closeGraceMs: 1500 })
+    const { sock, closed, received } = await rawUpgrade(port)
+    // The deadline passes: the close frame (opcode 0x8) goes out, and this peer does not answer it
+    for (let i = 0; i < 500 && !received().includes(Buffer.from([0x88])); i++) await new Promise((r) => setTimeout(r, 10))
+    expect(received().includes(Buffer.from([0x88]))).toBe(true)
+    // It is still connected and could still stream, so its slot is taken
+    expect(sock.destroyed).toBe(false)
+    expect(await upgradeStatus(port)).toBe(503)
+    // After the grace the peer is cut, and only then is the slot free again
+    await closed
+    expect(await upgradeStatus(port)).toBe(101)
+  })
+
+  it('cuts a refused socket that does not answer the close frame, so it cannot keep sending', async () => {
+    const { port } = await start(undefined, { closeGraceMs: 100 })
+    const { sock, closed } = await rawUpgrade(port)
+    // Not a hello: masked text frame "{}" with an all-zero mask
+    sock.write(Buffer.from([0x81, 0x82, 0, 0, 0, 0, 0x7b, 0x7d]))
+    await closed
+  })
+
   it('closes with 1009 a frame over the size limit, also after hello', async () => {
     const { port } = await start(undefined, { maxFrameBytes: 4096 })
     const c = connect(port)
@@ -428,10 +509,10 @@ describe('handshake', () => {
     expect(await c.closed()).toBe(1009)
   })
 
-  it('still takes the largest attachment call after hello', async () => {
+  it('still takes the largest attachment call after hello, and a file bigger than that', async () => {
     const seen: number[] = []
     const { port } = await start(async (method, params) => {
-      if (method === 'attachments.save') seen.push((params as { dataBase64: string }).dataBase64.length)
+      seen.push((params as { dataBase64: string }).dataBase64.length)
       return { ok: true }
     })
     const c = connect(port)
@@ -445,11 +526,16 @@ describe('handshake', () => {
       // Names as long as a path allows: the frame is the base64 string plus what is around it
       params: { sessionId: 's'.repeat(200), name: 'n'.repeat(4096), mime: 'image/png', dataBase64: 'A'.repeat(ATTACHMENT_MAX_BASE64) },
     })
-    await c.wait(() => c.frames.length > 1, 15_000)
+    await c.wait(() => c.frames.length > 1, 20_000)
     expect(c.frames[1]).toMatchObject({ kind: 'res', id: '1', ok: true })
-    expect(seen).toEqual([ATTACHMENT_MAX_BASE64])
+    // A dropped file of about 40 MB has always gone through as one call with no cap of its own: still does
+    const dropped = 'A'.repeat(Math.ceil((40 * 1024 * 1024) / 3) * 4)
+    c.send({ kind: 'rpc', id: '2', method: 'fs.importFile', params: { projectId: 'p', toDir: '', name: 'big.bin', dataBase64: dropped } })
+    await c.wait(() => c.frames.length > 2, 20_000)
+    expect(c.frames[2]).toMatchObject({ kind: 'res', id: '2', ok: true })
+    expect(seen).toEqual([ATTACHMENT_MAX_BASE64, dropped.length])
     c.ws.close()
-  })
+  }, 30_000)
 })
 
 describe('RPC round trip', () => {

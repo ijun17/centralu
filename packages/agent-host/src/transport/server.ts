@@ -1,7 +1,6 @@
 import { WebSocketServer, type RawData, type WebSocket } from 'ws'
-import { createServer, type Server } from 'node:http'
+import { createServer, type IncomingMessage, type Server } from 'node:http'
 import {
-  ATTACHMENT_MAX_BASE64,
   PROTOCOL_VERSION,
   ProtocolErrorCode,
   type HostBuild,
@@ -83,7 +82,7 @@ export type HostServerOptions = {
    * connections that never speak cannot hold a slot each for the whole handshake deadline.
    */
   maxPendingHandshakes?: number
-  /** The largest frame a socket may send, as bytes of payload. Defaults to what the largest attachment call needs */
+  /** The largest frame a socket may send once it has said hello, as bytes of payload. Defaults to `TRANSPORT_LIMITS.maxFrameBytes` */
   maxFrameBytes?: number
   /**
    * The undrained backlog a peer may leave on one socket before it is cut (#82). See
@@ -126,17 +125,25 @@ export const TRANSPORT_LIMITS = {
   handshakeTimeoutMs: 10_000,
   maxPendingHandshakes: 16,
   /**
-   * The largest legitimate frame is an `attachments.save` call: a base64 string of up to
-   * `ATTACHMENT_MAX_BASE64` characters plus a few fields around it. A megabyte of room covers those
-   * (a long file name or path included) and nothing else in the protocol comes near it.
+   * The largest frame a socket may send after hello: the library's own default (100 MiB), set here so it
+   * is a decision and not an accident. A call carries a file as one base64 string (an attachment, a
+   * dropped file), and a file bigger than the usual cap has always worked, so this stays as it was.
+   * Before hello a socket gets much less (`maxHelloFrameBytes`).
    */
-  maxFrameBytes: ATTACHMENT_MAX_BASE64 + 1024 * 1024,
-  /** A hello is a token and two numbers; a socket that has not sent one sends nothing bigger than this */
+  maxFrameBytes: 100 * 1024 * 1024,
+  /**
+   * What a socket may send before it has said hello: a hello is a token and two numbers. Counted as
+   * bytes read from the socket (`onConnection`), so a frame cannot be buffered whole first, and also as
+   * the size of the one frame allowed.
+   */
   maxHelloFrameBytes: 64 * 1024,
   maxBufferedBytes: 64 * 1024 * 1024,
   replayBudgetBytes: 16 * 1024 * 1024,
   closeGraceMs: 250,
 } as const
+
+/** What the pre-hello byte count allows beyond the one frame: its WebSocket header, and the bytes of a close it may answer */
+const PRE_HELLO_SLACK_BYTES = 1024
 
 /** WebSocket close codes this server uses (4001 is the token rule's own) */
 const CLOSE_GOING_AWAY = 1001
@@ -221,10 +228,10 @@ export class HostServer {
     this.http = createServer(createHttpHandler(opts.http))
     this.wss = new WebSocketServer({
       server: this.http,
-      // A frame over this closes the socket with 1009 before it is handed to us (ws default: 100 MiB)
+      // A frame over this closes the socket with 1009 before it is handed to us
       maxPayload: this.limits.maxFrameBytes,
       verifyClient: (info, done) => {
-        // Sockets that have not said hello are limited in number: past that a new upgrade waits for a slot
+        // Sockets that have not said hello are limited in number: past that a new upgrade is refused
         if (this.handshakeTimers.size >= this.limits.maxPendingHandshakes) return done(false, 503, 'too many connections waiting for hello')
         const origin = info.req.headers.origin
         const ok = this.originAllowed(origin)
@@ -256,7 +263,7 @@ export class HostServer {
         done(ok, 403, 'forbidden origin')
       },
     })
-    this.wss.on('connection', (ws) => this.onConnection(ws))
+    this.wss.on('connection', (ws, req) => this.onConnection(ws, req))
     // ws re-emits http server errors on its own instance — if this is not received here, the process dies
     this.wss.on('error', (err) => this.listenError?.(err))
   }
@@ -417,19 +424,39 @@ export class HostServer {
     return true
   }
 
-  private onConnection(ws: WebSocket): void {
+  /**
+   * Closes a socket that is not in: the close frame goes out (the peer sees why), and a peer that does not
+   * answer it is cut after the grace. `ws.close()` alone waits up to 30 s for the answer, with the socket
+   * still open and still read, and the slot it holds would stay taken that long.
+   */
+  private refuse(ws: WebSocket, code: number, reason: string): void {
+    ws.close(code, reason)
+    setTimeout(() => ws.terminate(), this.limits.closeGraceMs).unref()
+  }
+
+  private onConnection(ws: WebSocket, req: IncomingMessage): void {
     let authed = false
     /** The session whose bridge credential this socket said hello with; null for the front door's token */
     let bridgeOf: string | null = null
     const client = ++this.lastClient
-    // A socket that never says hello is closed, not kept forever (#82)
+    // A socket that never says hello is closed, not kept forever (#82). Its slot is given back when it is gone ('close' below), not before
     this.handshakeTimers.set(
       ws,
       setTimeout(() => {
-        this.handshakeTimers.delete(ws)
-        if (!authed) ws.close(CLOSE_AUTH, 'auth timeout')
+        if (!authed) this.refuse(ws, CLOSE_AUTH, 'auth timeout')
       }, this.limits.handshakeTimeoutMs),
     )
+    /*
+     * Until hello, what the socket sends is counted as it is read, and a socket past the bound is cut.
+     * The message handler below only sees a frame once all of it has arrived, which is too late for a
+     * peer that announces a frame of tens of megabytes and keeps sending it.
+     */
+    let preHelloBytes = 0
+    const countPreHello = (chunk: Buffer) => {
+      preHelloBytes += chunk.length
+      if (preHelloBytes > TRANSPORT_LIMITS.maxHelloFrameBytes + PRE_HELLO_SLACK_BYTES) req.socket.destroy()
+    }
+    req.socket.on('data', countPreHello)
 
     ws.on('message', async (raw) => {
       /*
@@ -438,17 +465,17 @@ export class HostServer {
        * does not keep a slot while it tries other things. The size is checked before JSON.parse, which
        * would otherwise build the whole value first.
        */
-      if (!authed && rawBytes(raw) > TRANSPORT_LIMITS.maxHelloFrameBytes) return ws.close(CLOSE_AUTH, 'not a hello')
+      if (!authed && rawBytes(raw) > TRANSPORT_LIMITS.maxHelloFrameBytes) return this.refuse(ws, CLOSE_AUTH, 'not a hello')
       let parsedJson: unknown
       try {
         parsedJson = JSON.parse(String(raw))
       } catch {
-        if (!authed) return ws.close(CLOSE_AUTH, 'not a hello')
+        if (!authed) return this.refuse(ws, CLOSE_AUTH, 'not a hello')
         return this.sendError(ws, null, { code: 'internal', message: 'Malformed JSON', retryable: false })
       }
       const frame = parseClientFrame(parsedJson)
       if (!frame.success) {
-        if (!authed) return ws.close(CLOSE_AUTH, 'not a hello')
+        if (!authed) return this.refuse(ws, CLOSE_AUTH, 'not a hello')
         return this.sendError(ws, null, { code: 'internal', message: 'Unknown frame', retryable: false })
       }
 
@@ -463,7 +490,7 @@ export class HostServer {
           // A Codex bridge holds a credential for its own session's calls only (bridge-token.ts)
           bridgeOf = bridgeSessionOf(this.opts.token, frame.data.token)
           if (bridgeOf === null) {
-            ws.close(CLOSE_AUTH, 'bad token')
+            this.refuse(ws, CLOSE_AUTH, 'bad token')
             return
           }
         }
@@ -478,10 +505,11 @@ export class HostServer {
              */
             data: { protocolVersion: PROTOCOL_VERSION, ...(this.opts.build?.version ? { version: this.opts.build.version } : {}) },
           })
-          ws.close(4002, 'version mismatch')
+          this.refuse(ws, 4002, 'version mismatch')
           return
         }
         authed = true
+        req.socket.off('data', countPreHello)
         clearTimeout(this.handshakeTimers.get(ws))
         this.handshakeTimers.delete(ws)
         /*
@@ -499,7 +527,7 @@ export class HostServer {
       }
 
       if (!authed) {
-        ws.close(CLOSE_AUTH, 'not authed')
+        this.refuse(ws, CLOSE_AUTH, 'not authed')
         return
       }
 
