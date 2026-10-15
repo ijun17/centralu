@@ -1889,7 +1889,7 @@ serveStdio(() => {
         body: z.string().optional().describe('The squash commit body; default a summary of the PR description'),
         wait: z.boolean().optional().describe('Wait for pending checks instead of answering "pending" at once; default false'),
         waitMinutes: z.number().positive().max(60).optional().describe('With wait: how many minutes to wait at most; default 40'),
-        deleteBranch: z.boolean().optional().describe('Delete the head branch on GitHub after the merge (never a fork\'s); default false'),
+        deleteBranch: z.boolean().optional().describe('Delete the head branch on GitHub after the merge (never a fork\'s, never a local branch: a Centralu worktree may hold it); default false'),
         detail: detailInput.describe('"full" lists passed and non-required checks too'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },

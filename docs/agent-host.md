@@ -472,9 +472,13 @@ unowned session, a session in another project, and self-deletion are refused.
 
 **Deleting a worktree child** (#608, decision owner 2026-10-13). In every preset the parent decides whether
 to remove its child: neither uncommitted files nor an unproven merge refuses deletion. A working child must
-finish or be stopped first. A missing worktree folder is refused with its path and a request to restore it;
-the live/stored session retains worktree metadata (only the trash list hides missing folders), so it never
-becomes a same-folder deletion. Cleanup refuses a child still waking/restarting, blocks sends/resumes, and requires
+finish or be stopped first. A worktree folder that is already gone (#715) holds no work to lose, so deletion
+goes ahead without a snapshot: the session goes to the trash, `git worktree prune` drops git's stale entry, and
+the branch is kept when it has commits the trunk lacks (or when that cannot be told) and removed when it has
+none. The answer carries a `note` saying so in one line. A merge run as `gh pr merge --delete-branch` beside a
+worktree removes that folder this way (gh deletes the local branch, so it removes the worktree that holds it),
+which is why the project board's `merge_when_green` deletes the branch on GitHub only. The session never
+becomes a same-folder deletion: it keeps its worktree metadata. Cleanup refuses a child still waking/restarting, blocks sends/resumes, and requires
 successful disposal of the idle CLI before snapshotting. It is also refused while any other session has its
 folder inside the worktree (#647), asleep or not: a helper the child started without a worktree of its own
 works there, and after a host swap no session has a process, so a message would wake it right in the folder.

@@ -234,8 +234,8 @@ export type ChildRunResult =
        * queued until memory recovers (#686)
        */
       | { state: 'pending'; lowMemory?: { available: string; floor: string; maxWaitMinutes: number } }
-      | { state: 'deleted'; branch?: undefined; setAside?: undefined; warning?: undefined }
-      | { state: 'deleted'; branch: string; warning?: string; setAside: { changedFiles: number; commits: number } }
+      | { state: 'deleted'; branch?: undefined; setAside?: undefined; warning?: undefined; note?: undefined }
+      | { state: 'deleted'; branch: string; warning?: string; note?: string; setAside: { changedFiles: number; commits: number } }
     ))
   | { ok: false; error: string }
 

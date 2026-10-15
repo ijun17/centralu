@@ -636,6 +636,19 @@ export async function gitWorktreeRemove(repoCwd: string, path: string, force = f
   await git(repoCwd, ['worktree', 'remove', ...(force ? ['--force', ...(withSubmodules ? ['--force'] : [])] : []), path])
 }
 
+/**
+ * How many commits `branch` holds that `trunk` does not (#715): what deleting the branch would lose. null when it
+ * cannot be told (the branch or the trunk is not there), which a caller must read as "keep the branch".
+ */
+export async function gitBranchAhead(repoCwd: string, branch: string, trunk: string): Promise<number | null> {
+  try {
+    const n = Number((await git(repoCwd, ['rev-list', '--count', `${trunk}..refs/heads/${branch}`])).trim())
+    return Number.isFinite(n) ? n : null
+  } catch {
+    return null
+  }
+}
+
 /** Deletes a branch ref after the caller has preserved local work or obtained the person's discard decision. */
 export async function gitBranchDelete(repoCwd: string, branch: string, trust: GitTrust = {}): Promise<void> {
   await git(repoCwd, ['branch', '-D', branch], trust)

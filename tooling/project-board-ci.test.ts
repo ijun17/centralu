@@ -652,6 +652,9 @@ describe.skipIf(process.platform === 'win32')('the project board app: ci_status 
     expect(merges()[0]!.at(-1)).toBe('Short body.')
     expect(r.text.split('\n')[0]).toContain('Deleted branch feat/merge-when-green.')
     expect(ghCalls().filter((a) => a.includes('DELETE'))).toEqual([['api', '-X', 'DELETE', 'repos/ijun17/centralu/git/refs/heads/feat/merge-when-green']])
+    // Remote only (#715): `gh pr merge --delete-branch` also removes the local branch, and the worktree that holds it
+    expect(ghCalls().flat()).not.toContain('--delete-branch')
+    expect(ghCalls().flat()).not.toContain('-d')
 
     await rt!.dispose()
     writeFileSync(logPath, '')

@@ -121,9 +121,11 @@ intermittent failures (#368), and how long a merge may wait.
 - **`merge_when_green`** (`pr`, `body?`, `wait?`, `waitMinutes?`, `deleteBranch?`): refuses unless the
   gh account has maintain or admin permission (checked first), the PR is open and not a draft, the
   checks are green and GitHub can merge it. Squash only, with `--match-head-commit`, never `--auto`
-  and never `--delete-branch` (that flag touches the local checkout; the branch is deleted through
-  the API when asked, never a fork's). Subject `Title (#N)`; body from `body` or the description's
-  Why / What changed / Closes, without `Co-Authored-By:` or "Generated with" lines; no author flag,
+  and never `--delete-branch` (that flag deletes the local branch and, when a Centralu worktree
+  has it checked out, removes that worktree and its session's folder, #715; the branch is deleted
+  through the API when asked, on GitHub only, never a fork's, never a local branch). Session
+  deletion removes a worktree and its branch, not the merge. Subject `Title (#N)`; body from `body`
+  or the description's Why / What changed / Closes, without `Co-Authored-By:` or "Generated with" lines; no author flag,
   so the PR author stays the author. Pending answers at once unless `wait: true`, which polls every
   `pollSeconds` up to `waitMinutes`, sends a progress notification each poll (Centralu ends a call
   after 10 minutes without one), and stops if the PR's head moves. A Codex session gets an early

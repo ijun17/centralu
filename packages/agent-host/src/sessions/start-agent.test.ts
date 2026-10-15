@@ -1100,13 +1100,52 @@ describe('starting another agent in the same project', () => {
       const next = new SessionManager(w.store, w.adapters, () => {})
       try {
         expect(next.listSessions().find((row) => row.id === c.id)?.worktree).toEqual(worktree)
-        expect(await next.agentSession(s, { sessionId: c.id, action: 'delete' })).toMatchObject({ ok: false, error: expect.stringContaining('worktree folder for') })
-        expect(w.store.trashedSession(c.id)).toBeNull()
-        expect(w.store.listSessions().find((row) => row.id === c.id)?.worktree).toEqual(worktree)
-        expect(git(w.caller.path, 'rev-parse', '--verify', 'refs/heads/feat/missing')).not.toBe('')
+        // The folder is gone, so there is nothing to lose: the session goes to the trash (#715)
+        expect(await next.agentSession(s, { sessionId: c.id, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted', note: expect.stringContaining('already gone') })
+        expect(w.store.trashedSession(c.id)).not.toBeNull()
+        expect(next.listSessions().some((row) => row.id === c.id)).toBe(false)
       } finally {
         await next.disposeAll()
       }
+    })
+
+    describe('whose folder is already gone (#715)', () => {
+      const startGone = async (branch: string, commit: boolean) => {
+        repo()
+        allowProject()
+        const s = await session()
+        await w.mgr.startAgent(s, { task: 'worktree task', branch, wait: false })
+        const c = childrenOf(s)[0]!
+        handleOf(c.id)!.answer('done')
+        await w.mgr.agentSession(s, { sessionId: c.id, action: 'wait' })
+        if (commit) {
+          writeFileSync(join(c.worktree!.path, 'work.txt'), 'work')
+          git(c.worktree!.path, 'add', '.')
+          git(c.worktree!.path, 'commit', '-qm', 'work')
+        }
+        rmSync(c.worktree!.path, { recursive: true, force: true })
+        return { s, c }
+      }
+      const branches = () => git(w.caller.path, 'branch', '--format=%(refname:short)').split('\n')
+
+      it('trashes the session, prunes git\'s entry and keeps a branch with commits the trunk lacks', async () => {
+        const { s, c } = await startGone('feat/gone-ahead', true)
+        expect(git(w.caller.path, 'worktree', 'list', '--porcelain')).toContain(c.worktree!.path)
+        const r = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
+        expect(r).toMatchObject({ ok: true, state: 'deleted', branch: 'feat/gone-ahead', note: expect.stringMatching(/already gone.*kept/) })
+        expect(w.store.trashedSession(c.id)).not.toBeNull()
+        expect(git(w.caller.path, 'worktree', 'list', '--porcelain')).not.toContain(c.worktree!.path)
+        expect(branches()).toContain('feat/gone-ahead')
+      })
+
+      it('removes a branch that holds nothing the trunk lacks', async () => {
+        const { s, c } = await startGone('feat/gone-merged', false)
+        const r = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
+        expect(r).toMatchObject({ ok: true, state: 'deleted', note: expect.stringContaining('already gone') })
+        expect(w.store.trashedSession(c.id)).not.toBeNull()
+        expect(git(w.caller.path, 'worktree', 'list', '--porcelain')).not.toContain(c.worktree!.path)
+        expect(branches()).not.toContain('feat/gone-merged')
+      })
     })
 
     it('prepares installed JS dependencies before the child starts, without a configured setup command', async () => {

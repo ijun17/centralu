@@ -684,6 +684,8 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
       return { text: `Stopped ${who}.` }
     case 'deleted':
       if (r.branch === undefined) return { text: `Moved ${who} to the trash. Tell the person in one line.` }
+      // The worktree folder was already gone (#715): nothing was lost, and the answer says what became of the branch
+      if (r.note) return { text: `Moved ${who} to the trash. ${r.note} Tell the person in one line.` }
       return {
         text:
           (r.warning ? `Moved ${who} to the trash. Warning: ${r.warning} ` : `Cleaned up ${who}: its worktree and branch "${r.branch}" were removed and the session went to the trash. `) +
