@@ -89,7 +89,7 @@ centralu/
 │        ├─ main.ts             # CLI entry (--port, --token)
 │        ├─ transport/          # WS server, session handshake
 │        ├─ adapters/           # claude/, codex/ + the common adapter contract
-│        ├─ sessions/           # SessionManager (manager.ts) and the parts moved out of it (#428): child-ownership, delegation-flow, ask-project-flow, external-conversations, session-record, host-cards, orchestrator-seat, restart-policy, worktree-sessions, transcript-view, orchestrator-proposals
+│        ├─ sessions/           # SessionManager (manager.ts) and the parts moved out of it (#428): child-ownership, delegation-flow, ask-project-flow, external-conversations, session-record, tool-queries, host-cards, orchestrator-seat, restart-policy, worktree-sessions, transcript-view, orchestrator-proposals
 │        ├─ dev-services/       # dev-only: git, fs, store (sqlite), watcher
 │        │  └─ store/           # what `Store` (store.ts) is made of; it opens the file, runs migrations and passes each call on
 │        │     ├─ migrations/   # the step list, in files by version range; index.ts holds the rule a new step follows

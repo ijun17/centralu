@@ -80,8 +80,9 @@ let rpc: ReturnType<typeof createRpcHandler>
 
 /** What the manager holds in one of its caches — reached past its interface on purpose: the size is invisible through it */
 const held = (name: 'commandCache' | 'externalIndex') => {
-  // The index lives with the external conversations since #428
-  const owner = name === 'externalIndex' ? (mgr as unknown as { externals: object }).externals : mgr
+  // The index lives with the external conversations since #428, the commands with the tool queries
+  const parts = mgr as unknown as { externals: object; toolQueries: object }
+  const owner = name === 'externalIndex' ? parts.externals : parts.toolQueries
   return (owner as unknown as Record<typeof name, Map<string, unknown>>)[name].size
 }
 

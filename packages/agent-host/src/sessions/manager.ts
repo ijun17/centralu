@@ -19,7 +19,6 @@ import { CacheLedger } from './cache-ledger.js'
 import { askFrame, underGrant } from './ask-project.js'
 import { agentFrame, presetWithin } from './start-agent.js'
 import { builderRole } from './app-builder.js'
-import { remember } from './folder-cache.js'
 import { makeProjectFolder, projectFolderTarget, type ProjectFolderTarget } from '../dev-services/project-folder.js'
 import { cloneInto } from '../dev-services/project-clone.js'
 import { labelOf, orchestratorMemory, previewOf } from './transcript-view.js'
@@ -28,15 +27,12 @@ import { homedir } from 'node:os'
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { existsSync, rmSync, statSync } from 'node:fs'
 import type {
-  CacheStats,
   RebuildCause,
   AppReach,
   BackgroundTask,
   ProjectConsent,
   ProjectConsentKind,
-  ModelOption,
   ApprovalDecision,
-  CommandInfo,
   Attachment,
   ApprovalScope,
   CreateSessionParams,
@@ -53,7 +49,6 @@ import type {
   Interruption,
   StoredMessage,
   TrashedSession,
-  UsageSnapshot,
   ToolName,
   UiPreferences,
   UiPreferencesPatch,
@@ -143,30 +138,9 @@ import { WorktreeSessions, type WorktreeHost, canonicalPath, insideFolder } from
 import { HostCards, type HostAsk, type HostCardsHost } from './host-cards.js'
 import { ExternalConversations, type ExternalConversationsHost, truncate } from './external-conversations.js'
 import { SessionRecord, type SessionRecordHost } from './session-record.js'
+import { ToolQueries, type ToolQueriesHost } from './tool-queries.js'
+import { withTimeout } from './with-timeout.js'
 export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './delegation-flow.js'
-
-/**
- * Do not let a call that never answers hold the screen hostage.
- *
- * The `label` is the diagnosis. An unnamed timeout only ever surfaced as the outer RPC's 30-second
- * "RPC timed out: agents.resumeSession", and that message does not say **where** it stopped — when
- * an actual MGH session died that way, there was no way to find out after the fact. If each stage
- * fails carrying its own name, the next occurrence of the same incident is its own diagnosis.
- */
-function withTimeout<T>(p: Promise<T>, ms: number, label = 'A call'): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  return Promise.race([
-    p,
-    new Promise<T>((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${label} did not finish within ${Math.round(ms / 1000)}s`)), ms)
-    }),
-  ]).finally(() => clearTimeout(timer))
-}
-
-/** How long one read of a tool's model list may run, whoever waits on it (#660) */
-const MODEL_LIST_READ_MS = 60_000
-/** After a failed read, how long a caller that cannot wait goes without a list before one is tried again (#660) */
-const MODEL_LIST_RETRY_MS = 60_000
 
 /**
  * One piece of the original's live work a handoff moved to the session that took over (#693), as the handoff note
@@ -366,13 +340,6 @@ export class SessionManager {
    * sessionId).
    */
   private watchers = new DirWatchers((projectId, dirs) => this.emit({ type: 'fs_changed', projectId, dirs }))
-  /**
-   * Slash-command cache per tool and directory (so a list can be returned even before a session is ready). Written
-   * only through `remember`, like `externalIndex`, so it keeps the most recently used keys (folder-cache.ts)
-   */
-  private commandCache = new Map<string, CommandInfo[]>()
-  /** Usage cache — do not spin up the tool every time the modal opens and closes */
-  private usageCache = new Map<ToolName, { snapshot: UsageSnapshot; at: number }>()
   /** Every model request's cache figures over the last day, per tool (docs/agent-host.md §6.1); read by `usageFor` */
   private readonly cacheLedger = new CacheLedger()
   /**
@@ -390,6 +357,8 @@ export class SessionManager {
   private readonly externals: ExternalConversations
   /** What a session's events leave in the store: streamed messages, rows, images (session-record.ts) */
   private readonly record: SessionRecord
+  /** What the host asks a tool outside a turn: commands, usage, models (tool-queries.ts) */
+  private readonly toolQueries: ToolQueries
   /** When a session's process is replaced, and the background work a restart waits for (restart-policy.ts) */
   private readonly restartPolicy: RestartPolicy
   /** A worktree session's worktree: made for a new session, taken apart on cleanup (worktree-sessions.ts) */
@@ -538,6 +507,7 @@ export class SessionManager {
     this.askProjectFlow = new AskProjectFlow(this.askProjectHost())
     this.externals = new ExternalConversations(this.externalConversationsHost())
     this.record = new SessionRecord(this.sessionRecordHost())
+    this.toolQueries = new ToolQueries(this.toolQueriesHost())
     this.restartPolicy = new RestartPolicy(this.restartHost())
     this.worktrees = new WorktreeSessions(this.worktreeHost())
     this.hostCards = new HostCards(this.hostCardsHost())
@@ -3633,77 +3603,14 @@ export class SessionManager {
     }
   }
 
-  /**
-   * The list of slash commands.
-   *
-   * **Skills are a property of tool + directory, not of a session.** So this is cached by (tool, cwd)
-   * — right after a session is created, the CLI is still coming up and cannot be asked at all (a
-   * dogfooding finding), but if it has ever been fetched once in the same project, a brand-new session
-   * has the list immediately.
-   *
-   * If the tool is not ready yet, this reports ready=false — 'there is none' and 'not yet' are different
-   * things.
-   */
-  async listCommands(sessionId: string): Promise<{ ready: boolean; commands: CommandInfo[] }> {
-    const m = this.meta.get(sessionId)
-    if (!m) return { ready: false, commands: [] }
-    const cwd = this.cwdFor(m)
-    const key = `${m.tool}:${cwd}`
-    // Looked up in memory first, then on disk. The list has to survive the host being turned off and
-    // back on, so slash commands still work for a sleeping session
-    const cached = this.commandCache.get(key) ?? this.store.loadCommands<CommandInfo[]>(m.tool, cwd) ?? undefined
-    if (cached) remember(this.commandCache, key, cached)
-
-    const handle = this.handles.get(sessionId)
-    if (handle?.listCommands) {
-      try {
-        // Before it is ready, a response may never come at all — do not hold the composer hostage
-        const rows = await withTimeout(handle.listCommands(), 4000)
-        const commands = rows
-          .filter((c) => typeof c.name === 'string' && c.name.length > 0)
-          .map((c) => ({ name: c.name, description: c.description ?? '', argumentHint: c.argumentHint ?? '' }))
-        if (commands.length > 0) {
-          remember(this.commandCache, key, commands)
-          this.store.saveCommands(m.tool, cwd, commands)
-        }
-        return { ready: true, commands }
-      } catch {
-        // Falls back to the cache below
-      }
-    }
-    return cached ? { ready: true, commands: cached } : { ready: false, commands: [] }
+  /** `ToolQueries.listCommands` (tool-queries.ts), kept on the manager for its callers */
+  listCommands(...a: Parameters<ToolQueries['listCommands']>): ReturnType<ToolQueries['listCommands']> {
+    return this.toolQueries.listCommands(...a)
   }
 
-  /**
-   * Account usage and limits (FR-9).
-   *
-   * Cached briefly — spinning up a codex app-server every time the modal opens and closes would be
-   * slow. Never throws on failure: failing to see usage is no reason to block the conversation.
-   */
-  async usageFor(
-    tool: ToolName,
-    opts: { limits?: boolean } = {},
-  ): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null; cache: CacheStats }> {
-    /*
-     * The cache figures are summed now, on the question, from what this host counted: a sum over a day's requests at
-     * most, cheap next to the tool call below, and nothing is kept up to date while nobody asks.
-     */
-    const cache = this.cacheLedger.stats(tool, (id) => this.meta.get(id)?.name)
-    const adapter = this.adapters.get(tool)
-    if (!adapter?.listUsage) return { supported: false, reason: `${tool} does not support usage queries`, usage: null, cache }
-    // The hub shows its own limits for this machine (same account, #726): only the figures counted here are wanted
-    if (opts.limits === false) return { supported: true, usage: null, cache }
-
-    const hit = this.usageCache.get(tool)
-    if (hit && Date.now() - hit.at < 60_000) return { supported: true, usage: hit.snapshot, cache }
-
-    try {
-      const snapshot = await withTimeout(adapter.listUsage(), 15_000)
-      this.usageCache.set(tool, { snapshot, at: Date.now() })
-      return { supported: true, usage: snapshot, cache }
-    } catch (err) {
-      return { supported: false, reason: (err as Error).message, usage: hit?.snapshot ?? null, cache }
-    }
+  /** `ToolQueries.usageFor` (tool-queries.ts), kept on the manager for its callers */
+  usageFor(...a: Parameters<ToolQueries['usageFor']>): ReturnType<ToolQueries['usageFor']> {
+    return this.toolQueries.usageFor(...a)
   }
 
   /** Which account `tool` is logged in to here, as the hub compares it with a linked machine's (#726) */
@@ -3713,93 +3620,9 @@ export class SessionManager {
     return adapter.account().catch(() => ({ loggedIn: null, fingerprint: null }))
   }
 
-  /**
-   * The models that can be picked, and each model's reasoning effort levels.
-   *
-   * The only argument is tool because this sits on the same account axis as usage. The list rarely
-   * changes, so it is cached for 5 minutes — spinning up the tool process every time the selector
-   * opens would make that click feel slow.
-   */
-  private modelCache = new Map<ToolName, { models: ModelOption[]; at: number }>()
-  /** One read of a tool's list at a time: a second asker waits on it instead of starting another tool process */
-  private modelFetches = new Map<ToolName, Promise<ModelOption[]>>()
-  /** When a read last failed, so a caller that cannot wait does not start another one at once (#660) */
-  private modelFailures = new Map<ToolName, number>()
-
-  /**
-   * Reads the list once at a time and **keeps the result whenever it arrives**, also after the caller that asked has
-   * stopped waiting: a Codex list that takes 20 seconds is cached for the next call instead of being thrown away at
-   * the caller's bound and read again from scratch (#660). The read has its own ceiling, so it cannot stay pending
-   * and block every later asker.
-   */
-  private fetchModels(tool: ToolName, adapter: AgentAdapter): Promise<ModelOption[]> {
-    const running = this.modelFetches.get(tool)
-    if (running) return running
-    const p = withTimeout(adapter.listModels!(), MODEL_LIST_READ_MS, `${tool}'s model list`).then(
-      (models) => {
-        this.modelCache.set(tool, { models, at: Date.now() })
-        this.modelFailures.delete(tool)
-        return models
-      },
-      (err: unknown) => {
-        this.modelFailures.set(tool, Date.now())
-        throw err
-      },
-    )
-    this.modelFetches.set(tool, p)
-    const clear = () => {
-      if (this.modelFetches.get(tool) === p) this.modelFetches.delete(tool)
-    }
-    p.then(clear, clear)
-    return p
-  }
-
-  async listModels(tool: ToolName): Promise<{ supported: boolean; reason?: string; models: ModelOption[] }> {
-    const adapter = this.adapters.get(tool)
-    if (!adapter?.listModels) {
-      return { supported: false, reason: `${tool} does not support listing models`, models: [] }
-    }
-
-    const hit = this.modelCache.get(tool)
-    if (hit && Date.now() - hit.at < 5 * 60_000) return { supported: true, models: hit.models }
-
-    try {
-      const models = await withTimeout(this.fetchModels(tool, adapter), 15_000)
-      return { supported: true, models }
-    } catch (err) {
-      // Leaving the list empty just because it failed to read would erase even the model already chosen — the
-      // last known list is kept instead
-      return { supported: false, reason: (err as Error).message, models: hit?.models ?? [] }
-    }
-  }
-
-  /**
-   * The list for checking a choice, **never waiting longer than `ms`** (#660). A list we already have, however old,
-   * answers at once (and an old one is refreshed in the background); otherwise one read is started or joined and
-   * waited on for `ms`. Null when there is no list in time: the caller goes on without checking. A read that fails
-   * is not started again for a minute, so a hung Codex does not get a new tool process on every call.
-   *
-   * `fresh` skips the cached list and reads again: the CLI may have been updated since, so a name the cached list
-   * lacks is not refused on its word alone. `cached` says which kind of list came back.
-   */
-  private async modelsWithin(tool: ToolName, ms: number, fresh = false): Promise<{ models: ModelOption[]; cached: boolean } | null> {
-    const adapter = this.adapters.get(tool)
-    if (!adapter?.listModels) return null
-    const hit = this.modelCache.get(tool)
-    const stale = !hit || Date.now() - hit.at >= 5 * 60_000
-    if (hit && !stale && !fresh) return { models: hit.models, cached: true }
-    const failedAt = this.modelFailures.get(tool)
-    const failedRecently = failedAt !== undefined && Date.now() - failedAt < MODEL_LIST_RETRY_MS && !this.modelFetches.has(tool)
-    if (failedRecently) return hit && !fresh ? { models: hit.models, cached: true } : null
-    const read = this.fetchModels(tool, adapter)
-    // Nobody may be left waiting on this when it fails after the bound
-    read.catch(() => {})
-    if (hit && !fresh) return { models: hit.models, cached: true }
-    try {
-      return { models: await withTimeout(read, ms), cached: false }
-    } catch {
-      return null
-    }
+  /** `ToolQueries.listModels` (tool-queries.ts), kept on the manager for its callers */
+  listModels(...a: Parameters<ToolQueries['listModels']>): ReturnType<ToolQueries['listModels']> {
+    return this.toolQueries.listModels(...a)
   }
 
   /** A project's working directory. Used by the terminal to decide its own key (cwd) */
@@ -4597,6 +4420,30 @@ export class SessionManager {
     }
   }
 
+  /** What `ToolQueries` reaches of this manager (#428): its state read when used, its operations called through */
+  private toolQueriesHost(): ToolQueriesHost {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
+    const self = this
+    return {
+      get adapters() {
+        return self.adapters
+      },
+      get cacheLedger() {
+        return self.cacheLedger
+      },
+      cwdFor: (...a) => self.cwdFor(...a),
+      get handles() {
+        return self.handles
+      },
+      get meta() {
+        return self.meta
+      },
+      get store() {
+        return self.store
+      },
+    }
+  }
+
   /** What `SessionRecord` reaches of this manager (#428): its state read when used, its operations called through */
   private sessionRecordHost(): SessionRecordHost {
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
@@ -4738,7 +4585,7 @@ export class SessionManager {
       get meta() {
         return self.meta
       },
-      modelsWithin: (...a) => self.modelsWithin(...a),
+      modelsWithin: (...a) => self.toolQueries.modelsWithin(...a),
       onEvent: (...a) => self.onEvent(...a),
       ownTasksRunning: (...a) => self.ownTasksRunning(...a),
       pauseReport: (...a) => self.pauseReport(...a),
