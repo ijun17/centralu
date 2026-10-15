@@ -1,7 +1,10 @@
+import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { SessionInfo } from '@cc/protocol'
-import type { LinkedSessions } from '../adapters/contract.js'
+import type { AdapterCapabilities, SessionInfo, ToolName } from '@cc/protocol'
+import type { AgentAdapter, CreateSessionOpts, EventSink, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
+import { createRpcHandler } from '../rpc.js'
+import { SessionManager } from './manager.js'
 import { ChildOwnership } from './child-ownership.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
 
@@ -118,5 +121,42 @@ describe('what a send leaves', () => {
     expect(children.linkedReports.get('m1/x')).toEqual({ orchestratorId: 'other', busy: true })
     // A coordinator does not reach the machines: the same id is just not one of its sessions
     expect(await orchestratorToolsFor(host, 'orch', ['a']).sendToSession('m1/x', 'hi')).toEqual({ ok: false, error: 'Not a member of this coordinating session: m1/x' })
+  })
+})
+
+describe('over the real manager', () => {
+  /** The smallest adapter a session can be created with: a process that only records what it is sent */
+  class Adapter implements AgentAdapter {
+    readonly tool: ToolName = 'claude'
+    descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'x', login: 'x' }
+    readonly capabilities: AdapterCapabilities = {
+      approvals: true, contextUsage: 'exact', resume: true, autoTitle: true, attachments: [], verbosities: [], exclusiveWriter: false, backgroundTasks: true, sleep: true,
+    }
+    async detect() {
+      return { tool: this.tool, installed: true, loggedIn: true, detail: 'fake' }
+    }
+    async createSession(opts: CreateSessionOpts, _emit: EventSink): Promise<SessionHandle> {
+      return { sessionId: opts.sessionId, externalId: `ext-${opts.sessionId}`, send() {}, respondApproval: () => true, interrupt() {}, async dispose() {} }
+    }
+  }
+
+  it('reads the sessions as they are now, after the person reorders them (#757 review)', async () => {
+    const real = new Store()
+    const adapters = new Map<ToolName, AgentAdapter>([['claude', new Adapter()]])
+    const mgr = new SessionManager(real, adapters, () => {})
+    const rpc = createRpcHandler(mgr, adapters)
+    try {
+      const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string }
+      const create = async () => ((await rpc('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })) as { id: string }).id
+      const orch = await create()
+      const a = await create()
+      const tools = (mgr as unknown as { orchestratorToolsFor(id: string): OrchestratorTools }).orchestratorToolsFor(orch)
+      mgr.reorderSessions(p.id, [a, orch])
+      const b = await create()
+      expect((await tools.listSessions()).map((s) => s.sessionId).sort()).toEqual([a, b].sort())
+    } finally {
+      await mgr.disposeAll()
+      real.close()
+    }
   })
 })

@@ -5852,13 +5852,26 @@ export class SessionManager {
   }
 
   private seatHost: OrchestratorSeatHost | undefined
-  /** What the orchestrator tools reach of this manager (#428), made once on first use */
+  /**
+   * What the orchestrator tools reach of this manager (#428), made once on first use. Its fields are read when a tool
+   * runs, never kept: `reorderSessions` replaces `meta`, and a kept map would leave the tools on the old one (#757 review).
+   */
   private seat(): OrchestratorSeatHost {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
+    const self = this
     return (this.seatHost ??= {
-      store: this.store,
-      meta: this.meta,
-      children: this.children,
-      proposals: this.proposals,
+      get store() {
+        return self.store
+      },
+      get meta() {
+        return self.meta
+      },
+      get children() {
+        return self.children
+      },
+      get proposals() {
+        return self.proposals
+      },
       linkedReader: () => this.linkedReader,
       emit: (e) => this.emit(e),
       updateCentraluAsked: (sessionId, action, signal) => this.updateCentraluAsked(sessionId, action, signal),
