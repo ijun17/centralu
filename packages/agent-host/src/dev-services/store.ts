@@ -2809,6 +2809,32 @@ export class Store {
   }
 
   /**
+   * The sessions that inherited a handoff from this one (#738), newest first, trashed ones included with their mark:
+   * where a removed session's remaining children go. The same evidence as above, the successor's handoff marker.
+   */
+  handoffHeirs(fromSessionId: string): { sessionId: string; trashed: boolean }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT m.session_id as sessionId, m.payload as payload, s.deleted_at as deletedAt
+           FROM messages m JOIN sessions s ON s.id = m.session_id
+          WHERE m.kind = 'marker' ORDER BY m.ts DESC`,
+      )
+      .all() as { sessionId: string; payload: string; deletedAt: number | null }[]
+    const out: { sessionId: string; trashed: boolean }[] = []
+    for (const r of rows) {
+      try {
+        const p = JSON.parse(r.payload) as { type?: unknown; fromSessionId?: unknown }
+        if (p.type === 'handoff' && p.fromSessionId === fromSessionId && !out.some((o) => o.sessionId === r.sessionId)) {
+          out.push({ sessionId: r.sessionId, trashed: r.deletedAt !== null })
+        }
+      } catch {
+        // A row that cannot be parsed names no heir
+      }
+    }
+    return out
+  }
+
+  /**
    * Whether this session already has a stored notice with this text (#304) — so a notice the tool repeats on every
    * start (`oncePerSession`, Codex's configuration warnings) is kept once. Only marker rows are read, and a session has
    * a handful of those; the text is compared after parsing, as stored.

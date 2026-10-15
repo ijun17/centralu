@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -7,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { handoffNotePath, writeHandoffNote } from '../dev-services/handoff-notes.js'
+import { ASK_WAIT_MS } from './ask-project.js'
 import { Store } from '../dev-services/store.js'
 import { crossWorld } from './cross-project.test-helpers.js'
 import { MemoryGate } from './memory-gate.js'
@@ -15,7 +17,8 @@ import { SessionManager, type AgentProcessHost } from './manager.js'
 /**
  * A handoff moves the original session's live children to the session that took over (#693): their reports, the
  * agent_session handle, their delegated turns, the requests the original queued and its start_agent cards still
- * standing. A settled child stays where its history happened. The move is one store transaction, so a crash leaves
+ * standing. A settled child stays where its history happened while the original stays, and moves too when the
+ * original goes (#738). The move is one store transaction, so a crash leaves
  * every link with one owner, and a host that takes over after a swap reads that owner.
  */
 
@@ -133,16 +136,17 @@ async function startChild(h: ReturnType<typeof host>, parent: string, task: stri
 
 /**
  * The handoff as the window does it (`store.handoff`): the original's note is on disk, the new session is created with
- * the note and the original's id, and then the original is deleted (the default).
+ * the note and the original's id, saying whether the original goes next (#738), and then the original is deleted (the
+ * default). `says`: false is a frame that does not say so (an older window).
  */
-async function handOff(h: ReturnType<typeof host>, project: string, parent: string, deleteOld = true) {
+async function handOff(h: ReturnType<typeof host>, project: string, parent: string, deleteOld = true, says = deleteOld) {
   await writeHandoffNote(project, parent, 'NOTE BODY: where things stand')
   // The new session inherits the original's settings, its permission preset among them
   const preset = h.mgr.listSessions().find((s) => s.id === parent)!.permissionPreset
   const heir = (await h.mgr.createSession({
     projectId: project, cwd: root, tool: 'claude', permissionPreset: preset,
     initialPrompt: 'You are taking over. Read the note.',
-    handoff: { from: 'Planner', note: 'NOTE BODY: where things stand', fromSessionId: parent },
+    handoff: { from: 'Planner', note: 'NOTE BODY: where things stand', fromSessionId: parent, ...(says ? { removesOriginal: true } : {}) },
   })).id
   if (deleteOld) await h.mgr.trashSession(parent)
   return heir
@@ -188,7 +192,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(h.mgr.listSessions().some((s) => s.id === child)).toBe(false)
   })
 
-  it('leaves a settled child with the original and lists only the moved ones in the note', async () => {
+  it('leaves a settled child with an original that stays and lists only the moved ones in the note', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)
     const settled = await startChild(h, parent, 'quick check')
@@ -196,7 +200,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     await until(() => reports(h.claude.handles.get(parent), settled).length === 1)
     const live = await startChild(h, parent, 'long work')
     h.mgr.rename(live, 'Port the parser')
-    const heir = await handOff(h, project, parent)
+    const heir = await handOff(h, project, parent, false)
 
     expect(owner(settled)).toBe(parent)
     expect(owner(live)).toBe(heir)
@@ -207,8 +211,8 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     // The note the person wrote follows, whole; the marker keeps the same text
     expect(note.endsWith('NOTE BODY: where things stand')).toBe(true)
     expect(marker(heir)?.note).toBe(note)
-    // The original was deleted afterwards (the handoff's default): the moved child kept its report
     expect(store.listReportMarks()).toEqual([{ sessionId: live, callerSessionId: heir }])
+    expect(await h.mgr.agentSession(parent, { sessionId: settled, action: 'status' })).toMatchObject({ ok: true, sessionId: settled })
   })
 
   it('moves a child paused on its own background work (#721): the note says so, and the end is reported to the new session', async () => {
@@ -486,5 +490,176 @@ describe("a handoff moves the original's ask_project delegations (#693)", () => 
       vi.useRealTimers()
       await w.dispose()
     }
+  })
+})
+
+/**
+ * A settled child is often still in use: finished, reported, and waiting for its orchestrator's next instruction. Left
+ * with an original that goes, it belonged to nobody (#738), so when the original goes every child moves.
+ */
+describe('a handoff whose original goes takes the settled children too (#738)', () => {
+  /** A child that finished its work and reported it: nothing is owed */
+  async function settledChild(h: ReturnType<typeof host>, parent: string, name = 'Release notes') {
+    const child = await startChild(h, parent, 'write the notes')
+    h.mgr.rename(child, name)
+    h.claude.handles.get(child)!.answer('notes written, PR opened')
+    await until(() => reports(h.claude.handles.get(parent), child).length === 1)
+    return child
+  }
+
+  /**
+   * agent_session send as an orchestrator makes it: the call waits up to its bound and answers "working", and the
+   * child's report comes later, to the session the child now belongs to
+   */
+  async function sendPastBound(h: ReturnType<typeof host>, caller: string, child: string, text: string) {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const sent = h.mgr.agentSession(caller, { sessionId: child, action: 'send', text })
+      for (let i = 0; i < 50 && !h.claude.handles.get(child)!.sent.some((t) => t.includes(text)); i++) await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
+      expect(await sent).toMatchObject({ ok: true, state: 'working', reported: true })
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: caller }])
+  }
+
+  it('gives a settled child to the new session, which can status, send and delete it without auto', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await settledChild(h, parent)
+    const heir = await handOff(h, project, parent)
+
+    expect(h.mgr.listSessions().find((s) => s.id === heir)!.permissionPreset).toBe('normal')
+    expect(owner(child)).toBe(heir)
+    expect(h.mgr.listSessions().find((s) => s.id === child)!.askedBy).toBe(heir)
+    expect(events).toContainEqual(expect.objectContaining({ type: 'session_owner', sessionId: child, askedBy: heir }))
+    expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, sessionId: child })
+
+    // Its next report, after the new session gives it more work, reaches the new session
+    await sendPastBound(h, heir, child, 'now the changelog')
+    h.claude.handles.get(child)!.answer('changelog written')
+    await until(() => reports(h.claude.handles.get(heir), child).length === 1)
+    expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, answer: 'changelog written' })
+
+    expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted' })
+    expect(h.mgr.listSessions().some((s) => s.id === child)).toBe(false)
+  })
+
+  it('lists every moved child in the note, a settled one as waiting for more work', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const settled = await settledChild(h, parent)
+    const live = await startChild(h, parent, 'long work')
+    h.mgr.rename(live, 'Port the parser')
+    const heir = await handOff(h, project, parent)
+
+    const note = readFileSync(handoffNotePath(project, parent), 'utf8')
+    expect(note).toContain(`"Release notes" — finished; waiting for more work — handle: ${settled}. Give it more work with agent_session (send) and its report comes to you. agent_session works on it as on a session you started`)
+    expect(note).toContain(`"Port the parser" — working — handle: ${live}. Its report comes to you.`)
+    expect(note.endsWith('NOTE BODY: where things stand')).toBe(true)
+    expect(marker(heir)?.note).toBe(note)
+    expect(owner(live)).toBe(heir)
+  })
+
+  it('moves the parent link of a worktree child too', async () => {
+    const h = host()
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'ignore' })
+    git('init', '-q', '-b', 'main')
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init')
+    const { project, parent } = await parentOf(h)
+    const started = await h.mgr.startAgent(parent, { task: 'write the notes', worktree: true, wait: false })
+    if (!started.ok) throw new Error(started.error)
+    const child = started.sessionId
+    expect(store.listSessions().find((s) => s.id === child)!.parentSessionId).toBe(parent)
+    h.claude.handles.get(child)!.answer('done')
+    await until(() => reports(h.claude.handles.get(parent), child).length === 1)
+    const heir = await handOff(h, project, parent)
+
+    expect(store.listSessions().find((s) => s.id === child)).toMatchObject({ askedBy: heir, parentSessionId: heir })
+    expect(events).toContainEqual({ type: 'session_owner', sessionId: child, askedBy: heir, parentSessionId: heir })
+  })
+
+  it('survives a host swap: the next host reads the new session as the settled child\'s owner', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await settledChild(h, parent)
+    const heir = await handOff(h, project, parent)
+    await h.mgr.detachAll()
+
+    const next = host()
+    expect(next.mgr.listSessions().find((s) => s.id === child)!.askedBy).toBe(heir)
+    expect(await next.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, sessionId: child })
+  })
+
+  it('leaves a settled child with the original when the store fails mid-move', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await settledChild(h, parent)
+    const db = (store as unknown as { db: { prepare(sql: string): unknown } }).db
+    const prepare = db.prepare.bind(db)
+    vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+      if (sql.includes('UPDATE queued_requests SET caller_session_id')) throw new Error('crash between steps')
+      return prepare(sql)
+    })
+    await handOff(h, project, parent, false, true)
+    vi.restoreAllMocks()
+    expect(owner(child)).toBe(parent)
+    expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toBe('NOTE BODY: where things stand')
+  })
+
+  it('gives what an original that stayed still has to the new session when the original is deleted later', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await settledChild(h, parent)
+    const heir = await handOff(h, project, parent, false)
+    expect(owner(child)).toBe(parent)
+
+    await h.mgr.trashSession(parent)
+    expect(owner(child)).toBe(heir)
+    expect(events).toContainEqual(expect.objectContaining({ type: 'session_owner', sessionId: child, askedBy: heir }))
+    // The new session is told in its conversation; its note was read long ago
+    const notice = store.loadMessages(heir, 20).map((m) => m.payload as { type?: string; text?: string }).find((p) => p.type === 'notice' && p.text?.includes('was deleted'))
+    expect(notice?.text).toContain(`[${parent}]`)
+    expect(notice?.text).toContain('"Release notes" (finished; waiting for more work)')
+
+    await sendPastBound(h, heir, child, 'one more')
+    h.claude.handles.get(child)!.answer('one more done')
+    await until(() => reports(h.claude.handles.get(heir), child).length === 1)
+  })
+
+  it('gives the settled children to the new session when a window that does not say so deletes the original', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await settledChild(h, parent)
+    const heir = await handOff(h, project, parent, true, false)
+    expect(owner(child)).toBe(heir)
+  })
+
+  it("passes a removed original's children on past a successor that is gone too", async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await settledChild(h, parent)
+    const first = await handOff(h, project, parent, false)
+    // The first successor hands over in turn and goes; the original stayed all along
+    await writeHandoffNote(project, first, 'SECOND NOTE')
+    const second = (await h.mgr.createSession({
+      projectId: project, cwd: root, tool: 'claude', permissionPreset: 'normal', initialPrompt: 'Take over.',
+      handoff: { from: 'Planner', note: 'SECOND NOTE', fromSessionId: first, removesOriginal: true },
+    })).id
+    await h.mgr.trashSession(first)
+    expect(owner(child)).toBe(parent)
+
+    await h.mgr.trashSession(parent)
+    expect(owner(child)).toBe(second)
+  })
+
+  it('leaves the children of a removed session that never handed over where they are', async () => {
+    const h = host()
+    const { parent } = await parentOf(h)
+    const child = await settledChild(h, parent)
+    await h.mgr.trashSession(parent)
+    expect(owner(child)).toBe(parent)
+    expect(events.filter((e) => e.type === 'session_owner')).toEqual([])
   })
 })

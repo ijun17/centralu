@@ -3212,7 +3212,8 @@ describe('handing off and starting fresh', () => {
     expect(repoHandoffTraces(mock, old)).toEqual([])
     // The full text goes into the record — the only material that can never be recreated once the predecessor is gone
     // Its id goes along too (#106) — this is how the host's cleanup knows this note still has an owner
-    expect(mock.lastCreateParams?.handoff).toEqual({ from: 'Mea', note: 'To my successor: status summary', fromSessionId: 'ho-s1' })
+    // and that the original goes next (#738), so the host gives the new session every child, settled ones too
+    expect(mock.lastCreateParams?.handoff).toEqual({ from: 'Mea', note: 'To my successor: status summary', fromSessionId: 'ho-s1', removesOriginal: true })
     expect(mock.lastCreateParams?.tool).toBe('codex')
     expect(mock.lastCreateParams?.model).toBe('gpt-5.6')
     const heir = [...mock.sessions.values()].find((r) => r.name === 'Mea')
@@ -3338,6 +3339,8 @@ describe('handing off and starting fresh', () => {
     await done
 
     expect(mock.sessions.has('ho-s6')).toBe(true) // The old session survives
+    // It keeps its settled children: the host is not told the original goes (#738)
+    expect(mock.lastCreateParams?.handoff).not.toHaveProperty('removesOriginal')
     expect(mock.externallyDeleted).not.toContain('ho-s6')
     expect([...mock.sessions.values()].filter((r) => r.name === 'Branch').length).toBe(2)
   })

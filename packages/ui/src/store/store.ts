@@ -5894,8 +5894,9 @@ export const useStore = create<AppState>((set, get) => ({
         initialPrompt: handoffOpening(session.name, note, notePath),
         // The note's full text goes into the record (#102), along with the id (#106) — that id is
         // what tells the host's cleanup this note still has an owner; without it, deleting the
-        // predecessor is the same as deleting the note
-        handoff: { from: session.name, note, fromSessionId: sessionId },
+        // predecessor is the same as deleting the note. Saying the predecessor goes next gives this session all of
+        // its children, settled ones too, and the note lists them (#738)
+        handoff: { from: session.name, note, fromSessionId: sessionId, ...(deleteOld ? { removesOriginal: true } : {}) },
       })
       await get().rename(info.id, session.name)
 

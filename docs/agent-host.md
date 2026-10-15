@@ -808,13 +808,13 @@ memory. It gives up after 30 minutes (`MEMORY_WAIT_MAX_MS`): the caller is told 
 notice. A withdrawn request, a deleted caller, or a host leaving (`disposeAll`, `detachAll` close the gate; the stored
 request goes to the next host) ends the wait without a start. Sessions the person starts are never gated.
 
-### 1.2.5 A handoff takes the live children along (#693)
+### 1.2.5 A handoff takes the children along (#693, #738)
 
 A handoff (`createSession` with `handoff.fromSessionId`, the session handoff of domain-model §1.1) used to leave the
 original's children where they were: their reports woke the original, which the person had stopped working in (and
 usually deleted next), and the new session could not reach them, since `agent_session` works only for the starter. The
 new session now takes over the original's **live** work as it is created, before its first turn reads the note
-(`moveLiveChildren`, owner decision on #693):
+(`moveChildren`, owner decision on #693), and **every** child when the original goes (#738):
 
 - **What is live**: a session working or waiting on the person (approval or question), one holding a request the
   original queued (§1.2.3), one whose report to the original is not delivered yet, an `ask_project` answer the
@@ -828,8 +828,26 @@ new session now takes over the original's **live** work as it is created, before
   original and stands in the new session as a card raised between turns, so the new session's first turn hides it and
   its end raises it again; an approval starts the child for the new session (the waiting setup reads the request's
   caller after the card). A start that already made a moved child hands its handle over too.
-- **What stays**: a settled child (finished and reported or read, nothing pending) stays with the original, so its
-  history stays where it happened, and is deleted with it or left on its own as before.
+- **What stays, and only while the original stays**: a settled child (finished and reported or read, nothing
+  pending) stays with an original the handoff keeps, so its history stays where it happened. A settled child is often
+  still in use, though (finished, reported, waiting for its orchestrator's next instruction), and left with an original
+  that goes it belonged to nobody: `askedBy` named a removed session, the sidebar showed it at the top level, its next
+  report was owed to the removed session, and a successor that is not `auto` could not `agent_session` it (#738). So:
+  - **A handoff that removes the original** (the window's default) says so (`handoff.removesOriginal`, an addition to
+    `createSession`), and every child moves as the session is created, settled ones too, listed in the note as
+    "finished; waiting for more work". It is the same move in the same transaction; only `stateOf` gives a settled
+    child a state instead of passing it over. The window removes the original as a separate, last step (`store.handoff`,
+    "destruction comes last"), so the host is told beforehand rather than finding out: told at creation, the move still
+    happens before the first turn reads the note. If that deletion then fails, both sessions stand and the children
+    are with the session the person works in.
+  - **An original removed later** (a handoff that kept it, then a delete; or a window that did not say it would
+    remove it) gives what it still has to the session that inherited its handoff, in `trashSessionOnce` before the
+    teardown lets go of it (scope `removed`): settled children, and anything it started after the handoff. The heir is
+    the newest live session whose handoff marker names it (`Store.handoffHeirs`, trashed successors pass on to their
+    own successor). Its note was read long ago, so it is told in its conversation (a `notice`); the original, about to
+    go, is told nothing. The move is its own transaction ahead of the trash's: a crash between them leaves the children
+    on the heir and the original standing. A removed session that never handed over leaves its children on their own,
+    as before.
 - **The note**: the note file the opening message points at, and the marker that keeps its original, open with a
   section listing what moved: name, state, handle, and what the new session can actually do with it, which depends on
   what moved (#693 review). A child it now started: `agent_session` works on it, and its report comes when one is owed.
@@ -845,7 +863,7 @@ new session now takes over the original's **live** work as it is created, before
   the answer is read once, by the new session; a wait had taken the child's report mark down, so that report is owed to
   the new session, set in the same transaction (`armReports`). Its later `agent_session` or `ask_project` about one of
   them says where it went (`handedOver`, live only) rather than "not a session this session started".
-- **Who may hand over** is not checked here: `moveLiveChildren` trusts its caller. Today only the person's handoff
+- **Who may hand over** is not checked here: `moveChildren` trusts its caller. Today only the person's handoff
   calls it; an agent-facing handoff (#694's orchestrator tools) must check its authority over the original first.
 - **Atomic**: everything stored moves in one transaction (`Store.moveChildren`); the host's memory follows after the
   commit, with no await in between. A crash before the commit leaves every link on the original, after it every

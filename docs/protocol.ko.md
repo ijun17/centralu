@@ -85,7 +85,7 @@ type NormalizedEvent =
   | { type: 'interruption';     sessionId, interruption: Interruption|null }  // #698: 마지막 턴이 끝까지 가지 못한 이유(network, quit, interrupted, reconnecting). SessionInfo.interruption으로 남는다
   | { type: 'history_synced';   sessionId, added }              // 밖에서 이어간 대화를 따라잡았다
   | { type: 'session_deleted';  sessionId }
-  | { type: 'session_owner';    sessionId, askedBy|null, parentSessionId|null }  // #693: 인계가 이 살아 있는 자식을 넘겨받은 세션으로 옮겼다. 사이드바는 그 아래에 둔다
+  | { type: 'session_owner';    sessionId, askedBy|null, parentSessionId|null }  // #693: 인계가 이 자식을 넘겨받은 세션으로 옮겼다(원래 세션이 없어지면 정리된 자식도, #738). 사이드바는 그 아래에 둔다
   // 앱 스코프 (sessionId optional — 모든 사실이 대화의 소유물은 아니다)
   | { type: 'update_status';    status: UpdateStatus }          // #43; autoApply (#352)는 기본값 false
   | { type: 'agent_versions';   status: AgentVersions }         // #297: { installed: {tool: version|null}, autoApply (기본값 true), checkedAt }
