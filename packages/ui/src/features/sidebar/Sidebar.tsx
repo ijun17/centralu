@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import type { ProjectInfo, SessionState, ToolName } from '@cc/protocol'
+import type { Interruption, ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 import { appSessionsNeedAttention, groupProjectAppSessions, treeRows } from './tree.js'
 import { appGroupKey, childrenGroupKey } from '../../store/foldGroups.js'
@@ -20,7 +20,7 @@ import {
   useToolMeta,
   useTools,
 } from '../../store/selectors.js'
-import { Kbd, Tooltip, stateLabel } from '../../components/primitives.jsx'
+import { Kbd, Tooltip, interruptionLabel, stateLabel } from '../../components/primitives.jsx'
 import { useShortcut } from '../../app/shortcut.js'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
@@ -1001,7 +1001,7 @@ function ProjectBlock({ projectId }: { projectId: string }) {
                         state. A separate dot right next to the mark would read as overlapping the
                         two, and blur both instead.
                       */}
-                      <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} />
+                      <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} />
                       <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
                       {childrenFolded && (
                         <FoldedMark count={children.length} attention={groupAttention(children)} testId={`children-folded-${s.id}`} />
@@ -1284,7 +1284,7 @@ function ProjectAppSessions({ sessions, projectId, folded }: { sessions: Session
                   : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
               }`}
             >
-              <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} />
+              <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} />
               <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
               {childrenFolded && (
                 <FoldedMark count={children.length} attention={groupAttention(children)} testId={`children-folded-${s.id}`} />
@@ -1403,7 +1403,7 @@ function UserAppSessions({ sessions: own }: { sessions: SessionSummary[] }) {
             focused ? 'border-l-ink-muted bg-surface-hover/40 text-ink' : 'border-l-transparent text-ink-muted hover:bg-surface-hover/20 hover:text-ink'
           }`}
         >
-          <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} />
+          <ToolMark tool={s.tool} state={s.state} asleep={!s.live && !s.unreachable} interruption={s.interruption ?? null} />
           <span className={`truncate ${unread && !focused ? 'text-ink' : ''}`}>{s.name}</span>
         </button>
         {approvalLine(s, null, () => focusSession(s.id))}
@@ -2507,9 +2507,9 @@ const RING: Record<SessionState, string> = {
  * sleep is nothing the person has to act on (using the session wakes it) and a fade would be mistaken for a stalled
  * session (#670). So a finished turn still looks finished and idle still looks idle; only limited and error fade.
  */
-function ToolMark({ tool, state, asleep = false }: { tool: ToolName; state: SessionState; asleep?: boolean }) {
+function ToolMark({ tool, state, asleep = false, interruption = null }: { tool: ToolName; state: SessionState; asleep?: boolean; interruption?: Interruption | null }) {
   const meta = useToolMeta(tool)
-  const label = `${meta.label} · ${stateLabel(state)}${asleep ? ' · asleep' : ''}`
+  const label = `${meta.label} · ${stateLabel(state)}${interruption ? ` · ${interruptionLabel(interruption)}` : ''}${asleep ? ' · asleep' : ''}`
   const stalled = state === 'limited' || state === 'error'
   // Spins at **the same angle** as a grid panel's border (components/orbit.ts)
   useOrbitSync(state === 'working')
@@ -2518,10 +2518,16 @@ function ToolMark({ tool, state, asleep = false }: { tool: ToolName; state: Sess
     <Tooltip content={label} testId={`tool-mark-tip-${tool}`} className="shrink-0">
       <span
         className={`shrink-0 rounded-md p-[1.5px] ${state === 'working' ? 'cc-orbit' : ''}`}
-        style={state === 'working' ? undefined : { background: RING[state] }}
+        /*
+         * A stopped turn rests in a state that does not say so (`idle` after a quit, `waiting_input` after an interrupt),
+         * so its ring is the signal ink an error's is (#698): the turn needs the person. Working keeps its orbit; a
+         * tool reconnecting for too long is said in the tooltip and the inbox.
+         */
+        style={state === 'working' ? undefined : { background: interruption ? 'var(--color-ink-signal)' : RING[state] }}
         aria-label={label}
         data-testid={`tool-mark-${tool}`}
         data-state={state}
+        data-interruption={interruption?.reason}
         data-asleep={asleep || undefined} // a hook for tests and the tooltip's wording; it changes no style
       >
         <span

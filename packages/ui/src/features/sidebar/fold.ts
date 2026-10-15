@@ -1,4 +1,4 @@
-import type { SessionState } from '@cc/protocol'
+import type { Interruption, SessionState } from '@cc/protocol'
 import { isListedWaiting, type ReadTracked } from '@cc/core'
 
 /**
@@ -24,13 +24,15 @@ export const FOLD_SUMMARY_STATES = ['waiting_approval', 'error', 'waiting_input'
 export type FoldSummaryState = (typeof FOLD_SUMMARY_STATES)[number]
 
 export function foldSummary(
-  sessions: readonly ({ state: SessionState } & ReadTracked)[],
+  sessions: readonly ({ state: SessionState; interruption?: Interruption | null } & ReadTracked)[],
 ): { state: FoldSummaryState; count: number }[] {
   const counts = new Map<SessionState, number>()
   for (const s of sessions) {
     // Waiting states follow the inbox rule (#669): a read `waiting_input` session is not "waiting on me"
     if (s.state === 'waiting_input' && !isListedWaiting(s)) continue
-    counts.set(s.state, (counts.get(s.state) ?? 0) + 1)
+    // A stopped turn the inbox lists counts with the errors, as the inbox's counters count it (#698)
+    const counted = s.interruption && (s.state === 'idle' || s.state === 'working') && isListedWaiting(s) ? 'error' : s.state
+    counts.set(counted, (counts.get(counted) ?? 0) + 1)
   }
   return FOLD_SUMMARY_STATES.flatMap((state) => {
     const count = counts.get(state) ?? 0
@@ -49,11 +51,13 @@ export function foldSummary(
 export type GroupAttention = 'alert' | 'unread'
 
 export function groupAttention(
-  sessions: readonly { state: SessionState; pendingQuestions: readonly unknown[]; lastSeq: number; lastReadSeq: number }[],
+  sessions: readonly { state: SessionState; pendingQuestions: readonly unknown[]; lastSeq: number; lastReadSeq: number; interruption?: Interruption | null }[],
 ): GroupAttention | null {
   let found: GroupAttention | null = null
   for (const s of sessions) {
     if (s.state === 'waiting_approval' || s.state === 'error' || s.pendingQuestions.length > 0) return 'alert'
+    // A stopped turn still listed in the inbox needs the person as an error does (#698)
+    if (s.interruption && isListedWaiting(s)) return 'alert'
     if (s.lastSeq > s.lastReadSeq) found = 'unread'
   }
   return found

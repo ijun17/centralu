@@ -375,6 +375,9 @@ export class MockPlatform implements Platform {
         if (event.type === 'agent_version') s.agentVersion = event.version
         // The same rule as the real thing (#568): a session put to sleep lists as not live until it is woken
         if (event.type === 'session_live') s.live = event.live
+        // The same rule as the real thing (#698): why the last turn stopped stays on the session until it works again
+        if (event.type === 'interruption') s.interruption = event.interruption
+        if ((event.type === 'state_change' && event.state === 'working') || event.type === 'message_delta' || event.type === 'tool_call') s.interruption = null
         /*
          * A switch the agent tool made (#304, #659) — like the host, recorded on the session so the list a reconnect reads
          * shows it too. (The host applies only what differs from what the process was launched with; the mock has no

@@ -1,6 +1,7 @@
 import { applyBackgroundTasks } from '@cc/protocol'
 import type {
   BackgroundTask,
+  Interruption,
   ToolName,
   ApprovalDetail,
   NormalizedEvent,
@@ -153,6 +154,12 @@ export type SessionSummary = {
    * value, not a fact. Such a session is shown as away and never woken; that machine's `machine_resync` replaces it.
    */
   unreachable?: boolean
+  /**
+   * Why the last turn did not run to its end (#698): the network, a quit, an interrupt nobody here asked for, or a tool
+   * reconnecting for too long. The host decides it (`SessionInfo.interruption`, the `interruption` event); the inbox
+   * and the sidebar show it beside the state, which alone cannot tell a stopped turn from a finished one.
+   */
+  interruption?: Interruption | null
 }
 
 export function initialSession(init: Pick<SessionSummary, 'id' | 'projectId' | 'name' | 'tool'> & Partial<SessionSummary>): SessionSummary {
@@ -239,6 +246,8 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
     : {
         ...s, state, waitingSince, activity, thinkingTokens, plan,
         ...(recovered ? { limit: null, lastError: null } : {}),
+        // A new turn is the end of whatever stopped the last one; the host says so too, a moment later (#698)
+        ...(stateChanged && state === 'working' ? { interruption: null } : {}),
         ...(cardsDead ? { pendingApproval: null, pendingQuestions: [] } : {}),
       }
 
@@ -301,6 +310,8 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
       return { ...next, backgroundTasks: applyBackgroundTasks(s.backgroundTasks, event) }
     case 'agent_version':
       return { ...next, agentVersion: event.version }
+    case 'interruption':
+      return { ...next, interruption: event.interruption }
     // The process went to sleep or came back (#568), whoever caused it
     case 'session_live':
       return { ...next, live: event.live }

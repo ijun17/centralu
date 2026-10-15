@@ -1833,7 +1833,7 @@ function liveFactsOf(
   s: SessionInfo,
 ): Pick<
   SessionSummary,
-  'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context' | 'backgroundTasks' | 'agentVersion' | 'machine' | 'unreachable'
+  'pendingApproval' | 'pendingQuestions' | 'activity' | 'limit' | 'usage' | 'context' | 'backgroundTasks' | 'agentVersion' | 'machine' | 'unreachable' | 'interruption'
 > {
   return {
     pendingApproval: s.pendingApproval,
@@ -1852,6 +1852,8 @@ function liveFactsOf(
      */
     machine: s.machine ?? null,
     unreachable: s.unreachable === true,
+    // Why the last turn did not finish (#698); stored by the host, so it comes back after a restart too
+    interruption: s.interruption ?? null,
   }
 }
 
@@ -2321,7 +2323,7 @@ export function handoffBlockedBy(s: Pick<SessionSummary, 'pendingQuestions' | 'p
 }
 
 /** A message of unknown send status (#173) — bubble render key → what is needed to undo it. Cleared against the store after reconnecting */
-type UnsureSend = { sessionId: string; text: string; attachments?: ChatAttachment[]; prevState?: SessionSummary['state'] }
+type UnsureSend = { sessionId: string; text: string; attachments?: ChatAttachment[]; prevState?: SessionSummary['state']; prevInterruption?: SessionSummary['interruption'] }
 const unsureSends = new Map<number, UnsureSend>()
 
 /**
@@ -2341,7 +2343,7 @@ function unsend(
   set((s) => {
     const sessions =
       s.sessions[u.sessionId] && u.prevState
-        ? { ...s.sessions, [u.sessionId]: { ...s.sessions[u.sessionId]!, state: u.prevState } }
+        ? { ...s.sessions, [u.sessionId]: { ...s.sessions[u.sessionId]!, state: u.prevState, interruption: u.prevInterruption ?? null } }
         : s.sessions
     const drafts = draftsWith(s.drafts, u.sessionId, u.text, u.attachments)
     return {
@@ -5247,9 +5249,11 @@ export const useStore = create<AppState>((set, get) => ({
      * awaited.** A failure is undone below.
      */
     const prevState = get().sessions[sessionId]?.state
+    // A new turn is also the end of whatever stopped the last one (#698), as the reducer's own move to working says
+    const prevInterruption = get().sessions[sessionId]?.interruption ?? null
     set((s) => {
       const sessions = s.sessions[sessionId]
-        ? { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: 'working' as const } }
+        ? { ...s.sessions, [sessionId]: { ...s.sessions[sessionId]!, state: 'working' as const, interruption: null } }
         : s.sessions
       return {
         /*
@@ -5318,14 +5322,14 @@ export const useStore = create<AppState>((set, get) => ({
        * confirmed there, it was sent; if not, it is undone at that point.
        */
       if (e.code === 'connection_lost') {
-        unsureSends.set(seq, { sessionId, text, attachments, prevState })
+        unsureSends.set(seq, { sessionId, text, attachments, prevState, prevInterruption })
         set({ toast: 'Connection lost while sending — checking whether it arrived once reconnected' })
         return
       }
       // Silently swallowing a send failure would leave the person standing there waiting for an
       // answer forever. The bubble that looks sent is removed and what to do is reported.
       // The host revives a sleeping session on its own before sending — reaching this point means reviving itself failed
-      unsend(set, { seq, sessionId, text, attachments, prevState }, e.message)
+      unsend(set, { seq, sessionId, text, attachments, prevState, prevInterruption }, e.message)
     } finally {
       if (waking) set((st) => ({ resuming: omitKey(st.resuming, sessionId) }))
     }

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import type { SessionState } from '@cc/protocol'
+import type { Interruption, SessionState } from '@cc/protocol'
 import { useCapability } from '../app/PlatformProvider.jsx'
 
 /**
@@ -19,6 +19,29 @@ const SIGNAL: Record<SessionState, { glyph: string; tone: string; label: string 
 
 /** The state's spoken name. The same wording must be used wherever a dot is not drawn (e.g. a tool marker) */
 export const stateLabel = (state: SessionState): string => SIGNAL[state].label
+
+/**
+ * Why the last turn did not finish (#698), in the words the inbox, the sidebar's tooltip and the conversation share.
+ * `reconnecting` is the one that has not stopped: the session still works, and the tool is still trying.
+ */
+export function interruptionLabel(i: Interruption): string {
+  switch (i.reason) {
+    case 'network':
+      return 'Stopped: network'
+    case 'quit':
+      return 'Stopped: Centralu quit'
+    case 'interrupted':
+      return 'Stopped: interrupted'
+    case 'reconnecting':
+      return 'Reconnecting for 5+ min'
+  }
+}
+
+/** A stopped turn the person can continue with one message (#698); reconnecting goes on by itself */
+export const canContinue = (i: Interruption | null | undefined): i is Interruption => !!i && i.reason !== 'reconnecting'
+
+/** What Continue sends: short, and the agent still has its whole conversation */
+export const CONTINUE_TEXT = 'Continue where you stopped.'
 
 export function StateDot({ state }: { state: SessionState }) {
   const s = SIGNAL[state]

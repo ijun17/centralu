@@ -1,4 +1,4 @@
-import type { SessionState } from '@cc/protocol'
+import type { Interruption, SessionState } from '@cc/protocol'
 import { URGENCY, isWaiting } from '../session/state-machine.js'
 import { isUnread, type ReadTracked } from '../unread/unread.js'
 
@@ -11,6 +11,11 @@ import { isUnread, type ReadTracked } from '../unread/unread.js'
  * (or marked Done) needs nothing more, so it leaves the list; a new answer (a new `lastSeq`)
  * makes it unread again and it returns. The list, the counters, the sidebar's folded summary and
  * "next waiting" all ask `isListedWaiting`, so they cannot disagree.
+ *
+ * **A stopped turn is listed too** (#698): a session whose last turn the network, a quit or its tool cut short rests in
+ * a state that says nothing of it (`idle` after a quit, `waiting_input` after an interrupt). It is listed like a
+ * finished turn, while unread, with the urgency of an error; the line Centralu writes for a quit makes it unread.
+ * A tool reconnecting for too long is listed while it lasts, though the session is still working.
  */
 
 export type InboxCandidate = {
@@ -23,6 +28,7 @@ export type InboxCandidate = {
   lastSeq: number
   lastReadSeq: number
   preview?: string
+  interruption?: Interruption | null
 }
 
 export type InboxItem = InboxCandidate & {
@@ -32,8 +38,15 @@ export type InboxItem = InboxCandidate & {
 }
 
 /** Does this session belong in the inbox and its counters? */
-export function isListedWaiting(s: { state: SessionState } & ReadTracked): boolean {
+export function isListedWaiting(s: { state: SessionState; interruption?: Interruption | null } & ReadTracked): boolean {
+  if (s.interruption?.reason === 'reconnecting') return true
+  if (s.interruption && s.state === 'idle') return isUnread(s)
   return s.state === 'waiting_input' ? isUnread(s) : isWaiting(s.state)
+}
+
+/** A stopped turn waits on the person as an error does (#698): only an approval blocks the agent more */
+export function urgencyOf(s: { state: SessionState; interruption?: Interruption | null }): number {
+  return s.interruption ? Math.min(URGENCY[s.state], URGENCY.error) : URGENCY[s.state]
 }
 
 export function buildInbox(sessions: readonly InboxCandidate[], now: number): InboxItem[] {
@@ -41,10 +54,12 @@ export function buildInbox(sessions: readonly InboxCandidate[], now: number): In
     .filter(isListedWaiting)
     .map((s) => ({
       ...s,
+      // An idle session stopped by a quit has no wait of its own; it has waited since it stopped
+      waitingSince: s.waitingSince ?? s.interruption?.at ?? null,
       unread: isUnread(s),
-      urgency: URGENCY[s.state],
-      waitingMs: s.waitingSince == null ? 0 : Math.max(0, now - s.waitingSince),
+      urgency: urgencyOf(s),
     }))
+    .map((s) => ({ ...s, waitingMs: s.waitingSince == null ? 0 : Math.max(0, now - s.waitingSince) }))
     .sort(
       (a, b) =>
         a.urgency - b.urgency ||
@@ -62,7 +77,8 @@ export function countWaiting(sessions: readonly InboxCandidate[]): WaitingCounts
   for (const s of sessions) {
     if (!isListedWaiting(s)) continue
     if (s.state === 'waiting_approval') c.approval++
-    else if (s.state === 'error') c.error++
+    // A stopped turn at rest, or a tool reconnecting for too long, counts with the errors (#698), as it is ordered
+    else if (s.state === 'error' || (s.interruption && (s.state === 'idle' || s.state === 'working'))) c.error++
     else if (s.state === 'waiting_input') c.input++
   }
   return c

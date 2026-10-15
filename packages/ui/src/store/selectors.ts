@@ -14,7 +14,7 @@ import type { SessionSummary } from '@cc/core'
 const toCandidate = (x: SessionSummary) => ({
   id: x.id, projectId: x.projectId, name: x.name, state: x.state,
   waitingSince: x.waitingSince, lastSeq: x.lastSeq, lastReadSeq: x.lastReadSeq,
-  preview: x.preview,
+  preview: x.preview, interruption: x.interruption ?? null,
 })
 
 /**

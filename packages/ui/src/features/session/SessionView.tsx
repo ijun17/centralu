@@ -17,7 +17,8 @@ import { ApprovalCard, approvalCardCovered } from '../approval/ApprovalCard.jsx'
 import { QuestionCard } from '../approval/QuestionCard.jsx'
 import { CloseIcon, CrownIcon, PlusIcon, RestartIcon, SendIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
-import { Kbd } from '../../components/primitives.jsx'
+import { CONTINUE_TEXT, Kbd, canContinue, interruptionLabel } from '../../components/primitives.jsx'
+import type { Interruption } from '@cc/protocol'
 import { DragRegion } from '../../components/DragRegion.jsx'
 import { RunMenu } from './RunMenu.jsx'
 import { BackgroundTasksBadge } from './BackgroundTasks.jsx'
@@ -626,6 +627,15 @@ export function SessionPane({
         better than reporting failure after they have already sent something (FR-10).
       */}
       {away ? <AwayNote machine={session.machine ?? null} /> : !session.live && <DormantNote sessionId={session.id} />}
+
+      {/*
+        The last turn stopped before it finished, and nobody here chose that (#698): the network, a quit, or the tool's
+        own interrupt. Said above the composer with the one action that goes on, since the state alone (error, idle,
+        waiting for input) looks the same as a turn that ended.
+      */}
+      {canContinue(session.interruption) && session.state !== 'working' && session.state !== 'waiting_approval' && !away && (
+        <InterruptedNote sessionId={session.id} interruption={session.interruption} />
+      )}
 
       {/*
         Collapsed (requested by a user on 2026-09-10): a rounded card shows only its top edge
@@ -2768,6 +2778,34 @@ function AwayNote({ machine }: { machine: string | null }) {
  * composer taking the keyboard wakes it (and so does a message), so "type to it" is the whole story;
  * while it starts the line says "Waking".
  */
+function InterruptedNote({ sessionId, interruption }: { sessionId: string; interruption: Interruption }) {
+  const send = useStore((s) => s.send)
+  const why =
+    interruption.reason === 'network' ? 'A network error ended the last turn before it finished.'
+    : interruption.reason === 'quit' ? 'Centralu quit while the last turn was running, so it did not finish.'
+    : 'The agent tool interrupted the last turn before it finished.'
+  return (
+    <p
+      className="flex items-center gap-2 border-t border-line px-4 py-1.5 text-xs leading-body text-ink-muted"
+      data-testid="interrupted-note"
+      data-reason={interruption.reason}
+      title={interruption.detail}
+    >
+      <span className="min-w-0 flex-1 break-words">
+        <span className="text-ink">{interruptionLabel(interruption)}</span> — {why}
+      </span>
+      <button
+        className="shrink-0 rounded-md border border-line px-2 py-0.5 text-xs text-ink transition-colors hover:border-line-strong"
+        onClick={() => void send(sessionId, CONTINUE_TEXT)}
+        title={`Sends "${CONTINUE_TEXT}"`}
+        data-testid="interrupted-continue"
+      >
+        Continue
+      </button>
+    </p>
+  )
+}
+
 function DormantNote({ sessionId }: { sessionId: string }) {
   const waking = useStore((s) => !!s.resuming[sessionId])
   const error = useStore((s) => s.wakeError[sessionId])

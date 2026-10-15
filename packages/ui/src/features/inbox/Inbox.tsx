@@ -5,7 +5,7 @@ import { useStore } from '../../store/store.js'
 import { useInbox } from '../../store/selectors.js'
 import { inboxCovered, inboxKeyAction, typingTarget } from './inboxKeys.js'
 import { useFocusReturn } from '../../components/focusReturn.js'
-import { Kbd, StateDot, formatWaiting, waitingTone } from '../../components/primitives.jsx'
+import { CONTINUE_TEXT, Kbd, StateDot, canContinue, formatWaiting, interruptionLabel, waitingTone } from '../../components/primitives.jsx'
 import { SessionMachineTag } from '../machines/MachineTag.jsx'
 import { RowApproval, useRowsSettled } from '../approval/RowApproval.jsx'
 
@@ -27,6 +27,7 @@ export function Inbox() {
   const toggle = useStore((s) => s.toggleInbox)
   const focusSession = useStore((s) => s.focusSession)
   const markRead = useStore((s) => s.markRead)
+  const send = useStore((s) => s.send)
   const projects = useStore((s) => s.projects)
   const items = useInbox(Date.now())
   const [rawCursor, setCursor] = useState(0)
@@ -60,7 +61,7 @@ export function Inbox() {
         }
       } else if (action === 'done') {
         // Done (#669): marks a finished turn read without opening it. Approvals and errors have no Done.
-        if (item?.state === 'waiting_input') void markRead(item.id)
+        if (item && doneable(item)) void markRead(item.id)
       } else if (action === 'allow' || action === 'deny') {
         /*
          * Allow and Deny on the row under the cursor (#543), the approval card's own letters. The key presses the row's
@@ -143,18 +144,36 @@ export function Inbox() {
                     <SessionMachineTag sessionId={it.id} testId={`inbox-machine-${it.id}`} />
                     <span className="ml-auto flex shrink-0 items-center gap-2.5">
                       <span className="text-xs text-ink-faint">
-                        {it.state === 'waiting_approval'
-                          ? 'Needs approval'
-                          : it.state === 'error'
-                            ? 'Error'
-                            : 'Waiting for input'}
+                        {/* Why the turn stopped says more than the state it stopped in (#698) */}
+                        {it.interruption
+                          ? interruptionLabel(it.interruption)
+                          : it.state === 'waiting_approval'
+                            ? 'Needs approval'
+                            : it.state === 'error'
+                              ? 'Error'
+                              : 'Waiting for input'}
                       </span>
                       {/* The longer the wait, the brighter it gets — time pressure is stated without any new shape */}
                       <WaitingTime since={it.waitingSince} />
                     </span>
                   </button>
+                  {/*
+                    Continue (#698): a turn the network, a quit or its tool cut short goes on with one message; the agent
+                    still has its conversation. Never sent by itself: a resent turn can repeat a push or a release.
+                  */}
+                  {canContinue(it.interruption) && it.state !== 'working' && it.state !== 'waiting_approval' && (
+                    <button
+                      className="mr-1.5 shrink-0 rounded border border-line px-2 py-0.5 text-xs text-ink hover:bg-surface-hover"
+                      onClick={() => void send(it.id, CONTINUE_TEXT)}
+                      aria-label={`Continue: ${it.name}`}
+                      title={`Sends "${CONTINUE_TEXT}"`}
+                      data-testid={`inbox-continue-${it.id}`}
+                    >
+                      Continue
+                    </button>
+                  )}
                   {/* Done (#669): the answer was read elsewhere or needs nothing more; marks it read without opening it */}
-                  {it.state === 'waiting_input' && (
+                  {doneable(it) && (
                     <button
                       className="mr-3 shrink-0 rounded border border-line px-2 py-0.5 text-xs text-ink-muted hover:bg-surface-hover hover:text-ink"
                       onClick={() => void markRead(it.id)}
@@ -194,4 +213,9 @@ function WaitingTime({ since }: { since: number | null }) {
   return <span className={`readout w-16 text-right text-xs ${waitingTone(elapsed)}`}>
     {formatWaiting(elapsed)}
   </span>
+}
+
+/** Rows Done applies to (#669): a finished turn, and a turn a quit stopped (#698), both listed only while unread */
+function doneable(it: { state: string; interruption?: { reason: string } | null }): boolean {
+  return it.state === 'waiting_input' || (it.state === 'idle' && !!it.interruption)
 }

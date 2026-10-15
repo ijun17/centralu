@@ -405,3 +405,17 @@ describe('a session going to sleep and waking (#568)', () => {
     expect(applyEvent(asleep, ev({ type: 'session_live', live: true }), NOW).live).toBe(true)
   })
 })
+
+describe('why a turn stopped (#698)', () => {
+  it('takes the host\'s interruption, and a new turn clears it before the host says so', () => {
+    const stopped = replay([ev({ type: 'state_change', state: 'working' }), ev({ type: 'error', error: { code: 'internal', message: 'ECONNREFUSED', retryable: true } }), ev({ type: 'interruption', interruption: { reason: 'network', at: 5 } })])
+    expect(stopped).toMatchObject({ state: 'error', interruption: { reason: 'network', at: 5 } })
+    expect(applyEvent(stopped, ev({ type: 'state_change', state: 'working' }), NOW).interruption).toBeNull()
+    expect(applyEvent(stopped, ev({ type: 'interruption', interruption: null }), NOW).interruption).toBeNull()
+  })
+
+  it('a reconnecting flag stands while the session works', () => {
+    const s = replay([ev({ type: 'state_change', state: 'working' }), ev({ type: 'interruption', interruption: { reason: 'reconnecting', at: 1 } })])
+    expect(applyEvent(s, ev({ type: 'activity', activity: 'retrying' }), NOW).interruption).toMatchObject({ reason: 'reconnecting' })
+  })
+})

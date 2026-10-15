@@ -118,3 +118,28 @@ describe('go to the next waiting item (FR-17)', () => {
     expect(nextWaitingSession([], 'a')).toBeNull()
   })
 })
+
+/** A turn the network, a quit or its tool cut short (#698): listed as an error is, while the person has not read it */
+describe('stopped turns in the inbox (#698)', () => {
+  const quit = { reason: 'quit' as const, at: NOW - 30_000 }
+
+  it('an idle session a quit stopped is listed while its line is unread, as urgent as an error, and waits since it stopped', () => {
+    const inbox = buildInbox([s('done', 'waiting_input'), s('quit', 'idle', { waitingSince: null, interruption: quit })], NOW)
+    expect(inbox.map((i) => i.id)).toEqual(['quit', 'done'])
+    expect(inbox[0]).toMatchObject({ urgency: 1, waitingSince: quit.at, waitingMs: 30_000 })
+    expect(buildInbox([s('quit', 'idle', { waitingSince: null, interruption: quit, lastSeq: 4, lastReadSeq: 4 })], NOW)).toEqual([])
+    // An idle session nothing stopped is not waiting on anyone
+    expect(buildInbox([s('idle', 'idle', { waitingSince: null })], NOW)).toEqual([])
+  })
+
+  it('a tool reconnecting for too long is listed though it works, read or not', () => {
+    const r = { reason: 'reconnecting' as const, at: NOW - 6 * 60_000 }
+    expect(buildInbox([s('r', 'working', { waitingSince: null, interruption: r, lastSeq: 3, lastReadSeq: 3 })], NOW).map((i) => i.id)).toEqual(['r'])
+  })
+
+  it('counts them with the errors, so the counters and the list agree', () => {
+    expect(countWaiting([s('quit', 'idle', { waitingSince: null, interruption: quit }), s('net', 'error', { interruption: { reason: 'network', at: NOW } })])).toEqual({
+      approval: 0, error: 2, input: 0,
+    })
+  })
+})
