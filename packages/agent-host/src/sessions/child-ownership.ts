@@ -27,7 +27,7 @@ export type AgentStartRequest = {
   detail: Extract<ApprovalDetail, { kind: 'agent_start' }>
 }
 
-/** One such request while this host serves it (`SessionManager.agentStarts`) */
+/** One such request while this host serves it (`ChildOwnership.agentStarts`) */
 export type AgentStartRecord = {
   req: AgentStartRequest
   /** The call that raised it has answered "pending" (#673): how it ends is told to the caller as a message */
@@ -47,7 +47,7 @@ export type AgentStartRecord = {
 /** A start queued for memory (#686), as the caller reads it */
 export type LowMemory = { available: string; floor: string; maxWaitMinutes: number }
 
-/** One ask_project call's work in the target project (#371 part B) — see `SessionManager.delegations` */
+/** One ask_project call's work in the target project (#371 part B) — see `ChildOwnership.delegations` */
 export type Delegation = {
   callerId: string
   /** The delegated session, in the target project */

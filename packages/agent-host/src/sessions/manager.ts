@@ -8361,14 +8361,14 @@ export class SessionManager {
       // Settled: nothing is owed. It moves only when the original goes (#738), and is often still in use
       return scope === 'live' ? null : SETTLED_CHILD
     }
-    const children = [...this.meta.values()].filter((s) => s.id !== from && s.id !== to && (s.askedBy === from || s.parentSessionId === from)).map((s) => s.id)
+    const childIds = [...this.meta.values()].filter((s) => s.id !== from && s.id !== to && (s.askedBy === from || s.parentSessionId === from)).map((s) => s.id)
     // A removed original gives only its children; another session's turn it held, or another project's, is let go
-    const linked = removed ? new Set(children) : new Set<string>([
+    const linked = removed ? new Set(childIds) : new Set<string>([
       ...queuedBy,
       ...delegated.map((d) => d.sessionId),
       ...[...this.children.awaitingReport].filter(([, caller]) => caller === from).map(([child]) => child),
       ...[...this.children.turnOwners].filter(([, owner]) => owner.callerId === from).map(([child]) => child),
-      ...children,
+      ...childIds,
     ])
     /*
      * A child the original is waiting on in a call right now: that wait took its report mark down (`awaitAgent`) and is

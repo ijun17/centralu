@@ -38,7 +38,7 @@ export class StepsV48ToV54 extends MigrationRange {
          *   caller_session_id  the session told about it
          *   marked_at          when the report was asked for
          *
-         * The mark used to live in the host's memory alone (`SessionManager.awaitingReport`), so a host swap (#280) lost
+         * The mark used to live in the host's memory alone (`ChildOwnership.awaitingReport`), so a host swap (#280) lost
          * it: the keeper kept the child's process, it finished under the new host, and the parent was never woken. The
          * new host reads the rows at startup and keeps the marks of the sessions the keeper kept; a mark whose session
          * has no process any more is dropped, since the turn it was about died with the old host.
@@ -106,7 +106,7 @@ export class StepsV48ToV54 extends MigrationRange {
          *                      its standing card again to the next host, which then does not tell the caller twice
          *   turn_id            the delegated turn, bound into each card's handle so an answer meets only the card read
          *
-         * Kept beside the host's memory (`SessionManager.turnOwners`) so a host swap (#280) does not cut the link while
+         * Kept beside the host's memory (`ChildOwnership.turnOwners`) so a host swap (#280) does not cut the link while
          * the kept session waits on a question: the new host reads the rows of the sessions the keeper kept and still
          * running, and drops the rest, as it does `report_marks`.
          *
