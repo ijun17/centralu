@@ -1,5 +1,5 @@
 -- Centralu local storage schema v1
--- Read by the host (better-sqlite3). Migrations are handled by the steps in dev-services/store.ts.
+-- Read by the host (better-sqlite3). Migrations are handled by the steps in dev-services/store/migrations/.
 --
 -- **user_version is never set here.** This file runs every time the database is opened (safe,
 -- since every table uses CREATE IF NOT EXISTS), so if `PRAGMA user_version = 1` were here, a

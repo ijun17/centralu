@@ -451,7 +451,7 @@ one session reaching another session's prompt is the privilege path it closed. S
 - **Events leave the host as their card.** `withoutToolRecord` is applied where every event leaves `SessionManager`,
   before the WebSocket broadcast, its reconnect buffer and the in-process app observers.
 - **The search index holds none of it.** Only what the person and the agents said, and the agents' reasoning, are
-  indexed (`INDEXED_KINDS` in `store.ts`) — not tool calls, and not their output — so neither `recall` nor the palette
+  indexed (`INDEXED_KINDS` in `dev-services/store/search-index.ts`) — not tool calls, and not their output — so neither `recall` nor the palette
   can find a session by what a command printed, or by the command.
 
 Tests: `manager.test.ts` ("a tool call is kept whole in the store and leaves it only as its card") puts secrets where

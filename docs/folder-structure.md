@@ -75,6 +75,7 @@ centralu/
 │        ├─ transport/          # WS server, session handshake
 │        ├─ adapters/           # claude/, codex/ + the common adapter contract
 │        ├─ dev-services/       # dev-only: git, fs, store (sqlite), watcher
+│        │  └─ store/           # what `Store` (store.ts) is made of; migrations/ holds the step list in files by version range
 │        ├─ keeper/             # the keeper's child service: agents and ptys spawned there, re-attach (#280)
 │        ├─ usage/              # incremental parser for ~/.claude, ~/.codex logs
 │        └─ mcp/                # MCP server for the orchestrator (M3)

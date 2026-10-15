@@ -1531,7 +1531,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 삭제)과 v32(`projects.default_model` / `default_effort` 삭제)는 직전 빌드를 곧바로 깨뜨렸고, v13(그리드의 옛 이름 테이블
 삭제)은 옛 `schema.sql`이 그 테이블을 빈 채로 다시 만들기 때문에 그리드 배치를 모두 조용히 잃게 했다.
 
-규칙은 `dev-services/store.ts`의 단계 목록(`migrationSteps`) 위에 적혀 있고, 리뷰어는 새 단계를 이 규칙에 비추어 본다:
+규칙은 `dev-services/store/migrations/index.ts`의 단계 목록(`migrationSteps`) 위에 적혀 있고, 리뷰어는 새 단계를 이 규칙에 비추어 본다:
 
 1. **넓히기.** 단계는 테이블, nullable이거나 기본값이 있는 열, 인덱스를 더하거나, 직전 빌드가 여전히 읽을 수 있는
    모양으로 데이터를 고쳐 쓸 수 있다. `breaksOlderReaders: false`를 선언한다.

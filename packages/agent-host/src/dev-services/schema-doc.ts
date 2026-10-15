@@ -238,7 +238,7 @@ export function renderSchemaDoc(schema: Schema = readSchema()): string {
     '',
     'What the tables mean, and which concept each one stores, is in [the domain model](../domain-model.md).',
     'How a migration may change them is in [agent-host.md](../agent-host.md) and above `migrationSteps` in',
-    '`packages/agent-host/src/dev-services/store.ts`.',
+    '`packages/agent-host/src/dev-services/store/migrations/index.ts`.',
     '',
     '"Added in" is the first step that gives a new store the table or column: `schema.sql`, the migration runner',
     '(its own bookkeeping, before any step), or the migration step `v<N>`. A column that a step added to older stores',

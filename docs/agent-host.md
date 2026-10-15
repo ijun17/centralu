@@ -2343,7 +2343,7 @@ weeks), v28 (`sessions.archived` dropped) and v32 (`projects.default_model` / `d
 build before them outright, and v13 (the grid's old-named table dropped) made it silently lose every grid placement, because the
 older `schema.sql` recreated the table empty.
 
-The rule, written above the step list in `dev-services/store.ts` (`migrationSteps`), which a reviewer checks every new
+The rule, written above the step list in `dev-services/store/migrations/index.ts` (`migrationSteps`), which a reviewer checks every new
 step against:
 
 1. **Expand.** A step may add tables, nullable or defaulted columns and indexes, or rewrite data into a form the
