@@ -24,7 +24,7 @@ export function isAway(row: Placed | undefined, machines: Readonly<Record<string
   return !!m && m.status !== 'connected'
 }
 
-/** One word or two for a link's state, as the sidebar's machine header and Settings say it */
+/** One word or two for a link's state, as Add project's machine menu and Settings say it */
 export const MACHINE_STATUS_LABEL: Record<MachineStatus, string> = {
   connected: 'connected',
   connecting: 'connecting',

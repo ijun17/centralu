@@ -72,7 +72,7 @@ machine it runs on.
    approval rule integers, pids) need the prefix too.
 4. **One orchestrator, apps from every machine.** A remote host's orchestrator and coordinators are
    not shown on the hub; the hub has one orchestrator. A remote host's **user-folder apps are
-   shown** (owner, 2026-10-05), grouped by machine and qualified by it (`_user/<appId>` collides
+   shown** (owner, 2026-10-05), grouped by machine (in "Your apps" with a machine badge since #734) and qualified by it (`_user/<appId>` collides
    across machines otherwise). They run on their own machine; their views need the proxy of
    phase 2, so in phase 1 they are listed and their tools work, and their views say they open in a
    later version. Phase 2 (§11) opens their views, named by their machine where no project can
@@ -252,7 +252,7 @@ calls, `unreachable` on mirrored rows, and data on the version refusal ([protoco
 
 ### 8.3 What phase 1 built, window side
 
-`packages/ui`, `packages/platform` and `@cc/core`'s `machines.ts`: the sidebar grouped by machine (this computer first),
+`packages/ui`, `packages/platform` and `@cc/core`'s `machines.ts`: the sidebar grouped by machine (this computer first; one list with a machine badge on each linked machine's project and app since #734),
 Settings → Machines (add, remove, reconnect, the last error as what to do), the version prompt (§4: the hub through its
 own update, the remote by the exact `npm i -g centralu@<version>` in phase 1, "connect anyway" on one protocol only),
 away rows dimmed and never woken, `machine_resync` handled by a recovery scoped to that machine, the per-machine

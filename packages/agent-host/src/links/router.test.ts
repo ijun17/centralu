@@ -586,6 +586,35 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       expect(r.map((p) => p.id)).toEqual(['h1', 'h2', 'm1.b', 'm1.a'])
     })
 
+    it('keeps the person’s order across machines on the hub, and lists the projects in it (#734)', async () => {
+      const saved: string[][] = []
+      const order = { read: () => saved.at(-1) ?? [], write: (ids: readonly string[]) => void saved.push([...ids]) }
+      const local: { method: string; params: unknown }[] = []
+      const localAnswers: Record<string, unknown> = { 'projects.reorder': [{ id: 'h2' }, { id: 'h1' }], 'projects.list': [{ id: 'h2' }, { id: 'h1' }, { id: 'h3' }] }
+      const m1 = new FakeMachine('m1', 1)
+      m1.answers['projects.reorder'] = [{ id: 'b' }, { id: 'a' }]
+      m1.answers['projects.list'] = [{ id: 'b' }, { id: 'a' }]
+      const m2 = new FakeMachine('m2', 2)
+      m2.answers['projects.list'] = [{ id: 'c' }]
+      const router = new Router({ local: async (method, params) => (local.push({ method, params }), localAnswers[method]), machines: () => [m1, m2], order })
+
+      const r = (await router.handle('projects.reorder', { orderedIds: ['m1.b', 'h2', 'm1.a', 'h1'] })) as { id: string }[]
+      expect(saved).toEqual([['m1.b', 'h2', 'm1.a', 'h1']])
+      // Each machine still keeps its own order
+      expect(local.at(-1)!.params).toEqual({ orderedIds: ['h2', 'h1'] })
+      expect(m1.calls).toEqual([{ method: 'projects.reorder', params: { orderedIds: ['b', 'a'] } }])
+      expect(r.map((p) => p.id)).toEqual(['m1.b', 'h2', 'm1.a', 'h1'])
+      // A project the order does not name yet (h3, added since; m2's, a machine linked since) goes at the end
+      const listed = (await router.handle('projects.list', {})) as { id: string }[]
+      expect(listed.map((p) => p.id)).toEqual(['m1.b', 'h2', 'm1.a', 'h1', 'h3', 'm2.c'])
+    })
+
+    it('with no machine linked, lists the hub’s projects in its own order whatever was kept (#734)', async () => {
+      const order = { read: () => ['m1.b', 'h2', 'h1'], write: () => {} }
+      const router = new Router({ local: async () => [{ id: 'h1' }, { id: 'h2' }], machines: () => [], order })
+      expect(((await router.handle('projects.list', {})) as { id: string }[]).map((p) => p.id)).toEqual(['h1', 'h2'])
+    })
+
     it('saves the project order on the machines that can take it while another is away, and gives the away one’s projects back as they were, marked', async () => {
       const { local, localAnswers, m1, m2 } = rig()
       localAnswers['projects.reorder'] = [{ id: 'h1' }]

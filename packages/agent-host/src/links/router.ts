@@ -37,9 +37,21 @@ export interface RoutedMachine {
   hides(session: unknown): boolean
 }
 
+/**
+ * The person's project order across machines (#734), in the hub's terms: hub ids and machine-qualified ids in one list.
+ * Each machine keeps the order of its own projects too, but only the hub knows where one machine's stand among
+ * another's, so the hub keeps this list in its own store (links/stored.ts).
+ */
+export interface ProjectOrder {
+  read(): string[]
+  write(orderedIds: readonly string[]): void
+}
+
 export type RouterOptions = {
   local: RpcHandler
   machines: () => Iterable<RoutedMachine>
+  /** Absent: the order is per machine, the hub's own projects first (as before #734) */
+  order?: ProjectOrder
 }
 
 type Obj = Record<string, unknown>
@@ -271,7 +283,27 @@ export class Router {
         return this.present(m, kind, m.lastKnown(kind) ?? [], true)
       }),
     ])
-    return [...local, ...remote.flat()]
+    const all = [...local, ...remote.flat()]
+    return kind === 'projects' && machines.length > 0 ? this.inPersonsOrder(all) : all
+  }
+
+  /**
+   * The projects in the order the person last gave across machines (#734). A project that order does not name yet
+   * (one added since, or a newly linked machine's) goes at the end, in the order the machines gave it: nothing that
+   * was out of sight jumps ahead of what the person placed.
+   */
+  private inPersonsOrder(list: unknown[]): unknown[] {
+    const saved = this.opts.order?.read() ?? []
+    if (saved.length === 0) return list
+    const rank = new Map(saved.map((id, i) => [id, i]))
+    const at = (p: unknown) => {
+      const id = isObj(p) ? p.id : undefined
+      return typeof id === 'string' ? (rank.get(id) ?? Infinity) : Infinity
+    }
+    return list
+      .map((p, i) => ({ p, i, r: at(p) }))
+      .sort((a, b) => (a.r === b.r ? a.i - b.i : a.r - b.r))
+      .map((x) => x.p)
   }
 
   private present(m: RoutedMachine, kind: 'sessions' | 'projects', list: unknown[], unreachable: boolean): unknown[] {
@@ -283,10 +315,14 @@ export class Router {
   /**
    * The person's project order, split per machine: each machine keeps the order of its own. A
    * machine that cannot take it does not fail the rest, which has already been saved: its projects
-   * come back from the mirror as they were, marked `unreachable`, the way `projects.list` gives them
+   * come back from the mirror as they were, marked `unreachable`, the way `projects.list` gives them.
+   *
+   * The whole list is kept on the hub as well (#734), so one machine's projects can stand between another's: the
+   * answer, and every `projects.list` after it, comes back in that order once a machine is linked.
    */
   private async reorderProjects(machines: RoutedMachine[], params: unknown): Promise<unknown> {
     const ids = isObj(params) && Array.isArray(params.orderedIds) ? (params.orderedIds as unknown[]) : []
+    this.opts.order?.write(ids.filter((id): id is string => typeof id === 'string'))
     const perMachine = new Map<RoutedMachine, string[]>()
     const local: unknown[] = []
     for (const id of ids) {
@@ -304,7 +340,8 @@ export class Router {
         }
       }),
     ])
-    return [...mine, ...theirs.flat()]
+    const all = [...mine, ...theirs.flat()]
+    return machines.length > 0 ? this.inPersonsOrder(all) : all
   }
 
   private async deleteRule(machines: RoutedMachine[], params: unknown): Promise<unknown> {

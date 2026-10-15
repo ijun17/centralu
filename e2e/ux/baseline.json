@@ -265,28 +265,46 @@
       "task": "Add a folder on a linked machine as a project",
       "path": "mouse",
       "access": "discoverable",
-      "operators": "H M P B B H 12K H M P B B",
+      "operators": "H M P B B M P B B H 12K H M P B B",
       "counts": {
         "K": 12,
-        "P": 2,
-        "B": 4,
+        "P": 3,
+        "B": 6,
         "H": 3,
-        "M": 2,
-        "R": 2
+        "M": 3,
+        "R": 3
       },
-      "seconds": 9.98,
-      "waitMs": 17,
-      "travelPx": 996,
+      "seconds": 12.33,
+      "waitMs": 7,
+      "travelPx": 1325,
       "steps": [
         {
           "kind": "click",
-          "label": "add-remote-project-box",
+          "label": "add-project",
           "operators": "H M P B B",
-          "seconds": 3.19,
+          "seconds": 2.99,
           "pointer": {
-            "D": 426,
-            "W": 21,
-            "ID": 4.4
+            "D": 566,
+            "W": 134,
+            "ID": 2.39
+          }
+        },
+        {
+          "kind": "wait",
+          "label": "the machine menu",
+          "operators": "R",
+          "seconds": 0,
+          "waitMs": 2
+        },
+        {
+          "kind": "click",
+          "label": "add-project-on-box",
+          "operators": "M P B B",
+          "seconds": 2.52,
+          "pointer": {
+            "D": 76,
+            "W": 33,
+            "ID": 1.74
           }
         },
         {
@@ -294,7 +312,7 @@
           "label": "the dialog",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 5
+          "waitMs": 2
         },
         {
           "kind": "type",
@@ -306,11 +324,11 @@
           "kind": "click",
           "label": "add-remote-project-confirm",
           "operators": "H M P B B",
-          "seconds": 3.03,
+          "seconds": 3.06,
           "pointer": {
-            "D": 570,
-            "W": 95,
-            "ID": 2.81
+            "D": 684,
+            "W": 92,
+            "ID": 3.08
           }
         },
         {
@@ -318,11 +336,13 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 12
+          "waitMs": 2
         }
       ],
       "notes": [
-        "The machine group's \"Add project on…\"; the path is typed, there is no picker for the other machine"
+        "Add project, then the machine in its menu (#734; it was the machine header's +, which went with the headers)",
+        "Hick–Hyman: a choice among this computer and each linked machine (two here)",
+        "The path is typed, there is no picker for the other machine"
       ],
       "breaches": []
     },

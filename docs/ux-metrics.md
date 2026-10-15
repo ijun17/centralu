@@ -300,7 +300,7 @@ pixel. A pull request that makes one cheaper tightens it.
 | Put an app on the grid | `grid-app.mouse` | `H M P B B M P B P B` | 0 | 3 | 4 | 1 | 2 | 10 | 6.63 | 1524 |
 | Put a session on the grid | `grid-session.mouse` | `H M P B B M P B P B` | 0 | 3 | 4 | 1 | 2 | 10 | 6.59 | 1452 |
 | Move a project to the top of the sidebar | `reorder-projects.mouse` | `H M P B P B` | 0 | 2 | 2 | 1 | 1 | 6 | 3.98 | 724 |
-| Add a folder on a linked machine as a project | `add-remote-project.mouse` | `H M P B B H 12K H M P B B` | 12 | 2 | 4 | 3 | 2 | 23 | 9.98 | 996 |
+| Add a folder on a linked machine as a project (since #734: Add project, then the machine, `H M P B B M P B B H 12K H M P B B`, 27 · 12.33 s · 1325 px) | `add-remote-project.mouse` | `H M P B B H 12K H M P B B` | 12 | 2 | 4 | 3 | 2 | 23 | 9.98 | 996 |
 | Update the app when a new version is out | `update-app.mouse` | `H M P B B M B B` | 0 | 1 | 4 | 1 | 2 | 8 | 4.75 | 589 |
 | See how much of the weekly limit is used | `view-usage.mouse` | `H M P B B` | 0 | 1 | 2 | 1 | 1 | 5 | 3.18 | 647 |
 | Switch to the light theme | `change-theme.mouse` | `H M P B B M P B B M P B B` | 0 | 3 | 6 | 1 | 3 | 13 | 8.44 | 1791 |
@@ -316,7 +316,7 @@ What they show:
   begin with a `P` to reveal it). A path in a tool card ("Read packages/…") was not a link, so the
   same file cost 15.8 s through the tree instead of 3.1 s (a link since #543 item 6: 3.07 s). A project can be reordered only by a drag
   nothing on screen mentions. Adding a machine lives in Settings, not in the sidebar's machine group
-  where the machines are.
+  where the machines are (the groups went in #734: one list, each linked machine's project with its badge).
 - **Fields that do not take the keyboard**: the composer after clicking a session's row (the core
   task "send a message", `P B B`), and the commit message after Stage all.
 
@@ -344,7 +344,7 @@ that changes is re-priced by Fitts's law. Each is a proposal, not a decision.
 | 13 | Run a saved command (`run-command.mouse`) | 13 · 8.25 · 3 · 964 | Picking a command selects it; Run is a second decision (#60 chose this so a click can read a log) | A ▶ on each command's row runs it; clicking the row still selects | 9 · ~5.8 (−2.5) | M | UI only |
 | 14 | Start a worktree session (`worktree-session.mouse`) | 13 · 8.50 · 3 · 1364 | Dialog, box, Start | With 3: the "…" beside `+` offers "New session in a worktree", which starts at once on the default branch name | 9 · ~5.8 (−2.7) | M | UI only |
 | 15 | Any session menu (rename, delete, hand off) | e.g. 14 · 9.17 · 3 for delete | The ⋯ shows only under the pointer: a `P` to the row before the `P` to the ⋯, and nothing tells a newcomer a menu exists | Keep the open session's ⋯ visible, and open the same menu on a right-click of any row | −1 P each, about −0.75 s | M | UI only |
-| 16 | Add a folder on a linked machine (`add-remote-project.mouse`) | 23 · 9.98 · 2 · 996 | The whole path is typed; there is no picker on the other machine | Prefill the machine's home folder, and list its recent or likely folders under the field | 14 · ~7.5 (−2.5) | L | Prefill: UI only (the host's New-folder preview already names a folder there). Listing folders: host (a directory listing on the linked machine) |
+| 16 | Add a folder on a linked machine (`add-remote-project.mouse`) | 23 · 9.98 · 2 · 996 (#734: 27 · 12.33 · 3 · 1325, the machine is now picked in Add project's menu since the machine header and its + are gone) | The whole path is typed; there is no picker on the other machine | Prefill the machine's home folder, and list its recent or likely folders under the field | 14 · ~7.5 (−2.5) | L | Prefill: UI only (the host's New-folder preview already names a folder there). Listing folders: host (a directory listing on the linked machine) |
 | 17 | Update the app (`update-app.mouse`) | 8 · 4.75 · 2 · 589 | Install, then Apply now | When nothing is running, one click installs and applies | 5 · 3.20 (−1.55) | L | UI only (the keeper's busy report exists) |
 
 "Work" says whether a candidate is a change to the screen alone (`packages/ui`, through ports that

@@ -179,7 +179,7 @@ export function Settings() {
   const nav = useNavShortcut()
   const [rules, setRules] = useState<Rule[] | null>(null)
   const [category, setCategory] = useState<Category>('notifications')
-  // Another screen asked for a category (a machine's header in the sidebar opens Machines, #82)
+  // Another screen asked for a category (a machine's badge in the sidebar opens Machines, #82, #734)
   const request = useStore((s) => s.settingsRequest)
   useEffect(() => {
     const asked = CATEGORIES.find((c) => c.id === request?.category)

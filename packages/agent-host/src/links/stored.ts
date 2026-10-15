@@ -1,5 +1,6 @@
 import type { Store } from '../dev-services/store.js'
 import type { HeadersMirror, MachineRecord, MachineRegistry } from './links.js'
+import type { ProjectOrder } from './router.js'
 
 /**
  * The registry and the headers mirror in the hub's own store (v46, store/linked-machines.ts). One writer per store
@@ -33,5 +34,26 @@ export function storeMirror(store: Store): HeadersMirror {
     removeSession: (machine, sessionId) => store.removeMachineSession(machine, sessionId),
     // The registry's removal takes the headers with the machine (store.removeLinkedMachine)
     forget: () => {},
+  }
+}
+
+/**
+ * The project order across machines (#734) in the hub's own store, as one setting: a key the previous build never
+ * reads, so a host swap needs no migration. A value that cannot be read is no order at all, and the next drag writes
+ * a new one.
+ */
+const PROJECT_ORDER_KEY = 'hub.projectOrder'
+
+export function storeProjectOrder(store: Store): ProjectOrder {
+  return {
+    read: () => {
+      try {
+        const v: unknown = JSON.parse(store.appSetting(PROJECT_ORDER_KEY) ?? '[]')
+        return Array.isArray(v) ? v.filter((id): id is string => typeof id === 'string') : []
+      } catch {
+        return []
+      }
+    },
+    write: (orderedIds) => store.setAppSetting(PROJECT_ORDER_KEY, JSON.stringify(orderedIds)),
   }
 }

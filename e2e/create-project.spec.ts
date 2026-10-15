@@ -83,7 +83,8 @@ test('New folder: a click on Change as the dialog opens still opens the location
 test("a linked Windows machine: Create a new folder is made by that machine's host, in its own ~/Centralu, in its own path terms", async ({ page }) => {
   await start(page)
   await page.evaluate(() => (window as any).__mock.machines.add({ name: 'Win', sshTarget: 'me@win', shell: 'powershell' }))
-  await page.getByTestId('add-remote-project-win').click()
+  await page.getByTestId('add-project').click()
+  await page.getByTestId('add-project-on-win').click()
   const dialog = page.getByTestId('add-remote-project-dialog')
   // Adding an existing folder is still the first choice
   await expect(dialog.getByTestId('add-remote-project-path')).toBeVisible()
@@ -96,7 +97,7 @@ test("a linked Windows machine: Create a new folder is made by that machine's ho
   await expect(dialog.getByTestId('create-project-path')).toHaveText('C:\\Users\\you\\Centralu\\game')
   await dialog.getByTestId('create-project-confirm').click()
   await expect(dialog).toHaveCount(0)
-  await expect(page.getByTestId('machine-group-win').getByTestId('project-game')).toBeVisible()
+  await expect(page.getByTestId('project-machine-game')).toHaveText('Win')
   expect(await page.evaluate(() => (window as any).__mock.createProjectCalls)).toEqual([{ name: 'game', machine: 'win' }])
 })
 

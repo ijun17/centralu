@@ -47,6 +47,12 @@ async function addMachine(page: Page, name: string, target: string): Promise<voi
   await expect(page.getByTestId('machines-add-form')).toHaveCount(0)
 }
 
+/** The sidebar's projects, top to bottom, as on screen */
+const listed = (page: Page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('[data-testid="sidebar"] section[data-testid^="project-"]')].map((el) => el.getAttribute('data-testid')!.slice('project-'.length)),
+  )
+
 async function send(page: Page, text: string) {
   await page.getByTestId('prompt-input').fill(text)
   await page.getByTestId('prompt-input').press('Enter')
@@ -79,7 +85,7 @@ export function linkedHostsUiTests(): void {
       await expect.poll(async () => (await machines(pair))[0]?.status, { timeout: 20_000 }).toBe('connected')
       const calls = watchCalls(page)
       await page.goto('/')
-      await expect(page.getByTestId('machine-status-m1')).toHaveAttribute('data-status', 'connected')
+      await expect(page.getByTestId('project-machine-remote-project')).toHaveAttribute('data-status', 'connected')
 
       await test.step('a project app of the machine opens, from the hub’s own door, and its tool calls reach the machine', async () => {
         const key = `${MACHINE}.p-remote/board`
@@ -150,7 +156,7 @@ export function linkedHostsUiTests(): void {
       await expect.poll(async () => (await machines(pair))[0]?.status, { timeout: 20_000 }).toBe('connected')
       const calls = watchCalls(page)
       await page.goto('/')
-      await expect(page.getByTestId('machine-status-m1')).toHaveAttribute('data-status', 'connected')
+      await expect(page.getByTestId('project-machine-remote-project')).toHaveAttribute('data-status', 'connected')
       const theirs = `${MACHINE}:_user/notes`
       const tools = (key: string) => page.getByTestId(`pinned-app-${key}`).getByTestId('runs-panel').getByTestId('run-tool')
 
@@ -190,7 +196,7 @@ export function linkedHostsUiTests(): void {
       await expect.poll(async () => (await machines(pair))[0]?.status, { timeout: 20_000 }).toBe('connected')
       const calls = watchCalls(page)
       await page.goto('/')
-      await expect(page.getByTestId('machine-status-m1')).toHaveAttribute('data-status', 'connected')
+      await expect(page.getByTestId('project-machine-remote-project')).toHaveAttribute('data-status', 'connected')
       const theirs = `${MACHINE}:_user/notes`
       const theirFolder = join(pair.remoteSide.dir, 'data', 'apps', 'notes')
       const ourFolder = join(pair.hubSide.dir, 'data', 'apps', 'notes')
@@ -248,7 +254,7 @@ export function linkedHostsUiTests(): void {
       await expect.poll(async () => (await machines(pair))[0]?.status, { timeout: 20_000 }).toBe('connected')
       const calls = watchCalls(page)
       await page.goto('/')
-      await expect(page.getByTestId('machine-status-m1')).toHaveAttribute('data-status', 'connected')
+      await expect(page.getByTestId('project-machine-remote-project')).toHaveAttribute('data-status', 'connected')
       await page.getByTestId('grid-button').click()
       await expect(page.getByTestId('grid')).toBeVisible()
       const board = `${MACHINE}.p-remote/board`
@@ -300,14 +306,14 @@ export function linkedHostsUiTests(): void {
     })
   })
 
-  test('a machine added in Settings: grouped in the sidebar, a session created, sent to and approved on it', async ({ page }) => {
+  test('a machine added in Settings: its projects in the one list, a session created, sent to and approved on it', async ({ page }) => {
     test.setTimeout(120_000)
     await withPair({ link: false }, async (pair) => {
       const calls = watchCalls(page)
       await page.goto('/')
       await expect(page.getByTestId('project-hub-project')).toBeVisible()
-      // No machine yet: the list is as it always was, with no group headers
-      await expect(page.getByTestId('machine-header-local')).toHaveCount(0)
+      // No machine yet: the list is as it always was, and Add project is the folder picker with nothing to choose
+      await expect(page.getByTestId('add-project')).not.toHaveAttribute('aria-haspopup', 'menu')
 
       await test.step('add the machine in Settings → Machines', async () => {
         await addMachine(page, 'Remote box', `direct:${pair.remotePort}`)
@@ -316,47 +322,58 @@ export function linkedHostsUiTests(): void {
         await expect(page.getByTestId('settings')).toHaveCount(0)
       })
 
-      await test.step('the sidebar groups by machine: this computer first, then the machine', async () => {
-        const local = page.getByTestId('machine-header-local')
-        const remote = page.getByTestId('machine-header-remote-box')
-        await expect(local).toBeVisible()
-        await expect(remote).toContainText('Remote box')
-        await expect(page.getByTestId('machine-status-remote-box')).toHaveAttribute('data-status', 'connected')
-        const group = page.getByTestId('machine-group-remote-box')
-        await expect(group.getByTestId('project-remote-project')).toBeVisible()
-        await expect(group.getByTestId('project-hub-project')).toHaveCount(0)
-        expect((await local.boundingBox())!.y).toBeLessThan((await remote.boundingBox())!.y)
+      await test.step("one list (#734): the machine's project after this computer's, with the machine's badge and no header", async () => {
+        await expect(page.getByTestId('project-machine-remote-project')).toHaveText('Remote box')
+        await expect(page.getByTestId('project-machine-remote-project')).toHaveAttribute('data-status', 'connected')
+        await expect(page.getByTestId('project-machine-hub-project')).toHaveCount(0)
+        await expect(page.locator('[data-testid^="machine-header-"]')).toHaveCount(0)
+        expect(await listed(page)).toEqual(['hub-project', 'remote-project'])
       })
 
       await test.step('add a folder on the machine as a project, by its path there', async () => {
         const folder = join(pair.remoteSide.dir, 'second-project')
         mkdirSync(folder)
-        await page.getByTestId('add-remote-project-remote-box').click()
+        await page.getByTestId('add-project').click()
+        await page.getByTestId('add-project-on-remote-box').click()
         await page.getByTestId('add-remote-project-path').fill(folder)
         await page.getByTestId('add-remote-project-confirm').click()
-        await expect(page.getByTestId('machine-group-remote-box').getByTestId('project-second-project')).toBeVisible()
+        await expect(page.getByTestId('project-machine-second-project')).toHaveText('Remote box')
         expect(calls.find((c) => c.method === 'projects.add')?.params).toEqual({ path: folder, machine: 'remote-box' })
       })
 
       await test.step("create a new folder there (#515): that machine's host names its ~/Centralu, makes it if missing, and the folder", async () => {
         const centralu = join(pair.remoteSide.home, 'Centralu')
-        await page.getByTestId('add-remote-project-remote-box').click()
+        await page.getByTestId('add-project').click()
+        await page.getByTestId('add-project-on-remote-box').click()
         const dialog = page.getByTestId('add-remote-project-dialog')
         await dialog.getByTestId('add-remote-project-mode-new').click()
         await expect(dialog.getByTestId('create-project-parent-shown')).toHaveText(centralu)
         await dialog.getByTestId('create-project-name').fill('fresh')
         await expect(dialog.getByTestId('create-project-path')).toHaveText(join(centralu, 'fresh'))
         await dialog.getByTestId('create-project-confirm').click()
-        await expect(page.getByTestId('machine-group-remote-box').getByTestId('project-fresh')).toBeVisible()
+        await expect(page.getByTestId('project-machine-fresh')).toHaveText('Remote box')
         expect(readdirSync(join(centralu, 'fresh'))).toEqual([])
         expect(calls.find((c) => c.method === 'projects.create')?.params).toEqual({ name: 'fresh', machine: 'remote-box' })
         // A second one of the same name is refused before anything is made
-        await page.getByTestId('add-remote-project-remote-box').click()
+        await page.getByTestId('add-project').click()
+        await page.getByTestId('add-project-on-remote-box').click()
         await dialog.getByTestId('add-remote-project-mode-new').click()
         await dialog.getByTestId('create-project-name').fill('fresh')
         await expect(dialog.getByTestId('create-project-error')).toContainText('already in')
         await page.keyboard.press('Escape')
         await expect(dialog).toHaveCount(0)
+      })
+
+      await test.step("a machine's project dragged above this computer's (#734): the hub keeps the one order, across a reload", async () => {
+        expect(await listed(page)).toEqual(['hub-project', 'remote-project', 'second-project', 'fresh'])
+        await page.dragAndDrop('[data-testid="project-header-second-project"]', '[data-testid="project-hub-project"]', { targetPosition: { x: 10, y: 2 } })
+        await expect.poll(() => listed(page)).toEqual(['second-project', 'hub-project', 'remote-project', 'fresh'])
+        // The hub's own list answers in that order, the machine's projects by their qualified ids
+        const order = async () => ((await hubCall(pair.hub.port, 'projects.list', {})) as { name: string }[]).map((p) => p.name)
+        await expect.poll(order).toEqual(['second-project', 'hub-project', 'remote-project', 'fresh'])
+        await page.reload()
+        await expect(page.getByTestId('project-hub-project')).toBeVisible()
+        await expect.poll(() => listed(page)).toEqual(['second-project', 'hub-project', 'remote-project', 'fresh'])
       })
 
       let id = ''
@@ -371,7 +388,7 @@ export function linkedHostsUiTests(): void {
           .poll(async () => ((await hubCall(pair.hub.port, 'sessions.list', {})) as { id: string; machine?: string }[]).filter((s) => s.machine === 'remote-box'))
           .toHaveLength(1)
         id = ((await hubCall(pair.hub.port, 'sessions.list', {})) as { id: string; machine?: string }[]).find((s) => s.machine === 'remote-box')!.id
-        await expect(page.getByTestId('machine-group-remote-box').getByTestId(`session-row-${id}`)).toBeVisible()
+        await expect(page.getByTestId('project-remote-project').getByTestId(`session-row-${id}`)).toBeVisible()
         await expect(page.getByTestId('session-machine')).toHaveText('Remote box')
       })
 
@@ -412,11 +429,11 @@ export function linkedHostsUiTests(): void {
       const calls = watchCalls(page)
       await page.goto('/')
       await expect(page.getByTestId(`session-row-${live.id}`)).toBeVisible()
-      await expect(page.getByTestId('machine-status-m1')).toHaveAttribute('data-status', 'connected')
+      await expect(page.getByTestId('project-machine-remote-project')).toHaveAttribute('data-status', 'connected')
 
       await test.step('the machine stops: its rows stay, dimmed, and nothing wakes them, not even opening one', async () => {
         await pair.remote.kill('SIGKILL')
-        await expect(page.getByTestId('machine-status-m1')).toHaveAttribute('data-status', 'unreachable', { timeout: 15_000 })
+        await expect(page.getByTestId('project-machine-remote-project')).toHaveAttribute('data-status', 'unreachable', { timeout: 15_000 })
         await expect(page.getByTestId('project-remote-project')).toHaveAttribute('data-away', 'true')
         await page.getByTestId(`session-row-${dormant.id}`).click()
         await expect(page.getByTestId('away-note')).toBeVisible()
@@ -427,7 +444,7 @@ export function linkedHostsUiTests(): void {
 
       await test.step('it comes back: the machine resyncs, and only the session it held live is woken', async () => {
         await restartRemote(pair)
-        await expect(page.getByTestId('machine-status-m1')).toHaveAttribute('data-status', 'connected', { timeout: 20_000 })
+        await expect(page.getByTestId('project-machine-remote-project')).toHaveAttribute('data-status', 'connected', { timeout: 20_000 })
         await expect(page.getByTestId('project-remote-project')).not.toHaveAttribute('data-away', 'true')
         // The remote host restarted: the live one's process is gone and is asked for again; the dormant one stays as it was
         await expect.poll(() => calls.filter((c) => c.method === 'agents.resumeSession').map((c) => c.params.sessionId)).toEqual([live.id])
@@ -491,12 +508,12 @@ export function linkedHostsUiTests(): void {
         await expect(page.getByTestId('machine-stop-confirm-remote-box')).toHaveCount(0)
         await expect(page.getByTestId('machine-update-remote-remote-box')).toBeVisible()
         await page.keyboard.press('Escape')
-        await expect(page.getByTestId('machine-status-remote-box')).toHaveAttribute('data-status', 'connected')
+        await expect(page.getByTestId('project-machine-remote-project')).toHaveAttribute('data-status', 'connected')
       })
 
-      await test.step('nothing waits for an answer: the machine\'s projects are listed, and the header still leads back to the offer', async () => {
-        await expect(page.getByTestId('machine-group-remote-box').getByTestId('project-remote-project')).toBeVisible()
-        await page.getByTestId('machine-name-remote-box').click()
+      await test.step('nothing waits for an answer: the machine\'s projects are listed, and its badge still leads back to the offer', async () => {
+        await expect(page.getByTestId('project-remote-project')).toBeVisible()
+        await page.getByTestId('project-machine-remote-project').click()
         await expect(page.getByTestId('settings-machines')).toBeVisible()
         await expect(page.getByTestId('machine-update-remote-remote-box')).toBeVisible()
         // "Connect anyway" is only for a link that is held, which one protocol never is

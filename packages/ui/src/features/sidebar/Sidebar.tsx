@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type { Interruption, ProjectInfo, SessionState, ToolName } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 import { appSessionsNeedAttention, groupProjectAppSessions, treeRows } from './tree.js'
@@ -24,9 +24,9 @@ import { StateDot, Tooltip, interruptionLabel, stateLabel } from '../../componen
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { AppIcon, ChevronIcon, CrownIcon, DotsIcon, ImportIcon, PlusIcon } from '../../components/icons.jsx'
-import { isRemoteUserApp, useMachineApps, useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
+import { isRemoteUserApp, useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { isAway } from '@cc/core'
-import { MachineStatusMark } from '../machines/MachineTag.jsx'
+import { MachineBadge, MachineStatusMark } from '../machines/MachineTag.jsx'
 import { RowApproval } from '../approval/RowApproval.jsx'
 import { AddRemoteProjectDialog } from '../machines/AddRemoteProjectDialog.jsx'
 import { useRemoteIde } from '../machines/remoteIde.js'
@@ -296,25 +296,18 @@ function approvalLine(s: SessionSummary, renaming: string | null, open: () => vo
 
 /** The observation lane — high density, using as little space as possible (docs/architecture.md design principle 1) */
 export function Sidebar() {
+  /*
+   * One list whatever machine a project is on (#734), in the hub's order, which the person sets by dragging across
+   * machines; a linked machine's project carries its machine's badge instead of standing under a machine header.
+   */
   const projectIds = useStore((s) => Object.keys(s.projects).join(','))
   const ids = projectIds ? projectIds.split(',') : []
-  /*
-   * Grouped by machine once there is another machine to tell apart (#82): this computer first, then each linked machine
-   * in the order the host lists them. Projects keep their own order inside their group. With no link at all the list
-   * stays as it always was, with no header to read past.
-   */
-  const placement = useStore((s) => Object.values(s.projects).map((p) => `${p.id}\u0000${p.machine ?? ''}`).join('\u0001'))
-  const machineList = useStore((s) => Object.keys(s.machines).join(','))
-  const groups = useMemo(() => {
-    const where = new Map(placement ? placement.split('\u0001').map((x) => x.split('\u0000') as [string, string]) : [])
-    const machines = machineList ? machineList.split(',') : []
-    // A project whose machine has no row (its list not read yet) still gets a group, rather than vanishing
-    for (const m of where.values()) if (m && !machines.includes(m)) machines.push(m)
-    const order = projectIds ? projectIds.split(',') : []
-    return { machines, of: (m: string) => order.filter((id) => (where.get(id) ?? '') === m) }
-  }, [placement, machineList, projectIds])
-  const grouped = groups.machines.length > 0
+  const machineIds = useStore((s) => Object.keys(s.machines).join(','))
+  const machines = machineIds ? machineIds.split(',') : []
   const [addingOn, setAddingOn] = useState<string | null>(null)
+  /** The Add project button's machine choice (#734), open once a machine is linked */
+  const [choosing, setChoosing] = useState(false)
+  const addAnchor = useRef<HTMLButtonElement>(null)
   const width = useStore((s) => s.sidebarWidth)
   const setSidebarWidth = useStore((s) => s.setSidebarWidth)
   // The minimum width is fixed in real pixels — the limit on how narrow the list can get stays the
@@ -325,6 +318,17 @@ export function Sidebar() {
   const setToast = useStore((s) => s.setToast)
   const [adding, setAdding] = useState(false)
   const [creating, setCreating] = useState(false)
+  const pickHere = async () => {
+    setAdding(true)
+    try {
+      const picked = await platform.system.pickDirectory()
+      if (picked) await addProject(picked)
+    } catch (e) {
+      setToast((e as Error).message)
+    } finally {
+      setAdding(false)
+    }
+  }
 
   return (
     <aside
@@ -342,35 +346,16 @@ export function Sidebar() {
       />
       <OrchestratorButton />
       <GridButton />
-      {grouped ? (
-        <>
-          <MachineHeader machine={null} />
-          {groups.of('').map((id) => (
-            <ProjectBlock key={id} projectId={id} />
-          ))}
-          <UserApps />
-          {groups.machines.map((m) => (
-            <Fragment key={m}>
-              <MachineHeader machine={m} onAddProject={() => setAddingOn(m)} />
-              <MachineProjects machine={m} projectIds={groups.of(m)} />
-            </Fragment>
-          ))}
-          {addingOn && <AddRemoteProjectDialog machine={addingOn} onClose={() => setAddingOn(null)} />}
-        </>
+      {ids.length === 0 ? (
+        <p className="px-4 py-6 text-sm leading-body text-ink-faint">
+          No projects yet.
+          <br />
+          Start with <span className="text-ink-muted">Add project</span> below.
+        </p>
       ) : (
-        <>
-          {ids.length === 0 ? (
-            <p className="px-4 py-6 text-sm leading-body text-ink-faint">
-              No projects yet.
-              <br />
-              Start with <span className="text-ink-muted">Add project</span> below.
-            </p>
-          ) : (
-            ids.map((id) => <ProjectBlock key={id} projectId={id} />)
-          )}
-          <UserApps />
-        </>
+        ids.map((id) => <ProjectBlock key={id} projectId={id} />)
       )}
+      <UserApps />
       {/*
         **Where the person presses and where the result appears must be the same place** (issue
         #4). It used to live at the far right of the top bar — the person pressed one side of the
@@ -399,24 +384,23 @@ export function Sidebar() {
            * Finder, copy the path, come back and paste it). The dialog is gone entirely, and the
            * button itself is now the picker.
            */
-          onClick={async () => {
-            setAdding(true)
-            try {
-              const picked = await platform.system.pickDirectory()
-              if (picked) await addProject(picked)
-            } catch (e) {
-              setToast((e as Error).message)
-            } finally {
-              setAdding(false)
-            }
+          /*
+           * Once a machine is linked, it first asks where (#734): this computer, the picker as before, or a linked
+           * machine, whose folder is typed (the picker cannot see that machine's disk). The machine headers that each
+           * had their own + are gone; with no machine linked there is nothing to choose and it is the picker at once.
+           */
+          ref={addAnchor}
+          onClick={() => {
+            if (machines.length > 0) setChoosing((v) => !v)
+            else void pickHere()
           }}
           disabled={adding}
           data-testid="add-project"
-          title={grouped ? 'Add an existing folder on this computer as a project' : 'Add an existing folder as a project'}
+          aria-haspopup={machines.length > 0 ? 'menu' : undefined}
+          title="Add an existing folder as a project"
         >
           <PlusIcon size={13} />
-          {/* With machines listed, the picker is this computer's: a folder elsewhere is added from its machine's + */}
-          <span className="truncate">{grouped ? 'Add project on this computer' : 'Add project'}</span>
+          <span className="truncate">Add project</span>
         </button>
         <button
           className="shrink-0 rounded-lg border border-line px-2.5 py-1.5 text-sm text-ink-faint transition-colors hover:border-line-strong hover:text-ink"
@@ -427,6 +411,19 @@ export function Sidebar() {
           New folder
         </button>
       </div>
+      {choosing && (
+        <AddProjectMachines
+          machines={machines}
+          anchorEl={addAnchor.current}
+          onClose={() => setChoosing(false)}
+          onPick={(machine) => {
+            setChoosing(false)
+            if (machine) setAddingOn(machine)
+            else void pickHere()
+          }}
+        />
+      )}
+      {addingOn && <AddRemoteProjectDialog machine={addingOn} onClose={() => setAddingOn(null)} />}
       {creating && <CreateProjectDialog onClose={() => setCreating(false)} />}
     </aside>
   )
@@ -765,6 +762,8 @@ function ProjectBlock({ projectId }: { projectId: string }) {
             {project.name}
           </button>
         </Tooltip>
+        {/* Which linked machine it is on (#734), right of its name; this computer's projects carry none */}
+        {project.machine && <MachineBadge machine={project.machine} testId={`project-machine-${project.name}`} />}
 
         {/*
           Only marks that claim no new space stay on the name line.
@@ -1419,9 +1418,11 @@ function AppRow({
   const waitsForYou = asking || sessionWaiting
   const hint = waitsForYou ? 'asks you' : APP_HINT[app.info.status]
   const projectId = app.projectId
+  // A linked machine's user-folder app keeps the dimming its machine's group gave it while that machine is not connected (#734)
+  const away = useStore((s) => !!machine && s.machines[machine]?.status !== 'connected')
   return (
     <li
-      className={`relative ${INDENT[1]}`}
+      className={`relative ${INDENT[1]} ${away ? 'opacity-60' : ''}`}
       data-level={1}
       data-folded={folded || undefined}
       /*
@@ -1464,6 +1465,7 @@ function AppRow({
           <AppIcon />
         </span>
         <span className="truncate">{app.title}</span>
+        {machine && <MachineBadge machine={machine} testId={`app-machine-${app.key}`} inRow />}
         {folded && sessions.length > 0 && (
           <FoldedMark count={sessions.length} attention={groupAttention(sessions)} testId={`app-folded-${app.key}`} />
         )}
@@ -1520,83 +1522,6 @@ function UserApps() {
       )}
       {newAppOpen && <NewAppDialog projectId={null} onClose={() => setNewAppOpen(false)} />}
     </section>
-  )
-}
-
-/**
- * A machine's header in the sidebar (#82): this computer, or a linked machine with its link's state. Pressing a linked
- * machine's name opens Settings → Machines, where its last error is said in plain words and the version prompt waits.
- * The + adds a folder on that machine; it is offered only while the link is up, because the machine's host is the one
- * that checks the path.
- *
- * Shaped like the "Your apps" header: a group heading, not a row. It sits on the sidebar's own surface with the faint
- * ink, so it orders the list without competing with a session that is waiting.
- */
-function MachineHeader({ machine, onAddProject }: { machine: string | null; onAddProject?: () => void }) {
-  const info = useStore((s) => (machine ? s.machines[machine] : undefined))
-  const openSettingsAt = useStore((s) => s.openSettingsAt)
-  const name = machine ? (info?.name ?? machine) : 'This computer'
-  return (
-    <header
-      className="flex items-center gap-2 border-b border-line/70 px-3 pb-1.5 pt-3"
-      data-testid={`machine-header-${machine ?? 'local'}`}
-    >
-      {machine ? (
-        <button
-          type="button"
-          className="flex min-w-0 items-center gap-2 text-left"
-          onClick={() => openSettingsAt('machines')}
-          title={info?.error ?? `${name} — ${info?.sshTarget ?? ''}`}
-          data-testid={`machine-name-${machine}`}
-        >
-          <span className="truncate text-2xs font-medium uppercase tracking-wide text-ink-faint hover:text-ink">{name}</span>
-          {info && <MachineStatusMark status={info.status} testId={`machine-status-${machine}`} />}
-        </button>
-      ) : (
-        <span className="truncate text-2xs font-medium uppercase tracking-wide text-ink-faint">{name}</span>
-      )}
-      {machine && onAddProject && (
-        <span className="-my-1 ml-auto shrink-0">
-          <IconButton
-            label={info?.status === 'connected' ? `Add a project on ${name}` : `${name} is not connected`}
-            onClick={onAddProject}
-            disabled={info?.status !== 'connected'}
-            testId={`add-remote-project-${machine}`}
-            align="right"
-          >
-            <PlusIcon size={13} />
-          </IconButton>
-        </span>
-      )}
-    </header>
-  )
-}
-
-/** A linked machine's projects and its user-folder apps (#82), under its header */
-function MachineProjects({ machine, projectIds }: { machine: string; projectIds: string[] }) {
-  const apps = useMachineApps(machine)
-  const status = useStore((s) => s.machines[machine]?.status)
-  return (
-    <div data-testid={`machine-group-${machine}`}>
-      {projectIds.map((id) => (
-        <ProjectBlock key={id} projectId={id} />
-      ))}
-      {projectIds.length === 0 && (
-        <p className="border-b border-line/70 px-3 py-2.5 text-xs text-ink-faint" data-testid={`machine-empty-${machine}`}>
-          {status === 'connected' ? 'No projects here yet. Add one with +.' : 'No projects listed.'}
-        </p>
-      )}
-      {apps.length > 0 && (
-        <section className={`border-b border-line/70 py-2.5 ${status === 'connected' ? '' : 'opacity-60'}`} data-testid={`machine-apps-${machine}`}>
-          <header className="px-3">
-            <span className="text-md font-medium tracking-tight text-ink">Apps</span>
-          </header>
-          <div className="mt-1.5">
-            <AppRows apps={apps} testId={`machine-apps-list-${machine}`} />
-          </div>
-        </section>
-      )}
-    </div>
   )
 }
 
@@ -2018,11 +1943,19 @@ function ActionRow({
   onClick,
   testId,
   danger,
+  disabled,
+  title,
+  trailing,
 }: {
   label: string
   onClick: () => void
   testId: string
   danger?: boolean
+  /** Shown but not pressable, with `title` saying why (a linked machine that is not connected, #734) */
+  disabled?: boolean
+  title?: string
+  /** A mark at the row's right end (a machine's link state, #734) */
+  trailing?: ReactNode
 }) {
   return (
     <button
@@ -2030,12 +1963,57 @@ function ActionRow({
       role="menuitem"
       data-testid={testId}
       onClick={onClick}
-      className={`block w-full px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover/25 ${
+      disabled={disabled}
+      title={title}
+      className={`block w-full px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover/25 disabled:opacity-40 disabled:hover:bg-transparent ${
         danger ? 'text-ink-muted hover:text-ink-signal' : 'text-ink-muted hover:text-ink'
-      }`}
+      } ${trailing ? 'flex items-center justify-between gap-2' : ''}`}
     >
-      {label}
+      {trailing ? <span className="truncate">{label}</span> : label}
+      {trailing}
     </button>
+  )
+}
+
+/**
+ * Where Add project adds the folder, once a machine is linked (#734): this computer (the folder picker), or a linked
+ * machine (its path typed in AddRemoteProjectDialog, or a new folder made there). It took the place of each machine
+ * header's +. A machine that is not connected is listed but cannot be picked, since that machine's host is the one that
+ * checks the path; its state says why, in the words the header used.
+ */
+function AddProjectMachines({
+  machines,
+  anchorEl,
+  onClose,
+  onPick,
+}: {
+  machines: string[]
+  anchorEl: HTMLElement | null
+  onClose: () => void
+  /** null: this computer */
+  onPick: (machine: string | null) => void
+}) {
+  const info = useStore((s) => s.machines)
+  return (
+    <RowMenu anchorEl={anchorEl} testId="add-project-machines" onClose={onClose}>
+      <ActionRow label="This computer" onClick={() => onPick(null)} testId="add-project-on-local" />
+      {machines.map((m) => {
+        const machine = info[m]
+        const name = machine?.name ?? m
+        const connected = machine?.status === 'connected'
+        return (
+          <ActionRow
+            key={m}
+            label={name}
+            onClick={() => onPick(m)}
+            testId={`add-project-on-${m}`}
+            disabled={!connected}
+            title={connected ? `Add a project on ${name}` : `${name} is not connected`}
+            trailing={machine && <MachineStatusMark status={machine.status} testId={`add-project-status-${m}`} />}
+          />
+        )
+      })}
+    </RowMenu>
   )
 }
 

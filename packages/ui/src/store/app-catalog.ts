@@ -155,16 +155,14 @@ export function useProjectApps(projectId: string): ExternalCatalogApp[] {
   return useMemo(() => buildCatalog(external).byProject[projectId] ?? NONE, [external, projectId])
 }
 
-/** The user folder's apps — since they do not belong to a project, they get their own group in the sidebar */
+/**
+ * The user folder's apps — since they do not belong to a project, they get their own group in the sidebar. Every
+ * machine's (#734): a linked machine's stand among this computer's, by title, each with its machine's badge, where they
+ * used to stand under that machine's header.
+ */
 export function useUserApps(): ExternalCatalogApp[] {
   const external = useStore((s) => s.externalApps)
-  return useMemo(() => buildCatalog(external).user, [external])
-}
-
-/** A linked machine's user-folder apps (#82) */
-export function useMachineApps(machine: string): ExternalCatalogApp[] {
-  const external = useStore((s) => s.externalApps)
-  return useMemo(() => buildCatalog(external).byMachine[machine] ?? NONE, [external, machine])
+  return useMemo(() => buildCatalog(external).external.filter((a) => a.projectId === null), [external])
 }
 
 /**

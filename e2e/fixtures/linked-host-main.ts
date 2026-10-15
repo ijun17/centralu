@@ -10,7 +10,7 @@ import { HostServer } from '../../packages/agent-host/src/transport/server.js'
 import { Links } from '../../packages/agent-host/src/links/links.js'
 import { Router } from '../../packages/agent-host/src/links/router.js'
 import { DirectTunnel, SshTunnel, type RemoteSpec } from '../../packages/agent-host/src/links/tunnel.js'
-import { storeMirror, storeRegistry } from '../../packages/agent-host/src/links/stored.js'
+import { storeMirror, storeProjectOrder, storeRegistry } from '../../packages/agent-host/src/links/stored.js'
 import { scriptedAdapters } from '../../packages/agent-host/src/links/scripted-agent.test-helpers.js'
 import { projectsHome } from '../../packages/agent-host/src/dev-services/project-folder.js'
 import { linkedViews } from '../../packages/agent-host/src/links/linked-views.js'
@@ -147,6 +147,8 @@ const views: ViewHost = new ViewHost({
 const router: Router = new Router({
   local: createRpcHandler(mgr, adapters, { terminals, commands, machines: links, externalApps, views }),
   machines: () => links.all(),
+  // The project order across machines, kept in this host's store as main.ts keeps it (#734)
+  order: storeProjectOrder(store),
 })
 const server: HostServer = new HostServer({
   port: Number(values.port),

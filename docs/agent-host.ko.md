@@ -577,7 +577,7 @@ https로 서비스하는 로컬 bare 저장소를 상대로 끝까지 시험한�
 대상은 카드 전에(거절은 사람에게 아무 비용이 없다) 그리고 카드 뒤에 다시 확인한다. 이렇게 만든 프로젝트는
 `projects_changed`로 알리고, 모든 창이 프로젝트 목록을 다시 읽는다. 오케스트레이터만 가진 도구이고
 (security-boundaries.md) 이 컴퓨터에만 만든다: 허브의 오케스트레이터는 연결된 머신을 보지 못하므로 그 머신의
-프로젝트는 그 머신의 +에서 만든다. 클론이면 만들기를 누른 뒤 호출이 도는 동안 오케스트레이터 대화에 "Cloning … into …"라고 알린다.
+프로젝트는 Add project에서 그 머신을 골라 만든다. 클론이면 만들기를 누른 뒤 호출이 도는 동안 오케스트레이터 대화에 "Cloning … into …"라고 알린다.
 이 교체로 오케스트레이터가 늘 싣는 정의는 전보다 작아졌다(`residentCost`, Claude: 11,798 → 11,620자, 클론 인자까지
 11,770자; docs/tool-cost.md).
 
@@ -1492,7 +1492,7 @@ Windows에서는 beta.10의 `centralu serve`):
 
 | 어디 | 링크로 하는 일 |
 |---|---|
-| 사이드바 | 연결된 기기가 하나라도 있으면 `machine`으로 묶는다: 이 컴퓨터가 먼저("Your apps"와 함께), 그다음 기기마다 이름과 링크 상태(`connected`, `connecting`, `away`, `version mismatch`, …), 그 프로젝트와 사용자 폴더 앱. 연결되지 않은 기기의 프로젝트와 세션은 흐리게(`data-away`) 남고, 결코 깨우지 않는다. 기기의 +는 그 기기의 경로로 폴더를 더하고(`projects.add {path, machine}`), 기기 이름은 설정 → 기기를 연다 |
+| 사이드바 | 기기와 상관없이 프로젝트 목록 하나(#734)이고, 순서는 허브가 기기를 넘나들며 지킨다: `projects.reorder`는 기기 접두사가 붙은 id로 목록 전체를 받고, 기기마다 제 프로젝트의 순서를 저장하며, 허브는 목록 전체를 제 저장소(`app_settings`의 `hub.projectOrder`)에 저장한다. 그래서 기기가 연결되어 있으면 `projects.list`가 그 순서로 답한다. 그 순서에 아직 없는 프로젝트(그 뒤에 더한 것, 새로 연결한 기기의 것)는 끝에 선다. 연결된 기기의 프로젝트와, "Your apps"에 선 그 사용자 폴더 앱은 이름 오른쪽에 기기 이름 배지를 단다: 링크가 `connected`이면 실선 테두리, 그 밖(`connecting`, `away`, …)이면 점선이다. 누르면 설정 → 기기를 열고, 툴팁에는 링크의 마지막 오류가 있다. 연결되지 않은 기기의 프로젝트와 세션은 흐리게(`data-away`) 남고, 결코 깨우지 않는다. 기기가 하나라도 연결되면 Add project가 어디에 더할지 묻는다: 이 컴퓨터(폴더 선택기), 또는 연결된 기기의 경로로 폴더를 더하거나(`projects.add {path, machine}`) 그 기기의 `~/Centralu`에 빈 폴더를 만든다(`projects.create {name, parent?, machine}`) |
 | 설정 → 기기 | `machines.list/add/remove/reconnect`. 행마다 마지막 오류를 할 일로 말하고(`@cc/core`의 `machineProblem`: 키가 안 올라감, 호스트 키를 받은 적 없음, 거기에 Centralu가 없거나 serve가 안 돎), 버전 질문을 담는다 |
 | 버전 질문 | `MachineInfo.versions`에서: 허브가 오래되면 기존 업데이트 경로, 원격이 오래되면 거기서 칠 정확한 `npm i -g centralu@<허브 버전>`(1단계는 원격을 업데이트하지 못한다). "Connect anyway"는 `machines.acceptVersions`이고, 프로토콜이 같을 때만 내놓는다 |
 | 새 세션 대화상자, 세션 메뉴 | `agents.detect`, `agents.models`, `agents.capabilities`에 프로젝트의 `machine`을 넘긴다 |

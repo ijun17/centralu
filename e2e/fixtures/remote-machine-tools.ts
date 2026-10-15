@@ -217,7 +217,8 @@ export function remoteMachineToolsTests(): void {
     async function remoteProject(page: Page, spec: { name: string; sshTarget: string; shell?: 'posix' | 'powershell' | 'wsl' }, path: string) {
       await link(page, spec)
       const id = spec.name.toLowerCase()
-      await page.getByTestId(`add-remote-project-${id}`).click()
+      await page.getByTestId('add-project').click()
+      await page.getByTestId(`add-project-on-${id}`).click()
       await page.getByTestId('add-remote-project-path').fill(path)
       await page.getByTestId('add-remote-project-confirm').click()
       await expect(page.getByTestId('add-remote-project-dialog')).toHaveCount(0)

@@ -1027,7 +1027,7 @@ export type AppState = {
   /** What would stop on a machine if its host stopped now, for the update prompt; null when unknown */
   machineActivity(machineId: string): Promise<HostActivity | null>
   checkMachineAgentVersions(machineId: string, force?: boolean): Promise<void>
-  /** Opens Settings on one category, e.g. Machines from a machine's header in the sidebar */
+  /** Opens Settings on one category, e.g. Machines from a machine's badge in the sidebar */
   settingsRequest: { category: string; at: number } | null
   openSettingsAt(category: string): void
   /**

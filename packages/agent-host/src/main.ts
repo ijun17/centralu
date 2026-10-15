@@ -51,7 +51,7 @@ import { linkedSessions } from './links/linked-sessions.js'
 import { linkedViews } from './links/linked-views.js'
 import { Router } from './links/router.js'
 import { SshTunnel } from './links/tunnel.js'
-import { storeMirror, storeRegistry } from './links/stored.js'
+import { storeMirror, storeProjectOrder, storeRegistry } from './links/stored.js'
 import { projectsHome } from './dev-services/project-folder.js'
 
 /**
@@ -529,6 +529,7 @@ const router: Router = new Router({
     updateApply,
   }),
   machines: () => links.all(),
+  order: storeProjectOrder(store),
 })
 const server = new HostServer({
   port: Number(values.port),

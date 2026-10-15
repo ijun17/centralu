@@ -457,20 +457,26 @@ uxTask({
   task: 'Add a folder on a linked machine as a project',
   path: 'mouse',
   access: 'discoverable',
-  notes: ['The machine group\'s "Add project on…"; the path is typed, there is no picker for the other machine'],
+  notes: [
+    'Add project, then the machine in its menu (#734; it was the machine header\'s +, which went with the headers)',
+    'Hick–Hyman: a choice among this computer and each linked machine (two here)',
+    'The path is typed, there is no picker for the other machine',
+  ],
   start: async (page) => {
     await demo(page)
     await page.evaluate(() => (window as any).__mock.machines.add({ name: 'Box', sshTarget: 'me@box', shell: 'posix' }))
-    await expect(page.getByTestId('add-remote-project-box')).toBeVisible()
+    await expect(page.getByTestId('add-project')).toHaveAttribute('aria-haspopup', 'menu')
   },
   run: async (u, page) => {
-    await u.click(page.getByTestId('add-remote-project-box'))
+    await u.click(page.getByTestId('add-project'))
+    await u.until('the machine menu', () => expect(page.getByTestId('add-project-machines')).toBeVisible())
+    await u.click(page.getByTestId('add-project-on-box'))
     await u.until('the dialog', () => expect(page.getByTestId('add-remote-project-dialog')).toBeVisible())
     await u.fill(page.getByTestId('add-remote-project-path'), '/home/me/api')
     await u.click(page.getByTestId('add-remote-project-confirm'))
   },
-  goal: async (page) => expect(page.getByTestId('machine-group-box').getByTestId('project-api')).toBeVisible(),
-  budget: { operators: 25, M: 2, seconds: 11.0 },
+  goal: async (page) => expect(page.getByTestId('project-machine-api')).toHaveText('Box'),
+  budget: { operators: 27, M: 3, seconds: 12.7 },
 })
 
 // ---------------------------------------------------------------------------------------------

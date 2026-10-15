@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { Store } from '../dev-services/store.js'
-import { storeMirror, storeRegistry } from './stored.js'
+import { storeMirror, storeProjectOrder, storeRegistry } from './stored.js'
 
 /** The linked machines and the headers mirror in the hub's store (#82, store v46) */
 
@@ -145,5 +145,17 @@ describe('linked machines in the store (#82)', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('the project order across machines in the store (#734)', () => {
+  it('reads back what was written; nothing written, or a value it cannot read, is no order', () => {
+    const store = new Store()
+    const order = storeProjectOrder(store)
+    expect(order.read()).toEqual([])
+    order.write(['m1.b', 'h2', 'm1.a'])
+    expect(storeProjectOrder(store).read()).toEqual(['m1.b', 'h2', 'm1.a'])
+    store.setAppSetting('hub.projectOrder', '{oops')
+    expect(order.read()).toEqual([])
   })
 })
