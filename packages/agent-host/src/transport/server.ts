@@ -1,6 +1,7 @@
-import { WebSocketServer, type WebSocket } from 'ws'
+import { WebSocketServer, type RawData, type WebSocket } from 'ws'
 import { createServer, type Server } from 'node:http'
 import {
+  ATTACHMENT_MAX_BASE64,
   PROTOCOL_VERSION,
   ProtocolErrorCode,
   type HostBuild,
@@ -9,7 +10,7 @@ import {
   parseClientFrame,
 } from '@cc/protocol'
 import { EventLog } from './event-log.js'
-import { createHttpHandler, type HttpGate } from './http.js'
+import { createHttpHandler, sameSecret, type HttpGate } from './http.js'
 import { bridgeRefusal, bridgeSessionOf } from './bridge-token.js'
 import { DrainCut, type Drain } from '../drain.js'
 
@@ -78,6 +79,13 @@ export type HostServerOptions = {
    */
   handshakeTimeoutMs?: number
   /**
+   * How many sockets may wait for their hello at once. A new upgrade past this is refused with a 503, so
+   * connections that never speak cannot hold a slot each for the whole handshake deadline.
+   */
+  maxPendingHandshakes?: number
+  /** The largest frame a socket may send, as bytes of payload. Defaults to what the largest attachment call needs */
+  maxFrameBytes?: number
+  /**
    * The undrained backlog a peer may leave on one socket before it is cut (#82). See
    * `sendTo` for why the rule is "already over the bound", not "this frame would cross it".
    */
@@ -116,6 +124,15 @@ export type HostServerOptions = {
  */
 export const TRANSPORT_LIMITS = {
   handshakeTimeoutMs: 10_000,
+  maxPendingHandshakes: 16,
+  /**
+   * The largest legitimate frame is an `attachments.save` call: a base64 string of up to
+   * `ATTACHMENT_MAX_BASE64` characters plus a few fields around it. A megabyte of room covers those
+   * (a long file name or path included) and nothing else in the protocol comes near it.
+   */
+  maxFrameBytes: ATTACHMENT_MAX_BASE64 + 1024 * 1024,
+  /** A hello is a token and two numbers; a socket that has not sent one sends nothing bigger than this */
+  maxHelloFrameBytes: 64 * 1024,
   maxBufferedBytes: 64 * 1024 * 1024,
   replayBudgetBytes: 16 * 1024 * 1024,
   closeGraceMs: 250,
@@ -124,6 +141,12 @@ export const TRANSPORT_LIMITS = {
 /** WebSocket close codes this server uses (4001 is the token rule's own) */
 const CLOSE_GOING_AWAY = 1001
 const CLOSE_AUTH = 4001
+
+/** The payload size of a received message, whichever shape `ws` hands it in */
+function rawBytes(raw: RawData): number {
+  if (Array.isArray(raw)) return raw.reduce((n, b) => n + b.length, 0)
+  return raw.byteLength
+}
 
 /** Bytes a server-to-client WebSocket frame adds around its payload (RFC 6455 §5.2, unmasked) */
 function frameOverhead(payloadBytes: number): number {
@@ -147,7 +170,14 @@ export class HostServer {
   /** Handshake deadlines of sockets that have not sent a valid hello yet */
   private handshakeTimers = new Map<WebSocket, ReturnType<typeof setTimeout>>()
   private closing: Promise<void> | null = null
-  private readonly limits: { handshakeTimeoutMs: number; maxBufferedBytes: number; replayBudgetBytes: number; closeGraceMs: number }
+  private readonly limits: {
+    handshakeTimeoutMs: number
+    maxPendingHandshakes: number
+    maxFrameBytes: number
+    maxBufferedBytes: number
+    replayBudgetBytes: number
+    closeGraceMs: number
+  }
   private listenError: ((err: Error) => void) | null = null
   private readonly allowedOrigins: ReadonlySet<string>
   /**
@@ -181,6 +211,8 @@ export class HostServer {
     const maxBufferedBytes = opts.maxBufferedBytes ?? TRANSPORT_LIMITS.maxBufferedBytes
     this.limits = {
       handshakeTimeoutMs: opts.handshakeTimeoutMs ?? TRANSPORT_LIMITS.handshakeTimeoutMs,
+      maxPendingHandshakes: opts.maxPendingHandshakes ?? TRANSPORT_LIMITS.maxPendingHandshakes,
+      maxFrameBytes: opts.maxFrameBytes ?? TRANSPORT_LIMITS.maxFrameBytes,
       maxBufferedBytes,
       replayBudgetBytes: Math.min(opts.replayBudgetBytes ?? TRANSPORT_LIMITS.replayBudgetBytes, maxBufferedBytes),
       closeGraceMs: opts.closeGraceMs ?? TRANSPORT_LIMITS.closeGraceMs,
@@ -189,7 +221,11 @@ export class HostServer {
     this.http = createServer(createHttpHandler(opts.http))
     this.wss = new WebSocketServer({
       server: this.http,
+      // A frame over this closes the socket with 1009 before it is handed to us (ws default: 100 MiB)
+      maxPayload: this.limits.maxFrameBytes,
       verifyClient: (info, done) => {
+        // Sockets that have not said hello are limited in number: past that a new upgrade waits for a slot
+        if (this.handshakeTimers.size >= this.limits.maxPendingHandshakes) return done(false, 503, 'too many connections waiting for hello')
         const origin = info.req.headers.origin
         const ok = this.originAllowed(origin)
         /*
@@ -396,14 +432,23 @@ export class HostServer {
     )
 
     ws.on('message', async (raw) => {
+      /*
+       * Until hello is accepted a socket is allowed one small frame, and it has to be a hello. Anything
+       * else (a frame that is too big, not JSON, not a frame of the protocol, an RPC) closes it, so it
+       * does not keep a slot while it tries other things. The size is checked before JSON.parse, which
+       * would otherwise build the whole value first.
+       */
+      if (!authed && rawBytes(raw) > TRANSPORT_LIMITS.maxHelloFrameBytes) return ws.close(CLOSE_AUTH, 'not a hello')
       let parsedJson: unknown
       try {
         parsedJson = JSON.parse(String(raw))
       } catch {
+        if (!authed) return ws.close(CLOSE_AUTH, 'not a hello')
         return this.sendError(ws, null, { code: 'internal', message: 'Malformed JSON', retryable: false })
       }
       const frame = parseClientFrame(parsedJson)
       if (!frame.success) {
+        if (!authed) return ws.close(CLOSE_AUTH, 'not a hello')
         return this.sendError(ws, null, { code: 'internal', message: 'Unknown frame', retryable: false })
       }
 
@@ -414,7 +459,7 @@ export class HostServer {
          * delivered seq 2 twice — and the client has no way to tell a repeat from new work.
          */
         if (authed) return
-        if (frame.data.token !== this.opts.token) {
+        if (!sameSecret(frame.data.token, this.opts.token)) {
           // A Codex bridge holds a credential for its own session's calls only (bridge-token.ts)
           bridgeOf = bridgeSessionOf(this.opts.token, frame.data.token)
           if (bridgeOf === null) {

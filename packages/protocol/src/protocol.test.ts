@@ -479,6 +479,13 @@ describe('SessionId', () => {
     expect(save.safeParse({ ...ok, dataBase64: 'AAAA' }).success).toBe(true)
     expect(save.safeParse({ ...ok, dataBase64: 'A'.repeat(ATTACHMENT_MAX_BASE64 + 1) }).success).toBe(false)
   })
+
+  it('refuses an imported file bigger than the same cap, so the host never needs a frame bigger than an attachment', () => {
+    const imp = RpcMethods['fs.importFile'].params
+    const ok = { projectId: 'p1', toDir: '', name: 'a.bin' }
+    expect(imp.safeParse({ ...ok, dataBase64: 'A'.repeat(ATTACHMENT_MAX_BASE64) }).success).toBe(true)
+    expect(imp.safeParse({ ...ok, dataBase64: 'A'.repeat(ATTACHMENT_MAX_BASE64 + 1) }).success).toBe(false)
+  })
 })
 
 describe("a session's background tasks (#290)", () => {

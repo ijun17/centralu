@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocket } from 'ws'
 import { request, type IncomingHttpHeaders } from 'node:http'
-import { PROTOCOL_VERSION, parseServerFrame, type NormalizedEvent } from '@cc/protocol'
+import { ATTACHMENT_MAX_BASE64, PROTOCOL_VERSION, parseServerFrame, type NormalizedEvent } from '@cc/protocol'
 import { HostServer, parseAllowedOrigins, versionMismatchMessage, type HostServerOptions, type RpcHandler } from './server.js'
 import { deriveHttpSecret, sameSecret, secretError, type HttpRoute } from './http.js'
 import { bridgeToken } from './bridge-token.js'
@@ -359,6 +359,96 @@ describe('handshake', () => {
     await c.open()
     c.send({ kind: 'rpc', id: '1', method: 'sessions.list', params: {} })
     expect(await c.closed()).toBe(4001)
+  })
+
+  it('closes a socket whose first frame is not a hello, whatever it is instead', async () => {
+    const { port } = await start()
+    for (const first of ['not json', JSON.stringify({ kind: 'nonsense' }), JSON.stringify({ kind: 'hello' })]) {
+      const c = connect(port)
+      await c.open()
+      c.ws.send(first)
+      expect(await c.closed()).toBe(4001)
+    }
+  })
+
+  it('closes a socket that sends a big frame before hello, without reading it', async () => {
+    const { port } = await start()
+    const c = connect(port)
+    await c.open()
+    // A correct hello, only padded: what makes it refused is its size alone
+    c.ws.send(JSON.stringify({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION, pad: 'x'.repeat(128 * 1024) }))
+    expect(await c.closed()).toBe(4001)
+    expect(c.frames).toEqual([])
+  })
+
+  it('still answers a malformed frame with an error once the socket is in', async () => {
+    const { port } = await start()
+    const c = connect(port)
+    await c.open()
+    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    await c.wait(() => c.frames.length > 0)
+    c.ws.send('not json')
+    await c.wait(() => c.frames.length > 1)
+    expect(c.frames[1]).toMatchObject({ kind: 'res', ok: false })
+    c.ws.close()
+  })
+
+  it('refuses a new connection while the limit of sockets waiting for hello is held, and frees a slot when one leaves', async () => {
+    const { port } = await start(undefined, { maxPendingHandshakes: 16 })
+    const waiting: ReturnType<typeof connect>[] = []
+    for (let i = 0; i < 16; i++) {
+      const c = connect(port)
+      await c.open()
+      waiting.push(c)
+    }
+    const seventeenth = new WebSocket(`ws://127.0.0.1:${port}`)
+    const refusal = await new Promise<string>((resolve) => {
+      seventeenth.on('unexpected-response', (_req, res) => resolve(String(res.statusCode)))
+      seventeenth.on('error', () => {})
+      seventeenth.on('open', () => resolve('opened'))
+    })
+    expect(refusal).toBe('503')
+
+    // A socket that says hello (or leaves) gives its slot back, and a window can connect again
+    waiting[0]!.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    await waiting[0]!.wait(() => waiting[0]!.frames.length > 0)
+    const again = connect(port)
+    await again.open()
+    again.ws.close()
+    for (const c of waiting) c.ws.close()
+  })
+
+  it('closes with 1009 a frame over the size limit, also after hello', async () => {
+    const { port } = await start(undefined, { maxFrameBytes: 4096 })
+    const c = connect(port)
+    await c.open()
+    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    await c.wait(() => c.frames.length > 0)
+    c.send({ kind: 'rpc', id: '1', method: 'x', params: { pad: 'x'.repeat(8192) } })
+    expect(await c.closed()).toBe(1009)
+  })
+
+  it('still takes the largest attachment call after hello', async () => {
+    const seen: number[] = []
+    const { port } = await start(async (method, params) => {
+      if (method === 'attachments.save') seen.push((params as { dataBase64: string }).dataBase64.length)
+      return { ok: true }
+    })
+    const c = connect(port)
+    await c.open()
+    c.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    await c.wait(() => c.frames.length > 0)
+    c.send({
+      kind: 'rpc',
+      id: '1',
+      method: 'attachments.save',
+      // Names as long as a path allows: the frame is the base64 string plus what is around it
+      params: { sessionId: 's'.repeat(200), name: 'n'.repeat(4096), mime: 'image/png', dataBase64: 'A'.repeat(ATTACHMENT_MAX_BASE64) },
+    })
+    await c.wait(() => c.frames.length > 1, 15_000)
+    expect(c.frames[1]).toMatchObject({ kind: 'res', id: '1', ok: true })
+    expect(seen).toEqual([ATTACHMENT_MAX_BASE64])
+    c.ws.close()
   })
 })
 

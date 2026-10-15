@@ -663,7 +663,11 @@ browser does not hand the 403 to the page. Development tokens should be generate
 only with the intended local client. Mock/demo modes do not connect to the host.
 A socket that has not sent a valid hello within 10 seconds is closed, and a socket whose undrained
 outbound backlog passes 64 MiB is cut, so a connection cannot make the host hold unbounded memory or
-an endless slot (#82; `transport/server.ts`, `TRANSPORT_LIMITS`). An authenticated socket's hello is
+an endless slot (#82; `transport/server.ts`, `TRANSPORT_LIMITS`). Before its hello a socket may send
+one frame of at most 64 KiB and it must be a hello: anything else closes it (4001). At most 16 sockets
+may wait for their hello at once; a further upgrade is refused with a 503. No frame, before or after
+hello, may be bigger than the largest attachment call (`ATTACHMENT_MAX_BASE64` plus 1 MiB); a bigger
+one closes the socket (1009). The token is compared in constant time. An authenticated socket's hello is
 answered once; a repeat is ignored. A hello may carry a Codex bridge's credential instead of the token
 (#382, "The front door" below); that socket receives no events and may call only its own session's
 bridge RPCs.

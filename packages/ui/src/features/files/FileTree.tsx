@@ -249,6 +249,10 @@ function useFileOps(projectId: string, refresh: (...dirs: string[]) => void) {
       },
       importFiles: async (files: File[], toDir: string) => {
         for (const file of files) {
+          if (file.size > IMPORT_MAX_BYTES) {
+            setToast(`${file.name} is too large to import (max ${IMPORT_MAX_BYTES / 1024 / 1024}MB)`)
+            continue
+          }
           try {
             await platform.fs.importFile(projectId, toDir, file.name, await readBase64(file))
             refresh(toDir)
@@ -263,6 +267,9 @@ function useFileOps(projectId: string, refresh: (...dirs: string[]) => void) {
 }
 
 type FileOps = ReturnType<typeof useFileOps>
+
+/** The largest file a drop imports: the host takes the bytes as one base64 string, capped like an attachment (ATTACHMENT_MAX_BASE64) */
+const IMPORT_MAX_BYTES = 32 * 1024 * 1024
 
 /**
  * Turns one file into base64.

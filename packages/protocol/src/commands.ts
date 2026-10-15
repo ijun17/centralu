@@ -1031,7 +1031,8 @@ export const RpcMethods = {
    * which is the same reason attachments travel this way.
    */
   'fs.importFile': {
-    params: z.object({ projectId: ProjectId, toDir: z.string(), name: z.string(), dataBase64: z.string() }),
+    // The same cap as an attachment: the host's socket takes no frame bigger than one of those carries
+    params: z.object({ projectId: ProjectId, toDir: z.string(), name: z.string(), dataBase64: z.string().max(ATTACHMENT_MAX_BASE64, 'This file is too large to import') }),
     result: z.object({ path: z.string() }),
   },
   /**
