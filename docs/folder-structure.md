@@ -77,6 +77,7 @@ centralu/
 │  │     │     sessions/ (a session's actions: focus, send, answers, process, lifecycle, handoff)
 │  │     │     connection.ts (attaching to the host, reconnect recovery, the workspace snapshot)
 │  │     │     history.ts (reading a conversation's history pages and a launch card's steps)
+│  │     │     updates.ts (Centralu's update and the agent CLIs' versions)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)
