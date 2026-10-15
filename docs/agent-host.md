@@ -754,8 +754,21 @@ new session now takes over the original's **live** work as it is created, before
 - **What stays**: a settled child (finished and reported or read, nothing pending) stays with the original, so its
   history stays where it happened, and is deleted with it or left on its own as before.
 - **The note**: the note file the opening message points at, and the marker that keeps its original, open with a
-  section listing what moved (name, state, handle; the project for another project's session). Nothing moved, nothing
-  added. The opening message itself is the window's and is not changed (the window confirms it by its text).
+  section listing what moved: name, state, handle, and what the new session can actually do with it, which depends on
+  what moved (#693 review). A child it now started: `agent_session` works on it, and its report comes when one is owed.
+  Another project's session: `ask_project` with no task waits for the answer, and the cards of the turn it now owns
+  are told to it. A same-project session it did not start (a turn it now owns): the report and the cards, while
+  `agent_session` works on it only under `auto`. A standing card: the handle for `agent_session` until the person
+  answers. Nothing moved, nothing added. The opening message itself is the window's and is not changed (the window
+  confirms it by its text).
+- **An original that stays** (a handoff that keeps it, #694) is told in its conversation what went to whom (a
+  `notice`). A call of its own still waiting on one of them (`agent_session` wait or send, `ask_project` with no task,
+  a wait on a start request's handle, a `start_agent` call whose card is approved later) ends with where it went, so
+  the answer is read once, by the new session; a wait had taken the child's report mark down, so that report is owed to
+  the new session, set in the same transaction (`armReports`). Its later `agent_session` or `ask_project` about one of
+  them says where it went (`handedOver`, live only) rather than "not a session this session started".
+- **Who may hand over** is not checked here: `moveLiveChildren` trusts its caller. Today only the person's handoff
+  calls it; an agent-facing handoff (#694's orchestrator tools) must check its authority over the original first.
 - **Atomic**: everything stored moves in one transaction (`Store.moveChildren`); the host's memory follows after the
   commit, with no await in between. A crash before the commit leaves every link on the original, after it every
   link on the new session, so a host taking over after a swap or a restart reads one owner (`report_marks`,

@@ -3785,9 +3785,14 @@ export class Store {
    * report each owes it (`report_marks`), the delegated turn it gave each (`delegated_turns`), every request it queued
    * (`queued_requests`), and its start_agent requests still waiting for the person (`agent_start_requests`, whose
    * stored request names its caller too). A crash before the commit leaves every row on the original; after it, every
-   * row on the new session, so the next host (a swap or a restart) reads one owner either way.
+   * row on the new session, so the next host (a swap or a restart) reads one owner either way. `armReports`: children
+   * whose report the original was waiting for in a call (its wait had taken the mark down), now owed to the new session.
    */
-  moveChildren(from: string, to: string, move: { sessions: readonly string[]; startRequests: readonly { requestId: string; request: unknown }[] }): void {
+  moveChildren(
+    from: string,
+    to: string,
+    move: { sessions: readonly string[]; startRequests: readonly { requestId: string; request: unknown }[]; armReports?: readonly string[] },
+  ): void {
     this.db.transaction(() => {
       const owner = this.db.prepare(
         `UPDATE sessions SET
@@ -3805,6 +3810,11 @@ export class Store {
       this.db.prepare(`UPDATE queued_requests SET caller_session_id = ? WHERE caller_session_id = ?`).run(to, from)
       const start = this.db.prepare(`UPDATE agent_start_requests SET caller_session_id = ?, request = ? WHERE request_id = ? AND caller_session_id = ?`)
       for (const r of move.startRequests) start.run(to, JSON.stringify(r.request), r.requestId, from)
+      const arm = this.db.prepare(
+        `INSERT INTO report_marks (session_id, caller_session_id, marked_at) VALUES (?, ?, ?)
+           ON CONFLICT(session_id) DO UPDATE SET caller_session_id = excluded.caller_session_id, marked_at = excluded.marked_at`,
+      )
+      for (const id of move.armReports ?? []) arm.run(id, to, Date.now())
     })()
   }
 

@@ -175,7 +175,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const heir = await handOff(h, project, parent, false)
 
     expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, state: 'working', sessionId: child })
-    expect(await h.mgr.agentSession(parent, { sessionId: child, action: 'status' })).toMatchObject({ ok: false, error: expect.stringContaining('not a session this session started') })
+    expect(await h.mgr.agentSession(parent, { sessionId: child, action: 'status' })).toMatchObject({ ok: false, error: expect.stringContaining(`took over from this one, "You are taking over. Read the note." [${heir}]`) })
     expect(await h.mgr.agentSession(parent, { sessionId: child, action: 'delete' })).toMatchObject({ ok: false })
     expect(h.mgr.listSessions().some((s) => s.id === child)).toBe(true)
     // The delegation moved with it: the new session may delete the child it now owns while it works
@@ -196,8 +196,8 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(owner(settled)).toBe(parent)
     expect(owner(live)).toBe(heir)
     const note = readFileSync(handoffNotePath(project, parent), 'utf8')
-    expect(note).toContain('Sessions handed over with this note')
-    expect(note).toContain(`"Port the parser" — working — handle: ${live}`)
+    expect(note).toContain('Work handed over with this note')
+    expect(note).toContain(`"Port the parser" — working — handle: ${live}. Its report comes to you. agent_session works on it as on a session you started`)
     expect(note).not.toContain(settled)
     // The note the person wrote follows, whole; the marker keeps the same text
     expect(note.endsWith('NOTE BODY: where things stand')).toBe(true)
@@ -263,6 +263,65 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const child = h.mgr.listSessions().find((s) => s.askedBy === heir)!.id
     expect(store.listAgentStartRequests()).toEqual([])
     expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, sessionId: child })
+  })
+
+  it('tells an original that stays what went where, in its conversation', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await startChild(h, parent, 'long work')
+    h.mgr.rename(child, 'Port the parser')
+    const heir = await handOff(h, project, parent, false)
+    const notice = store.loadMessages(parent, 20).map((m) => m.payload as { type?: string; text?: string }).find((p) => p.type === 'notice' && p.text?.includes('Handed over'))
+    expect(notice?.text).toContain(`[${heir}]`)
+    expect(notice?.text).toContain('"Port the parser" (working)')
+  })
+
+  it("ends the original's wait on a moved child: the answer goes to the new session alone", async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await startChild(h, parent, 'long work')
+    // The original waits on the child in a call (its wait takes the report mark down)
+    const waiting = h.mgr.agentSession(parent, { sessionId: child, action: 'wait' })
+    await until(() => store.listReportMarks().length === 0)
+    const heir = await handOff(h, project, parent, false)
+    expect(await waiting).toMatchObject({ ok: false, error: expect.stringContaining(`[${heir}]`) })
+    // The report that wait had taken down is owed to the new session, stored too
+    expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: heir }])
+    h.claude.handles.get(child)!.answer('the answer')
+    await until(() => reports(h.claude.handles.get(heir), child).length === 1)
+    expect(reports(h.claude.handles.get(parent), child)).toEqual([])
+    expect(await h.mgr.agentSession(heir, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, answer: 'the answer' })
+  })
+
+  it("ends the original's wait on a start request it handed over", async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h, 'safe')
+    void h.mgr.startAgent(parent, { task: 'needs a yes', wait: false })
+    await until(() => h.mgr.listSessions().find((s) => s.id === parent)?.pendingApproval?.detail.kind === 'agent_start')
+    const requestId = h.mgr.listSessions().find((s) => s.id === parent)!.pendingApproval!.requestId
+    const waiting = h.mgr.agentSession(parent, { sessionId: requestId, action: 'wait' })
+    const heir = await handOff(h, project, parent, false)
+    expect(await waiting).toMatchObject({ ok: false, error: expect.stringContaining(`[${heir}]`) })
+    expect(await h.mgr.agentSession(heir, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: true, state: 'pending' })
+  })
+
+  it('says in the note what the new session can do with a session it did not start', async () => {
+    const h = host()
+    const project = await h.mgr.addProject(root)
+    h.mgr.setProjectTrusted(project.id, true)
+    store.setProjectConsent(project.id, project.id, 'agents')
+    // An auto session gives work to a session the person opened: the turn is its own, the session is not its child
+    const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'auto' })).id
+    const other = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
+    h.mgr.rename(other, 'Docs')
+    const sent = h.mgr.agentSession(parent, { sessionId: other, action: 'send', text: 'tidy the docs' })
+    await until(() => h.mgr.listSessions().find((s) => s.id === other)?.state === 'working')
+    const heir = await handOff(h, project.id, parent, false)
+    // The call that gave the work was still waiting: it hears where the work went
+    expect(await sent).toMatchObject({ ok: false, error: expect.stringContaining(`[${heir}]`) })
+    const note = readFileSync(handoffNotePath(project.id, parent), 'utf8')
+    expect(note).toContain(`"Docs" — working — handle: ${other}. Its report comes to you, and you are told of the cards of the turn you now own. You did not start it, so agent_session works on it only with the auto preset.`)
+    expect(owner(other) ?? null).toBeNull()
   })
 
   it('leaves everything with the original when the store fails mid-move, and a restart reads that one owner', async () => {
@@ -333,10 +392,15 @@ describe("a handoff moves the original's ask_project delegations (#693)", () => 
         projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal',
         initialPrompt: 'Take over.', handoff: { from: 'Caller', note: 'NOTE', fromSessionId: caller },
       })).id
-      expect(readFileSync(handoffNotePath(w.caller.id, caller), 'utf8')).toContain(`"Sprites" (project ${w.target.name}, through ask_project) — working — handle: ${target}`)
+      const note = readFileSync(handoffNotePath(w.caller.id, caller), 'utf8')
+      // Another project's session: what the new session can do is ask_project and the cards, not agent_session's verbs (#693 review)
+      expect(note).toContain(`"Sprites" (project ${w.target.name}) — working — handle: ${target}. Call ask_project with project "${w.target.name}" and no task to wait for its answer; you are told of the cards`)
+      expect(note).not.toContain('as on a session you started')
       expect(w.store.listDelegatedTurns()).toEqual([expect.objectContaining({ sessionId: target, callerSessionId: heir })])
       // The other project's session is not the new session's child: its owner on the row stays as it was
       expect(w.store.listSessions().find((s) => s.id === target)?.askedBy ?? null).toBeNull()
+      // The original, kept, is told where its delegation went rather than waiting on it
+      expect(await w.mgr.askProject(caller, { project: w.target.id })).toMatchObject({ ok: false, error: expect.stringContaining(`[${heir}]`) })
       await w.mgr.trashSession(caller)
 
       const waiting = w.mgr.askProject(heir, { project: w.target.id })
