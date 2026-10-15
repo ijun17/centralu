@@ -1967,19 +1967,19 @@
         "M": 1,
         "R": 1
       },
-      "seconds": 3.01,
-      "waitMs": 46,
-      "travelPx": 544,
+      "seconds": 3.15,
+      "waitMs": 6,
+      "travelPx": 549,
       "steps": [
         {
           "kind": "click",
           "label": "app-row-box:_user/notes",
           "operators": "H M P B B",
-          "seconds": 3.01,
+          "seconds": 3.15,
           "pointer": {
-            "D": 544,
-            "W": 109,
-            "ID": 2.59
+            "D": 549,
+            "W": 36,
+            "ID": 4.03
           }
         },
         {
@@ -1987,10 +1987,12 @@
           "label": "goal",
           "operators": "R",
           "seconds": 0,
-          "waitMs": 46
+          "waitMs": 6
         }
       ],
-      "notes": [],
+      "notes": [
+        "Pressing the app's name; the machine badge beside it opens Settings → Machines"
+      ],
       "breaches": []
     },
     {

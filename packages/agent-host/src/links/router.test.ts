@@ -3,7 +3,7 @@ import { RpcMethods } from '@cc/protocol'
 import { encodeNumber } from './machine-ids.js'
 import { Qualifier } from './qualifier.js'
 import { ROUTES } from './routes.js'
-import { Router, type RoutedMachine } from './router.js'
+import { Router, keepUnseen, type RoutedMachine } from './router.js'
 
 /** A linked machine that records what reached it and answers from a table */
 class FakeMachine implements RoutedMachine {
@@ -603,10 +603,92 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
       // Each machine still keeps its own order
       expect(local.at(-1)!.params).toEqual({ orderedIds: ['h2', 'h1'] })
       expect(m1.calls).toEqual([{ method: 'projects.reorder', params: { orderedIds: ['b', 'a'] } }])
-      expect(r.map((p) => p.id)).toEqual(['m1.b', 'h2', 'm1.a', 'h1'])
+      // m2 was named in none of it, and its project is still in the answer (the window replaces its list with it)
+      expect(r.map((p) => p.id)).toEqual(['m1.b', 'h2', 'm1.a', 'h1', 'm2.c'])
+      expect(m2.calls.filter((c) => c.method === 'projects.reorder')).toEqual([])
       // A project the order does not name yet (h3, added since; m2's, a machine linked since) goes at the end
       const listed = (await router.handle('projects.list', {})) as { id: string }[]
       expect(listed.map((p) => p.id)).toEqual(['m1.b', 'h2', 'm1.a', 'h1', 'h3', 'm2.c'])
+    })
+
+    /** A hub with two machines and a kept order, for the cases below */
+    function ordered(kept: string[]) {
+      const saved: string[][] = [kept]
+      const order = { read: () => saved.at(-1)!, write: (ids: readonly string[]) => void saved.push([...ids]) }
+      const local: { method: string; params: unknown }[] = []
+      const hubIds = ['h1', 'h2']
+      const localAnswers: Record<string, unknown> = {
+        'projects.list': () => hubIds.map((id) => ({ id })),
+        'projects.reorder': (p: { orderedIds: string[] }) => [...p.orderedIds.filter((id) => hubIds.includes(id)), ...hubIds.filter((id) => !p.orderedIds.includes(id))].map((id) => ({ id })),
+      }
+      const m1 = new FakeMachine('m1', 1)
+      const m2 = new FakeMachine('m2', 2)
+      for (const m of [m1, m2]) {
+        const own = m === m1 ? ['a', 'b'] : ['c']
+        m.answers['projects.list'] = () => own.map((id) => ({ id }))
+        m.answers['projects.reorder'] = (p: { orderedIds: string[] }) => p.orderedIds.map((id) => ({ id }))
+      }
+      const router = new Router({
+        local: async (method, params) => {
+          local.push({ method, params })
+          const a = localAnswers[method]
+          return typeof a === 'function' ? (a as (p: unknown) => unknown)(params) : a
+        },
+        machines: () => [m1, m2],
+        order,
+      })
+      const ids = async (method: string, params: unknown) => ((await router.handle(method, params)) as { id: string }[]).map((p) => p.id)
+      return { router, saved, local, m1, m2, hubIds, ids }
+    }
+
+    it('a stale window’s order keeps the projects it did not know in their kept place (#734)', async () => {
+      // The window never saw m2.c (its machine came back after it last read): it moves h1 to the top
+      const { saved, m2, ids } = ordered(['m1.a', 'm2.c', 'h1', 'h2', 'm1.b'])
+      expect(await ids('projects.reorder', { orderedIds: ['h1', 'm1.a', 'h2', 'm1.b'] })).toEqual(['h1', 'm1.a', 'm2.c', 'h2', 'm1.b'])
+      expect(saved.at(-1)).toEqual(['h1', 'm1.a', 'm2.c', 'h2', 'm1.b'])
+      // m2 keeps its own order too, from the full list
+      expect(m2.calls).toContainEqual({ method: 'projects.reorder', params: { orderedIds: ['c'] } })
+      expect(keepUnseen(['b'], ['x', 'a', 'b', 'y'])).toEqual(['x', 'a', 'b', 'y'])
+      expect(keepUnseen(['b', 'a'], ['a', 'x', 'b'])).toEqual(['b', 'a', 'x'])
+    })
+
+    it('refuses an order that is not a list of ids before keeping or sending anything (#734)', async () => {
+      const { router, saved, local, m1 } = ordered(['h1'])
+      await expect(router.handle('projects.reorder', { orderedIds: 'h1' })).rejects.toThrow()
+      await expect(router.handle('projects.reorder', {})).rejects.toThrow()
+      expect(saved).toEqual([['h1']])
+      expect(local).toEqual([])
+      expect(m1.calls).toEqual([])
+    })
+
+    it('forgets a project the hub no longer lists, but keeps a linked machine’s it cannot see (#734)', async () => {
+      const { saved, ids } = ordered(['gone', 'm1.a', 'h1', 'h2', 'm1.b', 'm1.lost', 'zz.x'])
+      await ids('projects.reorder', { orderedIds: ['h2', 'h1', 'm1.a', 'm1.b', 'm2.c'] })
+      // `gone` and `zz.x` (a machine no longer linked) are not listed; m1.lost may be out of reach on m1
+      expect(saved.at(-1)).toEqual(['h2', 'h1', 'm1.a', 'm1.b', 'm1.lost', 'm2.c'])
+    })
+
+    it('a machine that is away keeps its mirrored projects in their place, in the list and in a reorder (#734)', async () => {
+      const { m1, ids } = ordered(['m1.a', 'h1', 'm1.b', 'h2', 'm2.c'])
+      m1.reachable = false
+      m1.mirror.projects = [{ id: 'a' }, { id: 'b' }]
+      expect(await ids('projects.list', {})).toEqual(['m1.a', 'h1', 'm1.b', 'h2', 'm2.c'])
+      // The window moves h2 to the top; m1 cannot take its part, and its projects stay where they were among the rest
+      expect(await ids('projects.reorder', { orderedIds: ['h2', 'm1.a', 'h1', 'm1.b', 'm2.c'] })).toEqual(['h2', 'm1.a', 'h1', 'm1.b', 'm2.c'])
+    })
+
+    it('a machine that comes back with new projects lists them at the end, its known ones in place (#734)', async () => {
+      const { m1, ids } = ordered(['m1.a', 'h1', 'h2', 'm2.c', 'm1.b'])
+      m1.answers['projects.list'] = () => [{ id: 'a' }, { id: 'b' }, { id: 'new' }]
+      expect(await ids('projects.list', {})).toEqual(['m1.a', 'h1', 'h2', 'm2.c', 'm1.b', 'm1.new'])
+    })
+
+    it('a new project on the hub goes at the end of the list, with machines linked as with none (#734)', async () => {
+      const linked = ordered(['m1.a', 'h1', 'm2.c', 'h2', 'm1.b'])
+      linked.hubIds.push('h3')
+      expect((await linked.ids('projects.list', {})).at(-1)).toBe('h3')
+      const alone = new Router({ local: async () => [{ id: 'h1' }, { id: 'h2' }, { id: 'h3' }], machines: () => [], order: { read: () => ['h2', 'h1'], write: () => {} } })
+      expect(((await alone.handle('projects.list', {})) as { id: string }[]).at(-1)!.id).toBe('h3')
     })
 
     it('with no machine linked, lists the hub’s projects in its own order whatever was kept (#734)', async () => {

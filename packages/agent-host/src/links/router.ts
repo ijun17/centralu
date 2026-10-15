@@ -1,4 +1,4 @@
-import type { RpcMethodName } from '@cc/protocol'
+import { RpcMethods, type RpcMethodName } from '@cc/protocol'
 import { decodeNumber, encodeNumber, splitQualified } from './machine-ids.js'
 import type { Qualifier } from './qualifier.js'
 import { ROUTES, type Route } from './routes.js'
@@ -268,23 +268,26 @@ export class Router {
     const method = kind === 'sessions' ? 'sessions.list' : 'projects.list'
     const [local, ...remote] = await Promise.all([
       this.opts.local(method, params) as Promise<unknown[]>,
-      ...machines.map(async (m) => {
-        if (m.reachable) {
-          try {
-            const list = (await m.call(method, {})) as unknown[]
-            if (Array.isArray(list)) {
-              m.observe(kind, list)
-              return this.present(m, kind, list, false)
-            }
-          } catch {
-            // Fell through to the mirror below
-          }
-        }
-        return this.present(m, kind, m.lastKnown(kind) ?? [], true)
-      }),
+      ...machines.map((m) => this.listOf(m, kind)),
     ])
     const all = [...local, ...remote.flat()]
     return kind === 'projects' && machines.length > 0 ? this.inPersonsOrder(all) : all
+  }
+
+  /** One machine's list in the hub's terms: asked when it can be, else its mirror, marked `unreachable` */
+  private async listOf(m: RoutedMachine, kind: 'sessions' | 'projects'): Promise<unknown[]> {
+    if (m.reachable) {
+      try {
+        const list = (await m.call(kind === 'sessions' ? 'sessions.list' : 'projects.list', {})) as unknown[]
+        if (Array.isArray(list)) {
+          m.observe(kind, list)
+          return this.present(m, kind, list, false)
+        }
+      } catch {
+        // Fell through to the mirror below
+      }
+    }
+    return this.present(m, kind, m.lastKnown(kind) ?? [], true)
   }
 
   /**
@@ -318,29 +321,44 @@ export class Router {
    * come back from the mirror as they were, marked `unreachable`, the way `projects.list` gives them.
    *
    * The whole list is kept on the hub as well (#734), so one machine's projects can stand between another's: the
-   * answer, and every `projects.list` after it, comes back in that order once a machine is linked.
+   * answer, and every `projects.list` after it, comes back in that order once a machine is linked. The answer holds
+   * every machine's projects, a machine the request named none of too, since the window replaces its list with it.
+   *
+   * A window that did not know some project (one added, or a machine come back, since it last read the list) sends an
+   * order without it. That project keeps its place after the one it followed in the kept order instead of dropping
+   * out of it: a stale window cannot move what it never saw. The kept order forgets a project the hub no longer lists,
+   * unless it is a linked machine's, which may only be out of reach.
    */
   private async reorderProjects(machines: RoutedMachine[], params: unknown): Promise<unknown> {
-    const ids = isObj(params) && Array.isArray(params.orderedIds) ? (params.orderedIds as unknown[]) : []
-    this.opts.order?.write(ids.filter((id): id is string => typeof id === 'string'))
+    // Checked before anything is kept or sent, as the hub's own handler would check it
+    const { orderedIds } = RpcMethods['projects.reorder'].params.parse(params)
+    const kept = this.opts.order?.read() ?? []
+    const full = keepUnseen(orderedIds, kept)
     const perMachine = new Map<RoutedMachine, string[]>()
-    const local: unknown[] = []
-    for (const id of ids) {
+    const local: string[] = []
+    for (const id of full) {
       const m = this.owner(id)
       if (!m) local.push(id)
       else perMachine.set(m, [...(perMachine.get(m) ?? []), m.q.strip(id, 'A project')])
     }
     const [mine, ...theirs] = await Promise.all([
       this.opts.local('projects.reorder', { ...(isObj(params) ? params : {}), orderedIds: local }) as Promise<unknown[]>,
-      ...[...perMachine].map(async ([m, orderedIds]) => {
+      ...machines.map(async (m) => {
+        const ordered = perMachine.get(m)
+        // A machine the order names none of is not asked to reorder anything; its list still belongs in the answer
+        if (!ordered) return this.listOf(m, 'projects')
         try {
-          return m.q.projects(await this.forward(m, 'projects.reorder', { orderedIds })) as unknown[]
+          return m.q.projects(await this.forward(m, 'projects.reorder', { orderedIds: ordered })) as unknown[]
         } catch {
           return this.present(m, 'projects', m.lastKnown('projects') ?? [], true)
         }
       }),
     ])
     const all = [...mine, ...theirs.flat()]
+    if (this.opts.order) {
+      const listed = new Set(all.map((p) => (isObj(p) ? p.id : undefined)))
+      this.opts.order.write(full.filter((id) => listed.has(id) || this.owner(id) !== null))
+    }
     return machines.length > 0 ? this.inPersonsOrder(all) : all
   }
 
@@ -411,4 +429,22 @@ function combine(method: RpcMethodName, acc: unknown, r: unknown, q: Qualifier):
     default:
       return acc
   }
+}
+
+/**
+ * `ordered`, with each id of `kept` it lacks put back after the id it followed in `kept` (at the front when nothing
+ * before it is in the list), so what a window did not know about keeps its place among what it did (#734)
+ */
+export function keepUnseen(ordered: readonly string[], kept: readonly string[]): string[] {
+  const out = [...ordered]
+  const present = new Set(out)
+  let previous: string | null = null
+  for (const id of kept) {
+    if (!present.has(id)) {
+      out.splice(previous === null ? 0 : out.indexOf(previous) + 1, 0, id)
+      present.add(id)
+    }
+    previous = id
+  }
+  return out
 }

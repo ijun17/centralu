@@ -28,9 +28,13 @@ async function setup(page: Page): Promise<void> {
 }
 
 /** Links a mock machine: it stands as connected at once and its `machine_status` reaches the store */
-async function link(page: Page, name: string): Promise<void> {
-  await page.evaluate((n) => (window as unknown as MockWindow).__mock.machines.add({ name: n, sshTarget: `me@${n.toLowerCase()}`, shell: 'posix' }), name)
-  await expect.poll(() => page.evaluate((id) => (window as unknown as MockWindow).__store.getState().machines[id]?.status, name.toLowerCase())).toBe('connected')
+async function link(page: Page, name: string): Promise<string> {
+  const id = await page.evaluate(
+    async (n) => ((await (window as unknown as MockWindow).__mock.machines.add({ name: n, sshTarget: `me@${n.toLowerCase()}`, shell: 'posix' })) as { id: string }).id,
+    name,
+  )
+  await expect.poll(() => page.evaluate((i) => (window as unknown as MockWindow).__store.getState().machines[i]?.status, id)).toBe('connected')
+  return id
 }
 
 /** Moves a mock machine's link to another state, as the hub's `machine_status` does */
@@ -250,6 +254,48 @@ export function sidebarMachinesTests(): void {
       await page.getByTestId('app-machine-box:_user/notes').click()
       await expect(page.getByTestId('settings-machines')).toBeVisible()
       await expect(page.getByTestId('pinned-app-box:_user/notes')).toHaveCount(0)
+    })
+
+    test("the app row's badge is a button of its own beside the row's, reached by keyboard, standing right after the title", async ({ page, browserName }) => {
+      await setup(page)
+      await link(page, 'Box')
+      await page.evaluate((notes) => {
+        const mock = (window as unknown as MockWindow).__mock
+        mock.setExternalApps([...mock.externalAppList, notes])
+      }, NOTES)
+      const row = page.getByTestId('app-row-box:_user/notes')
+      const badge = page.getByTestId('app-machine-box:_user/notes')
+      await expect(badge).toBeVisible()
+      // Not inside the row's button: a sibling button
+      await expect(row.getByTestId('app-machine-box:_user/notes')).toHaveCount(0)
+      expect(await badge.evaluate((el) => el.tagName)).toBe('BUTTON')
+      expect(await badge.evaluate((el, r) => el.parentElement === document.querySelector(`[data-testid="${r}"]`)!.parentElement, 'app-row-box:_user/notes')).toBe(true)
+      // Right after the title, on its line
+      const title = (await row.locator('.truncate').first().boundingBox())!
+      const box = (await badge.boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(title.x + title.width)
+      expect(box.x - (title.x + title.width)).toBeLessThanOrEqual(10)
+      expect(Math.abs(box.y + box.height / 2 - (title.y + title.height / 2))).toBeLessThanOrEqual(1)
+      // From the row, the next Tab stop is the badge (WebKit on macOS reaches buttons with Option-Tab), and Enter opens Settings → Machines
+      await row.focus()
+      await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab')
+      await expect(badge).toBeFocused()
+      await page.keyboard.press('Enter')
+      await expect(page.getByTestId('settings-machines')).toBeVisible()
+      await expect(page.getByTestId('pinned-app-box:_user/notes')).toHaveCount(0)
+    })
+
+    test('a long machine name is cut in its badge, so it cannot take the line from the project name', async ({ page }) => {
+      await setup(page)
+      const id = await link(page, 'Workstation in the back office')
+      await addOn(page, id, '/home/me/api')
+      const badge = page.getByTestId('project-machine-api')
+      await expect(badge).toHaveText('Workstation in the back office')
+      const size = await badge.evaluate((el) => ({ width: el.getBoundingClientRect().width, cut: el.scrollWidth > el.clientWidth }))
+      expect(size.width).toBeLessThanOrEqual(96)
+      expect(size.cut).toBe(true)
+      await page.mouse.move(900, 450)
+      expect(await page.getByTestId('project-header-api').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(false)
     })
   })
 }

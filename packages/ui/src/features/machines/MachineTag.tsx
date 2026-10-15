@@ -1,3 +1,4 @@
+import { forwardRef, type CSSProperties } from 'react'
 import type { MachineStatus } from '@cc/protocol'
 import { MACHINE_STATUS_LABEL } from '@cc/core'
 import { useStore } from '../../store/store.js'
@@ -34,42 +35,53 @@ export function MachineTag({ machine, testId, className = '' }: { machine: strin
  * border is the link: solid while connected, dashed while not (connecting, away, unreachable, …). It keeps what the
  * header offered: pressing it opens Settings → Machines, and its tooltip carries the link's last error.
  *
- * `inRow`: it stands inside a row that is itself a button (an app row), where a second button is not allowed, so it is
- * a span that takes the click before the row does. The project row's badge is a button of its own.
+ * Capped at 96px and cut with an ellipsis past it, so a long machine name cannot take the line from the project's own
+ * name; the whole name is in Settings → Machines. `placeholder` is the same chip, invisible and inert, holding the
+ * badge's place inside a row that is itself a button (an app row), where the badge stands over it as a button of its
+ * own beside the row's.
  */
-export function MachineBadge({ machine, testId, inRow = false }: { machine: string; testId?: string; inRow?: boolean }) {
+const BADGE = `${CHIP} max-w-24`
+
+export function MachineBadge({
+  machine,
+  testId,
+  className = '',
+  style,
+}: {
+  machine: string
+  testId?: string
+  className?: string
+  style?: CSSProperties
+}) {
   const info = useStore((s) => s.machines[machine])
   const openSettingsAt = useStore((s) => s.openSettingsAt)
   const name = info?.name ?? machine
   const connected = info?.status === 'connected'
-  const props = {
-    className: `${CHIP} ${connected ? '' : 'border-dashed'} hover:text-ink`,
-    title: info?.error ?? `${name} — ${info?.sshTarget ?? ''}`,
-    'data-testid': testId,
-    'data-machine': machine,
-    'data-status': info?.status ?? 'unknown',
-  }
-  if (inRow) {
-    return (
-      <span
-        {...props}
-        role="button"
-        onClick={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          openSettingsAt('machines')
-        }}
-      >
-        {name}
-      </span>
-    )
-  }
   return (
-    <button type="button" {...props} onClick={() => openSettingsAt('machines')}>
+    <button
+      type="button"
+      className={`${BADGE} ${connected ? '' : 'border-dashed'} hover:text-ink ${className}`}
+      style={style}
+      title={info?.error ?? `${name} — ${info?.sshTarget ?? ''}`}
+      data-testid={testId}
+      data-machine={machine}
+      data-status={info?.status ?? 'unknown'}
+      onClick={() => openSettingsAt('machines')}
+    >
       {name}
     </button>
   )
 }
+
+/** The badge's place in a row that is itself a button: the same box, invisible, read by nothing */
+export const MachineBadgePlaceholder = forwardRef<HTMLSpanElement, { machine: string }>(function MachineBadgePlaceholder({ machine }, ref) {
+  const name = useMachineName(machine) ?? machine
+  return (
+    <span ref={ref} aria-hidden className={`${BADGE} invisible`}>
+      {name}
+    </span>
+  )
+})
 
 /** The machine a session runs on, by session id */
 export function SessionMachineTag({ sessionId, testId, className }: { sessionId: string; testId?: string; className?: string }) {

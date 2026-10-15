@@ -445,8 +445,10 @@ uxTask({
   path: 'mouse',
   access: 'discoverable',
   start: linkedMachine,
+  // The app's name: the row's middle is its machine's badge since #734, which opens Settings → Machines
+  notes: ["Pressing the app's name; the machine badge beside it opens Settings → Machines"],
   run: async (u, page) => {
-    await u.click(page.getByTestId(`app-row-${NOTES}`))
+    await u.click(page.getByTestId(`app-row-${NOTES}`).locator('.truncate').first())
   },
   goal: openedNotes,
   budget: { operators: 5, M: 1, H: 1, seconds: 3.3 },

@@ -26,7 +26,7 @@ import { IconButton } from '../../components/IconButton.jsx'
 import { AppIcon, ChevronIcon, CrownIcon, DotsIcon, ImportIcon, PlusIcon } from '../../components/icons.jsx'
 import { isRemoteUserApp, useProjectApps, useUserApps, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { isAway } from '@cc/core'
-import { MachineBadge, MachineStatusMark } from '../machines/MachineTag.jsx'
+import { MachineBadge, MachineBadgePlaceholder, MachineStatusMark } from '../machines/MachineTag.jsx'
 import { RowApproval } from '../approval/RowApproval.jsx'
 import { AddRemoteProjectDialog } from '../machines/AddRemoteProjectDialog.jsx'
 import { useRemoteIde } from '../machines/remoteIde.js'
@@ -1425,6 +1425,25 @@ function AppRow({
   const projectId = app.projectId
   // A linked machine's user-folder app keeps the dimming its machine's group gave it while that machine is not connected (#734)
   const away = useStore((s) => !!machine && s.machines[machine]?.status !== 'connected')
+  /*
+   * Its machine's badge is a button, and the row is one: a button inside a button is neither valid nor reachable by
+   * keyboard. So the row holds the badge's place (an invisible chip of the same size, right after the title, where the
+   * title's truncation moves it) and the badge stands over that place as the row's sibling (#734). Measured after
+   * every render and whenever the row's box changes, in layout pixels on both sides, so the text zoom cancels out.
+   */
+  const badgePlace = useRef<HTMLSpanElement>(null)
+  const [badgeAt, setBadgeAt] = useState<{ left: number; top: number } | null>(null)
+  useLayoutEffect(() => {
+    const el = badgePlace.current
+    if (!el) return
+    const place = () =>
+      setBadgeAt((was) => (was && was.left === el.offsetLeft && was.top === el.offsetTop ? was : { left: el.offsetLeft, top: el.offsetTop }))
+    place()
+    const watch = new ResizeObserver(place)
+    if (el.parentElement) watch.observe(el.parentElement)
+    watch.observe(el)
+    return () => watch.disconnect()
+  })
   return (
     <li
       className={`relative ${INDENT[1]} ${away ? 'opacity-60' : ''}`}
@@ -1470,7 +1489,7 @@ function AppRow({
           <AppIcon />
         </span>
         <span className="truncate">{app.title}</span>
-        {machine && <MachineBadge machine={machine} testId={`app-machine-${app.key}`} inRow />}
+        {machine && <MachineBadgePlaceholder ref={badgePlace} machine={machine} />}
         {folded && sessions.length > 0 && (
           <FoldedMark count={sessions.length} attention={groupAttention(sessions)} testId={`app-folded-${app.key}`} />
         )}
@@ -1484,6 +1503,14 @@ function AppRow({
           </span>
         )}
       </button>
+      {machine && (
+        <MachineBadge
+          machine={machine}
+          testId={`app-machine-${app.key}`}
+          className={`absolute ${badgeAt ? '' : 'invisible'}`}
+          style={badgeAt ? { left: badgeAt.left, top: badgeAt.top } : undefined}
+        />
+      )}
     </li>
   )
 }

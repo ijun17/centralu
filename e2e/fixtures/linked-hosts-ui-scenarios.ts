@@ -366,6 +366,9 @@ export function linkedHostsUiTests(): void {
 
       await test.step("a machine's project dragged above this computer's (#734): the hub keeps the one order, across a reload", async () => {
         expect(await listed(page)).toEqual(['hub-project', 'remote-project', 'second-project', 'fresh'])
+        // The pointer rests on the row first, as a hand does: the row's hover buttons take their room then (#734), and the
+        // name it grabs is where the hand sees it
+        await page.getByTestId('project-header-second-project').hover()
         await page.dragAndDrop('[data-testid="project-header-second-project"]', '[data-testid="project-hub-project"]', { targetPosition: { x: 10, y: 2 } })
         await expect.poll(() => listed(page)).toEqual(['second-project', 'hub-project', 'remote-project', 'fresh'])
         // The hub's own list answers in that order, the machine's projects by their qualified ids
