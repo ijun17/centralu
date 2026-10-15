@@ -115,7 +115,7 @@ export const Composer = memo(function Composer({
    * list, even the autocomplete menu) on every delta while a response streams — yet this
    * component only reads three things from the session, and none of the three ever changes
    * mid-conversation. Values that actually change, like model, permissions, and context, are
-   * subscribed to separately by ComposerFooter below.
+   * subscribed to separately by ComposerFooter (ComposerFooter.tsx).
    */
   const alive = useStore((s) => !!s.sessions[sessionId])
   const projectId = useStore((s) => s.sessions[sessionId]?.projectId ?? '')

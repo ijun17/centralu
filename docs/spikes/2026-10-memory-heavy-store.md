@@ -143,7 +143,7 @@ state going to working and back each turn, with `usage_update`s; every other row
 
 Three things follow. The GPU growth while working is not the orbit or the pulsing dot: it stays with every
 animation off and goes when only `ActivityRow`'s one-second `setInterval` (the elapsed time in the activity row,
-`features/session/SessionView.tsx`) is slowed down, animations on or off (a copy of main with that one interval
+`features/session/chat-stream/ActivityRow.tsx`) is slowed down, animations on or off (a copy of main with that one interval
 set to ten minutes, built with `--ui-root`). A repaint every second keeps the window's
 backing stores live; with nothing repainting, WebKit lets them go within seconds (the settled column). Streamed
 text, tool output and images add WebContent memory in WebKit that Chromium shows to be garbage, not state: its
