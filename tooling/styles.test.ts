@@ -121,8 +121,8 @@ describe('the built CSS actually contains styles', () => {
    */
   it('the palette is monochrome (R=G=B) outside the allowed exceptions', () => {
     const ALLOWED = new Set([
-      '7ee787', '10251a', // diff addition
-      'ffa198', '2b1517', // diff deletion, and danger
+      '8ff59a', '0f2f1c', // diff addition
+      'ff9b91', '38171a', // diff deletion, and danger
       // The terminal's ANSI palette (xterm's defaults, see --color-term-* in index.css)
       '2e3436', 'cc0000', '4e9a06', 'c4a000', '3465a4', '75507b', '06989a', 'd3d7cf',
       '555753', 'ef2929', '8ae234', 'fce94f', '729fcf', 'ad7fa8', '34e2e2', 'eeeeec',

@@ -667,7 +667,7 @@ export function SessionPane({
                      * The shadow's job is **to separate the card from the text it covers.**
                      * It covers the most while raised, so it is cast further — the darkness is
                      * kept the same as when collapsed (measured: both bottom out at 12, over
-                     * the pane's floor colour then, #1d1d1d; it is #141414 since #362), only the
+                     * the pane's floor colour then, #1d1d1d; it is #141414 since #362 and #0f0f0f since #725), only the
                      * spread distance is increased.
                      * 25px here, 18px when collapsed.
                      */
@@ -705,7 +705,7 @@ export function SessionPane({
                      * so this shadow alone is what says the card is **resting on** the pane.
                      *
                      * The darkness was tuned with a ruler, not by eye: the pane's floor was
-                     * #1d1d1d then (#141414 since #362, not re-tuned), so on screen, black barely moves at all — a ruler with fewer than
+                     * #1d1d1d then (#141414 since #362, #0f0f0f since #725, not re-tuned), so on screen, black barely moves at all — a ruler with fewer than
                      * ten marks on it. Measured in pixels, over a floor of 18, this shadow's
                      * darkest line comes out to **12**. That value came from five rounds of
                      * measuring: 12 → 6 (too dark) → 9 ("halfway") → 10 ("just a touch

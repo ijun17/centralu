@@ -37,11 +37,11 @@
    * Surfaces — what things sit on, named by position. In the default theme they climb in
    * brightness from the floor up.
    */
-  --color-surface-floor: #141414; /* the app floor */
-  --color-surface-side: #1a1a1a; /* the sidebar — six steps off the floor, see the session-view block */
-  --color-surface-raised: #1d1d1d; /* what floats: cards, menus, dialogs, inputs */
-  --color-surface-selected: #292929; /* a picked tab or option, and the quiet hover on a raised card */
-  --color-surface-hover: #353535; /* hover and pressed; also my own message bubble */
+  --color-surface-floor: #0f0f0f; /* the app floor */
+  --color-surface-side: #1d1d1d; /* the sidebar — ΔL* 6.5 off the floor, see the session-view block */
+  --color-surface-raised: #242424; /* what floats: cards, menus, dialogs, inputs */
+  --color-surface-selected: #353535; /* a picked tab or option, and the quiet hover on a raised card */
+  --color-surface-hover: #424242; /* hover and pressed; also my own message bubble */
   /*
    * The control tower's floor — the plate the panels sit on.
    *
@@ -54,20 +54,20 @@
    * outside look the same, it's confusing"). What is actually visible is only the gaps between
    * panels and the edges, so it does not brighten a large area.
    */
-  --color-surface-deck: #272727; /* the grid's and the project screen's floor */
+  --color-surface-deck: #2b2b2b; /* the grid's and the project screen's floor */
   /* The conversation's own surfaces — the floor's steps in this preset, see the session-view block below */
-  --color-surface-reading: #141414;
-  --color-surface-reading-raised: #1d1d1d;
+  --color-surface-reading: #0f0f0f;
+  --color-surface-reading-raised: #242424;
 
   /* Lines */
-  --color-line: #292929; /* hairline: borders, dividers, meter tracks */
-  --color-line-strong: #353535; /* a border that has to show: focused inputs, checkboxes, graph lanes */
+  --color-line: #363636; /* hairline: borders, dividers, meter tracks */
+  --color-line-strong: #4d4d4d; /* a border that has to show: focused inputs, checkboxes, graph lanes */
 
   /* Ink — 4 steps. Brightness is urgency */
   --color-ink-signal: #ffffff; /* what is waiting for me. The only pure white on screen */
-  --color-ink: #e9e9e9; /* body text */
-  --color-ink-muted: #909090; /* secondary */
-  --color-ink-faint: #5c5c5c; /* background information */
+  --color-ink: #ededed; /* body text */
+  --color-ink-muted: #a8a8a8; /* secondary */
+  --color-ink-faint: #707070; /* background information */
 
   /*
    * Colors reserved for diffs — with danger below, the only places in the chrome that use hue.
@@ -78,10 +78,10 @@
    * Instead, it never leaves the body of the diff — state and urgency are still spoken by
    * brightness alone.
    */
-  --color-diff-add: #7ee787;
-  --color-diff-add-bg: #10251a;
-  --color-diff-del: #ffa198;
-  --color-diff-del-bg: #2b1517;
+  --color-diff-add: #8ff59a;
+  --color-diff-add-bg: #0f2f1c;
+  --color-diff-del: #ff9b91;
+  --color-diff-del-bg: #38171a;
   /*
    * Danger — what is about to destroy something (deleting a project with its folder, purging
    * the trash) and an action that failed (a quit or a switch that did not go through). It
@@ -90,14 +90,14 @@
    * the two answer different questions: a theme may want the diff's red softer for reading while
    * keeping a warning loud.
    */
-  --color-danger: #ffa198;
-  --color-danger-bg: #2b1517;
+  --color-danger: #ff9b91;
+  --color-danger-bg: #38171a;
 
   /*
    * Interaction. Focus is the keyboard focus ring and the inset line that marks a drop target —
    * both say "this is where it goes". Selection is translucent, see ::selection below.
    */
-  --color-focus: #909090;
+  --color-focus: #b4b4b4;
   --color-selection: rgb(255 255 255 / 0.24);
   /*
    * The scrollbar is part of the theme: its colours and its shape. The thumb is drawn inset from
@@ -105,8 +105,8 @@
    * than a bar.
    */
   --color-scrollbar-track: transparent;
-  --color-scrollbar-thumb: #292929;
-  --color-scrollbar-thumb-hover: #353535;
+  --color-scrollbar-thumb: #3c3c3c;
+  --color-scrollbar-thumb-hover: #4d4d4d;
   --scrollbar-size: 10px;
   --scrollbar-thumb-inset: 3px;
   --scrollbar-radius: 999px;
@@ -119,8 +119,8 @@
   --color-scrim-thin: color-mix(in oklab, #000 50%, transparent);
 
   /* The keycap's face and rim, see .keycap */
-  --color-keycap-top: #222222;
-  --color-keycap-bottom: #151515;
+  --color-keycap-top: #2a2a2a;
+  --color-keycap-bottom: #181818;
   --color-keycap-border: #0a0a0a;
   /* The light around the signal, see .signal */
   --color-signal-glow: rgb(255 255 255 / 0.45);
@@ -143,11 +143,11 @@
    * out so a theme can change them: the achromatic rule belongs to our screens, it does not take
    * colour away from a program's output.
    */
-  --color-term-bg: #1a1a1a;
-  --color-term-log-bg: #1d1d1d;
-  --color-term-fg: #e9e9e9;
-  --color-term-cursor: #e9e9e9;
-  --color-term-selection: #353535;
+  --color-term-bg: #1d1d1d;
+  --color-term-log-bg: #242424;
+  --color-term-fg: #ededed;
+  --color-term-cursor: #ededed;
+  --color-term-selection: #424242;
   --color-term-black: #2e3436;
   --color-term-red: #cc0000;
   --color-term-green: #4e9a06;
@@ -271,18 +271,25 @@
  *
  * So the sidebar keeps the distance now. Measured as CIELAB lightness (ΔL*), which follows what
  * the eye sees at the dark end better than hex steps do:
- *   Dark   sidebar #1a1a1a, conversation #141414: ΔL* 2.9, what the lifted conversation had from
- *          the old sidebar (#1d1d1d and #171717, ΔL* 3.0). The old #171717 would be ΔL* 1.4.
+ *   Dark   sidebar #1d1d1d, conversation #0f0f0f: ΔL* 6.5, twice what the lifted conversation had
+ *          from the old sidebar (#1d1d1d and #171717, ΔL* 3.0). Dark was #1a1a1a on #141414
+ *          (ΔL* 2.9) until the owner asked for wider steps between the surfaces (#725).
  *   Light  sidebar #e0e0e0, conversation #e8e8e8: ΔL* 2.8, the sidebar a recess below the floor
  *          as it was before.
  * The hairline on the sidebar's edge stays; it was never enough on its own.
  *
  * The other constraint is the approval card: lifted enough to be a component without becoming a
- * signal. Raised sits ΔL* 4.5 above the floor in Dark (#1d1d1d on #141414) and 4.2 in Light
- * (#f4f4f4 on #e8e8e8), less than the lifted conversation gave its cards (6.3), and the card's
- * `line` border (ΔL* 10.3 and 7.1 off the floor) and its signal edge carry the rest, as the
- * board's borders do. The signal ink keeps the highest contrast on every surface
- * (app/theme.ts `urgencyBreaks`, checked for every preset).
+ * signal. Raised sits ΔL* 9.9 above the floor in Dark (#242424 on #0f0f0f) and 4.2 in Light
+ * (#f4f4f4 on #e8e8e8). Dark's wider steps (#725) put it above what the lifted conversation gave
+ * its cards (6.3), which is the point of the change: the composer and the cards read apart from
+ * the conversation without leaning on their border. The card's `line` border (ΔL* 18.3 and 7.1
+ * off the floor) and its signal edge still carry the rest, as the board's borders do. The signal
+ * ink keeps the highest contrast on every surface (app/theme.ts `urgencyBreaks`, checked for
+ * every preset).
+ *
+ * Dark's inks measure against the floor #0f0f0f: body 16.4:1, muted 8.1:1, faint 3.9:1, and
+ * the signal 19.2:1. On raised (#242424) the three are 13.3, 6.5 and 3.1:1. The order holds on
+ * every surface, which is what the urgency test checks.
  */
 [data-testid='session-view'] {
   --color-surface-floor: var(--color-surface-reading);
@@ -683,9 +690,10 @@
   /*
    * The session marker chip.
    *
-   * Bright text on a dark background, but the sidebar background (surface-side, #1a1a1a) and the
-   * chip background (surface-floor, #141414) are only six steps apart (three when this was
-   * written), so a single border did not separate them well.
+   * Bright text on a dark background, but the sidebar background (surface-side) and the chip
+   * background (surface-floor) were only six steps apart when this was written (#1a1a1a on
+   * #141414, three before that; Dark is #1d1d1d on #0f0f0f since #725, fourteen), so a single
+   * border did not separate them well.
    *
    * Instead of pushing the border brighter, this borrows the same touch as a keycap: a 1px
    * highlight on top and a shadow underneath. It reads as a distinct object without spending any

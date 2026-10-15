@@ -612,7 +612,7 @@ function Metric({
         The glow belongs to the number (user's observation, 2026-09-12: "it looks smeared").
 
         `signal` sets both a color and `text-shadow: 0 0 6px var(--color-signal-glow)`. The color
-        gets overridden here by text-ink-faint, but the shadow is inherited — so the #5c5c5c label
+        gets overridden here by text-ink-faint, but the shadow is inherited — so the ink-faint label
         text was wearing a white glow. A bright halo on dark text does not look luminous, it looks
         out of focus. A glow is only a glow on pure white text.
 

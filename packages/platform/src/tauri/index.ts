@@ -304,7 +304,7 @@ export class TauriSystemPort implements SystemPort {
    * The window's appearance and background (#312). `setTheme(null)` hands the appearance back to
    * the OS, which is what lets the webview's `prefers-color-scheme` follow it in System mode
    * (tauri.conf.json no longer holds the window to Dark). The background arrives as a computed
-   * CSS colour (`rgb(20, 20, 20)`); Tauri wants channels, so anything else is left alone.
+   * CSS colour (`rgb(15, 15, 15)`); Tauri wants channels, so anything else is left alone.
    */
   async setWindowAppearance(scheme: 'dark' | 'light' | null, background: string): Promise<void> {
     const win = getCurrentWindow()

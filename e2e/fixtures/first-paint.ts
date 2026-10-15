@@ -36,7 +36,7 @@ export function firstPaintTests() {
       // A light OS: the webview's own default would be white
       await page.emulateMedia({ colorScheme: 'light' })
       const shown = await beforeTheBundle(page, undefined)
-      expect(shown).toEqual({ sheets: 0, root: 0, background: 'rgb(20, 20, 20)', scheme: 'dark' })
+      expect(shown).toEqual({ sheets: 0, root: 0, background: 'rgb(15, 15, 15)', scheme: 'dark' })
     })
 
     test('with a light theme cached, the page is the light floor before any stylesheet or module loads', async ({ page }) => {

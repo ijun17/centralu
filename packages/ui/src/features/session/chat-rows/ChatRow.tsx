@@ -72,10 +72,12 @@ export const ChatRow = memo(function ChatRow({
           person typed, and break-words breaks even a long chunk that otherwise could not wrap.
         */}
         {/*
-          Contrast against the background (surface-floor, #141414) is what makes "something I said"
-          visible. surface-raised (#1d1d1d) plus line (#292929) is only two steps apart, and was
-          effectively invisible in a dark room (found in dogfooding). This lifts it to surface-hover,
-          the same as the hover background, and gives the border one step more brightness.
+          Contrast against the background (surface-floor) is what makes "something I said" visible.
+          surface-raised plus line was only two steps apart (#1d1d1d and #292929 then; Dark's wider
+          steps, #725, make them #242424 and #363636, ΔL* 8.4 apart), and was effectively invisible
+          in a dark room (found in dogfooding). This lifts it to surface-hover (#424242 on a #0f0f0f
+          floor, ΔL* 23.7), the same as the hover background, and gives the border one step more
+          brightness.
         */}
         {/*
           Attachments stand as real objects above the body text — an image as a thumbnail

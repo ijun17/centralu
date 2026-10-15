@@ -37,9 +37,13 @@ view is told the steps the conversation uses ([apps.md §6.5](apps.md#65-the-the
 `surface-reading` and `surface-reading-raised` still exist, so a custom theme can give the
 conversation surfaces of its own; the presets set them to the floor and raised values.
 
-Dark is a dark floor (`#141414`) with raised boxes (`#1d1d1d`). The sidebar (`#1a1a1a`) stays
-apart from the conversation by lightness, not only by its edge line: a reader once saw the two as
-"the same colour" at three steps apart with the line between them, so the gap is kept at ΔL* 2.9.
+Dark is a dark floor (`#0f0f0f`) with raised boxes (`#242424`, ΔL* 9.9 above the floor). The
+sidebar (`#1d1d1d`) stays apart from the conversation by lightness, not only by its edge line: a
+reader once saw the two as "the same colour" at three steps apart with the line between them, so
+the gap is kept at ΔL* 6.5. Dark had narrower steps (floor `#141414`, sidebar `#1a1a1a`, raised
+`#1d1d1d`, ΔL* 2.9 and 4.5) until the owner asked for wider ones ([#725](https://github.com/ijun17/centralu/issues/725)),
+with the inks widened to match: body `#ededed` (16.4:1 on the floor), secondary `#a8a8a8` (8.1:1),
+background `#707070` (3.9:1).
 Light keeps the dark rule in the form that survives the inversion: pure black is reserved for what
 is waiting for you, and raised surfaces move toward white. It sits a step down from white: the floor
 is `#e8e8e8`, raised `#f4f4f4`, the sidebar a recess at `#e0e0e0` (ΔL* 2.8 below the conversation),
@@ -132,7 +136,7 @@ longer forced to Dark, WKWebView painted its own default until the bundle loaded
 default is white. `main.tsx` runs only after the bundle, so a small inline script in `index.html` (desktop and web, the
 same text) runs before any stylesheet or module: it reads the same `cc-theme` cache, picks the side the same way, and
 sets `background-color` and `color-scheme` on `<html>` to that theme's floor (a custom theme's own floor token, else its
-preset's). Nothing cached paints the stylesheet's Dark, `#141414`. `applyTheme` removes the two inline values, because
+preset's). Nothing cached paints the stylesheet's Dark, `#0f0f0f`. `applyTheme` removes the two inline values, because
 from then on the stylesheet owns them, and a leftover inline `color-scheme` would outrank `html[data-theme-base]`
 after a switch.
 

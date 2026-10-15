@@ -18,7 +18,7 @@ type Mock = {
   windowAppearance: { scheme: 'dark' | 'light' | null; background: string } | null
 }
 
-const DARK_FLOOR = '#141414'
+const DARK_FLOOR = '#0f0f0f'
 
 export async function token(page: Page, name: string): Promise<string> {
   return page.evaluate((n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(), name)
@@ -169,7 +169,7 @@ export function themeTests() {
     await expect(problems).toContainText('Unknown token "glitter" is ignored.')
     await expect(problems).toContainText('"blue-ish" is not a usable value for ink')
     // The unusable ink is not applied: the Dark ink stays
-    expect(await token(page, '--color-ink')).toBe('#e9e9e9')
+    expect(await token(page, '--color-ink')).toBe('#ededed')
   })
 
   test('the theme choice and the file survive a reload, and the last theme is cached for the first frame', async ({ page }) => {
@@ -212,7 +212,7 @@ export function themeTests() {
 
     // Held to Dark, the window is told so (and its own background is the floor)
     await page.getByTestId('settings-theme-mode-dark').click()
-    await expect.poll(() => page.evaluate(() => (window as any).__mock.windowAppearance)).toEqual({ scheme: 'dark', background: 'rgb(20, 20, 20)' })
+    await expect.poll(() => page.evaluate(() => (window as any).__mock.windowAppearance)).toEqual({ scheme: 'dark', background: 'rgb(15, 15, 15)' })
   })
 
   test('the accent colours focus and selection, never the signal', async ({ page }) => {
@@ -224,7 +224,7 @@ export function themeTests() {
     expect(await token(page, '--color-selection')).toContain('#6ea8fe')
     expect(await token(page, '--color-ink-signal')).toBe(signal)
     await page.getByTestId('settings-accent-toggle').uncheck()
-    await expect.poll(() => token(page, '--color-focus')).toBe('#909090')
+    await expect.poll(() => token(page, '--color-focus')).toBe('#b4b4b4')
   })
 
   test('Import copies a theme file in, and Show in Finder reveals one', async ({ page }) => {
@@ -259,7 +259,7 @@ export function themeTests() {
     await expect(warning).toContainText('The urgency order breaks')
     await expect(warning).toContainText('On the floor, background information stands out as much as secondary or more.')
 
-    await writeFile(page, 'flat', { name: 'Flat', base: 'dark', tokens: { 'ink-faint': '#5c5c5c' } })
+    await writeFile(page, 'flat', { name: 'Flat', base: 'dark', tokens: { 'ink-faint': '#707070' } })
     await expect(warning).toHaveCount(0)
   })
 }

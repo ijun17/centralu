@@ -50,12 +50,12 @@ describe('the theme as an app view receives it (#312 step 6)', () => {
     expect(variables['--color-text-warning']).toBe('#ffffff')
     expect(variables['--color-border-warning']).toBe('#ffffff')
     expect(variables['--color-background-warning']).toBe('color-mix(in srgb, #ffffff 12%, transparent)')
-    expect(variables['--color-text-primary']).toBe('#e9e9e9')
+    expect(variables['--color-text-primary']).toBe('#ededed')
     expect(variables['--font-text-md-size']).toBe('13px')
     expect(centralu).toEqual({
       '--centralu-signal': '#ffffff',
-      '--centralu-scrollbar-thumb': '#292929',
-      '--centralu-scrollbar-thumb-hover': '#353535',
+      '--centralu-scrollbar-thumb': '#3c3c3c',
+      '--centralu-scrollbar-thumb-hover': '#4d4d4d',
       '--centralu-scrollbar-track': 'transparent',
       '--centralu-scrollbar-size': '10px',
       '--centralu-scrollbar-inset': '3px',

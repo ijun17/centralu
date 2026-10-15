@@ -1903,7 +1903,7 @@ test('Settings: turning off the spinning indicator stops it, leaving only a brig
   // The indicator still remains: a plain bright-gray layer instead of the rainbow — this is the
   // panel's own border, not a drawn-on ring (#208)
   await expect(page.locator('.cc-orbit-ring-layer')).toBeHidden()
-  await expect(panel).toHaveCSS('border-top-color', 'rgb(144, 144, 144)')
+  await expect(panel).toHaveCSS('border-top-color', 'rgb(168, 168, 168)')
   // The fact that the panel is working is still readable as a value (for tests and assistive technology)
   await expect(panel).toHaveClass(/cc-orbit-ring/)
 
@@ -8982,8 +8982,8 @@ test('Deleting a project: unlocks only by typing the name, and the file checkbox
   await expect(confirm).toHaveText('Delete and trash folder')
   // The warning uses the danger palette (dogfooding: dangerous spots are red) — today the same
   // values as a diff's deletion
-  await expect(page.getByTestId('delete-project-warning')).toHaveCSS('background-color', 'rgb(43, 21, 23)')
-  await expect(confirm).toHaveCSS('color', 'rgb(255, 161, 152)')
+  await expect(page.getByTestId('delete-project-warning')).toHaveCSS('background-color', 'rgb(56, 23, 26)')
+  await expect(confirm).toHaveCSS('color', 'rgb(255, 155, 145)')
 
   // 4. Delete it — both the project and its sessions disappear, and the folder went to the trash
   await confirm.click()

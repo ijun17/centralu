@@ -70,10 +70,10 @@ describe('the first paint (#340)', () => {
   })
 
   it('paints the dark floor when nothing is cached, or the cache is unreadable', () => {
-    expect(firstPaint(null)).toEqual({ backgroundColor: '#141414', colorScheme: 'dark' })
-    expect(firstPaint('{not json')).toEqual({ backgroundColor: '#141414', colorScheme: 'dark' })
+    expect(firstPaint(null)).toEqual({ backgroundColor: '#0f0f0f', colorScheme: 'dark' })
+    expect(firstPaint('{not json')).toEqual({ backgroundColor: '#0f0f0f', colorScheme: 'dark' })
     // Nothing cached is the stylesheet's Dark even on a light OS: no theme has been chosen yet
-    expect(firstPaint(null, false)).toEqual({ backgroundColor: '#141414', colorScheme: 'dark' })
+    expect(firstPaint(null, false)).toEqual({ backgroundColor: '#0f0f0f', colorScheme: 'dark' })
   })
 
   it('paints the light floor for a cached light theme', () => {
@@ -82,7 +82,7 @@ describe('the first paint (#340)', () => {
 
   it('in System mode, picks the side the OS shows, as applyCachedTheme does', () => {
     expect(firstPaint(choice('system'), false)).toEqual({ backgroundColor: '#e8e8e8', colorScheme: 'light' })
-    expect(firstPaint(choice('system'), true)).toEqual({ backgroundColor: '#141414', colorScheme: 'dark' })
+    expect(firstPaint(choice('system'), true)).toEqual({ backgroundColor: '#0f0f0f', colorScheme: 'dark' })
   })
 
   it("paints a high-contrast preset's floor and a custom theme's own floor", () => {
