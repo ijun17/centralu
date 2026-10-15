@@ -363,9 +363,11 @@ below retained for `safe` and `normal`:
 
    | Rule | Why |
    |---|---|
-   | A turn that **completes** while background work the session's tool lists as running (`liveBackgroundTasks`) is still going is a pause: the caller is told once, "The assigned work paused: its turn ended while background work it started still runs (…). You will be told again when the work ends", with the last response, and the report stays owed (`pausedReports`, the app setting `report_paused:<session>`) | The caller reads why the child stopped talking and that the answer is still to come, instead of "finished" |
+   | A turn that **completes** while background work the session's tool lists as running (`liveBackgroundTasks`, timers left out) is still going is a pause: the caller is told once, "The assigned work paused: its turn ended while its own background work is still running (…). If that work is a server or watcher it leaves running, the answer below may be its final one. A final report follows only if that work ends; agent_session(action="stop") on it stops that work and ends the wait", with the last response. The report stays owed (`pausedReports`, with the tasks it paused on; the app setting `report_paused:<session>`). Task descriptions are framed fields (`frameField`) | The caller reads why the child stopped talking, and is not promised an end that a dev server left running never brings |
+   | A timer the tool holds (`BackgroundTask.timer`: Claude's `/loop` wake-ups and scheduled prompts) does not hold a report | A loop or a seven-day cron job would hold it for good; the timer keeps the process awake all the same |
+   | `agent_session stop` on a paused child stops the tasks it paused on that still run, where the tool can stop one on its own (`stopBackgroundTask`), takes the report down, and names what it could not stop | The caller of a child that left a server running had no way out: it was not kept awake, and `stop` said nothing was running |
    | Later turn ends while work still runs say nothing; the first turn end with none left delivers the owed report ("finished", the answer of that turn) and wakes the caller through `deliver`'s resume | One pause notice per task: a Monitor that fires every few minutes would otherwise wake the caller each time. The turns that keep the report are the child's own work, never a loop: a report does not start the reporting session's turn |
-   | The work ends with no turn running and none starts within `PAUSED_REPORT_SETTLE_MS` (60 s): the report goes out as the end, with the last answer | Claude starts the turn within a second (its task-notification); a task the person stopped by hand starts none. Each change of the work starts the wait again, and a turn running when it is up reports at its own end |
+   | The work ends with no turn running and none starts within `PAUSED_REPORT_SETTLE_MS` (60 s): the report goes out with the last answer and how each task ended ("background work ended (pnpm verify: stopped) and no turn followed, so the work may not have finished"; "…: completed …" when all completed) | Claude starts the turn within a second (its task-notification); a task the person stopped by hand starts none. Each change of the work starts the wait again, and a turn running when it is up reports at its own end |
    | A failed or stopped turn (error, usage limit, the person's Stop, the #698 reasons) is reported as it ended, work running or not | Those need the caller now; the next turn is not the work's own |
    | A call waiting on the turn (`wait: true`, `agent_session wait`) takes the paused answer, with a notice that the work is not over, and the report is held for the end without a separate pause notice. `status` and `wait` on a paused child read the answer and the same notice and leave the report owed | A read of the paused answer used to take the report down, and with it the end |
    | A paused child at rest does not keep its caller awake (`waitsOn`); in a turn it does | The work may run for minutes or for good (a dev server); the report wakes the caller when it comes |
@@ -374,6 +376,9 @@ below retained for `safe` and `normal`:
    | Across a host swap the pause stays with the mark when the keeper kept the child's process (the work runs on there); a host that finds no process drops both, and a kept process that cannot be re-attached reports the work as stopped | The work went with a process that is gone |
    | A handoff moves a paused child with its report; the note says "paused on its own background work; its report comes when that work ends" | Not "finished; its report has not been delivered yet": the new session would wait for a report that is not late |
    | Only a turn the delegation's own wait saw end is judged: the delegation's outcome path reports only a wait that failed with no ending event, or one notes held (`tracksInputs`) | Judged again a microtask later, the pause could read as the end once the work had ended |
+
+   Not yet for a linked machine's session (`observeLinked`, `reportLinked`): its report still goes out at the first
+   turn end. Carrying the pause there needs the relayed `background_tasks` level and its own settle wait.
 
    Codex lists child threads as background work, so a Codex parent thread that ends with a child thread running is
    paused the same way; a tool that cannot report its background work (`capabilities.backgroundTasks` off) never
@@ -925,7 +930,7 @@ Implementation rules:
 - **Background work is reported as one level, `background_tasks`** (#290): every live task after a change (REPLACE
   semantics, so a missed message cannot leave a task "running"), and the tasks that just ended with their status
   (`completed`, `failed`, `stopped`). Each task carries `{ id, kind: agent | shell | mcp | other, description,
-  parentCallId?, ambient?, stopsWithTurn?, stoppable? }`. `stopsWithTurn` is what interrupting the turn does to it,
+  parentCallId?, ambient?, stopsWithTurn?, stoppable?, timer? }` (`timer`: a timer the tool holds, not work, #721). `stopsWithTurn` is what interrupting the turn does to it,
   **as measured for that tool**, and absent where it was not measured; it is what the session's Stop control says
   before it is pressed. An adapter that cannot see its background work declares `capabilities.backgroundTasks: false`
   and sends nothing rather than guessing. An adapter that reports it also releases it: when its process goes away it

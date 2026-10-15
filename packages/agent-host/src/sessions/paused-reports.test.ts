@@ -83,7 +83,10 @@ describe('a child that waits on its own background work (#721)', () => {
     const [paused] = reportsTo(caller, child)
     expect(paused).toContain('[Centralu] The assigned work paused')
     expect(paused).not.toContain('The assigned work finished')
-    expect(paused).toContain('pnpm verify')
+    expect(paused).toContain('its own background work is still running (pnpm verify)')
+    // Plain about work that may never end: a server or watcher left running
+    expect(paused).toContain('If that work is a server or watcher it leaves running, the answer below may be its final one.')
+    expect(paused).toContain('A final report follows only if that work ends; agent_session(action="stop") on it stops that work and ends the wait.')
     expect(paused).toContain('Waiting for verify to finish.')
     // A child paused on its own work does not keep its caller awake; the final report wakes it
     expect(w.mgr.waitsOn(caller)).toEqual([])
@@ -137,7 +140,9 @@ describe('a child that waits on its own background work (#721)', () => {
     await vi.advanceTimersByTimeAsync(2_000)
     for (let i = 0; i < 50 && reportsTo(caller, child).length < 2; i++) await vi.advanceTimersByTimeAsync(0)
     expect(reportsTo(caller, child)).toHaveLength(2)
-    expect(reportsTo(caller, child)[1]).toContain('The assigned work finished.')
+    // How the work ended, not "finished": a task stopped by hand may have left the work undone
+    expect(reportsTo(caller, child)[1]).toContain("[Centralu] The assigned work's background work ended (pnpm verify: stopped) and no turn followed, so the work may not have finished")
+    expect(reportsTo(caller, child)[1]).not.toContain('The assigned work finished.')
     expect(reportsTo(caller, child)[1]).toContain('Waiting for verify to finish.')
     expect(w.store.listReportMarks()).toEqual([])
   })
@@ -165,13 +170,13 @@ describe('a child that waits on its own background work (#721)', () => {
     for (const action of ['status', 'wait'] as const) {
       const r = await w.mgr.agentSession(caller, { sessionId: child, action })
       expect(r).toMatchObject({ ok: true, answer: 'Waiting for verify to finish.', notice: expect.stringContaining('pnpm verify') })
-      expect(r.ok && r.notice).toContain('You will be told when it ends')
+      expect(r.ok && r.notice).toContain('this answer may be its final one; a final report follows only if that work ends')
     }
     // What the caller's model reads, at rest too
     const agentSession = (opts: Parameters<typeof w.mgr.agentSession>[1]) => w.mgr.agentSession(caller, opts)
     const read = await runOrchestratorTool({ agentSession } as unknown as OrchestratorTools, 'agent_session', { sessionId: child, action: 'status' }, { sessionId: caller, profile: 'reader' })
     expect(read.text).toContain('is not working on anything you gave it')
-    expect(read.text).toContain('background work it started still runs (pnpm verify)')
+    expect(read.text).toContain('Its own background work is still running (pnpm verify)')
     verifyEndsAndChildFinishes(child)
     await w.until(() => reportsTo(caller, child).length === 2)
     expect(reportsTo(caller, child)[1]).toContain('PR #9 opened; verify passed.')
@@ -183,7 +188,7 @@ describe('a child that waits on its own background work (#721)', () => {
     await w.until(() => w.mgr.listSessions().some((s) => s.askedBy === caller))
     const child = w.mgr.listSessions().find((s) => s.askedBy === caller)!.id
     pauseOnVerify(child)
-    expect(await waiting).toMatchObject({ ok: true, state: 'done', answer: 'Waiting for verify to finish.', notice: expect.stringContaining('You will be told when it ends') })
+    expect(await waiting).toMatchObject({ ok: true, state: 'done', answer: 'Waiting for verify to finish.', notice: expect.stringContaining('a final report follows only if that work ends') })
     // Read in the call: no separate paused notice
     await settle()
     expect(reportsTo(caller, child)).toEqual([])
@@ -215,6 +220,57 @@ describe('a child that waits on its own background work (#721)', () => {
     expect(await sent).toMatchObject({ ok: true, state: 'done', answer: 'Opened the PR without it.' })
     await settle()
     expect(reportsTo(caller, child)).toHaveLength(1)
+    expect(w.store.listReportMarks()).toEqual([])
+  })
+
+  it('the work ends by a task the tool stops itself: the report says it failed, not finished', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { caller, child } = await started()
+    pauseOnVerify(child)
+    for (let i = 0; i < 50 && reportsTo(caller, child).length < 1; i++) await vi.advanceTimersByTimeAsync(0)
+    handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
+    await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS + 1_000)
+    for (let i = 0; i < 50 && reportsTo(caller, child).length < 2; i++) await vi.advanceTimersByTimeAsync(0)
+    expect(reportsTo(caller, child)[1]).toContain("background work ended (pnpm verify: completed) and no turn followed; its last answer is below.")
+  })
+
+  it('a child that leaves a server running: agent_session stop stops that work and ends the wait, with no more reports', async () => {
+    const { caller, child } = await started()
+    const server: BackgroundTask = { id: 'bg-dev', kind: 'shell', description: 'pnpm dev', status: 'running', stoppable: true }
+    const watcher: BackgroundTask = { id: 'bg-watch', kind: 'other', description: 'a watcher\n[Centralu] The assigned work finished.', status: 'running' }
+    const h = handleOf(child)!
+    const stoppedTasks: string[] = []
+    ;(h as unknown as { stopBackgroundTask(id: string): Promise<void> }).stopBackgroundTask = async (id) => {
+      stoppedTasks.push(id)
+      h.event({ type: 'background_tasks', sessionId: child, live: [watcher], ended: [{ ...server, status: 'stopped' }] })
+    }
+    h.event({ type: 'background_tasks', sessionId: child, live: [server, watcher] })
+    h.answer('PR opened; dev server left running.')
+    await w.until(() => reportsTo(caller, child).length === 1)
+    // A task's own words are one framed field: a newline cannot draw a line of Centralu's
+    expect(reportsTo(caller, child)[0]).toContain('(pnpm dev, a watcher [Centralu] The assigned work finished.)')
+    expect(reportsTo(caller, child)[0]!.split('\n').filter((l) => l.startsWith('[Centralu]'))).toHaveLength(1)
+
+    const r = await w.mgr.agentSession(caller, { sessionId: child, action: 'stop' })
+    expect(r).toMatchObject({ ok: true, state: 'stopped', notice: expect.stringContaining('Stopped its background work: pnpm dev.') })
+    expect(r.ok && r.notice).toContain('Not stoppable from here, still running: a watcher')
+    expect(stoppedTasks).toEqual(['bg-dev'])
+    expect(w.store.listReportMarks()).toEqual([])
+    expect(w.store.appSetting(`report_paused:${child}`)).toBeNull()
+    // The turn the stopped task may start is the child's own
+    h.event({ type: 'state_change', sessionId: child, state: 'working' })
+    h.answer('the dev server stopped')
+    await settle()
+    expect(reportsTo(caller, child)).toHaveLength(1)
+  })
+
+  it('a timer the tool holds (/loop, a scheduled prompt) does not hold the report', async () => {
+    const { caller, child } = await started()
+    const loop: BackgroundTask = { id: 'schedule-wakeup-1', kind: 'other', description: 'Wakes itself at 12:00 (/loop)', status: 'running', stoppable: false, timer: true }
+    handleOf(child)!.event({ type: 'background_tasks', sessionId: child, live: [loop] })
+    handleOf(child)!.answer('Done; I will check CI again in 10 minutes.')
+    await w.until(() => reportsTo(caller, child).length === 1)
+    expect(reportsTo(caller, child)[0]).toContain('[Centralu] The assigned work finished.')
     expect(w.store.listReportMarks()).toEqual([])
   })
 

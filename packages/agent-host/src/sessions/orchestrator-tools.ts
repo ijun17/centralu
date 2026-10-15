@@ -684,7 +684,7 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
     case 'stopped':
       // A request withdrawn before the person answered has no session to name (#673)
       if (!r.sessionName) return { text: `Withdrew request ${r.sessionId}: its card is gone and no session was started.` }
-      return { text: `Stopped ${who}.` }
+      return { text: `Stopped ${who}.${r.notice ? ` ${r.notice}` : ''}` }
     case 'deleted':
       if (r.branch === undefined) return { text: `Moved ${who} to the trash. Tell the person in one line.` }
       return {

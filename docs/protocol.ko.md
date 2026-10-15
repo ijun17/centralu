@@ -170,6 +170,7 @@ type BackgroundTask = {
   ambient?: boolean        // 도구가 활동이 아니라고 하는 살림 작업 — 목록에는 있지만 세지 않는다
   stopsWithTurn?: boolean  // 턴을 중단하면 어떻게 되는지, 도구마다 측정한 대로. 없으면 측정하지 않은 것
   stoppable?: boolean      // agents.stopBackgroundTask로 그것만 멈출 수 있다
+  timer?: boolean          // 도구가 쥐고 있는 타이머(Claude의 /loop, 예약 프롬프트)이지 작업이 아니다. 보고를 붙잡아 두지 않는다 (#721)
   status: 'running' | 'completed' | 'failed' | 'stopped'
   summary?: string         // 어떻게 끝났는지, 도구의 말로
 }

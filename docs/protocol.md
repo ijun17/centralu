@@ -174,6 +174,7 @@ type BackgroundTask = {
   ambient?: boolean        // housekeeping the tool says is not activity — listed, never counted
   stopsWithTurn?: boolean  // what interrupting the turn does to it, as measured per tool; absent = not measured
   stoppable?: boolean      // agents.stopBackgroundTask can stop it alone
+  timer?: boolean          // a timer the tool holds (Claude's /loop, scheduled prompts), not work: no report is held for it (#721)
   status: 'running' | 'completed' | 'failed' | 'stopped'
   summary?: string         // how it ended, in the tool's words
 }

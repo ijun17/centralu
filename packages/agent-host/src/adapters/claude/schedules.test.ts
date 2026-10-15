@@ -39,7 +39,7 @@ describe('a /loop wake-up', () => {
     expect(t.push(call('w1', 'ScheduleWakeup', { delaySeconds: 600, reason: 'check the build', prompt: '/loop check the build' }))).toEqual([])
     const live = liveOf(t.push(result('w1', { scheduledFor: now + 600_000, clampedDelaySeconds: 600, wasClamped: false })))!
     expect(live).toHaveLength(1)
-    expect(live[0]).toMatchObject({ kind: 'other', stoppable: false, status: 'running' })
+    expect(live[0]).toMatchObject({ kind: 'other', stoppable: false, timer: true, status: 'running' })
     expect(live[0]!.description).toMatch(/^Wakes itself at \d\d:\d\d \(\/loop\): check the build$/)
     expect(idleWith(live)).toBe(false)
     expect(t.nextDue()).toBe(now + 600_000)

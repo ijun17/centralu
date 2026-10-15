@@ -1141,6 +1141,8 @@ class ClaudeSchedules {
       description: t.description,
       // Not a task the CLI can stop by id (`stopTask`); the loop is ended by asking the agent
       stoppable: false,
+      // A timer, not work: a report is not held for it (#721)
+      timer: true,
       status: 'running' as const,
     }))
   }

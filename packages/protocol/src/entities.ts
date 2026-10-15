@@ -150,6 +150,8 @@ export type SessionActivity = z.infer<typeof SessionActivity>
  *                  leaves it running, absent means not measured. Claude: a subagent stops, a shell continues;
  *                  Codex: a child agent continues (probe-background-tasks.mts, probe-codex-background.mts)
  *   stoppable      it can be stopped on its own (`agents.stopBackgroundTask`)
+ *   timer          a timer the tool holds rather than work it runs: Claude's `ScheduleWakeup` (`/loop`) and `CronCreate`
+ *                  (#721). It keeps the process awake like any task, but a report is not held for it
  *   status         running while it is in the live set; an ended task keeps how it ended
  */
 export const BackgroundTaskKind = z.enum(['agent', 'shell', 'mcp', 'other'])
@@ -164,6 +166,7 @@ export const BackgroundTask = z.object({
   ambient: z.boolean().optional(),
   stopsWithTurn: z.boolean().optional(),
   stoppable: z.boolean().optional(),
+  timer: z.boolean().optional(),
   status: BackgroundTaskStatus.catch('completed').default('running'),
   /** How it ended, in the tool's words (a failure's reason, a stop's cause). Ended tasks only */
   summary: z.string().optional(),
