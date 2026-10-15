@@ -78,6 +78,7 @@ centralu/
 │  │     │     projects.ts(프로젝트, git 요약과 명령)  patch.ts(상태를 쓰는 보조 함수)
 │  │     │     sessions/(세션 액션: 포커스, 보내기, 응답, 프로세스, 생애주기, 인계)
 │  │     │     connection.ts(호스트에 붙기, 재연결 복구, 작업 공간 스냅숏)
+│  │     │     history.ts(대화 히스토리 페이지와 실행 카드의 단계 읽기)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)

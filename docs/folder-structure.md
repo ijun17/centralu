@@ -76,6 +76,7 @@ centralu/
 │  │     │     projects.ts (projects, their git summary and commands)  patch.ts (helpers for writing state)
 │  │     │     sessions/ (a session's actions: focus, send, answers, process, lifecycle, handoff)
 │  │     │     connection.ts (attaching to the host, reconnect recovery, the workspace snapshot)
+│  │     │     history.ts (reading a conversation's history pages and a launch card's steps)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)
