@@ -1,0 +1,79 @@
+import type { ProjectInfo } from '@cc/protocol'
+import { RowMenu } from './RowMenu.jsx'
+import { ActionRow } from './ActionRow.jsx'
+
+/**
+ * The action menu on a project row.
+ *
+ * The reason it is one labeled list instead of three icons is **that names are needed.** `+` could
+ * be learned to mean new session, but there is no way to know before pressing that a branch icon
+ * means the worktree manager and a trash icon means deleting the project — and one of those is the
+ * kind of thing that must not be pressed just to find out.
+ *
+ * Delete sits **at the very bottom, below a divider.** The two above it are things done every day,
+ * while this is something done once, and they must not sit in the same group when the hand is
+ * moving from memory.
+ */
+
+export function ProjectMenu({
+  project,
+  anchorEl,
+  onClose,
+  onNewSession,
+  onNewApp,
+  onToggleTrust,
+  onOpenInVsCode,
+  onDelete,
+}: {
+  project: ProjectInfo
+  anchorEl: HTMLElement | null
+  onClose: () => void
+  onNewSession: () => void
+  onNewApp?: () => void
+  onToggleTrust: () => void
+  /** A project on a linked machine VS Code can reach over Remote-SSH (#82): its folder there */
+  onOpenInVsCode?: () => void
+  onDelete: () => void
+}) {
+  const pick = (fn: () => void) => () => {
+    fn()
+    onClose()
+  }
+  return (
+    <RowMenu anchorEl={anchorEl} testId={`project-menu-open-${project.name}`} onClose={onClose}>
+      <ActionRow label="New session" onClick={pick(onNewSession)} testId={`new-session-${project.name}`} />
+      {/*
+        New app (M4 C-1) — right below new session. Both are "add one more thing to this project,"
+        so they belong in the same group. It shows up even for an untrusted project too: the dialog
+        states why and lets the person trust it right there (if the row disappeared from the menu
+        instead, there would be nowhere to ask why it is missing).
+      */}
+      {onNewApp && <ActionRow label="New app…" onClick={pick(onNewApp)} testId={`new-app-${project.name}`} />}
+      {/*
+        The whole project in VS Code, on its own machine (#82). It lives here and not in the file tree's tab strip:
+        there it took the width the strip counts tabs by, and pushed the terminal tab into "more" in a narrow panel.
+      */}
+      {onOpenInVsCode && (
+        <ActionRow label="Open in VS Code" onClick={pick(onOpenInVsCode)} testId={`open-vscode-${project.name}`} />
+      )}
+      {/*
+        Trust (M4, decision 3). Asked once at registration, and changed from here afterward. A
+        single toggle row, not a confirmation dialog: turning it off is the safe direction, which
+        stops apps and ignores settings, and turning it on is something the person did by opening
+        the menu, reading the label and pressing it.
+      */}
+      <ActionRow
+        label={project.trusted ? 'Stop trusting this project' : 'Trust this project'}
+        onClick={pick(onToggleTrust)}
+        testId={`toggle-trust-${project.name}`}
+      />
+      <div className="my-1 border-t border-line" />
+      <ActionRow
+        label="Delete project…"
+        onClick={pick(onDelete)}
+        testId={`delete-project-${project.name}`}
+        danger
+      />
+    </RowMenu>
+  )
+}
