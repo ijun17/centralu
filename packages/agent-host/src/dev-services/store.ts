@@ -1872,8 +1872,9 @@ export class Store {
          *   session_id         the session running the delegated turn
          *   caller_session_id  the session that gave it (the turn's owner)
          *   started_at         when the turn was given
-         *   told_cards         the cards the caller was already told of, space-separated request ids: a kept CLI sends
+         *   told_cards         the cards the caller was already told of, space-separated card handles: a kept CLI sends
          *                      its standing card again to the next host, which then does not tell the caller twice
+         *   turn_id            the delegated turn, bound into each card's handle so an answer meets only the card read
          *
          * Kept beside the host's memory (`SessionManager.turnOwners`) so a host swap (#280) does not cut the link while
          * the kept session waits on a question: the new host reads the rows of the sessions the keeper kept and still
@@ -1889,7 +1890,8 @@ export class Store {
               session_id        TEXT PRIMARY KEY,
               caller_session_id TEXT NOT NULL,
               started_at        INTEGER NOT NULL,
-              told_cards        TEXT NOT NULL DEFAULT ''
+              told_cards        TEXT NOT NULL DEFAULT '',
+              turn_id           TEXT NOT NULL DEFAULT ''
             )
           `)
         },
@@ -3669,21 +3671,21 @@ export class Store {
 
   // ── Sessions running a turn another session gave them (#676) — see migration v51 ──
 
-  listDelegatedTurns(): { sessionId: string; callerSessionId: string; told: string[] }[] {
+  listDelegatedTurns(): { sessionId: string; callerSessionId: string; told: string[]; turnId: string }[] {
     const rows = this.db
-      .prepare(`SELECT session_id as sessionId, caller_session_id as callerSessionId, told_cards as told FROM delegated_turns ORDER BY started_at`)
-      .all() as { sessionId: string; callerSessionId: string; told: string }[]
+      .prepare(`SELECT session_id as sessionId, caller_session_id as callerSessionId, told_cards as told, turn_id as turnId FROM delegated_turns ORDER BY started_at`)
+      .all() as { sessionId: string; callerSessionId: string; told: string; turnId: string }[]
     return rows.map((r) => ({ ...r, told: r.told.split(' ').filter(Boolean) }))
   }
 
   /** A new delegated turn: the cards told of the session's earlier one go with it */
-  setDelegatedTurn(sessionId: string, callerSessionId: string): void {
+  setDelegatedTurn(sessionId: string, callerSessionId: string, turnId: string): void {
     this.db
       .prepare(
-        `INSERT INTO delegated_turns (session_id, caller_session_id, started_at, told_cards) VALUES (?, ?, ?, '')
-           ON CONFLICT(session_id) DO UPDATE SET caller_session_id = excluded.caller_session_id, started_at = excluded.started_at, told_cards = ''`,
+        `INSERT INTO delegated_turns (session_id, caller_session_id, started_at, told_cards, turn_id) VALUES (?, ?, ?, '', ?)
+           ON CONFLICT(session_id) DO UPDATE SET caller_session_id = excluded.caller_session_id, started_at = excluded.started_at, told_cards = '', turn_id = excluded.turn_id`,
       )
-      .run(sessionId, callerSessionId, Date.now())
+      .run(sessionId, callerSessionId, Date.now(), turnId)
   }
 
   setDelegatedTurnTold(sessionId: string, told: readonly string[]): void {

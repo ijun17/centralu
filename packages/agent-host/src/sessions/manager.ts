@@ -4,7 +4,7 @@ import { residentCost } from './tool-cost.js'
 import { orchestratorHome, orchestratorRole } from './orchestrator-home.js'
 import { dedupeNearbyHits, takeInTurns, windowAround } from './snippet.js'
 import { commandsFor, profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
-import { answersFrom, cardCall, cardNotice, decisionFrom } from './delegated-cards.js'
+import { answersFrom, cardCall, cardHandle, cardNotice, decisionFrom } from './delegated-cards.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -614,12 +614,13 @@ export class SessionManager {
    * `send_to_session` turn, or one a new host found in the store). Mirrored in the store's `delegated_turns` (v51) so
    * a host swap keeps the link while the kept session waits on a question.
    */
-  private turnOwners = new Map<string, { callerId: string; untilTurnEnd: boolean; told: Set<string> }>()
+  private turnOwners = new Map<string, { callerId: string; untilTurnEnd: boolean; told: Set<string>; turnId: string }>()
   /** The owner's waits on a delegated turn, woken by a card it may read (#676): session -> wakers, each for one caller */
   private cardWakers = new Map<string, Set<{ callerId: string; wake: () => void }>>()
   private ownTurn(sessionId: string, callerId: string, untilTurnEnd: boolean): void {
-    this.turnOwners.set(sessionId, { callerId, untilTurnEnd, told: new Set() })
-    this.store.setDelegatedTurn(sessionId, callerId)
+    const turnId = randomUUID()
+    this.turnOwners.set(sessionId, { callerId, untilTurnEnd, told: new Set(), turnId })
+    this.store.setDelegatedTurn(sessionId, callerId, turnId)
   }
   /** Ends the link; with `callerId`, only that caller's (a later delegation by someone else is not cut) */
   private releaseTurn(sessionId: string, callerId?: string): void {
@@ -882,7 +883,7 @@ export class SessionManager {
     for (const row of store.listDelegatedTurns()) {
       const s = this.meta.get(row.sessionId)
       if (keeperOpts.keptSessions?.has(row.sessionId) && !!s && inTurn(s.state) && this.meta.has(row.callerSessionId)) {
-        this.turnOwners.set(row.sessionId, { callerId: row.callerSessionId, untilTurnEnd: true, told: new Set(row.told) })
+        this.turnOwners.set(row.sessionId, { callerId: row.callerSessionId, untilTurnEnd: true, told: new Set(row.told), turnId: row.turnId })
         continue
       }
       store.clearDelegatedTurn(row.sessionId)
@@ -7320,22 +7321,30 @@ export class SessionManager {
    */
   private routedCards(sessionId: string, callerId: string): RoutedCard[] {
     const m = this.meta.get(sessionId)
-    if (!m || this.turnOwners.get(sessionId)?.callerId !== callerId) return []
-    const cards: RoutedCard[] = m.pendingQuestions.map((q) => ({ card: q.requestId, kind: 'question' as const, questions: q.questions }))
+    const owner = this.turnOwners.get(sessionId)
+    if (!m || owner?.callerId !== callerId) return []
+    const cards: RoutedCard[] = m.pendingQuestions.map((q) => ({
+      card: cardHandle(owner.turnId, q.requestId, q.questions), requestId: q.requestId, kind: 'question' as const, questions: q.questions,
+    }))
     if (m.pendingApproval) {
-      cards.push({ card: m.pendingApproval.requestId, kind: 'approval', detail: m.pendingApproval.detail, answerable: this.answersApproval(callerId, m.pendingApproval.requestId) })
+      const a = m.pendingApproval
+      cards.push({ card: cardHandle(owner.turnId, a.requestId, a.detail), requestId: a.requestId, kind: 'approval', detail: a.detail, answerable: this.answersApproval(callerId, sessionId, a.requestId) })
     }
     return cards
   }
 
   /**
-   * Whether a delegated turn's owner may answer its approval card (#676): only an `auto` owner, asked at the call (the
-   * rule #603/#606 give other Centralu boundaries), never an app's agent, and never a card the host raised in that
-   * session (its own reach to another project or agent is the person's to allow).
+   * Whether a delegated turn's owner may answer its approval card (#676): the rule #603/#606 give other Centralu
+   * boundaries, read at the call, and never above the session that asks. The owner is `auto` and not an app's agent;
+   * the session running the turn is `normal` or `auto` and not an app's agent, so a `safe` session's approvals stay the
+   * person's whoever gave it the work (an `auto` caller does not raise the target's permissions); and the card is not
+   * one the host raised there (its own reach to another project or agent is the person's to allow).
    */
-  private answersApproval(callerId: string, requestId: string): boolean {
+  private answersApproval(callerId: string, sessionId: string, requestId: string): boolean {
     const caller = this.meta.get(callerId)
+    const target = this.meta.get(sessionId)
     if (!caller || caller.permissionPreset !== 'auto' || this.isAppAgentSession(caller)) return false
+    if (!target || target.permissionPreset === 'safe' || this.isAppAgentSession(target)) return false
     return !this.hostAsks.has(requestId)
   }
 
@@ -7346,8 +7355,11 @@ export class SessionManager {
    */
   private routeCard(sessionId: string, requestId: string, kind: 'question' | 'approval'): void {
     const owner = this.turnOwners.get(sessionId)
-    if (!owner || this.handingOver || !this.meta.has(owner.callerId) || owner.told.has(requestId)) return
-    owner.told.add(requestId)
+    if (!owner || this.handingOver || !this.meta.has(owner.callerId)) return
+    // Told once per card, by its handle: a request id an adapter numbers again after a restart is another card
+    const handle = this.routedCards(sessionId, owner.callerId).find((c) => c.requestId === requestId)?.card
+    if (!handle || owner.told.has(handle)) return
+    owner.told.add(handle)
     this.store.setDelegatedTurnTold(sessionId, [...owner.told])
     let woke = false
     for (const waker of this.cardWakers.get(sessionId) ?? []) {
@@ -7380,7 +7392,7 @@ export class SessionManager {
   private async tellCardRaised(callerId: string, sessionId: string, kind: 'question' | 'approval', requestId: string): Promise<void> {
     const profile = this.toolProfileOf(callerId)
     const how = profile === null ? 'none' : commandsFor(profile).includes('answer_question') ? 'command' : profileAllows(profile, 'answer_question') ? 'tool' : 'none'
-    const text = cardNotice(kind, sessionId, cardCall(profile, sessionId, how), kind === 'approval' && this.answersApproval(callerId, requestId))
+    const text = cardNotice(kind, sessionId, cardCall(profile, sessionId, how), kind === 'approval' && this.answersApproval(callerId, sessionId, requestId))
     const name = this.meta.get(sessionId)?.name ?? sessionId
     try {
       // Relayed, as a report: the stored line names the source, and the agent reads the same host-written words, which
@@ -7394,8 +7406,12 @@ export class SessionManager {
   /**
    * Answers a card of a delegated turn for its owner (#676): agent_session `answer`, answer_question. The owner must
    * still own the session's running turn, and the card must still stand: once the person answered, it is gone, and the
-   * first answer counted. A question takes the owner's answer; an approval only from an owner whose preset is `auto`
-   * now, and only allow or deny.
+   * first answer counted. A question takes the owner's answer; an approval only as `answersApproval` allows, and only
+   * allow or deny.
+   *
+   * The card is named by the handle the owner read (`cardHandle`): the session, the request id and the delegated turn,
+   * with what the card asks. An adapter numbers its requests again in a new process (`req-1`, …), so a request id alone
+   * could carry an answer meant for an earlier card onto a new one; a handle that matches no standing card is refused.
    */
   async answerRoutedCard(callerId: string, sessionId: string, card: string | undefined, text: string): Promise<ChildRunResult> {
     const m = this.meta.get(sessionId)
@@ -7404,26 +7420,30 @@ export class SessionManager {
       return { ok: false, error: `"${name}" is not running a turn you gave it, so none of its cards are yours to answer.` }
     }
     const cards = this.routedCards(sessionId, callerId)
-    const chosen = card ? cards.find((c) => c.card === card) : cards.length === 1 ? cards[0] : undefined
+    const chosen = card ? cards.find((c) => c.card === card) : undefined
     if (!chosen) {
       return {
         ok: false,
-        error: cards.length
-          ? `Name the card: ${cards.map((c) => c.card).join(', ')}.`
-          : card
-            ? `Card ${card} no longer stands in "${name}": it was answered (the person may have answered first) or withdrawn.`
-            : `"${name}" has no card waiting.`,
+        error: !card
+          ? cards.length
+            ? `Name the card you read: ${cards.map((c) => c.card).join(', ')}.`
+            : `"${name}" has no card waiting.`
+          : `Card ${card} no longer stands in "${name}" as you read it: it was answered (the person may have answered first), withdrawn, or replaced by another card. ` +
+            (cards.length ? `Read it again: ${cards.map((c) => c.card).join(', ')} stands now.` : 'Nothing is waiting now.'),
       }
     }
     const answered: ChildRunResult = { ok: true, state: 'answered', card: chosen.card, sessionId, sessionName: name, tool: m.tool }
     if (chosen.kind === 'approval') {
       if (!chosen.answerable || !this.autoBoundaryOpen(callerId, 'answer an approval in a delegated turn')) {
-        return { ok: false, error: `Only the person can answer this approval in "${name}"${this.hostAsks.has(chosen.card) ? '' : ': your permission preset is not auto'}. Tell them if it matters.` }
+        const why = this.hostAsks.has(chosen.requestId) ? 'Centralu raised it there'
+          : m.permissionPreset === 'safe' || this.isAppAgentSession(m) ? `"${name}" runs under ${this.isAppAgentSession(m) ? "an app's agent" : 'safe'}, and you cannot raise its permissions`
+          : 'your permission preset is not auto'
+        return { ok: false, error: `Only the person can answer this approval in "${name}": ${why}. Tell them if it matters.` }
       }
       const decision = decisionFrom(text)
       if (!decision) return { ok: false, error: 'Answer an approval with allow or deny.' }
       try {
-        this.respondApproval(sessionId, chosen.card, decision)
+        this.respondApproval(sessionId, chosen.requestId, decision)
       } catch (e) {
         return { ok: false, error: `The approval was not answered: ${(e as Error).message}` }
       }
@@ -7432,7 +7452,7 @@ export class SessionManager {
     const answers = answersFrom(chosen.questions, text)
     if ('error' in answers) return { ok: false, error: answers.error }
     try {
-      this.answerQuestion(sessionId, chosen.card, answers)
+      this.answerQuestion(sessionId, chosen.requestId, answers)
     } catch (e) {
       return { ok: false, error: `The question was not answered: ${(e as Error).message}` }
     }

@@ -653,9 +653,18 @@ already running (the person's, or someone else's) gives no one that turn.
   command, so through `centralu_run` in the default tier; a coordinator only reads). `text` is the answer, one line
   per question, `;` between a multi-select's choices, or a JSON array; a choice naming an option is that option's
   label (`answersFrom`). The card stays in the session for the person; the first answer lands, a later one finds the
-  card gone. An approval: the caller is told, and may allow or deny only when its own preset is `auto` at the answer
-  (`answersApproval`, the rule of #603/#606), never as an app's agent, and never for a card the host raised in that
-  session; "always" stays the person's.
+  card gone. An approval: the caller is told, and may allow or deny only when **both** hold at the answer
+  (`answersApproval`, the rule of #603/#606): the caller's own preset is `auto` and it is not an app's agent, and the
+  session running the turn is `normal` or `auto` and not an app's agent (owner decision: an `auto` orchestrator may
+  approve for a `normal` session). A `safe` session's approvals stay the person's whoever gave it the work: the
+  caller's `auto` never raises the target's permissions. Never a card the host raised in that session; "always" stays
+  the person's.
+- **Which card** (#679 review). The caller reads each card by a handle, `<request id>.<digest>`, the digest over the
+  delegated turn (`turnId`, stored with the link) and what the card asks (`cardHandle`), and its answer must name
+  that handle. An adapter numbers its requests again in a new process (`req-1`, …), so a request id alone could carry
+  an answer meant for an earlier card onto a new one in the same session, or into a later turn; a handle that matches
+  no standing card is refused, and the caller reads the card again. `told_cards` keeps handles too, so a new card
+  under a reused id is told.
 
 ### 1.3 Making a new project (`projects.create`, `create_project`, #515)
 

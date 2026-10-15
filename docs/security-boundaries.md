@@ -49,8 +49,10 @@ boundaries (#603), with a log line instead of a card or refusal:
 - **Cards of a delegated turn** (#676): a question raised in a turn the caller gave (also `ask_project`'s and
   `send_to_session`'s) reaches the caller as a tool result it asks for, never as a user message carrying the
   target's text; the caller may answer it, as the person may, and the first answer counts. An approval reaches it as
-  a notice only: it may allow or deny only while its own preset is `auto`, never as an app's agent, never a card the
-  host raised, never "always". The link ends with the turn, so the person's later turns stay theirs.
+  a notice only: it may allow or deny only while its own preset is `auto` and the target is `normal` or `auto`; never
+  for a `safe` target, never as or for an app's agent, never a card the host raised, never "always". An answer names
+  the handle of the card the caller read (request id, turn, content), so an id an adapter reuses after a restart
+  cannot carry it onto another card. The link ends with the turn, so the person's later turns stay theirs.
 - **A ceiling**: Settings → Orchestrator → Running agents per project (`prefs.agentCeiling`).
   Empty uses the preset default: no ceiling under `auto`, 4 otherwise (`AGENT_CEILING`); zero
   explicitly removes the ceiling, and a positive integer limits all running children in each project.
@@ -341,7 +343,8 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `agent_session` delete without a worktree, a session the caller did not start | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (#637): requires `askedBy` or `parentSessionId` equal to the caller in the same project. An owned child is moved to the sidebar trash; mid-turn deletion requires the caller's own unsettled delegation and otherwise protects the person's turn/cards. |
 | `agent_session` delete, an idle worktree child with uncommitted changes or commits absent from the trunk | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `cleanUpWorktreeChild` (#608): the parent decides; patches and bundles follow the session into the trash before the worktree and branch are removed. Working children are refused; an idle process must be disposed successfully first. |
 | `agent_session` answer / `answer_question`, a question in a turn the caller gave (#676) | allowed | allowed | allowed | allowed | allowed | allowed | allowed | allowed | `answerRoutedCard`: only while the caller owns the session's running turn (`turnOwners`) and the card stands; the person may answer first |
-| `agent_session` answer / `answer_question`, an approval in a turn the caller gave (#676) | refused | refused | refused | open | refused | refused | refused | open | `answersApproval`: the caller's own preset at the answer; never an app agent or a host-raised card; allow or deny, never always |
+| `agent_session` answer / `answer_question`, an approval in a turn the caller gave (#676), target `normal` or `auto` | refused | refused | refused | open | refused | refused | refused | open | `answersApproval`: the caller's own preset at the answer; never an app agent or a host-raised card; allow or deny, never always |
+| The same, target `safe` or an app's agent | refused | refused | refused | refused | refused | refused | refused | refused | `answersApproval` (#679 review): the caller's `auto` never raises the target's permissions; the caller is told only |
 | `agent_session` send, to a child the person raised above the caller's preset | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (`presetWithin`) |
 | `create_project` (the orchestrator makes a new project, empty or a clone) | asks (a card with the full path and, for a clone, the repository, every time) | asks | asks | open | asks | asks | asks | open | `SessionManager.createProjectAsked` → `askHost`; the folder is made only after "Create", and never over anything already there (`projectFolderTarget`, `makeProjectFolder`); by default in `~/Centralu`, a folder of the home that macOS does not protect, so making one raises no OS permission prompt (the Desktop did); a clone takes https, ssh and scp-like addresses only, never `ext::`, `file://` or a local path (`gitSourceError`), clones no submodules and never asks for a sign-in (`project-clone.ts`) |
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | open | asks | asks | asks | open | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
@@ -368,7 +371,9 @@ Rows that differ by session:
 - **An agent an app started** (`run_agent`, `SessionManager.runAppAgent`) is `safe` whatever the
   calling session uses, has no Centralu server and no apps. Reads run; everything else asks.
 - **A session `ask_project` addresses** already exists and keeps its own preset, tool and project
-  trust. The caller's `auto` skips host consent; it does not raise the target's permissions. Depth
+  trust. The caller's `auto` skips host consent; it does not raise the target's permissions, which
+  includes answering its approval cards: an `auto` caller may answer them only for a `normal` or `auto`
+  target, never a `safe` one or an app's agent (#676, `answersApproval`). Depth
   one applies during a delegated task under `safe`/`normal`; the target's own `auto` opens that gate.
 - **A session `start_agent` started** (#561) runs in the caller's own folder under **the caller's
   preset**, so it never has more than the session that asked for it: `safe` stays `safe`, `normal` reads

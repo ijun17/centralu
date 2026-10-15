@@ -100,6 +100,7 @@ erDiagram
     TEXT caller_session_id
     INTEGER started_at
     TEXT told_cards
+    TEXT turn_id
   }
   grid_layout {
     TEXT panel_key PK
@@ -358,6 +359,7 @@ Added in v51.
 | `caller_session_id` | TEXT | no |  |  | v51 |
 | `started_at` | INTEGER | no |  |  | v51 |
 | `told_cards` | TEXT | no | `''` |  | v51 |
+| `turn_id` | TEXT | no | `''` |  | v51 |
 
 ### `grid_layout`
 

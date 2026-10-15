@@ -132,9 +132,12 @@ export type LinkedSessions = {
  * when it answers. The questions and the approval's detail are the target's text: rendered fenced, never as an
  * instruction.
  */
-export type RoutedCard =
-  | { card: string; kind: 'question'; questions: Question[] }
-  | { card: string; kind: 'approval'; detail: ApprovalDetail; answerable: boolean }
+export type RoutedCard = {
+  /** The handle the caller answers with (`cardHandle`): the request id bound to the turn and to what the card asks */
+  card: string
+  /** The adapter's own id for the card, which a new process may reuse */
+  requestId: string
+} & ({ kind: 'question'; questions: Question[] } | { kind: 'approval'; detail: ApprovalDetail; answerable: boolean })
 
 /** What one ask_project call comes back with (#371 part B) — rendered for the model by runOrchestratorTool */
 export type AskProjectResult =
