@@ -69,7 +69,7 @@ centralu/
 │  │     │  └─ usage/  settings/  onboarding/
 │  │     ├─ components/         # feature-agnostic shared (Button, Kbd, VirtualList…)
 │  │     ├─ store/              # zustand store + selectors (reducers are imported from core)
-│  │     │                      #   store.ts가 스토어 하나를 만들고 액션을 담는다. 거기서 떼어 낸 부분(#428):
+│  │     │                      #   store.ts가 아래 부분들로 스토어 하나를 만든다(#428):
 │  │     │  └─ state.ts(타입)  historyPages.ts(히스토리 페이지와 화면 병합)
 │  │     │     screens.ts(지금 보이는 화면)  appKeys.ts(앱과 그 뷰의 이름)
 │  │     │     sessionList.ts(스토어가 가진 세션: 호스트 목록 병합, 아직 등록되지 않은 세션의 이벤트 보관)
@@ -81,6 +81,7 @@ centralu/
 │  │     │     history.ts(대화 히스토리 페이지와 실행 카드의 단계 읽기)
 │  │     │     updates.ts(Centralu 업데이트와 에이전트 CLI 버전)  machines.ts(연결된 기기)
 │  │     │     orchestrator.ts(오케스트레이터와 그 제안)
+│  │     │     layout.ts(창 배치)  navigation.ts(보이는 화면, 뒤로·앞으로)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)

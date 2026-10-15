@@ -14,24 +14,18 @@ import type {
 } from '@cc/protocol'
 import {
   DEFAULT_NOTIFY_POLICY,
-  appKeyOf,
-  gridPanelKey,
-  withPanelSpan,
   gridSessionIds,
-  sanitizeGridPanels,
   type ProjectArrangement,
 } from '@cc/core'
-import { activateTab, defaultLayout } from './panelLayout.js'
-import { closeLayer, EMPTY_NAV, sameScreen, step, visit } from './navHistory.js'
-import { FOLDED_GROUPS_MAX, deadFoldKeys, sameKeys } from './foldGroups.js'
+import { defaultLayout } from './panelLayout.js'
+import { closeLayer, EMPTY_NAV, sameScreen, visit } from './navHistory.js'
 export { audienceText, compactionText, errorText, handoffText, markerText, messagesToChat, noticeLine, resetText } from './transcript.js'
 export type { ChatAttachment, ChatItem, NoticeLine } from './transcript.js'
-import { type AppState, type InlineView, type Notice, type Overlay, type PinnedView } from './state.js'
+import { type AppState, type InlineView, type Notice, type PinnedView } from './state.js'
 export { EMPTY_DRAFT } from './state.js'
 export type { AppState, Draft, InlineView, Notice, Overlay, PinnedView, SubagentSteps } from './state.js'
-import { gridAppViewKey } from './appKeys.js'
 export { externalAppKey, gridAppViewKey, isApp } from './appKeys.js'
-import { screenExists, screenOf } from './screens.js'
+import { screenOf } from './screens.js'
 export {
   gridScreenAppKeys,
   newSessionProjectOf,
@@ -60,6 +54,10 @@ export {
 } from './apps.js'
 export type { InlineFrame } from './apps.js'
 import { eventActions } from './events/index.js'
+import { layoutActions } from './layout.js'
+export { CENTER_MIN, PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN } from './layout.js'
+import { PANEL_DEFAULT, SIDEBAR_DEFAULT } from './layout.js'
+import { navigationActions, navigating } from './navigation.js'
 import { orchestratorActions } from './orchestrator.js'
 import { machineActions } from './machines.js'
 import { updateActions } from './updates.js'
@@ -67,7 +65,6 @@ export { appliedVersionsText } from './updates.js'
 import { historyActions } from './history.js'
 import { connectionActions, goodThemes, restoringWorkspace } from './connection.js'
 import { projectActions } from './projects.js'
-import { omitKey } from './patch.js'
 import { lifecycleActions } from './sessions/lifecycle.js'
 import { processActions } from './sessions/process.js'
 import { answerActions } from './sessions/answers.js'
@@ -85,30 +82,12 @@ import { focusActions } from './sessions/focus.js'
  */
 
 /**
- * One higher than the last one opened. Coming from outside git resets it to 1 — panels opened
- * in between are appended fresh.
- */
-const nextPick = (o: Overlay): number => (o?.kind === 'git' ? o.pick : 0) + 1
-
-/**
  * The tab set and arrangement live in panelLayout.ts (#20) — the single `panelTab`
  * value became a group structure when the panel learned to split, and the reasoning
  * for what the tabs *are* (e.g. why `history` sits beside `git` rather than inside it,
  * #21) moved with the type. Re-exported so screens keep one import site for the store.
  */
 export type { PanelGroup, PanelTab } from './panelLayout.js'
-
-/** Limits on the evidence panel's width. Too narrow kills the path; too wide kills the conversation */
-export const PANEL_MIN = 260
-export const PANEL_MAX = 900
-export const PANEL_DEFAULT = 340
-
-/** Width of the session list (observation lane) */
-/** The height "history" takes up in the git tab. "Changes" gets the rest */
-
-export const SIDEBAR_MIN = 180
-export const SIDEBAR_MAX = 480
-export const SIDEBAR_DEFAULT = 240
 
 /**
  * The five steps of overall text size (the middle one is the default) — the protocol's
@@ -121,32 +100,6 @@ export const SIDEBAR_DEFAULT = 240
  * because it follows the same rule as the OS's own display scaling.
  */
 export const TEXT_SCALES = TEXT_SIZES
-
-/**
- * The minimum width the conversation lane must keep.
- *
- * Without this, stretching both side panels squeezes the center down to zero and beyond, pushing
- * the whole layout past the window edge so the entire screen scrolls horizontally (this actually
- * happened during dogfooding). Worse, in that state the handle position calculation goes wrong,
- * creating feedback where dragging it makes it grow larger still.
- */
-export const CENTER_MIN = 360
-
-/**
- * Clamps to the width that can actually fit inside the window.
- *
- * Why `zoom` is needed (for overall text size): the layout width is in zoom coordinates, while
- * `window.innerWidth` is in **real pixels**. Without dividing by it, the available width gets
- * inflated at higher zoom and the layout is pushed past the window edge. The minimum width, on
- * the other hand, is **pinned to real pixels** — if it were allowed to grow with the zoom level up
- * to the point where the panel could be narrowed, raising the zoom in a narrow window would let
- * the panel eat the whole screen (per a dogfooding request: the minimum width stays fixed).
- */
-function fitWidth(px: number, minReal: number, max: number, otherLane: number, zoom = 1): number {
-  const winW = (typeof window === 'undefined' ? 1280 : window.innerWidth) / zoom
-  const available = winW - otherLane - CENTER_MIN / zoom
-  return Math.min(max, Math.max(Math.round(minReal / zoom), Math.round(Math.min(px, available))))
-}
 
 /** Registers a drawn frame in `inlineFrames` (apps.ts, with the reason it exists); here because each change bumps the store's counter */
 export function registerInlineFrame(sessionId: string, callId: string, frame: InlineFrame): () => void {
@@ -176,9 +129,6 @@ export function useTextZoom(): number {
  * moment a new message was appended.)
  * So this number is pushed above every stored item as it is brought in.
  */
-
-/** The newest save of the folded groups (#666): an older one that fails must not undo what a later one is saving */
-let foldSaveSeq = 0
 
 /**
  * Which tools the Usage modal should report on — deduplicated, in screen order (#26).
@@ -304,176 +254,6 @@ export const useStore = create<AppState>((set, get) => ({
   settingsRequest: null as { category: string; at: number } | null,
   prefs: DEFAULT_UI_PREFERENCES,
 
-  setBuilderPane(sessionId) {
-    if (get().builderPaneSessionId !== sessionId) set({ builderPaneSessionId: sessionId })
-  },
-
-  setAppFocused(focused) {
-    /*
-     * **Only the false→true edge.** `onVisibility` fires once at mount while `appFocused`
-     * is already true and `attach` has just fetched every project — refreshing on every
-     * call would repeat that fetch for no new information. Focus and visibilitychange also
-     * both fire for a single alt-tab; the debounce would collapse those anyway, but there
-     * is no reason to arm two timers to learn one thing.
-     */
-    const returning = focused && !get().appFocused
-    set({ appFocused: focused })
-    /*
-     * Coming back to the window is the only signal we get for work done **outside** the app
-     * (issue #41): a commit typed in a terminal, a rebase, a `git clean`. Nothing in here
-     * watched it happen, so no project is more suspect than another and all of them are
-     * re-measured — refreshing only the focused one would leave every other sidebar row
-     * exactly as stale as before, which is the bug.
-     */
-    if (returning) for (const id of Object.keys(get().projects)) get().refreshProjectGit(id)
-    // The same signal for an agent CLI updated in a terminal (#297): the host reads the installed versions again
-    if (returning) void get().checkAgentVersions(false)
-  },
-
-  dismissNotices(sessionIds) {
-    if (sessionIds.length === 0) return
-    const drop = new Set(sessionIds)
-    set((s) => {
-      const kept = s.notices.filter((n) => !drop.has(n.sessionId))
-      // Leave it as is when nothing changed — putting in a new array reruns any effect watching this
-      return kept.length === s.notices.length ? {} : { notices: kept }
-    })
-  },
-
-  /** Selects only the project — git, files and the viewer can be viewed without picking a session */
-  focusProject(id) {
-    set(() => ({
-      focusedProjectId: id,
-      /*
-       * Picking a project **always** releases session focus — the click was made to see the project
-       * screen. This used to release it only when a *different* project was picked, so clicking that
-       * same project's name while already viewing one of its sessions left the session in place,
-       * looking as if nothing had happened (user report 2026-09-28). The only callers are the
-       * sidebar's name and the palette when it picks a project with no session — both want the
-       * project screen.
-       */
-      focusedSessionId: null,
-      // The project screen exists only in the focus lane — what the person picked must be shown (the same
-      // rule as `focusSession`). This combination actually arose once onboarding started opening the
-      // orchestrator view first (#63) (caught by e2e).
-      view: 'focus',
-      viewerPath: null,
-  viewerProjectId: null,
-      overlay: null,
-    }))
-    get().saveWorkspace()
-  },
-
-  togglePanel(open) {
-    set((s) => ({ panelOpen: open ?? !s.panelOpen }))
-    get().saveWorkspace()
-  },
-
-  setPanelTab(tab) {
-    set((s) => ({ panelLayout: activateTab(s.panelLayout, tab), panelOpen: true }))
-    get().saveWorkspace()
-  },
-
-  setPanelLayout(panelLayout) {
-    set({ panelLayout })
-    get().saveWorkspace()
-  },
-
-  setPanelWidth(px) {
-    const s = get()
-    const sidebar = s.panelOpen ? s.sidebarWidth : s.sidebarWidth
-    set({ panelWidth: fitWidth(px, PANEL_MIN, PANEL_MAX, sidebar, s.prefs.textSize) })
-    get().saveWorkspace()
-  },
-
-  setPanelSplit(share) {
-    // If one group drops below 15%, only the tab strip remains and it reads as "gone" — a floor is set
-    const clamped = Math.min(0.85, Math.max(0.15, share))
-    if (clamped === get().panelSplit) return
-    set({ panelSplit: clamped })
-    get().saveWorkspace()
-  },
-
-  setSidebarWidth(px) {
-    const s = get()
-    // If the panel is collapsed, it only occupies a 32px strip
-    const panel = s.panelOpen ? s.panelWidth : 32
-    set({ sidebarWidth: fitWidth(px, SIDEBAR_MIN, SIDEBAR_MAX, panel, s.prefs.textSize) })
-    get().saveWorkspace()
-  },
-
-  openFile(path, projectId) {
-    set({ viewerPath: path, viewerProjectId: projectId ?? null, overlay: { kind: 'viewer' } })
-  },
-
-  /*
-   * Opens Finder from a right-click. The path arrives with the same credentials as a file link
-   * (relative to the currently viewed session's project), and goes through the same port as the file
-   * tree's reveal — a failure is loud with the same wording as the tree's.
-   */
-  async revealFile(path, from) {
-    const s = get()
-    const projectId = from ?? (s.focusedSessionId ? s.sessions[s.focusedSessionId]?.projectId : null)
-    if (!projectId || !s.platform) return
-    // The file manager is this computer's; a file on a linked machine is not in it (#82)
-    const machine = s.projects[projectId]?.machine
-    if (machine) {
-      set({ toast: `${path} is on ${s.machines[machine]?.name ?? machine}, not on this computer` })
-      return
-    }
-    try {
-      const res = await s.platform.fs.reveal(projectId, path)
-      if (!res.supported) set({ toast: res.reason ?? 'Showing files is not available here' })
-    } catch (e) {
-      set({ toast: `Could not show ${path}: ${(e as Error).message}` })
-    }
-  },
-
-  openGit(path, staged) {
-    // The tab is recorded explicitly — clicking a changed file while viewing history must return to changes
-    set((s) => ({ overlay: { kind: 'git', path: path ?? null, staged, sub: 'changes', pick: nextPick(s.overlay) } }))
-  },
-
-  openCommit(sha) {
-    set((s) => ({ overlay: { kind: 'git', sha, sub: 'history', pick: nextPick(s.overlay) } }))
-  },
-
-  openBranches() {
-    set((s) => ({ overlay: { kind: 'git', sub: 'branches', pick: nextPick(s.overlay) } }))
-  },
-
-  closeOverlay() {
-    set({ overlay: null })
-  },
-  toggleInbox(open) {
-    set((s) => ({ inboxOpen: open ?? !s.inboxOpen }))
-  },
-  togglePalette(open) {
-    set((s) => ({ paletteOpen: open ?? !s.paletteOpen }))
-  },
-  askComposerFocus(sessionId) {
-    set({ composerFocusFor: sessionId })
-  },
-  toggleUsage(open) {
-    set((s) => ({ usageOpen: open ?? !s.usageOpen }))
-  },
-  toggleSettings(open) {
-    set((s) => ({ settingsOpen: open ?? !s.settingsOpen }))
-  },
-  openSettingsAt(category) {
-    set({ settingsOpen: true, settingsRequest: { category, at: Date.now() } })
-  },
-  openImport(source = '', fromLink = false) {
-    // `at` is needed so a new link arriving at an already-open window still makes the window stand up again for that link (a request to open the same window twice)
-    set({ importDialog: { source, fromLink, at: Date.now() }, settingsOpen: false })
-  },
-  closeImport() {
-    set({ importDialog: null })
-  },
-  requestSettingsMenu(sessionId) {
-    set({ settingsMenuRequest: { sessionId, at: Date.now() } })
-  },
-
   async loadSleepPolicy() {
     const platform = get().platform
     if (!platform) return
@@ -532,159 +312,7 @@ export const useStore = create<AppState>((set, get) => ({
     // The policy is carried in the workspace snapshot too (E-5) — saving goes through the single writer
     get().saveWorkspace()
   },
-  setStickToBottom(sessionId, sticking) {
-    set((s) => {
-      // Scrolling fires this by the dozen; only a change is worth a new state object
-      if ((s.stickToBottom[sessionId] ?? true) === sticking) return {}
-      // Sticking is the default, so it is recorded by *not* being recorded — that way the
-      // map only ever holds the sessions someone has actually scrolled away from
-      if (sticking) return { stickToBottom: omitKey(s.stickToBottom, sessionId) }
-      return { stickToBottom: { ...s.stickToBottom, [sessionId]: false } }
-    })
-  },
-  setScrollAnchor(sessionId, anchor) {
-    set((s) => {
-      if (!anchor) {
-        // Left at the bottom — if the previous anchor were left behind, arriving next time would go to that old spot
-        if (!(sessionId in s.scrollAnchor)) return {}
-        return { scrollAnchor: omitKey(s.scrollAnchor, sessionId) }
-      }
-      const cur = s.scrollAnchor[sessionId]
-      if (cur && cur.seq === anchor.seq && cur.offset === anchor.offset) return {}
-      return { scrollAnchor: { ...s.scrollAnchor, [sessionId]: anchor } }
-    })
-  },
-  toggleDir(projectId, path) {
-    set((s) => {
-      const cur = s.expandedDirs[projectId] ?? []
-      /*
-        Closing a folder leaves its children in the list on purpose. "As you left it" means
-        the whole shape comes back when you open the parent again, not just its first row.
-      */
-      const next = cur.includes(path) ? cur.filter((p) => p !== path) : [...cur, path]
-      return { expandedDirs: { ...s.expandedDirs, [projectId]: next } }
-    })
-  },
-  setShowIgnored(show) {
-    set({ showIgnored: show })
-    get().saveWorkspace()
-  },
-  toggleProjectFold(projectId) {
-    set((s) => ({
-      foldedProjects: s.foldedProjects.includes(projectId)
-        ? s.foldedProjects.filter((id) => id !== projectId)
-        : [...s.foldedProjects, projectId],
-    }))
-    get().saveWorkspace()
-  },
-  setGroupsFolded(keys, folded) {
-    const before = get().prefs.foldedGroups
-    const next = folded
-      ? [...before, ...keys.filter((k, i) => !before.includes(k) && keys.indexOf(k) === i)].slice(-FOLDED_GROUPS_MAX)
-      : before.filter((k) => !keys.includes(k))
-    if (sameKeys(next, before)) return
-    set((s) => ({ prefs: { ...s.prefs, foldedGroups: next } }))
-    const platform = get().platform
-    if (!platform) return
-    const mine = ++foldSaveSeq
-    platform.prefs.save({ foldedGroups: next }).catch((e: unknown) => {
-      /*
-       * Undone only when this is still the newest save and the list is still what it wrote: a later fold has its own
-       * save in flight, and its state must not be rolled back by this one's failure. Compared by value, not identity:
-       * a reconnect reads the preferences again and hands the screen a new array with the same keys.
-       */
-      if (mine === foldSaveSeq && sameKeys(get().prefs.foldedGroups, next)) {
-        set((s) => ({ prefs: { ...s.prefs, foldedGroups: before } }))
-      }
-      set({ toast: `Could not save that: ${(e as Error).message}` })
-    })
-  },
-  pruneFoldedGroups() {
-    const s = get()
-    // An empty app list may be a read that failed; it names no app, so it must not condemn every app's fold
-    const apps = s.externalApps.length > 0 ? new Set(s.externalApps.map((a) => appKeyOf(a.projectId, a.appId, a.machine))) : null
-    const dead = deadFoldKeys(s.prefs.foldedGroups, s.sessions, apps)
-    if (dead.length > 0) get().setGroupsFolded(dead, false)
-  },
-  foldOtherProjects(projectId) {
-    set((s) => ({ foldedProjects: Object.keys(s.projects).filter((id) => id !== projectId) }))
-    get().saveWorkspace()
-  },
-  arrangeProject(projectId, next) {
-    set((s) => ({ projectPanels: { ...s.projectPanels, [projectId]: next } }))
-    get().saveWorkspace()
-  },
-  setAppSpan(projectId, appId, span, machine) {
-    const key = appKeyOf(projectId, appId, machine)
-    set((s) => {
-      const { [key]: _old, ...rest } = s.appSpans
-      return { appSpans: span ? { ...rest, [key]: span } : rest }
-    })
-    get().saveWorkspace()
-  },
-  async setGridPanelSpan(key, span) {
-    await get().setGridPanels(withPanelSpan(get().gridPanels, key, span))
-  },
-  setFoldComposer(fold) {
-    set({ foldComposer: fold })
-    get().saveWorkspace()
-  },
 
-  setToast(toast) {
-    set({ toast })
-  },
-
-
-  goBack() {
-    navigate(get, set, -1)
-  },
-
-  goForward() {
-    navigate(get, set, 1)
-  },
-
-  setView(view) {
-    /*
-     * Picking a screen = having passed the intro (#63).
-     *
-     * A person who clicks the grid or the orchestrator from the sidebar beside the intro screen is
-     * saying "enough explaining, I want to use the app." If that click did not change the screen, the
-     * button would look broken; hiding the button instead would force reading the intro — squarely
-     * against this onboarding's premise of never forcing a conversation.
-     */
-    set({ view, introSeen: true })
-    get().saveWorkspace()
-  },
-
-  /**
-   * Saves the whole arrangement (adding, removing and reordering all arrive as this one action).
-   *
-   * The screen changes first and the save follows — if a dropped panel waited for a round trip to
-   * the server before settling into place, the hand would feel like it stumbled. A failure reverts to
-   * whatever the host says is true.
-   */
-  async setGridPanels(panels) {
-    const platform = get().platform
-    if (!platform) return
-    const before = get().gridPanels
-    /*
-     * An app panel taken off the grid closes its view, teardown first — the project screen's × rule (#288). Here
-     * rather than at the grid's ×, so every way a panel leaves the list (the ×, a test, a future caller) takes its view
-     * with it instead of leaving a frame alive behind a screen that no longer shows it. The view is not inside the
-     * panel (it is laid over it from PinnedApps), so the panel leaving first does not cut teardown off: the frame stays
-     * in the document, hidden, until `dismissPinnedView` has had its answer.
-     */
-    const kept = new Set(panels.map(gridPanelKey))
-    for (const p of before) {
-      if (p.kind === 'app' && !kept.has(gridPanelKey(p))) void get().dismissPinnedView(gridAppViewKey(p.projectId, p.appId, p.machine))
-    }
-    set({ gridPanels: panels })
-    try {
-      set({ gridPanels: sanitizeGridPanels(await platform.agents.setGridView(panels)) })
-    } catch (e) {
-      set({ gridPanels: before, toast: `Could not save layout: ${(e as Error).message}` })
-    }
-  },
 
   ...connectionActions(set, get),
   ...eventActions(set, get),
@@ -700,50 +328,13 @@ export const useStore = create<AppState>((set, get) => ({
   ...updateActions(set, get),
   ...machineActions(set, get),
   ...orchestratorActions(set, get),
+  ...navigationActions(set, get),
+  ...layoutActions(set, get),
 }))
 
 /** The theme files to apply: a broken one stands in as its last clean version, if it ever had one */
 export function usableThemeFiles(s: { themeFiles: ThemeFileEntry[]; lastGoodThemes: Record<string, ThemeFileEntry> }): ThemeFileEntry[] {
   return s.themeFiles.map((f) => (f.broken ? (s.lastGoodThemes[f.id] ?? f) : f))
-}
-
-/** True while `navigate` puts a recorded screen back, so `recordScreen` does not record it as a new visit */
-let navigating = false
-
-function navigate(get: () => AppState, set: (partial: Partial<AppState>) => void, dir: -1 | 1): void {
-  const st = get()
-  const { history, screen } = step(st.nav, dir, (x) => screenExists(st, x))
-  navigating = true
-  try {
-    if (history !== st.nav) set({ nav: history })
-    if (!screen) return
-    /*
-     * Through the same doors a click uses, so a screen comes back exactly as it opens: a session unfolds its
-     * project, an app gets its pinned view, Settings opens on the category it was left on.
-     */
-    if (screen.kind === 'settings') {
-      st.toggleSettings(true)
-      return
-    }
-    if (get().settingsOpen) st.toggleSettings(false)
-    switch (screen.kind) {
-      case 'session':
-        st.focusSession(screen.id)
-        break
-      case 'project':
-        st.focusProject(screen.id)
-        break
-      case 'app':
-        st.openApp(screen.projectId, screen.appId, { machine: screen.machine })
-        break
-      case 'grid':
-      case 'orchestrator':
-        st.setView(screen.kind)
-        break
-    }
-  } finally {
-    navigating = false
-  }
 }
 
 /**
