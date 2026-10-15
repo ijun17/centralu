@@ -1515,7 +1515,8 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 - **git**: `git` CLI spawn + `--porcelain=v2/-z` 파싱. status·diff·log·branches·checkout·stage·commit·push.
   git2(Rust)로의 이전은 **측정으로 병목이 확인되기 전까지는 하지 않는다** (m2-plan 결정 3).
   포트 인터페이스가 같으므로 나중에 옮겨도 UI는 변경되지 않는다.
-- **store**: better-sqlite3 + `user_version` 마이그레이션 러너. 스키마 DDL은 정확히 한 곳,
+- **store**: better-sqlite3 + `user_version` 마이그레이션 러너. `Store`(`store.ts`)는 파일을 열고 마이그레이션을 돌린다. 나머지 메서드는 `dev-services/store/`의
+  개념별 모듈(프로젝트, 세션, 메시지, 휴지통, 앱 실행 기록 등)로 호출을 넘기고, 단계 목록은 `store/migrations/`에 있다. 스키마 DDL은 정확히 한 곳,
   `protocol/src/schema/schema.sql`에만 있다. 번들에서는 빌드 산출물 옆에 복사되어 함께 배포된다 (F-0).
   마이그레이션 단계의 규칙은 아래(§5.1)에 있다.
 - **fs**: lazy readdir 목록 + `git check-ignore` (디렉터리당 1회) + 경로 이탈 차단.

@@ -1,13 +1,39 @@
-import type { WorktreeRecovery } from './worktree-recovery.js'
 import Database from 'better-sqlite3'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { GridPanel, ProjectInfo, SavedCommand, SessionInfo, StoredMessage, ToolDefaults } from '@cc/protocol'
+import { AppRunRecords, type AppRunRecord } from './store/app-runs.js'
+import { ChildOwnershipRecords, type QueuedRequest } from './store/child-ownership.js'
+import { GridRecords } from './store/grid.js'
+import { HandoffMarkers } from './store/handoff-markers.js'
+import { LinkedMachineRecords, type LinkedMachineRow } from './store/linked-machines.js'
+import { MessageRecords, type ReadOpts } from './store/messages.js'
 import { APP_SETTINGS_DDL, type MigrationStep } from './store/migrations/context.js'
 import { migrationSteps } from './store/migrations/index.js'
-import { indexedText } from './store/search-index.js'
+import {
+  PermissionRecords,
+  type AppPermissionRecord,
+  type ProjectConsent,
+  type ProjectConsentKind,
+} from './store/permissions.js'
+import { ProjectRecords } from './store/projects.js'
+import { SessionRecords } from './store/sessions.js'
+import { SettingsRecords } from './store/settings.js'
+import { TrashRecords, type TrashedRow, type TrashRecord } from './store/trash.js'
 import { mb, type VacuumDone } from './store/vacuum.js'
-import { GridSpan, Interruption as InterruptionSchema, ProjectConsentKind as ProjectConsentKindSchema, sessionLiveDefaults } from '@cc/protocol'
+
+// The shapes the store hands out are defined beside the code that reads them; they are named here as they always were
+export type {
+  AppPermissionRecord,
+  AppRunRecord,
+  LinkedMachineRow,
+  ProjectConsent,
+  ProjectConsentKind,
+  QueuedRequest,
+  ReadOpts,
+  TrashedRow,
+  TrashRecord,
+}
 
 /**
  * Where the schema lives depends on how the process is running.
@@ -104,26 +130,19 @@ export function storeTooNewMessage(minReaderVersion: number, knownVersion: numbe
  * The dev-only store (docs/agent-host.md §5). Replaced by rusqlite once the app moves to
  * Tauri; the schema file (protocol/src/schema/schema.sql) is shared as-is.
  */
-/** A request held for a busy session until its turn ends (#677, `queued_requests`) */
-export type QueuedRequest = {
-  id: string
-  sessionId: string
-  callerSessionId: string
-  via: 'ask_project' | 'agent_session' | 'send_to_session'
-  text: string
-  queuedAt: number
-  /** When delivery began, until the session's turn starts (#684 review); null while it waits */
-  deliveringAt?: number | null
-  /**
-   * An ask_project request that passed only because its requester was `auto`, with no remembered consent for the pair
-   * (v54): delivered only while the requester still is, or the pair has consent by then. Null in a row an older build
-   * wrote, which does not say.
-   */
-  openedByAuto?: boolean | null
-}
-
 export class Store {
   private db: Database.Database
+  private readonly projects: ProjectRecords
+  private readonly sessions: SessionRecords
+  private readonly grid: GridRecords
+  private readonly messages: MessageRecords
+  private readonly handoffs: HandoffMarkers
+  private readonly trash: TrashRecords
+  private readonly settings: SettingsRecords
+  private readonly permissions: PermissionRecords
+  private readonly appRuns: AppRunRecords
+  private readonly children: ChildOwnershipRecords
+  private readonly machines: LinkedMachineRecords
 
   /**
    * The number of migration steps **actually run** this time.
@@ -141,6 +160,17 @@ export class Store {
   ) {
     const path = dbPath
     this.db = new Database(path)
+    this.projects = new ProjectRecords(this.db)
+    this.sessions = new SessionRecords(this.db)
+    this.grid = new GridRecords(this.db)
+    this.messages = new MessageRecords(this.db)
+    this.handoffs = new HandoffMarkers(this.db)
+    this.settings = new SettingsRecords(this.db)
+    this.trash = new TrashRecords(this.db, this.sessions)
+    this.permissions = new PermissionRecords(this.db)
+    this.appRuns = new AppRunRecords(this.db)
+    this.children = new ChildOwnershipRecords(this.db)
+    this.machines = new LinkedMachineRecords(this.db, this.settings)
     try {
       /*
        * Before anything writes: not the WAL switch, not schema.sql, not a migration. schema.sql alone would already
@@ -560,1263 +590,262 @@ export class Store {
     this.db.close()
   }
 
-  /**
-   * `trusted` is the trust a NEW row starts with (#655); absent means untrusted, as before. It is an insert-only
-   * value: registering a path that already has a row renames it and leaves its trust alone, so neither an earlier
-   * "no" nor a later "yes" is overwritten by a second registration.
+  /*
+   * Everything below only passes the call on to the module named in its heading, which holds the code and the comment
+   * that says what it does. The methods stay here so that no caller names a module.
    */
+
+  // ── ProjectRecords (store/projects.ts) ──
+
   addProject(p: { id: string; path: string; name: string; trusted?: boolean }): void {
-    this.db
-      .prepare(
-        `INSERT INTO projects (id, path, name, created_at, trusted) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(path) DO UPDATE SET name = excluded.name`,
-      )
-      .run(p.id, p.path, p.name, Date.now(), p.trusted ? 1 : 0)
+    return this.projects.addProject(p)
   }
 
-  /**
-   * `commands` is deliberately not in here (issue #44) — `projectCommands` answers that one.
-   *
-   * The column holds JSON, so it needs decoding, and every caller of this method wants a
-   * path or a name. Leaving it out of the row type means the omission is stated rather than
-   * silently cast away, which is how `Omit<ProjectInfo, 'git'>` would have become a lie the
-   * moment the field was added.
-   */
   listProjects(): Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels'>[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, path, name, default_tool as defaultTool, trusted FROM projects ORDER BY sidebar_order, created_at`,
-      )
-      .all() as (Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels' | 'trusted'> & { trusted: number })[]
-    // SQLite has no boolean — passing 0/1 straight through would still satisfy `if (p.trusted)` on screen, but fail schema validation
-    return rows.map((r) => ({ ...r, trusted: r.trusted === 1 }))
+    return this.projects.listProjects()
   }
 
-  /**
-   * The shell commands saved on a project (issue #44).
-   *
-   * Unreadable JSON reads as "none". A row that somehow got corrupted must not take the
-   * project list — and with it the sidebar — down with it; the worst it can cost is a menu
-   * you have to fill in again.
-   */
   projectCommands(projectId: string): SavedCommand[] {
-    const row = this.db.prepare(`SELECT commands FROM projects WHERE id = ?`).get(projectId) as
-      { commands: string } | undefined
-    if (!row) return []
-    try {
-      const parsed = JSON.parse(row.commands) as unknown
-      if (!Array.isArray(parsed)) return []
-      // Old rows are an array of strings (before labels, ~2026-09-06) — upgraded on read, and the next save fixes the new shape
-      return parsed.flatMap((c): SavedCommand[] => {
-        if (typeof c === 'string') return [{ command: c }]
-        if (c && typeof c === 'object' && typeof (c as { command?: unknown }).command === 'string') {
-          const label = (c as { label?: unknown }).label
-          return [{ command: (c as { command: string }).command, ...(typeof label === 'string' && label ? { label } : {}) }]
-        }
-        return []
-      })
-    } catch {
-      return []
-    }
+    return this.projects.projectCommands(projectId)
   }
 
-  /** The whole list at once — add and delete both arrive here as "it looks like this now" */
   setProjectCommands(projectId: string, commands: readonly SavedCommand[]): void {
-    this.db.prepare(`UPDATE projects SET commands = ? WHERE id = ?`).run(JSON.stringify(commands), projectId)
+    return this.projects.setProjectCommands(projectId, commands)
   }
 
-  /**
-   * The worktree provisioning setup (#69). null means nothing runs — it is not enforced.
-   * The same rule as projectCommands: read whole, written whole.
-   */
   worktreeSetup(projectId: string): { command: string; copyFiles: string[] } | null {
-    const row = this.db.prepare(`SELECT worktree_setup FROM projects WHERE id = ?`).get(projectId) as
-      { worktree_setup: string | null } | undefined
-    if (!row?.worktree_setup) return null
-    try {
-      const parsed = JSON.parse(row.worktree_setup) as { command?: unknown; copyFiles?: unknown }
-      const command = typeof parsed.command === 'string' ? parsed.command : ''
-      const copyFiles = Array.isArray(parsed.copyFiles)
-        ? parsed.copyFiles.filter((f): f is string => typeof f === 'string')
-        : []
-      if (!command && copyFiles.length === 0) return null
-      return { command, copyFiles }
-    } catch {
-      return null
-    }
+    return this.projects.worktreeSetup(projectId)
   }
 
   setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): void {
-    this.db
-      .prepare(`UPDATE projects SET worktree_setup = ? WHERE id = ?`)
-      .run(setup ? JSON.stringify(setup) : null, projectId)
+    return this.projects.setWorktreeSetup(projectId, setup)
   }
 
-  /**
-   * This project's worktree manager slot and trunk (#76).
-   *
-   * **This does not check whether the session it points at actually still exists** — that is
-   * the job of the side that knows sessions (SessionManager); the store just hands back what
-   * it was told to write down. Putting the "is this link broken" judgment (session deleted or
-   * archived) in two places would let the two places disagree.
-   */
   worktreeManager(projectId: string): { sessionId: string; baseBranch: string } | null {
-    const row = this.db.prepare(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId) as
-      { worktree_manager: string | null } | undefined
-    if (!row?.worktree_manager) return null
-    try {
-      const parsed = JSON.parse(row.worktree_manager) as { sessionId?: unknown; baseBranch?: unknown }
-      if (typeof parsed.sessionId !== 'string' || !parsed.sessionId) return null
-      return {
-        sessionId: parsed.sessionId,
-        baseBranch: typeof parsed.baseBranch === 'string' ? parsed.baseBranch : '',
-      }
-    } catch {
-      return null
-    }
+    return this.projects.worktreeManager(projectId)
   }
 
-  /**
-   * The project's worktree trunk (#76), from the same row as the former manager slot (#561 part 3): read whatever the
-   * slot's session, since the trunk is the project's and no longer a manager's. Empty or unreadable: none.
-   */
   worktreeTrunk(projectId: string): string | null {
-    const row = this.db.prepare(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId) as
-      { worktree_manager: string | null } | undefined
-    if (!row?.worktree_manager) return null
-    try {
-      const parsed = JSON.parse(row.worktree_manager) as { baseBranch?: unknown }
-      return typeof parsed.baseBranch === 'string' && parsed.baseBranch ? parsed.baseBranch : null
-    } catch {
-      return null
-    }
+    return this.projects.worktreeTrunk(projectId)
   }
 
-  /**
-   * Sets the trunk, keeping the slot's session id when there is one, so an older build still finds the manager it made
-   * there (agent-host.md §5.1: the shape is expanded, not changed)
-   */
   setWorktreeTrunk(projectId: string, baseBranch: string): void {
-    this.setWorktreeManager(projectId, { sessionId: this.worktreeManager(projectId)?.sessionId ?? '', baseBranch })
+    return this.projects.setWorktreeTrunk(projectId, baseBranch)
   }
 
   setWorktreeManager(projectId: string, manager: { sessionId: string; baseBranch: string } | null): void {
-    this.db
-      .prepare(`UPDATE projects SET worktree_manager = ? WHERE id = ?`)
-      .run(manager ? JSON.stringify(manager) : null, projectId)
+    return this.projects.setWorktreeManager(projectId, manager)
   }
 
-  /**
-   * The tool a new session in this project starts on.
-   *
-   * Written when a session is created with an explicit tool, not from a settings screen:
-   * the column was set to 'claude' at project creation and never updated again, so a Codex
-   * user re-picked the pill on every single new session, forever.
-   */
   setProjectDefaultTool(projectId: string, tool: string): void {
-    this.db.prepare(`UPDATE projects SET default_tool = ? WHERE id = ?`).run(tool, projectId)
+    return this.projects.setProjectDefaultTool(projectId, tool)
   }
 
-  /**
-   * The last model and effort chosen becomes the default (#69 finding 5) — but **per tool**
-   * (#107).
-   *
-   * Read whole and written whole, the same rule as projectCommands. Unparsable JSON reads as
-   * "none": the cost of losing one remembered value is a click, while throwing here would take
-   * the project list — and with it the sidebar — down with it.
-   */
   projectToolDefaults(projectId: string): Record<string, ToolDefaults> {
-    const row = this.db.prepare(`SELECT default_models FROM projects WHERE id = ?`).get(projectId) as
-      { default_models: string | null } | undefined
-    if (!row?.default_models) return {}
-    try {
-      const parsed = JSON.parse(row.default_models) as unknown
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-      const out: Record<string, ToolDefaults> = {}
-      for (const [tool, v] of Object.entries(parsed as Record<string, unknown>)) {
-        if (!v || typeof v !== 'object') continue
-        const { model, effort } = v as { model?: unknown; effort?: unknown }
-        out[tool] = {
-          model: typeof model === 'string' && model ? model : null,
-          effort: typeof effort === 'string' && effort ? effort : null,
-        }
-      }
-      return out
-    } catch {
-      return {}
-    }
+    return this.projects.projectToolDefaults(projectId)
   }
 
-  /** Only one tool's slot is rewritten — another tool's remembered value has nothing to do with this choice (#107) */
   setProjectToolDefaults(projectId: string, tool: string, d: ToolDefaults): void {
-    const all = { ...this.projectToolDefaults(projectId), [tool]: d }
-    this.db.prepare(`UPDATE projects SET default_models = ? WHERE id = ?`).run(JSON.stringify(all), projectId)
+    return this.projects.setProjectToolDefaults(projectId, tool, d)
   }
 
-  /**
-   * The projects the app runtime sees — root path and trust (M4 A-2).
-   *
-   * Worktrees are not here. A worktree is a copy of a project, not a project, and if an app
-   * instance stood up per copy, the same app would end up running multiple times over a single
-   * data folder — the app only reads from a registered root (plan A-2).
-   */
   projectRoots(): { id: string; path: string; trusted: boolean }[] {
-    const rows = this.db
-      .prepare(`SELECT id, path, trusted FROM projects ORDER BY sidebar_order, created_at`)
-      .all() as { id: string; path: string; trusted: number }[]
-    return rows.map((r) => ({ id: r.id, path: r.path, trusted: r.trusted === 1 }))
+    return this.projects.projectRoots()
   }
 
-  /** @returns whether the project existed — this does not silently succeed on an unknown id */
   setProjectTrusted(projectId: string, trusted: boolean): boolean {
-    return this.db.prepare(`UPDATE projects SET trusted = ? WHERE id = ?`).run(trusted ? 1 : 0, projectId).changes > 0
+    return this.projects.setProjectTrusted(projectId, trusted)
   }
 
   findProjectByPath(path: string): { id: string } | undefined {
-    return this.db.prepare(`SELECT id FROM projects WHERE path = ?`).get(path) as { id: string } | undefined
+    return this.projects.findProjectByPath(path)
   }
 
-  /**
-   * The UPDATE clause has to list **everything that can change.**
-   * It used to be missing tool, so switching agents (claude to codex) was never saved — on
-   * restart the tool reverted, but by then the thread to resume from (external_id) had already
-   * broken, turning the session into one that could not even be recovered. (project_id and
-   * created_at do not change, by definition.)
-   */
-  upsertSession(s: SessionInfo): void {
-    this.db
-      .prepare(
-        `INSERT INTO sessions (id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, last_read_seq, waiting_since, created_at, model, effort, verbosity, service_tier, permission_preset, imported_from, worktree_path, worktree_branch, worktree_base, parent_session_id, scope_session_ids, role_append, app_id, asked_by_session_id, forked_from_session_id, context_used, context_window, context_exactness, interruption)
-         VALUES (@id, @projectId, @tool, @externalId, @name, @autoNamed, @state, @isOrchestrator, @lastReadSeq, @waitingSince, @createdAt, @model, @effort, @verbosity, @serviceTier, @permissionPreset, @importedFrom, @worktreePath, @worktreeBranch, @worktreeBase, @parentSessionId, @scopeSessionIds, @roleAppend, @appId, @askedBy, @forkedFrom, @contextUsed, @contextWindow, @contextExactness, @interruption)
-         ON CONFLICT(id) DO UPDATE SET
-           tool = excluded.tool,
-           external_id = excluded.external_id, name = excluded.name, auto_named = excluded.auto_named,
-           state = excluded.state, last_read_seq = excluded.last_read_seq,
-           is_orchestrator = excluded.is_orchestrator,
-           waiting_since = excluded.waiting_since, model = excluded.model, effort = excluded.effort,
-           verbosity = excluded.verbosity,
-           service_tier = excluded.service_tier,
-           permission_preset = excluded.permission_preset, imported_from = excluded.imported_from,
-           worktree_path = excluded.worktree_path, worktree_branch = excluded.worktree_branch,
-           worktree_base = excluded.worktree_base,
-           parent_session_id = excluded.parent_session_id,
-           scope_session_ids = excluded.scope_session_ids,
-           role_append = excluded.role_append,
-           app_id = excluded.app_id,
-           asked_by_session_id = excluded.asked_by_session_id,
-           forked_from_session_id = excluded.forked_from_session_id,
-           context_used = excluded.context_used, context_window = excluded.context_window,
-           context_exactness = excluded.context_exactness,
-           interruption = excluded.interruption`,
-      )
-      .run({
-        ...s,
-        autoNamed: s.autoNamed ? 1 : 0,
-        // The marker (#13) rides the ordinary upsert too — with two write paths, only one would end up fixed
-        isOrchestrator: s.kind === 'orchestrator' ? 1 : 0,
-        effort: s.effort ?? null,
-        verbosity: s.verbosity ?? null,
-        serviceTier: s.serviceTier ?? null,
-        importedFrom: s.importedFrom ?? null,
-        worktreePath: s.worktree?.path ?? null,
-        worktreeBranch: s.worktree?.branch ?? null,
-        worktreeBase: s.worktree?.base ?? null,
-        parentSessionId: s.parentSessionId ?? null,
-        // Visibility is flattened into a JSON array (#80, #81) — the relationship lives in the row (lesson of the orphan)
-        scopeSessionIds: s.scopeSessionIds ? JSON.stringify(s.scopeSessionIds) : null,
-        roleAppend: s.roleAppend ?? null,
-        appId: s.appId ?? null,
-        askedBy: s.askedBy ?? null,
-        forkedFrom: s.forkedFrom ?? null,
-        /*
-         * Context rides the ordinary upsert (issue #48), which the manager already runs after
-         * every event — so a reading is on disk the instant it arrives, with no second write
-         * path to remember. Saving at session close instead would lose exactly the sessions
-         * that matter: the ones a crash or a force-quit ends.
-         */
-        contextUsed: s.context?.used ?? null,
-        contextWindow: s.context?.window ?? null,
-        contextExactness: s.context?.exactness ?? null,
-        // `reconnecting` describes the running process and is not kept (#698)
-        interruption: s.interruption && s.interruption.reason !== 'reconnecting' ? JSON.stringify(s.interruption) : null,
-      })
-  }
-
-  /**
-   * Saves the sidebar order.
-   *
-   * **The whole order is taken and renumbered from scratch.** Touching only the neighboring
-   * items in a "move this after that" way would eventually need a reshuffle once the values
-   * get packed too tight, and would drift if the list changed in between. The list is short
-   * (it is a sidebar a person looks at), so rewriting all of it is simple and safe.
-   */
   setProjectOrder(orderedIds: readonly string[]): void {
-    const stmt = this.db.prepare(`UPDATE projects SET sidebar_order = ? WHERE id = ?`)
-    this.db.transaction(() => orderedIds.forEach((id, i) => stmt.run(i, id)))()
+    return this.projects.setProjectOrder(orderedIds)
+  }
+
+  // ── SessionRecords (store/sessions.ts) ──
+
+  upsertSession(s: SessionInfo): void {
+    return this.sessions.upsertSession(s)
   }
 
   setSessionOrder(orderedIds: readonly string[]): void {
-    const stmt = this.db.prepare(`UPDATE sessions SET sidebar_order = ? WHERE id = ?`)
-    this.db.transaction(() => orderedIds.forEach((id, i) => stmt.run(i, id)))()
+    return this.sessions.setSessionOrder(orderedIds)
   }
 
-  /**
-   * The grid layout — sessions and apps, in the order the panels were placed (#288).
-   *
-   * A session panel shows only while its session is live: `trashSession` takes the panel away, and the join keeps a
-   * panel written by an older build out of the grid too. An app panel shows while its project is registered (a
-   * user-folder app has none); `deleteProject` takes its panels away, and the join covers a row it missed. Whether the
-   * app itself still exists is not asked here — the app list is read from folders, it can lag behind, and the screen
-   * leaves out an app it cannot find without the list losing its place.
-   */
-  listGridView(): GridPanel[] {
-    const rows = this.db
-      .prepare(
-        `SELECT g.kind, COALESCE(g.session_id, g.remote_session_id) AS session_id, g.project_id,
-                COALESCE(g.app_id, g.remote_app_id) AS app_id, g.app_machine, g.span_cols, g.span_rows
-           FROM grid_layout g
-           LEFT JOIN sessions s ON g.kind = 'session' AND s.id = g.session_id
-           LEFT JOIN projects p ON g.kind = 'app' AND p.id = g.project_id
-          WHERE (g.kind = 'session' AND s.id IS NOT NULL AND s.deleted_at IS NULL)
-             OR (g.kind = 'session' AND g.session_id IS NULL AND g.remote_session_id IS NOT NULL AND EXISTS (
-                  SELECT 1 FROM machine_headers h
-                   WHERE h.kind = 'session' AND h.machine_id || '.' || h.item_id = g.remote_session_id))
-             OR (g.kind = 'app' AND g.app_id IS NOT NULL AND (g.project_id IS NULL OR p.id IS NOT NULL))
-             OR (g.kind = 'app' AND g.app_id IS NULL AND g.remote_app_id IS NOT NULL
-                 AND EXISTS (SELECT 1 FROM linked_machines m WHERE m.id = g.app_machine)
-                 AND (g.project_id IS NULL OR EXISTS (
-                  SELECT 1 FROM machine_headers h
-                   WHERE h.kind = 'project' AND h.machine_id = g.app_machine AND h.machine_id || '.' || h.item_id = g.project_id)))
-          ORDER BY g.position`,
-      )
-      .all() as {
-      kind: string
-      session_id: string | null
-      project_id: string | null
-      app_id: string | null
-      app_machine: string | null
-      span_cols: number | null
-      span_rows: number | null
-    }[]
-    return rows.map((r) => {
-      if (r.kind === 'session') return { kind: 'session' as const, sessionId: r.session_id! }
-      // A span is kept only whole: a row with one half, or a value outside the protocol's bounds, reads as none chosen
-      const span = GridSpan.safeParse({ cols: r.span_cols, rows: r.span_rows })
-      return {
-        kind: 'app' as const,
-        projectId: r.project_id,
-        appId: r.app_id!,
-        // A linked machine's user-folder app names its machine; a project app's qualified id already does (#82)
-        ...(r.app_machine && r.project_id === null ? { machine: r.app_machine } : {}),
-        ...(span.success ? { span: span.data } : {}),
-      }
-    })
-  }
-
-  /**
-   * Rewrites the layout whole.
-   *
-   * Adding, removing and reordering all arrive as this one call, so deleting and reinserting
-   * is the simplest approach. The list is short (a screen a person looks at), and being one
-   * transaction means no intermediate state is ever visible. A panel named twice keeps its first
-   * place (`panel_key` is the primary key).
-   */
-  setGridView(
-    panels: readonly GridPanel[],
-    remote: (sessionId: string) => boolean = () => false,
-    /** The linked machine an app panel's app is on (#82), or null for this host's own */
-    appMachine: (panel: Extract<GridPanel, { kind: 'app' }>) => string | null = () => null,
-  ): void {
-    const del = this.db.prepare(`DELETE FROM grid_layout`)
-    const ins = this.db.prepare(
-      `INSERT OR IGNORE INTO grid_layout (panel_key, kind, session_id, project_id, app_id, position, span_cols, span_rows)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    // Another machine's session is not in `sessions`, so it goes in a column without the reference (v46, #82)
-    const insRemote = this.db.prepare(
-      `INSERT OR IGNORE INTO grid_layout (panel_key, kind, session_id, remote_session_id, position) VALUES (?, 'session', NULL, ?, ?)`,
-    )
-    // Another machine's app keeps `app_id` empty, so a host from before v47 never reads it as its own (v47, #82)
-    const insRemoteApp = this.db.prepare(
-      `INSERT OR IGNORE INTO grid_layout (panel_key, kind, session_id, project_id, app_id, remote_app_id, app_machine, position, span_cols, span_rows)
-       VALUES (?, 'app', NULL, ?, NULL, ?, ?, ?, ?, ?)`,
-    )
-    this.db.transaction(() => {
-      del.run()
-      panels.forEach((p, i) => {
-        if (p.kind === 'session' && remote(p.sessionId)) insRemote.run(`session:${p.sessionId}`, p.sessionId, i)
-        else if (p.kind === 'session') ins.run(`session:${p.sessionId}`, 'session', p.sessionId, null, null, i, null, null)
-        else {
-          const machine = appMachine(p)
-          if (machine) {
-            // The UI's key (`gridPanelKey`): a machine's user-folder app names the machine, a project app its qualified project
-            const key = p.projectId ? `app:${p.projectId}/${p.appId}` : `app:${machine}:_user/${p.appId}`
-            insRemoteApp.run(key, p.projectId, p.appId, machine, i, p.span?.cols ?? null, p.span?.rows ?? null)
-            return
-          }
-          const key = `app:${p.projectId ?? '_user'}/${p.appId}`
-          ins.run(key, 'app', null, p.projectId, p.appId, i, p.span?.cols ?? null, p.span?.rows ?? null)
-        }
-      })
-    })()
-  }
-
-  /**
-   * The id of the **central** orchestrator (null if there is none).
-   *
-   * There used to be only one orchestrator per app, so this query was the whole answer. Once
-   * project orchestrators existed (#13), the marker (is_orchestrator=1) could be set on more
-   * than one row, and the central one is whichever of those has no project. The marker itself
-   * rides SessionInfo.kind through the ordinary upsert — at one point this was the only place
-   * that answered, on the reasoning that "keeping it in two places lets one drift out of sync,"
-   * but the project orchestrator broke the premise that reasoning relied on (that projectId
-   * being null was the same fact as the marker), so kind is now the single source of truth and
-   * this query just reads it.
-   */
   orchestratorId(): string | null {
-    /*
-     * A trashed session has no project (see `trashSession`), so without the filter a trashed project orchestrator
-     * would answer here as the central one.
-     */
-    const row = this.db
-      .prepare(`SELECT id FROM sessions WHERE is_orchestrator = 1 AND project_id IS NULL AND deleted_at IS NULL LIMIT 1`)
-      .get() as { id: string } | undefined
-    return row?.id ?? null
+    return this.sessions.orchestratorId()
   }
 
-  /** Live sessions only — the trash (#204) is listed by `listTrash` and nowhere else */
   listSessions(): SessionInfo[] {
-    return this.readSessions(`s.deleted_at IS NULL`)
+    return this.sessions.listSessions()
   }
 
-  /** The rows of `listSessions`, for any condition on `sessions s` — the one place a row becomes a `SessionInfo` */
-  private readSessions(where: string, ...params: unknown[]): SessionInfo[] {
-    const rows = this.db
-      .prepare(
-        `SELECT s.id, s.project_id as projectId, s.tool, s.external_id as externalId, s.name,
-                s.auto_named as autoNamed, s.state, s.is_orchestrator as isOrchestrator,
-                s.last_read_seq as lastReadSeq,
-                s.waiting_since as waitingSince, s.created_at as createdAt,
-                s.model, s.effort, s.verbosity, s.service_tier as serviceTier, s.permission_preset as permissionPreset, s.imported_from as importedFrom,
-                s.worktree_path as worktreePath, s.worktree_branch as worktreeBranch,
-                s.worktree_base as worktreeBase,
-                s.parent_session_id as parentSessionId,
-                s.scope_session_ids as scopeSessionIdsJson, s.role_append as roleAppend, s.app_id as appId,
-                s.asked_by_session_id as askedBy,
-                s.forked_from_session_id as forkedFrom,
-                s.context_used as contextUsed, s.context_window as contextWindow,
-                s.context_exactness as contextExactness,
-                s.interruption as interruptionJson,
-                COALESCE((SELECT MAX(seq) FROM messages m WHERE m.session_id = s.id), 0) as lastSeq
-         FROM sessions s WHERE ${where} ORDER BY s.sidebar_order, s.created_at`,
-      )
-      .all(...params) as (Omit<SessionInfo, 'autoNamed' | 'worktree' | 'kind'> & {
-      autoNamed: number
-      isOrchestrator: number
-      worktreePath: string | null
-      worktreeBranch: string | null
-      worktreeBase: string | null
-      contextUsed: number | null
-      contextWindow: number | null
-      contextExactness: string | null
-      scopeSessionIdsJson: string | null
-      interruptionJson: string | null
-    })[]
-    // Live-only fields are not in the database — a restored session correctly has none of them (facts that die with the host)
-    return rows.map(
-      ({
-        worktreePath,
-        worktreeBranch,
-        worktreeBase,
-        contextUsed,
-        contextWindow,
-        contextExactness,
-        isOrchestrator,
-        scopeSessionIdsJson,
-        interruptionJson,
-        ...r
-      }) => ({
-        ...r,
-        autoNamed: !!r.autoNamed,
-        /*
-         * Whether a session coordinates is also relational (#80, #81): having a visibility list
-         * makes it a coordinating session — a separate marker column would eventually drift out
-         * of sync with the relationship it is meant to reflect (the lesson of #13).
-         */
-        kind: isOrchestrator
-          ? ('orchestrator' as const)
-          : scopeSessionIdsJson
-            ? ('coordinator' as const)
-            : ('worker' as const),
-        scopeSessionIds: scopeSessionIdsJson ? (JSON.parse(scopeSessionIdsJson) as string[]) : null,
-        live: false,
-        worktree: worktreePath
-          ? {
-              path: worktreePath,
-              branch: worktreeBranch ?? '',
-              ...(worktreeBase ? { base: worktreeBase } : {}),
-            }
-          : null,
-        ...sessionLiveDefaults(),
-        /*
-         * **Context is the one that comes back** (issue #48), so it overrules the defaults above.
-         *
-         * The rest of that group are facts about *our* process — a request id nobody can answer
-         * any more, a rate-limit window that expired while we were gone — and are rightly gone
-         * with it. How full the context is, is not: it is a fact about the conversation, and the
-         * conversation is the tool's and outlives us.
-         *
-         * It is shown plainly, with no staleness mark, and that is a decision rather than an
-         * omission. The gauge has never claimed to be live — the reading arrives at the end of a
-         * turn and is already a turn behind while the next one runs; restarting only lengthens a
-         * gap that is always there. The event that really makes it wrong is the conversation
-         * moving without us (someone continuing it in the terminal), which can happen with or
-         * without a restart and which we cannot detect either way. A mark keyed on "we
-         * restarted" would therefore flag the common case, where nothing moved and the number is
-         * exact, and stay silent in the case that actually earns it. The first turn corrects it
-         * regardless — at the very instant the old behaviour would have shown anything at all.
-         */
-        context:
-          contextUsed !== null && contextWindow !== null
-            ? {
-                used: contextUsed,
-                window: contextWindow,
-                // Only the adapter can claim 'exact'; anything we cannot read back says 'estimate'
-                exactness: contextExactness === 'exact' ? ('exact' as const) : ('estimate' as const),
-              }
-            : null,
-        // Why the last turn did not finish (#698); a value this build cannot read is no interruption rather than a lost row
-        interruption: readInterruption(interruptionJson),
-      }),
-    )
-  }
-
-  /**
-   * Handoff notes that still **have an owner** — predecessor ids that a live session has
-   * recorded inheriting (#106).
-   *
-   * The note's file name is the predecessor's id (#104). So "the predecessor is gone, so its
-   * note can go too" is **wrong**: the last step of a handoff is deleting the predecessor
-   * itself, and at that moment the successor has not even opened the note yet. Only the
-   * successor's marker knows which file it inherited, so that is where cleanup has to get its
-   * evidence.
-   *
-   * What the JOIN buys: a marker whose session is gone disappears along with it — a dead
-   * session cannot hold on to a note.
-   */
-  handoffPredecessors(): Set<string> {
-    /*
-     * A successor in the trash still claims its note (#204): restoring it must find the note it was handed, so
-     * only deleting it for good lets the note go.
-     */
-    const rows = this.db
-      .prepare(
-        `/* includes the trash: a trashed successor keeps its note */
-         SELECT m.payload as payload FROM messages m JOIN sessions s ON s.id = m.session_id WHERE m.kind = 'marker'`,
-      )
-      .all() as { payload: string }[]
-    const out = new Set<string>()
-    for (const r of rows) {
-      try {
-        const p = JSON.parse(r.payload) as { type?: unknown; fromSessionId?: unknown }
-        if (p.type === 'handoff' && typeof p.fromSessionId === 'string' && p.fromSessionId) out.add(p.fromSessionId)
-      } catch {
-        // A row that cannot be parsed claims nothing — cleanup only holds off when there is a claim
-      }
-    }
-    return out
-  }
-
-  /**
-   * The sessions that inherited a handoff from this one (#738), newest first, trashed ones included with their mark:
-   * where a removed session's remaining children go. The same evidence as above, the successor's handoff marker.
-   */
-  handoffHeirs(fromSessionId: string): { sessionId: string; trashed: boolean }[] {
-    /*
-     * Filtered in SQL (#740 review): a handoff marker carries its whole note, megabytes, and this runs on every delete.
-     * The CASE keeps a row that is not valid JSON from failing the query; it names no heir.
-     */
-    const rows = this.db
-      .prepare(
-        `SELECT m.session_id as sessionId, MAX(m.ts) as ts, s.deleted_at IS NOT NULL as trashed
-           FROM messages m JOIN sessions s ON s.id = m.session_id
-          WHERE m.kind = 'marker'
-            AND CASE WHEN json_valid(m.payload)
-                  THEN json_extract(m.payload, '$.type') = 'handoff' AND json_extract(m.payload, '$.fromSessionId') = ?
-                  ELSE 0 END
-          GROUP BY m.session_id ORDER BY ts DESC`,
-      )
-      .all(fromSessionId) as { sessionId: string; trashed: number }[]
-    return rows.map((r) => ({ sessionId: r.sessionId, trashed: !!r.trashed }))
-  }
-
-  /**
-   * Whether this session already has a stored notice with this text (#304) — so a notice the tool repeats on every
-   * start (`oncePerSession`, Codex's configuration warnings) is kept once. Only marker rows are read, and a session has
-   * a handful of those; the text is compared after parsing, as stored.
-   */
-  hasNotice(sessionId: string, text: string): boolean {
-    const rows = this.db
-      .prepare(`SELECT payload FROM messages WHERE session_id = ? AND kind = 'marker'`)
-      .all(sessionId) as { payload: string }[]
-    return rows.some((r) => {
-      try {
-        const p = JSON.parse(r.payload) as { type?: unknown; text?: unknown }
-        return p.type === 'notice' && p.text === text
-      } catch {
-        return false
-      }
-    })
-  }
-
-  /**
-   * Whether this session inherited a handoff (#142) — asked so that waking it can reopen access to the notes
-   * folder it can read from. The same test as above: a handoff marker carrying `fromSessionId`. A session only
-   * ever has a handful of markers, so only those are read.
-   */
-  inheritsHandoff(sessionId: string): boolean {
-    const rows = this.db
-      .prepare(`SELECT payload FROM messages WHERE session_id = ? AND kind = 'marker'`)
-      .all(sessionId) as { payload: string }[]
-    return rows.some((r) => {
-      try {
-        const p = JSON.parse(r.payload) as { type?: unknown; fromSessionId?: unknown }
-        return p.type === 'handoff' && typeof p.fromSessionId === 'string' && !!p.fromSessionId
-      } catch {
-        return false
-      }
-    })
-  }
-
-  // ── The trash (#204) ──
-  //
-  // Deleting a session moves it here; only Settings removes it for good. While it is here its rows stay as they
-  // were, except its search index, which is dropped: no search and no agent's `recall` can reach it, and the index is
-  // the larger half of the store (71MB of 137MB, measured for #96). Restoring rebuilds the index from the messages.
-
-  /**
-   * Moves a live session into the trash. `record` carries where it came from and what the person chose to remove
-   * with it once it is deleted for good. Returns false when there was no live session to move.
-   *
-   * The session leaves every listing in the first transaction: `deleted_at` is set before anything slow runs. It
-   * also leaves its project: `project_id` becomes NULL and the project is kept in `record`. That is what lets a
-   * project be deleted while its sessions sit in the trash — `sessions.project_id` cascades a project delete (FK), so
-   * a session still pointing at the project would be destroyed with it. The grid panel goes too: it is layout, not a
-   * record, and a restored session is opened from the sidebar.
-   *
-   * The index rows are then dropped in chunks, letting the event loop go between them (#179: the biggest session in
-   * a copy of the real store held 32,323 index rows, and dropping them in one transaction froze the host for 2.9s).
-   * If the host stops halfway, the session is in the trash with part of its index left; searches still skip it
-   * (`searchMessages` filters the trash), and restoring or purging finishes the job.
-   */
-  async trashSession(sessionId: string, record: TrashRecord, chunk = DELETE_CHUNK): Promise<boolean> {
-    const move = this.db.transaction((): boolean => {
-      const moved = this.db
-        .prepare(`UPDATE sessions SET deleted_at = ?, trash = ?, project_id = NULL WHERE id = ? AND deleted_at IS NULL`)
-        .run(Date.now(), JSON.stringify(record), sessionId).changes
-      if (moved === 0) return false
-      // Both lists: this build's, and the one an older host still reads (v42)
-      this.db.prepare(`DELETE FROM grid_panels WHERE session_id = ?`).run(sessionId)
-      this.db.prepare(`DELETE FROM grid_layout WHERE session_id = ?`).run(sessionId)
-      return true
-    })
-    if (!move()) return false
-    const dropFts = this.db.prepare(`DELETE FROM messages_fts WHERE rowid = ?`)
-    await this.walkMessages(sessionId, chunk, false, (rows) => {
-      for (const r of rows) dropFts.run(r.rowid)
-    })
-    return true
-  }
-
-  /**
-   * Takes a session out of the trash into `projectId` (null for one that had no project). Returns null when it was
-   * not in the trash.
-   *
-   * The index is rebuilt first, in chunks, and the session becomes live only in the last step. A restore cut short
-   * therefore leaves it in the trash with part of its index, which the search filter hides and the next restore
-   * overwrites (the index row is keyed by the message's rowid, so writing it again replaces it).
-   */
-  async restoreSession(sessionId: string, projectId: string | null, chunk = DELETE_CHUNK): Promise<SessionInfo | null> {
-    if (!this.isTrashed(sessionId)) return null
-    const put = this.db.prepare(`INSERT OR REPLACE INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`)
-    const drop = this.db.prepare(`DELETE FROM messages_fts WHERE rowid = ?`)
-    await this.walkMessages(sessionId, chunk, true, (rows) => {
-      for (const r of rows) {
-        const body = indexedText(r.kind ?? '', r.payload ?? '')
-        if (body) put.run(r.rowid, body, sessionId, r.seq)
-        else drop.run(r.rowid)
-      }
-    })
-    const back = this.db
-      .prepare(`UPDATE sessions SET deleted_at = NULL, trash = NULL, project_id = ? WHERE id = ? AND deleted_at IS NOT NULL`)
-      .run(projectId, sessionId).changes
-    if (back === 0) return null
-    return this.readSessions(`s.id = ? AND s.deleted_at IS NULL`, sessionId)[0] ?? null
-  }
-
-  /**
-   * Deletes a session in the trash for good. It is the only way a session's rows leave the store, and it takes only
-   * a session already in the trash: a live one has to be moved there first, so nothing skips the way back.
-   *
-   * Everything that points at the session goes with it: its messages and whatever is left of their index, the steps
-   * of the subagents it launched (`subagent_messages`, #222), its approval rules, its commit links (`commit_sessions` — #96 found 57 of 304 links pointing at sessions that no
-   * longer existed, because deleting used to leave them behind), and the app runs it started or ran in
-   * (`app_runs.session_id` / `caller_session_id`, with their kept failures).
-   *
-   * Chunked like `trashSession` (#179: on the same copy of the real store the longest pause went from 2.9s to 84ms;
-   * the whole took 4.1s, with the event loop turning 231 times). The rows that are not messages, and the session row, go in the same
-   * transaction as the last chunk, so a purge cut short leaves the session in the trash with fewer messages, to be
-   * purged again, and never messages without a session.
-   */
-  async purgeSession(sessionId: string, chunk = DELETE_CHUNK): Promise<boolean> {
-    if (!this.isTrashed(sessionId)) return false
-    const pick = this.db.prepare(`SELECT rowid FROM messages WHERE session_id = ? LIMIT ?`)
-    const dropFts = this.db.prepare(`DELETE FROM messages_fts WHERE rowid = ?`)
-    const dropMsg = this.db.prepare(`DELETE FROM messages WHERE rowid = ?`)
-    // A subagent's steps (#222) go first, in the same chunks: they can outnumber the conversation's own rows
-    const pickSub = this.db.prepare(`SELECT rowid FROM subagent_messages WHERE session_id = ? LIMIT ?`)
-    const dropSub = this.db.prepare(`DELETE FROM subagent_messages WHERE rowid = ?`)
-    const step = this.db.transaction((): boolean => {
-      const subs = pickSub.all(sessionId, chunk) as { rowid: number }[]
-      for (const { rowid } of subs) dropSub.run(rowid)
-      if (subs.length === chunk) return false
-      const rows = pick.all(sessionId, chunk) as { rowid: number }[]
-      for (const { rowid } of rows) {
-        dropFts.run(rowid)
-        dropMsg.run(rowid)
-      }
-      if (rows.length === chunk) return false
-      this.db.prepare(`DELETE FROM approval_rules WHERE session_id = ?`).run(sessionId)
-      this.db.prepare(`DELETE FROM commit_sessions WHERE session_id = ?`).run(sessionId)
-      this.db
-        .prepare(`DELETE FROM app_run_failures WHERE run_id IN (SELECT id FROM app_runs WHERE session_id = ? OR caller_session_id = ?)`)
-        .run(sessionId, sessionId)
-      this.db.prepare(`DELETE FROM app_runs WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
-      this.db.prepare(`DELETE FROM report_marks WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
-      this.db.prepare(`DELETE FROM agent_start_requests WHERE caller_session_id = ?`).run(sessionId)
-      this.db.prepare(`DELETE FROM delegated_turns WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
-      this.db.prepare(`DELETE FROM queued_requests WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
-      this.db.prepare(`DELETE FROM sessions WHERE id = ? AND deleted_at IS NOT NULL`).run(sessionId)
-      return true
-    })
-    while (!step()) await new Promise<void>((resolve) => setImmediate(resolve))
-    return true
-  }
-
-  /** One session's messages in seq order, one transaction per chunk, letting the event loop go between chunks (#179) */
-  private async walkMessages(
-    sessionId: string,
-    chunk: number,
-    withPayload: boolean,
-    each: (rows: { rowid: number; seq: number; kind?: string; payload?: string }[]) => void,
-  ): Promise<void> {
-    const pick = this.db.prepare(
-      `SELECT rowid, seq${withPayload ? ', kind, payload' : ''} FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq LIMIT ?`,
-    )
-    let after = Number.MIN_SAFE_INTEGER
-    const step = this.db.transaction((): boolean => {
-      const rows = pick.all(sessionId, after, chunk) as { rowid: number; seq: number; kind?: string; payload?: string }[]
-      each(rows)
-      if (rows.length > 0) after = rows[rows.length - 1]!.seq
-      return rows.length < chunk
-    })
-    while (!step()) await new Promise<void>((resolve) => setImmediate(resolve))
-  }
-
-  isTrashed(sessionId: string): boolean {
-    return !!this.db.prepare(`SELECT 1 FROM sessions WHERE id = ? AND deleted_at IS NOT NULL`).get(sessionId)
-  }
-
-  /** The ids in the trash — for the few callers that must tell "in the trash" from "gone" */
-  trashedIds(): Set<string> {
-    const rows = this.db.prepare(`SELECT id FROM sessions WHERE deleted_at IS NOT NULL`).all() as { id: string }[]
-    return new Set(rows.map((r) => r.id))
-  }
-
-  /** A session in the trash as it will come back, with its record — null when it is not in the trash */
-  trashedSession(sessionId: string): { session: SessionInfo; record: TrashRecord; deletedAt: number } | null {
-    const session = this.readSessions(`s.id = ? AND s.deleted_at IS NOT NULL`, sessionId)[0]
-    if (!session) return null
-    const row = this.db.prepare(`SELECT deleted_at as deletedAt, trash FROM sessions WHERE id = ?`).get(sessionId) as {
-      deletedAt: number
-      trash: string | null
-    }
-    return { session, record: parseTrashRecord(row.trash), deletedAt: row.deletedAt }
-  }
-
-  /**
-   * What is in the trash, most recently deleted first, with how much of the store each one holds: the bytes of its
-   * messages (the index is already gone). Settings shows the total, because nothing empties the trash on its own.
-   * Measured on a copy of the real store (135,828 messages): summing every session's messages takes about 40ms.
-   */
-  listTrash(): TrashedRow[] {
-    const rows = this.db
-      .prepare(
-        `SELECT s.id, s.name, s.tool, s.deleted_at as deletedAt, s.trash as trash,
-                s.worktree_path as worktreePath, s.worktree_branch as worktreeBranch,
-                (s.external_id IS NOT NULL OR s.imported_from IS NOT NULL) as hasConversationFile,
-                COUNT(m.seq) as messages,
-                COALESCE(SUM(LENGTH(CAST(m.payload AS BLOB))), 0)
-                  /* a subagent's steps (#222) are part of what it holds, though not of its message count */
-                  + COALESCE((SELECT SUM(LENGTH(CAST(sm.payload AS BLOB))) FROM subagent_messages sm WHERE sm.session_id = s.id), 0) as bytes
-         FROM sessions s LEFT JOIN messages m ON m.session_id = s.id
-         WHERE s.deleted_at IS NOT NULL GROUP BY s.id ORDER BY s.deleted_at DESC`,
-      )
-      .all() as (Omit<TrashedRow, 'record' | 'worktree' | 'hasConversationFile'> & {
-      hasConversationFile: number
-      trash: string | null
-      worktreePath: string | null
-      worktreeBranch: string | null
-    })[]
-    return rows.map(({ trash, worktreePath, worktreeBranch, hasConversationFile, ...r }) => ({
-      ...r,
-      hasConversationFile: !!hasConversationFile,
-      record: parseTrashRecord(trash),
-      worktree: worktreePath ? { path: worktreePath, branch: worktreeBranch ?? '' } : null,
-    }))
-  }
-
-  /**
-   * Deletes a project. Its sessions go to the trash (#204), not with it.
-   *
-   * The manager moves each session to the trash first (`SessionManager.deleteProject`), which also stops its
-   * process. This step catches any live row that did not get there, in the same transaction as the project row, so
-   * deleting a project cannot destroy a conversation. Such a row is marked to keep the tool's conversation file and
-   * the worktree: nobody was asked about them.
-   *
-   * **This does not rely on an FK's CASCADE.** `messages_fts` is a virtual table with no foreign key at all, so the index rows
-   * of a session caught here are dropped by hand — a session in the trash must not turn up in a search.
-   *
-   * The rows that belong to the project go with it as before: project-scope rules, the answers given to its apps, and
-   * the app runs and commit links that point at no session still here. (`usage_facts` is not touched: no build ever
-   * wrote a row to it, and this build is the first that leaves it alone, so a later step can drop it; schema.sql.) Rows that point at a session in the trash stay with that session until it is
-   * deleted for good: its own rules, its commit links, the app runs it started or ran in. A restore that registers
-   * the folder again under the same id finds them where they were.
-   */
-  deleteProject(projectId: string): void {
-    const tx = this.db.transaction(() => {
-      const project = this.db.prepare(`SELECT name, path FROM projects WHERE id = ?`).get(projectId) as
-        | { name: string; path: string }
-        | undefined
-      const record: TrashRecord = {
-        projectId,
-        projectName: project?.name ?? null,
-        projectPath: project?.path ?? null,
-        removeExternal: false,
-        removeWorktree: false,
-      }
-      const left = this.db.prepare(`SELECT id FROM sessions WHERE project_id = ? AND deleted_at IS NULL`).all(projectId) as {
-        id: string
-      }[]
-      for (const { id } of left) {
-        this.db.prepare(`DELETE FROM messages_fts WHERE rowid IN (SELECT rowid FROM messages WHERE session_id = ?)`).run(id)
-        this.db
-          .prepare(`UPDATE sessions SET deleted_at = ?, trash = ?, project_id = NULL WHERE id = ? AND deleted_at IS NULL`)
-          .run(Date.now(), JSON.stringify(record), id)
-        this.db.prepare(`DELETE FROM grid_panels WHERE session_id = ?`).run(id)
-        this.db.prepare(`DELETE FROM grid_layout WHERE session_id = ?`).run(id)
-      }
-      // The project's apps leave the grid with it: layout, like a session's panel
-      this.db.prepare(`DELETE FROM grid_layout WHERE kind = 'app' AND project_id = ?`).run(projectId)
-      this.db
-        .prepare(
-          `/* includes the trash: a rule of a session in the trash stays with it */
-           DELETE FROM approval_rules WHERE project_id = ? AND (session_id IS NULL OR session_id NOT IN (SELECT id FROM sessions))`,
-        )
-        .run(projectId)
-      this.db
-        .prepare(
-          `/* includes the trash: a commit link of a session in the trash stays with it */
-           DELETE FROM commit_sessions WHERE project_id = ? AND session_id NOT IN (SELECT id FROM sessions)`,
-        )
-        .run(projectId)
-      // The run log for that project's apps is part of this deletion too (M4 A-6) — a run that points at a session in the trash stays with it
-      this.db
-        .prepare(
-          `/* includes the trash: a run of a session in the trash stays with it */
-           DELETE FROM app_runs WHERE project_id = ?
-             AND (session_id IS NULL OR session_id NOT IN (SELECT id FROM sessions))
-             AND (caller_session_id IS NULL OR caller_session_id NOT IN (SELECT id FROM sessions))`,
-        )
-        .run(projectId)
-      this.db.prepare(`DELETE FROM app_run_failures WHERE project_id = ? AND run_id NOT IN (SELECT id FROM app_runs)`).run(projectId)
-      // Answers given to that project's apps' capabilities too (M4 D-4) — a folder registered again, even under the same id by a restore, is asked again
-      this.db.prepare(`DELETE FROM app_permissions WHERE project_id = ?`).run(projectId)
-      this.db.prepare(`DELETE FROM projects WHERE id = ?`).run(projectId)
-    })
-    tx()
-  }
-
-  /**
-   * Writes messages — **writing the same spot twice overwrites it, index included.**
-   *
-   * messages used to be the only INSERT OR REPLACE; the index was a plain INSERT. So rewriting
-   * the same (session, seq) added **another row to the index** every time. In the real database
-   * that came to 28,892 messages against 249,809 index rows — 8.6x — and some had piled up as
-   * many as 13 duplicates.
-   *
-   * The cost showed up in two places: recall results were papered over with the same line
-   * repeated (dogfooding: "limit was 8 and the same thing came back 5 times"), and the index had
-   * bloated to tens of times the size of the actual text.
-   *
-   * The fix is to **pin the index row to its message row.** Using the messages rowid as the
-   * index's own rowid lets INSERT OR REPLACE overwrite it automatically. (session_id and seq
-   * are UNINDEXED, so deleting by a WHERE clause on them would scan all 250,000 rows — that
-   * cannot happen on every write.)
-   *
-   * messages also has to be UPDATE, not REPLACE. REPLACE deletes and reinserts, which **changes
-   * the rowid**, and once that happens the spot the index was pointing at is gone.
-   */
-  appendMessages(msgs: StoredMessage[]): void {
-    const stmt = this.db.prepare(
-      `INSERT INTO messages (session_id, seq, role, kind, payload, ts) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(session_id, seq) DO UPDATE SET role = excluded.role, kind = excluded.kind,
-         payload = excluded.payload, ts = excluded.ts`,
-    )
-    const rowidOf = this.db.prepare(`SELECT rowid FROM messages WHERE session_id = ? AND seq = ?`)
-    const fts = this.db.prepare(
-      `INSERT OR REPLACE INTO messages_fts (rowid, body, session_id, seq) VALUES (?, ?, ?, ?)`,
-    )
-    /*
-     * Deletes by rowid. FTS5's `'delete'` command only works on contentless or external-content
-     * tables, and messages_fts is an ordinary table that holds its own text, so that command
-     * always failed with `SQL logic error` and rolled back other messages in the same batch
-     * along with it (#179).
-     */
-    const dropFts = this.db.prepare(`DELETE FROM messages_fts WHERE rowid = ?`)
-    const tx = this.db.transaction((rows: StoredMessage[]) => {
-      for (const m of rows) {
-        const payload = JSON.stringify(m.payload)
-        stmt.run(m.sessionId, m.seq, m.role, m.kind, payload, m.ts)
-        const body = indexedText(m.kind, payload)
-        const rid = (rowidOf.get(m.sessionId, m.seq) as { rowid: number } | undefined)?.rowid
-        if (rid === undefined) continue
-        if (body) {
-          fts.run(rid, body, m.sessionId, m.seq)
-        } else {
-          // A spot whose text disappeared is removed from the index too (otherwise the old text stays searchable)
-          dropFts.run(rid)
-        }
-      }
-    })
-    tx(msgs)
-  }
-
-  /**
-   * Full-text search over conversations (E-1). Archived sessions are included too — what is
-   * being looked for may be sitting in one of them.
-   */
-  /**
-   * Full-text search over conversations. **Returns the whole body** — trimming it is left to
-   * the caller.
-   *
-   * This used to trim with `snippet(..., 12)` here, but that 12 counted not characters but
-   * **tokens**, and with the trigram tokenizer that cut off after roughly 15 real characters.
-   * The orchestrator would receive something like `"the policy list already said the…"` and
-   * **could not tell whether this was even the passage it was looking for.** How much
-   * surrounding context is needed is something only the caller knows, so that judgment is
-   * left to it.
-   */
-  searchMessages(query: string, limit = 50): { sessionId: string; seq: number; body: string }[] {
-    const q = query.trim()
-    if (!q) return []
-
-    // The trigram tokenizer **cannot find anything shorter than 3 characters** (measured).
-    // Two-character searches like '승인' or '배포' are common in Korean, so this falls back to LIKE.
-    if (q.length < 3) {
-      return this.db
-        .prepare(
-          `SELECT session_id as sessionId, seq, body FROM messages_fts
-           WHERE body LIKE ? AND ${OUT_OF_TRASH} ORDER BY seq DESC LIMIT ?`,
-        )
-        .all(`%${q}%`, limit) as { sessionId: string; seq: number; body: string }[]
-    }
-
-    try {
-      return this.db
-        .prepare(
-          `SELECT session_id as sessionId, seq, body
-           FROM messages_fts WHERE messages_fts MATCH ? AND ${OUT_OF_TRASH} ORDER BY rank LIMIT ?`,
-        )
-        .all(`"${q.replace(/"/g, '""')}"`, limit) as { sessionId: string; seq: number; body: string }[]
-    } catch {
-      // An FTS syntax error (special characters, etc.) quietly returns an empty result — the search box must not break
-      return []
-    }
-  }
-
-  /**
-   * The directory this session was created in — the one its tool-side history is filed under.
-   *
-   * Deliberately **not** part of `SessionInfo`: it is not something the screen shows, and
-   * `upsertSession` must never carry it. The whole point (issue #28) is that this value is
-   * written once and then left alone; routing it through the same upsert that saves names and
-   * states would let any later save quietly replace it with whatever the caller happened to
-   * hold. `touched_paths` lives on the same terms.
-   *
-   * null means "we do not know yet" — an orchestrator row that predates v14. The manager
-   * resolves it the first time it needs the path and writes it back.
-   */
   sessionCwd(sessionId: string): string | null {
-    const row = this.db.prepare(`SELECT cwd FROM sessions WHERE id = ?`).get(sessionId) as
-      { cwd: string | null } | undefined
-    return row?.cwd ?? null
+    return this.sessions.sessionCwd(sessionId)
   }
 
   setSessionCwd(sessionId: string, cwd: string): void {
-    this.db.prepare(`UPDATE sessions SET cwd = ? WHERE id = ?`).run(cwd, sessionId)
+    return this.sessions.setSessionCwd(sessionId, cwd)
   }
 
   setTouchedPaths(sessionId: string, paths: string[]): void {
-    this.db
-      .prepare(`UPDATE sessions SET touched_paths = ? WHERE id = ?`)
-      .run(JSON.stringify(paths), sessionId)
+    return this.sessions.setTouchedPaths(sessionId, paths)
   }
 
   getTouchedPaths(sessionId: string): string[] {
-    const row = this.db.prepare(`SELECT touched_paths as p FROM sessions WHERE id = ?`).get(sessionId) as
-      { p: string } | undefined
-    try {
-      return row ? (JSON.parse(row.p) as string[]) : []
-    } catch {
-      return []
-    }
+    return this.sessions.getTouchedPaths(sessionId)
   }
 
-  /**
-   * Reads a conversation — **one row is one message** (#77).
-   *
-   * In the delta era (before #66), one token was one row, so this used to join consecutive
-   * assistant rows back into a single message when reading. Those rows were merged once by v21,
-   * and writes now write one row per message. Since then, neighboring assistant rows are
-   * **genuinely different messages** — a new reply with no human turn in between (a background
-   * task finished, a question card was answered), and rows written per reply by transcript
-   * import. Joining them the old way would run two replies together into one paragraph with no
-   * space, like "…still running.All six reviews are in." So rows are handed back as-is — limit
-   * also counts rows (= messages).
-   */
-  loadMessages(sessionId: string, limit = 200, beforeSeq?: number, opts: ReadOpts = {}): StoredMessage[] {
-    const raw = this.db
-      .prepare(
-        `SELECT session_id as sessionId, seq, role, kind, ${payloadColumn(opts)}, ts FROM messages
-         WHERE session_id = ? AND (? IS NULL OR seq < ?) ORDER BY seq DESC LIMIT ?`,
-      )
-      .all(sessionId, beforeSeq ?? null, beforeSeq ?? null, limit) as (StoredMessage & { payload: string })[]
-    return raw.reverse().map((r) => ({ ...r, payload: JSON.parse(r.payload) }))
-  }
-
-  /**
-   * The text of this session's replies that contain `needle`: the agent's own words (`assistant` `text` rows), and
-   * those of the subagents it launched, which the window shows under their cards. The person's messages, reasoning and
-   * tool output are not replies. Asked by `messages.image`, which reads only an image a reply names.
-   *
-   * `instr` over the stored JSON narrows the rows in SQLite; the needle is JSON-escaped the way the payload was
-   * written, so a path with a quote or a backslash is still found. The caller decides on the parsed text.
-   */
-  replyTextsContaining(sessionId: string, needle: string): string[] {
-    const escaped = JSON.stringify(needle).slice(1, -1)
-    const rows = this.db
-      .prepare(
-        `SELECT payload FROM messages
-           WHERE session_id = ? AND role = 'assistant' AND kind = 'text' AND instr(payload, ?) > 0
-         UNION ALL
-         SELECT payload FROM subagent_messages
-           WHERE session_id = ? AND role = 'assistant' AND kind = 'text' AND instr(payload, ?) > 0`,
-      )
-      .all(sessionId, escaped, sessionId, escaped) as { payload: string }[]
-    const texts: string[] = []
-    for (const r of rows) {
-      try {
-        const text = (JSON.parse(r.payload) as { text?: unknown }).text
-        if (typeof text === 'string') texts.push(text)
-      } catch {
-        // A row that is not JSON names nothing
-      }
-    }
-    return texts
-  }
-
-  /**
-   * The conversation **after** afterSeq — loadMessages's forward-going counterpart (#66).
-   * Used to read "what was said next" from a spot recall handed back. Same rule: one row is one message (#77).
-   */
-  loadMessagesFrom(sessionId: string, afterSeq: number, limit = 20, opts: ReadOpts = {}): StoredMessage[] {
-    const raw = this.db
-      .prepare(
-        `SELECT session_id as sessionId, seq, role, kind, ${payloadColumn(opts)}, ts FROM messages
-         WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
-      )
-      .all(sessionId, afterSeq, limit) as (StoredMessage & { payload: string })[]
-    return raw.map((r) => ({ ...r, payload: JSON.parse(r.payload) }))
-  }
-
-  /**
-   * Updates a row while it is still streaming — **the index is left untouched** (#66).
-   *
-   * Re-indexing a growing body with trigram on every delta would make the cost grow with the
-   * square of the message's length. appendMessages indexes it once when the stream closes (the
-   * turn_complete boundary).
-   */
-  upsertMessageNoIndex(m: StoredMessage): void {
-    this.db
-      .prepare(
-        `INSERT INTO messages (session_id, seq, role, kind, payload, ts) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(session_id, seq) DO UPDATE SET role = excluded.role, kind = excluded.kind,
-           payload = excluded.payload, ts = excluded.ts`,
-      )
-      .run(m.sessionId, m.seq, m.role, m.kind, JSON.stringify(m.payload), m.ts)
-  }
-
-  /**
-   * Keeps one step of a native subagent under the call that launched it (#222) and returns its number within that
-   * launch. Never indexed, and never in `messages`: see v41 for why the steps have a table of their own.
-   */
-  appendSubagentMessage(
-    sessionId: string,
-    parentCallId: string,
-    m: Pick<StoredMessage, 'role' | 'kind' | 'payload' | 'ts'>,
-  ): number {
-    const next = this.db.prepare(
-      `SELECT COALESCE(MAX(seq), 0) + 1 as seq FROM subagent_messages WHERE session_id = ? AND parent_call_id = ?`,
-    )
-    const put = this.db.prepare(
-      `INSERT INTO subagent_messages (session_id, parent_call_id, seq, role, kind, payload, ts) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    return this.db.transaction((): number => {
-      const { seq } = next.get(sessionId, parentCallId) as { seq: number }
-      put.run(sessionId, parentCallId, seq, m.role, m.kind, JSON.stringify(m.payload), m.ts)
-      return seq
-    })()
-  }
-
-  /**
-   * The steps of the subagent one call launched (#222), oldest first, from after `afterSeq`. `seq` in what comes back
-   * is the step's number within that launch.
-   *
-   * The only reader of `subagent_messages`, and it names one launch card: nothing reads a session's subagent steps by
-   * the way. A tool step reads as its card unless `full` is asked for, the same as `loadMessages`.
-   */
-  loadSubagentMessages(
-    sessionId: string,
-    parentCallId: string,
-    opts: ReadOpts & { afterSeq?: number; limit?: number } = {},
-  ): StoredMessage[] {
-    const raw = this.db
-      .prepare(
-        `SELECT session_id as sessionId, seq, role, kind, ${payloadColumn(opts)}, ts FROM subagent_messages
-         WHERE session_id = ? AND parent_call_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
-      )
-      .all(sessionId, parentCallId, opts.afterSeq ?? 0, opts.limit ?? -1) as (StoredMessage & { payload: string })[]
-    return raw.map((r) => ({ ...r, payload: JSON.parse(r.payload) }))
-  }
-
-  /** Records the skill list (per tool and directory) */
-  /** Records commit attribution (#50) — kept here only, not in the repository */
   recordCommit(projectId: string, sha: string, sessionId: string): void {
-    this.db
-      .prepare(`INSERT OR REPLACE INTO commit_sessions (project_id, sha, session_id, ts) VALUES (?, ?, ?, ?)`)
-      .run(projectId, sha, sessionId, Date.now())
+    return this.sessions.recordCommit(projectId, sha, sessionId)
   }
 
   commitSessions(projectId: string): { sha: string; sessionId: string }[] {
-    return this.db
-      .prepare(`SELECT sha, session_id AS sessionId FROM commit_sessions WHERE project_id = ?`)
-      .all(projectId) as { sha: string; sessionId: string }[]
-  }
-
-  saveCommands(tool: string, cwd: string, commands: unknown): void {
-    this.db
-      .prepare(
-        `INSERT INTO command_cache (tool, cwd, commands, updated_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT(tool, cwd) DO UPDATE SET commands = excluded.commands, updated_at = excluded.updated_at`,
-      )
-      .run(tool, cwd, JSON.stringify(commands), Date.now())
-  }
-
-  loadCommands<T>(tool: string, cwd: string): T | null {
-    const row = this.db
-      .prepare(`SELECT commands FROM command_cache WHERE tool = ? AND cwd = ?`)
-      .get(tool, cwd) as { commands: string } | undefined
-    if (!row) return null
-    try {
-      return JSON.parse(row.commands) as T
-    } catch {
-      return null
-    }
-  }
-
-  nextSeq(sessionId: string): number {
-    const row = this.db
-      .prepare(`SELECT COALESCE(MAX(seq), 0) as m FROM messages WHERE session_id = ?`)
-      .get(sessionId) as { m: number }
-    return row.m + 1
+    return this.sessions.commitSessions(projectId)
   }
 
   markRead(sessionId: string, seq: number): void {
-    this.db
-      .prepare(`UPDATE sessions SET last_read_seq = MAX(last_read_seq, ?) WHERE id = ?`)
-      .run(seq, sessionId)
+    return this.sessions.markRead(sessionId, seq)
   }
 
-  /**
-   * A workspace snapshot (C-3). Saved on every change rather than at exit, so the last state
-   * survives even a crash (docs/state-management.md §5).
-   */
+  // ── GridRecords (store/grid.ts) ──
+
+  listGridView(): GridPanel[] {
+    return this.grid.listGridView()
+  }
+
+  setGridView(panels: readonly GridPanel[], remote?: (sessionId: string) => boolean, appMachine?: (panel: Extract<GridPanel, { kind: 'app' }>) => string | null): void {
+    return this.grid.setGridView(panels, remote, appMachine)
+  }
+
+  // ── MessageRecords (store/messages.ts) ──
+
+  appendMessages(msgs: StoredMessage[]): void {
+    return this.messages.appendMessages(msgs)
+  }
+
+  searchMessages(query: string, limit?: number): { sessionId: string; seq: number; body: string }[] {
+    return this.messages.searchMessages(query, limit)
+  }
+
+  loadMessages(sessionId: string, limit?: number, beforeSeq?: number, opts?: ReadOpts): StoredMessage[] {
+    return this.messages.loadMessages(sessionId, limit, beforeSeq, opts)
+  }
+
+  replyTextsContaining(sessionId: string, needle: string): string[] {
+    return this.messages.replyTextsContaining(sessionId, needle)
+  }
+
+  loadMessagesFrom(sessionId: string, afterSeq: number, limit?: number, opts?: ReadOpts): StoredMessage[] {
+    return this.messages.loadMessagesFrom(sessionId, afterSeq, limit, opts)
+  }
+
+  upsertMessageNoIndex(m: StoredMessage): void {
+    return this.messages.upsertMessageNoIndex(m)
+  }
+
+  appendSubagentMessage(sessionId: string, parentCallId: string, m: Pick<StoredMessage, 'role' | 'kind' | 'payload' | 'ts'>): number {
+    return this.messages.appendSubagentMessage(sessionId, parentCallId, m)
+  }
+
+  loadSubagentMessages(sessionId: string, parentCallId: string, opts?: ReadOpts & { afterSeq?: number; limit?: number }): StoredMessage[] {
+    return this.messages.loadSubagentMessages(sessionId, parentCallId, opts)
+  }
+
+  nextSeq(sessionId: string): number {
+    return this.messages.nextSeq(sessionId)
+  }
+
+  // ── HandoffMarkers (store/handoff-markers.ts) ──
+
+  handoffPredecessors(): Set<string> {
+    return this.handoffs.handoffPredecessors()
+  }
+
+  handoffHeirs(fromSessionId: string): { sessionId: string; trashed: boolean }[] {
+    return this.handoffs.handoffHeirs(fromSessionId)
+  }
+
+  hasNotice(sessionId: string, text: string): boolean {
+    return this.handoffs.hasNotice(sessionId, text)
+  }
+
+  inheritsHandoff(sessionId: string): boolean {
+    return this.handoffs.inheritsHandoff(sessionId)
+  }
+
+  // ── TrashRecords (store/trash.ts) ──
+
+  trashSession(sessionId: string, record: TrashRecord, chunk?: number): Promise<boolean> {
+    return this.trash.trashSession(sessionId, record, chunk)
+  }
+
+  restoreSession(sessionId: string, projectId: string | null, chunk?: number): Promise<SessionInfo | null> {
+    return this.trash.restoreSession(sessionId, projectId, chunk)
+  }
+
+  purgeSession(sessionId: string, chunk?: number): Promise<boolean> {
+    return this.trash.purgeSession(sessionId, chunk)
+  }
+
+  isTrashed(sessionId: string): boolean {
+    return this.trash.isTrashed(sessionId)
+  }
+
+  trashedIds(): Set<string> {
+    return this.trash.trashedIds()
+  }
+
+  trashedSession(sessionId: string): { session: SessionInfo; record: TrashRecord; deletedAt: number } | null {
+    return this.trash.trashedSession(sessionId)
+  }
+
+  listTrash(): TrashedRow[] {
+    return this.trash.listTrash()
+  }
+
+  deleteProject(projectId: string): void {
+    return this.trash.deleteProject(projectId)
+  }
+
+  // ── SettingsRecords (store/settings.ts) ──
+
+  saveCommands(tool: string, cwd: string, commands: unknown): void {
+    return this.settings.saveCommands(tool, cwd, commands)
+  }
+
+  loadCommands<T>(tool: string, cwd: string): T | null {
+    return this.settings.loadCommands(tool, cwd)
+  }
+
   saveWorkspace(layout: unknown): void {
-    this.db
-      .prepare(
-        `INSERT INTO workspace (id, layout, updated_at) VALUES (1, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET layout = excluded.layout, updated_at = excluded.updated_at`,
-      )
-      .run(JSON.stringify(layout), Date.now())
+    return this.settings.saveWorkspace(layout)
   }
 
   loadWorkspace<T = unknown>(): T | null {
-    const row = this.db.prepare(`SELECT layout FROM workspace WHERE id = 1`).get() as
-      { layout: string } | undefined
-    if (!row) return null
-    try {
-      return JSON.parse(row.layout) as T
-    } catch {
-      return null
-    }
+    return this.settings.loadWorkspace()
   }
 
-  /**
-   * A setting that belongs to this install rather than to any project or session (#43).
-   *
-   * `null` means never written, which is deliberately distinguishable from a stored
-   * `'false'`: it is what lets a default move later without silently overruling the one
-   * person who had turned the thing off (the same trade `showIgnored` makes in the UI).
-   */
   appSetting(key: string): string | null {
-    const row = this.db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(key) as
-      { value: string } | undefined
-    return row?.value ?? null
+    return this.settings.appSetting(key)
   }
 
   setAppSetting(key: string, value: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO app_settings (key, value) VALUES (?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-      )
-      .run(key, value)
+    return this.settings.setAppSetting(key, value)
   }
 
-  /**
-   * Reads a setting, computes its next value from it and writes that, as one transaction that takes the write lock
-   * first. Another process on the same file (the old and new host of a swap) cannot change the value between the
-   * read and the write, which a separate appSetting and setAppSetting cannot promise.
-   */
   updateAppSetting(key: string, next: (current: string | null) => string): void {
-    this.db.transaction(() => this.setAppSetting(key, next(this.appSetting(key)))).immediate()
+    return this.settings.updateAppSetting(key, next)
   }
 
-  /** Deletes a setting — reading it back afterward is "never written" (null). Where an old key is cleaned up once everything is migrated off it (M4 A-7) */
   deleteAppSetting(key: string): void {
-    this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(key)
+    return this.settings.deleteAppSetting(key)
   }
+
+  // ── PermissionRecords (store/permissions.ts) ──
 
   addApprovalRule(r: {
     scope: string
@@ -1825,11 +854,7 @@ export class Store {
     matcher: string
     decision: string
   }): void {
-    this.db
-      .prepare(
-        `INSERT INTO approval_rules (scope, project_id, session_id, matcher, decision, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(r.scope, r.projectId ?? null, r.sessionId ?? null, r.matcher, r.decision, Date.now())
+    return this.permissions.addApprovalRule(r)
   }
 
   listApprovalRules(): {
@@ -1841,661 +866,179 @@ export class Store {
     sessionId: string | null
     createdAt: number
   }[] {
-    return this.db
-      .prepare(
-        `SELECT id, scope, matcher, decision, project_id as projectId, session_id as sessionId,
-                created_at as createdAt
-         FROM approval_rules
-         WHERE session_id IS NULL OR session_id NOT IN (SELECT id FROM sessions WHERE deleted_at IS NOT NULL)
-         ORDER BY created_at DESC`,
-      )
-      .all() as never
+    return this.permissions.listApprovalRules()
   }
 
-  /** A rule has to be deletable — saving without being able to delete would make "show the outcome" only half true */
   deleteApprovalRule(id: number): void {
-    this.db.prepare(`DELETE FROM approval_rules WHERE id = ?`).run(id)
+    return this.permissions.deleteApprovalRule(id)
   }
-
-  // ── The run log for external apps (M4 A-6) — this store fills in the app runtime's `RunLedger` ──
-  //
-  // The runtime does not import this class. The runtime declares the shape it needs (RunLedger),
-  // and main.ts passes these methods in as that shape (inverting the dependency from #97).
-
-  beginAppRun(r: AppRunRecord): void {
-    this.db
-      .prepare(
-        `INSERT INTO app_runs (id, project_id, app_id, kind, tool, caller_kind, caller_session_id, parent_run_id,
-                               status, duration_ms, args_digest, args_summary, error, created_at, session_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        r.id, r.projectId, r.appId, r.kind, r.tool, r.callerKind, r.callerSessionId, r.parentRunId,
-        r.status, r.durationMs, r.argsDigest, r.argsSummary, r.error, r.createdAt, r.sessionId,
-      )
-  }
-
-  /** Links a running run_agent row to the session that request set up (M4 D-6) */
-  linkAppRunSession(id: string, sessionId: string): void {
-    this.db.prepare(`UPDATE app_runs SET session_id = ? WHERE id = ?`).run(sessionId, id)
-  }
-
-  endAppRun(id: string, end: { status: string; durationMs: number; error: string | null; tokens?: { input: number; output: number } | null }): void {
-    this.db
-      .prepare(`UPDATE app_runs SET status = ?, duration_ms = ?, error = ?, tokens_in = ?, tokens_out = ? WHERE id = ?`)
-      .run(end.status, end.durationMs, end.error, end.tokens?.input ?? null, end.tokens?.output ?? null, id)
-  }
-
-  /**
-   * How much of the agents an app requested since `since` were used (M4 D-5) — only run_agent
-   * rows that had a session stand up (a rejected request never set an agent up). A still-running
-   * row is counted, but its duration is not in yet.
-   */
-  appAgentUse(projectId: string | null, appId: string, since: number): { runs: number; durationMs: number; tokens: { input: number; output: number } | null } {
-    const r = this.db
-      .prepare(
-        `SELECT COUNT(*) as runs, COALESCE(SUM(duration_ms), 0) as durationMs, COUNT(tokens_in) as counted,
-                COALESCE(SUM(tokens_in), 0) as input, COALESCE(SUM(tokens_out), 0) as output
-         FROM app_runs
-         WHERE app_id = ? AND project_id IS ? AND kind = 'broker' AND tool = 'run_agent' AND session_id IS NOT NULL AND created_at >= ?`,
-      )
-      .get(appId, projectId, since) as { runs: number; durationMs: number; counted: number; input: number; output: number }
-    return { runs: r.runs, durationMs: r.durationMs, tokens: r.counted > 0 ? { input: r.input, output: r.output } : null }
-  }
-
-  /**
-   * Keeps the raw text of a failure, but only the **most recent `keep`** for that app. The raw
-   * text is large and rarely read — what an agent building the app needs to fix it is the last
-   * handful of failures, not all of them.
-   */
-  keepAppRunFailure(f: { runId: string; projectId: string | null; appId: string; args: string; result: string | null; createdAt: number }, keep: number): void {
-    const tx = this.db.transaction(() => {
-      this.db
-        .prepare(`INSERT OR REPLACE INTO app_run_failures (run_id, project_id, app_id, args, result, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(f.runId, f.projectId, f.appId, f.args, f.result, f.createdAt)
-      this.db
-        .prepare(
-          `DELETE FROM app_run_failures WHERE app_id = ? AND project_id IS ? AND run_id NOT IN (
-             SELECT run_id FROM app_run_failures WHERE app_id = ? AND project_id IS ? ORDER BY created_at DESC, rowid DESC LIMIT ?
-           )`,
-        )
-        .run(f.appId, f.projectId, f.appId, f.projectId, keep)
-    })
-    tx()
-  }
-
-  /**
-   * One app's run log, most recent first — **including the chain beneath each row** (M4 D-6).
-   * A failure whose raw text is still kept is returned with it.
-   *
-   * A root is one of this app's rows whose parent is not also one of this app's rows (called
-   * from the UI or a session, called by a different app, or requested with no open run at all).
-   * `limit` counts roots. Everything below a root is included by following parent links down —
-   * rows for other apps this app called, down to the rows for agents that app in turn requested.
-   * That is what lets a single history screen read "what the UI clicked → another app → an
-   * agent" as one chain. Rows below the roots are capped at `CHAIN_ROWS_MAX`, so an app that
-   * makes requests without end inside a single call cannot hold the screen hostage.
-   */
-  listAppRuns(
-    projectId: string | null,
-    appId: string,
-    limit: number,
-  ): (AppRunRecord & { tokens: { input: number; output: number } | null; failure: { args: string; result: string | null } | null })[] {
-    const rows = this.db
-      .prepare(
-        `WITH RECURSIVE
-           roots(id) AS (
-             SELECT r.id FROM app_runs r
-             WHERE r.app_id = ? AND r.project_id IS ?
-               AND NOT EXISTS (SELECT 1 FROM app_runs p WHERE p.id = r.parent_run_id AND p.app_id = r.app_id AND p.project_id IS r.project_id)
-             ORDER BY r.created_at DESC, r.rowid DESC LIMIT ?
-           ),
-           chain(id) AS (
-             SELECT id FROM roots
-             UNION
-             SELECT c.id FROM app_runs c JOIN chain ON c.parent_run_id = chain.id
-           )
-         SELECT r.id, r.project_id as projectId, r.app_id as appId, r.kind, r.tool, r.caller_kind as callerKind,
-                r.caller_session_id as callerSessionId, r.parent_run_id as parentRunId, r.status,
-                r.duration_ms as durationMs, r.args_digest as argsDigest, r.args_summary as argsSummary,
-                r.error, r.created_at as createdAt, r.session_id as sessionId, r.tokens_in as tokensIn, r.tokens_out as tokensOut,
-                f.args as failureArgs, f.result as failureResult,
-                r.rowid as seq, r.id IN (SELECT id FROM roots) as isRoot
-         FROM app_runs r LEFT JOIN app_run_failures f ON f.run_id = r.id
-         WHERE r.id IN (SELECT id FROM chain)
-         ORDER BY isRoot DESC, r.created_at DESC, r.rowid DESC LIMIT ?`,
-      )
-      .all(appId, projectId, limit, limit + CHAIN_ROWS_MAX) as (AppRunRecord & {
-      tokensIn: number | null
-      tokensOut: number | null
-      failureArgs: string | null
-      failureResult: string | null
-      seq: number
-      isRoot: number
-    })[]
-    // Filling roots first was only the order used for truncation — what is returned is chronological (most recent first)
-    rows.sort((a, b) => b.createdAt - a.createdAt || b.seq - a.seq)
-    return rows.map(({ failureArgs, failureResult, tokensIn, tokensOut, seq: _seq, isRoot: _isRoot, ...r }) => ({
-      ...r,
-      tokens: tokensIn === null ? null : { input: tokensIn, output: tokensOut ?? 0 },
-      failure: failureArgs === null ? null : { args: failureArgs, result: failureResult },
-    }))
-  }
-
-  /** Removes run records outside the retention window. @returns the number of runs deleted */
-  pruneAppRuns(before: number): number {
-    const tx = this.db.transaction(() => {
-      this.db.prepare(`DELETE FROM app_run_failures WHERE created_at < ?`).run(before)
-      return this.db.prepare(`DELETE FROM app_runs WHERE created_at < ?`).run(before).changes
-    })
-    return tx()
-  }
-
-  /**
-   * Closes out runs that never saw an end (once, at startup). When the host dies, the app
-   * process's input also closes and it ends — a row left at `running` would look like it is
-   * running forever. The same reasoning as fixing session state at startup (`manager.ts`'s
-   * LIVE_ONLY): a "live" state is only true while a process backs it.
-   */
-  settleUnfinishedAppRuns(error: string): number {
-    return this.db.prepare(`UPDATE app_runs SET status = 'error', error = ? WHERE status = 'running'`).run(error).changes
-  }
-
-  // ── The person's answers to an app's capability requests (M4 D-4) — this store fills in the runtime's `CapabilityBook` ──
 
   getAppPermission(appKey: string, capability: string): AppPermissionRecord | null {
-    const row = this.db
-      .prepare(
-        `SELECT capability, text, decision, uses_stamp as stamp, decided_at as decidedAt FROM app_permissions WHERE app_key = ? AND capability = ?`,
-      )
-      .get(appKey, capability) as AppPermissionRecord | undefined
-    return row ?? null
+    return this.permissions.getAppPermission(appKey, capability)
   }
 
   putAppPermission(appKey: string, projectId: string | null, r: AppPermissionRecord): void {
-    this.db
-      .prepare(
-        `INSERT OR REPLACE INTO app_permissions (app_key, project_id, capability, text, decision, uses_stamp, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(appKey, projectId, r.capability, r.text, r.decision, r.stamp, r.decidedAt)
+    return this.permissions.putAppPermission(appKey, projectId, r)
   }
 
   forgetAppPermission(appKey: string, capability: string): void {
-    this.db.prepare(`DELETE FROM app_permissions WHERE app_key = ? AND capability = ?`).run(appKey, capability)
+    return this.permissions.forgetAppPermission(appKey, capability)
   }
 
   listAppPermissions(appKey: string): AppPermissionRecord[] {
-    return this.db
-      .prepare(
-        `SELECT capability, text, decision, uses_stamp as stamp, decided_at as decidedAt FROM app_permissions WHERE app_key = ? ORDER BY decided_at DESC`,
-      )
-      .all(appKey) as AppPermissionRecord[]
+    return this.permissions.listAppPermissions(appKey)
   }
 
-  // ── The person's "always" for one project reaching another (#371) — see migration v44 ──
-
   getProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): ProjectConsent | null {
-    const row = this.db
-      .prepare(
-        `SELECT from_project_id as fromProjectId, to_project_id as toProjectId, kind, decided_at as decidedAt
-           FROM project_consents WHERE from_project_id = ? AND to_project_id = ? AND kind = ?`,
-      )
-      .get(fromProjectId, toProjectId, kind) as ProjectConsent | undefined
-    return row ?? null
+    return this.permissions.getProjectConsent(fromProjectId, toProjectId, kind)
   }
 
   setProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): void {
-    this.db
-      .prepare(
-        `INSERT INTO project_consents (from_project_id, to_project_id, kind, decided_at) VALUES (?, ?, ?, ?)
-           ON CONFLICT(from_project_id, to_project_id, kind) DO UPDATE SET decided_at = excluded.decided_at`,
-      )
-      .run(fromProjectId, toProjectId, kind, Date.now())
+    return this.permissions.setProjectConsent(fromProjectId, toProjectId, kind)
   }
 
   forgetProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): boolean {
-    return (
-      this.db
-        .prepare(`DELETE FROM project_consents WHERE from_project_id = ? AND to_project_id = ? AND kind = ?`)
-        .run(fromProjectId, toProjectId, kind).changes > 0
-    )
+    return this.permissions.forgetProjectConsent(fromProjectId, toProjectId, kind)
   }
 
-  /**
-   * Only the kinds this build knows (#384). `kind` has no CHECK, so a newer build can add one without a breaking step;
-   * a row of a kind this build cannot name is left in place for that build rather than listed here, where the settings
-   * screen would show it without a label and could not revoke it (`projectConsents.revoke` takes known kinds only).
-   */
   listProjectConsents(): ProjectConsent[] {
-    const rows = this.db
-      .prepare(
-        `SELECT from_project_id as fromProjectId, to_project_id as toProjectId, kind, decided_at as decidedAt
-           FROM project_consents ORDER BY decided_at DESC`,
-      )
-      .all() as ProjectConsent[]
-    return rows.filter((r) => ProjectConsentKindSchema.safeParse(r.kind).success)
+    return this.permissions.listProjectConsents()
   }
 
-  // ── Sessions that owe a report to the session that gave them work (#646) — see migration v49 ──
+  // ── AppRunRecords (store/app-runs.ts) ──
+
+  beginAppRun(r: AppRunRecord): void {
+    return this.appRuns.beginAppRun(r)
+  }
+
+  linkAppRunSession(id: string, sessionId: string): void {
+    return this.appRuns.linkAppRunSession(id, sessionId)
+  }
+
+  endAppRun(id: string, end: { status: string; durationMs: number; error: string | null; tokens?: { input: number; output: number } | null }): void {
+    return this.appRuns.endAppRun(id, end)
+  }
+
+  appAgentUse(projectId: string | null, appId: string, since: number): { runs: number; durationMs: number; tokens: { input: number; output: number } | null } {
+    return this.appRuns.appAgentUse(projectId, appId, since)
+  }
+
+  keepAppRunFailure(f: { runId: string; projectId: string | null; appId: string; args: string; result: string | null; createdAt: number }, keep: number): void {
+    return this.appRuns.keepAppRunFailure(f, keep)
+  }
+
+  listAppRuns(projectId: string | null, appId: string, limit: number): (AppRunRecord & { tokens: { input: number; output: number } | null; failure: { args: string; result: string | null } | null })[] {
+    return this.appRuns.listAppRuns(projectId, appId, limit)
+  }
+
+  pruneAppRuns(before: number): number {
+    return this.appRuns.pruneAppRuns(before)
+  }
+
+  settleUnfinishedAppRuns(error: string): number {
+    return this.appRuns.settleUnfinishedAppRuns(error)
+  }
+
+  // ── ChildOwnershipRecords (store/child-ownership.ts) ──
 
   listReportMarks(): { sessionId: string; callerSessionId: string }[] {
-    return this.db
-      .prepare(`SELECT session_id as sessionId, caller_session_id as callerSessionId FROM report_marks ORDER BY marked_at`)
-      .all() as { sessionId: string; callerSessionId: string }[]
+    return this.children.listReportMarks()
   }
 
   setReportMark(sessionId: string, callerSessionId: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO report_marks (session_id, caller_session_id, marked_at) VALUES (?, ?, ?)
-           ON CONFLICT(session_id) DO UPDATE SET caller_session_id = excluded.caller_session_id, marked_at = excluded.marked_at`,
-      )
-      .run(sessionId, callerSessionId, Date.now())
+    return this.children.setReportMark(sessionId, callerSessionId)
   }
 
   clearReportMark(sessionId: string): void {
-    this.db.prepare(`DELETE FROM report_marks WHERE session_id = ?`).run(sessionId)
+    return this.children.clearReportMark(sessionId)
   }
 
-  // ── start_agent requests waiting for the person (#673) — see migration v50 ──
-
   listAgentStartRequests(): { requestId: string; callerSessionId: string; request: unknown; askedAt: number }[] {
-    const rows = this.db
-      .prepare(`SELECT request_id as requestId, caller_session_id as callerSessionId, request, asked_at as askedAt FROM agent_start_requests ORDER BY asked_at`)
-      .all() as { requestId: string; callerSessionId: string; request: string; askedAt: number }[]
-    return rows.flatMap((r) => {
-      try {
-        return [{ ...r, request: JSON.parse(r.request) as unknown }]
-      } catch {
-        return []
-      }
-    })
+    return this.children.listAgentStartRequests()
   }
 
   putAgentStartRequest(requestId: string, callerSessionId: string, request: unknown): void {
-    this.db
-      .prepare(
-        `INSERT INTO agent_start_requests (request_id, caller_session_id, request, asked_at) VALUES (?, ?, ?, ?)
-           ON CONFLICT(request_id) DO UPDATE SET caller_session_id = excluded.caller_session_id, request = excluded.request`,
-      )
-      .run(requestId, callerSessionId, JSON.stringify(request), Date.now())
+    return this.children.putAgentStartRequest(requestId, callerSessionId, request)
   }
 
   deleteAgentStartRequest(requestId: string): void {
-    this.db.prepare(`DELETE FROM agent_start_requests WHERE request_id = ?`).run(requestId)
+    return this.children.deleteAgentStartRequest(requestId)
   }
-
-  // ── Sessions running a turn another session gave them (#676) — see migration v51 ──
 
   listDelegatedTurns(): { sessionId: string; callerSessionId: string; told: string[]; turnId: string }[] {
-    const rows = this.db
-      .prepare(`SELECT session_id as sessionId, caller_session_id as callerSessionId, told_cards as told, turn_id as turnId FROM delegated_turns ORDER BY started_at`)
-      .all() as { sessionId: string; callerSessionId: string; told: string; turnId: string }[]
-    return rows.map((r) => ({ ...r, told: r.told.split(' ').filter(Boolean) }))
+    return this.children.listDelegatedTurns()
   }
 
-  /** A new delegated turn: the cards told of the session's earlier one go with it */
   setDelegatedTurn(sessionId: string, callerSessionId: string, turnId: string): void {
-    this.db
-      .prepare(
-        `INSERT INTO delegated_turns (session_id, caller_session_id, started_at, told_cards, turn_id) VALUES (?, ?, ?, '', ?)
-           ON CONFLICT(session_id) DO UPDATE SET caller_session_id = excluded.caller_session_id, started_at = excluded.started_at, told_cards = '', turn_id = excluded.turn_id`,
-      )
-      .run(sessionId, callerSessionId, Date.now(), turnId)
+    return this.children.setDelegatedTurn(sessionId, callerSessionId, turnId)
   }
 
   setDelegatedTurnTold(sessionId: string, told: readonly string[]): void {
-    this.db.prepare(`UPDATE delegated_turns SET told_cards = ? WHERE session_id = ?`).run(told.join(' '), sessionId)
+    return this.children.setDelegatedTurnTold(sessionId, told)
   }
 
-  // ── Requests held for a busy session (#677) — see migration v52 ──
-
   listQueuedRequests(): QueuedRequest[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, session_id as sessionId, caller_session_id as callerSessionId, via, text, queued_at as queuedAt,
-                delivering_at as deliveringAt, opened_by_auto as openedByAuto
-           FROM queued_requests ORDER BY queued_at, rowid`,
-      )
-      .all() as (Omit<QueuedRequest, 'openedByAuto'> & { openedByAuto: number | null })[]
-    return rows.map((r) => ({ ...r, openedByAuto: r.openedByAuto === null ? null : r.openedByAuto === 1 }))
+    return this.children.listQueuedRequests()
   }
 
   addQueuedRequest(r: QueuedRequest): void {
-    this.db
-      .prepare(`INSERT INTO queued_requests (id, session_id, caller_session_id, via, text, queued_at, opened_by_auto) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run(r.id, r.sessionId, r.callerSessionId, r.via, r.text, r.queuedAt, r.openedByAuto ? 1 : 0)
+    return this.children.addQueuedRequest(r)
   }
 
   markQueuedDelivering(id: string, at: number | null): void {
-    this.db.prepare(`UPDATE queued_requests SET delivering_at = ? WHERE id = ?`).run(at, id)
+    return this.children.markQueuedDelivering(id, at)
   }
 
   removeQueuedRequest(id: string): void {
-    this.db.prepare(`DELETE FROM queued_requests WHERE id = ?`).run(id)
+    return this.children.removeQueuedRequest(id)
   }
 
   clearDelegatedTurn(sessionId: string): void {
-    this.db.prepare(`DELETE FROM delegated_turns WHERE session_id = ?`).run(sessionId)
+    return this.children.clearDelegatedTurn(sessionId)
   }
 
-  /**
-   * A handoff's move of the original session's live children to the session that took over (#693), in one
-   * transaction: each moved session's `asked_by_session_id` and `parent_session_id` where they name the original, the
-   * report each owes it (`report_marks`), the delegated turn it gave each (`delegated_turns`), every request it queued
-   * (`queued_requests`), and its start_agent requests still waiting for the person (`agent_start_requests`, whose
-   * stored request names its caller too). A crash before the commit leaves every row on the original; after it, every
-   * row on the new session, so the next host (a swap or a restart) reads one owner either way. `armReports`: children
-   * whose report the original was waiting for in a call (its wait had taken the mark down), now owed to the new session.
-   */
-  moveChildren(
-    from: string,
-    to: string,
-    move: { sessions: readonly string[]; startRequests: readonly { requestId: string; request: unknown }[]; armReports?: readonly string[]; queued?: boolean },
-  ): void {
-    this.db.transaction(() => {
-      const owner = this.db.prepare(
-        `UPDATE sessions SET
-           asked_by_session_id = CASE WHEN asked_by_session_id = @from THEN @to ELSE asked_by_session_id END,
-           parent_session_id = CASE WHEN parent_session_id = @from THEN @to ELSE parent_session_id END
-         WHERE id = @id`,
-      )
-      const mark = this.db.prepare(`UPDATE report_marks SET caller_session_id = @to WHERE session_id = @id AND caller_session_id = @from`)
-      const turn = this.db.prepare(`UPDATE delegated_turns SET caller_session_id = @to WHERE session_id = @id AND caller_session_id = @from`)
-      for (const id of move.sessions) {
-        owner.run({ from, to, id })
-        mark.run({ from, to, id })
-        turn.run({ from, to, id })
-      }
-      // A removed original's queue stays with it, for the trash to drop (#738)
-      if (move.queued !== false) this.db.prepare(`UPDATE queued_requests SET caller_session_id = ? WHERE caller_session_id = ?`).run(to, from)
-      const start = this.db.prepare(`UPDATE agent_start_requests SET caller_session_id = ?, request = ? WHERE request_id = ? AND caller_session_id = ?`)
-      for (const r of move.startRequests) start.run(to, JSON.stringify(r.request), r.requestId, from)
-      const arm = this.db.prepare(
-        `INSERT INTO report_marks (session_id, caller_session_id, marked_at) VALUES (?, ?, ?)
-           ON CONFLICT(session_id) DO UPDATE SET caller_session_id = excluded.caller_session_id, marked_at = excluded.marked_at`,
-      )
-      for (const id of move.armReports ?? []) arm.run(id, to, Date.now())
-    })()
+  moveChildren(from: string, to: string, move: { sessions: readonly string[]; startRequests: readonly { requestId: string; request: unknown }[]; armReports?: readonly string[]; queued?: boolean }): void {
+    return this.children.moveChildren(from, to, move)
   }
 
-  // ── Linked machines (#82, v46) ─────────────────────────────────────────────────────────────
+  // ── LinkedMachineRecords (store/linked-machines.ts) ──
 
   listLinkedMachines(): LinkedMachineRow[] {
-    const rows = this.db
-      .prepare(
-        `SELECT id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions
-           FROM linked_machines ORDER BY added_at, id`,
-      )
-      .all() as {
-      id: string
-      name: string
-      ssh_target: string
-      shell: string
-      wsl_distro: string | null
-      command: string | null
-      slot: number
-      added_at: number
-      accepted_versions: string | null
-    }[]
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      sshTarget: r.ssh_target,
-      remote: { shell: r.shell === 'powershell' || r.shell === 'wsl' ? r.shell : 'posix', wslDistro: r.wsl_distro, command: r.command },
-      slot: r.slot,
-      addedAt: r.added_at,
-      acceptedVersions: r.accepted_versions,
-    }))
+    return this.machines.listLinkedMachines()
   }
 
-  /**
-   * Adds a linked machine with the next slot. A slot is never handed out twice, even after its machine is removed:
-   * an approval rule id folded with it may still be on a screen (links/machine-ids.ts), and must not come to name a
-   * rule of the next machine. The high-water mark lives in app_settings.
-   */
   addLinkedMachine(m: Omit<LinkedMachineRow, 'slot'>): LinkedMachineRow {
-    return this.db.transaction(() => {
-      const used = (this.db.prepare(`SELECT MAX(slot) AS s FROM linked_machines`).get() as { s: number | null }).s ?? 0
-      const slot = Math.max(used, Number(this.appSetting(LINK_SLOT_KEY) ?? 0)) + 1
-      this.db
-        .prepare(
-          `INSERT INTO linked_machines (id, name, ssh_target, shell, wsl_distro, command, slot, added_at, accepted_versions)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(m.id, m.name, m.sshTarget, m.remote.shell, m.remote.wslDistro ?? null, m.remote.command ?? null, slot, m.addedAt, m.acceptedVersions)
-      this.setAppSetting(LINK_SLOT_KEY, String(slot))
-      return { ...m, slot }
-    })()
+    return this.machines.addLinkedMachine(m)
   }
 
-  /** Removes a machine with its mirrored headers and its grid panels */
   removeLinkedMachine(id: string): void {
-    this.db.transaction(() => {
-      this.db.prepare(`DELETE FROM machine_headers WHERE machine_id = ?`).run(id)
-      this.db.prepare(`DELETE FROM grid_layout WHERE remote_session_id IS NOT NULL AND substr(remote_session_id, 1, ?) = ?`).run(id.length + 1, `${id}.`)
-      this.db.prepare(`DELETE FROM grid_layout WHERE remote_app_id IS NOT NULL AND app_machine = ?`).run(id)
-      this.db.prepare(`DELETE FROM linked_machines WHERE id = ?`).run(id)
-      this.deleteAppSetting(`${MIRRORED_KEY}${id}.session`)
-      this.deleteAppSetting(`${MIRRORED_KEY}${id}.project`)
-    })()
+    return this.machines.removeLinkedMachine(id)
   }
 
   setLinkedMachineAcceptedVersions(id: string, key: string | null): void {
-    this.db.prepare(`UPDATE linked_machines SET accepted_versions = ? WHERE id = ?`).run(key, id)
+    return this.machines.setLinkedMachineAcceptedVersions(id, key)
   }
 
-  /** One machine's mirrored sessions or projects, in the order it last listed them; null when never mirrored */
   machineHeaders(machineId: string, kind: 'session' | 'project'): unknown[] | null {
-    if (this.appSetting(`${MIRRORED_KEY}${machineId}.${kind}`) === null) return null
-    const rows = this.db
-      .prepare(`SELECT info FROM machine_headers WHERE machine_id = ? AND kind = ? ORDER BY position, item_id`)
-      .all(machineId, kind) as { info: string }[]
-    return rows.map((r) => JSON.parse(r.info) as unknown)
+    return this.machines.machineHeaders(machineId, kind)
   }
 
-  /** Replaces one machine's mirrored list whole, as it was just read */
   replaceMachineHeaders(machineId: string, kind: 'session' | 'project', items: readonly { id: string }[]): void {
-    const del = this.db.prepare(`DELETE FROM machine_headers WHERE machine_id = ? AND kind = ?`)
-    const ins = this.db.prepare(`INSERT OR REPLACE INTO machine_headers (machine_id, kind, item_id, info, position) VALUES (?, ?, ?, ?, ?)`)
-    this.db.transaction(() => {
-      // A machine removed meanwhile has no row to hang headers on
-      if (!this.db.prepare(`SELECT 1 FROM linked_machines WHERE id = ?`).get(machineId)) return
-      del.run(machineId, kind)
-      items.forEach((item, i) => ins.run(machineId, kind, item.id, JSON.stringify(item), i))
-      this.setAppSetting(`${MIRRORED_KEY}${machineId}.${kind}`, '1')
-    })()
+    return this.machines.replaceMachineHeaders(machineId, kind, items)
   }
 
-  /** One session header, added or replaced; a new one goes last */
   upsertMachineSession(machineId: string, item: { id: string }): void {
-    if (!this.db.prepare(`SELECT 1 FROM linked_machines WHERE id = ?`).get(machineId)) return
-    const pos = (
-      this.db
-        .prepare(`SELECT COALESCE(MAX(position), -1) + 1 AS p FROM machine_headers WHERE machine_id = ? AND kind = 'session'`)
-        .get(machineId) as { p: number }
-    ).p
-    this.db
-      .prepare(
-        `INSERT INTO machine_headers (machine_id, kind, item_id, info, position) VALUES (?, 'session', ?, ?, ?)
-         ON CONFLICT (machine_id, kind, item_id) DO UPDATE SET info = excluded.info`,
-      )
-      .run(machineId, item.id, JSON.stringify(item), pos)
+    return this.machines.upsertMachineSession(machineId, item)
   }
 
-  /** Changes a few fields of one mirrored session (its name, its state) */
   patchMachineSession(machineId: string, sessionId: string, patch: Record<string, unknown>): void {
-    const row = this.db
-      .prepare(`SELECT info FROM machine_headers WHERE machine_id = ? AND kind = 'session' AND item_id = ?`)
-      .get(machineId, sessionId) as { info: string } | undefined
-    if (!row) return
-    const next = { ...(JSON.parse(row.info) as Record<string, unknown>), ...patch }
-    this.db
-      .prepare(`UPDATE machine_headers SET info = ? WHERE machine_id = ? AND kind = 'session' AND item_id = ?`)
-      .run(JSON.stringify(next), machineId, sessionId)
+    return this.machines.patchMachineSession(machineId, sessionId, patch)
   }
 
   removeMachineSession(machineId: string, sessionId: string): void {
-    this.db.prepare(`DELETE FROM machine_headers WHERE machine_id = ? AND kind = 'session' AND item_id = ?`).run(machineId, sessionId)
+    return this.machines.removeMachineSession(machineId, sessionId)
   }
 }
-
-/** One linked machine as stored (#82, v46): the registry's record (links/links.ts `MachineRecord`) */
-export type LinkedMachineRow = {
-  id: string
-  name: string
-  sshTarget: string
-  remote: { shell: 'posix' | 'powershell' | 'wsl'; wslDistro?: string | null; command?: string | null }
-  slot: number
-  addedAt: number
-  acceptedVersions: string | null
-}
-
-/** The highest slot ever handed to a linked machine (#82) */
-const LINK_SLOT_KEY = 'links.slotHighWater'
-/** Marks that a machine's list was mirrored at least once, so an empty mirror reads as empty rather than unknown */
-const MIRRORED_KEY = 'links.mirrored.'
-
-/**
- * What a remembered consent allows (#371): 'delegate' is part B's ask_project, 'apps' part A's app tools, 'agents' a
- * project's sessions starting agents in that same project (#561, start_agent; the row names the project twice)
- */
-export type ProjectConsentKind = 'delegate' | 'apps' | 'agents'
-
-/** One remembered "always" from one project to another (#371, migration v44) */
-export type ProjectConsent = { fromProjectId: string; toProjectId: string; kind: ProjectConsentKind; decidedAt: number }
-
-/**
- * What a session in the trash remembers (`sessions.trash`, #204).
- *
- *   projectId, projectName, projectPath   where it came from. A trashed session has no `project_id` (see
- *                                         `trashSession`), and its project may be deleted meanwhile; restoring
- *                                         then registers the folder again under the same id
- *   removeExternal   delete the tool's own conversation file (Claude JSONL, Codex rollout) when deleted for good
- *   removeWorktree   remove the session's worktree when deleted for good
- */
-export type TrashRecord = {
-  projectId: string | null
-  projectName: string | null
-  projectPath: string | null
-  removeExternal: boolean
-  removeWorktree: boolean
-  recovery?: WorktreeRecovery
-}
-
-/** One row of `listTrash` */
-export type TrashedRow = {
-  id: string
-  name: string
-  tool: string
-  deletedAt: number
-  messages: number
-  bytes: number
-  /** The tool knows this conversation by an id of its own — there is a file of the tool's to keep or delete */
-  hasConversationFile: boolean
-  record: TrashRecord
-  worktree: { path: string; branch: string } | null
-}
-
-/** A record written by an older or broken build reads as "keep everything" — deleting for good must be asked for */
-function parseTrashRecord(json: string | null): TrashRecord {
-  let r: Partial<Record<keyof TrashRecord, unknown>> = {}
-  try {
-    r = json ? (JSON.parse(json) as typeof r) : {}
-  } catch {
-    // unreadable: the defaults below keep the files
-  }
-  const str = (v: unknown) => (typeof v === 'string' && v ? v : null)
-  return {
-    projectId: str(r.projectId),
-    projectName: str(r.projectName),
-    projectPath: str(r.projectPath),
-    removeExternal: r.removeExternal === true,
-    removeWorktree: r.removeWorktree === true,
-    ...(r.recovery && typeof r.recovery === 'object' &&
-      typeof (r.recovery as WorktreeRecovery).snapshot === 'string' &&
-      typeof (r.recovery as WorktreeRecovery).tip === 'string' &&
-      typeof (r.recovery as WorktreeRecovery).changedFiles === 'number' &&
-      typeof (r.recovery as WorktreeRecovery).commits === 'number'
-      ? { recovery: r.recovery as WorktreeRecovery } : {}),
-  }
-}
-
-/**
- * The condition that keeps the trash out of a search (#204). Its index rows are dropped when it goes to the trash;
- * this also covers the ones a trash step cut short left behind.
- */
-const OUT_OF_TRASH = `session_id NOT IN (SELECT id FROM sessions WHERE deleted_at IS NOT NULL)`
-
-/** One row of app_permissions — the same shape as the runtime's `CapabilityDecision` (locked together structurally, M4 D-4) */
-export type AppPermissionRecord = { capability: string; text: string; decision: 'allow' | 'deny'; stamp: string; decidedAt: number }
-
-/** The cap on chain rows the history screen loads beneath one app's roots (M4 D-6, `listAppRuns`) */
-const CHAIN_ROWS_MAX = 500
-
-/** One row of app_runs — the same shape as the runtime's `AppRunRow` (locked together structurally) */
-export type AppRunRecord = {
-  id: string
-  projectId: string | null
-  appId: string
-  kind: string
-  tool: string
-  callerKind: string
-  callerSessionId: string | null
-  parentRunId: string | null
-  status: string
-  durationMs: number | null
-  argsDigest: string
-  argsSummary: string
-  error: string | null
-  createdAt: number
-  sessionId: string | null
-}
-
 
 /** What a reset WAL is cut back to (`journal_size_limit`) */
 const WAL_SIZE_LIMIT = 64 * 1024 * 1024
-
-
-
-/**
- * One chunk of a session deletion (#179). Removing one index row from the real database took
- * about 0.064ms (1,774ms for 27,887 rows), so 250 rows keeps one chunk under about 20ms. Cutting
- * it finer would only add more commits and lengthen the total time.
- */
-const DELETE_CHUNK = 250
-
-/**
- * How a stored message is read back (`loadMessages`, `loadMessagesFrom`, and a subagent's steps, `loadSubagentMessages`).
- *
- *   full   include a tool call's `input` and a tool result's `output` — the whole record (#221)
- *
- * Without `full` a tool message reads as its card: `summary` and nothing more. That is the default because every
- * reader today hands what it reads to someone else: the UI (a history page), another session's prompt
- * (`read_session`, `recall`, the orchestrator's memory), a successor (the handoff record). Full tool output reaching
- * another session's prompt is the privilege path #73 closed, and an agent `cat`-ing a large file must not ride every
- * page load. A reader that needs the record asks for it by name here, where the question gets asked.
- */
-export type ReadOpts = { full?: boolean }
-
-/**
- * The payload column as `ReadOpts` asks for it. The fields are dropped by SQLite (`json_remove`) rather than after
- * `JSON.parse`, so a page never pulls a megabyte of tool output into the host only to throw it away.
- */
-function payloadColumn(opts: ReadOpts): string {
-  return opts.full
-    ? 'payload'
-    : `CASE WHEN kind IN ('tool_call', 'tool_result') THEN json_remove(payload, '$.input', '$.output') ELSE payload END as payload`
-}
-
-
-/** `sessions.interruption` back as `SessionInfo.interruption` (#698) */
-function readInterruption(json: string | null): SessionInfo['interruption'] {
-  if (!json) return null
-  try {
-    const r = InterruptionSchema.safeParse(JSON.parse(json))
-    return r.success ? r.data : null
-  } catch {
-    return null
-  }
-}

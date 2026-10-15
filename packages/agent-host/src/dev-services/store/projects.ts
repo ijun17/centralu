@@ -1,0 +1,236 @@
+import type Database from 'better-sqlite3'
+import type { ProjectInfo, SavedCommand, ToolDefaults } from '@cc/protocol'
+
+/** The projects table: what a project remembers (its commands, worktree setup, tool defaults, trust) and where it sits in the sidebar */
+export class ProjectRecords {
+  constructor(private readonly db: Database.Database) {}
+
+  /**
+   * `trusted` is the trust a NEW row starts with (#655); absent means untrusted, as before. It is an insert-only
+   * value: registering a path that already has a row renames it and leaves its trust alone, so neither an earlier
+   * "no" nor a later "yes" is overwritten by a second registration.
+   */
+  addProject(p: { id: string; path: string; name: string; trusted?: boolean }): void {
+    this.db
+      .prepare(
+        `INSERT INTO projects (id, path, name, created_at, trusted) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(path) DO UPDATE SET name = excluded.name`,
+      )
+      .run(p.id, p.path, p.name, Date.now(), p.trusted ? 1 : 0)
+  }
+
+  /**
+   * `commands` is deliberately not in here (issue #44) — `projectCommands` answers that one.
+   *
+   * The column holds JSON, so it needs decoding, and every caller of this method wants a
+   * path or a name. Leaving it out of the row type means the omission is stated rather than
+   * silently cast away, which is how `Omit<ProjectInfo, 'git'>` would have become a lie the
+   * moment the field was added.
+   */
+  listProjects(): Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels'>[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, path, name, default_tool as defaultTool, trusted FROM projects ORDER BY sidebar_order, created_at`,
+      )
+      .all() as (Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels' | 'trusted'> & { trusted: number })[]
+    // SQLite has no boolean — passing 0/1 straight through would still satisfy `if (p.trusted)` on screen, but fail schema validation
+    return rows.map((r) => ({ ...r, trusted: r.trusted === 1 }))
+  }
+
+  /**
+   * The shell commands saved on a project (issue #44).
+   *
+   * Unreadable JSON reads as "none". A row that somehow got corrupted must not take the
+   * project list — and with it the sidebar — down with it; the worst it can cost is a menu
+   * you have to fill in again.
+   */
+  projectCommands(projectId: string): SavedCommand[] {
+    const row = this.db.prepare(`SELECT commands FROM projects WHERE id = ?`).get(projectId) as
+      { commands: string } | undefined
+    if (!row) return []
+    try {
+      const parsed = JSON.parse(row.commands) as unknown
+      if (!Array.isArray(parsed)) return []
+      // Old rows are an array of strings (before labels, ~2026-09-06) — upgraded on read, and the next save fixes the new shape
+      return parsed.flatMap((c): SavedCommand[] => {
+        if (typeof c === 'string') return [{ command: c }]
+        if (c && typeof c === 'object' && typeof (c as { command?: unknown }).command === 'string') {
+          const label = (c as { label?: unknown }).label
+          return [{ command: (c as { command: string }).command, ...(typeof label === 'string' && label ? { label } : {}) }]
+        }
+        return []
+      })
+    } catch {
+      return []
+    }
+  }
+
+  /** The whole list at once — add and delete both arrive here as "it looks like this now" */
+  setProjectCommands(projectId: string, commands: readonly SavedCommand[]): void {
+    this.db.prepare(`UPDATE projects SET commands = ? WHERE id = ?`).run(JSON.stringify(commands), projectId)
+  }
+
+  /**
+   * The worktree provisioning setup (#69). null means nothing runs — it is not enforced.
+   * The same rule as projectCommands: read whole, written whole.
+   */
+  worktreeSetup(projectId: string): { command: string; copyFiles: string[] } | null {
+    const row = this.db.prepare(`SELECT worktree_setup FROM projects WHERE id = ?`).get(projectId) as
+      { worktree_setup: string | null } | undefined
+    if (!row?.worktree_setup) return null
+    try {
+      const parsed = JSON.parse(row.worktree_setup) as { command?: unknown; copyFiles?: unknown }
+      const command = typeof parsed.command === 'string' ? parsed.command : ''
+      const copyFiles = Array.isArray(parsed.copyFiles)
+        ? parsed.copyFiles.filter((f): f is string => typeof f === 'string')
+        : []
+      if (!command && copyFiles.length === 0) return null
+      return { command, copyFiles }
+    } catch {
+      return null
+    }
+  }
+
+  setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): void {
+    this.db
+      .prepare(`UPDATE projects SET worktree_setup = ? WHERE id = ?`)
+      .run(setup ? JSON.stringify(setup) : null, projectId)
+  }
+
+  /**
+   * This project's worktree manager slot and trunk (#76).
+   *
+   * **This does not check whether the session it points at actually still exists** — that is
+   * the job of the side that knows sessions (SessionManager); the store just hands back what
+   * it was told to write down. Putting the "is this link broken" judgment (session deleted or
+   * archived) in two places would let the two places disagree.
+   */
+  worktreeManager(projectId: string): { sessionId: string; baseBranch: string } | null {
+    const row = this.db.prepare(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId) as
+      { worktree_manager: string | null } | undefined
+    if (!row?.worktree_manager) return null
+    try {
+      const parsed = JSON.parse(row.worktree_manager) as { sessionId?: unknown; baseBranch?: unknown }
+      if (typeof parsed.sessionId !== 'string' || !parsed.sessionId) return null
+      return {
+        sessionId: parsed.sessionId,
+        baseBranch: typeof parsed.baseBranch === 'string' ? parsed.baseBranch : '',
+      }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * The project's worktree trunk (#76), from the same row as the former manager slot (#561 part 3): read whatever the
+   * slot's session, since the trunk is the project's and no longer a manager's. Empty or unreadable: none.
+   */
+  worktreeTrunk(projectId: string): string | null {
+    const row = this.db.prepare(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId) as
+      { worktree_manager: string | null } | undefined
+    if (!row?.worktree_manager) return null
+    try {
+      const parsed = JSON.parse(row.worktree_manager) as { baseBranch?: unknown }
+      return typeof parsed.baseBranch === 'string' && parsed.baseBranch ? parsed.baseBranch : null
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Sets the trunk, keeping the slot's session id when there is one, so an older build still finds the manager it made
+   * there (agent-host.md §5.1: the shape is expanded, not changed)
+   */
+  setWorktreeTrunk(projectId: string, baseBranch: string): void {
+    this.setWorktreeManager(projectId, { sessionId: this.worktreeManager(projectId)?.sessionId ?? '', baseBranch })
+  }
+
+  setWorktreeManager(projectId: string, manager: { sessionId: string; baseBranch: string } | null): void {
+    this.db
+      .prepare(`UPDATE projects SET worktree_manager = ? WHERE id = ?`)
+      .run(manager ? JSON.stringify(manager) : null, projectId)
+  }
+
+  /**
+   * The tool a new session in this project starts on.
+   *
+   * Written when a session is created with an explicit tool, not from a settings screen:
+   * the column was set to 'claude' at project creation and never updated again, so a Codex
+   * user re-picked the pill on every single new session, forever.
+   */
+  setProjectDefaultTool(projectId: string, tool: string): void {
+    this.db.prepare(`UPDATE projects SET default_tool = ? WHERE id = ?`).run(tool, projectId)
+  }
+
+  /**
+   * The last model and effort chosen becomes the default (#69 finding 5) — but **per tool**
+   * (#107).
+   *
+   * Read whole and written whole, the same rule as projectCommands. Unparsable JSON reads as
+   * "none": the cost of losing one remembered value is a click, while throwing here would take
+   * the project list — and with it the sidebar — down with it.
+   */
+  projectToolDefaults(projectId: string): Record<string, ToolDefaults> {
+    const row = this.db.prepare(`SELECT default_models FROM projects WHERE id = ?`).get(projectId) as
+      { default_models: string | null } | undefined
+    if (!row?.default_models) return {}
+    try {
+      const parsed = JSON.parse(row.default_models) as unknown
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+      const out: Record<string, ToolDefaults> = {}
+      for (const [tool, v] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!v || typeof v !== 'object') continue
+        const { model, effort } = v as { model?: unknown; effort?: unknown }
+        out[tool] = {
+          model: typeof model === 'string' && model ? model : null,
+          effort: typeof effort === 'string' && effort ? effort : null,
+        }
+      }
+      return out
+    } catch {
+      return {}
+    }
+  }
+
+  /** Only one tool's slot is rewritten — another tool's remembered value has nothing to do with this choice (#107) */
+  setProjectToolDefaults(projectId: string, tool: string, d: ToolDefaults): void {
+    const all = { ...this.projectToolDefaults(projectId), [tool]: d }
+    this.db.prepare(`UPDATE projects SET default_models = ? WHERE id = ?`).run(JSON.stringify(all), projectId)
+  }
+
+  /**
+   * The projects the app runtime sees — root path and trust (M4 A-2).
+   *
+   * Worktrees are not here. A worktree is a copy of a project, not a project, and if an app
+   * instance stood up per copy, the same app would end up running multiple times over a single
+   * data folder — the app only reads from a registered root (plan A-2).
+   */
+  projectRoots(): { id: string; path: string; trusted: boolean }[] {
+    const rows = this.db
+      .prepare(`SELECT id, path, trusted FROM projects ORDER BY sidebar_order, created_at`)
+      .all() as { id: string; path: string; trusted: number }[]
+    return rows.map((r) => ({ id: r.id, path: r.path, trusted: r.trusted === 1 }))
+  }
+
+  /** @returns whether the project existed — this does not silently succeed on an unknown id */
+  setProjectTrusted(projectId: string, trusted: boolean): boolean {
+    return this.db.prepare(`UPDATE projects SET trusted = ? WHERE id = ?`).run(trusted ? 1 : 0, projectId).changes > 0
+  }
+
+  findProjectByPath(path: string): { id: string } | undefined {
+    return this.db.prepare(`SELECT id FROM projects WHERE path = ?`).get(path) as { id: string } | undefined
+  }
+
+  /**
+   * Saves the sidebar order.
+   *
+   * **The whole order is taken and renumbered from scratch.** Touching only the neighboring
+   * items in a "move this after that" way would eventually need a reshuffle once the values
+   * get packed too tight, and would drift if the list changed in between. The list is short
+   * (it is a sidebar a person looks at), so rewriting all of it is simple and safe.
+   */
+  setProjectOrder(orderedIds: readonly string[]): void {
+    const stmt = this.db.prepare(`UPDATE projects SET sidebar_order = ? WHERE id = ?`)
+    this.db.transaction(() => orderedIds.forEach((id, i) => stmt.run(i, id)))()
+  }
+}

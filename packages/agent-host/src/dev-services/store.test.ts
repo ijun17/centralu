@@ -1841,10 +1841,11 @@ describe('the trash (#204)', () => {
    * A new listing that forgets all three fails here, before it reaches a screen or an agent.
    */
   it('no query in the store reads sessions without deciding about the trash', async () => {
-    const { readFileSync } = await import('node:fs')
-    const src = readFileSync(new URL('./store.ts', import.meta.url), 'utf8')
-    // Migrations run before anything is in the trash; the queries that serve the app start after them
-    const body = src.slice(src.indexOf('get schemaVersion(): number'))
+    const { readFileSync, readdirSync } = await import('node:fs')
+    // The queries that serve the app: every file of `store/` but the migrations, which run before anything is in the trash
+    const parts = readdirSync(new URL('./store/', import.meta.url)).filter((f) => f.endsWith('.ts'))
+    expect(parts).toContain('sessions.ts')
+    const body = parts.map((f) => readFileSync(new URL(`./store/${f}`, import.meta.url), 'utf8')).join('\n')
     const literals = [...body.matchAll(/`([^`]*)`/g)].map((m) => m[1]!)
     const reading = literals.filter((q) => /\b(FROM|JOIN)\s+sessions\b/i.test(q))
     expect(reading.length).toBeGreaterThan(10)
@@ -1853,7 +1854,7 @@ describe('the trash (#204)', () => {
     )
     expect(undecided).toEqual([])
     // `readSessions` takes its condition from the caller — every caller has to name the trash in it
-    const callers = [...body.matchAll(/this\.readSessions\(`([^`]*)`/g)].map((m) => m[1]!)
+    const callers = [...body.matchAll(/this\.(?:sessions\.)?readSessions\(`([^`]*)`/g)].map((m) => m[1]!)
     expect(callers.length).toBeGreaterThanOrEqual(3)
     expect(callers.filter((w) => !/deleted_at/.test(w))).toEqual([])
   })

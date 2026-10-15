@@ -177,6 +177,8 @@ describe('who can delete for good', () => {
     }
     walk(src)
     expect(callers.sort()).toEqual([
+      // The store passes the call on to its trash module (store/trash.ts); it is the same call, not another caller
+      'dev-services/store.ts: this.trash.purgeSession',
       'rpc.ts: mgr.emptyTrash',
       'rpc.ts: mgr.purgeSession',
       // emptyTrash purges one by one; purgeSession removes the rows through the store

@@ -2326,7 +2326,9 @@ was **put on hold**. This directory is used as is in prod today. The name is a h
 - **git**: spawn the `git` CLI + parse `--porcelain=v2/-z`. status·diff·log·branches·checkout·stage·commit·push.
   Moving to git2 (Rust) **is not done until measurement confirms a bottleneck** (m2-plan decision 3).
   The port interface is the same, so moving it later leaves the UI unchanged.
-- **store**: better-sqlite3 + a `user_version` migration runner. The schema DDL lives in exactly one place,
+- **store**: better-sqlite3 + a `user_version` migration runner. `Store` (`store.ts`) opens the file and runs the
+  migrations; its other methods pass the call on to one module per concept in `dev-services/store/` (projects, sessions,
+  messages, the trash, app runs, …), and the step list is in `store/migrations/`. The schema DDL lives in exactly one place,
   `protocol/src/schema/schema.sql`. In the bundle it is copied next to the build output and ships with it (F-0).
   The rule for migration steps is below (§5.1).
 - **fs**: lazy readdir listing + `git check-ignore` (once per directory) + path escape blocking.
