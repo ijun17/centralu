@@ -71,6 +71,7 @@ centralu/
 │  │     │  └─ state.ts (the types)  historyPages.ts (history pages merged with the screen)
 │  │     │     screens.ts (which screen is on)  appKeys.ts (how an app and its views are named)
 │  │     │     sessionList.ts (the sessions it holds: host lists merged in, events held for one not yet listed)
+│  │     │     apps.ts (external apps: the list, pinned and in-conversation views, their actions)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)

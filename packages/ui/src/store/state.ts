@@ -1,3 +1,4 @@
+import type { StoreApi } from 'zustand'
 import type {
   AppQuestion,
   ToolStatus,
@@ -35,8 +36,13 @@ import type { ChatAttachment, ChatItem } from './transcript.js'
 /**
  * The store's state and actions as one type (`AppState`), and the shapes of what it holds. The store
  * (`useStore`, store.ts) builds it; the modules split out of store.ts (#428) import these types from
- * here rather than from the store, so none of them depends on the store itself.
+ * here rather than from the store, so none of them depends on the store itself. Those that hold
+ * actions take the store's `set` and `get` (`StoreSet`, `StoreGet`).
  */
+
+/** The store's own `set` and `get`, as the modules holding its actions receive them */
+export type StoreSet = StoreApi<AppState>['setState']
+export type StoreGet = StoreApi<AppState>['getState']
 
 /**
  * The wide surface that covers the conversation. `null` means nothing is covering it.
