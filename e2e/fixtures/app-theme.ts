@@ -220,9 +220,9 @@ export function appThemeTests() {
     const [changed] = await entries(v, 'host-context-changed')
     const vars = changed.styles.variables
     // The picked font goes first, and the app's own stack stays behind it (the Korean fallback)
-    expect(vars['--font-sans']).toMatch(/^"Inter", -apple-system/)
+    expect(vars['--font-sans']).toMatch(/^"Inter", ["']Pretendard Variable["']/)
     expect(vars['--font-sans']).toContain('Apple SD Gothic Neo')
-    expect(vars['--font-mono']).toMatch(/^"JetBrains Mono", ui-monospace/)
+    expect(vars['--font-mono']).toMatch(/^"JetBrains Mono", D2Coding/)
     expect(vars['--font-text-md-line-height']).toBe('1.848')
     // Headings keep the tight line height
     expect(vars['--font-heading-md-line-height']).toBe('1.3')

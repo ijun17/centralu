@@ -6,8 +6,9 @@ import { expect, test, type Page } from '@playwright/test'
  * and line height of real elements, the terminal's own font, and the root zoom.
  */
 
-const DEFAULT_SANS_START = '-apple-system'
-const DEFAULT_MONO_START = 'ui-monospace'
+// The bundled fonts lead the stacks (#731); an engine may or may not quote a family name it reports
+const DEFAULT_SANS_START = `["']?Pretendard Variable["']?,`
+const DEFAULT_MONO_START = `["']?D2Coding["']?,`
 
 const computed = (page: Page, testId: string, prop: 'fontFamily' | 'lineHeight' | 'fontSize') =>
   page.getByTestId(testId).first().evaluate((el, p) => getComputedStyle(el)[p], prop)
@@ -41,6 +42,23 @@ async function openTerminal(page: Page) {
 }
 
 export function typographyTests() {
+  test('the bundled fonts load from the app and lead the body and code stacks (#731)', async ({ page }) => {
+    await openDemo(page)
+    const loaded = await page.evaluate(async () => {
+      await Promise.all([document.fonts.load("13px 'Pretendard Variable'"), document.fonts.load('12px D2Coding')])
+      return [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family.replace(/["']/g, ''))
+    })
+    expect(loaded).toEqual(expect.arrayContaining(['Pretendard Variable', 'D2Coding']))
+    expect(await computed(page, 'markdown', 'fontFamily')).toMatch(new RegExp(`^${DEFAULT_SANS_START}`))
+    // Hangul in the code font is drawn by the code font itself, at twice the width of a Latin cell
+    const widths = await page.evaluate(() => {
+      const ctx = document.createElement('canvas').getContext('2d')!
+      ctx.font = '12px D2Coding'
+      return { latin: ctx.measureText('a').width, hangul: ctx.measureText('한').width }
+    })
+    expect(widths.hangul).toBeCloseTo(widths.latin * 2, 1)
+  })
+
   test('with nothing chosen, nothing is written on the root and the stylesheet’s fonts and line heights show', async ({ page }) => {
     await openDemo(page)
     for (const name of ['--font-sans', '--font-mono', '--leading-body', '--leading-code']) expect(await rootStyle(page, name)).toBe('')
@@ -56,7 +74,7 @@ export function typographyTests() {
 
     await openAppearance(page)
     await page.getByTestId('settings-font-body').selectOption('Inter')
-    await expect.poll(() => rootToken(page, '--font-sans')).toMatch(/^"Inter", -apple-system/)
+    await expect.poll(() => rootToken(page, '--font-sans')).toMatch(/^"Inter", ["']Pretendard Variable["']/)
     // The app's own stack stays behind it: Korean still has a font
     expect(await rootToken(page, '--font-sans')).toMatch(/["']Apple SD Gothic Neo["']/)
     expect(await computed(page, 'settings-font-body-sample', 'fontFamily')).toMatch(/^"?Inter"?,/)
@@ -66,7 +84,7 @@ export function typographyTests() {
     const other = page.getByTestId('settings-font-code-other')
     await other.fill('Iosevka Term')
     await other.press('Enter')
-    await expect.poll(() => rootToken(page, '--font-mono')).toMatch(/^"Iosevka Term", ui-monospace/)
+    await expect.poll(() => rootToken(page, '--font-mono')).toMatch(/^"Iosevka Term", D2Coding/)
 
     await page.getByTestId('settings-line-height-relaxed').click()
     await expect(page.getByTestId('settings-line-height-relaxed')).toHaveAttribute('aria-checked', 'true')
@@ -156,7 +174,8 @@ export function typographyTests() {
       await input.press('Enter')
       await expect(input).toHaveValue('')
 
-      const long = Array.from({ length: 60 }, (_, i) => `word${i}`).join(' ')
+      // 55 words: clear of the lengths where WebKit's textarea starts a row the composer's mirror does not (#744)
+      const long = Array.from({ length: 55 }, (_, i) => `word${i}`).join(' ')
       await input.fill(long)
       const rows = await input.evaluate((el: HTMLTextAreaElement) => Math.round(el.scrollHeight / parseFloat(getComputedStyle(el).lineHeight)))
       expect(rows).toBeGreaterThan(2)

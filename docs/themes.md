@@ -165,7 +165,16 @@ applied the way a theme is — as values for tokens, written on `<html>` (`packa
 | `codeFont` | a family or a list, `''` (default) | Goes in front of `--font-mono`: code blocks and spans, paths, readouts, and every terminal |
 | `lineHeight` | `compact` · `normal` (default) · `relaxed` | Multiplies `--leading-body` (1.65) and `--leading-code` (1.5) by 0.88 · 1 · 1.12 |
 
-Settings offers a short list of common fonts and *Other…* for any installed font by name. What is
+The defaults are bundled with the UI (#731, `packages/ui/src/assets/fonts/`): **Pretendard** leads
+`--font-sans` and **D2Coding** leads `--font-mono`, so the desktop app, the browser and Windows show
+the same type; the system fonts stay behind them. Both are under the SIL Open Font License 1.1, with
+the licence next to the files and inside them. They load with `font-display: block` and start loading
+before the first frame (`apps/web/src/main.tsx`); a terminal opened before D2Coding finished measures
+its cell again when it does. App views receive the same stacks but not the font files, so a view
+shows its system fallback until it bundles the fonts itself.
+
+Settings offers a short list of common fonts, *System* / *System monospace* for the OS's own, and
+*Other…* for any installed font by name. What is
 typed is quoted name by name (`JetBrains Mono` becomes `"JetBrains Mono"`; a generic keyword such as
 `monospace` stays bare) and checked by the browser before it is kept.
 

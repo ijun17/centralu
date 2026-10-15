@@ -18,8 +18,8 @@ import { DEFAULT_UI_PREFERENCES, LineHeight, nearestTextSize, type UiPreferences
  * inline value replaces the stylesheet's. Appending them is what keeps the Korean fallback: a Latin
  * font has no Hangul, and the browser takes each missing glyph from the next family in the list.
  */
-export const DEFAULT_SANS = "-apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard, system-ui, sans-serif"
-export const DEFAULT_MONO = "ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace"
+export const DEFAULT_SANS = "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', system-ui, sans-serif"
+export const DEFAULT_MONO = "D2Coding, ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace"
 
 /** The body line height and the code one at Normal — copies of `@theme`'s, kept equal by the same test */
 export const LEADING_BODY = 1.65
@@ -34,16 +34,17 @@ export const LINE_HEIGHT_FACTORS: Record<LineHeight, number> = { compact: 0.88, 
 
 /** A short list to pick from. Empty is the app's own stack; anything else can be typed */
 export const BODY_FONTS: readonly { value: string; label: string }[] = [
-  { value: '', label: 'System (default)' },
+  { value: '', label: 'Pretendard (default)' },
+  { value: 'system-ui', label: 'System' },
   { value: 'Inter', label: 'Inter' },
   { value: 'Helvetica Neue', label: 'Helvetica Neue' },
   { value: 'Avenir Next', label: 'Avenir Next' },
   { value: 'IBM Plex Sans', label: 'IBM Plex Sans' },
-  { value: 'Pretendard', label: 'Pretendard' },
 ]
 
 export const CODE_FONTS: readonly { value: string; label: string }[] = [
-  { value: '', label: 'System monospace (default)' },
+  { value: '', label: 'D2Coding (default)' },
+  { value: 'ui-monospace', label: 'System monospace' },
   { value: 'SF Mono', label: 'SF Mono' },
   { value: 'Menlo', label: 'Menlo' },
   { value: 'JetBrains Mono', label: 'JetBrains Mono' },

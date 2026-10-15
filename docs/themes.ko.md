@@ -150,7 +150,14 @@ Dark는 어두운 바닥(`#0f0f0f`) 위에 떠 있는 상자(`#242424`, 바닥�
 | `codeFont` | 글꼴 하나나 목록, `''`(기본) | `--font-mono` 앞에 붙는다: 코드 블록과 코드 조각, 경로, 수치, 모든 터미널 |
 | `lineHeight` | `compact` · `normal`(기본) · `relaxed` | `--leading-body`(1.65)와 `--leading-code`(1.5)에 0.88 · 1 · 1.12를 곱한다 |
 
-설정에는 흔한 글꼴의 짧은 목록과, 설치된 아무 글꼴이나 이름으로 쓰는 *Other…*가 있다. 쓴 것은 이름마다
+기본 글꼴은 UI와 함께 들어 있다(#731, `packages/ui/src/assets/fonts/`). `--font-sans`의 맨 앞은
+**Pretendard**, `--font-mono`의 맨 앞은 **D2Coding**이어서 데스크톱 앱, 브라우저, Windows가 같은 글꼴을
+보여 준다. 시스템 글꼴은 그 뒤에 남는다. 둘 다 SIL Open Font License 1.1이고, 라이선스는 파일 옆과 파일
+안에 있다. `font-display: block`으로 불러오고, 첫 프레임 전에 불러오기를 시작한다(`apps/web/src/main.tsx`).
+D2Coding이 다 오기 전에 열린 터미널은 다 온 뒤에 칸 크기를 다시 잰다. 앱 화면은 같은 글꼴 목록을 받지만
+글꼴 파일은 받지 않으므로, 앱이 글꼴을 직접 담기 전까지는 시스템 대체 글꼴로 보인다.
+
+설정에는 흔한 글꼴의 짧은 목록, OS 글꼴을 고르는 *System* / *System monospace*, 설치된 아무 글꼴이나 이름으로 쓰는 *Other…*가 있다. 쓴 것은 이름마다
 따옴표로 감싸고(`JetBrains Mono`는 `"JetBrains Mono"`가 된다. `monospace` 같은 일반 키워드는 그대로),
 브라우저가 받아들이는지 확인한 뒤에 저장한다.
 

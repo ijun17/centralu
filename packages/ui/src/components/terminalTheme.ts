@@ -82,6 +82,24 @@ export function followTheme(
       refit?.()
     }
   }
+  /*
+   * The bundled code font (#731) may still be loading when a terminal opens, and xterm measures its cell once, with
+   * whatever font is there: the fallback's cell would stay, and D2Coding's wider Hangul would overlap. When a font
+   * finishes loading, the cell is measured again: xterm measures only when the family changes, so it is set away
+   * and back.
+   */
+  const fonts = typeof document === 'undefined' ? undefined : document.fonts
+  const remeasure = () => {
+    const family = term.options.fontFamily
+    if (!family) return
+    term.options.fontFamily = 'monospace'
+    term.options.fontFamily = family
+    refit?.()
+  }
   window.addEventListener('cc-themechange', update)
-  return () => window.removeEventListener('cc-themechange', update)
+  fonts?.addEventListener?.('loadingdone', remeasure)
+  return () => {
+    window.removeEventListener('cc-themechange', update)
+    fonts?.removeEventListener?.('loadingdone', remeasure)
+  }
 }

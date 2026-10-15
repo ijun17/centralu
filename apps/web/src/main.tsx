@@ -27,6 +27,12 @@ if (!rootElement) throw new Error('Root element #root not found')
 // The theme the last run chose, before anything is drawn — the preferences arrive a round trip later (theme.ts)
 applyCachedTheme()
 applyCachedTypography()
+/*
+ * The bundled fonts (#731) start loading now, not when the first text in each is laid out: the code font would
+ * otherwise wait for the first path or terminal, and that text would sit blank for its load (font-display: block)
+ */
+void document.fonts?.load("13px 'Pretendard Variable'").catch(() => {})
+void document.fonts?.load('12px D2Coding').catch(() => {})
 
 const params = new URLSearchParams(location.search)
 const demo = params.get('demo')

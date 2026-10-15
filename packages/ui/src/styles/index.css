@@ -9,6 +9,26 @@
 @source '../../../../apps/*/src/**/*.{ts,tsx}';
 
 /*
+ * The bundled fonts (#731, assets/fonts/README.md): Pretendard for what a person or a model says,
+ * D2Coding for what a machine wrote. They load from the app bundle, so `block` costs no visible wait
+ * and keeps the first frame from painting in a system font that then swaps (the text would jump).
+ */
+@font-face {
+  font-family: 'Pretendard Variable';
+  src: url('../assets/fonts/PretendardVariable.woff2') format('woff2-variations');
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'D2Coding';
+  src: url('../assets/fonts/D2Coding.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+/*
  * ── Design tokens ────────────────────────────────────────────────
  * Named by role, not by how they look (#312). The old names (void, chalk, beacon…) described
  * brightness, which reads backwards the moment a light theme exists; a role name says what the
@@ -174,13 +194,13 @@
   --shadow-chip: inset 0 1px 0 rgb(255 255 255 / 0.06), inset 0 -1px 2px rgb(0 0 0 / 0.5), 0 1px 0 rgb(0 0 0 / 0.6);
 
   /* Text a machine wrote (commands, paths, numbers, the terminal) is mono; what a person or a
-     model says is sans. Korean breaks the mono fallback, so sans handles it.
-     These are the defaults of Settings → Appearance's body and code fonts (#312 step 5): a font
+     model says is sans. Both lead with the bundled font (#731, @font-face above); D2Coding has
+     Hangul at twice the Latin width, so Korean in code stays on the grid. These are the defaults of Settings → Appearance's body and code fonts (#312 step 5): a font
      picked there goes in front of the stack, never in place of it (app/typography.ts keeps a copy
      of both stacks, and a test keeps the copies equal). */
-  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  --font-mono: D2Coding, ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
   --font-sans:
-    -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard Variable', Pretendard,
+    'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo',
     system-ui, sans-serif;
 
   /*
