@@ -1,24 +1,29 @@
-import { useEffect, useState } from 'react'
-import type { ApprovalDetail } from '@cc/protocol'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { wireSegments, type ApprovalDetail } from '@cc/protocol'
 import { answersInPlace, type SessionSummary } from '@cc/core'
-import { useStore } from '../../store/store.js'
+import { inFlightKey, useStore } from '../../store/store.js'
 import { Kbd, Tooltip } from '../../components/primitives.jsx'
 import { detailText } from './ApprovalCard.jsx'
 
 /**
  * An approval answered from a list row (#543, audit items 1 and 2): the waiting list's row and the sidebar's row of a
  * session that waits on an approval. Answering without opening the session is a shortcut past the card, so the row
- * keeps the card's three promises:
+ * keeps the card's promises:
  *
- * - **It says what is being approved.** The verb and the command or path stand on the row, cut to its width; the
- *   tooltip is the card's own text, whole (`detailText`, the same function the card draws).
- * - **Only a plain yes or no.** Allow and Deny for a card whose question one line states whole (`answersInPlace`);
- *   any other card, or a question pending beside the approval, shows Open, and the card answers it.
+ * - **It says what is being approved, and nothing of it is hidden.** The verb and the command or path stand on the
+ *   row; the tooltip is the card's own text, whole (`detailText`, the same function the card draws, with what the
+ *   request says beyond its line). A path shows its file's name first, then its folder inside the session's own
+ *   folder (#683 review: cut at the end, an absolute path lost the name). A command is answered from the row only
+ *   when it fits on it whole (measured, `useFitsWhole`): a cut command can hide its dangerous end (`cd ~/x && …`).
+ * - **Only a plain yes or no.** Allow and Deny for a card whose question one line states whole (`answersInPlace`,
+ *   which also sends empty and flagged requests to the card), for an edit inside the session's folder; anything else
+ *   shows Open, and the card answers it.
  * - **Never an answer to something else.** The answer is the card's own (`respondApproval`), with the request id this
- *   row was drawn from: the store refuses an id that is no longer pending, and the host one it no longer holds.
- *   And for a moment after the rows change (an approval comes or goes, a session is added or removed) no row
- *   answers, so a row that slid under the pointer, or under the waiting list's cursor, is not answered by a click or
- *   a key meant for the one that was there (`useRowsSettled`).
+ *   row was drawn from: the store refuses an id that is no longer pending, and the host one it no longer holds. And
+ *   for a moment after the rows change (an approval comes or goes, a session is added or removed) no row answers, so a
+ *   row that slid under the pointer, or under the waiting list's cursor, is not answered by a click or a key meant for
+ *   the one that was there (`useRowsSettled`). The waiting list's y and n press these buttons, so a key answers only
+ *   what a click could.
  */
 export function RowApproval({
   sessionId,
@@ -39,106 +44,200 @@ export function RowApproval({
   const pending = useStore((s) => s.sessions[sessionId]?.pendingApproval ?? null)
   const others = useStore((s) => s.sessions[sessionId]?.pendingQuestions.length ?? 0)
   const name = useStore((s) => s.sessions[sessionId]?.name ?? '')
-  const busy = useStore((s) => (pending ? !!s.approvalsInFlight[pending.requestId] : false))
+  // The folder the session works in: its worktree, or its project's
+  const root = useStore((s) => {
+    const x = s.sessions[sessionId]
+    return x?.worktree?.path ?? (x?.projectId ? s.projects[x.projectId]?.path : undefined) ?? null
+  })
+  const busy = useStore((s) => (pending ? !!s.approvalsInFlight[inFlightKey(sessionId, pending.requestId)] : false))
   const respond = useStore((s) => s.respondApproval)
   const settledHere = useRowsSettled()
-  const ready = (settled ?? settledHere) && !busy
-  if (!pending) return null
-  const { verb, line } = rowSummary(pending.detail)
-  const inPlace = answersInPlace(pending.detail, others)
+  const view = pending ? rowView(pending.detail, root, others) : null
+  const [fitRef, fits] = useFitsWhole(view ? `${pending!.requestId}|${view.verb}|${view.line}|${view.dir ?? ''}` : '')
+  if (!pending || !view) return null
+  // Allow and Deny while the line is not yet measured stay disabled, as before the rows settle
+  const answerable = view.inPlace && fits !== false
+  const ready = (settled ?? settledHere) && !busy && fits === true
   const answer = (decision: 'allow' | 'deny') => void respond(sessionId, pending.requestId, decision)
   const id = (part: string) => `${place}-${part}-${sessionId}`
+  const why = !view.inPlace ? view.openWhy : 'The line is longer than the row: open the session to read it whole on its card'
   const button =
     'flex shrink-0 items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-xs text-ink-muted transition-[color,background-color,opacity] hover:bg-surface-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40'
 
   /*
-   * The waiting list is wide enough for the line and its buttons side by side. The sidebar is not (240 px by default):
-   * there the command took what the buttons left, a handful of characters, too few to know what is being allowed. So
-   * it has the row's whole width, and the buttons wrap under it.
+   * The waiting list is wide enough for the line and its buttons side by side; their slot has one width whether it
+   * holds Allow and Deny or Open, so the line's room, and so whether it fits, does not change with the answer. The
+   * sidebar is not wide enough (240 px by default): the line has the row's whole width, and the buttons wrap under it.
    */
   return (
     <div
       className={`flex min-w-0 items-center gap-x-1.5 ${place === 'inbox' ? 'pb-2 pl-[30px] pr-3' : 'flex-wrap gap-y-1 pb-1.5 pl-8 pr-3'}`}
       data-testid={id('approval')}
       data-request={pending.requestId}
-      data-in-place={inPlace || undefined}
+      data-in-place={answerable || undefined}
     >
       <Tooltip
         className={place === 'inbox' ? 'min-w-0 flex-1' : 'min-w-0 basis-full'}
         testId={id('approval-tip')}
         content={<span className="block max-h-72 overflow-hidden whitespace-pre-wrap break-words font-mono">{tooltipText(pending.detail)}</span>}
       >
-        <span className="flex min-w-0 items-baseline gap-1.5 text-xs" data-testid={id('approval-what')}>
-          <span className="signal shrink-0 text-2xs font-medium">{verb}</span>
-          <span className="truncate font-mono text-ink">{line}</span>
-        </span>
+        {view.dir === undefined ? (
+          <span className="flex min-w-0 items-baseline gap-1.5 text-xs" data-testid={id('approval-what')}>
+            <span className="signal shrink-0 text-2xs font-medium">{view.verb}</span>
+            <span ref={view.inPlace ? fitRef : undefined} className="truncate font-mono text-ink">{view.line}</span>
+          </span>
+        ) : (
+          // An edit: the file's name never shrinks, its folder gives way first; the whole must show the name
+          <span ref={view.inPlace ? fitRef : undefined} className="flex min-w-0 items-baseline gap-1.5 overflow-hidden text-xs" data-testid={id('approval-what')}>
+            <span className="signal shrink-0 text-2xs font-medium">{view.verb}</span>
+            <span className="shrink-0 font-mono text-ink" data-testid={id('approval-file')}>{view.line}</span>
+            {view.dir && <span className="min-w-0 truncate font-mono text-ink-faint">{view.dir}</span>}
+          </span>
+        )}
       </Tooltip>
-      {inPlace ? (
-        <>
+      <span className={`flex shrink-0 items-center gap-1.5 ${place === 'inbox' ? 'w-[8.5rem] justify-end' : ''}`}>
+        {answerable ? (
+          <>
+            <button
+              type="button"
+              className={button}
+              disabled={!ready}
+              onClick={() => answer('allow')}
+              aria-label={`Allow ${view.verb.toLowerCase()} ${view.line} in ${name}`}
+              data-testid={id('approve-allow')}
+              data-row-answer="allow"
+              data-session={sessionId}
+            >
+              {keys && <Kbd live>y</Kbd>}
+              Allow
+            </button>
+            <button
+              type="button"
+              className={button}
+              disabled={!ready}
+              onClick={() => answer('deny')}
+              aria-label={`Deny ${view.verb.toLowerCase()} ${view.line} in ${name}`}
+              data-testid={id('approve-deny')}
+              data-row-answer="deny"
+              data-session={sessionId}
+            >
+              {keys && <Kbd live>n</Kbd>}
+              Deny
+            </button>
+          </>
+        ) : (
           <button
             type="button"
             className={button}
-            disabled={!ready}
-            onClick={() => answer('allow')}
-            aria-label={`Allow ${verb.toLowerCase()} ${line} in ${name}`}
-            data-testid={id('approve-allow')}
+            onClick={onOpen}
+            title={why}
+            aria-label={`Open ${name} to answer its approval`}
+            data-testid={id('approve-open')}
           >
-            {keys && <Kbd live>y</Kbd>}
-            Allow
+            Open
           </button>
-          <button
-            type="button"
-            className={button}
-            disabled={!ready}
-            onClick={() => answer('deny')}
-            aria-label={`Deny ${verb.toLowerCase()} ${line} in ${name}`}
-            data-testid={id('approve-deny')}
-          >
-            {keys && <Kbd live>n</Kbd>}
-            Deny
-          </button>
-        </>
-      ) : (
-        <button
-          type="button"
-          className={button}
-          onClick={onOpen}
-          title="This approval offers more than allow and deny: open the session to answer it on its card"
-          aria-label={`Open ${name} to answer its approval`}
-          data-testid={id('approve-open')}
-        >
-          Open
-        </button>
-      )}
+        )}
+      </span>
     </div>
   )
 }
 
-/** The answer the waiting list's y or n gives the row under its cursor, or null when that row cannot be answered in place */
-export function rowAnswerFor(
-  s: Pick<SessionSummary, 'state' | 'pendingApproval' | 'pendingQuestions'> | undefined,
-): { requestId: string } | null {
-  if (!s || s.state !== 'waiting_approval' || !s.pendingApproval) return null
-  return answersInPlace(s.pendingApproval.detail, s.pendingQuestions.length) ? { requestId: s.pendingApproval.requestId } : null
+/**
+ * Whether an element shows its whole content, measured after layout and again when it is resized (the sidebar's width
+ * changes): null until measured, and when there is nothing to measure. `key` names what it shows.
+ */
+function useFitsWhole(key: string): [(el: HTMLElement | null) => void, boolean | null] {
+  const [el, setEl] = useState<HTMLElement | null>(null)
+  const [fits, setFits] = useState<boolean | null>(null)
+  const ref = useRef(setEl).current
+  useLayoutEffect(() => {
+    if (!el) {
+      setFits(null)
+      return
+    }
+    const check = () => setFits(el.scrollWidth <= el.clientWidth + 1)
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [el, key])
+  return [ref, fits]
+}
+
+export type RowView = {
+  verb: string
+  /** The command or the question; for an edit, the file's name */
+  line: string
+  /** For an edit, the folder the file is in (inside the session's folder, or the whole folder outside it); '' at its root */
+  dir?: string
+  /** Allow and Deny may stand on the row, if the line fits */
+  inPlace: boolean
+  /** Why the row shows Open instead */
+  openWhy: string
 }
 
 /**
- * What a row says about an approval: a verb, and one line of what it acts on. The line is the card's text (the
- * command, the path, the question), up to its first line break; the tooltip carries the rest.
+ * What a row says about an approval: a verb, and one line of what it acts on, and whether it may be answered there.
+ * The line is the card's text (the command, the question), up to its first line break; the tooltip carries the rest.
  */
-export function rowSummary(d: ApprovalDetail): { verb: string; line: string } {
+export function rowView(d: ApprovalDetail, root: string | null, otherPending = 0): RowView {
   const first = (t: string) => {
     const lines = t.split('\n')
     return lines.length > 1 ? `${lines[0]} …` : t
   }
-  if (d.kind === 'command') return { verb: 'Run', line: first(d.command) }
-  if (d.kind === 'file_edit') return { verb: 'Edit', line: d.path }
-  if (d.kind === 'agent_start') return { verb: 'Start agent', line: first(detailText(d)) }
-  if (d.kind === 'project_access') return { verb: 'Reach project', line: first(detailText(d)) }
-  if (d.kind === 'capability') return { verb: 'App permission', line: first(detailText(d)) }
-  if (d.kind === 'project_create') return { verb: 'New project', line: first(detailText(d)) }
-  if (d.kind === 'centralu_update') return { verb: 'Update', line: first(detailText(d)) }
-  return { verb: 'Approve', line: first(detailText(d)) }
+  const policy = answersInPlace(d, otherPending)
+  const more = otherPending > 0 ? 'Something else is pending in this session too: open it to answer both' : 'This approval offers more than allow and deny, or says more than one line can: open the session to answer it on its card'
+  if (d.kind === 'command') {
+    const line = d.command.trim() === '' ? (d.network ? `network access to ${d.network.host}` : '(no command)') : first(d.command)
+    return { verb: d.stdin ? 'Type' : 'Run', line, inPlace: policy, openWhy: more }
+  }
+  if (d.kind === 'file_edit' && !d.multi) {
+    const p = pathParts(d.path, root)
+    const inside = p.inside
+    return {
+      verb: d.change === 'add' ? 'Create' : d.change === 'delete' ? 'Delete' : d.change === 'move' ? 'Move' : 'Edit',
+      line: p.name,
+      dir: p.dir,
+      inPlace: policy && inside,
+      openWhy: policy && !inside ? "The file is outside this session's folder: open the session to read the whole path on its card" : more,
+    }
+  }
+  const verb =
+    d.kind === 'file_edit' ? 'Edit files'
+    : d.kind === 'agent_start' ? 'Start agent'
+    : d.kind === 'project_access' ? 'Reach project'
+    : d.kind === 'capability' ? 'App permission'
+    : d.kind === 'project_create' ? 'New project'
+    : d.kind === 'centralu_update' ? 'Update'
+    : 'Approve'
+  return { verb, line: first(d.kind === 'file_edit' ? d.path : detailText(d)), inPlace: false, openWhy: more }
+}
+
+/**
+ * A path as a row shows it (#683 review): the file's name first, then its folder relative to the session's folder.
+ * A path outside that folder (or with no folder to compare against) keeps its whole folder, and is not `inside`.
+ * Windows paths compare without case and with either slash.
+ */
+export function pathParts(path: string, root: string | null): { name: string; dir: string; inside: boolean } {
+  const p = path.replace(/\\/g, '/')
+  const drive = /^[a-z]:\//i
+  const absolute = p.startsWith('/') || drive.test(p)
+  let rel = p
+  let inside = false
+  if (absolute) {
+    const r = root?.replace(/\\/g, '/').replace(/\/+$/, '') ?? null
+    const fold = (x: string) => (drive.test(p) ? x.toLowerCase() : x)
+    if (r && fold(p).startsWith(`${fold(r)}/`)) {
+      rel = p.slice(r.length + 1)
+      inside = true
+    }
+  } else {
+    inside = !wireSegments(p).includes('..')
+  }
+  // Read as a wire path: the backslashes are already turned into the wire separator above
+  const segs = wireSegments(rel)
+  const name = segs.pop() ?? ''
+  return { name, dir: rel.slice(0, rel.length - name.length), inside }
 }
 
 /** The card's text, cut after this many lines: an edit's diff can be thousands, and its card is one click away */

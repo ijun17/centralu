@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { __resetWarningsForTest, approvalDetailFrom, CodexRequestInputs, CompactionMarks, normalizeNotification, toCodexDecision } from './normalize.js'
+import { __resetWarningsForTest, approvalDetailFrom, CodexRequestInputs, fileChangesOf, CompactionMarks, normalizeNotification, toCodexDecision } from './normalize.js'
 
 /**
  * A-2 contract tests. The fixtures are trimmed-down versions of protocol output **actually
@@ -586,6 +586,40 @@ describe('approval request conversion (the basis for approving right from the ba
       diffPreview: 'src/a.ts\n@@ -1 +1 @@\n-a\n+b\n\n\nsrc/new.ts\nexport {}\n',
       multi: true,
     })
+  })
+
+  // #683 review: these were dropped, so a network approval drew `Run ` and nothing, and a delete read as an edit
+  it('keeps what a command approval says beyond its command: the network host, stdin, the reason', () => {
+    expect(
+      approvalDetailFrom('item/commandExecution/requestApproval', {
+        kind: 'command',
+        threadId: 't', turnId: 'u', itemId: 'i', startedAtMs: 1, environmentId: null,
+        reason: 'needs network access to fetch the docs',
+        networkApprovalContext: { host: 'docs.example.com', protocol: 'https' },
+        command: null,
+        cwd: '/tmp/p',
+      }),
+    ).toEqual({
+      kind: 'command',
+      command: '',
+      cwd: '/tmp/p',
+      reason: 'needs network access to fetch the docs',
+      network: { host: 'docs.example.com', protocol: 'https' },
+    })
+    expect(
+      approvalDetailFrom('item/commandExecution/requestApproval', { kind: 'writeStdin', command: 'y', cwd: '/tmp/p' }),
+    ).toEqual({ kind: 'command', command: 'y', cwd: '/tmp/p', stdin: true })
+  })
+
+  it("keeps a single file change's kind: a delete, a move, a new file", () => {
+    const one = (kind: Record<string, unknown>) =>
+      approvalDetailFrom('item/fileChange/requestApproval', { itemId: 'fc' }, fileChangesOf({ changes: [{ path: 'a.ts', kind, diff: '-a' }] }))
+    expect(one({ type: 'delete' })).toMatchObject({ path: 'a.ts', change: 'delete' })
+    expect(one({ type: 'update', move_path: 'b.ts' })).toMatchObject({ change: 'move', movePath: 'b.ts' })
+    expect(one({ type: 'update', move_path: null })).toMatchObject({ change: 'update' })
+    expect(one({ type: 'add' })).toMatchObject({ change: 'add' })
+    // The older request carries the same kinds
+    expect(approvalDetailFrom('applyPatchApproval', { fileChanges: { 'old.ts': { type: 'delete', content: 'x' } } })).toMatchObject({ path: 'old.ts', change: 'delete' })
   })
 
   it('an unknown approval kind becomes other (leaves the judgment to the person)', () => {

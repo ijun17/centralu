@@ -1,4 +1,4 @@
-import type { ApprovalDetail, BackgroundTask, NormalizedEvent, RequestInput, SessionActivity, SessionGoal, TokenUsage, ToolSummary } from '@cc/protocol'
+import { NO_PATH, type ApprovalDetail, type BackgroundTask, type NormalizedEvent, type RequestInput, type SessionActivity, type SessionGoal, type TokenUsage, type ToolSummary } from '@cc/protocol'
 import { UnmappedTypes } from '../unmapped.js'
 
 /** The settings a Claude process was launched with — the snapshot a `settings_changed` the tool made carries (#304). */
@@ -157,9 +157,10 @@ function backgroundLaunch(m: Json): string | null {
 
 /** Normalizes an approval request into one of 3 kinds the banner can judge (core/approval decides based on `kind` alone). */
 export function approvalDetail(name: string, input: Json, cwd: string): ApprovalDetail {
-  if (name === 'Bash') return { kind: 'command', command: str(input.command), cwd }
+  // Running outside the sandbox is part of what is asked (#683 review): the card says so, and no list row answers it
+  if (name === 'Bash') return { kind: 'command', command: str(input.command), cwd, ...(input.dangerouslyDisableSandbox === true ? { unsandboxed: true } : {}) }
   if (FILE_EDIT_TOOLS.has(name)) {
-    const path = str(input.file_path ?? input.notebook_path, '?')
+    const path = str(input.file_path ?? input.notebook_path, NO_PATH)
     const preview =
       str(input.new_string) || str(input.content) || str(input.new_source) || JSON.stringify(input).slice(0, 400)
     return { kind: 'file_edit', path, diffPreview: preview.slice(0, 400), multi: false }

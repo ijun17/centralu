@@ -593,12 +593,35 @@ export type ApprovalScope = z.infer<typeof ApprovalScope>
  * single answer is remembered either way.
  */
 export const ApprovalDetail = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('command'), command: z.string(), cwd: z.string() }),
+  z.object({
+    kind: z.literal('command'),
+    command: z.string(),
+    cwd: z.string(),
+    /*
+     * What else the request says, kept so the card can show it and a list row does not answer it (#683 review). All
+     * optional: an older host sends none, and a window that predates them ignores them.
+     */
+    /** Why the agent asks (Codex `reason`, e.g. it wants network access), in its own words */
+    reason: z.string().optional(),
+    /** The network access it asks for (Codex `networkApprovalContext`): the command alone may be empty */
+    network: z.object({ host: z.string(), protocol: z.string() }).optional(),
+    /** Input to a terminal already running (Codex `kind: 'writeStdin'`), not a new command */
+    stdin: z.boolean().optional(),
+    /** It runs outside the sandbox (Claude Code's Bash `dangerouslyDisableSandbox`) */
+    unsandboxed: z.boolean().optional(),
+  }),
   z.object({
     kind: z.literal('file_edit'),
     path: z.string(),
     diffPreview: z.string(),
     multi: z.boolean().default(false),
+    /**
+     * What the change does to the file, when the tool says (#683 review; Codex `PatchChangeKind`): absent is an edit.
+     * A delete or a move is said on the card, and a list row does not answer it.
+     */
+    change: z.enum(['add', 'update', 'delete', 'move']).optional(),
+    /** Where a move takes the file */
+    movePath: z.string().optional(),
   }),
   /**
    * Anything else, as one text to read. `about` names a card the host raised that a window may know more about
@@ -691,6 +714,9 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
   }),
 ])
 export type ApprovalDetail = z.infer<typeof ApprovalDetail>
+
+/** The path of a file edit whose request names no file (#169): said as such rather than drawn as an empty card */
+export const NO_PATH = '(no path)'
 
 /** The `about` of an agent's apply card (#665), on an `other` detail */
 export const CENTRALU_APPLY = 'centralu_apply'

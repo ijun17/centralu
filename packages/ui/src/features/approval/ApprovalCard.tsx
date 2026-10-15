@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { isCentraluApply, type ApprovalDetail } from '@cc/protocol'
-import { agentStartQuestion, centraluUpdateQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
-import { useStore } from '../../store/store.js'
+import { agentStartQuestion, approvalNotes, centraluUpdateQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
+import { inFlightKey, useStore } from '../../store/store.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { composingKey, letterOf } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
@@ -24,7 +24,7 @@ export function ApprovalCard({
 }) {
   const respond = useStore((s) => s.respondApproval)
   // The buttons cannot be clicked while a response is in flight — a second response would record an executed command as denied (#158)
-  const busy = useStore((s) => !!s.approvalsInFlight[requestId])
+  const busy = useStore((s) => !!s.approvalsInFlight[inFlightKey(sessionId, requestId)])
   const sc = useShortcut()
   const inComposer = useComposerFocused(sessionId)
   // An update card (#581) or an agent's apply card (#665): its "always" is for this session only, never the project
@@ -564,9 +564,15 @@ export type AnswerKeys = { allow: string; deny: string; always: string }
 
 const BARE_KEYS: AnswerKeys = { allow: 'y', deny: 'n', always: 'a' }
 
+/**
+ * The card's text, which a list row's tooltip shows too (#543). What the request says beyond its command or path
+ * (`approvalNotes`: network access, input to a running terminal, outside the sandbox, the reason, a delete or a move)
+ * stands under it, so nothing the agent asked for is only in the row's head (#683 review).
+ */
 export function detailText(d: ApprovalDetail): string {
-  if (d.kind === 'command') return `${d.command}\n${d.cwd}`
-  if (d.kind === 'file_edit') return `${d.path}\n\n${d.diffPreview}`
+  const notes = approvalNotes(d)
+  if (d.kind === 'command') return [d.command, d.cwd, ...notes].filter((line) => line !== '').join('\n')
+  if (d.kind === 'file_edit') return `${[d.path, ...notes].join('\n')}\n\n${d.diffPreview}`
   if (d.kind === 'capability') return `${d.app.name} wants to ${d.text}`
   if (d.kind === 'project_access') return projectAccessQuestion(d)
   if (d.kind === 'project_create') return projectCreateQuestion(d)

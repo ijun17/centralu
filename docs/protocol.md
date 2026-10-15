@@ -193,8 +193,11 @@ mock all move the list with one function, `applyBackgroundTasks`.
 
 ```ts
 type ApprovalDetail =
-  | { kind: 'command';   command: string; cwd: string }               // approvable from the banner
-  | { kind: 'file_edit'; path: string; diffPreview: string; multi: boolean } // "needs review"
+  | { kind: 'command';   command: string; cwd: string;
+      reason?: string; network?: { host: string; protocol: string };  // #683: kept from the request,
+      stdin?: boolean; unsandboxed?: boolean }                         // said on the card
+  | { kind: 'file_edit'; path: string; diffPreview: string; multi: boolean;
+      change?: 'add' | 'update' | 'delete' | 'move'; movePath?: string }
   | { kind: 'other';     raw: string }                                 // always "needs review"
 ```
 

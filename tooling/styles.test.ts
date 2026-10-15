@@ -277,7 +277,11 @@ describe('bundle regression (decision C-3: no editor engine in the viewer)', () 
     //
     // Raised from 1.65MB for the Search button, the open project's + and apps in the palette
     // (#529): 1,648,218B on main at 27027fb1, 1,650,238B with it (+2KB, no dependency).
-    expect(jsBytes).toBeLessThan(1_700_000)
+    //
+    // Raised from 1.7MB for answering approvals from the waiting list and sidebar rows (#683, with
+    // its review's guards: the row's line, its fit check, the list's key rules): 1,701,035B with
+    // it, no dependency. Main sat just under the old line again.
+    expect(jsBytes).toBeLessThan(1_750_000)
   })
 })
 

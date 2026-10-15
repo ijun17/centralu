@@ -107,8 +107,26 @@ describe('codex approval requests', () => {
 
     expect(client.responses).toHaveLength(0)
     expect(events).toContainEqual(
-      expect.objectContaining({ type: 'approval_request', requestId: 'codex-req-1' }),
+      expect.objectContaining({ type: 'approval_request', requestId: expect.stringMatching(/^codex-req-\w+-1$/) }),
     )
+  })
+
+  // #683 review: the counter restarts in each process; a window that missed the swap must not answer the new request
+  it("the old process's first request id does not answer the new process's first request", async () => {
+    const old = await createLiveSession()
+    old.client.trigger({ id: 1, method: 'item/commandExecution/requestApproval', params: { command: 'ls', cwd: '/tmp' } })
+    const oldId = (old.events.find((e) => (e as { type: string }).type === 'approval_request') as { requestId: string }).requestId
+    await old.handle.dispose()
+
+    const next = await createLiveSession()
+    next.client.trigger({ id: 1, method: 'item/commandExecution/requestApproval', params: { command: 'rm -rf build', cwd: '/tmp' } })
+    const newId = (next.events.find((e) => (e as { type: string }).type === 'approval_request') as { requestId: string }).requestId
+
+    expect(newId).not.toBe(oldId)
+    expect(next.handle.respondApproval(oldId, 'allow')).toBe(false)
+    // Nothing went back to the new process's request
+    expect(next.client.responses).toEqual([])
+    await next.handle.dispose()
   })
 
   it('does not auto-approve a multi-file approval just because a path includes centralu', async () => {
@@ -174,7 +192,7 @@ describe('codex approval requests', () => {
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'approval_request',
-        detail: { kind: 'file_edit', path: MEASURED_PATH, diffPreview: MEASURED_DIFF, multi: false },
+        detail: { kind: 'file_edit', path: MEASURED_PATH, diffPreview: MEASURED_DIFF, multi: false, change: 'update' },
       }),
     )
   })

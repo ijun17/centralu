@@ -304,22 +304,23 @@ describe('elicitation — app tool approval goes to our card, everything else st
     c.trigger(approval(21, 'app-notes'))
     // Does not answer automatically — waits for the person
     expect(c.responses).toEqual([])
-    const card = events.find((e) => e.type === 'approval_request')
+    const cards = () => events.filter((e) => e.type === 'approval_request') as { requestId: string }[]
+    const card = cards()[0]
     expect(card).toMatchObject({
       type: 'approval_request',
-      requestId: 'codex-req-1',
+      requestId: expect.stringMatching(/^codex-req-\w+-1$/),
       detail: { kind: 'other', raw: 'app-notes · poke {"to":3}' },
     })
 
-    expect(handle!.respondApproval('codex-req-1', 'allow')).toBe(true)
+    expect(handle!.respondApproval(card!.requestId, 'allow')).toBe(true)
     expect(c.responses).toContainEqual({ id: 21, payload: { action: 'accept', content: null, _meta: null } })
 
     c.trigger(approval(22, 'app-notes'))
-    handle!.respondApproval('codex-req-2', 'deny')
+    handle!.respondApproval(cards()[1]!.requestId, 'deny')
     expect(c.responses).toContainEqual({ id: 22, payload: { action: 'decline', content: null, _meta: null } })
 
     c.trigger(approval(23, 'app-tasks', { 'codex/approval_kind': 'mcp_tool_call' }))
-    handle!.respondApproval('codex-req-3', 'always')
+    handle!.respondApproval(cards()[2]!.requestId, 'always')
     expect(c.responses).toContainEqual({ id: 23, payload: { action: 'accept', content: null, _meta: { persist: 'session' } } })
   })
 

@@ -1,4 +1,4 @@
-import type { ApprovalDetail, BackgroundTask, NormalizedEvent, RequestInput, SessionGoal, SubagentStep } from '@cc/protocol'
+import { NO_PATH, type ApprovalDetail, type BackgroundTask, type NormalizedEvent, type RequestInput, type SessionGoal, type SubagentStep } from '@cc/protocol'
 import { noticeWords } from './notices.js'
 
 /**
@@ -211,9 +211,23 @@ function isReadOnlyCommand(cmd: string): boolean {
  * each `{ path, kind, diff }`). The adapter remembers them per item id, because the approval request
  * for that item does not carry them (see approvalDetailFrom).
  */
-export function fileChangesOf(item: Record<string, unknown>): { path: string; diff: string }[] {
+export type FileChange = { path: string; diff: string; change?: 'add' | 'update' | 'delete' | 'move'; movePath?: string }
+
+export function fileChangesOf(item: Record<string, unknown>): FileChange[] {
   const changes = Array.isArray(item.changes) ? item.changes : []
-  return changes.map((c) => ({ path: str(obj(c).path), diff: str(obj(c).diff) }))
+  return changes.map((c) => ({ path: str(obj(c).path), diff: str(obj(c).diff), ...changeKindOf(obj(obj(c).kind)) }))
+}
+
+/**
+ * What a change does to its file (generated v2 `PatchChangeKind`: `{type: 'add'}`, `{type: 'delete'}`,
+ * `{type: 'update', move_path}`), kept for the card and the list rows (#683 review): a delete or a move must not read
+ * as an ordinary edit. An update with a `move_path` is a move.
+ */
+function changeKindOf(kind: Record<string, unknown>): Pick<FileChange, 'change' | 'movePath'> {
+  const type = str(kind.type)
+  if (type === 'add' || type === 'delete') return { change: type }
+  if (type === 'update') return str(kind.move_path) ? { change: 'move', movePath: str(kind.move_path) } : { change: 'update' }
+  return {}
 }
 
 /**
@@ -243,17 +257,33 @@ export function fileChangesOf(item: Record<string, unknown>): { path: string; di
 export function approvalDetailFrom(
   method: string,
   params: Record<string, unknown>,
-  itemChanges?: readonly { path: string; diff: string }[],
+  itemChanges?: readonly FileChange[],
 ): ApprovalDetail {
   if (method === 'item/commandExecution/requestApproval') {
     const item = obj(params.item)
-    return { kind: 'command', command: str(item.command) || str(params.command), cwd: str(item.cwd) || str(params.cwd) }
+    /*
+     * Everything else the request says is kept (#683 review; generated v2 `CommandExecutionRequestApprovalParams`):
+     * a network approval carries its host in `networkApprovalContext` and may have no command at all, `kind:
+     * 'writeStdin'` is input to a terminal already running, and `reason` is why the agent asks. Dropping them drew a
+     * card that read `Run ` and nothing, which a list row could then allow.
+     */
+    const net = obj(params.networkApprovalContext)
+    return {
+      kind: 'command',
+      command: str(item.command) || str(params.command),
+      cwd: str(item.cwd) || str(params.cwd),
+      ...(str(params.reason) ? { reason: str(params.reason) } : {}),
+      ...(str(net.host) ? { network: { host: str(net.host), protocol: str(net.protocol) } } : {}),
+      ...(str(params.kind) === 'writeStdin' ? { stdin: true } : {}),
+    }
   }
   if (method === 'item/fileChange/requestApproval') return fileEditDetail(itemChanges ?? [])
   if (method === 'applyPatchApproval') {
     const changes = Object.entries(obj(params.fileChanges)).map(([path, c]) => ({
       path,
       diff: str(obj(c).unified_diff) || str(obj(c).content),
+      // generated FileChange: the same `type` (add, delete, update with move_path) as the v2 kind
+      ...changeKindOf(obj(c)),
     }))
     return fileEditDetail(changes)
   }
@@ -266,17 +296,21 @@ export function approvalDetailFrom(
  * would read as one. `(no path)` when nothing names a file — an empty string looks like a card that failed to
  * draw rather than a request that did not say.
  */
-function fileEditDetail(changes: readonly { path: string; diff: string }[]): ApprovalDetail {
+function fileEditDetail(changes: readonly FileChange[]): ApprovalDetail {
   const named = changes.filter((c) => c.path)
   const diff =
     named.length > 1
       ? named.map((c) => `${c.path}\n${c.diff}`).join('\n\n')
       : changes.map((c) => c.diff).filter(Boolean).join('\n')
+  // One file's own kind of change (a delete, a move) is said on its card; several files are one card that opens
+  const one = named.length === 1 ? named[0]! : null
   return {
     kind: 'file_edit',
-    path: named[0]?.path || '(no path)',
+    path: named[0]?.path || NO_PATH,
     diffPreview: diff.slice(0, 4000),
     multi: named.length > 1,
+    ...(one?.change ? { change: one.change } : {}),
+    ...(one?.movePath ? { movePath: one.movePath } : {}),
   }
 }
 

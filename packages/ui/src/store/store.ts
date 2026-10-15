@@ -149,6 +149,11 @@ export const SIDEBAR_MIN = 180
 export const SIDEBAR_MAX = 480
 export const SIDEBAR_DEFAULT = 240
 
+/** The key of an answer in flight (`approvalsInFlight`): the session and the request, since ids repeat across sessions */
+export function inFlightKey(sessionId: string, requestId: string): string {
+  return `${sessionId}\u0000${requestId}`
+}
+
 /**
  * The five steps of overall text size (the middle one is the default) — the protocol's
  * `TEXT_SIZES`, since the size is a preference (`UiPreferences.textSize`, #312 step 5).
@@ -947,8 +952,9 @@ export type AppState = {
    */
   openLayers: number
   /**
-   * Approval requests that have had a response sent but not yet answered (#158) — `requestId` →
-   * `true`. If a second input arrives on the same card (two key presses, the card and the rail)
+   * Approval requests that have had a response sent but not yet answered (#158) — `inFlightKey(sessionId, requestId)`
+   * → `true`. Keyed by the session too (#683 review): a request id is unique only within a session's process, so two
+   * sessions can hold the same one, and an answer in one must not be dropped as a repeat of the other's. If a second input arrives on the same card (two key presses, the card and the rail)
    * before the first response's result reaches the screen, the second response became a "vanished
    * request" and recorded a command that had already run as denied.
    */
@@ -5337,8 +5343,9 @@ export const useStore = create<AppState>((set, get) => ({
      * "vanished request" on the host and recorded a command that had already run as Denied. Both the
      * card's key and its buttons go through this same path.
      */
-    if (get().approvalsInFlight[requestId] || pending?.requestId !== requestId) return
-    set((s) => ({ approvalsInFlight: { ...s.approvalsInFlight, [requestId]: true } }))
+    const flight = inFlightKey(sessionId, requestId)
+    if (get().approvalsInFlight[flight] || pending?.requestId !== requestId) return
+    set((s) => ({ approvalsInFlight: { ...s.approvalsInFlight, [flight]: true } }))
     const matcher =
       decision === 'always' && pending
         ? pending.detail.kind === 'command'
@@ -5396,7 +5403,7 @@ export const useStore = create<AppState>((set, get) => ({
     } finally {
       // A failure must allow pressing it again. A success already dismissed the card, so the `pendingApproval` check above blocks a repeat
       set((s) => {
-        const { [requestId]: _done, ...rest } = s.approvalsInFlight
+        const { [flight]: _done, ...rest } = s.approvalsInFlight
         return { approvalsInFlight: rest }
       })
     }

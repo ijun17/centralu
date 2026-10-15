@@ -3,11 +3,11 @@ import { nextWaitingTick } from '../../app/labelClock.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { useInbox } from '../../store/selectors.js'
-import { letterOf } from '../../app/keys.js'
+import { inboxCovered, inboxKeyAction, typingTarget } from './inboxKeys.js'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import { Kbd, StateDot, formatWaiting, waitingTone } from '../../components/primitives.jsx'
 import { SessionMachineTag } from '../machines/MachineTag.jsx'
-import { RowApproval, rowAnswerFor, useRowsSettled } from '../approval/RowApproval.jsx'
+import { RowApproval, useRowsSettled } from '../approval/RowApproval.jsx'
 
 /**
  * The inbox (FR-15) — the entry point for coming back to the desk.
@@ -27,7 +27,6 @@ export function Inbox() {
   const toggle = useStore((s) => s.toggleInbox)
   const focusSession = useStore((s) => s.focusSession)
   const markRead = useStore((s) => s.markRead)
-  const respondApproval = useStore((s) => s.respondApproval)
   const projects = useStore((s) => s.projects)
   const items = useInbox(Date.now())
   const [rawCursor, setCursor] = useState(0)
@@ -48,36 +47,36 @@ export function Inbox() {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      // A letter is read by meaning — on a Korean keyboard layout, j, k and d arrive as ㅓ, ㅏ and ㅇ (app/keys.ts)
-      const letter = letterOf(e)
-      if (e.key === 'ArrowDown' || letter === 'j') setCursor((c) => Math.min(c + 1, items.length - 1))
-      else if (e.key === 'ArrowUp' || letter === 'k') setCursor((c) => Math.max(c - 1, 0))
-      else if (e.key === 'Enter') {
-        const item = items[cursor]
+      // The list's keys only when nothing covers it and no field has the keyboard (#683 review, inboxKeys.ts)
+      const action = inboxKeyAction(e, { typing: typingTarget(e.target), covered: inboxCovered(useStore.getState()) })
+      if (!action) return
+      const item = items[cursor]
+      if (action === 'down') setCursor((c) => Math.min(c + 1, items.length - 1))
+      else if (action === 'up') setCursor((c) => Math.max(c - 1, 0))
+      else if (action === 'open') {
         if (item) {
           focusSession(item.id, { preferGrid: true })
           toggle(false)
         }
-      } else if (letter === 'd' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      } else if (action === 'done') {
         // Done (#669): marks a finished turn read without opening it. Approvals and errors have no Done.
-        const item = items[cursor]
         if (item?.state === 'waiting_input') void markRead(item.id)
-      } else if ((letter === 'y' || letter === 'n') && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      } else if (action === 'allow' || action === 'deny') {
         /*
-         * Allow and Deny on the row under the cursor (#543), the approval card's own letters. Only a row that offers
-         * them (`rowAnswerFor`), with the request id it shows, and not while the rows are moving or on a held key: the
-         * row that slid under the cursor is not the one the person read.
+         * Allow and Deny on the row under the cursor (#543), the approval card's own letters. The key presses the row's
+         * own button, and only while it is there and enabled: so a key answers exactly what a click would, never a row
+         * that shows Open, has not settled, is already answering, or whose line does not fit (RowApproval).
          */
-        const item = items[cursor]
-        const answer = item && settled && !e.repeat ? rowAnswerFor(useStore.getState().sessions[item.id]) : null
-        if (item && answer) void respondApproval(item.id, answer.requestId, letter === 'y' ? 'allow' : 'deny')
-      } else if (e.key === 'Escape') toggle(false)
-      else return
+        const button = item
+          ? panelRef.current?.querySelector<HTMLButtonElement>(`[data-row-answer="${action}"][data-session="${CSS.escape(item.id)}"]`)
+          : null
+        if (button && !button.disabled) button.click()
+      } else toggle(false)
       e.preventDefault()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, items, cursor, focusSession, toggle, markRead, respondApproval, settled])
+  }, [open, items, cursor, focusSession, toggle, markRead])
 
   if (!open) return null
 

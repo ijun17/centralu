@@ -42,6 +42,7 @@ import type {
   QuestionAnswer,
   ToolDescriptor,
 } from '@cc/protocol'
+import { NO_PATH } from '@cc/protocol'
 import { dataRoot } from '../../data-dir.js'
 import { whichTool } from '../../env-path.js'
 import { launchFor, toolExecutable, type ToolLaunch } from '../../tool-launch.js'
@@ -337,6 +338,13 @@ class ClaudeSession implements SessionHandle {
   /** Auto-approval matchers. Seeded with the saved rules at session start, and grows with each 'always' response. */
   private alwaysAllow = new AlwaysAllowRules()
   private reqCounter = 0
+  /**
+   * Part of every request id this handle raises (#683 review). The counter starts at 0 in each process, so after a
+   * swap a window that missed the events between could still hold `req-1` of the old process while the new one
+   * raises its own `req-1`, and an answer meant for the first would land on the second. With this the ids of two
+   * handles never meet, and the old id is refused as gone.
+   */
+  private readonly reqTag = randomUUID().slice(0, 8)
   private readonly stream: ClaudeStreamNormalizer
   /**
    * Proxy servers for attached apps (M4 A-5) — server name to proxy server, plus the last tool
@@ -662,7 +670,7 @@ class ClaudeSession implements SessionHandle {
             const questions = parseQuestions(toolInput)
             // If the shape is not a question, we cannot render it — never swallow it, let it flow through as usual.
             if (questions.length === 0) return { behavior: 'allow' as const, updatedInput: toolInput }
-            const requestId = `q-${++self.reqCounter}`
+            const requestId = `q-${self.reqTag}-${++self.reqCounter}`
             self.emit({ type: 'question_request', sessionId: self.sessionId, requestId, questions })
             return new Promise((resolve) => {
               self.questions.set(requestId, { resolve: resolve as (r: unknown) => void, input: toolInput })
@@ -679,10 +687,10 @@ class ClaudeSession implements SessionHandle {
            * it was edited again. Other kinds (`other`) have no key at all: what "always" would
            * even mean for them has not been decided yet.
            */
-          const key = alwaysAllowKey(detail, { skipPath: '?' })
+          const key = alwaysAllowKey(detail, { skipPath: NO_PATH })
           if (key && self.alwaysAllow.allows(key)) return { behavior: 'allow' as const, updatedInput: toolInput }
 
-          const requestId = `req-${++self.reqCounter}`
+          const requestId = `req-${self.reqTag}-${++self.reqCounter}`
           self.emit({ type: 'approval_request', sessionId: self.sessionId, requestId, detail })
           return new Promise((resolve) => {
             self.pending.set(requestId, { resolve: resolve as PendingApproval['resolve'], input: toolInput })

@@ -17,7 +17,7 @@ vi.mock('../../store/store.js', async (importOriginal) => {
   return { ...real, useStore: Object.assign(useStore, real.useStore) }
 })
 
-const { RowApproval, rowAnswerFor, rowsKey, rowSummary, tooltipText } = await import('./RowApproval.jsx')
+const { RowApproval, pathParts, rowsKey, rowView, tooltipText } = await import('./RowApproval.jsx')
 
 // Only what the row reads from the platform: the key names its Kbd prints
 const platform = { capabilities: { shortcutKeys: { mod: '⌘', alt: '⌥' } } } as unknown as Platform
@@ -26,7 +26,7 @@ beforeEach(() => {
   state = {}
 })
 
-const command = (c: string): ApprovalDetail => ({ kind: 'command', command: c, cwd: '/work/site' })
+const command = (c: string): Extract<ApprovalDetail, { kind: 'command' }> => ({ kind: 'command', command: c, cwd: '/work/site' })
 
 function waiting(detail: ApprovalDetail, over: Partial<SessionSummary> = {}): SessionSummary {
   return {
@@ -35,6 +35,8 @@ function waiting(detail: ApprovalDetail, over: Partial<SessionSummary> = {}): Se
     state: 'waiting_approval',
     pendingApproval: { requestId: 'r7', detail },
     pendingQuestions: [],
+    // The session's own folder, which an edit's path is shown relative to
+    worktree: { path: '/work/site', branch: 'b' },
     ...over,
   } as SessionSummary
 }
@@ -59,13 +61,42 @@ describe('RowApproval', () => {
     expect(button(html, 'approve-allow')).toContain('aria-label="Allow run kill -TERM 40321 in Clean up"')
     expect(button(html, 'approve-deny')).not.toBeNull()
     expect(button(html, 'approve-open')).toBeNull()
-    expect(button(html, 'approve-allow')).not.toContain('disabled=""')
+    // The waiting list's y and n press these, by these marks
+    expect(button(html, 'approve-allow')).toContain('data-row-answer="allow"')
+    expect(button(html, 'approve-deny')).toContain('data-row-answer="deny"')
   })
 
-  it('an edit of one file shows its path', () => {
-    const { text, html } = render(waiting({ kind: 'file_edit', path: 'src/app.ts', diffPreview: '+x', multi: false }), { settled: true })
-    expect(text).toContain('Edit src/app.ts')
+  it('does not answer until it has measured that the line fits whole, even once the rows have settled', () => {
+    // The measurement is a layout effect, which a static render never runs: the buttons stay disabled
+    const { html } = render(waiting(command('kill -TERM 40321')), { settled: true })
+    expect(button(html, 'approve-allow')).toContain('disabled=""')
+    expect(button(html, 'approve-deny')).toContain('disabled=""')
+  })
+
+  it("an edit shows the file's name first, then its folder inside the session's folder", () => {
+    const { text, html } = render(waiting({ kind: 'file_edit', path: '/work/site/src/features/app.ts', diffPreview: '+x', multi: false }), { settled: true })
+    expect(text).toContain('Edit app.ts src/features/')
+    expect(html).toMatch(/data-testid="inbox-approval-file-s1"[^>]*>app\.ts</)
     expect(button(html, 'approve-allow')).not.toBeNull()
+  })
+
+  // #683 review: requests that say nothing on their line, or carry a risk it does not show, open the session
+  it('an empty, flagged, multi-line or outside-the-folder request shows Open', () => {
+    const open = (d: ApprovalDetail) => {
+      const { html, text } = render(waiting(d), { settled: true })
+      expect(button(html, 'approve-allow'), JSON.stringify(d)).toBeNull()
+      expect(button(html, 'approve-open'), JSON.stringify(d)).not.toBeNull()
+      return text
+    }
+    // A Codex network approval with no command says what it asks, not `Run ` and nothing
+    expect(open({ kind: 'command', command: '', cwd: '/w', network: { host: 'docs.example.com', protocol: 'https' } })).toContain('Run network access to docs.example.com')
+    open({ ...command('curl x'), unsandboxed: true })
+    expect(open({ ...command('y'), stdin: true })).toContain('Type y')
+    open(command('cd /tmp\nrm -rf build'))
+    open({ kind: 'file_edit', path: '(no path)', diffPreview: '', multi: false })
+    expect(open({ kind: 'file_edit', path: '/work/site/old.ts', diffPreview: '', multi: false, change: 'delete' })).toContain('Delete old.ts')
+    open({ kind: 'file_edit', path: '/work/site/a.ts', diffPreview: '', multi: false, change: 'move', movePath: '/work/site/b.ts' })
+    open({ kind: 'file_edit', path: '/etc/hosts', diffPreview: '', multi: false })
   })
 
   it('does not answer before the rows have stood still', () => {
@@ -105,10 +136,28 @@ describe('RowApproval', () => {
 })
 
 describe('what a row says', () => {
-  it('cuts a command to its first line on the row and keeps it whole, with its folder, in the tooltip', () => {
+  it('cuts a command to its first line on the row, does not answer it there, and keeps it whole in the tooltip', () => {
     const d = command('git commit -m "one\n\ntwo"')
-    expect(rowSummary(d)).toEqual({ verb: 'Run', line: 'git commit -m "one …' })
+    expect(rowView(d, null)).toMatchObject({ verb: 'Run', line: 'git commit -m "one …', inPlace: false })
     expect(tooltipText(d)).toBe('git commit -m "one\n\ntwo"\n/work/site')
+  })
+
+  it('the tooltip carries what the request says beyond its line', () => {
+    expect(tooltipText({ kind: 'command', command: '', cwd: '/w', network: { host: 'h.example', protocol: 'https' }, reason: 'fetch' })).toBe(
+      '/w\nNetwork access to h.example (https)\nReason: fetch',
+    )
+    expect(tooltipText({ kind: 'file_edit', path: '/w/a.ts', diffPreview: '-a', multi: false, change: 'delete' })).toBe('/w/a.ts\nDeletes the file\n\n-a')
+  })
+
+  it("splits a path into its name and its folder inside the session's folder, on any platform", () => {
+    expect(pathParts('/work/site/src/a.ts', '/work/site')).toEqual({ name: 'a.ts', dir: 'src/', inside: true })
+    expect(pathParts('/work/site/a.ts', '/work/site/')).toEqual({ name: 'a.ts', dir: '', inside: true })
+    expect(pathParts('src/a.ts', '/work/site')).toEqual({ name: 'a.ts', dir: 'src/', inside: true })
+    expect(pathParts('C:\\Work\\Site\\src\\a.ts', 'c:\\work\\site')).toEqual({ name: 'a.ts', dir: 'src/', inside: true })
+    // Outside, or nothing to compare with: the whole folder, and not inside
+    expect(pathParts('/work/site-2/a.ts', '/work/site')).toEqual({ name: 'a.ts', dir: '/work/site-2/', inside: false })
+    expect(pathParts('../x/a.ts', '/work/site').inside).toBe(false)
+    expect(pathParts('/etc/hosts', null)).toEqual({ name: 'hosts', dir: '/etc/', inside: false })
   })
 
   it("cuts a long diff in the tooltip and says the rest is on the card", () => {
@@ -120,14 +169,7 @@ describe('what a row says', () => {
   })
 })
 
-describe('the waiting list keys and the settle key', () => {
-  it('y and n answer only a row that offers Allow and Deny, by the id it shows', () => {
-    expect(rowAnswerFor(waiting(command('ls')))).toEqual({ requestId: 'r7' })
-    expect(rowAnswerFor(waiting({ kind: 'other', raw: '{}' }))).toBeNull()
-    expect(rowAnswerFor(waiting(command('ls'), { state: 'working' }))).toBeNull()
-    expect(rowAnswerFor(undefined)).toBeNull()
-  })
-
+describe('the settle key', () => {
   it('changes when an approval comes, goes or is replaced, or a session is added; not on a state change', () => {
     const a = waiting(command('ls'))
     const base = rowsKey({ s1: a })

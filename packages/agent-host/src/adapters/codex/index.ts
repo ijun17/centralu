@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
@@ -8,7 +9,7 @@ import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { CLIENT_INFO, parseCliVersion } from '@cc/protocol'
+import { CLIENT_INFO, NO_PATH, parseCliVersion } from '@cc/protocol'
 import type {
   AdapterCapabilities,
   ApprovalDecision,
@@ -293,6 +294,11 @@ class CodexSession implements SessionHandle {
   /** The approval mode the app bridges on this thread were given, or null when it has none (#382, `checkAppMode`) */
   private appModeLoaded: AppApprovalMode | null = null
   private reqCounter = 0
+  /**
+   * Part of every request id this handle raises (#683 review): the counter restarts in each process, and after a
+   * swap a window that missed the events between could answer the new process's `codex-req-1` with the old one's.
+   */
+  private readonly reqTag = randomUUID().slice(0, 8)
   private alwaysAllow = new AlwaysAllowRules()
   /**
    * The changes of each file-change item still open, by item id (#169). The approval request for that item
@@ -1077,7 +1083,7 @@ class CodexSession implements SessionHandle {
        * is `codex_approval_kind`, while current codex source uses `codex/approval_kind` — we read both.
        */
       if (typeof p.serverName === 'string' && this.appServers.has(p.serverName) && approvalKindOf(p._meta) === 'mcp_tool_call') {
-        const requestId = `codex-req-${++this.reqCounter}`
+        const requestId = `codex-req-${this.reqTag}-${++this.reqCounter}`
         this.approvals.set(requestId, requestOrigin(r))
         this.elicitations.add(requestId)
         this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId, detail: appApprovalDetail(p.serverName, p.message, p._meta) })
@@ -1125,13 +1131,14 @@ class CodexSession implements SessionHandle {
     const detail = approvalDetailFrom(r.method, params, this.fileChanges.get(itemId)?.changes)
 
     // Does not ask if it matches a saved "always allow" rule (the same rule as C-2)
-    const key = alwaysAllowKey(detail)
+    // A request that names no file has no key: a rule saved for "(no path)" would let every such request through
+    const key = alwaysAllowKey(detail, { skipPath: NO_PATH })
     if (key && this.alwaysAllow.allows(key)) {
       this.client.respond(r.id, { decision: 'accept' })
       return
     }
 
-    const requestId = `codex-req-${++this.reqCounter}`
+    const requestId = `codex-req-${this.reqTag}-${++this.reqCounter}`
     this.approvals.set(requestId, requestOrigin(r))
     this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId, detail })
   }

@@ -4144,6 +4144,24 @@ describe('an approval is sent only once per request (#158)', () => {
     expect(spy.mock.calls.map((c) => c[2])).toEqual(['allow'])
   })
 
+  // #683 review: ids repeat across sessions (each process counts its own), so the guard is per session
+  it('an answer in flight in one session does not swallow the same request id in another', async () => {
+    const { platform, id } = await pendingCard()
+    const other = await platform.agents.createSession({ projectId: 'p1', cwd: '/tmp/p1', tool: 'claude', permissionPreset: 'safe' })
+    useStore.setState((st) => ({
+      sessions: { ...st.sessions, [other.id]: { ...other, pendingApproval: { requestId: 'r1', detail: { kind: 'command', command: 'rm x', cwd: '/tmp' } } } as never },
+    }))
+    const finish: (() => void)[] = []
+    const spy = vi
+      .spyOn(platform.agents, 'respondApproval')
+      .mockImplementation(() => new Promise<void>((r) => void finish.push(r)))
+    const first = useStore.getState().respondApproval(id, 'r1', 'allow')
+    const second = useStore.getState().respondApproval(other.id, 'r1', 'deny')
+    finish.forEach((f) => f())
+    await Promise.all([first, second])
+    expect(spy.mock.calls.map((c) => [c[0], c[2]])).toEqual([[id, 'allow'], [other.id, 'deny']])
+  })
+
   it('nothing is sent for a request whose card is already dismissed', async () => {
     const { platform, id } = await pendingCard()
     const spy = vi.spyOn(platform.agents, 'respondApproval').mockResolvedValue(undefined as never)

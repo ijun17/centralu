@@ -220,6 +220,14 @@ describe('normalizing an approval request (input to the banner\'s judgment)', ()
   it('everything else becomes other', () => {
     expect(approvalDetail('WebFetch', { url: 'http://x' }, '/p').kind).toBe('other')
   })
+
+  // #683 review: a Bash call that turns the sandbox off was a plain command card, answerable from a list row
+  it('keeps a Bash call that runs outside the sandbox, and an edit that names no file says so', () => {
+    expect(approvalDetail('Bash', { command: 'curl x', dangerouslyDisableSandbox: true }, '/p')).toEqual({
+      kind: 'command', command: 'curl x', cwd: '/p', unsandboxed: true,
+    })
+    expect(approvalDetail('Edit', { new_string: 'x' }, '/p')).toMatchObject({ kind: 'file_edit', path: '(no path)' })
+  })
 })
 
 describe('a limit (M0 finding: rate_limit_event)', () => {

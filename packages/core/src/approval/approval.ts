@@ -1,4 +1,4 @@
-import type { ApprovalDetail, ApprovalScope } from '@cc/protocol'
+import { NO_PATH, type ApprovalDetail, type ApprovalScope } from '@cc/protocol'
 
 /**
  * Approval policy (FR-3). "Don't block it, make it visible" — approving in place is not forbidden; only the
@@ -120,12 +120,39 @@ export function projectCreateQuestion(d: Extract<ApprovalDetail, { kind: 'projec
 }
 
 /**
+ * What a request says beyond its command or path, one line each (#683 review): the card prints these under the
+ * command, and a list row's tooltip carries them with the rest of the card's text. A request that carries any of the
+ * risky ones is not answered from a row (`answersInPlace`).
+ */
+export function approvalNotes(d: ApprovalDetail): string[] {
+  if (d.kind === 'command') {
+    return [
+      ...(d.stdin ? ['Input to a terminal that is already running'] : []),
+      ...(d.network ? [`Network access to ${d.network.host}${d.network.protocol ? ` (${d.network.protocol})` : ''}`] : []),
+      ...(d.unsandboxed ? ['Runs outside the sandbox'] : []),
+      ...(d.reason ? [`Reason: ${d.reason}`] : []),
+    ]
+  }
+  if (d.kind === 'file_edit') {
+    if (d.change === 'delete') return ['Deletes the file']
+    if (d.change === 'move') return [`Moves the file to ${d.movePath ?? 'another path'}`]
+    if (d.change === 'add') return ['Creates the file']
+  }
+  return []
+}
+
+/**
  * Whether a waiting approval can be answered from a list row (#543): the waiting list's row and the sidebar's row
  * offer Allow and Deny without opening the session, and only for a card whose question is a plain yes or no that one
  * line states whole.
  *
- * - A **command** and a **single-file edit**: the line is the command or the path, the tooltip the card's whole text.
- *   Their card's "Always allow" is not on the row: what it remembers is the card's to show (the pattern, the scope).
+ * - A **command** on one line, and a **single-file edit or new file** that names its file: the line is the command or
+ *   the path, the tooltip the card's whole text. Their card's "Always allow" is not on the row: what it remembers is
+ *   the card's to show (the pattern, the scope).
+ * - **Empty or flagged requests open the session** (#683 review): a command with no text (a network approval), input
+ *   to a running terminal, network access, a command outside the sandbox, a command of several lines; an edit that
+ *   names no file, a delete or a move. A row that does not show the line fits whole is the screen's to decide
+ *   (`RowApproval`).
  * - Everything else opens the session instead. Starting an agent and reaching another project carry scopes and
  *   consequences the card spells out (the permissions, an untrusted target); an edit of several files is more than one
  *   path; an app's capability is remembered for good; an update relaunches things; a new project makes a folder; and
@@ -135,7 +162,13 @@ export function projectCreateQuestion(d: Extract<ApprovalDetail, { kind: 'projec
  */
 export function answersInPlace(detail: ApprovalDetail, otherPending = 0): boolean {
   if (otherPending > 0) return false
-  if (detail.kind === 'command') return true
-  if (detail.kind === 'file_edit') return !detail.multi
+  if (detail.kind === 'command') {
+    const c = detail.command.trim()
+    return c !== '' && !c.includes('\n') && !detail.stdin && !detail.network && !detail.unsandboxed
+  }
+  if (detail.kind === 'file_edit') {
+    const named = detail.path.trim() !== '' && detail.path !== NO_PATH
+    return !detail.multi && named && (detail.change === undefined || detail.change === 'update' || detail.change === 'add')
+  }
   return false
 }

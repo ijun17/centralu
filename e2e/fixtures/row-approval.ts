@@ -23,6 +23,8 @@ type Mock = {
 }
 
 const COMMAND = 'kill -TERM 40321 && rm -rf ./tmp/orphans'
+/** Short enough for the sidebar's 240 px row: a command is answered from a row only when it fits whole */
+const SHORT = 'kill -TERM 40321'
 const CWD = '/tmp/alpha'
 
 /** Two sessions in alpha; the second is on screen. Returns the first (the one the tests are about) and the second. */
@@ -106,10 +108,10 @@ export function rowApprovalTests() {
 
   test('the sidebar row of a waiting session shows the command and answers it in place', async ({ page }) => {
     const { target, shown } = await twoSessions(page)
-    await ask(page, target, { kind: 'command', command: COMMAND, cwd: CWD })
+    await ask(page, target, { kind: 'command', command: SHORT, cwd: CWD })
 
     const what = page.getByTestId(`sidebar-approval-what-${target}`)
-    await expect(what).toContainText(COMMAND)
+    await expect(what).toContainText(SHORT)
     await what.hover()
     await expect(page.getByTestId(`sidebar-approval-tip-${target}`)).toContainText(CWD)
 
@@ -119,6 +121,83 @@ export function rowApprovalTests() {
     expect(await focused(page)).toBe(shown)
     // Only while it waits: the line goes once the approval is answered
     await expect(page.getByTestId(`sidebar-approval-${target}`)).toHaveCount(0)
+  })
+
+  // #683 review: the list listens on the window; a key typed into a layer over it, or composing, is not the list's
+  test('typing in the palette over the waiting list, or composing a syllable, answers nothing', async ({ page }) => {
+    const { target } = await twoSessions(page)
+    await ask(page, target, { kind: 'command', command: 'rm -rf build', cwd: CWD })
+    await page.keyboard.press('Meta+i')
+    await expect(page.getByTestId(`inbox-approve-allow-${target}`)).toBeEnabled()
+
+    // ⌘K over the open list: its field takes "yarn", and the row under the cursor is not allowed
+    await page.keyboard.press('ControlOrMeta+k')
+    await expect(page.getByTestId('palette-input')).toBeFocused()
+    await page.keyboard.type('yarn')
+    // Nothing answered (without the guard, the y allowed the row and the n went on to the next)
+    await expect(page.getByTestId('palette-input')).toBeFocused()
+    expect(await answers(page)).toEqual([])
+    await expect(page.getByTestId('palette-input')).toHaveValue('yarn')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('palette-input')).toHaveCount(0)
+
+    // A Korean ㅛ on the Y key while an input method composes, and a held y, are not an answer either
+    await expect(page.getByTestId('inbox')).toBeVisible()
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ㅛ', code: 'KeyY', isComposing: true, bubbles: true, cancelable: true }))
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', code: 'KeyY', repeat: true, bubbles: true, cancelable: true }))
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Y', code: 'KeyY', shiftKey: true, bubbles: true, cancelable: true }))
+    })
+    expect(await answers(page)).toEqual([])
+    expect(await hostPending(page, target)).toBe('r1')
+
+    // The plain key, with nothing over the list, still answers
+    await page.keyboard.press('y')
+    await expect.poll(() => answers(page)).toEqual([{ sessionId: target, requestId: 'r1', decision: 'allow' }])
+  })
+
+  // #683 review: a cut line can hide what matters, so a command that does not fit opens the session
+  test('a command too long for the row shows Open there; an edit shows its file name first', async ({ page }) => {
+    const { target } = await twoSessions(page)
+    // Longer than the sidebar's row, short enough for the waiting list's
+    await ask(page, target, { kind: 'command', command: COMMAND, cwd: CWD })
+    // The sidebar's row is too narrow for it: Open, and the tooltip has it whole
+    await expect(page.getByTestId(`sidebar-approve-open-${target}`)).toBeVisible()
+    await expect(page.getByTestId(`sidebar-approve-allow-${target}`)).toHaveCount(0)
+    await page.getByTestId(`sidebar-approval-what-${target}`).hover()
+    await expect(page.getByTestId(`sidebar-approval-tip-${target}`)).toContainText(COMMAND)
+    // The waiting list's wider row fits it whole, and answers it there
+    await openInbox(page)
+    await expect(page.getByTestId(`inbox-approve-allow-${target}`)).toBeEnabled()
+    await page.keyboard.press('Escape')
+
+    await page.evaluate(({ sid }) => ((window as any).__mock as Mock).emit({ type: 'approval_resolved', sessionId: sid, requestId: 'r1', decision: 'deny' }), { sid: target })
+    await ask(page, target, { kind: 'file_edit', path: '/tmp/alpha/packages/ui/src/features/approval/RowApproval.tsx', diffPreview: '+x', multi: false }, 'r2')
+    // The name stands whole at the front; the folder, relative to the project, gives way
+    await expect(page.getByTestId(`sidebar-approval-file-${target}`)).toHaveText('RowApproval.tsx')
+    await expect(page.getByTestId(`sidebar-approval-what-${target}`)).toContainText('packages/ui/')
+    await expect(page.getByTestId(`sidebar-approval-what-${target}`)).not.toContainText('/tmp/alpha')
+    await expect(page.getByTestId(`sidebar-approve-allow-${target}`)).toBeEnabled()
+  })
+
+  // #683 review: requests whose line says nothing, or that carry a risk the line does not show
+  test('a network approval, an edit naming no file, a delete and a command outside the sandbox show Open', async ({ page }) => {
+    await setup(page, ['/tmp/alpha'])
+    const ids = [await newSession(page, 'alpha'), await newSession(page, 'alpha'), await newSession(page, 'alpha'), await newSession(page, 'alpha')]
+    await newSession(page, 'alpha') // on screen
+    await ask(page, ids[0]!, { kind: 'command', command: '', cwd: CWD, network: { host: 'docs.example.com', protocol: 'https' } })
+    await ask(page, ids[1]!, { kind: 'file_edit', path: '(no path)', diffPreview: '', multi: false })
+    await ask(page, ids[2]!, { kind: 'file_edit', path: '/tmp/alpha/old.ts', diffPreview: '-x', multi: false, change: 'delete' })
+    await ask(page, ids[3]!, { kind: 'command', command: 'curl x', cwd: CWD, unsandboxed: true })
+    for (const id of ids) {
+      await expect(page.getByTestId(`sidebar-approve-open-${id}`)).toBeVisible()
+      await expect(page.getByTestId(`sidebar-approve-allow-${id}`)).toHaveCount(0)
+    }
+    await expect(page.getByTestId(`sidebar-approval-what-${ids[0]}`)).toContainText('network access to docs.example.com')
+    await expect(page.getByTestId(`sidebar-approval-what-${ids[2]}`)).toContainText('Delete')
+    // The card says it too
+    await page.getByTestId(`sidebar-approve-open-${ids[3]}`).click()
+    await expect(page.getByTestId('approval-detail')).toContainText('Runs outside the sandbox')
   })
 
   test('a row that just appeared or moved does not answer until the rows stand still', async ({ page }) => {
