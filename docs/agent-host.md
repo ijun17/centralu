@@ -67,8 +67,8 @@ then created) and deleted a merged one behind a hard gate (`delete_worktree_sess
 agents itself (`start_agent` with `worktree`, §1.2.1), works with them (`agent_session`) and removes an idle child
 with `agent_session` `delete`, keeping local work with the session in the trash (#608, `cleanUpWorktreeChild`). What stayed: the person's own worktree
 sessions (the new-session window's option; they now stand alone instead of under a manager made for them), merge and
-pull-request detection on every worktree session, and the project's trunk (`worktrees.setTrunk`, the project menu's
-"Worktree trunk", kept in the former slot's row). The orchestrator gets no replacement for `propose_worktree_session`:
+pull-request detection on every worktree session, and the project's trunk (`worktrees.setTrunk`, kept in the former slot's row;
+the project menu's "Worktree trunk" entry was removed in #733, so the trunk is detected and used but no screen sets it) The orchestrator gets no replacement for `propose_worktree_session`:
 making a branch and a folder in the person's repository now goes through a project session's consent card, and the
 orchestrator reaches that session with `send_to_session`. Existing data: store v48 gives a former manager's worktree
 sessions `askedBy` = their parent, so it owns them as the agents it started; `worktrees.createManager` is refused with

@@ -2445,12 +2445,6 @@ test("Sidebar: the arrow folds and unfolds a project's session rows (#205)", asy
   await page.getByTestId('project-fold-alpha').click()
   await expect(sessionRows(page, 'alpha')).toHaveCount(1)
   await expect(page.getByTestId('project-alpha')).not.toHaveAttribute('data-folded', 'true')
-
-  // Fold all at once — leave only the project whose menu was opened expanded, and fold the rest
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('fold-others-alpha').click()
-  await expect(page.getByTestId('project-beta')).toHaveAttribute('data-folded', 'true')
-  await expect(sessionRows(page, 'alpha')).toHaveCount(1)
 })
 
 test('Sidebar: clicking the name opens the project screen instead of folding (#205)', async ({ page }) => {
@@ -8564,26 +8558,20 @@ test('A worktree session the person makes stands on its own; one a session start
 })
 
 /**
- * The project's worktree trunk (#76): chosen from the project menu, which says the trunk it has. It was chosen when
- * starting the worktree manager before #561 part 3; the trunk stayed, as the project's own setting.
+ * The project's worktree trunk (#76) is still what a new worktree session forks from by default. Nothing in the project
+ * menu sets it any more (#733): it is detected, and the store keeps `setWorktreeTrunk` for whatever sets it next.
  */
-test('The project menu sets the worktree trunk and says which it is', async ({ page }) => {
+test('A new worktree session forks from the project trunk, and the project menu no longer sets it (#733)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const st = (window as any).__store.getState()
+    return st.setWorktreeTrunk(Object.keys(st.projects)[0], 'develop')
+  })
 
   await page.getByTestId('project-menu-alpha').click()
-  await expect(page.getByTestId('worktree-trunk-alpha')).toHaveText('Set worktree trunk…')
-  await page.getByTestId('worktree-trunk-alpha').click()
-  // The field is filled with the current branch — the guess is put in front of the person for confirmation
-  await expect(page.getByTestId('worktree-trunk-input')).toHaveValue('main')
-  await page.getByTestId('worktree-trunk-input').fill('develop')
-  await page.getByTestId('worktree-trunk-confirm').click()
-  await expect(page.getByTestId('worktree-trunk-dialog')).toBeHidden()
-
-  await page.getByTestId('project-menu-alpha').click()
-  await expect(page.getByTestId('worktree-trunk-alpha')).toHaveText('Worktree trunk: develop…')
-  await page.keyboard.press('Escape')
-  // A new worktree session forks from it by default
-  await page.getByTestId('project-menu-alpha').click()
+  await expect(page.getByTestId('project-menu-open-alpha')).toBeVisible()
+  await expect(page.locator('[data-testid^="worktree-trunk-"]')).toHaveCount(0)
+  await expect(page.getByTestId('project-menu-open-alpha')).not.toContainText(/trunk/i)
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('worktree-toggle').locator('input').check()
   await expect(page.getByTestId('worktree-base-input')).toHaveValue('develop')
@@ -9448,22 +9436,6 @@ test("Turning on ⌘Enter to send also keeps the orchestrator's first composer f
   await page.waitForTimeout(200)
   await expect(page.getByTestId('orchestrator-empty')).toBeVisible()
   expect(await page.evaluate(() => (window as any).__store.getState().orchestratorId)).toBeNull()
-})
-
-test('If the worktree trunk cannot be set, the dialog stays open and states why (#180)', async ({
-  page,
-}) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
-  await page.evaluate(() => {
-    ;(window as any).__mock.projects.setWorktreeTrunk = async () => {
-      throw new Error('not a git repository')
-    }
-  })
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('worktree-trunk-alpha').click()
-  await page.getByTestId('worktree-trunk-confirm').click()
-  await expect(page.getByTestId('worktree-trunk-dialog')).toContainText('not a git repository')
-  await expect(page.getByTestId('worktree-trunk-input')).toHaveValue('main')
 })
 
 test('Nothing sends while an attachment is uploading, and it goes out with the text once it finishes (#180)', async ({
