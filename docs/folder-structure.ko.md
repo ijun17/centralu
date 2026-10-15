@@ -80,6 +80,7 @@ centralu/
 │  │     │     connection.ts(호스트에 붙기, 재연결 복구, 작업 공간 스냅숏)
 │  │     │     history.ts(대화 히스토리 페이지와 실행 카드의 단계 읽기)
 │  │     │     updates.ts(Centralu 업데이트와 에이전트 CLI 버전)  machines.ts(연결된 기기)
+│  │     │     orchestrator.ts(오케스트레이터와 그 제안)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)

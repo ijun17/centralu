@@ -78,6 +78,7 @@ centralu/
 │  │     │     connection.ts (attaching to the host, reconnect recovery, the workspace snapshot)
 │  │     │     history.ts (reading a conversation's history pages and a launch card's steps)
 │  │     │     updates.ts (Centralu's update and the agent CLIs' versions)  machines.ts (linked machines)
+│  │     │     orchestrator.ts (the orchestrator and its proposals)
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)
