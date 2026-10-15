@@ -2598,6 +2598,10 @@ function sameGit(a: ProjectInfo['git'], b: ProjectInfo['git']): boolean {
   )
 }
 
+/** Calls of the orchestrator's proposal tools that have not returned yet: their `tool_result` re-reads the lists (#703) */
+const proposalCalls = new Set<string>()
+const PROPOSAL_CALLS_MAX = 50
+
 /**
  * Tells the system the number of things that need an answer (the dock badge): approvals and errors among the sessions,
  * and the orchestrator's pending proposals (#703), which wait like an approval. Called whenever either changes.
@@ -3691,10 +3695,21 @@ export const useStore = create<AppState>((set, get) => ({
     const appended = appendChat(had ?? [], e)
     const chat = had === undefined && appended.length === 0 ? undefined : appended
     /*
-     * The MCP-server and skill proposal lists are not re-read here (#703). A `tool_call` arrives when the call starts,
+     * The MCP-server and skill proposal lists are not re-read on the `tool_call` (#703). It arrives when the call starts,
      * before the host has run it and saved the proposal, so a read on it came back with the old list and the card never
      * showed. The host broadcasts `orchestrator_proposals_changed` after it writes a list; that is the signal above.
+     *
+     * A safety net for a host that predates that event (an old host still serving during a swap): the call's
+     * `tool_result` comes after the save, so it re-reads both lists. `centralu_run` may be either proposal (#512).
      */
+    if (e.type === 'tool_call' && /(propose_mcp_server|propose_skill|centralu_run)$/.test(e.summary.tool)) {
+      if (proposalCalls.size >= PROPOSAL_CALLS_MAX) proposalCalls.delete(proposalCalls.values().next().value!)
+      proposalCalls.add(e.callId)
+    }
+    if (e.type === 'tool_result' && proposalCalls.delete(e.callId)) {
+      void get().refreshMcpProposals()
+      void get().refreshSkillProposals()
+    }
     /*
      * A worktree suggestion (#69) — the same principle (pointing), carrying one extra value: the
      * branch name. The adapter carries it in the title (there is no other channel). If the title is
@@ -6420,6 +6435,9 @@ export const useStore = create<AppState>((set, get) => ({
     // Broadcasts from the gap while disconnected never come again — the app list (A-8) is also aligned to whatever the host currently knows
     void get().refreshExternalApps()
     void get().refreshAppQuestions()
+    // So is a proposal list change (#703): a missed `orchestrator_proposals_changed` leaves a card, the count and the badge stale
+    void get().refreshMcpProposals()
+    void get().refreshSkillProposals()
     // So are the links' states (#82): a machine that went away or came back during the gap
     void get().refreshMachines()
     // The pinned views this window shows are leased to its connection, which just ended (#392)

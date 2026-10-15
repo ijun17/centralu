@@ -227,12 +227,16 @@ export class OrchestratorProposals {
     const hit = proposals.find((p) => p.name === name)
     if (!hit) return { ok: false, error: `No pending skill proposal named "${name}"`, restart: false }
     this.store.setAppSetting(SKILL_PROPOSALS_KEY, JSON.stringify(proposals.filter((p) => p.name !== name)))
-    this.changed()
-    if (!approve) return { ok: true, restart: false }
+    if (!approve) {
+      this.changed()
+      return { ok: true, restart: false }
+    }
 
     const skills = this.orchestratorSkills().filter((s) => s.name !== name)
     skills.push({ name: hit.name, content: hit.content })
     this.store.setAppSetting(SKILLS_KEY, JSON.stringify(skills))
+    // After both writes, so a screen that reads on the announcement sees the proposal gone and the skill saved
+    this.changed()
     return { ok: true, restart: true }
   }
 

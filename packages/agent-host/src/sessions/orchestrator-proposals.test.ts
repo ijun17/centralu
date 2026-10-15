@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest'
+import type { ExternalApps } from '../apps/external/runtime.js'
 import { OrchestratorProposals } from './orchestrator-proposals.js'
 
 /** The three lists in app_settings, as another build or a hand edit may have left them (#384) */
-function withRows(rows: Record<string, string>, changed: () => void = () => {}) {
+function withRows(rows: Record<string, string>, changed: () => void = () => {}, apps?: Pick<ExternalApps, 'installUserApp' | 'list'>) {
   const store = {
     appSetting: (k: string) => rows[k] ?? null,
     setAppSetting: (k: string, v: string) => void (rows[k] = v),
     deleteAppSetting: (k: string) => void delete rows[k],
   }
-  return { proposals: new OrchestratorProposals(store, () => undefined, changed), rows }
+  return { proposals: new OrchestratorProposals(store, () => apps as ExternalApps | undefined, changed), rows }
 }
 
 describe('orchestrator proposals read from a row another build wrote', () => {
@@ -68,5 +69,42 @@ describe('a change to a proposal list is announced after it is saved', () => {
     expect(proposals.resolveSkillProposal('nothing', true).ok).toBe(false)
     expect(proposals.resolveMcpProposal('nothing', true).ok).toBe(false)
     expect(told).toBe(0)
+  })
+})
+
+describe('an approval announces once, when what it changes is saved', () => {
+  it('approving a skill announces after both the proposal is gone and the skill is saved', () => {
+    const seen: { proposals: string[]; skills: string[] }[] = []
+    const { proposals } = withRows({}, () => seen.push({ proposals: proposals.skillProposals().map((p) => p.name), skills: proposals.orchestratorSkills().map((p) => p.name) }))
+    proposals.proposeSkill({ name: 'tidy', content: 'Keep it short.' })
+    seen.length = 0
+
+    expect(proposals.resolveSkillProposal('tidy', true)).toEqual({ ok: true, restart: true })
+    expect(seen).toEqual([{ proposals: [], skills: ['tidy'] }])
+  })
+
+  it('approving an MCP server announces once, with the proposal gone and the app installed', () => {
+    const installed: string[] = []
+    const apps = { installUserApp: (a: { id: string }) => void installed.push(a.id), list: () => [] } as unknown as Pick<ExternalApps, 'installUserApp' | 'list'>
+    const seen: { proposals: string[]; installed: string[] }[] = []
+    const { proposals } = withRows({}, () => seen.push({ proposals: proposals.mcpProposals().map((p) => p.name), installed: [...installed] }), apps)
+    proposals.proposeMcpServer({ name: 'db', command: 'node', args: ['s.js'] })
+    seen.length = 0
+
+    expect(proposals.resolveMcpProposal('db', true)).toEqual({ ok: true, restart: true })
+    expect(seen).toEqual([{ proposals: [], installed: ['db'] }])
+  })
+
+  it('an approval whose install fails announces nothing: the proposal stays where it was', () => {
+    let told = 0
+    const apps = { installUserApp: () => { throw new Error('manifest refused') }, list: () => [] } as unknown as Pick<ExternalApps, 'installUserApp' | 'list'>
+    const { proposals } = withRows({}, () => told++, apps)
+    proposals.proposeMcpServer({ name: 'db', command: 'node', args: [] })
+    expect(told).toBe(1)
+
+    const r = proposals.resolveMcpProposal('db', true)
+    expect(r.ok).toBe(false)
+    expect(proposals.mcpProposals().map((p) => p.name)).toEqual(['db'])
+    expect(told).toBe(1)
   })
 })

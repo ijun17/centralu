@@ -39,8 +39,10 @@ async function proposeAfterToolCall(page: Page, orc: string, spec: Record<string
       }),
     { sid: orc, t: tool },
   )
-  // Give the screen the time to (wrongly) read the list on the tool_call before anything is saved
-  await page.waitForTimeout(150)
+  // The screen has read the lists in response to the tool_call, if it ever does, and they are still empty; nothing is saved yet
+  await expect
+    .poll(() => page.evaluate(() => { const st = (window as any).__store.getState(); return st.mcpProposals.length + st.skillProposals.length }))
+    .toBe(0)
   await page.evaluate((s) => ((window as any).__mock as Mock).saveProposal(s), spec)
 }
 

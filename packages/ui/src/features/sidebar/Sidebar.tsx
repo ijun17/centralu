@@ -14,6 +14,7 @@ import { DeleteProjectDialog } from '../project/DeleteProjectDialog.jsx'
 import { CreateProjectDialog } from '../project/CreateProjectDialog.jsx'
 import {
   useIsProjectOpen,
+  useHasPendingProposal,
   useIsProjectSelected,
   useSelectedSessionId,
   useSessionsOf,

@@ -190,7 +190,6 @@ export function CommandPalette() {
     togglePanel,
     toggleSettings,
     toggleInbox,
-    focusSession,
     sc,
     nav,
   ])

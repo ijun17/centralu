@@ -3646,6 +3646,59 @@ describe('MCP server suggestions', () => {
     expect(read).not.toHaveBeenCalled()
   })
 
+  /*
+   * A host that predates `orchestrator_proposals_changed` (an old host still serving during a swap) sends only the
+   * tool events. The result comes after the save, so it re-reads: the one place a guess about the tool name stays.
+   */
+  it('the tool_result of a proposal call re-reads both lists, for a host that does not broadcast', async () => {
+    const mock = new MockPlatform()
+    mock.sessions.set('mcp-s3', sessionInfo('mcp-s3'))
+    await useStore.getState().attach(mock)
+    const call = (tool: string, callId: string) =>
+      mock.emit({ type: 'tool_call', sessionId: 'mcp-s3', callId, summary: { tool, title: tool, readOnly: false, paths: [] } } as NormalizedEvent)
+    const result = (callId: string) => mock.emit({ type: 'tool_result', sessionId: 'mcp-s3', callId, ok: true, summary: '' } as NormalizedEvent)
+    const read = vi.spyOn(mock.agents, 'mcpProposals')
+
+    // An unrelated call's result reads nothing
+    call('Bash', 'other')
+    result('other')
+    await Promise.resolve()
+    expect(read).not.toHaveBeenCalled()
+
+    // The old host saved without announcing (the lists change silently), then the call returned
+    call('centralu_run', 'run-1')
+    mock.mcpProposalList.push({ name: 'playwright', command: 'npx', args: [] })
+    mock.skillProposalList.push({ name: 'weekly-report', content: 'a summary every Friday' })
+    expect(useStore.getState().mcpProposals).toEqual([])
+    result('run-1')
+    await vi.waitFor(() => {
+      expect(useStore.getState().mcpProposals.map((p) => p.name)).toEqual(['playwright'])
+      expect(useStore.getState().skillProposals.map((p) => p.name)).toEqual(['weekly-report'])
+    })
+  })
+
+  it('a reconnect re-reads both lists: a broadcast lost in the gap leaves no stale card, count or badge', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    mock.saveProposal({ mcp: { name: 'playwright', command: 'npx', args: [] } })
+    await vi.waitFor(() => expect(useStore.getState().mcpProposals).toHaveLength(1))
+    expect(mock.badge).toBe(1)
+
+    // While the socket was down the person answered in another window and the orchestrator proposed a skill: no event arrived
+    mock.mcpProposalList.splice(0)
+    mock.skillProposalList.push({ name: 'weekly-report', content: 'a summary every Friday' })
+    expect(useStore.getState().mcpProposals).toHaveLength(1)
+
+    await useStore.getState().recoverAfterReconnect(true)
+
+    await vi.waitFor(() => {
+      expect(useStore.getState().mcpProposals).toEqual([])
+      expect(useStore.getState().skillProposals.map((p) => p.name)).toEqual(['weekly-report'])
+      expect(computeInbox(useStore.getState()).map((i) => i.proposal)).toEqual([{ kind: 'skill', name: 'weekly-report' }])
+    })
+    expect(mock.badge).toBe(1)
+  })
+
   it('one broadcast re-reads both lists, whichever tool or command made the change', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
