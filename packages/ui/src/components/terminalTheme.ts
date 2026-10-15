@@ -83,15 +83,24 @@ export function followTheme(
     }
   }
   /*
-   * The bundled code font (#731) may still be loading when a terminal opens, and xterm measures its cell once, with
-   * whatever font is there: the fallback's cell would stay, and D2Coding's wider Hangul would overlap. When a font
-   * finishes loading, the cell is measured again: xterm measures only when the family changes, so it is set away
-   * and back.
+   * A code font that was still loading when the terminal opened (#731: the app waits for the bundled fonts before it
+   * draws, so this is a font picked later, or one that took longer than that wait). xterm measures its cell once, with
+   * whatever font is there, so when a face of the terminal's family finishes loading the cell is measured again: xterm
+   * measures only when the family changes, so it is set away and back. Only for a face of the terminal's own family,
+   * and once per face: measuring makes the engine resolve fonts, and in WebKit that can end in another `loadingdone`,
+   * which must not start the cycle again.
    */
   const fonts = typeof document === 'undefined' ? undefined : document.fonts
-  const remeasure = () => {
+  const measured = new Set<FontFace>()
+  const remeasure = (e: Event) => {
     const family = term.options.fontFamily
     if (!family) return
+    const names = family.split(',').map((n) => n.trim().replace(/^["']|["']$/g, '').toLowerCase())
+    const faces = ((e as FontFaceSetLoadEvent).fontfaces ?? []).filter(
+      (f) => !measured.has(f) && names.includes(f.family.replace(/^["']|["']$/g, '').toLowerCase()),
+    )
+    if (!faces.length) return
+    for (const f of faces) measured.add(f)
     term.options.fontFamily = 'monospace'
     term.options.fontFamily = family
     refit?.()
