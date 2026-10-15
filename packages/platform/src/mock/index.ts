@@ -788,7 +788,7 @@ export class MockPlatform implements Platform {
     usage: { plan: 'max', windows: [], daily: [] },
   }
   /** For tests: a linked machine's usage, by machine id (#82); a machine with none answers `usageState` */
-  machineUsage: Record<string, { supported: boolean; reason?: string; usage: UsageSnapshot | null }> = {}
+  machineUsage: Record<string, { supported: boolean; reason?: string; usage: UsageSnapshot | null; sameAccountAsHub?: boolean }> = {}
   /** For tests: the tools a linked machine has, by machine id (#82) */
   machineDetected: Record<string, ToolStatus[]> = {}
   /** For tests: every usage question, and which machine it went to (null: this computer) */

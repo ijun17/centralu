@@ -1865,11 +1865,25 @@ export const RpcMethods = {
     }),
   },
   'agents.usage': {
-    params: z.object({ tool: ToolName, ...machineParam }),
+    params: z.object({
+      tool: ToolName,
+      /**
+       * `false`: answer the prompt cache figures only and do not read the account's limits (#726). The hub asks a
+       * linked machine this when it shows its own limits for it (same account), so that machine does not start a
+       * reading of limits nobody will look at. Absent: read them.
+       */
+      limits: z.boolean().optional(),
+      ...machineParam,
+    }),
     result: z.object({
       supported: z.boolean(),
       reason: z.string().optional(),
       usage: UsageSnapshot.nullable(),
+      /**
+       * Set on the hub's answer for a linked machine when `usage` is this computer's own because both are logged in to
+       * the same account (#726); the meter says so. Absent otherwise, and from a host that predates it.
+       */
+      sameAccountAsHub: z.boolean().optional(),
       /**
        * The prompt cache over the last hours, counted by this host from its sessions' requests (docs/agent-host.md
        * §6.1). Independent of `supported`: a limit the tool would not tell does not hide what the host counted.
@@ -1877,6 +1891,16 @@ export const RpcMethods = {
        */
       cache: CacheStats.optional(),
     }),
+  },
+  /**
+   * Which account a tool is logged in to on this host, as an opaque fingerprint (#726). The hub compares its own with a
+   * linked machine's to know the two share one account's limits. Nothing readable leaves the host: not the email, not
+   * the organisation id. `fingerprint` is null when the tool is not logged in with an account, or does not say which.
+   * `loggedIn` is null when the tool cannot tell.
+   */
+  'agents.account': {
+    params: z.object({ tool: ToolName, ...machineParam }),
+    result: z.object({ loggedIn: z.boolean().nullable(), fingerprint: z.string().nullable() }),
   },
   /** File search for `@` autocomplete (within the project only) */
   /**

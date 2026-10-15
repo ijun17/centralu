@@ -223,7 +223,7 @@ type ApprovalDetail =
 | git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | prod에서는 같은 계약을 Tauri invoke로 |
 | fs (dev) | `fs.listDir, fs.readFile, fs.watchProject` | 〃 |
 | store (dev) | `store.loadWorkspace, store.saveWorkspace, store.appendMessages, …` | 〃 |
-| usage | `agents.usage` | 계정의 한도 창, 도구 자신에게 묻는다. 호스트가 센 최근 몇 시간의 프롬프트 캐시도 함께 (`cache`, [agent-host.ko.md](agent-host.ko.md) §6, §6.1) |
+| usage | `agents.usage`, `agents.account` | 계정의 한도 창, 도구 자신에게 묻는다. 호스트가 센 최근 몇 시간의 프롬프트 캐시도 함께 (`cache`, [agent-host.ko.md](agent-host.ko.md) §6, §6.1). `agents.usage { limits: false }`는 캐시만 답하고, 허브가 연결된 기기에 대해 한도가 자기 것이면 `sameAccountAsHub: true`를 단다. `agents.account { tool }`은 로그인의 불투명한 지문(`{ loggedIn, fingerprint }`)으로, 허브가 기기의 것과 견주며 이메일은 나가지 않는다 (#726). 추가만 |
 
 git/fs/store RPC의 요청·응답 타입은 **포트 인터페이스와 1:1**이다. 의도된 중복이다 — 포트가 원본 계약이고, RPC와 Tauri invoke는 그 계약을 실어 나르는 두 운반체일 뿐이다.
 

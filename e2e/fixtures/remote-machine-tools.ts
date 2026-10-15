@@ -124,6 +124,43 @@ export function remoteMachineToolsTests(): void {
       })
     })
 
+    test('a machine logged in to the same account says so, and one that cannot be read gives its reason, not a blank meter (#726)', async ({ page }) => {
+      await setup(page)
+      await page.evaluate((w) => {
+        const m = (window as unknown as MockWindow).__mock
+        m.usageState = w.here
+        m.machineUsage = {
+          box: { ...w.here, sameAccountAsHub: true },
+          laptop: { supported: false, reason: 'Claude Code is not logged in on this computer', usage: null },
+        }
+      }, { here: WEEKLY(12) })
+      await link(page, { name: 'Box', sshTarget: 'me@box' })
+      await link(page, { name: 'Laptop', sshTarget: 'laptop' })
+
+      await test.step('the donut and its detail say whose numbers they are', async () => {
+        await expect(page.getByTestId('usage-donut-box.claude')).toHaveAttribute('data-percent', '12')
+        await page.getByTestId('usage-donut-box.claude').hover()
+        await expect(page.getByTestId('usage-donut-same-box.claude')).toHaveText('Same account as this computer')
+        await page.getByTestId('usage-donut-box.claude').click()
+        await expect(page.getByTestId('usage-same-account')).toHaveText('Same account as this computer')
+        await expect(page.getByTestId('usage-window-weekly_all')).toContainText('12%')
+        await page.keyboard.press('Escape')
+        // This computer's own detail does not carry the label
+        await page.getByTestId('usage-donut-claude').click()
+        await expect(page.getByTestId('usage-window-weekly_all')).toBeVisible()
+        await expect(page.getByTestId('usage-same-account')).toHaveCount(0)
+        await page.keyboard.press('Escape')
+      })
+
+      await test.step('a machine whose limits cannot be read says why in one line', async () => {
+        await expect(page.getByTestId('usage-donut-laptop.claude')).toHaveAttribute('data-percent', '')
+        await page.getByTestId('usage-donut-laptop.claude').hover()
+        await expect(page.getByTestId('usage-donut-reason-laptop.claude')).toHaveText('Claude Code is not logged in on this computer')
+        await page.getByTestId('usage-donut-laptop.claude').click()
+        await expect(page.getByTestId('usage-unavailable')).toContainText('Claude Code is not logged in on this computer')
+      })
+    })
+
     test('a machine with no usable agent says so in its group, and this computer with none still shows the machines', async ({ page }) => {
       await setup(page)
       await page.evaluate(() => {

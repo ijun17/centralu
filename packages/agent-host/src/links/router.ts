@@ -187,15 +187,45 @@ export class Router {
   private async byMachine(
     method: string,
     params: unknown,
-    route: { result?: (r: unknown, q: Qualifier) => unknown },
+    route: { result?: (r: unknown, q: Qualifier) => unknown; sharesAccount?: boolean },
     ctx?: RpcContext,
   ): Promise<unknown> {
     if (!isObj(params) || params.machine === undefined || params.machine === null) return this.opts.local(method, params, ctx)
     const m = this.machineById(params.machine)
     if (!m) throw Object.assign(new Error(`No linked machine ${String(params.machine)}`), { code: 'internal' })
     const { machine: _machine, ...rest } = params
+    if (route.sharesAccount && m.reachable) {
+      const shared = await this.sameAccountAnswer(m, method, rest, ctx)
+      if (shared) return route.result ? route.result(shared, m.q) : shared
+    }
     const r = await this.forward(m, method, rest)
     return route.result ? route.result(r, m.q) : r
+  }
+
+  /**
+   * A tool logged in to the same account on the hub and on `m` has one set of limits, so the hub's reading answers for
+   * both (#726). The remote may have no session to read them from, and reading them there would only repeat what the
+   * hub already shows. Each host fingerprints its own login and only the fingerprints meet here; `undefined` when the
+   * accounts are not known to be the same, or the hub's own reading failed, and the remote is then asked as usual.
+   * The prompt cache figures stay the remote's: they count its requests, not the hub's.
+   */
+  private async sameAccountAnswer(m: RoutedMachine, method: string, params: Obj, ctx?: RpcContext): Promise<Obj | undefined> {
+    const tool = params.tool
+    if (typeof tool !== 'string' || params.limits === false) return undefined
+    try {
+      const [mine, theirs] = await Promise.all([this.opts.local('agents.account', { tool }), m.call('agents.account', { tool })])
+      const a = isObj(mine) ? mine.fingerprint : null
+      const b = isObj(theirs) ? theirs.fingerprint : null
+      if (typeof a !== 'string' || a === '' || a !== b) return undefined
+      const own = await this.opts.local(method, { tool }, ctx)
+      if (!isObj(own) || own.supported !== true || !own.usage) return undefined
+      const there = await m.call(method, { tool, limits: false })
+      const cache = isObj(there) ? there.cache : undefined
+      return { supported: true, usage: own.usage, sameAccountAsHub: true, ...(cache ? { cache } : {}) }
+    } catch {
+      // A remote that predates `agents.account` (or `limits`), or a call that failed: it is asked as usual
+      return undefined
+    }
   }
 
   // ── Merges ──────────────────────────────────────────────────────────────────────────────

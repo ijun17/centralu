@@ -459,6 +459,61 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     expect(await router.handle('agents.usage', { tool: 'claude', machine: 'm1' })).toEqual({ supported: true, usage: null })
   })
 
+  describe('the limits of a linked machine logged in to the same account (#726)', () => {
+    const limits = { plan: 'max', windows: [{ id: 'weekly_all', label: 'Weekly', percent: 61, resetsAt: null, scope: null }], daily: [] }
+    const cache = { writes: true, countingSince: '2026-10-12T00:00:00.000Z', windows: [] }
+
+    it('answers with the hub’s own limits, labelled, and asks the machine only for its cache figures', async () => {
+      const { router, local, localAnswers, m1 } = rig()
+      localAnswers['agents.account'] = { loggedIn: true, fingerprint: 'same' }
+      localAnswers['agents.usage'] = { supported: true, usage: limits }
+      m1.answers['agents.account'] = { loggedIn: true, fingerprint: 'same' }
+      m1.answers['agents.usage'] = (p: unknown) => ((p as { limits?: boolean }).limits === false ? { supported: true, usage: null, cache } : { supported: false, reason: 'A running session is required to read usage', usage: null })
+      expect(await router.handle('agents.usage', { tool: 'claude', machine: 'm1' })).toEqual({ supported: true, usage: limits, sameAccountAsHub: true, cache })
+      expect(local.map((c) => c.method)).toEqual(['agents.account', 'agents.usage'])
+      expect(m1.calls).toEqual([
+        { method: 'agents.account', params: { tool: 'claude' } },
+        { method: 'agents.usage', params: { tool: 'claude', limits: false } },
+      ])
+    })
+
+    it('asks the machine for its limits when the accounts differ', async () => {
+      const { router, local, localAnswers, m1 } = rig()
+      localAnswers['agents.account'] = { loggedIn: true, fingerprint: 'mine' }
+      m1.answers['agents.account'] = { loggedIn: true, fingerprint: 'theirs' }
+      m1.answers['agents.usage'] = { supported: true, usage: { ...limits, windows: [] } }
+      expect(await router.handle('agents.usage', { tool: 'claude', machine: 'm1' })).toEqual({ supported: true, usage: { ...limits, windows: [] } })
+      expect(local.map((c) => c.method)).toEqual(['agents.account'])
+      expect(m1.calls.at(-1)).toEqual({ method: 'agents.usage', params: { tool: 'claude' } })
+    })
+
+    it('never takes two logins that do not say their account for the same one', async () => {
+      const { router, localAnswers, m1 } = rig()
+      localAnswers['agents.account'] = { loggedIn: true, fingerprint: null }
+      m1.answers['agents.account'] = { loggedIn: true, fingerprint: null }
+      m1.answers['agents.usage'] = { supported: false, reason: 'Claude Code is not logged in on this computer', usage: null }
+      expect(await router.handle('agents.usage', { tool: 'claude', machine: 'm1' })).toEqual({ supported: false, reason: 'Claude Code is not logged in on this computer', usage: null })
+    })
+
+    it('asks the machine as before when its host does not know the account question, or the hub has no limits of its own to give', async () => {
+      const { router, localAnswers, m1 } = rig()
+      localAnswers['agents.account'] = { loggedIn: true, fingerprint: 'same' }
+      m1.answers['agents.account'] = new Error('Unknown method agents.account')
+      m1.answers['agents.usage'] = { supported: true, usage: limits }
+      expect(await router.handle('agents.usage', { tool: 'claude', machine: 'm1' })).toEqual({ supported: true, usage: limits })
+      m1.answers['agents.account'] = { loggedIn: true, fingerprint: 'same' }
+      localAnswers['agents.usage'] = { supported: false, reason: 'no answer', usage: null }
+      expect(await router.handle('agents.usage', { tool: 'claude', machine: 'm1' })).toEqual({ supported: true, usage: limits })
+    })
+
+    it('leaves a call for this computer alone', async () => {
+      const { router, local, m1 } = rig()
+      await router.handle('agents.usage', { tool: 'claude' })
+      expect(local).toEqual([{ method: 'agents.usage', params: { tool: 'claude' } }])
+      expect(m1.calls).toEqual([])
+    })
+  })
+
   it('refuses a call that mixes two machines rather than passing a stranger’s id on', async () => {
     const { router, m1 } = rig()
     await expect(router.handle('sessions.reorder', { projectId: 'm1.p1', orderedIds: ['m1.a', 'm2.b'] })).rejects.toThrow(/another machine/)

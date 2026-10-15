@@ -5029,6 +5029,7 @@ export class SessionManager {
    */
   async usageFor(
     tool: ToolName,
+    opts: { limits?: boolean } = {},
   ): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null; cache: CacheStats }> {
     /*
      * The cache figures are summed now, on the question, from what this host counted: a sum over a day's requests at
@@ -5037,6 +5038,8 @@ export class SessionManager {
     const cache = this.cacheLedger.stats(tool, (id) => this.meta.get(id)?.name)
     const adapter = this.adapters.get(tool)
     if (!adapter?.listUsage) return { supported: false, reason: `${tool} does not support usage queries`, usage: null, cache }
+    // The hub shows its own limits for this machine (same account, #726): only the figures counted here are wanted
+    if (opts.limits === false) return { supported: true, usage: null, cache }
 
     const hit = this.usageCache.get(tool)
     if (hit && Date.now() - hit.at < 60_000) return { supported: true, usage: hit.snapshot, cache }
@@ -5048,6 +5051,13 @@ export class SessionManager {
     } catch (err) {
       return { supported: false, reason: (err as Error).message, usage: hit?.snapshot ?? null, cache }
     }
+  }
+
+  /** Which account `tool` is logged in to here, as the hub compares it with a linked machine's (#726) */
+  async accountFor(tool: ToolName): Promise<{ loggedIn: boolean | null; fingerprint: string | null }> {
+    const adapter = this.adapters.get(tool)
+    if (!adapter?.account) return { loggedIn: null, fingerprint: null }
+    return adapter.account().catch(() => ({ loggedIn: null, fingerprint: null }))
   }
 
   /**

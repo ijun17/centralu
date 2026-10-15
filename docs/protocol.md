@@ -227,7 +227,7 @@ The judgement logic (core/approval) decides from `kind` alone — a worked examp
 | git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | in prod the same contract via Tauri invoke |
 | fs (dev) | `fs.listDir, fs.readFile, fs.watchProject` | 〃 |
 | store (dev) | `store.loadWorkspace, store.saveWorkspace, store.appendMessages, …` | 〃 |
-| usage | `agents.usage` | the account's limit windows, asked of the tool itself, and the prompt cache over the last hours as the host counted it (`cache`, [agent-host.md](agent-host.md) §6, §6.1) |
+| usage | `agents.usage`, `agents.account` | the account's limit windows, asked of the tool itself, and the prompt cache over the last hours as the host counted it (`cache`, [agent-host.md](agent-host.md) §6, §6.1). `agents.usage { limits: false }` answers the cache alone; a hub's answer for a linked machine carries `sameAccountAsHub: true` when the limits are its own. `agents.account { tool }` is an opaque fingerprint of the login (`{ loggedIn, fingerprint }`) the hub compares with a machine's, never the email (#726). Additive |
 
 The request and response types of the git/fs/store RPCs are **1:1 with the port interfaces**. Deliberate duplication — the port is the original contract, and RPC and Tauri invoke are just two carriers of that contract.
 

@@ -39,7 +39,8 @@ export type Route =
   /** `orMachine`: with no project, the optional `machine` parameter names the machine (a user-folder app of it) */
   | { kind: 'project'; key?: string; params?: ParamsFix; result?: ResultFix; orMachine?: boolean }
   | { kind: 'terminal'; result?: ResultFix }
-  | { kind: 'machine'; result?: ResultFix }
+  /** `sharesAccount`: a tool logged in to the same account here and there reads its limits once, on the hub (`agents.usage`, #726) */
+  | { kind: 'machine'; result?: ResultFix; sharesAccount?: boolean }
   | { kind: 'view'; keys: readonly string[]; result?: ResultFix; orMachine?: boolean }
   | { kind: 'noRemote'; key: 'sessionId' | 'projectId' }
 
@@ -187,7 +188,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   },
   'agents.models': { kind: 'machine' },
   // The sessions the cache figures name are the remote's, so the hub's screen can open them (docs/agent-host.md §6.1)
-  'agents.usage': { kind: 'machine', result: (r, q) => usageResult(r, q) },
+  'agents.usage': { kind: 'machine', result: (r, q) => usageResult(r, q), sharesAccount: true },
+  'agents.account': { kind: 'machine' },
   'projects.add': { kind: 'machine', result: (r, q) => q.project(r) },
   // Made by the host of the machine the project lives on, in its own home and path terms (#515)
   'projects.create': { kind: 'machine', result: (r, q) => q.project(r) },

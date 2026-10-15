@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { UsageSnapshot, UsageWindow } from '@cc/protocol'
 
 /**
@@ -113,4 +114,22 @@ export async function readUsageFromAny(
     }
   }
   throw first instanceof Error ? first : new Error('A running session is required to read usage')
+}
+
+/**
+ * Which account `claude auth status --json` describes, as an opaque fingerprint (#726), or null when it does not say.
+ *
+ * The hub compares its own with a linked machine's to know both share one account's limits. The organisation id alone
+ * is not enough, since a team's members share it and each has their own limits, so the email goes in too; but only
+ * the hash leaves this host, never the email or the organisation id. Null for a login that is not an account's
+ * (an API key, a cloud provider) and for output without an organisation and an email: when it cannot be said, the
+ * two are not taken for the same.
+ */
+export function accountFingerprint(status: unknown): string | null {
+  const s = (status ?? {}) as { loggedIn?: unknown; orgId?: unknown; email?: unknown }
+  if (s.loggedIn !== true) return null
+  const org = str(s.orgId)
+  const email = str(s.email)
+  if (!org || !email) return null
+  return createHash('sha256').update(`claude\0${org}\0${email.toLowerCase()}`).digest('hex').slice(0, 32)
 }

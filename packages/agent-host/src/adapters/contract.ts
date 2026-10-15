@@ -990,6 +990,12 @@ export interface AgentAdapter {
   listUsage?(): Promise<UsageSnapshot>
 
   /**
+   * Which account the tool is logged in to on this host, as an opaque fingerprint (#726); `fingerprint` is null when the
+   * tool does not say. An adapter without it never has its account compared, so a linked machine's usage is read there.
+   */
+  account?(): Promise<{ loggedIn: boolean | null; fingerprint: string | null }>
+
+  /**
    * The models available to choose from, and the reasoning effort levels each supports.
    *
    * Takes no argument because it is the same **account** axis as usage — the answer is the same no

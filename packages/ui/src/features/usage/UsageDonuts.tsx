@@ -7,9 +7,10 @@ import { useStore, usageTools } from '../../store/store.js'
 import { useMachineName, useToolMeta, useTools } from '../../store/selectors.js'
 import { Tooltip } from '../../components/primitives.jsx'
 import { UsagePanel } from './UsagePanel.jsx'
+import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
 import { usageTone, weeklyWindow } from './weekly.js'
 
-type Snap = { usage: UsageSnapshot | null; reason?: string; cache?: CacheStats }
+type Snap = { usage: UsageSnapshot | null; reason?: string; cache?: CacheStats; sameAccount?: boolean }
 
 /**
  * What one machine said about its limits. `live` is null until it has answered which tools are usable there; `snap`
@@ -116,7 +117,7 @@ export function UsageDonuts() {
         const put = (snap: Snap) => patch((g) => ({ snap: { ...g.snap, [tool]: snap } }))
         void platform.agents
           .usage(tool, on)
-          .then((r) => put({ usage: r.usage, reason: r.supported ? undefined : r.reason, cache: r.cache }))
+          .then((r) => put({ usage: r.usage, reason: r.supported ? undefined : r.reason, cache: r.cache, sameAccount: r.sameAccountAsHub }))
           .catch((e: Error) => put({ usage: null, reason: e.message }))
       }
     },
@@ -397,6 +398,17 @@ function Donut({
           <span className="readout mt-1 block">
             {known ? `${w.label}${w.scope ? ` · ${w.scope}` : ''} — ${percent}% used` : 'Weekly usage unknown'}
           </span>
+          {/* Why the numbers equal this computer's, or why there are none: said in the donut's words, never a blank (#726) */}
+          {known && snap?.sameAccount && (
+            <span className="readout block text-ink-faint" data-testid={`usage-donut-same-${id}`}>
+              {SAME_ACCOUNT_LABEL}
+            </span>
+          )}
+          {!known && snap?.reason && (
+            <span className="readout block text-ink-faint" data-testid={`usage-donut-reason-${id}`}>
+              {snap.reason}
+            </span>
+          )}
           {/*
             The prompt cache in one line (docs/agent-host.md §6.1), from the answer the donut already asked for: the
             detail below the donut breaks it down. Absent when the host did not count it (one that predates it).

@@ -8,6 +8,7 @@ import { useStore } from '../../store/store.js'
 import { useToolMeta } from '../../store/selectors.js'
 import { CacheSection } from './CacheSection.jsx'
 import { formatTokens } from './format.js'
+import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
 
 /**
  * Usage (FR-9).
@@ -25,6 +26,7 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
     reason?: string
     usage: UsageSnapshot | null
     cache?: CacheStats
+    sameAccount?: boolean
   }>({ loading: true, usage: null })
   const meta = useToolMeta(tool)
   /*
@@ -43,7 +45,7 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
     setState({ loading: true, usage: null })
     void platform.agents
       .usage(tool, machine ?? undefined)
-      .then((r) => alive && setState({ loading: false, usage: r.usage, reason: r.supported ? undefined : r.reason, cache: r.cache }))
+      .then((r) => alive && setState({ loading: false, usage: r.usage, reason: r.supported ? undefined : r.reason, cache: r.cache, sameAccount: r.sameAccountAsHub }))
       .catch((e: Error) => alive && setState({ loading: false, usage: null, reason: e.message }))
     return () => {
       alive = false
@@ -83,6 +85,12 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
       {plan && (
         <p className="readout mb-3 text-xs text-ink-faint" data-testid="usage-plan">
           {plan} plan
+        </p>
+      )}
+      {/* A linked machine's limits that are this computer's, because one account is signed in to both (#726) */}
+      {state.sameAccount && (
+        <p className="mb-3 text-xs text-ink-faint" data-testid="usage-same-account">
+          {SAME_ACCOUNT_LABEL}
         </p>
       )}
 

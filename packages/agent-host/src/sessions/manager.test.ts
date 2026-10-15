@@ -2914,6 +2914,21 @@ describe('while-alive facts are carried in the list', () => {
     expect(m.limit).toBeNull()
   })
 
+  it('answers the cache figures alone when the hub shows its own limits for this machine, and says which account it is logged in to (#726)', async () => {
+    let reads = 0
+    Object.assign(adapter, {
+      listUsage: async () => (reads++, { plan: 'max', windows: [], daily: [] }),
+      account: async () => ({ loggedIn: true, fingerprint: 'abc' }),
+    })
+    expect(await rpc('agents.usage', { tool: 'claude', limits: false })).toMatchObject({ supported: true, usage: null, cache: expect.anything() })
+    expect(reads).toBe(0)
+    expect(await rpc('agents.usage', { tool: 'claude' })).toMatchObject({ supported: true, usage: { plan: 'max' } })
+    expect(reads).toBe(1)
+    expect(await rpc('agents.account', { tool: 'claude' })).toEqual({ loggedIn: true, fingerprint: 'abc' })
+    // A tool whose adapter does not say answers unknown, not an error
+    expect(await rpc('agents.account', { tool: 'codex' })).toEqual({ loggedIn: null, fingerprint: null })
+  })
+
   it('counts each model request into the prompt cache figures agents.usage answers with (docs/agent-host.md §6.1)', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }

@@ -1,5 +1,7 @@
 import { query, resolveSettings, filterEscalatingDefaultMode, type McpServerConfig, type PermissionMode, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
@@ -41,6 +43,7 @@ import type {
   Question,
   QuestionAnswer,
   ToolDescriptor,
+  UsageSnapshot,
 } from '@cc/protocol'
 import { NO_PATH } from '@cc/protocol'
 import { dataRoot } from '../../data-dir.js'
@@ -50,7 +53,7 @@ import { installedCliVersion } from '../../cli-version.js'
 import { ClaudeLinks, ClaudePlaceholderError, windowsStart, type ExeFs } from './exe-link.js'
 import { StartGate } from './start-gate.js'
 import { deleteClaudeSession, forkClaudeSession, listClaudeSessions, readClaudeHistory, readClaudeTranscriptTail } from './history.js'
-import { readUsageFromAny, type UsageQuery } from './usage.js'
+import { accountFingerprint, readUsageFromAny, type UsageQuery } from './usage.js'
 import { ORCHESTRATOR_MCP_NAME, orchestratorMcp } from './orchestrator-mcp.js'
 import { appProxy, type AppProxy } from './app-proxy.js'
 import { APP_MCP_PREFIX } from '../../apps/contract.js'
@@ -63,6 +66,11 @@ import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { withoutCrossSessionMessaging } from './cross-session.js'
 
 const exec = promisify(execFile)
+
+/** How long a usage probe may take to get its answer, and the wait between its asks (#726) */
+const PROBE_USAGE_MS = 12_000
+const PROBE_USAGE_RETRY_MS = 500
+const ACCOUNT_CACHE_MS = 60_000
 
 /**
  * The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself. One
@@ -1483,7 +1491,7 @@ class ClaudeSession implements SessionHandle {
  * quo. An old CLI without an `auth` subcommand prints an error message instead of JSON, and that
  * means "unknown", not "not logged in".
  */
-async function claudeLoggedIn(bin: ToolLaunch): Promise<boolean> {
+async function claudeAuthStatus(bin: ToolLaunch): Promise<unknown> {
   let out = ''
   try {
     out = (await exec(bin.command, [...bin.args, 'auth', 'status', '--json'], { timeout: 5000 })).stdout
@@ -1492,11 +1500,15 @@ async function claudeLoggedIn(bin: ToolLaunch): Promise<boolean> {
     out = typeof (e as { stdout?: unknown }).stdout === 'string' ? (e as { stdout: string }).stdout : ''
   }
   try {
-    const flag = (JSON.parse(out) as { loggedIn?: unknown }).loggedIn
-    return typeof flag === 'boolean' ? flag : true
+    return JSON.parse(out) as unknown
   } catch {
-    return true // If it is not JSON, this CLI does not know about auth status — when unknown, pass it through.
+    return null // If it is not JSON, this CLI does not know about auth status.
   }
+}
+
+async function claudeLoggedIn(bin: ToolLaunch): Promise<boolean> {
+  const flag = (await claudeAuthStatus(bin) as { loggedIn?: unknown } | null)?.loggedIn
+  return typeof flag === 'boolean' ? flag : true // When unknown, pass it through.
 }
 
 /** What a test can change about how the adapter starts Claude; the host passes nothing */
@@ -1690,13 +1702,72 @@ export class ClaudeAdapter implements AgentAdapter {
   /**
    * Account usage (FR-9).
    *
-   * **This can only be asked about while a session is alive** — the SDK puts this method only on
-   * a Query. It throws when there is no session at all, and the manager degrades with a reason.
+   * **The SDK puts this method only on a Query**, so a running session answers it. With none running, a short-lived
+   * probe session is started for the read and stopped right after (#726): it sends no message, so nothing is billed,
+   * and the manager keeps the answer for a minute. Without it a linked machine nobody had a session on showed no usage
+   * at all.
    */
   async listUsage() {
     const live = [...ClaudeAdapter.liveQueries].reverse()
-    if (live.length === 0) throw new Error('A running session is required to read usage')
-    return readUsageFromAny(live.map((query) => ({ query, sessionId: ClaudeAdapter.querySessions.get(query) ?? null })))
+    if (live.length > 0) return readUsageFromAny(live.map((query) => ({ query, sessionId: ClaudeAdapter.querySessions.get(query) ?? null })))
+    // Asked twice at once, the second waits for the first's probe instead of starting another process
+    return (this.probing ??= this.probeUsage().finally(() => (this.probing = null)))
+  }
+  private probing: Promise<UsageSnapshot> | null = null
+
+  private async probeUsage(): Promise<UsageSnapshot> {
+    // Not signed in: a process would only fail to start a reading, and say less than this does
+    if ((await this.account()).loggedIn === false) throw new Error('Claude Code is not logged in on this computer')
+    const dir = await mkdtemp(join(tmpdir(), 'cc-usage-'))
+    let probe: SessionHandle | null = null
+    try {
+      probe = await this.createSession({ sessionId: `usage-probe-${randomUUID()}`, cwd: dir, permissionPreset: 'safe', noSettingFiles: true, noCodeIntelligence: true }, () => {})
+      /*
+       * The query exists at once but the CLI behind it is still starting; asked too early it fails or stays quiet
+       * (smoke-usage waits 7 s). Asked again until the bound, every ask bounded by readUsageFromAny's.
+       */
+      const until = Date.now() + PROBE_USAGE_MS
+      let failure: unknown
+      for (;;) {
+        const query = ClaudeAdapter.lastQuery
+        if (query) {
+          try {
+            return await readUsageFromAny([{ query, sessionId: 'usage probe' }], { log: () => {} })
+          } catch (e) {
+            failure = e
+          }
+        }
+        if (Date.now() >= until) break
+        await new Promise((r) => setTimeout(r, PROBE_USAGE_RETRY_MS))
+      }
+      throw failure instanceof Error ? failure : new Error('Claude Code did not answer a usage reading in time')
+    } finally {
+      await probe?.dispose().catch(() => {})
+      await rm(dir, { recursive: true, force: true }).catch(() => {})
+    }
+  }
+
+  /** Which account Claude Code is logged in to here, from the CLI itself (`claude auth status`), cached a minute (#726) */
+  async account(): Promise<{ loggedIn: boolean | null; fingerprint: string | null }> {
+    if (this.accountCache && Date.now() - this.accountCache.at < ACCOUNT_CACHE_MS) return this.accountCache.value
+    let value: { loggedIn: boolean | null; fingerprint: string | null }
+    try {
+      const status = await claudeAuthStatus(this.statusLaunch())
+      const flag = (status as { loggedIn?: unknown } | null)?.loggedIn
+      value = { loggedIn: typeof flag === 'boolean' ? flag : null, fingerprint: accountFingerprint(status) }
+    } catch {
+      value = { loggedIn: null, fingerprint: null }
+    }
+    this.accountCache = { value, at: Date.now() }
+    return value
+  }
+  private accountCache: { value: { loggedIn: boolean | null; fingerprint: string | null }; at: number } | null = null
+
+  /** The program the sign-in is asked of: what sessions start (on Windows the link), else the one on PATH */
+  private statusLaunch(): ToolLaunch {
+    const exe = this.launch.windows ? this.launch.executable() : null
+    if (exe && /\.exe$/i.test(exe)) return { command: this.launch.links.prepare(exe).path, args: [] }
+    return launchFor(whichTool('claude') ?? 'claude')
   }
 
   async listModels() {

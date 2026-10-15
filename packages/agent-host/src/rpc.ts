@@ -688,7 +688,11 @@ export function createRpcHandler(
     },
     'agents.commands': async (p) =>
       mgr.listCommands(RpcMethods['agents.commands'].params.parse(p).sessionId),
-    'agents.usage': async (p) => mgr.usageFor(RpcMethods['agents.usage'].params.parse(p).tool),
+    'agents.usage': async (p) => {
+      const { tool, limits } = RpcMethods['agents.usage'].params.parse(p)
+      return mgr.usageFor(tool, { limits })
+    },
+    'agents.account': async (p) => mgr.accountFor(RpcMethods['agents.account'].params.parse(p).tool),
     'files.search': async (p) => {
       const { projectId, query, limit } = RpcMethods['files.search'].params.parse(p)
       return searchFiles(mgr.cwdOfProject(projectId), query, limit, mgr.gitTrust(projectId))

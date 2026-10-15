@@ -2423,6 +2423,23 @@ Usage is an **account** property, not a session or directory one, which is why `
 takes no arguments — the answer is the same whichever folder you ask from. Only subscription
 limits are in scope; metered credits are not.
 
+**With no session running (#726).** The Claude SDK puts the usage call only on a running session's query, so a host
+nobody had a session on (typically a linked machine) used to answer "A running session is required to read usage" and
+its meter stayed blank. `listUsage()` now starts a **probe session** for the read when none is live: a Claude process in
+a temporary folder that is sent no message (nothing is billed), read until it answers (about 1.5 s measured; bounded at
+12 s) and stopped right after. Two askers at once share one probe, and the manager's one-minute cache keeps a refresh
+from starting another. Not logged in: no probe, the reason says so. Codex already reads usage with a short-lived client
+and has no such gap.
+
+**Same account on the hub and a linked machine (#726).** Each host answers `agents.account { tool }` with a fingerprint
+of the login it sees (`claude auth status --json`: a hash of the organisation id and the lower-cased email; the
+organisation alone would equate a team's members, who each have limits of their own). Only the hash leaves a host, never
+the email. When the hub's and the machine's fingerprints are equal, the hub answers `agents.usage { machine }` with its
+own limits and `sameAccountAsHub: true`, and asks the machine only for its prompt cache figures (`limits: false`), since
+those count the machine's own requests. Otherwise, or when the machine's host predates `agents.account`, the machine is
+asked as usual and probes if it has no session. The screen says "Same account as this computer", or the one-line reason
+when no reading could be made, in place of a blank meter.
+
 This section used to describe something else entirely: a chokidar watcher parsing
 `~/.claude/projects/**` and `~/.codex/sessions/**` incrementally, writing `usage_facts` rows
 that a `usage.weekly` RPC would read, with aggregation in `core/usage`. **None of it exists** —

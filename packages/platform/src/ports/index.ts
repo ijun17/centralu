@@ -222,12 +222,13 @@ export interface AgentPort {
   commands(sessionId: string): Promise<{ ready: boolean; commands: CommandInfo[] }>
   /**
    * Account usage and limits (FR-9). Handles only subscription limits. Also what the prompt cache did lately, as that
-   * machine's host counted it (`cache`, absent from a host that predates it)
+   * machine's host counted it (`cache`, absent from a host that predates it).
+   * `sameAccountAsHub`: for a linked machine, the limits are this computer's because both are logged in to one account (#726)
    */
   usage(
     tool: ToolName,
     machine?: MachineRef,
-  ): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null; cache?: CacheStats }>
+  ): Promise<{ supported: boolean; reason?: string; usage: UsageSnapshot | null; cache?: CacheStats; sameAccountAsHub?: boolean }>
   detect(machine?: MachineRef): Promise<ToolStatus[]>
   /**
    * The agent CLIs installed now, and whether idle sessions move to a newer one by themselves (#297). `force: false`
