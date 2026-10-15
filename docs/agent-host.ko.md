@@ -163,7 +163,7 @@ It never creates a session in another project (#614, owner decision 2026-10-13).
 person's action in that project; `start_agent` creates only within its caller's own project. The global
 orchestrator, which belongs to no project, retains its own create-session tool.
 
-What one call does (`SessionManager.askProject`):
+호출 한 번이 하는 일(`SessionManager.askProject`, 실제로는 `sessions/delegation-flow.ts`의 `DelegationFlow`, #428):
 
 1. **The project.** Name or id of another registered project. Its own project is refused; an unknown
    name lists the other projects. Under `safe`/`normal`, an untrusted caller cannot ask, and a child
@@ -242,7 +242,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 있는지 확인한다. 모르는 이름이면 설치된 도구 목록을 담은 오류를 반환하므로, 어댑터를 추가해도
 이 스키마를 고칠 필요가 없다.
 
-`start_agent` 한 번(`SessionManager.startAgent`):
+`start_agent` 한 번(`SessionManager.startAgent`, 역시 `DelegationFlow`):
 
 1. **Who may.** An ordinary session (`reader` profile) of a trusted project (#382's rule), not one marked `askedBy`:
    depth one, so a child cannot start agents, and neither can a session handling an active ask_project task.

@@ -183,7 +183,7 @@ It never creates a session in another project (#614, owner decision 2026-10-13).
 person's action in that project; `start_agent` creates only within its caller's own project. The global
 orchestrator, which belongs to no project, retains its own create-session tool.
 
-What one call does (`SessionManager.askProject`):
+What one call does (`SessionManager.askProject`, which runs `DelegationFlow` in `sessions/delegation-flow.ts`, #428):
 
 1. **The project.** Name or id of another registered project, on this computer or on a linked machine
    (§1.2.4). Its own project is refused; an unknown name lists the other projects, each with the machine
@@ -331,7 +331,7 @@ completion watcher is reused, or a temporary event reader watches the person's t
 is removed when the observation ends. These observations do not add a `waitsOn` dependency,
 prevent an idle caller from sleeping, or stop the target when the caller is interrupted.
 
-What one `start_agent` call does (`SessionManager.startAgent`), with the refusal/card rules
+What one `start_agent` call does (`SessionManager.startAgent`, also `DelegationFlow`), with the refusal/card rules
 below retained for `safe` and `normal`:
 
 1. **Who may.** An ordinary session (`reader` profile) of a trusted project (#382's rule), not one marked `askedBy`:
