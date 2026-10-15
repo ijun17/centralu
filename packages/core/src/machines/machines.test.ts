@@ -150,6 +150,12 @@ describe('the version prompt (#82, plan §4)', () => {
     expect(p.text).toMatch(/a local build; 0\.1\.0-beta\.13 is what gets installed there/)
   })
 
+  it('names the .cmd shims in the command to run on a PowerShell machine (#688)', () => {
+    const win = versionPrompt(machine({ status: 'connected', versions: versions({}), shell: 'powershell', command: '~/bin/centralu' }))!
+    expect(win).toMatchObject({ remoteCommand: 'npm.cmd i -g centralu@0.1.0-beta.12', centralu: 'centralu.cmd' })
+    expect(versionPrompt(machine({ status: 'connected', versions: versions({}) }))).toMatchObject({ remoteCommand: 'npm i -g centralu@0.1.0-beta.12', centralu: 'centralu' })
+  })
+
   it('no prompt while a connected link has nothing to align', () => {
     expect(versionPrompt(machine({ status: 'connected', versions: versions({ older: null }) }))).toBeNull()
     expect(versionPrompt(machine({ status: 'unreachable', versions: versions({}) }))).toBeNull()

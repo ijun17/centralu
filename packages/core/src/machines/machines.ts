@@ -127,6 +127,8 @@ export type VersionPrompt = {
   updateHere: boolean
   /** One sentence for the person */
   text: string
+  /** The command to restart the remote's host with, in its shell's terms: `centralu`, or `centralu.cmd` on PowerShell (#688) */
+  centralu: string
   /**
    * The link waits for the person (`versions_differ`: another protocol). False when it is connected
    * and the update is only offered: one protocol connects whatever the app versions (#689)
@@ -134,7 +136,7 @@ export type VersionPrompt = {
   held: boolean
 }
 
-export function versionPrompt(m: Pick<MachineInfo, 'name' | 'status' | 'versions'> & Partial<Pick<MachineInfo, 'command'>>): VersionPrompt | null {
+export function versionPrompt(m: Pick<MachineInfo, 'name' | 'status' | 'versions'> & Partial<Pick<MachineInfo, 'command' | 'shell'>>): VersionPrompt | null {
   const v = m.versions
   if (!v) return null
   const held = m.status === 'versions_differ'
@@ -145,7 +147,7 @@ export function versionPrompt(m: Pick<MachineInfo, 'name' | 'status' | 'versions
   const hubRelease = releaseOf(hub)
   const remote = v.remote.version
   const target = v.older === 'hub' ? remote : v.older === 'remote' ? hubRelease : null
-  const remoteCommand = v.older === 'remote' ? `npm i -g centralu@${hubRelease}` : null
+  const remoteCommand = v.older === 'remote' ? `${shims(m).npm} i -g centralu@${hubRelease}` : null
   const updateHere = v.older === 'remote' && !v.hub.dev && !m.command
   const or = held ? 'connect anyway' : 'keep it as it is'
   let text: string
@@ -159,7 +161,7 @@ export function versionPrompt(m: Pick<MachineInfo, 'name' | 'status' | 'versions
   } else {
     text = `${m.name} runs Centralu ${remote} and this computer runs ${hub}${v.sameChannel ? '' : ', from another release channel'}. Align them, or ${or}.`
   }
-  return { compatible: v.compatible, older: v.older, target, remoteCommand, updateHere, text, held }
+  return { compatible: v.compatible, older: v.older, target, remoteCommand, updateHere, text, held, centralu: shims(m).centralu }
 }
 
 /** Plural for counts in a sentence: "1 terminal", "2 terminals" */
