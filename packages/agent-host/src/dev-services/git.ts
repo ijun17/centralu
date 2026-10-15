@@ -593,9 +593,10 @@ export type BranchPr = {
  * Neither branch throws — this signal is the basis for one badge, not a precondition for the
  * session list.
  */
-export async function gitBranchPr(projectCwd: string, branch: string): Promise<BranchPr | 'unavailable' | null> {
+export async function gitBranchPr(projectCwd: string, branch: string, signal?: AbortSignal): Promise<BranchPr | 'unavailable' | null> {
   try {
-    const { stdout } = await exec(programPath('gh'), ['pr', 'view', branch, '--json', 'number,state,url,headRefOid'], { cwd: projectCwd, ...OK })
+    // An abort ends gh (the host stopping, #368): it works in the project's folder, which a test removes right after
+    const { stdout } = await exec(programPath('gh'), ['pr', 'view', branch, '--json', 'number,state,url,headRefOid'], { cwd: projectCwd, ...OK, signal })
     const j = JSON.parse(stdout) as { number?: unknown; state?: unknown; url?: unknown; headRefOid?: unknown }
     if (typeof j.number !== 'number' || typeof j.state !== 'string' || typeof j.url !== 'string') return null
     return {

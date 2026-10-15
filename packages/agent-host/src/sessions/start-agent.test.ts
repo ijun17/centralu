@@ -1169,6 +1169,8 @@ describe('starting another agent in the same project', () => {
       await w.mgr.agentSession(s, { sessionId: c.id, action: 'wait' })
       await w.mgr.detachAll()
       const next = new SessionManager(w.store, w.adapters, () => {})
+      // Its startup merge check would otherwise ask the machine's gh about the branch (#415)
+      next.prLookup = async () => null
       try {
         expect(next.listSessions().find((row) => row.id === c.id)?.worktree).toEqual(worktree)
         // The folder is gone, so there is nothing to lose: the session goes to the trash (#715)
@@ -1177,6 +1179,39 @@ describe('starting another agent in the same project', () => {
         expect(next.listSessions().some((row) => row.id === c.id)).toBe(false)
       } finally {
         await next.disposeAll()
+      }
+    })
+
+    /*
+     * A manager checks whether its worktree branches were merged when it starts, without waiting, and that check runs
+     * gh in the project's folder. The check used to outlive the manager: on windows-2022, where gh is installed and
+     * can take 10 s, removing the project right after the test failed with EPERM (#368).
+     */
+    it('a manager let go of leaves no merge check working in the project folder (#368)', async () => {
+      repo()
+      allowProject()
+      const s = await session()
+      await w.mgr.startAgent(s, { task: 'worktree task', branch: 'feat/checked', wait: false })
+      await w.mgr.detachAll()
+      for (const letGo of ['disposeAll', 'detachAll'] as const) {
+        const next = new SessionManager(w.store, w.adapters, () => {})
+        let asked = false
+        let stopped: boolean | undefined
+        let answered = false
+        // A gh that answers only once it is told to stop, and a moment after that
+        next.prLookup = (_cwd, _branch, signal) => new Promise((resolve) => {
+          asked = true
+          stopped = signal?.aborted ?? false
+          signal?.addEventListener('abort', () => setTimeout(() => {
+            stopped = true
+            answered = true
+            resolve(null)
+          }, 50))
+        })
+        await w.until(() => asked, 10_000)
+        await next[letGo]()
+        expect(stopped).toBe(true)
+        expect(answered).toBe(true)
       }
     })
 

@@ -1044,7 +1044,7 @@ export class SessionManager {
     for (const pid of new Set(
       [...this.meta.values()].filter((s) => s.worktree && s.projectId).map((s) => s.projectId as string),
     )) {
-      void this.refreshMergedWorktrees(pid).catch(() => {})
+      this.checkMergedInBackground(pid)
     }
   }
 
@@ -1716,7 +1716,7 @@ export class SessionManager {
      * terminal is caught on the next refresh too. It does not block the response: the badge flows
      * separately as an event.
      */
-    void this.refreshMergedWorktrees(projectId).catch(() => {})
+    this.checkMergedInBackground(projectId)
     return this.projectInfo(p.id, p.path)
   }
 
@@ -9926,8 +9926,24 @@ export class SessionManager {
    * measure it — a test swaps this field out instead. prPollMs is also a field for the same reason (a test
    * sets it to 0).
    */
-  prLookup: (projectCwd: string, branch: string) => Promise<BranchPr | 'unavailable' | null> = gitBranchPr
+  prLookup: (projectCwd: string, branch: string, signal?: AbortSignal) => Promise<BranchPr | 'unavailable' | null> = gitBranchPr
   prPollMs = 120_000
+  /**
+   * **The merge checks nobody awaits, so `disposeAll` can end them** (#368). Started at startup and on every project
+   * refresh, each runs git, and gh where it is installed, in the project's folder. They used to outlive the manager:
+   * a test that disposed a manager and removed its temporary project right away met a gh still running in that folder,
+   * which Windows refuses to remove (EPERM on windows-2022, #368). `disposeAll` and `detachAll` abort the gh call
+   * and wait for the rest; a check stops at its next session once either has begun.
+   */
+  private mergeChecks = new Set<Promise<void>>()
+  private mergeChecksStop = new AbortController()
+
+  private checkMergedInBackground(projectId: string): void {
+    const check: Promise<void> = this.refreshMergedWorktrees(projectId)
+      .catch(() => {})
+      .finally(() => this.mergeChecks.delete(check))
+    this.mergeChecks.add(check)
+  }
   private prCheckedAt = new Map<string, number>()
   /** A one-way switch so a machine with no gh does not hit ENOENT on every single sweep */
   private ghAvailable = true
@@ -9951,6 +9967,7 @@ export class SessionManager {
     // then
     const trunk = this.trunkOf(projectId) ?? 'HEAD'
     for (const m of this.meta.values()) {
+      if (this.disposing || this.handingOver) return
       if (m.projectId !== projectId || !m.worktree?.base || m.worktreeMerged) continue
       let merged = await gitBranchMerged(cwd, m.worktree.branch, m.worktree.base, trunk).catch(() => false)
       /*
@@ -9963,12 +9980,12 @@ export class SessionManager {
        * network call, a per-session TTL applies (this sweep runs every time a turn ends), and once gh
        * itself is missing (ENOENT), this process never asks again — the answer to that cannot change either.
        */
-      if (!merged && this.ghAvailable) {
+      if (!merged && this.ghAvailable && !this.disposing && !this.handingOver) {
         const now = Date.now()
         // Not for a session deleted during the git check above: its entry would outlive it (#392)
         if (this.meta.get(m.id) === m && now - (this.prCheckedAt.get(m.id) ?? 0) >= this.prPollMs) {
           this.prCheckedAt.set(m.id, now)
-          const pr = await this.prLookup(cwd, m.worktree.branch).catch(() => null)
+          const pr = await this.prLookup(cwd, m.worktree.branch, this.mergeChecksStop.signal).catch(() => null)
           if (pr === 'unavailable') {
             this.ghAvailable = false
             // Logs it once, at the end — without this, "why is the PR chip never showing up" becomes a
@@ -10208,6 +10225,8 @@ export class SessionManager {
     // So does a start waiting for memory (#686)
     this.memoryGate?.close()
     this.watchers.close()
+    // Ends a merge check's gh; the check itself is waited for with the processes below (#368)
+    this.mergeChecksStop.abort()
     for (const readers of this.turnObservers.values()) for (const observer of readers) observer.fail(new Error('Centralu is stopping'))
     this.appsHub?.rt.attachBrokerHost(null)
     for (const run of [...this.agentRuns.values()]) run.fail(new Error('Centralu is shutting down'))
@@ -10222,7 +10241,8 @@ export class SessionManager {
     for (const [id, run] of this.streams) this.flushStream(id, run)
     // Even if one fails, the rest are still cleaned up — one rejection blocking the whole cleanup during
     // shutdown would leave orphans behind
-    await Promise.allSettled([...this.handles.values()].map((h) => h.dispose()))
+    // No merge check's git or gh is left working in a project's folder once this returns (#368)
+    await Promise.allSettled([...[...this.handles.values()].map((h) => h.dispose()), ...this.mergeChecks])
     // The closed processes get a moment to leave on their own before the host's exit takes them along (#353)
     await Promise.allSettled([...this.adapters.values()].map((a) => a.settle?.()))
     // Closed once the processes are down, so their last deltas grow the open rows instead of opening new ones (#213)
@@ -10250,6 +10270,8 @@ export class SessionManager {
     this.appsHub?.rt.attachBrokerHost(null)
     // The kept turns go on under the next host, which owes their reports (#646); failing the waits here must not report
     this.handingOver = true
+    // The next host checks merges again at its start; this one's gh ends, and its check is waited for below (#368)
+    this.mergeChecksStop.abort()
     // A paused report's wait is the next host's, which starts it again on adoption (#721)
     this.stopSettlingPausedReports()
     // A start waiting for memory stays stored for the next host (#686)
@@ -10262,7 +10284,7 @@ export class SessionManager {
     this.appQuestions.clear()
     this.appAccess?.dispose()
     this.appsHub?.dispose()
-    await Promise.allSettled([...this.handles.values()].map((h) => (h.detach ? h.detach() : h.dispose())))
+    await Promise.allSettled([...[...this.handles.values()].map((h) => (h.detach ? h.detach() : h.dispose())), ...this.mergeChecks])
     for (const [id, run] of this.streams) this.flushStream(id, run)
     for (const id of [...this.streams.keys()]) this.closeStream(id)
     this.handles.clear()
