@@ -1,0 +1,342 @@
+{
+ "mid": {
+  "version": 54,
+  "deferred": [
+   3,
+   11,
+   13,
+   21,
+   28,
+   32,
+   40
+  ],
+  "minReader": 0
+ },
+ "userVersion": 54,
+ "master": [
+  {
+   "type": "index",
+   "name": "idx_app_runs_app",
+   "tbl_name": "app_runs",
+   "sql": "CREATE INDEX idx_app_runs_app ON app_runs(app_id, project_id, created_at)"
+  },
+  {
+   "type": "index",
+   "name": "idx_app_runs_parent",
+   "tbl_name": "app_runs",
+   "sql": "CREATE INDEX idx_app_runs_parent ON app_runs(parent_run_id)"
+  },
+  {
+   "type": "index",
+   "name": "idx_sessions_project",
+   "tbl_name": "sessions",
+   "sql": "CREATE INDEX idx_sessions_project ON sessions(project_id)"
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_agent_start_requests_1",
+   "tbl_name": "agent_start_requests",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_app_permissions_1",
+   "tbl_name": "app_permissions",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_app_run_failures_1",
+   "tbl_name": "app_run_failures",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_app_runs_1",
+   "tbl_name": "app_runs",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_app_settings_1",
+   "tbl_name": "app_settings",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_command_cache_1",
+   "tbl_name": "command_cache",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_commit_sessions_1",
+   "tbl_name": "commit_sessions",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_delegated_turns_1",
+   "tbl_name": "delegated_turns",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_grid_layout_1",
+   "tbl_name": "grid_layout",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_grid_panels_1",
+   "tbl_name": "grid_panels",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_linked_machines_1",
+   "tbl_name": "linked_machines",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_linked_machines_2",
+   "tbl_name": "linked_machines",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_machine_headers_1",
+   "tbl_name": "machine_headers",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_messages_1",
+   "tbl_name": "messages",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_project_consents_1",
+   "tbl_name": "project_consents",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_projects_1",
+   "tbl_name": "projects",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_projects_2",
+   "tbl_name": "projects",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_queued_requests_1",
+   "tbl_name": "queued_requests",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_report_marks_1",
+   "tbl_name": "report_marks",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_sessions_1",
+   "tbl_name": "sessions",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_subagent_messages_1",
+   "tbl_name": "subagent_messages",
+   "sql": null
+  },
+  {
+   "type": "index",
+   "name": "sqlite_autoindex_usage_facts_1",
+   "tbl_name": "usage_facts",
+   "sql": null
+  },
+  {
+   "type": "table",
+   "name": "agent_start_requests",
+   "tbl_name": "agent_start_requests",
+   "sql": "CREATE TABLE agent_start_requests (\n              request_id        TEXT PRIMARY KEY,\n              caller_session_id TEXT NOT NULL,\n              request           TEXT NOT NULL,\n              asked_at          INTEGER NOT NULL\n            )"
+  },
+  {
+   "type": "table",
+   "name": "app_permissions",
+   "tbl_name": "app_permissions",
+   "sql": "CREATE TABLE app_permissions (\n              app_key    TEXT NOT NULL,\n              project_id TEXT,\n              capability TEXT NOT NULL,\n              text       TEXT NOT NULL,\n              decision   TEXT NOT NULL,\n              uses_stamp TEXT NOT NULL,\n              decided_at INTEGER NOT NULL,\n              PRIMARY KEY (app_key, capability)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "app_run_failures",
+   "tbl_name": "app_run_failures",
+   "sql": "CREATE TABLE app_run_failures (\n              run_id     TEXT PRIMARY KEY,\n              project_id TEXT,\n              app_id     TEXT NOT NULL,\n              args       TEXT NOT NULL,\n              result     TEXT,\n              created_at INTEGER NOT NULL\n            )"
+  },
+  {
+   "type": "table",
+   "name": "app_runs",
+   "tbl_name": "app_runs",
+   "sql": "CREATE TABLE app_runs (\n              id                TEXT PRIMARY KEY,\n              project_id        TEXT,\n              app_id            TEXT NOT NULL,\n              tool              TEXT NOT NULL,\n              caller_kind       TEXT NOT NULL,\n              caller_session_id TEXT,\n              parent_run_id     TEXT,\n              status            TEXT NOT NULL,\n              duration_ms       INTEGER,\n              args_digest       TEXT NOT NULL,\n              args_summary      TEXT NOT NULL,\n              error             TEXT,\n              created_at        INTEGER NOT NULL\n            , kind TEXT NOT NULL DEFAULT 'tool', session_id TEXT, tokens_in INTEGER, tokens_out INTEGER)"
+  },
+  {
+   "type": "table",
+   "name": "app_settings",
+   "tbl_name": "app_settings",
+   "sql": "CREATE TABLE app_settings (\n    key   TEXT PRIMARY KEY,\n    value TEXT NOT NULL\n  )"
+  },
+  {
+   "type": "table",
+   "name": "approval_rules",
+   "tbl_name": "approval_rules",
+   "sql": "CREATE TABLE approval_rules (\n      id         INTEGER PRIMARY KEY AUTOINCREMENT,\n      scope      TEXT NOT NULL,\n      project_id TEXT,\n      session_id TEXT,\n      matcher    TEXT NOT NULL,\n      decision   TEXT NOT NULL,\n      created_at INTEGER NOT NULL\n    )"
+  },
+  {
+   "type": "table",
+   "name": "command_cache",
+   "tbl_name": "command_cache",
+   "sql": "CREATE TABLE command_cache (\n              tool TEXT NOT NULL,\n              cwd TEXT NOT NULL,\n              commands TEXT NOT NULL,\n              updated_at INTEGER NOT NULL,\n              PRIMARY KEY (tool, cwd)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "commit_sessions",
+   "tbl_name": "commit_sessions",
+   "sql": "CREATE TABLE commit_sessions (\n  project_id TEXT NOT NULL,\n  sha        TEXT NOT NULL,\n  session_id TEXT NOT NULL,\n  ts         INTEGER NOT NULL,\n  PRIMARY KEY (project_id, sha)\n)"
+  },
+  {
+   "type": "table",
+   "name": "delegated_turns",
+   "tbl_name": "delegated_turns",
+   "sql": "CREATE TABLE delegated_turns (\n              session_id        TEXT PRIMARY KEY,\n              caller_session_id TEXT NOT NULL,\n              started_at        INTEGER NOT NULL,\n              told_cards        TEXT NOT NULL DEFAULT '',\n              turn_id           TEXT NOT NULL DEFAULT ''\n            )"
+  },
+  {
+   "type": "table",
+   "name": "grid_layout",
+   "tbl_name": "grid_layout",
+   "sql": "CREATE TABLE grid_layout (\n                panel_key  TEXT PRIMARY KEY,\n                kind       TEXT NOT NULL CHECK (kind IN ('session', 'app')),\n                session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,\n                project_id TEXT,\n                app_id     TEXT,\n                position   INTEGER NOT NULL\n              , span_cols INTEGER, span_rows INTEGER, remote_session_id TEXT, remote_app_id TEXT, app_machine TEXT)"
+  },
+  {
+   "type": "table",
+   "name": "grid_panels",
+   "tbl_name": "grid_panels",
+   "sql": "CREATE TABLE grid_panels (\n              session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,\n              position   INTEGER NOT NULL\n            )"
+  },
+  {
+   "type": "table",
+   "name": "linked_machines",
+   "tbl_name": "linked_machines",
+   "sql": "CREATE TABLE linked_machines (\n              id                TEXT PRIMARY KEY,\n              name              TEXT NOT NULL,\n              ssh_target        TEXT NOT NULL,\n              shell             TEXT NOT NULL DEFAULT 'posix',\n              wsl_distro        TEXT,\n              command           TEXT,\n              slot              INTEGER NOT NULL UNIQUE,\n              added_at          INTEGER NOT NULL,\n              accepted_versions TEXT\n            )"
+  },
+  {
+   "type": "table",
+   "name": "machine_headers",
+   "tbl_name": "machine_headers",
+   "sql": "CREATE TABLE machine_headers (\n              machine_id TEXT NOT NULL REFERENCES linked_machines(id) ON DELETE CASCADE,\n              kind       TEXT NOT NULL CHECK (kind IN ('session', 'project')),\n              item_id    TEXT NOT NULL,\n              info       TEXT NOT NULL,\n              position   INTEGER NOT NULL DEFAULT 0,\n              PRIMARY KEY (machine_id, kind, item_id)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "messages",
+   "tbl_name": "messages",
+   "sql": "CREATE TABLE messages (\n      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,\n      seq        INTEGER NOT NULL,\n      role       TEXT NOT NULL,\n      kind       TEXT NOT NULL,\n      payload    TEXT NOT NULL,\n      ts         INTEGER NOT NULL,\n      PRIMARY KEY (session_id, seq)\n    )"
+  },
+  {
+   "type": "table",
+   "name": "messages_fts",
+   "tbl_name": "messages_fts",
+   "sql": "CREATE VIRTUAL TABLE messages_fts USING fts5(\n          body, session_id UNINDEXED, seq UNINDEXED, tokenize='trigram'\n        )"
+  },
+  {
+   "type": "table",
+   "name": "messages_fts_config",
+   "tbl_name": "messages_fts_config",
+   "sql": "CREATE TABLE 'messages_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+  },
+  {
+   "type": "table",
+   "name": "messages_fts_content",
+   "tbl_name": "messages_fts_content",
+   "sql": "CREATE TABLE 'messages_fts_content'(id INTEGER PRIMARY KEY, c0, c1, c2)"
+  },
+  {
+   "type": "table",
+   "name": "messages_fts_data",
+   "tbl_name": "messages_fts_data",
+   "sql": "CREATE TABLE 'messages_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+  },
+  {
+   "type": "table",
+   "name": "messages_fts_docsize",
+   "tbl_name": "messages_fts_docsize",
+   "sql": "CREATE TABLE 'messages_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+  },
+  {
+   "type": "table",
+   "name": "messages_fts_idx",
+   "tbl_name": "messages_fts_idx",
+   "sql": "CREATE TABLE 'messages_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+  },
+  {
+   "type": "table",
+   "name": "project_consents",
+   "tbl_name": "project_consents",
+   "sql": "CREATE TABLE project_consents (\n              from_project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,\n              to_project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,\n              kind            TEXT NOT NULL,\n              decided_at      INTEGER NOT NULL,\n              PRIMARY KEY (from_project_id, to_project_id, kind)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "projects",
+   "tbl_name": "projects",
+   "sql": "CREATE TABLE projects (\n      id            TEXT PRIMARY KEY,\n      path          TEXT NOT NULL UNIQUE,\n      name          TEXT NOT NULL,\n      default_tool  TEXT NOT NULL DEFAULT 'claude',\n      sidebar_order INTEGER NOT NULL DEFAULT 0,\n      created_at    INTEGER NOT NULL\n    , commands TEXT NOT NULL DEFAULT '[]', worktree_setup TEXT, worktree_manager TEXT, trusted INTEGER NOT NULL DEFAULT 0, default_models TEXT)"
+  },
+  {
+   "type": "table",
+   "name": "queued_requests",
+   "tbl_name": "queued_requests",
+   "sql": "CREATE TABLE queued_requests (\n              id                TEXT PRIMARY KEY,\n              session_id        TEXT NOT NULL,\n              caller_session_id TEXT NOT NULL,\n              via               TEXT NOT NULL,\n              text              TEXT NOT NULL,\n              queued_at         INTEGER NOT NULL,\n              delivering_at     INTEGER\n            , opened_by_auto INTEGER)"
+  },
+  {
+   "type": "table",
+   "name": "report_marks",
+   "tbl_name": "report_marks",
+   "sql": "CREATE TABLE report_marks (\n              session_id        TEXT PRIMARY KEY,\n              caller_session_id TEXT NOT NULL,\n              marked_at         INTEGER NOT NULL\n            )"
+  },
+  {
+   "type": "table",
+   "name": "sessions",
+   "tbl_name": "sessions",
+   "sql": "CREATE TABLE \"sessions\" (\n              id            TEXT PRIMARY KEY,\n              project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE,\n              tool          TEXT NOT NULL,\n              external_id   TEXT,\n              name          TEXT NOT NULL,\n              auto_named    INTEGER NOT NULL DEFAULT 1,\n              state         TEXT NOT NULL DEFAULT 'idle',\n              is_orchestrator INTEGER NOT NULL DEFAULT 0,\n              last_read_seq INTEGER NOT NULL DEFAULT 0,\n              waiting_since INTEGER,\n              created_at    INTEGER NOT NULL,\n              touched_paths TEXT NOT NULL DEFAULT '[]',\n              model         TEXT,\n              effort        TEXT,\n              verbosity     TEXT,\n              permission_preset TEXT NOT NULL DEFAULT 'normal',\n              imported_from TEXT,\n              worktree_path TEXT,\n              worktree_branch TEXT,\n              sidebar_order INTEGER NOT NULL DEFAULT 0\n            , cwd TEXT, context_used INTEGER, context_window INTEGER, context_exactness TEXT, service_tier TEXT, parent_session_id TEXT, worktree_base TEXT, scope_session_ids TEXT, role_append TEXT, app_id TEXT, deleted_at INTEGER, trash TEXT, asked_by_session_id TEXT, forked_from_session_id TEXT, interruption TEXT)"
+  },
+  {
+   "type": "table",
+   "name": "sqlite_sequence",
+   "tbl_name": "sqlite_sequence",
+   "sql": "CREATE TABLE sqlite_sequence(name,seq)"
+  },
+  {
+   "type": "table",
+   "name": "subagent_messages",
+   "tbl_name": "subagent_messages",
+   "sql": "CREATE TABLE subagent_messages (\n              session_id     TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,\n              parent_call_id TEXT NOT NULL,\n              seq            INTEGER NOT NULL,\n              role           TEXT NOT NULL,\n              kind           TEXT NOT NULL,\n              payload        TEXT NOT NULL,\n              ts             INTEGER NOT NULL,\n              PRIMARY KEY (session_id, parent_call_id, seq)\n            )"
+  },
+  {
+   "type": "table",
+   "name": "usage_facts",
+   "tbl_name": "usage_facts",
+   "sql": "CREATE TABLE usage_facts (\n      date       TEXT NOT NULL,\n      tool       TEXT NOT NULL,\n      model      TEXT NOT NULL,\n      project_id TEXT,\n      input_tokens  INTEGER NOT NULL DEFAULT 0,\n      output_tokens INTEGER NOT NULL DEFAULT 0,\n      cache_tokens  INTEGER NOT NULL DEFAULT 0,\n      cost_est   REAL NOT NULL DEFAULT 0,\n      PRIMARY KEY (date, tool, model, project_id)\n    )"
+  },
+  {
+   "type": "table",
+   "name": "workspace",
+   "tbl_name": "workspace",
+   "sql": "CREATE TABLE workspace (\n      id         INTEGER PRIMARY KEY CHECK (id = 1),\n      layout     TEXT NOT NULL,\n      updated_at INTEGER NOT NULL\n    )"
+  }
+ ]
+}
