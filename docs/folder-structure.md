@@ -70,7 +70,9 @@ centralu/
 │  │     ├─ components/         # feature-agnostic shared (Button, Kbd, VirtualList…)
 │  │     ├─ store/              # zustand store + selectors (reducers are imported from core)
 │  │     │                      #   store.ts builds the one store out of these parts (#428):
-│  │     │  └─ state.ts (the types)  historyPages.ts (history pages merged with the screen)
+│  │     │  └─ state.ts (the types: `AppState` is the intersection of the per-concept types in state/)
+│  │     │     state/ (one type per concept: connection, projects, sessions, conversation, layout, grid, layers, notifications, machines, preferences, apps, appViews, navigation, orchestrator)
+│  │     │     historyPages.ts (history pages merged with the screen)
 │  │     │     screens.ts (which screen is on)  appKeys.ts (how an app and its views are named)
 │  │     │     sessionList.ts (the sessions it holds: host lists merged in, events held for one not yet listed)
 │  │     │     apps.ts (external apps: the list, pinned and in-conversation views, their actions)

@@ -72,7 +72,9 @@ centralu/
 │  │     ├─ components/         # feature-agnostic shared (Button, Kbd, VirtualList…)
 │  │     ├─ store/              # zustand store + selectors (reducers are imported from core)
 │  │     │                      #   store.ts가 아래 부분들로 스토어 하나를 만든다(#428):
-│  │     │  └─ state.ts(타입)  historyPages.ts(히스토리 페이지와 화면 병합)
+│  │     │  └─ state.ts(타입: `AppState`는 state/의 개념별 타입을 교차한 것이다)
+│  │     │     state/(개념별 타입 하나씩: connection, projects, sessions, conversation, layout, grid, layers, notifications, machines, preferences, apps, appViews, navigation, orchestrator)
+│  │     │     historyPages.ts(히스토리 페이지와 화면 병합)
 │  │     │     screens.ts(지금 보이는 화면)  appKeys.ts(앱과 그 뷰의 이름)
 │  │     │     sessionList.ts(스토어가 가진 세션: 호스트 목록 병합, 아직 등록되지 않은 세션의 이벤트 보관)
 │  │     │     apps.ts(외부 앱: 목록, 고정 뷰와 대화 속 뷰, 그 액션)
