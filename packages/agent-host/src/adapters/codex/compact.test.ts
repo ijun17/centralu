@@ -440,6 +440,26 @@ describe('codex /goal — runs as a function', () => {
   })
 
   /*
+   * The notice counter is the host's, not the handle's: a handle started after a swap or a restart of the tool must not
+   * reuse the id of a notice row that is still open, or the record would join the new notice onto it.
+   */
+  it('two handles never give their notices the same id', async () => {
+    const ids: string[] = []
+    const collect = (e: unknown) => {
+      const d = e as { type: string; messageId?: string }
+      if (d.type === 'message_delta' && d.messageId) ids.push(d.messageId)
+    }
+    const first = await session(collect)
+    first.send('/goal')
+    await tick()
+    const second = await session(collect)
+    second.send('/goal')
+    await tick()
+    expect(ids).toHaveLength(2)
+    expect(new Set(ids).size).toBe(2)
+  })
+
+  /*
    * Dogfooding 2026-09-08: "it looks registered but does not do anything". Measurement showed
    * that thread already had a finished goal, and codex left status at complete while only
    * swapping in the new objective. If we had just answered "Goal set" at that point, the screen
