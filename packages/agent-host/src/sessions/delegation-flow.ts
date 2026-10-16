@@ -78,6 +78,20 @@ const AGENT_DEPTH_ERROR =
 /** The person's answer on a start_agent card, read as consent; a refusal says whether they refused or nobody answered */
 type AgentConsent = { ok: true } | { ok: false; error: string; why: 'denied' | 'withdrawn' }
 
+/** How a wait on a delegation's turn ended (`DelegationFlow.awaitTurn`), for each caller to word (#428) */
+export type TurnWait =
+  /** A handoff gave the delegation away (#693); `owner` is who it was waited for */
+  | { kind: 'handedOver'; owner: string }
+  /** Cards wait on the caller (#676) */
+  | { kind: 'asking'; cards: RoutedCard[] }
+  /** Woken by a card that is no longer standing */
+  | { kind: 'working' }
+  | { kind: 'bound' }
+  /** The call was cancelled: the turn was stopped, or left running when it was another's or the person's */
+  | { kind: 'cancelled' }
+  | { kind: 'failed'; error: string }
+  | { kind: 'done'; answer: string }
+
 /**
  * The answer while a start waits on the person (#673), or on memory (#686): the request's id is the handle agent_session
  * follows
@@ -739,7 +753,7 @@ export class DelegationFlow {
     try {
       await this.host.deliver(child.id, agentFrame(labelOf(this.host.store, caller), choice.task), undefined, { sessionId: callerId, name: labelOf(this.host.store, caller) }, false)
     } catch (e) {
-      this.host.children.dropDelegation(key)
+      this.host.children.dropDelegation(key, d)
       if (this.host.agentRuns.get(child.id) === d.wait) this.host.agentRuns.delete(child.id)
       this.host.children.releaseTurn(child.id, callerId)
       return done({ ok: false, error: `Could not give the task to the new session: ${(e as Error).message}` })
@@ -849,7 +863,7 @@ export class DelegationFlow {
           if (!observing && this.host.children.awaitingReport.get(child.id) === callerId) this.host.children.clearReport(child.id)
           d.stop('the session that started it stopped it', observing)
           await d.outcome
-          if (!observing) this.host.children.dropDelegation(key)
+          if (!observing) this.host.children.dropDelegation(key, d)
           return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool }
         }
         case 'delete': {
@@ -862,7 +876,7 @@ export class DelegationFlow {
             }
             // Use the sidebar's stop/flush/trash path, including pending waits and wake withdrawal.
             await this.host.trashSession(child.id)
-            if (d) this.host.children.dropDelegation(key)
+            if (d) this.host.children.dropDelegation(key, d)
             return { ok: true, state: 'deleted', sessionId: child.id, sessionName: child.name, tool: child.tool }
           }
           if (d && !d.settled) return { ok: false, error: `"${child.name}" is still working on what you gave it — stop it or wait first.` }
@@ -870,7 +884,7 @@ export class DelegationFlow {
           const timers = this.host.handles.has(child.id) ? liveBackgroundTasks(child.backgroundTasks).filter((t) => t.timer) : []
           const r = await this.host.cleanUpWorktreeChild(child)
           if (!r.ok) return r
-          if (d) this.host.children.dropDelegation(key)
+          if (d) this.host.children.dropDelegation(key, d)
           const note = [r.note, timers.length ? `Its timers ended with its process: ${taskList(timers)}.` : ''].filter(Boolean).join(' ')
           return { ok: true, state: 'deleted', sessionId: child.id, sessionName: child.name, tool: child.tool, branch: r.branch, setAside: r.setAside, ...(r.warning ? { warning: r.warning } : {}), ...(note ? { note } : {}) }
         }
@@ -963,7 +977,7 @@ export class DelegationFlow {
           try {
             await this.host.deliver(child.id, agentFrame(from.name, opts.text ?? ''), undefined, from, false)
           } catch (e) {
-            this.host.children.dropDelegation(key)
+            this.host.children.dropDelegation(key, next)
             if (this.host.agentRuns.get(child.id) === next.wait) this.host.agentRuns.delete(child.id)
             this.host.children.releaseTurn(child.id, callerId)
             return { ok: false, error: `Could not send it: ${(e as Error).message}` }
@@ -1497,7 +1511,7 @@ export class DelegationFlow {
         await this.host.deliver(child.id, agentFrame(labelOf(this.host.store, caller), text), undefined, { sessionId: callerId, name: labelOf(this.host.store, caller) }, false)
       } catch (e) {
         d.wait.fail(e as Error)
-        this.host.children.dropDelegation(key)
+        this.host.children.dropDelegation(key, d)
         return { ok: false, error: `The fork "${child.name}" [${child.id}] was made but did not take the request: ${(e as Error).message}` }
       }
       return { ok: true, key, d, fork: child }
@@ -1604,77 +1618,113 @@ export class DelegationFlow {
     return this.host.ownTasksRunning(child.id)
   }
 
-  /** Waits on a child's turn up to the bound (#561), like `awaitDelegation`, and reads its outcome for the caller */
+  /**
+   * Waits on a delegation's turn up to the bound, the one wait ask_project (`AskProjectFlow.awaitDelegation`) and
+   * start_agent / agent_session (`awaitAgent`) share (#428); each words the result for its caller. A card already
+   * waiting on the caller comes first (#676), before and during the wait; a handoff that gives the delegation away ends
+   * the wait (#693), the answer then the new owner's, never read twice. A cancelled call stops the turn (one that
+   * joined the person's turn is only left) and lets the delegation go, only if it is still this one. The call counts
+   * as waiting on it (`waiters`) until it has its result, the stop included.
+   *
+   * `observing`: an auto caller reading another caller's turn (#646): no cards, no handoff, no claim on the delegation,
+   * and a cancelled call leaves the turn running.
+   */
+  async awaitTurn(key: string, d: Delegation, opts: { signal?: AbortSignal; boundMs?: number; observing?: boolean; stopWhy: string }): Promise<TurnWait> {
+    const observing = opts.observing ?? false
+    const standing = observing || d.settled ? [] : this.host.routedCards(d.sessionId, d.callerId)
+    if (standing.length) return { kind: 'asking', cards: standing }
+    const card = observing ? undefined : this.host.untilCard(d.sessionId, d.callerId)
+    const owner = d.callerId
+    const leaving = observing ? undefined : this.untilHandedOver(d)
+    if (!observing) d.waiters = (d.waiters ?? 0) + 1
+    try {
+      // The owner's own cancellation (`waitCancelled`, a task that joined the person's turn) ends its wait, never an observer's
+      const r = await raceBound(d.outcome, opts.boundMs ?? ASK_WAIT_MS, opts.signal, ...(d.waitCancelled && !observing ? [d.waitCancelled] : []), ...(card ? [card.asked] : []), ...(leaving ? [leaving.gone] : []))
+      if (r === 'handedOver') return { kind: 'handedOver', owner }
+      if (r === 'asked') {
+        const cards = this.host.routedCards(d.sessionId, d.callerId)
+        return cards.length ? { kind: 'asking', cards } : { kind: 'working' }
+      }
+      if (r === 'aborted') {
+        if (observing) return { kind: 'cancelled' }
+        d.stop(opts.stopWhy)
+        if (!d.joinedTurn) await d.outcome
+        this.host.children.dropDelegation(key, d)
+        return { kind: 'cancelled' }
+      }
+      if (r === 'bound') return { kind: 'bound' }
+      if (!observing) this.host.children.dropDelegation(key, d)
+      if (!r.ok) return { kind: 'failed', error: r.error }
+      return { kind: 'done', answer: r.answer ?? turnAnswer(this.host.store.loadMessages(d.sessionId, 50)) }
+    } finally {
+      card?.done()
+      leaving?.done()
+      if (!observing) d.waiters = (d.waiters ?? 1) - 1
+    }
+  }
+
+  /**
+   * Paths an answer names under `root` become readable to the caller (ask_project's and a child's alike); the rest are
+   * listed as outside. A child in another folder (a worktree, #561 part 2) is outside the caller's own
+   */
+  grantReads(callerId: string, answer: string, root: string): { granted: string[]; outside: string[] } {
+    const { granted, outside } = readableGrants(pathsIn(answer), root)
+    if (granted.length) {
+      const set = this.host.readGrants.get(callerId) ?? new Set<string>()
+      for (const g of granted) set.add(g)
+      this.host.readGrants.set(callerId, set)
+    }
+    return { granted, outside }
+  }
+
+  /** Waits on a child's turn up to the bound (#561), as `awaitTurn` does, and reads its outcome for the caller */
   private async awaitAgent(key: string, d: Delegation, signal?: AbortSignal, observing = false, boundMs = ASK_WAIT_MS): Promise<ChildRunResult> {
     // Only the owner consumes its report/key/grants. Auto observers have their own bound and cancellation.
     // A report held over the child's own background work (#721) is the work's end, still to come: reading the paused
     // turn's answer does not take it
     if (!observing && this.host.children.awaitingReport.get(d.sessionId) === d.callerId && !this.host.children.pausedReports.has(d.sessionId)) this.host.children.clearReport(d.sessionId)
     const endedBefore = d.settled
-    // A card already waiting on the caller is what it reads first (#676): the turn goes nowhere until it is answered
-    const standing = observing || d.settled ? [] : this.host.routedCards(d.sessionId, d.callerId)
-    if (standing.length) return this.agentAsking(d, standing)
     const name = () => this.host.meta.get(d.sessionId)?.name ?? d.sessionId
-    const card = observing ? undefined : this.host.untilCard(d.sessionId, d.callerId)
-    // A handoff that gives the child away ends this wait (#693): the answer is the new owner's, never read twice
-    const owner = d.callerId
-    const leaving = observing ? undefined : this.untilHandedOver(d)
-    if (!observing) d.waiters = (d.waiters ?? 0) + 1
-    try {
-      const r = await raceBound(d.outcome, boundMs, signal, ...(card ? [card.asked] : []), ...(leaving ? [leaving.gone] : []))
-      if (!observing) d.waiters = (d.waiters ?? 1) - 1
-      if (r === 'handedOver') return this.handedOverReply(owner, d.sessionId)
-      if (r === 'asked') {
-        const cards = this.host.routedCards(d.sessionId, d.callerId)
-        return cards.length ? this.agentAsking(d, cards) : this.agentWorking(d)
-      }
-      if (r === 'aborted') {
-        if (observing) return { ok: false, error: `The observation was cancelled; "${name()}" was left running.` }
-        d.stop('the call that started it was cancelled')
-        await d.outcome
-        this.host.children.dropDelegation(key)
-        return { ok: false, error: `The call was cancelled, so "${name()}" was stopped.` }
-      }
-      if (r === 'bound') return this.agentWorking(d, !observing, observing)
-      if (!observing) this.host.children.dropDelegation(key, d)
-      if (!r.ok) return { ok: false, error: `"${name()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or give it a clearer task.` }
-      const answer = r.answer ?? turnAnswer(this.host.store.loadMessages(d.sessionId, 50))
-      if (observing) return {
-        ok: true, state: 'done', sessionId: d.sessionId, sessionName: name(),
-        tool: this.host.meta.get(d.sessionId)?.tool ?? '', answer: clipAnswer(answer, name()), readable: [], outside: [],
-      }
-      // Paths it names in its folder become readable to the caller, as ask_project's do: a child in another
-      // folder (a worktree, #561 part 2) is outside the caller's own
-      const { granted, outside } = readableGrants(pathsIn(answer), d.target.path)
-      if (granted.length) {
-        const set = this.host.readGrants.get(d.callerId) ?? new Set<string>()
-        for (const g of granted) set.add(g)
-        this.host.readGrants.set(d.callerId, set)
-      }
-      /*
-       * The turn this call saw end left background work of the child's own running (#721): the caller reads the answer
-       * now, and the report is held for the work's end, with no separate notice of the pause
-       */
-      const left = this.host.ownTasksRunning(d.sessionId)
-      if (!endedBefore && !this.host.children.pausedReports.has(d.sessionId) && left.length) {
-        this.host.children.markReport(d.sessionId, d.callerId)
-        this.host.pauseReport(d.sessionId, left)
-      }
-      const notice = this.pausedNotice(d.sessionId, d.callerId)
-      return {
-        ok: true,
-        state: 'done',
-        sessionId: d.sessionId,
-        sessionName: name(),
-        tool: this.host.meta.get(d.sessionId)?.tool ?? '',
-        answer: clipAnswer(answer, name()),
-        readable: granted,
-        outside,
-        ...(notice ? { notice } : {}),
-      }
-    } finally {
-      card?.done()
-      leaving?.done()
+    const r = await this.awaitTurn(key, d, { signal, boundMs, observing, stopWhy: 'the call that started it was cancelled' })
+    switch (r.kind) {
+      case 'handedOver':
+        return this.handedOverReply(r.owner, d.sessionId)
+      case 'asking':
+        return this.agentAsking(d, r.cards)
+      case 'working':
+        return this.agentWorking(d)
+      case 'cancelled':
+        return { ok: false, error: observing ? `The observation was cancelled; "${name()}" was left running.` : `The call was cancelled, so "${name()}" was stopped.` }
+      case 'bound':
+        return this.agentWorking(d, !observing, observing)
+      case 'failed':
+        return { ok: false, error: `"${name()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or give it a clearer task.` }
+    }
+    if (observing) return {
+      ok: true, state: 'done', sessionId: d.sessionId, sessionName: name(),
+      tool: this.host.meta.get(d.sessionId)?.tool ?? '', answer: clipAnswer(r.answer, name()), readable: [], outside: [],
+    }
+    const { granted, outside } = this.grantReads(d.callerId, r.answer, d.target.path)
+    /*
+     * The turn this call saw end left background work of the child's own running (#721): the caller reads the answer
+     * now, and the report is held for the work's end, with no separate notice of the pause
+     */
+    const left = this.host.ownTasksRunning(d.sessionId)
+    if (!endedBefore && !this.host.children.pausedReports.has(d.sessionId) && left.length) {
+      this.host.children.markReport(d.sessionId, d.callerId)
+      this.host.pauseReport(d.sessionId, left)
+    }
+    const notice = this.pausedNotice(d.sessionId, d.callerId)
+    return {
+      ok: true,
+      state: 'done',
+      sessionId: d.sessionId,
+      sessionName: name(),
+      tool: this.host.meta.get(d.sessionId)?.tool ?? '',
+      answer: clipAnswer(r.answer, name()),
+      readable: granted,
+      outside,
+      ...(notice ? { notice } : {}),
     }
   }
 

@@ -4276,6 +4276,8 @@ export class SessionManager {
       deliver: (...a) => self.deliver(...a),
       enqueue: (...a) => self.enqueue(...a),
       ensureProjectAccess: (...a) => self.ensureProjectAccess(...a),
+      awaitTurn: (...a) => self.delegationFlow.awaitTurn(...a),
+      grantReads: (...a) => self.delegationFlow.grantReads(...a),
       handedOverReply: (...a) => self.delegationFlow.handedOverReply(...a),
       get linkedReader() {
         return self.linkedReader

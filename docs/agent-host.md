@@ -424,7 +424,7 @@ below retained for `safe` and `normal`:
    back: "Started by …"), under **the caller's permission preset**:
    never more, and no argument or tool of the caller changes it. The task goes in a frame (`agentFrame`: who asks,
    and that the final message is the answer) recorded as sent by the caller (`from`).
-6. **The answer.** Waited for like ask_project's, up to 240 s; past it, or with `wait: false` at once, the answer is
+6. **The answer.** Waited for by the same wait as ask_project's (`DelegationFlow.awaitTurn`, #428, each wording its own result; paths an answer names are granted by `grantReads`), up to 240 s; past it, or with `wait: false` at once, the answer is
    `working` and the caller is told when the turn ends through the report the orchestrator's `reportBack` uses
    (`awaitingReport` → `deliverReport`, which reaches the model as an untrusted-source notice it reads with
    `read_session`). A call waiting at that moment takes the answer instead, so it does not arrive twice. The marker

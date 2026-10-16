@@ -1,10 +1,9 @@
 import type { Delegation } from './child-ownership.js'
-import { turnAnswer } from './turn-answer.js'
-import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, readableGrants, taskLine, type AskableProject } from './ask-project.js'
+import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, taskLine, type AskableProject } from './ask-project.js'
 import { labelOf, lastActiveOf } from './transcript-view.js'
 import type { SessionState } from '@cc/protocol'
 import { NOT_REACHABLE } from '../adapters/contract.js'
-import type { AskProjectResult, RoutedCard, LinkedProject, LinkedSessions } from '../adapters/contract.js'
+import type { AskProjectResult, LinkedProject, LinkedSessions } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
 import { linkedTurnEnd, type LinkedTurnEvent } from './linked-turn-end.js'
 import { raceBound } from './with-timeout.js'
@@ -44,7 +43,7 @@ type LinkedAsk = {
  * read when used, never kept.
  */
 export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'applyDeferredRestart' | 'askHost' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'routedCards' | 'store' | 'untilCard'> &
-  Pick<DelegationFlow, 'handedOverReply' | 'startDelegation' | 'untilHandedOver'>
+  Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation' | 'untilHandedOver'>
 
 /**
  * ask_project (#371 part B): a session asks another project, here or on a linked machine (#700), and waits for the
@@ -451,68 +450,36 @@ export class AskProjectFlow {
     }
   }
 
-  /** Waits for a delegation up to the bound, and turns its outcome into what the caller reads */
+  /** Waits for a delegation up to the bound (`awaitTurn`), and turns its outcome into what the caller reads */
   private async awaitDelegation(key: string, d: Delegation, signal?: AbortSignal): Promise<AskProjectResult> {
     const sessionName = () => this.host.meta.get(d.sessionId)?.name ?? d.sessionId
-    const asking = (cards: RoutedCard[]): AskProjectResult => ({ ok: true, state: 'asking', project: d.target.name, sessionId: d.sessionId, sessionName: sessionName(), cards })
-    // A card waiting on the caller comes first (#676), before and during the wait
-    const standing = d.settled ? [] : this.host.routedCards(d.sessionId, d.callerId)
-    if (standing.length) return asking(standing)
-    const card = this.host.untilCard(d.sessionId, d.callerId)
-    // A handoff that gives the delegation away ends this wait (#693)
-    const owner = d.callerId
-    const leaving = this.host.untilHandedOver(d)
-    d.waiters = (d.waiters ?? 0) + 1
-    try {
-      const r = await raceBound(d.outcome, ASK_WAIT_MS, signal, ...(d.waitCancelled ? [d.waitCancelled] : []), card.asked, leaving.gone)
-      if (r === 'handedOver') return this.host.handedOverReply(owner, d.sessionId)
-      if (r === 'asked') {
-        const cards = this.host.routedCards(d.sessionId, d.callerId)
-        if (cards.length) return asking(cards)
-        return { ok: true, state: 'working', project: d.target.name, sessionId: d.sessionId, sessionName: sessionName() }
+    const base = { project: d.target.name, sessionId: d.sessionId }
+    const r = await this.host.awaitTurn(key, d, { signal, stopWhy: 'the call that asked was cancelled' })
+    switch (r.kind) {
+      case 'handedOver':
+        return this.host.handedOverReply(r.owner, d.sessionId)
+      case 'asking':
+        return { ok: true, state: 'asking', ...base, sessionName: sessionName(), cards: r.cards }
+      case 'working':
+        return { ok: true, state: 'working', ...base, sessionName: sessionName() }
+      case 'bound': {
+        const notice = d.notice()
+        return { ok: true, state: 'working', ...base, sessionName: sessionName(), ...(notice ? { notice } : {}) }
       }
-      if (r === 'aborted') {
-        d.stop('the call that asked was cancelled')
-        if (!d.joinedTurn) await d.outcome
-        this.host.children.dropDelegation(key, d)
+      case 'cancelled':
         return { ok: false, error: d.joinedTurn
           ? `The call was cancelled; ${d.target.name}'s session "${sessionName()}" was left running.`
           : `The call was cancelled, so ${d.target.name}'s session "${sessionName()}" was stopped.` }
-      }
-      if (r === 'bound') {
-        const notice = d.notice()
-        return { ok: true, state: 'working', project: d.target.name, sessionId: d.sessionId, sessionName: sessionName(), ...(notice ? { notice } : {}) }
-      }
-      this.host.children.dropDelegation(key, d)
-      if (!r.ok) {
+      case 'failed':
         return {
           ok: false,
           error: d.joinedTurn
             ? `The wait for ${d.target.name}'s session "${sessionName()}" [${d.sessionId}] ended: ${r.error}.`
             : `${d.target.name}'s session "${sessionName()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or ask again with a clearer task.`,
         }
-      }
-      const answer = r.answer ?? turnAnswer(this.host.store.loadMessages(d.sessionId, 50))
-      const { granted, outside } = readableGrants(pathsIn(answer), d.target.path)
-      if (granted.length) {
-        const set = this.host.readGrants.get(d.callerId) ?? new Set<string>()
-        for (const g of granted) set.add(g)
-        this.host.readGrants.set(d.callerId, set)
-      }
-      return {
-        ok: true,
-        state: 'done',
-        project: d.target.name,
-        sessionId: d.sessionId,
-        sessionName: sessionName(),
-        answer: clipAnswer(answer, sessionName()),
-        readable: granted,
-        outside,
-      }
-    } finally {
-      card.done()
-      leaving.done()
-      d.waiters = (d.waiters ?? 1) - 1
     }
+    const { granted, outside } = this.host.grantReads(d.callerId, r.answer, d.target.path)
+    return { ok: true, state: 'done', ...base, sessionName: sessionName(), answer: clipAnswer(r.answer, sessionName()), readable: granted, outside }
   }
+
 }
