@@ -28,8 +28,6 @@ import { imageEventFromDisk } from '../images.js'
 import { readCodexUsage } from './usage-client.js'
 import { listCodexModels } from './models.js'
 import {
-  childSteps,
-  CodexChildTracker,
   CODEX_KNOWN_NOTIFICATIONS,
   CompactionMarks,
   CodexRequestInputs,
@@ -48,6 +46,7 @@ import { withStderrTail } from '../../stream-text.js'
 import { raceTimeout } from '../../timing.js'
 import { CodexRequests } from './server-requests.js'
 import { CodexServers } from './thread-servers.js'
+import { CodexChildThreads } from './child-threads.js'
 import { runningTurnOf, threadIdOf, turnIdOf } from './turn-reads.js'
 import { APP_CALL_WAIT_MS, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, permissionOptionsFor, repoFilesConfig, spawnInKeeper } from './launch-config.js'
 
@@ -64,12 +63,6 @@ const exec = promisify(execFile)
 
 /** How long we let a resume wait in front of the person — a lock error ("active writer") arrives within this window (measured ~0.3s) */
 export const LAZY_RESUME_WAIT_MS = 3_000
-/**
- * How many child items wait for their launch call at most (#222, `unlinked`). The wait is milliseconds long (measured:
- * the link came in the same millisecond as the child's first notification), so this only bounds a thread that is
- * never named.
- */
-const UNLINKED_CAP = 2_000
 /** The ceiling for a background resume — the same value as the manager's step limit (150s). Past this, it is considered stuck */
 const BACKGROUND_RESUME_CAP_MS = 150_000
 
@@ -154,24 +147,10 @@ class CodexSession implements SessionHandle {
   private startFailed = false
   /** The thread came up (`ready` resolved). Until then, every message sent is still waiting on it */
   private started = false
-  /**
-   * Child threads (#222): a child's thread id, to the `spawnAgent` item that launched it. Its steps are kept under
-   * that card. Learned from the item's `receiverThreadIds` on `item/completed` (the `item/started` has an empty list).
-   */
-  private childCalls = new Map<string, string>()
-  /**
-   * A child's items that arrived before its launch call named it. The child starts before the parent's `spawnAgent`
-   * completes: measured (codex-cli 0.160.0), the child's first `thread/status/changed` came in the same millisecond
-   * as, and before, the `item/completed` that names it. Held, not dropped, and replayed once the link arrives. What is
-   * still unlinked when the parent's turn ends belonged to no launch call this session saw (one from before a restart),
-   * and is let go with a log line.
-   */
-  private unlinked = new Map<string, { method: string; params?: unknown }[]>()
-  private unlinkedCount = 0
   /** Notification methods this session received that nothing maps or ignores on purpose, said once each in host.log (#58) */
   private readonly unmapped: UnmappedTypes
-  /** The child agents running in the background (#290, see `CodexChildTracker`). */
-  private readonly children: CodexChildTracker
+  /** The child threads and the steps they send (see `CodexChildThreads`) */
+  private readonly childThreads: CodexChildThreads
   /** One compaction marker per compaction, from the item, the deprecated notification, or both (#303) */
   private readonly compactions = new CompactionMarks()
   /** Each model request's input, once (prompt cache accounting, see `CodexRequestInputs`) */
@@ -191,7 +170,7 @@ class CodexSession implements SessionHandle {
   ) {
     this.sessionId = opts.sessionId
     this.unmapped = new UnmappedTypes('codex', opts.sessionId, CODEX_KNOWN_NOTIFICATIONS)
-    this.children = new CodexChildTracker(opts.sessionId)
+    this.childThreads = new CodexChildThreads({ sessionId: opts.sessionId, emit: (e) => this.emit(e) })
     this.threadServers = new CodexServers({
       sessionId: opts.sessionId,
       opts,
@@ -495,9 +474,9 @@ class CodexSession implements SessionHandle {
      * steps under the `spawnAgent` card that launched it, which the host stores apart from the conversation.
      */
     if (typeof from === 'string' && this.threadId !== null && from !== this.threadId) {
-      for (const e of this.children.push(from, n)) this.emit(e)
-      this.onChildNotification(from, n)
-      this.noteSpawn(n)
+      for (const e of this.childThreads.children.push(from, n)) this.emit(e)
+      this.childThreads.onChildNotification(from, n)
+      this.childThreads.noteSpawn(n)
       return
     }
     // Which turn is running (Turn.id — generated/v2/Turn.ts). Cleared once it ends: trying to
@@ -567,7 +546,7 @@ class CodexSession implements SessionHandle {
       }
       if (e.type === 'compaction' && !this.compactions.admit(n)) continue
       // A spawnAgent card stays open while the children it started run, so their steps show on it live (#843)
-      if (e.type === 'tool_result' && this.children.hold(e, launchedThreads(n))) continue
+      if (e.type === 'tool_result' && this.childThreads.children.hold(e, launchedThreads(n))) continue
       if (e.type === 'usage_update') {
         const request = this.requests.take(n.params)
         if (request) {
@@ -599,49 +578,8 @@ class CodexSession implements SessionHandle {
         if (ended) this.inputReceipts.endTurn(ended)
       }
     }
-    this.noteSpawn(n)
-    if (n.method === 'turn/completed' && this.unlinked.size > 0) {
-      console.error(`[codex] ${this.sessionId.slice(0, 8)} let go of ${this.unlinkedCount} items from ${this.unlinked.size} threads no spawnAgent call named`)
-      this.unlinked.clear()
-      this.unlinkedCount = 0
-    }
-  }
-
-  /**
-   * A child thread's notification (#222): its items become steps under the `spawnAgent` card that launched it, or wait
-   * for that card to name the thread (`unlinked`). Only items are kept — the child's turn, status and deltas carry
-   * nothing `childSteps` reads.
-   */
-  private onChildNotification(thread: string, n: { method: string; params?: unknown }): void {
-    if (n.method !== 'item/started' && n.method !== 'item/completed') return
-    const call = this.childCalls.get(thread)
-    if (call) {
-      for (const e of childSteps(this.sessionId, call, n)) this.emit(e)
-      return
-    }
-    if (this.unlinkedCount >= UNLINKED_CAP) return
-    this.unlinked.set(thread, [...(this.unlinked.get(thread) ?? []), n])
-    this.unlinkedCount += 1
-  }
-
-  /**
-   * A `spawnAgent` call completed and named the threads it started (#222) — from the parent, or from a child that
-   * started its own. Those threads' steps go under this card from now on, starting with whatever arrived before it.
-   */
-  private noteSpawn(n: { method: string; params?: unknown }): void {
-    if (n.method !== 'item/completed') return
-    const item = (n.params as { item?: Record<string, unknown> } | undefined)?.item
-    if (!item || item.type !== 'collabAgentToolCall' || item.tool !== 'spawnAgent' || typeof item.id !== 'string') return
-    const receivers = Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds : []
-    for (const thread of receivers) {
-      if (typeof thread !== 'string' || this.childCalls.has(thread)) continue
-      this.childCalls.set(thread, item.id)
-      for (const e of this.children.link(thread, item.id, typeof item.prompt === 'string' ? item.prompt : '')) this.emit(e)
-      const held = this.unlinked.get(thread) ?? []
-      this.unlinked.delete(thread)
-      this.unlinkedCount -= held.length
-      for (const early of held) this.onChildNotification(thread, early)
-    }
+    this.childThreads.noteSpawn(n)
+    this.childThreads.noteTurnEnd(n)
   }
 
   sendTracked(text: string, observer?: InputObserver): Promise<void> {
@@ -987,7 +925,7 @@ class CodexSession implements SessionHandle {
    * process outlived the interrupt), which is Codex's own behaviour for every interrupted turn.
    */
   async stopBackgroundTask(taskId: string): Promise<void> {
-    const turnId = this.children.turnOf(taskId)
+    const turnId = this.childThreads.children.turnOf(taskId)
     if (!turnId) throw new Error('That child agent has no running turn to stop')
     await this.client.request('turn/interrupt', { threadId: taskId, turnId })
   }
@@ -996,7 +934,7 @@ class CodexSession implements SessionHandle {
   private releaseChildren(): void {
     this.inputGroups.clear()
     this.inputReceipts.failAll(new Error('The session process ended before the parent note finished'))
-    for (const e of this.children.release('Ended with the session process')) this.emit(e)
+    for (const e of this.childThreads.children.release('Ended with the session process')) this.emit(e)
   }
 
   /**
