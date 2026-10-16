@@ -177,8 +177,9 @@ export function measuresWithDu(platform: Platform = HOST_PLATFORM): boolean {
 }
 
 /**
- * A file name has to pass Windows' rules to be one (#849): there `nul` or `aux.c` opens a device, a trailing dot or space
- * is dropped, and `notes.txt:payload` writes a hidden stream on `notes.txt` instead of a file of that name.
+ * A file name has to pass Windows' rules to be one (#849): there `nul` or `aux.c` names a device and a trailing dot or
+ * space is dropped when a program reads the name (Node, writing through `\\?\`, makes a file no other program can open),
+ * and `notes.txt:payload` writes a hidden stream on `notes.txt` instead of a file of that name.
  */
 export function hasWindowsFileNames(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'win32'

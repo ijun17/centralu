@@ -134,9 +134,10 @@ export async function moveEntry(root: string, from: string, toDir: string): Prom
  * `wx` makes the no-overwrite rule atomic here, unlike the move above: the create fails if
  * anything is at that path already.
  *
- * On Windows the name must also be one Windows takes as a file's name (#849), checked as a new folder's is: `nul` or
- * `aux.c` would open a device, a trailing dot or space would be dropped, and `notes.txt:payload` would write a hidden
- * stream on `notes.txt` past `wx`, since the file the name seems to say is not the thing created.
+ * On Windows the name must also be one Windows takes as a file's name (#849), checked as a new folder's is. Node
+ * writes through `\\?\` paths, so `nul`, `aux.c` or `notes.` would land as a file of that very name, one Explorer,
+ * cmd and git read as a device or without its trailing dot or space, and cannot open or remove; and
+ * `notes.txt:payload` would write a hidden stream on `notes.txt` past `wx`, not a file of that name.
  */
 export async function importFile(
   root: string,

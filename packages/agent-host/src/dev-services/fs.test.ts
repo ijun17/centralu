@@ -437,8 +437,9 @@ describe('importFile — a file dragged in from outside', () => {
   })
 
   /*
-   * #849: on Windows `nul` and `aux.c` open a device, a trailing dot or space is dropped (`notes.` lands as `notes`),
-   * and `notes.txt:payload` writes a hidden stream on notes.txt past `wx`. Checked here with this host's rules on
+   * #849: on Windows Node writes through `\\?\` paths, so `nul`, `aux.c` or `notes.` lands as a file of that very
+   * name, which Explorer, cmd and git read as a device or without its dot and cannot open or remove; and
+   * `notes.txt:payload` writes a hidden stream on notes.txt past `wx`. Checked here with this host's rules on
    * Windows, and with Windows' rules given on any machine.
    */
   it('refuses on Windows a name Windows does not take as a file\'s, and writes nothing', async () => {

@@ -1567,9 +1567,10 @@ tests. What differs from macOS and Linux, and what holds it:
   name or another case was refused, and a touched file under a project kept through a link was dropped.
 - **Names that are not file names.** A file dragged into the tree (`importFile`) is refused on
   Windows when Windows would not make a file of that name, by the rules a new project folder's
-  name follows (`folderNameError`): a device name (`nul`, `aux.c`, `CONOUT$`) opens the device, a
-  trailing dot or space is dropped, and `notes.txt:payload` writes a hidden stream on `notes.txt`
-  past the no-overwrite flag (#849).
+  name follows (`folderNameError`). Node writes through `\\?\` paths, so a device name (`nul`,
+  `aux.c`, `nul .txt`) or a name with a trailing dot or space lands as a file of that very name, which
+  Explorer, cmd and git read as the device or as another name and cannot open or remove; and
+  `notes.txt:payload` writes a hidden stream on `notes.txt` past the no-overwrite flag (#849).
 - **File identity.** A read's opened-file check is the only guard against a swap there, since
   Windows has no `O_NOFOLLOW`. An NTFS file id is 64 bits with the record's reuse count on top, so
   it is above 2^53, and as a Number two files can compare equal: on windows-2022, 1754 of 2000
