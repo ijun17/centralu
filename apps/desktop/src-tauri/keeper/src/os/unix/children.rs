@@ -269,6 +269,68 @@ pub fn group_exists(pgid: i32) -> bool {
     rc == 0 || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
+/**
+ * Signals every process group in the session `sid`: a terminal's shell (whose pid is the session's
+ * number, `setsid` in `spawn_pty`) and the jobs it started, which job control puts in groups of
+ * their own and a hang-up does not reach when they are not in the foreground or ignore it (#840
+ * item 2). Returns whether anything was signalled.
+ *
+ * The same rule as `signal_leftovers`: a session number is not reused while anyone is in the
+ * session, so once the shell has exited (`leader_alive` false) the session is signalled only while
+ * nobody holds its number as a pid. The keeper's own session and group are never a target.
+ */
+pub fn signal_session(sid: i32, sig: i32, leader_alive: bool) -> bool {
+    let mut groups = session_groups(sid, leader_alive);
+    groups.sort_unstable();
+    groups.dedup();
+    let mut any = false;
+    for pgid in groups {
+        // SAFETY: a plain syscall; a negative pid is the group.
+        any |= unsafe { libc::kill(-pgid, sig) } == 0;
+    }
+    any
+}
+
+/// Whether anyone is still in the session `sid` (by `signal_session`'s rule).
+pub fn session_exists(sid: i32, leader_alive: bool) -> bool {
+    !session_groups(sid, leader_alive).is_empty()
+}
+
+/// The process group of each member of the session `sid`, by `signal_session`'s rule.
+fn session_groups(sid: i32, leader_alive: bool) -> Vec<i32> {
+    session_groups_among(crate::os::this_unix::all_pids(), sid, leader_alive)
+}
+
+/**
+ * `session_groups` over the pids `pids` lists. While the leader runs, its own group (`sid`, which
+ * `setsid` made the shell's) is always among them, so a listing that failed or found nothing (the
+ * fallback on a unix that is neither macOS nor Linux) still reaches the shell, as the stop did
+ * before it looked at the session at all. A member's group is taken only if it is still in the
+ * session after its group was read: between the two calls the pid may have exited and been reused.
+ */
+fn session_groups_among(pids: Vec<i32>, sid: i32, leader_alive: bool) -> Vec<i32> {
+    // SAFETY: getsid(0) and getpgrp take or need no pointers.
+    let (own_session, own_group) = unsafe { (libc::getsid(0), libc::getpgrp()) };
+    if sid <= 1 || sid == own_session || (!leader_alive && exists(sid)) {
+        return Vec::new();
+    }
+    // SAFETY (both calls): plain syscalls; a process gone meanwhile answers -1.
+    let in_session = |pid: i32| unsafe { libc::getsid(pid) } == sid;
+    let mut groups: Vec<i32> = pids
+        .into_iter()
+        .filter(|&pid| in_session(pid))
+        .filter_map(|pid| {
+            let pgid = unsafe { libc::getpgid(pid) };
+            in_session(pid).then_some(pgid)
+        })
+        .collect();
+    if leader_alive {
+        groups.push(sid);
+    }
+    groups.retain(|&pgid| pgid > 1 && pgid != own_group);
+    groups
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Reap {
     Reaped(ExitStatus),
@@ -682,6 +744,38 @@ mod tests {
         w.polled.push(999_999);
         w.know(999_999, ExitStatus { code: Some(3), signal: None });
         assert_eq!(w.collect(), vec![(999_999, ExitStatus { code: Some(3), signal: None })]);
+    }
+
+    /// `signal_session` finds a session's members and never reaches the keeper's own session, or a
+    /// session whose leader has exited while its number belongs to a process again.
+    #[test]
+    fn a_session_is_found_by_its_members_and_never_the_keepers_own() {
+        let mut c = command("/bin/sleep", &["30".to_string()], "/tmp", &env());
+        crate::os::new_session(&mut c);
+        let mut child = c.spawn().unwrap();
+        let sid = child.id() as i32;
+        assert!(session_exists(sid, true), "a running leader's session is found");
+        assert!(!session_exists(sid, false), "a number some process holds is not taken for an exited leader's");
+        // SAFETY: getsid(0) only reads.
+        let own = unsafe { libc::getsid(0) };
+        assert!(!signal_session(own, 0, true), "never the keeper's own session");
+        assert!(signal_session(sid, libc::SIGKILL, true), "the leader is signalled");
+        let _ = child.wait();
+        assert!(!session_exists(sid, false), "an empty session is gone");
+    }
+
+    /// With no listing to go by (it failed, or this unix has none), a running shell's own group is
+    /// still signalled; an exited one's is not guessed at.
+    #[test]
+    fn a_running_leaders_group_is_signalled_even_when_no_pid_is_listed() {
+        let mut c = command("/bin/sleep", &["30".to_string()], "/tmp", &env());
+        crate::os::new_session(&mut c);
+        let mut child = c.spawn().unwrap();
+        let sid = child.id() as i32;
+        assert_eq!(session_groups_among(Vec::new(), sid, true), vec![sid]);
+        assert!(session_groups_among(Vec::new(), sid, false).is_empty());
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     #[test]

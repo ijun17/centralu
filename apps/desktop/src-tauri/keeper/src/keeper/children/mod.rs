@@ -229,7 +229,8 @@ impl Children {
     }
 
     /// Ends every child still running: stdin EOF for pipes and SIGHUP for ptys, then after `grace`
-    /// TERM to each child's group, then KILL. Returns once they are gone (with what exited agents
+    /// TERM to each child's group, then KILL. A pty's signals go to every group in its session, so
+    /// its shell's jobs end too (#840 item 2). Returns once they are gone (with what exited agents
     /// left in their groups, `Sweep`) or the steps ran out; leftovers still waiting get KILL then.
     pub fn stop_all(&self, grace: Duration) {
         let (tx, rx) = mpsc::channel();
@@ -400,6 +401,9 @@ struct Stopping {
     phase: u8,
     deadline: Instant,
     done: Vec<mpsc::Sender<()>>,
+    /// Every terminal's session (its shell's pid), running or not: each step signals every group in
+    /// it, so a job the shell put in a group of its own ends with the stop too (#840 item 2).
+    sessions: Vec<i32>,
 }
 
 /**
@@ -410,7 +414,8 @@ struct Stopping {
  * made the agent's own. A CLI that ends without stopping them (killed after a timeout, crashed, or
  * just not cleaning up) left them running under launchd/init. So when an agent exits, its group gets
  * TERM at once and, `SWEEP_GRACE` later, KILL for whatever is still there (`proc::signal_leftovers`).
- * Ptys are not swept: the kernel hangs up a terminal's foreground group as its shell exits, and the
+ * Ptys are not swept (only the keeper's own stop reaches every group in a terminal's session,
+ * `Stopping::sessions`): the kernel hangs up a terminal's foreground group as its shell exits, and the
  * host ends a terminal's or a command's whole tree when it stops one (`kill-tree.ts`).
  */
 struct Sweep {
@@ -874,19 +879,14 @@ impl Reactor {
                         if live > 0 {
                             log(&format!("stopping {live} children still running"));
                         }
-                        for c in self.children.values_mut().filter(|c| c.exit.is_none()) {
-                            match c.kind {
-                                // EOF first: codex removes its thread lock on stdin EOF but not on TERM (#57).
-                                Kind::Pipes => {
-                                    c.inbuf.clear();
-                                    c.stdin = None;
-                                }
-                                Kind::Pty => {
-                                    let _ = proc::signal(c.pid, libc::SIGHUP, true);
-                                }
-                            }
+                        for c in self.children.values_mut().filter(|c| c.exit.is_none() && c.kind == Kind::Pipes) {
+                            // EOF first: codex removes its thread lock on stdin EOF but not on TERM (#57).
+                            c.inbuf.clear();
+                            c.stdin = None;
                         }
-                        self.stopping = Some(Stopping { phase: 0, deadline: Instant::now() + grace, done: vec![done] });
+                        let sessions: Vec<i32> = self.children.values().filter(|c| c.kind == Kind::Pty).map(|c| c.pid).collect();
+                        self.signal_sessions(&sessions, libc::SIGHUP);
+                        self.stopping = Some(Stopping { phase: 0, deadline: Instant::now() + grace, done: vec![done], sessions });
                     }
                 },
             }
@@ -1380,6 +1380,18 @@ impl Reactor {
         });
     }
 
+    /// Whether the child whose pid this is still runs (not exited as far as this keeper knows).
+    fn is_running(&self, pid: i32) -> bool {
+        self.children.values().any(|c| c.pid == pid && c.exit.is_none())
+    }
+
+    /// `sig` to every group in each terminal session (`proc::signal_session`).
+    fn signal_sessions(&self, sessions: &[i32], sig: i32) {
+        for &sid in sessions {
+            proc::signal_session(sid, sig, self.is_running(sid));
+        }
+    }
+
     fn housekeeping(&mut self) {
         // A host asked to stop has finished once no control connection is left.
         if !self.host_stop_waiters.is_empty() && !self.conns.values().any(|c| matches!(c.role, Role::Control)) {
@@ -1388,30 +1400,36 @@ impl Reactor {
             }
         }
         self.sweep();
-        if let Some(s) = &mut self.stopping {
+        if let Some(mut s) = self.stopping.take() {
             let live: Vec<i32> = self.children.values().filter(|c| c.exit.is_none()).map(|c| c.pid).collect();
             let now = Instant::now();
             let given_up = s.phase >= 2 && now >= s.deadline;
-            if (live.is_empty() && self.sweeps.is_empty()) || given_up {
+            let sessions_left = s.sessions.iter().any(|&sid| proc::session_exists(sid, self.is_running(sid)));
+            if (live.is_empty() && self.sweeps.is_empty() && !sessions_left) || given_up {
                 if !live.is_empty() {
                     log(&format!("{} children did not exit after KILL", live.len()));
                 }
-                // Nothing runs after this keeper to sweep later: what agents left gets its KILL now.
+                // Nothing runs after this keeper to sweep later: what agents left gets its KILL now,
+                // and so does what is left in a terminal's session.
                 for sw in self.sweeps.drain(..) {
                     proc::signal_leftovers(sw.pgid, libc::SIGKILL);
                 }
+                self.signal_sessions(&s.sessions, libc::SIGKILL);
                 let _ = fs::remove_file(&self.shared.sock);
                 for d in s.done.drain(..) {
                     let _ = d.send(());
                 }
-                self.stopping = None;
-            } else if now >= s.deadline {
-                let sig = if s.phase == 0 { libc::SIGTERM } else { libc::SIGKILL };
-                for pid in live {
-                    let _ = proc::signal(pid, sig, true);
+            } else {
+                if now >= s.deadline {
+                    let sig = if s.phase == 0 { libc::SIGTERM } else { libc::SIGKILL };
+                    for pid in live {
+                        let _ = proc::signal(pid, sig, true);
+                    }
+                    self.signal_sessions(&s.sessions, sig);
+                    s.phase += 1;
+                    s.deadline = now + Duration::from_secs(1);
                 }
-                s.phase += 1;
-                s.deadline = now + Duration::from_secs(1);
+                self.stopping = Some(s);
             }
         }
         let exited: Vec<(Instant, u64)> =

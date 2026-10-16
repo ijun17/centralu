@@ -96,6 +96,13 @@ pub fn is_zombie(pid: u32) -> bool {
         .is_ok_and(|stat| matches!(proc_state(&stat), Some('Z' | 'X' | 'x')))
 }
 
+/// Every process id the system has now, whoever owns it (the numeric names in `/proc`). Used to
+/// find the members of a session (`children::signal_session`), which no call lists directly.
+pub fn all_pids() -> Vec<i32> {
+    let Ok(dir) = std::fs::read_dir("/proc") else { return Vec::new() };
+    dir.filter_map(|e| e.ok()?.file_name().to_str()?.parse::<i32>().ok()).filter(|&p| p > 0).collect()
+}
+
 /// The state letter of a `/proc/<pid>/stat` line: the first field after the command name, which is
 /// in parentheses and may itself hold spaces and parentheses.
 fn proc_state(stat: &str) -> Option<char> {

@@ -15,6 +15,11 @@ pub fn is_zombie(_pid: u32) -> bool {
     false
 }
 
+/// No portable way to list processes: a session's other groups are not found here.
+pub fn all_pids() -> Vec<i32> {
+    Vec::new()
+}
+
 pub fn peer_uid(_stream: &UnixStream) -> io::Result<u32> {
     Err(io::Error::new(io::ErrorKind::Unsupported, "peer credentials are not implemented here"))
 }

@@ -905,8 +905,10 @@ Platforms: macOS, Linux.
 
 **CH8. The keeper's stop escalates in a fixed order.**
 Rule: the host stops its own children first (up to 6 s); then stdin EOF for pipes and SIGHUP for ptys; TERM to the
-group after 2 s; KILL 1 s later; then `children.sock` is removed.
+group after 2 s; KILL 1 s later; then `children.sock` is removed. A pty's signals go to every group in its session,
+its shell's jobs included (#840 item 2).
 Guard: `keeper/keeper/children/tests.rs` `stop_all_ends_pipes_and_ptys_the_host_left_running`;
+`keeper/keeper/children/tests.rs` `stop_all_ends_every_group_in_a_terminals_session`;
 `keeper/keeper/children/tests.rs` `asking_the_host_to_stop_waits_for_it_to_hang_up`;
 `scripts/keeper-children-integration.mjs` check "the host stopped its children itself first".
 Platforms: macOS, Linux.

@@ -267,6 +267,29 @@ fn stop_all_ends_pipes_and_ptys_the_host_left_running() {
     assert!(!socket_path(&d.0).exists(), "the socket goes with the stop");
 }
 
+/**
+ * #840 item 2: "Quit completely" with a terminal whose shell runs a job of its own. Job control
+ * puts the job in a process group of its own, in the shell's session, and it does not hear the
+ * hang-up (here it ignores it, as a dev server started with `nohup` does). The stop used to signal
+ * the shell's group alone, so the job kept running, and its port, after the keeper had gone.
+ */
+#[test]
+fn stop_all_ends_every_group_in_a_terminals_session() {
+    let d = temp_dir("ptyjobs");
+    let keeper = Children::start(&d.0).unwrap();
+    let mut host = Control::open(&d.0);
+    let (id, pid) = host.spawn("pty", "set -m; trap '' HUP; sleep 300 & echo $!; wait");
+    let job = helper_of(&d.0, &id);
+    let _kill = KillOnDrop(vec![job]);
+    // SAFETY: plain syscalls on a pid this test started.
+    let (job_group, job_session) = unsafe { (libc::getpgid(job), libc::getsid(job)) };
+    assert_eq!(job_session, pid, "the job is in the terminal's session");
+    assert_ne!(job_group, pid, "and in a process group of its own");
+    keeper.stop_all(Duration::from_millis(300));
+    assert!(gone(pid), "the shell is gone");
+    assert!(gone_within(job, Duration::from_secs(1)), "the terminal's job {job} outlived the stop");
+}
+
 #[test]
 fn asking_the_host_to_stop_waits_for_it_to_hang_up() {
     let d = temp_dir("askstop");

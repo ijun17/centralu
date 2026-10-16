@@ -37,6 +37,24 @@ pub fn is_zombie(pid: u32) -> bool {
     n == size && info.pbi_status == libc::SZOMB
 }
 
+/// Every process id the system has now, whoever owns it (`proc_listallpids`). Used to find the
+/// members of a session (`children::signal_session`), which no call lists directly.
+pub fn all_pids() -> Vec<i32> {
+    // SAFETY: a null buffer asks only for the count.
+    let n = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
+    if n <= 0 {
+        return Vec::new();
+    }
+    // Room for processes started between the two calls.
+    let mut pids = vec![0 as libc::c_int; n as usize + 64];
+    let size = (pids.len() * std::mem::size_of::<libc::c_int>()) as libc::c_int;
+    // SAFETY: the buffer is valid for `size` bytes for the duration of the call.
+    let got = unsafe { libc::proc_listallpids(pids.as_mut_ptr() as *mut libc::c_void, size) };
+    pids.truncate(got.max(0) as usize);
+    pids.retain(|&p| p > 0);
+    pids
+}
+
 /// kqueue `EVFILT_PROC` with `NOTE_EXIT | NOTE_EXITSTATUS`: one queue for every child, the exit
 /// status delivered with the event even to a process that is not the parent (`ExitWatch`).
 pub struct ExitBackend {

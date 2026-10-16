@@ -1662,7 +1662,9 @@ is sent to the tool, a waiting approval stays waiting, and output still in fligh
 closes. App processes and the in-process tool servers stop, as they live in the host. *Stop* — the keeper's `stop`
 event, or any ending without the child service — is the old path: sessions disposed, terminals and runs killed.
 After a stop the keeper ends whatever is left (stdin EOF and SIGHUP, 2 s, TERM to each group, 1 s, KILL), and
-what exited agents left in their groups.
+what exited agents left in their groups. For a terminal each step reaches every process group in its session, so a
+job its shell put in a group of its own (a dev server sent to the background, one that ignores the hang-up) ends
+too (#840 item 2); before, only the shell's own group was signalled and such a job kept its port.
 
 **Re-attach.** At startup the host lists the keeper's children. Live agents re-attach after `listen`, through
 `resumeSession`, so a screen waking the same session joins the re-attach instead of starting a second process.
