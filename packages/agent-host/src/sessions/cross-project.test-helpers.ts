@@ -91,7 +91,8 @@ export type CrossWorld = {
 }
 
 export async function crossWorld(): Promise<CrossWorld> {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-xproj-')))
+  // The real spelling (on Windows the long name for `RUNNER~1`), as the host reads paths it grants (#428)
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-xproj-')))
   const callerPath = join(root, 'consumer')
   const targetPath = join(root, 'toolkit')
   mkdirSync(callerPath)
