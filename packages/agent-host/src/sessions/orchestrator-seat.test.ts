@@ -206,6 +206,20 @@ describe("two sends to a linked machine's session at once (#839)", () => {
     expect(host.linkedReportRestored).not.toHaveBeenCalled()
   })
 
+  it('two sends that both fail, the first failing first, put back the request that was there before either', async () => {
+    const answers = machine()
+    const tools = orchestratorToolsFor(host, 'orch')
+    const original = { orchestratorId: 'orch', busy: false }
+    children.setLinkedReport('far', original)
+    const first = tools.sendToSession('far', 'first', true)
+    const second = tools.sendToSession('far', 'second', true)
+    answers[0]!({ ok: false, error: 'the link dropped' })
+    expect(await first).toMatchObject({ ok: false })
+    answers[1]!({ ok: false, error: 'the link dropped' })
+    expect(await second).toMatchObject({ ok: false })
+    expect(children.linkedReports.get('far')).toBe(original)
+  })
+
   it('a send without a report drops only the request it found, not one another call set meanwhile', async () => {
     const answers = machine()
     const tools = orchestratorToolsFor(host, 'orch')

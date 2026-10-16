@@ -4,7 +4,7 @@ import type { AppCheckReport, AppRef } from '../apps/external/runtime.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
 import { presetWithin } from './start-agent.js'
-import type { ChildOwnership } from './child-ownership.js'
+import type { ChildOwnership, LinkedReport } from './child-ownership.js'
 import type { OrchestratorProposals } from './orchestrator-proposals.js'
 import { dedupeNearbyHits, takeInTurns, windowAround } from './snippet.js'
 import { authorOf, contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
@@ -85,6 +85,13 @@ export type OrchestratorSeatHost = {
     tool?: ToolName
   }): Promise<{ app: ExternalAppInfo; builder: SessionInfo | null; builderError?: string }>
 }
+
+/**
+ * Report requests of overlapping linked sends (#839): what each one replaced, and those whose send failed while another
+ * send's request stood over them. A failed send puts back what was there before it, past any such failed request.
+ */
+const replacedBy = new WeakMap<LinkedReport, LinkedReport | undefined>()
+const failedSends = new WeakSet<LinkedReport>()
 
 /**
  * The tools given to an orchestrator (FR-11).
@@ -412,13 +419,17 @@ export function orchestratorToolsFor(
         const r = await remote.send(sessionId, text, host.meta.get(orchestratorId)?.name ?? 'Orchestrator')
         // Only what this call left is undone or dropped (#839): another send to the session set its own meanwhile
         const current = host.children.linkedReports.get(sessionId)
+        if (mine) replacedBy.set(mine, earlier)
         if (!r.ok) {
           if (mine && current === mine) {
-            if (earlier) {
-              host.children.setLinkedReport(sessionId, earlier)
+            // What was there before: past any request of an overlapping send that failed while this one was out (#839)
+            let back = earlier
+            while (back && failedSends.has(back)) back = replacedBy.get(back)
+            if (back) {
+              host.children.setLinkedReport(sessionId, back)
               host.linkedReportRestored(sessionId)
             } else host.children.dropLinkedReport(sessionId)
-          }
+          } else if (mine) failedSends.add(mine)
           return r
         }
         // As here (#166): a new instruction without a report replaces this orchestrator's earlier request
