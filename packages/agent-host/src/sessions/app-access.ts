@@ -1,7 +1,8 @@
 import type { ExternalAppInfo } from '@cc/protocol'
 import { appMcpServerName } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
-import type { AppSessionKey, OnDemandApps, SessionAppsHub } from './session-apps.js'
+import { TOOL_LIST_WAIT_MS, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
+import { withTimeout } from './with-timeout.js'
 
 /**
  * Another project's app tools, on demand (#371 part A) — `find_apps`, `attach_app` and `detach_app`.
@@ -98,7 +99,6 @@ export type DetachOutcome = { ok: true; server: string; when: 'now' | 'next_turn
 const KEY = (sessionId: string) => `session_apps:${sessionId}`
 const SHARED_KEY = (ref: { projectId: string; appId: string }) => `app_shared:${ref.projectId}/${ref.appId}`
 const UNUSABLE = new Set(['invalid', 'untrusted', 'unconfirmed', 'failed'])
-const TOOL_LIST_WAIT_MS = 15_000
 
 /** Whether the person shares this project app with their other projects (#371 part A) — the runtime's `shared` dep reads this */
 export function readShared(store: Pick<AppAccessStore, 'appSetting'>, ref: AppRef): boolean {
@@ -325,17 +325,10 @@ export class AppAccess implements OnDemandApps {
   private async toolNames(ref: AppRef, sessionId: string): Promise<string[]> {
     const known = this.deps.hub.rt.knownTools(ref, 'model')
     if (known) return known.map((t) => t.name)
-    let timer: NodeJS.Timeout | undefined
     try {
-      const listed = await Promise.race([
-        this.deps.hub.rt.tools(ref, 'model', sessionId),
-        new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error('timeout')), this.deps.toolListWaitMs ?? TOOL_LIST_WAIT_MS))),
-      ])
-      return listed.map((t) => t.name)
+      return (await withTimeout(this.deps.hub.rt.tools(ref, 'model', sessionId), this.deps.toolListWaitMs ?? TOOL_LIST_WAIT_MS, 'Its tool list')).map((t) => t.name)
     } catch {
       return []
-    } finally {
-      clearTimeout(timer)
     }
   }
 

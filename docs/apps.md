@@ -666,7 +666,8 @@ that was detached.
 Each app appears as an MCP server named `app-<id>`; in Claude its tools read `mcp__app-<id>__<tool>`.
 The tool list is the last one read, so starting a session does not start every app. If none has
 been read yet, the host starts the app and waits up to 15 s, then attaches it with an empty list
-and updates the list when the app answers.
+and updates the list when the app answers. A session's apps and `attach_app` wait the same bound
+(`TOOL_LIST_WAIT_MS` in `sessions/session-apps.ts`, through `withTimeout`, #428).
 
 ### 9.2 Claude and Codex
 

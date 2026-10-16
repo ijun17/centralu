@@ -1,4 +1,5 @@
 import { qualify } from './machine-ids.js'
+import { isObj, type Obj } from './obj.js'
 
 /**
  * Rewrites what one linked machine says into the hub's terms, and the hub's terms back into the
@@ -16,10 +17,6 @@ import { qualify } from './machine-ids.js'
  * reads it tolerantly (#339). Values are read as `unknown` on purpose: the remote is another build,
  * and the UI parses the result again through the method's schema.
  */
-
-type Obj = Record<string, unknown>
-
-const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v)
 
 export class CrossMachineError extends Error {
   readonly code = 'internal'

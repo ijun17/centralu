@@ -25,6 +25,7 @@ import { RemoteClient, type RemoteClientOptions, type RemoteHello } from './remo
 import type { RoutedMachine } from './router.js'
 import { shimNames, type Endpoint, type HostStart, type RemoteAutostart, type RemoteCommand, type RemoteInstall, type RemoteRun, type RemoteSpec, type Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
+import { isObj } from './obj.js'
 
 /**
  * The hub's links to other machines (docs/plans/remote-hub.md §2, §5): one `LinkedMachine` per
@@ -99,9 +100,6 @@ export type LinkInstaller = {
   registry?: RegistryOptions
   nodeDist?: string
 }
-
-type Obj = Record<string, unknown>
-const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v)
 
 const linkError = (message: string) => Object.assign(new Error(message), { code: 'internal' })
 

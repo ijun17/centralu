@@ -4,6 +4,7 @@ import { NOT_REACHABLE, type LinkedProject, type LinkedSessions, type Orchestrat
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { splitQualified } from './machine-ids.js'
 import type { RoutedMachine, RpcHandler } from './router.js'
+import { isObj } from './obj.js'
 
 /** Without a router (the reading tests), nothing that acts is reachable */
 const notRouted: RpcHandler = async (method) => {
@@ -41,8 +42,6 @@ function oneLine(value: unknown, max = LABEL_MAX): string {
 function fencedLine(line: string): string {
   return line.replace(NOT_ONE_LINE, '') === line ? line : trustedJsonText(line)
 }
-
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
 /**
  * How long a name is resolved against a machine's project list before that machine is counted as not answering. A

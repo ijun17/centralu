@@ -2,6 +2,7 @@ import type { AppReach, ExternalAppInfo, SessionKind } from '@cc/protocol'
 import type { AppToolResult, AppToolSpec, AttachedApp, SessionApps, SessionHandle } from '../adapters/contract.js'
 import { appMcpServerName } from '../apps/contract.js'
 import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
+import { withTimeout } from './with-timeout.js'
 
 /**
  * Attaches external apps to a session (M4 A-5) — **which session gets which app**, and the path
@@ -412,21 +413,11 @@ class Attachment implements SessionApps {
      * exceeded or it fails to start, attach it with an empty list and log the reason. Starting
      * itself keeps going in the background, and the runtime announces once the list is read.
      */
-    const waitMs = this.hub.opts.toolListWaitMs ?? TOOL_LIST_WAIT_MS
-    let timer: NodeJS.Timeout | undefined
     try {
-      const listed = await Promise.race([
-        this.hub.rt.tools(hit.ref, 'model', this.session.id),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`did not list its tools within ${Math.round(waitMs / 1000)}s`)), waitMs)
-        }),
-      ])
-      return withRunStatus(listed.map(toSpec))
+      return withRunStatus((await withTimeout(this.hub.rt.tools(hit.ref, 'model', this.session.id), this.hub.opts.toolListWaitMs ?? TOOL_LIST_WAIT_MS, 'Its tool list')).map(toSpec))
     } catch (err) {
       console.error(`[apps] ${server} attached with no tools for now: ${(err as Error).message.split('\n')[0]}`)
       return withRunStatus([])
-    } finally {
-      clearTimeout(timer)
     }
   }
 

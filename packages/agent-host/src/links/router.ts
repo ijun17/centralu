@@ -2,6 +2,7 @@ import { RpcMethods, type RpcMethodName } from '@cc/protocol'
 import { decodeNumber, encodeNumber, splitQualified } from './machine-ids.js'
 import type { Qualifier } from './qualifier.js'
 import { ROUTES, type Route } from './routes.js'
+import { isObj, type Obj } from './obj.js'
 
 /**
  * The hub's request router (docs/plans/remote-hub.md §5): one function in front of
@@ -53,9 +54,6 @@ export type RouterOptions = {
   /** Absent: the order is per machine, the hub's own projects first (as before #734) */
   order?: ProjectOrder
 }
-
-type Obj = Record<string, unknown>
-const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v)
 
 export class MachineUnreachableError extends Error {
   readonly code = 'internal'
