@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Store } from './store.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 const dirs: string[] = []
 function storeFile(): string {
@@ -172,26 +173,38 @@ describe('the WAL', () => {
     s.close()
   })
 
+  /*
+   * "Without waiting" means not waiting out the busy timeout. With the store's own 5 s the bound had to sit between a
+   * slow runner and 5 s (1,078 ms seen on Windows against 1,000 first, then 2,500): load alone could cross it. The
+   * busy timeout is set to 20 s here, so a checkpoint that waits takes 20 s and one that does not is far under the
+   * 10 s bound however loaded the machine is (#845). The test's own limit lets a waiting one end and be reported.
+   */
+  const BUSY_MS = 20_000
   it('a checkpoint with another connection reading reports it did not fold, without waiting', () => {
     const file = storeFile()
     const s = new Store(file)
-    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
     const reader = new Database(file, { readonly: true })
     try {
+      s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+      const db = (s as unknown as { db: Database.Database }).db
+      db.pragma(`busy_timeout = ${BUSY_MS}`)
       reader.exec('BEGIN')
       reader.prepare('SELECT COUNT(*) FROM projects').get()
       const t0 = Date.now()
       expect(s.checkpoint()).toBe(false)
-      // "Without waiting" means not the 5 s busy timeout; half of it leaves room for a slow Windows runner (1,078 ms seen)
-      expect(Date.now() - t0).toBeLessThan(2500)
+      expect(Date.now() - t0).toBeLessThan(BUSY_MS / 2)
+      // And the store's own wait is back for everything else
+      expect(db.pragma('busy_timeout', { simple: true })).toBe(BUSY_MS)
       reader.exec('COMMIT')
-    } finally {
       reader.close()
+      expect(s.checkpoint()).toBe(true)
+      expect(statSync(`${file}-wal`).size).toBe(0)
+    } finally {
+      // Both closed whatever failed: Windows cannot remove the folder while either holds the file
+      if (reader.open) reader.close()
+      s.close()
     }
-    expect(s.checkpoint()).toBe(true)
-    expect(statSync(`${file}-wal`).size).toBe(0)
-    s.close()
-  })
+  }, (BUSY_MS + 10_000) * SLOW)
 
   it('a checkpoint or a second close on a closed store does nothing rather than throw', () => {
     const s = new Store(storeFile())
