@@ -7062,9 +7062,17 @@ test('The card does not disappear on its own over time', async ({ page }) => {
   await emitEvent(page, 0, { type: 'turn_complete' })
   await expect(page.getByTestId('notice')).toHaveCount(1)
 
-  // A toast clears at 2.5 seconds. Even waiting comfortably longer than that, this must remain.
-  await page.waitForTimeout(4000)
-  await expect(page.getByTestId('notice')).toHaveCount(1)
+  /*
+   * A toast clears at 2.5 seconds, and this must outlast it. A fixed 4 s wait measured the test's clock, not the page's:
+   * on a loaded machine the page may have run far less of it, and the check passed without the time having passed
+   * there (#845). Two toasts in a row, each cleared by the page's own 2.5 s timer, are 5 s the page did run.
+   */
+  for (let i = 0; i < 2; i++) {
+    await page.evaluate((n) => (window as any).__store.getState().setToast(`time passing ${n}`), i)
+    await expect(page.getByTestId('toast')).toBeVisible()
+    await expect(page.getByTestId('toast')).toBeHidden({ timeout: 30_000 })
+    await expect(page.getByTestId('notice')).toHaveCount(1)
+  }
 })
 
 test('The card clears once that session is being viewed', async ({ page }) => {
