@@ -94,6 +94,19 @@ describe('the hosts of a config and what it includes', () => {
     expect(aliases()).toEqual(['first', 'from-a', 'from-b', 'middle', 'orb', 'abs', 'last'])
   })
 
+  /*
+   * #849: Windows' OpenSSH reads `~\` as `~/` (measured with 9.5p2: `Include ~\x` is "include ~/x"), and Windows users
+   * write paths with backslashes. Such an Include was left out, with a note about another user's folder.
+   */
+  it.runIf(process.platform === 'win32')('on Windows, reads an Include of ~\\ as ssh does', () => {
+    write('.orbstack/ssh/config', 'Host orb\n')
+    write('.ssh/config.d/a.conf', 'Host from-a\n')
+    write('.ssh/config', ['Host first', 'Include ~\\.orbstack\\ssh\\config', 'Include ~\\.ssh\\config.d\\*', 'Host last'].join('\n'))
+    const read = readSshConfig({ file: join(home, '.ssh', 'config'), home })
+    expect(read.hosts.map((h) => h.alias)).toEqual(['first', 'orb', 'from-a', 'last'])
+    expect(read.notes).toEqual([])
+  })
+
   it('reads an Include inside a Host block too, as ssh declares the hosts in it either way', () => {
     write('.ssh/work', 'Host inner\n')
     write('.ssh/config', 'Host outer\n  User me\n  Include work\n')

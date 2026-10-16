@@ -185,7 +185,8 @@ export function readSshConfig(opts: { file: string; home: string }): ConfigRead 
         }
         for (const arg of split.args) {
           let path = arg
-          if (path.startsWith('~/')) path = join(opts.home, path.slice(2))
+          // Windows' OpenSSH reads `~\` as `~/` (#849; measured with 9.5p2: `Include ~\x` is "include ~/x")
+          if (path.startsWith('~/') || (process.platform === 'win32' && path.startsWith('~\\'))) path = join(opts.home, path.slice(2))
           else if (path.startsWith('~')) {
             notes.push(`An Include of another user's folder (${where(file, n + 1)}) was not read`)
             continue
