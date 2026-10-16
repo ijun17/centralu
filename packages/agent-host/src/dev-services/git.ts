@@ -432,7 +432,7 @@ async function duSizes(cwd: string, paths: string[]): Promise<Map<string, number
 
 /**
  * The same sizes read from the file system, where du is not run (`measuresWithDu`, Windows, #849): bytes in files, not
- * blocks on disk, and a link counts as itself, never as what it leads to. An entry not finished within the budget has
+ * blocks on disk, and a link counts for nothing and is never followed. An entry not finished within the budget has
  * no size, as one du did not reach.
  */
 async function walkedSizes(cwd: string, paths: string[]): Promise<Map<string, number>> {
@@ -446,24 +446,40 @@ async function walkedSizes(cwd: string, paths: string[]): Promise<Map<string, nu
   return sizes
 }
 
-async function treeBytes(path: string, deadline: number): Promise<number | null> {
+/** How many lstat calls the size walk has in flight at once, and how many entries it reads before giving up */
+const SIZE_BATCH = 256
+const MAX_SIZED_ENTRIES = 1_000_000
+
+/**
+ * The bytes under `path`, or null past `deadline` or past `maxEntries` entries. The files of one folder are measured
+ * SIZE_BATCH at a time, with the deadline checked between batches: one folder of a million files used to queue a
+ * million lstat calls at once (#849 review). A link counts as nothing and is not asked about: `lstat` follows one
+ * whose target libuv cannot read, and following it could reach anywhere.
+ */
+export async function treeBytes(path: string, deadline: number, maxEntries: number = MAX_SIZED_ENTRIES): Promise<number | null> {
   const top = await lstat(path).catch(() => null)
   if (!top) return null
   if (!top.isDirectory()) return top.size
   let total = 0
+  let seen = 0
   const folders = [path]
   while (folders.length > 0) {
     if (Date.now() > deadline) return null
     const folder = folders.pop()!
     const entries = await readdir(folder, { withFileTypes: true }).catch(() => [])
+    seen += entries.length
+    if (seen > maxEntries) return null
     const files: string[] = []
     for (const entry of entries) {
-      // A junction or symlink is not a directory here, so it is measured as a link and not walked into
+      // A junction or symlink is neither: it is not walked into
       if (entry.isDirectory()) folders.push(join(folder, entry.name))
-      else files.push(join(folder, entry.name))
+      else if (!entry.isSymbolicLink()) files.push(join(folder, entry.name))
     }
-    const each = await Promise.all(files.map((file) => lstat(file).then((s) => s.size, () => 0)))
-    for (const bytes of each) total += bytes
+    for (let i = 0; i < files.length; i += SIZE_BATCH) {
+      if (Date.now() > deadline) return null
+      const each = await Promise.all(files.slice(i, i + SIZE_BATCH).map((file) => lstat(file).then((s) => s.size, () => 0)))
+      for (const bytes of each) total += bytes
+    }
   }
   return total
 }
