@@ -3,6 +3,7 @@ import { useDismiss } from '../../components/useDismiss.js'
 import { ChevronIcon } from '../../components/icons.jsx'
 import type { ModelOption, PermissionPreset, ToolName } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useLoad } from '../../app/useLoad.js'
 import { useStore } from '../../store/store.js'
 
 /**
@@ -84,6 +85,9 @@ export function useModels(
   return state
 }
 
+/** The same empty list each render, so a menu reading it does not see a new one every time */
+const NO_LEVELS: string[] = []
+
 /**
  * The response-length levels for this tool (#54). If empty, the tool has no such knob, so the
  * row itself does not appear.
@@ -95,19 +99,8 @@ export function useModels(
  */
 export function useVerbosities(tool: ToolName, machine: string | null = null): string[] {
   const platform = usePlatform()
-  const [levels, setLevels] = useState<string[]>([])
-  useEffect(() => {
-    let alive = true
-    void platform.agents
-      .capabilities(tool, machine)
-      .then((c) => alive && setLevels(c.verbosities))
-      // The menu must still render even if capabilities cannot be read — it just loses one row
-      .catch(() => alive && setLevels([]))
-    return () => {
-      alive = false
-    }
-  }, [platform, tool, machine])
-  return levels
+  // The menu must still render even if capabilities cannot be read — it just loses one row
+  return useLoad(() => platform.agents.capabilities(tool, machine), [platform, tool, machine]).data?.verbosities ?? NO_LEVELS
 }
 
 /**

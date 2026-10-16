@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { ToolName } from '@cc/protocol'
 import { usePlatform } from '../../../app/PlatformProvider.jsx'
 import { useToolMeta } from '../../../store/selectors.js'
 import { Modal } from '../../../components/Modal.jsx'
 import { formatChangedCount } from '../../../app/format.js'
+import { useLoad } from '../../../app/useLoad.js'
 
 /**
  * Delete confirmation.
@@ -48,20 +49,9 @@ export function ConfirmDelete({
    * moment the dialog opens.** The session list only holds the path, not whether it is dirty —
    * that is a fact only the filesystem can answer.
    */
-  const [wt, setWt] = useState<{ path: string; branch: string; dirty: boolean; changedFiles: number; more?: boolean; unknown?: boolean } | null>(
-    null,
-  )
+  // Unknown until the host answers, and when it cannot: the dialog then says nothing about a worktree
+  const wt = useLoad(() => platform.agents.worktreeStatus(sessionId), [platform, sessionId]).data ?? null
   const [deleteWorktree, setDeleteWorktree] = useState(false)
-  useEffect(() => {
-    let alive = true
-    void platform.agents
-      .worktreeStatus(sessionId)
-      .then((r) => alive && setWt(r))
-      .catch(() => {})
-    return () => {
-      alive = false
-    }
-  }, [platform, sessionId])
   return (
     <Modal onClose={onCancel} testId="confirm-delete">
       <div className="w-[380px] max-w-[calc(90vw/var(--text-zoom))] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)">

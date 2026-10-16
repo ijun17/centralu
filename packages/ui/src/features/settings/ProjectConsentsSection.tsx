@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { ProjectConsent } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { formatDay } from '../../app/format.js'
+import { useLoad } from '../../app/useLoad.js'
+import { LoadFailed } from '../../components/LoadFailed.jsx'
 
 const KIND_LABEL: Record<ProjectConsent['kind'], string> = {
   delegate: 'may ask',
@@ -22,23 +24,12 @@ const KIND_LABEL: Record<ProjectConsent['kind'], string> = {
 export function ProjectConsentsSection() {
   const platform = usePlatform()
   const version = useStore((s) => s.projectConsentsVersion)
-  const [list, setList] = useState<ProjectConsent[] | null>(null)
+  // Read again whenever a consent is given or revoked elsewhere (`projectConsentsVersion`)
+  const read = useLoad(() => platform.consents.list(), [platform], [version])
+  // Revoked here since the last read: gone from the list without waiting for it
+  const [revoked, setRevoked] = useState<ProjectConsent[]>([])
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let live = true
-    platform.consents
-      .list()
-      .then((l) => live && setList(l))
-      .catch((e: unknown) => {
-        if (!live) return
-        setList([])
-        setError((e as Error).message || 'Could not read the list')
-      })
-    return () => {
-      live = false
-    }
-  }, [platform, version])
+  const list = read.data?.filter((c) => !revoked.includes(c))
 
   return (
     <section className="mt-6 border-t border-line pt-4" data-testid="project-consents">
@@ -48,7 +39,15 @@ export function ProjectConsentsSection() {
         listed here; revoke it and the next request asks again.
       </p>
       {error && <p className="mt-2 text-sm text-ink-faint">{error}</p>}
-      {list === null ? (
+      {read.error !== null ? (
+        <LoadFailed
+          what="the list"
+          error={read.error}
+          onRetry={() => void read.reload()}
+          className="mt-2"
+          testId="project-consents-failed"
+        />
+      ) : list === undefined ? (
         <p className="mt-2 text-sm text-ink-faint">Loading…</p>
       ) : list.length === 0 ? (
         <p className="mt-2 text-sm text-ink-faint" data-testid="project-consents-empty">
@@ -73,7 +72,7 @@ export function ProjectConsentsSection() {
                   onClick={async () => {
                     try {
                       await platform.consents.revoke(c.fromProjectId, c.toProjectId, c.kind)
-                      setList((l) => (l ?? []).filter((x) => x !== c))
+                      setRevoked((r) => [...r, c])
                     } catch (e) {
                       setError((e as Error).message || 'Could not revoke it')
                     }

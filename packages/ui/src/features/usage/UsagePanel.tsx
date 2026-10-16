@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback } from 'react'
 import { useLabelNow } from '../../app/useLabelNow.js'
 import { nextResetTick } from '../../app/labelClock.js'
 import type { CacheStats, ToolName, UsageSnapshot, UsageWindow } from '@cc/protocol'
@@ -9,6 +9,7 @@ import { useToolMeta } from '../../store/selectors.js'
 import { CacheSection } from './CacheSection.jsx'
 import { formatCount, formatDuration } from '../../app/format.js'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
+import { useLoad } from '../../app/useLoad.js'
 
 /**
  * Usage (FR-9).
@@ -21,13 +22,6 @@ import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
  */
 export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A linked machine's limits (#82); null for this computer */ machine?: string | null }) {
   const platform = usePlatform()
-  const [state, setState] = useState<{
-    loading: boolean
-    reason?: string
-    usage: UsageSnapshot | null
-    cache?: CacheStats
-    sameAccount?: boolean
-  }>({ loading: true, usage: null })
   const meta = useToolMeta(tool)
   /*
    * A session the cache section names opens like a sidebar row, and the dropdown closes: the person asked "which
@@ -40,19 +34,13 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
     focusSession(id)
   }
 
-  useEffect(() => {
-    let alive = true
-    setState({ loading: true, usage: null })
-    void platform.agents
-      .usage(tool, machine ?? undefined)
-      .then((r) => alive && setState({ loading: false, usage: r.usage, reason: r.supported ? undefined : r.reason, cache: r.cache, sameAccount: r.sameAccountAsHub }))
-      .catch((e: Error) => alive && setState({ loading: false, usage: null, reason: e.message }))
-    return () => {
-      alive = false
-    }
-  }, [platform, tool, machine])
+  const read = useLoad(() => platform.agents.usage(tool, machine ?? undefined), [platform, tool, machine])
+  const r = read.data
+  const state: { usage: UsageSnapshot | null; reason?: string; cache?: CacheStats; sameAccount?: boolean } = r
+    ? { usage: r.usage, reason: r.supported ? undefined : r.reason, cache: r.cache, sameAccount: r.sameAccountAsHub }
+    : { usage: null, reason: read.error ?? undefined }
 
-  if (state.loading) {
+  if (r === undefined && read.error === null) {
     return (
       <p className="px-4 py-6 text-center text-sm text-ink-faint" data-testid="usage-loading">
         Loading usage…

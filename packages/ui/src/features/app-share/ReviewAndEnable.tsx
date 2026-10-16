@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { AppReview } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useLoad } from '../../app/useLoad.js'
 import { useStore } from '../../store/store.js'
 import type { ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppReviewDetails } from './AppReviewDetails.jsx'
@@ -19,35 +20,27 @@ export function ReviewAndEnable({ app }: { app: ExternalCatalogApp }) {
   const platform = usePlatform()
   const refresh = useStore((s) => s.refreshExternalApps)
   const setToast = useStore((s) => s.setToast)
-  const [review, setReview] = useState<AppReview | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  // An enable that was refused; reading the review fails on its own (`read.error`)
+  const [enableError, setEnableError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const load = useCallback(() => {
-    let alive = true
-    platform.apps
-      .review(app.appId, app.projectId)
-      .then((r) => alive && setReview(r))
-      .catch((e: Error) => alive && setError(e.message))
-    return () => {
-      alive = false
-    }
-  }, [platform, app.appId, app.projectId])
   // Reads again whenever the reason the list gives changes (the manifest changed again)
-  useEffect(() => load(), [load, app.info.error, app.info.version])
+  const read = useLoad(() => platform.apps.review(app.appId, app.projectId), [platform, app.appId, app.projectId], [app.info.error, app.info.version])
+  const review: AppReview | null = read.data ?? null
+  const error = enableError ?? read.error
 
   const enable = async () => {
     if (!review || busy) return
     setBusy(true)
-    setError(null)
+    setEnableError(null)
     try {
       await platform.apps.enable(app.appId, app.projectId, review.reviewKey)
       setToast(`Enabled ${app.title}`)
       void refresh()
     } catch (e) {
       // It changed in the meantime — show the reason and read the new window (the person sees what changed and enables it again)
-      setError((e as Error).message)
-      load()
+      setEnableError((e as Error).message)
+      void read.reload()
     } finally {
       setBusy(false)
     }

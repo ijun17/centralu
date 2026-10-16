@@ -8,6 +8,8 @@ import { useMachineName, useTools } from '../../store/selectors.js'
 import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { isPlainEscape } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
+import { LoadFailed } from '../../components/LoadFailed.jsx'
+import { useLoad } from '../../app/useLoad.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
@@ -180,7 +182,6 @@ export function Settings() {
   const platform = usePlatform()
   const sc = useShortcut()
   const nav = useNavShortcut()
-  const [rules, setRules] = useState<Rule[] | null>(null)
   const [category, setCategory] = useState<Category>('notifications')
   // Another screen asked for a category (a machine's badge in the sidebar opens Machines, #82, #734)
   const request = useStore((s) => s.settingsRequest)
@@ -189,16 +190,9 @@ export function Settings() {
     if (asked) setCategory(asked.id)
   }, [request])
 
-  const loadRules = useCallback(() => {
-    void platform.rules
-      .list()
-      .then(setRules)
-      .catch(() => setRules([]))
-  }, [platform])
-
-  useEffect(() => {
-    if (open) loadRules()
-  }, [open, loadRules])
+  // Read each time settings open. A failed read says so: it used to be drawn as "No saved rules" (#850 item 8)
+  const rules = useLoad(() => (open ? platform.rules.list() : null), [open, platform])
+  const loadRules = rules.reload
 
   useEffect(() => {
     if (!open) return
@@ -321,15 +315,23 @@ export function Settings() {
                   Pressing <Kbd>a</Kbd> on an approval adds an always-allow rule here. Delete any of them
                   anytime.
                 </p>
-                {rules === null ? (
+                {rules.error !== null ? (
+                  <LoadFailed
+                    what="the rules"
+                    error={rules.error}
+                    onRetry={() => void loadRules()}
+                    className="mt-2"
+                    testId="rules-failed"
+                  />
+                ) : rules.data === undefined ? (
                   <p className="mt-2 text-sm text-ink-faint">Loading…</p>
-                ) : rules.length === 0 ? (
+                ) : rules.data.length === 0 ? (
                   <p className="mt-2 text-sm text-ink-faint" data-testid="rules-empty">
                     No saved rules
                   </p>
                 ) : (
                   <ul className="mt-2 divide-y divide-line/60 rounded-md border border-line" data-testid="rules-list">
-                    {rules.map((r) => (
+                    {rules.data.map((r) => (
                       <li key={r.id} className="flex items-center gap-2 px-2.5 py-1.5">
                         <code className="truncate font-mono text-sm text-ink">{r.matcher}</code>
                         <span className="shrink-0 text-2xs text-ink-faint">
@@ -344,7 +346,7 @@ export function Settings() {
                           data-testid={`delete-rule-${r.id}`}
                           onClick={async () => {
                             await platform.rules.remove(r.id)
-                            loadRules()
+                            void loadRules()
                           }}
                         >
                           Delete
@@ -982,19 +984,11 @@ function AppearanceSection() {
  * no window must never be one whose consequences someone discovers later.
  */
 function BackgroundSection({ port }: { port: BackgroundPort }) {
-  const [on, setOn] = useState<boolean | null>(null)
+  const read = useLoad(() => port.get(), [port])
+  // What the keeper answered to the last change, over what it said when the section opened
+  const [saved, setSaved] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    port
-      .get()
-      .then((v) => alive && setOn(v))
-      .catch((e: Error) => alive && setError(e.message))
-    return () => {
-      alive = false
-    }
-  }, [port])
+  const on = saved ?? read.data ?? null
 
   return (
     <section data-testid="settings-background">
@@ -1010,7 +1004,7 @@ function BackgroundSection({ port }: { port: BackgroundPort }) {
             setError(null)
             port
               .set(next)
-              .then(setOn)
+              .then(setSaved)
               .catch((err: Error) => setError(err.message))
           }}
         />
@@ -1028,9 +1022,9 @@ function BackgroundSection({ port }: { port: BackgroundPort }) {
         when you quit: it also stops agents, terminals and running commands. With no window open and
         nothing running for 30 minutes, the background host stops by itself.
       </p>
-      {error && (
+      {(error ?? read.error) && (
         <p className="mt-2 text-xs text-danger" data-testid="settings-background-error">
-          {error}
+          {error ?? read.error}
         </p>
       )}
     </section>

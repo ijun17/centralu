@@ -3,6 +3,7 @@ import { RelativeAge } from '../../components/RelativeAge.jsx'
 import type { ExternalSession, GitBranch } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useLoad } from '../../app/useLoad.js'
 import { formatBytes } from '../../app/format.js'
 import { isPlainEscape, isTextEntry } from '../../app/keys.js'
 import { useSessionsOf, useTools } from '../../store/selectors.js'
@@ -133,38 +134,22 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
    */
   const [base, setBase] = useState<string | null>(null)
   const baseValue = base ?? trunk
-  const [branches, setBranches] = useState<GitBranch[] | null>(null)
-  useEffect(() => {
-    if (!isRepo || !worktree || branches) return
-    let alive = true
-    void platform.git
-      .branches(projectId)
-      .then((list) => alive && setBranches(list.filter((b) => !b.remote)))
-      .catch(() => alive && setBranches([]))
-    return () => {
-      alive = false
-    }
-  }, [isRepo, worktree, branches, platform, projectId])
+  // Read once a worktree is asked for; a failed read offers none, as before (the base stays the trunk)
+  const branches: GitBranch[] | null =
+    useLoad(
+      () => (isRepo && worktree ? platform.git.branches(projectId).then((list) => list.filter((b) => !b.remote)) : null),
+      [isRepo, worktree, platform, projectId],
+    ).data ?? null
 
-  const [ignored, setIgnored] = useState<{ path: string; bytes: number | null }[] | null>(null)
-  useEffect(() => {
-    if (!isRepo || !worktree || ignored) return
-    let alive = true
-    void platform.git
-      .ignoredEntries(projectId)
-      .then((list) => alive && setIgnored(list))
-      .catch(() => alive && setIgnored([]))
-    return () => {
-      alive = false
-    }
-  }, [isRepo, worktree, ignored, platform, projectId])
+  const ignored: { path: string; bytes: number | null }[] | null =
+    useLoad(() => (isRepo && worktree ? platform.git.ignoredEntries(projectId) : null), [isRepo, worktree, platform, projectId]).data ?? null
 
   // The past session to resume. null means 'new session' (the default)
   const [resume, setResume] = useState<ExternalSession | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const focusSession = useStore((s) => s.focusSession)
   const askComposerFocus = useStore((s) => s.askComposerFocus)
-  const [past, setPast] = useState<PastState>({ status: 'loading' })
+
 
   /**
    * Follows the row picked by the arrow keys when it is outside the collapsed list's view —
@@ -186,25 +171,16 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
   }, [resume?.externalId])
 
   // Changing the tool changes the list too — the previous selection belonged to a different tool, so it is discarded
-  useEffect(() => {
-    let alive = true
-    setResume(null)
-    setPast({ status: 'loading' })
-    void platform.agents
-      .listExternalSessions(projectId, tool)
-      .then((r) => {
-        if (!alive) return
-        setPast(
-          r.supported
-            ? { status: 'ok', sessions: r.sessions }
-            : { status: 'unsupported', reason: r.reason ?? 'Could not list past conversations' },
-        )
-      })
-      .catch((e: Error) => alive && setPast({ status: 'unsupported', reason: e.message }))
-    return () => {
-      alive = false
-    }
-  }, [platform, projectId, tool])
+  useEffect(() => setResume(null), [platform, projectId, tool])
+  const listed = useLoad(() => platform.agents.listExternalSessions(projectId, tool), [platform, projectId, tool])
+  const past: PastState =
+    listed.error !== null
+      ? { status: 'unsupported', reason: listed.error }
+      : listed.data === undefined
+        ? { status: 'loading' }
+        : listed.data.supported
+          ? { status: 'ok', sessions: listed.data.sessions }
+          : { status: 'unsupported', reason: listed.data.reason ?? 'Could not list past conversations' }
 
   // The weight that copying would drag along — the judgment a person makes from this list is "this is too big," so a total is shown
   const picks = splitList(copyFiles)

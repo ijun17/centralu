@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { HostActivity, MachineInfo } from '@cc/protocol'
 import { autostartRow, hostStartNote, installNote, machineProblem, operationNote, updateStops, versionPrompt } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
 import { AddMachineForm, SHELL_LABEL, withCode } from './AddMachineForm.jsx'
+import { useLoad } from '../../app/useLoad.js'
 
 /**
  * Settings → Machines (#82, docs/plans/remote-hub.md): the other computers this computer's host reaches.
@@ -151,14 +152,12 @@ const boxButton =
  */
 function StopConfirm({ m, action, onCancel, onConfirm }: { m: MachineInfo; action: string; onCancel: () => void; onConfirm: () => void }) {
   const machineActivity = useStore((s) => s.machineActivity)
-  const [activity, setActivity] = useState<HostActivity | null | undefined>(undefined)
-  useEffect(() => {
-    let live = true
-    void machineActivity(m.id).then((a) => live && setActivity(a))
-    return () => {
-      live = false
-    }
-  }, [machineActivity, m.id])
+  /*
+   * Undefined while the machine is being asked. A failed question reads as an unknown answer (null), which the
+   * sentence words as such: it used to leave the confirmation asking, with its button disabled, for good.
+   */
+  const asked = useLoad(() => machineActivity(m.id), [machineActivity, m.id])
+  const activity: HostActivity | null | undefined = asked.error !== null ? null : asked.data
   return (
     <InlineConfirm
       text={activity === undefined ? `Asking ${m.name} what is running…` : updateStops(m.name, activity).replace(/^Updating/, action)}

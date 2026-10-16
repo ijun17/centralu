@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { AgentUse, AppPermission, AppRun, AppUsage } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useLoad } from '../../app/useLoad.js'
 import { formatClock, formatCount, formatDuration } from '../../app/format.js'
 import { externalAppKey, useStore } from '../../store/store.js'
 
@@ -37,25 +38,11 @@ export function RunsPanel({ appId, projectId, machine }: { appId: string; projec
   const sessions = useStore((s) => s.sessions)
   const apps = useStore((s) => s.externalApps)
   const focusSession = useStore((s) => s.focusSession)
-  const [runs, setRuns] = useState<AppRun[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  const load = useCallback(() => {
-    let alive = true
-    platform.apps
-      .runs(appId, projectId, 100, machine)
-      .then((r) => {
-        if (!alive) return
-        setRuns(r)
-        setError(null)
-      })
-      .catch((e: Error) => alive && setError(e.message))
-    return () => {
-      alive = false
-    }
-  }, [platform, appId, projectId, machine])
   // Every time `changed` changes — a row visible in this panel was created or ended
-  useEffect(() => load(), [load, changed])
+  const read = useLoad(() => platform.apps.runs(appId, projectId, 100, machine), [platform, appId, projectId, machine], [changed])
+  const runs = read.data ?? null
+  const error = read.error
+  const load = read.reload
   const nameOf = (r: AppRun) => apps.find((a) => a.appId === r.appId && a.projectId === r.projectId)?.name ?? r.appId
 
   return (
@@ -113,18 +100,13 @@ function Permissions({ appId, projectId, machine, changed }: { appId: string; pr
   const platform = usePlatform()
   const asked = useStore((s) => s.appQuestionsVersion)
   const setToast = useStore((s) => s.setToast)
-  const [list, setList] = useState<AppPermission[] | null>(null)
   const [again, setAgain] = useState(0)
-  useEffect(() => {
-    let alive = true
-    platform.apps
-      .permissions(appId, projectId, machine)
-      .then((l) => alive && setList(l))
-      .catch(() => alive && setList([]))
-    return () => {
-      alive = false
-    }
-  }, [platform, appId, projectId, machine, changed, asked, again])
+  // A failed read shows no section, as an empty one does: the runs below say when the host does not answer
+  const list: AppPermission[] | undefined = useLoad(
+    () => platform.apps.permissions(appId, projectId, machine),
+    [platform, appId, projectId, machine],
+    [changed, asked, again],
+  ).data
   const forget = async (p: AppPermission) => {
     try {
       await platform.apps.forgetPermission(appId, projectId, p.capability, machine)
@@ -172,17 +154,7 @@ function Permissions({ appId, projectId, machine, changed }: { appId: string; pr
  */
 function AgentUseSection({ appId, projectId, machine, runs }: { appId: string; projectId: string | null; machine?: string | null; runs: AppRun[] | null }) {
   const platform = usePlatform()
-  const [use, setUse] = useState<AppUsage | null>(null)
-  useEffect(() => {
-    let alive = true
-    platform.apps
-      .usage(appId, projectId, machine)
-      .then((u) => alive && setUse(u))
-      .catch(() => alive && setUse(null))
-    return () => {
-      alive = false
-    }
-  }, [platform, appId, projectId, machine, runs])
+  const use: AppUsage | undefined = useLoad(() => platform.apps.usage(appId, projectId, machine), [platform, appId, projectId, machine], [runs]).data
   if (!use || use.month.runs === 0) return null
   return (
     <section className="border-b border-line px-3 py-2" data-testid="runs-agent-use">

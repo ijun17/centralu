@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { AppSnapshot, AppVersions } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useLoad } from '../../app/useLoad.js'
 import { formatBytes, formatClock, formatDay } from '../../app/format.js'
 import { useStore } from '../../store/store.js'
 import { userAppMachine, type ExternalCatalogApp } from '../../store/app-catalog.js'
@@ -22,41 +23,29 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
   const refresh = useStore((s) => s.refreshExternalApps)
-  const [versions, setVersions] = useState<AppVersions | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  // A restore that failed; reading the list fails on its own (`read.error`)
+  const [restoreError, setRestoreError] = useState<string | null>(null)
   const [asking, setAsking] = useState<AppSnapshot | null>(null)
   const [busy, setBusy] = useState(false)
   // A linked machine's user-folder app (#82): its versions are that machine's
   const machine = userAppMachine(app.info)
 
-  const load = useCallback(() => {
-    let alive = true
-    platform.apps
-      .versions(app.appId, app.projectId, machine)
-      .then((v) => {
-        if (!alive) return
-        setVersions(v)
-        setError(null)
-      })
-      .catch((e: Error) => alive && setError(e.message))
-    return () => {
-      alive = false
-    }
-  }, [platform, app.appId, app.projectId, machine])
   // A new version appears when the app restarts on new code — reads again whenever the list's codeStamp changes
-  useEffect(() => load(), [load, app.info.codeStamp])
+  const read = useLoad(() => platform.apps.versions(app.appId, app.projectId, machine), [platform, app.appId, app.projectId, machine], [app.info.codeStamp])
+  const versions: AppVersions | null = read.data ?? null
+  const error = restoreError ?? read.error
 
   const restore = async (snap: AppSnapshot) => {
     setBusy(true)
-    setError(null)
+    setRestoreError(null)
     try {
       await platform.apps.restoreVersion(app.appId, app.projectId, snap.id, userAppMachine(app.info))
       setAsking(null)
       setToast(`Restored ${app.title} to the version from ${when(snap.at)}`)
       void refresh()
-      load()
+      void read.reload()
     } catch (e) {
-      setError((e as Error).message)
+      setRestoreError((e as Error).message)
     } finally {
       setBusy(false)
     }

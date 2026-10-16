@@ -3,6 +3,8 @@ import type { DragEvent as ReactDragEvent } from 'react'
 import type { FsEntry } from '@cc/platform/ports'
 import { wireParent } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useLoad } from '../../app/useLoad.js'
+import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { useStore } from '../../store/store.js'
 import { useProjectMachine } from '../../store/selectors.js'
 import { useRemoteIde, type RemoteIde } from '../machines/remoteIde.js'
@@ -340,7 +342,6 @@ function Dir({
   const platform = usePlatform()
   const { version } = useTree()
   const open = defaultOpen
-  const [entries, setEntries] = useState<FsEntry[] | null>(null)
   const stamp = version[path] ?? 0
 
   /*
@@ -358,17 +359,8 @@ function Dir({
    * The project can change again while a response is still in flight, so a late response is
    * discarded.
    */
-  useEffect(() => {
-    if (!open) return
-    let alive = true
-    void platform.fs
-      .listDir(projectId, path)
-      .then((e) => alive && setEntries(e))
-      .catch(() => alive && setEntries([]))
-    return () => {
-      alive = false
-    }
-  }, [open, platform, projectId, path, stamp])
+  const read = useLoad(() => (open ? platform.fs.listDir(projectId, path) : null), [open, platform, projectId, path], [stamp])
+  const entries: FsEntry[] | undefined = read.data
 
   if (!open && depth > 0) return null
   const visible = (entries ?? []).filter((e) => showIgnored || !e.ignored)
@@ -383,6 +375,18 @@ function Dir({
         ),
       )}
       {entries?.length === 0 && depth === 0 && <li className="px-3 py-2 text-sm text-ink-faint">Empty</li>}
+      {/* A failed read used to be drawn as "Empty" at the top, and as nothing inside a folder (#850 item 8) */}
+      {read.error !== null && (
+        <li>
+          <LoadFailed
+            what={depth === 0 ? 'the files' : 'this folder'}
+            error={read.error}
+            onRetry={() => void read.reload()}
+            className="px-3 py-1"
+            testId={depth === 0 ? 'file-tree-failed' : undefined}
+          />
+        </li>
+      )}
     </ul>
   )
 }

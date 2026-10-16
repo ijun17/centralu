@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { RelativeAge } from '../../components/RelativeAge.jsx'
 import { useDismiss } from '../../components/useDismiss.js'
-import { changedFileCount, type GitCommit, type GitFileStatus } from '@cc/protocol'
+import { changedFileCount, type GitFileStatus } from '@cc/protocol'
 import { laneCount, layoutCommits } from '@cc/core'
 import { CommitGraph, ROW_H } from '../../components/CommitGraph.jsx'
 import { ChevronIcon } from '../../components/icons.jsx'
@@ -22,6 +22,8 @@ import { COMMIT_LIMIT, hasMultipleAuthors } from './commits.js'
 import { fitTabs } from './fitTabs.js'
 import { TabActionSlot, TabActions } from './tabActions.jsx'
 import { DragRegion } from '../../components/DragRegion.jsx'
+import { LoadFailed } from '../../components/LoadFailed.jsx'
+import { useLoad } from '../../app/useLoad.js'
 import { ResizeHandle } from '../../components/ResizeHandle.jsx'
 import { lazyComponent } from '../../components/lazy.jsx'
 import { PANEL_DEFAULT, PANEL_MAX, PANEL_MIN, useTextZoom } from '../../store/store.js'
@@ -669,25 +671,13 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
   const platform = usePlatform()
   const sc = useShortcut()
   const touched = useGitRefreshKey(projectId)
-  const [count, setCount] = useState<number | null>(null)
   // Collapsing the panel must not collapse the fact that "a command is running" (the reason for the #60 carryover)
   const running = useStore((s) => Object.values(s.commandRuns[projectId] ?? {}).some((r) => r.running))
 
-  useEffect(() => {
-    if (!isRepo) {
-      setCount(null)
-      return
-    }
-    // A response arriving late while switching projects must not draw another project's number
-    let alive = true
-    platform.git
-      .status(projectId)
-      .then((f) => alive && setCount(changedFileCount(f)))
-      .catch(() => alive && setCount(null))
-    return () => {
-      alive = false
-    }
-  }, [platform, projectId, isRepo, touched])
+  // A response arriving late while switching projects must not draw another project's number (`useLoad`). A failed
+  // read shows no number: the rail has no room to say why, and the panel says it once opened
+  const files = useLoad(() => (isRepo ? platform.git.status(projectId) : null), [platform, projectId, isRepo], [touched])
+  const count = files.data ? changedFileCount(files.data) : null
 
   return (
     /* The shell (width, border, background) belongs to the outer aside — drawing it here too would double the line during the transition */
@@ -753,26 +743,17 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
   const gitStage = useStore((s) => s.gitStage)
   const gitCommit = useStore((s) => s.gitCommit)
   const touched = useGitRefreshKey(projectId)
-  const [files, setFiles] = useState<GitFileStatus[] | null>(null)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
 
-  // A request generation number — a response arriving late while switching projects must not draw another project's list
-  const statusGen = useRef(0)
-  const refresh = useCallback(async () => {
-    const gen = ++statusGen.current
-    try {
-      const next = await platform.git.status(projectId)
-      if (gen === statusGen.current) setFiles(next)
-    } catch {
-      if (gen === statusGen.current) setFiles([])
-    }
-  }, [platform, projectId])
-
-  // Re-reads whenever an agent touches a file (evidence only means something if it is current)
-  useEffect(() => {
-    void refresh()
-  }, [refresh, touched])
+  /*
+   * A response arriving late while switching projects must not draw another project's list (`useLoad`). Re-reads
+   * whenever an agent touches a file (evidence only means something if it is current). A failed read says so: it
+   * used to be drawn as "No changes" (#850 item 8).
+   */
+  const status = useLoad(() => platform.git.status(projectId), [platform, projectId], [touched])
+  const files = status.data
+  const refresh = status.reload
 
   const unstaged = files?.filter((f) => !f.staged) ?? []
   const staged = files?.filter((f) => f.staged) ?? []
@@ -813,7 +794,15 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
         <p className="px-3 pb-2 text-xs leading-body text-ink-muted" data-testid="evidence-git-denied">
           Folder access permission required — System Settings → Privacy & Security → Files and Folders
         </p>
-      ) : files === null ? (
+      ) : status.error !== null ? (
+        <LoadFailed
+          what="the changes"
+          error={status.error}
+          onRetry={() => void refresh()}
+          className="px-3 pb-2"
+          testId="evidence-git-failed"
+        />
+      ) : files === undefined ? (
         <p className="px-3 pb-2 text-xs text-ink-faint">Loading…</p>
       ) : files.length === 0 ? (
         <p className="px-3 pb-2 text-xs text-ink-faint" data-testid="evidence-clean">
@@ -856,7 +845,8 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
           </div>
         </>
       )}
-      {!denied && files !== null && (
+      {/* After a failed read too: git may still commit and push what it could not list */}
+      {!denied && (files !== undefined || status.error !== null) && (
         /*
          * Committing has to work in a narrow space too — the flow of checking a change and then
          * wrapping it up right there must not be broken. This block stays even when the list is
@@ -1021,19 +1011,9 @@ function CommitHistory({ projectId }: { projectId: string }) {
   const platform = usePlatform()
   const openCommit = useStore((s) => s.openCommit)
   const touched = useGitRefreshKey(projectId)
-  const [commits, setCommits] = useState<GitCommit[] | null>(null)
-
-  useEffect(() => {
-    // A response arriving late while switching projects must not draw another project's history
-    let alive = true
-    platform.git
-      .log(projectId, COMMIT_LIMIT)
-      .then((c) => alive && setCommits(c))
-      .catch(() => alive && setCommits([]))
-    return () => {
-      alive = false
-    }
-  }, [platform, projectId, touched])
+  // A response arriving late while switching projects must not draw another project's history (`useLoad`)
+  const log = useLoad(() => platform.git.log(projectId, COMMIT_LIMIT), [platform, projectId], [touched])
+  const commits = log.data
 
   const withAuthor = commits ? hasMultipleAuthors(commits) : false
   const graph = useMemo(() => {
@@ -1041,7 +1021,19 @@ function CommitHistory({ projectId }: { projectId: string }) {
     return { rows, lanes: laneCount(rows) }
   }, [commits])
 
-  if (commits === null) {
+  // A failed read used to be drawn as "No commits yet" (#850 item 8)
+  if (log.error !== null) {
+    return (
+      <LoadFailed
+        what="the history"
+        error={log.error}
+        onRetry={() => void log.reload()}
+        className="px-3 py-2"
+        testId="evidence-history-failed"
+      />
+    )
+  }
+  if (commits === undefined) {
     return (
       <p className="px-3 py-2 text-xs text-ink-faint" data-testid="evidence-history">
         Loading…

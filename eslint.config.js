@@ -73,8 +73,9 @@ export default tseslint.config(
     rules: {
       'react-hooks/rules-of-hooks': 'error',
       // A missing dependency shows up as "occasionally does not update", which is hard to
-      // trace back to a cause — left as a warning.
-      'react-hooks/exhaustive-deps': 'warn',
+      // trace back to a cause — left as a warning. `useLoad` takes its dependencies the way an
+      // effect does (app/useLoad.ts), so they are checked the same way.
+      'react-hooks/exhaustive-deps': ['warn', { additionalHooks: '^useLoad$' }],
     },
   },
   {
