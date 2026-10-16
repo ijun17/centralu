@@ -351,7 +351,7 @@ export class AgentStartFlow {
       return done(this.queueAgentStart(req, short))
     }
     // A handoff while the card stood moved the request to the session that took over (#693): the child is that session's
-    const r = await this.createAgentChild(request?.callerId ?? callerId, { id: project.id, name: project.name, path: project.path }, choice, progress, request?.detail.preset)
+    const r = await this.createAgentChild(request?.callerId ?? callerId, { id: project.id, name: project.name, path: project.path }, choice, progress, request?.detail.preset, request?.requestId)
     if (request) {
       if ('key' in r) this.endAgentStart(request.requestId, { childId: r.d.sessionId })
       else {
@@ -389,6 +389,8 @@ export class AgentStartFlow {
     choice: Pick<AgentStartRequest, 'tool' | 'model' | 'effort' | 'worktreeBranch' | 'task' | 'unchecked' | 'lsp'>,
     progress: StartProgress,
     approvedPreset?: PermissionPreset,
+    /** The start request this child is made for, if one stood: withdrawn while the child is made, it gets no task (#839) */
+    requestId?: string,
   ): Promise<{ done: ChildRunResult } | { key: string; d: Delegation; notice: string | undefined }> {
     const done = (r: ChildRunResult) => ({ done: r })
     const refused = this.agentStartGateError(callerId, project.id)
@@ -417,6 +419,7 @@ export class AgentStartFlow {
         worktree,
         progress,
         release,
+        requestId,
       )
     } finally {
       release()
@@ -499,6 +502,7 @@ export class AgentStartFlow {
     worktree: { branch: string } | null,
     progress: StartProgress,
     release: () => void,
+    requestId?: string,
   ): Promise<{ done: ChildRunResult } | { key: string; d: Delegation; notice: string | undefined }> {
     const done = (r: ChildRunResult) => ({ done: r })
     const { tool, model, effort, unchecked } = choice
@@ -531,7 +535,9 @@ export class AgentStartFlow {
     }
     // Making the session took a while: what the start rests on is read again, with no wait before the delegation
     const callerNow = this.host.meta.get(callerId)
-    const late = this.agentStartGateError(callerId, project.id) ??
+    const withdrawn = requestId ? this.host.children.agentStarts.get(requestId)?.ended : undefined
+    const late = (withdrawn && 'error' in withdrawn ? `The request was withdrawn while its session was being made. ${withdrawn.error}` : null) ??
+      this.agentStartGateError(callerId, project.id) ??
       (callerNow && !presetWithin(child.permissionPreset, callerNow.permissionPreset)
         ? `This session's permissions were lowered to ${callerNow.permissionPreset} while the session was being made.`
         : null)
@@ -843,7 +849,7 @@ export class AgentStartFlow {
     if (rec.ended) return
     const project = this.host.store.listProjects().find((p) => p.id === req.projectId)
     const r = project
-      ? await this.createAgentChild(req.callerId, { id: project.id, name: project.name, path: project.path }, req, { stage: 'creating' }, req.detail.preset)
+      ? await this.createAgentChild(req.callerId, { id: project.id, name: project.name, path: project.path }, req, { stage: 'creating' }, req.detail.preset, req.requestId)
       : { done: { ok: false as const, error: "This session's project is no longer registered." } }
     if ('key' in r) {
       this.endAgentStart(req.requestId, { childId: r.d.sessionId })
