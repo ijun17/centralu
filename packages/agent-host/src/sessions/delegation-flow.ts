@@ -1694,7 +1694,8 @@ export class DelegationFlow {
       case 'working':
         return this.agentWorking(d)
       case 'cancelled':
-        return { ok: false, error: observing ? `The observation was cancelled; "${name()}" was left running.` : `The call was cancelled, so "${name()}" was stopped.` }
+        // A turn this call only joined is left running, as ask_project words it (no child's turn joins one today)
+        return { ok: false, error: observing ? `The observation was cancelled; "${name()}" was left running.` : d.joinedTurn ? `The call was cancelled; "${name()}" was left running.` : `The call was cancelled, so "${name()}" was stopped.` }
       case 'bound':
         return this.agentWorking(d, !observing, observing)
       case 'failed':
