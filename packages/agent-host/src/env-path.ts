@@ -91,18 +91,19 @@ export function probeLoginShell(
     // Honoured by spawnSync as by spawn (setsid; measured, Node 26), though its options type leaves it out
     ...({ detached: true } as object),
   })
-  if (r.error) {
+  if (r.error && r.pid > 1) {
     // Cut off, or never started. Its session's group is its pid: whatever it started goes with it
-    if (r.pid > 1) {
-      try {
-        process.kill(-r.pid, 'SIGKILL')
-      } catch {
-        // the group is already empty
-      }
+    try {
+      process.kill(-r.pid, 'SIGKILL')
+    } catch {
+      // the group is already empty
     }
-    return []
   }
-  // The shell config might print something else, so only the marked line is picked out, whatever spaces or a CR around it
+  /*
+   * What it printed is read even when it was cut off: a config that hangs after the marked line was printed (a
+   * prompt helper, a background job holding the pipe) still said the PATH. The shell config might print something
+   * else, so only the marked line is picked out, whatever spaces or a CR around it.
+   */
   const line = (r.stdout ?? '')
     .split('\n')
     .map((l) => l.trim())

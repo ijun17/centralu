@@ -177,6 +177,11 @@ describe.skipIf(process.platform === 'win32')('the login-shell probe', () => {
     expect(left).toBe(false)
   })
 
+  it('reads the marked line a shell printed before it was cut off', () => {
+    const late = shell('hangs-after', `echo "__CC_PATH__:/before-the-hang"\nexec sleep 30`)
+    expect(probeLoginShell('linux', { SHELL: late }, 1000)).toEqual(['/before-the-hang'])
+  })
+
   it('reads the marked line with the spaces or carriage return a config leaves around it', () => {
     const crlf = shell('crlf', `printf '  __CC_PATH__:/a:/b\\r\\n'`)
     expect(probeLoginShell('linux', { SHELL: crlf })).toEqual(['/a', '/b'])
