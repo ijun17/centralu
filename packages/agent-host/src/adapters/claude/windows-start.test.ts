@@ -535,16 +535,22 @@ describe('a turn that lost the sign-in refresh race (#353)', () => {
     await handle.dispose()
   })
 
+  /*
+   * On fake timers (#845): with a real 30 ms delay, a loaded machine could let the delay run out before the Stop, and a
+   * 60 ms wait afterwards only said the resend had not come yet. Here the Stop lands inside the delay, and the clock
+   * then runs well past it.
+   */
   it('Stop during the delay calls the resend off', async () => {
-    const { handle, events, cli } = await session(adapter({ retryDelay: () => 30 }))
+    const { handle, events, cli } = await session(adapter({ retryDelay: () => 100 }))
+    vi.useFakeTimers()
     handle.send('fix the build')
     await cli.input.next()
     raceTurn(cli)
-    await tick()
+    await vi.advanceTimersByTimeAsync(50)
     handle.interrupt()
     let resent = false
     void cli.input.next().then(() => (resent = true))
-    await new Promise((r) => setTimeout(r, 60))
+    await vi.advanceTimersByTimeAsync(1_000)
     expect(resent).toBe(false)
     expect(events.at(-1)).toMatchObject({ type: 'state_change', state: 'waiting_input', reason: 'interrupted' })
     await handle.dispose()
