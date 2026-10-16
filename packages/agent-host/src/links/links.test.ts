@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
+import { fakeExe } from '../fake-exe.test-helpers.js'
 import { APP_VERSION, PROTOCOL_VERSION, sessionLiveDefaults, type HostActivity, type MachineInfo, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from '../sessions/manager.js'
@@ -985,23 +986,29 @@ describe('machines.autostart (#82, plan §10.4, owner decision 4)', () => {
 })
 
 describe('machines.sshHosts and machines.probe (#514)', () => {
-  it.skipIf(process.platform === 'win32')('lists the ssh config’s hosts through the hub, each marked with the machines linked through it, and probes one', async () => {
+  it('lists the ssh config’s hosts through the hub, each marked with the machines linked through it, and probes one', async () => {
     const remote = await remoteHost()
     const home = folder()
     mkdirSync(join(home, '.ssh'))
     writeFileSync(join(home, '.ssh', 'config'), 'Host *\n  User me\nHost box laptop\n')
     // A fake ssh: `-G` resolves as OpenSSH does; anything else is the probe, answered as a POSIX shell would
-    const ssh = join(home, 'ssh')
-    writeFileSync(ssh, '#!/bin/sh\nif [ "$1" = -G ]; then printf \'user me\\nhostname %s.lan\\nport 22\\n\' "$3"; exit 0; fi\necho "sh: powershell: not found" >&2\nexit 127\n')
-    chmodSync(ssh, 0o755)
+    const ssh = fakeExe(
+      home,
+      'ssh',
+      `const a = process.argv.slice(2)
+if (a[0] === '-G') { process.stdout.write('user me\\nhostname ' + a[2] + '.lan\\nport 22\\n'); process.exit(0) }
+process.stderr.write('sh: powershell: not found\\n')
+process.exit(127)
+`,
+    )
     const hub = await hubHost(() => lineFor(remote.port), new Store(), true, { ssh: { ssh, home } })
     const u = await ui(hub.port)
     expect(await u.call('machines.sshHosts')).toEqual({
-      configFile: '~/.ssh/config',
+      configFile: ['~', '.ssh', 'config'].join(sep),
       notes: [],
       hosts: [
-        { alias: 'box', hostName: 'box.lan', user: 'me', port: 22, source: '~/.ssh/config:3', linked: [{ machineId: 'm1', name: 'Remote box', shell: 'posix', wslDistro: null }] },
-        { alias: 'laptop', hostName: 'laptop.lan', user: 'me', port: 22, source: '~/.ssh/config:3', linked: [] },
+        { alias: 'box', hostName: 'box.lan', user: 'me', port: 22, source: `${['~', '.ssh', 'config'].join(sep)}:3`, linked: [{ machineId: 'm1', name: 'Remote box', shell: 'posix', wslDistro: null }] },
+        { alias: 'laptop', hostName: 'laptop.lan', user: 'me', port: 22, source: `${['~', '.ssh', 'config'].join(sep)}:3`, linked: [] },
       ],
     })
     expect(await u.call('machines.probe', { sshTarget: 'laptop' })).toMatchObject({ sshTarget: 'laptop', reachable: true, os: 'posix' })
