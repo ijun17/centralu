@@ -37,8 +37,10 @@ agent-host/src/
 
 Usage parsing and the orchestrator's MCP surface do **not** have their own directories:
 per-account usage lives in `adapters/<tool>/usage.ts` (it is a per-tool question), and the
-orchestrator's tools are defined once in `sessions/orchestrator-tools.ts` and exposed per
-adapter — in-process for claude, over a stdio bridge for codex.
+orchestrator's tools are defined once in `sessions/tool-definitions.ts`, run by
+`sessions/orchestrator-tools.ts` (which re-exports every name, so most modules import from it) and exposed per
+adapter — in-process for claude, over a stdio bridge for codex. Which seat is shown and may run
+which tool is `sessions/tool-seats.ts`; the texts the answers are built from, `sessions/tool-answers.ts`.
 
 ### 1.1 Who gets Centralu's own tools (tool profiles)
 

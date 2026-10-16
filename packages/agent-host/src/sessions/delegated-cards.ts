@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { ApprovalDecision, Question, QuestionAnswer } from '@cc/protocol'
 import type { ToolProfile } from '../apps/contract.js'
-import { callForm, FILL } from './orchestrator-tools.js'
+import { callForm, FILL } from './tool-seats.js'
 
 /**
  * Cards in a delegated turn (#676): a session P gave another session A a turn (ask_project, start_agent,

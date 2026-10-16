@@ -32,8 +32,9 @@ agent-host/src/
 
 사용량 파싱과 오케스트레이터의 MCP 표면은 **자기 디렉토리를 갖지 않는다**: 계정 사용량은
 도구마다 다른 질문이라 `adapters/<tool>/usage.ts`에 있고, 오케스트레이터 도구는
-`sessions/orchestrator-tools.ts`에 한 번 정의된 뒤 어댑터마다 다른 길로 노출된다 —
-claude는 인프로세스, codex는 stdio 다리.
+`sessions/tool-definitions.ts`에 한 번 정의되고 `sessions/orchestrator-tools.ts`가 실행하며(이 파일이 모든
+이름을 다시 내보내므로 대부분의 모듈은 여기서 가져온다) 어댑터마다 다른 길로 노출된다 — claude는 인프로세스, codex는 stdio 다리. 어느 자리가
+어떤 도구를 보고 실행하는지는 `sessions/tool-seats.ts`, 답의 문구는 `sessions/tool-answers.ts`에 있다.
 
 ### 1.1 Centralu 자체 도구를 누가 받는가 (도구 프로필)
 
