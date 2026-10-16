@@ -16,7 +16,7 @@ import { saveAttachment, sweepAttachments } from '../dev-services/attachments.js
  * flush on every delta: it would rewrite the whole growing body every time, so the amount
  * written grows quadratically for a long answer.
  */
-const STREAM_FLUSH_CHARS = 2000
+export const STREAM_FLUSH_CHARS = 2000
 
 export const STREAM_FLUSH_MS = 2000
 
