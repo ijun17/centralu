@@ -5,6 +5,7 @@ import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { fakeExe, linkNode, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { SLOW } from './test-timing.js'
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
 const SCRIPT = join(ROOT, '.centralu/apps/project-board/bin/wait-checks.mjs')
@@ -63,7 +64,7 @@ else if (a[1].includes('/commits/')) {
   return { ...result, calls: () => readFileSync(join(dir, 'calls'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as string[]) }
 }
 
-describe('wait-checks', { timeout: 30_000 }, () => {
+describe('wait-checks', { timeout: 30_000 * SLOW }, () => {
   it.each(['77', '#77', 'ijun17/centralu#77'])('keeps the pull request form %s', (pr) => {
     const r = run([pr])
     expect(r.status).toBe(0)

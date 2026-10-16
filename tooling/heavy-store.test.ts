@@ -6,6 +6,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { NormalizedEvent } from '@cc/protocol'
 import { seedHeavyStore, type SeedSummary } from '../e2e/fixtures/heavy-store.js'
 import { Store } from '../packages/agent-host/src/dev-services/store.js'
+import { SLOW } from './test-timing.js'
 
 /**
  * The perf fixture (`e2e/fixtures/heavy-store.ts`): a measurement is only comparable with another if both ran on
@@ -51,7 +52,7 @@ describe('heavy-store fixture', () => {
     expect(once(2)).not.toBe(first)
     // Three full seeds of the small profile, each a few thousand rows written and read back: about 4 s on a Mac,
     // more than the 15 s Windows limit on a loaded windows-2022 runner (#368)
-  }, 90_000)
+  }, 90_000 * SLOW)
 
   it('has the real store’s mix: calls and results dominate, then texts, then reasoning', () => {
     const k = a.rowsByKind

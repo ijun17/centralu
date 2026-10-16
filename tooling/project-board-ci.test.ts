@@ -19,6 +19,7 @@ import {
   workflowEventJobs,
   // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 } from '../.centralu/apps/project-board/ci.mjs'
+import { SLOW } from './test-timing.js'
 
 /**
  * ci_status and merge_when_green of the project board app (#386). First the decisions as pure
@@ -455,7 +456,7 @@ async function call(name: string, args: Record<string, unknown>, progress?: stri
 const ghCalls = () => readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as string[])
 const merges = () => (JSON.parse(readFileSync(statePath, 'utf8')) as { merges?: string[][] }).merges ?? []
 
-describe('the project board app: ci_status and merge_when_green', { timeout: 30_000 }, () => {
+describe('the project board app: ci_status and merge_when_green', { timeout: 30_000 * SLOW }, () => {
   it('passes check with ci_status as a read and merge_when_green as a change, both for agents only', async () => {
     const r = await runtime(ghState()).check(ref)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])

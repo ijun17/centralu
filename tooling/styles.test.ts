@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { SLOW } from './test-timing.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
@@ -69,7 +70,7 @@ beforeAll(() => {
   jsBytes = readdirSync(assets)
     .filter((f) => f.endsWith('.js'))
     .reduce((n, f) => n + readFileSync(join(assets, f)).length, 0)
-}, 120_000)
+}, 120_000 * SLOW)
 
 afterAll(() => {
   if (outDir && existsSync(outDir)) rmSync(outDir, { recursive: true, force: true })

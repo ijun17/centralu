@@ -20,6 +20,7 @@ import {
 } from '../.centralu/apps/project-board/rules.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { topLevel } from '../.centralu/apps/project-board/git.mjs'
+import { SLOW } from './test-timing.js'
 
 /**
  * The project board's contribution tools (#386 step 2): comment, file_issue, open_pr, commit_check,
@@ -291,7 +292,7 @@ function filesNamed(dir: string, name: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? filesNamed(join(dir, e.name), name) : e.name === name ? [join(dir, e.name)] : []))
 }
 
-describe('the board app carries the contribution procedure', { timeout: 60_000 }, () => {
+describe('the board app carries the contribution procedure', { timeout: 60_000 * SLOW }, () => {
   it('passes check, with the new tools annotated and open to agents', async () => {
     const r = await runtime().check(ref)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])
@@ -540,7 +541,7 @@ function stack({ mainMoves = 'none', stale = false }: { mainMoves?: 'none' | 'ot
 const checkout = (work: string) => ({ branch: g(work, 'branch', '--show-current'), head: g(work, 'rev-parse', 'HEAD'), status: g(work, 'status', '--porcelain') })
 const leftovers = (work: string) => ({ worktrees: g(work, 'worktree', 'list').split('\n').length, refs: g(work, 'for-each-ref', 'refs/centralu-restack') })
 
-describe('topLevel on a real repository', { timeout: 60_000 }, () => {
+describe('topLevel on a real repository', { timeout: 60_000 * SLOW }, () => {
   const bare = () => {
     const origin = join(root, 'origin.git')
     const work = join(root, 'work')
@@ -560,7 +561,7 @@ describe('topLevel on a real repository', { timeout: 60_000 }, () => {
   })
 })
 
-describe('rebase_stack', { timeout: 60_000 }, () => {
+describe('rebase_stack', { timeout: 60_000 * SLOW }, () => {
   it('reports a restack without pushing: the change and the tree are the tested ones, and the checkout is untouched', async () => {
     const s = stack()
     const before = checkout(s.work)

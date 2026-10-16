@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { DEFAULT_PORT, dataDir, keeperSocketPath, readHostDoor, run, servePort, type Launch } from '../scripts/dev-live.mjs'
+import { SLOW } from './test-timing.js'
 
 // The keeper is a unix socket: there is none on Windows, and a fake one cannot be made there (listen EACCES).
 const unixIt = it.skipIf(process.platform === 'win32')
@@ -238,7 +239,7 @@ describe.skipIf(process.platform === 'win32')('dev:live: launching Vite', () => 
     await d.exited
     expect(d.output()).toContain('PARENT_TOKEN undefined')
     expect(d.output()).not.toContain(TOKEN)
-  }, 30_000)
+  }, 30_000 * SLOW)
 
   it.each([
     ['SIGINT', 130],
@@ -250,5 +251,5 @@ describe.skipIf(process.platform === 'win32')('dev:live: launching Vite', () => 
     await d.exited
     expect(d.read().signal).toBe(signal)
     expect(d.output()).toContain(`EXIT ${code} `)
-  }, 30_000)
+  }, 30_000 * SLOW)
 })

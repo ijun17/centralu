@@ -10,6 +10,7 @@ import { buildViewCsp } from '../packages/agent-host/src/views/csp.js'
 import { ALLOWED, decisionSummary, renderInline, renderMarkdown } from '../.centralu/apps/project-board/markdown.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { ANSWERS_MAX, answerFor, commentIdOf, markRecorded, saveAnswer, unrecorded } from '../.centralu/apps/project-board/answers.mjs'
+import { SLOW } from './test-timing.js'
 
 describe("the owner's saved answers", () => {
   const save = (list: unknown[], number: number, text = 'x') => saveAnswer(list, { repository: 'o/r', number, text, now: `t${number}` }).list
@@ -416,7 +417,7 @@ const patch = (fn: (s: ReturnType<typeof state>) => void) => {
   writeFileSync(statePath, JSON.stringify(s))
 }
 
-describe('the board app reads and answers items', { timeout: 60_000 }, () => {
+describe('the board app reads and answers items', { timeout: 60_000 * SLOW }, () => {
   it('passes check, and its screen declares GitHub image hosts, and only those, in the CSP Centralu reads', async () => {
     const r = await runtime().check(ref)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])

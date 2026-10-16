@@ -50,7 +50,7 @@ export function limitsIn(file: string, source: string): string[] {
   return found.map((e) => `${sf.getLineAndCharacterOfPosition(e.getStart(sf)).line + 1}: ${e.getText(sf)}`)
 }
 
-const testFiles = execFileSync('git', ['ls-files', 'packages/**/*.test.ts', 'packages/**/*.test.tsx', 'tooling/**/*.test.ts'], { cwd: root, encoding: 'utf8' })
+const testFiles = execFileSync('git', ['ls-files', 'packages/*.test.ts', 'packages/*.test.tsx', 'tooling/*.test.ts'], { cwd: root, encoding: 'utf8' })
   .trim()
   .split('\n')
 

@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { build, type Rollup } from 'vite'
+import { SLOW } from './test-timing.js'
 
 /**
  * What the window loads before its first frame (#364).
@@ -66,5 +67,5 @@ describe.each(Object.entries(ENTRIES))('the %s startup bundle', (_, config) => {
       // Not vacuous: the module is still built, into a chunk of its own
       expect.soft(anywhere.some((id) => pattern.test(id)), `${what} is not in the build at all`).toBe(true)
     }
-  }, 60_000)
+  }, 60_000 * SLOW)
 })

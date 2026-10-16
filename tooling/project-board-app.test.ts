@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { fakeExe, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
+import { SLOW } from './test-timing.js'
 
 /**
  * The project board app committed with this repository (`.centralu/apps/project-board`), run by
@@ -171,7 +172,7 @@ const setMode = (mode: string) => patchState({ mode })
 const writtenItems = () => ghCalls().filter((a) => a.some((x) => x.includes('updateProjectV2ItemFieldValue'))).map((a) => a.find((x) => x.startsWith('item='))!.slice(5))
 const stored = (id: string) => (JSON.parse(readFileSync(statePath, 'utf8')) as ReturnType<typeof project>).items.find((i) => i.id === id)
 
-describe('the project board app', { timeout: 30_000 }, () => {
+describe('the project board app', { timeout: 30_000 * SLOW }, () => {
   it('passes check: every tool annotated, the screen served with its bridge, show as an app-only home', async () => {
     const r = await runtime().check(ref)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])

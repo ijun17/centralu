@@ -26,6 +26,7 @@ import {
   versionLines,
   // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 } from '../.centralu/apps/project-board/versions.mjs'
+import { SLOW } from './test-timing.js'
 
 /**
  * The project board's release tool (#386 step 3): docs/releasing.md as `release_status` and
@@ -432,7 +433,7 @@ function bumpEvidence(s: Repo, { differentTree = false } = {}) {
   return prHead
 }
 
-describe('release', { timeout: 60_000 }, () => {
+describe('release', { timeout: 60_000 * SLOW }, () => {
   it.each(['pending', 'none'] as const)('accepts the bump PR same tree when main CI is %s, in both steps', async (ci) => {
     const s = repo({ bumped: true })
     // Release jobs can share CI names; their separate event is not PR CI evidence.

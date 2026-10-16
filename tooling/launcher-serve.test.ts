@@ -51,6 +51,7 @@ import {
 } from '../packaging/npm/centralu/bin/serve.mjs'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { hostDirIn } from '../packaging/npm/centralu/bin/platform.mjs'
+import { SLOW } from './test-timing.js'
 
 /**
  * `centralu serve` (#82): the host without the app, on a machine the app reaches over SSH. The
@@ -437,7 +438,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       expect(s.out.stderr).not.toContain(String(info.token))
       expect((await connection(d)).hostRunning).toBe(false)
     },
-    90_000,
+    90_000 * SLOW,
   )
 
   // Windows cannot send a Ctrl+C to one process from Node (the console delivers it to the whole group), and serve
@@ -454,7 +455,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       expect(await s.exited).toBe(0)
       expect(s.out.stderr).toContain('[agent-host] shutting down')
     },
-    90_000,
+    90_000 * SLOW,
   )
 
   it(
@@ -481,7 +482,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       if (alive) process.kill(hostPid, 'SIGKILL') // started by this test, so ours to end
       expect(alive).toBe(false)
     },
-    90_000,
+    90_000 * SLOW,
   )
 
   it(
@@ -499,7 +500,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
         if (held.ok) held.release()
       }
     },
-    90_000,
+    90_000 * SLOW,
   )
   it(
     'starts on the next free port when another program holds the recorded one, and reports that port (#482)',
@@ -530,7 +531,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
         await new Promise((r) => blocker.close(r))
       }
     },
-    90_000,
+    90_000 * SLOW,
   )
   it(
     'gives serve\'s advice, not a developer\'s, when the port given with --port is taken (#482)',
@@ -549,7 +550,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
         await new Promise((r) => blocker.close(r))
       }
     },
-    90_000,
+    90_000 * SLOW,
   )
 })
 
@@ -817,7 +818,7 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
         cleanup(d)
       }
     },
-    120_000,
+    120_000 * SLOW,
   )
 
   // The process group is POSIX's. Windows has no group to kill at once; its counterpart is the first test above, where the
@@ -851,7 +852,7 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
         cleanup(d)
       }
     },
-    120_000,
+    120_000 * SLOW,
   )
 })
 
