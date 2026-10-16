@@ -124,16 +124,36 @@ export function nodeShimEntry(text: string, dir: string, deps: Pick<Deps, 'exist
  * `node` becomes the absolute `node.exe` on PATH. The second matters too: given a bare name,
  * Windows process creation looks in the working directory before PATH, and an app's working
  * directory is its own folder.
+ *
+ * A path (`bin/server`, `.\run.cmd`) is taken from `cwd`, the folder the command will run in, and
+ * on Windows without an extension it is looked up with PATHEXT as cmd.exe does (#849). Read from the
+ * host's own folder instead, a relative `.cmd` was never found and an extensionless one never had
+ * its `.cmd` tried, so an app that started everywhere else failed only on Windows.
  */
 export function resolveCommand(
   command: string,
   env: Record<string, string | undefined> = process.env,
   deps: Deps = realDeps(),
+  cwd?: string,
 ): ToolLaunch {
   if (deps.platform !== 'win32') return { command, args: [] }
-  if (/[\\/]/.test(command)) return launchFor(command, deps)
+  if (/[\\/]/.test(command)) {
+    const path = cwd === undefined ? command : win32.resolve(cwd, command)
+    return launchFor(withPathExt(path, env, deps) ?? path, deps)
+  }
   const found = whichTool(command, env, 'win32', deps.exists)
   return found ? launchFor(found, deps) : { command, args: [] }
+}
+
+/** A Windows path without an extension, with the first PATHEXT extension that exists; null when it has one or none fits */
+function withPathExt(path: string, env: Record<string, string | undefined>, deps: Pick<Deps, 'exists'>): string | null {
+  if (/\.[^\\/.]+$/.test(win32.basename(path))) return null
+  const pathExt = Object.entries(env).find(([k]) => k.toUpperCase() === 'PATHEXT')?.[1] || '.COM;.EXE;.BAT;.CMD'
+  for (const ext of pathExt.split(';').filter(Boolean)) {
+    const candidate = path + ext.toLowerCase()
+    if (deps.exists(candidate)) return candidate
+  }
+  return null
 }
 
 /**

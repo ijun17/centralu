@@ -3,9 +3,9 @@
  * the write lands on a closed pipe, and a stream 'error' nobody listens to is an uncaught exception
  * that ends the host and every session. The start fails; nothing escapes.
  */
-import { mkdtempSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { AppProcess, AppStartError } from './app-process.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
@@ -85,4 +85,64 @@ describe('the stderr lines a failed start carries', () => {
     expect(err).toBeInstanceOf(AppStartError)
     expect(err.stderr).toEqual(['실패: 한글'])
   })
+})
+
+/**
+ * #849: a manifest's relative command was read from the host's own folder, and on Windows an extensionless one never had
+ * its `.cmd` tried: the app started everywhere but there. A `.cmd` the spawn refused threw before there was a process,
+ * outside the start's own failure handling, and left the app's log open for good.
+ */
+describe("a manifest's command as a path in the app folder", () => {
+  const appDir = () => {
+    const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-app-cmd-')))
+    mkdirSync(join(dir, 'bin'))
+    writeFileSync(join(dir, 'server.js'), "process.stderr.write('ran from ' + require('node:path').basename(process.cwd()) + '\\n'); process.exit(3)\n")
+    // npm's shim shape on Windows; a script that runs the same file elsewhere
+    writeFileSync(join(dir, 'bin', 'server.cmd'), '@"%~dp0\\..\\server.js" %*\r\n')
+    writeFileSync(join(dir, 'bin', 'server'), `#!/bin/sh\nexec "${process.execPath}" "$(dirname "$0")/../server.js" "$@"\n`)
+    chmodSync(join(dir, 'bin', 'server'), 0o755)
+    return dir
+  }
+  const start = (dir: string, command: string) =>
+    AppProcess.start({
+      command,
+      args: [],
+      cwd: dir,
+      env: process.env,
+      logPath: join(dir, 'logs', 'app.log'),
+      logMaxBytes: 1024 * 1024,
+      redact: (t) => t,
+      probeTimeoutMs: 10_000,
+      connectTimeoutMs: 10_000,
+      exitWaitMs: 10_000,
+    })
+
+  it('starts bin/server from the app folder, its .cmd on Windows', async () => {
+    const dir = appDir()
+    const err = (await start(dir, 'bin/server').catch((e: unknown) => e)) as AppStartError
+    expect(err).toBeInstanceOf(AppStartError)
+    expect(err.head).toBe('exited before it was ready (code 3)')
+    expect(err.stderr).toEqual([`ran from ${basename(dir)}`])
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+  }, 30_000 * SLOW)
+
+  it.runIf(process.platform === 'win32')('on Windows, starts a relative .cmd shim from the app folder', async () => {
+    const dir = appDir()
+    const err = (await start(dir, '.\\bin\\server.cmd').catch((e: unknown) => e)) as AppStartError
+    expect(err).toBeInstanceOf(AppStartError)
+    expect(err.stderr).toEqual([`ran from ${basename(dir)}`])
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+  }, 30_000 * SLOW)
+
+  it.runIf(process.platform === 'win32')('on Windows, a .cmd that is not a shim fails the start with the reason, and lets go of the log', async () => {
+    const dir = appDir()
+    writeFileSync(join(dir, 'run.cmd'), '@echo run\r\n')
+    const err = (await start(dir, './run.cmd').catch((e: unknown) => e)) as AppStartError
+    expect(err).toBeInstanceOf(AppStartError)
+    expect(err.message).toMatch(/EINVAL.*needs a shell/)
+    expect(readFileSync(join(dir, 'logs', 'app.log'), 'utf8')).toMatch(/could not run .*run\.cmd/)
+    // Windows refuses to delete a file that is still open: the log is closed, with no retries to wait it out
+    rmSync(join(dir, 'logs'), { recursive: true })
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+  }, 30_000 * SLOW)
 })

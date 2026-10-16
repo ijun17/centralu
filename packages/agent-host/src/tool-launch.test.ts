@@ -235,5 +235,28 @@ describe("an app manifest's command on Windows", () => {
 
   it('off Windows the manifest command is spawned as written', () => {
     expect(resolveCommand('npx', env, deps(files, 'linux'))).toEqual({ command: 'npx', args: [] })
+    expect(resolveCommand('bin/server', env, deps(files, 'linux'), '/apps/a')).toEqual({ command: 'bin/server', args: [] })
+  })
+
+  /*
+   * #849: a path was read from the host's own folder, so a relative `.cmd` was never found (and then refused by the
+   * spawn with EINVAL), and an extensionless one never had its `.cmd` tried: only on Windows, the app did not start.
+   */
+  const app = 'C:\\Users\\me\\apps\\a'
+  const appFiles = { [`${app}\\bin\\server.cmd`]: '@"%~dp0\\..\\server.js" %*\r\n', [`${app}\\server.js`]: '', [`${app}\\run.cmd`]: '@echo run\r\n' }
+
+  it("a relative path is the app folder's, and its shim is read there", () => {
+    expect(resolveCommand('bin\\server.cmd', env, deps(appFiles), app)).toEqual({ command: NODE, args: [`${app}\\server.js`] })
+    expect(resolveCommand('./bin/server.cmd', env, deps(appFiles), app)).toEqual({ command: NODE, args: [`${app}\\server.js`] })
+  })
+
+  it('a path without an extension is tried with PATHEXT, as cmd.exe does', () => {
+    expect(resolveCommand('bin/server', env, deps(appFiles), app)).toEqual({ command: NODE, args: [`${app}\\server.js`] })
+    expect(resolveCommand('bin/server', { ...env, PATHEXT: '.EXE' }, deps(appFiles), app)).toEqual({ command: `${app}\\bin\\server`, args: [] })
+  })
+
+  it('a .cmd that is not a shim is left as the absolute path, for the spawn to refuse', () => {
+    expect(resolveCommand('run.cmd', env, deps(appFiles), app)).toEqual({ command: 'run.cmd', args: [] })
+    expect(resolveCommand('./run', env, deps(appFiles), app)).toEqual({ command: `${app}\\run.cmd`, args: [] })
   })
 })

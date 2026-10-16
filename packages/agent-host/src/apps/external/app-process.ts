@@ -9,7 +9,7 @@ import { killHandle, spawnGrouped, sweepExited } from '../../dev-services/groupe
 import { rotateIfLarge } from '../../log-file.js'
 import { LineTail, lineSplitter } from '../../stream-text.js'
 import { ExitAfterDrain } from '../../exit-after-drain.js'
-import { resolveCommand } from '../../tool-launch.js'
+import { resolveCommand, type ToolLaunch } from '../../tool-launch.js'
 import { StreamTransport } from './stream-transport.js'
 
 /**
@@ -152,30 +152,45 @@ export class AppProcess {
   static async start(spec: SpawnSpec): Promise<AppProcess> {
     const log = new AppLog(spec.logPath, spec.logMaxBytes, spec.redact)
     log.note(`starting: ${spec.command} ${spec.args.join(' ')}`)
-    // Windows: `npx` is `npx.cmd`, which cannot be spawned without a shell (tool-launch.ts)
-    const launch = resolveCommand(spec.command, spec.env)
-    const { child, spawnedAt } = spawnGrouped(launch.command, [...launch.args, ...spec.args], {
-      cwd: spec.cwd,
-      env: spec.env,
+    let launch: ToolLaunch = { command: spec.command, args: [] }
+    let started: ReturnType<typeof spawnGrouped>
+    try {
+      // Windows: `npx` is `npx.cmd`, which cannot be spawned without a shell (tool-launch.ts); a path is the app folder's
+      launch = resolveCommand(spec.command, spec.env, undefined, spec.cwd)
+      started = spawnGrouped(launch.command, [...launch.args, ...spec.args], {
+        cwd: spec.cwd,
+        env: spec.env,
+        /*
+         * fd 3 is the broker pipe, and the one stdio pipe used in both directions. On Windows a plain
+         * 'pipe' reaches the child as a synchronous handle, and Windows serialises I/O on a
+         * synchronous handle: the app's read waiting on fd 3 holds back its own write of the request,
+         * so the host never sees it and every broker call timed out (the first Windows test run,
+         * #14). 'overlapped' hands the child an overlapped handle, which Node's net.Socket reads and
+         * writes at once; off Windows it is the same as 'pipe'. stdin and stdout each go one way.
+         */
+        stdio: ['pipe', 'pipe', 'pipe', 'overlapped'],
+        /*
+         * Gives it its own process group. kill-tree never signals the host's own group, so without a
+         * separate group there would be no way to end the app and its descendants group-wide.
+         *
+         * Not on Windows (#14): there `detached` means DETACHED_PROCESS, which leaves the app with no
+         * console at all, so every console program it starts opens a visible window of its own. Windows
+         * has no groups to gain, and its tree is ended with `taskkill /T` (kill-tree.ts). Attached and
+         * hidden, the app shares the host's windowless console (`spawnGrouped`).
+         */
+      })
+    } catch (e) {
       /*
-       * fd 3 is the broker pipe, and the one stdio pipe used in both directions. On Windows a plain
-       * 'pipe' reaches the child as a synchronous handle, and Windows serialises I/O on a
-       * synchronous handle: the app's read waiting on fd 3 holds back its own write of the request,
-       * so the host never sees it and every broker call timed out (the first Windows test run,
-       * #14). 'overlapped' hands the child an overlapped handle, which Node's net.Socket reads and
-       * writes at once; off Windows it is the same as 'pipe'. stdin and stdout each go one way.
+       * A spawn that fails before there is a process (EINVAL for a `.cmd` on Windows, #849) throws instead of reporting
+       * an 'error': it is a failed start like any other, with the log closed rather than held open for good.
        */
-      stdio: ['pipe', 'pipe', 'pipe', 'overlapped'],
-      /*
-       * Gives it its own process group. kill-tree never signals the host's own group, so without a
-       * separate group there would be no way to end the app and its descendants group-wide.
-       *
-       * Not on Windows (#14): there `detached` means DETACHED_PROCESS, which leaves the app with no
-       * console at all, so every console program it starts opens a visible window of its own. Windows
-       * has no groups to gain, and its tree is ended with `taskkill /T` (kill-tree.ts). Attached and
-       * hidden, the app shares the host's windowless console (`spawnGrouped`).
-       */
-    })
+      const shim = /\.(cmd|bat)$/i.test(launch.command) ? ' (a .cmd or .bat that is not a package manager shim needs a shell: name the program it starts)' : ''
+      const head = `could not run ${launch.command}: ${(e as Error).message}${shim}`
+      log.note(head)
+      log.close()
+      throw new AppStartError(head, head, [])
+    }
+    const { child, spawnedAt } = started
     const proc = new AppProcess(child, (child.stdio[3] as Socket | undefined) ?? null, log, spec.probeTimeoutMs, spawnedAt)
     if (proc.fd3 && spec.serveFd3) proc.closeFd3Server = spec.serveFd3(proc.fd3, (line) => log.note(line))
     spec.onSpawn?.(proc)
