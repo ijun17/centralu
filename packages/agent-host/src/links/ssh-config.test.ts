@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { fakeExe, rmFakeDir } from '../fake-exe.test-helpers.js'
 import { expandGlob, isConcreteAlias, listSshHosts, MAX_HOSTS, parseSshG, readSshConfig, resolveAlias, splitConfigLine, type ResolvedHost } from './ssh-config.js'
 
 /**
@@ -15,7 +17,7 @@ beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'cc-sshcfg-'))
   mkdirSync(join(home, '.ssh'))
 })
-afterEach(() => rmSync(home, { recursive: true, force: true }))
+afterEach(() => rmFakeDir(home))
 
 const write = (rel: string, text: string) => {
   const p = join(home, rel)
@@ -25,8 +27,17 @@ const write = (rel: string, text: string) => {
 }
 /** A path as the reader shows it: the home folder as `~`, in this OS's separator */
 const T = (p: string) => p.replaceAll('/', sep)
-/** The fake ssh is a shell script, and `chmod` takes no read permission away on Windows */
+/** `chmod` takes no read permission away on Windows, so a file that cannot be read cannot be made there */
 const posix = process.platform !== 'win32'
+/** Whether an ssh client is installed: Windows 10 and later have one, the CI Linux and macOS images too */
+function hasSsh(): boolean {
+  try {
+    execFileSync('ssh', ['-V'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+}
 const aliases = () => readSshConfig({ file: join(home, '.ssh', 'config'), home }).hosts.map((h) => h.alias)
 
 describe('one config line, split as OpenSSH splits it', () => {
@@ -154,14 +165,19 @@ describe('resolving each alias with ssh -G', () => {
     expect(parseSshG('')).toEqual({ hostName: null, user: null, port: null })
   })
 
-  it.skipIf(!posix)('asks the real ssh binary only for -G, never to connect, and lists what it resolved', async () => {
+  it('asks ssh only for -G, never to connect, and lists what it resolved', async () => {
     const log = join(home, 'ssh.log')
     // A fake ssh: logs its arguments, and answers -G as OpenSSH does (the alias as hostname unless the config says otherwise)
-    const fake = write(
-      'bin/ssh',
-      `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nfor a; do last="$a"; done\nif [ "$last" = broken ]; then echo "ssh: bad config line" >&2; exit 255; fi\nprintf 'user me\\nhostname %s.lan\\nport 2222\\n' "$last"\n`,
+    const fake = fakeExe(
+      join(home, 'bin'),
+      'ssh',
+      `const args = process.argv.slice(2)
+require('node:fs').appendFileSync(${JSON.stringify(log)}, args.join(' ') + '\\n')
+const last = args[args.length - 1]
+if (last === 'broken') { process.stderr.write('ssh: bad config line\\n'); process.exit(255) }
+process.stdout.write('user me\\nhostname ' + last + '.lan\\nport 2222\\n')
+`,
     )
-    chmodSync(fake, 0o755)
     write('.ssh/config', 'Host box lab\nHost broken\n')
     const r = await listSshHosts({ home, ssh: fake })
     expect(r.configFile).toBe(T('~/.ssh/config'))
@@ -181,6 +197,18 @@ describe('resolving each alias with ssh -G', () => {
     )
     chmodSync(fake, 0o755)
     expect(await resolveAlias('box', { ssh: fake })).toEqual({ hostName: null, user: null, port: null, error: '설정 오류: 잘못된 줄' })
+  })
+
+  // The OpenSSH this computer has (Windows ships one in System32\OpenSSH), asked with -G against a config of the
+  // test's own: it prints what it would use and exits without connecting, so nothing leaves this machine
+  it.runIf(hasSsh())('reads hostname, user and port from the real ssh -G, with a Windows path in -F', async () => {
+    const config = write('.ssh/config', 'Host box\n  HostName box.invalid\n  User me\n  Port 2222\nHost plain\n  HostName plain.invalid\n  User you\n  Port 22\n')
+    const r = await listSshHosts({ home, configFile: config })
+    expect(r.notes).toEqual([])
+    expect(r.hosts.map((h) => [h.alias, h.hostName, h.user, h.port])).toEqual([
+      ['box', 'box.invalid', 'me', 2222],
+      ['plain', 'plain.invalid', 'you', 22],
+    ])
   })
 
   it('says so when ssh cannot resolve any of them (no ssh on this computer)', async () => {
