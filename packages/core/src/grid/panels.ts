@@ -1,4 +1,4 @@
-import { MACHINE_ID_RE, type GridPanel, type GridSpan } from '@cc/protocol'
+import { MACHINE_ID_RE, appKeyOf, type GridPanel, type GridSpan } from '@cc/protocol'
 import { sanitizeGridSpan } from './span.js'
 
 /**
@@ -15,39 +15,11 @@ import { sanitizeGridSpan } from './span.js'
  * app's key, which is `app:<project id | _user>/<app id>`.
  */
 
-/**
- * The scope name of a user-folder app. It matches the host's scope name and the UI's
- * `externalAppKey`, and never collides with a project id (a UUID).
+/*
+ * One app as a string (`appKeyOf`, `parseAppKey`, `USER_APP_SCOPE`) lives in @cc/protocol (`app-key.ts`), so the host
+ * spells it the same way; re-exported here, where the grid's keys are built from it.
  */
-export const USER_APP_SCOPE = '_user'
-
-/**
- * One app as a single string: `<project id | _user>/<app id>` — the UI's `externalAppKey`.
- *
- * A linked machine's user-folder app (#82) has no project to tell it from this computer's app of the same id, so its
- * key names the machine: `<machine>:_user/<app id>`. `machine` is ignored with a project, whose id already names it.
- */
-export function appKeyOf(projectId: string | null | undefined, appId: string, machine?: string | null): string {
-  return machine && !projectId ? `${machine}:${USER_APP_SCOPE}/${appId}` : `${projectId ?? USER_APP_SCOPE}/${appId}`
-}
-
-/**
- * The (project, app) an app key stands for, with the machine of a linked machine's user-folder app, or null for a
- * string that is not one. Neither a project id nor an app id can contain `/`, so the first one splits it; a project
- * id never contains `:` (a UUID, or `<machine>.<uuid>`), so `<machine>:_user` is a machine's user folder.
- */
-export function parseAppKey(key: string): { projectId: string | null; appId: string; machine?: string } | null {
-  const at = key.indexOf('/')
-  if (at <= 0 || at === key.length - 1) return null
-  const scope = key.slice(0, at)
-  const appId = key.slice(at + 1)
-  const colon = scope.indexOf(':')
-  if (colon >= 0) {
-    const machine = scope.slice(0, colon)
-    return scope.slice(colon + 1) === USER_APP_SCOPE && MACHINE_ID_RE.test(machine) ? { projectId: null, appId, machine } : null
-  }
-  return { projectId: scope === USER_APP_SCOPE ? null : scope, appId }
-}
+export { USER_APP_SCOPE, appKeyOf, parseAppKey } from '@cc/protocol'
 
 export const sessionGridPanel = (sessionId: string): GridPanel => ({ kind: 'session', sessionId })
 /** An app's panel. `machine` is kept only for a linked machine's user-folder app (see `appKeyOf`) */
@@ -55,7 +27,7 @@ export const appGridPanel = (projectId: string | null, appId: string, machine?: 
   kind: 'app',
   projectId,
   appId,
-  ...(machine && !projectId ? { machine } : {}),
+  ...(machine && projectId == null ? { machine } : {}),
 })
 
 /**

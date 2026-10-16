@@ -1,3 +1,4 @@
+import { appKeyOf } from '@cc/protocol'
 import type { GridPanel } from '@cc/protocol'
 import type { AgentPort } from '../ports/index.js'
 import type { SessionStore } from './session-store.js'
@@ -39,7 +40,7 @@ export class GridMock {
     setGridView: async (panels: GridPanel[]) => {
       const seen = new Set<string>()
       this.gridPanels = panels.filter((p) => {
-        const key = p.kind === 'session' ? `session:${p.sessionId}` : `app:${p.projectId ?? '_user'}/${p.appId}`
+        const key = p.kind === 'session' ? `session:${p.sessionId}` : `app:${appKeyOf(p.projectId, p.appId)}`
         if (seen.has(key)) return false
         seen.add(key)
         return p.kind === 'session' ? this.store.sessions.has(p.sessionId) : p.projectId === null || this.projectStore.list.some((x) => x.id === p.projectId)

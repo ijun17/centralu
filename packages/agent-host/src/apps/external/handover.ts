@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { AppReview, ExternalAppInfo } from '@cc/protocol'
+import { USER_APP_SCOPE, type AppReview, type ExternalAppInfo } from '@cc/protocol'
 import { canonicalJson } from './runs.js'
 import { ImportBook, reviewKey } from './import-book.js'
 import {
@@ -84,7 +84,7 @@ export class AppHandover {
     private opts: HandoverOptions = {},
   ) {
     this.book = new ImportBook(host.dataRoot)
-    this.versions = new AppVersions(join(host.dataRoot, VERSIONS_REL, '_user'))
+    this.versions = new AppVersions(join(host.dataRoot, VERSIONS_REL, USER_APP_SCOPE))
     this.limits = { ...IMPORT_LIMITS, ...opts.limits }
     this.stagingRoot = join(host.dataRoot, STAGING_REL)
     // The staging area a previous host left behind — never brought in, so it is discarded (it can be imported again)

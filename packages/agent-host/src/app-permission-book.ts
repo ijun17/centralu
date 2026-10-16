@@ -1,5 +1,6 @@
 import type { AppRef, CapabilityBook } from './apps/external/runtime.js'
 import type { Store } from './dev-services/store.js'
+import { appKeyOf } from '@cc/protocol'
 
 /**
  * Backs the external app runtime's capability approval memory (`CapabilityBook`) with the store
@@ -10,7 +11,7 @@ import type { Store } from './dev-services/store.js'
  * seam, they could stay green while the real host's wiring was actually broken.
  */
 export function storePermissionBook(store: Store): CapabilityBook {
-  const key = (app: AppRef) => `${app.projectId ?? '_user'}/${app.appId}`
+  const key = (app: AppRef) => appKeyOf(app.projectId, app.appId)
   return {
     get: (app, capability) => store.getAppPermission(key(app), capability),
     put: (app, d) => store.putAppPermission(key(app), app.projectId, d),

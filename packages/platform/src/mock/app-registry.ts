@@ -1,3 +1,4 @@
+import { appKeyOf } from '@cc/protocol'
 import type { AppErrorBundle, AppRun, ExternalAppInfo, NormalizedEvent } from '@cc/protocol'
 import type { AppToolResult } from '../ports/index.js'
 import type { Emit } from './event-bus.js'
@@ -16,7 +17,7 @@ export class AppRegistry {
    * screen's only signal.
    */
   recordAppError(appId: string, projectId: string | null, bundle: Omit<AppErrorBundle, 'sentAt'>): void {
-    const key = `${projectId ?? '_user'}/${appId}`
+    const key = appKeyOf(projectId, appId)
     this.appErrors.set(key, [bundle, ...(this.appErrors.get(key) ?? [])])
     this.emit({ type: 'external_apps_changed' })
   }

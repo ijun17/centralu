@@ -1,3 +1,4 @@
+import { appKeyOf } from '@cc/protocol'
 import type { AppPermission, AppUsage, AppQuestion } from '@cc/protocol'
 import type { AppRegistry } from './app-registry.js'
 import type { Emit } from './event-bus.js'
@@ -41,16 +42,16 @@ export class AppSettingsMock {
       this.questionWaiters.delete(questionId)
     },
     permissions: async (appId: string, projectId: string | null): Promise<AppPermission[]> =>
-      structuredClone(this.appPermissions.get(`${projectId ?? '_user'}/${appId}`) ?? []),
+      structuredClone(this.appPermissions.get(appKeyOf(projectId, appId)) ?? []),
     forgetPermission: async (appId: string, projectId: string | null, capability: string) => {
-      const key = `${projectId ?? '_user'}/${appId}`
+      const key = appKeyOf(projectId, appId)
       this.appPermissions.set(key, (this.appPermissions.get(key) ?? []).filter((p) => p.capability !== capability))
       this.forgottenPermissions.push({ appId, projectId, capability })
     },
     // Agent usage (M4 D-5) — a test fills this in. If absent, 0, like the host
     usage: async (appId: string, projectId: string | null): Promise<AppUsage> =>
       structuredClone(
-        this.appUsage.get(`${projectId ?? '_user'}/${appId}`) ?? {
+        this.appUsage.get(appKeyOf(projectId, appId)) ?? {
           day: { runs: 0, durationMs: 0, tokens: null },
           month: { runs: 0, durationMs: 0, tokens: null },
         },

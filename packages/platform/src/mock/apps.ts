@@ -1,3 +1,4 @@
+import { appKeyOf } from '@cc/protocol'
 import type { AppRun, ExternalAppInfo } from '@cc/protocol'
 import type { AppCallOrigin, AppHomeView, AppResourceResult, AppToolResult, AppViewFrame, InlineViewKept, InlineViewReopened } from '../ports/index.js'
 import type { MockClock } from './clock.js'
@@ -70,7 +71,7 @@ export class AppsMock {
     // Like the host, carries the time of the most recent error bundle (M4 C-6) — a test supplies the mock's bundles (appErrors)
     list: async (): Promise<ExternalAppInfo[]> =>
       structuredClone(this.registry.externalAppList).map((a) => {
-        const at = this.registry.appErrors.get(`${a.projectId ?? '_user'}/${a.appId}`)?.[0]?.at
+        const at = this.registry.appErrors.get(appKeyOf(a.projectId, a.appId))?.[0]?.at
         return at === undefined ? a : { ...a, lastErrorAt: at }
       }),
     /**
@@ -185,7 +186,7 @@ export class AppsMock {
     runs: async (appId: string, projectId: string | null, limit = 100): Promise<AppRun[]> => {
       this.appRunReads++
       if (this.appRunsProvider) return structuredClone(await this.appRunsProvider(appId, projectId, limit))
-      return structuredClone((this.registry.appRuns.get(`${projectId ?? '_user'}/${appId}`) ?? []).slice(0, limit))
+      return structuredClone((this.registry.appRuns.get(appKeyOf(projectId, appId)) ?? []).slice(0, limit))
     },
     restart: async (appId: string, projectId: string | null) => {
       this.restarts.push({ appId, projectId })

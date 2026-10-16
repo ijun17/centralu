@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CallToolResult, ListResourcesResult, PriorDiscovery, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
-import { APP_ID_MAX_LENGTH, APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, newAppIdProblem, type AppReview, type ExternalAppInfo, type NewAppIdProblem } from '@cc/protocol'
+import { APP_ID_MAX_LENGTH, APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, USER_APP_SCOPE, appKeyOf, appLabel, newAppIdProblem, type AppReview, type ExternalAppInfo, type NewAppIdProblem } from '@cc/protocol'
 import { DirWatchers } from '../../dev-services/watch.js'
 import { AppProcess, AppStartError, type SpawnSpec } from './app-process.js'
 import { BROKER_KEEPALIVE_MS, RUN_META, serveBroker } from './broker.js'
@@ -41,10 +41,10 @@ import { resourceUriOf, visibilityOf, type Audience } from './visibility.js'
 
 /**
  * The scope name for a user-folder app — a key in memory, and also one segment of the data and log
- * folders.
+ * folders (`USER_APP_SCOPE`, the same name every app key carries).
  * A project id is a UUID, so it never collides with this name.
  */
-const USER_SCOPE = '_user'
+const USER_SCOPE = USER_APP_SCOPE
 
 export type { AppRef } from './ref.js'
 
@@ -1141,7 +1141,7 @@ export class ExternalApps {
    * again if idle). A check never calls a tool, so it leaves no row in the run ledger.
    */
   async check(ref: AppRef): Promise<AppCheckReport> {
-    const label = `${ref.projectId === null ? 'user' : ref.projectId.slice(0, 8)}/${ref.appId}`
+    const label = appLabel(ref)
     const findings: CheckFinding[] = []
     const notes: string[] = []
     let tools: CheckedTool[] = []
@@ -1818,7 +1818,7 @@ export class ExternalApps {
 
   /** The key for an open screen. Since this is never used in a path, it does not care about a project id's shape (unlike scopeDir) */
   private holdKey(ref: AppRef): string {
-    return `${ref.projectId ?? USER_SCOPE}/${ref.appId}`
+    return appKeyOf(ref.projectId, ref.appId)
   }
 
   /**
@@ -1924,7 +1924,7 @@ export class ExternalApps {
   }
 
   private label(ref: AppRef): string {
-    return `${ref.projectId === null ? 'user' : ref.projectId.slice(0, 8)}/${ref.appId}`
+    return appLabel(ref)
   }
 
   // ── Discovery ──────────────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { GridPanel } from '@cc/protocol'
-import { GridSpan } from '@cc/protocol'
+import { GridSpan, appKeyOf } from '@cc/protocol'
 
 /** The grid layout: which sessions and apps sit in the grid, in what order */
 export class GridRecords {
@@ -96,11 +96,11 @@ export class GridRecords {
           const machine = appMachine(p)
           if (machine) {
             // The UI's key (`gridPanelKey`): a machine's user-folder app names the machine, a project app its qualified project
-            const key = p.projectId ? `app:${p.projectId}/${p.appId}` : `app:${machine}:_user/${p.appId}`
+            const key = `app:${appKeyOf(p.projectId, p.appId, machine)}`
             insRemoteApp.run(key, p.projectId, p.appId, machine, i, p.span?.cols ?? null, p.span?.rows ?? null)
             return
           }
-          const key = `app:${p.projectId ?? '_user'}/${p.appId}`
+          const key = `app:${appKeyOf(p.projectId, p.appId)}`
           ins.run(key, 'app', null, p.projectId, p.appId, i, p.span?.cols ?? null, p.span?.rows ?? null)
         }
       })

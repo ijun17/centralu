@@ -1,5 +1,5 @@
 import type { AppErrorBundle, AppReach, Attachment, BuilderRequestFacts, ExternalAppInfo, SessionInfo, ToolName } from '@cc/protocol'
-import { builderErrorFrame, builderRequestFrame, newAppIdProblem, sessionLiveDefaults } from '@cc/protocol'
+import { appKeyOf, builderErrorFrame, builderRequestFrame, newAppIdProblem, sessionLiveDefaults } from '@cc/protocol'
 import type { AppCreated, BuilderAsk, NewAppSpec } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
@@ -91,7 +91,7 @@ export class AppBuilderMock {
       }
     },
     builder: async (appId: string, projectId: string | null): Promise<SessionInfo | null> => {
-      const id = this.registry.appBuilders.get(`${projectId ?? '_user'}/${appId}`)
+      const id = this.registry.appBuilders.get(appKeyOf(projectId, appId))
       const s = id ? this.store.sessions.get(id) : undefined
       return s ? structuredClone(s) : null
     },
@@ -104,7 +104,7 @@ export class AppBuilderMock {
      * creation.
      */
     createBuilder: async (appId: string, projectId: string | null, tool?: ToolName): Promise<SessionInfo> => {
-      const key = `${projectId ?? '_user'}/${appId}`
+      const key = appKeyOf(projectId, appId)
       const have = this.registry.appBuilders.get(key)
       if (have && this.store.sessions.has(have)) return structuredClone(this.store.sessions.get(have)!)
       const app = this.registry.externalAppList.find((a) => a.appId === appId && a.projectId === projectId)
@@ -167,7 +167,7 @@ export class AppBuilderMock {
       if (!text && !req.attachments?.length) throw new Error('Write what to change, or attach a screenshot')
       const info = this.registry.externalAppList.find((a) => a.appId === req.appId && a.projectId === req.projectId)
       if (!info) throw new Error('This app no longer exists')
-      const builderId = this.registry.appBuilders.get(`${req.projectId ?? '_user'}/${req.appId}`)
+      const builderId = this.registry.appBuilders.get(appKeyOf(req.projectId, req.appId))
       if (!builderId || !this.store.sessions.has(builderId)) throw new Error('This app has no builder session yet. Start one, then ask again')
       const facts: BuilderRequestFacts = {
         app: { appId: info.appId, name: info.name ?? info.appId },
@@ -182,7 +182,7 @@ export class AppBuilderMock {
         }
         facts.screen = { tool: info.home ?? '(no home tool)', resourceUri: inst.uri }
       }
-      const last = this.registry.appRuns.get(`${req.projectId ?? '_user'}/${req.appId}`)?.[0]
+      const last = this.registry.appRuns.get(appKeyOf(req.projectId, req.appId))?.[0]
       if (last && last.status !== 'ok') facts.latestRun = { tool: last.tool, callerKind: last.callerKind, status: last.status, error: last.error }
       this.deliverToBuilder(builderId, builderRequestFrame(facts, text), req.attachments)
       return { sessionId: builderId }
@@ -190,7 +190,7 @@ export class AppBuilderMock {
     /** Error bundles (M4 C-6) — a test fills `appErrors` (most recent first). A sent bundle carries `sentAt`, like the host */
     errors: async (appId: string, projectId: string | null): Promise<{ latest: AppErrorBundle | null; recent: AppErrorBundle[] }> => {
       this.errorReads++
-      const key = `${projectId ?? '_user'}/${appId}`
+      const key = appKeyOf(projectId, appId)
       const recent = (this.registry.appErrors.get(key) ?? []).map((b) => ({ ...structuredClone(b), sentAt: this.errorsSent.get(`${key}\n${b.kind}\n${b.at}`) ?? null }))
       return { latest: recent[0] ?? null, recent }
     },
@@ -205,7 +205,7 @@ export class AppBuilderMock {
       if (!s) throw new Error(`Session not found: ${sessionId}`)
       const app = this.registry.externalAppList.find((a) => a.appId === appId && a.projectId === projectId)
       if (!app) return { reachable: false, reason: 'unavailable' }
-      const key = `${projectId ?? '_user'}/${appId}`
+      const key = appKeyOf(projectId, appId)
       const given =
         (s.kind === 'orchestrator' ? projectId === null : s.projectId !== null && s.projectId === projectId) ||
         this.registry.appBuilders.get(key) === sessionId
@@ -229,7 +229,7 @@ export class AppBuilderMock {
       this.errorSends.push({ appId, projectId, at })
       // So a test can hold "sending" open — checking meanwhile whether the screen accepts a second click
       if (this.sendErrorGate) await this.sendErrorGate
-      const key = `${projectId ?? '_user'}/${appId}`
+      const key = appKeyOf(projectId, appId)
       const info = this.registry.externalAppList.find((a) => a.appId === appId && a.projectId === projectId)
       if (!info) throw new Error('This app no longer exists')
       const builderId = this.registry.appBuilders.get(key)

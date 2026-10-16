@@ -1,5 +1,5 @@
 import type { CallToolResult } from '@modelcontextprotocol/client'
-import { APP_VIEWS_LIVE_PER_SESSION, type NormalizedEvent } from '@cc/protocol'
+import { APP_VIEWS_LIVE_PER_SESSION, appLabel, type NormalizedEvent } from '@cc/protocol'
 import { resourceUriOf, type AppRef, type ExternalApps } from './apps/external/runtime.js'
 import type { SessionAppCall, SessionAppsHub } from './sessions/session-apps.js'
 import type { ViewHost } from './views/view-host.js'
@@ -262,7 +262,7 @@ export class InlineViews {
     const ui = resourceUriOf(def)
     if (!ui.uri) return
     const callId = await c.callId
-    const where = `${c.ref.projectId === null ? 'user' : c.ref.projectId.slice(0, 8)}/${c.ref.appId} ${c.tool}`
+    const where = `${appLabel(c.ref)} ${c.tool}`
     if (!callId) {
       this.log(`[apps] ${where}: no conversation card matched this call — its view is not shown`)
       return

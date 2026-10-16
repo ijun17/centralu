@@ -1,6 +1,6 @@
 import { createHmac, randomBytes } from 'node:crypto'
 import type { Server } from 'node:http'
-import { MACHINE_ID_RE, RpcMethods } from '@cc/protocol'
+import { MACHINE_ID_RE, RpcMethods, USER_APP_SCOPE, appKeyOf } from '@cc/protocol'
 import type { HomeView } from './home-view.js'
 import { createHttpHandler, type HttpRoute } from '../transport/http.js'
 import { withDragRelay } from './drag-relay.js'
@@ -216,7 +216,7 @@ export class ViewHost {
    * has to differ too.
    */
   static originKey(app: AppRef): string {
-    return `${app.projectId ?? '_user'}/${app.appId}`
+    return appKeyOf(app.projectId, app.appId)
   }
 
   /**
@@ -449,7 +449,7 @@ export class ViewHost {
    * machines never shares an origin in this window, nor with this computer's own `notes`.
    */
   static remoteOriginKey(machine: string, app: AppRef): string {
-    return app.projectId !== null ? `${app.projectId}/${app.appId}` : `${machine}._user/${app.appId}`
+    return app.projectId !== null ? appKeyOf(app.projectId, app.appId) : `${machine}.${USER_APP_SCOPE}/${app.appId}`
   }
 
   /**

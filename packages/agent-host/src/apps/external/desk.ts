@@ -16,6 +16,7 @@ import {
 import type { AppManifest } from './manifest.js'
 import type { AppRef } from './ref.js'
 import { RunRow, type AgentTokens, type RunLedger } from './runs.js'
+import { appKeyOf } from '@cc/protocol'
 
 /**
  * The broker desk (M4 D) — the **one place** that resolves what an app requests over fd 3.
@@ -242,7 +243,7 @@ function deniedText(tool: BrokerToolName, appName: string, text: string): string
 }
 
 /** The slot name for one app — runaway prevention counts per app under this */
-const slotOf = (ref: AppRef): string => `${ref.projectId ?? '_user'}/${ref.appId}`
+const slotOf = (ref: AppRef): string => appKeyOf(ref.projectId, ref.appId)
 
 /** A duration for a person to read — "5 minutes", "1 second" */
 function humanDuration(ms: number): string {
@@ -587,7 +588,7 @@ export class BrokerDesk {
     const host = this.host
     if (!host) return refuse('the broker is unavailable: there is no one to ask for permission')
 
-    const slot = `${app.ref.projectId ?? '_user'}/${app.ref.appId} ${key}`
+    const slot = `${slotOf(app.ref)} ${key}`
     let q = this.asking.get(slot)
     if (!q) {
       const withdraw = new AbortController()

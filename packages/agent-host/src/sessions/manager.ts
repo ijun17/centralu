@@ -75,6 +75,7 @@ import {
   sessionLiveDefaults,
   withoutToolRecord,
   NO_PATH,
+  appKeyOf,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, BusyAnswer, BusyChoice, ChildRunResult, RoutedCard, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { LaunchSettings } from '../adapters/contract.js'
@@ -1083,7 +1084,7 @@ export class SessionManager {
       // A panel naming a machine this host does not link is nobody's app here
       if (!elsewhere && (p.machine || (p.projectId !== null && !projects.has(p.projectId)))) continue
       const panel: GridPanel = elsewhere && p.projectId === null ? { ...own, machine: elsewhere } : own
-      const key = elsewhere && p.projectId === null ? `app:${elsewhere}:_user/${p.appId}` : `app:${p.projectId ?? '_user'}/${p.appId}`
+      const key = `app:${appKeyOf(p.projectId, p.appId, elsewhere)}`
       if (seen.has(key)) continue
       seen.add(key)
       clean.push(panel)

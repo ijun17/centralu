@@ -1,3 +1,4 @@
+import { appKeyOf } from '@cc/protocol'
 import type { AppReview, AppVersions, ExternalAppInfo } from '@cc/protocol'
 import type { MockClock } from './clock.js'
 import type { AppRegistry } from './app-registry.js'
@@ -65,7 +66,7 @@ export class AppImportsMock {
         ...(review.secrets.length ? { secrets: review.secrets.map((name) => ({ name, set: false })) } : {}),
       }
       this.registry.externalAppList.push(app)
-      this.appReviews.set(`_user/${review.appId}`, review)
+      this.appReviews.set(appKeyOf(null, review.appId), review)
       this.importCommits.push({ token, enable: opts.enable, appId: review.appId })
       this.emit({ type: 'external_apps_changed' })
       return structuredClone(app)
@@ -75,13 +76,13 @@ export class AppImportsMock {
       this.importCancels.push(token)
     },
     review: async (appId: string, projectId: string | null): Promise<AppReview> => {
-      const r = this.appReviews.get(`${projectId ?? '_user'}/${appId}`)
+      const r = this.appReviews.get(appKeyOf(projectId, appId))
       if (!r) throw new Error(`No app named "${appId}" in your apps`)
       return structuredClone(r)
     },
     enable: async (appId: string, projectId: string | null, reviewKey: string): Promise<ExternalAppInfo> => {
       const a = this.registry.externalAppList.find((x) => x.appId === appId && x.projectId === projectId)
-      const r = this.appReviews.get(`${projectId ?? '_user'}/${appId}`)
+      const r = this.appReviews.get(appKeyOf(projectId, appId))
       if (!a) throw new Error(`No app named "${appId}" in your apps`)
       if (!a.imported || !r) throw new Error('This app was not imported, so it needs no enabling')
       if (r.reviewKey !== reviewKey) throw new Error('This app changed since you reviewed it. Review it again')
@@ -97,13 +98,13 @@ export class AppImportsMock {
      * current one, then broadcasts the list.
      */
     versions: async (appId: string, projectId: string | null): Promise<AppVersions> => {
-      const v = this.appVersions.get(`${projectId ?? '_user'}/${appId}`)
+      const v = this.appVersions.get(appKeyOf(projectId, appId))
       if (v) return structuredClone(v)
       return projectId === null ? { kind: 'snapshots', snapshots: [] } : { kind: 'git', repo: true, commits: [] }
     },
     restoreVersion: async (appId: string, projectId: string | null, id: string): Promise<ExternalAppInfo> => {
       if (projectId !== null) throw new Error("A project app's versions are its git history; restore it with git")
-      const key = `_user/${appId}`
+      const key = appKeyOf(null, appId)
       const v = this.appVersions.get(key)
       const a = this.registry.externalAppList.find((x) => x.appId === appId && x.projectId === null)
       if (!a || !v || v.kind !== 'snapshots' || !v.snapshots.some((s) => s.id === id)) throw new Error('That version is no longer kept')

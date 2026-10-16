@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { z } from 'zod'
 import type { AppRef } from './ref.js'
 import { canonicalJson } from './runs.js'
+import { appKeyOf } from '@cc/protocol'
 
 /**
  * The data an app can read from the host — a **closed list** (M4 D-3, this is where the "capability
@@ -69,7 +70,7 @@ export function capabilityKey(c: Capability): string {
     case 'agent':
       return `agent:${c.tool}`
     case 'app':
-      return `app:${c.target.projectId ?? '_user'}/${c.target.appId}`
+      return `app:${appKeyOf(c.target.projectId, c.target.appId)}`
     case 'host':
       return `host:${c.name}`
   }
@@ -110,7 +111,7 @@ export type CapabilityBook = {
 }
 
 export function memoryCapabilityBook(): CapabilityBook {
-  const key = (app: AppRef) => `${app.projectId ?? '_user'}/${app.appId}`
+  const key = (app: AppRef) => appKeyOf(app.projectId, app.appId)
   const rows = new Map<string, Map<string, CapabilityDecision>>()
   return {
     get: (app, capability) => rows.get(key(app))?.get(capability) ?? null,

@@ -13,6 +13,7 @@ import type {
   SessionInfo,
   ToolName,
 } from '@cc/protocol'
+import { appKeyOf } from '@cc/protocol'
 import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
 import type { MemoryGate } from './memory-gate.js'
 import type { Store } from '../dev-services/store.js'
@@ -28,7 +29,7 @@ import type { SessionRecord } from './session-record.js'
 import type { AppMessageSource, AppMessageVia } from './app-messages.js'
 
 /** Key for the builder-session directory (APP_BUILDERS_KEY) — an app is identified by (project, id) */
-const builderKey = (ref: AppRef): string => `${ref.projectId ?? '_user'}/${ref.appId}`
+const builderKey = (ref: AppRef): string => appKeyOf(ref.projectId, ref.appId)
 
 /**
  * One builder session per app (M4 C-2) — `<projectId | _user>/<appId>` -> session id. A single JSON
