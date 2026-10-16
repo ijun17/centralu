@@ -97,7 +97,9 @@ async function walkPath(root: string, rel: string, mode: WalkMode): Promise<Walk
 }
 
 function walkPathSync(root: string, rel: string, mode: WalkMode): WalkResult {
-  const rootReal = realpathSync(root)
+  // .native, as the async walk's realpath is (#849): the JS one keeps a Windows short name (`RUNNER~1`) as given, while a
+  // link's target comes back in full, so every link under a root spelled short was refused as leaving it
+  const rootReal = realpathSync.native(root)
   let current = rootReal
   const parts = pathParts(root, rel)
   if (parts.length === 0) return { stats: statSync(rootReal), exists: true }
@@ -114,7 +116,7 @@ function walkPathSync(root: string, rel: string, mode: WalkMode): WalkResult {
     try {
       const linkStats = lstatSync(candidate)
       if (linkStats.isSymbolicLink()) {
-        const target = realpathSync(candidate)
+        const target = realpathSync.native(candidate)
         assertInside(rootReal, target)
         stats = statSync(target)
         current = target
