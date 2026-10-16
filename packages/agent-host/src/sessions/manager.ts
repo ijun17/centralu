@@ -3134,15 +3134,12 @@ export class SessionManager {
     // cross-project consent keeps all three (always is the pair remembered)
     const ask = this.hostCards.hostAsks.get(requestId)
     if (ask && ask.sessionId === sessionId) {
-      this.hostCards.hostAsks.delete(requestId)
       // A new project (#515) has nothing to remember either: "always" makes this one, as allow does. An update, an apply
       // and a handoff (#694) keep theirs for the asking session
       const keepsAlways = ask.detail.kind === 'project_access' || ask.detail.kind === 'agent_start' || sessionOnlyAlways(ask.detail)
       const answer = !keepsAlways && decision === 'always' ? 'allow' : decision
-      this.hostCards.restAfterCard(ask)
-      this.onEvent({ type: 'approval_resolved', sessionId, requestId, decision: answer })
       // Starting agents (#561) has two always: this session (the card's default) or the whole project (⌥)
-      ask.resolve(ask.detail.kind === 'agent_start' && answer === 'always' && scope === 'project' ? 'always_project' : answer)
+      this.hostCards.closeAsk(ask, answer, ask.detail.kind === 'agent_start' && answer === 'always' && scope === 'project' ? 'always_project' : answer)
       // The agent is still inside that tool call — if there are no other pending questions, it is working
       // again
       const after = this.meta.get(sessionId)
@@ -4847,14 +4844,8 @@ export class SessionManager {
         r.req.callerId = to
         const ask = this.hostCards.hostAsks.get(r.req.requestId)
         if (!ask || ask.sessionId !== from) continue
-        const standing = this.meta.get(from)?.pendingApproval?.requestId === ask.requestId
-        if (standing) this.hostCards.restAfterCard(ask)
         // Moved before the original's slot empties: closing it raises the next card waiting there, never this one again
-        ask.sessionId = to
-        ask.shown = true
-        ask.restState = undefined
-        if (standing) this.onEvent({ type: 'approval_resolved', sessionId: from, requestId: ask.requestId, decision: 'deny' })
-        this.hostCards.raiseHostAsks(to)
+        this.hostCards.closeAsk(ask, 'deny', { moveTo: to })
       }
     })
     const items = moved.map((c) => `${movedLabel(c)} (${c.state})`)

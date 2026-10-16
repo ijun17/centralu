@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { CapabilityQuestion } from '../apps/external/runtime.js'
 import type {
   AppQuestion,
+  ApprovalDecision,
   ApprovalDetail,
   NormalizedEvent,
   SessionInfo,
@@ -93,13 +94,8 @@ export class HostCards {
       const requestId = card.requestId ?? `${detail.kind === 'project_access' ? 'xp' : detail.kind === 'agent_start' ? 'ag' : detail.kind === 'centralu_update' || isCentraluApply(detail) ? 'up' : 'mk'}-${randomUUID()}`
       const ask: HostAsk = { requestId, sessionId, detail, shown: card.shown ?? false, resolve }
       this.hostAsks.set(requestId, ask)
-      signal?.addEventListener('abort', () => {
-        if (!this.hostAsks.delete(requestId)) return
-        // An unanswerable card is never left behind, in the session it stands in now (a handoff moves it, #693)
-        const m = this.host.meta.get(ask.sessionId)
-        if (m?.pendingApproval?.requestId === requestId) this.host.onEvent({ type: 'approval_resolved', sessionId: ask.sessionId, requestId, decision: 'deny' })
-        resolve(null)
-      }, { once: true })
+      // An unanswerable card is never left behind, in the session it stands in now (a handoff moves it, #693)
+      signal?.addEventListener('abort', () => this.withdrawHostAsk(requestId), { once: true })
       this.raiseHostAsks(sessionId)
     })
   }
@@ -107,13 +103,37 @@ export class HostCards {
   /** A card the host raised closes unanswered: out of the session's slot, and whatever waits on it hears no answer */
   withdrawHostAsk(requestId: string): void {
     const ask = this.hostAsks.get(requestId)
-    if (!ask) return
-    this.hostAsks.delete(requestId)
-    if (this.host.meta.get(ask.sessionId)?.pendingApproval?.requestId === requestId) {
-      this.restAfterCard(ask)
-      this.host.onEvent({ type: 'approval_resolved', sessionId: ask.sessionId, requestId, decision: 'deny' })
+    if (ask) this.closeAsk(ask, 'deny', null)
+  }
+
+  /**
+   * Closes a card the host raised, the one way every path does (#428): the person's answer, a withdrawal, an aborted
+   * call, and a handoff moving the card. A card standing in its session's slot leaves it, back into the rest it was
+   * raised from between turns (`restAfterCard`), and `emitted` is the decision its `approval_resolved` records. Every
+   * path used to write this itself, and an aborted call skipped the rest, so a session stopped while a card raised
+   * between turns stood was left `waiting_approval` with no card, which no turn would ever end.
+   *
+   * `answer` is what the caller waiting on the card hears. `{ moveTo }` instead keeps the card waiting and stands it in
+   * that session as a card raised between turns (a handoff, #693): moved before the original's slot empties, so closing
+   * it there raises the next card waiting there, never this one again. A withdrawal closes only a card that stands; the
+   * person's answer is recorded either way, as their answer has always been.
+   */
+  closeAsk(ask: HostAsk, emitted: ApprovalDecision, answer: HostAskAnswer | { moveTo: string }): void {
+    const moveTo = answer !== null && typeof answer === 'object' ? answer.moveTo : null
+    if (moveTo === null) this.hostAsks.delete(ask.requestId)
+    const from = ask.sessionId
+    const standing = this.host.meta.get(from)?.pendingApproval?.requestId === ask.requestId
+    if (standing) this.restAfterCard(ask)
+    if (moveTo !== null) {
+      ask.sessionId = moveTo
+      ask.shown = true
+      ask.restState = undefined
     }
-    ask.resolve(null)
+    if (standing || (moveTo === null && answer !== null)) {
+      this.host.onEvent({ type: 'approval_resolved', sessionId: from, requestId: ask.requestId, decision: emitted })
+    }
+    if (moveTo !== null) this.raiseHostAsks(moveTo)
+    else ask.resolve(answer as HostAskAnswer)
   }
 
   askCapability(q: CapabilityQuestion, signal: AbortSignal): Promise<'allow' | 'deny' | null> {
@@ -130,13 +150,8 @@ export class HostCards {
           resolve: (d) => resolve(d === 'always' || d === 'always_project' ? 'allow' : d),
         }
         this.hostAsks.set(requestId, ask)
-        signal.addEventListener('abort', () => {
-          if (!this.hostAsks.delete(requestId)) return
-          // If the card is still showing, it is closed — an unanswerable card is never left behind
-          const m = this.host.meta.get(ask.sessionId)
-          if (m?.pendingApproval?.requestId === requestId) this.host.onEvent({ type: 'approval_resolved', sessionId: ask.sessionId, requestId, decision: 'deny' })
-          resolve(null)
-        }, { once: true })
+        // If the card is still showing, it is closed — an unanswerable card is never left behind
+        signal.addEventListener('abort', () => this.withdrawHostAsk(requestId), { once: true })
         this.raiseHostAsks(ask.sessionId)
         return
       }

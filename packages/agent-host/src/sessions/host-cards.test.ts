@@ -30,14 +30,14 @@ beforeEach(() => {
     emit: (e) => void events.push(e),
     autoBoundaryOpen: () => open,
     applyStateHint: (e, m) => {
-      if (e.type === 'approval_request') m.pendingApproval = { requestId: e.requestId, detail: e.detail }
+      if (e.type === 'approval_request') Object.assign(m, { pendingApproval: { requestId: e.requestId, detail: e.detail }, state: 'waiting_approval' })
       if (e.type === 'state_change') m.state = e.state
     },
     onEvent: (e) => {
       events.push(e)
       const m = e.sessionId ? meta.get(e.sessionId) : undefined
       if (!m) return
-      if (e.type === 'approval_request') m.pendingApproval = { requestId: e.requestId, detail: e.detail }
+      if (e.type === 'approval_request') Object.assign(m, { pendingApproval: { requestId: e.requestId, detail: e.detail }, state: 'waiting_approval' })
       if (e.type === 'approval_resolved') {
         m.pendingApproval = null
         cards.raiseHostAsks(e.sessionId!)
@@ -90,6 +90,45 @@ describe('the approval slot', () => {
     cards.withdrawHostAsk('ag-1')
     expect(events.map((e) => e.type)).toEqual(['approval_request', 'state_change', 'approval_resolved'])
     expect(events[1]).toEqual({ type: 'state_change', sessionId: 's', state: 'idle' })
+  })
+
+  /** The turn ends under a standing card (Stop): its events clear the slot, and the manager raises the card again */
+  const turnEnds = () => {
+    Object.assign(meta.get('s')!, { state: 'idle', pendingApproval: null })
+    cards.raiseHostAsks('s')
+  }
+
+  it('a call stopped while its card stands again between turns returns the session to its rest (#428)', async () => {
+    const stop = new AbortController()
+    const asked = cards.askHost('s', access, stop.signal, { requestId: 'xp-1' })
+    turnEnds()
+    expect(meta.get('s')!.state).toBe('waiting_approval')
+    stop.abort()
+    expect(await asked).toBeNull()
+    expect(meta.get('s')).toMatchObject({ state: 'idle', pendingApproval: null })
+    expect(events.at(-2)).toEqual({ type: 'state_change', sessionId: 's', state: 'idle' })
+  })
+
+  it("an app's capability question stopped the same way leaves the same rest (#428)", async () => {
+    const stop = new AbortController()
+    const q = { app: { appId: 'a1', projectId: 'p1' }, appName: 'App', capability: 'read', text: 'App reads', origin: { kind: 'session', sessionId: 's' }, askedAt: 1, expiresAt: 2 } as CapabilityQuestion
+    const asked = cards.askCapability(q, stop.signal)
+    turnEnds()
+    stop.abort()
+    expect(await asked).toBeNull()
+    expect(meta.get('s')).toMatchObject({ state: 'idle', pendingApproval: null })
+  })
+
+  it('a handoff moves a standing card: the original rests, the heir shows it as raised between turns (#693)', () => {
+    meta.set('h', { id: 'h', state: 'idle', pendingApproval: null } as unknown as SessionInfo)
+    meta.get('s')!.state = 'idle'
+    const asked = cards.askHost('s', access, undefined, { requestId: 'ag-1', shown: true })
+    cards.closeAsk(cards.hostAsks.get('ag-1')!, 'deny', { moveTo: 'h' })
+    expect(meta.get('s')).toMatchObject({ state: 'idle', pendingApproval: null })
+    expect(meta.get('h')).toMatchObject({ state: 'waiting_approval', pendingApproval: { requestId: 'ag-1' } })
+    cards.withdrawHostAsk('ag-1')
+    expect(meta.get('h')).toMatchObject({ state: 'idle', pendingApproval: null })
+    return expect(asked).resolves.toBeNull()
   })
 })
 
