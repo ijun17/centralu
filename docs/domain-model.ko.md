@@ -28,12 +28,12 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 
 | 용어 | 뜻 | 정의된 곳 | 피할 말 |
 |---|---|---|---|
-| 프로젝트 | Centralu에 등록한 폴더. 세션, 규칙, 동의, 앱, 저장한 명령, 커밋 귀속이 여기에 달린다. git 저장소가 아니어도 된다 | `ProjectInfo`, `packages/protocol/src/commands.ts` | 워크스페이스, 레포 |
+| 프로젝트 | Centralu에 등록한 폴더. 세션, 규칙, 동의, 앱, 저장한 명령, 커밋 귀속이 여기에 달린다. git 저장소가 아니어도 된다 | `ProjectInfo`, `packages/protocol/src/commands/projects.ts` | 워크스페이스, 레포 |
 | 신뢰한 프로젝트 | 사람이 예라고 답한 프로젝트. 신뢰해야 그 앱이 돌고 저장소 설정(`.claude/`)이 적용된다. 새 프로젝트는 신뢰하지 않은 채로 시작한다. Centralu가 직접 만든 빈 폴더만 예외다 | `projects.trusted`; [apps.ko.md](apps.ko.md) §3 | |
-| 세션 | 에이전트 도구 하나와의 대화 하나. 자기 프로세스(살아 있을 때), 상태, 모델, 권한 프리셋을 가진다 | `SessionInfo`, `packages/protocol/src/commands.ts` | 채팅, 스레드, 에이전트 |
+| 세션 | 에이전트 도구 하나와의 대화 하나. 자기 프로세스(살아 있을 때), 상태, 모델, 권한 프리셋을 가진다 | `SessionInfo`, `packages/protocol/src/commands/sessions.ts` | 채팅, 스레드, 에이전트 |
 | 에이전트 도구 | 세션이 돌리는 CLI: Claude Code 또는 Codex. 세 번째를 더할 수 있게 문자열이다 | `ToolName`, `packages/protocol/src/entities/ids.ts`; 어댑터는 `packages/agent-host/src/adapters/` | 모델, 프로바이더 |
 | 어댑터 | 에이전트 도구 하나를 공통 계약으로 감싸고, 그 출력을 정규화된 이벤트로 바꾸는 모듈 | `AgentAdapter`, `packages/agent-host/src/adapters/contract.ts` | 드라이버 |
-| 세션 종류 | 세션이 무엇으로 만들어지는가: `worker`(평범한 세션 전부), `orchestrator`, `coordinator`. 그대로 저장하지 않는다. `is_orchestrator`와 코디네이터의 구성원 목록이 있는지에서 읽어 낸다 | `SessionKind`, `packages/protocol/src/commands.ts`; 읽어 내는 곳은 `readSessions`, `packages/agent-host/src/dev-services/store/sessions.ts` | |
+| 세션 종류 | 세션이 무엇으로 만들어지는가: `worker`(평범한 세션 전부), `orchestrator`, `coordinator`. 그대로 저장하지 않는다. `is_orchestrator`와 코디네이터의 구성원 목록이 있는지에서 읽어 낸다 | `SessionKind`, `packages/protocol/src/commands/sessions.ts`; 읽어 내는 곳은 `readSessions`, `packages/agent-host/src/dev-services/store/sessions.ts` | |
 | 오케스트레이터 | 앱 전체에 하나뿐인, 모든 세션을 보고 지휘하는 세션. 어느 프로젝트에도 속하지 않는다 | `kind: 'orchestrator'`; `packages/agent-host/src/sessions/orchestrator-tools.ts`, `orchestrator-home.ts` | 프로젝트 오케스트레이터(폐지) |
 | 평범한 세션 | 빌더도 앱의 에이전트도 아닌 프로젝트 안의 `worker`. 읽기 전용 `reader` 도구를 받는다(워크트리 세션, 띄운 에이전트, 다른 프로젝트의 일을 받은 세션도). 설정에서 끌 수 있다 | `readsOwnProject`, `packages/agent-host/src/sessions/tool-profiles.ts` | |
 | 워크트리 세션(워커) | 자기 git 워크트리와 브랜치에서 일하는 세션. 사람이 만든 것은 따로 서고, 세션이 `start_agent`로 띄운 것은 그 세션 아래에 놓인다(`parentSessionId`). 이것들을 쥐던 워크트리 매니저는 없어졌다(#561 part 3) | `SessionInfo.worktree`, `parentSessionId` | 브랜치 세션 |
