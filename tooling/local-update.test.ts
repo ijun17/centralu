@@ -65,6 +65,7 @@ describe('version stamping', () => {
   })
 })
 
+// ditto and the launcher swap are macOS's: the app bundle is installed by a local update on darwin-arm64 only
 it.runIf(process.platform === 'darwin')('installs through ditto and the launcher swap against a temporary target', () => {
   const root = temp()
   const source = join(root, 'staged/Centralu.app')
@@ -178,6 +179,8 @@ describe('the data-only manifest boundary', () => {
     expect(() => execFileSync(process.execPath, ['--experimental-strip-types', resolve('scripts/content-manifest.mts'), 'sign-local', manifestPath], { stdio: 'pipe', env: { ...process.env, CONTENT_SIGNING_KEY: '' } })).toThrow()
   })
 
+  // The workflow's run blocks are bash for GitHub's Linux runner (they are what this runs), and a local update is
+  // darwin-arm64 only (`pnpm local-update` refuses anywhere else), so there is no Windows run of either to check
   it.skipIf(process.platform === 'win32')('rehearses both workflow run blocks locally without environment secrets', () => {
     const root = temp()
     for (const path of ['scripts/content-manifest.mts', 'scripts/local-manifest.mjs', 'packaging/npm/centralu/bin/semver.mjs', 'packaging/shell/keys.json', 'packages/protocol/src/brand.ts']) {
@@ -216,6 +219,7 @@ describe('the data-only manifest boundary', () => {
     expect(existsSync(join(root, 'manifest-data', SIGNATURE_NAME))).toBe(false)
   })
 
+  // requestSignature is only reached after `pnpm local-update` has checked for darwin-arm64, so Windows never runs it
   it.skipIf(process.platform === 'win32')('dispatches only manifest data, watches the matching run and downloads only its signature using fake gh', async () => {
     const root = temp()
     const bin = join(root, 'bin'); mkdirSync(bin)
