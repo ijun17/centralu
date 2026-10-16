@@ -1700,7 +1700,10 @@ naming it and interrupts the turn. A planned swap drains such calls first (§4.2
 nothing: its bridge fails a call whose socket closed.
 
 **Strays.** `strays.ts` rule 3 counts the keeper's live children and their descendants as ours. After a keeper
-handover (§4.4) their parent is init, and the parent chain alone would offer them as leftovers.
+handover (§4.4) their parent is init, and the parent chain alone would offer them as leftovers. Stopping the ones a
+person chose (`stopStrays`) is the two shots every stop uses: SIGTERM to those still leftovers, then, after 3 s,
+SIGKILL to those that still are, measured again each time (#428). Both walk the table with `dev-services/proc-table.ts`,
+as `kill-tree.ts` does.
 
 **Activity.** Kept terminals, runs and live sessions are the host's own entries again once taken over, so the
 activity report counts them as before. While no host is up the keeper counts nothing; its idle limit is 30

@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
-import { insideAny, noTty, parseLsofCwd, parsePsRows, pickStrays } from './strays.js'
+import { describe, expect, it, vi } from 'vitest'
+import { spawn } from 'node:child_process'
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { hasPs } from '../os.js'
+import { insideAny, noTty, parseLsofCwd, parsePsRows, pickStrays, stopStrays } from './strays.js'
 
 /**
  * Choosing a leftover process (user request, 2026-09-07).
@@ -143,4 +148,53 @@ describe('reading output', () => {
     expect(noTty('?')).toBe(true)
     expect(noTty('ttys005')).toBe(false)
   })
+})
+
+/** Stop sent one SIGTERM and nothing after it: a dev server that traps TERM ran on (#428) */
+describe('stopStrays', () => {
+  const stray = (pid: number) => ({ pid, command: 'node server.js', cwd: '/p' })
+
+  it('KILLs what is still a leftover once the grace is over, measured again first', async () => {
+    const sent: [number, string][] = []
+    const scans = [[stray(10), stray(11), stray(12)], [stray(10)]]
+    const r = await stopStrays([10, 11, 99], ['/p'], 1, [], {
+      find: async () => scans.shift() ?? [],
+      kill: (pid, signal) => void sent.push([pid, signal]),
+      graceMs: 5,
+    })
+    expect(r).toEqual({ stopped: 2 })
+    // 11 left during the grace, and 99 was never a leftover: only 10 gets the second shot
+    await vi.waitFor(() => expect(sent).toEqual([[10, 'SIGTERM'], [11, 'SIGTERM'], [10, 'SIGKILL']]))
+  })
+
+  /*
+   * A real leftover: started by a shell that exits at once, so it is init's child, in a session of its own (no
+   * terminal), working in the project folder, and it ignores TERM. Not on Windows, which has no ps (`hasPs`).
+   */
+  it.skipIf(!hasPs())('a real leftover that ignores TERM is gone after the grace', async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'cc-stray-')))
+    const pidFile = join(dir, 'pid')
+    const script = `process.on('SIGTERM', () => {}); require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000)`
+    // `detached`: a session of its own, so the leftover has no controlling terminal even when the tests run in one
+    const sh = spawn('/bin/sh', ['-c', `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)} </dev/null >/dev/null 2>&1 &`], { cwd: dir, detached: true, stdio: 'ignore' })
+    await new Promise((r) => sh.once('exit', r))
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0)
+        return true
+      } catch {
+        return false
+      }
+    }
+    let pid = 0
+    try {
+      await vi.waitFor(() => (pid = Number(readFileSync(pidFile, 'utf8'))) > 0, { timeout: 10_000 })
+      // Not this test's process: the host's descendants are not leftovers
+      expect(await stopStrays([pid], [dir], 999_999)).toEqual({ stopped: 1 })
+      await vi.waitFor(() => expect(alive(pid)).toBe(false), { timeout: 10_000, interval: 100 })
+    } finally {
+      if (pid && alive(pid)) process.kill(pid, 'SIGKILL')
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 30_000)
 })
