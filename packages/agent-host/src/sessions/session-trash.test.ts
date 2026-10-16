@@ -83,3 +83,22 @@ describe('a restore or purge while the delete still runs (#839)', () => {
     await expect(privates(trash).trashOp('s', async () => 'restored')).resolves.toBe('restored')
   })
 })
+
+describe('a delete while a restore still runs (#839 review)', () => {
+  it('is refused: the restore makes the session live only at its end', async () => {
+    const worktrees = { worktreeCleanup: new Map<string, string>() } as unknown as WorktreeSessions
+    const trash = trashWith({ worktrees })
+    let runs = 0
+    privates(trash).trashSessionOnce = async () => {
+      runs++
+    }
+    let finish!: () => void
+    const restoring = privates(trash).trashOp('s', () => new Promise<void>((r) => (finish = r)))
+    await expect(trash.trashSession('s')).rejects.toThrow('That session is already being restored or deleted')
+    expect(runs).toBe(0)
+    finish()
+    await restoring
+    await trash.trashSession('s')
+    expect(runs).toBe(1)
+  })
+})
