@@ -1,10 +1,11 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { closeSync, existsSync, mkdirSync, openSync, renameSync, statSync, writeSync } from 'node:fs'
 import type { Socket } from 'node:net'
 import { dirname } from 'node:path'
 import { Client, type PriorDiscovery, type Tool } from '@modelcontextprotocol/client'
 import { CLIENT_INFO } from '@cc/protocol'
-import { KILL_GRACE_MS, collectOrphansWindows, hasProcessGroups, stopGroup, stopTree } from '../../dev-services/kill-tree.js'
+import { KILL_GRACE_MS, hasProcessGroups, stopTree } from '../../dev-services/kill-tree.js'
+import { killHandle, spawnGrouped, sweepExited } from '../../dev-services/grouped-child.js'
 import { rotateIfLarge } from '../../log-file.js'
 import { LineTail, lineSplitter } from '../../stream-text.js'
 import { resolveCommand } from '../../tool-launch.js'
@@ -142,8 +143,7 @@ export class AppProcess {
     log.note(`starting: ${spec.command} ${spec.args.join(' ')}`)
     // Windows: `npx` is `npx.cmd`, which cannot be spawned without a shell (tool-launch.ts)
     const launch = resolveCommand(spec.command, spec.env)
-    const spawnedAt = Date.now()
-    const child = spawn(launch.command, [...launch.args, ...spec.args], {
+    const { child, spawnedAt } = spawnGrouped(launch.command, [...launch.args, ...spec.args], {
       cwd: spec.cwd,
       env: spec.env,
       /*
@@ -162,10 +162,8 @@ export class AppProcess {
        * Not on Windows (#14): there `detached` means DETACHED_PROCESS, which leaves the app with no
        * console at all, so every console program it starts opens a visible window of its own. Windows
        * has no groups to gain, and its tree is ended with `taskkill /T` (kill-tree.ts). Attached and
-       * hidden, the app shares the host's windowless console.
+       * hidden, the app shares the host's windowless console (`spawnGrouped`).
        */
-      detached: hasProcessGroups(),
-      windowsHide: true,
     })
     const proc = new AppProcess(child, (child.stdio[3] as Socket | undefined) ?? null, log, spec.probeTimeoutMs, spawnedAt)
     if (proc.fd3 && spec.serveFd3) proc.closeFd3Server = spec.serveFd3(proc.fd3, (line) => log.note(line))
@@ -234,10 +232,10 @@ export class AppProcess {
       this.fd3?.end()
       if (this.alive && !(await this.waitExit(graceMs))) {
         this.log.note(`did not exit within ${graceMs}ms of stdin and fd 3 closing — stopping the process tree`)
-        stopTree({ pid: this.child.pid, kill: (s) => this.child.kill(s as NodeJS.Signals) }, KILL_GRACE_MS, () => this.alive)
+        stopTree(killHandle(this.child), KILL_GRACE_MS, () => this.alive)
         if (opts.awaitKill !== false) await this.waitExit(KILL_GRACE_MS + 1000)
-      } else {
-        this.signalOwnGroup()
+      } else if (hasProcessGroups()) {
+        void this.collectLeftovers()
       }
       this.fd3?.destroy()
       const leftovers = !hasProcessGroups() && !this.alive ? this.collectLeftovers() : null
@@ -282,18 +280,15 @@ export class AppProcess {
     })
   }
 
-  /** Windows: ends what the app left running once it has ended (kill-tree's `collectOrphansWindows`). Never rejects */
+  /**
+   * Ends what the app left running once it has ended (`sweepExited`): its group on macOS and Linux, at once; on
+   * Windows what descends from it by parent links (kill-tree's `collectOrphansWindows`). Never rejects
+   */
   private async collectLeftovers(): Promise<void> {
     const pid = this.child.pid
-    if (typeof pid !== 'number' || this.exitedAt === null) return
-    const ended = await collectOrphansWindows({ pid, spawnedAt: this.spawnedAt, exitedAt: this.exitedAt })
-    if (ended.length > 0) this.log.note(`ended ${ended.length} process(es) it left running: ${ended.join(', ')}`)
-  }
-
-  private signalOwnGroup(): void {
-    const pid = this.child.pid
     if (typeof pid !== 'number') return
-    stopGroup(pid, KILL_GRACE_MS)
+    const ended = await sweepExited({ pid, spawnedAt: this.spawnedAt, exitedAt: this.exitedAt ?? Date.now() })
+    if (ended.length > 0) this.log.note(`ended ${ended.length} process(es) it left running: ${ended.join(', ')}`)
   }
 }
 

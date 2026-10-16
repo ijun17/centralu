@@ -121,7 +121,8 @@ describe('the app runtime does not know what carries it', () => {
  * The external app runtime (M4 A) is the one part of `apps/` allowed into `dev-services/`, and
  * only by name: folder watching, path containment and killing a process tree are promises the
  * terminal and the command runner already keep, and a second copy of "how we kill a tree" is how
- * the two drift apart.
+ * the two drift apart. Starting a child as such a tree's root, and sweeping what it leaves, is shared
+ * with the agent CLIs the same way (grouped-child, #428).
  * Everything else stays out — sessions and adapters are callers of the runtime, and the store is
  * reached through the `ExternalAppsDeps` the host supplies.
  *
@@ -130,7 +131,7 @@ describe('the app runtime does not know what carries it', () => {
  */
 describe('the external app runtime borrows only the named physics modules', () => {
   const sources = sourcesUnder(join(ROOT, 'packages/agent-host/src/apps/external/'))
-  const PHYSICS = /(^|\/)dev-services\/(watch|path-guard|kill-tree)\.js$/
+  const PHYSICS = /(^|\/)dev-services\/(watch|path-guard|kill-tree|grouped-child)\.js$/
 
   it('has source files to read', () => {
     expect(sources.length).toBeGreaterThan(0)

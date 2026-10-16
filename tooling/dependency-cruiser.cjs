@@ -48,7 +48,8 @@ module.exports = {
      * one rule differs. Since external apps are folders and processes, the runtime has to keep
      * a few of the same OS promises the terminal and the command runner already keep: watching
      * a folder (watch), a path that never leaks outside its root (path-guard), and a shutdown
-     * that finishes off descendants too (kill-tree).
+     * that finishes off descendants too (kill-tree), and a child started as the root of such a
+     * tree with what it leaves swept (grouped-child, shared with the agent CLIs, #428).
      * Building two copies of those would repeat the same accident as having two versions of
      * "how do we kill a tree".
      *
@@ -64,7 +65,7 @@ module.exports = {
       from: { path: '^packages/agent-host/src/apps/external/' },
       to: {
         path: '^packages/agent-host/src/(sessions|dev-services|adapters)/',
-        pathNot: ['^packages/agent-host/src/dev-services/(watch|path-guard|kill-tree)\\.ts$'],
+        pathNot: ['^packages/agent-host/src/dev-services/(watch|path-guard|kill-tree|grouped-child)\\.ts$'],
       },
     },
     {

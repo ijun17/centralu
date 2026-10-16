@@ -5,6 +5,7 @@ import { assertExistingPath, isInside, isMissingPathError } from './path-guard.j
 import type { GitBranch, GitCommit, GitFileStatus } from '@cc/protocol'
 import { runGit, type GitTrust } from './git-exec.js'
 import { killTree } from './kill-tree.js'
+import { killHandle } from './grouped-child.js'
 import { programPath } from '../tool-launch.js'
 import { raceTimeout } from '../timing.js'
 
@@ -609,7 +610,7 @@ export async function gitBranchPr(projectCwd: string, branch: string, signal?: A
    * folder a process works in).
    */
   const stop = () => {
-    killTree({ pid: run.child.pid, kill: (signal) => void run.child.kill(signal as NodeJS.Signals | undefined) }, 'SIGKILL')
+    killTree(killHandle(run.child), 'SIGKILL')
     // gh itself as well: elsewhere than Windows it shares the host's process group, which the tree kill spares, and
     // once that kill has hit a group of gh's children it does not fall back to gh
     run.child.kill('SIGKILL')
