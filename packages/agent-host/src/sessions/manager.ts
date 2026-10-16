@@ -5230,9 +5230,10 @@ export class SessionManager {
 
   /**
    * Tells a session something in its conversation (#428): a report, or Centralu's word on a request, a note or a queued
-   * request that did not go. Never while this host is leaving: handing over, the next host owes what is still owed;
-   * quitting, the next start tells what the quit cut (#698), where a word now would read "failed" and could wake a
-   * sleeping session on the way out. Never to a session that is gone, and it never throws: the session may be asleep
+   * request that did not go. Never while this host is leaving. Handing over, a report whose mark the store keeps is the
+   * next host's to give (#646); one held only in memory (a linked machine's, #723) and a notice like these are dropped
+   * in that window, as anything said then would be. Quitting, the next start tells what the quit cut (#698), where a
+   * word now would read "failed" and could wake a sleeping session on the way out. Never to a session that is gone, and it never throws: the session may be asleep
    * or deleted, and a notice must not destabilize the host. The four ways of telling each kept their own guard, and
    * the report and a queued request's had none.
    */
