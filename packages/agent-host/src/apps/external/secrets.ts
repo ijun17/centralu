@@ -110,18 +110,27 @@ export function secretValueProblem(value: string): string | null {
  * Values shorter than 4 characters are never masked: masking a value like `a` or `1` would turn the
  * whole record into confetti, and a value that short is not meaningful as a secret anyway.
  */
+/** The shortest line of a multi-line secret masked on its own: a PEM line is 64, a JSON key's line longer */
+export const SECRET_LINE_MIN_CHARS = 16
+
 export function redactor(secrets: Record<string, string>): (text: string) => string {
   /*
    * Each value also in its JSON-escaped form (#838): a run record keeps the arguments as JSON (`describeArgs`), where
    * a value with a line break, a quote, a backslash or a control character is spelled differently (`\n`, `\"`), so a
    * multi-line key (a PEM, a service account's JSON) passed as an argument was kept unmasked. Both forms are sorted
    * together, longest first, by the same rule as the values.
+   *
+   * And each line of a multi-line value on its own (#838 review): the app's log is masked a line at a time (`AppLog`),
+   * so a PEM printed raw never matched the whole value, and every line of the key went to the log. A line shorter than
+   * `SECRET_LINE_MIN_CHARS` is left out, as a short value is: `}` or an empty line would mask half the log.
    */
   const pairs = Object.entries(secrets)
     .filter(([, v]) => v.length >= 4)
     .flatMap(([name, v]): [string, string][] => {
       const escaped = JSON.stringify(v).slice(1, -1)
-      return escaped === v ? [[name, v]] : [[name, v], [name, escaped]]
+      const forms: [string, string][] = escaped === v ? [[name, v]] : [[name, v], [name, escaped]]
+      const lines = v.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length >= SECRET_LINE_MIN_CHARS)
+      return lines.length > 1 ? [...forms, ...lines.map((l): [string, string] => [name, l])] : forms
     })
     .sort((a, b) => b[1].length - a[1].length)
   if (pairs.length === 0) return (t) => t

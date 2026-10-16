@@ -1098,7 +1098,8 @@ then who may call it:
   run records (arguments, errors, kept failures) and error bundles (`secrets.ts` `redactor`,
   `app-process.ts` `AppLog`; test "stderr goes to the app's own log, with secret values masked by
   name"). Each value is also replaced in its JSON-escaped form (#838), since run records keep
-  arguments as JSON, where a multi-line key or one with quotes is spelled differently. Arguments are
+  arguments as JSON, where a multi-line key or one with quotes is spelled differently, and each line of a
+  multi-line value of 16 characters or more on its own, since the app's log is masked a line at a time. Arguments are
   hashed only after redaction. The person enters values through
   `apps.setSecret`, which accepts only names the manifest declares and never returns a value: the
   app list carries only whether each declared name is set, and refusals never quote the value. A

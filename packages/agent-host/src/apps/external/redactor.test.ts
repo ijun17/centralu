@@ -28,3 +28,20 @@ describe('a secret is masked in a run record however JSON spells it', () => {
     expect(redactor({ T: 'plain-token' })(JSON.stringify({ t: 'plain-token' }))).toBe('{"t":"[redacted:T]"}')
   })
 })
+
+// The app's log is masked a line at a time (#838 review): a PEM printed raw went out a line at a time, unmasked
+describe('a multi-line secret in the app log, masked line by line', () => {
+  const pem = '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASC\nBKcwggSjAgEAAoIBAQDf\n}\n-----END PRIVATE KEY-----'
+  it('masks each line long enough to be the key, one line at a time', () => {
+    const redact = redactor({ KEY: pem })
+    const logged = pem.split('\n').map(redact)
+    expect(logged.join('\n')).not.toContain('MIIEvQIBADANBgkqhkiG9w0BAQEFAASC')
+    expect(logged.join('\n')).not.toContain('BKcwggSjAgEAAoIBAQDf')
+    // A short line is not a key's: left as it is
+    expect(logged[3]).toBe('}')
+  })
+
+  it('a one-line value is not split', () => {
+    expect(redactor({ T: 'plain-token-value-1234' })('x plain-token-value-1234 y')).toBe('x [redacted:T] y')
+  })
+})

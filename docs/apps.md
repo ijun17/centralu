@@ -94,7 +94,9 @@ app wrote there while running would reach the whole team.
   at all is left in place and not written until it can be (`private-json-file.ts`). An
   app receives only the names it declares, as environment variables. Values of 4 characters or more
   are replaced by `[redacted:NAME]` in the app's log, run records and error bundles, also where JSON
-  escapes them (a multi-line key in an argument, #838).
+  escapes them (a multi-line key in an argument, #838). The app's log is masked a line at a time, so each line of a
+  multi-line value (a PEM) of 16 characters or more is masked on its own; shorter lines of it (`}`, an empty line)
+  are not.
   A person enters them in the **Secrets** panel beside the pinned view (its button says how many
   are missing) or in the app's row in Settings > Apps: Set, Replace, Clear. Both call
   `apps.setSecret`, which takes only a name the manifest declares, refuses an empty value, and
