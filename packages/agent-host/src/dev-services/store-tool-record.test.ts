@@ -209,7 +209,7 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
     const said = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const s = new Store(file)
-    expect(s.schemaVersion).toBe(55)
+    expect(s.schemaVersion).toBe(s.latestKnownVersion)
     expect(s.searchMessages('zebracorn')).toEqual([])
     expect(indexRows(s)).toBe(3)
     expect(said.mock.calls.some(([line]) => String(line).includes('could not vacuum'))).toBe(true)

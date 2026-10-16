@@ -1,0 +1,103 @@
+-- A v20 store, written through the Store API of the build that had v20 as its newest step.
+-- Generated once (#845); never edited by hand.
+CREATE TABLE projects (
+  id            TEXT PRIMARY KEY,
+  path          TEXT NOT NULL UNIQUE,
+  name          TEXT NOT NULL,
+  default_tool  TEXT NOT NULL DEFAULT 'claude',
+  default_model TEXT,
+  sidebar_order INTEGER NOT NULL DEFAULT 0,
+  created_at    INTEGER NOT NULL
+, commands TEXT NOT NULL DEFAULT '[]');
+CREATE TABLE sessions (
+  id            TEXT PRIMARY KEY,
+  -- 오케스트레이터는 프로젝트에 속하지 않는다 (앱에 하나, 프로젝트를 가로지른다).
+  -- NOT NULL이면 아무 데나 매달아야 하고 그 프로젝트를 지우면 CASCADE로 함께 죽는다.
+  project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  tool          TEXT NOT NULL,
+  external_id   TEXT,
+  name          TEXT NOT NULL,
+  auto_named    INTEGER NOT NULL DEFAULT 1,
+  state         TEXT NOT NULL DEFAULT 'idle',
+  archived      INTEGER NOT NULL DEFAULT 0,
+  is_orchestrator INTEGER NOT NULL DEFAULT 0,
+  last_read_seq INTEGER NOT NULL DEFAULT 0,
+  waiting_since INTEGER,
+  created_at    INTEGER NOT NULL
+, touched_paths TEXT NOT NULL DEFAULT '[]', model TEXT, permission_preset TEXT NOT NULL DEFAULT 'normal', imported_from TEXT, effort TEXT, sidebar_order INTEGER NOT NULL DEFAULT 0, worktree_path TEXT, worktree_branch TEXT, cwd TEXT, context_used INTEGER, context_window INTEGER, context_exactness TEXT, verbosity TEXT, service_tier TEXT);
+CREATE TABLE messages (
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  seq        INTEGER NOT NULL,
+  role       TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  payload    TEXT NOT NULL,
+  ts         INTEGER NOT NULL,
+  PRIMARY KEY (session_id, seq)
+);
+CREATE TABLE approval_rules (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  scope      TEXT NOT NULL,
+  project_id TEXT,
+  session_id TEXT,
+  matcher    TEXT NOT NULL,
+  decision   TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE usage_facts (
+  date       TEXT NOT NULL,
+  tool       TEXT NOT NULL,
+  model      TEXT NOT NULL,
+  project_id TEXT,
+  input_tokens  INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  cache_tokens  INTEGER NOT NULL DEFAULT 0,
+  cost_est   REAL NOT NULL DEFAULT 0,
+  PRIMARY KEY (date, tool, model, project_id)
+);
+CREATE TABLE workspace (
+  id         INTEGER PRIMARY KEY CHECK (id = 1),
+  layout     TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE commit_sessions (
+  project_id TEXT NOT NULL,
+  sha        TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  ts         INTEGER NOT NULL,
+  PRIMARY KEY (project_id, sha)
+);
+CREATE TABLE command_cache (
+              tool TEXT NOT NULL,
+              cwd TEXT NOT NULL,
+              commands TEXT NOT NULL,
+              updated_at INTEGER NOT NULL,
+              PRIMARY KEY (tool, cwd)
+            );
+CREATE TABLE grid_panels (
+              session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+              position   INTEGER NOT NULL
+            );
+CREATE VIRTUAL TABLE messages_fts USING fts5(
+                body, session_id UNINDEXED, seq UNINDEXED, tokenize='trigram'
+              );
+CREATE TABLE app_settings (
+              key   TEXT PRIMARY KEY,
+              value TEXT NOT NULL
+            );
+INSERT INTO "projects" ("id", "path", "name", "default_tool", "default_model", "sidebar_order", "created_at", "commands") VALUES ('p1', '/tmp/p1', 'alpha', 'claude', NULL, 0, 1792168336190, '[]');
+INSERT INTO "sessions" ("id", "project_id", "tool", "external_id", "name", "auto_named", "state", "archived", "is_orchestrator", "last_read_seq", "waiting_since", "created_at", "touched_paths", "model", "permission_preset", "imported_from", "effort", "sidebar_order", "worktree_path", "worktree_branch", "cwd", "context_used", "context_window", "context_exactness", "verbosity", "service_tier") VALUES ('s1', 'p1', 'claude', 'ext-s1', 'seeded at v20', 0, 'idle', 0, 0, 2, NULL, 1700000000000, '[]', 'opus', 'normal', NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+INSERT INTO "sessions" ("id", "project_id", "tool", "external_id", "name", "auto_named", "state", "archived", "is_orchestrator", "last_read_seq", "waiting_since", "created_at", "touched_paths", "model", "permission_preset", "imported_from", "effort", "sidebar_order", "worktree_path", "worktree_branch", "cwd", "context_used", "context_window", "context_exactness", "verbosity", "service_tier") VALUES ('s2', 'p1', 'claude', 'ext-s2', 'second', 0, 'idle', 0, 0, 0, NULL, 1700000000000, '[]', 'opus', 'normal', NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+INSERT INTO "messages" ("session_id", "seq", "role", "kind", "payload", "ts") VALUES ('s1', 1, 'user', 'text', '{"type":"user_message","sessionId":"s1","text":"find the galaxy colour policy"}', 1700000000000);
+INSERT INTO "messages" ("session_id", "seq", "role", "kind", "payload", "ts") VALUES ('s1', 2, 'assistant', 'text', '{"type":"message_delta","sessionId":"s1","role":"assistant","text":"the galaxy colour policy lives in docs"}', 1700000000001);
+INSERT INTO "messages" ("session_id", "seq", "role", "kind", "payload", "ts") VALUES ('s1', 3, 'system', 'tool_call', '{"type":"tool_call","sessionId":"s1","callId":"c1","summary":{"tool":"Read","title":"Read: docs/colour.md","paths":["docs/colour.md"]}}', 1700000000002);
+INSERT INTO "messages" ("session_id", "seq", "role", "kind", "payload", "ts") VALUES ('s1', 4, 'system', 'tool_result', '{"type":"tool_result","sessionId":"s1","callId":"c1","ok":true,"summary":"nebula purple is the default"}', 1700000000003);
+INSERT INTO "messages" ("session_id", "seq", "role", "kind", "payload", "ts") VALUES ('s1', 5, 'assistant', 'text', '{"type":"message_delta","sessionId":"s1","role":"assistant","text":"done reading"}', 1700000000004);
+INSERT INTO "messages" ("session_id", "seq", "role", "kind", "payload", "ts") VALUES ('s2', 1, 'user', 'text', '{"type":"user_message","sessionId":"s2","text":"hello second"}', 1700000000000);
+INSERT INTO "approval_rules" ("id", "scope", "project_id", "session_id", "matcher", "decision", "created_at") VALUES (1, 'project', 'p1', NULL, 'npm test', 'allow', 1792168336191);
+INSERT INTO "messages_fts" ("rowid", "body", "session_id", "seq") VALUES (1, 'find the galaxy colour policy', 's1', 1);
+INSERT INTO "messages_fts" ("rowid", "body", "session_id", "seq") VALUES (2, 'the galaxy colour policy lives in docs', 's1', 2);
+INSERT INTO "messages_fts" ("rowid", "body", "session_id", "seq") VALUES (3, 'Read: docs/colour.md', 's1', 3);
+INSERT INTO "messages_fts" ("rowid", "body", "session_id", "seq") VALUES (5, 'done reading', 's1', 5);
+INSERT INTO "messages_fts" ("rowid", "body", "session_id", "seq") VALUES (6, 'hello second', 's2', 1);
+CREATE INDEX idx_sessions_project ON sessions(project_id, archived);
+PRAGMA user_version = 20;

@@ -9,11 +9,11 @@ import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from './store.js'
 
 /**
- * The current latest schema version — bump **only this one place** when adding a migration.
- * v22, v23 and v24 broke the same six assertions one after another: if the version is written
- * six times, every migration bills six small chores.
+ * The current latest schema version, read from the step list itself. v22, v23 and v24 broke the same six
+ * assertions one after another while it was written out here, and it was still written in three files (#845):
+ * a new step bills no chore in these tests. What the list holds is pinned in `store-migrations.golden.json`.
  */
-const LATEST_SCHEMA = 55
+const LATEST_SCHEMA = new Store().latestKnownVersion
 
 function seeded() {
   const s = new Store()

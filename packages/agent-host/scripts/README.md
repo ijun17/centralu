@@ -61,3 +61,9 @@ They are kept so that whoever asks "why was it built this way" can run them agai
 | `probe-codex-mcp-instructions.mts` | whether a Codex model sees an MCP server's `initialize` `instructions` (no) or the thread's `developerInstructions` (yes), whether `thread/resume` takes new developer instructions (no), and that a thread cannot be resumed before its first turn (#524, #525) → `sessions/orchestrator-tools.ts` `codexToolInstructionsFor` rides in the thread's developer instructions at start, and `adapters/codex/index.ts` names a started thread only at its first turn |
 | `probe-codex-background.mts` | `--mode interrupt\|stop`: what `turn/interrupt` on the parent, and on the child's own turn, does to a Codex child agent (#290) → the parent's interrupt leaves the child running; interrupting the child's turn stops it, which is the per-task stop `adapters/codex/index.ts` offers |
 | `probe-resume-cache.mts` | whether a Claude session the host put to sleep reads the prompt cache when a message wakes it (#568), through a real host with `CC_SLEEP_AFTER_MS` → `capabilities.sleep` on the Claude adapter rests on it. Run it on a Claude Code update, beside `pnpm drift:claude`; it exits 1 under 90% read |
+
+## Fixtures
+
+| Script | What it writes |
+|---|---|
+| `write-store-fixture.mts` | a store written through the `Store` API of an older checkout, printed as SQL, for `src/dev-services/store-older-builds.test.ts` (#845). The steps to run it against an older commit are in its header; it costs nothing and starts no model |
