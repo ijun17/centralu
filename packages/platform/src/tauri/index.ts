@@ -43,6 +43,25 @@ type HostStatus =
   | { state: 'failed'; message: string }
 
 /**
+ * Listens for the host's status, the shell's `host-status` report (#184). The one reader of that payload, for
+ * the wait below, the endpoint switch and the desktop's failure screen (#850 item 17): anything that is not an
+ * object with a state is dropped.
+ * @returns a promise of the unsubscribe, settled once the listener is registered
+ */
+function listenHostStatus(cb: (status: HostStatus) => void): Promise<() => void> {
+  return listen<unknown>('host-status', (e) => {
+    const p = e.payload
+    if (typeof p === 'object' && p !== null && typeof (p as { state?: unknown }).state === 'string') cb(p as HostStatus)
+  })
+}
+
+/** `listenHostStatus` for a caller that does not wait on the registration */
+export function onHostStatus(cb: (status: HostStatus) => void): () => void {
+  const un = listenHostStatus(cb)
+  return () => void un.then((f) => f()).catch(() => {})
+}
+
+/**
  * Waits for the sidecar to be ready. The app comes up before the host does.
  *
  * **Order matters:** subscribe to the event first, then ask for the current state.
@@ -83,9 +102,7 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
     }, timeoutMs)
 
     // (1) Subscribes first
-    const unlisten = listen<HostStatus>('host-status', (e) => {
-      const p = e.payload
-      if (typeof p !== 'object' || p === null) return
+    const unlisten = listenHostStatus((p) => {
       if (p.state === 'ready') finish({ port: p.port, token: p.token })
       else if (p.state === 'failed') fail(p.message)
     })
@@ -192,15 +209,46 @@ export async function hostBuild(): Promise<ShellHostBuild> {
   return invoke<ShellHostBuild>('host_build')
 }
 
-/** Listens for changes to which builds are involved (a host restarted, a switch finished) */
-export function onHostBuild(cb: (b: ShellHostBuild) => void): () => void {
-  const un = listen<ShellHostBuild>('host-build', (e) => cb(e.payload))
-  return () => void un.then((f) => f())
+/**
+ * Listens for changes to which builds are involved (a host restarted, a switch finished).
+ * @returns a promise of the unsubscribe, settled once the listener is registered
+ */
+function listenHostBuild(cb: (b: ShellHostBuild) => void): Promise<() => void> {
+  return listen<ShellHostBuild>('host-build', (e) => cb(e.payload))
+}
+
+/**
+ * Follows which builds are involved: the current report, then every change (#850 item 17).
+ *
+ * The order is the one `waitForHost` keeps: the listener is registered first and only then is the current report
+ * asked for. Asked the other way round, a report sent between the answer and the registration was missed, and an
+ * answer read before a report but arriving after it put the older state back. Once a report has arrived, the
+ * answer to the question is dropped for the same reason. `onAskFailed` is called when asking fails and no report
+ * has arrived.
+ */
+export function watchHostBuild(cb: (b: ShellHostBuild) => void, onAskFailed?: () => void): () => void {
+  let stopped = false
+  let heard = false
+  const un = listenHostBuild((b) => {
+    if (stopped) return
+    heard = true
+    cb(b)
+  })
+  void un
+    .then(() => hostBuild())
+    .then(
+      (b) => !stopped && !heard && cb(b),
+      () => !stopped && !heard && onAskFailed?.(),
+    )
+  return () => {
+    stopped = true
+    void un.then((f) => f()).catch(() => {})
+  }
 }
 
 /**
  * Switches the host to this window's build with the keeper's blue-green swap (#280 step 3). Returns
- * once the keeper has taken the request; the swap's phases arrive in `onHostBuild` (`swap`), and the
+ * once the keeper has taken the request; the swap's phases arrive in `watchHostBuild` (`swap`), and the
  * window reconnects through the same front door. What it can cost is `switchPlan`'s to say.
  */
 export async function switchHostBuild(): Promise<void> {
@@ -372,20 +420,11 @@ export function tauriRelaunchPort(): RelaunchPort {
   return {
     check: () => invoke<RelaunchCheck>('relaunch_info').catch((e) => ({ ready: false, reason: String(e) })),
     relaunch: () => invoke<void>('apply_update_relaunch').catch(rethrowAsError),
-    watchBusy: (cb) => {
-      let stopped = false
-      const push = (b: ShellHostBuild) => {
-        if (!stopped) cb(typeof b.busy === 'boolean' ? b.busy : null)
-      }
-      void hostBuild()
-        .then(push)
-        .catch(() => !stopped && cb(null))
-      const un = onHostBuild(push)
-      return () => {
-        stopped = true
-        un()
-      }
-    },
+    watchBusy: (cb) =>
+      watchHostBuild(
+        (b) => cb(typeof b.busy === 'boolean' ? b.busy : null),
+        () => cb(null),
+      ),
   }
 }
 
@@ -395,7 +434,7 @@ export async function createTauriPlatform(): Promise<TauriPlatform> {
   await waitForHost()
   const attached = await hostBuild().catch(() => null)
   const relaunchSwap = attached
-    ? await finishRelaunchSwap(attached, async (cb) => listen<ShellHostBuild>('host-build', (e) => cb(e.payload)), switchHostBuild)
+    ? await finishRelaunchSwap(attached, listenHostBuild, switchHostBuild)
     : { tried: false }
   const { port, token } = await waitForHost()
 
@@ -442,13 +481,10 @@ export async function createTauriPlatform(): Promise<TauriPlatform> {
       trash: (path) => invoke<void>('trash_path', { path }).catch(rethrowAsError),
       reveal: (path) => invoke<void>('reveal_path', { path }).catch(rethrowAsError),
     },
-    onEndpointChange: (cb) => {
-      const un = listen<HostStatus>('host-status', (e) => {
-        const p = e.payload
-        if (typeof p === 'object' && p !== null && p.state === 'ready') cb({ port: p.port, token: p.token })
-      })
-      return () => void un.then((f) => f())
-    },
+    onEndpointChange: (cb) =>
+      onHostStatus((p) => {
+        if (p.state === 'ready') cb({ port: p.port, token: p.token })
+      }),
   })
 
   return {

@@ -6,19 +6,17 @@ import {
   buildBar,
   createTauriPlatform,
   focusWindow,
-  hostBuild,
   listenForQuit,
-  onHostBuild,
+  onHostStatus,
   quitAndStopAgents,
   restartHost,
   restartKeeper,
   switchHostBuild,
   switchPlan,
   type ShellHostBuild,
-  type HostStatus,
   type TauriPlatform,
+  watchHostBuild,
 } from '@cc/platform/tauri'
-import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { BuildBarView, RestartKeeperDialog } from './build-bar.js'
 import { QuitDialog } from './quit-dialog.js'
@@ -152,15 +150,14 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
    * platform's onEndpointChange.
    */
   const [hostFailure, setHostFailure] = useState<string | null>(null)
-  useEffect(() => {
-    const un = listen<HostStatus>('host-status', (e) => {
-      const p = e.payload
-      if (typeof p !== 'object' || p === null) return
-      if (p.state === 'failed') setHostFailure(p.message)
-      else if (p.state === 'ready') setHostFailure(null)
-    })
-    return () => void un.then((f) => f())
-  }, [])
+  useEffect(
+    () =>
+      onHostStatus((p) => {
+        if (p.state === 'failed') setHostFailure(p.message)
+        else if (p.state === 'ready') setHostFailure(null)
+      }),
+    [],
+  )
   /*
    * A window of one build attached to a host of another (#280). Happens when the app was updated
    * or rebuilt while the keeper kept the old host running in the background. The window still
@@ -194,19 +191,19 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
   const [dismissedSwap, setDismissedSwap] = useState<number | null>(null)
   // The note that the keeper started without the permission shell, once dismissed, for this window's life
   const [dismissedShell, setDismissedShell] = useState(false)
-  useEffect(() => {
-    void hostBuild()
-      .then(setBuild)
-      .catch(() => {})
-    return onHostBuild((b) => {
-      setBuild(b)
-      if (b.sameBuild && b.keeperSameBuild !== false) {
-        setDismissed(false)
-        // The keeper of this build answered: a full restart, if one ran, is over
-        setRestarting(false)
-      }
-    })
-  }, [])
+  // Subscribed before asking, and a report that arrived first is not overwritten by the answer (`watchHostBuild`)
+  useEffect(
+    () =>
+      watchHostBuild((b) => {
+        setBuild(b)
+        if (b.sameBuild && b.keeperSameBuild !== false) {
+          setDismissed(false)
+          // The keeper of this build answered: a full restart, if one ran, is over
+          setRestarting(false)
+        }
+      }),
+    [],
+  )
   useEffect(() => {
     // A keeper carries its last swap across handoffs. Repeated reports of that old final
     // state cannot settle a new request which was refused or has not started a swap yet.
