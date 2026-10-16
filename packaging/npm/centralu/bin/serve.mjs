@@ -301,8 +301,11 @@ export function launcherScript(platform, execPath, cliPath) {
      * The file is UTF-8, and cmd.exe reads each line of a batch file in the console's code page as it reaches it: 949
      * on a Korean Windows, where a profile folder named in Korean came out as other characters and node found no
      * centralu.mjs there (#849). So the lines before the paths, all ASCII, switch the console to UTF-8 (65001), and the
-     * code page it had is put back after node ends, since the console is the shell's that ran this. chcp is named by
-     * its full path: the shell's PATH may not have System32 on it.
+     * code page it had is put back on the line with the paths, ahead of node: cmd.exe reads and decodes a whole line
+     * before it runs any of it, so the paths are already read as UTF-8 by then. The console is the shell's that ran
+     * this, and node runs on the page it had; a Ctrl+C answered at "Terminate batch job (Y/N)?" ends this file
+     * before any later line, and a restore there was skipped. chcp is named by its full path: the shell's PATH may
+     * not have System32 on it.
      */
     return [
       '@echo off',
@@ -311,10 +314,8 @@ export function launcherScript(platform, execPath, cliPath) {
       'set "CENTRALU_CP="',
       `for /f "tokens=2 delims=:." %%c in ('%SystemRoot%\\System32\\chcp.com') do set /a "CENTRALU_CP=%%c" >nul 2>&1`,
       '%SystemRoot%\\System32\\chcp.com 65001 >nul 2>&1',
-      `"${lit(execPath)}" "${lit(cliPath)}" %*`,
-      'set "CENTRALU_RC=%ERRORLEVEL%"',
-      'if defined CENTRALU_CP %SystemRoot%\\System32\\chcp.com %CENTRALU_CP% >nul 2>&1',
-      'exit /b %CENTRALU_RC%',
+      `(if defined CENTRALU_CP %SystemRoot%\\System32\\chcp.com %CENTRALU_CP% >nul 2>&1) & "${lit(execPath)}" "${lit(cliPath)}" %*`,
+      'exit /b %ERRORLEVEL%',
       '',
     ].join('\r\n')
   }

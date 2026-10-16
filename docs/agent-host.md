@@ -2177,8 +2177,10 @@ shells): use `~/.centralu/bin/centralu`, which `serve` and `--connection` keep p
 by absolute path. Those paths are versioned under nvm and Homebrew, so after a Node upgrade the launcher fails until
 `centralu serve` (or `--connection`) runs once from an interactive shell and rewrites it.
 On Windows it is `centralu.cmd`, written in UTF-8; cmd.exe reads a batch file in the console's code page, so the file
-switches the console to UTF-8 (`chcp 65001`) before the line with the paths and puts the code page back after, or a
-profile folder named in Korean (code page 949) sent node to a path that was not there (#849, `launcher-cmd.test.ts`).
+switches the console to UTF-8 (`chcp 65001`) before the line with the paths, or a profile folder named in Korean
+(code page 949) sent node to a path that was not there (#849, `launcher-cmd.test.ts`). The code page it had is put back
+on that same line, ahead of node: cmd.exe has read the whole line by then, and a Ctrl+C that ends the batch job cannot
+skip the restore.
 
 | Decision | Why |
 |---|---|

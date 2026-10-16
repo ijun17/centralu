@@ -17,7 +17,7 @@ afterEach(() => {
 })
 
 describe.skipIf(process.platform !== 'win32')('the Windows launcher in a folder named in Korean', () => {
-  it('runs the CLI by its Korean path and leaves the console on the code page it had', () => {
+  it('runs the CLI by its Korean path, on the console code page it had, and leaves that page set', () => {
     const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-launcher-')))
     dirs.push(base)
     const profile = join(base, '사용자')
@@ -25,7 +25,13 @@ describe.skipIf(process.platform !== 'win32')('the Windows launcher in a folder 
     const cli = join(profile, 'npm', 'centralu.mjs')
     mkdirSync(data, { recursive: true })
     mkdirSync(dirname(cli), { recursive: true })
-    writeFileSync(cli, 'console.log(JSON.stringify(process.argv.slice(2)))\n')
+    // The CLI says what it got and which code page the console is on while it runs
+    writeFileSync(
+      cli,
+      "import { execFileSync } from 'node:child_process'\n" +
+        "const page = execFileSync(process.env.SystemRoot + '\\\\System32\\\\chcp.com').toString('latin1').trim()\n" +
+        'console.log(JSON.stringify({ argv: process.argv.slice(2), page }))\n',
+    )
     const file = ensureLauncher(data, { cliPath: cli }) as string
     const systemRoot = process.env.SystemRoot ?? 'C:\\Windows'
     const chcp = join(systemRoot, 'System32', 'chcp.com')
@@ -50,8 +56,11 @@ describe.skipIf(process.platform !== 'win32')('the Windows launcher in a folder 
     expect(r.stderr.toString('utf8')).toBe('')
     expect(r.status).toBe(0)
     expect(lines).toHaveLength(2)
-    expect(JSON.parse(Buffer.from(lines[0]!, 'latin1').toString('utf8'))).toEqual(['serve', '한글'])
-    // The launcher switched to UTF-8 for itself and back
+    const ran = JSON.parse(Buffer.from(lines[0]!, 'latin1').toString('utf8')) as { argv: string[]; page: string }
+    expect(ran.argv).toEqual(['serve', '한글'])
+    // UTF-8 only while cmd.exe read the line with the paths: the page was back before node ran, so a Ctrl+C that ends
+    // the batch job at "Terminate batch job (Y/N)?" leaves the console as it was
+    expect(ran.page).toMatch(/\b437\b/)
     expect(lines[1]).toMatch(/\b437\b/)
   })
 })
