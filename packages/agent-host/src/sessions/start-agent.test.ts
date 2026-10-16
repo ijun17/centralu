@@ -1486,6 +1486,7 @@ describe('starting another agent in the same project', () => {
         expect(branches()).toContain('feat/gone-unmounted')
       })
 
+      // chmod cannot make a folder unreadable on Windows (it only sets the read-only flag), nor for root
       it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('refuses when the folder cannot be read for a reason other than ENOENT', async () => {
         const { s, c } = await startGone('feat/gone-eacces', true)
         const parent = dirname(c.worktree!.path)

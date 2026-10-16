@@ -59,6 +59,8 @@ it('rejects an opened object changed after validation without reading its conten
   expect(hooks.handle?.fd).toBe(-1)
 })
 
+// Windows has no FIFOs in folders (its named pipes live under `\\.\pipe\`), and a device name such as CON in a
+// folder is not found there (measured on Windows 11), so nothing in a project can block an open this way
 it.skipIf(process.platform === 'win32')('rejects a FIFO before opening or waiting for a writer', async () => {
   const fifo = join(root, 'pipe')
   execFileSync('mkfifo', [fifo])

@@ -238,6 +238,7 @@ process.exit(0)
  * differently and stole a live lock (the start time is still recorded in `host.lock`).
  */
 describe('reading another process (LK3)', () => {
+  // Windows has no ps and records no start time; ownership there is the SQLite lock alone
   it.skipIf(process.platform === 'win32')('ps runs in the C locale whatever the host was started with', () => {
     const d = mkdtempSync(join(tmpdir(), 'cc-ps-'))
     dirs.push(d)
