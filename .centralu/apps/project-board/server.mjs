@@ -393,6 +393,22 @@ function fail(failed, entries, i, text, e) {
 
 const fieldNamesOf = (b) => Object.fromEntries(FIELDS.map((k) => [k, b.fields[k].name]))
 
+const notVisible = (ref) => `${ref} is not an issue or pull request this GitHub login can see. Nothing added.`
+
+/**
+ * Adds an entry's issue or pull request to the project, for both writes. Answers null when this login
+ * cannot see it. GitHub answering the add without the item it made is a failure (`added`: it may be on
+ * the project all the same), never an item without an id.
+ */
+async function addToProject(b, e) {
+  const content = await findContent(e.want.repo, e.want.number)
+  if (!content) return null
+  const itemId = await addContent(b.project.id, content.id)
+  forget()
+  if (!itemId) throw Object.assign(new GitHubError('github', `GitHub did not return the project item it added for ${e.ref}.`), { added: true })
+  return { content, itemId }
+}
+
 // The two writes. Registered below; each runs inside oneAtATime.
 async function setItemFields(args) {
   let b, entries
@@ -410,14 +426,12 @@ async function setItemFields(args) {
     let added = false
     if (!item) {
       try {
-        const content = await findContent(e.want.repo, e.want.number)
-        if (!content) {
-          failed.push(`${e.ref} is not an issue or pull request this GitHub login can see. Nothing added.`)
+        const r = await addToProject(b, e)
+        if (!r) {
+          failed.push(notVisible(e.ref))
           continue
         }
-        const itemId = await addContent(b.project.id, content.id)
-        if (!itemId) throw new GitHubError('github', `GitHub did not return the project item it added for ${e.ref}.`)
-        forget()
+        const { content, itemId } = r
         item = {
           itemId,
           type: content.type,
@@ -478,16 +492,16 @@ async function addItem(args) {
       if (existing) holder = { itemId: existing.itemId, item: { ...existing } }
       else {
         try {
-          const content = await findContent(e.want.repo, e.want.number)
-          if (!content) {
-            failed.push(`${e.ref} is not an issue or pull request this GitHub login can see. Nothing added.`)
+          const r = await addToProject(b, e)
+          if (!r) {
+            failed.push(notVisible(e.ref))
             continue
           }
-          holder = { itemId: await addContent(b.project.id, content.id), added: true }
-          forget()
+          const { content, itemId } = r
+          holder = { itemId, added: true }
           Object.assign(row, { added: true, touched: true, head: `${e.ref} added: ${content.title}${content.type === 'pull' ? ' (PR)' : ''}` })
         } catch (err) {
-          if (fail(failed, entries, i, `${e.ref}: ${reason(err)} Nothing added.`, err)) {
+          if (fail(failed, entries, i, `${e.ref}: ${reason(err)}${err.added ? '' : ' Nothing added.'}`, err)) {
             stopped = 'its fields were not set after the failure above'
             break
           }
