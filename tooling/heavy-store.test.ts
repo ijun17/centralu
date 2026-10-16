@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { NormalizedEvent } from '@cc/protocol'
 import { seedHeavyStore, type SeedSummary } from '../e2e/fixtures/heavy-store.js'
 import { Store } from '../packages/agent-host/src/dev-services/store.js'
@@ -38,18 +38,32 @@ function digest(s: SeedSummary): string {
   }
 }
 
-describe('heavy-store fixture', () => {
-  const a = seedHeavyStore(fresh(), 'small', 1)
+/*
+ * A seed is synchronous work (SQLite writes), and the worker answers nothing while it runs. Vitest's worker waits 60 s
+ * for an answer to each report it sends (`onTaskUpdate`, not configurable), and on a loaded windows-2022 runner the
+ * seed made while collecting and the three in one test held the worker for about a minute together: the run failed
+ * with "Timeout calling onTaskUpdate" though every test passed (#845). So no seed runs while the file is collected,
+ * and the event loop gets a turn before each seed.
+ */
+const turn = () => new Promise<void>((r) => setImmediate(r))
 
-  it('writes the same rows for the same seed, and other rows for another', () => {
+describe('heavy-store fixture', () => {
+  let a: SeedSummary
+  beforeAll(async () => {
+    await turn()
+    a = seedHeavyStore(fresh(), 'small', 1)
+  }, 30_000 * SLOW)
+
+  it('writes the same rows for the same seed, and other rows for another', async () => {
     const dir = fresh()
-    const once = (seed: number) => {
+    const once = async (seed: number) => {
+      await turn()
       rmSync(dir, { recursive: true, force: true })
       return digest(seedHeavyStore(dir, 'small', seed))
     }
-    const first = once(1)
-    expect(once(1)).toBe(first)
-    expect(once(2)).not.toBe(first)
+    const first = await once(1)
+    expect(await once(1)).toBe(first)
+    expect(await once(2)).not.toBe(first)
     // Three full seeds of the small profile, each a few thousand rows written and read back: about 4 s on a Mac,
     // more than the 15 s Windows limit on a loaded windows-2022 runner (#368)
   }, 90_000 * SLOW)
