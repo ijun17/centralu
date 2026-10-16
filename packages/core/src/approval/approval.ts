@@ -1,4 +1,4 @@
-import { NO_PATH, type ApprovalDetail, type ApprovalScope } from '@cc/protocol'
+import { NO_PATH, alwaysAllowKey, matchesAllowRule, type ApprovalDetail, type ApprovalScope } from '@cc/protocol'
 
 /**
  * Approval policy (FR-3). "Don't block it, make it visible" — approving in place is not forbidden; only the
@@ -34,19 +34,18 @@ export type ApprovalRule = {
   scope: ApprovalScope
   projectId?: string
   sessionId?: string
-  /** A glob-like pattern: only * is supported (zero or more characters) */
+  /** The command, or a prefix of it ending in `*` (protocol's `matchesAllowRule`) */
   matcher: string
 }
 
 /*
- * `*` is `[\s\S]*`, not `.*`: `.` stops at a line break, so `git commit*` never matched a commit whose message
- * comes in a heredoc or a multi-line `-m`, while the host's matcher (`AlwaysAllowRules.allows`, a prefix test)
- * auto-allows exactly those. A preview built on `.*` would leave out commands the rule really lets through.
+ * The host's own rule (protocol's `alwaysAllowKey` and `matchesAllowRule`, #428), so a preview shows exactly what the
+ * host lets through: the command trimmed, as the suggested matcher is, and `*` a wildcard only at the end, a prefix
+ * test that spans line breaks (a heredoc commit matches `git commit*`). Reading `*` anywhere as a wildcard used to
+ * widen the preview past what the host allows.
  */
 export function matchesRule(command: string, matcher: string): boolean {
-  if (!matcher.includes('*')) return command === matcher
-  const escaped = matcher.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[\\s\\S]*')
-  return new RegExp(`^${escaped}$`).test(command)
+  return matchesAllowRule(alwaysAllowKey({ kind: 'command', command, cwd: '' }), matcher)
 }
 
 export function findMatchingRule(
@@ -79,7 +78,7 @@ export function previewMatches(matcher: string, history: readonly string[]): str
  * (previewMatches) first.
  */
 export function suggestMatcher(command: string): string {
-  return command.trim()
+  return alwaysAllowKey({ kind: 'command', command, cwd: '' })
 }
 
 /**

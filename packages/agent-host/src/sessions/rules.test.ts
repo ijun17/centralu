@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { NO_PATH } from '@cc/protocol'
 import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
@@ -52,6 +53,13 @@ describe('approval rules persist (C-2)', () => {
   it('does not save it with no matcher (an empty rule is useless)', async () => {
     const { mgr, session } = await setup()
     mgr.respondApproval(session.id, 'req-1', 'always', 'session')
+    expect(mgr.listApprovalRules()).toEqual([])
+  })
+
+  // An edit with no path has no key to match (#428): a rule saved for "(no path)" would be listed and never apply
+  it('does not save a rule for a file edit with no path', async () => {
+    const { mgr, session } = await setup()
+    mgr.respondApproval(session.id, 'req-1', 'always', 'session', NO_PATH)
     expect(mgr.listApprovalRules()).toEqual([])
   })
 

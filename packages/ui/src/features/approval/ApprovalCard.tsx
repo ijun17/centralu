@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { isCentraluApply, SESSION_HANDOFF, sessionOnlyAlways, type ApprovalDetail } from '@cc/protocol'
+import { alwaysAllowKey, isCentraluApply, SESSION_HANDOFF, sessionOnlyAlways, type ApprovalDetail } from '@cc/protocol'
 import { agentStartQuestion, approvalNotes, centraluUpdateQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
 import { inFlightKey, useStore } from '../../store/store.js'
 import { useShortcut } from '../../app/shortcut.js'
@@ -48,6 +48,8 @@ export function ApprovalCard({
       // A capability question (M4 D-4) has no "always allow" — the answer gets remembered either way. `a` does nothing on this card
       // Nor does a new project (#515): it is one folder, made once — there is nothing to always allow
       if ((detail.kind === 'capability' || detail.kind === 'project_create') && action.decision === 'always') return
+      // Nor does an edit whose file is unknown (#428): there is no path to remember
+      if (!offersAlways(detail) && action.decision === 'always') return
       // Nor does a project of another machine (#700): the consent is for this call, nothing is remembered for it
       if (detail.kind === 'project_access' && detail.to.machine && action.decision === 'always') return
       // A cross-project consent's "always" is for the pair (#371) — there is no session or project scope to pick
@@ -139,7 +141,7 @@ export function ApprovalCard({
       <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
         <ActionKey k={keys.allow} label="Allow" onClick={() => void respond(sessionId, requestId, 'allow')} testId="approve-allow" disabled={busy} />
         <ActionKey k={keys.deny} label="Deny" onClick={() => void respond(sessionId, requestId, 'deny')} testId="approve-deny" disabled={busy} />
-        <ActionKey
+        {offersAlways(detail) && <ActionKey
           k={keys.always}
           label="Always allow"
           testId="approve-always"
@@ -154,9 +156,9 @@ export function ApprovalCard({
                 : `Hold ${sc('alt')} and click to apply to the whole project`
           }
           onClick={(alt) => void respond(sessionId, requestId, 'always', updateCard ? 'session' : alt ? 'project' : 'session')}
-        />
+        />}
         {/* Project scope is ⌥a, a letter: from the composer it stays a click with ⌥ held (the button's title says so) */}
-        {!inComposer && !updateCard && (
+        {!inComposer && !updateCard && offersAlways(detail) && (
           <span className="ml-auto text-2xs text-ink-faint">
             <Kbd alt /> <Kbd>a</Kbd> whole project
           </span>
@@ -426,6 +428,14 @@ function ActionKey({
       {label}
     </button>
   )
+}
+
+/**
+ * Whether the card offers "always allow". Not for a file edit whose path is unknown (#428): the rule would be
+ * "(no path)", which the host never matches, so it would be saved, listed and announced while doing nothing.
+ */
+export function offersAlways(detail: ApprovalDetail): boolean {
+  return detail.kind !== 'file_edit' || alwaysAllowKey(detail) !== ''
 }
 
 export type ApprovalKeyAction = { decision: 'allow' | 'deny' | 'always'; scope?: 'session' | 'project' }

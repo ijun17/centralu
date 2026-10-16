@@ -9,7 +9,7 @@ import { existsSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { CLIENT_INFO, NO_PATH, parseCliVersion } from '@cc/protocol'
+import { CLIENT_INFO, parseCliVersion } from '@cc/protocol'
 import type {
   AdapterCapabilities,
   ApprovalDecision,
@@ -1148,7 +1148,7 @@ class CodexSession implements SessionHandle {
 
     // Does not ask if it matches a saved "always allow" rule (the same rule as C-2)
     // A request that names no file has no key: a rule saved for "(no path)" would let every such request through
-    const key = alwaysAllowKey(detail, { skipPath: NO_PATH })
+    const key = alwaysAllowKey(detail)
     if (key && this.alwaysAllow.allows(key)) {
       this.client.respond(r.id, { decision: 'accept' })
       return

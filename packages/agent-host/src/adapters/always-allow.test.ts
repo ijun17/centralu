@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { NO_PATH } from '@cc/protocol'
 import { AlwaysAllowRules, alwaysAllowKey } from './always-allow.js'
 
 describe('AlwaysAllowRules', () => {
@@ -50,9 +51,11 @@ describe('alwaysAllowKey', () => {
     expect(alwaysAllowKey({ kind: 'other', raw: '{}' })).toBe('')
   })
 
-  it('gives no key to a file edit whose path is the skipped placeholder, and only when asked to', () => {
-    const edit = { kind: 'file_edit', path: '?', diffPreview: '', multi: false } as const
-    expect(alwaysAllowKey(edit, { skipPath: '?' })).toBe('')
-    expect(alwaysAllowKey(edit)).toBe('?')
+  it('gives no key to a file edit whose path is unknown', () => {
+    expect(alwaysAllowKey({ kind: 'file_edit', path: NO_PATH, diffPreview: '', multi: false })).toBe('')
+  })
+
+  it('keys a command by its trimmed text, as the UI suggests the matcher', () => {
+    expect(alwaysAllowKey({ kind: 'command', command: ' npm test\n', cwd: '/repo' })).toBe('npm test')
   })
 })

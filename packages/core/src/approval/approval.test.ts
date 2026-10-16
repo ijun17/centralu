@@ -73,6 +73,22 @@ describe('matching "always allow" rules', () => {
     expect(matchesRule('echo hi\ngit commit -m x', 'git commit*')).toBe(false)
   })
 
+  /*
+   * The host lets a rule through only by a trailing * (adapters/always-allow.ts). A * anywhere else used to widen the
+   * preview here while the host still asked: the preview said a command was covered that the host did not cover (#428).
+   */
+  it('* is a wildcard only at the end, as the host matches — elsewhere it is a literal *', () => {
+    expect(matchesRule('git push --force origin', 'git * origin')).toBe(false)
+    expect(matchesRule('git * origin', 'git * origin')).toBe(true)
+    expect(previewMatches('git * origin', ['git push origin', 'git * origin'])).toEqual(['git * origin'])
+  })
+
+  // The rule the card suggests for a command must match that command (#428): suggestMatcher trims, and the match did not
+  it('a command matches the rule suggested for it, surrounding whitespace and all', () => {
+    const command = '  npm test\n'
+    expect(matchesRule(command, suggestMatcher(command))).toBe(true)
+  })
+
   it('regex metacharacters are escaped (so a rule does not apply where it should not)', () => {
     expect(matchesRule('rm -rf /', 'rm -rf .')).toBe(false)
     expect(matchesRule('a.b', 'a.b')).toBe(true)

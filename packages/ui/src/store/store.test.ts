@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExternalAppInfo, MachineInfo, NormalizedEvent, SessionInfo } from '@cc/protocol'
-import { sessionLiveDefaults } from '@cc/protocol'
+import { NO_PATH, sessionLiveDefaults } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, arrangePanels, countWaiting, withOrder, withPanel, sessionGridPanel, type NotifyPolicy } from '@cc/core'
 // eslint-disable-next-line no-restricted-imports -- the runtime ui knows only ports, but tests are contractually required to use MockPlatform instead of ad-hoc mocking (see the header of platform/src/mock/index.ts)
 import { MockPlatform } from '@cc/platform/mock'
@@ -4364,6 +4364,13 @@ describe('the always-allow notification (#170)', () => {
     const r = await answerAlways({ kind: 'file_edit', path: '/x/a.ts', diffPreview: '', multi: false }, 'project')
     expect(r.matcher).toBe('/x/a.ts')
     expect(r.toast).toBe('Always allow in this project: /x/a.ts')
+  })
+
+  // An edit whose path is unknown has nothing to remember (#428): it used to send "(no path)" and toast it as a rule
+  it('a file edit with no path sends no matcher and says it was allowed once', async () => {
+    const r = await answerAlways({ kind: 'file_edit', path: NO_PATH, diffPreview: '', multi: false })
+    expect(r.matcher).toBeUndefined()
+    expect(r.toast).toContain('Allowed once')
   })
 
   it('a kind with no matcher never claims a rule was kept', async () => {

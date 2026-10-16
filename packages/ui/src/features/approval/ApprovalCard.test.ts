@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { approvalCardCovered, approvalKeyAction } from './ApprovalCard.jsx'
+import { NO_PATH } from '@cc/protocol'
+import { approvalCardCovered, approvalKeyAction, offersAlways } from './ApprovalCard.jsx'
 
 /**
  * `code` having a default value matters.
@@ -183,5 +184,15 @@ describe('approvalCardCovered — which card accepts a key press', () => {
   it('even a single window opened via local state blocks the focused card', () => {
     expect(approvalCardCovered({ ...open, openLayers: 1 }, 's1')).toBe(true)
     expect(approvalCardCovered({ ...open, openLayers: 2 }, 's1')).toBe(true)
+  })
+})
+
+// An edit whose file is unknown has nothing to remember (#428): no "always allow" button, and `a` does nothing
+describe('offersAlways', () => {
+  it('is off only for a file edit with no path', () => {
+    expect(offersAlways({ kind: 'file_edit', path: NO_PATH, diffPreview: '', multi: false })).toBe(false)
+    expect(offersAlways({ kind: 'file_edit', path: '/x/a.ts', diffPreview: '', multi: false })).toBe(true)
+    expect(offersAlways({ kind: 'command', command: 'npm test', cwd: '/x' })).toBe(true)
+    expect(offersAlways({ kind: 'other', raw: '{}' })).toBe(true)
   })
 })

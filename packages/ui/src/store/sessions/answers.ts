@@ -1,4 +1,4 @@
-import { suggestMatcher } from '@cc/core'
+import { alwaysAllowKey } from '@cc/protocol'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 
 /** Answering what a session asks: an approval, exactly once (#158), and a question's options */
@@ -29,14 +29,8 @@ export const answerActions = (set: StoreSet, get: StoreGet): AnswerActions => ({
     const flight = inFlightKey(sessionId, requestId)
     if (get().approvalsInFlight[flight] || pending?.requestId !== requestId) return
     set((s) => ({ approvalsInFlight: { ...s.approvalsInFlight, [flight]: true } }))
-    const matcher =
-      decision === 'always' && pending
-        ? pending.detail.kind === 'command'
-          ? suggestMatcher(pending.detail.command)
-          : pending.detail.kind === 'file_edit'
-            ? pending.detail.path
-            : undefined
-        : undefined
+    // The command trimmed or the edit's path, the same key the host matches (#428); none for an edit with no path
+    const matcher = (decision === 'always' && pending && alwaysAllowKey(pending.detail)) || undefined
     /*
      * This used to be the one action in this store that swallowed a failure. Approval is exactly the
      * spot where **pressing it and having nothing happen is worst of all** — there is no way to tell

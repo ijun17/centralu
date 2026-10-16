@@ -72,6 +72,7 @@ import {
   textSizeFromLegacyStep,
   sessionLiveDefaults,
   withoutToolRecord,
+  NO_PATH,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, BusyAnswer, BusyChoice, ChildRunResult, RoutedCard, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { LaunchSettings } from '../adapters/contract.js'
@@ -3170,7 +3171,8 @@ export class SessionManager {
 
     // Persisting the rule — the adapter only keeps it in memory, so this is needed for it to survive a
     // restart (C-2)
-    if (decision === 'always' && m && matcher) {
+    // An edit with no path has no key to match (protocol's `alwaysAllowKey`, #428): "(no path)" is never a rule
+    if (decision === 'always' && m && matcher && matcher !== NO_PATH) {
       this.store.addApprovalRule({
         scope: scope ?? 'session',
         sessionId: scope === 'project' ? undefined : sessionId,

@@ -1,4 +1,4 @@
-import type { ApprovalDetail } from '@cc/protocol'
+import { matchesAllowRule } from '@cc/protocol'
 
 /**
  * The "always allow" rules of one session, shared by the Claude and Codex adapters. Seeded with the saved rules at
@@ -21,21 +21,12 @@ export class AlwaysAllowRules {
     for (const m of matchers) this.matchers.add(m)
   }
 
-  /** Only supports a trailing wildcard (`npm test*`) — the same rule as core's `matchesRule`. */
+  /** The protocol's rule (`matchesAllowRule`): exact, or a prefix when the matcher ends in `*` — the same rule core previews */
   allows(key: string): boolean {
-    for (const m of this.matchers) {
-      if (m.endsWith('*') ? key.startsWith(m.slice(0, -1)) : key === m) return true
-    }
+    for (const m of this.matchers) if (matchesAllowRule(key, m)) return true
     return false
   }
 }
 
-/**
- * The key a rule is matched against: the full command text for a command, the path for a file edit, and `''` (no key)
- * for every other kind. `skipPath` names a placeholder path that gets no key either (Claude's `'?'`).
- */
-export function alwaysAllowKey(detail: ApprovalDetail, opts: { skipPath?: string } = {}): string {
-  if (detail.kind === 'command') return detail.command
-  if (detail.kind === 'file_edit' && (opts.skipPath === undefined || detail.path !== opts.skipPath)) return detail.path
-  return ''
-}
+/** The key a rule is matched against (`alwaysAllowKey` in protocol, which the UI's matcher comes from too) */
+export { alwaysAllowKey } from '@cc/protocol'
