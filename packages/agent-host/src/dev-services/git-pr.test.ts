@@ -97,8 +97,9 @@ describe('gh stopped by an abort (#368)', () => {
   })
 
   // macOS and Linux: the tree kill does not reach a child that left gh's group, and one holding gh's output kept
-  // `close` from coming for as long as it ran, which held the host's shutdown with it
-  it.skipIf(process.platform === 'win32')('returns once gh is gone even while a child it started holds its output', { timeout: 30_000 }, async () => {
+  // `close` from coming for as long as it ran, which held the host's shutdown with it. Windows (#849): the child is
+  // outside gh's job, so only `taskkill /T` ends it, and it must, since it holds the output open
+  it('returns once gh is gone even while a child it started holds its output', { timeout: 30_000 }, async () => {
     root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-gh-abort-')))
     const bin = join(root, 'bin')
     const project = join(root, 'project')
@@ -127,5 +128,6 @@ describe('gh stopped by an abort (#368)', () => {
     expect(await answer).toBeNull()
     expect(Date.now() - started).toBeLessThan(5_000)
     expect(alive(ghPid)).toBe(false)
+    if (process.platform === 'win32') await until(() => !alive(child), 5_000)
   })
 })
