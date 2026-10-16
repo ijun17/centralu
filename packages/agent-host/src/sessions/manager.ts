@@ -5938,25 +5938,7 @@ export class SessionManager {
   async disposeAll(): Promise<void> {
     // The cards it closes below are not the person's answers: a standing start_agent request stays stored (#673)
     this.disposing = true
-    // Reconnect clocks die with the host (#698)
-    for (const id of [...this.reconnecting.keys()]) this.stopWatchingReconnect(id)
-    // So do the waits of paused reports (#721): the work ends with its process, and the next start drops the mark
-    this.stopSettlingPausedReports()
-    this.linkedReports.dispose()
-    // So does a start waiting for memory (#686)
-    this.memoryGate?.close()
-    this.watchers.close()
-    // Ends a merge check's gh; the check itself is waited for with the processes below (#368)
-    this.mergeChecksStop.abort()
-    for (const readers of this.turnObservers.values()) for (const observer of readers) observer.fail(new Error('Centralu is stopping'))
-    this.appsHub?.rt.attachBrokerHost(null)
-    for (const run of [...this.agentRuns.values()]) run.fail(new Error('Centralu is shutting down'))
-    for (const ask of [...this.hostCards.hostAsks.values()]) ask.resolve(null)
-    this.hostCards.hostAsks.clear()
-    for (const q of [...this.hostCards.appQuestions.values()]) q.resolve(null)
-    this.hostCards.appQuestions.clear()
-    this.appAccess?.dispose()
-    this.appsHub?.dispose()
+    this.leaveHost('Centralu is shutting down')
     // The messages in progress are written as they stand — a shutdown must not swallow the last two seconds (#66).
     // Written, not closed: the supervisor may kill the host before the processes are down
     for (const [id, run] of this.record.streams) this.record.flushStream(id, run)
@@ -5987,29 +5969,42 @@ export class SessionManager {
    * nothing is stamped as synced: the conversation goes on.
    */
   async detachAll(): Promise<void> {
-    this.watchers.close()
-    this.appsHub?.rt.attachBrokerHost(null)
     // The kept turns go on under the next host, which owes their reports (#646); failing the waits here must not report
     this.handingOver = true
-    // The next host checks merges again at its start; this one's gh ends, and its check is waited for below (#368)
-    this.mergeChecksStop.abort()
-    // A paused report's wait is the next host's, which starts it again on adoption (#721)
+    this.leaveHost('Centralu is restarting')
+    await Promise.allSettled([...[...this.handles.values()].map((h) => (h.detach ? h.detach() : h.dispose())), ...this.mergeChecks])
+    for (const [id, run] of this.record.streams) this.record.flushStream(id, run)
+    for (const id of [...this.record.streams.keys()]) this.record.closeStream(id)
+    this.handles.clear()
+  }
+
+  /**
+   * What ends with this host whether it quits (`disposeAll`) or hands its sessions over (`detachAll`), said once: the
+   * two used to list it each, and handing over missed the reconnect clocks, which went on to flag a session from a
+   * host that had already left. `why` is what the waits it fails hear.
+   */
+  private leaveHost(why: string): void {
+    // Reconnect clocks die with the host (#698); the next one starts its own from the session's next event
+    for (const id of [...this.reconnecting.keys()]) this.stopWatchingReconnect(id)
+    // So do the waits of paused reports (#721): quitting, the work ends with its process and the next start drops the
+    // mark; handing over, the wait is the next host's, which starts it again on adoption
     this.stopSettlingPausedReports()
     this.linkedReports.dispose()
-    // A start waiting for memory stays stored for the next host (#686)
+    // So does a start waiting for memory (#686); handing over, it stays stored for the next host
     this.memoryGate?.close()
-    for (const run of [...this.agentRuns.values()]) run.fail(new Error('Centralu is restarting'))
-    for (const readers of this.turnObservers.values()) for (const observer of readers) observer.fail(new Error('Centralu is restarting'))
+    this.watchers.close()
+    // Ends a merge check's gh; the check itself is waited for with the processes (#368). The next host checks merges
+    // again at its start
+    this.mergeChecksStop.abort()
+    this.appsHub?.rt.attachBrokerHost(null)
+    for (const run of [...this.agentRuns.values()]) run.fail(new Error(why))
+    for (const readers of this.turnObservers.values()) for (const observer of readers) observer.fail(new Error(why))
     for (const ask of [...this.hostCards.hostAsks.values()]) ask.resolve(null)
     this.hostCards.hostAsks.clear()
     for (const q of [...this.hostCards.appQuestions.values()]) q.resolve(null)
     this.hostCards.appQuestions.clear()
     this.appAccess?.dispose()
     this.appsHub?.dispose()
-    await Promise.allSettled([...[...this.handles.values()].map((h) => (h.detach ? h.detach() : h.dispose())), ...this.mergeChecks])
-    for (const [id, run] of this.record.streams) this.record.flushStream(id, run)
-    for (const id of [...this.record.streams.keys()]) this.record.closeStream(id)
-    this.handles.clear()
   }
 
   private requireHandle(sessionId: string): SessionHandle {

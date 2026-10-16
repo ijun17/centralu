@@ -453,6 +453,18 @@ describe('a tool reconnecting for too long (#698)', () => {
     expect(clocks().has(id)).toBe(false)
   })
 
+  it('a host handing its sessions over leaves no reconnect clock running behind it', async () => {
+    const a = host()
+    const { id, h } = await working(a)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    h.emit({ type: 'activity', sessionId: id, activity: 'retrying' })
+    await a.mgr.detachAll()
+    vi.advanceTimersByTime(RECONNECTING_FLAG_MS * 2)
+    // The next host watches the session from its own first event; this one says nothing after leaving
+    expect(interruptions(id)).toEqual([])
+    expect(info(a, id).interruption ?? null).toBeNull()
+  })
+
   it('silence alone is not flagged: a long build or a sleep looks the same', async () => {
     const a = host()
     const { id } = await working(a)
