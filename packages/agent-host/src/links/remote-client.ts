@@ -41,7 +41,8 @@ export type RemoteHello = {
   build?: HostBuild
 }
 
-export type RemoteRefusal = { code: 4001 | 4002; reason: string; error?: ProtocolError }
+/** `proving`: refused the `prove` itself (#838), as a host from before the proof, still running, does */
+export type RemoteRefusal = { code: 4001 | 4002; reason: string; error?: ProtocolError; proving?: boolean }
 
 export type RemoteClientOptions = {
   url: string
@@ -145,7 +146,7 @@ export class RemoteClient {
          * build from before #838 whose line still said it could. Reported as a refusal, so the link reads the connection
          * line again rather than retrying the same prove for as long as the hub runs.
          */
-        if (code === 4001 || code === 4002) return this.onClose(ws, code, Buffer.from("the host did not answer a proof of its token"))
+        if (code === 4001 || code === 4002) return this.onClose(ws, code, Buffer.from("the host did not answer a proof of its token"), true)
         // Closed otherwise before it proved anything: not this machine's host, or one that went away
         return this.lost(ws, `the forward's port closed before the host proved it holds the token (${code})`)
       }
@@ -180,7 +181,7 @@ export class RemoteClient {
     )
   }
 
-  private onClose(ws: WebSocket, code: number, reason: Buffer): void {
+  private onClose(ws: WebSocket, code: number, reason: Buffer, proving = false): void {
     if (code === 4001 || code === 4002) {
       this.detach(ws)
       this.ws = null
@@ -188,7 +189,7 @@ export class RemoteClient {
       this.clearTimers()
       this.failAll(`The host refused the link: ${this.refusal?.message ?? String(reason)}`)
       // Not retried: the same hello gets the same answer (the link decides what to do next)
-      this.on.refused?.({ code, reason: String(reason), ...(this.refusal ? { error: this.refusal } : {}) })
+      this.on.refused?.({ code, reason: String(reason), ...(this.refusal ? { error: this.refusal } : {}), ...(proving ? { proving } : {}) })
       return
     }
     this.lost(ws, `closed (${code})`)

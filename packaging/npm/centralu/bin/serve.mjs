@@ -15,7 +15,7 @@
  * import time and cannot be imported by a test. package.json "files" lists the whole bin/
  * directory, so this ships automatically.
  */
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync, closeSync } from 'node:fs'
 import { connect, createServer } from 'node:net'
@@ -702,11 +702,52 @@ export function probeHost({ port, token, protocolVersion, prove = false, timeout
  * still running after an update. It is running, and is not sent the token; a hub asking it for a proof is refused
  * until it restarts. Without a live lock holder, what answered is not ours.
  */
-export function heldHere(probe, dataDir) {
+export function heldHere(probe, dataDir, startOf = processStartTime) {
   if (probe.running) return true
   if (!probe.unproven) return false
-  const pid = lockHolderPid(dataDir)
-  return !!pid && isAlive(pid)
+  return lockHolderIsAlive(dataDir, startOf)
+}
+
+/**
+ * Whether the process `host.lock` names is the one that wrote it (#838 review): alive, and started when the lock says
+ * (`ps -o lstart`, as the host writes it, `instance-lock.ts`). A lock left by a host that died, whose pid another
+ * process of the same user now has, names a stranger: counted as running, `--stop` would signal it. A lock without a
+ * start time (a host from before #184) or a system without `ps` (Windows) cannot be told apart, so it does not count.
+ */
+export function lockHolderIsAlive(dataDir, startOf = processStartTime) {
+  let holder
+  try {
+    holder = parseLockHolder(readFileSync(join(dataDir, 'host.lock'), 'utf8'))
+  } catch {
+    return false
+  }
+  if (!holder || !holder.started || !isAlive(holder.pid)) return false
+  return startOf(holder.pid) === holder.started
+}
+
+/** host.lock's `{ pid, started }`; a bare pid (an older host) has no start time */
+function parseLockHolder(text) {
+  const t = text.trim()
+  if (/^\d+$/.test(t)) return { pid: Number(t), started: null }
+  try {
+    const v = JSON.parse(t)
+    return Number.isInteger(v?.pid) && v.pid > 0 ? { pid: v.pid, started: typeof v.started === 'string' ? v.started : null } : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * A pid's start time, as `instance-lock.ts`'s `processStartTime` reads it: `ps -o lstart=` with the C locale, so the
+ * host that wrote the lock and this launcher read the same text. null without `ps` (Windows) or when it fails.
+ */
+export function processStartTime(pid) {
+  if (process.platform === 'win32') return null
+  try {
+    return execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', timeout: 2000, env: { ...process.env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null
+  } catch {
+    return null
+  }
 }
 
 function tcpProbe(port, timeoutMs) {

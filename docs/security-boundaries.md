@@ -803,8 +803,14 @@ A host started with `centralu serve` on another machine is reached by the app th
   port with the token, and another account there can hold that port while the host is down. When the installed
   build proves, they send `prove` first and the hello only to a host that proved it (`helloSocket` in `serve.mjs`).
   Something on the port that does not prove is not this folder's host unless the folder's `host.lock` names a live
-  process (a host from before #838 still running after an update, which then counts as running and is stopped by
-  its pid). A Unix-socket forward
+  process that started when the lock says (`ps -o lstart`, `lockHolderIsAlive`): a host from before #838 still running
+  after an update, which then counts as running and is stopped by its pid. A lock a dead host left, whose pid another
+  process now has, or one without a start time (an older host, or Windows, which has no `ps`), does not count, so
+  `--stop` never signals a stranger.
+- **A linked machine updated without a restart** runs an older host than the one installed: its line says `proof`
+  (from the installed build), the host refuses the `prove`, and the link says so ("runs an older Centralu host than
+  the one installed there") and asks for a restart (`centralu serve --stop`, then start it), rather than reporting a
+  token problem. The hub sends it no token meanwhile. A Unix-socket forward
   in a 0700 folder was the other choice; it was not taken because a Windows hub's Node cannot connect to the
   AF_UNIX socket OpenSSH would create there, while the proof works with every hub and every remote.
 

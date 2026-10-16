@@ -717,13 +717,20 @@ export class LinkedMachine implements RoutedMachine {
            * token until it restarts, while `--connection` already prints the new one, and asking
            * again at once would loop.
            */
-          const why = r.code === 4002 ? (r.error?.message ?? 'The remote host speaks another protocol') : `${this.name} refused the link's token`
+          /*
+           * Refused the proof itself (#838): the installed Centralu there proves its token, the host still running is
+           * from before it (updated without a restart, or rolled back). Said as that, not as a token problem.
+           */
+          const serve = `${shimNames(this.record.remote).centralu} serve`
+          const why = r.proving
+            ? `${this.name} runs an older Centralu host than the one installed there, which cannot prove it holds the link's token`
+            : r.code === 4002 ? (r.error?.message ?? 'The remote host speaks another protocol') : `${this.name} refused the link's token`
           if (!this.refusedOnce) {
             this.refusedOnce = true
             this.setStatus('connecting', why)
             return this.retryLater(0)
           }
-          this.setStatus('refused', `${why}. If its token was rotated, restart \`${shimNames(this.record.remote).centralu} serve\` there`)
+          this.setStatus('refused', r.proving ? `${why}. Restart it there: \`${serve} --stop\`, then start it again` : `${why}. If its token was rotated, restart \`${serve}\` there`)
           this.retryLater()
         },
       },

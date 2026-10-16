@@ -1394,6 +1394,17 @@ describe('a link to a host that can prove it holds the token', () => {
     await until(() => status(hub) === 'connected')
   })
 
+  // A host from before the proof, still running after an update, closes on `prove` (#838 review): said as that
+  it('says the machine runs an older host than the one installed, and to restart it, when the host refuses the proof', async () => {
+    const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+    await new Promise<void>((r) => wss.once('listening', () => r()))
+    cleanups.push(() => new Promise<void>((r) => wss.close(() => r())))
+    wss.on('connection', (ws) => ws.on('message', () => ws.close(4001, 'not a hello')))
+    const hub = await hubHost(() => lineFor((wss.address() as { port: number }).port, { proof: true }))
+    await until(() => status(hub) === 'refused')
+    expect(hub.links.list()[0]!.error).toMatch(/runs an older Centralu host than the one installed there.*Restart it there: `centralu serve --stop`/)
+  })
+
   it('never sends the token to whatever else holds the port', async () => {
     const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
     await new Promise<void>((r) => wss.once('listening', () => r()))

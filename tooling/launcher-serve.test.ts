@@ -45,6 +45,8 @@ import {
   askHostToStop,
   hostProvesOf,
   heldHere,
+  lockHolderIsAlive,
+  processStartTime,
   // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 } from '../packaging/npm/centralu/bin/serve.mjs'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
@@ -906,5 +908,31 @@ describe('asking the host on the port without handing the token to anyone else (
     writeFileSync(join(d, 'bundle-info.json'), JSON.stringify({ protocolVersion: 1, hostProof: 1 }))
     expect(hostProvesOf(join(d, 'main.mjs'))).toBe(true)
     expect(hostProvesOf(SOURCE_HOST)).toBe(true)
+  })
+})
+
+/*
+ * A host.lock a dead host left names a pid another process of the same user may have now (#838 review): counted as the
+ * folder's host, `--stop` would signal that stranger. Only the process that started when the lock says counts.
+ */
+describe.skipIf(!POSIX)('the folder’s host, by the lock and the start time it records', () => {
+  const lock = (d: string, v: unknown) => writeFileSync(join(d, 'host.lock'), typeof v === 'string' ? v : JSON.stringify(v))
+
+  it('is the live process that started when host.lock says, and nothing else', () => {
+    const d = tempDir()
+    const started = processStartTime(process.pid)
+    expect(started).toEqual(expect.any(String))
+    lock(d, { pid: process.pid, started })
+    expect(lockHolderIsAlive(d)).toBe(true)
+    expect(heldHere({ running: false, unproven: true }, d)).toBe(true)
+    // The same pid, started at another time: the pid was reused
+    lock(d, { pid: process.pid, started: 'Thu Jan  1 00:00:00 1970' })
+    expect(lockHolderIsAlive(d)).toBe(false)
+    expect(heldHere({ running: false, unproven: true }, d)).toBe(false)
+    // No start time (a host from before it was recorded): cannot be told apart, so not counted
+    lock(d, String(process.pid))
+    expect(lockHolderIsAlive(d)).toBe(false)
+    // A proven host is the host whatever the lock says
+    expect(heldHere({ running: true }, d)).toBe(true)
   })
 })
