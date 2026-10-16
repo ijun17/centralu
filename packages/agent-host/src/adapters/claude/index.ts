@@ -1,7 +1,8 @@
 import { query, resolveSettings, filterEscalatingDefaultMode, type McpServerConfig, type PermissionMode, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { homedir, tmpdir } from 'node:os'
 import { mkdtemp, readdir, rm, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { existsSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
@@ -705,7 +706,8 @@ class ClaudeSession implements SessionHandle {
               self.releaseOnCancel(requestId, options?.signal)
             })
           }
-          const detail = approvalDetail(toolName, toolInput, self.opts.cwd)
+          // Whether a Write makes a new file is said on its card (#843)
+          const detail = approvalDetail(toolName, toolInput, self.opts.cwd, (path) => existsSync(resolve(self.opts.cwd, path)))
           /*
            * The rule's key — for a command it is the full command text, for a file edit it is
            * **the path** (#170). This matches what the UI carries on "always allow" (both come

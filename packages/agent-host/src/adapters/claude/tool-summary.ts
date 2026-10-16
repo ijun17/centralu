@@ -1,4 +1,5 @@
-import { NO_PATH, type ApprovalDetail, type ToolSummary } from '@cc/protocol'
+import type { ApprovalDetail, ToolSummary } from '@cc/protocol'
+import { diffLines, fileEditDetail, type FileChange } from '../file-changes.js'
 import { str, type Json } from './json.js'
 
 const FILE_EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
@@ -123,15 +124,35 @@ export function resultOutput(content: unknown): string {
     .join('\n')
 }
 
+/**
+ * What an Edit, Write or NotebookEdit call would do to its file, as Codex's file changes are read (#843). The card
+ * showed only the new text, cut at 400 characters: an edit read the same whatever it replaced, and a Write that makes
+ * a file the same as one that overwrites it. An Edit is its removed and its added lines; a Write is a new file when
+ * none is there (`exists`, read by the adapter, which knows the working folder); a notebook cell is its new source.
+ */
+export function claudeFileChange(name: string, input: Json, exists?: (path: string) => boolean): FileChange {
+  const path = str(input.file_path ?? input.notebook_path)
+  if (name === 'Edit') {
+    const diff = [diffLines('-', str(input.old_string)), diffLines('+', str(input.new_string))].filter(Boolean).join('\n')
+    return { path, diff: input.replace_all === true && diff ? `(every occurrence)\n${diff}` : diff }
+  }
+  if (name === 'Write') {
+    const isNew = path !== '' && exists !== undefined && !exists(path)
+    return { path, diff: diffLines('+', str(input.content)), ...(isNew ? { change: 'add' as const } : {}) }
+  }
+  const mode = str(input.edit_mode)
+  const diff = diffLines('+', str(input.new_source))
+  return { path, diff: mode === 'delete' ? `(deletes cell ${str(input.cell_id) || '?'})` : mode === 'insert' ? `(inserts a cell)\n${diff}` : diff }
+}
+
 /** Normalizes an approval request into one of 3 kinds the banner can judge (core/approval decides based on `kind` alone). */
-export function approvalDetail(name: string, input: Json, cwd: string): ApprovalDetail {
+export function approvalDetail(name: string, input: Json, cwd: string, exists?: (path: string) => boolean): ApprovalDetail {
   // Running outside the sandbox is part of what is asked (#683 review): the card says so, and no list row answers it
   if (name === 'Bash') return { kind: 'command', command: str(input.command), cwd, ...(input.dangerouslyDisableSandbox === true ? { unsandboxed: true } : {}) }
   if (FILE_EDIT_TOOLS.has(name)) {
-    const path = str(input.file_path ?? input.notebook_path, NO_PATH)
-    const preview =
-      str(input.new_string) || str(input.content) || str(input.new_source) || JSON.stringify(input).slice(0, 400)
-    return { kind: 'file_edit', path, diffPreview: preview.slice(0, 400), multi: false }
+    const change = claudeFileChange(name, input, exists)
+    // A call that carries none of the fields read is shown as it came, rather than as an empty card
+    return fileEditDetail([change.diff ? change : { ...change, diff: JSON.stringify(input) }])
   }
   return { kind: 'other', raw: `${name} ${JSON.stringify(input).slice(0, 300)}` }
 }

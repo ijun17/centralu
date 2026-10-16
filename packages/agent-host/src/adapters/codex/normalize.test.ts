@@ -122,6 +122,16 @@ describe('streaming and tool calls', () => {
     expect(out[1]).toMatchObject({ paths: ['src/a.ts'] })
   })
 
+  it('a declined or failed file change marks no file; a move marks both of its paths (#843)', () => {
+    const change = (status: string) => n('item/completed', { item: { type: 'fileChange', id: 'fc', status, changes: [{ path: 'src/a.ts', diff: '+1' }] } })
+    expect(change('declined').map((e) => e.type)).toEqual(['tool_result'])
+    expect(change('failed').map((e) => e.type)).toEqual(['tool_result'])
+    const moved = n('item/completed', {
+      item: { type: 'fileChange', id: 'fc', status: 'completed', changes: [{ path: 'src/a.ts', diff: '', kind: { type: 'update', move_path: 'src/b.ts' } }] },
+    })
+    expect(moved[1]).toMatchObject({ type: 'files_touched', paths: ['src/a.ts', 'src/b.ts'] })
+  })
+
   it('a failed tool gets ok=false', () => {
     const out = n('item/completed', { item: { type: 'commandExecution', id: 'e', status: 'failed', output: 'error' } })
     expect(out[0]).toMatchObject({ type: 'tool_result', ok: false })

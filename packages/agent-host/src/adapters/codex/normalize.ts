@@ -1,5 +1,6 @@
-import { NO_PATH, type ApprovalDetail, type BackgroundTask, type NormalizedEvent, type RequestInput, type SessionGoal, type SubagentStep } from '@cc/protocol'
 import { asObj, finite, str } from '../../json-value.js'
+import { type ApprovalDetail, type BackgroundTask, type NormalizedEvent, type RequestInput, type SessionGoal, type SubagentStep } from '@cc/protocol'
+import { fileEditDetail, type FileChange } from '../file-changes.js'
 import { toolResultEvent } from '../tool-result.js'
 import { noticeWords } from './notices.js'
 
@@ -214,8 +215,6 @@ function argsPreview(raw: unknown): string {
  * each `{ path, kind, diff }`). The adapter remembers them per item id, because the approval request
  * for that item does not carry them (see approvalDetailFrom).
  */
-export type FileChange = { path: string; diff: string; change?: 'add' | 'update' | 'delete' | 'move'; movePath?: string }
-
 export function fileChangesOf(item: Record<string, unknown>): FileChange[] {
   const changes = Array.isArray(item.changes) ? item.changes : []
   return changes.map((c) => ({ path: str(asObj(c).path), diff: str(asObj(c).diff), ...changeKindOf(asObj(asObj(c).kind)) }))
@@ -291,30 +290,6 @@ export function approvalDetailFrom(
     return fileEditDetail(changes)
   }
   return { kind: 'other', raw: JSON.stringify(params).slice(0, 2000) }
-}
-
-/**
- * The card for one or more file changes. The card prints the path and then the preview, so a single file's
- * preview is its diff alone; with several files each diff is headed by its own path, or the hunks of two files
- * would read as one. `(no path)` when nothing names a file — an empty string looks like a card that failed to
- * draw rather than a request that did not say.
- */
-function fileEditDetail(changes: readonly FileChange[]): ApprovalDetail {
-  const named = changes.filter((c) => c.path)
-  const diff =
-    named.length > 1
-      ? named.map((c) => `${c.path}\n${c.diff}`).join('\n\n')
-      : changes.map((c) => c.diff).filter(Boolean).join('\n')
-  // One file's own kind of change (a delete, a move) is said on its card; several files are one card that opens
-  const one = named.length === 1 ? named[0]! : null
-  return {
-    kind: 'file_edit',
-    path: named[0]?.path || NO_PATH,
-    diffPreview: diff.slice(0, 4000),
-    multi: named.length > 1,
-    ...(one?.change ? { change: one.change } : {}),
-    ...(one?.movePath ? { movePath: one.movePath } : {}),
-  }
 }
 
 /**
@@ -590,8 +565,14 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       // carries no output, so its card says which it was rather than fail blank (#843)
       const ending = str(item.status) === 'declined' ? 'Declined' : str(item.status) === 'interrupted' ? 'Interrupted' : ''
       const out: NormalizedEvent[] = [toolResultEvent(sessionId, str(item.id), codexItemOk(item), resultSummary(item) || ending)]
-      // If a file was actually changed, announce it for conflict detection and highlighting (FR-2, FR-5)
-      if (s.paths.length > 0) out.push({ type: 'files_touched', sessionId, paths: s.paths })
+      /*
+       * If a file was actually changed, announce it for conflict detection and highlighting (FR-2, FR-5). Only a change
+       * that went through changed it (#843): a declined or failed one used to mark its files all the same. A move
+       * changes the file it leaves and the one it makes, and only the first was named.
+       */
+      const moved = type === 'fileChange' ? fileChangesOf(item).flatMap((c) => (c.movePath ? [c.movePath] : [])) : []
+      const paths = [...s.paths, ...moved]
+      if (paths.length > 0 && codexItemOk(item)) out.push({ type: 'files_touched', sessionId, paths })
       return out
     }
 

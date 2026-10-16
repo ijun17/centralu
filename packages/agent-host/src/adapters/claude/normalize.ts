@@ -1,4 +1,5 @@
 import type { NormalizedEvent, RequestInput, SessionActivity, TokenUsage } from '@cc/protocol'
+import { TouchedFiles } from '../file-changes.js'
 import { toolResultEvent } from '../tool-result.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { ClaudeBackgroundTracker } from './background-tracker.js'
@@ -92,7 +93,7 @@ export function normalizeMessage(
    *
    * Files are the exception — a file a subagent edited is still a file changed inside this
    * session's own working folder, so it is still reported to conflict detection and highlighting
-   * (FR-2, FR-5).
+   * (FR-2, FR-5), from its steps, once the edit's result says it went through (`ClaudeStreamNormalizer`).
    *
    * **What the subagent did is kept, under its launch card** (#222). Its text, readable thinking,
    * tool calls and their results go out as `subagent_event`s tagged with that same
@@ -115,8 +116,6 @@ export function normalizeMessage(
         out.push({ type: 'subagent_event', sessionId, parentCallId: parent, step: e })
       } else if (e.type === 'tool_result') {
         out.push({ type: 'subagent_event', sessionId, parentCallId: parent, step: e })
-      } else if (e.type === 'files_touched') {
-        out.push(e)
       }
     }
     return out
@@ -328,7 +327,10 @@ export function normalizeMessage(
       if (str(block.type) === 'tool_use') {
         const name = str(block.name)
         const input = (block.input ?? {}) as Json
-        // `input` is the record (#221): a Write's content and an Edit's both sides, which the title reduces to a path
+        /*
+         * `input` is the record (#221): a Write's content and an Edit's both sides, which the title reduces to a path.
+         * The files it changes are marked when its result says it went through (`ClaudeStreamNormalizer`, #843).
+         */
         out.push({
           type: 'tool_call',
           sessionId,
@@ -336,8 +338,6 @@ export function normalizeMessage(
           summary: toolSummary(name, input),
           ...(block.input !== undefined ? { input: block.input } : {}),
         })
-        const paths = editedPaths(toolSummary(name, input))
-        if (paths.length) out.push({ type: 'files_touched', sessionId, paths })
       }
     }
     // Usage also comes carried on an assistant message.
@@ -634,6 +634,8 @@ export class ClaudeStreamNormalizer {
   private readonly requestsSeen: string[] = []
   /** The parent's last `usage_update` reading, which a subagent's request repeats (see `withRequest`) */
   private lastTokens: TokenUsage | null = null
+  /** Edits whose result has not come yet (see `touch`) */
+  private readonly touched: TouchedFiles
   /** The session's /goal, read off the stream (see `ClaudeGoalTracker`). */
   readonly goal: ClaudeGoalTracker
   /** Message types this session received that nothing maps or ignores on purpose, said once each in host.log (#58) */
@@ -665,6 +667,7 @@ export class ClaudeStreamNormalizer {
     private readonly settings: () => ClaudeLaunchedSettings = () => ({ model: null, effort: null, verbosity: null, serviceTier: null }),
   ) {
     this.goal = new ClaudeGoalTracker(sessionId)
+    this.touched = new TouchedFiles(sessionId)
     this.unmapped = new UnmappedTypes('claude', sessionId, CLAUDE_KNOWN_TYPES)
     this.tasks = new ClaudeBackgroundTracker(sessionId)
   }
@@ -739,6 +742,21 @@ export class ClaudeStreamNormalizer {
       return this.lastTokens ? [...events, { type: 'usage_update', sessionId: this.sessionId, tokens: this.lastTokens, request }] : events
     }
     return events.map((e) => (e.type === 'usage_update' ? { ...e, request } : e))
+  }
+
+  /**
+   * The files an edit changed, marked by its result rather than its call (#843), for the parent's own calls and a
+   * subagent's steps alike: a denied edit's result is an error, and it marks nothing.
+   */
+  private touch(events: NormalizedEvent[]): NormalizedEvent[] {
+    const out: NormalizedEvent[] = []
+    for (const e of events) {
+      out.push(e)
+      const step = e.type === 'subagent_event' ? e.step : e
+      if (step.type === 'tool_call') this.touched.call(step.callId, editedPaths(step.summary))
+      else if (step.type === 'tool_result') out.push(...this.touched.result(step.callId, step.ok))
+    }
+    return out
   }
 
   /** The adapter interrupted the turn (see `stopping` above). */
@@ -816,6 +834,7 @@ export class ClaudeStreamNormalizer {
     if (type === 'assistant') events = this.withRequest(m, events, subagent)
     // The turn's result is a running reading too: a subagent's request repeats whichever came last
     else if (type === 'result' && !subagent) this.lastTokens = readingOf(events) ?? this.lastTokens
+    events = this.touch(events)
     if (subagent) return events
     events = this.followRetry(type, events)
     if (type === 'result' && this.refusal !== null) {

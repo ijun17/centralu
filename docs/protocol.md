@@ -77,7 +77,7 @@ type NormalizedEvent =
   | { type: 'limit_reached';    sessionId, resumeAt?, usedPercent?, windowMins? }
   | { type: 'session_title';    sessionId, title, auto }        // auto=false: human-given, never overwritten
   | { type: 'settings_changed'; sessionId, model, effort, verbosity, serviceTier?, permissionPreset?, by?, person? }  // #30: a non-human hand changed settings; by 'tool': the agent tool switched by itself (#304); person: a client called agents.updateSettings (#659)
-  | { type: 'files_touched';    sessionId, paths: string[] }    // FR-2 conflict detection, FR-5 highlighting
+  | { type: 'files_touched';    sessionId, paths: string[] }    // FR-2 conflict detection, FR-5 highlighting; once the change went through (#843)
   | { type: 'goal';             sessionId, goal: SessionGoal|null }  // the badge; codex announces it, claude's is read from the CLI's /goal replies and Stop hook feedback
   | { type: 'background_tasks'; sessionId, live: BackgroundTask[], ended?: BackgroundTask[], clearEnded? }  // #290: the live set (REPLACE) and what just ended
   | { type: 'agent_version';    sessionId, version }            // #297: the CLI version this process runs, once per process; kept as SessionInfo.agentVersion

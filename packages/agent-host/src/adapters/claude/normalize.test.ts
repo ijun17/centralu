@@ -4,6 +4,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
+import { DIFF_PREVIEW_CHARS } from '../file-changes.js'
 import { RESULT_SUMMARY_CHARS } from '../tool-result.js'
 import { ClaudeStreamNormalizer, approvalDetail, normalizeMessage, toolSummary } from './normalize.js'
 
@@ -112,13 +113,44 @@ describe('tool calls (the actual shape from the spike)', () => {
     expect(out[0]).toMatchObject({ type: 'tool_call', callId: 'tu1', summary: { tool: 'Bash', title: 'npm run build' } })
   })
 
-  it('a Write tool_use becomes a tool_call plus files_touched (for conflict detection)', () => {
-    const out = n({
+  it('a Write marks its file (for conflict detection) once its result says it went through', () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    const call = stream.push({
       type: 'assistant',
       message: { content: [{ type: 'tool_use', id: 'tu2', name: 'Write', input: { file_path: '/tmp/hello.txt', content: 'hi' } }] },
     })
-    expect(out.map((e) => e.type)).toEqual(['tool_call', 'files_touched'])
-    expect(out[1]).toMatchObject({ type: 'files_touched', paths: ['/tmp/hello.txt'] })
+    expect(call.map((e) => e.type)).toEqual(['tool_call'])
+    const done = stream.push({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu2', content: 'wrote' }] } })
+    expect(done.map((e) => e.type)).toEqual(['tool_result', 'files_touched'])
+    expect(done[1]).toMatchObject({ type: 'files_touched', paths: ['/tmp/hello.txt'] })
+  })
+
+  it('an edit the person denied marks no file (#843)', () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    const events = [
+      ...stream.push({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'e1', name: 'Edit', input: { file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' } }] } }),
+      ...stream.push({
+        type: 'user',
+        message: { content: [{ type: 'tool_result', tool_use_id: 'e1', content: 'The user denied this edit', is_error: true }] },
+      }),
+    ]
+    expect(events.map((e) => e.type)).toEqual(['tool_call', 'tool_result'])
+  })
+
+  it("a subagent's edit marks its file once its own result went through (#843)", () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    const call = stream.push({
+      type: 'assistant',
+      parent_tool_use_id: 'agent1',
+      message: { content: [{ type: 'tool_use', id: 's1', name: 'Edit', input: { file_path: '/repo/b.ts', old_string: 'a', new_string: 'b' } }] },
+    })
+    expect(call.some((e) => e.type === 'files_touched')).toBe(false)
+    const done = stream.push({
+      type: 'user',
+      parent_tool_use_id: 'agent1',
+      message: { content: [{ type: 'tool_result', tool_use_id: 's1', content: 'ok' }] },
+    })
+    expect(done.find((e) => e.type === 'files_touched')).toMatchObject({ paths: ['/repo/b.ts'] })
   })
 
   it('Read does not count as touching a file — it emits no files_touched (#185)', () => {
@@ -237,7 +269,21 @@ describe('normalizing an approval request (input to the banner\'s judgment)', ()
 
   it('Write/Edit become file_edit (a diff needs to be shown)', () => {
     const d = approvalDetail('Edit', { file_path: '/a.ts', new_string: 'const a = 1' }, '/p')
-    expect(d).toMatchObject({ kind: 'file_edit', path: '/a.ts', diffPreview: 'const a = 1', multi: false })
+    expect(d).toMatchObject({ kind: 'file_edit', path: '/a.ts', diffPreview: '+const a = 1', multi: false })
+  })
+
+  it('an edit shows what it removes as well as what it adds, and a Write to no file is a new file (#843)', () => {
+    const edit = approvalDetail('Edit', { file_path: '/a.ts', old_string: 'const a = 1\nconst b = 2', new_string: 'const a = 3' }, '/p')
+    expect(edit).toMatchObject({ kind: 'file_edit', path: '/a.ts', diffPreview: '-const a = 1\n-const b = 2\n+const a = 3' })
+    expect(edit).not.toHaveProperty('change')
+    const created = approvalDetail('Write', { file_path: '/new.ts', content: 'x\n' }, '/p', () => false)
+    expect(created).toMatchObject({ kind: 'file_edit', path: '/new.ts', diffPreview: '+x', change: 'add' })
+    expect(approvalDetail('Write', { file_path: '/old.ts', content: 'x' }, '/p', () => true)).not.toHaveProperty('change')
+  })
+
+  it('an edit card carries as much of its diff as a Codex one (#843)', () => {
+    const d = approvalDetail('Write', { file_path: '/a.ts', content: 'y'.repeat(DIFF_PREVIEW_CHARS * 2) }, '/p')
+    expect(d.kind === 'file_edit' && d.diffPreview.length).toBe(DIFF_PREVIEW_CHARS)
   })
 
   it('everything else becomes other', () => {
