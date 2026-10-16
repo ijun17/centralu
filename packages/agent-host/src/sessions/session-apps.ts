@@ -2,6 +2,7 @@ import type { AppReach, ExternalAppInfo, SessionKind } from '@cc/protocol'
 import type { AppToolResult, AppToolSpec, AttachedApp, SessionApps, SessionHandle } from '../adapters/contract.js'
 import { appMcpServerName } from '../apps/contract.js'
 import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
+import { raceTimeout } from '../timing.js'
 import { withTimeout } from './with-timeout.js'
 
 /**
@@ -479,12 +480,11 @@ class Attachment implements SessionApps {
      * and record, and the agent follows up with `run_status`. Left to be cut off, the app's work
      * would keep going while the agent lost any way to get the result.
      */
-    let timer: NodeJS.Timeout | undefined
-    const first = await Promise.race([
+    const first = await raceTimeout(
       pending.then((o) => ({ o })),
-      new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), opts.waitMs))),
-    ])
-    clearTimeout(timer)
+      opts.waitMs,
+      null,
+    )
     if (first) return toResult(first.o)
     const entry: Detached = { sessionId: this.session.id, server, startedAt: Date.now() - opts.waitMs, outcome: null }
     this.hub.remember(runId!, entry)

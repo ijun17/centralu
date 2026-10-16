@@ -6,6 +6,7 @@ import { clipPreview } from '../sessions/turn-answer.js'
 import { splitQualified } from './machine-ids.js'
 import type { RoutedMachine, RpcHandler } from './router.js'
 import { isObj } from './obj.js'
+import { raceTimeout } from '../timing.js'
 
 /** Without a router (the reading tests), nothing that acts is reachable */
 const notRouted: RpcHandler = async (method) => {
@@ -61,6 +62,8 @@ function fencedLine(line: string): string {
  * project on this computer or on another machine; the link's own call timeout is much longer
  */
 const LOOKUP_MS = 4000
+/** What a linked machine's lookup answers past its bound (`raceTimeout`) */
+const TIMED_OUT = Symbol('timed out')
 
 /** What to tell the model when a machine could not answer: its own words for a refusal, a plain cause otherwise */
 function cause(m: RoutedMachine, err: unknown): string {
@@ -212,17 +215,12 @@ export function linkedSessions(
             return (m.lastKnown('projects') ?? []).map((raw) => projectOf(m, raw)).filter((p): p is LinkedProject => p !== null).map((p) => ({ ...p, away: why }))
           }
           if (!m.reachable) return mirrored(NOT_REACHABLE)
-          let timer: ReturnType<typeof setTimeout> | undefined
           try {
-            const slow = new Promise<never>((_, reject) => {
-              timer = setTimeout(() => reject(new Error(`did not answer within ${lookupMs % 1000 === 0 ? `${lookupMs / 1000} s` : `${lookupMs} ms`}`)), lookupMs)
-            })
-            const list = await Promise.race([m.call('projects.list', {}), slow])
+            const list = await raceTimeout(m.call('projects.list', {}), lookupMs, TIMED_OUT)
+            if (list === TIMED_OUT) throw new Error(`did not answer within ${lookupMs % 1000 === 0 ? `${lookupMs / 1000} s` : `${lookupMs} ms`}`)
             return (Array.isArray(list) ? list : []).map((raw) => projectOf(m, raw)).filter((p): p is LinkedProject => p !== null)
           } catch (err) {
             return mirrored(cause(m, err))
-          } finally {
-            clearTimeout(timer)
           }
         }),
       )
