@@ -208,10 +208,17 @@ const STEP_TEXT: Record<string, string> = {
   remove: 'removing it',
 }
 
-/** The row's line while the hub installs, updates, rolls back or removes Centralu there; null otherwise */
+const AUTOSTART_TEXT: Record<string, string> = {
+  on: 'Turning on its start at boot…',
+  off: 'Turning off its start at boot…',
+  status: 'Asking whether it starts at boot…',
+}
+
+/** The row's line while the hub installs, updates, rolls back or removes Centralu there, or changes its start at boot; null otherwise */
 export function operationNote(m: Pick<MachineInfo, 'operation'>): string | null {
   const o = m.operation
   if (!o) return null
+  if (o.kind === 'autostart') return AUTOSTART_TEXT[o.step] ?? `Changing its start at boot: ${o.step}…`
   const what =
     o.kind === 'install'
       ? `Installing Centralu${o.target ? ` ${o.target}` : ''}`

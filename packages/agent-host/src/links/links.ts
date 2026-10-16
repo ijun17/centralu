@@ -137,8 +137,8 @@ export class LinkedMachine implements RoutedMachine {
   private opening: Promise<void> | null = null
   /** A refusal was already answered by asking the remote again; the next one is reported and backed off */
   private refusedOnce = false
-  /** One install, update, rollback or uninstall at a time per machine (the remote also holds `install.lock`) */
-  private busy = false
+  /** One install, update, rollback, uninstall or start-at-boot change at a time per machine (`begin`; the remote also holds `install.lock`) */
+  private busy: MachineOperation['kind'] | null = null
   /** That operation and its step, for the row (`MachineInfo.operation`) */
   private operation: MachineOperation | null = null
   /**
@@ -358,23 +358,24 @@ export class LinkedMachine implements RoutedMachine {
   async autostart(on?: boolean): Promise<MachineAutostartResult> {
     const exec = this.tunnel.exec?.bind(this.tunnel)
     if (!exec) throw linkError(`This computer has no shell on ${this.name} to change how it starts`)
-    if (this.busy) throw linkError(`${this.name} is busy with ${this.operation?.kind ?? 'another change'}; wait until it is done`)
-    this.busy = true
+    const action = on === undefined ? 'status' : on ? 'on' : 'off'
+    const done = this.begin('autostart', action, null)
+    let state: MachineAutostartResult['autostart']
     try {
-      const a = await autostartRemote({ exec, spec: this.record.remote, target: this.record.sshTarget }, on === undefined ? 'status' : on ? 'on' : 'off')
-      const state = { on: a.on, how: a.how, linger: a.linger }
+      const a = await autostartRemote({ exec, spec: this.record.remote, target: this.record.sshTarget }, action)
+      state = { on: a.on, how: a.how, linger: a.linger }
       this.bootStart = state
       if (on !== undefined) {
         this.deps.log?.(`[links] ${this.name}: ${a.on ? `starts Centralu at boot (${a.how}${a.how === 'systemd' && a.linger === false ? ', at login until lingering is enabled' : ''})` : 'no longer starts Centralu at boot'}`)
       }
-      this.deps.broadcast({ type: 'machine_status', machine: this.info() })
-      return { machine: this.info(), autostart: state }
     } catch (err) {
-      this.deps.log?.(`[links] ${this.name}: autostart ${on === undefined ? 'status' : on ? 'on' : 'off'} failed: ${(err as Error).message}`)
+      this.deps.log?.(`[links] ${this.name}: autostart ${action} failed: ${(err as Error).message}`)
       throw linkError((err as Error).message)
     } finally {
-      this.busy = false
+      done()
     }
+    // The row as it is after the change, no longer saying it runs
+    return { machine: this.info(), autostart: state }
   }
 
   /**
@@ -414,6 +415,27 @@ export class LinkedMachine implements RoutedMachine {
   }
 
   /**
+   * The one change at a time per machine that `operate` and `autostart` share: refused while another runs, naming
+   * it, and said on the row while it runs (`MachineInfo.operation`), so the window greys out what would be refused. The
+   * returned `done` clears both and sends the row again; `then` runs after the clear and before that send.
+   * `step` null leaves the row unchanged until the operation's first step (an install says `preflight` at once)
+   */
+  private begin(kind: MachineOperation['kind'], step: string | null, target: string | null): (then?: () => void) => void {
+    if (this.busy) throw linkError(`${this.name} is busy with ${this.busy}; wait until it is done`)
+    this.busy = kind
+    if (step !== null) {
+      this.operation = { kind, step, target, at: Date.now() }
+      this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+    }
+    return (then) => {
+      this.busy = null
+      this.operation = null
+      then?.()
+      this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+    }
+  }
+
+  /**
    * Runs one install, update, rollback or uninstall: refused where this hub cannot install (no
    * installer or shell, a development build, a command of the person's own), one at a time, with its
    * steps in the row. Afterwards the link opens again, also after a failure
@@ -426,8 +448,7 @@ export class LinkedMachine implements RoutedMachine {
       throw linkError(`A development build is not published, so it cannot be installed on ${this.name}; install the latest release there (${shimNames(this.record.remote).npm} i -g centralu)`)
     }
     if (this.record.remote.command) throw linkError(`${this.name} runs a command of its own in place of centralu; clear it to use an installed one`)
-    if (this.busy) throw linkError(`${this.name} is busy with ${this.operation?.kind ?? 'another change'}; wait until it is done`)
-    this.busy = true
+    const done = this.begin(kind, null, target)
     const at = Date.now()
     const step = (s: UpdateStep) => {
       this.deps.log?.(`[links] ${this.name}: ${kind}${target ? ` ${target}` : ''}: ${s}`)
@@ -441,12 +462,11 @@ export class LinkedMachine implements RoutedMachine {
       this.deps.log?.(`[links] ${this.name}: ${kind} failed: ${(err as Error).message}`)
       throw linkError((err as Error).message)
     } finally {
-      this.busy = false
       const wasHeld = this.held
       this.held = false
-      this.operation = null
-      if (!this.stopped && (wasHeld || this.status !== 'connected')) this.reconnect()
-      this.deps.broadcast({ type: 'machine_status', machine: this.info() })
+      done(() => {
+        if (!this.stopped && (wasHeld || this.status !== 'connected')) this.reconnect()
+      })
     }
     // The row as it is now, not as it was mid-operation: it said `updating` after an uninstall (#482)
     return result && typeof result === 'object' && 'machine' in result ? { ...result, machine: this.info() } : result
@@ -621,7 +641,7 @@ export class LinkedMachine implements RoutedMachine {
     if (this.record.remote.command) return report('it runs a command of its own in place of centralu')
     if (this.removedByPerson) return report('it was removed from there on request, and is not put back unasked')
     // An install the person started waits for itself; this one does not count as tried
-    if (this.busy) return report(`${this.operation?.kind ?? 'another change'} is running there, and this computer waits for it`)
+    if (this.busy) return report(`${this.busy} is running there, and this computer waits for it`)
     this.switchTried = true
     this.deps.log?.(`[links] ${this.name}: ${problem.message}; installing the pinned Node there`)
     let result: MachineInstallResult

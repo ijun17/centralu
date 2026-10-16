@@ -927,7 +927,7 @@ describe('machines.update through the link (#82, plan §10.5)', () => {
 
 describe('machines.autostart (#82, plan §10.4, owner decision 4)', () => {
   /** A machine whose `serve --autostart` keeps its state here, answering as serve.mjs does */
-  async function setup(o: { how?: 'systemd' | 'task' | null; refuse?: string } = {}) {
+  async function setup(o: { how?: 'systemd' | 'task' | null; refuse?: string; gate?: Promise<void> } = {}) {
     const remote = await remoteHost()
     const how = o.how === undefined ? 'systemd' : o.how
     let on = false
@@ -935,6 +935,7 @@ describe('machines.autostart (#82, plan §10.4, owner decision 4)', () => {
     const exec = async (cmd: string) => {
       const action = /serve --autostart (on|off|status)/.exec(cmd)?.[1]
       runs.push(action ?? cmd)
+      if (o.gate && action === 'on') await o.gate
       if (o.refuse && action === 'on') return { code: 1, stderr: '', stdout: `${JSON.stringify({ v: 1, autostart: { ok: false, on, how, linger: null, message: o.refuse } })}\n` }
       if (action === 'on' || action === 'off') on = action === 'on' && how !== null
       return { code: 0, stderr: '', stdout: `${JSON.stringify({ v: 1, autostart: { ok: true, on, how, linger: on ? false : null } })}\n` }
@@ -965,6 +966,21 @@ describe('machines.autostart (#82, plan §10.4, owner decision 4)', () => {
     expect(hub.links.list()[0]!.autostart?.on).toBe(false)
     // The link was never dropped for it: nothing starts or stops there
     expect(status(hub)).toBe('connected')
+  })
+
+  it('says on the row while it runs, and a change asked meanwhile is refused naming it (#850)', async () => {
+    let release!: () => void
+    const { hub, u } = await setup({ gate: new Promise<void>((r) => (release = r)) })
+    const turning = u.call('machines.autostart', { machineId: 'm1', on: true })
+    await until(() => hub.links.list()[0]!.operation !== null, 2000)
+    // The row says so, as for an install or an update: the window greys out the buttons that would be refused
+    expect(hub.links.list()[0]!.operation).toMatchObject({ kind: 'autostart', step: 'on', target: null })
+    await until(() => u.events().some((e) => e.type === 'machine_status' && e.machine.operation?.kind === 'autostart'))
+    await expect(u.call('machines.autostart', { machineId: 'm1', on: false })).rejects.toThrow('Remote box is busy with autostart; wait until it is done')
+    release()
+    expect((await turning).autostart.on).toBe(true)
+    expect(hub.links.list()[0]!.operation).toBeNull()
+    expect((await u.call('machines.autostart', { machineId: 'm1', on: false })).autostart.on).toBe(false)
   })
 
   it('passes on the machine’s refusal in one sentence, and keeps the row as the machine has it', async () => {

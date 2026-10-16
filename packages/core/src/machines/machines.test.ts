@@ -198,6 +198,9 @@ describe('the update prompt and the install rows (plan §10.5)', () => {
     expect(operationNote(machine({ operation: { kind: 'update', step: 'stop', target: '0.1.0-beta.14', at: 1 } }))).toBe('Updating to 0.1.0-beta.14: stopping Centralu there…')
     expect(operationNote(machine({ operation: { kind: 'update', step: 'roll_back', target: '0.1.0-beta.14', at: 1 } }))).toMatch(/putting the old version back/)
     expect(operationNote(machine({}))).toBeNull()
+    // A start-at-boot change holds the machine too (#850), and says which way it goes
+    expect(operationNote(machine({ operation: { kind: 'autostart', step: 'on', target: null, at: 1 } }))).toBe('Turning on its start at boot…')
+    expect(operationNote(machine({ operation: { kind: 'autostart', step: 'off', target: null, at: 1 } }))).toBe('Turning off its start at boot…')
     expect(installNote(machine({ install: { managed: true, current: { version: '2', node: '24' }, previous: { version: '1', node: '24' } } }))).toBe(
       'Installed from this computer: Centralu 2 (1 kept to roll back to)',
     )

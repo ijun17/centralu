@@ -77,9 +77,12 @@ export type InstalledVersion = z.infer<typeof InstalledVersion>
  *              roll_back when the check failed
  *   rollback   stop, switch, start, check
  *   uninstall  stop, remove
+ *   autostart  on, off or status: `machines.autostart` (§10.4), one step. It holds the machine like
+ *              the others, since the entry it writes names a launcher an uninstall may be removing.
+ *              Additive (#850): a build before it reads the kind as `update`
  */
 export const MachineOperation = z.object({
-  kind: z.enum(['install', 'update', 'rollback', 'uninstall']).catch('update'),
+  kind: z.enum(['install', 'update', 'rollback', 'uninstall', 'autostart']).catch('update'),
   step: z.string(),
   /** The version it brings the machine to, when there is one */
   target: z.string().nullable().default(null),
