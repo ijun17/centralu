@@ -105,6 +105,16 @@ export async function readClaudeTranscriptTail(externalId: string, cwd: string, 
   return Array.isArray(rows) ? rows.slice(-last) : []
 }
 
+/**
+ * The opening of the summary a compaction leaves as a user turn (#843). The transcript marks that row
+ * `isCompactSummary` and writes a `compact_boundary` system row before it, but the SDK's `getSessionMessages` keeps
+ * neither (SDK 0.3.263: a row is cut to `type`, `uuid`, `message`; a system row has no `message`, so even
+ * `includeSystemMessages` cannot tell a compaction from any other). So an imported conversation showed the whole
+ * summary as if the person had typed it, and no marker, where a Codex import has one (#303). The CLI's own words are
+ * the one sign left (measured in transcripts of CLI 2.1.228 to 2.1.289).
+ */
+const COMPACT_SUMMARY = /^This session is being continued from a previous conversation that ran out of context\./
+
 export async function readClaudeHistory(
   externalId: string,
   cwd: string,
@@ -120,6 +130,10 @@ export async function readClaudeHistory(
     if (!role) continue
     // Only stripped from user turns — a tag inside the model's own words is something the model actually wrote.
     const raw = textOf(r.message)
+    if (role === 'user' && COMPACT_SUMMARY.test(raw)) {
+      out.push({ role: 'system', marker: 'compaction' })
+      continue
+    }
     const text = role === 'user' ? stripInjectedBlocks(raw) : raw
     if (!text) continue
     out.push({ role, text })

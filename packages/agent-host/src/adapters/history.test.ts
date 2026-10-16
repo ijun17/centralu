@@ -104,6 +104,31 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
     ])
   })
 
+  it("keeps a compaction as a marker, where its summary was, rather than as the person's words (#843)", async () => {
+    __setSessionApiForTest({
+      listSessions: async () => [],
+      getSessionMessages: async () => [
+        { type: 'user', message: { role: 'user', content: 'Start the work' } },
+        { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Working on it' }] } },
+        {
+          type: 'user',
+          message: {
+            role: 'user',
+            content:
+              'This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\n1. Primary Request',
+          },
+        },
+        { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Continuing' }] } },
+      ],
+    })
+    expect(await readClaudeHistory('s', '/p', 100)).toEqual([
+      { role: 'user', text: 'Start the work' },
+      { role: 'assistant', text: 'Working on it' },
+      { role: 'system', marker: 'compaction' },
+      { role: 'assistant', text: 'Continuing' },
+    ])
+  })
+
   it('an older SDK (missing the function) leaves a reason instead of throwing', async () => {
     __setSessionApiForTest(null)
     await expect(listClaudeSessions('/p', 10)).rejects.toThrow(CLAUDE_UNSUPPORTED)
