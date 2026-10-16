@@ -1,4 +1,4 @@
-import type { NormalizedEvent, RequestInput, SessionActivity, TokenUsage } from '@cc/protocol'
+import type { NormalizedEvent, RequestInput, TokenUsage } from '@cc/protocol'
 import { TouchedFiles } from '../file-changes.js'
 import { inlineImageEvent, undrawnImageEvent } from '../images.js'
 import { todoWritePlan } from '../plan.js'
@@ -6,6 +6,7 @@ import { addTokens, NO_TOKENS, tokenCount } from '../token-usage.js'
 import { toolResultEvent } from '../tool-result.js'
 import { stepLine } from '../tool-titles.js'
 import { UnmappedTypes } from '../unmapped.js'
+import { RetryActivity } from '../retry-activity.js'
 import { ClaudeBackgroundTracker } from './background-tracker.js'
 import { ClaudeGoalTracker } from './goal-tracker.js'
 import { str, type Json } from './json.js'
@@ -643,14 +644,8 @@ export class ClaudeStreamNormalizer {
 
   /** The session's background work (see `ClaudeBackgroundTracker`). */
   readonly tasks: ClaudeBackgroundTracker
-  /**
-   * The CLI is retrying a failed API call (`system/api_retry`, #304): the `retrying` activity is up, and
-   * `activityBefore` is what was showing before it. The CLI sends no "recovered" message — the next stream event or
-   * assistant message is the sign that output flows again, so that is where the previous activity is put back. The
-   * same shape as the Codex adapter's.
-   */
-  private retrying = false
-  private activityBefore: SessionActivity | null = null
+  /** The CLI is retrying a failed API call (`system/api_retry`, #304): the same rule as Codex's (`RetryActivity`) */
+  private readonly retry: RetryActivity
   /**
    * What the CLI said when the model refused and no fallback ran (`model_refusal_no_fallback`, #304), held until the
    * turn's result: if the turn failed, this is its message (the result itself only says *that* it failed); if not, it
@@ -671,6 +666,7 @@ export class ClaudeStreamNormalizer {
     this.taskPlan = new ClaudeTaskPlan(sessionId)
     this.unmapped = new UnmappedTypes('claude', sessionId, CLAUDE_KNOWN_TYPES)
     this.tasks = new ClaudeBackgroundTracker(sessionId)
+    this.retry = new RetryActivity(sessionId)
   }
 
   /**
@@ -794,30 +790,12 @@ export class ClaudeStreamNormalizer {
     this.stopping = true
   }
 
-  /** Raises `retrying` once per episode and puts the previous activity back when output flows again (see `retrying`). */
+  /** Raises `retrying` once per episode and puts the previous activity back when output flows again (see `retry`). */
   private followRetry(type: string, events: NormalizedEvent[]): NormalizedEvent[] {
-    const out: NormalizedEvent[] = []
-    for (const e of events) {
-      if (e.type === 'activity' && e.activity === 'retrying') {
-        // Each attempt sends its own message; one indication is enough
-        if (this.retrying) continue
-        this.retrying = true
-      } else if (e.type === 'activity') {
-        // A status message says what is happening now by itself, which ends the retry indication too
-        this.activityBefore = e.activity
-        this.retrying = false
-      }
-      out.push(e)
-    }
-    if (this.retrying && (type === 'stream_event' || type === 'assistant')) {
-      this.retrying = false
-      out.unshift({ type: 'activity', sessionId: this.sessionId, activity: this.activityBefore })
-    }
-    // A finished turn takes its activity with it (the state machine clears it on leaving working)
-    if (type === 'result') {
-      this.retrying = false
-      this.activityBefore = null
-    }
+    const out = events.filter((e) => e.type !== 'activity' || this.retry.admit(e.activity))
+    const resumed = type === 'stream_event' || type === 'assistant' ? this.retry.resumed() : null
+    if (resumed) out.unshift(resumed)
+    if (type === 'result') this.retry.ended()
     return out
   }
 

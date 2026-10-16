@@ -2,13 +2,14 @@ import { InputReceipts, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
 import { codexToolInstructionsFor } from '../../sessions/orchestrator-tools.js'
 import { CLIENT_INFO, parseCliVersion } from '@cc/protocol'
-import type { ApprovalDecision, ApprovalScope, SessionActivity } from '@cc/protocol'
+import type { ApprovalDecision, ApprovalScope } from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
 import { INTERRUPTED_BY_TOOL, type CreateSessionOpts, type EventSink, type SessionHandle } from '../contract.js'
 import { CodexClient } from './client.js'
 import { imageEventFromDisk } from '../images.js'
 import { CODEX_KNOWN_NOTIFICATIONS, CompactionMarks, CodexRequestInputs, goalFromCodex, launchedThreads, normalizeNotification, threadSettingsChanged, threadSettingsOf, type CodexThreadSettings } from './normalize.js'
 import { UnmappedTypes } from '../unmapped.js'
+import { RetryActivity } from '../retry-activity.js'
 import { couldNotStop, undeliveredError, undeliveredText } from '../session-kit.js'
 import { sandboxConfig } from './sandbox.js'
 import { withStderrTail } from '../../stream-text.js'
@@ -90,14 +91,8 @@ export class CodexSession implements SessionHandle {
    */
   private sendsIssued = 0
   private sendsStopped = 0
-  /**
-   * Codex is reconnecting on its own (#168): the `retrying` activity is up, and `activityBefore`
-   * is what was showing before it (compacting, reviewing or nothing). Codex sends no "reconnected"
-   * notification — the next item is the sign that output flows again, so that is where the
-   * previous activity is put back.
-   */
-  private retrying = false
-  private activityBefore: SessionActivity | null = null
+  /** Codex is reconnecting on its own (#168): the `retrying` activity and what it puts back (see `RetryActivity`) */
+  private readonly retry: RetryActivity
   /**
    * The thread never came up. Only possible after a lazy resume handed the handle out:
    * watchBackgroundStart reports that once, counting the messages it swallowed (#168, item 5).
@@ -130,6 +125,7 @@ export class CodexSession implements SessionHandle {
   ) {
     this.sessionId = opts.sessionId
     this.unmapped = new UnmappedTypes('codex', opts.sessionId, CODEX_KNOWN_NOTIFICATIONS)
+    this.retry = new RetryActivity(opts.sessionId)
     this.slashCommands = new CodexSlashCommands({
       sessionId: opts.sessionId,
       emit: (e) => this.emit(e),
@@ -463,15 +459,10 @@ export class CodexSession implements SessionHandle {
     }
 
     // Output flows again after a reconnect — the retrying activity gives way to what was showing before it
-    if (this.retrying && n.method.startsWith('item/')) {
-      this.retrying = false
-      this.emit({ type: 'activity', sessionId: this.sessionId, activity: this.activityBefore })
-    }
+    const resumed = n.method.startsWith('item/') ? this.retry.resumed() : null
+    if (resumed) this.emit(resumed)
     // A finished turn takes its activity with it (the state machine clears it on leaving working)
-    if (n.method === 'turn/completed') {
-      this.retrying = false
-      this.activityBefore = null
-    }
+    if (n.method === 'turn/completed') this.retry.ended()
 
     this.threadServers.noteAppCall(n)
     if (n.method === 'item/started' || n.method === 'item/completed') {
@@ -524,12 +515,8 @@ export class CodexSession implements SessionHandle {
           continue
         }
       }
-      if (e.type === 'activity') {
-        // Each attempt sends its own notice; one indication is enough
-        if (e.activity === 'retrying' && this.retrying) continue
-        if (e.activity === 'retrying') this.retrying = true
-        else this.activityBefore = e.activity
-      }
+      // Each attempt sends its own notice; one indication is enough
+      if (e.type === 'activity' && !this.retry.admit(e.activity)) continue
       /*
        * Who interrupted the turn is logged (#698): a real one ended a delegated turn as "finished" seven seconds before
        * the person quit, and nothing said whether the person's Stop, the host or Codex itself had sent it.
