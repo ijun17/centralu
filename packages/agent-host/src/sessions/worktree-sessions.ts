@@ -5,6 +5,7 @@ import { foldsPathCase } from '../os.js'
 import { lstatSync, realpathSync, statSync } from 'node:fs'
 import { exec } from 'node:child_process'
 import type {
+  BackgroundTask,
   NormalizedEvent,
   PermissionPreset,
   SessionInfo,
@@ -367,7 +368,17 @@ export class WorktreeSessions {
     const work = live ? liveBackgroundTasks(target.backgroundTasks).filter((t) => !t.timer) : []
     if (inTurn(target.state) || this.host.agentRuns.has(target.id) || sessionBusy({ ...target, live, backgroundTasks: work })) {
       if (!inTurn(target.state) && !this.host.agentRuns.has(target.id) && !target.pendingApproval && !target.pendingQuestions.length) {
-        return { ok: false, error: `"${target.name}" has finished its turn, but its background work is still running: ${work.map((t) => frameField(t.description)).join(', ')}. agent_session(action="stop") stops it; wait for it or stop it first.` }
+        const names = (tasks: readonly BackgroundTask[]) => tasks.map((t) => frameField(t.description)).join(', ')
+        const stoppable = work.filter((t) => t.stoppable)
+        const other = work.filter((t) => !t.stoppable)
+        return {
+          ok: false,
+          error: [
+            `"${target.name}" has finished its turn, but its background work is still running: ${names(work)}.`,
+            stoppable.length ? `agent_session(action="stop") stops ${names(stoppable)}.` : '',
+            other.length ? `${names(other)} cannot be stopped from here: wait for it, or ask the child or the person to stop it.` : '',
+          ].filter(Boolean).join(' '),
+        }
       }
       return { ok: false, error: `"${target.name}" is still working — stop it or wait first` }
     }

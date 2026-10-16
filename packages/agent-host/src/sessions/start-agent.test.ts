@@ -1147,6 +1147,45 @@ describe('starting another agent in the same project', () => {
     expect(w.mgr.listSessions().find((x) => x.id === c)?.askedBy).toBe(s)
   })
 
+  /*
+   * `stop` ends background work only of a child the caller started, at rest, with nobody else's turn, wait or report on
+   * it (#718 review): the person may have typed into a finished child, and an auto caller reaches sessions it did not start
+   */
+  describe('stopping background work at rest (#718)', () => {
+    const dev = { id: 'bg-dev', kind: 'shell' as const, description: 'pnpm dev', status: 'running' as const, stoppable: true }
+    const watchStops = (id: string) => {
+      const stopped: string[] = []
+      ;(handleOf(id) as unknown as { stopBackgroundTask(id: string): Promise<void> }).stopBackgroundTask = async (task) => { stopped.push(task) }
+      return stopped
+    }
+
+    it('leaves the dev server a turn of the person\'s started in the finished child while that turn runs', async () => {
+      allowProject()
+      const s = await session()
+      const c = await startRunning(s)
+      handleOf(c)!.answer('done')
+      expect(await w.mgr.agentSession(s, { sessionId: c, action: 'wait' })).toMatchObject({ ok: true, state: 'done' })
+      const stopped = watchStops(c)
+      handleOf(c)!.event({ type: 'state_change', sessionId: c, state: 'working' })
+      handleOf(c)!.event({ type: 'background_tasks', sessionId: c, live: [dev] })
+      expect(await w.mgr.agentSession(s, { sessionId: c, action: 'stop' })).toMatchObject({ ok: false })
+      expect(stopped).toEqual([])
+    })
+
+    it('an auto caller does not stop the work of a session the person made', async () => {
+      allowProject()
+      const caller = await session('auto')
+      const person = await session()
+      await w.mgr.send(person, 'run the dev server')
+      handleOf(person)!.answer('it runs')
+      await w.until(() => w.mgr.listSessions().find((x) => x.id === person)?.state === 'waiting_input')
+      const stopped = watchStops(person)
+      handleOf(person)!.event({ type: 'background_tasks', sessionId: person, live: [dev] })
+      expect(await w.mgr.agentSession(caller, { sessionId: person, action: 'stop' })).toMatchObject({ ok: false })
+      expect(stopped).toEqual([])
+    })
+  })
+
   describe('in a new worktree (part 2)', () => {
     const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' }).trim()
     const repo = () => {
@@ -1187,35 +1226,58 @@ describe('starting another agent in the same project', () => {
      * first" and `stop` answered that nothing was running, so the caller had no way out. `delete` now names the work and
      * `stop` stops it; a timer the tool holds (`/loop`), which `stop` cannot reach, does not hold `delete`.
      */
-    it('a child at rest with only background work left: delete names it, stop stops it, then delete goes through (#718)', async () => {
+    /** A worktree child that finished the task and was read, with a stop that its tool reports a moment later, as Claude's */
+    async function finishedWorktreeChild(branch: string) {
       repo()
       allowProject()
       const s = await session()
-      await w.mgr.startAgent(s, { task: 'worktree task', branch: 'feat/looping', wait: false })
+      await w.mgr.startAgent(s, { task: 'worktree task', branch, wait: false })
       const c = childrenOf(s)[0]!
       const h = handleOf(c.id)!
       h.answer('done')
       expect(await w.mgr.agentSession(s, { sessionId: c.id, action: 'wait' })).toMatchObject({ ok: true, state: 'done' })
-      const poll = { id: 'bg-poll', kind: 'shell' as const, description: 'until gh run view 7; do sleep 15; done', status: 'running' as const, stoppable: true }
-      const loop = { id: 'schedule-wakeup-1', kind: 'other' as const, description: 'Wakes itself at 12:00 (/loop)', status: 'running' as const, stoppable: false, timer: true }
       const stopped: string[] = []
       ;(h as unknown as { stopBackgroundTask(id: string): Promise<void> }).stopBackgroundTask = async (id) => {
         stopped.push(id)
-        h.event({ type: 'background_tasks', sessionId: c.id, live: [loop], ended: [{ ...poll, status: 'stopped' }] })
+        const now = w.mgr.listSessions().find((x) => x.id === c.id)!.backgroundTasks.filter((t) => t.status === 'running')
+        const task = now.find((t) => t.id === id)!
+        setTimeout(() => h.event({ type: 'background_tasks', sessionId: c.id, live: now.filter((t) => t.id !== id), ended: [{ ...task, status: 'stopped' }] }), 50)
       }
+      return { s, c, h, stopped }
+    }
+    const poll = { id: 'bg-poll', kind: 'shell' as const, description: 'until gh run view 7; do sleep 15; done', status: 'running' as const, stoppable: true }
+    const loop = { id: 'schedule-wakeup-1', kind: 'other' as const, description: 'Wakes itself at 12:00 (/loop)', status: 'running' as const, stoppable: false, timer: true }
+
+    it('a child at rest with only background work left: delete names it, stop stops it, then delete goes through (#718)', async () => {
+      const { s, c, h, stopped } = await finishedWorktreeChild('feat/looping')
       h.event({ type: 'background_tasks', sessionId: c.id, live: [poll, loop] })
 
       const refused = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
-      expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('background work is still running: until gh run view 7; do sleep 15; done') })
-      expect(!refused.ok && refused.error).toContain('agent_session(action="stop") stops it')
+      expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('background work is still running: until gh run view 7; do sleep 15; done.') })
+      expect(!refused.ok && refused.error).toContain('agent_session(action="stop") stops until gh run view 7; do sleep 15; done.')
       expect(!refused.ok && refused.error).not.toContain('Wakes itself')
 
       const r = await w.mgr.agentSession(s, { sessionId: c.id, action: 'stop' })
       expect(r).toMatchObject({ ok: true, state: 'stopped', notice: expect.stringContaining('Stopped its background work: until gh run view 7; do sleep 15; done.') })
       expect(stopped).toEqual(['bg-poll'])
 
-      expect(await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted' })
+      // Right after the stop, though the tool reported its end only after the stop returned
+      const deleted = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
+      expect(deleted).toMatchObject({ ok: true, state: 'deleted', note: 'Its timers ended with its process: Wakes itself at 12:00 (/loop).' })
       expect(w.store.trashedSession(c.id)).not.toBeNull()
+    })
+
+    it('work that cannot be stopped on its own: delete does not point to stop, and stop says nothing was stopped (#718)', async () => {
+      const { s, c, h, stopped } = await finishedWorktreeChild('feat/stuck')
+      const thread = { id: 'thread-1', kind: 'agent' as const, description: 'a child thread', status: 'running' as const }
+      h.event({ type: 'background_tasks', sessionId: c.id, live: [thread] })
+      const refused = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
+      expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('a child thread cannot be stopped from here') })
+      expect(!refused.ok && refused.error).not.toContain('agent_session')
+      expect(await w.mgr.agentSession(s, { sessionId: c.id, action: 'stop' })).toMatchObject({
+        ok: false, error: expect.stringContaining('Not stoppable from here, still running: a child thread'),
+      })
+      expect(stopped).toEqual([])
     })
 
     /*
