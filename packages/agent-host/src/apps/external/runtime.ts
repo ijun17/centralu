@@ -9,7 +9,7 @@ import { BROKER_KEEPALIVE_MS, RUN_META, serveBroker } from './broker.js'
 import { BrokerDesk, type BrokerHost, type CapabilityDecisionListed, type CapabilityDenial, type CapabilityOrigin } from './desk.js'
 import { memoryCapabilityBook, type CapabilityBook } from './capabilities.js'
 import { checkScreen, checkTools, formatReport, type AppCheckReport, type CheckFinding, type CheckedTool } from './check.js'
-import { ERRORS_KEPT, errorBundle, type AppErrorBundle } from './errors.js'
+import { ERRORS_KEPT, errorBundle, type HeldErrorBundle, type SentErrorBundle } from './errors.js'
 import { folderFingerprint } from './fingerprint.js'
 import { PROJECT_APPS_PARTS, PROJECT_APPS_REL, USER_APPS_PARTS, USER_APPS_REL, scanApps, type ScannedApp } from './discovery.js'
 import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError, type AppManifest } from './manifest.js'
@@ -50,7 +50,7 @@ export type { AppRef } from './ref.js'
 /** The shape of a check report also leaves through this door (C-3) */
 export type { AppCheckReport, CheckFinding } from './check.js'
 /** The shape of an error bundle (C-6) */
-export type { AppErrorBundle } from './errors.js'
+export type { HeldErrorBundle, SentErrorBundle } from './errors.js'
 /** The part of the broker's body the host's core fills in (D) — the manager supplies it via `attachBrokerHost` */
 export type { AgentRunRequest, AgentRunResult, BrokerHost, CapabilityOrigin, CapabilityQuestion, CapabilityDecisionListed } from './desk.js'
 /** Where a capability approval's answer is stored (D-4) — the host fills it in with the store (`app-permission-book.ts`) */
@@ -337,11 +337,8 @@ type AppEntry = {
  */
 const STDERR_SETTLE_MS = 150
 
-/** An error bundle returned on request — carries the time it was sent, if it was sent to the building session (C-6) */
-export type SentErrorBundle = AppErrorBundle & { sentAt: number | null }
-
 /** The key for a sent bundle — within one app, a bundle is uniquely (kind, time). Stays the same key even after stderr is re-captured and the bundle is replaced */
-const sentKey = (holdKey: string, b: Pick<AppErrorBundle, 'kind' | 'at'>): string => `${holdKey}\n${b.kind}\n${b.at}`
+const sentKey = (holdKey: string, b: Pick<HeldErrorBundle, 'kind' | 'at'>): string => `${holdKey}\n${b.kind}\n${b.at}`
 
 /**
  * The reason a new app id is rejected, worded for an agent and a person to read (C-1b). Validation is
@@ -387,7 +384,7 @@ export class ExternalApps {
   /** A reflect in progress — an overlapping call waits on the same one */
   private reloading = new Map<string, Promise<boolean>>()
   /** Recent error bundles per app name (holdKey), most recent first (C-6) — carried over even when the manifest changes and a new entry is created */
-  private errorLog = new Map<string, AppErrorBundle[]>()
+  private errorLog = new Map<string, HeldErrorBundle[]>()
   /**
    * A bundle sent to the building session → the time it was sent (C-6). Kept separately instead of
    * marked on the bundle because a tool-failure bundle **gets replaced with a new object** shortly
@@ -492,7 +489,7 @@ export class ExternalApps {
    * The sending itself does not happen here. The runtime only collects bundles and answers when asked
    * (errors.ts); what actually sends it is the RPC a person triggers by clicking.
    */
-  markErrorSent(ref: AppRef, at: number): AppErrorBundle | 'sent' | null {
+  markErrorSent(ref: AppRef, at: number): HeldErrorBundle | 'sent' | null {
     const key = this.holdKey(ref)
     const list = this.errorLog.get(key) ?? []
     const b = list.find((x) => x.at === at)
@@ -518,7 +515,7 @@ export class ExternalApps {
    * separate pipes — a thrown stack goes over stderr, the failure answer over stdout), that process's
    * stderr is captured once more a little afterward.
    */
-  private recordError(e: AppEntry, b: Omit<AppErrorBundle, 'text' | 'denied'> & { denied?: AppErrorBundle['denied'] }, proc: AppProcess | null = null): void {
+  private recordError(e: AppEntry, b: Omit<HeldErrorBundle, 'text' | 'denied'> & { denied?: HeldErrorBundle['denied'] }, proc: AppProcess | null = null): void {
     const key = this.holdKey(e.ref)
     const app = `${e.manifest?.name ?? e.ref.appId} (${this.label(e.ref)})`
     const list = this.errorLog.get(key) ?? []

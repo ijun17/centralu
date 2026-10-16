@@ -288,7 +288,7 @@ export type BuildBar =
   | { kind: 'shell'; text: string; detail: string }
 
 /**
- * How the window's last keeper start went through the macOS shell (`HostBuild.shell`). Absent when
+ * How the window's last keeper start went through the macOS shell (`ShellHostBuild.shell`). Absent when
  * none was tried. `notify`: a release says so on screen; a local build only writes keeper.log.
  */
 export type ShellStart = {

@@ -1,5 +1,5 @@
 import { ShellBanner } from '@cc/ui'
-import type { HostBuild } from '@cc/platform/tauri'
+import type { ShellHostBuild } from '@cc/platform/tauri'
 // The pure half, by path rather than through `@cc/platform/tauri`: the browser harness that drives
 // this bar in e2e (apps/web/src/harness/shell-banner.tsx) has no Tauri, and the index imports it
 import { olderBuildText, RESTART_COMPLETELY_LOSES, type BuildBar } from '../../../packages/platform/src/tauri/switch-plan.js'
@@ -7,7 +7,7 @@ import { olderBuildText, RESTART_COMPLETELY_LOSES, type BuildBar } from '../../.
 /**
  * The bar a window shows when the keeper or the host is of another build (#280), drawn from
  * `buildBar`'s decision. Presentational: the state and the actions live in main.tsx, so the browser
- * harness can draw exactly this with a made-up `HostBuild` (e2e/fixtures/shell-banner.ts).
+ * harness can draw exactly this with a made-up `ShellHostBuild` (e2e/fixtures/shell-banner.ts).
  */
 export function BuildBarView({
   build,
@@ -18,7 +18,7 @@ export function BuildBarView({
   onDismiss,
   onRestart,
 }: {
-  build: HostBuild
+  build: ShellHostBuild
   bar: BuildBar
   /** A request the window made that failed (the switch or the restart), next to the bar's own line */
   error: string | null
@@ -144,7 +144,7 @@ export function RestartKeeperDialog({ onCancel, onConfirm }: { onCancel: () => v
 }
 
 /** "build abc1234 (0.1.0-beta.6) from /Applications/Centralu.app" — what a person can check against what they installed */
-export function describeBuild(b: HostBuild['host']): string {
+export function describeBuild(b: ShellHostBuild['host']): string {
   if (!b) return 'an unknown build'
   const version = b.version ? ` (${b.version})` : ''
   const from = b.bundlePath ? ` from ${b.bundlePath}` : ''

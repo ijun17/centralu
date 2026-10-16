@@ -14,7 +14,7 @@ import {
   restartKeeper,
   switchHostBuild,
   switchPlan,
-  type HostBuild,
+  type ShellHostBuild,
   type HostStatus,
   type TauriPlatform,
 } from '@cc/platform/tauri'
@@ -179,7 +179,7 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
    * keeper moves when it next starts, and offers "Restart completely" rather than a switch that
    * would only fail again (`buildBar`, `keeperStaysBehind`).
    */
-  const [build, setBuild] = useState<HostBuild | null>(null)
+  const [build, setBuild] = useState<ShellHostBuild | null>(null)
   const [askSwitch, setAskSwitch] = useState(false)
   const [askRestart, setAskRestart] = useState(false)
   const [restarting, setRestarting] = useState(false)

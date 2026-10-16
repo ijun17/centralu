@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
 import { lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { IMAGE_PREVIEW_MAX_BYTES, wireBaseName, wireJoin } from '@cc/protocol'
+import { IMAGE_PREVIEW_MAX_BYTES, wireBaseName, wireJoin, type FsEntry, type FsFile } from '@cc/protocol'
 import { assertCreatePath, assertExistingPath, UnsafePathError } from './path-guard.js'
 import { runGit, type GitTrust } from './git-exec.js'
 import { clonesFiles } from '../os.js'
@@ -23,18 +23,8 @@ import { clonesFiles } from '../os.js'
  * against concurrent same-user filesystem mutations.
  */
 
-export type FsEntry = { name: string; path: string; isDir: boolean; ignored: boolean }
-export type FsImage = { mime: string; data: string }
-export type FsFile = {
-  text: string
-  truncated: boolean
-  binary: boolean
-  bytes: number
-  /** Raster image bytes for the read-only viewer. Never present for arbitrary binary files. */
-  image?: FsImage
-  /** Why an otherwise recognized image cannot be previewed (for example, its size). */
-  previewError?: string
-}
+// What `listDir` and `readTextFile` answer are the protocol's shapes (`fs.listDir`, `fs.readFile`), not copies of them
+export type { FsEntry, FsFile }
 
 const MAX_TEXT = 2_000_000 // past 2MB this is truncated for display (the viewer virtual-scrolls anyway)
 const MAX_IMAGE_PREVIEW = IMAGE_PREVIEW_MAX_BYTES

@@ -1,14 +1,14 @@
 import type Database from 'better-sqlite3'
-import { ProjectConsentKind as ProjectConsentKindSchema } from '@cc/protocol'
+import { ProjectConsentKind } from '@cc/protocol'
+
+// What a remembered consent allows (#371): the protocol's kinds, which the settings screen names and revokes
+export type { ProjectConsentKind }
 
 /**
- * What a remembered consent allows (#371): 'delegate' is part B's ask_project, 'apps' part A's app tools, 'agents' a
- * project's sessions starting agents in that same project (#561, start_agent; the row names the project twice)
+ * One remembered "always" from one project to another (#371, migration v44), as the table holds it. Not the protocol's
+ * `ProjectConsent`: that is a row of Settings' list, with the projects' names as they are now and the machine that keeps it.
  */
-export type ProjectConsentKind = 'delegate' | 'apps' | 'agents'
-
-/** One remembered "always" from one project to another (#371, migration v44) */
-export type ProjectConsent = { fromProjectId: string; toProjectId: string; kind: ProjectConsentKind; decidedAt: number }
+export type ConsentRow = { fromProjectId: string; toProjectId: string; kind: ProjectConsentKind; decidedAt: number }
 
 /** One row of app_permissions — the same shape as the runtime's `CapabilityDecision` (locked together structurally, M4 D-4) */
 export type AppPermissionRecord = { capability: string; text: string; decision: 'allow' | 'deny'; stamp: string; decidedAt: number }
@@ -89,13 +89,13 @@ export class PermissionRecords {
 
   // ── The person's "always" for one project reaching another (#371) — see migration v44 ──
 
-  getProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): ProjectConsent | null {
+  getProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): ConsentRow | null {
     const row = this.db
       .prepare(
         `SELECT from_project_id as fromProjectId, to_project_id as toProjectId, kind, decided_at as decidedAt
            FROM project_consents WHERE from_project_id = ? AND to_project_id = ? AND kind = ?`,
       )
-      .get(fromProjectId, toProjectId, kind) as ProjectConsent | undefined
+      .get(fromProjectId, toProjectId, kind) as ConsentRow | undefined
     return row ?? null
   }
 
@@ -121,13 +121,13 @@ export class PermissionRecords {
    * a row of a kind this build cannot name is left in place for that build rather than listed here, where the settings
    * screen would show it without a label and could not revoke it (`projectConsents.revoke` takes known kinds only).
    */
-  listProjectConsents(): ProjectConsent[] {
+  listProjectConsents(): ConsentRow[] {
     const rows = this.db
       .prepare(
         `SELECT from_project_id as fromProjectId, to_project_id as toProjectId, kind, decided_at as decidedAt
            FROM project_consents ORDER BY decided_at DESC`,
       )
-      .all() as ProjectConsent[]
-    return rows.filter((r) => ProjectConsentKindSchema.safeParse(r.kind).success)
+      .all() as ConsentRow[]
+    return rows.filter((r) => ProjectConsentKind.safeParse(r.kind).success)
   }
 }

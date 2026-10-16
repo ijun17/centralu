@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { activityCounts, hostBusy, type ActivitySnapshot, type SessionActivity } from './idle.js'
+import { activityCounts, hostBusy, type ActivitySnapshot, type IdleActivity } from './idle.js'
 
 describe('activityCounts (host.activity, for the "Update <machine>" prompt)', () => {
-  const live = (over: Partial<SessionActivity>): SessionActivity => ({ state: 'waiting_input', live: true, ...over })
+  const live = (over: Partial<IdleActivity>): IdleActivity => ({ state: 'waiting_input', live: true, ...over })
 
   it('counts each busy session once, by what a stop would cost it, and nothing hostBusy does not count', () => {
     const s: ActivitySnapshot = {

@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { assertExistingPath, isMissingPathError } from './path-guard.js'
+import type { GitBranch, GitCommit, GitFileStatus } from '@cc/protocol'
 import { runGit, type GitTrust } from './git-exec.js'
 import { killTree } from './kill-tree.js'
 import { programPath } from '../tool-launch.js'
@@ -25,10 +26,8 @@ const exec = promisify(execFile)
  * A situation actually run into, measured against the shipped `.app` (F-1).
  */
 export type GitSummary = { isRepo: boolean; branch: string; changedFiles: number; denied?: boolean }
-export type GitFileStatus = { path: string; staged: boolean; status: 'M' | 'A' | 'D' | 'R' | 'U' | '?' }
-export type GitCommit = { sha: string; shortSha: string; subject: string; author: string; when: number; parents: string[] }
-export type GitBranch = { name: string; current: boolean; remote: boolean; upstream?: string }
-export type { GitTrust }
+// The git panel's shapes are the protocol's (FR-4); a hand copy here had already lost `sessionName` (#428)
+export type { GitBranch, GitCommit, GitFileStatus, GitTrust }
 
 const OK = { timeout: 10_000, maxBuffer: 32 * 1024 * 1024 }
 

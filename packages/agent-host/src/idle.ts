@@ -30,15 +30,15 @@ const BUSY_STATES: ReadonlySet<SessionState> = new Set(['working', 'waiting_appr
 export const inTurn = (state: SessionState): boolean => state === 'working' || state === 'waiting_approval'
 
 /**
- * One session as the idle rule reads it. The fields past `state` and `live` are optional so a
+ * One session as the idle rule reads it (not the protocol's `SessionActivity`, what a working session is busy with). The fields past `state` and `live` are optional so a
  * snapshot that does not carry them still reads (as nothing pending); the host's (`main.ts`,
  * `mgr.listSessions()`) carries all of them.
  */
-export type SessionActivity = Pick<SessionInfo, 'state' | 'live'> &
+export type IdleActivity = Pick<SessionInfo, 'state' | 'live'> &
   Partial<Pick<SessionInfo, 'pendingApproval' | 'pendingQuestions' | 'backgroundTasks'>>
 
 export type ActivitySnapshot = {
-  sessions: SessionActivity[]
+  sessions: IdleActivity[]
   terminals: number
   commandRuns: number
 }
@@ -48,7 +48,7 @@ export type ActivitySnapshot = {
  * question waiting for them, or background work that counts as activity (#290 — the tool holds it in
  * its process). A session with no process holds nothing.
  */
-export function sessionBusy(s: SessionActivity): boolean {
+export function sessionBusy(s: IdleActivity): boolean {
   if (s.live !== true) return false
   return (
     BUSY_STATES.has(s.state) ||

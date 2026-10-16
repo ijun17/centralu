@@ -1,11 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
-import type { HostBuild } from '../packages/platform/src/tauri/index.js'
+import type { ShellHostBuild } from '../packages/platform/src/tauri/index.js'
 
 declare global {
   interface Window {
     __relaunch: {
       calls: string[]
-      report: (patch: Partial<HostBuild>) => Promise<void>
+      report: (patch: Partial<ShellHostBuild>) => Promise<void>
       rejectRequest: (message: string) => void
       timeoutNextSwitch: (finalBeforeTimeout?: 'done' | 'failed') => void
     }
@@ -13,7 +13,7 @@ declare global {
 }
 
 const timeout = 'The host update did not finish in time'
-const report = (page: Page, patch: Partial<HostBuild>) => page.evaluate((b) => window.__relaunch.report(b), patch)
+const report = (page: Page, patch: Partial<ShellHostBuild>) => page.evaluate((b) => window.__relaunch.report(b), patch)
 const calls = (page: Page) => page.evaluate(() => window.__relaunch.calls)
 
 async function open(page: Page, scenario: string, prior?: 'done' | 'failed') {
@@ -56,7 +56,7 @@ for (const ending of ['same-build', 'done', 'failed'] as const) {
     await report(page, { swap: { phase: 'activating', target: { commit: 'new' }, startedAt: 1 } })
     await expect(page.getByTestId('host-switch-progress')).toContainText('Reconnecting')
     await expect(page.getByTestId('host-switch-error')).toHaveText(timeout)
-    const final: Partial<HostBuild> = ending === 'same-build'
+    const final: Partial<ShellHostBuild> = ending === 'same-build'
       ? { sameBuild: true, keeperSameBuild: false, swap: undefined, keeper: undefined }
       : { swap: { phase: ending, target: { commit: 'new' }, startedAt: 1,
           ...(ending === 'failed' ? { message: 'Activation failed; rolled back', rolledBack: true } : {}) } }

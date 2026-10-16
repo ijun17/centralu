@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { App, useStore } from '@cc/ui'
 import { createMockPlatform } from '@cc/platform/mock'
 import { isDemoScene, seedDemo } from '@cc/platform/mock/demo'
-import type { HostBuild } from '@cc/platform/tauri'
+import type { ShellHostBuild } from '@cc/platform/tauri'
 import { buildBar } from '../../../../packages/platform/src/tauri/switch-plan.js'
 import { BuildBarView, RestartKeeperDialog } from '../../../desktop/src/build-bar.js'
 import { QuitDialog } from '../../../desktop/src/quit-dialog.js'
@@ -15,7 +15,7 @@ import '../../../../packages/ui/src/styles/index.css'
  *
  * The keeper's build bar and the quit question only exist inside Tauri. So this stands the whole
  * App up on the mock, the way the browser entry does, and draws **the desktop's own components**
- * (apps/desktop/src/build-bar.tsx, quit-dialog.tsx) with a made-up `HostBuild`, decided by the same
+ * (apps/desktop/src/build-bar.tsx, quit-dialog.tsx) with a made-up `ShellHostBuild`, decided by the same
  * `buildBar` the desktop calls. What the buttons would do in the app is recorded in
  * `window.__shellCalls` instead.
  *
@@ -63,7 +63,7 @@ const older = { commit: '2ffcaec5', version: '0.1.0-beta.6', bundlePath: '/Appli
 const tooLong = 'could not pass the state on: Message too long (os error 40)'
 
 /** What the keeper would report in each state, as the shell hands it to the window */
-function reported(): HostBuild {
+function reported(): ShellHostBuild {
   const base = { mode: 'keeper' as const, app: newer, keeper: older, keeperSameBuild: false, keepsAgents: true, busy: true }
   switch (state) {
     case 'older':

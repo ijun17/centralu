@@ -1,10 +1,10 @@
 import { mockIPC, mockWindows } from '@tauri-apps/api/mocks'
 import { emit } from '@tauri-apps/api/event'
-import type { HostBuild } from '@cc/platform/tauri'
+import type { ShellHostBuild } from '@cc/platform/tauri'
 
 // Only the shell boundary is mocked: main.tsx boots the real Tauri platform and DesktopRoot.
 // No host is started and no real data or OS APIs are used.
-let build: HostBuild = {
+let build: ShellHostBuild = {
   mode: 'keeper', relaunched: true, sameBuild: false, keeperSameBuild: false,
   busy: false, keepsAgents: true,
   app: { commit: 'new', version: `0.1.0-beta.${20}` },
@@ -20,7 +20,7 @@ if (prior === 'done' || prior === 'failed') {
 let timedSwitch: { finalBeforeTimeout?: 'done' | 'failed' } | null = null
 const calls: string[] = []
 let requestError: string | null = null
-const report = async (patch: Partial<HostBuild>) => {
+const report = async (patch: Partial<ShellHostBuild>) => {
   build = { ...build, ...patch }
   await emit('host-build', build)
 }

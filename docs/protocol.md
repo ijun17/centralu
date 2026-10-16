@@ -288,6 +288,7 @@ External apps keep their state in their own process ([apps.md](apps.md)).
 ## 4. Schema and version rules (the C6 defence)
 
 - Every message is defined by a zod schema and validated **only at the boundary** (once, on receipt. Re-validating internally is forbidden — performance).
+- **A shape on the wire is declared once, here.** The host and the platform `import type` it (re-exporting it under an old local name where callers use one) instead of writing it out again: copies drifted (#428), a host `GitCommit` without `sessionName` and an error bundle without `sentAt`. A result shape is named (`FsEntry`, `FsFile`) rather than written inline in its method, so both sides can name it. A host type that only looks alike gets a name of its own (`ConsentRow` beside `ProjectConsent`, `IdleActivity` beside `SessionActivity`, the shell's `ShellHostBuild` beside `HostBuild`).
 - `protocolVersion` is a single integer. Compatibility rules:
   - **Additions are free** (a new event type, a new optional field) — the version does not change.
   - The receiver **must ignore event types and fields it does not know** (a plain zod object drops a field it does not declare; an event of an unknown type is dropped whole).

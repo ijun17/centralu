@@ -5,6 +5,7 @@ import { isPermissionGranted, requestPermission, sendNotification } from '@tauri
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { AlertKind, Platform, RelaunchCheck, RelaunchPort, ShortcutKeys, SystemPort } from '../ports/index.js'
+import type { HostBuild } from '@cc/protocol'
 import { createWebPlatform } from '../web/index.js'
 import { finishRelaunchSwap, type RelaunchSwapResult } from './relaunch-swap.js'
 import type { ShellStart, SwapView } from './switch-plan.js'
@@ -139,24 +140,26 @@ export function listenForQuit(): (ask: (() => void) | null) => void {
   }
 }
 
-/** Where a build came from (#280) — the keeper's record, as the shell hands it over */
-export type BuildSource = {
-  commit: string
-  builtAt?: string
-  version?: string
+/**
+ * Where a build came from (#280) — the keeper's record, as the shell hands it over. The host's own record (`HostBuild`,
+ * protocol envelope.ts) with what only the keeper records: when it was built and the folder it runs from. The keeper's
+ * record may lack the protocol version, so it is optional here. Named apart from this file's `ShellHostBuild`, the
+ * shell's whole report, which used to share the protocol's name (#428).
+ */
+export type BuildSource = Omit<HostBuild, 'protocolVersion'> & {
   protocolVersion?: number
-  bundlePath?: string
+  builtAt?: string
   hostDir?: string
-  copyDir?: string
 }
 
 /**
  * Which builds are involved (#280): this window's and the running host's. `mode` says whether the
  * host is held by the keeper (release builds) or is the app's own child (`pnpm app:dev`).
  * `sameBuild` is false when a window of one build is attached to a host of another — the case the
- * window offers to switch.
+ * window offers to switch. The shell's `HostBuild` (sidecar.rs), named apart from the protocol's `HostBuild`, which is
+ * one host's record (#428).
  */
-export type HostBuild = {
+export type ShellHostBuild = {
   mode: 'keeper' | 'direct'
   app?: BuildSource
   host?: BuildSource
@@ -185,13 +188,13 @@ export type HostBuild = {
   shell?: ShellStart
 }
 
-export async function hostBuild(): Promise<HostBuild> {
-  return invoke<HostBuild>('host_build')
+export async function hostBuild(): Promise<ShellHostBuild> {
+  return invoke<ShellHostBuild>('host_build')
 }
 
 /** Listens for changes to which builds are involved (a host restarted, a switch finished) */
-export function onHostBuild(cb: (b: HostBuild) => void): () => void {
-  const un = listen<HostBuild>('host-build', (e) => cb(e.payload))
+export function onHostBuild(cb: (b: ShellHostBuild) => void): () => void {
+  const un = listen<ShellHostBuild>('host-build', (e) => cb(e.payload))
   return () => void un.then((f) => f())
 }
 
@@ -371,7 +374,7 @@ export function tauriRelaunchPort(): RelaunchPort {
     relaunch: () => invoke<void>('apply_update_relaunch').catch(rethrowAsError),
     watchBusy: (cb) => {
       let stopped = false
-      const push = (b: HostBuild) => {
+      const push = (b: ShellHostBuild) => {
         if (!stopped) cb(typeof b.busy === 'boolean' ? b.busy : null)
       }
       void hostBuild()
@@ -392,7 +395,7 @@ export async function createTauriPlatform(): Promise<TauriPlatform> {
   await waitForHost()
   const attached = await hostBuild().catch(() => null)
   const relaunchSwap = attached
-    ? await finishRelaunchSwap(attached, async (cb) => listen<HostBuild>('host-build', (e) => cb(e.payload)), switchHostBuild)
+    ? await finishRelaunchSwap(attached, async (cb) => listen<ShellHostBuild>('host-build', (e) => cb(e.payload)), switchHostBuild)
     : { tried: false }
   const { port, token } = await waitForHost()
 

@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import type { GridPanel, ProjectInfo, SavedCommand, SessionInfo, StoredMessage, ToolDefaults } from '@cc/protocol'
+import type { AgentUse, GridPanel, ProjectInfo, SavedCommand, SessionInfo, StoredMessage, ToolDefaults } from '@cc/protocol'
 import { AppRunRecords, type AppRunRecord } from './store/app-runs.js'
 import { ChildOwnershipRecords, type QueuedRequest } from './store/child-ownership.js'
 import { GridRecords } from './store/grid.js'
@@ -13,7 +13,7 @@ import { migrationSteps } from './store/migrations/index.js'
 import {
   PermissionRecords,
   type AppPermissionRecord,
-  type ProjectConsent,
+  type ConsentRow,
   type ProjectConsentKind,
 } from './store/permissions.js'
 import { ProjectRecords } from './store/projects.js'
@@ -27,7 +27,7 @@ export type {
   AppPermissionRecord,
   AppRunRecord,
   LinkedMachineRow,
-  ProjectConsent,
+  ConsentRow,
   ProjectConsentKind,
   QueuedRequest,
   ReadOpts,
@@ -889,7 +889,7 @@ export class Store {
     return this.permissions.listAppPermissions(appKey)
   }
 
-  getProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): ProjectConsent | null {
+  getProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): ConsentRow | null {
     return this.permissions.getProjectConsent(fromProjectId, toProjectId, kind)
   }
 
@@ -901,7 +901,7 @@ export class Store {
     return this.permissions.forgetProjectConsent(fromProjectId, toProjectId, kind)
   }
 
-  listProjectConsents(): ProjectConsent[] {
+  listProjectConsents(): ConsentRow[] {
     return this.permissions.listProjectConsents()
   }
 
@@ -919,7 +919,7 @@ export class Store {
     return this.appRuns.endAppRun(id, end)
   }
 
-  appAgentUse(projectId: string | null, appId: string, since: number): { runs: number; durationMs: number; tokens: { input: number; output: number } | null } {
+  appAgentUse(projectId: string | null, appId: string, since: number): AgentUse {
     return this.appRuns.appAgentUse(projectId, appId, since)
   }
 

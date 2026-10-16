@@ -1,3 +1,4 @@
+import type { InstalledVersion } from '@cc/protocol'
 import { existsSync, readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -208,7 +209,7 @@ export type InstallParams = {
 export type PointerParams = { action: 'pointers'; version: string; node: string; current: InstalledVersion | null; previous: InstalledVersion | null }
 export type PruneParams = { action: 'prune'; version: string; node: string }
 
-export type InstalledVersion = { version: string; node: string }
+export type { InstalledVersion }
 
 /**
  * Step 2 in the remote's shell: writes `remote-install.mjs` (gzip, then base64, so it fits one

@@ -669,6 +669,23 @@ export type MessageImageRefusal = z.infer<typeof MessageImageRefusal>
  */
 export const IMAGE_PREVIEW_MAX_BYTES = 10_000_000
 
+/** One row of a project folder, as `fs.listDir` answers it; `path` is project-relative and POSIX-separated (paths.ts) */
+export const FsEntry = z.object({ name: z.string(), path: z.string(), isDir: z.boolean(), ignored: z.boolean() })
+export type FsEntry = z.infer<typeof FsEntry>
+
+/** A file as the read-only viewer reads it (`fs.readFile`) */
+export const FsFile = z.object({
+  text: z.string(),
+  truncated: z.boolean(),
+  binary: z.boolean(),
+  bytes: z.number(),
+  /** Raster image bytes for the read-only viewer. Never present for arbitrary binary files. */
+  image: z.object({ mime: z.string(), data: z.string() }).optional(),
+  /** Why an otherwise recognized image cannot be previewed (for example, its size). */
+  previewError: z.string().optional(),
+})
+export type FsFile = z.infer<typeof FsFile>
+
 /**
  * A local image an agent's reply names, as `messages.image` answers it.
  *
@@ -1004,7 +1021,7 @@ export const RpcMethods = {
   },
   'fs.listDir': {
     params: z.object({ projectId: ProjectId, path: z.string() }),
-    result: z.array(z.object({ name: z.string(), path: z.string(), isDir: z.boolean(), ignored: z.boolean() })),
+    result: z.array(FsEntry),
   },
   /**
    * The full set of directories to watch in this project (#34). **Received as the complete
@@ -1020,14 +1037,7 @@ export const RpcMethods = {
   },
   'fs.readFile': {
     params: z.object({ projectId: ProjectId, path: z.string() }),
-    result: z.object({
-      text: z.string(),
-      truncated: z.boolean(),
-      binary: z.boolean(),
-      bytes: z.number(),
-      image: z.object({ mime: z.string(), data: z.string() }).optional(),
-      previewError: z.string().optional(),
-    }),
+    result: FsFile,
   },
   /**
    * Move a file or folder into another folder of the same project (#19).

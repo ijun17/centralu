@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import type { AgentUse } from '@cc/protocol'
 
 /**
  * The shape and rules of the run ledger (M4 A-6).
@@ -42,7 +43,7 @@ export type AppRunRow = {
 }
 
 /** Tokens an agent spent (M4 D-5) — as much as the tool reported. If the tool did not report it, the row has none (null) */
-export type AgentTokens = { input: number; output: number }
+export type AgentTokens = NonNullable<AgentUse['tokens']>
 
 /** A row as read back — the store returns text (an open-ended string), and the protocol narrows its shape */
 export type AppRunListed = Omit<AppRunRow, 'callerKind' | 'status' | 'kind'> & {
@@ -58,9 +59,9 @@ export type AppRunListed = Omit<AppRunRow, 'callerKind' | 'status' | 'kind'> & {
  * The agent usage one app has requested (M4 D-5) — over a period, the count of agent runs that
  * **actually started** (a run_agent row with a session), the sum of time spent, and the sum of
  * tokens. A refused request never started an agent, so it is not counted. Tokens are added up only
- * from runs that reported them — null if there were none at all.
+ * from runs that reported them — null if there were none at all. The protocol's shape, as the screen reads it.
  */
-export type AgentUse = { runs: number; durationMs: number; tokens: AgentTokens | null }
+export type { AgentUse }
 
 export type RunLedger = {
   begin(row: AppRunRow): void

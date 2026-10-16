@@ -1,3 +1,5 @@
+import type { AppErrorBundle } from '@cc/protocol'
+
 /**
  * An app's error bundle (M4 C-6) — holds the moment an app failed to start, crashed, or a tool
  * failed, as one unit.
@@ -14,31 +16,27 @@
  * body.
  */
 
-export type AppErrorKind = 'start' | 'crash' | 'tool'
+/**
+ * The bundle as the host holds it: the protocol's `AppErrorBundle` without `sentAt`, which is kept apart (by kind and
+ * time, `errorsSent` in runtime.ts) so a bundle replaced when stderr is re-captured stays sent. A hand copy here had
+ * drifted from the protocol's (#428). What its fields hold, as the host fills them:
+ *
+ * - `message`: a one-line reason — why it failed to start, the shape it ended in, or the failure a tool returned.
+ * - `stderr`: the last lines of the app's stderr, after secrets are masked.
+ * - `tool`, `args`: the tool that failed and a summary of that call's arguments, secrets masked by name (tool errors only).
+ * - `denied`: this failure came from a person's decision (D-4) — the person denied this call's request (or a request
+ *   further up its chain). Since it is not a bug in the app, the screen does not show it as an error and instead states
+ *   the decision (the place to reverse it is that app's record panel: Permissions → Forget). It is also not sent to
+ *   the building session — sending it would make the building agent "fix" code that is working as intended. It appears
+ *   only on a tool-failure bundle.
+ * - `text`: the text that can be sent to the building session as-is.
+ */
+export type HeldErrorBundle = Omit<AppErrorBundle, 'sentAt'>
 
-export type AppErrorBundle = {
-  kind: AppErrorKind
-  at: number
-  /** A one-line reason — why it failed to start, the shape it ended in, or the failure a tool returned */
-  message: string
-  /** The last lines of the app's stderr (after secrets are masked) */
-  stderr: string[]
-  /** The tool that failed (tool errors only) */
-  tool: string | null
-  /** A summary of that call's arguments — secrets are masked by name (tool errors only) */
-  args: string | null
-  runId: string | null
-  /**
-   * This failure came from a person's decision (D-4) — the person denied this call's request (or a
-   * request further up its chain). Since it is not a bug in the app, the screen does not show it as
-   * an error and instead states the decision (the place to reverse it is that app's record panel:
-   * Permissions → Forget). It is also not sent to the building session — sending it would make the
-   * building agent "fix" code that is working as intended. It appears only on a tool-failure bundle.
-   */
-  denied: { appId: string; projectId: string | null; name: string; capability: string; text: string } | null
-  /** The text that can be sent to the building session as-is */
-  text: string
-}
+export type AppErrorKind = AppErrorBundle['kind']
+
+/** An error bundle returned on request — carries the time it was sent, if it was sent to the building session (C-6) */
+export type SentErrorBundle = AppErrorBundle
 
 /** How many bundles are kept per app — the most recent only. Cleared when the host restarts (keeping them longer is the run ledger's job). */
 export const ERRORS_KEPT = 10
@@ -49,7 +47,7 @@ const KIND_LABEL: Record<AppErrorKind, string> = {
   tool: 'a tool call failed',
 }
 
-export function errorBundle(app: string, input: Omit<AppErrorBundle, 'text' | 'denied'> & { denied?: AppErrorBundle['denied'] }): AppErrorBundle {
+export function errorBundle(app: string, input: Omit<HeldErrorBundle, 'text' | 'denied'> & { denied?: HeldErrorBundle['denied'] }): HeldErrorBundle {
   const b = { ...input, denied: input.denied ?? null }
   const lines = [`App ${app}: ${KIND_LABEL[b.kind]} (${new Date(b.at).toISOString()})`]
   if (b.tool) lines.push(`Tool: ${b.tool}`)

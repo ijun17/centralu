@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import type { AgentUse } from '@cc/protocol'
 
 /** The cap on chain rows the history screen loads beneath one app's roots (M4 D-6, `listAppRuns`) */
 const CHAIN_ROWS_MAX = 500
@@ -60,7 +61,7 @@ export class AppRunRecords {
    * rows that had a session stand up (a rejected request never set an agent up). A still-running
    * row is counted, but its duration is not in yet.
    */
-  appAgentUse(projectId: string | null, appId: string, since: number): { runs: number; durationMs: number; tokens: { input: number; output: number } | null } {
+  appAgentUse(projectId: string | null, appId: string, since: number): AgentUse {
     const r = this.db
       .prepare(
         `SELECT COUNT(*) as runs, COALESCE(SUM(duration_ms), 0) as durationMs, COUNT(tokens_in) as counted,

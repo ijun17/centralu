@@ -1,4 +1,6 @@
 import type {
+  FsEntry,
+  FsFile,
   ProjectConsent,
   ProjectConsentKind,
   AdapterCapabilities,
@@ -355,16 +357,8 @@ export interface FsPort {
 /** What it is calling about — this decides how strong the sound and the dock bounce are */
 export type AlertKind = 'approval' | 'error' | 'done' | 'all_done'
 
-export type FsEntry = { name: string; path: string; isDir: boolean; ignored: boolean }
-export type FsFile = {
-  text: string
-  truncated: boolean
-  binary: boolean
-  bytes: number
-  /** Raster image payload for the read-only viewer. Arbitrary binary files omit this. */
-  image?: { mime: string; data: string }
-  previewError?: string
-}
+// The file tree's and the viewer's shapes are the protocol's (`fs.listDir`, `fs.readFile`), named here as they always were
+export type { FsEntry, FsFile }
 
 export interface SystemPort {
   notify(title: string, body: string): Promise<void>
