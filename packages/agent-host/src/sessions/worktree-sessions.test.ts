@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
-import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
+import { canonicalPath, WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
 
 /*
  * The worktree code over a host it reaches only through `WorktreeHost` (#428): the refusals before anything is checked
@@ -90,7 +90,8 @@ describe('what a cleanup under way holds still (#647)', () => {
     at('helper', join(tree, 'pkg'))
     at('other', root)
     expect(wt.worktreeCleanupBlocks('helper')).toBe(false)
-    wt.worktreeCleanup.set('child', realpathSync(tree))
+    // The code keeps the native canonical form (`canonicalPath`): on Windows that is the long name, not the 8.3 one
+    wt.worktreeCleanup.set('child', canonicalPath(tree))
     expect(wt.worktreeCleanupBlocks('child')).toBe(true)
     expect(wt.worktreeCleanupBlocks('helper')).toBe(true)
     expect(wt.worktreeCleanupBlocks('other')).toBe(false)

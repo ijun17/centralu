@@ -72,7 +72,7 @@ import {
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, BusyAnswer, BusyChoice, ChildRunResult, RoutedCard, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { LaunchSettings } from '../adapters/contract.js'
 import { registeredTool } from '../adapters/registry.js'
-import { codeIntelligenceOff, isAppAgent, toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
+import { codeIntelligenceKey, codeIntelligenceOff, isAppAgent, toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
 import type { MemoryGate } from './memory-gate.js'
 
 /**
@@ -138,7 +138,7 @@ import { ToolQueries, type ToolQueriesHost } from './tool-queries.js'
 import { withTimeout } from './with-timeout.js'
 import { AppSessions, type AppSessionsHost } from './app-sessions.js'
 import { appMessageFrame, type AppMessageSource, type AppMessageVia, type AppViewPlace } from './app-messages.js'
-import { SessionTrash, type SessionTrashHost, codeIntelligenceKey } from './session-trash.js'
+import { SessionTrash, type SessionTrashHost } from './session-trash.js'
 export { appMessageFrame } from './app-messages.js'
 export type { AppMessageSource, AppMessageVia, AppViewPlace } from './app-messages.js'
 export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './delegation-flow.js'
@@ -249,6 +249,15 @@ const HOST_RECALL_MAX_HITS = 50
 export class SessionManager {
   private handles = new Map<string, SessionHandle>()
   private meta = new Map<string, SessionInfo>()
+  /**
+   * **The configuration the currently running process actually holds.**
+   *
+   * This can differ from meta (the value shown on screen). Permissions and model are fixed when the
+   * tool is launched, so a mismatch can arise where the screen changes to "auto" but the process
+   * keeps running with the old configuration. In that state, picking "auto" again does nothing,
+   * because compared against meta nothing changed (dogfooding: "it shows auto selected but keeps
+   * asking anyway"). So the comparison baseline is always this map, not meta.
+   */
   private running = new Map<
     string,
     { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset }

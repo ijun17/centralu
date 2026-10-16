@@ -1,7 +1,7 @@
 import { restoreWorktreeRecovery, stageWorktreeRecoveryRemoval, worktreeRecoveryBytes, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
-import { ChildOwnership } from './child-ownership.js'
-import { SessionAppsHub } from './session-apps.js'
-import { AgentRunWait } from './app-agents.js'
+import type { ChildOwnership } from './child-ownership.js'
+import type { SessionAppsHub } from './session-apps.js'
+import type { AgentRunWait } from './app-agents.js'
 import { basename } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import type {
@@ -20,18 +20,12 @@ import {
 } from '../dev-services/git.js'
 import { attachmentBytes, clearAttachments } from '../dev-services/attachments.js'
 import { handoffNoteBytes } from '../dev-services/handoff-notes.js'
-import { DelegationFlow, agentStartPersonText } from './delegation-flow.js'
-import { RestartPolicy } from './restart-policy.js'
-import { WorktreeSessions } from './worktree-sessions.js'
-import { HostCards } from './host-cards.js'
-import { SessionRecord } from './session-record.js'
-
-/**
- * A session created without code intelligence (#686, `codeIntelligenceOff`): `off`. Decided once at creation and read on
- * every wake, so a child keeps what it started with, and a session made before this build keeps the person's setting.
- * A setting rather than a column: it only matters to the adapter's launch, and needs no migration.
- */
-export const codeIntelligenceKey = (sessionId: string) => `code_intelligence:${sessionId}`
+import { codeIntelligenceKey } from './tool-profiles.js'
+import { type DelegationFlow, agentStartPersonText } from './delegation-flow.js'
+import type { RestartPolicy } from './restart-policy.js'
+import type { WorktreeSessions } from './worktree-sessions.js'
+import type { HostCards } from './host-cards.js'
+import type { SessionRecord } from './session-record.js'
 
 /**
  * What the trash reaches of the session manager (#428), typed as the manager declares each member. The manager builds

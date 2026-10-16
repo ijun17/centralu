@@ -76,7 +76,8 @@ export function conversationEvent(e: NormalizedEvent, sessionId: string, announc
   /*
    * The MCP-server and skill proposal lists are not re-read on the `tool_call` (#703). It arrives when the call starts,
    * before the host has run it and saved the proposal, so a read on it came back with the old list and the card never
-   * showed. The host broadcasts `orchestrator_proposals_changed` after it writes a list; that is the signal above.
+   * showed. The host broadcasts `orchestrator_proposals_changed` after it writes a list; that event's handler (in
+   * events/lists.ts) is what re-reads them.
    *
    * A safety net for a host that predates that event (an old host still serving during a swap): the call's
    * `tool_result` comes after the save, so it re-reads both lists. `centralu_run` may be either proposal (#512).

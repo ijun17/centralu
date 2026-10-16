@@ -1,5 +1,5 @@
 import { orchestratorHome } from './orchestrator-home.js'
-import { SessionAppsHub } from './session-apps.js'
+import type { SessionAppsHub } from './session-apps.js'
 import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, HostCapability } from '../apps/external/runtime.js'
 import { AgentRunWait, finalAnswer } from './app-agents.js'
 import { builderRole } from './app-builder.js'
@@ -20,8 +20,8 @@ import {
   gitSummary,
   gitStatusFiles,
 } from '../dev-services/git.js'
-import { DelegationFlow } from './delegation-flow.js'
-import { SessionRecord } from './session-record.js'
+import type { DelegationFlow } from './delegation-flow.js'
+import type { SessionRecord } from './session-record.js'
 import type { AppMessageSource, AppMessageVia } from './app-messages.js'
 
 /** Key for the builder-session directory (APP_BUILDERS_KEY) — an app is identified by (project, id) */

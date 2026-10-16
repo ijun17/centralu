@@ -101,6 +101,13 @@ export function codeIntelligenceOff(f: CodeIntelligenceFacts): boolean {
 }
 
 /**
+ * A session created without code intelligence (#686, `codeIntelligenceOff`): `off`. Decided once at creation and read on
+ * every wake, so a child keeps what it started with, and a session made before this build keeps the person's setting.
+ * A setting rather than a column: it only matters to the adapter's launch, and needs no migration.
+ */
+export const codeIntelligenceKey = (sessionId: string) => `code_intelligence:${sessionId}`
+
+/**
  * Where each bundle comes from. The orchestrator and the builder share one object (the builder's
  * profile blocks everything but `check` through `profileAllows`); a coordinator's object sees only
  * its members; the reader's object refuses directing calls.

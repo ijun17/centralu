@@ -1,4 +1,4 @@
-import { CacheLedger } from './cache-ledger.js'
+import type { CacheLedger } from './cache-ledger.js'
 import { remember } from './folder-cache.js'
 import type {
   CacheStats,

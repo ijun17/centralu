@@ -1,4 +1,4 @@
-import { CacheLedger } from './cache-ledger.js'
+import type { CacheLedger } from './cache-ledger.js'
 import type {
   NormalizedEvent,
   PermissionPreset,
@@ -55,15 +55,6 @@ export class SessionRecord {
     { seq: number; kind: 'text' | 'reasoning'; payload: Record<string, unknown>; text: string; written: number; lastWrite: number }
   >()
 
-  /**
-   * **The configuration the currently running process actually holds.**
-   *
-   * This can differ from meta (the value shown on screen). Permissions and model are fixed when the
-   * tool is launched, so a mismatch can arise where the screen changes to "auto" but the process
-   * keeps running with the old configuration. In that state, picking "auto" again does nothing,
-   * because compared against meta nothing changed (dogfooding: "it shows auto selected but keeps
-   * asking anyway"). So the comparison baseline is always this map, not meta.
-   */
   /**
    * Events a session's tool sent while `createSession` was still waiting for it to come up (#304). The session is
    * registered only once the adapter answers (a failed start must leave no ghost), so anything emitted before then

@@ -368,14 +368,6 @@ export class ExternalConversations {
   }
 
   /**
-   * Whether a conversation to resume from still exists on the tool's side.
-   *
-   * Even the list lookup itself is not free (codex spins up an app-server for it), so this is cached
-   * briefly. **When it cannot be determined, it is never treated as gone** — failing to fetch the list
-   * and treating a perfectly fine session as deleted would break the conversation just because the
-   * tool did not respond for a moment.
-   */
-  /**
    * The moment a handle is set aside, stamps "everything up to here is something I already know".
    *
    * The skip marker (externalSyncedKey) used to be updated only when catch-up actually read it. But
@@ -401,6 +393,14 @@ export class ExternalConversations {
     this.host.store.setAppSetting(externalSyncedKey(sessionId), String(Date.now()))
   }
 
+  /**
+   * Whether a conversation to resume from still exists on the tool's side.
+   *
+   * Even the list lookup itself is not free (codex spins up an app-server for it), so this is cached
+   * briefly. **When it cannot be determined, it is never treated as gone** — failing to fetch the list
+   * and treating a perfectly fine session as deleted would break the conversation just because the
+   * tool did not respond for a moment.
+   */
   async externalGone(m: SessionInfo, cwd: string): Promise<boolean> {
     const id = m.externalId ?? m.importedFrom
     if (!id) return false
