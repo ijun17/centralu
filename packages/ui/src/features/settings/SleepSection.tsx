@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useStore } from '../../store/store.js'
+import { SettingsSelect } from './OtherChoice.jsx'
 
 /** The choices, in minutes; null never. 15 is the default (the owner's decision, 2026-10-12) */
 const CHOICES: readonly (number | null)[] = [5, 15, 30, 60, 240, null]
@@ -27,8 +28,8 @@ export function SleepSection({ first }: { first: boolean }) {
     <section className={first ? '' : 'mt-5 border-t border-line pt-4'} data-testid="settings-sleep">
       <label className="flex items-center gap-2 text-sm text-ink-muted">
         Put idle sessions to sleep after
-        <select
-          className="rounded-md border border-line bg-surface-floor px-1.5 py-0.5 text-sm text-ink"
+        <SettingsSelect
+          tone="compact"
           data-testid="settings-sleep-after"
           value={value === null ? 'never' : String(value)}
           onChange={(e) => void setAfter(e.target.value === 'never' ? null : Number(e.target.value))}
@@ -38,7 +39,7 @@ export function SleepSection({ first }: { first: boolean }) {
               {label(m)}
             </option>
           ))}
-        </select>
+        </SettingsSelect>
       </label>
       <p className="mt-1 text-xs leading-body text-ink-faint">
         A session that has not been used for this long, and is not working, waiting for you or running background

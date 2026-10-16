@@ -1,16 +1,13 @@
-import { useState } from 'react'
 import { TEXT_SIZES, type LineHeight } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { BODY_FONTS, CODE_FONTS, isUsableFont } from '../../app/typography.js'
-import { isPlainEnter } from '../../app/keys.js'
+import { OtherInput, OtherOption, SettingsSelect, useOtherChoice } from './OtherChoice.jsx'
 
 const LINE_HEIGHTS: { id: LineHeight; label: string }[] = [
   { id: 'compact', label: 'Compact' },
   { id: 'normal', label: 'Normal' },
   { id: 'relaxed', label: 'Relaxed' },
 ]
-
-const OTHER = '\u0000other'
 
 /**
  * Text in Appearance (#312 step 5): the app-wide text size, the body and code fonts, and the line
@@ -129,12 +126,11 @@ function FontPicker({
   onPick: (font: string) => void
 }) {
   const listed = options.some((o) => o.value === value)
-  const [other, setOther] = useState(!listed)
-  const [draft, setDraft] = useState(listed ? '' : value)
-  const usable = isUsableFont(draft)
+  const choice = useOtherChoice({ other: !listed, draft: listed ? '' : value })
+  const usable = isUsableFont(choice.draft)
 
   const commit = () => {
-    const font = draft.trim()
+    const font = choice.draft.trim()
     if (!isUsableFont(font) || font === value) return
     onPick(font)
   }
@@ -144,18 +140,10 @@ function FontPicker({
       <span className="py-1">{label}</span>
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={other ? OTHER : value}
-            onChange={(e) => {
-              if (e.target.value === OTHER) {
-                setOther(true)
-                setDraft(value)
-                return
-              }
-              setOther(false)
-              onPick(e.target.value)
-            }}
-            className="w-fit rounded-md border border-line bg-surface-raised px-2 py-1 text-sm text-ink"
+          <SettingsSelect
+            tone="raised"
+            value={choice.shown(value)}
+            onChange={(e) => choice.onSelect(e, value, onPick)}
             data-testid={`settings-font-${kind}`}
           >
             {options.map((o) => (
@@ -163,23 +151,17 @@ function FontPicker({
                 {o.label}
               </option>
             ))}
-            <option value={OTHER}>Other…</option>
-          </select>
-          {other && (
-            <input
-              type="text"
-              value={draft}
-              spellCheck={false}
+            <OtherOption />
+          </SettingsSelect>
+          {choice.other && (
+            <OtherInput
+              draft={choice.draft}
+              onDraft={choice.setDraft}
+              commit={commit}
+              autoFocus={choice.asked}
               placeholder={kind === 'body' ? 'Font name, e.g. Inter' : 'Font name, e.g. Iosevka'}
               aria-label={`${label} name`}
               aria-invalid={!usable}
-              maxLength={200}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={commit}
-              onKeyDown={(e) => {
-                // A Korean font name's last syllable is still being composed on that Enter (#181)
-                if (isPlainEnter(e.nativeEvent)) commit()
-              }}
               className={`w-56 rounded-md border bg-surface-raised px-2 py-1 text-sm text-ink placeholder:text-ink-faint focus:outline-none ${
                 usable ? 'border-line focus:border-line-strong' : 'border-danger'
               }`}

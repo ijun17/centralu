@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { THEME_TOKENS, THEME_TOKEN_BY_KEY, type ThemeFileEntry, type ThemeMode } from '@cc/protocol'
 import { useStore, usableThemeFiles } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { SettingsSelect } from './OtherChoice.jsx'
 import { isPlainEnter } from '../../app/keys.js'
 import {
   INK_ORDER,
@@ -189,10 +190,10 @@ function SidePicker({
   return (
     <>
       <span>{side === 'dark' ? 'Dark theme' : 'Light theme'}</span>
-      <select
+      <SettingsSelect
+        tone="raised"
         value={value}
         onChange={(e) => onPick(e.target.value)}
-        className="w-fit rounded-md border border-line bg-surface-raised px-2 py-1 text-sm text-ink"
         data-testid={`settings-theme-${side}`}
       >
         {!known && <option value={value}>{`${resolved.name}${resolved.base !== side ? ` (no ${side} theme yet)` : ''}`}</option>}
@@ -206,7 +207,7 @@ function SidePicker({
             {f.name}
           </option>
         ))}
-      </select>
+      </SettingsSelect>
     </>
   )
 }

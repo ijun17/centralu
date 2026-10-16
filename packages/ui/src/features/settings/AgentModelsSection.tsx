@@ -1,9 +1,8 @@
-import { useState } from 'react'
 import type { AgentDifficulty, AgentModelChoice, AgentModels, ToolStatus } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { useTools } from '../../store/selectors.js'
-import { isPlainEnter } from '../../app/keys.js'
 import { useModels } from '../session/SessionSettings.jsx'
+import { OtherInput, OtherOption, SettingsSelect, useOtherChoice } from './OtherChoice.jsx'
 
 const LEVELS: { id: AgentDifficulty; label: string }[] = [
   { id: 'light', label: 'Light' },
@@ -11,15 +10,12 @@ const LEVELS: { id: AgentDifficulty; label: string }[] = [
   { id: 'heavy', label: 'Heavy' },
 ]
 
-const OTHER = '\u0000other'
-
 /**
  * Background's select, at one width per column: Claude's and Codex's rows line up, and a row does not move when the
  * model list arrives after the first paint
  */
-const SELECT = 'rounded-md border border-line bg-surface-floor px-1.5 py-0.5 text-sm text-ink'
-const MODEL_SELECT = `${SELECT} w-44`
-const EFFORT_SELECT = `${SELECT} w-32`
+const MODEL_WIDTH = 'w-44'
+const EFFORT_WIDTH = 'w-32'
 
 /**
  * Which model a session's start_agent runs per tool and difficulty (#729). A calling agent says how hard the job is
@@ -101,17 +97,17 @@ function LevelRow({
   onPick: (choice: AgentModelChoice | null) => void
 }) {
   const listed = !value || models.some((m) => m.id === value.model)
-  const [other, setOther] = useState(false)
-  const [draft, setDraft] = useState('')
+  const choice = useOtherChoice({ other: false, draft: '' })
+  const { other } = choice
   // A model chosen before and no longer listed (or typed, or a list not read yet) stays shown as itself
   const options = value && !models.some((m) => m.id === value.model) ? [...models, { id: value.model, label: value.model, efforts: [] }] : models
   // A model the list does not show (typed under Other…) is offered every effort the tool's listed models have
   const efforts = models.find((m) => m.id === value?.model)?.efforts ?? [...new Set(models.flatMap((m) => m.efforts))]
   const effortOptions = value?.effort && !efforts.includes(value.effort) ? [...efforts, value.effort] : efforts
   const commit = () => {
-    const model = draft.trim()
+    const model = choice.draft.trim()
     // Left empty: back to the select as it was, rather than a field nothing will fill
-    setOther(false)
+    choice.close()
     if (!model) return
     if (model !== value?.model) onPick({ model })
   }
@@ -119,21 +115,18 @@ function LevelRow({
     <>
       <span>{label}</span>
       <div className="flex flex-wrap items-center gap-2">
-        <select
-          className={MODEL_SELECT}
+        <SettingsSelect
+          tone="compact"
+          className={MODEL_WIDTH}
           aria-label={`${label} model`}
           data-testid={testId}
-          value={other ? OTHER : (value?.model ?? '')}
-          onChange={(e) => {
-            if (e.target.value === OTHER) {
-              setOther(true)
-              setDraft(listed ? '' : (value?.model ?? ''))
-              return
-            }
-            setOther(false)
-            // A new model takes its own default effort: the effort chosen belonged to the old one
-            onPick(e.target.value ? { model: e.target.value } : null)
-          }}
+          value={choice.shown(value?.model ?? '')}
+          onChange={(e) =>
+            choice.onSelect(e, listed ? '' : (value?.model ?? ''), (model) =>
+              // A new model takes its own default effort: the effort chosen belonged to the old one
+              onPick(model ? { model } : null),
+            )
+          }
         >
           <option value="">Default</option>
           {options.map((m) => (
@@ -141,30 +134,24 @@ function LevelRow({
               {m.label}
             </option>
           ))}
-          <option value={OTHER}>Other…</option>
-        </select>
+          <OtherOption />
+        </SettingsSelect>
         {other && (
-          <input
-            type="text"
-            value={draft}
-            spellCheck={false}
-            autoFocus
+          <OtherInput
+            draft={choice.draft}
+            onDraft={choice.setDraft}
+            commit={commit}
+            autoFocus={choice.asked}
             placeholder="Model name"
             aria-label={`${label} model name`}
-            maxLength={200}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              // A Korean name's last syllable is still being composed on that Enter (#181)
-              if (isPlainEnter(e.nativeEvent)) commit()
-            }}
             className="w-40 rounded border border-line bg-surface-floor px-2 py-1 text-sm text-ink placeholder:text-ink-faint"
             data-testid={`${testId}-other`}
           />
         )}
         {value && !other && effortOptions.length > 0 && (
-          <select
-            className={EFFORT_SELECT}
+          <SettingsSelect
+            tone="compact"
+            className={EFFORT_WIDTH}
             aria-label={`${label} effort`}
             data-testid={`${testId}-effort`}
             value={value.effort ?? ''}
@@ -176,7 +163,7 @@ function LevelRow({
                 {lv}
               </option>
             ))}
-          </select>
+          </SettingsSelect>
         )}
       </div>
     </>
