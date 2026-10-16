@@ -3,6 +3,7 @@ import { extname, join } from 'node:path'
 import { isSessionId, type Attachment } from '@cc/protocol'
 import { dataRoot } from '../data-dir.js'
 import { dataBytes, removeData } from './data-folder.js'
+import { rpcError } from '../rpc-error.js'
 
 /**
  * Attachment storage (D-1).
@@ -34,7 +35,7 @@ const root = () => join(dataRoot(), 'attachments')
  */
 function sessionDir(sessionId: string): string {
   if (!isSessionId(sessionId)) {
-    throw Object.assign(new Error(`Not a session id: ${sessionId}`), { code: 'internal' })
+    throw rpcError(`Not a session id: ${sessionId}`)
   }
   return join(root(), sessionId)
 }

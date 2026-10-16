@@ -26,6 +26,7 @@ import type { RestartPolicy } from './restart-policy.js'
 import type { WorktreeSessions } from './worktree-sessions.js'
 import type { HostCards } from './host-cards.js'
 import type { SessionRecord } from './session-record.js'
+import { rpcError } from '../rpc-error.js'
 
 /**
  * What the trash reaches of the session manager (#428), typed as the manager declares each member. The manager builds
@@ -103,7 +104,7 @@ export class SessionTrash {
        * A worktree cleanup cannot ride on a delete that started first (#647): that one writes a trash record without
        * the recovery snapshot, and removing the worktree after it would leave nothing a restore could bring back.
        */
-      if (recovery || fromCleanup) throw Object.assign(new Error('The session is already being deleted without its recovery snapshot'), { code: 'internal' })
+      if (recovery || fromCleanup) throw rpcError('The session is already being deleted without its recovery snapshot')
       return pending
     }
     // The first request owns the options; concurrent sidebar/agent deletes share its result.
@@ -117,7 +118,7 @@ export class SessionTrash {
   }
 
   private async trashSessionOnce(sessionId: string, removeWorktree: boolean, removeExternal: boolean, recovery?: WorktreeRecovery, fromCleanup = false): Promise<void> {
-    if (this.host.worktrees.worktreeCleanup.has(sessionId) && !recovery && !fromCleanup) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    if (this.host.worktrees.worktreeCleanup.has(sessionId) && !recovery && !fromCleanup) throw rpcError('The session worktree is being removed')
     const m = this.host.meta.get(sessionId)
     if (!m) {
       // Already in the trash, or never here: nothing to move. Say it is gone anyway, so a screen holding a stale row lets go
@@ -137,7 +138,7 @@ export class SessionTrash {
      */
     const externalId = m.externalId ?? m.importedFrom
     if (removeExternal && externalId && !this.host.adapters.get(m.tool)?.deleteExternalConversation) {
-      throw Object.assign(new Error(`${m.tool} does not support deleting its conversation file`), { code: 'internal' })
+      throw rpcError(`${m.tool} does not support deleting its conversation file`)
     }
     /*
      * If a wake is in progress, it is withdrawn and this waits for it to finish (#163). It used to
@@ -246,7 +247,7 @@ export class SessionTrash {
   private async trashOp<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
     // A delete still running counts (#839): the session is in the trash before its last steps, which would undo a restore
     if (this.trashBusy.has(sessionId) || this.trashing.has(sessionId) || this.host.worktrees.worktreeCleanup.has(sessionId)) {
-      throw Object.assign(new Error('That session is already being restored or deleted'), { code: 'internal' })
+      throw rpcError('That session is already being restored or deleted')
     }
     this.trashBusy.add(sessionId)
     try {
@@ -294,7 +295,7 @@ export class SessionTrash {
   /** A trashed conversation, read-only (#204). Live sessions are read through `loadMessages`, not here */
   async readTrashed(sessionId: string, limit: number, beforeSeq?: number): Promise<StoredMessage[]> {
     if (!this.host.store.isTrashed(sessionId)) {
-      throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
+      throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
     }
     return this.host.loadMessages(sessionId, limit, beforeSeq)
   }
@@ -316,7 +317,7 @@ export class SessionTrash {
     return this.trashOp(sessionId, async () => {
       await this.host.recoveryRepair
       const t = this.host.store.trashedSession(sessionId)
-      if (!t) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
+      if (!t) throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
       const { record } = t
       let projectId: string | null = null
       let registered: ProjectInfo | null = null
@@ -336,16 +337,11 @@ export class SessionTrash {
           projectId = record.projectId
           registered = await this.host.projectInfo(projectId, record.projectPath)
         } else {
-          throw Object.assign(
-            new Error(
-              `Its project was deleted and its folder is gone${record.projectPath ? ` (${record.projectPath})` : ''} — put the folder back, then restore`,
-            ),
-            { code: 'internal' },
-          )
+          throw rpcError(`Its project was deleted and its folder is gone${record.projectPath ? ` (${record.projectPath})` : ''} — put the folder back, then restore`)
         }
       } else if (t.session.kind === 'orchestrator' && this.host.store.orchestratorId()) {
         // Two central orchestrators would answer the same questions; the app has one (FR-11)
-        throw Object.assign(new Error('Another orchestrator is in place — the app runs one at a time'), { code: 'internal' })
+        throw rpcError('Another orchestrator is in place — the app runs one at a time')
       }
       let recovered: { branch: string; notice: string } | undefined
       if (record.recovery && t.session.worktree && projectId) {
@@ -353,7 +349,7 @@ export class SessionTrash {
         recovered = await restoreWorktreeRecovery(sessionId, repo, t.session.worktree.path, t.session.worktree.branch, record.recovery, this.host.gitTrust(projectId))
       }
       const back = await this.host.store.restoreSession(sessionId, projectId)
-      if (!back) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
+      if (!back) throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
       const fixed = isInTurn(back.state) ? { ...back, state: 'idle' as const, waitingSince: null } : back
       if (recovered && fixed.worktree) fixed.worktree = { ...fixed.worktree, branch: recovered.branch }
       if (fixed !== back || recovered) this.host.store.upsertSession(fixed)
@@ -381,7 +377,7 @@ export class SessionTrash {
     return this.trashOp(sessionId, async () => {
       await this.host.recoveryRepair
       const t = this.host.store.trashedSession(sessionId)
-      if (!t) throw Object.assign(new Error(`Not in the trash: ${sessionId}`), { code: 'session_not_found' })
+      if (!t) throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
       const { session: s, record } = t
       const cwd = this.host.store.sessionCwd(sessionId) ?? s.worktree?.path ?? record.projectPath
       const externalId = s.externalId ?? s.importedFrom
@@ -392,9 +388,9 @@ export class SessionTrash {
         if (!held) {
           const adapter = this.host.adapters.get(s.tool)
           if (!adapter?.deleteExternalConversation) {
-            throw Object.assign(new Error(`${s.tool} does not support deleting its conversation file`), { code: 'internal' })
+            throw rpcError(`${s.tool} does not support deleting its conversation file`)
           }
-          if (!cwd) throw Object.assign(new Error('The folder this conversation ran in is unknown'), { code: 'internal' })
+          if (!cwd) throw rpcError('The folder this conversation ran in is unknown')
           await adapter.deleteExternalConversation(externalId, cwd)
         }
       }

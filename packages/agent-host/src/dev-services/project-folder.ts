@@ -2,6 +2,7 @@ import { lstatSync, mkdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { PROJECTS_DIR, folderNameError } from '@cc/protocol'
+import { rpcError } from '../rpc-error.js'
 
 /**
  * Making a project's folder (#515): an **empty** folder, named by the person or the orchestrator, by default in the
@@ -44,7 +45,7 @@ export interface ProjectFolderTarget {
 
 /** A refusal worded for the person (or the model) that asked */
 function refuse(message: string): never {
-  throw Object.assign(new Error(message), { code: 'internal' })
+  throw rpcError(message)
 }
 
 /**

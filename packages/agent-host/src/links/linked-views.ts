@@ -1,6 +1,7 @@
 import { RpcMethods } from '@cc/protocol'
 import type { RemoteViews } from '../views/view-host.js'
 import type { RpcHandler } from './router.js'
+import { rpcError } from '../rpc-error.js'
 
 /**
  * The views of linked machines, as the hub's ViewHost reads them (docs/plans/remote-hub.md §11).
@@ -19,10 +20,7 @@ export function linkedViews(call: RpcHandler): RemoteViews {
       } catch (err) {
         // A machine on a Centralu from before phase 2 (connected anyway, on one protocol): say what would fix it
         if (err instanceof Error && err.message.startsWith('Unknown method: apps.viewDocument')) {
-          throw Object.assign(
-            new Error('This app view is on a machine whose Centralu cannot show its views here yet. Update Centralu there to open it.'),
-            { code: 'internal' },
-          )
+          throw rpcError('This app view is on a machine whose Centralu cannot show its views here yet. Update Centralu there to open it.')
         }
         throw err
       }

@@ -4,6 +4,7 @@ import { devNull } from 'node:os'
 import { promisify } from 'node:util'
 import { programPath } from '../tool-launch.js'
 import { killTree } from './kill-tree.js'
+import { rpcError } from '../rpc-error.js'
 
 const exec = promisify(execFile)
 
@@ -163,7 +164,7 @@ async function filterOverrides(cwd: string): Promise<string[]> {
   const out: string[] = []
   for (const name of names) {
     if (name.includes('=')) {
-      throw Object.assign(new Error(`git filter "${name}" cannot be turned off for a read before trust`), { code: 'internal' })
+      throw rpcError(`git filter "${name}" cannot be turned off for a read before trust`)
     }
     out.push('-c', `filter.${name}.clean=`, '-c', `filter.${name}.smudge=`, '-c', `filter.${name}.process=`, '-c', `filter.${name}.required=false`)
   }

@@ -7,10 +7,11 @@ import { splitQualified } from './machine-ids.js'
 import type { RoutedMachine, RpcHandler } from './router.js'
 import { isObj } from '../json-value.js'
 import { raceTimeout } from '../timing.js'
+import { rpcError } from '../rpc-error.js'
 
 /** Without a router (the reading tests), nothing that acts is reachable */
 const notRouted: RpcHandler = async (method) => {
-  throw Object.assign(new Error(`${method} cannot reach a linked machine here`), { code: 'internal' })
+  throw rpcError(`${method} cannot reach a linked machine here`)
 }
 
 /**

@@ -6,6 +6,7 @@ import { wireSegments } from '@cc/protocol'
 import { hasPs } from '../os.js'
 import { KILL_GRACE_MS } from './kill-tree.js'
 import { descendants } from './proc-table.js'
+import { rpcError } from '../rpc-error.js'
 
 const exec = promisify(execFile)
 
@@ -254,9 +255,7 @@ export async function stopStrays(
   deps: StrayStopDeps = REAL_STRAY_STOP,
 ): Promise<{ stopped: number }> {
   if (held === null) {
-    throw Object.assign(new Error('The keeper could not say which processes it holds for this host, so nothing was stopped; try again'), {
-      code: 'internal',
-    })
+    throw rpcError('The keeper could not say which processes it holds for this host, so nothing was stopped; try again')
   }
   const shoot = async (targets: readonly StrayProcess[], signal: NodeJS.Signals): Promise<StrayProcess[]> => {
     const live = new Map((await deps.find(roots, selfPid, held)).map((s) => [s.pid, s]))

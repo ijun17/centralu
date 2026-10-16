@@ -10,6 +10,7 @@ import {
   type ThemeFileContent,
   type ThemeFileEntry,
 } from '@cc/protocol'
+import { rpcError } from './rpc-error.js'
 
 /** A theme file bigger than this is not a theme (the full token set written out is about 4KB) */
 const MAX_FILE_BYTES = 256 * 1024
@@ -119,11 +120,11 @@ export class ThemeFiles {
   /** Copies a file from elsewhere in, under a fresh id if its name is taken. Refuses what does not read as a theme. */
   async importFrom(source: string): Promise<ThemeFileEntry> {
     const info = await stat(source)
-    if (!info.isFile()) throw Object.assign(new Error('That is not a file.'), { code: 'invalid_params' })
-    if (info.size > MAX_FILE_BYTES) throw Object.assign(new Error('The file is too large to be a theme.'), { code: 'invalid_params' })
+    if (!info.isFile()) throw rpcError('That is not a file.')
+    if (info.size > MAX_FILE_BYTES) throw rpcError('The file is too large to be a theme.')
     const text = await readFile(source, 'utf8')
     const parsed = parseThemeFile('import', source, text)
-    if (parsed.broken) throw Object.assign(new Error(parsed.problems[0] ?? 'Not a theme file.'), { code: 'invalid_params' })
+    if (parsed.broken) throw rpcError(parsed.problems[0] ?? 'Not a theme file.')
     const fromName = basename(source).replace(/\.json$/i, '')
     const id = await this.freeId(parsed.name !== 'import' ? parsed.name : fromName)
     // The text is copied as it is (comments of a sort, key order, `$schema`), not re-serialised
@@ -133,7 +134,7 @@ export class ThemeFiles {
 
   /** The absolute path for an id, for the shell to trash or reveal. Refuses anything that is not an id. */
   pathOf(id: string): string {
-    if (!ID_PATTERN.test(id)) throw Object.assign(new Error(`Not a theme id: ${id}`), { code: 'invalid_params' })
+    if (!ID_PATTERN.test(id)) throw rpcError(`Not a theme id: ${id}`)
     return join(this.dir, `${id}.json`)
   }
 

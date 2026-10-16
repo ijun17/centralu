@@ -10,6 +10,7 @@ import { killHandle } from './grouped-child.js'
 import { programPath } from '../tool-launch.js'
 import { raceTimeout } from '../timing.js'
 import { measuresWithDu } from '../os.js'
+import { rpcError } from '../rpc-error.js'
 
 const exec = promisify(execFile)
 
@@ -182,7 +183,7 @@ function mapStatus(c: string): GitFileStatus['status'] {
 
 function assertLexicalGitPath(cwd: string, path: string): string {
   if (!path || path.includes('\0') || path.startsWith(':')) {
-    throw Object.assign(new Error('Invalid git path'), { code: 'internal' })
+    throw rpcError('Invalid git path')
   }
   const root = resolve(cwd)
   const target = isAbsolute(path) ? resolve(path) : resolve(root, path)
@@ -192,9 +193,9 @@ function assertLexicalGitPath(cwd: string, path: string): string {
    * supposed to be a single file's path), but says why directly. This used to say the root was
    * "outside the project" too, and readers went looking for the cause in the wrong place.
    */
-  if (rel === '') throw Object.assign(new Error('Path is the project root, not a file in it'), { code: 'internal' })
+  if (rel === '') throw rpcError('Path is the project root, not a file in it')
   if (isInside(root, target)) return rel
-  throw Object.assign(new Error('Path is outside the project'), { code: 'internal' })
+  throw rpcError('Path is outside the project')
 }
 
 async function assertCanonicalGitPath(cwd: string, path: string): Promise<string> {
@@ -640,7 +641,7 @@ export async function gitWorktreeAdd(
    * before it gets here.
    */
   if (trust.trusted !== true) {
-    throw Object.assign(new Error('A worktree can only be created in a trusted project'), { code: 'internal' })
+    throw rpcError('A worktree can only be created in a trusted project')
   }
   await gitWrite(repoCwd, ['worktree', 'add', '-b', branch, path, ...(from ? [from] : [])])
   return { path, branch }

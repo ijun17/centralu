@@ -103,6 +103,7 @@ import type { UpdateService } from '../updates.js'
 import type { UpdateApplyBroker } from '../update-apply.js'
 import { inTurn, sessionIdle, type SessionIdle } from '../idle.js'
 import { appSettingRests, CardRests } from './card-rest.js'
+import { rpcError, sessionNotFound } from '../rpc-error.js'
 import {
   gitSummary,
   gitStatusFiles,
@@ -618,10 +619,7 @@ export class SessionManager {
    * (start_agent), and the person makes a worktree session from the new-session window.
    */
   async createWorktreeManager(_projectId: string, _baseBranch: string): Promise<SessionInfo> {
-    throw Object.assign(
-      new Error('The worktree manager is gone: make a worktree session from New session, or have a session start one with start_agent'),
-      { code: 'internal' },
-    )
+    throw rpcError('The worktree manager is gone: make a worktree session from New session, or have a session start one with start_agent')
   }
 
   /**
@@ -631,7 +629,7 @@ export class SessionManager {
    */
   async addProject(path: string, opts: { trusted?: boolean } = {}): Promise<ProjectInfo> {
     if (!existsSync(path) || !statSync(path).isDirectory()) {
-      throw Object.assign(new Error(`Directory not found: ${path}`), { code: 'internal' })
+      throw rpcError(`Directory not found: ${path}`)
     }
     // One folder is one project (#849): `C:\proj\`, `c:\proj` and `C:\Proj` were three. A new one is kept without a
     // trailing separator and with a capital drive letter; one already kept in another spelling is found and kept as is
@@ -677,7 +675,7 @@ export class SessionManager {
    * fails instead of writing in the home of whoever runs it.
    */
   private projectsHome: () => string = () => {
-    throw Object.assign(new Error('This host has no default location for a new project — give a parent folder'), { code: 'internal' })
+    throw rpcError('This host has no default location for a new project — give a parent folder')
   }
 
   useProjectsHome(resolve: () => string): void {
@@ -700,13 +698,13 @@ export class SessionManager {
   private async newProjectTarget(name: string, parent?: string, source?: GitSource): Promise<ProjectFolderTarget> {
     if (source) {
       const urlError = gitSourceError(source.git)
-      if (urlError) throw Object.assign(new Error(urlError), { code: 'internal' })
+      if (urlError) throw rpcError(urlError)
       if (source.branch !== undefined && !(await gitValidBranchName(source.branch))) {
-        throw Object.assign(new Error(`"${source.branch}" is not a branch name.`), { code: 'internal' })
+        throw rpcError(`"${source.branch}" is not a branch name.`)
       }
     }
     const folder = name.trim() || (source ? repoNameOf(source.git) : '')
-    if (!folder && source) throw Object.assign(new Error('The repository address gives no name for the folder — give one.'), { code: 'internal' })
+    if (!folder && source) throw rpcError('The repository address gives no name for the folder — give one.')
     return projectFolderTarget({ name: folder, parent }, parent?.trim() ? null : this.projectsHome())
   }
 
@@ -876,7 +874,7 @@ export class SessionManager {
   setProjectTrusted(projectId: string, trusted: boolean): Promise<void> {
     const was = this.store.listProjects().find((p) => p.id === projectId)?.trusted
     if (!this.store.setProjectTrusted(projectId, trusted)) {
-      throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
+      throw rpcError(`Project not found: ${projectId}`)
     }
     // Every window re-reads the project: the trust mark, the ⋯ menu and the project's apps follow the host (#719)
     if (was !== trusted) this.emit({ type: 'projects_changed' })
@@ -1015,7 +1013,7 @@ export class SessionManager {
    */
   setProjectCommands(projectId: string, commands: readonly SavedCommand[]): SavedCommand[] {
     if (!this.store.listProjects().some((p) => p.id === projectId)) {
-      throw Object.assign(new Error('Project not found'), { code: 'internal' })
+      throw rpcError('Project not found')
     }
     // Drop empty commands, and turn an empty alias into no alias — the label is display-only, so all it needs
     // is normalizing
@@ -1035,7 +1033,7 @@ export class SessionManager {
   /** Worktree provisioning settings (#69) — saved by the new session window's worktree section */
   setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): void {
     if (!this.store.listProjects().some((p) => p.id === projectId)) {
-      throw Object.assign(new Error('Project not found'), { code: 'internal' })
+      throw rpcError('Project not found')
     }
     const clean = setup
       ? { command: setup.command.trim(), copyFiles: setup.copyFiles.map((f) => f.trim()).filter(Boolean) }
@@ -1187,7 +1185,7 @@ export class SessionManager {
   async sendFromHub(sessionId: string, text: string, fromName: string, ask?: { depth: number }): Promise<void> {
     const target = this.meta.get(sessionId)
     if (!target || target.kind === 'orchestrator' || target.kind === 'coordinator') {
-      throw Object.assign(new Error(`Not a session this machine shares: ${sessionId}`), { code: 'session_not_found' })
+      throw rpcError(`Not a session this machine shares: ${sessionId}`, 'session_not_found')
     }
     const name = oneLineText(fromName, 120) || 'Orchestrator on a linked computer'
     /*
@@ -1229,7 +1227,7 @@ export class SessionManager {
       sessions: () => view.listSessions(),
       read: async (sessionId, limit, opts) => {
         const r = await view.readSession(sessionId, Math.min(limit ?? 40, HOST_READ_MAX_LINES), opts)
-        if (!r.ok) throw Object.assign(new Error(r.error ?? 'Could not read it'), { code: 'internal' })
+        if (!r.ok) throw rpcError(r.error ?? 'Could not read it')
         return { state: r.state ?? 'idle', lines: r.lines ?? [] }
       },
       recall: async (query, limit) => (await view.recall(query, Math.min(limit ?? 12, HOST_RECALL_MAX_HITS))).hits,
@@ -1250,7 +1248,7 @@ export class SessionManager {
    */
   async projectGitStatus(projectId: string): Promise<ProjectInfo> {
     const p = this.store.listProjects().find((x) => x.id === projectId)
-    if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
+    if (!p) throw rpcError('Project not found')
     /*
      * Merge detection (#69) piggybacks here — the UI's call is debounced to fire whenever a turn
      * ends, which happens to be the same rhythm as "something just moved". A merge done in a
@@ -1335,18 +1333,15 @@ export class SessionManager {
       throw new Error('A session cannot create a session in another project')
     }
     if (!params.tool) {
-      throw Object.assign(new Error('No agent adapter is available. Install and configure an agent CLI before creating a session.'), { code: 'tool_not_installed' })
+      throw rpcError('No agent adapter is available. Install and configure an agent CLI before creating a session.', 'tool_not_installed')
     }
     const adapter = this.adapters.get(params.tool)
-    if (!adapter) throw Object.assign(new Error(`Unknown tool: ${params.tool}`), { code: 'tool_not_installed' })
+    if (!adapter) throw rpcError(`Unknown tool: ${params.tool}`, 'tool_not_installed')
 
     if (params.resumeExternalId) {
       const holder = this.externals.holderOf(params.resumeExternalId)
       if (holder) {
-        throw Object.assign(
-          new Error(`This conversation is already open in the "${holder.name}" session — continue there`),
-          { code: 'internal' },
-        )
+        throw rpcError(`This conversation is already open in the "${holder.name}" session — continue there`)
       }
     }
 
@@ -1478,7 +1473,7 @@ export class SessionManager {
         await gitBranchDelete(params.cwd, worktree.branch, this.gitTrust(params.projectId)).catch(() => {})
       }
       const msg = (err as Error).message
-      throw Object.assign(new Error(`Could not start ${params.tool} session: ${msg}`), { code: 'internal' })
+      throw rpcError(`Could not start ${params.tool} session: ${msg}`)
     }
 
     this.meta.set(id, info)
@@ -1873,9 +1868,9 @@ export class SessionManager {
     sessionId: string,
     adopt?: AgentProcess,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }> {
-    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw rpcError('The session worktree is being removed')
     const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!m) throw sessionNotFound(sessionId)
 
     // If it is already alive, use it as-is (never create a duplicate process); a kept process offered too is stopped (#839)
     if (this.handles.has(sessionId)) {
@@ -2182,9 +2177,9 @@ export class SessionManager {
    * exactly as it was, and only what happens from here on piles up in the copy.
    */
   async forkConversation(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
-    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw rpcError('The session worktree is being removed')
     const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!m) throw sessionNotFound(sessionId)
 
     const source = m.externalId ?? m.importedFrom
     if (!source) {
@@ -2338,9 +2333,9 @@ export class SessionManager {
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
     by: 'person' | 'orchestrator' = 'person',
   ): Promise<SessionInfo & { applied: SettingsApplied }> {
-    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw rpcError('The session worktree is being removed')
     const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!m) throw sessionNotFound(sessionId)
 
     // Another model reads none of this one's cache (§6.1), whether it applies live or through a restart
     if (s.model !== undefined && s.model !== m.model) this.cacheLedger.note(sessionId, 'model_change')
@@ -3041,9 +3036,9 @@ export class SessionManager {
   ): Promise<void> {
     const restarting = this.restartPolicy.deferredRestarts.get(sessionId)
     if (restarting) await restarting
-    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw rpcError('The session worktree is being removed')
     const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!m) throw sessionNotFound(sessionId)
 
     /*
      * A wake in progress is waited out, through the same call as the send that woke it (#839): its process is registered
@@ -3054,13 +3049,11 @@ export class SessionManager {
     if (!this.handles.has(sessionId)) {
       const r = await this.resumeSession(sessionId)
       if (!r.resumed) {
-        throw Object.assign(new Error(`Could not resume the conversation: ${r.reason ?? 'unknown reason'}`), {
-          code: 'session_not_found',
-        })
+        throw rpcError(`Could not resume the conversation: ${r.reason ?? 'unknown reason'}`, 'session_not_found')
       }
     }
 
-    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw rpcError('The session worktree is being removed')
     const h = this.requireHandle(sessionId)
     // A message from the person is always a message boundary — continuing after an interrupt means everything
     // before it is one chunk (#66)
@@ -3143,14 +3136,14 @@ export class SessionManager {
    * untouched, and only the tool underneath it is swapped.
    */
   async switchTool(sessionId: string, tool: ToolName): Promise<SessionInfo> {
-    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw rpcError('The session worktree is being removed')
     this.refuseWhileLettingGo()
     const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!m) throw sessionNotFound(sessionId)
     if (m.tool === tool) return { ...m, live: this.handles.has(sessionId) }
 
     const adapter = this.adapters.get(tool)
-    if (!adapter) throw Object.assign(new Error(`Unknown tool: ${tool}`), { code: 'tool_not_installed' })
+    if (!adapter) throw rpcError(`Unknown tool: ${tool}`, 'tool_not_installed')
 
     /*
      * Checks whether the new tool is usable before switching to it.
@@ -3159,7 +3152,7 @@ export class SessionManager {
      */
     const d = await adapter.detect()
     if (!d.installed || !d.loggedIn) {
-      throw Object.assign(new Error(`Cannot use ${tool}: ${d.detail}`), { code: 'tool_not_installed' })
+      throw rpcError(`Cannot use ${tool}: ${d.detail}`, 'tool_not_installed')
     }
     /*
      * Read again after each wait (#839): a session deleted meanwhile is not written back from the copy read before it
@@ -3167,8 +3160,8 @@ export class SessionManager {
      */
     const from = m.tool
     const stillHere = () => {
-      if (this.meta.get(sessionId) !== m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
-      if (m.tool !== from) throw Object.assign(new Error(`The session switched to ${m.tool} meanwhile`), { code: 'internal' })
+      if (this.meta.get(sessionId) !== m) throw sessionNotFound(sessionId)
+      if (m.tool !== from) throw rpcError(`The session switched to ${m.tool} meanwhile`)
     }
     stillHere()
 
@@ -3294,10 +3287,7 @@ export class SessionManager {
        * card that does nothing when clicked would just stay there.
        */
       this.emit({ type: 'approval_resolved', sessionId, requestId, decision: 'deny' })
-      throw Object.assign(
-        new Error('That approval request is already gone (the agent restarted). The command was not run.'),
-        { code: 'approval_gone' },
-      )
+      throw rpcError('That approval request is already gone (the agent restarted). The command was not run.', 'approval_gone')
     }
 
     // Persisting the rule — the adapter only keeps it in memory, so this is needed for it to survive a
@@ -3326,10 +3316,7 @@ export class SessionManager {
     const landed = handle.answerQuestion?.(requestId, answers) ?? false
     if (!landed) {
       this.emit({ type: 'question_resolved', sessionId, requestId })
-      throw Object.assign(
-        new Error('That question is already gone (the agent restarted). The answer was not delivered.'),
-        { code: 'question_gone' },
-      )
+      throw rpcError('That question is already gone (the agent restarted). The answer was not delivered.', 'question_gone')
     }
   }
 
@@ -3437,8 +3424,8 @@ export class SessionManager {
    */
   async exportHandoffRecord(sessionId: string, toTool?: string): Promise<{ text: string; path: string }> {
     const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
-    if (!m.projectId) throw Object.assign(new Error('Only project sessions can hand off'), { code: 'internal' })
+    if (!m) throw sessionNotFound(sessionId)
+    if (!m.projectId) throw rpcError('Only project sessions can hand off')
     const rows = this.store.loadMessages(sessionId, 1_000_000)
     // Pivot = the last **successful** compaction marker — a failed compaction folded nothing at all
     let pivotSeq: number | null = null
@@ -3478,8 +3465,8 @@ export class SessionManager {
    */
   async exportHandoffNote(sessionId: string, afterSeq: number): Promise<{ text: string; path: string } | null> {
     const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
-    if (!m.projectId) throw Object.assign(new Error('Only project sessions can hand off'), { code: 'internal' })
+    if (!m) throw sessionNotFound(sessionId)
+    if (!m.projectId) throw rpcError('Only project sessions can hand off')
     if (inTurn(m.state)) return null
     let note = ''
     let asked = false
@@ -3534,7 +3521,7 @@ export class SessionManager {
   private cwdOf(projectId: string | null): string {
     if (projectId === null) return orchestratorHome()
     const p = this.store.listProjects().find((x) => x.id === projectId)
-    if (!p) throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
+    if (!p) throw rpcError(`Project not found: ${projectId}`)
     return p.path
   }
 
@@ -3743,9 +3730,9 @@ export class SessionManager {
   async stopBackgroundTask(sessionId: string, taskId: string): Promise<void> {
     const handle = this.requireHandle(sessionId)
     const task = this.meta.get(sessionId)?.backgroundTasks.find((t) => t.id === taskId && t.status === 'running')
-    if (!task) throw Object.assign(new Error('That background task is no longer running'), { code: 'task_gone' })
+    if (!task) throw rpcError('That background task is no longer running')
     if (!task.stoppable || !handle.stopBackgroundTask) {
-      throw Object.assign(new Error('This task cannot be stopped on its own'), { code: 'unsupported' })
+      throw rpcError('This task cannot be stopped on its own')
     }
     await handle.stopBackgroundTask(taskId)
   }
@@ -3753,7 +3740,7 @@ export class SessionManager {
   /** Takes the ended tasks off the session's list (#290); the running ones stay. */
   clearBackgroundTasks(sessionId: string): void {
     const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!m) throw sessionNotFound(sessionId)
     const e: NormalizedEvent = { type: 'background_tasks', sessionId, live: m.backgroundTasks.filter((t) => t.status === 'running'), clearEnded: true }
     m.backgroundTasks = applyBackgroundTasks(m.backgroundTasks, e)
     this.emit(e)
@@ -3767,7 +3754,7 @@ export class SessionManager {
   sessionIdle(sessionId: string): SessionIdle {
     if (this.worktrees.worktreeCleanupBlocks(sessionId)) return { idle: false, reason: 'turn' }
     const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!m) throw sessionNotFound(sessionId)
     if (this.inputsHeld(sessionId)) return { idle: false, reason: 'turn' }
     return sessionIdle(m, {
       running: this.handles.has(sessionId),
@@ -3854,7 +3841,7 @@ export class SessionManager {
     /** What made the restart, for the cache's rebuild cause (§6.1); a plain new process when absent */
     cause?: RebuildCause,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
-    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw rpcError('The session worktree is being removed')
     this.refuseWhileLettingGo()
     if (cause) {
       this.restartPolicy.restartReasons.set(sessionId, cause)
@@ -5225,7 +5212,7 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     const { profile, tools } = m ? this.toolChoice(m) : { profile: null, tools: () => undefined }
     if (!m || !profile) {
-      throw Object.assign(new Error('Only the orchestrator can use this tool'), { code: 'internal' })
+      throw rpcError('Only the orchestrator can use this tool')
     }
     /*
      * Narrowing only what is exposed still lets anyone who knows the name just call it anyway (#69) —
@@ -5233,7 +5220,7 @@ export class SessionManager {
      * check is made again on the execution side too.
      */
     if (!profileAllows(profile, name)) {
-      throw Object.assign(new Error(notAToolText(profile, name)), { code: 'internal' })
+      throw rpcError(notAToolText(profile, name))
     }
     return runOrchestratorTool(tools()!, name, args, { sessionId, profile })
   }
@@ -5343,7 +5330,7 @@ export class SessionManager {
    */
   appReach(sessionId: string, ref: AppRef): AppReach {
     const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!m) throw sessionNotFound(sessionId)
     if (!this.appsHub) return { reachable: false, reason: 'unavailable' }
     const key = this.isAppAgentSession(m) ? null : { id: m.id, kind: m.kind, projectId: m.projectId, builderOf: this.appSessions.builderRefOf(m) }
     return this.appsHub.reach(key, ref, this.handles.get(sessionId))
@@ -5407,19 +5394,19 @@ export class SessionManager {
   setAppShared(ref: { projectId: string; appId: string }, shared: boolean): void {
     const rt = this.requireAppsHub().rt
     if (!rt.list().some((a) => a.projectId === ref.projectId && a.appId === ref.appId)) {
-      throw Object.assign(new Error(`No such app: ${ref.appId}`), { code: 'internal' })
+      throw rpcError(`No such app: ${ref.appId}`)
     }
     writeShared(this.store, ref, shared)
     rt.sharingChanged()
   }
 
   private requireAppAccess(): AppAccess {
-    if (!this.appAccess) throw Object.assign(new Error('External apps are unavailable'), { code: 'internal' })
+    if (!this.appAccess) throw rpcError('External apps are unavailable')
     return this.appAccess
   }
 
   private requireAppsHub(): SessionAppsHub {
-    if (!this.appsHub) throw Object.assign(new Error('External apps are unavailable'), { code: 'internal' })
+    if (!this.appsHub) throw rpcError('External apps are unavailable')
     return this.appsHub
   }
 
@@ -5509,11 +5496,11 @@ export class SessionManager {
   /** Sets the project's worktree trunk (`worktrees.setTrunk`, #76; the manager's dialog chose it before #561 part 3) */
   async setWorktreeTrunk(projectId: string, baseBranch: string): Promise<void> {
     if (!this.store.listProjects().some((p) => p.id === projectId)) {
-      throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
+      throw rpcError(`Project not found: ${projectId}`)
     }
     const branch = baseBranch.trim()
-    if (!branch) throw Object.assign(new Error('Pick the branch worktrees should fork from'), { code: 'internal' })
-    if (!(await gitValidBranchName(branch))) throw Object.assign(new Error(`Not a branch name: ${branch}`), { code: 'internal' })
+    if (!branch) throw rpcError('Pick the branch worktrees should fork from')
+    if (!(await gitValidBranchName(branch))) throw rpcError(`Not a branch name: ${branch}`)
     this.store.setWorktreeTrunk(projectId, branch)
     this.emit({ type: 'projects_changed' })
   }
@@ -5729,12 +5716,12 @@ export class SessionManager {
    */
   rename(sessionId: string, name: string): void {
     const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!m) throw sessionNotFound(sessionId)
     // One line (#838): a name goes into the model's text (list_sessions, cards, reports), where a line break started a line of its own
     const next = oneLineText(name)
     // An empty name becomes a row in the list that points at nothing at all — accepting it would create a
     // nameless session
-    if (!next) throw Object.assign(new Error('Session name cannot be empty'), { code: 'internal' })
+    if (!next) throw rpcError('Session name cannot be empty')
     m.name = next
     m.autoNamed = false
     this.store.upsertSession(m)
@@ -5760,7 +5747,7 @@ export class SessionManager {
    */
   async messageImage(sessionId: string, written: string): Promise<MessageImage> {
     const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!m) throw sessionNotFound(sessionId)
     if (!this.repliesName(sessionId, written)) {
       return { ok: false, reason: 'not_mentioned', message: 'No reply in this session names this path, so it is not read' }
     }
@@ -5839,7 +5826,7 @@ export class SessionManager {
   }
   /** Refuses a process swap asked for while the handles are let go of (#839): it would stop a process the keeper keeps */
   private refuseWhileLettingGo(): void {
-    if (this.lettingGo()) throw Object.assign(new Error('Centralu is restarting or quitting; try again once it is back'), { code: 'internal' })
+    if (this.lettingGo()) throw rpcError('Centralu is restarting or quitting; try again once it is back')
   }
 
   async disposeAll(): Promise<void> {
@@ -5925,7 +5912,7 @@ export class SessionManager {
 
   private requireHandle(sessionId: string): SessionHandle {
     const h = this.handles.get(sessionId)
-    if (!h) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    if (!h) throw sessionNotFound(sessionId)
     return h
   }
 }

@@ -19,6 +19,7 @@ import { CodexChildThreads } from './child-threads.js'
 import { CodexSlashCommands } from './slash-commands.js'
 import { runningTurnOf, threadIdOf, turnIdOf } from './turn-reads.js'
 import { permissionOptionsFor, repoFilesConfig, spawnInKeeper } from './launch-config.js'
+import { rpcError } from '../../rpc-error.js'
 
 /** How long we let a resume wait in front of the person — a lock error ("active writer") arrives within this window (measured ~0.3s) */
 export const LAZY_RESUME_WAIT_MS = 3_000
@@ -298,12 +299,7 @@ export class CodexSession implements SessionHandle {
            * exact moment — codex running in a terminal, another app, or an orphan that survived
            * without being cleaned up, having inherited only the fd.
            */
-          throw Object.assign(
-            new Error(
-              'This conversation is already open elsewhere (codex in a terminal, another app, or a process left behind by an unclean shutdown)',
-            ),
-            { code: 'conversation_locked' },
-          )
+          throw rpcError('This conversation is already open elsewhere (codex in a terminal, another app, or a process left behind by an unclean shutdown)', 'conversation_locked')
         }
         throw err
       }

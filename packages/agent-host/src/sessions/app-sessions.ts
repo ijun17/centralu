@@ -29,6 +29,7 @@ import type { SessionRecord } from './session-record.js'
 import type { AppMessageSource, AppMessageVia } from './app-messages.js'
 import { parseJson } from '../dev-services/store/json.js'
 import { asObj } from '../json-value.js'
+import { rpcError } from '../rpc-error.js'
 
 /** Key for the builder-session directory (APP_BUILDERS_KEY) — an app is identified by (project, id) */
 const builderKey = (ref: AppRef): string => appKeyOf(ref.projectId, ref.appId)
@@ -92,7 +93,7 @@ export class AppSessions {
     tool?: ToolName
   }): Promise<{ app: ExternalAppInfo; builder: SessionInfo | null; builderError?: string }> {
     const rt = this.host.appsHub?.rt
-    if (!rt) throw Object.assign(new Error('External apps are unavailable — there is nowhere to make an app'), { code: 'internal' })
+    if (!rt) throw rpcError('External apps are unavailable — there is nowhere to make an app')
     const app = rt.createApp(params)
     /*
      * Creating an app also stands up its builder session (C-2). Even if that session fails to come up
@@ -159,11 +160,11 @@ export class AppSessions {
 
   private async standUpBuilder(ref: AppRef, tool?: ToolName): Promise<SessionInfo> {
     const rt = this.host.appsHub?.rt
-    if (!rt) throw Object.assign(new Error('External apps are unavailable'), { code: 'internal' })
+    if (!rt) throw rpcError('External apps are unavailable')
     const app = rt.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)
-    if (!app) throw Object.assign(new Error(`There is no such app: ${ref.projectId ?? 'user'}/${ref.appId}`), { code: 'internal' })
+    if (!app) throw rpcError(`There is no such app: ${ref.projectId ?? 'user'}/${ref.appId}`)
     if (!app.trusted) {
-      throw Object.assign(new Error('Centralu does not give a builder to an app in a project it does not trust — trust the project, and the app can start and be tested'), { code: 'internal' })
+      throw rpcError('Centralu does not give a builder to an app in a project it does not trust — trust the project, and the app can start and be tested')
     }
     /*
      * An imported app the person has not enabled yet (E-3) — its builder session works inside that
@@ -171,13 +172,13 @@ export class AppSessions {
      * first: enabling comes first.
      */
     if (app.status === 'unconfirmed') {
-      throw Object.assign(new Error(`${app.error ?? 'This imported app is not enabled'}. Enable it before starting its builder`), { code: 'internal' })
+      throw rpcError(`${app.error ?? 'This imported app is not enabled'}. Enable it before starting its builder`)
     }
     let cwd = app.dir
     const fallback = this.host.defaultToolFor(ref.projectId)
     if (ref.projectId !== null) {
       const project = this.host.store.listProjects().find((p) => p.id === ref.projectId)
-      if (!project) throw Object.assign(new Error(`Project not found: ${ref.projectId}`), { code: 'internal' })
+      if (!project) throw rpcError(`Project not found: ${ref.projectId}`)
       cwd = project.path
     }
     const info = await this.host.createSession({
@@ -219,7 +220,7 @@ export class AppSessions {
    */
   async checkApp(ref: AppRef): Promise<AppCheckReport> {
     const rt = this.host.appsHub?.rt
-    if (!rt) throw Object.assign(new Error('External apps are unavailable'), { code: 'internal' })
+    if (!rt) throw rpcError('External apps are unavailable')
     return rt.check(ref)
   }
 

@@ -7,6 +7,7 @@ import type { TerminalHandle, TerminalService } from './dev-services/terminal.js
 import type { CommandRunner } from './dev-services/commands.js'
 import { findStrays, stopStrays } from './dev-services/strays.js'
 import { gitLogPath } from './dev-services/git.js'
+import { rpcError } from './rpc-error.js'
 
 /** Internal handle → protocol shape (history is rendered as a fresh snapshot each time) */
 const toInfo = (h: TerminalHandle) => ({
@@ -113,42 +114,42 @@ export function createRpcHandler(
   { terminals, updates, commands, externalApps, views, inlineViews, heldPids, themes, agentVersions, sleeper, machines, stopHost, activity, updateApply }: RpcServices = {},
 ) {
   const requireThemes = (): ThemeFiles => {
-    if (!themes) throw Object.assign(new Error('Theme files are unavailable'), { code: 'internal' })
+    if (!themes) throw rpcError('Theme files are unavailable')
     return themes
   }
   const held = async (): Promise<number[]> => (heldPids ? heldPids().catch(() => []) : [])
   /** The same list, or null when the keeper could not answer: a stop must not guess (`stopStrays`) */
   const heldOrUnknown = async (): Promise<number[] | null> => (heldPids ? heldPids().catch(() => null) : [])
   const requireTerminals = (): TerminalService => {
-    if (!terminals) throw Object.assign(new Error('Terminals are unavailable'), { code: 'internal' })
+    if (!terminals) throw rpcError('Terminals are unavailable')
     return terminals
   }
   const requireCommands = (): CommandRunner => {
-    if (!commands) throw Object.assign(new Error('Command runs are unavailable'), { code: 'internal' })
+    if (!commands) throw rpcError('Command runs are unavailable')
     return commands
   }
   const requireExternalApps = (): ExternalApps => {
-    if (!externalApps) throw Object.assign(new Error('External apps are unavailable'), { code: 'internal' })
+    if (!externalApps) throw rpcError('External apps are unavailable')
     return externalApps
   }
   const requireViews = (): ViewHost => {
-    if (!views) throw Object.assign(new Error('App views are unavailable'), { code: 'internal' })
+    if (!views) throw rpcError('App views are unavailable')
     return views
   }
   const requireAgentVersions = (): AgentVersionService => {
-    if (!agentVersions) throw Object.assign(new Error('Agent version checks are unavailable'), { code: 'internal' })
+    if (!agentVersions) throw rpcError('Agent version checks are unavailable')
     return agentVersions
   }
   const requireSleeper = (): SessionSleeper => {
-    if (!sleeper) throw Object.assign(new Error('Putting sessions to sleep is unavailable on this host'), { code: 'internal' })
+    if (!sleeper) throw rpcError('Putting sessions to sleep is unavailable on this host')
     return sleeper
   }
   const requireMachines = (): MachinesPort => {
-    if (!machines) throw Object.assign(new Error('Linked machines are unavailable on this host'), { code: 'internal' })
+    if (!machines) throw rpcError('Linked machines are unavailable on this host')
     return machines
   }
   const requireUpdates = (): UpdateService => {
-    if (!updates) throw Object.assign(new Error('Update checks are unavailable'), { code: 'internal' })
+    if (!updates) throw rpcError('Update checks are unavailable')
     return updates
   }
 
@@ -204,21 +205,21 @@ export function createRpcHandler(
     'agents.resolveMcpProposal': async (p) => {
       const { name, approve } = RpcMethods['agents.resolveMcpProposal'].params.parse(p)
       const r = await mgr.resolveMcpProposal(name, approve)
-      if (!r.ok) throw Object.assign(new Error(r.error ?? 'unknown proposal'), { code: 'internal' })
+      if (!r.ok) throw rpcError(r.error ?? 'unknown proposal')
       return { ok: true as const }
     },
     'agents.skillProposals': async () => ({ proposals: mgr.skillProposals() }),
     'agents.resolveSkillProposal': async (p) => {
       const { name, approve } = RpcMethods['agents.resolveSkillProposal'].params.parse(p)
       const r = await mgr.resolveSkillProposal(name, approve)
-      if (!r.ok) throw Object.assign(new Error(r.error ?? 'unknown proposal'), { code: 'internal' })
+      if (!r.ok) throw rpcError(r.error ?? 'unknown proposal')
       return { ok: true as const }
     },
     'agents.orchestratorSkills': async () => ({ skills: mgr.orchestratorSkills() }),
     'agents.deleteOrchestratorSkill': async (p) => {
       const { name } = RpcMethods['agents.deleteOrchestratorSkill'].params.parse(p)
       const r = await mgr.deleteOrchestratorSkill(name)
-      if (!r.ok) throw Object.assign(new Error(r.error ?? 'unknown skill'), { code: 'internal' })
+      if (!r.ok) throw rpcError(r.error ?? 'unknown skill')
       return { ok: true as const }
     },
     'agents.listExternalSessions': async (p) => {
@@ -249,7 +250,7 @@ export function createRpcHandler(
     'agents.capabilities': async (p) => {
       const { tool } = RpcMethods['agents.capabilities'].params.parse(p)
       const a = adapters.get(tool)
-      if (!a) throw Object.assign(new Error(`Unknown tool: ${tool}`), { code: 'tool_not_installed' })
+      if (!a) throw rpcError(`Unknown tool: ${tool}`, 'tool_not_installed')
       return a.capabilities
     },
     'agents.versions': async (p) => requireAgentVersions().check(RpcMethods['agents.versions'].params.parse(p).force),
@@ -381,7 +382,7 @@ export function createRpcHandler(
     },
     'apps.holdViews': async (p, ctx) => {
       const { instanceIds } = RpcMethods['apps.holdViews'].params.parse(p)
-      if (!ctx) throw Object.assign(new Error('App views are held through a window connection'), { code: 'internal' })
+      if (!ctx) throw rpcError('App views are held through a window connection')
       return { missing: requireViews().hold(instanceIds, ctx.client) }
     },
     'apps.closeView': async (p) => {
@@ -392,7 +393,7 @@ export function createRpcHandler(
     },
     'apps.inlineReopen': async (p) => {
       const { sessionId, callId } = RpcMethods['apps.inlineReopen'].params.parse(p)
-      if (!inlineViews) throw Object.assign(new Error('App views are unavailable'), { code: 'internal' })
+      if (!inlineViews) throw rpcError('App views are unavailable')
       return inlineViews.reopen(sessionId, callId)
     },
     // A host with no app runtime holds no views either — a reopened UI shows nothing but "open app"
@@ -411,10 +412,10 @@ export function createRpcHandler(
        */
       const owner = inlineViews?.owner(instanceId) ?? null
       if (owner && owner.sessionId !== sessionId) {
-        throw Object.assign(new Error('This app view is not open in that conversation'), { code: 'internal' })
+        throw rpcError('This app view is not open in that conversation')
       }
       const ref = owner?.ref ?? views?.describe(instanceId)?.app ?? null
-      if (!ref) throw Object.assign(new Error('This app view is not open'), { code: 'internal' })
+      if (!ref) throw rpcError('This app view is not open')
       const name = externalApps?.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)?.name
       await mgr.sendFromApp(sessionId, text, { appId: ref.appId, projectId: ref.projectId, name: name ?? ref.appId }, owner ? 'inline' : 'pinned')
       return { ok: true as const }
@@ -496,7 +497,7 @@ export function createRpcHandler(
       if (projectId === null) return { kind: 'snapshots' as const, snapshots: apps.snapshots({ appId, projectId }).map(({ stamp: _stamp, depth: _depth, ...s }) => s) }
       const project = (await mgr.listProjects()).find((x) => x.id === projectId)
       const app = apps.list().find((a) => a.appId === appId && a.projectId === projectId)
-      if (!project || !app) throw Object.assign(new Error(`There is no such app: ${projectId}/${appId}`), { code: 'internal' })
+      if (!project || !app) throw rpcError(`There is no such app: ${projectId}/${appId}`)
       const { repo, commits } = await gitLogPath(project.path, relative(project.path, app.dir), 20)
       return { kind: 'git' as const, repo, commits }
     },
@@ -726,7 +727,7 @@ export function createRpcHandler(
     'terminal.restart': async (p) => {
       const { terminalId, cols, rows } = RpcMethods['terminal.restart'].params.parse(p)
       const h = requireTerminals().restart(terminalId, cols, rows)
-      if (!h) throw Object.assign(new Error('Terminal not found'), { code: 'internal' })
+      if (!h) throw rpcError('Terminal not found')
       return toInfo(h)
     },
     // Runner for frequently used commands (#60) — the same cwd rule as the terminal (preparation for worktrees)
@@ -805,7 +806,7 @@ export function createRpcHandler(
     },
     'machines.activity': async (p) => ({ activity: await requireMachines().activity(RpcMethods['machines.activity'].params.parse(p).machineId) }),
     'host.activity': async () => {
-      if (!activity) throw Object.assign(new Error('This host does not report its activity'), { code: 'internal' })
+      if (!activity) throw rpcError('This host does not report its activity')
       return activity()
     },
     // What a hub's orchestrator reads of this host's sessions (#82 phase 4, docs/plans/remote-hub.md §12)
@@ -844,7 +845,7 @@ export function createRpcHandler(
     },
     'host.stop': async () => {
       if (!stopHost) {
-        throw Object.assign(new Error('This host runs under the Centralu app, which stops it: quit the app instead'), { code: 'internal' })
+        throw rpcError('This host runs under the Centralu app, which stops it: quit the app instead')
       }
       // After this answer has been written: the shutdown closes the socket it travels on
       setTimeout(stopHost, 50)
@@ -861,10 +862,7 @@ export function createRpcHandler(
      * transport says so for everything but a swap's cut): asking again gets the same answer.
      */
     if (!h) {
-      throw Object.assign(
-        new Error(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`),
-        { code: 'internal' },
-      )
+      throw rpcError(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`)
     }
     const result = await h(params, ctx)
 
@@ -890,7 +888,7 @@ export function createRpcHandler(
         .slice(0, 3)
         .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
         .join(' / ')
-      throw Object.assign(new Error(`${method}'s response does not match its declaration — ${where}`), { code: 'internal' })
+      throw rpcError(`${method}'s response does not match its declaration — ${where}`)
     }
     return checked.data
   }

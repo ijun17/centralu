@@ -1,6 +1,7 @@
 import type { HomeView } from './views/home-view.js'
 import type { AppRef, ExternalApps } from './apps/external/runtime.js'
 import type { ViewHost } from './views/view-host.js'
+import { rpcError } from './rpc-error.js'
 
 /**
  * Opens the one fixed view (M4 B-2) — the body of the RPC `apps.openView`.
@@ -39,7 +40,7 @@ export async function openHomeView(apps: ExternalApps, views: ViewHost, ref: App
   const toolInput: Record<string, unknown> = {}
   const invoke = async () => {
     const out = await apps.call(ref, home.tool, toolInput, { kind: 'view' })
-    if (!out.result) throw Object.assign(new Error(out.error ?? `The home tool "${home.tool}" did not answer`), { code: 'internal' })
+    if (!out.result) throw rpcError(out.error ?? `The home tool "${home.tool}" did not answer`)
     return { tool: home.tool, resourceUri: home.resourceUri, toolInput, toolResult: out.result, runId: out.runId }
   }
   if (openKey) {

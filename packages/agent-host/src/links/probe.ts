@@ -1,6 +1,7 @@
 import type { MachineProbe } from '@cc/protocol'
 import { runSsh, SshRunFailure } from './ssh-run.js'
 import { lastLine, powershell, WSL_DISTRO_RE } from './tunnel.js'
+import { rpcError } from '../rpc-error.js'
 
 /**
  * What runs at the other end of an ssh target, asked once before it is linked (#514), so the Add
@@ -93,7 +94,7 @@ export type ProbeOptions = {
 export function probeTarget(target: string, opts: ProbeOptions = {}): Promise<MachineProbe> {
   const t = target.trim()
   if (!t || t.startsWith('-') || /\s/.test(t)) {
-    return Promise.reject(Object.assign(new Error('Not an ssh target: use a host alias from ~/.ssh/config, or user@host'), { code: 'internal' }))
+    return Promise.reject(rpcError('Not an ssh target: use a host alias from ~/.ssh/config, or user@host'))
   }
   const args = [...(opts.configFile ? ['-F', opts.configFile] : []), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '--', t, probeCommand()]
   /*

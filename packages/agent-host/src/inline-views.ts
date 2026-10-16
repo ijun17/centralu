@@ -3,6 +3,7 @@ import { APP_VIEWS_LIVE_PER_SESSION, appLabel, type NormalizedEvent } from '@cc/
 import { resourceUriOf, type AppRef, type ExternalApps } from './apps/external/runtime.js'
 import type { SessionAppCall, SessionAppsHub } from './sessions/session-apps.js'
 import type { ViewHost } from './views/view-host.js'
+import { rpcError } from './rpc-error.js'
 
 /**
  * An app view inside a conversation (M4 B-1) — when a session's agent calls an app tool that has a
@@ -108,7 +109,7 @@ export type ReopenedView = {
 
 /** Cannot be reopened — the reason is the message itself (it stands as is in the placeholder) */
 function refuse(message: string): never {
-  throw Object.assign(new Error(message), { code: 'internal' })
+  throw rpcError(message)
 }
 
 export class InlineViews {

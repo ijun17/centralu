@@ -1,5 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 import type { IncomingHttpHeaders, RequestListener } from 'node:http'
+import { rpcError } from '../rpc-error.js'
 
 /**
  * The host's HTTP door (M4 P-2).
@@ -149,7 +150,7 @@ function routeLabel(route: HttpRoute): string {
 export function createHttpHandler(gate: HttpGate | undefined): RequestListener {
   if (gate) {
     const err = secretError(gate.secret)
-    if (err) throw Object.assign(new Error(err), { code: 'internal' })
+    if (err) throw rpcError(err)
   }
   const routes = (gate?.routes ?? []).map(compile)
 

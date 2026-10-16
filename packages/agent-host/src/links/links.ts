@@ -26,6 +26,7 @@ import type { RoutedMachine } from './router.js'
 import { shimNames, type Endpoint, type HostStart, type RemoteAutostart, type RemoteCommand, type RemoteInstall, type RemoteRun, type RemoteSpec, type Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
 import { isObj } from '../json-value.js'
+import { rpcError } from '../rpc-error.js'
 
 /**
  * The hub's links to other machines (docs/plans/remote-hub.md §2, §5): one `LinkedMachine` per
@@ -101,7 +102,7 @@ export type LinkInstaller = {
   nodeDist?: string
 }
 
-const linkError = (message: string) => Object.assign(new Error(message), { code: 'internal' })
+const linkError = (message: string) => rpcError(message)
 
 /** The connection line's `install`, as the row shows it; null when the remote did not say */
 function installOf(i: RemoteInstall | undefined): MachineInfo['install'] {
@@ -215,14 +216,11 @@ export class LinkedMachine implements RoutedMachine {
   // ── RoutedMachine ───────────────────────────────────────────────────────────────────────
 
   call(method: string, params: unknown): Promise<unknown> {
-    if (!this.client) return Promise.reject(Object.assign(new Error(`${this.name} is not reachable right now`), { code: 'internal', retryable: true }))
+    if (!this.client) return Promise.reject(rpcError(`${this.name} is not reachable right now`, 'internal', { retryable: true }))
     // A card the hub could not read is never allowed for good from here, whatever the window offered (#844, `unreadCard`)
     if (method === 'agents.respondApproval' && isObj(params) && params.decision === 'always' && this.q.unreadCard(params.sessionId, params.requestId)) {
       return Promise.reject(
-        Object.assign(new Error(`This question from ${this.name} could not be read in full here, so it cannot be allowed always. Allow it once or deny it.`), {
-          code: 'internal',
-          retryable: false,
-        }),
+        rpcError(`This question from ${this.name} could not be read in full here, so it cannot be allowed always. Allow it once or deny it.`, 'internal', { retryable: false }),
       )
     }
     return this.client.call(method, params)
@@ -885,11 +883,11 @@ export class Links {
   add(spec: { name: string; sshTarget: string; shell?: RemoteSpec['shell']; wslDistro?: string | null; command?: string | null }): MachineInfo {
     const trimmed = { name: spec.name.trim(), sshTarget: spec.sshTarget.trim() }
     const remote: RemoteSpec = { shell: spec.shell ?? 'posix', wslDistro: spec.wslDistro?.trim() || null, command: spec.command?.trim() || null }
-    if (remote.shell === 'wsl' && !remote.wslDistro) throw Object.assign(new Error('A WSL machine needs the distro name (`wsl.exe -l -v` lists them)'), { code: 'internal' })
-    if (remote.command && /[\r\n]/.test(remote.command)) throw Object.assign(new Error('The remote command must be one line'), { code: 'internal' })
-    if (!trimmed.name) throw Object.assign(new Error('A machine needs a name'), { code: 'internal' })
+    if (remote.shell === 'wsl' && !remote.wslDistro) throw rpcError('A WSL machine needs the distro name (`wsl.exe -l -v` lists them)')
+    if (remote.command && /[\r\n]/.test(remote.command)) throw rpcError('The remote command must be one line')
+    if (!trimmed.name) throw rpcError('A machine needs a name')
     if (!trimmed.sshTarget || trimmed.sshTarget.startsWith('-') || /\s/.test(trimmed.sshTarget)) {
-      throw Object.assign(new Error('Not an ssh target: use a host alias from ~/.ssh/config, or user@host'), { code: 'internal' })
+      throw rpcError('Not an ssh target: use a host alias from ~/.ssh/config, or user@host')
     }
     const record = this.deps.registry.add({ id: newMachineId(trimmed.name, new Set(this.machines.keys())), ...trimmed, remote, addedAt: Date.now(), acceptedVersions: null })
     return this.startOne(record).info()
@@ -930,7 +928,7 @@ export class Links {
   acceptVersions(id: string): MachineInfo {
     const m = this.need(id)
     if (m.info().versions?.compatible === false) {
-      throw Object.assign(new Error('The two sides speak different protocols; one of them has to be updated first'), { code: 'internal' })
+      throw rpcError('The two sides speak different protocols; one of them has to be updated first')
     }
     m.acceptVersions()
     return m.info()
@@ -962,13 +960,13 @@ export class Links {
 
   private need(id: string): LinkedMachine {
     const m = this.machines.get(id)
-    if (!m) throw Object.assign(new Error(`No linked machine ${id}`), { code: 'internal' })
+    if (!m) throw rpcError(`No linked machine ${id}`)
     return m
   }
 
   async remove(id: string): Promise<void> {
     const m = this.machines.get(id)
-    if (!m) throw Object.assign(new Error(`No linked machine ${id}`), { code: 'internal' })
+    if (!m) throw rpcError(`No linked machine ${id}`)
     this.machines.delete(id)
     await m.stop()
     this.deps.registry.remove(id)

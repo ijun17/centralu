@@ -14,6 +14,7 @@ import {
 import type { SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
+import { rpcError } from '../rpc-error.js'
 
 /** A card the host raised in a session's approval slot (M4 D-4, #371) — see `HostCards.hostAsks` */
 export type HostAsk = {
@@ -221,7 +222,7 @@ export class HostCards {
   answerAppQuestion(questionId: string, decision: 'allow' | 'deny'): void {
     const q = this.appQuestions.get(questionId)
     if (!q) {
-      throw Object.assign(new Error('That question is no longer open — it timed out, or the app stopped waiting'), { code: 'internal' })
+      throw rpcError('That question is no longer open — it timed out, or the app stopped waiting')
     }
     this.appQuestions.delete(questionId)
     this.host.emit({ type: 'external_app_questions_changed' })

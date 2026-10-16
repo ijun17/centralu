@@ -8,6 +8,7 @@ import { allowAttribute, approvedPermissions, buildProxyCsp, buildViewCsp, type 
 import type { OriginPorts } from './origin-ports.js'
 import { PROXY_SCRIPT_HASH, proxyPageHtml } from './proxy-page.js'
 import { viewDocumentFromResource, type ViewDocument } from './view-document.js'
+import { rpcError } from '../rpc-error.js'
 
 /**
  * App view hosting (M4 B-3a).
@@ -185,7 +186,7 @@ function sameApp(a: AppRef, b: AppRef): boolean {
 }
 
 function fail(message: string): never {
-  throw Object.assign(new Error(message), { code: 'internal' })
+  throw rpcError(message)
 }
 
 export class ViewHost {

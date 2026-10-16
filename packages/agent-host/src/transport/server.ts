@@ -13,6 +13,7 @@ import { createHttpHandler, sameSecret, type HttpGate } from './http.js'
 import { bridgeRefusal, bridgeSessionOf } from './bridge-token.js'
 import { hostProof } from './host-proof.js'
 import { DrainCut, type Drain } from '../drain.js'
+import { rpcError } from '../rpc-error.js'
 
 /**
  * The WS server (docs/protocol.md §1). Identical in dev and prod — Tauri only spawns this process.
@@ -214,7 +215,7 @@ export class HostServer {
      * as listen, and the UI threw MissingHostTokenError. Both sides are aligned to use the same
      * rule.
      */
-    if (!opts.token.trim()) throw Object.assign(new Error('Host token must not be empty'), { code: 'internal' })
+    if (!opts.token.trim()) throw rpcError('Host token must not be empty')
     this.allowedOrigins = new Set(opts.allowedOrigins ?? DEFAULT_ALLOWED_ORIGINS)
     const maxBufferedBytes = opts.maxBufferedBytes ?? TRANSPORT_LIMITS.maxBufferedBytes
     this.limits = {

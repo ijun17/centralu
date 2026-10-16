@@ -1,4 +1,5 @@
 import { runGit } from './git-exec.js'
+import { rpcError } from '../rpc-error.js'
 
 /**
  * Cloning a repository into a new project's folder (#515). The folder is already made (empty) by
@@ -80,6 +81,6 @@ export async function cloneInto(url: string, into: string, cwd: string, branch?:
   try {
     await runGit(cwd, cloneArgs(url, into, branch), { allowRepoPrograms: true, timeout: CLONE_TIMEOUT_MS, env: cloneEnv(process.env, own) })
   } catch (e) {
-    throw Object.assign(new Error(cloneFailure(e, url, branch)), { code: 'internal' })
+    throw rpcError(cloneFailure(e, url, branch))
   }
 }

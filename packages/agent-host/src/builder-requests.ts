@@ -1,6 +1,7 @@
 import { builderErrorFrame, builderRequestFrame, type Attachment, type BuilderRequestFacts, type BuilderRunFact, type SessionInfo } from '@cc/protocol'
 import type { AppRef, ExternalApps } from './apps/external/runtime.js'
 import type { ViewHost } from './views/view-host.js'
+import { rpcError } from './rpc-error.js'
 
 /**
  * A message from an app to its building session (M4 C-5) — the body of the RPC `apps.askBuilder`.
@@ -34,7 +35,7 @@ export type BuilderRequest = {
 }
 
 function refuse(message: string): never {
-  throw Object.assign(new Error(message), { code: 'internal' })
+  throw rpcError(message)
 }
 
 export async function askBuilder(deps: BuilderRequestDeps, req: BuilderRequest): Promise<{ sessionId: string }> {

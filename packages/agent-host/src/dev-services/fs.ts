@@ -6,6 +6,7 @@ import { folderNameError, IMAGE_PREVIEW_MAX_BYTES, wireBaseName, wireJoin, type 
 import { assertCreatePath, assertExistingPath, canonicalPath, isInside, UnsafePathError } from './path-guard.js'
 import { runGit, type GitTrust } from './git-exec.js'
 import { clonesFiles, cpKeepsLinks, hasWindowsFileNames, HOST_PLATFORM, type Platform } from '../os.js'
+import { rpcError } from '../rpc-error.js'
 
 /**
  * The file tree and viewer service (C-1).
@@ -49,13 +50,13 @@ function imageMime(path: string): string | undefined {
 export function safeJoin(root: string, rel: string): string {
   const target = resolve(root, rel || '.')
   if (!isInside(resolve(root), target)) {
-    throw Object.assign(new Error('Path is outside the project'), { code: 'internal' })
+    throw rpcError('Path is outside the project')
   }
   return target
 }
 
 function fail(message: string): never {
-  throw Object.assign(new Error(message), { code: 'internal' })
+  throw rpcError(message)
 }
 
 /**

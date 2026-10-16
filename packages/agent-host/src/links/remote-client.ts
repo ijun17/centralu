@@ -1,6 +1,7 @@
 import WebSocket from 'ws'
 import { HostBuild, PROTOCOL_VERSION, ProtocolError, parseServerFrame } from '@cc/protocol'
 import { proofNonce, provesToken } from '../transport/host-proof.js'
+import { rpcError } from '../rpc-error.js'
 
 /**
  * The hub's connection to one linked machine's host (docs/plans/remote-hub.md §2, §5).
@@ -85,7 +86,7 @@ const DEFAULT_CALL_TIMEOUT_MS = 200_000
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
 
-const linkError = (message: string, retryable: boolean) => Object.assign(new Error(message), { code: 'internal', retryable })
+const linkError = (message: string, retryable: boolean) => rpcError(message, 'internal', { retryable })
 
 export class RemoteClient {
   private ws: WebSocket | null = null
@@ -225,7 +226,7 @@ export class RemoteClient {
     const id = String(this.nextId++)
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        if (this.pending.delete(id)) reject(Object.assign(new Error(`The machine did not answer ${method} in time`), { code: 'internal', retryable: true }))
+        if (this.pending.delete(id)) reject(rpcError(`The machine did not answer ${method} in time`, 'internal', { retryable: true }))
       }, this.opts.callTimeoutMs ?? DEFAULT_CALL_TIMEOUT_MS)
       this.pending.set(id, { resolve, reject, timer })
       ws.send(JSON.stringify({ kind: 'rpc', id, method, params }))

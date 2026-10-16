@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { isProjectId, isSessionId } from '@cc/protocol'
 import { dataRoot } from '../data-dir.js'
 import { dataBytes, removeData, removeDataSync } from './data-folder.js'
+import { rpcError } from '../rpc-error.js'
 
 /**
  * Where a handoff note lives (#142) — **under the data folder**,
@@ -38,7 +39,7 @@ const root = () => join(dataRoot(), 'handoff')
  */
 export function handoffNoteDir(projectId: string): string {
   if (!isProjectId(projectId)) {
-    throw Object.assign(new Error(`Not a project id: ${projectId}`), { code: 'internal' })
+    throw rpcError(`Not a project id: ${projectId}`)
   }
   return join(root(), projectId)
 }
@@ -46,7 +47,7 @@ export function handoffNoteDir(projectId: string): string {
 /** One handing-off session's note — since its name is the session id, two handoffs running at once never contend for the same spot (#104) */
 export function handoffNotePath(projectId: string, sessionId: string): string {
   if (!isSessionId(sessionId)) {
-    throw Object.assign(new Error(`Not a session id: ${sessionId}`), { code: 'internal' })
+    throw rpcError(`Not a session id: ${sessionId}`)
   }
   return join(handoffNoteDir(projectId), `${sessionId}.md`)
 }

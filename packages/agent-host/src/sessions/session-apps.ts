@@ -4,6 +4,7 @@ import { appMcpServerName } from '../apps/contract.js'
 import type { AppCallOutcome, AppRef, ExternalApps } from '../apps/external/runtime.js'
 import { raceTimeout } from '../timing.js'
 import { withTimeout } from './with-timeout.js'
+import { rpcError } from '../rpc-error.js'
 
 /**
  * Attaches external apps to a session (M4 A-5) — **which session gets which app**, and the path
@@ -189,7 +190,7 @@ export class SessionAppsHub {
    */
   forSession(sessionId: string): SessionApps {
     const a = this.live.get(sessionId)
-    if (!a) throw Object.assign(new Error(`This session cannot call apps right now (it is not running): ${sessionId}`), { code: 'session_not_found' })
+    if (!a) throw rpcError(`This session cannot call apps right now (it is not running): ${sessionId}`, 'session_not_found')
     return a
   }
 

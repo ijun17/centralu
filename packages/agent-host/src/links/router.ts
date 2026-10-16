@@ -3,6 +3,7 @@ import { decodeNumber, encodeNumber, splitQualified } from './machine-ids.js'
 import type { Qualifier } from './qualifier.js'
 import { ROUTES, type Route } from './routes.js'
 import { isObj, type Obj } from '../json-value.js'
+import { rpcError } from '../rpc-error.js'
 
 /**
  * The hub's request router (docs/plans/remote-hub.md §5): one function in front of
@@ -143,7 +144,7 @@ export class Router {
     if (route.orMachine && (params[key] === null || params[key] === undefined) && typeof params.machine === 'string') {
       // A linked machine's user-folder app, named by `machine` since it has no project (plan §11)
       const m = this.machineById(params.machine)
-      if (!m) throw Object.assign(new Error(`No linked machine ${params.machine}`), { code: 'internal' })
+      if (!m) throw rpcError(`No linked machine ${params.machine}`)
       const { machine: _machine, ...rest } = params
       const r = await this.forward(m, method, route.params ? route.params(rest, m.q) : rest)
       return route.result ? route.result(r, m.q) : r
@@ -182,7 +183,7 @@ export class Router {
     // A linked machine's user-folder app, named by `machine` since it has no project (plan §11.9); it must agree with the ids
     if (route.orMachine && typeof params.machine === 'string') {
       const named = this.machineById(params.machine)
-      if (!named) throw Object.assign(new Error(`No linked machine ${params.machine}`), { code: 'internal' })
+      if (!named) throw rpcError(`No linked machine ${params.machine}`)
       if (target === undefined) target = named
       else if (target !== named) throw new AcrossMachinesError(method)
     }
@@ -202,7 +203,7 @@ export class Router {
   ): Promise<unknown> {
     if (!isObj(params) || params.machine === undefined || params.machine === null) return this.opts.local(method, params, ctx)
     const m = this.machineById(params.machine)
-    if (!m) throw Object.assign(new Error(`No linked machine ${String(params.machine)}`), { code: 'internal' })
+    if (!m) throw rpcError(`No linked machine ${String(params.machine)}`)
     const { machine: _machine, ...rest } = params
     if (route.sharesAccount && m.reachable) {
       const shared = await this.sameAccountAnswer(m, method, rest, ctx)
@@ -365,7 +366,7 @@ export class Router {
     const folded = typeof id === 'number' ? decodeNumber(id) : null
     if (!folded) return this.opts.local('approvals.deleteRule', params)
     const m = machines.find((x) => x.q.slot === folded.slot)
-    if (!m) throw Object.assign(new Error('That rule belongs to a machine that is no longer linked'), { code: 'internal' })
+    if (!m) throw rpcError('That rule belongs to a machine that is no longer linked')
     return this.forward(m, 'approvals.deleteRule', { id: folded.n })
   }
 

@@ -43,6 +43,7 @@ import {
 import { canonicalPath, isInside, isMissingPathError } from '../dev-services/path-guard.js'
 import { prepareWorktreeDependencies } from '../dev-services/worktree-dependencies.js'
 import { RestartPolicy } from './restart-policy.js'
+import { rpcError } from '../rpc-error.js'
 
 /** A path as a comparison key: real long name, forward slashes, no trailing slash, case-folded on Windows (git prints its own spelling) */
 function pathKey(path: string): string {
@@ -113,14 +114,7 @@ export class WorktreeSessions {
     let worktree: Worktree
     const summary = await gitSummary(params.cwd, this.host.gitTrust(params.projectId))
     if (!summary.isRepo || summary.denied) {
-      throw Object.assign(
-        new Error(
-          summary.denied
-            ? 'Cannot read this git repository — grant folder access and try again'
-            : 'Worktrees need a git repository. This directory is not one.',
-        ),
-        { code: 'internal' },
-      )
+      throw rpcError(summary.denied ? 'Cannot read this git repository — grant folder access and try again' : 'Worktrees need a git repository. This directory is not one.')
     }
     const path = this.worktreePathFor(params.projectId, id)
     /*
@@ -131,10 +125,7 @@ export class WorktreeSessions {
      * repository's programs (the read above is locked for an untrusted project).
      */
     if (!this.host.projectTrusted(params.projectId) && !(params.askedBy && this.host.autoBoundaryOpen(params.askedBy, 'worktree in an untrusted project'))) {
-      throw Object.assign(
-        new Error("Worktree sessions need a trusted project: checking out runs the repository's hooks and filters. Trust the project first."),
-        { code: 'internal' },
-      )
+      throw rpcError("Worktree sessions need a trusted project: checking out runs the repository's hooks and filters. Trust the project first.")
     }
     /*
      * The person can set the branch name (#69) — because the branch name doubles as the session
@@ -145,7 +136,7 @@ export class WorktreeSessions {
      */
     const requested = params.worktreeBranch?.trim()
     if (requested && !(await gitValidBranchName(requested))) {
-      throw Object.assign(new Error(`Not a valid branch name: ${requested}`), { code: 'internal' })
+      throw rpcError(`Not a valid branch name: ${requested}`)
     }
     const branch = requested || `${APP_SLUG}/${id.slice(0, 8)}`
     /*
@@ -165,7 +156,7 @@ export class WorktreeSessions {
      */
     const asked = params.worktreeBase?.trim()
     if (asked && !(await gitRevParse(params.cwd, asked))) {
-      throw Object.assign(new Error(`Not a branch in this repository: ${asked}`), { code: 'internal' })
+      throw rpcError(`Not a branch in this repository: ${asked}`)
     }
     const trunk = params.projectId ? this.host.trunkOf(params.projectId) : null
     const fromTrunk = trunk && (await gitRevParse(params.cwd, trunk)) ? trunk : null
@@ -180,7 +171,7 @@ export class WorktreeSessions {
       if (baseSha) worktree = { ...worktree, base: baseSha }
     } catch (err) {
       const msg = (err as { stderr?: string; message?: string }).stderr ?? (err as Error).message
-      throw Object.assign(new Error(`Could not create the worktree: ${String(msg).trim()}`), { code: 'internal' })
+      throw rpcError(`Could not create the worktree: ${String(msg).trim()}`)
     }
     // Sets up the empty workspace (#69): copy files -> run the setup command. This order is exactly what VK
     // verified
@@ -198,8 +189,8 @@ export class WorktreeSessions {
      * boundary (`ProjectId`) already filters this, but the code building the path checks it again
      * itself — this function is also called by callers that never go through RPC.
      */
-    if (!isProjectId(projectId)) throw Object.assign(new Error(`Not a project id: ${projectId}`), { code: 'internal' })
-    if (!isSessionId(sessionId)) throw Object.assign(new Error(`Not a session id: ${sessionId}`), { code: 'internal' })
+    if (!isProjectId(projectId)) throw rpcError(`Not a project id: ${projectId}`)
+    if (!isSessionId(sessionId)) throw rpcError(`Not a session id: ${sessionId}`)
     return join(this.host.worktreeRoot, projectId, sessionId)
   }
 
