@@ -107,7 +107,20 @@ type InstallModule = {
   lock(l: Layout): () => void
   placeVersion(l: Layout, partial: string, dir: string): void
   setPointers(p: unknown, o: { dataDir: string; platform: string }): Promise<unknown>
+  tarProgram(platform: string, env: Record<string, string | undefined>): string
 }
+
+/** Windows looks a relative program path up in the working directory first: tar is named by a whole path (#428) */
+describe('remote-install.mjs: the tar it runs', () => {
+  it('is System32\'s on Windows, never under a SystemRoot that is not a whole path from a drive', async () => {
+    const mod = (await import(pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), 'remote-install.mjs')).href)) as InstallModule
+    expect(mod.tarProgram('win32', { SystemRoot: 'D:\\Win' })).toBe('D:\\Win\\System32\\tar.exe')
+    for (const SystemRoot of [undefined, '', 'Windows', 'C:Windows', '\\Windows']) {
+      expect(mod.tarProgram('win32', { SystemRoot })).toBe('C:\\Windows\\System32\\tar.exe')
+    }
+    expect(mod.tarProgram('linux', {})).toBe('tar')
+  })
+})
 
 describe('remote-install.mjs: the pointer files (plan §10.1, S11)', () => {
   let dir: string

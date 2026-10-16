@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, join, win32 } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const WORD = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
@@ -176,9 +176,15 @@ function alive(pid) {
   }
 }
 
-/** The system's tar. On Windows the one in System32 (bsdtar): a GNU tar on PATH reads `C:` as a host */
-function tarProgram() {
-  return process.platform === 'win32' ? join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe') : 'tar'
+/**
+ * The system's tar. On Windows the one in System32 (bsdtar): a GNU tar on PATH reads `C:` as a host. Named by its whole
+ * path: a `SystemRoot` that is not one from a drive's root is not used (the host's `systemTool` rule, which this script
+ * cannot import), since Windows looks a relative program path up in the working directory first (#428).
+ */
+export function tarProgram(platform = process.platform, env = process.env) {
+  if (platform !== 'win32') return 'tar'
+  const root = /^[A-Za-z]:[\\/]/.test(env.SystemRoot ?? '') ? env.SystemRoot : 'C:\\Windows'
+  return win32.join(root, 'System32', 'tar.exe')
 }
 
 /** The tarball's bytes, refused unless their sha512 is the integrity the hub read from the signed metadata */
