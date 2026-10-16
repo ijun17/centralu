@@ -2728,26 +2728,21 @@ export class SessionManager {
     const resume = cutShort
       ? `It keeps its conversation: send it a message to go on${stop?.reason === 'network' ? ', once the network is back' : ''}, the same one the person's Continue sends: "Continue where you stopped. Check what already happened before repeating a step."\n`
       : ''
-    try {
-      await this.deliver(
-        orchestratorId,
-        outcome +
-          `Session: ${frameField(name)}\n` +
-          `id: ${sessionId}\n` +
-          `Project: ${frameField(project)}\n\n` +
-          failure +
-          resume +
-          `Last response:\n${preview || '(no content)'}\n\n` +
-          `If you need more, you can read that session's recent conversation with read_session.`,
-        undefined,
-        // A report is not the person's own words either (FR-11) — the reporting session is tagged as its
-        // source
-        { sessionId, name },
-        true,
-      )
-    } catch {
-      // The orchestrator may be asleep or deleted — the app must not be destabilized over a single report
-    }
+    await this.tellSession(
+      orchestratorId,
+      outcome +
+        `Session: ${frameField(name)}\n` +
+        `id: ${sessionId}\n` +
+        `Project: ${frameField(project)}\n\n` +
+        failure +
+        resume +
+        `Last response:\n${preview || '(no content)'}\n\n` +
+        `If you need more, you can read that session's recent conversation with read_session.`,
+      // A report is not the person's own words either (FR-11) — the reporting session is tagged as its
+      // source
+      { sessionId, name },
+      true,
+    )
   }
 
   /** A state hint, for storage: the core reducer's rules on the host's copy (`applySessionState`, protocol session-state.ts) */
@@ -4335,6 +4330,7 @@ export class SessionManager {
       createSession: (...a) => self.createSession(...a),
       cwdFor: (...a) => self.cwdFor(...a),
       deliver: (...a) => self.deliver(...a),
+      tellSession: (...a) => self.tellSession(...a),
       get disposing() {
         return self.disposing
       },
@@ -5224,16 +5220,28 @@ export class SessionManager {
   /** A queued request could not be delivered (#677): said in the requester's session, as a report is */
   private async tellQueuedFailed(callerId: string, sessionId: string, why: string): Promise<void> {
     const name = this.meta.get(sessionId)?.name ?? sessionId
+    await this.tellSession(
+      callerId,
+      `[Centralu] Your queued request to another session was not delivered.\nSession: ${frameField(name)}\nid: ${sessionId}\n\nReason: ${why.slice(0, 600)}`,
+      { sessionId, name },
+      true,
+    )
+  }
+
+  /**
+   * Tells a session something in its conversation (#428): a report, or Centralu's word on a request, a note or a queued
+   * request that did not go. Never while this host is leaving: handing over, the next host owes what is still owed;
+   * quitting, the next start tells what the quit cut (#698), where a word now would read "failed" and could wake a
+   * sleeping session on the way out. Never to a session that is gone, and it never throws: the session may be asleep
+   * or deleted, and a notice must not destabilize the host. The four ways of telling each kept their own guard, and
+   * the report and a queued request's had none.
+   */
+  private async tellSession(sessionId: string, text: string, from: { sessionId: string; name: string }, relayed: boolean): Promise<void> {
+    if (this.handingOver || this.disposing || !this.meta.has(sessionId)) return
     try {
-      await this.deliver(
-        callerId,
-        `[Centralu] Your queued request to another session was not delivered.\nSession: ${frameField(name)}\nid: ${sessionId}\n\nReason: ${why.slice(0, 600)}`,
-        undefined,
-        { sessionId, name },
-        true,
-      )
+      await this.deliver(sessionId, text, undefined, from, relayed)
     } catch {
-      // The requester may be asleep or deleted — a notice must not destabilize the host
+      // The session may be asleep or deleted — a notice must not destabilize the host
     }
   }
 

@@ -180,6 +180,8 @@ export type DelegationHost = {
   cleanUpWorktreeChild: (target: SessionInfo) => Promise<{ ok: true; branch: string; setAside: { changedFiles: number; commits: number; }; warning?: string; note?: string; } | { ok: false; error: string; }>
   createSession: (params: Omit<CreateSessionParams, "projectId" | "tool"> & { projectId: string | null; tool: ToolName | null; kind?: Exclude<SessionInfo["kind"], "coordinator">; roleAppend?: string; appId?: string | null; builderOf?: AppRef; appAgent?: { outputSchema?: Record<string, unknown>; }; askedBy?: string; forkedFrom?: string; lsp?: boolean; }) => Promise<SessionInfo>
   cwdFor: (m: SessionInfo) => string
+  /** Tells a session something in its conversation, never while the host leaves, never throwing (`SessionManager.tellSession`, #428) */
+  tellSession: (sessionId: string, text: string, from: { sessionId: string; name: string }, relayed: boolean) => Promise<void>
   deliver: (sessionId: string, text: string, attachments: Attachment[] | undefined, from: { sessionId: string; name: string } | undefined, relayed: boolean, fromApp?: undefined, fromAppVia?: 'inline', sendInput?: (handle: SessionHandle, text: string) => void) => Promise<void>
   readonly disposing: boolean
   readonly emit: (e: NormalizedEvent) => void
@@ -1181,21 +1183,15 @@ export class DelegationFlow {
 
   /** The caller of a request that already answered "pending" hears how it ended (#673), as a message in its session */
   private async tellAgentStartEnded(req: AgentStartRequest, why: string): Promise<void> {
-    if (this.host.handingOver || this.host.disposing || !this.host.meta.has(req.callerId)) return
-    try {
-      await this.host.deliver(
-        req.callerId,
-        `[Centralu] Your start_agent request ${req.requestId} did not start a session.\n` +
-          `Agent: ${frameField(req.detail.tool)}\n` +
-          `Task: ${frameField(req.detail.text)}\n\n` +
-          `Reason: ${why.slice(0, 600)}`,
-        undefined,
-        { sessionId: HOST_SENDER, name: 'Centralu' },
-        false,
-      )
-    } catch {
-      // The caller may be asleep or deleted — the notice in its session is already there
-    }
+    await this.host.tellSession(
+      req.callerId,
+      `[Centralu] Your start_agent request ${req.requestId} did not start a session.\n` +
+        `Agent: ${frameField(req.detail.tool)}\n` +
+        `Task: ${frameField(req.detail.text)}\n\n` +
+        `Reason: ${why.slice(0, 600)}`,
+      { sessionId: HOST_SENDER, name: 'Centralu' },
+      false,
+    )
   }
 
   /**
@@ -1359,23 +1355,17 @@ export class DelegationFlow {
 
   /** The observer's note was refused after its send returned (#646): said in the observer's session, as a report is */
   private async tellNoteRefused(observerId: string, sessionId: string, why: string): Promise<void> {
-    if (this.host.handingOver || !this.host.meta.has(observerId)) return
     const name = this.host.meta.get(sessionId)?.name ?? sessionId
-    try {
-      await this.host.deliver(
-        observerId,
-        `[Centralu] Your note to another session was not delivered.\n` +
-          `Session: ${frameField(name)}\n` +
-          `id: ${sessionId}\n\n` +
-          `Reason: ${why.slice(0, 600)}\n\n` +
-          `Send it again with agent_session, or read that session's recent conversation with read_session.`,
-        undefined,
-        { sessionId, name },
-        true,
-      )
-    } catch {
-      // The observer may be asleep or deleted — a notice must not destabilize the host
-    }
+    await this.host.tellSession(
+      observerId,
+      `[Centralu] Your note to another session was not delivered.\n` +
+        `Session: ${frameField(name)}\n` +
+        `id: ${sessionId}\n\n` +
+        `Reason: ${why.slice(0, 600)}\n\n` +
+        `Send it again with agent_session, or read that session's recent conversation with read_session.`,
+      { sessionId, name },
+      true,
+    )
   }
 
   /** The owner's view of its delegated turn waiting on cards (#676), for start_agent and agent_session */

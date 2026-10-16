@@ -176,6 +176,16 @@ describe('starting another agent in the same project', () => {
     expect(w.mgr.projectConsents()).toEqual([])
   })
 
+  it('a quit tells no caller anything: the children it stops are the next start\'s to report (#428)', async () => {
+    const s = await session('normal')
+    const child = await startRunning(s)
+    await w.until(() => !!handleOf(child)?.sent.length)
+    const said = () => w.store.loadMessages(s, 50).filter((m) => String((m.payload as { text?: string }).text ?? '').startsWith('[Centralu]'))
+    await w.mgr.disposeAll()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(said()).toEqual([])
+  })
+
   it('a safe session in a trusted project still asks (#673)', async () => {
     const s = await session('safe')
     const p = w.mgr.startAgent(s, { task: 'write it', wait: false })
