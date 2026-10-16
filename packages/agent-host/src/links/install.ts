@@ -138,7 +138,14 @@ export function preflight(f: PreflightFacts, runtime: RemoteRuntime): { ok: true
 const PLAIN = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
 const SAFE_URL = /^https?:\/\/[0-9A-Za-z.:-]+(\/[0-9A-Za-z._~%/-]*)?$/
 
-/** Step 1 in the remote's shell: the pinned Node, checked against its SHA-256 and pruned */
+/**
+ * Step 1 in the remote's shell: the pinned Node, checked against its SHA-256 and pruned.
+ *
+ * On Windows, tar is given names relative to the folder it runs in, never a path (#849): System32's tar takes its
+ * arguments in the ANSI code page, so a profile folder named outside it reached tar as "?????" and the unpack failed.
+ * The working folder is handed over whole. curl.exe takes the same path whole and needs no such care (both measured on
+ * Windows 11 with a folder named in Thai and an emoji).
+ */
 export function nodeCommand(spec: RemoteSpec, n: { version: string; url: string; sha256: string }): RemoteCommand {
   if (!PLAIN.test(n.version) || !SAFE_URL.test(n.url) || !/^[0-9a-f]{64}$/.test(n.sha256)) throw new Error('Not a Node archive to install')
   const sh = `${DATA_SH}; V="${n.version}"; n="$r/node/v$V"
@@ -170,7 +177,8 @@ try {
   else { try { Invoke-WebRequest -UseBasicParsing '${n.url}' -OutFile $a } catch { throw 'download node' } }
   $h = (Get-FileHash -Algorithm SHA256 $a).Hash.ToLower()
   if ($h -ne '${n.sha256}') { throw "node_hash $h" }
-  & (Join-Path $env:SystemRoot 'System32\\tar.exe') -xf $a -C (Join-Path $t 'x') --strip-components 1
+  Push-Location -LiteralPath $t
+  try { & (Join-Path $env:SystemRoot 'System32\\tar.exe') -xf a.zip -C x --strip-components 1 } finally { Pop-Location }
   if ($LASTEXITCODE -ne 0) { throw 'unpack node' }
   $k = Join-Path $t 'keep'; New-Item -ItemType Directory -Force $k | Out-Null
   Move-Item (Join-Path $t 'x\\node.exe') $k

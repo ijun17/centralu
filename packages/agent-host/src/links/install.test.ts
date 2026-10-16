@@ -1,11 +1,13 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { execFileSync, spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { fakeRegistry, sha256, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
+import { fakeRegistry, sha256, sha512, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installCommand, installRemote, installScript, nodeCommand, preflight, preflightCommand, remoteRuntime, type PreflightFacts, type RemoteRuntime } from './install.js'
 import { connectionCommand, SshTunnel, WINDOWS_INLINE_MAX, type RemoteCommand, type RemoteSpec } from './tunnel.js'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
@@ -89,9 +91,43 @@ describe('the install scripts per shell (plan §10.2)', () => {
   it('a Windows remote checks the Node zip with Get-FileHash and unpacks it with System32 tar.exe', () => {
     const ps = decode(nodeCommand({ shell: 'powershell' }, { version: NODE_V, url: 'https://nodejs.org/dist/v24.21.0/node-v24.21.0-win-x64.zip', sha256: 'a'.repeat(64) }))
     expect(ps).toContain("if ($h -ne '" + 'a'.repeat(64) + "') { throw \"node_hash $h\" }")
-    expect(ps).toContain("& (Join-Path $env:SystemRoot 'System32\\tar.exe') -xf $a")
+    expect(ps).toContain("& (Join-Path $env:SystemRoot 'System32\\tar.exe') -xf a.zip -C x")
     expect(ps.indexOf('node_hash')).toBeLessThan(ps.indexOf('tar.exe') + 100)
   })
+
+  /*
+   * #849, for real: System32's tar takes its arguments in the ANSI code page, so with the data folder under a profile
+   * named outside it, the archive's path reached tar as "?????" and the step said "fail unpack node". The pinned Node is
+   * this Node, zipped and served from loopback.
+   */
+  it.runIf(process.platform === 'win32')('on Windows, installs Node into a data folder named outside the ANSI code page', async () => {
+    const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-node-step-')))
+    const top = 'node-v24.21.0-win-x64'
+    mkdirSync(join(base, 'zip', top), { recursive: true })
+    copyFileSync(process.execPath, join(base, 'zip', top, 'node.exe'))
+    const tar = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
+    execFileSync(tar, ['-a', '-cf', 'node.zip', top], { cwd: join(base, 'zip'), windowsHide: true })
+    const zip = readFileSync(join(base, 'zip', 'node.zip'))
+    const server = createServer((_req, res) => res.end(zip))
+    await new Promise<void>((done) => server.listen(0, '127.0.0.1', done))
+    try {
+      const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/dist/v24.21.0/node-v24.21.0-win-x64.zip`
+      const script = join(base, 'step.ps1')
+      writeFileSync(script, `\ufeff${decode(nodeCommand({ shell: 'powershell' }, { version: NODE_V, url, sha256: sha256(zip) }))}`)
+      const data = join(base, 'ทดสอบ-😀')
+      const powershell = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+      const run = spawn(powershell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { env: { ...process.env, CC_DATA_DIR: data }, windowsHide: true })
+      let out = ''
+      run.stdout.on('data', (d: Buffer) => (out += d.toString('utf8')))
+      run.stderr.on('data', (d: Buffer) => (out += d.toString('utf8')))
+      await new Promise((done) => run.once('close', done))
+      expect(out.trim()).toBe('CENTRALU-INSTALL node ok')
+      expect(existsSync(join(data, 'remote', 'node', `v${NODE_V}`, 'node.exe'))).toBe(true)
+    } finally {
+      server.close()
+      rmSync(base, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+    }
+  }, 120_000 * SLOW)
 
   it('refuses to put anything but plain words and a plain URL into a script', () => {
     expect(() => nodeCommand({ shell: 'posix' }, { version: NODE_V, url: 'https://x/"; rm -rf ~', sha256: 'a'.repeat(64) })).toThrow(/Not a Node archive/)
@@ -109,6 +145,7 @@ type InstallModule = {
   placeVersion(l: Layout, partial: string, dir: string): void
   setPointers(p: unknown, o: { dataDir: string; platform: string }): Promise<unknown>
   tarProgram(platform: string, env: Record<string, string | undefined>): string
+  install(p: unknown, o: { dataDir: string; platform: string }): Promise<unknown>
 }
 
 /** Windows looks a relative program path up in the working directory first: tar is named by a whole path (#428) */
@@ -121,6 +158,31 @@ describe('remote-install.mjs: the tar it runs', () => {
     }
     expect(mod.tarProgram('linux', {})).toBe('tar')
   })
+})
+
+/**
+ * #849: Windows' tar (System32, bsdtar) takes its arguments in the ANSI code page, so a data folder under a profile whose
+ * name is outside it (another script, an emoji) reached tar as "?????" and every unpack failed. Real tar, real folder.
+ */
+describe('remote-install.mjs: unpacking under a folder named outside the ANSI code page', () => {
+  it('unpacks the package there', async () => {
+    const mod = (await import(pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), 'remote-install.mjs')).href)) as InstallModule
+    const name = '@centralu/host-linux-x64'
+    const reg = await fakeRegistry([{ name, version: '9.9.1', files: { 'package.json': '{}', 'host/main.mjs': 'export {}\n' } }])
+    const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-unpack-')))
+    try {
+      const tarball = `${reg.url}/${name}/-/host-linux-x64-9.9.1.tgz`
+      const bytes = Buffer.from(await (await fetch(tarball)).arrayBuffer())
+      const dataDir = join(base, 'ทดสอบ-😀')
+      const p = { version: '9.9.1', node: NODE_V, platform: 'linux-x64', hub: 'test', packages: [{ name, tarball, integrity: sha512(bytes) }], activate: false }
+      await mod.install(p, { dataDir, platform: process.platform })
+      const host = join(mod.remoteLayout(dataDir).versions, '9.9.1', 'node_modules', '@centralu', 'host-linux-x64', 'host', 'main.mjs')
+      expect(readFileSync(host, 'utf8')).toBe('export {}\n')
+    } finally {
+      await reg.close()
+      rmSync(base, { recursive: true, force: true })
+    }
+  }, 30_000 * SLOW)
 })
 
 describe('remote-install.mjs: the pointer files (plan §10.1, S11)', () => {

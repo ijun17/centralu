@@ -264,15 +264,15 @@ export async function install(p, { dataDir = process.env.CC_DATA_DIR || join(hom
       const partial = join(l.root, `.partial-${p.version}-${process.pid}`)
       rmSync(partial, { recursive: true, force: true })
       try {
-        for (const [i, pkg] of p.packages.entries()) {
+        for (const pkg of p.packages) {
           const bytes = await fetchChecked(pkg)
-          const file = join(partial, `${i}.tgz`)
           const dest = join(partial, 'node_modules', ...pkg.name.split('/'))
           mkdirSync(dest, { recursive: true })
-          writeFileSync(file, bytes)
-          const r = spawnSync(tarProgram(), ['-xzf', file, '-C', dest, '--strip-components', '1'], { encoding: 'utf8', windowsHide: true })
+          // No path among the arguments (#849): Windows' tar takes its arguments in the ANSI code page, so a profile
+          // folder outside it (a name in another script) reached it as "?????" and the unpack failed. The archive comes
+          // on stdin, and the destination is the working folder, which Windows hands over whole
+          const r = spawnSync(tarProgram(), ['-xzf', '-', '--strip-components', '1'], { cwd: dest, input: bytes, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024 })
           if (r.status !== 0) throw new Refusal('unpack', `${pkg.name}: ${(r.stderr || r.error?.message || '').trim().split('\n').at(-1)}`)
-          rmSync(file, { force: true })
         }
         const pkgDir = join(partial, 'node_modules', ...parts.pkg.split('/'))
         if (!existsSync(join(pkgDir, parts.host))) throw new Refusal('no_host', p.platform)
