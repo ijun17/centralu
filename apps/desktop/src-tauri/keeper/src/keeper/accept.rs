@@ -97,7 +97,10 @@ pub(crate) mod few_descriptors {
             .output()
             .unwrap();
         let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-        assert!(out.status.success(), "the child run failed:\n{}\n{stderr}", String::from_utf8_lossy(&out.stdout));
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        // Not the exit status alone: a test whose code under test ends the process (`exit(0)`)
+        // would read as a pass.
+        assert!(out.status.success() && stdout.contains("1 passed"), "the child run failed:\n{stdout}\n{stderr}");
         Some(stderr)
     }
 

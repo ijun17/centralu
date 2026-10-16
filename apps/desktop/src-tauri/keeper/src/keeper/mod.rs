@@ -92,6 +92,11 @@ pub const RELAUNCH_GRACE: Duration = Duration::from_secs(60);
 /// failed, and a keeper with background mode off should not outlive its window by more than that.
 pub const MAX_RELAUNCH_GRACE: Duration = Duration::from_secs(300);
 
+/// How long a keeper that closed a window itself (it stopped taking its status, #840 item 5)
+/// waits for that window to attach again before the idle rule applies as usual. A window that was
+/// only stalled (suspended, in a debugger, its reader blocked) attaches again once it runs.
+pub const REATTACH_GRACE: Duration = Duration::from_secs(300);
+
 pub fn is_keeper_invocation(args: &[String]) -> bool {
     args.iter().skip(1).any(|a| a == KEEPER_FLAG)
 }

@@ -677,6 +677,8 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
             // Not passed on: a handoff starts from an attached window's switch, which already
             // spent any relaunch grace (#352)
             relaunch_until: None,
+            // Not passed on either: the handoff's own windows are attached
+            reattach_until: None,
         }),
         idle: super::idle_limit(),
         started: ago(snap.since_start_ms),

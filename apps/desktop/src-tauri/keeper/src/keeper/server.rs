@@ -50,7 +50,7 @@ use super::source::{self, BuildSource, Settings};
 use super::swap::{self, Phase, SwapView};
 use super::{
     idle_decision, idle_limit, relaunch_grace, relaunch_state, socket_path, stop_on_detach, IdleInput, KeeperInfo, KeeperView, EXIT_ALREADY_RUNNING,
-    KEEPER_PROTOCOL,
+    KEEPER_PROTOCOL, REATTACH_GRACE,
 };
 use crate::host_proc::{self, HostInfo, HostLaunch, HostStatus, LaunchError, Launcher, StatusSink, Supervisor};
 use crate::os;
@@ -131,12 +131,21 @@ pub(super) struct State {
     /// Until when an announced relaunch (#352) holds the keeper with no window attached. Cleared by
     /// the next attach, which is told it is the window that relaunch started.
     pub(super) relaunch_until: Option<Instant>,
+    /// Until when the keeper waits for a window it closed itself (it stopped taking its status) to
+    /// attach again, as for a relaunch: with no window attached, nothing stops it meanwhile. Cleared
+    /// by the next attach.
+    pub(super) reattach_until: Option<Instant>,
 }
 
 impl State {
     /// An announced relaunch whose grace is still running.
     pub(super) fn relaunching(&self, now: Instant) -> bool {
         relaunch_state(self.relaunch_until, now).0
+    }
+
+    /// A window the keeper closed itself may still come back (`reattach_until`).
+    pub(super) fn reattaching(&self, now: Instant) -> bool {
+        self.reattach_until.is_some_and(|u| now < u)
     }
 }
 
@@ -302,6 +311,7 @@ pub fn run(args: &[String]) -> i32 {
             drained: None,
             keeps_agents: None,
             relaunch_until: None,
+            reattach_until: None,
         }),
         idle: idle_limit(),
         started: now,
@@ -410,6 +420,13 @@ impl Drop for Request {
 pub(super) fn log(msg: &str) {
     eprintln!("[keeper] {msg}");
 }
+
+/// How long a write to a window (an answer, a status push) may wait for it to read. A window that
+/// does not take its status within this is closed (`Keeper::broadcast`).
+#[cfg(not(test))]
+const WINDOW_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const WINDOW_WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// Writes our pid into the lock file — a description of the holder for someone reading it,
 /// not the lock itself (the flock is). From the start of the file: a keeper that took the lock
@@ -591,6 +608,10 @@ impl Keeper {
     /// Pushes the current view to every attached window, dropping any that stopped reading. Not
     /// while frozen for a handoff: the windows' sockets may be in two keepers' hands then, and two
     /// writers could interleave half lines.
+    ///
+    /// A window dropped here has its connection closed too (#840 item 5): that is its detach, which
+    /// `watch_window` counts, and the window attaches again. Left open, it counted as attached for
+    /// good and, if it came back, waited for status that never came.
     pub(super) fn broadcast(&self, st: &mut State) {
         if self.frozen.load(Ordering::SeqCst) || self.handed_over.load(Ordering::SeqCst) {
             return;
@@ -602,7 +623,19 @@ impl Keeper {
             }
             Err(_) => return,
         };
-        st.subscribers.retain_mut(|(_, s)| s.write_all(&line).is_ok());
+        let mut closed = false;
+        st.subscribers.retain_mut(|(id, s)| {
+            let Err(e) = s.write_all(&line) else { return true };
+            log(&format!("window {id} stopped taking its status ({e}); closing its connection"));
+            let _ = s.shutdown(std::net::Shutdown::Both);
+            closed = true;
+            false
+        });
+        // The window may only be stalled: its detach must not stop the keeper with everything it
+        // holds. It is given `REATTACH_GRACE` to come back, as an announced relaunch is.
+        if closed {
+            st.reattach_until = Some(Instant::now() + REATTACH_GRACE);
+        }
     }
 
     /// `keeper.json`: what this keeper is and what it runs, for a person reading the data folder
@@ -677,6 +710,8 @@ pub(super) fn spawn_idle_watch(k: Arc<Keeper>) {
             let Ok(st) = k.state.lock() else { return };
             let now = Instant::now();
             let (relaunching, relaunch_expired) = relaunch_state(st.relaunch_until, now);
+            // A window the keeper closed itself is waited for like a relaunching one.
+            let relaunching = relaunching || st.reattaching(now);
             idle_decision(
                 IdleInput {
                     background: st.settings.background,
@@ -711,7 +746,7 @@ fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
         return;
     }
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_write_timeout(Some(WINDOW_WRITE_TIMEOUT));
     let Ok(read_half) = stream.try_clone() else { return };
     let mut reader = BufReader::new(read_half);
     let req: Value = match read_line(&mut reader) {
@@ -793,6 +828,9 @@ fn attach(k: Arc<Keeper>, mut stream: UnixStream, reader: BufReader<UnixStream>,
         st.ever_attached = true;
         // The window an announced relaunch started (#352): it is told so, and the grace is spent
         let relaunched = st.relaunching(Instant::now());
+        if st.reattach_until.take().is_some() {
+            log("a window attached after the keeper had closed one that stopped taking its status");
+        }
         if st.relaunch_until.take().is_some() {
             log(if relaunched {
                 "a window attached after the announced relaunch"
@@ -845,7 +883,10 @@ pub(super) fn watch_window(k: Arc<Keeper>, id: u64, mut reader: BufReader<UnixSt
         if st.attached == 0 && st.relaunching(now) {
             log("the last window closed for an announced relaunch; waiting for it to come back");
         }
-        stop_on_detach(st.attached, st.settings.background, st.relaunching(now))
+        if st.attached == 0 && st.reattaching(now) {
+            log(&format!("the last window was closed for not taking its status; waiting up to {}s for it to attach again", REATTACH_GRACE.as_secs()));
+        }
+        stop_on_detach(st.attached, st.settings.background, st.relaunching(now) || st.reattaching(now))
     };
     // Frozen: the decision waits for the thaw, when the idle rule sees no window either.
     if stop && !k.frozen.load(Ordering::SeqCst) {
@@ -881,13 +922,14 @@ fn relaunching(k: &Arc<Keeper>, stream: &mut UnixStream, req: &Value) {
 /// Registers a window connection another keeper handed over (step 4) and watches it.
 pub(super) fn adopt_window(k: &Arc<Keeper>, stream: UnixStream) {
     let Ok(read_half) = stream.try_clone() else { return };
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_write_timeout(Some(WINDOW_WRITE_TIMEOUT));
     let id = {
         let Ok(mut st) = k.state.lock() else { return };
         let id = st.next_id;
         st.next_id += 1;
         st.attached += 1;
         st.ever_attached = true;
+        st.reattach_until = None;
         st.subscribers.push((id, stream));
         id
     };
@@ -1385,10 +1427,145 @@ mod tests {
             drained: None,
             keeps_agents: None,
             relaunch_until: None,
+            reattach_until: None,
         };
         let dirs = |st: &State| host_dirs_in_use(st).into_iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>();
         assert_eq!(dirs(&st), ["/d/hosts/abc", "/d/content/0.2.0/host", "/d/content/0.2.0/host", "/d/content/0.2.1/host"]);
         st.swapping = false;
         assert!(!dirs(&st).contains(&"/d/content/0.2.1/host".to_string()), "a switch that ended holds nothing");
+    }
+
+    /// A keeper with nothing running, for tests of what it does with its windows.
+    fn test_keeper(data: &Path) -> Arc<Keeper> {
+        let now = Instant::now();
+        let sock = data.join("keeper.sock");
+        let _ = fs::remove_file(&sock);
+        Arc::new(Keeper {
+            origin: content::Origin::Direct,
+            info: KeeperInfo {
+                pid: std::process::id(),
+                protocol: KEEPER_PROTOCOL,
+                version: "test".into(),
+                started_at: 0,
+                data_dir: data.to_string_lossy().to_string(),
+                build: None,
+            },
+            listener: UnixListener::bind(&sock).unwrap(),
+            sock,
+            data: data.to_path_buf(),
+            sup: Supervisor::new(),
+            door: FrontDoor::open(0, "t".into()).unwrap(),
+            children: Children::disabled(),
+            copies: source::Copies::new(data, None),
+            state: Mutex::new(State {
+                status: HostStatus::Starting,
+                source: None,
+                desired: BuildSource::dev(),
+                subscribers: Vec::new(),
+                next_id: 1,
+                attached: 0,
+                ever_attached: false,
+                last_detach: now,
+                busy: false,
+                last_busy: now,
+                // Background on: a window leaving does not stop the test's process.
+                settings: Settings { background: true },
+                stopping: false,
+                swap: None,
+                swapping: false,
+                drained: None,
+                keeps_agents: None,
+                relaunch_until: None,
+            reattach_until: None,
+            }),
+            idle: Duration::from_secs(3600),
+            started: now,
+            lock: File::create(data.join("keeper.lock")).unwrap(),
+            frozen: AtomicBool::new(false),
+            handed_over: AtomicBool::new(false),
+            accept_parked: AtomicBool::new(false),
+            requests: AtomicUsize::new(0),
+        })
+    }
+
+    /**
+     * #840 item 5: a window the keeper can no longer push its status to (it stopped reading) was
+     * taken off the push list and nothing else: its connection stayed open, so it still counted as
+     * attached (background mode off never stopped the keeper for it) and the window, if it came
+     * back, waited for status that never came. The keeper now closes that connection, which is the
+     * detach, and the window attaches again.
+     */
+    #[test]
+    fn a_window_whose_status_push_fails_is_closed_and_detached() {
+        let data = PathBuf::from(format!("/tmp/cck-push-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&data);
+        fs::create_dir_all(&data).unwrap();
+        let k = test_keeper(&data);
+        let (window, keeper_end) = UnixStream::pair().unwrap();
+        adopt_window(&k, keeper_end);
+        assert_eq!(k.state.lock().unwrap().attached, 1);
+        // The window stops reading and never closes its own end: pushes fill its socket until one
+        // times out.
+        for _ in 0..1000 {
+            let Ok(mut st) = k.state.lock() else { break };
+            if st.subscribers.is_empty() {
+                break;
+            }
+            k.broadcast(&mut st);
+        }
+        let end = Instant::now() + Duration::from_secs(3);
+        while k.state.lock().unwrap().attached > 0 && Instant::now() < end {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(k.state.lock().unwrap().attached, 0, "the window still counts as attached");
+        assert!(k.state.lock().unwrap().subscribers.is_empty());
+        drop(window);
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    /**
+     * #840 item 5, the review's catch: with background mode off (the default), the window the
+     * keeper closed was its last, and its detach stopped the keeper at once, host, agents and
+     * terminals with it. A window that was only stalled then came back to a new keeper with
+     * nothing. It is waited for now, as an announced relaunch is, and the next attach spends that.
+     *
+     * Run in a process of its own: without the grace the keeper's stop ends the process.
+     */
+    #[test]
+    fn a_closed_window_is_waited_for_with_background_mode_off() {
+        if super::super::accept::few_descriptors::rerun("keeper::server::tests::a_closed_window_is_waited_for_with_background_mode_off").is_some() {
+            return;
+        }
+        let data = PathBuf::from(format!("/tmp/cck-regrace-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&data);
+        fs::create_dir_all(&data).unwrap();
+        let k = test_keeper(&data);
+        k.state.lock().unwrap().settings.background = false;
+        let (window, keeper_end) = UnixStream::pair().unwrap();
+        adopt_window(&k, keeper_end);
+        for _ in 0..1000 {
+            let Ok(mut st) = k.state.lock() else { break };
+            if st.subscribers.is_empty() {
+                break;
+            }
+            k.broadcast(&mut st);
+        }
+        let end = Instant::now() + Duration::from_secs(3);
+        while k.state.lock().unwrap().attached > 0 && Instant::now() < end {
+            thread::sleep(Duration::from_millis(20));
+        }
+        thread::sleep(Duration::from_millis(300));
+        let st = k.state.lock().unwrap();
+        assert_eq!(st.attached, 0, "the window was closed");
+        assert!(!st.stopping, "the keeper stopped for the window it closed itself");
+        assert!(st.reattaching(Instant::now()), "it waits for the window to attach again");
+        drop(st);
+        let (again, keeper_end) = UnixStream::pair().unwrap();
+        adopt_window(&k, keeper_end);
+        assert!(k.state.lock().unwrap().reattach_until.is_none(), "a window back spends the grace");
+        // Its leaving would be an ordinary last detach, which stops this process: it stays.
+        std::mem::forget(again);
+        drop(window);
+        let _ = fs::remove_dir_all(&data);
     }
 }

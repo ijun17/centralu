@@ -1485,6 +1485,13 @@ be the keeper's own. Newline-delimited JSON, one request per connection except `
 | `{"op":"restart"}` | Retry after the host gave up (refused during a swap) |
 | `{"op":"settings"}` / `{"op":"set_background","on":bool}` | background mode, kept in `<data>/keeper-settings.json` |
 
+A window that does not take a status push within 5 s (it stopped reading) is closed by the keeper, which is its
+detach; the window then attaches again. Before #840 item 5 it was only taken off the push list, kept counting as
+attached, and got no status again. A window the keeper closed itself may only be stalled (suspended, in a debugger,
+its reader blocked), so its detach does not stop the keeper even when it was the last one and background mode is
+off: for 5 minutes (`REATTACH_GRACE`) the keeper waits for a window as it does for an announced relaunch, the next
+attach spends that, and if none comes the idle rule applies as usual.
+
 **The legacy folder.** Before anything creates the default data folder, the app and the keeper move the
 pre-rename folder to the new name by the same rule as `data-dir.ts`: the host leaves a legacy folder alone once
 the new one exists, so creating `~/.centralu` first (for `keeper.log` or the socket) would strand the data.
