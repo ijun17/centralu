@@ -320,6 +320,18 @@ describe.skipIf(process.platform === 'win32')('the board app carries the contrib
   })
 
   /*
+   * The screen's dialog and an agent may edit the list at the same moment. Each edit reads the list,
+   * then writes it whole: two at once must not both start from the list before either, or the later
+   * write drops the earlier one's word. They run one at a time, like every other write.
+   */
+  it('keeps both words when two edits of the private list arrive at once', async () => {
+    runtime()
+    const words = ['Moonbase', 'Side quest', 'Lantern', 'Harbor']
+    await Promise.all(words.map((w) => call('edit_private_words', { add: [w] })))
+    expect([...(await call('private_words')).data.words].sort()).toEqual([...words].sort())
+  })
+
+  /*
    * The owner answers decisions in Korean on the screen, and that text is saved on this computer, not
    * posted (tooling/project-board-reader.test.ts). What reaches GitHub is an agent's comment, held to
    * English, the private list and no attribution.
