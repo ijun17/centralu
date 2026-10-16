@@ -12,13 +12,12 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { GitError, changedFiles, commitCount, fetchRefs, git, isAncestor, patchId, remoteFor, topLevel, treeOf } from './git.mjs'
+import { listSome, plural, short } from './util.mjs'
 
 /** A refusal: nothing was pushed or changed. */
 export class StackRefusal extends Error {}
 
-const short = (sha) => String(sha ?? '?').slice(0, 7)
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
-const listFiles = (files, max = 8) => `${files.slice(0, max).join(', ')}${files.length > max ? ` and ${files.length - max} more` : ''}`
+const listFiles = (files) => listSome(files, 8)
 
 /**
  * `gh`: { readPr, prsWithHead, setPrBase } (github.mjs). `ref(n)` writes a pull request's number the
