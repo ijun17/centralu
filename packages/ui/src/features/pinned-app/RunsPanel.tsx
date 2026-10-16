@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AgentUse, AppPermission, AppRun, AppUsage } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { formatCount } from '../../app/format.js'
+import { formatClock, formatCount, formatDuration } from '../../app/format.js'
 import { externalAppKey, useStore } from '../../store/store.js'
 
 /**
@@ -196,7 +196,7 @@ function AgentUseSection({ appId, projectId, machine, runs }: { appId: string; p
 }
 
 function UseLine({ label, use, testId }: { label: string; use: AgentUse; testId: string }) {
-  const parts = [`${use.runs} ${use.runs === 1 ? 'run' : 'runs'}`, longDuration(use.durationMs)]
+  const parts = [`${use.runs} ${use.runs === 1 ? 'run' : 'runs'}`, formatDuration(use.durationMs)]
   if (use.tokens) parts.push(`${formatCount(use.tokens.input + use.tokens.output)} tokens`)
   return (
     <div className="flex items-baseline gap-2">
@@ -206,14 +206,6 @@ function UseLine({ label, use, testId }: { label: string; use: AgentUse; testId:
       </dd>
     </div>
   )
-}
-
-/** A summed duration — "42 s", "3m 20s", "2h 5m" */
-function longDuration(ms: number): string {
-  const s = Math.round(ms / 1000)
-  if (s < 60) return `${s} s`
-  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`
-  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
 }
 
 /**
@@ -256,11 +248,6 @@ const STATUS: Record<AppRun['status'], string> = {
 }
 
 const CALLER: Record<AppRun['callerKind'], string> = { view: 'View', session: 'Session', app: 'App' }
-
-function duration(ms: number | null): string {
-  if (ms === null) return '…'
-  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`
-}
 
 function RunRow({
   run,
@@ -307,7 +294,7 @@ function RunRow({
           </span>
         )}
         <time className="readout shrink-0 text-ink-faint" dateTime={when.toISOString()} data-testid="run-time">
-          {when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          {formatClock(when, { seconds: true })}
         </time>
         <span className="min-w-0 truncate font-mono text-ink" data-testid="run-tool">
           {tool}
@@ -336,7 +323,7 @@ function RunRow({
           </button>
         )}
         <span className="readout ml-auto shrink-0" data-testid="run-duration">
-          {duration(run.durationMs)}
+          {run.durationMs === null ? '…' : formatDuration(run.durationMs)}
         </span>
       </div>
       {failed && run.error && (

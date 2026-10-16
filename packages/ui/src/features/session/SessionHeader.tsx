@@ -1,5 +1,6 @@
 import type { DragEvent, ReactNode } from 'react'
 import type { SessionSummary } from '@cc/core'
+import { formatClock } from '../../app/format.js'
 import { useStore } from '../../store/store.js'
 import { CrownIcon, RestartIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
@@ -78,7 +79,7 @@ export function SessionHeader({
         <span className="readout text-xs text-ink-muted" data-testid="limit-badge">
           Limit {session.limit.usedPercent != null ? `${session.limit.usedPercent}%` : 'reached'}
           {session.limit.resumeAt
-            ? ` · resets ${new Date(session.limit.resumeAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
+            ? ` · resets ${formatClock(new Date(session.limit.resumeAt))}`
             : ''}
         </span>
       )}

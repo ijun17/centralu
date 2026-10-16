@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { newSession, setup } from './fixtures/project-screen.js'
 
 /**
- * Sizes and counts are written by one rule (`app/format.ts`, #428). The cases that went wrong, on screen: a token count
+ * Sizes, counts and clocks are written by one rule (`app/format.ts`, #428). The cases that went wrong, on screen: a token count
  * past a million came out as "2500.0k", and a context gauge for a model with no window as "Infinity%".
  */
 
@@ -27,4 +27,11 @@ test('a context gauge for a window of 0 says unknown, not Infinity%', async ({ p
   await emit(page, id, { type: 'context_update', used: 5000, window: 0, exactness: 'exact' })
   await expect(page.getByTestId('context-gauge')).toHaveAttribute('title', /Context 5k \/ 0 tokens/)
   await expect(page.getByTestId('context-gauge')).toHaveText('Context —')
+})
+
+test('the limit badge says when the limit resets as a 24-hour clock, not "03:12 PM"', async ({ page }) => {
+  await setup(page, ['/tmp/alpha'])
+  const id = await newSession(page, 'alpha')
+  await emit(page, id, { type: 'limit_reached', usedPercent: 21, windowMins: 10080, resumeAt: '2026-08-15T14:30:00Z' })
+  await expect(page.getByTestId('limit-badge')).toHaveText(/^Limit 21% · resets \d{2}:\d{2}$/)
 })

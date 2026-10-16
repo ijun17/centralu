@@ -1,4 +1,5 @@
 import type { CacheStats, CacheWindowStats } from '@cc/protocol'
+import { formatClock } from '../clock/clock.js'
 
 /** The input side of a window or a session: the three parts that do not overlap (`TokenUsage`) */
 type Input = Pick<CacheWindowStats, 'inputTokens' | 'cacheReadTokens' | 'cacheCreationTokens'>
@@ -31,8 +32,7 @@ export function percentOf(rate: number): string {
 export function cacheWindowName(w: Pick<CacheWindowStats, 'label' | 'since'>, countingSince: string): string {
   const from = Date.parse(countingSince)
   if (!Number.isFinite(from) || from <= Date.parse(w.since)) return w.label
-  const d = new Date(from)
-  return `since ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return `since ${formatClock(from)}`
 }
 
 /**

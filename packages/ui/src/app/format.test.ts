@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatBytes, formatCount } from './format.js'
+import { formatBytes, formatCount, formatDuration } from './format.js'
 
 describe('formatBytes', () => {
   it('writes whole bytes under a kilobyte', () => {
@@ -76,5 +76,55 @@ describe('formatCount', () => {
   it('does not write nonsense for what is not a count', () => {
     expect(formatCount(-1)).toBe('0')
     expect(formatCount(NaN)).toBe('0')
+  })
+})
+
+describe('formatDuration', () => {
+  it('writes milliseconds under a second and tenths under ten seconds', () => {
+    expect(formatDuration(5)).toBe('5ms')
+    expect(formatDuration(250)).toBe('250ms')
+    expect(formatDuration(999)).toBe('999ms')
+    expect(formatDuration(1000)).toBe('1s')
+    expect(formatDuration(1500)).toBe('1.5s')
+    expect(formatDuration(9999)).toBe('9.9s')
+  })
+
+  it('writes whole seconds to a minute and minutes with seconds to ten minutes', () => {
+    expect(formatDuration(10_000)).toBe('10s')
+    expect(formatDuration(42_900)).toBe('42s')
+    expect(formatDuration(60_000)).toBe('1m 0s')
+    expect(formatDuration(125_000)).toBe('2m 5s')
+    expect(formatDuration(599_999)).toBe('9m 59s')
+  })
+
+  it('writes only minutes from ten minutes, then hours and minutes', () => {
+    expect(formatDuration(600_000)).toBe('10m')
+    expect(formatDuration(3_599_000)).toBe('59m')
+    expect(formatDuration(3_600_000)).toBe('1h 0m')
+    expect(formatDuration(7_500_000)).toBe('2h 5m')
+    expect(formatDuration(86_399_000)).toBe('23h 59m')
+  })
+
+  it('writes days and hours from a day, not 75h 3m', () => {
+    expect(formatDuration(86_400_000)).toBe('1d 0h')
+    expect(formatDuration((75 * 60 + 3) * 60_000)).toBe('3d 3h')
+    expect(formatDuration(40 * 86_400_000 + 5 * 3_600_000)).toBe('40d 5h')
+  })
+
+  it('coarse reads to the minute: whole seconds to a minute, then no seconds', () => {
+    expect(formatDuration(0, { coarse: true })).toBe('0s')
+    expect(formatDuration(500, { coarse: true })).toBe('0s')
+    expect(formatDuration(45_900, { coarse: true })).toBe('45s')
+    expect(formatDuration(60_000, { coarse: true })).toBe('1m')
+    expect(formatDuration(125_000, { coarse: true })).toBe('2m')
+    expect(formatDuration(3_600_000, { coarse: true })).toBe('1h 0m')
+    expect(formatDuration(3 * 86_400_000 + 4 * 3_600_000, { coarse: true })).toBe('3d 4h')
+  })
+
+  it('writes nothing odd for what is not a length', () => {
+    expect(formatDuration(-5)).toBe('0ms')
+    expect(formatDuration(NaN)).toBe('0ms')
+    expect(formatDuration(0)).toBe('0ms')
+    expect(formatDuration(NaN, { coarse: true })).toBe('0s')
   })
 })

@@ -3,6 +3,7 @@ import type { SessionInfo, ToolName, ToolStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { formatDay } from '../../app/format.js'
 import { useMachineName, useTools } from '../../store/selectors.js'
 import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { isPlainEscape } from '../../app/keys.js'
@@ -336,7 +337,7 @@ export function Settings() {
                         </span>
                         <RuleOwner rule={r} />
                         <span className="readout ml-auto shrink-0 text-2xs text-ink-faint">
-                          {new Date(r.createdAt).toLocaleDateString('en-US')}
+                          {formatDay(r.createdAt)}
                         </span>
                         <button
                           className="shrink-0 text-xs text-ink-faint hover:text-ink"

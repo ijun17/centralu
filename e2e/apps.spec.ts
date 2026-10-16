@@ -578,7 +578,7 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     await expect(rows.getByTestId('run-tool')).toHaveText(['agent_only', 'crash', 'set_interval', 'home'])
     await expect(rows.getByTestId('run-status')).toHaveText(['refused', 'failed', 'ok', 'ok'])
     await expect(rows.getByTestId('run-caller')).toHaveText(['View', `Session · ${session.name}`, 'App', 'View'])
-    await expect(rows.getByTestId('run-duration')).toHaveText(['0 ms', '5 ms', '1.5 s', '42 ms'])
+    await expect(rows.getByTestId('run-duration')).toHaveText(['0ms', '5ms', '1.5s', '42ms'])
     await expect(rows.nth(0).getByTestId('run-time')).toHaveAttribute('datetime', new Date(t0).toISOString())
     // Only failures are marked — with a one-line reason
     await expect(rows.nth(0)).toHaveAttribute('data-failed', 'true')
@@ -655,7 +655,7 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
       { key: `${pid}/slider`, runs: chain({ status: 'ok', durationMs: 4200, sessionId: agentSession }), pid },
     )
     await expect(rows.nth(3).getByTestId('run-status')).toHaveText('ok')
-    await expect(rows.nth(3).getByTestId('run-duration')).toHaveText('4.2 s')
+    await expect(rows.nth(3).getByTestId('run-duration')).toHaveText('4.2s')
     const open = rows.nth(3).getByTestId('run-open-session')
     await expect(open).toHaveText('Open session')
     await expect(pinned.getByTestId('run-open-session')).toHaveCount(1)
@@ -683,6 +683,8 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     const panel = pinned.getByTestId('runs-panel')
     await expect(panel.getByTestId('run-row')).toHaveCount(1)
     await expect(panel.getByTestId('run-tokens')).toHaveText('1.3k tokens')
+    // A clock reads 24-hour with seconds, whatever the browser's locale (before: "03:04:05 AM" in en-US)
+    await expect(panel.getByTestId('run-time')).toHaveText(/^\d{2}:\d{2}:\d{2}$/)
     await expect(panel.getByTestId('run-tokens')).toHaveAttribute('title', 'in 1200 · out 80')
     // If the host says the app never asked for an agent, the usage field does not appear
     await expect(panel.getByTestId('runs-agent-use')).toHaveCount(0)
@@ -698,7 +700,7 @@ test.describe('pinned views (B-2, B-4, B-6, B-7)', () => {
     await panel.getByTestId('runs-refresh').click()
     const use = panel.getByTestId('runs-agent-use')
     await expect(use.getByTestId('agent-use-day')).toHaveText('2 runs · 1m 5s · 12.4k tokens')
-    await expect(use.getByTestId('agent-use-month')).toHaveText('41 runs · 22m 5s · 1.3M tokens')
+    await expect(use.getByTestId('agent-use-month')).toHaveText('41 runs · 22m · 1.3M tokens')
   })
 
   /** Messages the session received from the person — what the mock recorded, the way the host would */

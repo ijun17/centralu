@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { TrashedSession } from '@cc/protocol'
 import { messagesToChat, useStore, type ChatItem } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { formatBytes } from '../../app/format.js'
+import { formatBytes, formatDay } from '../../app/format.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { useToolMeta } from '../../store/selectors.js'
 import { Markdown } from '../session/Markdown.jsx'
@@ -136,7 +136,7 @@ export function TrashSection() {
                   {s.project && !s.project.exists && ' (project deleted)'}
                 </span>
                 <span className="readout ml-auto shrink-0 text-2xs text-ink-faint">
-                  {new Date(s.deletedAt).toLocaleDateString('en-US')}
+                  {formatDay(s.deletedAt)}
                 </span>
               </div>
               <div className="mt-0.5 text-2xs text-ink-faint" data-testid={`trash-holds-${s.id}`}>

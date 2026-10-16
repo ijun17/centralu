@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type RefObject } from 'react'
+import { formatDuration } from '../../app/format.js'
 import { useLabelNow } from '../../app/useLabelNow.js'
 
 /**
@@ -38,13 +39,10 @@ export function elapsedStep(seconds: number): number {
 }
 
 export function formatElapsed(seconds: number): string {
-  if (seconds < 10) return `${seconds}s`
-  if (seconds < 60) return `${Math.floor(seconds / 5) * 5}s`
-  const min = Math.floor(seconds / 60)
-  if (seconds < 600) return `${min}m ${Math.floor((seconds % 60) / 10) * 10}s`
-  if (min < 60) return `${min}m`
-  if (seconds < 86400) return `${Math.floor(min / 60)}h ${min % 60}m`
-  return `${Math.floor(seconds / 86400)}d ${Math.floor(seconds / 3600) % 24}h`
+  // What is shown is the start of the step the count is in (`STEPS`), so it never claims more than it knows
+  const step = elapsedStep(seconds)
+  const shown = Math.floor(seconds / step) * step
+  return shown === 0 ? '0s' : formatDuration(shown * 1000)
 }
 
 /** Re-read at the next displayed step from the turn's own start instant. */

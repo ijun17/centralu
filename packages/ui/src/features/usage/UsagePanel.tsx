@@ -7,7 +7,7 @@ import { Tooltip } from '../../components/primitives.jsx'
 import { useStore } from '../../store/store.js'
 import { useToolMeta } from '../../store/selectors.js'
 import { CacheSection } from './CacheSection.jsx'
-import { formatCount } from '../../app/format.js'
+import { formatCount, formatDuration } from '../../app/format.js'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
 
 /**
@@ -182,11 +182,7 @@ function resetText(resetsAt: string | null, now: number): string {
   const ms = new Date(resetsAt).getTime() - now
   if (!Number.isFinite(ms)) return 'reset time unknown'
   if (ms <= 0) return 'resets soon'
-  const min = Math.floor(ms / 60000)
-  if (min < 60) return `resets in ${min}m`
-  const hour = Math.floor(min / 60)
-  if (hour < 24) return `resets in ${hour}h ${min % 60}m`
-  return `resets in ${Math.floor(hour / 24)}d ${hour % 24}h`
+  return `resets in ${formatDuration(ms, { coarse: true })}`
 }
 
 /** Daily tokens — only the most recent 7 days. Bar length is relative to that day's peak */

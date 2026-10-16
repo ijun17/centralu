@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Interruption, SessionState } from '@cc/protocol'
 import { useCapability } from '../app/PlatformProvider.jsx'
+import { formatDuration } from '../app/format.js'
 import { useAnchoredPlacement } from './anchored.js'
 
 /**
@@ -91,14 +92,7 @@ export function Kbd({
   )
 }
 
-export function formatWaiting(ms: number): string {
-  const s = Math.floor(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m`
-  if (m < 1440) return `${Math.floor(m / 60)}h ${m % 60}m`
-  return `${Math.floor(m / 1440)}d ${Math.floor(m / 60) % 24}h`
-}
+export const formatWaiting = (ms: number): string => formatDuration(ms, { coarse: true })
 
 /**
  * The longer the wait, the brighter the text.

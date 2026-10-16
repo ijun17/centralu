@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AppErrorBundle } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { formatClock } from '../../app/format.js'
 import { IconButton } from '../../components/IconButton.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 import { userAppMachine, type ExternalCatalogApp } from '../../store/app-catalog.js'
@@ -114,7 +115,7 @@ export function ErrorTail({
             {`${bundle.tool ?? 'A tool'} stopped: you did not allow it`}
           </span>
           <time className="readout shrink-0 text-2xs text-ink-faint" dateTime={new Date(bundle.at).toISOString()}>
-            {new Date(bundle.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            {formatClock(bundle.at, { seconds: true })}
           </time>
           <span className="ml-auto flex shrink-0 items-center gap-1.5">
             {here && (
@@ -149,7 +150,7 @@ export function ErrorTail({
           {titleOf(bundle)}
         </span>
         <time className="readout shrink-0 text-2xs text-ink-faint" dateTime={new Date(bundle.at).toISOString()}>
-          {new Date(bundle.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          {formatClock(bundle.at, { seconds: true })}
         </time>
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {bundle.sentAt !== null ? (

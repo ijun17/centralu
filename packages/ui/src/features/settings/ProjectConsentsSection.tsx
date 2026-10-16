@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ProjectConsent } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { formatDay } from '../../app/format.js'
 
 const KIND_LABEL: Record<ProjectConsent['kind'], string> = {
   delegate: 'may ask',
@@ -64,7 +65,7 @@ export function ProjectConsentsSection() {
                   {c.kind === 'agents' ? null : ` ${c.toName}`}
                 </span>
                 <span className="readout ml-auto shrink-0 text-2xs text-ink-faint">
-                  {new Date(c.decidedAt).toLocaleDateString('en-US')}
+                  {formatDay(c.decidedAt)}
                 </span>
                 <button
                   className="shrink-0 text-xs text-ink-faint hover:text-ink"

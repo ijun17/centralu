@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AppSnapshot, AppVersions } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
-import { formatBytes } from '../../app/format.js'
+import { formatBytes, formatClock, formatDay } from '../../app/format.js'
 import { useStore } from '../../store/store.js'
 import { userAppMachine, type ExternalCatalogApp } from '../../store/app-catalog.js'
 
@@ -188,7 +188,5 @@ const REASON: Record<string, string> = {
   'before restore': 'Before a restore',
 }
 
-function when(at: number): string {
-  return new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
+const when = (at: number): string => `${formatDay(at)}, ${formatClock(at)}`
 
