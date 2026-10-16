@@ -33,6 +33,7 @@ function recordGitArgv(): { calls: () => string[][]; restore: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'cc-git-argv-'))
   dirs.push(dir)
   const log = join(dir, 'argv.log')
+  if (process.platform === 'win32') return recordGitArgvTrace2(log)
   const real = execFileSync('sh', ['-c', 'command -v git']).toString().trim()
   const shim = join(dir, 'bin')
   mkdirSync(shim)
@@ -53,6 +54,30 @@ function recordGitArgv(): { calls: () => string[][]; restore: () => void } {
         .map((line) => line.split('\u001e').slice(0, -1)),
     restore: () => {
       process.env.PATH = previousPath
+    },
+  }
+}
+
+/**
+ * The same record on Windows, where no shim on PATH can stand in for git: the host spawns git by
+ * its absolute path (#14), and a sh script could not be spawned anyway. Git writes the arguments it
+ * received itself, one `start` event per process in its trace2 log; only the processes the host
+ * started are kept, not the ones git starts under them.
+ */
+function recordGitArgvTrace2(log: string): { calls: () => string[][]; restore: () => void } {
+  const previous = process.env.GIT_TRACE2_EVENT
+  process.env.GIT_TRACE2_EVENT = log
+  return {
+    calls: () =>
+      (existsSync(log) ? readFileSync(log, 'utf8') : '')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { event: string; sid: string; argv?: string[] })
+        .filter((e) => e.event === 'start' && !e.sid.includes('/'))
+        .map((e) => e.argv!.slice(1)),
+    restore: () => {
+      if (previous === undefined) delete process.env.GIT_TRACE2_EVENT
+      else process.env.GIT_TRACE2_EVENT = previous
     },
   }
 }
@@ -98,13 +123,15 @@ describe('gitStatusFiles — porcelain v2', () => {
 describe('untrusted repository status', () => {
   // core.fsmonitor is a command from the repository's local config. Merely registering an
   // untrusted folder must not run it before the person has approved that repository.
-  it.skipIf(process.platform === 'win32')('disables fsmonitor until the project is trusted', async () => {
+  it('disables fsmonitor until the project is trusted', async () => {
     const { d, git } = repo()
     const marker = join(d, 'fsmonitor-ran')
     const hook = join(d, 'fsmonitor.sh')
-    writeFileSync(hook, `#!/bin/sh\nprintf ran >> "${marker}"\nprintf '2\\n'\n`)
+    // Forward slashes: Git for Windows runs the hook through its sh, which reads a backslash as an escape
+    const posixPath = (p: string) => p.replaceAll('\\', '/')
+    writeFileSync(hook, `#!/bin/sh\nprintf ran >> "${posixPath(marker)}"\nprintf '2\\n'\n`)
     chmodSync(hook, 0o755)
-    git('config', 'core.fsmonitor', hook)
+    git('config', 'core.fsmonitor', posixPath(hook))
 
     const untrusted = { trusted: false }
     expect((await gitSummary(d, untrusted)).isRepo).toBe(true)
@@ -139,8 +166,7 @@ describe('git path containment', () => {
     }
   })
 
-  // The argv recorder is a sh script put first on a `:`-joined PATH, and Windows spawns git by its absolute path (#14)
-  it.skipIf(process.platform === 'win32')('treats option-looking filenames as paths when diffing and staging', async () => {
+  it('treats option-looking filenames as paths when diffing and staging', async () => {
     const { d } = repo()
     const name = '--output=owned.patch'
     writeFileSync(join(d, name), 'content\n')
