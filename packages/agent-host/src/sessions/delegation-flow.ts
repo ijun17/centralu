@@ -401,6 +401,8 @@ export class DelegationFlow {
           try {
             await this.host.deliver(child.id, agentFrame(from.name, opts.text ?? ''), undefined, from, false)
           } catch (e) {
+            // Its wait fails too (#839): a wait of the caller's joined it while the child woke
+            next.wait.fail(e as Error)
             this.host.children.dropDelegation(key, next)
             if (this.host.agentRuns.get(child.id) === next.wait) this.host.agentRuns.delete(child.id)
             this.host.children.releaseTurn(child.id, callerId)
