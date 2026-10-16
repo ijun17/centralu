@@ -139,11 +139,12 @@ describe('streaming and tool calls', () => {
 
   it('a declined command or edit, and an interrupted agent call, close as not ok and say so (#843)', () => {
     const declined = n('item/completed', { item: { type: 'commandExecution', id: 'e', status: 'declined', command: 'rm -rf build', aggregatedOutput: null } })
-    expect(declined[0]).toMatchObject({ type: 'tool_result', ok: false, summary: 'Declined' })
+    expect(declined[0]).toMatchObject({ type: 'tool_result', ok: false, summary: '(declined)' })
+    expect(declined[0]).not.toHaveProperty('output')
     const edit = n('item/completed', { item: { type: 'fileChange', id: 'f', status: 'declined', changes: [{ path: 'src/a.ts', diff: '+1', kind: { type: 'update' } }] } })
-    expect(edit[0]).toMatchObject({ type: 'tool_result', ok: false, summary: 'Declined' })
+    expect(edit[0]).toMatchObject({ type: 'tool_result', ok: false, summary: '(declined)' })
     const agent = n('item/completed', { item: { type: 'collabAgentToolCall', id: 'c', tool: 'wait', status: 'interrupted' } })
-    expect(agent[0]).toMatchObject({ type: 'tool_result', ok: false, summary: 'Interrupted' })
+    expect(agent[0]).toMatchObject({ type: 'tool_result', ok: false, summary: '(interrupted)' })
     const dynamic = n('item/completed', { item: { type: 'dynamicToolCall', id: 'd', tool: 't', status: 'completed', success: false } })
     expect(dynamic[0]).toMatchObject({ type: 'tool_result', ok: false })
   })

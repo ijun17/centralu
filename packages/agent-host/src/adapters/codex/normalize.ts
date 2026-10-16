@@ -544,9 +544,9 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       }
       const s = itemSummary(item)
       // The card shows the opening; the result's record is all of it (#221). A declined or interrupted item usually
-      // carries no output, so its card says which it was rather than fail blank (#843)
-      const ending = str(item.status) === 'declined' ? 'Declined' : str(item.status) === 'interrupted' ? 'Interrupted' : ''
-      const out: NormalizedEvent[] = [toolResultEvent(sessionId, str(item.id), codexItemOk(item), resultSummary(item) || ending)]
+      // carries no output, so its card says which it was rather than fail blank, as a note, not as output (#843)
+      const ending = str(item.status) === 'declined' ? 'declined' : str(item.status) === 'interrupted' ? 'interrupted' : undefined
+      const out: NormalizedEvent[] = [toolResultEvent(sessionId, str(item.id), codexItemOk(item), resultSummary(item), ending)]
       // An MCP tool's images (a browser's screenshot, say) come after its card, as Claude's do (#40, #843)
       if (type === 'mcpToolCall') out.push(...mcpImageEvents(sessionId, asObj(item.result).content))
       /*
