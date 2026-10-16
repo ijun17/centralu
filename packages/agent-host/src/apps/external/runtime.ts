@@ -10,6 +10,7 @@ import { BrokerDesk, type BrokerHost, type CapabilityDecisionListed, type Capabi
 import { memoryCapabilityBook } from './capabilities.js'
 import { checkScreen, checkTools, formatReport, type AppCheckReport, type CheckFinding, type CheckedTool } from './check.js'
 import { AppLifecycle } from './app-lifecycle.js'
+import { ChangeReflector } from './change-reflector.js'
 import { ErrorLog } from './error-log.js'
 import { AppUnavailableError } from './unavailable.js'
 import type { HeldErrorBundle, SentErrorBundle } from './errors.js'
@@ -109,11 +110,6 @@ export class ExternalApps {
   /** `onAppsChanged` subscribers, and whether a notification is already scheduled for this tick */
   private appsListeners = new Set<() => void>()
   private appsNotePending = false
-  /** Timers for reflecting changes (C-4) — per app name (holdKey). Carried over even when the manifest changes and a new entry is created */
-  private turnEndTimers = new Map<string, NodeJS.Timeout>()
-  private quietTimers = new Map<string, NodeJS.Timeout>()
-  /** A reflect in progress — an overlapping call waits on the same one */
-  private reloading = new Map<string, Promise<boolean>>()
   /** Recent error bundles per app name (holdKey) and which were sent (C-6) — `error-log.ts` */
   private errorLog = new ErrorLog(() => this.appsChanged())
   /** Apps being removed (`removeUserApp`, by `holdKey`) — none of them starts again while its folder moves */
@@ -138,6 +134,8 @@ export class ExternalApps {
 
   /** An app process's lifecycle (A-3) — `app-lifecycle.ts` */
   private lifecycle: AppLifecycle
+  /** Reflecting a changed app folder (C-4) — `change-reflector.ts` */
+  private reflector: ChangeReflector
 
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
@@ -152,6 +150,22 @@ export class ExternalApps {
       find: (ref) => this.find(ref),
       holdKey: (ref) => this.holdKey(ref),
       label: (ref) => this.label(ref),
+    })
+    this.reflector = new ChangeReflector({
+      timing: this.timing,
+      disposed: () => this.disposed,
+      lifecycle: this.lifecycle,
+      find: (ref) => this.find(ref),
+      holdKey: (ref) => this.holdKey(ref),
+      label: (ref) => this.label(ref),
+      blocker: (e, opts) => this.blocker(e, opts),
+      appsChanged: () => this.appsChanged(),
+      emitChanged: (ref) => this.deps.emitChanged?.(ref),
+      builderBusy: (ref) => this.deps.builderBusy?.(ref) ?? false,
+      rescanNow: (ref) => {
+        const scopeKey = ref.projectId ?? USER_SCOPE
+        if (this.scopes.has(scopeKey) && !this.disposed) this.rescan(scopeKey, { now: ref.appId })
+      },
     })
     // Every ledger row passes through this one place — a tool-call row (`call`) and a broker-request row (the desk) alike. So the runs panel's own signal is also produced here, once
     const notify = deps.emitRunsChanged
@@ -1080,7 +1094,7 @@ export class ExternalApps {
     this.rescanUser({ now: ref.appId })
     const e = this.require(ref)
     resetLife(e.life)
-    void this.reloadIfChanged(ref, { startIfStopped: true, why: 'a previous version was restored' })
+    void this.reflector.reloadIfChanged(ref, { startIfStopped: true, why: 'a previous version was restored' })
     this.appsChanged()
     return this.info(e)
   }
@@ -1089,9 +1103,7 @@ export class ExternalApps {
     this.disposed = true
     this.watchers.close()
     this.handover.dispose()
-    for (const t of [...this.turnEndTimers.values(), ...this.quietTimers.values()]) clearTimeout(t)
-    this.turnEndTimers.clear()
-    this.quietTimers.clear()
+    this.reflector.dispose()
     this.appsListeners.clear()
     const all = [...this.scopes.values()].flatMap((s) => [...s.apps.values()])
     this.scopes.clear()
@@ -1100,128 +1112,9 @@ export class ExternalApps {
 
   // ── Reflecting changes (C-4) ─────────────────────────────────────────────────────────────────
 
-  /**
-   * This app's building session's turn ended (M4 C-4) — announced by the host from session state.
-   *
-   * This does not restart on every single change to the app folder: a building agent edits several
-   * files, several times, within one turn, and the app in between is half-edited code. Only once the
-   * turn ends is a whole batch of edits complete, and only the host watching session state knows that.
-   * Notifications are briefly collected (a turn ending and a state change arrive back to back) — this
-   * restarts once per turn.
-   *
-   * At turn end, the current folder is **measured directly** (its fingerprint). The answer is correct
-   * no matter how many watch events were missed. This starts the app even if it is idle and stopped,
-   * if it changed — the building session's tool list needs to move to the new code.
-   */
+  /** This app's building session's turn ended (M4 C-4) — announced by the host from session state (`ChangeReflector.builderTurnEnded`) */
   builderTurnEnded(ref: AppRef): void {
-    if (this.disposed) return
-    const key = this.holdKey(ref)
-    clearTimeout(this.turnEndTimers.get(key))
-    const t = setTimeout(() => {
-      this.turnEndTimers.delete(key)
-      /*
-       * A manifest change deferred while mid-turn is read right now (`rescan`'s `now`). Even if
-       * watching missed that change, it is read here. If a new entry was created, the old process
-       * stops after finishing its call (`haltWhenDrained`), and the new entry is started **once** with
-       * the new manifest — just like when only the folder changed, this starts an app even if it was
-       * idle and stopped, as long as it has ever started before (this moves the building session's
-       * tool list forward).
-       */
-      const before = this.find(ref)
-      const scopeKey = ref.projectId ?? USER_SCOPE
-      if (this.scopes.has(scopeKey) && !this.disposed) this.rescan(scopeKey, { now: ref.appId })
-      const after = this.find(ref)
-      if (before && after && after !== before) {
-        if (before.life.stamp !== null) void this.startNewManifest(after, "the builder's turn ended and the manifest changed")
-        return
-      }
-      void this.reloadIfChanged(ref, { startIfStopped: true, why: "the builder's turn ended and the app folder changed" })
-    }, this.timing.turnEndDebounceMs)
-    t.unref()
-    this.turnEndTimers.set(key, t)
-  }
-
-  /**
-   * A scan saw that the app folder changed (C-4). If a building session is mid-turn, this does
-   * nothing — turn end reflects it instead. If there is none, or it is idle (edited from an editor),
-   * this waits for things to go quiet after the last change, and reflects it if the building session
-   * is still not mid-turn at that point. This path only ever restarts a running app — an app no one is
-   * using is never woken up by an edit (the performance budget).
-   */
-  private folderChanged(e: AppEntry): void {
-    if (this.deps.builderBusy?.(e.ref)) return
-    const key = this.holdKey(e.ref)
-    clearTimeout(this.quietTimers.get(key))
-    const ref = e.ref
-    const t = setTimeout(() => {
-      this.quietTimers.delete(key)
-      if (this.deps.builderBusy?.(ref)) return
-      void this.reloadIfChanged(ref, { startIfStopped: false, why: 'the app folder changed and stayed quiet' })
-    }, this.timing.reloadQuietMs)
-    t.unref()
-    this.quietTimers.set(key, t)
-  }
-
-  /**
-   * If the folder differs from the last time it started, restarts with the current files — returns
-   * true if it restarted.
-   *
-   * **A call in progress is never cut off.** This waits for it to finish (no cap — cutting it off is
-   * worse). Stopped in the very same tick it finishes (see the comment on `drain`). Since a changed
-   * folder means the author fixed something, an app stopped after failing repeatedly also gets another
-   * chance (its count is cleared). Restarting re-reads the tool list, and a session is notified if the
-   * agent-facing tools changed (immediately for Claude, from the next thread for Codex — same as A-5).
-   * An open screen also receives "changed".
-   */
-  private reloadIfChanged(ref: AppRef, opts: { startIfStopped: boolean; why: string }): Promise<boolean> {
-    const key = this.holdKey(ref)
-    const running = this.reloading.get(key)
-    if (running) return running
-    const p = (async () => {
-      const e = this.find(ref)
-      // A changed folder gives a stopped app another chance (below), so only what that cannot clear stops it here
-      if (!e || this.blocker(e, { fresh: true }) || this.disposed) return false
-      const L = e.life
-      if (L.stamp === null || folderFingerprint(e.dir) === L.stamp) return false
-      if (!opts.startIfStopped && !L.proc?.alive) return false
-      while (L.inflight > 0) await this.lifecycle.drain(e, 60_000)
-      // The manifest changed and a new entry replaced this one, or it was removed, while waiting — a new entry starts through its own path
-      if (this.find(ref) !== e || this.disposed) return false
-      const pid = L.proc?.child.pid
-      L.proc?.log.note(`reloading: ${opts.why}`)
-      void this.lifecycle.halt(e, opts.why)
-      resetLife(L)
-      this.appsChanged()
-      try {
-        await this.lifecycle.use(e, async () => {})
-        console.error(`[apps] ${this.label(ref)} reloaded (${opts.why})${pid ? `, was pid ${pid}` : ''}`)
-        this.deps.emitChanged?.(ref)
-      } catch (err) {
-        // Failed to start — the reason is recorded both in the list (crashed) and in an error bundle. The building session's check reads that reason
-        console.error(`[apps] ${this.label(ref)} reload failed: ${(err as Error).message.split('\n')[0]}`)
-      }
-      return true
-    })().finally(() => this.reloading.delete(key))
-    this.reloading.set(key, p)
-    return p
-  }
-
-  /**
-   * Starts a newly created entry with a new manifest (C-4) — for when reading a manifest deferred
-   * until the building session's turn end replaces the entry. The old process is stopped by `rescan`
-   * after finishing its call. If it starts, "changed" is sent to an open screen (the same as
-   * `reloadIfChanged`).
-   */
-  private async startNewManifest(e: AppEntry, why: string): Promise<void> {
-    if (this.blocker(e) || this.disposed) return
-    try {
-      await this.lifecycle.use(e, async () => {})
-      console.error(`[apps] ${this.label(e.ref)} started on its new manifest (${why})`)
-      this.deps.emitChanged?.(e.ref)
-    } catch (err) {
-      // Failed to start — the reason is recorded both in the list (crashed) and in an error bundle. The building session's check reads that reason
-      console.error(`[apps] ${this.label(e.ref)} did not start on its new manifest: ${(err as Error).message.split('\n')[0]}`)
-    }
+    this.reflector.builderTurnEnded(ref)
   }
 
   /** The key for an open screen. Since this is never used in a path, it does not care about a project id's shape (unlike scopeDir) */
@@ -1458,7 +1351,7 @@ export class ExternalApps {
         // An app in a project that lost trust is stopped immediately — it stays in the list
         if (!scope.trusted) void this.lifecycle.halt(prev, 'project is no longer trusted')
         // Did something outside the manifest change (server.mjs, a screen…) (C-4)? Measured only for an app that has started at least once
-        else if (prev.life.stamp !== null && folderFingerprint(prev.dir) !== prev.life.stamp) this.folderChanged(prev)
+        else if (prev.life.stamp !== null && folderFingerprint(prev.dir) !== prev.life.stamp) this.reflector.folderChanged(prev)
         continue
       }
       /*
