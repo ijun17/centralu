@@ -33,13 +33,13 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Adapter | The module that wraps one agent tool in the common contract and turns its output into normalized events | `AgentAdapter`, `packages/agent-host/src/adapters/contract.ts` | driver |
 | Session kind | What a session is created as: `worker` (every ordinary session), `orchestrator` or `coordinator`. Not stored as such: read from `is_orchestrator` and from whether a coordinator's member list is set | `SessionKind`, `packages/protocol/src/commands.ts`; derivation in `readSessions`, `packages/agent-host/src/dev-services/store/sessions.ts` | |
 | Orchestrator | The one session of the whole app that sees and directs every session. Belongs to no project | `kind: 'orchestrator'`; `packages/agent-host/src/sessions/orchestrator-tools.ts`, `orchestrator-home.ts` | project orchestrator (retired) |
-| Ordinary session | A `worker` in a project that is not a builder, a manager or an app's agent. Gets the read-only `reader` tools (worktree and delegated sessions too), unless Settings turns them off | `readsOwnProject`, `packages/agent-host/src/sessions/tool-profiles.ts` | |
-| Worktree session (worker) | A session working in its own git worktree and branch, always under a manager (`parentSessionId`) | `SessionInfo.worktree`, `parentSessionId` | branch session |
+| Ordinary session | A `worker` in a project that is not a builder or an app's agent. Gets the read-only `reader` tools (worktree sessions, started agents and delegated sessions too), unless Settings turns them off | `readsOwnProject`, `packages/agent-host/src/sessions/tool-profiles.ts` | |
+| Worktree session (worker) | A session working in its own git worktree and branch. One the person makes stands on its own; one a session started with `start_agent` hangs under that session (`parentSessionId`). The worktree manager that held them is gone (#561 part 3) | `SessionInfo.worktree`, `parentSessionId` | branch session |
 | Coordinator | A session with a fixed list of sessions it may see (`scopeSessionIds`) and a role text (`roleAppend`), made only by the control app's tasks. That app was removed in #372 and the RPC that created one (`agents.createCoordinator`) after it, so nothing makes a new one; the kind stays for the ones already in people's stores, which are listed, read, woken and trashed like any session, and carry `appId: 'control'` | `kind: 'coordinator'`; `manager.ts` | sub-orchestrator |
 | Builder | `<<role>>` The session building one app. A session carrying `appId` **and** named by that app in the builder map (`apps.builders`) | `builderRefOf` on `AppSessions`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-builder.ts` | |
 | App-agent session | `<<role>>` A session an app started through `run_agent`: carries `appId`, is not the builder, runs under `safe`, gets no apps and no reader tools, and its answer goes back to the app | `isAppAgent`, `packages/agent-host/src/sessions/tool-profiles.ts`; `runAppAgent`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
-| Delegated ("asked by") session | `<<role>>` A session another project's session started or reused through `ask_project`; marked with `askedBy` | `SessionInfo.askedBy`; `packages/agent-host/src/sessions/ask-project.ts`; [agent-host.md](agent-host.md) §1.2 | delegate |
-| Started agent (child) | `<<role>>` A session another session of the same project started with `start_agent` (#561), in that session's folder and under its preset; marked with `askedBy`, and the only sessions that one may work with through `agent_session`. Like a delegated session it cannot start agents or ask a project | `SessionInfo.askedBy`; `startAgent`, `agentSession`, `manager.ts`; `packages/agent-host/src/sessions/start-agent.ts`; [agent-host.md](agent-host.md) §1.2.1 | child, worker |
+| Delegated session | `<<role>>` An existing ordinary session that another project's session gave a task through `ask_project`. Centralu never creates a session in another project for it (#614) and puts no mark on it: the asker is the task's `from` in the conversation, and the task runs as a delegated turn. Before #614 `ask_project` started or reused one and marked it with `askedBy`; those marks are removed | `askProject`, `packages/agent-host/src/sessions/ask-project-flow.ts`; `askFrame`, `ask-project.ts`; [agent-host.md](agent-host.md) §1.2 | delegate |
+| Started agent (child) | `<<role>>` A session another session of the same project started with `start_agent` (#561), in that session's folder and under its preset; marked with `askedBy`, and the only sessions that one may work with through `agent_session`. Like a session working on another project's task, it cannot start agents or ask a project | `SessionInfo.askedBy`; `startAgent` in `sessions/start-agent-flow.ts`, `agentSession` in `sessions/delegation-flow.ts` (both reached through `manager.ts`); `packages/agent-host/src/sessions/start-agent.ts`; [agent-host.md](agent-host.md) §1.2.1 | child, worker |
 | Tool profile | Which bundle of Centralu's own tools (`centralu` MCP server) a session gets: `orchestrator`, `scoped`, `builder`, `reader`, or none (the worktree manager's `manager` was folded into ordinary sessions, #561) | `toolProfileFor`, `packages/agent-host/src/sessions/tool-profiles.ts` (asked through `toolProfileOf`, `manager.ts`); [agent-host.md](agent-host.md) §1.1 | |
 | Permission preset | How much the agent may do without asking: `safe`, `normal`, `auto` | `PermissionPreset`, `entities.ts` | mode |
 | Live | Whether the session has a process now. A session that is not live is resumed when addressed | `SessionInfo.live` | archived (FR-20 was retired) |
@@ -62,14 +62,14 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Tool call / tool result | The agent using a tool, and what came back. Paired by `callId`; drawn as one tool card | `tool_call`, `tool_result`, `events.ts` | |
 | Subagent step | A step of a subagent the agent launched (Claude's Task). Hangs off the launching tool call, never part of the conversation's numbering | `subagent_event`, `events.ts`; `subagent_messages` (store v41) | |
 | Approval | A pending yes/no on something the agent wants to do. At most one per session at a time | `pendingApproval`, `ApprovalDetail`, `entities.ts` | permission request |
-| Approval detail | What is being asked: `command`, `file_edit`, `other` (from an adapter), `capability` and `project_access` (raised by the host) | `ApprovalDetail`, `entities.ts` | |
+| Approval detail | What is being asked: `command`, `file_edit`, `other` (from an adapter; the host's apply and handoff cards ride on it too, with an `about`), `capability`, `project_access`, `agent_start`, `centralu_update` and `project_create` (raised by the host) | `ApprovalDetail`, `entities.ts` | |
 | Approval rule | A remembered "always allow" for commands, matched by a pattern with `*`, scoped to a session or a project. Only allows are stored; the adapter checks them before it asks | `ApprovalRule`, `packages/core/src/approval/approval.ts`; `rulesFor`, `manager.ts` | allowlist |
 | Question | A choice the agent asks the person to make (AskUserQuestion), answered with `agents.answerQuestion`. Any number may wait | `Question`, `pendingQuestions`, `entities.ts` | prompt |
 | Project consent | A remembered "always" letting one project reach another: `delegate` (`ask_project`) or `apps` (attach its shared apps); or, from a project to itself, `agents` (its sessions may start agents, #561) | `ProjectConsent`, `entities.ts`; `project_consents` (store v44) | |
-| Read grant | A path inside the target project that a delegated answer named, readable by the caller while this host runs | `readGrants`, `ask-project.ts` | |
-| Report mark | "You will be told when it ends": a session that owes a report of its work's end to the session that gave it work (`start_agent` past its wait, `send_to_session` with `reportBack`). Cleared once reported; survives a host swap (#646). A turn that completes while background work the session started still runs **pauses** it (#721): the giver is told once that the work paused, and the report stays owed until a turn ends with none of that work left | `awaitingReport`, `pausedReports`, `manager.ts`; `report_marks` (store v49), app setting `report_paused:<session>` | |
-| Delegated turn | A turn another session's work started in a session (`ask_project`, `start_agent`, `agent_session` send, `send_to_session` to a session at rest). While it runs, its cards go to that session too: questions it may answer, approvals it is told of (#676). Ends with the turn; survives a host swap | `turnOwners`, `manager.ts`; `delegated_turns` (store v51) | |
-| Queued request | Work one session asked a busy session for and chose to queue (`ifBusy: "queue"`): delivered as a new turn the requester owns when the running one ends. Survives a host swap (#677) | `queued`, `manager.ts`; `queued_requests` (store v52) | |
+| Read grant | A path inside the target project that a delegated answer named, readable by the caller while this host runs | `readGrants` (held by `manager.ts`, handed to `sessions/delegation-host.ts`), `readableGrants`, `ask-project.ts` | |
+| Report mark | "You will be told when it ends": a session that owes a report of its work's end to the session that gave it work (`start_agent` past its wait, `send_to_session` with `reportBack`). Cleared once reported; survives a host swap (#646). A turn that completes while background work the session started still runs **pauses** it (#721): the giver is told once that the work paused, and the report stays owed until a turn ends with none of that work left | `awaitingReport`, `pausedReports`, `sessions/child-ownership.ts`; `report_marks` (store v49), app setting `report_paused:<session>` | |
+| Delegated turn | A turn another session's work started in a session (`ask_project`, `start_agent`, `agent_session` send, `send_to_session` to a session at rest). While it runs, its cards go to that session too: questions it may answer, approvals it is told of (#676). Ends with the turn; survives a host swap | `turnOwners`, `sessions/child-ownership.ts`; `delegated_turns` (store v51) | |
+| Queued request | Work one session asked a busy session for and chose to queue (`ifBusy: "queue"`): delivered as a new turn the requester owns when the running one ends. Survives a host swap (#677) | `queued`, `sessions/child-ownership.ts`; `queued_requests` (store v52) | |
 | Fork | A sub-session started from a copy of a busy session's conversation for another session's request (`ifBusy: "fork"`): linked to the requester, hung under the original in the sidebar (#677) | `SessionInfo.forkedFrom`; `sessions.forked_from_session_id` (store v52) | |
 | Unread | Whether there is content past what the person last saw (`lastReadSeq`). Independent of state | `SessionInfo.lastReadSeq` | |
 
@@ -202,8 +202,8 @@ classDiagram
   (its project is kept in the trash record). The inbox and the palette label every session with no project
   "Orchestrator".
 - `kind` is all a session is created as. Every other role is read off a relationship each time: a builder is named in the builder map; an app-agent session
-  carries an `appId` the builder map does not point back to; a delegated session has `askedBy` naming a session of
-  another project, a started agent `askedBy` naming one of its own. Moving a role into a
+  carries an `appId` the builder map does not point back to; a started agent has `askedBy` naming a session of its
+  own project. A delegated session is told by the delegated turn it is running, not by a stored relationship (#614). Moving a role into a
   stored flag was avoided on purpose, so the flag cannot drift from the relationship (#13, #80).
 - The tool profile follows from these, first match wins: orchestrator, coordinator (`scoped`), builder, ordinary
   session in a project (`reader`, unless Settings turns it off), none (`toolProfileFor`).
@@ -582,15 +582,18 @@ sequenceDiagram
   participant C as Session in project A
   participant M as Session manager
   actor P as Person
-  participant D as Delegated session in project B
-  C->>M: ask_project(B, task)
-  M->>M: B is another registered project, and C was not itself asked
+  participant D as Existing session in project B
+  C->>M: ask_project(B, session?, task)
+  M->>M: B is another registered project, and C is not itself working on another project's task
   M->>M: consent A to B, kind delegate?
   alt not given yet
-    M-->>P: project_access card in C's session
+    M-->>P: project_access card in C's session, naming D and B's trust
     P-->>M: allow once, or always (stored), or deny
   end
-  M->>M: the session C asked in B before, if idle or finished, else a new one (B's default tool, normal preset, askedBy C)
+  M->>M: the ordinary session of B that C named, or B's only one; never a new one (#614)
+  alt D is in a turn that is not C's
+    M-->>C: the choices (note for an auto caller, or queue), and nothing is sent
+  end
   M->>D: task in a frame, sent as from C
   D-->>P: its own approvals stand in D, where the person sees them
   alt within 240 s
@@ -601,8 +604,9 @@ sequenceDiagram
   end
 ```
 
-Depth is one: a delegated session cannot ask a third project. A second task to the same project while one runs is
-refused. Read grants live in the host's memory and end with it. Stopping the caller stops the delegated turn.
+Depth is one: a session working on another project's task cannot ask a third project. A session in a turn that is
+not the caller's gets nothing sent; the caller gets the choices instead ([agent-host.md](agent-host.md) §1.2.3). A new
+task cannot replace unfinished work in the same session. Read grants live in the host's memory and end with it. Stopping the caller stops the delegated turn.
 Detail: [agent-host.md](agent-host.md) §1.2.
 
 ### 5.3 An app calling `run_agent`

@@ -6,8 +6,8 @@ A standalone Node process. In dev the developer starts it directly (`pnpm host`)
 
 ```
 agent-host/src/
-├─ main.ts              # CLI (--port --token --db --watch-parent), the wiring of the services,
-│                       #   each start step marked against lifecycle/start.ts's START_ORDER
+├─ main.ts              # CLI (--port --token --db --watch-parent --memory --standby), the wiring of the
+│                       #   services, each start step marked against lifecycle/start.ts's START_ORDER
 ├─ lifecycle/           # the process's start and ending (runtime-unification.md step 3):
 │                       #   launch-env (variables read once, deleted), start (the order as data,
 │                       #   the final refusal), gate (nothing to a screen before the server),
@@ -20,19 +20,30 @@ agent-host/src/
 │  └─ json-lines.ts     # newline-delimited JSON: split at \n only (never readline, which also splits at U+2028), pending requests (#428)
 ├─ adapters/
 │  ├─ contract.ts       # AgentAdapter interface + capability types
+│  ├─ registry.ts       # the tool → adapter map
 │  ├─ claude/           # based on the Claude Agent SDK (incl. orchestrator-mcp.ts)
 │  └─ codex/            # app-server JSON-RPC client (written here, incl. the stdio bridge)
-├─ sessions/            # session lifecycle, orchestrator tools, app guide
-├─ dev-services/        # git/fs/store (the store is not dev-only — it is where messages live)
+├─ sessions/            # SessionManager and the parts moved out of it: delegation, handoff, the trash,
+│                       #   orchestrator tools, session apps (folder-structure.md §1)
+├─ apps/external/       # external apps: manifest, discovery, runs, broker, capabilities (apps.md)
+├─ views/               # app views: the view host, its CSP, the proxy page, drag relay
+├─ links/               # linked machines (#82): links, the remote client, install and update over ssh
+├─ keeper/              # the keeper's child service: agents and ptys spawned there, re-attach (#280)
+├─ dev-services/        # git/fs/store, terminals, commands (not dev-only — it is where messages live, §5)
+├─ swap-control.ts      # the host's half of a swap (#280 step 3); drain.ts waits out the calls it serves
+├─ keeper-link.ts       # what the host tells the keeper, and its own build
+├─ view-handover.ts     # open app views across a swap (#280 step 4)
 ├─ log-file.ts          # tees stderr to ~/.centralu/host.log (stdout is reserved, see below)
 ├─ env-path.ts          # PATH augmentation — a GUI app inherits no login-shell PATH
 ├─ stream-text.ts       # text read off a child's stream: a kept tail, lines, decoded as one stream (#428)
 ├─ timing.ts            # bounded waits (withTimeout, raceTimeout, raceBound, waitForEvent, waitForExit): each clears and unrefs its timer
 ├─ tool-launch.ts       # how a found tool is started (Windows .cmd shims, absolute paths)
-├─ os.ts               # what differs between OSes, asked by name (architecture.md §2)
+├─ os.ts                # what differs between OSes, asked by name (architecture.md §2)
 ├─ data-dir.ts          # locating and migrating the data directory
 ├─ idle.ts              # the one rule for "is anything running a person would lose" (#352)
-└─ updates.ts           # update checks, installing, "apply automatically when idle"
+├─ updates.ts           # update checks, installing, "apply automatically when idle"; update-apply.ts: an agent's apply (#665)
+├─ agent-versions.ts    # moving sessions to a newly installed agent CLI (#297); cli-version.ts finds the version
+└─ themes.ts            # the themes folder (#312)
 ```
 
 Usage parsing and the orchestrator's MCP surface do **not** have their own directories:
@@ -203,8 +214,8 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
    Duplicate names require an id. No ordinary session means a refusal telling the person to open
    one there. Selection never creates, renames or takes ownership of a session, and the task's
    text never auto-names a "New session" (#646): only the person's own words do, as with an app's
-   message. Old `Asked by <project> · HH:MM` sessions remain ordinary sessions; startup removes
-   their former cross-project `askedBy` mark, retaining their name and history.
+   message. Old `Asked by <project> · HH:MM` sessions remain ordinary sessions; their former cross-project `askedBy` mark is removed (#614), and
+   their name and history are kept.
 3. **Consent.** `ensureProjectAccess` (`delegate`) raises a card in the caller's session naming
    `<caller project> asks <project> / <session>` and the task. Allow once, always for this project
    pair, or deny; only always is stored in `project_consents` and revoked in Settings → Permissions.
@@ -823,7 +834,7 @@ the person sends are unchanged. The answer says which choice ran and its handle.
 | `ifBusy` | What happens |
 |---|---|
 | `note` | Today's mid-turn note (#594/#606/#653): only when B's own preset is `auto`, and only on a CLI that takes input mid-turn (`send_to_session` sends as before). The turn's answer stays its owner's; B reads the reply to its note on its own reader. Not into another caller's `ask_project` task. |
-| `queue` | Held (`queued`, `enqueue`) and delivered as a new turn B owns when A's running turn ends (`drainQueue`, from the turn's end and the boundaries that free a session): B's delegation for `agent_session` and `ask_project`, its turn for `send_to_session`, each framed as that tool frames its work, with the report when it ends and its cards (§1.2.2). One at a time, oldest first. The answer is a handle (`qr-…`) and the place in the queue; `agent_session` status (or `ask_project` with no task) says where it stands, `stop` withdraws it. Written to `queued_requests` (store v52): `detachAll` delivers nothing (`handingOver`), and the next host delivers a request when the kept session's turn ends there, or soon after start for a session at rest (a kept one after its adoption, so its input never starts a second process). A request whose session or requester is gone is dropped, as are those of a trashed session. Before it goes in, the request tool's gates are read again with the requester's preset as it is then (`queuedGateError`): for ask_project its trust and depth, the target project, and the pair's remembered consent when only `auto` let the request pass without one (`openedByAuto`, stored as `queued_requests.opened_by_auto`, store v54, so a swap keeps it; a row an older build wrote is read as marked when the pair has no remembered consent); for agent_session the ownership a requester that is not `auto` needs and the preset rule. A request that fails them is dropped with its requester told. A requester moved off `auto`, or handing off to a successor that is not `auto` (`moveLiveChildren`, the original is told), drops at once what only `auto` let through (`dropOpenedByAuto`: a marked ask whose pair still has no remembered consent, a send to a session it did not start); one being delivered at that moment is left to the delivery gate, which reads the stored mark if a swap delivers it again. Its caller's project losing trust or being removed, and the person revoking the pair, withdraw queued `ask_project` requests the same way (`withdrawReaches`); trust and a revoked pair leave an `auto` requester's requests, which the delivery gate reads again. **Delivery** (#684 review): one drain per session at a time (`delivering`), which reserves the session before its first await, so waking a sleeping session counts as busy and lets no second request in; the request stays first in the queue and its row stays, marked `delivering_at`, until the session's turn actually starts, and only then is it taken off. A swap or crash in between leaves the row, and the next host delivers it again: at least once, with one duplicate possible when the old process took the input without a word before the swap. A deferred restart is not waited out by the drain (`deliver` waits for it), and its end schedules the drain again. A retry of the same request (requester, tool and words) returns the handle already held instead of a second entry. |
+| `queue` | Held (`queued`, `enqueue`) and delivered as a new turn B owns when A's running turn ends (`drainQueue`, from the turn's end and the boundaries that free a session): B's delegation for `agent_session` and `ask_project`, its turn for `send_to_session`, each framed as that tool frames its work, with the report when it ends and its cards (§1.2.2). One at a time, oldest first. The answer is a handle (`qr-…`) and the place in the queue; `agent_session` status (or `ask_project` with no task) says where it stands, `stop` withdraws it. Written to `queued_requests` (store v52): `detachAll` delivers nothing (`handingOver`), and the next host delivers a request when the kept session's turn ends there, or soon after start for a session at rest (a kept one after its adoption, so its input never starts a second process). A request whose session or requester is gone is dropped, as are those of a trashed session. Before it goes in, the request tool's gates are read again with the requester's preset as it is then (`queuedGateError`): for ask_project its trust and depth, the target project, and the pair's remembered consent when only `auto` let the request pass without one (`openedByAuto`, stored as `queued_requests.opened_by_auto`, store v54, so a swap keeps it; a row an older build wrote is read as marked when the pair has no remembered consent); for agent_session the ownership a requester that is not `auto` needs and the preset rule. A request that fails them is dropped with its requester told. A requester moved off `auto`, or handing off to a successor that is not `auto` (`moveChildren`, the original is told), drops at once what only `auto` let through (`dropOpenedByAuto`: a marked ask whose pair still has no remembered consent, a send to a session it did not start); one being delivered at that moment is left to the delivery gate, which reads the stored mark if a swap delivers it again. Its caller's project losing trust or being removed, and the person revoking the pair, withdraw queued `ask_project` requests the same way (`withdrawReaches`); trust and a revoked pair leave an `auto` requester's requests, which the delivery gate reads again. **Delivery** (#684 review): one drain per session at a time (`delivering`), which reserves the session before its first await, so waking a sleeping session counts as busy and lets no second request in; the request stays first in the queue and its row stays, marked `delivering_at`, until the session's turn actually starts, and only then is it taken off. A swap or crash in between leaves the row, and the next host delivers it again: at least once, with one duplicate possible when the old process took the input without a word before the swap. A deferred restart is not waited out by the drain (`deliver` waits for it), and its end schedules the drain again. A retry of the same request (requester, tool and words) returns the handle already held instead of a second entry. |
 | `fork`, `fork_read` | A sub-session from a copy of A's conversation now (`forkFor`): the adapter's `forkConversation` (Claude: the SDK's `forkSession`, which writes the copy beside the original's transcript; Codex: `thread/fork`), resumed with its history on screen (`importHistory`). An adapter without it, a session with no conversation yet, and `ask_project` (which never creates a session in another project) are not offered a fork. start_agent's gates apply: depth one, the project's trust (#382; #673's consent rule as `ensureAgentConsent` has it) and the per-project ceiling; once the card is answered the gates are read again and a place is taken before the copy is made (`reservePlace`), and the project losing trust withdraws a card still standing. Once the fork's session exists the gates and the lower of the two presets as they are now are read again with no wait before its delegation; a fork that fails them gets no task and goes to the trash. The preset is the lowest of B's and A's. `fork` gets a worktree of its own (`agentWorktreeBranch`, branched from A's branch when A is a worktree session; a project with no git repository is refused and pointed at `fork_read`); `fork_read` is read-only work in A's folder under at most `safe`, so two agents never write one folder. Linked to B: `askedBy` B for a same-project ordinary session (the orchestrator through the delegation alone), its turn B's delegation (the report, its cards), and `forkedFrom` A (`sessions.forked_from_session_id`, store v52), which the sidebar uses to hang it under A, ahead of `parentSessionId` and `askedBy` (`orderAsTree`, `foldGroupsHiding`). |
 
 **Sizes.** `ifBusy` carries no words in any schema: the `busy` answer names it and its values. `ask_project`'s is a

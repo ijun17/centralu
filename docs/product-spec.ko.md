@@ -122,11 +122,11 @@ come back to the desk
 | 프로젝트 | 등록된 로컬 디렉터리 하나. git 저장소일 수도, 아닐 수도 있다 |
 | 세션 | 에이전트 대화 인스턴스 하나. 프로젝트에 속하며 도구(Claude Code/Codex), 모델, 권한 설정을 가진다 |
 | 어댑터 | 특정 에이전트 도구를 공통 인터페이스로 감싸는 모듈 |
-| 오케스트레이터 세션 | `kind: 'orchestrator'`인 세션 — 앱의 모든 세션을 조회하고 지시할 수 있다. 정확히 하나이며 어느 프로젝트에도 속하지 않는다. 프로젝트의 지휘석은 워크트리 매니저이고, 그것은 역할이 아니라 워크트리 자식이 있다는 관계로 정해진다 (FR-11, #69) |
+| 오케스트레이터 세션 | `kind: 'orchestrator'`인 세션 — 앱의 모든 세션을 조회하고 지시할 수 있다. 정확히 하나이며 어느 프로젝트에도 속하지 않는다. 프로젝트에는 따로 지휘석이 없다: 워크트리 매니저(#69)는 평범한 세션에 접혀 들어갔고(#561 part 3), 평범한 세션이라면 누구나 `start_agent`로 자기 프로젝트에 에이전트를 띄우고 그것을 소유한다 (FR-11) |
 | 워크스페이스 | 등록된 프로젝트 목록 + 레이아웃 + 열린 세션들의 전체 상태 (복원의 단위) |
 | 인박스 | 프로젝트 구조를 무시하고 "지금 내 개입을 기다리는 항목"만 보여주는 트리아지 뷰 |
 | 읽음/안읽음 | 세션 상태와 독립: 마지막으로 본 이후 새 내용이 있는가 |
-| 아카이브 | 세션 프로세스는 종료되고 목록에서 치워지지만, 대화 기록은 보존되는 상태 |
+| ~~아카이브~~ | FR-20과 함께 폐기됐다(2026-09-02). 살아 있지 않은 세션은 누가 말을 걸면 다시 이어지고, 사람이 지운 세션은 휴지통으로 간다(FR-22) |
 
 ---
 
@@ -291,7 +291,9 @@ come back to the desk
   매니저(#69)가 다른 방향에서 같은 자리를 가져갔다 — 프로젝트의 세션들을 지휘하는 세션. 그런 자리가 둘인 것은
   개념이 하나 많았다: 만든 사람조차 도그푸딩에서 둘을 헷갈렸고, 승격 줄은 한 번도 쓰이지 않았다. 남는 것은 값을
   하는 한 쌍이다 — 전부를 가로지르는 오케스트레이터 하나, 그리고 프로젝트마다 **관계에서 나오는**(워크트리 자식이
-  있으면 매니저다) 매니저. 스키마 v26은 프로젝트를 가진 채 표식이 남은 세션에서 그 표식을 지운다 — 이 단계가
+  있으면 매니저다) 매니저. #561 part 3 이후로는 매니저 자리도 없어졌다: 평범한 세션이라면 누구나 `start_agent`로 자기
+  프로젝트에 에이전트를 띄우고 그것을 소유하며, 예전 매니저의 워크트리 세션들은 그 매니저의 자식이 되었다(스토어 v48).
+  스키마 v26은 프로젝트를 가진 채 표식이 남은 세션에서 그 표식을 지운다 — 이 단계가
   없으면 프로젝트 단계를 걷어내는 것이 그 세션들을 조용히 중앙 범위로 **넓히는** 일이 된다.
 - 호스트는 오케스트레이터 세션에 **선별된 도구**(세션 조회, 대화 읽기, 지시 전송,
   `create_session`, `update_session_settings`)와 **컴파일 시점에 내장된 앱 가이드**(overview/sessions/orchestrator/approvals/
@@ -304,14 +306,18 @@ come back to the desk
   쓴 것이다. 모든 세션의 모든 턴에 실리므로 크기를 재서 줄였다: 후보 넷을 오케스트레이터 문구 그대로
   붙이면 요청마다 입력 +672토큰, 출시본은 +192토큰(측정과 근거는 agent-host.md §1.1). 설정 → 오케스트레이터의
   "Let sessions look at their own project"로 끈다.
-- **평범한 세션이 다른 프로젝트에 일을 맡길 수 있다**(#371 B, 2026-10-05 소유자 결정): `ask_project({ project, task })`가
-  그 프로젝트에 보이는 세션을 새로 띄우거나(또는 다시 쓰고) 그 프로젝트의 폴더·지침·도구·권한으로 일을 시킨 뒤, 턴이
-  끝나기를 기다려 답을 돌려준다 — 서브에이전트의 결과가 돌아오는 것처럼. 동의는 프로젝트 쌍마다다: X가 Y에 처음 맡길 때
-  호출한 세션에 카드가 선다(이번만 허용 / 이 쌍은 항상 / 거절). "항상"은 기억되고 설정 → Permissions에서 철회한다. 맡겨진
-  세션은 그 프로젝트의 권한 안에서 코드를 바꿀 수 있고, "asked by" 표시와 되돌아가는 링크가 붙는다. 호출한 쪽 대화에는
+- **평범한 세션이 다른 프로젝트에 일을 맡길 수 있다**(#371 B, 2026-10-05 소유자 결정): `ask_project({ project, session?, task })`가
+  그 프로젝트의 **이미 있는 평범한 세션**(이름을 댄 세션, 또는 그 프로젝트의 유일한 세션)에 일을 주고, 거기에 세션을 새로
+  만들지는 않는다(#614, 2026-10-13 소유자 결정). 세션을 만드는 것은 그 프로젝트에서 사람이 하는 일로 남는다. 턴이 끝나기를
+  기다려 답을 돌려준다 — 서브에이전트의 결과가 돌아오는 것처럼. 그 세션은 자기 이름·도구·모델·권한을 그대로 지니고, 일은
+  부탁한 세션이 보낸 것으로 그 대화에 나타난다. 부른 쪽의 턴이 아닌 턴을 돌고 있는 세션에는 아무것도 보내지 않고, 부른 쪽이
+  선택지를 받는다(`auto`인 부른 쪽에게는 메모, 또는 대기; agent-host.ko.md §1.2.3). 동의는 프로젝트 쌍마다다: X가 Y에 처음 맡길 때
+  호출한 세션에 카드가 선다(이번만 허용 / 이 쌍은 항상 / 거절). "항상"은 기억되고 설정 → Permissions에서 철회한다. 일을
+  받은 세션은 그 프로젝트의 권한 안에서 코드를 바꿀 수 있다. "asked by" 표시는 붙지 않는다(#614 이전에 ask_project가 남긴
+  표시는 지워진다). 호출한 쪽 대화에는
   그 세션으로 가는 작은 카드가 남는다. 답이 이름 붙인 파일 중 대상 프로젝트 안의 것만 호출한 세션이 읽을 수 있게 되고,
-  그보다 넓게는 열리지 않는다. 호출한 쪽의 Stop은 맡겨진 턴도 멈춘다. 맡겨진 세션은 세 번째 프로젝트에 다시 맡길 수
-  없다. 자세한 것은 agent-host.md §1.2.
+  그보다 넓게는 열리지 않는다. 호출한 쪽이 기다리는 동안 그쪽의 Stop은 맡겨진 턴도 멈춘다. 다른 프로젝트의 일을 하는 중인
+  세션은 세 번째 프로젝트에 다시 맡길 수 없다. 자세한 것은 agent-host.md §1.2.
 - **다른 프로젝트의 앱, 필요할 때만**(#371 A, 2026-10-05 소유자 결정): 평범한 프로젝트 세션은 다른 프로젝트가
   나눠 둔 앱이나 사람의 사용자 폴더 앱을 찾아, 그 도구가 필요한 동안 붙이고 뒤에 뗀다(`find_apps`, `attach_app`,
   `detach_app`). 그래서 그 도구는 그 밖에는 문맥을 차지하지 않는다. 나누기는 프로젝트 앱마다 사람이 고르고(설정 →
@@ -340,11 +346,11 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 
 | 상태 | 의미 | 긴급도 | 표시 |
 |---|---|---|---|
-| `working` | 에이전트 턴이 진행 중 | — | ⚙ 회전 |
-| `waiting_approval` | **에이전트가 막혀 있다.** 내가 뭔가 누르지 않으면 아무 일도 일어나지 않는다 | **긴급** | 🔴 (+ 경과 시간) |
-| `waiting_input` | 턴이 끝났다. 다음 지시가 없어도 해로울 것이 없다 | 긴급 아님 | 🔵 |
-| `limited` | 사용량 한도에 막혀 리셋 시각을 기다리는 중 | 정보성 | ⏳ (+ 예상 리셋) |
-| `error` | 프로세스 오류 등 | 긴급 | ⛔ |
+| `working` | 에이전트 턴이 진행 중 | — | 답하는 중: 움직이지 않는 연회색 고리 |
+| `waiting_approval` | **에이전트가 막혀 있다.** 내가 뭔가 누르지 않으면 아무 일도 일어나지 않는다 | **긴급** | 기다리는 중: 회색 칩 위의 흰 고리 (+ 경과 시간) |
+| `waiting_input` | 턴이 끝났다. 다음 지시가 없어도 해로울 것이 없다 | 긴급 아님 | 쉬는 중. 새로 온 것이 있다는 것은 행의 안읽음 표시가 말한다 |
+| `limited` | 사용량 한도에 막혀 리셋 시각을 기다리는 중 | 정보성 | 멈춘: 회색 칩 위의 흰 점선 고리 (+ 예상 리셋) |
+| `error` | 프로세스 오류 등 | 긴급 | 멈춘 |
 
 - **`waiting_approval`과 `waiting_input`은 절대 같은 배지로 합치지 않는다.** 색, 아이콘, 정렬, 알림 정책 모두 분리한다.
 - 전역 카운터도 분리한다: **"승인 2 · 응답 대기 3"** (합산된 "대기 5"는 금지).
@@ -568,7 +574,7 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 └────────────────┴─────────────────────────────────────────────────┘
 ```
 
-- 사이드바: 프로젝트/세션 트리, 상태 점 (🔴 승인 / 🔵 응답 대기 / ⚙ 작업 중 / ⏳ 한도 / ⛔ 오류 / 👑 오케스트레이터), 안읽음 점, 브랜치와 변경 수 요약. 접을 수 있다.
+- 사이드바: 프로젝트/세션 트리, 네 가지 모습(기다리는 중, 멈춘, 답하는 중, 쉬는 중; 위의 상태 표, #736) 가운데 하나를 한 세션 표시와 오케스트레이터의 왕관, 안읽음 점, 브랜치와 변경 수 요약. 접을 수 있다.
   - **어떤 프로젝트가 열려 있는지** (2026-10-01). 프로젝트 묶음(이름 줄, 세션, 앱)과 다음 묶음 사이를 가는
     구분선이 나눈다. 포커스 뷰가 어떤 프로젝트의 화면(§5.5)이나 그 프로젝트의 세션을 보여 주거나, 앱 화면이 그 프로젝트의 앱을 보여 주는 동안(2026-10-03), 그 프로젝트의
     묶음 전체에 선택된 Grid·Orchestrator 버튼의 surface-hover가 더 옅게 깔리고, 그 안에서 열린 줄은 더 강한 자기 표시(ink-muted
@@ -687,7 +693,7 @@ person adds**, laid out and moved the way the grid's are (owner, 2026-10-13, [#6
 | The **evidence panel stays** beside it, unlike the grid | One project, one repository: objection 1 of §5.4 does not apply. Columns come from the width that is left (`columnsFor`), so no panel goes below the minimum either way. |
 
 The panels share the grid's parts: `SessionPane`, the column count, the whole-pixel tracks and the
-working ring (#208), and the settings that fold the message box and stop the ring. A session that
+session looks (#736: a panel's border follows its session's look), and the setting that folds the message box. A session that
 finishes in a visible panel gets the breeze, not a card. A panel does not take the session focus, so
 typing in one does not leave the screen; objection 2 of §5.4 holds here too — ⌘⇧A and the inbox open
 the focus view. Every empty screen explains that this project's sessions and apps can be dragged
@@ -752,15 +758,17 @@ interface AgentAdapter {
 
 ### 6.3 데이터 모델 (SQLite)
 
-- `projects(id, path, name, default_tool, default_model, sidebar_order, …)`
-- `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind`는 `is_orchestrator`에서 온다. 이 앱의 유일한 오케스트레이터만 그 표식을 갖는다 (FR-11). `deleted_at`은 세션이 휴지통에 있는 동안 적혀 있고(FR-22, v39), 모든 목록이 이 칸으로 거른다
-- `messages(session_id, seq, role, kind, payload_json, ts)` — 복원용 대화 캐시 (+ FTS5 인덱스, M2). 한 행은 스트리밍 델타가 아니라 **메시지 하나**다 (#66): 스트리밍 중에는 열린 메시지의 행을 제자리에서 갱신하고(주기 flush), 닫힐 때 한 번 색인한다. 행이 닫히는 곳은 기록되는 이벤트, 턴의 끝, 답과 추론 사이의 전환, 그리고 열린 행과 다른 메시지를 가리키는 조각(`messageId`, #212: codex는 사이에 아무것도 기록되지 않은 채 두 말을 연달아 할 수 있다)이다. 읽기는 델타 시절의 행도 병합하므로 마이그레이션 전 데이터도 같게 동작한다. 도구 호출은 통째로 남는다 (#221, v40): `summary`(카드)에 더해 도구가 받은 `input`과 출력 전체 `output`. 이 둘은 저장소만 가진다 — 독자는 기록을 이름으로 묻지 않는 한 카드를 받고, 색인에는 `text`와 `reasoning` 행만 들어간다 (FR-21; [security-boundaries.md](security-boundaries.md#tool-output-in-the-store)). v40 전에 쓴 행에는 카드만 있다.
-- `subagent_messages(session_id, parent_call_id, seq, role, kind, payload_json, ts)` — 네이티브 서브에이전트가 한 일을 띄운 호출 아래에 남긴다 (#222, v41): 글, 읽을 수 있는 추론, 그리고 통째의 도구 호출과 결과를 `messages`와 같은 payload 모양으로. `messages`에 칸을 더하지 않고 표를 따로 둔다 — 그래야 대화를 읽는 모든 독자(기록 페이지, 안 읽음, 인계 기록과 인계 노트, `read_session`, `recall`, 오케스트레이터의 기억)가 지금 읽는 것을 읽는 것만으로 건너뛴다. 유일한 독자는 띄운 카드 하나를 지목한다. `seq`는 그 띄운 호출 안에서 센다. 그래서 서브에이전트는 대화의 안 읽음 표시를 움직이지 않는다. 색인하지 않는다. 행은 세션의 것이다: 휴지통이 지니고, 영구 삭제가 지운다. v41 전의 서브에이전트 실행은 채워 넣지 않는다.
-- `grid_layout(panel_key, kind, session_id?, project_id?, app_id?, position, span_cols?, span_rows?)` — 그리드에 올린 것, 순서대로 (§5.4): 세션이나 앱 하나, `session:<id>` / `app:<프로젝트 id | _user>/<앱 id>`를 키로 삼아 패널은 한 번만 오른다 (v42, #288). 세션 패널은 세션과 함께 cascade되고 휴지통으로 갈 때 떠난다; 앱 패널은 프로젝트와 함께 떠난다. `span_cols`/`span_rows`는 사람이 앱 패널의 머리글에서 고른 크기이고, 고르지 않았으면 둘 다 NULL이다 (v43, #306)
+- `projects(id, path, name, default_tool, default_models, sidebar_order, trusted, …)`
+- `sessions(id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind`는 `is_orchestrator`에서 온다. 이 앱의 유일한 오케스트레이터만 그 표식을 갖는다 (FR-11). `deleted_at`은 세션이 휴지통에 있는 동안 적혀 있고(FR-22, v39), 모든 목록이 이 칸으로 거른다
+- `messages(session_id, seq, role, kind, payload, ts)` — 복원용 대화 캐시 (+ FTS5 인덱스, M2). 한 행은 스트리밍 델타가 아니라 **메시지 하나**다 (#66): 스트리밍 중에는 열린 메시지의 행을 제자리에서 갱신하고(주기 flush), 닫힐 때 한 번 색인한다. 행이 닫히는 곳은 기록되는 이벤트, 턴의 끝, 답과 추론 사이의 전환, 그리고 열린 행과 다른 메시지를 가리키는 조각(`messageId`, #212: codex는 사이에 아무것도 기록되지 않은 채 두 말을 연달아 할 수 있다)이다. 읽기는 델타 시절의 행도 병합하므로 마이그레이션 전 데이터도 같게 동작한다. 도구 호출은 통째로 남는다 (#221, v40): `summary`(카드)에 더해 도구가 받은 `input`과 출력 전체 `output`. 이 둘은 저장소만 가진다 — 독자는 기록을 이름으로 묻지 않는 한 카드를 받고, 색인에는 `text`와 `reasoning` 행만 들어간다 (FR-21; [security-boundaries.md](security-boundaries.md#tool-output-in-the-store)). v40 전에 쓴 행에는 카드만 있다.
+- `subagent_messages(session_id, parent_call_id, seq, role, kind, payload, ts)` — 네이티브 서브에이전트가 한 일을 띄운 호출 아래에 남긴다 (#222, v41): 글, 읽을 수 있는 추론, 그리고 통째의 도구 호출과 결과를 `messages`와 같은 payload 모양으로. `messages`에 칸을 더하지 않고 표를 따로 둔다 — 그래야 대화를 읽는 모든 독자(기록 페이지, 안 읽음, 인계 기록과 인계 노트, `read_session`, `recall`, 오케스트레이터의 기억)가 지금 읽는 것을 읽는 것만으로 건너뛴다. 유일한 독자는 띄운 카드 하나를 지목한다. `seq`는 그 띄운 호출 안에서 센다. 그래서 서브에이전트는 대화의 안 읽음 표시를 움직이지 않는다. 색인하지 않는다. 행은 세션의 것이다: 휴지통이 지니고, 영구 삭제가 지운다. v41 전의 서브에이전트 실행은 채워 넣지 않는다.
+- `grid_layout(panel_key, kind, session_id?, project_id?, app_id?, position, span_cols?, span_rows?, remote_session_id?, remote_app_id?, app_machine?)` — 그리드에 올린 것, 순서대로 (§5.4): 세션이나 앱 하나, `session:<id>` / `app:<프로젝트 id | _user>/<앱 id>`를 키로 삼아 패널은 한 번만 오른다 (v42, #288). 세션 패널은 세션과 함께 cascade되고 휴지통으로 갈 때 떠난다; 앱 패널은 프로젝트와 함께 떠난다. `span_cols`/`span_rows`는 사람이 앱 패널의 머리글에서 고른 크기이고, 고르지 않았으면 둘 다 NULL이다 (v43, #306)
 - `grid_panels(session_id, position)` — #288 이전의 그리드, 세션 id 하나에 한 줄. v42가 그 줄들을 `grid_layout`에 한 번 옮겨 적고, 한 빌드 이전의 host를 위해 그대로 두었다 (agent-host.ko.md §5.1); 이 빌드는 휴지통으로 간 세션을 빼는 것 말고는 더 읽거나 쓰지 않는다. 지우는 것은 나중의, 깨뜨리는 단계다
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "항상 허용" 규칙
 - `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — 증분 집계. 만들지 않았고, 테이블은 나중 릴리스에서 지운다([agent-host.ko.md](agent-host.ko.md) §6)
-- `workspace(id, layout_json, updated_at)` — 스냅숏
+- `workspace(id, layout, updated_at)` — 스냅숏
+
+위 목록은 핵심만 적은 것이다. 지금 스키마의 모든 테이블과 열은 마이그레이션에서 생성한 [generated/schema.md](generated/schema.md)에 있다.
 
 ---
 
@@ -782,7 +790,8 @@ interface AgentAdapter {
 0.1–0.2%, React 커밋 0회; 세션이 *working*일 때 3.3% (포커스) / 4.0% (그리드, 패널 4개). working
 수치는 그날까지 24.4% / 32.9%였다 — 스피너가 등록된 커스텀 프로퍼티를 통해 conic-gradient의 각도를
 애니메이션하고 있었고, 이는 매 프레임 메인 스레드에서 리페인트한다; 지금은 미리 래스터화한 플레이트를
-transform으로 회전시키며, 컴포지터가 소유한다. 이 교훈을 여기 기록하는 이유는 §7.1 원칙의
+transform으로 회전시키며, 컴포지터가 소유한다. #736(2026-10-16) 이후로는 아무것도 움직이지 않는다: 일하는
+세션은 움직이지 않는 고리를 두르고, 회전 설정은 스피너와 함께 빠졌다. 이 교훈을 여기 기록하는 이유는 §7.1 원칙의
 상시 부하 버전이기 때문이다: **아무 일도 없을 때 화면이 하는 일이 곧 배터리 청구서다.** perf 스위트
 (`e2e/perf-idle.spec.ts`, `e2e/perf-grid.spec.ts`)는 판정이 아니라 숫자를 출력한다.
 

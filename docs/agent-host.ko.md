@@ -8,8 +8,12 @@
 
 ```
 agent-host/src/
-├─ main.ts              # CLI(--port --token --dev-services), 기동 순서,
-│                       #   그리고 도구 → 어댑터 레지스트리 (Map 리터럴. registry.ts는 없다)
+├─ main.ts              # CLI(--port --token --db --watch-parent --memory --standby), 서비스 연결,
+│                       #   기동 단계마다 lifecycle/start.ts의 START_ORDER에 맞춘 표시
+├─ lifecycle/           # 프로세스의 시작과 끝(runtime-unification.md 3단계):
+│                       #   launch-env(한 번 읽고 지우는 변수), start(데이터로 적은 순서, 마지막 거절),
+│                       #   gate(서버보다 먼저 화면에 가는 것이 없다), steps + shutdown(순서가 있고
+│                       #   한 번만 돌며 한도가 있는 종료 계획), endings(시그널, 부모의 파이프, 충돌, host-errors.log)
 ├─ rpc.ts               # RPC 메서드 분배
 ├─ transport/
 │  ├─ server.ts         # ws 서버, 핸드셰이크, RPC 라우팅
@@ -17,17 +21,30 @@ agent-host/src/
 │  └─ json-lines.ts     # 줄 단위 JSON: \n에서만 나눈다(U+2028에서도 끊는 readline은 쓰지 않는다), 대기 중인 요청 (#428)
 ├─ adapters/
 │  ├─ contract.ts       # AgentAdapter 인터페이스 + 능력 타입
+│  ├─ registry.ts       # 도구 → 어댑터 지도
 │  ├─ claude/           # Claude Agent SDK 기반 (orchestrator-mcp.ts 포함)
 │  └─ codex/            # app-server JSON-RPC 클라이언트 (직접 작성. stdio 다리 포함)
-├─ sessions/            # 세션 수명, 오케스트레이터 도구, 앱 안내
-├─ dev-services/        # git/fs/store (store는 dev 전용이 아니다 — 메시지가 사는 곳이다)
+├─ sessions/            # SessionManager와 거기서 떼어 낸 부분: 위임, 인계, 휴지통, 오케스트레이터 도구,
+│                       #   세션 앱 (folder-structure.ko.md §1)
+├─ apps/external/       # 외부 앱: 매니페스트, 찾기, 실행, 브로커, capability (apps.ko.md)
+├─ views/               # 앱 뷰: 뷰 호스트, 그 CSP, 프록시 페이지, 끌기 중계
+├─ links/               # 링크된 기기(#82): 링크, 원격 클라이언트, ssh로 하는 설치와 업데이트
+├─ keeper/              # 키퍼의 자식 서비스: 거기서 띄우는 에이전트와 pty, 다시 붙기 (#280)
+├─ dev-services/        # git/fs/store, 터미널, 명령 (dev 전용이 아니다 — 메시지가 사는 곳이다, §5)
+├─ swap-control.ts      # 교체에서 호스트가 맡는 절반(#280 3단계). drain.ts가 호스트가 처리 중인 호출을 기다린다
+├─ keeper-link.ts       # 호스트가 키퍼에게 알리는 것과 자기 빌드
+├─ view-handover.ts     # 교체를 넘어 열린 앱 뷰 (#280 4단계)
 ├─ log-file.ts          # stderr를 ~/.centralu/host.log로 흘린다 (stdout은 예약됨, 아래 참고)
 ├─ env-path.ts          # PATH 보강 — GUI 앱은 로그인 셸 PATH를 물려받지 못한다
 ├─ stream-text.ts       # 자식 스트림에서 읽은 텍스트: 쥐어 둔 꼬리, 줄, 한 스트림으로 디코딩 (#428)
 ├─ timing.ts            # 한도가 있는 기다림(withTimeout, raceTimeout, raceBound, waitForEvent, waitForExit). 타이머마다 지우고 unref한다
+├─ tool-launch.ts       # 찾은 도구를 띄우는 방법 (Windows .cmd shim, 절대 경로)
+├─ os.ts                # OS마다 다른 것을 이름으로 묻는 곳 (architecture.ko.md §2)
 ├─ data-dir.ts          # 데이터 폴더 위치 판정과 이전
 ├─ idle.ts              # "사람이 잃을 것이 돌고 있는가"에 대한 유일한 규칙 (#352)
-└─ updates.ts           # 업데이트 확인, 설치, "한가할 때 자동 적용"
+├─ updates.ts           # 업데이트 확인, 설치, "한가할 때 자동 적용". update-apply.ts: 에이전트의 적용 (#665)
+├─ agent-versions.ts    # 새로 설치된 에이전트 CLI로 세션 옮기기 (#297). 버전은 cli-version.ts가 찾는다
+└─ themes.ts            # 테마 폴더 (#312)
 ```
 
 사용량 파싱과 오케스트레이터의 MCP 표면은 **자기 디렉토리를 갖지 않는다**: 계정 사용량은
@@ -181,8 +198,8 @@ orchestrator, which belongs to no project, retains its own create-session tool.
    Duplicate names require an id. No ordinary session means a refusal telling the person to open
    one there. Selection never creates, renames or takes ownership of a session, and the task's
    text never auto-names a "New session" (#646): only the person's own words do, as with an app's
-   message. Old `Asked by <project> · HH:MM` sessions remain ordinary sessions; startup removes
-   their former cross-project `askedBy` mark, retaining their name and history.
+   message. Old `Asked by <project> · HH:MM` sessions remain ordinary sessions; their former cross-project `askedBy` mark is removed (#614), and
+   their name and history are kept.
 3. **Consent.** `ensureProjectAccess` (`delegate`) raises a card in the caller's session naming
    `<caller project> asks <project> / <session>` and the task. Allow once, always for this project
    pair, or deny; only always is stored in `project_consents` and revoked in Settings → Permissions.
@@ -479,7 +496,7 @@ B 자신의 턴이 돌고 있으면 B에게는 바쁜 것이 아니다: 자기 �
 | `ifBusy` | 일어나는 일 |
 |---|---|
 | `note` | 지금까지의 턴 중간 메모(#594/#606/#653): B 자신의 프리셋이 `auto`일 때만, 턴 중간 입력을 받는 CLI에서만(`send_to_session`은 예전처럼 보낸다). 턴의 답은 턴 주인의 것이고, B는 자기 메모에 대한 답을 자기 리더에서 읽는다. 다른 호출자의 `ask_project` 일에는 넣지 않는다. |
-| `queue` | 붙잡아 두었다가(`queued`, `enqueue`) A의 턴이 끝나면 B가 소유한 새 턴으로 전한다(`drainQueue`, 턴의 끝과 세션을 비우는 다른 경계에서): `agent_session`과 `ask_project`는 B의 위임으로, `send_to_session`은 B의 턴으로, 각 도구의 틀에 담아 보내고, 끝나면 보고하며 그 턴의 카드도 간다(§1.2.2). 한 번에 하나씩, 먼저 온 것부터. 답은 핸들(`qr-…`)과 대기 순서이고, `agent_session` status(또는 task 없는 `ask_project`)가 어디쯤인지 말하며 `stop`은 거둬들인다. `queued_requests`(스토어 v52)에 적는다: `detachAll`은 아무것도 전하지 않고(`handingOver`), 다음 호스트가 키퍼가 쥔 세션의 턴이 거기서 끝날 때, 쉬고 있는 세션이면 시작 직후에 전한다(키퍼가 쥔 세션은 넘겨받은 뒤에: 그 입력이 두 번째 프로세스를 띄우지 않도록). 세션이나 요청한 세션이 없어진 요청은 버리고, 휴지통에 간 세션의 요청도 버린다. 들어가기 전에 요청한 세션의 그때 프리셋으로 요청한 도구의 문을 다시 읽는다(`queuedGateError`). ask_project는 신뢰, 깊이, 대상 프로젝트, 그리고 `auto`만으로 통과한 요청이면 프로젝트 쌍의 기억된 동의를 본다(`openedByAuto`, `queued_requests.opened_by_auto`에 저장한다, 스토어 v54. 그래서 교체해도 표시가 남는다. 이전 빌드가 쓴 줄은 쌍의 기억된 동의가 없으면 표시된 것으로 읽는다). agent_session은 `auto`가 아닌 요청자에게 필요한 소유권과 프리셋 규칙을 본다. 통과하지 못한 요청은 버리면서 요청한 세션에 알린다. 요청한 세션이 `auto`에서 내려가거나, `auto`가 아닌 세션에 일을 넘길 때(`moveLiveChildren`, 원래 세션에 알린다) `auto`만으로 통과한 요청을 바로 버린다(`dropOpenedByAuto`: 표시가 있고 쌍의 기억된 동의가 아직 없는 ask, 자기가 시작하지 않은 세션으로 보낸 send). 그 순간 전달 중인 요청은 전달할 때의 문에 맡긴다. 교체 뒤 다시 전달하게 되면 그 문이 저장된 표시를 읽는다. 요청한 세션의 프로젝트가 신뢰를 잃거나 지워질 때, 그리고 사람이 프로젝트 쌍의 동의를 거둘 때도 대기 중인 `ask_project` 요청을 같은 방식으로 거둔다(`withdrawReaches`). 신뢰 상실과 동의 철회는 `auto` 요청자의 요청을 남겨 두고, 전달할 때 문이 다시 읽는다. **전달**(#684 리뷰): 세션마다 drain은 한 번에 하나만 돈다(`delivering`). 첫 대기 전에 세션을 예약하므로, 잠든 세션을 깨우는 동안도 바쁜 것으로 보이고 두 번째 요청은 들어가지 않는다. 요청은 세션의 턴이 실제로 시작될 때까지 큐의 맨 앞에 남고, 저장소 줄도 `delivering_at` 표시와 함께 남는다. 턴이 시작된 뒤에야 지운다. 그 사이 교체나 충돌이 나면 줄이 남아 다음 호스트가 다시 전한다: 적어도 한 번이고, 예전 프로세스가 아무 신호 없이 입력을 받은 채 교체되면 한 번 중복될 수 있다. drain은 미뤄 둔 재시작을 기다리지 않는다(`deliver`가 기다린다). 재시작이 끝나면 drain을 다시 예약한다. 같은 요청(요청한 세션, 도구, 내용)을 다시 보내면 두 번째 항목을 만들지 않고 이미 잡아 둔 핸들을 돌려준다. |
+| `queue` | 붙잡아 두었다가(`queued`, `enqueue`) A의 턴이 끝나면 B가 소유한 새 턴으로 전한다(`drainQueue`, 턴의 끝과 세션을 비우는 다른 경계에서): `agent_session`과 `ask_project`는 B의 위임으로, `send_to_session`은 B의 턴으로, 각 도구의 틀에 담아 보내고, 끝나면 보고하며 그 턴의 카드도 간다(§1.2.2). 한 번에 하나씩, 먼저 온 것부터. 답은 핸들(`qr-…`)과 대기 순서이고, `agent_session` status(또는 task 없는 `ask_project`)가 어디쯤인지 말하며 `stop`은 거둬들인다. `queued_requests`(스토어 v52)에 적는다: `detachAll`은 아무것도 전하지 않고(`handingOver`), 다음 호스트가 키퍼가 쥔 세션의 턴이 거기서 끝날 때, 쉬고 있는 세션이면 시작 직후에 전한다(키퍼가 쥔 세션은 넘겨받은 뒤에: 그 입력이 두 번째 프로세스를 띄우지 않도록). 세션이나 요청한 세션이 없어진 요청은 버리고, 휴지통에 간 세션의 요청도 버린다. 들어가기 전에 요청한 세션의 그때 프리셋으로 요청한 도구의 문을 다시 읽는다(`queuedGateError`). ask_project는 신뢰, 깊이, 대상 프로젝트, 그리고 `auto`만으로 통과한 요청이면 프로젝트 쌍의 기억된 동의를 본다(`openedByAuto`, `queued_requests.opened_by_auto`에 저장한다, 스토어 v54. 그래서 교체해도 표시가 남는다. 이전 빌드가 쓴 줄은 쌍의 기억된 동의가 없으면 표시된 것으로 읽는다). agent_session은 `auto`가 아닌 요청자에게 필요한 소유권과 프리셋 규칙을 본다. 통과하지 못한 요청은 버리면서 요청한 세션에 알린다. 요청한 세션이 `auto`에서 내려가거나, `auto`가 아닌 세션에 일을 넘길 때(`moveChildren`, 원래 세션에 알린다) `auto`만으로 통과한 요청을 바로 버린다(`dropOpenedByAuto`: 표시가 있고 쌍의 기억된 동의가 아직 없는 ask, 자기가 시작하지 않은 세션으로 보낸 send). 그 순간 전달 중인 요청은 전달할 때의 문에 맡긴다. 교체 뒤 다시 전달하게 되면 그 문이 저장된 표시를 읽는다. 요청한 세션의 프로젝트가 신뢰를 잃거나 지워질 때, 그리고 사람이 프로젝트 쌍의 동의를 거둘 때도 대기 중인 `ask_project` 요청을 같은 방식으로 거둔다(`withdrawReaches`). 신뢰 상실과 동의 철회는 `auto` 요청자의 요청을 남겨 두고, 전달할 때 문이 다시 읽는다. **전달**(#684 리뷰): 세션마다 drain은 한 번에 하나만 돈다(`delivering`). 첫 대기 전에 세션을 예약하므로, 잠든 세션을 깨우는 동안도 바쁜 것으로 보이고 두 번째 요청은 들어가지 않는다. 요청은 세션의 턴이 실제로 시작될 때까지 큐의 맨 앞에 남고, 저장소 줄도 `delivering_at` 표시와 함께 남는다. 턴이 시작된 뒤에야 지운다. 그 사이 교체나 충돌이 나면 줄이 남아 다음 호스트가 다시 전한다: 적어도 한 번이고, 예전 프로세스가 아무 신호 없이 입력을 받은 채 교체되면 한 번 중복될 수 있다. drain은 미뤄 둔 재시작을 기다리지 않는다(`deliver`가 기다린다). 재시작이 끝나면 drain을 다시 예약한다. 같은 요청(요청한 세션, 도구, 내용)을 다시 보내면 두 번째 항목을 만들지 않고 이미 잡아 둔 핸들을 돌려준다. |
 | `fork`, `fork_read` | 지금 A의 대화를 복사한 하위 세션(`forkFor`): 어댑터의 `forkConversation`(Claude: 원본 대화 기록 옆에 복사본을 쓰는 SDK `forkSession`, Codex: `thread/fork`)으로 만들고, 기록을 화면에 가져와 이어간다(`importHistory`). 이것이 없는 어댑터, 아직 대화가 없는 세션, 그리고 `ask_project`(다른 프로젝트에 세션을 만들지 않는다)에는 포크를 내놓지 않는다. start_agent의 문을 그대로 거친다: 깊이 하나, 프로젝트 신뢰(#382, 동의 규칙은 `ensureAgentConsent`가 가진 대로 #673), 프로젝트당 상한. 카드에 답이 나면 문을 다시 읽고, 복사하기 전에 자리를 잡는다(`reservePlace`). 프로젝트가 신뢰를 잃으면 아직 떠 있는 카드를 거둔다. 포크의 세션이 만들어지면 위임을 등록하기 전에, 기다림 없이 문과 두 프리셋 중 낮은 쪽을 그때 값으로 한 번 더 읽는다. 통과하지 못한 포크는 일을 받지 않고 휴지통으로 간다. 프리셋은 B와 A 중 낮은 쪽이다. `fork`는 자기 워크트리를 받고(`agentWorktreeBranch`, A가 워크트리 세션이면 A의 브랜치에서 갈라진다. git 저장소가 아닌 프로젝트는 거절하고 `fork_read`를 가리킨다), `fork_read`는 A의 폴더에서 하는 읽기 일로 많아야 `safe`다: 두 에이전트가 한 폴더에 쓰지 않는다. B와 연결된다: 같은 프로젝트의 평범한 세션이면 `askedBy` B(오케스트레이터는 위임으로만), 그 턴은 B의 위임(보고, 카드), 그리고 `forkedFrom` A(`sessions.forked_from_session_id`, 스토어 v52). 사이드바는 이것으로 포크를 A 아래에 둔다. `parentSessionId`와 `askedBy`보다 먼저 본다(`orderAsTree`, `foldGroupsHiding`). |
 
 **크기.** `ifBusy`는 어느 스키마에도 설명을 싣지 않는다: `busy` 답이 이름과 값을 알려 준다. `ask_project`의 것은 그냥

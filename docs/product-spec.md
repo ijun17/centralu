@@ -121,11 +121,11 @@ If the user has set the CLI to global bypass (auto-approve), approval request ev
 | Project | One registered local directory. It may or may not be a git repository |
 | Session | One agent conversation instance. Belongs to a project and has a tool (Claude Code/Codex), model and permission setting |
 | Adapter | A module wrapping a specific agent tool in the common interface |
-| Orchestrator session | A session with `kind: 'orchestrator'` — able to inspect and instruct every session in the app. Exactly one, belonging to no project. A project's own directing seat is the worktree manager, which is defined by having worktree children rather than by a role (FR-11, #69) |
+| Orchestrator session | A session with `kind: 'orchestrator'` — able to inspect and instruct every session in the app. Exactly one, belonging to no project. A project has no directing seat of its own: the worktree manager (#69) was folded into ordinary sessions (#561 part 3), and any ordinary session starts and owns agents in its own project with `start_agent` (FR-11) |
 | Workspace | The registered project list + layout + the full state of open sessions (the unit of restore) |
 | Inbox | A triage view that ignores project structure and shows only "items waiting on my intervention right now" |
 | Read/unread | Independent of session state: whether there is new content since I last looked |
-| Archive | The state where the session process is terminated and it is cleared from the list, but the conversation record is kept |
+| ~~Archive~~ | Retired with FR-20 (2026-09-02). A session that is not live is resumed when addressed, and one the person deletes goes to the trash (FR-22) |
 
 ---
 
@@ -296,7 +296,9 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   directs a project's sessions — and having two of those was one concept too many: the app's own author confused them
   in dogfooding, and the promote row was never used once. What survives is the pair that earns its keep: one
   orchestrator across everything, and a manager per project whose scope comes from a **relationship** (it has worktree
-  children) rather than from a menu choice. Schema v26 clears the marker off any session that still carries it with a
+  children) rather than from a menu choice. Since #561 part 3 the manager seat is gone too: any ordinary session starts
+  agents in its own project with `start_agent` and owns them, and a former manager's worktree sessions became its
+  children (store v48). Schema v26 clears the marker off any session that still carries it with a
   project — without that step, removing the project tier would silently *widen* those sessions to central scope.
 - The host exposes **curated tools** to orchestrator sessions (inspect sessions, read conversations, send instructions,
   `create_session`, `update_session_settings`) plus a **compiled-in app guide** (overview/sessions/orchestrator/approvals/
@@ -311,14 +313,18 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
   words cost +672 input tokens per request, the shipped set +192 (numbers and reasons in agent-host.md
   §1.1). Settings → Orchestrator → "Let sessions look at their own project" turns it off.
 - **An ordinary session can ask another project to do a task** (#371 part B, owner decision 2026-10-05):
-  `ask_project({ project, task })` starts (or reuses) a visible session in that project, with its folder,
-  instructions, tool and permissions, waits for the turn and returns its answer, the way a subagent's result comes
-  back. The person's consent is per pair of projects: the first ask from X to Y raises a card in the caller's session
+  `ask_project({ project, session?, task })` gives the task to an **existing ordinary session** in that project (the
+  one named, or the project's only one) and never creates one there (#614, owner decision 2026-10-13); creating a
+  session stays the person's action in that project. It waits for the turn and returns its answer, the way a
+  subagent's result comes back. The session keeps its own name, tool, model and permissions; the task appears in its
+  conversation as sent by the asking session. A session in a turn that is not the caller's gets nothing; the caller
+  gets the choices instead (a note for an `auto` caller, or a queue; agent-host.md §1.2.3). The person's consent is per pair of projects: the first ask from X to Y raises a card in the caller's session
   (allow once / always for this pair / deny); "always" is remembered and revocable in Settings → Permissions. The
-  delegated session may change code in its own project within that project's own permissions, and is marked "asked
-  by" with a link back; the caller's conversation shows a compact card linking to it. Files the answer names inside
-  the target project become readable to the caller, nothing broader. Stop on the caller stops the delegated turn; a
-  session that was itself asked cannot ask a third project. Details in agent-host.md §1.2.
+  session doing the task may change code in its own project within that project's own permissions; it carries no
+  "asked by" mark (the one ask_project left before #614 is removed), and the caller's conversation shows a compact card
+  linking to it. Files the answer names inside
+  the target project become readable to the caller, nothing broader. Stop on the caller stops the delegated turn while the caller waits; a
+  session working on another project's task cannot ask a third project. Details in agent-host.md §1.2.
 - **Another project's apps, on demand** (#371 part A, owner decision 2026-10-05): an ordinary project session can
   find an app another project shares, or one of the person's own user-folder apps, attach it while it needs its tools
   and detach it afterwards (`find_apps`, `attach_app`, `detach_app`), so those tools cost no context otherwise. Sharing
@@ -348,11 +354,11 @@ idle → working → (waiting_approval | waiting_input | limited | error) → wo
 
 | State | Meaning | Urgency | Display |
 |---|---|---|---|
-| `working` | An agent turn is in progress | — | ⚙ spinning |
-| `waiting_approval` | **The agent is blocked.** Nothing happens unless I press something | **urgent** | 🔴 (+ elapsed time) |
-| `waiting_input` | The turn is over. No harm done if there is no next instruction | not urgent | 🔵 |
-| `limited` | Blocked by a usage limit, waiting for the reset time | informational | ⏳ (+ expected reset) |
-| `error` | Process error etc. | urgent | ⛔ |
+| `working` | An agent turn is in progress | — | answering: a light grey ring, still |
+| `waiting_approval` | **The agent is blocked.** Nothing happens unless I press something | **urgent** | waiting: a white ring on a grey chip (+ elapsed time) |
+| `waiting_input` | The turn is over. No harm done if there is no next instruction | not urgent | idle; the row's unread mark says there is something new |
+| `limited` | Blocked by a usage limit, waiting for the reset time | informational | stopped: a dashed white ring on a grey chip (+ expected reset) |
+| `error` | Process error etc. | urgent | stopped |
 
 - **`waiting_approval` and `waiting_input` are never merged into the same badge.** Colour, icon, ordering and notification policy are all separate.
 - The global counter is split too: **"2 approvals · 3 awaiting response"** (a combined "5 waiting" is forbidden).
@@ -579,7 +585,7 @@ Observation (left, dense) separated from operation (right, full width). Not a gr
 └────────────────┴─────────────────────────────────────────────────┘
 ```
 
-- Sidebar: the project/session tree, status dots (🔴 approval / 🔵 awaiting response / ⚙ working / ⏳ limited / ⛔ error / 👑 orchestrator), unread dot, branch and change-count summary. Collapsible.
+- Sidebar: the project/session tree, each session's mark in one of four looks (waiting, stopped, answering, idle; the state's table above, #736) with the crown for the orchestrator, unread dot, branch and change-count summary. Collapsible.
   - **Which project is open** (2026-10-01). A thin divider separates each project's group — its name row, its
     sessions and its apps — from the next. While the focus view shows a project's screen (§5.5) or one of its
     sessions, or the app view shows one of its apps (2026-10-03), that project's whole group is tinted with the surface-hover of the selected Grid and Orchestrator
@@ -699,7 +705,7 @@ person adds**, laid out and moved the way the grid's are (owner, 2026-10-13, [#6
 | The **evidence panel stays** beside it, unlike the grid | One project, one repository: objection 1 of §5.4 does not apply. Columns come from the width that is left (`columnsFor`), so no panel goes below the minimum either way. |
 
 The panels share the grid's parts: `SessionPane`, the column count, the whole-pixel tracks and the
-working ring (#208), and the settings that fold the message box and stop the ring. A session that
+session looks (#736: a panel's border follows its session's look), and the setting that folds the message box. A session that
 finishes in a visible panel gets the breeze, not a card. A panel does not take the session focus, so
 typing in one does not leave the screen; objection 2 of §5.4 holds here too — ⌘⇧A and the inbox open
 the focus view. Every empty screen explains that this project's sessions and apps can be dragged
@@ -764,15 +770,17 @@ interface AgentAdapter {
 
 ### 6.3 Data model (SQLite)
 
-- `projects(id, path, name, default_tool, default_model, sidebar_order, …)`
-- `sessions(id, project_id, tool, external_session_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind` comes from `is_orchestrator`, which only the app's single orchestrator carries (FR-11). `deleted_at` is set while the session is in the trash (FR-22, v39), and every listing filters on it
-- `messages(session_id, seq, role, kind, payload_json, ts)` — the conversation cache for restore (+ FTS5 index, M2). One row is one **message**, not one streaming delta (#66): the open message's row is updated in place while streaming (periodic flush) and indexed once when it closes. It closes at a recorded event, at the end of a turn, at a switch between answer and reasoning, and at a chunk that names a different message than the open row (`messageId`, #212: codex can say two things in a row with nothing recorded between them). Reads merge legacy per-delta rows, so pre-migration data behaves identically. A tool call is kept whole (#221, v40): its `summary` (the card) plus the raw `input` and the whole `output`, which only the store keeps — readers get the card unless they ask for the record by name, and the index holds only `text` and `reasoning` rows (FR-21; [security-boundaries.md](security-boundaries.md#tool-output-in-the-store)). Rows written before v40 have the card alone.
-- `subagent_messages(session_id, parent_call_id, seq, role, kind, payload_json, ts)` — what a native subagent did, under the call that launched it (#222, v41): its text, readable reasoning, and tool calls and results whole, in the same payload shapes as `messages`. A table of its own rather than a column on `messages`, so every reader of the conversation (history pages, unread, the handoff record and note, `read_session`, `recall`, the orchestrator's memory) skips it by reading what it reads today; the only reader names one launch card. `seq` counts within that launch, so a subagent never moves the conversation's unread marker. Not indexed. The rows belong to the session: the trash keeps them, a purge deletes them. Subagent runs from before v41 are not back-filled.
-- `grid_layout(panel_key, kind, session_id?, project_id?, app_id?, position, span_cols?, span_rows?)` — what was placed on the grid, in order (§5.4): a session or an app, keyed `session:<id>` / `app:<project id | _user>/<app id>` so a panel is placed once (v42, #288). A session panel cascades with its session and leaves when it goes to the trash; an app panel leaves with its project. `span_cols`/`span_rows` are the span the person chose for an app panel from its top bar, both NULL when none was chosen (v43, #306)
+- `projects(id, path, name, default_tool, default_models, sidebar_order, trusted, …)`
+- `sessions(id, project_id, tool, external_id, name, auto_named, state, is_orchestrator, verbosity, last_read_seq, created_at, deleted_at, trash, …)` — `kind` comes from `is_orchestrator`, which only the app's single orchestrator carries (FR-11). `deleted_at` is set while the session is in the trash (FR-22, v39), and every listing filters on it
+- `messages(session_id, seq, role, kind, payload, ts)` — the conversation cache for restore (+ FTS5 index, M2). One row is one **message**, not one streaming delta (#66): the open message's row is updated in place while streaming (periodic flush) and indexed once when it closes. It closes at a recorded event, at the end of a turn, at a switch between answer and reasoning, and at a chunk that names a different message than the open row (`messageId`, #212: codex can say two things in a row with nothing recorded between them). Reads merge legacy per-delta rows, so pre-migration data behaves identically. A tool call is kept whole (#221, v40): its `summary` (the card) plus the raw `input` and the whole `output`, which only the store keeps — readers get the card unless they ask for the record by name, and the index holds only `text` and `reasoning` rows (FR-21; [security-boundaries.md](security-boundaries.md#tool-output-in-the-store)). Rows written before v40 have the card alone.
+- `subagent_messages(session_id, parent_call_id, seq, role, kind, payload, ts)` — what a native subagent did, under the call that launched it (#222, v41): its text, readable reasoning, and tool calls and results whole, in the same payload shapes as `messages`. A table of its own rather than a column on `messages`, so every reader of the conversation (history pages, unread, the handoff record and note, `read_session`, `recall`, the orchestrator's memory) skips it by reading what it reads today; the only reader names one launch card. `seq` counts within that launch, so a subagent never moves the conversation's unread marker. Not indexed. The rows belong to the session: the trash keeps them, a purge deletes them. Subagent runs from before v41 are not back-filled.
+- `grid_layout(panel_key, kind, session_id?, project_id?, app_id?, position, span_cols?, span_rows?, remote_session_id?, remote_app_id?, app_machine?)` — what was placed on the grid, in order (§5.4): a session or an app, keyed `session:<id>` / `app:<project id | _user>/<app id>` so a panel is placed once (v42, #288). A session panel cascades with its session and leaves when it goes to the trash; an app panel leaves with its project. `span_cols`/`span_rows` are the span the person chose for an app panel from its top bar, both NULL when none was chosen (v43, #306)
 - `grid_panels(session_id, position)` — the grid before #288, one row per session id. v42 copied its rows into `grid_layout` once and left it as it was, for a host one build older (agent-host.md §5.1); this build no longer reads or writes it, except to take a trashed session off it. Dropping it is a later, breaking step
 - `approval_rules(scope, project_id?, session_id?, matcher, decision, created_at)` — "always allow" rules
 - `usage_facts(date, tool, model, project_id, input_tokens, output_tokens, cache_tokens, cost_est)` — incremental aggregation; never built, and the table is dropped in a later release ([agent-host.md](agent-host.md) §6)
-- `workspace(id, layout_json, updated_at)` — snapshot
+- `workspace(id, layout, updated_at)` — snapshot
+
+The list above is the core of it; every table and column of the current schema, generated from the migrations, is in [generated/schema.md](generated/schema.md).
 
 ---
 
@@ -794,7 +802,8 @@ How it is achieved: event-driven (no polling), **a single focus-view render** (u
 0.1–0.2% with zero React commits; with sessions *working*, 3.3% (focus) / 4.0% (grid, 4 panels). The working
 figures were 24.4% / 32.9% until that day — the spinner animated a conic-gradient's angle through a registered
 custom property, which repaints on the main thread every frame; it now rotates a pre-rasterized plate via
-transform, owned by the compositor. The lesson is recorded here because it is the standing-load version of the
+transform, owned by the compositor. Since #736 (2026-10-16) nothing moves at all: a working session wears a still
+ring, and the spin settings left with the spinner. The lesson is recorded here because it is the standing-load version of the
 §7.1 principle: **what the screen does while nothing happens is a battery bill.** The perf suite
 (`e2e/perf-idle.spec.ts`, `e2e/perf-grid.spec.ts`) prints numbers, not verdicts.
 

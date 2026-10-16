@@ -17,7 +17,7 @@ centralu/
 │  ├─ web/                      # web entry point for development (Vite)
 │  │  ├─ index.html
 │  │  └─ src/main.tsx           # injects createWebPlatform() — the only place ① that knows an implementation
-│  └─ desktop/                  # Tauri entry point (created after M1)
+│  └─ desktop/                  # Tauri entry point
 │     ├─ src/main.tsx           # injects createTauriPlatform() — the only place ②
 │     ├─ content-verify/        # Rust, no Tauri: verifies and copies signed content (thin shell, #440)
 │     └─ src-tauri/             # Rust: supervisor, git2, rusqlite, OS integration
@@ -35,17 +35,25 @@ centralu/
 │                               #   content in Contents/Resources/content/ (scripts/bundle-stage.mts)
 │
 ├─ packages/
-│  ├─ protocol/                 # the shared language: event and command schemas (zod). 0 dependencies
+│  ├─ protocol/                 # the shared language: event and command schemas (zod, its only dependency)
 │  │  └─ src/
 │  │     ├─ events.ts           # the NormalizedEvent family
-│  │     ├─ commands.ts         # request/response RPC
-│  │     ├─ entities.ts         # shared types such as SessionState, Capability
-│  │     └─ version.ts
+│  │     ├─ commands.ts         # request/response RPC (RpcMethods), SessionInfo
+│  │     ├─ entities.ts         # shared types such as SessionState, ApprovalDetail, UpdateStatus
+│  │     ├─ envelope.ts         # the WS frames, PROTOCOL_VERSION
+│  │     ├─ tolerant.ts         # parseTolerant: how a client reads another build's answer (protocol.md §4)
+│  │     ├─ session-state.ts    # the session state machine's rules, run by both core and the host
+│  │     ├─ theme.ts  machines.ts  handoff.ts  paths.ts  semver.ts  always-allow.ts  app-*.ts …
+│  │     └─ schema/schema.sql   # the store's DDL, in one place (agent-host.md §5)
 │  │
 │  ├─ core/                     # pure domain. No IO, no React
 │  │  └─ src/
-│  │     ├─ session/            # state machine (transition table), session reducer
+│  │     ├─ session/            # session reducer (the transition rules are protocol's session-state.ts)
 │  │     ├─ inbox/              # ordering and urgency rules (all pure functions)
+│  │     ├─ grid/               # grid panels, spans and layout
+│  │     ├─ git/                # the commit graph's lanes
+│  │     ├─ notify/             # which events raise an OS notification
+│  │     ├─ clock/              # the clock the label ages read
 │  │     ├─ unread/             # read rules (FR-16)
 │  │     ├─ approval/           # always-allow rule matching, in-place approval policy
 │  │     ├─ machines/           # linked machines: away rows, link errors in words, the version prompt
@@ -53,11 +61,14 @@ centralu/
 │  │
 │  ├─ platform/                 # the firewall for C1/C2
 │  │  └─ src/
-│  │     ├─ ports/              # interfaces only. The only subpath ui may import
-│  │     │  ├─ agent.ts  git.ts  fs.ts  store.ts  usage.ts  system.ts
-│  │     │  └─ platform.ts      # the Platform facade + PlatformCapabilities
-│  │     ├─ web/                # browser implementation (WS/HTTP → agent-host)
-│  │     ├─ tauri/              # Tauri implementation (invoke/event) — after M1
+│  │     ├─ ports/              # interfaces only, one file per concept (#874). The only subpath ui may import
+│  │     │  ├─ agents.ts  projects.ts  fs.ts  git.ts  history.ts  preferences.ts  terminal.ts
+│  │     │  ├─ apps.ts  lifecycle.ts  machines.ts  system.ts (+ PlatformCapabilities)  common.ts
+│  │     │  └─ index.ts         # the Platform facade
+│  │     ├─ engine.ts           # facts about the web engine, so ui never asks (frame drag coordinates)
+│  │     ├─ web/                # browser implementation (WS → agent-host; rpc-client.ts)
+│  │     ├─ tauri/              # desktop implementation: the web one over the keeper's front door, plus the
+│  │     │                      #   shell's invoke/event (notifications, the build bar, switching hosts)
 │  │     └─ mock/               # in-memory implementation for tests and stories
 │  │                            #   index.ts: MockPlatform composes one module per concept (sessions.ts, apps.ts,
 │  │                            #   projects.ts, updates.ts…) and keeps every field tests reach; demo.ts seeds a scene
@@ -66,8 +77,10 @@ centralu/
 │  │  └─ src/
 │  │     ├─ app/                # root component, routing (view switching), PlatformProvider
 │  │     ├─ features/           # vertical split by feature (§2 below)
-│  │     │  ├─ inbox/  session/  approval/  sidebar/
-│  │     │  ├─ git/  file-tree/  code-viewer/
+│  │     │  ├─ inbox/  session/  approval/  notices/  sidebar/  grid/  palette/
+│  │     │  ├─ git/  files/  viewer/  evidence/  project/
+│  │     │  ├─ orchestrator/     # the orchestrator's screen and proposals
+│  │     │  ├─ app-frame/  pinned-app/  app-share/   # external apps' views and their sharing
 │  │     │  ├─ machines/         # machine tags, adding a folder on a linked machine
 │  │     │  └─ usage/  settings/  onboarding/
 │  │     ├─ components/         # feature-agnostic shared (Button, Kbd, VirtualList…)
@@ -87,23 +100,30 @@ centralu/
 │  │     │     updates.ts (Centralu's update and the agent CLIs' versions)  machines.ts (linked machines)
 │  │     │     orchestrator.ts (the orchestrator and its proposals)
 │  │     │     layout.ts (how the window is arranged)  navigation.ts (which screen, back and forward)
+│  │     │     selectors.ts (derived state)  transcript.ts (a conversation's rows)  layers.ts (open layers)
+│  │     │     navHistory.ts  panelLayout.ts  foldGroups.ts  reloadBudget.ts  viewReconnect.ts  app-catalog.ts
 │  │     └─ styles/
 │  │
 │  └─ agent-host/               # the Node process (no browser code)
 │     └─ src/
-│        ├─ main.ts             # CLI entry (--port, --token)
-│        ├─ transport/          # WS server, session handshake
-│        ├─ adapters/           # claude/, codex/ + the common adapter contract
-│        ├─ sessions/           # SessionManager (manager.ts) and the parts moved out of it (#428): child-ownership, delegation-flow (start_agent in start-agent-flow, what it reaches of the manager in delegation-host), ask-project-flow, external-conversations, session-record, tool-queries, app-sessions, app-messages, session-trash, host-cards, orchestrator-seat, restart-policy, worktree-sessions, transcript-view, orchestrator-proposals; the orchestrator tools' runner (orchestrator-tools) and the parts moved out of it (#850): tool-definitions, tool-seats, tool-answers
-│        ├─ dev-services/       # dev-only: git, fs, store (sqlite), watcher
+│        ├─ main.ts             # CLI entry (--port, --token, --db, --standby)
+│        ├─ lifecycle/          # a start's steps, the readiness gate, shutdown and endings
+│        ├─ transport/          # WS server, session handshake, the event log
+│        ├─ adapters/           # claude/, codex/ + the common adapter contract (contract.ts); each tool's usage
+│        │                      #   reader (usage.ts) and the orchestrator's MCP server (claude/orchestrator-mcp.ts,
+│        │                      #   codex/orchestrator-bridge.mjs)
+│        ├─ sessions/           # SessionManager (manager.ts) and the parts moved out of it (#428): child-ownership, delegation-flow (start_agent in start-agent-flow, what it reaches of the manager in delegation-host), ask-project-flow, handoff-flow, handoff-record, external-conversations, session-record, tool-queries, app-sessions, app-messages, session-trash, host-cards, card-rest, delegated-cards, interruptions, sleep, turn-answer, linked-reports, orchestrator-seat, restart-policy, worktree-sessions, transcript-view, orchestrator-proposals; the session apps (session-apps, app-access, app-agents, app-builder, app-guide); the orchestrator tools' runner (orchestrator-tools) and the parts moved out of it (#850): tool-definitions, tool-seats, tool-answers, tool-profiles
+│        ├─ apps/external/      # external apps: manifest, discovery, runs, broker, capabilities (apps.md)
+│        ├─ views/              # app views: the view host, its CSP, the proxy page
+│        ├─ links/              # linked machines (#82): links, the remote client, install and update over ssh
+│        ├─ dev-services/       # despite the name, the prod path (agent-host.md §5): git, fs, store (sqlite),
+│        │                      #   the watcher, terminals and commands
 │        │  └─ store/           # what `Store` (store.ts) is made of; it opens the file, runs migrations and passes each call on
 │        │     ├─ migrations/   # the step list, in files by version range; index.ts holds the rule a new step follows
 │        │     ├─ projects.ts  sessions.ts  grid.ts  messages.ts  handoff-markers.ts  trash.ts
 │        │     ├─ settings.ts  permissions.ts  app-runs.ts  child-ownership.ts  linked-machines.ts
 │        │     └─ search-index.ts  vacuum.ts   # shared by the steps and the tables above
-│        ├─ keeper/             # the keeper's child service: agents and ptys spawned there, re-attach (#280)
-│        ├─ usage/              # incremental parser for ~/.claude, ~/.codex logs
-│        └─ mcp/                # MCP server for the orchestrator (M3)
+│        └─ keeper/             # the keeper's child service: agents and ptys spawned there, re-attach (#280)
 │
 ├─ e2e/                         # Playwright (apps/web + platform/mock combination); perf-memory.mts and seed-store.mts
 │                               #   measure against a seeded heavy store (fixtures/heavy-store.ts)
@@ -114,17 +134,17 @@ centralu/
 
 ## 2. Rules inside ui/features (the vertical split)
 
-Each feature folder is self-contained:
+Each feature folder holds its screens and what only they use:
 
 ```
 features/inbox/
-├─ InboxView.tsx        # the screen
-├─ components/          # sub-components for this feature only
-├─ hooks.ts             # hooks for this feature only (combinations of store selectors)
-└─ index.ts             # the public surface (barrel) — other features import only through here
+├─ Inbox.tsx            # the screen
+└─ inboxKeys.ts         # what only this feature uses (here: its keys), tested beside it
 ```
 
-- Direct imports between features go through `index.ts` only. Deep-path imports are forbidden (enforced by lint).
+- A feature imports another feature's file directly (`../grid/drop.js`). There are no barrel files and no lint rule
+  on paths between features; what the lint enforces is the layer rule (ui reaches the outside only through
+  `@cc/platform`'s ports, [architecture.md](architecture.md) §2).
 - If two features want the same logic, that logic **moves down** into core or components. Horizontal dependencies between features are not increased.
 - State attached to the screen goes in the store; only component-local state (text being typed etc.) uses useState.
 
@@ -134,9 +154,9 @@ features/inbox/
 |---|---|---|
 | Add an agent tool (Gemini etc.) | `agent-host/adapters/gemini/` + a capability declaration | ui, core (because events are normalised) |
 | Add a new kind of event | `protocol/events.ts` → core reducer → the consuming feature | other features |
-| Move git from Node to Rust (C2) | new `platform/tauri/git.ts` + `src-tauri` | ports/git.ts (the interface is unchanged), ui |
+| Move git from Node to Rust (C2, on hold: [agent-host.md](agent-host.md) §5) | a git implementation in `platform/tauri/` + `src-tauri` | ports/git.ts (the interface is unchanged), ui |
 | Add a new screen | `ui/features/<new>/` | platform, agent-host |
-| Change how OS notifications work | `platform/{web,tauri}/system.ts` | ui (it is behind SystemPort) |
+| Change how OS notifications work | the `SystemPort` implementation in `platform/{web,tauri}/index.ts` (when to notify is `core/notify/`) | ui (it is behind SystemPort) |
 | Change session state rules | `core/session/` (+ transition table tests) | if statements in ui — there should not have been any |
 
 ## 4. Why a monorepo (and why this size)

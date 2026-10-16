@@ -225,12 +225,12 @@ type ApprovalDetail =
 | machines | `machines.list, machines.add, machines.remove, machines.reconnect, machines.acceptVersions` | #82: 허브가 다른 기기에 거는 링크 (§6). 언제나 허브 자신의 것이고 전달되지 않는다 |
 | host | `host.stop` | #82: 이 호스트를 시그널처럼 끝낸다. 먼저 답한다. `centralu serve --stop`용([agent-host.md](agent-host.md) §4.7)이고, 앱이 돌리는 호스트는 거절한다. 전달되지 않는다. 추가만 |
 | grid | `grid.get, grid.set` | 그리드의 패널들, 순서대로, 통째로 쓴다 (product spec §5.4). 하나하나가 `GridPanel`이다: `{ kind: 'session', sessionId }` 또는 `{ kind: 'app', projectId: string \| null, appId, span? }` (`null`은 사용자 폴더의 앱) — #288. `span`(#306)은 사람이 그 앱 패널의 머리글에서 고른 `{ cols, rows }`이고, 각 1에서 4, 고르지 않았으면 없다; 그 이전의 host는 이것을 걷어 내고 패널은 기본값으로 돌아간다. 바꾸지 않고 넓혔으므로 (§4) `PROTOCOL_VERSION`은 1 그대로다: `grid.get { tagged: true }`와 `grid.set { panels }`는 패널로 말하고, 그것이 없으면 둘 다 #288 이전의 모양, 세션 id만의 목록으로 말한다 (이전 UI의 `grid.set { sessionIds }`는 목록을 그 세션들로 바꾼다). UI는 `panels` 옆에 `sessionIds`도 보내고 id만의 목록을 세션 패널로 읽으므로, 한 빌드 차이의 UI와 host는 어느 쪽으로든 계속 함께 돈다; 이전 필드는 한 릴리스 뒤에 빠진다. `grid.set`은 최대 256개를 받고 저장한 것을 돌려준다: 중복, 모르는 세션, 등록되지 않은 프로젝트의 앱은 빠진다. 앱이 있는지는 확인하지 않는다 — 앱 목록은 폴더보다 늦을 수 있고, 찾지 못한 앱은 화면이 빼고 그린다. 모양은 패널의 정체성뿐이라 그대로 클라이언트로 옮겨 갈 수 있다 (#82) |
-| git (dev) | `git.status, git.log, git.branches, git.diff, git.checkout` | prod에서는 같은 계약을 Tauri invoke로 |
-| fs (dev) | `fs.listDir, fs.readFile, fs.watchProject` | 〃 |
-| store (dev) | `store.loadWorkspace, store.saveWorkspace, store.appendMessages, …` | 〃 |
+| git | `git.status, git.diff, git.log, git.commitDetail, git.branches, git.ignoredEntries, git.checkout, git.stage, git.commit, git.push` | dev와 prod 모두 호스트의 `dev-services`가 처리한다. 이름과 달리 prod 경로다([agent-host.ko.md](agent-host.ko.md) §5) |
+| fs | `fs.listDir, fs.watch, fs.readFile, fs.move, fs.importFile, fs.resolve`, `files.search` | 〃 |
+| workspace | `workspace.load, workspace.save` | 창이 기억하는 배치의 스냅숏. 대화는 위의 `messages.*`로 읽고, 쓰는 것은 호스트가 직접 한다 |
 | usage | `agents.usage`, `agents.account` | 계정의 한도 창, 도구 자신에게 묻는다. 호스트가 센 최근 몇 시간의 프롬프트 캐시도 함께 (`cache`, [agent-host.ko.md](agent-host.ko.md) §6, §6.1). `agents.usage { limits: false }`는 캐시만 답하고, 허브가 연결된 기기에 대해 한도가 자기 것이면 `sameAccountAsHub: true`를 단다. `agents.account { tool }`은 로그인의 불투명한 지문(`{ loggedIn, fingerprint }`)으로, 허브가 기기의 것과 견주며 이메일은 나가지 않는다 (#726). 추가만 |
 
-git/fs/store RPC의 요청·응답 타입은 **포트 인터페이스와 1:1**이다. 의도된 중복이다 — 포트가 원본 계약이고, RPC와 Tauri invoke는 그 계약을 실어 나르는 두 운반체일 뿐이다.
+git, fs, workspace RPC의 요청·응답 타입은 **포트 인터페이스와 1:1**이다. 의도된 중복이다 — 포트가 원본 계약이고, RPC가 그 계약을 실어 나른다(git이나 fs를 Rust로 옮기게 되면 Tauri invoke가 두 번째 운반체가 된다).
 
 ## 3.1 경로를 표기하는 법 ([#47](https://github.com/ijun17/centralu/issues/47))
 

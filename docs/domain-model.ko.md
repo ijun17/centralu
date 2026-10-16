@@ -35,13 +35,13 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 어댑터 | 에이전트 도구 하나를 공통 계약으로 감싸고, 그 출력을 정규화된 이벤트로 바꾸는 모듈 | `AgentAdapter`, `packages/agent-host/src/adapters/contract.ts` | 드라이버 |
 | 세션 종류 | 세션이 무엇으로 만들어지는가: `worker`(평범한 세션 전부), `orchestrator`, `coordinator`. 그대로 저장하지 않는다. `is_orchestrator`와 코디네이터의 구성원 목록이 있는지에서 읽어 낸다 | `SessionKind`, `packages/protocol/src/commands.ts`; 읽어 내는 곳은 `readSessions`, `packages/agent-host/src/dev-services/store/sessions.ts` | |
 | 오케스트레이터 | 앱 전체에 하나뿐인, 모든 세션을 보고 지휘하는 세션. 어느 프로젝트에도 속하지 않는다 | `kind: 'orchestrator'`; `packages/agent-host/src/sessions/orchestrator-tools.ts`, `orchestrator-home.ts` | 프로젝트 오케스트레이터(폐지) |
-| 평범한 세션 | 빌더도, 매니저도, 앱의 에이전트도 아닌 프로젝트 안의 `worker`. 읽기 전용 `reader` 도구를 받는다(워크트리 세션과 위임된 세션도). 설정에서 끌 수 있다 | `readsOwnProject`, `packages/agent-host/src/sessions/tool-profiles.ts` | |
-| 워크트리 세션(워커) | 자기 git 워크트리와 브랜치에서 일하는 세션. 언제나 매니저 아래에 있다(`parentSessionId`) | `SessionInfo.worktree`, `parentSessionId` | 브랜치 세션 |
+| 평범한 세션 | 빌더도 앱의 에이전트도 아닌 프로젝트 안의 `worker`. 읽기 전용 `reader` 도구를 받는다(워크트리 세션, 띄운 에이전트, 다른 프로젝트의 일을 받은 세션도). 설정에서 끌 수 있다 | `readsOwnProject`, `packages/agent-host/src/sessions/tool-profiles.ts` | |
+| 워크트리 세션(워커) | 자기 git 워크트리와 브랜치에서 일하는 세션. 사람이 만든 것은 따로 서고, 세션이 `start_agent`로 띄운 것은 그 세션 아래에 놓인다(`parentSessionId`). 이것들을 쥐던 워크트리 매니저는 없어졌다(#561 part 3) | `SessionInfo.worktree`, `parentSessionId` | 브랜치 세션 |
 | 코디네이터 | 볼 수 있는 세션 목록(`scopeSessionIds`)과 역할 글(`roleAppend`)을 만들 때 정해 둔 세션. 관제 앱의 작업만 이것을 만들었다. 그 앱은 #372에서 걷어냈고 만들던 RPC(`agents.createCoordinator`)도 그 뒤에 빠져서, 새로 만드는 것은 없다. 종류는 사람들의 저장소에 이미 있는 것을 위해 남는다. 그것들은 다른 세션처럼 목록에 들고, 읽히고, 깨어나고, 휴지통에 가며, `appId: 'control'`을 달고 있다 | `kind: 'coordinator'`; `manager.ts` | 하위 오케스트레이터 |
 | 빌더 | `<<role>>` 앱 하나를 만드는 세션. `appId`를 달고 **그리고** 빌더 지도(`apps.builders`)에서 그 앱이 가리키는 세션 | `AppSessions`의 `builderRefOf`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-builder.ts` | |
 | 앱 에이전트 세션 | `<<role>>` 앱이 `run_agent`로 세운 세션. `appId`를 달지만 빌더가 아니고, `safe`로 돌며, 앱도 reader 도구도 받지 않고, 답은 앱에게 돌아간다 | `isAppAgent`, `packages/agent-host/src/sessions/tool-profiles.ts`; `runAppAgent`, `packages/agent-host/src/sessions/app-sessions.ts`; `packages/agent-host/src/sessions/app-agents.ts` | |
-| 위임된("부탁받은") 세션 | `<<role>>` 다른 프로젝트의 세션이 `ask_project`로 세우거나 다시 쓴 세션. `askedBy`로 표시한다 | `SessionInfo.askedBy`; `packages/agent-host/src/sessions/ask-project.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2 | 델리게이트 |
-| 띄운 에이전트(자식) | `<<role>>` 같은 프로젝트의 다른 세션이 `start_agent`로 띄운 세션(#561). 그 세션의 폴더에서 그 세션의 프리셋으로 돈다. `askedBy`로 표시하며, 띄운 세션이 `agent_session`으로 다룰 수 있는 건 이 세션들뿐이다. 위임된 세션처럼 에이전트를 띄우거나 프로젝트에 부탁하지 못한다 | `SessionInfo.askedBy`; `manager.ts`의 `startAgent`, `agentSession`; `packages/agent-host/src/sessions/start-agent.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2.1 | 자식, 워커 |
+| 위임된 세션 | `<<role>>` 다른 프로젝트의 세션이 `ask_project`로 일을 준, 이미 있는 평범한 세션. Centralu는 그 일을 위해 다른 프로젝트에 세션을 만들지 않고(#614) 표시도 붙이지 않는다. 부탁한 세션은 대화 속 그 일의 `from`이고, 일은 맡긴 턴으로 돈다. #614 이전에는 `ask_project`가 세션을 세우거나 다시 쓰고 `askedBy`로 표시했으며, 그 표시는 지워진다 | `askProject`, `packages/agent-host/src/sessions/ask-project-flow.ts`; `askFrame`, `ask-project.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2 | 델리게이트 |
+| 띄운 에이전트(자식) | `<<role>>` 같은 프로젝트의 다른 세션이 `start_agent`로 띄운 세션(#561). 그 세션의 폴더에서 그 세션의 프리셋으로 돈다. `askedBy`로 표시하며, 띄운 세션이 `agent_session`으로 다룰 수 있는 건 이 세션들뿐이다. 다른 프로젝트의 일을 하는 세션처럼 에이전트를 띄우거나 프로젝트에 부탁하지 못한다 | `SessionInfo.askedBy`; `sessions/start-agent-flow.ts`의 `startAgent`, `sessions/delegation-flow.ts`의 `agentSession`(둘 다 `manager.ts`를 거쳐 닿는다); `packages/agent-host/src/sessions/start-agent.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2.1 | 자식, 워커 |
 | 도구 프로필 | 세션이 받는 Centralu 자체 도구(`centralu` MCP 서버) 묶음: `orchestrator`, `scoped`, `builder`, `reader`, 또는 없음(워크트리 매니저의 `manager`는 평범한 세션에 접혀 들어갔다, #561) | `toolProfileFor`, `packages/agent-host/src/sessions/tool-profiles.ts` (`manager.ts`의 `toolProfileOf`가 묻는다); [agent-host.ko.md](agent-host.ko.md) §1.1 | |
 | 권한 프리셋 | 에이전트가 묻지 않고 해도 되는 범위: `safe`, `normal`, `auto` | `PermissionPreset`, `entities.ts` | 모드 |
 | 살아 있음 | 세션에 지금 프로세스가 있는가. 살아 있지 않은 세션은 말을 걸면 이어 띄운다 | `SessionInfo.live` | 보관(FR-20은 폐지) |
@@ -64,14 +64,14 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 도구 호출 / 도구 결과 | 에이전트가 도구를 쓴 것과 돌아온 것. `callId`로 짝을 짓고, 도구 카드 하나로 그린다 | `tool_call`, `tool_result`, `events.ts` | |
 | 서브에이전트 단계 | 에이전트가 띄운 서브에이전트(Claude의 Task)의 한 걸음. 띄운 도구 호출에 매달리고, 대화의 번호에는 들어가지 않는다 | `subagent_event`, `events.ts`; `subagent_messages`(스토어 v41) | |
 | 승인 | 에이전트가 하려는 일에 대해 기다리는 예/아니오. 한 세션에 한 번에 하나까지 | `pendingApproval`, `ApprovalDetail`, `entities.ts` | 권한 요청 |
-| 승인 내용 | 무엇을 묻는가: `command`, `file_edit`, `other`(어댑터가 올린다), `capability`와 `project_access`(호스트가 올린다) | `ApprovalDetail`, `entities.ts` | |
+| 승인 내용 | 무엇을 묻는가: `command`, `file_edit`, `other`(어댑터가 올린다. 호스트의 적용·인계 카드도 `about`을 달고 여기에 실린다), `capability`, `project_access`, `agent_start`, `centralu_update`, `project_create`(호스트가 올린다) | `ApprovalDetail`, `entities.ts` | |
 | 승인 규칙 | 명령에 대해 기억해 둔 "항상 허용". `*`가 든 패턴으로 맞추고, 세션이나 프로젝트 범위를 가진다. 허용만 저장하고, 어댑터가 묻기 전에 확인한다 | `ApprovalRule`, `packages/core/src/approval/approval.ts`; `rulesFor`, `manager.ts` | 허용 목록 |
 | 질문 | 에이전트가 사람에게 고르라고 내놓는 선택지(AskUserQuestion). `agents.answerQuestion`으로 답한다. 몇 개든 기다릴 수 있다 | `Question`, `pendingQuestions`, `entities.ts` | 프롬프트 |
 | 프로젝트 동의 | 한 프로젝트가 다른 프로젝트에 닿도록 기억해 둔 "항상": `delegate`(`ask_project`) 또는 `apps`(공유된 앱 붙이기). 또는 자기 자신에게 `agents`(그 프로젝트의 세션이 에이전트를 띄워도 됨, #561) | `ProjectConsent`, `entities.ts`; `project_consents`(스토어 v44) | |
-| 읽기 허락 | 위임된 세션의 답이 이름을 댄, 대상 프로젝트 안의 경로. 이 호스트가 도는 동안 호출한 쪽이 읽을 수 있다 | `readGrants`, `ask-project.ts` | |
-| 보고 표지 | "끝나면 알려 준다": 일을 준 세션에게 턴이 끝났다는 보고를 빚진 세션(`start_agent`가 기다림을 넘겼을 때, `reportBack`을 켠 `send_to_session`). 보고하면 지우고, 호스트 교체를 넘겨 살아남는다(#646) | `awaitingReport`, `manager.ts`; `report_marks`(스토어 v49) | |
-| 맡긴 턴 | 다른 세션의 일이 시작한 턴(`ask_project`, `start_agent`, `agent_session` send, 쉬는 세션에 보낸 `send_to_session`). 도는 동안 그 턴의 카드는 맡긴 세션에게도 간다: 답할 수 있는 질문, 알림만 받는 승인(#676). 턴과 함께 끝나고, 호스트 교체를 넘겨 살아남는다 | `turnOwners`, `manager.ts`; `delegated_turns`(스토어 v51) | |
-| 대기 중인 요청 | 한 세션이 바쁜 세션에게 청하고 대기를 고른 일(`ifBusy: "queue"`). 돌던 턴이 끝나면 요청한 세션이 소유한 새 턴으로 전해진다. 호스트 교체를 넘겨 살아남는다(#677) | `queued`, `manager.ts`; `queued_requests`(스토어 v52) | |
+| 읽기 허락 | 위임된 세션의 답이 이름을 댄, 대상 프로젝트 안의 경로. 이 호스트가 도는 동안 호출한 쪽이 읽을 수 있다 | `readGrants`(`manager.ts`가 쥐고 `sessions/delegation-host.ts`로 넘긴다), `readableGrants`, `ask-project.ts` | |
+| 보고 표지 | "끝나면 알려 준다": 일을 준 세션에게 턴이 끝났다는 보고를 빚진 세션(`start_agent`가 기다림을 넘겼을 때, `reportBack`을 켠 `send_to_session`). 보고하면 지우고, 호스트 교체를 넘겨 살아남는다(#646) | `awaitingReport`, `pausedReports`, `sessions/child-ownership.ts`; `report_marks`(스토어 v49) | |
+| 맡긴 턴 | 다른 세션의 일이 시작한 턴(`ask_project`, `start_agent`, `agent_session` send, 쉬는 세션에 보낸 `send_to_session`). 도는 동안 그 턴의 카드는 맡긴 세션에게도 간다: 답할 수 있는 질문, 알림만 받는 승인(#676). 턴과 함께 끝나고, 호스트 교체를 넘겨 살아남는다 | `turnOwners`, `sessions/child-ownership.ts`; `delegated_turns`(스토어 v51) | |
+| 대기 중인 요청 | 한 세션이 바쁜 세션에게 청하고 대기를 고른 일(`ifBusy: "queue"`). 돌던 턴이 끝나면 요청한 세션이 소유한 새 턴으로 전해진다. 호스트 교체를 넘겨 살아남는다(#677) | `queued`, `sessions/child-ownership.ts`; `queued_requests`(스토어 v52) | |
 | 포크 | 다른 세션의 요청을 위해 바쁜 세션의 대화를 복사해 시작한 하위 세션(`ifBusy: "fork"`). 요청한 세션과 연결되고 사이드바에서는 원본 아래에 놓인다(#677) | `SessionInfo.forkedFrom`; `sessions.forked_from_session_id`(스토어 v52) | |
 | 안 읽음 | 사람이 마지막으로 본 곳(`lastReadSeq`) 너머에 내용이 있는가. 상태와는 따로다 | `SessionInfo.lastReadSeq` | |
 
@@ -137,7 +137,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 |---|---|
 | 인계(handoff) | 세션이 후임에게 일을 넘기는 것(§1.1). 키퍼가 더 새 키퍼에게 자신을 넘기는 것(§1.5). 스왑에서 다음 호스트로 열린 화면을 넘기는 것은 **화면 인계**(view handover)다 |
 | 매니저 | 모든 세션을 돌리는 호스트의 클래스 `SessionManager`. #561 3부 전에는 워크트리 매니저라는 역할이기도 했는데, 평범한 세션에 접혀 들어갔다(세션이 자기 워크트리 에이전트를 띄우고 가진다) |
-| 위임(delegate) | `DELEGATE_TOOLS`와 동의 종류 `delegate`는 `ask_project`의 **부르는** 쪽이다. 일을 하는 세션은 위임된 세션이다 |
+| 위임(delegate) | `DELEGATE_TOOLS`와 동의 종류 `delegate`는 `ask_project`의 **부르는** 쪽이다. 일을 하는 세션은 위임된 세션이다(일을 받은, 이미 있는 세션) |
 | 능력(capability) | `AdapterCapabilities`: 에이전트 도구가 지원하는 것. 앱의 능력: 앱이 중개자에게 부탁할 수 있는 것 |
 | 명령(commands) | 도구가 내놓는 슬래시 명령(`agents.commands`). 프로젝트에 저장한 명령(`projects.commands`)과, 그것을 pty에서 돌리는 **명령 실행** |
 | 사이드카 | Tauri 셸이 직접 띄운 호스트만 그렇다. 키퍼 아래에서 호스트는 키퍼의 자식이다 |
@@ -203,8 +203,8 @@ classDiagram
   빌더나 앱 에이전트 세션(사이드바에서 그 앱의 줄 아래에 선다), 그리고 휴지통의 세션(프로젝트는 휴지통 기록에
   남는다). 인박스와 팔레트는 프로젝트가 없는 세션을 모두 "Orchestrator"라고 적는다.
 - 세션이 만들어질 때 정해지는 것은 `kind`뿐이다. 다른 역할은 모두 그때그때 관계에서 읽어 낸다: 빌더는 빌더 지도에 이름이 있고, 앱 에이전트 세션은 빌더 지도가
-  되가리키지 않는 `appId`를 달고, 위임된 세션은 다른 프로젝트의 세션을, 띄운 에이전트는 같은 프로젝트의 세션을
-  가리키는 `askedBy`를 가진다. 역할을 저장된 깃발로 옮기지 않은 것은
+  되가리키지 않는 `appId`를 달고, 띄운 에이전트는 같은 프로젝트의 세션을 가리키는 `askedBy`를 가진다. 위임된
+  세션은 저장된 관계가 아니라 지금 도는 맡긴 턴으로 알아본다(#614). 역할을 저장된 깃발로 옮기지 않은 것은
   일부러다. 깃발은 관계와 어긋날 수 있기 때문이다(#13, #80).
 - 도구 프로필은 여기서 따라 나온다. 처음 맞는 것이 이긴다: 오케스트레이터, 코디네이터(`scoped`), 빌더,
   프로젝트 안의 평범한 세션(`reader`, 설정에서 끄지 않았다면), 없음(`toolProfileFor`).
@@ -575,15 +575,18 @@ sequenceDiagram
   participant C as Session in project A
   participant M as Session manager
   actor P as Person
-  participant D as Delegated session in project B
-  C->>M: ask_project(B, task)
-  M->>M: B is another registered project, and C was not itself asked
+  participant D as Existing session in project B
+  C->>M: ask_project(B, session?, task)
+  M->>M: B is another registered project, and C is not itself working on another project's task
   M->>M: consent A to B, kind delegate?
   alt not given yet
-    M-->>P: project_access card in C's session
+    M-->>P: project_access card in C's session, naming D and B's trust
     P-->>M: allow once, or always (stored), or deny
   end
-  M->>M: the session C asked in B before, if idle or finished, else a new one (B's default tool, normal preset, askedBy C)
+  M->>M: the ordinary session of B that C named, or B's only one; never a new one (#614)
+  alt D is in a turn that is not C's
+    M-->>C: the choices (note for an auto caller, or queue), and nothing is sent
+  end
   M->>D: task in a frame, sent as from C
   D-->>P: its own approvals stand in D, where the person sees them
   alt within 240 s
@@ -594,8 +597,9 @@ sequenceDiagram
   end
 ```
 
-깊이는 하나다: 위임된 세션은 세 번째 프로젝트에 부탁할 수 없다. 같은 프로젝트에 맡긴 일이 도는 동안 새 일을 주면
-거절한다. 읽기 허락은 호스트의 메모리에 살고 호스트와 함께 끝난다. 부른 쪽을 멈추면 위임된 턴도 멈춘다.
+깊이는 하나다: 다른 프로젝트의 일을 하는 중인 세션은 세 번째 프로젝트에 부탁할 수 없다. 대상 세션이 다른 턴을
+돌고 있으면 일을 보내지 않고 선택지를 돌려준다([agent-host.ko.md](agent-host.ko.md) §1.2.3). 같은 세션의 끝나지 않은 일을
+새 일로 바꿀 수는 없다. 읽기 허락은 호스트의 메모리에 살고 호스트와 함께 끝난다. 부른 쪽을 멈추면 위임된 턴도 멈춘다.
 자세한 것은 [agent-host.ko.md](agent-host.ko.md) §1.2.
 
 ### 5.3 앱이 `run_agent`를 부를 때

@@ -97,7 +97,7 @@ Patterns are not decoration, they are defences against the axes of change (C1~C6
 | **Explicit state machine** | Session state (FR-12) is a pure function defined by a transition table. Inferring state with if statements in the UI is forbidden | C5, correctness |
 | **Event-driven (pub-sub)** | The adapter → app direction is a one-way event stream. No polling (product spec §7.1) | C6, performance |
 | **CQRS-lite** | Separate the path of commands (calling a port method) from state updates (receiving an event → reducer). Minimise optimistic reflection of commands | C5, C6 |
-| **Repository** | Persistence sits behind `StorePort`. Only the implementation knows the SQLite schema | C2 |
+| **Repository** | Persistence sits behind the host's `Store` (`agent-host/src/dev-services/store.ts`) and its per-concept modules (`dev-services/store/`). The UI gets what it needs over RPC through ports (`WorkspacePort`, the ports in `history.ts`, …); only those modules know the SQLite schema | C2 |
 | **Derived state (selectors)** | The inbox, counters and ordering are not stored but **computed** from session state. Storing them is the root of synchronisation bugs | C5 |
 | **Strategy** | Policy branches — the card collapse policy, judging in-place banner approval (per tool kind) — are data (a settings table) | C5 |
 
@@ -110,21 +110,20 @@ Forbidden anti-patterns: global mutable singletons, IO directly in UI components
 ```
 [dev machine: browser]                   [production: Tauri]
 
-Vite dev server                        Tauri app (Rust)
-   │                                      │ spawn·watch·restart (supervisor)
-Browser (ui)                              │ git2/rusqlite/notify/shortcuts (Tauri invoke)
+Vite dev server                        Tauri app (Rust): the window, OS integration
+   │                                      │ keeper: spawn·watch·restart·swap the host (§4.1)
+Browser (ui)                              │
    │  WebSocket ws://127.0.0.1:PORT    Webview (ui)
    ▼                                      │  WebSocket ws://127.0.0.1:PORT (identical!)
 agent-host (node, run standalone)         ▼
-   ├─ adapters (claude, codex)         agent-host (node, sidecar)
-   ├─ dev-services (git/fs/store/usage)   ├─ adapters (claude, codex)
-   └─ mcp server                          ├─ usage parser · mcp server
-                                          └─ (dev-services replaced by Rust)
+   ├─ adapters (claude, codex)         agent-host (node, run by the keeper)
+   ├─ dev-services (git/fs/store)         ├─ adapters (claude, codex), usage readers, MCP server
+   └─ usage readers · MCP server          └─ dev-services (git/fs/store): the same Node code
 ```
 
 - **The AgentPort implementation stays single** — dev and prod use the same WS client. Tauri's role is not communication but **process supervision** (spawn, crash detection, restart) — in the packaged app through the keeper (§4.1). We do not build a stdio relay (double serialisation via Rust).
 - Security: an arbitrary port + a handshake with a token generated at startup, bound to loopback only. Browser/WebView clients must also come from the explicit dev/Tauri origin allowlist; native clients without an `Origin` header still need the token, and literal `Origin: null` is rejected.
-- In dev mode, git/fs/store are provided by the `dev-services` module inside agent-host (implemented in Node). At the Tauri migration only these switch to Rust (invoke), and **the ports stay the same** (C2). The order and method of the migration is in [platform-abstraction.md](platform-abstraction.md) §5.
+- In dev and prod alike, git/fs/store are provided by the `dev-services` module inside agent-host (implemented in Node); despite the name it is the prod path. Moving them to Rust (invoke) is on hold until a measurement shows a bottleneck ([agent-host.md](agent-host.md) §5), and if it happens **the ports stay the same** (C2). How that move would go is in [platform-abstraction.md](platform-abstraction.md) §5.
 - This structure is what lets M0~M1 be developed in a browser with hot reload and no Rust toolchain, and run E2E with Playwright.
 
 ### 4.1 The keeper: the host outlives the window (#280, option C step 1)

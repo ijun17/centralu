@@ -86,7 +86,7 @@ OS는 그 파일들을 고치는 일이다. 테스트와 빌드 스크립트는 
 | **명시적 상태 기계** | 세션 상태(FR-12)는 전이 테이블로 정의된 순수 함수다. UI에서 if 문으로 상태를 추론하는 것은 금지 | C5, 정확성 |
 | **이벤트 기반 (pub-sub)** | 어댑터 → 앱 방향은 단방향 이벤트 스트림이다. 폴링 없음 (product spec §7.1) | C6, 성능 |
 | **CQRS-lite** | 명령 경로(포트 메서드 호출)와 상태 갱신 경로(이벤트 수신 → 리듀서)를 분리한다. 명령의 낙관적 반영은 최소화 | C5, C6 |
-| **리포지토리** | 영속성은 `StorePort` 뒤에 둔다. SQLite 스키마는 구현만 안다 | C2 |
+| **리포지토리** | 영속성은 호스트의 `Store`(`agent-host/src/dev-services/store.ts`)와 개념별 모듈(`dev-services/store/`) 뒤에 있다. UI는 포트(`WorkspacePort`, `history.ts`의 포트 등)로 필요한 것만 RPC로 받고, SQLite 스키마는 그 모듈들만 안다 | C2 |
 | **파생 상태 (셀렉터)** | 인박스, 카운터, 정렬은 저장하지 않고 세션 상태에서 **계산**한다. 저장하는 것이 동기화 버그의 뿌리다 | C5 |
 | **전략** | 정책 분기 — 카드 접기 정책, 인플레이스 배너 승인 판정(도구 종류별) — 는 데이터(설정 테이블)다 | C5 |
 
@@ -99,21 +99,20 @@ OS는 그 파일들을 고치는 일이다. 테스트와 빌드 스크립트는 
 ```
 [dev machine: browser]                   [production: Tauri]
 
-Vite dev server                        Tauri app (Rust)
-   │                                      │ spawn·watch·restart (supervisor)
-Browser (ui)                              │ git2/rusqlite/notify/shortcuts (Tauri invoke)
+Vite dev server                        Tauri app (Rust): the window, OS integration
+   │                                      │ keeper: spawn·watch·restart·swap the host (§4.1)
+Browser (ui)                              │
    │  WebSocket ws://127.0.0.1:PORT    Webview (ui)
    ▼                                      │  WebSocket ws://127.0.0.1:PORT (identical!)
 agent-host (node, run standalone)         ▼
-   ├─ adapters (claude, codex)         agent-host (node, sidecar)
-   ├─ dev-services (git/fs/store/usage)   ├─ adapters (claude, codex)
-   └─ mcp server                          ├─ usage parser · mcp server
-                                          └─ (dev-services replaced by Rust)
+   ├─ adapters (claude, codex)         agent-host (node, run by the keeper)
+   ├─ dev-services (git/fs/store)         ├─ adapters (claude, codex), usage readers, MCP server
+   └─ usage readers · MCP server          └─ dev-services (git/fs/store): the same Node code
 ```
 
 - **AgentPort 구현은 하나로 유지된다** — dev와 prod가 같은 WS 클라이언트를 쓴다. Tauri의 역할은 통신이 아니라 **프로세스 감독**(spawn, 크래시 감지, 재시작)이다 — 패키지된 앱에서는 키퍼를 통해서(§4.1). stdio 릴레이(Rust를 거치는 이중 직렬화)는 만들지 않는다.
 - 보안: 임의 포트 + 시작 시 생성한 토큰으로 하는 핸드셰이크, loopback에만 바인딩. 브라우저/WebView 클라이언트는 명시된 dev/Tauri origin allowlist에도 들어야 한다. `Origin` 헤더가 없는 네이티브 클라이언트도 토큰은 필요하고, literal `Origin: null`은 거부한다.
-- dev 모드에서는 git/fs/store를 agent-host 안의 `dev-services` 모듈(Node로 구현)이 제공한다. Tauri 전환 시점에 이 부분만 Rust(invoke)로 바뀌고 **포트는 그대로 유지된다**(C2). 전환의 순서와 방법은 [platform-abstraction.ko.md](platform-abstraction.ko.md) §5에 있다.
+- git/fs/store는 dev와 prod 모두 agent-host 안의 `dev-services` 모듈(Node로 구현)이 제공한다. 이름과 달리 prod 경로다. 이 부분을 Rust(invoke)로 옮기는 계획은 측정으로 병목이 확인될 때까지 보류됐고([agent-host.ko.md](agent-host.ko.md) §5), 옮기더라도 **포트는 그대로 유지된다**(C2). 그때의 순서와 방법은 [platform-abstraction.ko.md](platform-abstraction.ko.md) §5에 있다.
 - 이 구조 덕분에 M0~M1을 Rust 툴체인 없이 브라우저에서 핫 리로드로 개발하고, Playwright로 E2E를 돌릴 수 있다.
 
 ### 4.1 키퍼: 호스트가 창보다 오래 산다 (#280, 옵션 C 1단계)
