@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
 import type { StoredMessage } from '@cc/protocol'
+import { parseJson } from './json.js'
 import { indexedText } from './search-index.js'
 
 /**
@@ -23,12 +24,26 @@ export type ReadOpts = { full?: boolean }
 
 /**
  * The payload column as `ReadOpts` asks for it. The fields are dropped by SQLite (`json_remove`) rather than after
- * `JSON.parse`, so a page never pulls a megabyte of tool output into the host only to throw it away.
+ * `JSON.parse`, so a page never pulls a megabyte of tool output into the host only to throw it away. A payload that is
+ * not JSON is passed through as it is: `json_remove` refuses it, and that refusal would fail the whole page (#850).
  */
 function payloadColumn(opts: ReadOpts): string {
   return opts.full
     ? 'payload'
-    : `CASE WHEN kind IN ('tool_call', 'tool_result') THEN json_remove(payload, '$.input', '$.output') ELSE payload END as payload`
+    : `CASE WHEN kind IN ('tool_call', 'tool_result') AND json_valid(payload) THEN json_remove(payload, '$.input', '$.output') ELSE payload END as payload`
+}
+
+/**
+ * Stored rows as messages. **A payload that is not JSON reads as `{}` and the row keeps its place** (#850): one bad row
+ * must not fail its page, and dropping it would shorten the page, which the window reads as the start of the
+ * conversation (`more: msgs.length >= HISTORY_PAGE`). An empty payload is what every reader already tolerates: no
+ * text, no summary.
+ */
+function readRows(raw: (StoredMessage & { payload: string })[]): StoredMessage[] {
+  return raw.map((r) => {
+    const payload = parseJson(r.payload)
+    return { ...r, payload: payload === undefined ? {} : payload }
+  })
 }
 
 /** The conversation: messages and their search index, a subagent's steps, and the full-text search over them */
@@ -152,7 +167,7 @@ export class MessageRecords {
          WHERE session_id = ? AND (? IS NULL OR seq < ?) ORDER BY seq DESC LIMIT ?`,
       )
       .all(sessionId, beforeSeq ?? null, beforeSeq ?? null, limit) as (StoredMessage & { payload: string })[]
-    return raw.reverse().map((r) => ({ ...r, payload: JSON.parse(r.payload) }))
+    return readRows(raw.reverse())
   }
 
   /**
@@ -176,12 +191,9 @@ export class MessageRecords {
       .all(sessionId, escaped, sessionId, escaped) as { payload: string }[]
     const texts: string[] = []
     for (const r of rows) {
-      try {
-        const text = (JSON.parse(r.payload) as { text?: unknown }).text
-        if (typeof text === 'string') texts.push(text)
-      } catch {
-        // A row that is not JSON names nothing
-      }
+      // A row that is not JSON names nothing
+      const text = (parseJson(r.payload) as { text?: unknown } | null | undefined)?.text
+      if (typeof text === 'string') texts.push(text)
     }
     return texts
   }
@@ -197,7 +209,7 @@ export class MessageRecords {
          WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
       )
       .all(sessionId, afterSeq, limit) as (StoredMessage & { payload: string })[]
-    return raw.map((r) => ({ ...r, payload: JSON.parse(r.payload) }))
+    return readRows(raw)
   }
 
   /**
@@ -257,7 +269,7 @@ export class MessageRecords {
          WHERE session_id = ? AND parent_call_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?`,
       )
       .all(sessionId, parentCallId, opts.afterSeq ?? 0, opts.limit ?? -1) as (StoredMessage & { payload: string })[]
-    return raw.map((r) => ({ ...r, payload: JSON.parse(r.payload) }))
+    return readRows(raw)
   }
 
   nextSeq(sessionId: string): number {

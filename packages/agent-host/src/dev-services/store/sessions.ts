@@ -1,17 +1,8 @@
 import type Database from 'better-sqlite3'
 import type { SessionInfo } from '@cc/protocol'
 import { Interruption as InterruptionSchema, sessionLiveDefaults } from '@cc/protocol'
-
-/** `sessions.interruption` back as `SessionInfo.interruption` (#698) */
-function readInterruption(json: string | null): SessionInfo['interruption'] {
-  if (!json) return null
-  try {
-    const r = InterruptionSchema.safeParse(JSON.parse(json))
-    return r.success ? r.data : null
-  } catch {
-    return null
-  }
-}
+import { z } from 'zod'
+import { readJson, readJsonList } from './json.js'
 
 /** The sessions table: one row per session, how a row becomes a `SessionInfo`, and what the host keeps on a session besides it (its directory, touched paths, read mark, commit links) */
 export class SessionRecords {
@@ -175,7 +166,8 @@ export class SessionRecords {
           : scopeSessionIdsJson
             ? ('coordinator' as const)
             : ('worker' as const),
-        scopeSessionIds: scopeSessionIdsJson ? (JSON.parse(scopeSessionIdsJson) as string[]) : null,
+        // An unreadable list is a coordinator that sees no session: it grants nothing, and fails no other row (#850)
+        scopeSessionIds: scopeSessionIdsJson ? readJsonList(scopeSessionIdsJson, z.string()) : null,
         live: false,
         worktree: worktreePath
           ? {
@@ -213,7 +205,7 @@ export class SessionRecords {
               }
             : null,
         // Why the last turn did not finish (#698); a value this build cannot read is no interruption rather than a lost row
-        interruption: readInterruption(interruptionJson),
+        interruption: readJson(interruptionJson, InterruptionSchema.nullable(), null),
       }),
     )
   }
@@ -249,11 +241,7 @@ export class SessionRecords {
   getTouchedPaths(sessionId: string): string[] {
     const row = this.db.prepare(`SELECT touched_paths as p FROM sessions WHERE id = ?`).get(sessionId) as
       { p: string } | undefined
-    try {
-      return row ? (JSON.parse(row.p) as string[]) : []
-    } catch {
-      return []
-    }
+    return readJsonList(row?.p, z.string())
   }
 
   /** Records the skill list (per tool and directory) */

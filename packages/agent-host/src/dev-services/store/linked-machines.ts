@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { JsonObject, parseJson, readJson } from './json.js'
 import { type SettingsRecords } from './settings.js'
 
 /** One linked machine as stored (#82, v46): the registry's record (links/links.ts `MachineRecord`) */
@@ -88,13 +89,19 @@ export class LinkedMachineRecords {
     this.db.prepare(`UPDATE linked_machines SET accepted_versions = ? WHERE id = ?`).run(key, id)
   }
 
-  /** One machine's mirrored sessions or projects, in the order it last listed them; null when never mirrored */
+  /**
+   * One machine's mirrored sessions or projects, in the order it last listed them; null when never mirrored. A header
+   * that is not JSON is skipped rather than failing the list (#850); the next full mirror writes it again.
+   */
   machineHeaders(machineId: string, kind: 'session' | 'project'): unknown[] | null {
     if (this.settings.appSetting(`${MIRRORED_KEY}${machineId}.${kind}`) === null) return null
     const rows = this.db
       .prepare(`SELECT info FROM machine_headers WHERE machine_id = ? AND kind = ? ORDER BY position, item_id`)
       .all(machineId, kind) as { info: string }[]
-    return rows.map((r) => JSON.parse(r.info) as unknown)
+    return rows.flatMap((r) => {
+      const info = parseJson(r.info)
+      return info === undefined ? [] : [info]
+    })
   }
 
   /** Replaces one machine's mirrored list whole, as it was just read */
@@ -126,13 +133,14 @@ export class LinkedMachineRecords {
       .run(machineId, item.id, JSON.stringify(item), pos)
   }
 
-  /** Changes a few fields of one mirrored session (its name, its state) */
+  /** Changes a few fields of one mirrored session (its name, its state); one that cannot be read is left for the next full mirror */
   patchMachineSession(machineId: string, sessionId: string, patch: Record<string, unknown>): void {
     const row = this.db
       .prepare(`SELECT info FROM machine_headers WHERE machine_id = ? AND kind = 'session' AND item_id = ?`)
       .get(machineId, sessionId) as { info: string } | undefined
-    if (!row) return
-    const next = { ...(JSON.parse(row.info) as Record<string, unknown>), ...patch }
+    const info = readJson(row?.info, JsonObject.nullable(), null)
+    if (!info) return
+    const next = { ...info, ...patch }
     this.db
       .prepare(`UPDATE machine_headers SET info = ? WHERE machine_id = ? AND kind = 'session' AND item_id = ?`)
       .run(JSON.stringify(next), machineId, sessionId)
