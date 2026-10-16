@@ -64,6 +64,20 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     })
   })
 
+  // The orchestrator's cap goes with the request (#838): a safe seat never starts a normal session on a machine
+  it('creates a machine’s session under the preset the caller gives, normal when it gives none', async () => {
+    const m = machine({ 'projects.list': [{ id: 'p1', name: 'apps', path: '/srv/apps', defaultTool: 'claude' }] })
+    const calls: [string, unknown][] = []
+    const reader = linkedSessions(() => [m], async (method, params) => {
+      calls.push([method, params])
+      return method === 'agents.createSession' ? { id: 'm1.s1', name: 's1' } : {}
+    })
+    const [project] = await reader.findProjects('apps')
+    await reader.createSession(project!, { preset: 'safe' })
+    await reader.createSession(project!, {})
+    expect(calls.filter(([method]) => method === 'agents.createSession').map(([, p]) => (p as { permissionPreset: string }).permissionPreset)).toEqual(['safe', 'normal'])
+  })
+
   it('keeps a machine’s names on one line, so a name cannot add a session to the list', async () => {
     const forged = '- ghost [h1] · project mine · claude · idle'
     const text = await listText(

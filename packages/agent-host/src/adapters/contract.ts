@@ -137,7 +137,7 @@ export type LinkedSessions = {
   /** A machine project's ordinary sessions (its workers, not an app's) as that machine reports them now; ids qualified */
   projectSessions(project: LinkedProject): Promise<Outcome<{ sessions: { id: string; name: string; state: string }[] }>>
   /** A new session in a machine's project, under `normal`, named if a name is given */
-  createSession(project: LinkedProject, opts: { tool?: ToolName; name?: string }): Promise<Outcome<{ sessionId: string; name: string }>>
+  createSession(project: LinkedProject, opts: { tool?: ToolName; name?: string; preset?: PermissionPreset }): Promise<Outcome<{ sessionId: string; name: string }>>
   /** A linked machine by its id or the name the person gave it, case aside */
   machineNamed(ref: string): { id: string; name: string } | null
   /** Whether the machine with this id is still linked: a removed machine is not (#723) */

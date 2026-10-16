@@ -312,6 +312,17 @@ person's. In agent mode the request goes in as the orchestrator's message and th
 the turn ends. The original is never deleted, and the successor runs under the original's preset, never the
 orchestrator's.
 
+**`create_session`** (#838) starts the session under the orchestrator's own preset, `normal` at most (`safe` stays
+`safe`, `auto` gets `normal`, as before), on this computer and on a linked machine alike, and its first message is
+stored and shown as the orchestrator's (`from`), not the person's. It was `normal` whatever the orchestrator ran
+under, with the instruction recorded as the person's, so a `safe` orchestrator that read a planted instruction could
+start a `normal` session carrying it without a card.
+
+**Proposals** (`propose_mcp_server`, `propose_skill`, #838) are approved by name, and approval installs or saves what
+is stored when the person presses it. A proposal under the name of one still waiting is refused, never replaced: a
+second one used to swap the command or text the person was reading for one they never saw. The person dismisses the
+first to free the name.
+
 A reader's `read_session` without an id lists its project's sessions; that is why it has no
 `list_sessions`. Its read tools see only its own project (`orchestratorToolsFor(…, ownProject)` in `sessions/orchestrator-seat.ts`), and
 the object behind them refuses directing calls (`readerToolsFor`).

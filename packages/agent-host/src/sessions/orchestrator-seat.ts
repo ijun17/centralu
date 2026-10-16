@@ -3,6 +3,7 @@ import type { BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedSessi
 import type { AppCheckReport, AppRef } from '../apps/external/runtime.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
+import { presetWithin } from './start-agent.js'
 import type { ChildOwnership } from './child-ownership.js'
 import type { OrchestratorProposals } from './orchestrator-proposals.js'
 import { dedupeNearbyHits, takeInTurns, windowAround } from './snippet.js'
@@ -207,11 +208,21 @@ export function orchestratorToolsFor(
         ]
         return { ok: false, error: `More than one project is called that; give its id: ${named.join('; ')}` }
       }
+      /*
+       * The new session never runs with more than this seat's own permissions, and its first message is this seat's,
+       * not the person's (#838). It used to be `normal` whatever the seat ran under and stored as if the person had
+       * typed it, so a `safe` orchestrator that read a planted instruction could start a `normal` session carrying
+       * it, with no card. `normal` stays the most it gets, as before: `auto` is the person's to give.
+       */
+      const seat = host.meta.get(orchestratorId)
+      const seatPreset = seat?.permissionPreset ?? 'safe'
+      const preset: PermissionPreset = presetWithin('normal', seatPreset) ? 'normal' : seatPreset
+      const sender = { sessionId: orchestratorId, name: seat?.name ?? 'Orchestrator' }
       if (reader && remote[0]) {
-        const r = await reader.createSession(remote[0], { tool: opts.tool, name: opts.name })
+        const r = await reader.createSession(remote[0], { tool: opts.tool, name: opts.name, preset })
         if (!r.ok) return r
         if (opts.firstMessage) {
-          const sent = await reader.send(r.sessionId, opts.firstMessage, host.meta.get(orchestratorId)?.name ?? 'Orchestrator')
+          const sent = await reader.send(r.sessionId, opts.firstMessage, sender.name)
           if (!sent.ok) return { ok: false, error: `Created ${r.sessionId} on ${remote[0].machine}, but the first instruction did not go: ${sent.error}` }
         }
         return { ok: true, sessionId: r.sessionId, name: r.name }
@@ -228,10 +239,10 @@ export function orchestratorToolsFor(
           projectId: project.id,
           cwd: project.path,
           tool: opts.tool ?? host.firstTool(project.defaultTool),
-          permissionPreset: 'normal',
+          permissionPreset: preset,
         })
         if (opts.name) host.rename(info.id, opts.name)
-        if (opts.firstMessage) await host.send(info.id, opts.firstMessage)
+        if (opts.firstMessage) await host.send(info.id, opts.firstMessage, undefined, sender)
         return { ok: true, sessionId: info.id, name: host.meta.get(info.id)?.name ?? info.name }
       } catch (e) {
         return { ok: false, error: (e as Error).message }

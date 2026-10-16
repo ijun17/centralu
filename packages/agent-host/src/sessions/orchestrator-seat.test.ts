@@ -219,3 +219,42 @@ describe("two sends to a linked machine's session at once (#839)", () => {
     expect(children.linkedReports.get('far')).toBe(asked)
   })
 })
+
+/*
+ * create_session (#838): the new session never runs above the seat's own permissions, and its first message is the
+ * seat's, not the person's. It was `normal` whatever the seat ran under, with the instruction stored as the person's.
+ */
+describe('a session the orchestrator creates', () => {
+  const created = (id: string) => ({ ...session(id), permissionPreset: 'safe' }) as SessionInfo
+
+  beforeEach(() => {
+    store.addProject({ id: 'p1', path: tmpdir(), name: 'site' })
+    host.createSession = vi.fn(async () => created('new'))
+    host.firstTool = vi.fn(() => 'claude' as ToolName)
+  })
+
+  it('a safe seat creates a safe session, and its first message is marked as the seat’s', async () => {
+    meta.set('orch', { ...meta.get('orch')!, permissionPreset: 'safe' })
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'site', firstMessage: 'do it' })).toMatchObject({ ok: true })
+    expect(host.createSession).toHaveBeenCalledWith(expect.objectContaining({ permissionPreset: 'safe' }))
+    expect(host.send).toHaveBeenCalledWith('new', 'do it', undefined, { sessionId: 'orch', name: 'Orchestrator' })
+  })
+
+  it('a normal seat creates a normal session, and an auto seat still no more than normal', async () => {
+    for (const [seat, expected] of [['normal', 'normal'], ['auto', 'normal']] as const) {
+      meta.set('orch', { ...meta.get('orch')!, permissionPreset: seat })
+      await orchestratorToolsFor(host, 'orch').createSession({ project: 'site' })
+      expect(host.createSession).toHaveBeenLastCalledWith(expect.objectContaining({ permissionPreset: expected }))
+    }
+  })
+
+  it('on a linked machine, the same cap goes with the request', async () => {
+    meta.set('orch', { ...meta.get('orch')!, permissionPreset: 'safe' })
+    const createSession = vi.fn(async () => ({ ok: true as const, sessionId: 'm1/s', name: 's' }))
+    const send = vi.fn(async () => ({ ok: true as const }))
+    linked = { findProjects: async () => [{ id: 'm1.p9', name: 'far', machine: 'Far', path: '/x' }], createSession, send } as unknown as LinkedSessions
+    expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'far', firstMessage: 'go' })).toMatchObject({ ok: true })
+    expect(createSession).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ preset: 'safe' }))
+    expect(send).toHaveBeenCalledWith('m1/s', 'go', 'Orchestrator')
+  })
+})

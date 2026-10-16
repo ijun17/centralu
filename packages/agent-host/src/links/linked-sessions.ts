@@ -254,7 +254,8 @@ export function linkedSessions(
           projectId: project.id,
           cwd: project.path,
           tool,
-          permissionPreset: 'normal',
+          // The caller's cap (#838): never above the seat that asked, `normal` when it says nothing
+          permissionPreset: opts.preset ?? 'normal',
         })) as { id: string; name: string }
         if (opts.name) await route('sessions.rename', { sessionId: info.id, name: opts.name })
         return { sessionId: info.id, name: opts.name ?? info.name }

@@ -26,6 +26,10 @@ const SKILLS_KEY = 'orchestrator_skills'
 const SKILL_MAX_COUNT = 10
 const SKILL_MAX_CHARS = 2_000
 
+/** Why a proposal under a pending one's name is refused (#838) */
+const PENDING = (name: string) =>
+  `A proposal named "${name}" is already waiting for the person. It is never replaced while it waits: ask the person to dismiss it first, or propose under another name`
+
 const isText = (v: unknown): v is string => typeof v === 'string'
 const isTextList = (v: unknown): v is string[] => Array.isArray(v) && v.every(isText)
 
@@ -100,7 +104,13 @@ export class OrchestratorProposals {
       return { ok: false, error: `"${spec.name}" is a reserved app name — propose a different name` }
     }
     if (this.userAppExists(spec.name)) return { ok: false, error: `"${spec.name}" is already installed` }
-    const proposals = this.mcpProposals().filter((p) => p.name !== spec.name)
+    /*
+     * A pending proposal is never replaced (#838). The person approves by name, and approval installs what is stored
+     * when the button is pressed: a second proposal under the same name, made while the first one was on screen,
+     * swapped the command the person was reading for one they never saw. To change it, the person dismisses it first.
+     */
+    if (this.mcpProposals().some((p) => p.name === spec.name)) return { ok: false, error: PENDING(spec.name) }
+    const proposals = this.mcpProposals()
     proposals.push({ name: spec.name, command: spec.command, args: spec.args, why: spec.why })
     this.store.setAppSetting(MCP_PROPOSALS_KEY, JSON.stringify(proposals))
     this.changed()
@@ -122,7 +132,9 @@ export class OrchestratorProposals {
     if (this.orchestratorSkills().length >= SKILL_MAX_COUNT) {
       return { ok: false, error: `There are already ${SKILL_MAX_COUNT} skills — the system prompt budget is full, so suggest to the person that a less-used one be deleted` }
     }
-    const proposals = this.skillProposals().filter((p) => p.name !== spec.name)
+    // Never replaced while pending (#838): approval saves what is stored when the person presses it, by name
+    if (this.skillProposals().some((p) => p.name === spec.name)) return { ok: false, error: PENDING(spec.name) }
+    const proposals = this.skillProposals()
     proposals.push({ name: spec.name, content: spec.content, why: spec.why })
     this.store.setAppSetting(SKILL_PROPOSALS_KEY, JSON.stringify(proposals))
     this.changed()
