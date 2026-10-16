@@ -61,6 +61,7 @@ import { readClaudeModels, type ModelQuery } from './models.js'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { spawnLocalAgent, type LocalSpawnSpec } from '../local-process.js'
 import { withStderrTail } from '../../stream-text.js'
+import { raceTimeout } from '../../timing.js'
 import { approvalDetail, ClaudeStreamNormalizer } from './normalize.js'
 import { noCodeIntelligenceSettings } from './lsp-plugins.js'
 import { PendingCards, adapterNotice, couldNotStop, undeliveredError } from '../session-kit.js'
@@ -1773,7 +1774,7 @@ export class ClaudeAdapter implements AgentAdapter {
        * one), and removing the folder then fails. So the folder goes once the process has ended, or after a bound with
        * retries, and a leftover is swept by the next run.
        */
-      if (probe) await Promise.race([probe.ended, new Promise((r) => setTimeout(r, PROBE_EXIT_WAIT_MS).unref())])
+      if (probe) await raceTimeout(probe.ended, PROBE_EXIT_WAIT_MS, undefined)
       ClaudeAdapter.probeIds.delete(sessionId)
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 500 }).catch(() => {})
     }
@@ -1831,12 +1832,7 @@ export class ClaudeAdapter implements AgentAdapter {
    */
   async settle(): Promise<void> {
     if (!this.launch.windows || this.launch.closing.size === 0) return
-    let timer: ReturnType<typeof setTimeout> | undefined
-    await Promise.race([
-      Promise.allSettled([...this.launch.closing]),
-      new Promise<void>((resolve) => (timer = setTimeout(resolve, this.launch.exitGraceMs))),
-    ])
-    clearTimeout(timer)
+    await raceTimeout(Promise.allSettled([...this.launch.closing]), this.launch.exitGraceMs, undefined)
   }
 }
 

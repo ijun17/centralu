@@ -1,3 +1,5 @@
+import { raceTimeout } from './timing.js'
+
 /**
  * Calls the host serves itself, and how a planned host swap waits for them (#280, option C step 3).
  *
@@ -110,14 +112,11 @@ export class Drain {
     const t0 = Date.now()
     const waitedFor = this.inflight.size
     if (waitedFor === 0) return { waitedFor, cut: [], ms: 0 }
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const finished = await Promise.race([
+    const finished = await raceTimeout(
       new Promise<true>((r) => this.idle.push(() => r(true))),
-      new Promise<false>((r) => {
-        timer = setTimeout(() => r(false), boundMs)
-      }),
-    ])
-    clearTimeout(timer)
+      boundMs,
+      false,
+    )
     const cut: string[] = []
     if (!finished) {
       for (const e of [...this.inflight]) {

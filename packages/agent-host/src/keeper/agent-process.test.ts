@@ -98,6 +98,17 @@ describe.skipIf(keeperless)('an agent process the keeper holds', () => {
     expect(keeper.alive(id)).toBe(true)
   })
 
+  /** The detach's bound on the attach was never cleared: every detach kept the host's loop for 2 s more (#428) */
+  it('leaves no timer running once a detach has finished', async () => {
+    const p = KeeperAgentProcess.spawn(children, echo, tag)
+    p.stdin.write('{"hello":1}\n')
+    await readUntil(p, 'hello')
+    const timers = () => process.getActiveResourcesInfo().filter((r) => r === 'Timeout').length
+    const before = timers()
+    await p.detach()
+    expect(timers()).toBeLessThanOrEqual(before)
+  })
+
   it('forgets an exit once the child is released (#392)', async () => {
     const p = KeeperAgentProcess.spawn(children, echo, tag)
     await until(() => p.childId !== null)

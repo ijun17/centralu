@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { UsageSnapshot, UsageWindow } from '@cc/protocol'
+import { withTimeout } from '../../timing.js'
 
 /**
  * Claude usage and limits (FR-9).
@@ -96,21 +97,13 @@ export async function readUsageFromAny(
 ): Promise<UsageSnapshot> {
   let first: unknown = null
   for (const [i, { query, sessionId }] of queries.entries()) {
-    let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      return await Promise.race([
-        readUsage(query),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`no answer within ${timeoutMs} ms`)), timeoutMs)
-        }),
-      ])
+      return await withTimeout(readUsage(query), timeoutMs, 'The usage read')
     } catch (e) {
       first ??= e
       const why = e instanceof Error ? e.message : String(e)
       log(`[usage] claude: session ${sessionId ?? 'unknown'} could not read usage (${i + 1} of ${queries.length}): ${why}`)
       if (why === UNSUPPORTED) break // the same SDK serves every session
-    } finally {
-      clearTimeout(timer)
     }
   }
   throw first instanceof Error ? first : new Error('A running session is required to read usage')

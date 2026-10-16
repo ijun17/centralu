@@ -23,6 +23,7 @@ agent-host/src/
 ├─ log-file.ts          # stderr를 ~/.centralu/host.log로 흘린다 (stdout은 예약됨, 아래 참고)
 ├─ env-path.ts          # PATH 보강 — GUI 앱은 로그인 셸 PATH를 물려받지 못한다
 ├─ stream-text.ts       # 자식 스트림에서 읽은 텍스트: 쥐어 둔 꼬리, 줄, 한 스트림으로 디코딩 (#428)
+├─ timing.ts            # 한도가 있는 기다림(withTimeout, raceTimeout, raceBound, waitForEvent, waitForExit). 타이머마다 지우고 unref한다
 ├─ data-dir.ts          # 데이터 폴더 위치 판정과 이전
 ├─ idle.ts              # "사람이 잃을 것이 돌고 있는가"에 대한 유일한 규칙 (#352)
 └─ updates.ts           # 업데이트 확인, 설치, "한가할 때 자동 적용"
@@ -212,7 +213,7 @@ bridge wait of 280 s. It then answers still working, naming the session and how 
 to continue waiting, even if another session was opened meanwhile. Multiple outstanding tasks need
 an explicit session. A new task cannot replace unfinished work in the same session.
 
-제한 시간이 있는 기다림(ask_project, start_agent, agent_session, 시작 요청, 핸드오프)은 모두 `sessions/with-timeout.ts`의
+제한 시간이 있는 기다림(ask_project, start_agent, agent_session, 시작 요청, 핸드오프)은 모두 `timing.ts`의
 `raceBound` 경합 하나를 쓴다(#428): 결과, 제한 시간, 호출의 취소(기다리기 전에 이미 취소된 것도), 그 기다림이 깨어나는 계기를
 겨룬다. `withTimeout`과 달리 거부하지 않는다: 제한 시간에 닿는 것도 하나의 답이다.
 

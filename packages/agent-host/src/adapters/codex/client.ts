@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { codexLaunch } from './native.js'
 import type { AgentProcess } from '../contract.js'
 import { spawnLocalAgent } from '../local-process.js'
+import { waitForExit } from '../../timing.js'
 
 /**
  * A JSON-RPC client for `codex app-server` (stdio, newline-delimited).
@@ -264,19 +265,12 @@ export class CodexClient {
      * gives it the chance to. If it has not exited within 2 seconds, we kill it then.
      */
     this.proc.stdin.end()
-    const exited = await new Promise<boolean>((resolve) => {
-      /*
-       * Ended is ended, by code or by signal: a process killed by a signal has no exit code, only a signal code. Its
-       * 'exit' is reported only after its output drains (up to 1 s, local-process.ts and keeper/agent-process.ts),
-       * so checking the exit code alone made a signalled process wait that out as if it were still running.
-       */
-      if (this.proc.exitCode !== null || this.proc.signalCode != null || this.finished) return resolve(true)
-      const t = setTimeout(() => resolve(false), 2000)
-      this.proc.once('exit', () => {
-        clearTimeout(t)
-        resolve(true)
-      })
-    })
+    /*
+     * Ended is ended, by code or by signal: a process killed by a signal has no exit code, only a signal code. Its
+     * 'exit' is reported only after its output drains (up to 1 s, local-process.ts and keeper/agent-process.ts),
+     * so checking the exit code alone made a signalled process wait that out as if it were still running (`waitForExit`).
+     */
+    const exited = this.finished || (await waitForExit(this.proc, 2000))
     if (!exited) this.proc.kill('SIGKILL')
   }
 

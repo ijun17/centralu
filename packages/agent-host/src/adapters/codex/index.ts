@@ -51,6 +51,7 @@ import { PendingCards, adapterNotice, couldNotStop, undeliveredError, undelivere
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { sandboxConfig } from './sandbox.js'
 import { withStderrTail } from '../../stream-text.js'
+import { raceTimeout } from '../../timing.js'
 
 const exec = promisify(execFile)
 
@@ -1948,13 +1949,14 @@ export class CodexAdapter implements AgentAdapter {
      */
     if (opts.resumeExternalId) {
       session.externalId = opts.resumeExternalId
-      const outcome = await Promise.race([
+      const outcome = await raceTimeout(
         session.ready.then(
           () => 'ready' as const,
           (err: unknown) => ({ err }),
         ),
-        new Promise<'pending'>((r) => setTimeout(() => r('pending'), LAZY_RESUME_WAIT_MS)),
-      ])
+        LAZY_RESUME_WAIT_MS,
+        'pending' as const,
+      )
       if (outcome === 'pending') {
         session.watchBackgroundStart()
         return session

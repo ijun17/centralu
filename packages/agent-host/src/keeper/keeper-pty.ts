@@ -3,6 +3,7 @@ import { constants } from 'node:os'
 import { StringDecoder } from 'node:string_decoder'
 import type { ChildExit, KeeperChildren, KeptChild } from './children-client.js'
 import type { CommandTag, TerminalTag } from './tags.js'
+import { raceTimeout, waitForEvent } from '../timing.js'
 
 /**
  * A terminal or project command whose pty the keeper owns (#280 step 2), with the surface of the
@@ -162,20 +163,14 @@ export class KeeperPty {
     if (this.exitTimer) clearTimeout(this.exitTimer)
     this.keeper.off('exit', this.onChildExit)
     this.keeper.off('lost', this.onLost)
-    await Promise.race([this.ready, new Promise((r) => setTimeout(r, 1000))])
+    await raceTimeout(this.ready, 1000, undefined)
     const sock = this.sock
     if (!sock) return
-    await new Promise<void>((resolve) => {
-      if (sock.readableEnded || sock.destroyed) return resolve()
-      const t = setTimeout(resolve, 1000)
-      const done = () => {
-        clearTimeout(t)
-        resolve()
-      }
-      sock.once('end', done)
-      sock.once('close', done)
+    if (!sock.readableEnded && !sock.destroyed) {
+      const ended = waitForEvent(sock, ['end', 'close'], 1000)
       sock.end()
-    })
+      await ended
+    }
     sock.destroy()
   }
 }

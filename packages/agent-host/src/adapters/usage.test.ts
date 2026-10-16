@@ -124,7 +124,7 @@ describe('claude usage from several live sessions (#481)', () => {
     )
     expect(usage.windows[0]?.percent).toBe(29)
     expect(lines).toEqual([
-      '[usage] claude: session a could not read usage (1 of 3): no answer within 20 ms',
+      '[usage] claude: session a could not read usage (1 of 3): The usage read did not finish within 20ms',
       '[usage] claude: session b could not read usage (2 of 3): ending',
     ])
   })

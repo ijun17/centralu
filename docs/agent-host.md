@@ -26,6 +26,7 @@ agent-host/src/
 ├─ log-file.ts          # tees stderr to ~/.centralu/host.log (stdout is reserved, see below)
 ├─ env-path.ts          # PATH augmentation — a GUI app inherits no login-shell PATH
 ├─ stream-text.ts       # text read off a child's stream: a kept tail, lines, decoded as one stream (#428)
+├─ timing.ts            # bounded waits (withTimeout, raceTimeout, raceBound, waitForEvent, waitForExit): each clears and unrefs its timer
 ├─ tool-launch.ts       # how a found tool is started (Windows .cmd shims, absolute paths)
 ├─ os.ts               # what differs between OSes, asked by name (architecture.md §2)
 ├─ data-dir.ts          # locating and migrating the data directory
@@ -234,7 +235,7 @@ to continue waiting, even if another session was opened meanwhile. Multiple outs
 an explicit session. A new task cannot replace unfinished work in the same session.
 
 Every bounded wait (ask_project's, start_agent's and agent_session's, a start request's, a handoff's) is one race,
-`raceBound` in `sessions/with-timeout.ts` (#428): the outcome, the bound, the call's cancellation (also one that came
+`raceBound` in `timing.ts` (#428): the outcome, the bound, the call's cancellation (also one that came
 before the wait) and the wait's own wakes. Unlike `withTimeout` it never rejects: the bound is an answer.
 
 **Stop.** Stop on the caller reaches delegated work only while that caller is actually waiting

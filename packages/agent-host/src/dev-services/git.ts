@@ -6,6 +6,7 @@ import type { GitBranch, GitCommit, GitFileStatus } from '@cc/protocol'
 import { runGit, type GitTrust } from './git-exec.js'
 import { killTree } from './kill-tree.js'
 import { programPath } from '../tool-launch.js'
+import { raceTimeout } from '../timing.js'
 
 const exec = promisify(execFile)
 
@@ -618,7 +619,7 @@ export async function gitBranchPr(projectCwd: string, branch: string, signal?: A
     onAbort = () => {
       stop()
       void exited
-        .then(() => Promise.race([closed, new Promise<void>((done) => setTimeout(done, 1000).unref?.())]))
+        .then(() => raceTimeout(closed, 1000, undefined))
         .then(() => reject(Object.assign(new Error('gh was stopped'), { code: 'ABORT_ERR' })))
     }
   })

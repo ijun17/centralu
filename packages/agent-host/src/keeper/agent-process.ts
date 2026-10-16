@@ -3,6 +3,7 @@ import type { Socket } from 'node:net'
 import { constants } from 'node:os'
 import { PassThrough, Writable } from 'node:stream'
 import { Tail } from '../stream-text.js'
+import { raceTimeout, waitForEvent } from '../timing.js'
 import type { ChildExit, KeeperChildren, KeptChild } from './children-client.js'
 import type { AgentTag } from './tags.js'
 
@@ -225,20 +226,14 @@ export class KeeperAgentProcess extends EventEmitter {
     this.keeper.off('exit', this.onChildExit)
     this.keeper.off('lost', this.onLost)
     if (this.exitTimer) clearTimeout(this.exitTimer)
-    await Promise.race([this.ready, new Promise((r) => setTimeout(r, DETACH_WAIT_MS))])
+    await raceTimeout(this.ready, DETACH_WAIT_MS, undefined)
     const out = this.out
     if (!out) return
-    await new Promise<void>((resolve) => {
-      if (out.readableEnded || out.destroyed) return resolve()
-      const t = setTimeout(resolve, DETACH_WAIT_MS)
-      const done = () => {
-        clearTimeout(t)
-        resolve()
-      }
-      out.once('end', done)
-      out.once('close', done)
+    if (!out.readableEnded && !out.destroyed) {
+      const ended = waitForEvent(out, ['end', 'close'], DETACH_WAIT_MS)
       out.end()
-    })
+      await ended
+    }
     out.destroy()
     this.err?.destroy()
   }
