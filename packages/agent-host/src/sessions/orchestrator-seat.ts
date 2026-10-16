@@ -393,17 +393,22 @@ export function orchestratorToolsFor(
          * that came in that moment went to the new wait and is not told again.
          */
         const earlier = host.children.linkedReports.get(sessionId)
-        if (reportBack) host.children.setLinkedReport(sessionId, { orchestratorId, busy: false })
+        const mine = reportBack ? { orchestratorId, busy: false } : undefined
+        if (mine) host.children.setLinkedReport(sessionId, mine)
         const r = await remote.send(sessionId, text, host.meta.get(orchestratorId)?.name ?? 'Orchestrator')
+        // Only what this call left is undone or dropped (#839): another send to the session set its own meanwhile
+        const current = host.children.linkedReports.get(sessionId)
         if (!r.ok) {
-          if (earlier) {
-            host.children.setLinkedReport(sessionId, earlier)
-            host.linkedReportRestored(sessionId)
-          } else host.children.dropLinkedReport(sessionId)
+          if (mine && current === mine) {
+            if (earlier) {
+              host.children.setLinkedReport(sessionId, earlier)
+              host.linkedReportRestored(sessionId)
+            } else host.children.dropLinkedReport(sessionId)
+          }
           return r
         }
         // As here (#166): a new instruction without a report replaces this orchestrator's earlier request
-        if (!reportBack && earlier?.orchestratorId === orchestratorId) host.children.dropLinkedReport(sessionId)
+        if (!reportBack && earlier?.orchestratorId === orchestratorId && current === earlier) host.children.dropLinkedReport(sessionId)
         return { ok: true }
       }
       const target = host.meta.get(sessionId)

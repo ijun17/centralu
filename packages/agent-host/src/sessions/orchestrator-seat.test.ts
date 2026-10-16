@@ -179,3 +179,43 @@ describe('over the real manager', () => {
     }
   })
 })
+
+describe("two sends to a linked machine's session at once (#839)", () => {
+  /** A linked machine whose sends answer when the test says, in any order */
+  const machine = () => {
+    const answers: ((r: { ok: true } | { ok: false; error: string }) => void)[] = []
+    linked = {
+      machineOf: (id: string) => (id === 'far' ? { id: 'm1', name: 'Far' } : null),
+      send: () => new Promise((r) => answers.push(r)),
+    } as unknown as LinkedSessions
+    return answers
+  }
+
+  it("a send that fails puts back only what it replaced: the other call's report request stays", async () => {
+    const answers = machine()
+    const tools = orchestratorToolsFor(host, 'orch')
+    const first = tools.sendToSession('far', 'first', true)
+    const second = tools.sendToSession('far', 'second', true)
+    const asked = children.linkedReports.get('far')
+    // The second went out after the first; the first fails, the second goes in
+    answers[0]!({ ok: false, error: 'the link dropped' })
+    answers[1]!({ ok: true })
+    expect(await first).toMatchObject({ ok: false })
+    expect(await second).toEqual({ ok: true })
+    expect(children.linkedReports.get('far')).toBe(asked)
+    expect(host.linkedReportRestored).not.toHaveBeenCalled()
+  })
+
+  it('a send without a report drops only the request it found, not one another call set meanwhile', async () => {
+    const answers = machine()
+    const tools = orchestratorToolsFor(host, 'orch')
+    children.setLinkedReport('far', { orchestratorId: 'orch', busy: false })
+    const plain = tools.sendToSession('far', 'no report needed', false)
+    const reported = tools.sendToSession('far', 'tell me', true)
+    const asked = children.linkedReports.get('far')
+    answers[1]!({ ok: true })
+    answers[0]!({ ok: true })
+    await Promise.all([plain, reported])
+    expect(children.linkedReports.get('far')).toBe(asked)
+  })
+})
