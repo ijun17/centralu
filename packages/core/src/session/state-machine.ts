@@ -28,3 +28,12 @@ export const URGENCY: Record<SessionState, number> = {
   working: 9,
   idle: 9,
 }
+
+/**
+ * Whether the session is waiting on an answer from the person: an approval card, or a question card it asked. The
+ * sidebar's marks, the look of a panel and a folded group's alert all ask this, so they cannot disagree (#428). An
+ * error or a finished turn is not one: it needs a look, not an answer.
+ */
+export function needsAnswer(s: { state: SessionState; pendingQuestions: { readonly length: number } }): boolean {
+  return s.state === 'waiting_approval' || s.pendingQuestions.length > 0
+}

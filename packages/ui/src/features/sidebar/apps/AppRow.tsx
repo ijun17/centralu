@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react'
-import type { SessionSummary } from '@cc/core'
+import { isAway, type SessionSummary } from '@cc/core'
 import type { ExternalAppStatus } from '@cc/protocol'
 import { appSessionsNeedAttention } from '../tree.js'
 import { externalAppKey, useStore } from '../../../store/store.js'
@@ -78,7 +78,7 @@ export function AppRow({
   const hint = waitsForYou ? 'asks you' : APP_HINT[app.info.status]
   const projectId = app.projectId
   // A linked machine's user-folder app keeps the dimming its machine's group gave it while that machine is not connected (#734)
-  const away = useStore((s) => !!machine && s.machines[machine]?.status !== 'connected')
+  const away = useStore((s) => isAway({ machine }, s.machines))
   /*
    * Its machine's badge is a button, and the row is one: a button inside a button is neither valid nor reachable by
    * keyboard. So the row holds the badge's place (an invisible chip of the same size, right after the title, where the

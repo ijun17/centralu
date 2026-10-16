@@ -256,6 +256,20 @@ export function sidebarMachinesTests(): void {
       await expect(page.getByTestId('pinned-app-box:_user/notes')).toHaveCount(0)
     })
 
+    test("a linked machine's app is not dimmed before its machine's row has arrived (the same rule as a project's)", async ({ page }) => {
+      await setup(page)
+      await link(page, 'Box')
+      await page.evaluate((notes) => {
+        const mock = (window as unknown as MockWindow).__mock
+        mock.setExternalApps([...mock.externalAppList, notes])
+      }, NOTES)
+      const item = page.getByTestId('user-apps').locator('li', { has: page.getByTestId('app-row-box:_user/notes') })
+      await expect(item).toHaveCSS('opacity', '1')
+      // A machine the store has no row for yet is judged by the row's own mark (`isAway`), not as away
+      await page.evaluate(() => (window as unknown as MockWindow).__store.setState({ machines: {} }))
+      await expect(item).toHaveCSS('opacity', '1')
+    })
+
     test("the app row's badge is a button of its own beside the row's, reached by keyboard, standing right after the title", async ({ page, browserName }) => {
       await setup(page)
       await link(page, 'Box')

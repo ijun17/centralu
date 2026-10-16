@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { nextWaitingSession } from '@cc/core'
 import { newSessionProjectOf, useStore } from '../../store/store.js'
 import { isRemoteUserApp, useAppCatalog } from '../../store/app-catalog.js'
-import { computeInbox, currentWaitingId } from '../../store/selectors.js'
+import { computeInbox, currentWaitingId, projectLabelOf } from '../../store/selectors.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { Kbd } from '../../components/primitives.jsx'
@@ -143,7 +143,7 @@ export function CommandPalette() {
           kind: 'session',
           id: s.id,
           label: s.name,
-          sub: (s.projectId ? projects[s.projectId]?.name : 'Orchestrator') ?? '',
+          sub: projectLabelOf(projects, s.projectId),
         })),
       ...Object.values(projects)
         .filter((p) => match(p.name))

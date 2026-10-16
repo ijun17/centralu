@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { NormalizedEvent, SessionState } from '@cc/protocol'
-import { URGENCY, canTransition, isWaiting, transition } from './state-machine.js'
+import { URGENCY, canTransition, isWaiting, needsAnswer, transition } from './state-machine.js'
 
 const ev = (e: Partial<NormalizedEvent> & { type: NormalizedEvent['type'] }) =>
   ({ sessionId: 's1', ...e }) as NormalizedEvent
@@ -106,6 +106,22 @@ describe('blocking illegal transitions', () => {
   it('working can go to every waiting state', () => {
     for (const s of ['waiting_approval', 'waiting_input', 'limited', 'error'] as SessionState[]) {
       expect(canTransition('working', s)).toBe(true)
+    }
+  })
+})
+
+describe('needsAnswer', () => {
+  const q = (state: SessionState, n = 0) => ({ state, pendingQuestions: new Array(n) })
+
+  it('is an approval card or an open question, in any state', () => {
+    expect(needsAnswer(q('waiting_approval'))).toBe(true)
+    expect(needsAnswer(q('working', 1))).toBe(true)
+    expect(needsAnswer(q('idle', 2))).toBe(true)
+  })
+
+  it('is not an error, a finished turn or a working session with nothing asked', () => {
+    for (const state of ['error', 'waiting_input', 'limited', 'working', 'idle'] as const) {
+      expect(needsAnswer(q(state))).toBe(false)
     }
   })
 })

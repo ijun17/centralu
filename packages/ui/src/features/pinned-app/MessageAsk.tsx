@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { SessionSummary } from '@cc/core'
 import { useStore } from '../../store/store.js'
-import { useToolMeta } from '../../store/selectors.js'
+import { projectLabelOf, useToolMeta } from '../../store/selectors.js'
 
 /**
  * A pinned view's `ui/message` — asks the person which session to send it to (M4 B-4).
@@ -60,7 +60,7 @@ export function MessageAsk({
         <ul className="mt-1 space-y-0.5">
           {targets.map((s) => (
             <li key={s.id}>
-              <Target session={s} project={s.projectId ? projects[s.projectId]?.name : undefined} onPick={() => onAnswer(s.id)} />
+              <Target session={s} project={s.projectId ? projectLabelOf(projects, s.projectId) : undefined} onPick={() => onAnswer(s.id)} />
             </li>
           ))}
         </ul>

@@ -1,3 +1,4 @@
+import { needsAnswer } from '@cc/core'
 import type { Interruption, SessionState } from '@cc/protocol'
 
 /**
@@ -21,7 +22,7 @@ export function lookOf(s: {
   /** The number of open questions; a card is waiting on the person whatever the state says */
   openQuestions?: number
 }): SessionLook {
-  if (s.state === 'waiting_approval' || (s.openQuestions ?? 0) > 0) return 'waiting'
+  if (needsAnswer({ state: s.state, pendingQuestions: { length: s.openQuestions ?? 0 } })) return 'waiting'
   if (s.state === 'working') return 'answering'
   if (s.state === 'error' || s.state === 'limited' || s.interruption) return 'stopped'
   return 'idle'

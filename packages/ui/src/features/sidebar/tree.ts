@@ -1,4 +1,4 @@
-import type { SessionSummary } from '@cc/core'
+import { needsAnswer, type SessionSummary } from '@cc/core'
 
 export type ProjectAppSessions = {
   /** Sessions that still belong in the project's ordinary tree. */
@@ -31,7 +31,7 @@ export function groupProjectAppSessions(
 
 /** A completed turn is not an app waiting on the person; approvals and pending questions are. */
 export function appSessionsNeedAttention(sessions: SessionSummary[]): boolean {
-  return sessions.some((session) => session.state === 'waiting_approval' || session.pendingQuestions.length > 0)
+  return sessions.some(needsAnswer)
 }
 
 /**

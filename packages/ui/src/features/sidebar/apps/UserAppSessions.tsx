@@ -1,4 +1,4 @@
-import type { SessionSummary } from '@cc/core'
+import { isUnread, type SessionSummary } from '@cc/core'
 import { useStore } from '../../../store/store.js'
 import { useSelectedSessionId } from '../../../store/selectors.js'
 import { SESSION_MIME } from '../reorder.js'
@@ -24,7 +24,7 @@ export function UserAppSessions({ sessions: own }: { sessions: SessionSummary[] 
   const focusSession = useStore((s) => s.focusSession)
   return own.map((s) => {
     const focused = selected === s.id
-    const unread = s.lastSeq > s.lastReadSeq
+    const unread = isUnread(s)
     return (
       <li
         key={s.id}

@@ -3,7 +3,7 @@ import { useLabelNow } from '../../app/useLabelNow.js'
 import { nextWaitingTick } from '../../app/labelClock.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store/store.js'
-import { useInbox } from '../../store/selectors.js'
+import { projectLabelOf, useInbox } from '../../store/selectors.js'
 import { inboxCovered, inboxKeyAction, typingTarget } from './inboxKeys.js'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import { CONTINUE_TEXT, Kbd, StateDot, canContinue, formatWaiting, interruptionLabel, waitingTone } from '../../components/primitives.jsx'
@@ -139,7 +139,7 @@ export function Inbox() {
                       {it.name}
                     </span>
                     <span className="truncate text-xs text-ink-faint">
-                      {(it.projectId ? projects[it.projectId]?.name : 'Orchestrator') ?? ''}
+                      {projectLabelOf(projects, it.projectId)}
                     </span>
                     {/* Which machine it waits on (#82): an approval answered here acts there. A proposal is this host's */}
                     {!it.proposal && <SessionMachineTag sessionId={it.id} testId={`inbox-machine-${it.id}`} />}

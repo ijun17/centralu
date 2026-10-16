@@ -151,6 +151,14 @@ export function useProjectMachine(projectId: string | null | undefined): string 
   return useStore((s) => (projectId ? (s.projects[projectId]?.machine ?? null) : null))
 }
 
+/**
+ * What names the project of a row beside it: the project's name, "Orchestrator" for a session that has none, and nothing
+ * for a project the list does not hold (yet). The inbox, the palette and the message picker said it three ways (#428).
+ */
+export function projectLabelOf(projects: Readonly<Record<string, { name: string }>>, projectId: string | null): string {
+  return (projectId ? projects[projectId]?.name : 'Orchestrator') ?? ''
+}
+
 /** A machine's name as the person gave it, or its id until the machine list arrives; null for this computer */
 export function useMachineName(machine: string | null | undefined): string | null {
   return useStore((s) => (machine ? (s.machines[machine]?.name ?? machine) : null))

@@ -1,5 +1,5 @@
 import type { Interruption, SessionState } from '@cc/protocol'
-import { isListedWaiting, type ReadTracked } from '@cc/core'
+import { isListedWaiting, isUnread, needsAnswer, type ReadTracked } from '@cc/core'
 
 /**
  * What a folded project's name line says in place of the sessions it hides (#205).
@@ -55,10 +55,10 @@ export function groupAttention(
 ): GroupAttention | null {
   let found: GroupAttention | null = null
   for (const s of sessions) {
-    if (s.state === 'waiting_approval' || s.state === 'error' || s.pendingQuestions.length > 0) return 'alert'
+    if (needsAnswer(s) || s.state === 'error') return 'alert'
     // A stopped turn still listed in the inbox needs the person as an error does (#698)
     if (s.interruption && isListedWaiting(s)) return 'alert'
-    if (s.lastSeq > s.lastReadSeq) found = 'unread'
+    if (isUnread(s)) found = 'unread'
   }
   return found
 }

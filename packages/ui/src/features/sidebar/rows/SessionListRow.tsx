@@ -1,4 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react'
+import { isUnread } from '@cc/core'
 import { childrenGroupKey } from '../../../store/foldGroups.js'
 import { useStore } from '../../../store/store.js'
 import { BackgroundMark } from '../../session/BackgroundTasks.jsx'
@@ -50,7 +51,7 @@ export function SessionListRow({
   const focusSession = useStore((s) => s.focusSession)
   const renameSession = useStore((s) => s.rename)
   const setGroupsFolded = useStore((s) => s.setGroupsFolded)
-  const unread = s.lastSeq > s.lastReadSeq
+  const unread = isUnread(s)
   const focused = focusedSessionId === s.id
   const groupKey = childrenGroupKey(s.id)
   return (
