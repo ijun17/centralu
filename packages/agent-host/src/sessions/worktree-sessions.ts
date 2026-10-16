@@ -265,7 +265,7 @@ export class WorktreeSessions {
       try {
         // Clone is tried first (#76) — an 8.5GB target crosses over in 4 seconds and 10MB (measured). Falls
         // back to a plain copy if that fails
-        await copyTree(src, dst)
+        await copyTree(src, dst, { links: { from: projectCwd, to: worktree.path } })
       } catch (err) {
         console.error(`[worktree] copy failed: ${f} — ${(err as Error).message}`)
       }

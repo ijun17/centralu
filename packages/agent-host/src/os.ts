@@ -157,3 +157,12 @@ export function availableMemorySource(
   if (platform === 'linux' || platform === 'android') return { kind: 'file', path: '/proc/meminfo', parse: 'meminfo' }
   return { kind: 'freemem' }
 }
+
+/**
+ * Node's `cpSync` keeps a link as a link (#849). Not on Windows: there a folder is linked with a junction (pnpm without
+ * Developer Mode, npm and yarn workspaces), and `cpSync` copies a junction as a real folder holding its target, and
+ * walks into two junctions that point at each other until the process dies. A copy there walks the tree itself.
+ */
+export function cpKeepsLinks(platform: Platform = HOST_PLATFORM): boolean {
+  return platform !== 'win32'
+}

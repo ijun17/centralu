@@ -51,7 +51,7 @@ export async function prepareWorktreeDependencies(projectCwd: string, worktreeCw
       if (!source.equals(target)) continue
       const dst = await prepareCopyTarget(worktreeCwd, rel)
       copied.push(dst)
-      await copyTree(src, dst)
+      await copyTree(src, dst, { links: { from: projectCwd, to: worktreeCwd } })
     } catch (err) {
       if (!isMissingPathError(err)) console.error(`[worktree] dependencies skipped: ${rel} — ${(err as Error).message}`)
     }

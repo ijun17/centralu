@@ -1,11 +1,11 @@
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
-import { lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
+import { copyFile, lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { IMAGE_PREVIEW_MAX_BYTES, wireBaseName, wireJoin, type FsEntry, type FsFile } from '@cc/protocol'
-import { assertCreatePath, assertExistingPath, isInside, UnsafePathError } from './path-guard.js'
+import { assertCreatePath, assertExistingPath, canonicalPath, isInside, UnsafePathError } from './path-guard.js'
 import { runGit, type GitTrust } from './git-exec.js'
-import { clonesFiles } from '../os.js'
+import { clonesFiles, cpKeepsLinks } from '../os.js'
 
 /**
  * The file tree and viewer service (C-1).
@@ -343,7 +343,7 @@ export async function readTextFile(root: string, rel: string): Promise<FsFile> {
 export async function copyTree(
   src: string,
   dst: string,
-  clone: (src: string, dst: string) => Promise<boolean> = cloneTree,
+  { clone = cloneTree, links = { from: src, to: dst } }: CopyTreeOptions = {},
 ): Promise<void> {
   const existed = await lstat(dst).then(
     () => true,
@@ -358,11 +358,81 @@ export async function copyTree(
    * existed before the copy started is left untouched, since it was never ours to begin with.
    */
   if (!existed) await rm(dst, { recursive: true, force: true })
+  if (!cpKeepsLinks()) return copyTreeWindows(src, dst, links)
   const { cpSync } = await import('node:fs')
   // verbatimSymlinks: without it Node rewrites a relative link into an absolute one pointing back into the
   // source, so dropEscapingLinks then removed every pnpm link in a Linux worktree as leaving it (seen on CI,
   // 2026-10-04). macOS took the clone path above, which keeps links as they are.
   cpSync(src, dst, { recursive: true, verbatimSymlinks: true })
+}
+
+export type CopyTreeOptions = {
+  /** The clone to try first; the ordinary copy runs when it answers false */
+  clone?: (src: string, dst: string) => Promise<boolean>
+  /**
+   * The folder whose copy this is and the one it lands in (the project and its worktree). On Windows a link whose
+   * target is inside `from` is made again pointing at the same place inside `to`; any other link is left out. Without
+   * it, `src` and `dst` themselves.
+   */
+  links?: { from: string; to: string }
+}
+
+/**
+ * The ordinary copy on Windows (#849): a walk that never follows a link.
+ *
+ * `cpSync` cannot be used there. pnpm (without Developer Mode) and npm/yarn workspaces link folders with junctions,
+ * and `cpSync` copied each junction as a real folder holding a copy of its target: dependency resolution broke,
+ * workspace packages froze as copies of the main checkout, a junction pointing outside the project arrived as plain
+ * files that `dropEscapingLinks` could no longer see, and two junctions pointing at each other ended the host with
+ * 0xC0000409 (measured on Windows 11, Node 22.23).
+ *
+ * A junction's target is an absolute path into the project, so it is made again pointing at the same place in the
+ * worktree. A relative symlink is kept as written, as `verbatimSymlinks` does elsewhere. A link whose target is not
+ * inside `links.from`, once resolved, is not made at all: it would be a window out of the worktree.
+ */
+async function copyTreeWindows(src: string, dst: string, links: { from: string; to: string }): Promise<void> {
+  const from = canonicalPath(links.from)
+  const to = canonicalPath(links.to)
+  const pending: [string, string][] = [[src, dst]]
+  while (pending.length > 0) {
+    const [source, target] = pending.pop()!
+    const info = await lstat(source)
+    if (info.isSymbolicLink()) {
+      if (!(await copyLinkWindows(source, target, from, to))) {
+        console.error(`[copy] link left out (points outside ${links.from}): ${source}`)
+      }
+    } else if (info.isDirectory()) {
+      await mkdir(target, { recursive: true })
+      for (const name of await readdir(source)) pending.push([join(source, name), join(target, name)])
+    } else if (info.isFile()) {
+      await copyFile(source, target)
+    }
+    // Anything else (a socket, a device) is not something a copy can carry
+  }
+}
+
+/** Makes the link `source` again at `target`; false when it points outside `from` and was left out */
+async function copyLinkWindows(source: string, target: string, from: string, to: string): Promise<boolean> {
+  const written = await readlink(source)
+  // Where it really leads, so a short name or another case of the project folder still counts as inside it
+  const real = canonicalPath(resolve(dirname(source), written))
+  if (!isInside(from, real)) return false
+  const folder = await stat(real).then(
+    (s) => s.isDirectory(),
+    () => true, // dangling: a junction is the only link made without a privilege, and its target may still appear
+  )
+  if (!isAbsolute(written)) {
+    try {
+      await symlink(written, target, folder ? 'dir' : 'file')
+      return true
+    } catch (e) {
+      // Without Developer Mode or administrator rights a symlink cannot be made; a junction or a copy can
+      if ((e as NodeJS.ErrnoException).code !== 'EPERM') throw e
+    }
+  }
+  if (folder) await symlink(join(to, relative(from, real)), target, 'junction')
+  else await copyFile(real, target)
+  return true
 }
 
 /** A macOS clonefile copy. Returns false wherever it cannot happen (a different volume, not APFS, not macOS) */

@@ -140,6 +140,10 @@ JS dependencies are copied into new worktrees before the agent starts when the r
 manifests match the project checkout. APFS clones fall back to ordinary copies, never a shared top-level
 `node_modules` symlink. Workspace package folders are included, existing targets are not overwritten, source
 and destination paths use the project path guards, and dependency links outside the worktree are removed.
+On Windows the copy is a walk that never follows a link (#849): a junction (pnpm without Developer Mode, npm and
+yarn workspaces) is made again as a junction to the same place in the worktree, and a link whose target is outside
+the project is not made at all. `cpSync` had copied every junction as a real folder, an outside one included, and two
+junctions pointing at each other ended the host.
 This avoids automatic registry access and install scripts in the host. It does not validate dependency code:
 running tests still executes the project's installed dependencies. Missing or incompatible source dependencies
 need the project's explicit setup command or an install by the child under its preset.
@@ -1563,7 +1567,7 @@ Limits:
   which has no mode bits; they are as private as the folder they are in. The default data folder
   is in the user's profile, which only that user (and administrators) can read. A `CC_DATA_DIR`
   elsewhere gets that folder's ACL.
-- Junctions are reported as links by `lstat` and so are treated like symlinks, but no containment
-  test creates one yet (creating a symlink on Windows needs Developer Mode or administrator
-  rights; a junction does not).
+- Junctions are reported as links by `lstat` and so are treated like symlinks. Only the worktree
+  copy has a test that makes them (`worktree-dependencies.test.ts`); no containment test does yet
+  (creating a symlink on Windows needs Developer Mode or administrator rights; a junction does not).
 - The keeper does not run on Windows (no named-pipe control socket), so the direct path is used.

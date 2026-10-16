@@ -222,7 +222,7 @@ describe('copyTree — the ordinary copy after a clone stops partway (#167)', ()
       return false
     }
 
-    await copyTree(src, dst, halfClone)
+    await copyTree(src, dst, { clone: halfClone })
     expect(readFileSync(join(dst, 'alias', 'index.js'), 'utf8')).toBe('module.exports = 1\n')
     expect(lstatSync(join(dst, 'alias')).isSymbolicLink()).toBe(true)
   })
