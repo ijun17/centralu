@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { CommandRunner } from './commands.js'
+import { alive, cleanUp, plantTreeScript, settle, treePids } from './process-tree.test-helpers.js'
+import type { PtyModule } from './terminal.js'
 
 /**
  * The contract for the frequently used command runner (#60):
@@ -135,7 +141,7 @@ describe('CommandRunner', () => {
  * The contract: given a pid, SIGTERM goes to the process **group** (-pid); if it has not died
  * within the grace period, SIGKILL follows.
  */
-// Process groups and signals: unix. Windows ends the tree with taskkill (kill-tree.test.ts, #14).
+// Process groups and signals: not on Windows, which ends the tree with taskkill (the real-pty block after this one)
 describe.skipIf(process.platform === 'win32')('CommandRunner — tree kill', () => {
   /*
    * The pid has to be **genuinely alive.** killTree walks the tree with ps, and if ps was read but
@@ -234,4 +240,62 @@ describe.skipIf(process.platform === 'win32')('CommandRunner — tree kill', () 
     svc.stop('/tmp/p', 'pnpm dev')
     expect(fake.instances[0]!.kill).toHaveBeenCalledWith('SIGTERM')
   })
+})
+
+/**
+ * Stop on Windows (#849), with the real pty (ConPTY) and the real cmd.exe a command runs under. The command ignores the
+ * hang-up its closing console sends, and starts two processes below it that are outside every job and have no console
+ * (`plantTreeScript`), as a dev server started by a script runner is: closing the pty never reaches those two, and
+ * only `taskkill /T` does.
+ */
+describe.runIf(process.platform === 'win32')('CommandRunner — the whole tree on Windows (#849)', () => {
+  const ptyModule = createRequire(import.meta.url)('node-pty') as PtyModule
+  let dir = ''
+  let pids: number[] = []
+  afterEach(async () => {
+    await cleanUp(pids)
+    pids = []
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+  })
+
+  /** Runs the tree as a project command; returns the runner, the pids of cmd.exe and the tree, and whether the run has ended */
+  async function runTree(): Promise<{ svc: CommandRunner; command: string; ended: () => boolean }> {
+    dir = mkdtempSync(join(tmpdir(), 'cc-cmd-tree-'))
+    const pidFile = join(dir, 'pids')
+    const shells: number[] = []
+    // The real node-pty, with the pid of each cmd.exe it starts noted down
+    const recording: PtyModule = {
+      spawn: (file, args, opts) => {
+        const pty = ptyModule.spawn(file, args, opts)
+        if (pty.pid) shells.push(pty.pid)
+        return pty
+      },
+    }
+    let ended = false
+    const svc = new CommandRunner((f) => {
+      if (f.exitCode !== undefined) ended = true
+    }, recording)
+    const command = `"${process.execPath}" "${plantTreeScript(dir)}" "${pidFile}" 2`
+    svc.run(dir, command)
+    expect(shells).toHaveLength(1)
+    const tree = await settle(() => treePids(pidFile), (p) => p.length === 3, 30_000)
+    pids = [shells[0]!, ...tree]
+    expect(tree).toHaveLength(3)
+    expect(pids.every(alive)).toBe(true)
+    return { svc, command, ended: () => ended }
+  }
+
+  it('Stop ends cmd.exe, the command and everything it started outside its job', async () => {
+    const r = await runTree()
+    r.svc.stop(dir, r.command)
+    expect(await settle(() => pids.filter(alive), (left) => left.length === 0, 15_000)).toEqual([])
+    expect(await settle(r.ended, (x) => x, 10_000)).toBe(true)
+    expect(r.svc.log(dir, r.command)!.running).toBe(false)
+  }, 60_000)
+
+  it('an app shutdown (disposeAll) ends the whole tree too', async () => {
+    const r = await runTree()
+    r.svc.disposeAll()
+    expect(await settle(() => pids.filter(alive), (left) => left.length === 0, 15_000)).toEqual([])
+  }, 60_000)
 })
