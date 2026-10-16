@@ -53,8 +53,6 @@ import { ClaudeLinks, ClaudePlaceholderError, windowsStart, type ExeFs } from '.
 import { StartGate } from './start-gate.js'
 import { deleteClaudeSession, forkClaudeSession, listClaudeSessions, readClaudeHistory, readClaudeTranscriptTail } from './history.js'
 import { accountFingerprint, readUsageFromAny, UNSUPPORTED, type UsageQuery } from './usage.js'
-import { ORCHESTRATOR_MCP_NAME, orchestratorMcp } from './orchestrator-mcp.js'
-import { appProxy, type AppProxy } from './app-proxy.js'
 
 import { readClaudeModels, type ModelQuery } from './models.js'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
@@ -67,6 +65,7 @@ import { adapterNotice, couldNotStop, undeliveredError } from '../session-kit.js
 
 import { withoutCrossSessionMessaging } from './cross-session.js'
 import { ClaudeCards } from './session-cards.js'
+import { ClaudeServers } from './session-servers.js'
 import { appToolOf, isOrchestratorTool, permissionOptionsFor, personsDefaultMode, settingSourcesFor } from './permissions.js'
 
 export { personsDefaultMode }
@@ -183,17 +182,8 @@ class ClaudeSession implements SessionHandle {
   private readonly stream: ClaudeStreamNormalizer
   /** The approval and question cards (see `ClaudeCards`) */
   private readonly cards: ClaudeCards
-  /**
-   * Proxy servers for attached apps (M4 A-5) — server name to proxy server, plus the last tool
-   * list seen. The same object is reloaded for as long as the same app stays attached: the SDK
-   * ignores a new object for a name that is already connected (sdk.mjs `setMcpServers`), so
-   * swapping in a different object requires detaching and reattaching.
-   */
-  private appProxies = new Map<string, { proxy: AppProxy; tools: string }>()
-  /** The orchestrator's in-process server — the same object passed initially is reloaded every time the server set changes. */
-  private orchestratorServer: ReturnType<typeof orchestratorMcp> | null = null
-  /** Serializes server-set changes into one line — so a later change never interleaves with one that has not finished yet. */
-  private serversSync: Promise<unknown> = Promise.resolve()
+  /** The orchestrator's server and the attached apps' proxies (see `ClaudeServers`) */
+  private readonly servers: ClaudeServers
   private stopAppWatch: (() => void) | null = null
   /**
    * Whether this session's CLI offers `/goal` — undefined until it has said (see `send`). Decided by
@@ -236,7 +226,8 @@ class ClaudeSession implements SessionHandle {
     private launch: ClaudeLaunch,
   ) {
     this.ended = new Promise<void>((resolve) => (this.markEnded = resolve))
-    this.cards = new ClaudeCards({ sessionId, opts, emit: (e) => this.emit(e), ownServer: () => this.orchestratorServer !== null })
+    this.servers = new ClaudeServers({ sessionId, opts, closed: () => this.closed, query: () => this.query })
+    this.cards = new ClaudeCards({ sessionId, opts, emit: (e) => this.emit(e), ownServer: () => this.servers.orchestratorServer !== null })
     // The process runs with these until it is replaced; a model switch the CLI makes is reported against them (#304)
     this.stream = new ClaudeStreamNormalizer(sessionId, () => ({
       model: opts.model ?? null,
@@ -279,18 +270,8 @@ class ClaudeSession implements SessionHandle {
     const exe = this.launch.executable()
     const run = exe ? this.launch.links.prepare(exe) : null
 
-    /*
-     * External apps (M4 A-5) — one proxy server per app. Loads whatever is currently attached,
-     * and follows along without restarting the session when an app comes, goes, or its tools
-     * change (syncApps).
-     */
-    for (const a of this.opts.apps?.current() ?? []) {
-      this.appProxies.set(a.server, { proxy: appProxy(this.opts.apps!, a.server), tools: JSON.stringify(a.tools) })
-    }
-    if (this.opts.orchestratorTools) {
-      this.orchestratorServer = orchestratorMcp(this.opts.orchestratorTools, this.opts.toolProfile, this.opts.sessionId)
-    }
-    const servers = this.mcpServers()
+    this.servers.load()
+    const servers = this.servers.mcpServers()
     const permissionOptions = await permissionOptionsFor(this.opts)
     // Code intelligence off for this session alone (#686): its language-server plugins disabled in the flag layer
     const codeIntelligence = this.opts.noCodeIntelligence
@@ -450,7 +431,7 @@ class ClaudeSession implements SessionHandle {
       .finally(() => this.settleGoalKnown())
 
     // Follows the server set when apps come and go, and that server's list when its tools change — never restarting the session.
-    this.stopAppWatch = this.opts.apps?.onChange(() => this.syncApps()) ?? null
+    this.stopAppWatch = this.opts.apps?.onChange(() => this.servers.syncApps()) ?? null
 
     void (async () => {
       try {
@@ -504,7 +485,7 @@ class ClaudeSession implements SessionHandle {
             this.goalCommand = m.slash_commands.includes('goal')
             this.settleGoalKnown()
           }
-          this.noteAppCalls(msg)
+          this.servers.noteAppCalls(msg)
           if (m.type === 'assistant') this.raceSeen ??= refreshRaceText(msg as RaceMsg)
           if (m.type === 'result') this.turnOpen = false
           let events = this.stream.push(msg)
@@ -704,30 +685,6 @@ class ClaudeSession implements SessionHandle {
     this.notify?.()
   }
 
-  /**
-   * Records a `tool_use` calling an attached app's tool with the attachment layer (M4 B-1 —
-   * conversation-view card matching).
-   *
-   * This is not usually needed: the CLI carries the card id on the call itself
-   * (app-proxy.ts's `CLAUDE_TOOL_USE_META`). This keeps the same matching logic as Codex as a
-   * fallback, so the UI can still find its own card even on a CLI where that mechanism changed.
-   * A card that has already received a result (`tool_result`) is removed from matching — a call
-   * denied at approval never reaches the app at all.
-   */
-  private noteAppCalls(msg: unknown): void {
-    const apps = this.opts.apps
-    const m = msg as { type?: string; message?: { content?: unknown } }
-    if (!apps || (m.type !== 'assistant' && m.type !== 'user') || !Array.isArray(m.message?.content)) return
-    for (const b of m.message.content as { type?: string; id?: unknown; name?: unknown; input?: unknown; tool_use_id?: unknown }[]) {
-      if (b?.type === 'tool_use' && typeof b.id === 'string' && typeof b.name === 'string') {
-        const t = appToolOf(b.name)
-        if (t && this.appProxies.has(t.server)) apps.noteCall(b.id, t.server, t.tool, b.input ?? {})
-      } else if (b?.type === 'tool_result' && typeof b.tool_use_id === 'string') {
-        apps.callEnded(b.tool_use_id)
-      }
-    }
-  }
-
   send(text: string): void { this.sendInput(text) }
 
   private sendInput(text: string, uuid = randomUUID(), note?: InputReceipt): void {
@@ -817,71 +774,6 @@ class ClaudeSession implements SessionHandle {
    * A failure here is swallowed quietly — the gauge briefly disappearing is better than blocking
    * the conversation.
    */
-  /**
-   * All of this session's MCP servers — assembled in this one place, both at first launch and
-   * whenever the set changes.
-   *
-   * There are two, and both are in-process, so there is never a separate process:
-   *   1. The orchestrator's tools (FR-11) — everything these tools can see is exactly what the
-   *      manager handed them.
-   *   2. External apps' proxy servers (M4 A-5) — `app-<id>`. A server the person approved
-   *      (`propose_mcp_server`) also becomes an app in the user's own folder and arrives here
-   *      (A-7). This server used to be loaded raw, as a stdio entry — calls never went through
-   *      mediation or recording, and a single server named `centralu` could replace the
-   *      in-process orchestrator outright (#93). No server is ever loaded raw anymore.
-   *
-   * When the set changes (`setMcpServers`), leaving out #1 makes the SDK **detach it** — that
-   * call replaces the entire set of dynamically attached servers with whatever was passed. So
-   * this always loads everything, every time.
-   */
-  private mcpServers(): Record<string, McpServerConfig> {
-    return {
-      ...(this.orchestratorServer ? { [ORCHESTRATOR_MCP_NAME]: this.orchestratorServer } : {}),
-      ...Object.fromEntries([...this.appProxies].map(([name, { proxy }]) => [name, proxy.config])),
-    }
-  }
-
-  /**
-   * An attached app changed (M4 A-5) — followed without a restart.
-   *
-   *   an app comes or goes (including trust flipping)   changes the set via `setMcpServers`; new tools become visible starting the next turn
-   *   an attached app's own tools changed                that proxy server sends `tools/list_changed` — the server itself stays the same
-   */
-  private syncApps(): void {
-    const apps = this.opts.apps
-    if (!apps || this.closed) return
-    const now = apps.current()
-    const want = new Set(now.map((a) => a.server))
-    let setChanged = false
-    for (const name of [...this.appProxies.keys()]) {
-      if (want.has(name)) continue
-      this.appProxies.delete(name)
-      setChanged = true
-    }
-    for (const a of now) {
-      const tools = JSON.stringify(a.tools)
-      const held = this.appProxies.get(a.server)
-      if (!held) {
-        // An app that detaches and reattaches also arrives with a fresh proxy server — a server the SDK has detached cannot be reconnected.
-        this.appProxies.set(a.server, { proxy: appProxy(apps, a.server), tools })
-        setChanged = true
-      } else if (held.tools !== tools) {
-        held.tools = tools
-        held.proxy.toolsChanged()
-      }
-    }
-    if (!setChanged || !this.query) return
-    const q = this.query
-    const servers = this.mcpServers()
-    this.serversSync = this.serversSync
-      .then(() => q.setMcpServers(servers))
-      .then((r) => {
-        const errors = Object.entries(r?.errors ?? {})
-        if (errors.length) console.error(`[claude] ${this.sessionId.slice(0, 8)} app servers failed to attach:`, errors)
-      })
-      .catch((err: Error) => console.error(`[claude] ${this.sessionId.slice(0, 8)} could not update app servers: ${err.message}`))
-  }
-
   /** The list of slash commands (an SDK public API). */
   async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
     if (!this.query) throw new Error('Session is not ready yet')
