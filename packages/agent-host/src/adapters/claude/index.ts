@@ -62,7 +62,7 @@ import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, Det
 import { LocalAgentProcess, spawnLocalAgent, type LocalSpawnSpec } from '../local-process.js'
 import { approvalDetail, ClaudeStreamNormalizer } from './normalize.js'
 import { noCodeIntelligenceSettings } from './lsp-plugins.js'
-import { adapterNotice, undeliveredError } from '../session-kit.js'
+import { PendingCards, adapterNotice, couldNotStop, undeliveredError } from '../session-kit.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { withoutCrossSessionMessaging } from './cross-session.js'
 
@@ -353,8 +353,8 @@ class ClaudeSession implements SessionHandle {
   /** The turn for a message we sent has not been closed by a result yet — decides whether to flag it as interrupted (see interrupt). */
   private turnOpen = false
   /** Choices waiting on an answer. Unlike approvals, **more than one can be open at once**. */
-  private questions = new Map<string, { resolve: (r: unknown) => void; input: Record<string, unknown> }>()
-  private pending = new Map<string, PendingApproval>()
+  private questions = new PendingCards<{ resolve: (r: unknown) => void; input: Record<string, unknown> }>()
+  private pending = new PendingCards<PendingApproval>()
   /** The live query — the channel for asking about slash commands and context. */
   private query: QueryHandle | null = null
   /** Auto-approval matchers. Seeded with the saved rules at session start, and grows with each 'always' response. */
@@ -1084,10 +1084,9 @@ class ClaudeSession implements SessionHandle {
   }
 
   respondApproval(requestId: string, decision: ApprovalDecision, scope?: ApprovalScope, matcher?: string): boolean {
-    const p = this.pending.get(requestId)
+    const p = this.pending.take(requestId)
     // Swapping the process empties this map and it starts fresh — the id of a card that came up before then is no longer here.
     if (!p) return false
-    this.pending.delete(requestId)
     if (decision === 'deny') {
       p.resolve({ behavior: 'deny', message: 'Denied by user' })
     } else {
@@ -1113,9 +1112,8 @@ class ClaudeSession implements SessionHandle {
    * the model receives the answers in the CLI's own words (see the AskUserQuestion branch of `canUseTool`).
    */
   answerQuestion(requestId: string, answers: QuestionAnswer[]): boolean {
-    const open = this.questions.get(requestId)
+    const open = this.questions.take(requestId)
     if (!open) return false
-    this.questions.delete(requestId)
     const byQuestion = Object.fromEntries(answers.map((a) => [a.question, a.answers.join(', ')]))
     open.resolve({ behavior: 'allow', updatedInput: { ...open.input, answers: byQuestion } })
     this.emit({ type: 'question_resolved', sessionId: this.sessionId, requestId })
@@ -1251,11 +1249,7 @@ class ClaudeSession implements SessionHandle {
     this.opts.apps?.cancelAll()
     // A turn waiting to go again after the sign-in race (#353) is stopped as well: it is the same turn
     this.cancelRetry()
-    for (const [id, p] of this.pending) {
-      p.resolve({ behavior: 'deny', message: 'Stopped by user' })
-      this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId: id, decision: 'deny' })
-    }
-    this.pending.clear()
+    this.releaseApprovals('Stopped by user')
     this.releaseQuestions('Stopped by user')
     /*
      * The ending of an interrupted turn (`error_during_execution`) is an interruption, not a
@@ -1273,14 +1267,7 @@ class ClaudeSession implements SessionHandle {
       let count = 0
       for (const id of cancelled) if (typeof id === 'string' && this.personInputs.delete(id)) count++
       this.reportUndelivered(count)
-    }).catch((err: Error) => {
-      // If we could not actually stop it, say so. Letting the person believe it stopped and wait is the worst outcome.
-      this.emit({
-        type: 'error',
-        sessionId: this.sessionId,
-        error: { code: 'internal', message: `Could not stop: ${err.message}`, retryable: true },
-      })
-    })
+    }).catch((err: Error) => this.emit(couldNotStop(this.sessionId, err)))
 
     this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
   }
@@ -1352,11 +1339,7 @@ class ClaudeSession implements SessionHandle {
       this.queue.length = 0
       this.emit(undeliveredError(this.sessionId, held, 'were still queued when the session closed'))
     }
-    for (const [id, p] of this.pending) {
-      p.resolve({ behavior: 'deny', message: 'Session closed' })
-      this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId: id, decision: 'deny' })
-    }
-    this.pending.clear()
+    this.releaseApprovals('Session closed')
     this.releaseQuestions('Session closed')
     this.releaseAgents('The session closed before this agent reported back')
     /*
@@ -1427,31 +1410,29 @@ class ClaudeSession implements SessionHandle {
   private releaseOnCancel(requestId: string, signal: AbortSignal | undefined): void {
     if (!signal) return
     const release = () => {
-      const approval = this.pending.get(requestId)
-      if (approval) {
-        this.pending.delete(requestId)
-        approval.resolve({ behavior: 'deny', message: 'Cancelled by Claude Code' })
-        this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
-      }
-      const question = this.questions.get(requestId)
-      if (question) {
-        this.questions.delete(requestId)
-        question.resolve({ behavior: 'deny', message: 'Cancelled by Claude Code' })
-        this.emit({ type: 'question_resolved', sessionId: this.sessionId, requestId })
-      }
+      const thisCard = (_: unknown, id: string) => id === requestId
+      this.releaseApprovals('Cancelled by Claude Code', thisCard)
+      this.releaseQuestions('Cancelled by Claude Code', thisCard)
     }
     if (signal.aborted) release()
     else signal.addEventListener('abort', release, { once: true })
   }
 
+  /** Releases approvals still waiting on an answer (all, or the ones `match` picks) as denied — **never silently** */
+  private releaseApprovals(why: string, match?: (card: PendingApproval, requestId: string) => boolean): void {
+    this.pending.release((requestId, p) => {
+      p.resolve({ behavior: 'deny', message: why })
+      this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
+    }, match)
+  }
+
   /** Releases a choice that was still waiting on an answer — **never released silently**, for the same reason as approval. */
-  private releaseQuestions(why: string): void {
+  private releaseQuestions(why: string, match?: (card: unknown, requestId: string) => boolean): void {
     // Closed without an answer: a deny, so the tool's result reads as the failure it is
-    for (const [id, open] of this.questions) {
+    this.questions.release((requestId, open) => {
       open.resolve({ behavior: 'deny', message: why })
-      this.emit({ type: 'question_resolved', sessionId: this.sessionId, requestId: id })
-    }
-    this.questions.clear()
+      this.emit({ type: 'question_resolved', sessionId: this.sessionId, requestId })
+    }, match)
   }
 }
 

@@ -47,7 +47,7 @@ import {
   type CodexThreadSettings,
 } from './normalize.js'
 import { UnmappedTypes } from '../unmapped.js'
-import { adapterNotice, undeliveredError, undeliveredText } from '../session-kit.js'
+import { PendingCards, adapterNotice, couldNotStop, undeliveredError, undeliveredText } from '../session-kit.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { sandboxConfig } from './sandbox.js'
 
@@ -287,12 +287,7 @@ class CodexSession implements SessionHandle {
    * itself when its turn ends or is interrupted (and says so with `serverRequest/resolved`); the card has to close
    * with it, or an answer goes to a request id nobody is waiting on.
    */
-  private approvals = new Map<string, { serverId: number | string; threadId: string | null; turnId: string | null }>()
-  /**
-   * Cards raised for app tool approval (M4 A-5) — the answer has a different shape (elicitation's
-   * `{ action }`, not `{ decision }`). Only a requestId in this set gets answered as an elicitation.
-   */
-  private elicitations = new Set<string>()
+  private approvals = new PendingCards<OpenRequest>()
   /** App servers loaded onto this thread through the bridge — only elicitations under those names go to our cards */
   private appServers = new Set<string>()
   /** Whether this thread was given Centralu's own server — only then is an elicitation under that name ours to accept (#382) */
@@ -1018,13 +1013,10 @@ class CodexSession implements SessionHandle {
   }
 
   /** Closes the matching cards as denied, without answering Codex: the request is already gone on its side */
-  private closeApprovals(match: (a: { serverId: number | string; threadId: string | null; turnId: string | null }) => boolean): void {
-    for (const [requestId, a] of this.approvals) {
-      if (!match(a)) continue
-      this.approvals.delete(requestId)
-      this.elicitations.delete(requestId)
+  private closeApprovals(match?: (a: OpenRequest) => boolean): void {
+    this.approvals.release((requestId) => {
       this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
-    }
+    }, match)
   }
 
   /** Keeps a file-change item's changes until it completes or its turn ends — see `fileChanges` */
@@ -1109,8 +1101,7 @@ class CodexSession implements SessionHandle {
        */
       if (typeof p.serverName === 'string' && this.appServers.has(p.serverName) && approvalKindOf(p._meta) === 'mcp_tool_call') {
         const requestId = `codex-req-${this.reqTag}-${++this.reqCounter}`
-        this.approvals.set(requestId, requestOrigin(r))
-        this.elicitations.add(requestId)
+        this.approvals.set(requestId, { ...requestOrigin(r), elicitation: true })
         this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId, detail: appApprovalDetail(p.serverName, p.message, p._meta) })
         return
       }
@@ -1420,13 +1411,12 @@ class CodexSession implements SessionHandle {
     _scope?: ApprovalScope,
     matcher?: string,
   ): boolean {
-    const open = this.approvals.get(requestId)
+    const open = this.approvals.take(requestId)
     // This map is empty when the thread has been started fresh — a card raised before that has no id here
     if (open === undefined) return false
-    this.approvals.delete(requestId)
     const serverId = open.serverId
 
-    if (this.elicitations.delete(requestId)) {
+    if (open.elicitation) {
       /*
        * The answer to an app tool approval (M4 A-5). `always` is passed to Codex as "remember
        * this for the rest of the session" (`_meta.persist: "session"` -> ApprovedForSession).
@@ -1513,8 +1503,7 @@ class CodexSession implements SessionHandle {
      * and a refusal sent to a request the interrupt already ended is ignored. A child's request stays open, because
      * stopping this turn does not stop the child (see `stopBackgroundTask`).
      */
-    for (const [requestId, a] of this.approvals) {
-      if (a.threadId !== null && a.threadId !== this.threadId) continue
+    for (const requestId of this.approvals.ids((a) => a.threadId === null || a.threadId === this.threadId)) {
       this.respondApproval(requestId, 'deny')
     }
     // Nothing to stop if no turn is running (this is the case of a stop pressed right after a turn just ended)
@@ -1523,13 +1512,7 @@ class CodexSession implements SessionHandle {
     // Swallowing a failure here would leave us assuming it stopped and waiting — if it did not stop, say so
     void this.client
       .request('turn/interrupt', { threadId: this.threadId, turnId: this.turnId })
-      .catch((err: Error) => {
-        this.emit({
-          type: 'error',
-          sessionId: this.sessionId,
-          error: { code: 'internal', message: `Could not stop: ${err.message}`, retryable: true },
-        })
-      })
+      .catch((err: Error) => this.emit(couldNotStop(this.sessionId, err)))
   }
 
   private noteInterruptSent(turnId: string): void {
@@ -1631,10 +1614,7 @@ class CodexSession implements SessionHandle {
     this.closed = true
     // App attachment closes together with the handle — a new handle gets its own
     this.opts.apps?.close()
-    for (const requestId of this.approvals.keys()) {
-      this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
-    }
-    this.approvals.clear()
+    this.closeApprovals()
     // Said before the process goes, while this handle is still the session's (the manager drops a stale handle's events)
     this.releaseChildren()
     /*
@@ -1726,7 +1706,14 @@ function runningTurnOf(res: Record<string, unknown> | undefined): string | null 
 const ENDED_TURNS_KEPT = 8
 
 /** Where a server request was asked, for closing its card when Codex ends it (see `approvals`) */
-function requestOrigin(r: ServerRequest): { serverId: number | string; threadId: string | null; turnId: string | null } {
+/**
+ * A Codex server request behind one of our cards: its id, and the thread and turn it was asked in. `elicitation`
+ * marks a card raised for an app tool's approval (M4 A-5), whose answer has a different shape (elicitation's
+ * `{ action }`, not `{ decision }`).
+ */
+type OpenRequest = { serverId: number | string; threadId: string | null; turnId: string | null; elicitation?: true }
+
+function requestOrigin(r: ServerRequest): OpenRequest {
   const p = (typeof r.params === 'object' && r.params !== null ? r.params : {}) as { threadId?: unknown; turnId?: unknown }
   return {
     serverId: r.id,

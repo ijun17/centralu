@@ -1205,6 +1205,9 @@ Implementation rules:
   meanwhile without a word (both places that spoke for them stood aside for each other); `dispose` and `detach` (a host
   swap: the next host resumes the thread, not those messages) now say them, and a
   resume that fails or outlives its cap names them inside the one error that retires the handle.
+  Open cards are a `PendingCards`: every way a card goes (answered, withdrawn by the CLI, the turn stopped, the handle
+  closed) goes through `take` or `release`, which removes it before it is closed, and the adapter says
+  `approval_resolved` / `question_resolved` there. A Stop that did not reach the CLI is `couldNotStop`.
 - Process management (spawning the CLI, crash detection) is the adapter's own responsibility. A crash is emitted as an `error` event and the host does not die.
 - A capability is not necessarily a static declaration; it can be **decided at detect() time** (e.g. if whether approvals work depends on the Codex version, decide after detecting the version — the C4 response).
 

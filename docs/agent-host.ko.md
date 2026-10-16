@@ -830,6 +830,9 @@ interface AdapterCapabilities {
   (그 메시지를 대신 말하던 두 곳이 서로에게 미뤘다). 이제 `dispose`와 `detach`(호스트 교체: 다음 호스트는 스레드를
   다시 열지만 그 메시지는 넘겨받지 않는다)가 말하고, 재개가 실패하거나 한도를 넘기면 핸들을
   물리는 오류 하나 안에 그 메시지를 적는다.
+  열린 카드는 `PendingCards`에 둔다: 카드가 닫히는 모든 길(답, CLI의 철회, 턴 정지, 핸들 닫힘)은 `take`나
+  `release`를 거치고, 이 둘은 카드를 닫기 전에 먼저 빼며, 어댑터는 거기서 `approval_resolved` / `question_resolved`를
+  말한다. CLI에 닿지 않은 정지는 `couldNotStop`이다.
 - 프로세스 관리(CLI spawn, 크래시 감지)는 어댑터 자신의 책임이다. 크래시는 `error` 이벤트로 방출되고 호스트는 죽지 않는다.
 - capability는 반드시 정적 선언일 필요가 없다 — **detect() 시점에 결정**할 수도 있다 (예: 승인 동작 여부가 Codex 버전에 달려 있다면, 버전을 감지한 뒤 결정한다 — C4에 대한 대응).
 
