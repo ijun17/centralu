@@ -20,6 +20,7 @@ import {
   importFile,
   listDir,
   moveEntry,
+  moveTarget,
   prepareCopyTarget,
   readTextFile,
   resolveExisting,
@@ -106,16 +107,32 @@ describe('baseName — a path cannot pass itself off as a name', () => {
   })
 
   /**
-   * Which characters are separators has two answers, and this asserts the one this machine can
-   * see (#47). The wire is POSIX, so `/` is settled by the protocol; `\` is settled by the
-   * platform, and here it is an ordinary character in a file name — so a file really called
-   * `a\b.txt` keeps its name and can still be moved.
-   *
-   * The other half cannot be run from here: on Windows `basename` reads that same string as a
-   * path, and `baseName` refuses it rather than quietly moving the file to `b.txt`. What is
-   * checkable on every platform is the invariant behind both answers — whatever comes back is
-   * never something this machine would read as a path.
+   * Which characters are separators has two answers (#47), and each machine asserts its own. The
+   * wire is POSIX, so `/` is settled by the protocol; `\` is settled by the platform. On macOS
+   * and Linux it is an ordinary character in a file name, so a file really called `a\b.txt` keeps
+   * its name and can still be moved. On Windows `basename` reads that same string as a path, and
+   * `baseName` refuses it rather than quietly moving the file to `b.txt`. Both check the invariant
+   * behind the two answers: whatever comes back is never something this machine would read as a
+   * path.
    */
+  it.runIf(process.platform === 'win32')('the separator decision is left to the platform — on Windows `\\` separates, and such a name is refused', () => {
+    expect(() => baseName('src/a\\b.txt')).toThrow(/Not a file name/)
+    expect(() => moveTarget('src/..\\..\\x.md', 'dst')).toThrow(/Not a file name/)
+    // A drive-relative path: Windows reads it as a file on drive C, not as a name
+    expect(() => baseName('src/C:x.md')).toThrow(/Not a file name/)
+    for (const input of ['src/app/a.ts', 'a\\b.txt', '../../.ssh/authorized_keys', 'x.md']) {
+      let name: string
+      try {
+        name = baseName(input)
+      } catch {
+        continue
+      }
+      expect(name).not.toContain(sep)
+      expect(name).not.toContain('/')
+    }
+  })
+
+  // macOS and Linux: Windows reads `\` as a separator, the test above
   it.skipIf(process.platform === 'win32')('the separator decision is left to the platform — here `\\` is part of the name', () => {
     expect(baseName('src/a\\b.txt')).toBe('a\\b.txt')
     for (const input of ['src/app/a.ts', 'a\\b.txt', '../../.ssh/authorized_keys', 'x.md']) {
