@@ -66,7 +66,9 @@ const tempDir = () => {
 afterEach(() => {
   // Only processes this file started; anything left after a failed test is ended here
   for (const c of started.splice(0)) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL')
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  // Windows can hold a node.exe the test copied and ran for a moment after the process ended (the image lock, or a
+  // scanner on a new executable): retry EBUSY rather than fail the cleanup
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 describe('serve arguments', () => {
