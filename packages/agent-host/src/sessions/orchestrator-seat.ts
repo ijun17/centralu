@@ -21,6 +21,8 @@ export type OrchestratorSeatHost = {
   readonly proposals: Pick<OrchestratorProposals, 'proposeMcpServer' | 'proposeSkill'>
   /** The links to other machines, once wired (`useLinkedReader`), else null */
   linkedReader(): LinkedSessions | null
+  /** A linked machine's report put back after a failed send: a paused one's settle wait starts again (#723) */
+  linkedReportRestored(sessionId: string): void
   emit(e: NormalizedEvent): void
   updateCentraluAsked(
     sessionId: string,
@@ -373,14 +375,20 @@ export function orchestratorToolsFor(
         /*
          * A linked machine's session (#82 phase 4): delivered there as an instruction from this orchestrator, under
          * that session's own approval settings. The report is watched for before the send, since the machine's first
-         * events can reach this hub before its answer does.
+         * events can reach this hub before its answer does. While the send is out, the session's events go to the new
+         * wait, a turn end included: the new instruction's turn is what the orchestrator asked about. An earlier report
+         * paused over its own work (#723) is replaced by it, as a new task ends a pause here; if the send fails it is
+         * put back, and its settle wait starts again from the work as the hub knows it now. A turn end of the old work
+         * that came in that moment went to the new wait and is not told again.
          */
         const earlier = host.children.linkedReports.get(sessionId)
         if (reportBack) host.children.setLinkedReport(sessionId, { orchestratorId, busy: false })
         const r = await remote.send(sessionId, text, host.meta.get(orchestratorId)?.name ?? 'Orchestrator')
         if (!r.ok) {
-          if (earlier) host.children.setLinkedReport(sessionId, earlier)
-          else host.children.dropLinkedReport(sessionId)
+          if (earlier) {
+            host.children.setLinkedReport(sessionId, earlier)
+            host.linkedReportRestored(sessionId)
+          } else host.children.dropLinkedReport(sessionId)
           return r
         }
         // As here (#166): a new instruction without a report replaces this orchestrator's earlier request

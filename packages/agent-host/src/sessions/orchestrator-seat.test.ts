@@ -37,6 +37,7 @@ beforeEach(() => {
     children,
     proposals: { proposeMcpServer: vi.fn(), proposeSkill: vi.fn() },
     linkedReader: () => linked,
+    linkedReportRestored: vi.fn(),
     emit: vi.fn(),
     updateCentraluAsked: vi.fn(),
     updateSettings: vi.fn(),

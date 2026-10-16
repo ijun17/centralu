@@ -225,6 +225,15 @@ function linkLostReportLine(machine: string, paused: readonly BackgroundTask[]):
     'so its end will not be reported. It may still be running there; read the session once the link is back.\n'
   )
 }
+/** The first line of a linked machine's report whose machine was removed before the work ended (#723) */
+function machineRemovedReportLine(machine: string, paused: readonly BackgroundTask[] | undefined): string {
+  return (
+    (paused
+      ? `[Centralu] The assigned work paused on its own background work (${taskList(paused)}), and its machine ${frameField(machine)} was removed from Centralu before that work ended`
+      : `[Centralu] The assigned work's machine ${frameField(machine)} was removed from Centralu before its turn ended`) +
+    ', so its end will not be reported.\n'
+  )
+}
 /** The first line of a paused report settled with no turn after its work ended (#721): how that work ended */
 function settledReportLine(tasks: readonly BackgroundTask[]): string {
   const clean = tasks.every((t) => t.status === 'completed')
@@ -2665,7 +2674,8 @@ export class SessionManager {
     /**
      * The session's own background work (#721): `paused`, what its turn ended with (the report is still owed, and
      * `stoppable` when the caller can stop it with agent_session); `settled`, the paused work's tasks that ended with no
-     * turn after them; `linkLost`, a linked machine's paused work whose link dropped before it ended (#723)
+     * turn after them; `linkLost`, a linked machine's paused work whose link dropped before it ended (#723);
+     * `machineRemoved`, a linked machine removed before the work or its turn ended
      */
     work?: ReportWork,
   ): Promise<void> {
@@ -2681,7 +2691,8 @@ export class SessionManager {
     const stop = this.meta.get(sessionId)?.interruption
     const cutShort = stop?.reason === 'network' || stop?.reason === 'interrupted' || stop?.reason === 'quit'
     const outcome =
-      work && 'linkLost' in work ? linkLostReportLine(work.linkLost, work.paused)
+      work && 'machineRemoved' in work ? machineRemovedReportLine(work.machineRemoved, work.paused)
+      : work && 'linkLost' in work ? linkLostReportLine(work.linkLost, work.paused)
       : work && 'paused' in work ? pausedReportLine(work.paused, work.stoppable)
       : work && 'settled' in work ? settledReportLine(work.settled)
       : stop?.reason === 'network' ? `[Centralu] The assigned work stopped before finishing: a network error ended its turn.\n`
@@ -4374,6 +4385,7 @@ export class SessionManager {
         return self.proposals
       },
       linkedReader: () => this.linkedReader,
+      linkedReportRestored: (sessionId) => this.linkedReports.restored(sessionId),
       emit: (e) => this.emit(e),
       updateCentraluAsked: (sessionId, action, signal) => this.updateCentraluAsked(sessionId, action, signal),
       updateSettings: (sessionId, settings, by) => this.updateSettings(sessionId, settings, by),

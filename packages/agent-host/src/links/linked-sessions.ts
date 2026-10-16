@@ -1,4 +1,4 @@
-import { HostReadSessionResult, HostRecallHit, HostSessionRow, SessionId, ToolName } from '@cc/protocol'
+import { BackgroundTask, HostReadSessionResult, HostRecallHit, HostSessionRow, SessionId, ToolName } from '@cc/protocol'
 import type { SessionInfo } from '@cc/protocol'
 import { NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
@@ -250,6 +250,30 @@ export function linkedSessions(
         if (opts.name) await route('sessions.rename', { sessionId: info.id, name: opts.name })
         return { sessionId: info.id, name: opts.name ?? info.name }
       })
+    },
+
+    machineLinked(machineId) {
+      return !!machineById(machineId)
+    },
+
+    async backgroundTasks(machineId) {
+      const m = machineById(machineId)
+      if (!m || !m.reachable) return null
+      try {
+        const list = await m.call('sessions.list', {})
+        const out: { sessionId: string; tasks: BackgroundTask[] }[] = []
+        for (const raw of Array.isArray(list) ? list : []) {
+          if (!isObj(raw) || typeof raw.id !== 'string' || !SessionId.safeParse(raw.id).success) continue
+          const tasks = (Array.isArray(raw.backgroundTasks) ? raw.backgroundTasks : []).flatMap((t) => {
+            const parsed = BackgroundTask.safeParse(t)
+            return parsed.success ? [parsed.data] : []
+          })
+          out.push({ sessionId: m.q.id(raw.id), tasks })
+        }
+        return out
+      } catch {
+        return null
+      }
     },
 
     machineNamed(ref) {

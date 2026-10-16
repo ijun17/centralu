@@ -137,6 +137,13 @@ export type LinkedSessions = {
   createSession(project: LinkedProject, opts: { tool?: ToolName; name?: string }): Promise<Outcome<{ sessionId: string; name: string }>>
   /** A linked machine by its id or the name the person gave it, case aside */
   machineNamed(ref: string): { id: string; name: string } | null
+  /** Whether the machine with this id is still linked: a removed machine is not (#723) */
+  machineLinked(machineId: string): boolean
+  /**
+   * Each session's background work as the machine lists it now (`sessions.list`, #723), ids qualified; null when the
+   * machine cannot be asked. What the hub knows of that work is otherwise only the changes relayed since its link came up
+   */
+  backgroundTasks(machineId: string): Promise<{ sessionId: string; tasks: BackgroundTask[] }[] | null>
   /** Where `projects.create` would make the folder on that machine, or why it would refuse */
   previewProject(machineId: string, spec: { name: string; parent?: string; source?: GitSource }): Promise<Outcome<{ name: string; path: string }>>
   createProject(machineId: string, spec: { name: string; parent?: string; source?: GitSource }): Promise<Outcome<{ projectId: string; name: string; path: string }>>
