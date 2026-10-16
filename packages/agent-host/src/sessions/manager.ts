@@ -150,7 +150,8 @@ import { withTimeout } from './with-timeout.js'
 import { AppSessions, type AppSessionsHost } from './app-sessions.js'
 import { appMessageFrame, type AppMessageSource, type AppMessageVia, type AppViewPlace } from './app-messages.js'
 import { SessionTrash, type SessionTrashHost } from './session-trash.js'
-import { JsonObject, readJson, readJsonObjects } from '../dev-services/store/json.js'
+import { parseJson, readJsonObjects } from '../dev-services/store/json.js'
+import { isObj } from '../json-value.js'
 export { appMessageFrame } from './app-messages.js'
 export type { AppMessageSource, AppMessageVia, AppViewPlace } from './app-messages.js'
 export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './delegation-flow.js'
@@ -3557,8 +3558,8 @@ export class SessionManager {
   private storedUiPreferences(): Record<string, unknown> {
     const raw = this.store.appSetting(UI_PREFS_KEY)
     if (raw === null) return {}
-    const v = readJson<JsonObject | null>(raw, JsonObject, null)
-    if (v) return v
+    const v = parseJson(raw)
+    if (isObj(v)) return v
     if (!this.brokenPrefsSaid) {
       this.brokenPrefsSaid = true
       console.error(`[agent-host] app_settings.${UI_PREFS_KEY} is not a JSON object; screen preferences read as their defaults until the next change`)

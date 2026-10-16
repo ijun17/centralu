@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isObj, type Obj } from '../../json-value.js'
 
 /**
  * Reading JSON the store (or a setting in it) holds (#850 item 5): **a value that cannot be read fails only itself.**
@@ -19,9 +20,12 @@ export function parseJson(raw: string | null | undefined): unknown {
   }
 }
 
-/** A JSON object (not a list, not null), every field kept */
-export const JsonObject = z.record(z.string(), z.unknown())
-export type JsonObject = z.infer<typeof JsonObject>
+/**
+ * A JSON object (not a list, not null), every field kept, as a schema: for `readJson` and `readJsonList`, where a schema
+ * is asked for. Anywhere else read an object with `isObj` / `asObj` (json-value.ts), the one guard both are built on.
+ */
+export const JsonObject = z.custom<Obj>(isObj)
+export type JsonObject = Obj
 
 /** `raw` read as `schema`; `fallback` when nothing is stored, the text is not JSON, or the value is not that shape */
 export function readJson<T>(raw: string | null | undefined, schema: z.ZodType<T>, fallback: T): T {

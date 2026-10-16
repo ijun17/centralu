@@ -53,7 +53,8 @@ import { Router } from './links/router.js'
 import { SshTunnel } from './links/tunnel.js'
 import { storeMirror, storeProjectOrder, storeRegistry } from './links/stored.js'
 import { projectsHome } from './dev-services/project-folder.js'
-import { JsonObject, parseJson, readJson } from './dev-services/store/json.js'
+import { parseJson } from './dev-services/store/json.js'
+import { asObj } from './json-value.js'
 import { flagSetting } from './dev-services/store/settings.js'
 
 /**
@@ -387,7 +388,7 @@ const agentVersions = new AgentVersionService({
   publish: (status) => events.push({ type: 'agent_versions', status }),
   readAutoApply: autoApplyAgentVersions.read,
   writeAutoApply: autoApplyAgentVersions.write,
-  readSeen: () => readJson(store.appSetting(AGENT_VERSIONS_SEEN_KEY), JsonObject, {}) as Record<string, string>,
+  readSeen: () => asObj(parseJson(store.appSetting(AGENT_VERSIONS_SEEN_KEY))) as Record<string, string>,
   writeSeen: (seen) => store.setAppSetting(AGENT_VERSIONS_SEEN_KEY, JSON.stringify(seen)),
 })
 versionsRef.current = agentVersions

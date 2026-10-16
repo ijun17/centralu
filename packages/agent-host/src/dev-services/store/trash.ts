@@ -3,7 +3,8 @@ import type { WorktreeRecovery } from '../worktree-recovery.js'
 import type { SessionInfo } from '@cc/protocol'
 import { indexedText } from './search-index.js'
 import { type SessionRecords } from './sessions.js'
-import { JsonObject, readJson } from './json.js'
+import { asObj } from '../../json-value.js'
+import { parseJson } from './json.js'
 
 /**
  * What a session in the trash remembers (`sessions.trash`, #204).
@@ -40,7 +41,7 @@ export type TrashedRow = {
 /** A record written by an older or broken build reads as "keep everything" — deleting for good must be asked for */
 function parseTrashRecord(json: string | null): TrashRecord {
   // Unreadable, or JSON that is not an object (#850): the defaults below keep the files
-  const r: Partial<Record<keyof TrashRecord, unknown>> = readJson(json, JsonObject, {})
+  const r: Partial<Record<keyof TrashRecord, unknown>> = asObj(parseJson(json))
   const str = (v: unknown) => (typeof v === 'string' && v ? v : null)
   return {
     projectId: str(r.projectId),

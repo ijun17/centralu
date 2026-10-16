@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
-import { JsonObject, parseJson, readJson } from './json.js'
+import { isObj } from '../../json-value.js'
+import { parseJson } from './json.js'
 import { type SettingsRecords } from './settings.js'
 
 /** One linked machine as stored (#82, v46): the registry's record (links/links.ts `MachineRecord`) */
@@ -138,8 +139,8 @@ export class LinkedMachineRecords {
     const row = this.db
       .prepare(`SELECT info FROM machine_headers WHERE machine_id = ? AND kind = 'session' AND item_id = ?`)
       .get(machineId, sessionId) as { info: string } | undefined
-    const info = readJson(row?.info, JsonObject.nullable(), null)
-    if (!info) return
+    const info = parseJson(row?.info)
+    if (!isObj(info)) return
     const next = { ...info, ...patch }
     this.db
       .prepare(`UPDATE machine_headers SET info = ? WHERE machine_id = ? AND kind = 'session' AND item_id = ?`)

@@ -1,4 +1,5 @@
-import { JsonObject, readJson } from './json.js'
+import { asObj } from '../../json-value.js'
+import { parseJson } from './json.js'
 
 /**
  * The kinds of message the search index holds (#221): what the person and the agent said, and the agent's reasoning.
@@ -17,6 +18,6 @@ export const INDEXED_KINDS: ReadonlySet<string> = new Set(['text', 'reasoning'])
 /** The text a message puts in the search index; '' puts none */
 export function indexedText(kind: string, payload: string): string {
   if (!INDEXED_KINDS.has(kind)) return ''
-  const p = readJson(payload, JsonObject, {})
+  const p = asObj(parseJson(payload))
   return typeof p.text === 'string' ? p.text : ''
 }

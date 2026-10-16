@@ -1,9 +1,10 @@
 import type Database from 'better-sqlite3'
-import { JsonObject, readJson } from './json.js'
+import { asObj } from '../../json-value.js'
+import { parseJson } from './json.js'
 
 /** The predecessor a stored handoff marker names; null for any other row, or one that cannot be read */
 function handoffFrom(payload: string): string | null {
-  const p = readJson(payload, JsonObject, {})
+  const p = asObj(parseJson(payload))
   return p.type === 'handoff' && typeof p.fromSessionId === 'string' && p.fromSessionId ? p.fromSessionId : null
 }
 
@@ -77,7 +78,7 @@ export class HandoffMarkers {
       .prepare(`SELECT payload FROM messages WHERE session_id = ? AND kind = 'marker'`)
       .all(sessionId) as { payload: string }[]
     return rows.some((r) => {
-      const p = readJson(r.payload, JsonObject, {})
+      const p = asObj(parseJson(r.payload))
       return p.type === 'notice' && p.text === text
     })
   }

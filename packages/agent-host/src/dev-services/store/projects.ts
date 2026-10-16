@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { ProjectInfo, SavedCommand, ToolDefaults } from '@cc/protocol'
-import { JsonObject, readJson, readJsonList } from './json.js'
+import { asObj } from '../../json-value.js'
+import { parseJson, readJsonList } from './json.js'
 import { z } from 'zod'
 
 /** The projects table: what a project remembers (its commands, worktree setup, tool defaults, trust) and where it sits in the sidebar */
@@ -72,7 +73,7 @@ export class ProjectRecords {
   worktreeSetup(projectId: string): { command: string; copyFiles: string[] } | null {
     const row = this.db.prepare(`SELECT worktree_setup FROM projects WHERE id = ?`).get(projectId) as
       { worktree_setup: string | null } | undefined
-    const parsed = readJson(row?.worktree_setup, JsonObject, {})
+    const parsed = asObj(parseJson(row?.worktree_setup))
     const command = typeof parsed.command === 'string' ? parsed.command : ''
     const copyFiles = Array.isArray(parsed.copyFiles)
       ? parsed.copyFiles.filter((f): f is string => typeof f === 'string')
@@ -98,7 +99,7 @@ export class ProjectRecords {
   worktreeManager(projectId: string): { sessionId: string; baseBranch: string } | null {
     const row = this.db.prepare(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId) as
       { worktree_manager: string | null } | undefined
-    const parsed = readJson(row?.worktree_manager, JsonObject, {})
+    const parsed = asObj(parseJson(row?.worktree_manager))
     if (typeof parsed.sessionId !== 'string' || !parsed.sessionId) return null
     return {
       sessionId: parsed.sessionId,
@@ -113,7 +114,7 @@ export class ProjectRecords {
   worktreeTrunk(projectId: string): string | null {
     const row = this.db.prepare(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId) as
       { worktree_manager: string | null } | undefined
-    const parsed = readJson(row?.worktree_manager, JsonObject, {})
+    const parsed = asObj(parseJson(row?.worktree_manager))
     return typeof parsed.baseBranch === 'string' && parsed.baseBranch ? parsed.baseBranch : null
   }
 
@@ -154,7 +155,7 @@ export class ProjectRecords {
     const row = this.db.prepare(`SELECT default_models FROM projects WHERE id = ?`).get(projectId) as
       { default_models: string | null } | undefined
     const out: Record<string, ToolDefaults> = {}
-    for (const [tool, v] of Object.entries(readJson(row?.default_models, JsonObject, {}))) {
+    for (const [tool, v] of Object.entries(asObj(parseJson(row?.default_models)))) {
       if (!v || typeof v !== 'object') continue
       const { model, effort } = v as { model?: unknown; effort?: unknown }
       out[tool] = {
