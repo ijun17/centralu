@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { APP_VERSION } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { installedUpdate, applyOffer, updateStateText, useRelaunchCheck } from './apply-update.js'
+import { SettingToggle } from './SettingToggle.jsx'
 
 /**
  * Updates (issue #43).
@@ -91,28 +92,27 @@ export function UpdatesSection() {
         )}
       </div>
 
-      <label className="mt-3 flex items-center gap-2 text-sm text-ink-muted">
-        <input
-          type="checkbox"
-          className="accent-line-strong"
-          data-testid="update-auto"
-          checked={update?.auto ?? true}
-          onChange={(e) => void setUpdateAuto(e.target.checked)}
-        />
-        Check for updates automatically
-      </label>
       {/*
         Why leaving this on is the default is recorded here. Someone turning it off needs to
         know what they are turning off, and someone leaving it on needs to know what goes out —
         there is no request that goes out silently.
       */}
-      <p className="mt-1 text-xs leading-body text-ink-faint">
-        At startup, every six hours, and on focus if the last check is over an hour old.
-        Opening Updates checks when automatic checking is on. Installing reuses a check
-        from the last minute or checks again. It asks the public npm
-        registry for one version number and nothing else; if it cannot reach it, nothing
-        happens and nothing interrupts you.
-      </p>
+      <SettingToggle
+        className="mt-3"
+        checked={update?.auto ?? true}
+        onChange={setUpdateAuto}
+        label="Check for updates automatically"
+        hint={
+          <>
+            At startup, every six hours, and on focus if the last check is over an hour old.
+            Opening Updates checks when automatic checking is on. Installing reuses a check
+            from the last minute or checks again. It asks the public npm
+            registry for one version number and nothing else; if it cannot reach it, nothing
+            happens and nothing interrupts you.
+          </>
+        }
+        testId="update-auto"
+      />
 
       {/*
         Only where the window can apply an update without cutting anything (#352: the desktop app
@@ -120,23 +120,20 @@ export function UpdatesSection() {
         would only leave a stale window behind.
       */}
       {relaunch !== undefined && (
-        <>
-          <label className="mt-3 flex items-center gap-2 text-sm text-ink-muted">
-            <input
-              type="checkbox"
-              className="accent-line-strong"
-              data-testid="update-auto-apply"
-              checked={update?.autoApply ?? false}
-              onChange={(e) => void setUpdateAutoApply(e.target.checked)}
-            />
-            Apply updates automatically when idle
-          </label>
-          <p className="mt-1 text-xs leading-body text-ink-faint">
-            A newer version is installed as soon as it is found, and applied once no session is
-            working or waiting for you, no terminal or command is running, and you are not typing.
-            Applying relaunches the window; agents keep running through it.
-          </p>
-        </>
+        <SettingToggle
+          className="mt-3"
+          checked={update?.autoApply ?? false}
+          onChange={setUpdateAutoApply}
+          label="Apply updates automatically when idle"
+          hint={
+            <>
+              A newer version is installed as soon as it is found, and applied once no session is
+              working or waiting for you, no terminal or command is running, and you are not typing.
+              Applying relaunches the window; agents keep running through it.
+            </>
+          }
+          testId="update-auto-apply"
+        />
       )}
     </section>
   )
@@ -166,22 +163,21 @@ export function AgentCliUpdates() {
       <p className="text-sm text-ink-muted" data-testid="agent-versions-installed">
         {versions === null ? 'Agent CLIs: not checked yet' : installed.length > 0 ? `Installed: ${installed.join(' · ')}` : 'No agent CLI version found'}
       </p>
-      <label className="mt-2 flex items-center gap-2 text-sm text-ink-muted">
-        <input
-          type="checkbox"
-          className="accent-line-strong"
-          data-testid="agent-versions-auto-apply"
-          checked={versions?.autoApply ?? true}
-          disabled={versions === null}
-          onChange={(e) => void setAutoApply(e.target.checked)}
-        />
-        Move idle sessions to a newly installed agent CLI
-      </label>
-      <p className="mt-1 text-xs leading-body text-ink-faint">
-        Each session runs its own Claude Code or Codex process, which keeps the version it started with. With this on, a
-        session restarts on the newer one once it is not working, not waiting for you and not running background tasks.
-        The conversation continues, and a line in it says the session moved.
-      </p>
+      <SettingToggle
+        className="mt-2"
+        checked={versions?.autoApply ?? true}
+        disabled={versions === null}
+        onChange={setAutoApply}
+        label="Move idle sessions to a newly installed agent CLI"
+        hint={
+          <>
+            Each session runs its own Claude Code or Codex process, which keeps the version it started with. With this on, a
+            session restarts on the newer one once it is not working, not waiting for you and not running background tasks.
+            The conversation continues, and a line in it says the session moved.
+          </>
+        }
+        testId="agent-versions-auto-apply"
+      />
     </section>
   )
 }

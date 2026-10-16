@@ -18,6 +18,7 @@ import {
   urgencyBreaks,
   type ThemeBase,
 } from '../../app/theme.js'
+import { SettingToggle } from './SettingToggle.jsx'
 
 const MODES: { id: ThemeMode; label: string }[] = [
   { id: 'dark', label: 'Dark' },
@@ -110,15 +111,14 @@ export function ThemeSection() {
         ))}
       </div>
 
-      <label className="mt-3 flex items-center gap-2 text-sm text-ink-muted">
-        <input
-          type="checkbox"
-          className="accent-line-strong"
-          checked={prefs.accent !== null}
-          onChange={(e) => void setPrefs({ accent: e.target.checked ? DEFAULT_ACCENT : null })}
-          data-testid="settings-accent-toggle"
-        />
-        Accent colour
+      <SettingToggle
+        className="mt-3"
+        checked={prefs.accent !== null}
+        onChange={(on) => setPrefs({ accent: on ? DEFAULT_ACCENT : null })}
+        label="Accent colour"
+        hint="Colours focus, selection and checked boxes. Never the white of something waiting for you."
+        testId="settings-accent-toggle"
+      >
         {prefs.accent !== null && (
           <input
             type="color"
@@ -129,10 +129,7 @@ export function ThemeSection() {
             data-testid="settings-accent-color"
           />
         )}
-      </label>
-      <p className="mt-1 text-xs leading-body text-ink-faint">
-        Colours focus, selection and checked boxes. Never the white of something waiting for you.
-      </p>
+      </SettingToggle>
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <button
