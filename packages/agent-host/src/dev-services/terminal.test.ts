@@ -1,9 +1,11 @@
-import { describe, expect, it, vi, afterEach } from 'vitest'
+import { describe, expect, it, vi, afterEach, onTestFinished } from 'vitest'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { homedir, tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
-import { TerminalService, commandShell, interactiveShell, shellPath, shortCwd } from './terminal.js'
+import { alive as isAlive, cleanUp, plantTreeScript, settle, treePids } from './process-tree.test-helpers.js'
+import { TerminalService, commandShell, interactiveShell, shellPath, shortCwd, type PtyModule } from './terminal.js'
 
 /**
  * The terminal has one core rule: **its identity is its cwd.**
@@ -143,7 +145,8 @@ describe('multiple terminals', () => {
    * A dev server started from an interactive shell is in a process group of its own (job control),
    * and one that ignores the hang-up a closing terminal sends used to be left running with its port.
    * The "shell" here is a real process standing in for a pty's shell: it leads its own session as
-   * node-pty's does, ignores TERM as an interactive shell does, and ends on HUP.
+   * node-pty's does, ignores TERM as an interactive shell does, and ends on HUP. Signals and sessions are not Windows':
+   * its counterpart is the next test, with a real pty.
    */
   it.skipIf(process.platform === 'win32')('closing one also ends a server started from its shell that ignores the hang-up', async () => {
     const dir = tmp()
@@ -198,6 +201,46 @@ describe('multiple terminals', () => {
       }
     }
   }, 30_000)
+
+  /*
+   * The same on Windows (#849), with the real pty (ConPTY) and the real shell a tab runs (PowerShell). The server is
+   * typed at the prompt and ignores the hang-up its closing console sends; the two processes under it were started
+   * outside every job and have no console (`plantTreeScript`), so closing the pty never reaches them and only the tree
+   * kill does.
+   */
+  it.runIf(process.platform === 'win32')('on Windows, closing one ends its shell, a server started from it and what that server started', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-term-tree-'))
+    const pidFile = join(dir, 'pids')
+    const ptyModule = createRequire(import.meta.url)('node-pty') as PtyModule
+    const shells: number[] = []
+    const recording: PtyModule = {
+      spawn: (file, args, opts) => {
+        const pty = ptyModule.spawn(file, args, opts)
+        if (pty.pid) shells.push(pty.pid)
+        return pty
+      },
+    }
+    let pids: number[] = []
+    // Not in a `finally`: an error there would replace the assertion that failed
+    onTestFinished(async () => {
+      await cleanUp(pids)
+      rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+    })
+    const svc = new TerminalService(() => {}, recording)
+    const t = svc.create(dir, 120, 30)
+    expect(shells).toHaveLength(1)
+    pids = [...shells]
+    // Typed once the prompt is up; PowerShell with a profile takes seconds on a loaded runner
+    await settle(() => t.history(), (h) => /PS .*>/.test(h), 60_000)
+    svc.input(t.id, `& '${process.execPath}' '${plantTreeScript(dir)}' '${pidFile}' 2\r`)
+    const tree = await settle(() => treePids(pidFile), (p) => p.length === 3, 30_000)
+    pids = [shells[0]!, ...tree]
+    expect(tree).toHaveLength(3)
+    expect(pids.every(isAlive)).toBe(true)
+
+    svc.close(t.id)
+    expect(await settle(() => pids.filter(isAlive), (left) => left.length === 0, 15_000)).toEqual([])
+  }, 120_000)
 
   it('closing the last one leaves the list empty', () => {
     const fake = fakePty()
@@ -283,8 +326,15 @@ describe('when a shell ends or fails to launch', () => {
 })
 
 describe('shell selection', () => {
+  // shellPath is the macOS and Linux login shell; a Windows tab never asks for it (interactiveShell, next test)
   it.skipIf(process.platform === 'win32')('picks the shell the user actually uses (so their aliases and prompt show up as-is)', () => {
     expect(shellPath()).toMatch(/\/(zsh|bash|sh|fish)$/)
+  })
+
+  it.runIf(process.platform === 'win32')('on Windows a tab runs a PowerShell that exists on this machine', () => {
+    const shell = interactiveShell()
+    expect(shell.file).toMatch(/\\(pwsh|powershell)\.exe$/i)
+    expect(existsSync(shell.file)).toBe(true)
   })
 
   it('a terminal tab runs the login shell with -l off Windows', () => {
