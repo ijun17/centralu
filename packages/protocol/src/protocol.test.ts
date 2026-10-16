@@ -36,17 +36,19 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   { type: 'message_delta', sessionId: 's1', role: 'assistant', text: 'hi' },
   // Which message the chunk belongs to (#212) — optional, so the frame above still parses
   { type: 'message_delta', sessionId: 's1', role: 'assistant', text: 'hi', messageId: 'm1' },
-  { type: 'tool_call', sessionId: 's1', callId: 'c1', summary: { tool: 'Bash', title: 'npm test', paths: [] } },
+  { type: 'tool_call', sessionId: 's1', callId: 'c1', summary: { tool: 'Bash', title: 'npm test', readOnly: false, paths: [] } },
   { type: 'tool_result', sessionId: 's1', callId: 'c1', ok: true, summary: 'exit 0' },
   // The whole record of a tool call (#221) — optional, so the two frames above still parse
-  { type: 'tool_call', sessionId: 's1', callId: 'c2', summary: { tool: 'Write', title: 'Write: a.ts', paths: ['a.ts'] }, input: { file_path: 'a.ts', content: 'export {}' } },
+  { type: 'tool_call', sessionId: 's1', callId: 'c2', summary: { tool: 'Write', title: 'Write: a.ts', readOnly: false, paths: ['a.ts'] }, input: { file_path: 'a.ts', content: 'export {}' } },
   { type: 'tool_result', sessionId: 's1', callId: 'c2', ok: true, summary: 'wrote', output: 'wrote a.ts' },
+  // A summary with no read-only hint (#428): adapters no longer set it, and it is optional, so the frames above still parse
+  { type: 'tool_call', sessionId: 's1', callId: 'c3', summary: { tool: 'Bash', title: 'git push', paths: [] } },
   // A native subagent's step, under the call that launched it (#222)
   {
     type: 'subagent_event',
     sessionId: 's1',
     parentCallId: 'toolu_agent',
-    step: { type: 'tool_call', sessionId: 's1', callId: 'toolu_sub', summary: { tool: 'Bash', title: 'ls', paths: [] }, input: { command: 'ls' } },
+    step: { type: 'tool_call', sessionId: 's1', callId: 'toolu_sub', summary: { tool: 'Bash', title: 'ls', readOnly: false, paths: [] }, input: { command: 'ls' } },
   },
   {
     type: 'subagent_event',
@@ -347,7 +349,7 @@ describe('a tool call leaves the host as its card (#221)', () => {
     const call = GOLDEN_EVENTS_V1.find((e) => (e as { callId?: string }).callId === 'c2' && (e as { type: string }).type === 'tool_call')
     const result = GOLDEN_EVENTS_V1.find((e) => (e as { callId?: string }).callId === 'c2' && (e as { type: string }).type === 'tool_result')
     expect(withoutToolRecord(NormalizedEvent.parse(call))).toEqual({
-      type: 'tool_call', sessionId: 's1', callId: 'c2', summary: { tool: 'Write', title: 'Write: a.ts', paths: ['a.ts'] },
+      type: 'tool_call', sessionId: 's1', callId: 'c2', summary: { tool: 'Write', title: 'Write: a.ts', readOnly: false, paths: ['a.ts'] },
     })
     expect(withoutToolRecord(NormalizedEvent.parse(result))).toEqual({ type: 'tool_result', sessionId: 's1', callId: 'c2', ok: true, summary: 'wrote' })
     // A turn's structured answer is also called `output`, and it is the answer — it stays
@@ -362,7 +364,7 @@ describe('a tool call leaves the host as its card (#221)', () => {
         type: 'subagent_event',
         sessionId: 's1',
         parentCallId: 'toolu_agent',
-        step: { type: 'tool_call', sessionId: 's1', callId: 'toolu_sub', summary: { tool: 'Bash', title: 'ls', paths: [] } },
+        step: { type: 'tool_call', sessionId: 's1', callId: 'toolu_sub', summary: { tool: 'Bash', title: 'ls', readOnly: false, paths: [] } },
       },
       {
         type: 'subagent_event',
