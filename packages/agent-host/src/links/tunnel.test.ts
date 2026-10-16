@@ -17,7 +17,6 @@ import {
   SSH_EXEC_TIMEOUT_MS,
   SshTunnel,
   stopCommand,
-  Tail,
   type RemoteSpec,
   type SshTunnelOptions,
 } from './tunnel.js'
@@ -579,22 +578,5 @@ describe('the remote command per shell (#82)', () => {
     expect(lastLine('Cloning into x_x000D__x000A_</S></Objs>')).toBe('')
     expect(lastLine('some error text that was cut_x000D__x000A_')).toBe('')
     expect(lastLine('<S S="Error">Cloning into x</S></Objs>')).toBe('')
-  })
-})
-
-describe('Tail', () => {
-  it('keeps the last characters written, however much is written', () => {
-    const t = new Tail(10)
-    for (let i = 0; i < 1000; i++) t.push('0123456789')
-    t.push('abc')
-    expect(t.text).toBe('3456789abc')
-    expect(t.text.length).toBe(10)
-  })
-
-  it('keeps everything while under the bound', () => {
-    const t = new Tail(10)
-    t.push('ab')
-    t.push('cd')
-    expect(t.text).toBe('abcd')
   })
 })

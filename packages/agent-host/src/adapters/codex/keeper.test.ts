@@ -180,6 +180,20 @@ describe('codex under the keeper', () => {
     expect(server.received.some((m) => m.method.includes('requestApproval') || (m.id === undefined && m.method !== 'initialized'))).toBe(false)
   })
 
+  /** "codex app-server exited (code 1)" said nothing a person could act on: its stderr was never kept (#428) */
+  it('an app-server that dies says why, from the end of its stderr', async () => {
+    const { events, server } = await adopt()
+    await until(() => events.some((e) => e.type === 'approval_request'))
+    Object.assign(server, { stderrTail: () => 'Error: thread already has an active writer\n' })
+    server.exitCode = 1
+    server.emit('exit', 1, null)
+    await until(() => events.some((e) => e.type === 'error'))
+    expect((events.find((e) => e.type === 'error') as unknown as { error: unknown }).error).toMatchObject({
+      code: 'adapter_crashed',
+      message: 'codex app-server exited (code 1). stderr: Error: thread already has an active writer',
+    })
+  })
+
   it('request ids carry a per-client prefix, so an answer meant for the old host cannot resolve a new request', async () => {
     const { server } = await adopt()
     const ids = server.received.filter((m) => m.id !== undefined).map((m) => String(m.id))

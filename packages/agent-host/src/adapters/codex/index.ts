@@ -50,6 +50,7 @@ import { UnmappedTypes } from '../unmapped.js'
 import { PendingCards, adapterNotice, couldNotStop, undeliveredError, undeliveredText } from '../session-kit.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { sandboxConfig } from './sandbox.js'
+import { withStderrTail } from '../../stream-text.js'
 
 const exec = promisify(execFile)
 
@@ -414,7 +415,8 @@ class CodexSession implements SessionHandle {
             sessionId: this.sessionId,
             error: {
               code: 'adapter_crashed',
-              message: `codex app-server exited (code ${code ?? 'null'})`,
+              // What it printed last is the reason a person can act on: a lock, a bad config line, a panic
+              message: withStderrTail(`codex app-server exited (code ${code ?? 'null'})`, this.client),
               retryable: true,
             },
           })

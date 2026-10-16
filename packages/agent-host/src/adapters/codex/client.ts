@@ -229,6 +229,11 @@ export class CodexClient {
     })
   }
 
+  /** The end of what the app-server wrote to stderr, when its process keeps it (`AgentProcess.stderrTail`) */
+  stderrTail(): string {
+    return this.proc.stderrTail?.() ?? ''
+  }
+
   notify(method: string, params?: unknown): void {
     this.write({ method, params })
   }

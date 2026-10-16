@@ -24,7 +24,7 @@ export class FakeKeeper {
   private controls = new Set<Socket>()
   private sockets = new Set<Socket>()
   private closed = false
-  private children = new Map<string, { proc: ChildProcess; tag: unknown; kind: string; exit: { code: number | null; signal: number | null } | null; out: Buffer[]; reader: Socket | null }>()
+  private children = new Map<string, { proc: ChildProcess; tag: unknown; kind: string; exit: { code: number | null; signal: number | null } | null; out: Buffer[]; reader: Socket | null; err: Buffer[]; errReader: Socket | null }>()
   private next = 1
 
   private constructor() {
@@ -77,14 +77,16 @@ export class FakeKeeper {
   private spawnChild(req: { cmd: string; args: string[]; cwd: string; env: Record<string, string>; tag: unknown; kind: string }): string {
     const id = `c${this.next++}`
     const proc = spawn(req.cmd, req.args, { cwd: req.cwd, env: req.env, stdio: 'pipe', detached: true })
-    const c = { proc, tag: req.tag, kind: req.kind, exit: null as { code: number | null; signal: number | null } | null, out: [] as Buffer[], reader: null as Socket | null }
+    const c = { proc, tag: req.tag, kind: req.kind, exit: null as { code: number | null; signal: number | null } | null, out: [] as Buffer[], reader: null as Socket | null, err: [] as Buffer[], errReader: null as Socket | null }
     this.children.set(id, c)
     proc.stdout!.on('data', (d: Buffer) => (c.reader ? c.reader.write(d) : c.out.push(d)))
+    proc.stderr!.on('data', (d: Buffer) => (c.errReader ? c.errReader.write(d) : c.err.push(d)))
     proc.stdin!.on('error', () => {})
     proc.on('exit', (code, signal) => {
       c.exit = { code, signal: signal ? (({ SIGTERM: 15, SIGKILL: 9, SIGHUP: 1, SIGINT: 2 }) as Record<string, number>)[signal] ?? 0 : null }
       setTimeout(() => {
         c.reader?.end()
+        c.errReader?.end()
         for (const s of this.controls) s.write(`${JSON.stringify({ event: 'exit', id, ...c.exit })}\n`)
       }, 20)
     })
@@ -111,7 +113,11 @@ export class FakeKeeper {
         role = 'attach'
         attached = String(req.id)
         s.write(`${JSON.stringify({ ok: true, child: this.info(attached) })}\n`)
-        if (req.stream === 'err') return
+        if (req.stream === 'err') {
+          c.errReader = s
+          for (const d of c.err.splice(0)) s.write(d)
+          return
+        }
         c.reader = s
         for (const d of c.out.splice(0)) s.write(d)
         if (c.exit) setTimeout(() => s.end(), 20)
@@ -173,6 +179,7 @@ export class FakeKeeper {
       this.controls.delete(s)
       const c = attached ? this.children.get(attached) : undefined
       if (c?.reader === s) c.reader = null
+      if (c?.errReader === s) c.errReader = null
     })
     s.on('error', () => {})
   }

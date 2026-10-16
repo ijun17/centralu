@@ -128,6 +128,16 @@ describe.skipIf(keeperless)('an agent process the keeper holds', () => {
     await readUntil(p, 'after')
   })
 
+  /** Claude's and Codex's crash reasons carry it; it was only kept for a child of this host (#428) */
+  it('keeps the end of stderr for a failure message, what the keeper buffered before the attach included', async () => {
+    const script = "const b = Buffer.from('실패: 한글\\n'); process.stderr.write(b.subarray(0, 4)); setTimeout(() => { process.stderr.write(b.subarray(4)); process.exit(1) }, 200)"
+    const id = keeper.spawnDirect(process.execPath, ['-e', script], tag)
+    await new Promise((r) => setTimeout(r, 100))
+    const p = KeeperAgentProcess.adopt(children, keeper.info(id) as never)
+    await new Promise((r) => p.once('exit', r))
+    await until(() => p.stderrTail() === '실패: 한글\n')
+  })
+
   it('reports an exit when the keeper itself goes away, since the pipes went with it', async () => {
     const p = KeeperAgentProcess.spawn(children, echo, tag)
     await until(() => p.childId !== null)

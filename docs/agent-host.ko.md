@@ -22,6 +22,7 @@ agent-host/src/
 ├─ dev-services/        # git/fs/store (store는 dev 전용이 아니다 — 메시지가 사는 곳이다)
 ├─ log-file.ts          # stderr를 ~/.centralu/host.log로 흘린다 (stdout은 예약됨, 아래 참고)
 ├─ env-path.ts          # PATH 보강 — GUI 앱은 로그인 셸 PATH를 물려받지 못한다
+├─ stream-text.ts       # 자식 스트림에서 읽은 텍스트: 쥐어 둔 꼬리, 줄, 한 스트림으로 디코딩 (#428)
 ├─ data-dir.ts          # 데이터 폴더 위치 판정과 이전
 ├─ idle.ts              # "사람이 잃을 것이 돌고 있는가"에 대한 유일한 규칙 (#352)
 └─ updates.ts           # 업데이트 확인, 설치, "한가할 때 자동 적용"
@@ -1189,7 +1190,10 @@ pty는 쓸어 내지 않는다: 셸이 끝나면 커널이 터미널의 전경 �
 방식으로 쓸어 낸다(`stopGroup`). Windows에서 멈춤은 트리에 `taskkill /T /F`이고, 끝난 뒤에는 남긴 것을 부모 링크와 생성
 시각으로 찾아 끝낸다(`collectOrphansWindows`). 자기 그룹에 있으므로 CLI는 더 이상 호스트의 그룹에 있지 않다: SIGKILL을
 받은 호스트는 stdin EOF로만 그것을 데려간다. codex는 EOF에 바로 끝나고, claude는 하던 턴을 마치고 끝난다. SDK는 자기가
-띄운 프로세스에만 실패 메시지에 CLI의 stderr 끝을 붙이므로, 어댑터가 같은 방식으로 붙인다.
+띄운 프로세스에만 실패 메시지에 CLI의 stderr 끝을 붙이므로, 두 어댑터가 같은 방식으로 붙인다(`withStderrTail`,
+`stream-text.ts`). 호스트가 띄운 자식과 keeper의 자식은 각각 stderr의 마지막 8 KiB를 쥐고(`AgentProcess.stderrTail`), 한
+스트림으로 디코딩하므로 두 조각에 걸쳐 나뉜 글자도 온전하다. Claude의 `adapter_crashed`와 Codex의 "codex app-server exited"는
+keeper 아래에서도 그 끝을 싣는다.
 
 **떠나기** (`main.ts`, `stopServices(mode)`). *detach* — SIGTERM, SIGINT, 키퍼 파이프가 닫힘, 잡히지 않은 예외,
 교체의 드레인 — 는 모든 세션 핸들·터미널·명령 실행에 `detach()`를 부른다: 도구에는 아무것도 보내지 않고, 기다리는

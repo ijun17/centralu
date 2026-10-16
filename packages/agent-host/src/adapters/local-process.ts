@@ -12,6 +12,7 @@ import {
   type KillablePty,
   type LeftoverOs,
 } from '../dev-services/kill-tree.js'
+import { Tail } from '../stream-text.js'
 import type { AgentProcess, AgentSpawnSpec } from './contract.js'
 
 /**
@@ -57,7 +58,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
   readonly stdout: Readable
   readonly stderr: Readable | null
   killed = false
-  private tail = ''
+  private readonly tail = new Tail(STDERR_TAIL)
   private exitReported = false
   private readonly spawnedAt = Date.now()
 
@@ -70,9 +71,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
     this.stdout = child.stdout!
     this.stderr = child.stderr
     // Always read: a CLI whose stderr nobody drains blocks once the pipe is full
-    child.stderr?.on('data', (d: Buffer) => {
-      this.tail = (this.tail + d.toString('utf8')).slice(-STDERR_TAIL)
-    })
+    child.stderr?.on('data', (d: Buffer) => this.tail.push(d))
     child.stdin?.on('error', () => {})
     child.on('error', (e) => this.emit('error', e))
     child.once('exit', () => this.onExit())
@@ -112,7 +111,7 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
 
   /** The end of what the CLI wrote to stderr */
   stderrTail(): string {
-    return this.tail
+    return this.tail.text
   }
 
   private get ended(): boolean {

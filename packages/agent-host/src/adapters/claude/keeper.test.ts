@@ -15,6 +15,8 @@ const sdk = vi.hoisted(() => {
     inbox: [] as unknown[],
     wake: null as null | (() => void),
     ended: false,
+    /** What the stream throws once its inbox is empty: the SDK's error for a CLI that died */
+    failure: null as null | Error,
   }
   return {
     state,
@@ -26,9 +28,14 @@ const sdk = vi.hoisted(() => {
       state.ended = true
       state.wake?.()
     },
+    fail(e: Error) {
+      state.failure = e
+      state.wake?.()
+    },
     async *stream() {
       for (;;) {
         while (state.inbox.length > 0) yield state.inbox.shift()
+        if (state.failure) throw state.failure
         if (state.ended) return
         await new Promise<void>((r) => (state.wake = r))
       }
@@ -41,6 +48,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
     sdk.state.options = args.options
     sdk.state.inbox.length = 0
     sdk.state.ended = false
+    sdk.state.failure = null
     return {
       [Symbol.asyncIterator]: () => sdk.stream(),
       interrupt: async () => {
@@ -155,6 +163,20 @@ describe('claude under the keeper', () => {
     expect(events.some((e) => e.type === 'background_tasks')).toBe(false)
     await handle.detach!()
     sdk.end()
+  })
+
+  /** The SDK adds a CLI's stderr to its error only for a process it spawned itself; the keeper's was left without (#428) */
+  it('a crash of the keeper\'s CLI carries the end of its stderr', async () => {
+    const { events, adopted, spawn } = await adoptedSession([])
+    Object.assign(adopted, { stderrTail: () => 'Error: Invalid API key · Please run /login\n' })
+    spawn({ command: 'claude', args: ['--resume=conv-1'], env: {} })
+    sdk.fail(new Error('Claude Code process exited with code 1'))
+    await vi.waitFor(() => expect(events.some((e) => e.type === 'error')).toBe(true))
+    const err = events.find((e) => e.type === 'error')
+    expect(err && err.type === 'error' && err.error).toMatchObject({
+      code: 'adapter_crashed',
+      message: 'Claude Code process exited with code 1. stderr: Error: Invalid API key · Please run /login',
+    })
   })
 
   it('detaching tells the CLI nothing: no close, no deny for a waiting approval, and the stream ending is no crash', async () => {

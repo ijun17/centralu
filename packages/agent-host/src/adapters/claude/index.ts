@@ -59,7 +59,8 @@ import { appProxy, type AppProxy } from './app-proxy.js'
 import { APP_MCP_PREFIX } from '../../apps/contract.js'
 import { readClaudeModels, type ModelQuery } from './models.js'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
-import { LocalAgentProcess, spawnLocalAgent, type LocalSpawnSpec } from '../local-process.js'
+import { spawnLocalAgent, type LocalSpawnSpec } from '../local-process.js'
+import { withStderrTail } from '../../stream-text.js'
 import { approvalDetail, ClaudeStreamNormalizer } from './normalize.js'
 import { noCodeIntelligenceSettings } from './lsp-plugins.js'
 import { PendingCards, adapterNotice, couldNotStop, undeliveredError } from '../session-kit.js'
@@ -89,17 +90,6 @@ const PROBE_DIR_PREFIX = 'centralu-usage-probe-'
 const PROBE_DIR_STALE_MS = 10 * 60_000
 /** How long a stopped probe's process may take to leave before its folder is removed anyway */
 const PROBE_EXIT_WAIT_MS = 10_000
-
-/**
- * The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself. One
- * spawned here (`local-process.ts`) keeps that tail, and it is added the same way, so a CLI that
- * fails to start still says why.
- */
-function withStderrTail(message: string, proc: AgentProcess | null): string {
-  if (!(proc instanceof LocalAgentProcess) || message.includes('stderr:')) return message
-  const tail = proc.stderrTail().trim().slice(-2000)
-  return tail ? `${message}. stderr: ${tail}` : message
-}
 
 /**
  * The Claude Code adapter (reflects M0 validation — docs/spikes/m0-findings.md).
@@ -865,6 +855,11 @@ class ClaudeSession implements SessionHandle {
          */
         if (this.closed || this.detaching) return
         this.releaseAgents('The session process ended before this agent reported back')
+        /*
+         * The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself. One
+         * spawned here (`local-process.ts`) or in the keeper (`keeper/agent-process.ts`) keeps that tail, and it is
+         * added the same way, so a CLI that fails to start still says why.
+         */
         this.emit({
           type: 'error',
           sessionId: this.sessionId,

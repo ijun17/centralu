@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import type { Socket } from 'node:net'
 import { constants } from 'node:os'
 import { PassThrough, Writable } from 'node:stream'
+import { Tail } from '../stream-text.js'
 import type { ChildExit, KeeperChildren, KeptChild } from './children-client.js'
 import type { AgentTag } from './tags.js'
 
@@ -40,6 +41,8 @@ export type SpawnSpec = { command: string; args: string[]; cwd?: string; env: Re
 const EXIT_AFTER_OUTPUT_MS = 1000
 /** How long a detach waits for the keeper to end the stream */
 const DETACH_WAIT_MS = 2000
+/** The end of stderr kept for a failure message, as `local-process.ts` keeps it */
+const STDERR_TAIL = 8 * 1024
 
 export class KeeperAgentProcess extends EventEmitter {
   readonly stdout = new PassThrough()
@@ -59,6 +62,7 @@ export class KeeperAgentProcess extends EventEmitter {
   private outEnded = false
   private queued: { chunk: Buffer; cb: (e?: Error | null) => void }[] = []
   private readonly ready: Promise<void>
+  private readonly tail = new Tail(STDERR_TAIL)
 
   private constructor(
     private keeper: KeeperChildren,
@@ -71,6 +75,11 @@ export class KeeperAgentProcess extends EventEmitter {
     })
     // A write after the child is gone is not worth a crash of the host
     this.stdin.on('error', () => {})
+    /*
+     * Always read, as a child of this host's stderr is: the end is what says why it failed, and nobody else may read
+     * it (the SDK reads it only when asked to). What the keeper buffered while no host was attached comes first.
+     */
+    this.stderr.on('data', (d: Buffer) => this.tail.push(d))
     this.ready = this.start(child)
   }
 
@@ -125,6 +134,11 @@ export class KeeperAgentProcess extends EventEmitter {
     const known = child.exit ?? this.keeper.exitOf(child.id)
     if (known) this.recordExit(known)
     for (const q of this.queued.splice(0)) out.write(q.chunk, q.cb)
+  }
+
+  /** The end of what the CLI wrote to stderr */
+  stderrTail(): string {
+    return this.tail.text
   }
 
   private fail(e: Error): void {

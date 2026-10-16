@@ -671,6 +671,12 @@ export interface AgentProcess {
   off(event: 'error', listener: (error: Error) => void): this
   /** Lets go of the process and leaves it running (only a process someone else holds can) */
   detach?(): Promise<void>
+  /**
+   * The end of what the process wrote to stderr, for a failure message (`withStderrTail`). The SDK keeps it only for
+   * a process it spawned itself; this host's own child (`local-process.ts`) and the keeper's (`keeper/agent-process.ts`)
+   * keep it here.
+   */
+  stderrTail?(): string
 }
 
 export type AgentSpawnSpec = { command: string; args: string[]; cwd?: string; env: Record<string, string | undefined> }

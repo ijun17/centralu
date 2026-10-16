@@ -211,3 +211,14 @@ describe('an agent CLI started without a keeper (Windows)', () => {
     expect(killed).toEqual([p.pid, orphan])
   })
 })
+
+/** A Korean or emoji crash reason came out as `��` when a pipe chunk ended inside a character (#428) */
+describe('the stderr an agent CLI leaves for a failure message', () => {
+  it('keeps a character whole when the pipe splits it between two chunks', async () => {
+    const script = "const b = Buffer.from('실패: 한글\\n'); process.stderr.write(b.subarray(0, 4)); setTimeout(() => process.stderr.write(b.subarray(4)), 200)"
+    const p = spawnLocalAgent({ command: process.execPath, args: ['-e', script], env: process.env })
+    started.push(p.pid!)
+    await exitOf(p)
+    expect(p.stderrTail()).toBe('실패: 한글\n')
+  })
+})

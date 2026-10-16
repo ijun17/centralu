@@ -25,6 +25,7 @@ agent-host/src/
 ├─ dev-services/        # git/fs/store (the store is not dev-only — it is where messages live)
 ├─ log-file.ts          # tees stderr to ~/.centralu/host.log (stdout is reserved, see below)
 ├─ env-path.ts          # PATH augmentation — a GUI app inherits no login-shell PATH
+├─ stream-text.ts       # text read off a child's stream: a kept tail, lines, decoded as one stream (#428)
 ├─ tool-launch.ts       # how a found tool is started (Windows .cmd shims, absolute paths)
 ├─ os.ts               # what differs between OSes, asked by name (architecture.md §2)
 ├─ data-dir.ts          # locating and migrating the data directory
@@ -1650,8 +1651,10 @@ the survivors after 3 s, and once it has exited its group is swept the same way 
 `taskkill /T /F` on its tree, and once it has exited what it left running is found by parent links and creation
 times and ended (`collectOrphansWindows`). Being in a group of its own, the CLI is no longer in the host's: a host
 that is SIGKILLed takes it along only through stdin EOF, on which codex exits at once and claude after the turn it
-is in. The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself, so the adapter
-adds it the same way.
+is in. The SDK adds the end of the CLI's stderr to a failure only for a process it spawned itself, so both
+adapters add it the same way (`withStderrTail`, `stream-text.ts`): the host's own child and the keeper's each keep the
+last 8 KiB of stderr (`AgentProcess.stderrTail`), decoded as one stream so a character split between two chunks stays
+whole, and Claude's `adapter_crashed` and Codex's "codex app-server exited" carry it, under the keeper too.
 
 **Leaving** (`lifecycle/shutdown.ts`, `stopPlan(mode)`). *Detach* — SIGTERM, SIGINT, SIGHUP, the keeper's pipe closing, an
 uncaught exception, a swap's drain — calls `detach()` on every session handle, terminal and command run: nothing

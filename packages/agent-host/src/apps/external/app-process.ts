@@ -6,6 +6,7 @@ import { Client, type PriorDiscovery, type Tool } from '@modelcontextprotocol/cl
 import { CLIENT_INFO } from '@cc/protocol'
 import { KILL_GRACE_MS, collectOrphansWindows, hasProcessGroups, stopGroup, stopTree } from '../../dev-services/kill-tree.js'
 import { rotateIfLarge } from '../../log-file.js'
+import { LineTail, lineSplitter } from '../../stream-text.js'
 import { resolveCommand } from '../../tool-launch.js'
 import { StreamTransport } from './stream-transport.js'
 
@@ -318,8 +319,9 @@ const TAIL_LINE_CHARS = 500
 class AppLog {
   private fd: number | null = null
   private written = 0
-  private partial = ''
-  private recent: string[] = []
+  // So a line that never ends does not consume memory — if it gets long, it is written even if that means cutting it off
+  private readonly lines = lineSplitter((line) => this.appLine(line), { maxLine: 8192 })
+  private readonly recent = new LineTail(TAIL_LINES, TAIL_LINE_CHARS)
 
   constructor(
     private path: string,
@@ -341,28 +343,20 @@ class AppLog {
   }
 
   stderr(chunk: Buffer): void {
-    const lines = (this.partial + chunk.toString('utf8')).split('\n')
-    this.partial = lines.pop() ?? ''
-    // So a line that never ends does not consume memory — if it gets long, it is written even if that means cutting it off
-    if (this.partial.length > 8192) {
-      lines.push(this.partial)
-      this.partial = ''
-    }
-    for (const line of lines) this.appLine(line)
+    this.lines.push(chunk)
   }
 
   flush(): void {
-    if (this.partial) this.appLine(this.partial)
-    this.partial = ''
+    this.lines.flush()
   }
 
   tail(): string {
-    return this.recent.join('\n')
+    return this.recent.text
   }
 
   /** The last lines of stderr (after masking) — a copy. An error bundle (C-6) carries away the ones from that moment */
   tailLines(): string[] {
-    return [...this.recent]
+    return this.recent.snapshot()
   }
 
   close(): void {
@@ -377,8 +371,7 @@ class AppLog {
 
   private appLine(line: string): void {
     const red = this.redact(line)
-    this.recent.push(red.length > TAIL_LINE_CHARS ? `${red.slice(0, TAIL_LINE_CHARS)}…` : red)
-    if (this.recent.length > TAIL_LINES) this.recent.shift()
+    this.recent.push(red)
     this.write(`${red}\n`)
   }
 

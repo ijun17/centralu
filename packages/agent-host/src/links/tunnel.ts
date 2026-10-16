@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createConnection, createServer } from 'node:net'
 import type { RemoteShell } from '@cc/protocol'
+import { Tail } from '../stream-text.js'
 import { isHostCrash, NodeTooOld } from './node-floor.js'
 
 /**
@@ -765,19 +766,6 @@ const STDOUT_LIMIT = 1024 * 1024
 const STDERR_KEEP = 64 * 1024
 /** How much of the end of the forward's stderr is kept, for as long as the link lives */
 const FORWARD_STDERR_KEEP = 16 * 1024
-
-/** The last `max` characters of a stream of text: memory stays at `max` however much is written */
-export class Tail {
-  private kept = ''
-  constructor(private readonly max: number) {}
-  push(chunk: string): void {
-    this.kept += chunk
-    if (this.kept.length > this.max) this.kept = this.kept.slice(-this.max)
-  }
-  get text(): string {
-    return this.kept
-  }
-}
 
 /**
  * What a stderr says once PowerShell's CLIXML is taken out. The XML is the last thing a failing
