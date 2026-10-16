@@ -9,7 +9,7 @@ import { APP_VERSION, DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY, PROTOCOL_VERSION,
 import { hostBuild, startActivityReport } from './keeper-link.js'
 import { activityCounts, type ActivitySnapshot } from './idle.js'
 import { connectHeldChildren } from './keeper/held-children.js'
-import { dataRoot, keepDataFolderPrivate, migrateLegacyDataDir } from './data-dir.js'
+import { dataRoot, keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
 import { DEFAULT_ALLOWED_ORIGINS, HostServer, parseAllowedOrigins } from './transport/server.js'
 import { deriveHttpSecret } from './transport/http.js'
 import { recordViewHandover, restoreViewHandover } from './view-handover.js'
@@ -146,7 +146,8 @@ const dbPath = values.memory ? ':memory:' : (values.db ?? defaultDbPath())
  * The data folder is its owner's only (#838), before the store or the log opens a file in it. Only the data folder
  * itself: a `--db` elsewhere (a test's temp folder, a folder of the person's) is left as it is.
  */
-const madePrivate = dbPath !== ':memory:' && dirname(dbPath) === dataRoot() ? keepDataFolderPrivate(dirname(dbPath)) : []
+const privateFolder = privateDataFolderFor(dbPath)
+const madePrivate = privateFolder ? keepDataFolderPrivate(privateFolder) : []
 
 /**
  * **Logging is turned on before anything else** (lessons HO3).

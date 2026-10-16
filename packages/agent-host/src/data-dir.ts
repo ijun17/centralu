@@ -1,8 +1,9 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { DATA_DIR } from '@cc/protocol'
 import { HOST_PLATFORM, modesGuardFiles, type Platform } from './os.js'
+import { canonicalPath } from './dev-services/path-guard.js'
 
 /**
  * Moves the pre-rename data folder to its new name (`~/.control-center` → `~/.centralu`). (legacy-name)
@@ -89,4 +90,16 @@ export function keepDataFolderPrivate(dir: string, platform: Platform = HOST_PLA
   tighten(dir, 0o700)
   for (const name of PRIVATE_FILES) tighten(join(dir, name), 0o600)
   return changed
+}
+
+/**
+ * The data folder to make private for a store at `dbPath` (#838), as its real path, or null when the store is not in
+ * the data folder (a `--db` elsewhere: a test's temp folder, a folder of the person's). Compared as real paths, so a
+ * trailing slash in `CC_DATA_DIR`, or a data folder reached through a link, still counts as the data folder, and the
+ * modes are set on the folder itself rather than skipped on the link.
+ */
+export function privateDataFolderFor(dbPath: string, root: string = dataRoot()): string | null {
+  if (dbPath === ':memory:') return null
+  const folder = canonicalPath(dirname(dbPath))
+  return folder === canonicalPath(root) ? folder : null
 }

@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, realpathSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { keepDataFolderPrivate, migrateLegacyDataDir } from './data-dir.js'
+import { join, sep } from 'node:path'
+import { keepDataFolderPrivate, migrateLegacyDataDir, privateDataFolderFor } from './data-dir.js'
 
 /**
  * This function moves **the folder holding the user's conversation history**.
@@ -110,5 +110,29 @@ describe.skipIf(process.platform === 'win32')('the data folder is its owner’s 
     chmodSync(dir, 0o755)
     expect(keepDataFolderPrivate(dir, 'win32')).toEqual([])
     expect(mode(dir)).toBe(0o755)
+  })
+})
+
+// Compared as real paths (#838 review): a trailing slash or a link to the data folder used to skip the mode fix
+describe('which folder is the data folder to make private', () => {
+  it('the store’s folder when it is the data folder, however the data folder is spelled; none elsewhere', () => {
+    const data = realpathSync(mkdtempSync(join(tmpdir(), 'cc-private-')))
+    try {
+      expect(privateDataFolderFor(join(data, 'store.db'), `${data}${sep}`)).toBe(data)
+      expect(privateDataFolderFor(join(data, 'store.db'), data)).toBe(data)
+      expect(privateDataFolderFor(join(data, 'elsewhere', 'store.db'), data)).toBeNull()
+      expect(privateDataFolderFor(':memory:', data)).toBeNull()
+      if (process.platform !== 'win32') {
+        const link = `${data}-link`
+        symlinkSync(data, link, 'dir')
+        try {
+          expect(privateDataFolderFor(join(link, 'store.db'), link)).toBe(data)
+        } finally {
+          rmSync(link)
+        }
+      }
+    } finally {
+      rmSync(data, { recursive: true, force: true })
+    }
   })
 })
