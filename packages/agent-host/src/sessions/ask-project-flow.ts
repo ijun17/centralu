@@ -222,9 +222,8 @@ export class AskProjectFlow {
     // A request of the caller's still queued there (#677): where it stands
     const held = !opts.task ? this.host.queuedOf(callerId, chosen.id) : undefined
     if (held?.ok && held.state === 'queued') return { ok: true, project: target.name, state: 'queued', sessionId: held.sessionId, sessionName: held.sessionName, queueId: held.queueId, position: held.position }
-    if (pending && !pending.settled) {
-      return { ok: false, error: `${target.name} is still working on your last task in the session "${chosen.name}". Call ask_project with project "${target.name}", session "${chosen.id}" and no task to wait for it.` }
-    }
+    const stillWorking = { ok: false as const, error: `${target.name} is still working on your last task in the session "${chosen.name}". Call ask_project with project "${target.name}", session "${chosen.id}" and no task to wait for it.` }
+    if (pending && !pending.settled) return stillWorking
     if (!opts.task) return { ok: false, error: `Give a task: what ${target.name} / ${chosen.name} should do.` }
 
     const available = (): string | undefined => {
@@ -255,6 +254,13 @@ export class AskProjectFlow {
     const changed = available()
     if (changed) return { ok: false, error: changed }
     if (signal?.aborted) return { ok: false, error: 'The call was cancelled before delivery' }
+    /*
+     * Read again after the card (#839): another call of this caller's with a task for this session may have gone in
+     * meanwhile. Its turn is the caller's own, so the busy check below lets this one through, and its delegation would be
+     * replaced. Nothing is awaited from here to `startDelegation`.
+     */
+    const current = this.host.children.delegations.get(key)
+    if (current && current !== pending && !current.settled) return stillWorking
     const busyAfter = this.host.busyForCaller(callerId, chosen.id)
     if (busyAfter && opts.ifBusy === 'queue') {
       const current = this.host.meta.get(chosen.id)!
