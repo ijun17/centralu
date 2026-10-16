@@ -3,7 +3,7 @@ import { type ApprovalDetail, type BackgroundTask, type NormalizedEvent, type Re
 import { fileEditDetail, type FileChange } from '../file-changes.js'
 import { mcpImageEvents } from '../images.js'
 import { planUpdate } from '../plan.js'
-import { firstLine, isCentraluTool } from '../tool-titles.js'
+import { firstLine, isCentraluTool, stepLine } from '../tool-titles.js'
 import { toolResultEvent } from '../tool-result.js'
 import { noticeWords } from './notices.js'
 
@@ -833,6 +833,9 @@ export function childSteps(sessionId: string, parentCallId: string, n: Notificat
   }
   const out: NormalizedEvent[] = []
   for (const e of normalizeNotification(sessionId, n)) {
+    // Each call is a line of the launch card's live output too, as a Claude subagent's are (#98, #843): the card said
+    // nothing while the child worked
+    if (e.type === 'tool_call') out.push({ type: 'tool_output_delta', sessionId, callId: parentCallId, text: `${stepLine(e.summary)}\n` })
     if (e.type === 'tool_call' || e.type === 'tool_result') out.push(step(e))
     else if (e.type === 'files_touched') out.push(e)
   }

@@ -139,6 +139,16 @@ describe("what a codex child agent did is kept under the spawnAgent card that la
     expect(steps(events)).toEqual(expected)
   })
 
+  it("writes each of the child's calls on the spawnAgent card's live output, as a Claude agent card does (#843)", async () => {
+    const { events, notify } = await session()
+    notify('item/started', spawn('item/started'))
+    notify('item/completed', spawn('item/completed'))
+    for (const [method, params] of childRun()) notify(method, params)
+    expect(events.filter((e) => e.type === 'tool_output_delta')).toEqual([
+      { type: 'tool_output_delta', sessionId: 's1', callId: SPAWN, text: "Bash: /bin/zsh -lc 'echo pong-from-child'\n" },
+    ])
+  })
+
   it('keeps what the child sent before the spawnAgent card named it — held, then replayed when the link arrives', async () => {
     const { events, notify } = await session()
     notify('item/started', spawn('item/started'))
