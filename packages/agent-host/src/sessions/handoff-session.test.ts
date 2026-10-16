@@ -44,6 +44,13 @@ class Handle implements SessionHandle {
     this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text })
     this.emit({ type: 'turn_complete', sessionId: this.sessionId })
   }
+  /** The turn ends cut short, as a Stop or the tool ends it */
+  cut(reason: string) {
+    this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason })
+  }
+  fail(message: string) {
+    this.emit({ type: 'error', sessionId: this.sessionId, error: { code: 'internal', message, retryable: false } })
+  }
   respondApproval() {
     return false
   }
@@ -87,7 +94,7 @@ beforeEach(() => {
   const adapters = new Map<ToolName, AgentAdapter>([['claude', claude], ['codex', codex]])
   mgr = new SessionManager(store, adapters, (_e: NormalizedEvent) => {}, undefined, join(root, 'worktrees'), {
     processes,
-    handoffTimings: { pollMs: 5, callMs: 400, noteMs: 5_000 },
+    handoffTimings: { callMs: 400, noteMs: 5_000 },
   })
   mgr.prLookup = async () => null
 })
@@ -249,6 +256,24 @@ describe('handoff_session (#694)', () => {
     expect(claude.handles.get(heir.id)!.sent[0]).toContain('> # Note')
   })
 
+  it('mode agent: a turn that ends without its note answers at once, saying how it ended (#428)', async () => {
+    const { target, orch } = await world('auto')
+    const h = claude.handles.get(target)!
+    const stopped = handoff(orch, { sessionId: target, mode: 'agent' })
+    await until(() => h.sent.length === 2)
+    h.cut('interrupted')
+    expect((await stopped).text).toContain('did not write its note: the turn was stopped before it finished; nothing was handed off')
+    const silent = handoff(orch, { sessionId: target, mode: 'agent' })
+    await until(() => h.sent.length === 3)
+    h.answer('')
+    expect((await silent).text).toContain('ended its turn without a note')
+    const failed = handoff(orch, { sessionId: target, mode: 'agent' })
+    await until(() => h.sent.length === 4)
+    h.fail('the CLI crashed')
+    expect((await failed).text).toContain("did not write its note: the agent's turn failed: the CLI crashed")
+    expect(named('Long run')).toHaveLength(1)
+  })
+
   it('mode agent past the call bound: "still running" with a handle, which picks up that handoff and no later one', async () => {
     const { target, orch } = await world('auto')
     const first = await handoff(orch, { sessionId: target, mode: 'agent' })
@@ -386,7 +411,8 @@ describe('the handoff wait (#428)', () => {
       toolProblem: async () => null,
       send: async () => {},
       exportHandoffNote: async () => null,
-    } as unknown as HandoffFlowHost, { pollMs: 5, callMs: 60_000, noteMs: 200 })
+      turnObservers: new Map(),
+    } as unknown as HandoffFlowHost, { callMs: 60_000, noteMs: 200 })
     const ctl = new AbortController()
     ctl.abort()
     const t0 = Date.now()

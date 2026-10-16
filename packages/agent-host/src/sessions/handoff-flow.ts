@@ -3,6 +3,7 @@ import { handoffOpening, handoffPrompt, SESSION_HANDOFF, type NormalizedEvent, t
 import type { HandoffResult } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
+import { AgentRunWait } from './app-agents.js'
 import type { HostAsk, HostAskAnswer } from './host-cards.js'
 import { trustedJsonText } from './orchestrator-tools.js'
 import { raceBound } from './with-timeout.js'
@@ -40,19 +41,19 @@ export type HandoffFlowHost = {
   exportHandoffRecord(sessionId: string, toTool?: string): Promise<{ text: string; path: string }>
   exportHandoffNote(sessionId: string, afterSeq: number): Promise<{ text: string; path: string } | null>
   onEvent(e: NormalizedEvent): void
+  /** Waits that read a session's turn as it ends (`AgentRunWait`), as start_agent's observers do */
+  readonly turnObservers: Map<string, Set<AgentRunWait>>
 }
 
 /** How the handoff waits (tests shorten them) */
 export type HandoffTimings = {
-  /** How often an agent-mode handoff looks for the note */
-  pollMs: number
   /** How long one call may wait for an agent's note before answering "still writing": under the Codex bridge's 280 s */
   callMs: number
   /** How long the note may take in all before the handoff gives up, as the window's own handoff does */
   noteMs: number
 }
 
-const TIMINGS: HandoffTimings = { pollMs: 500, callMs: 240_000, noteMs: 10 * 60_000 }
+const TIMINGS: HandoffTimings = { callMs: 240_000, noteMs: 10 * 60_000 }
 
 /**
  * One handoff the tool started. `done` is the whole of it (the record or the agent's note, then the successor), so a
@@ -208,12 +209,22 @@ export class HandoffFlow {
    */
   private async fromAgent(callerId: string, target: SessionInfo, tool: ToolName, instructions: string | undefined): Promise<HandoffResult> {
     const before = this.host.store.loadMessages(target.id, 1).at(-1)?.seq ?? 0
+    // Watched before the send, since an adapter can emit the turn's events while sending
+    const turn = new AgentRunWait(() => {}, () => target.name)
+    const readers = this.host.turnObservers.get(target.id) ?? new Set<AgentRunWait>()
+    readers.add(turn)
+    this.host.turnObservers.set(target.id, readers)
     try {
-      await this.host.send(target.id, handoffPrompt(), undefined, { sessionId: callerId, name: this.host.meta.get(callerId)?.name ?? 'Orchestrator' })
-    } catch (e) {
-      return { ok: false, error: `Could not ask ${trustedJsonText(target.name)} for its note: ${(e as Error).message}` }
+      try {
+        await this.host.send(target.id, handoffPrompt(), undefined, { sessionId: callerId, name: this.host.meta.get(callerId)?.name ?? 'Orchestrator' })
+      } catch (e) {
+        return { ok: false, error: `Could not ask ${trustedJsonText(target.name)} for its note: ${(e as Error).message}` }
+      }
+      return await this.awaitNote(callerId, target, tool, before, instructions, turn)
+    } finally {
+      readers.delete(turn)
+      if (readers.size === 0 && this.host.turnObservers.get(target.id) === readers) this.host.turnObservers.delete(target.id)
     }
-    return this.awaitNote(callerId, target, tool, before, instructions)
   }
 
   /** Waits on a run for what is left of the call's bound: its result once (then forgotten), or "still running" with its handle */
@@ -233,20 +244,22 @@ export class HandoffFlow {
     return { ok: true, state: 'writing', sessionId: run.targetId, sessionName: target?.name ?? run.targetId, handle: run.id }
   }
 
-  /** Waits for the agent's note, then starts the successor. Never throws: a failure is the result */
-  private async awaitNote(callerId: string, target: SessionInfo, tool: ToolName, before: number, instructions: string | undefined): Promise<HandoffResult> {
-    const deadline = Date.now() + this.timings.noteMs
+  /**
+   * Waits for the turn that writes the agent's note, then starts the successor. Never throws: a failure is the result.
+   * The turn's end is read as start_agent reads a child's (`AgentRunWait`, #428): one that failed, hit a limit or was
+   * stopped answers at once and says how, where polling the session's state waited out the whole bound and blamed it.
+   */
+  private async awaitNote(callerId: string, target: SessionInfo, tool: ToolName, before: number, instructions: string | undefined, turn: AgentRunWait): Promise<HandoffResult> {
+    const name = trustedJsonText(target.name)
     try {
-      for (;;) {
-        await new Promise((r) => setTimeout(r, this.timings.pollMs))
-        const cur = this.host.meta.get(target.id)
-        if (!cur) return { ok: false, error: `${trustedJsonText(target.name)} disappeared while writing its note; nothing was handed off.` }
-        if (cur.state === 'error') return { ok: false, error: `${trustedJsonText(target.name)} hit an error while writing its note; nothing was handed off. Hand it off from the record (mode "record").` }
-        if (Date.now() > deadline) return { ok: false, error: `${trustedJsonText(target.name)} wrote no note in ${Math.round(this.timings.noteMs / 60_000)} minutes; nothing was handed off.` }
-        if (inTurn(cur.state)) continue
-        const got = await this.host.exportHandoffNote(target.id, before).catch(() => null)
-        if (got) return await this.succeed(callerId, cur, tool, got, 'agent', instructions)
-      }
+      const r = await raceBound(turn.done.then(() => null, (e: Error) => e), this.timings.noteMs)
+      if (r === 'bound' || r === 'aborted') return { ok: false, error: `${name} wrote no note in ${Math.round(this.timings.noteMs / 60_000)} minutes; nothing was handed off.` }
+      if (r) return { ok: false, error: `${name} did not write its note: ${r.message}; nothing was handed off. Hand it off from the record (mode "record").` }
+      const cur = this.host.meta.get(target.id)
+      if (!cur) return { ok: false, error: `${name} disappeared while writing its note; nothing was handed off.` }
+      const got = await this.host.exportHandoffNote(target.id, before)
+      if (!got) return { ok: false, error: `${name} ended its turn without a note; nothing was handed off. Hand it off from the record (mode "record").` }
+      return await this.succeed(callerId, cur, tool, got, 'agent', instructions)
     } catch (e) {
       return { ok: false, error: `Nothing was handed off: ${(e as Error).message}` }
     }

@@ -990,7 +990,9 @@ the session to write it (`mode: "agent"`) stays an option in both.
   moves the original's live children (§1.2.5, scope `live`): **the original always stays**, and is told in its
   conversation who took over. The person removes it.
 - **Agent mode** sends the window's prompt (`handoffPrompt`, now in the protocol) as the orchestrator's message, waits
-  for the turn to end and reads the note from the store (`exportHandoffNote`). The call waits up to 240 seconds, under
+  for the turn to end and reads the note from the store (`exportHandoffNote`). The turn's end is read as start_agent
+  reads a child's (`AgentRunWait` among `turnObservers`, #428): a turn that fails, hits a limit or is stopped, or ends
+  with no note, answers at once and says which, instead of the bound's "wrote no note". The call waits up to 240 seconds, under
   the Codex bridge's 280; past that it answers "still running" with a handle, the handoff goes on, and calling again
   with `waitFor` set to that handle waits on that run. The handle's result is read once and kept at most ten minutes;
   a run nobody waits on frees its session when it ends, so a later call on that session is a new handoff. One handoff

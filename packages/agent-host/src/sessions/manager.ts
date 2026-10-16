@@ -3954,6 +3954,9 @@ export class SessionManager {
       exportHandoffRecord: (...a) => self.exportHandoffRecord(...a),
       exportHandoffNote: (...a) => self.exportHandoffNote(...a),
       onEvent: (e) => self.onEvent(e),
+      get turnObservers() {
+        return self.turnObservers
+      },
     }
   }
 
