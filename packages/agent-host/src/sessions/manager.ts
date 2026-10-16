@@ -22,6 +22,7 @@ import { agentFrame, presetWithin } from './start-agent.js'
 import { makeProjectFolder, projectFolderTarget, type ProjectFolderTarget } from '../dev-services/project-folder.js'
 import { cloneInto } from '../dev-services/project-clone.js'
 import { labelOf, orchestratorMemory, previewOf } from './transcript-view.js'
+import { clipPreview } from './turn-answer.js'
 import { RECONNECTING_FLAG_MS, interruptionAfter } from './interruptions.js'
 import { homedir } from 'node:os'
 import { basename, join, relative, resolve, sep } from 'node:path'
@@ -2597,7 +2598,7 @@ export class SessionManager {
       ? (this.store.listProjects().find((p) => p.id === target.projectId)?.name ?? '(project no longer exists)')
       : '(none)'
     const work = paused ? { paused: running, stoppable: target.askedBy === orchestratorId } : settled ? { settled } : undefined
-    await this.deliverReport(orchestratorId, sessionId, target.name, project, answer?.slice(0, 600) ?? previewOf(this.store, sessionId, 600), ending, work)
+    await this.deliverReport(orchestratorId, sessionId, target.name, project, answer !== undefined ? clipPreview(answer, 600) : previewOf(this.store, sessionId, 600), ending, work)
   }
 
   /**

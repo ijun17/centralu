@@ -1,7 +1,8 @@
 import { orchestratorHome } from './orchestrator-home.js'
 import type { SessionAppsHub } from './session-apps.js'
 import type { AgentRunRequest, AgentRunResult, AppCheckReport, AppRef, HostCapability } from '../apps/external/runtime.js'
-import { AgentRunWait, finalAnswer } from './app-agents.js'
+import { AgentRunWait } from './app-agents.js'
+import { turnAnswer } from './turn-answer.js'
 import { builderRole } from './app-builder.js'
 import type {
   Attachment,
@@ -383,7 +384,7 @@ export class AppSessions {
       const { output } = await wait.done
       // The answer is read from the store — what a person sees in that session and what the app receives are
       // the same text
-      return { sessionId: id, text: finalAnswer(this.host.store.loadMessages(id, 50)), ...(output !== undefined ? { output } : {}) }
+      return { sessionId: id, text: turnAnswer(this.host.store.loadMessages(id, 50)), ...(output !== undefined ? { output } : {}) }
     } finally {
       ctx.signal.removeEventListener('abort', onAbort)
       await this.finishAppAgent(id, wait)

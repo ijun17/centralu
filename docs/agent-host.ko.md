@@ -239,8 +239,14 @@ project export the sprites again, then tell me where the files are"에 로드하
 
 평범한 세션이 자기 프로젝트 안에서 다른 에이전트(Claude나 Codex)를 띄워 일을 맡길 수 있다. Claude 세션이 구현을
 Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는 셸의 `codex exec` 대신이다. ask_project의 기계
-(`Delegation`, `AgentRunWait`, `ASK_WAIT_MS`, `finalAnswer`) 위에 지었고, reader 묶음 안에 자기 예산을 가진다
+(`Delegation`, `AgentRunWait`, `ASK_WAIT_MS`, `turnAnswer`) 위에 지었고, reader 묶음 안에 자기 예산을 가진다
 (`AGENT_TOOLS`, `AGENT_BUDGET_CHARS`).
+
+"턴의 답"을 읽는 규칙은 `sessions/turn-answer.ts`의 `turnAnswer` 하나다(#428): 턴의 마지막 도구 호출 뒤에 남은 글이고, 추론
+요약은 건너뛰며, 메시지 사이는 문단으로 잇는다. `afterSeq`를 주면 앞선 답 뒤의 줄만 읽는다(대기열에 있던 턴에는 제 사용자 줄이
+없다). 위임, 자식, 앱의 에이전트가 이 답을 읽는다. 미리보기(`previewOf`, 보고의 "Last response")는 같은 규칙을 에이전트가
+마지막으로 쓴 글에 적용한 `lastResponse`를 읽고, `clipPreview`로 앞부분만 남기고 말줄임표를 붙인다. 연결된 기기의 세션
+(`lastWords`)도 같다.
 
 | 도구 | 인자 → 돌아오는 것 |
 |---|---|

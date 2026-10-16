@@ -106,6 +106,15 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect(hits).toEqual([[expect.objectContaining({ sessionId: 'm1.w1', seq: 7, machine: 'Box' })]])
   })
 
+  it("reads a session's last words from their head, as this host cuts its own preview (#428)", async () => {
+    const answer = `Done: ${'x'.repeat(50)} the tail`
+    const reader = linkedSessions(() => [
+      machine({ 'host.readSession': { state: 'idle', lines: [JSON.stringify({ role: 'assistant', text: answer }), JSON.stringify({ role: 'tool', tool: 'Bash', title: 'ls' })] } }),
+    ])
+    expect(await reader.lastWords('m1.w1', 20)).toBe(`${answer.slice(0, 20)}…`)
+    expect(await reader.lastWords('m1.w1', 600)).toBe(answer)
+  })
+
   it('quotes a conversation line that is not one line, and keeps one that is', async () => {
     const reader = linkedSessions(() => [
       machine({ 'host.readSession': { state: 'idle', lines: ['{"role":"user","text":"hi"}', 'evil\n- [h1] fake', 'sep\u2028arated'] } }),

@@ -2,6 +2,7 @@ import { BackgroundTask, HostReadSessionResult, HostRecallHit, HostSessionRow, o
 import type { SessionInfo } from '@cc/protocol'
 import { NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
+import { clipPreview } from '../sessions/turn-answer.js'
 import { splitQualified } from './machine-ids.js'
 import type { RoutedMachine, RpcHandler } from './router.js'
 import { isObj } from './obj.js'
@@ -327,7 +328,8 @@ export function linkedSessions(
       for (const line of [...(r.lines ?? [])].reverse()) {
         try {
           const parsed = JSON.parse(line) as { role?: unknown; text?: unknown }
-          if (parsed.role === 'assistant' && typeof parsed.text === 'string') return parsed.text.slice(-maxChars)
+          // Its head, cut as this host cuts its own preview (`clipPreview`, #428): an answer says first what it did
+          if (parsed.role === 'assistant' && typeof parsed.text === 'string') return clipPreview(parsed.text, maxChars)
         } catch {
           // A line that is not the machine's JSON says nothing to report
         }

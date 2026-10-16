@@ -1,5 +1,6 @@
 import { oneLineText, type SessionInfo, type StoredMessage } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
+import { clipPreview, lastResponse } from './turn-answer.js'
 
 /**
  * The read side of a session's transcript that the manager turns into labels, previews,
@@ -126,25 +127,15 @@ export function previewOf(reader: MessageReader, sessionId: string, maxChars = 1
   // Reading is in units of merged messages (#66) — finding the last response no longer needs hundreds of
   // rows
   const rows = reader.loadMessages(sessionId, 30)
-  const parts: string[] = []
+  const text = lastResponse(rows)
+  if (text) return clipPreview(text, maxChars)
+  // No response yet: the title of the tool call it is running says what it is doing
+  if (rows.some((x) => x.role === 'assistant')) return ''
   for (let i = rows.length - 1; i >= 0; i--) {
-    const r = rows[i]!
-    const isAssistantText = r.kind === 'text' && r.role === 'assistant'
-    if (isAssistantText) {
-      parts.unshift((r.payload as { text?: string }).text ?? '')
-      continue
-    }
-    // Hitting a different kind after collection has started means this is the start of that response
-    if (parts.length > 0) break
-    // If nothing has been collected yet, tool calls and the like are skipped to find the response before
-    // them
-    const title = (r.payload as { summary?: { title?: string } }).summary?.title
-    if (r.kind === 'tool_call' && title && rows.every((x) => x.role !== 'assistant')) {
-      return title.slice(0, maxChars)
-    }
+    const title = (rows[i]!.payload as { summary?: { title?: string } }).summary?.title
+    if (rows[i]!.kind === 'tool_call' && title) return title.slice(0, maxChars)
   }
-  const text = parts.join('').trim()
-  return text.length > maxChars ? text.slice(0, maxChars) + '…' : text
+  return ''
 }
 
 /**

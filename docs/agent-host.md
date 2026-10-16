@@ -303,8 +303,14 @@ words, read there. It runs on that machine with its own logins, folder and prese
 
 An ordinary session can start another agent, Claude or Codex, in its own project and work with it: a Claude session
 hands implementation to Codex and reviews the result, without a shell `codex exec` the app does not show. Built on
-ask_project's machinery (`Delegation`, `AgentRunWait`, `ASK_WAIT_MS`, `finalAnswer`), in the reader set with its
+ask_project's machinery (`Delegation`, `AgentRunWait`, `ASK_WAIT_MS`, `turnAnswer`), in the reader set with its
 own budget (`AGENT_TOOLS`, `AGENT_BUDGET_CHARS`).
+
+"The turn's answer" has one rule, `turnAnswer` in `sessions/turn-answer.ts` (#428): the text after the turn's last tool
+call, reasoning skipped, messages joined as paragraphs, and with `afterSeq` only the rows after the previous answer (a
+queued turn has no user row of its own). A delegation's, a child's and an app's agent's answer read it; a preview
+(`previewOf`, the report's "Last response") reads `lastResponse`, the same rule at the last text the agent wrote, and
+is cut by `clipPreview` (its head and an ellipsis), on this host and for a linked machine's session (`lastWords`) alike.
 
 | Tool | Arguments → what comes back |
 |---|---|

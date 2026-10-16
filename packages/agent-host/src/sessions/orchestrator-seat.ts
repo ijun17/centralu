@@ -314,8 +314,9 @@ export function orchestratorToolsFor(
           if (last) {
             try {
               const parsed = JSON.parse(last) as { role?: string; text?: string }
+              // Two messages of one response are two paragraphs, as `turnAnswer` joins them (#428)
               if (parsed.role === 'assistant') {
-                lines[lines.length - 1] = JSON.stringify({ ...parsed, text: `${parsed.text ?? ''}${text}` })
+                lines[lines.length - 1] = JSON.stringify({ ...parsed, text: parsed.text ? `${parsed.text}\n\n${text}` : text })
               } else {
                 lines.push(JSON.stringify({ ts: stamp(r.ts), role: 'assistant', text }))
               }

@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto'
 import type { QueuedRequest } from '../dev-services/store.js'
 import type { AgentStartRecord, AgentStartRequest, ChildOwnership, Delegation, LowMemory } from './child-ownership.js'
 import type { AppRef } from '../apps/external/runtime.js'
-import { AgentRunWait, finalAnswer } from './app-agents.js'
+import { AgentRunWait } from './app-agents.js'
+import { turnAnswer } from './turn-answer.js'
 import { ASK_WAIT_MS, clipAnswer, pathsIn, readableGrants, taskLine } from './ask-project.js'
 import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, agentName, presetWithin } from './start-agent.js'
 import { labelOf } from './transcript-view.js'
@@ -237,16 +238,24 @@ export class DelegationFlow {
    */
   private readonly agentStartReserved = new Map<string, number>()
 
+  /**
+   * Reads each turn's answer on its own (#428), from the session's record as it is when the reader is made: queued turns
+   * have no new stored user row (their input was recorded before the previous answer), so each read starts after the
+   * last one
+   */
+  private answerReader(sessionId: string): () => string {
+    let after = this.host.meta.get(sessionId)?.lastSeq ?? 0
+    return () => {
+      const answer = turnAnswer(this.host.store.loadMessages(sessionId, 50), { afterSeq: after })
+      after = this.host.meta.get(sessionId)?.lastSeq ?? after
+      return answer
+    }
+  }
+
   /** Registers the wait on the delegated session's turn (the same watcher an app's agent uses, `AgentRunWait`) */
   startDelegation(key: string, callerId: string, sessionId: string, target: { id: string; name: string; path: string }, agent = false, joinedTurn = false): Delegation {
     let notice: string | undefined
-    let answerAfter = this.host.meta.get(sessionId)?.lastSeq ?? 0
-    const wait = new AgentRunWait((message) => (notice = message), () => this.host.meta.get(sessionId)?.name ?? 'the session', undefined, () => {
-      // Queued turns have no new stored user row: their input was recorded before the previous answer.
-      const answer = finalAnswer(this.host.store.loadMessages(sessionId, 50).filter((m) => m.seq > answerAfter))
-      answerAfter = this.host.meta.get(sessionId)?.lastSeq ?? answerAfter
-      return answer
-    })
+    const wait = new AgentRunWait((message) => (notice = message), () => this.host.meta.get(sessionId)?.name ?? 'the session', undefined, this.answerReader(sessionId))
     // Detach the caller without failing the target's receipt watcher or other observers.
     let cancelWait!: (result: { ok: false; error: string }) => void
     const waitCancelled = new Promise<{ ok: false; error: string }>((resolve) => { cancelWait = resolve })
@@ -309,15 +318,14 @@ export class DelegationFlow {
   private observeTurn(child: SessionInfo, subscribe: boolean, own = false): { run: Delegation; release(): void } {
     const active = own ? undefined : this.host.agentRuns.get(child.id)
     const shared = active && !active.finished ? active : undefined
-    // A note's reader reads each turn's answer on its own, as a delegation does: queued turns have no user row between them
-    let answerAfter = this.host.meta.get(child.id)?.lastSeq ?? 0
+    /*
+     * A note's reader reads each turn's answer on its own, as a delegation does: it is made before its note goes in. An
+     * observer is made in the middle of a turn whose start it never saw, so the rows already written may be this turn's
+     * answer: it reads the turn's answer as the record ends
+     */
     const wait = shared ?? new AgentRunWait(() => {}, () => child.name, undefined, own
-      ? () => {
-          const answer = finalAnswer(this.host.store.loadMessages(child.id, 50).filter((m) => m.seq > answerAfter))
-          answerAfter = this.host.meta.get(child.id)?.lastSeq ?? answerAfter
-          return answer
-        }
-      : () => finalAnswer(this.host.store.loadMessages(child.id, 50)))
+      ? this.answerReader(child.id)
+      : () => turnAnswer(this.host.store.loadMessages(child.id, 50)))
     const project = this.host.store.listProjects().find((p) => p.id === child.projectId)
     const target = { id: child.projectId ?? '', name: project?.name ?? '', path: this.host.store.sessionCwd(child.id) ?? project?.path ?? '' }
     if (!shared && subscribe) {
@@ -1507,7 +1515,7 @@ export class DelegationFlow {
       sessionId: child.id,
       sessionName: child.name,
       tool: child.tool,
-      answer: clipAnswer(finalAnswer(this.host.store.loadMessages(child.id, 50)), child.name),
+      answer: clipAnswer(turnAnswer(this.host.store.loadMessages(child.id, 50)), child.name),
       sessionState: child.state,
       ...(child.interruption ? { interruption: child.interruption } : {}),
       ...(notice ? { notice } : {}),
@@ -1630,7 +1638,7 @@ export class DelegationFlow {
       if (r === 'bound') return this.agentWorking(d, !observing, observing)
       if (!observing) this.host.children.dropDelegation(key, d)
       if (!r.ok) return { ok: false, error: `"${name()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or give it a clearer task.` }
-      const answer = r.answer ?? finalAnswer(this.host.store.loadMessages(d.sessionId, 50))
+      const answer = r.answer ?? turnAnswer(this.host.store.loadMessages(d.sessionId, 50))
       if (observing) return {
         ok: true, state: 'done', sessionId: d.sessionId, sessionName: name(),
         tool: this.host.meta.get(d.sessionId)?.tool ?? '', answer: clipAnswer(answer, name()), readable: [], outside: [],

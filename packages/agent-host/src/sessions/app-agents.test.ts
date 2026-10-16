@@ -6,7 +6,7 @@ import type { ExternalApps } from '../apps/external/runtime.js'
 import { PROJECT_APPS, plantApp, until } from '../apps/external/test-helpers.js'
 import type { Store } from '../dev-services/store.js'
 import type { createRpcHandler } from '../rpc.js'
-import { finalAnswer } from './app-agents.js'
+import { turnAnswer } from './turn-answer.js'
 import { brokerSaid, brokerWorld, type BrokerWorld, type FakeAdapter } from './app-broker.test-helpers.js'
 import { appMessageFrame, type SessionManager } from './manager.js'
 
@@ -335,7 +335,9 @@ describe('the frame and the final answer', () => {
 
   it('the final answer is the text after the last tool call — a plan before a tool call is not an answer', () => {
     const row = (seq: number, role: 'user' | 'assistant' | 'system', kind: string, text = '') => ({ sessionId: 's', seq, role, kind, payload: { text }, ts: seq }) as never
-    expect(finalAnswer([row(1, 'user', 'text', 'q'), row(2, 'assistant', 'text', 'plan'), row(3, 'system', 'tool_call'), row(4, 'assistant', 'reasoning', 'hmm'), row(5, 'assistant', 'text', 'answer')])).toBe('answer')
-    expect(finalAnswer([row(1, 'user', 'text', 'q'), row(2, 'assistant', 'text', 'plan'), row(3, 'system', 'tool_result')])).toBe('')
+    expect(turnAnswer([row(1, 'user', 'text', 'q'), row(2, 'assistant', 'text', 'plan'), row(3, 'system', 'tool_call'), row(4, 'assistant', 'reasoning', 'hmm'), row(5, 'assistant', 'text', 'answer')])).toBe('answer')
+    expect(turnAnswer([row(1, 'user', 'text', 'q'), row(2, 'assistant', 'text', 'plan'), row(3, 'system', 'tool_result')])).toBe('')
+    // A queued turn has no user row of its own: only the rows after the previous answer are its own (#428)
+    expect(turnAnswer([row(1, 'user', 'text', 'q1'), row(2, 'user', 'text', 'q2'), row(3, 'assistant', 'text', 'one'), row(4, 'assistant', 'text', 'two')], { afterSeq: 3 })).toBe('two')
   })
 })

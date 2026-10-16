@@ -41,7 +41,17 @@ describe('labelOf', () => {
 describe('previewOf', () => {
   it('joins the last response and cuts it at 120 characters by default', () => {
     const reader = readerOf([text('user', 'q'), text('assistant', 'a'.repeat(100)), text('assistant', 'b'.repeat(100))])
-    expect(previewOf(reader, 's1')).toBe(`${'a'.repeat(100)}${'b'.repeat(20)}…`)
+    expect(previewOf(reader, 's1')).toBe(`${'a'.repeat(100)}\n\n${'b'.repeat(18)}…`)
+  })
+
+  it('reads the response as the turn\'s answer reads it: a reasoning summary between its messages does not cut it (#428)', () => {
+    const reader = readerOf([
+      text('user', 'q'),
+      text('assistant', 'Part one.'),
+      { role: 'assistant', kind: 'reasoning', payload: { text: 'thinking' }, ts: TS },
+      text('assistant', 'Part two.'),
+    ])
+    expect(previewOf(reader, 's1')).toBe('Part one.\n\nPart two.')
   })
 
   it('skips tool calls after the last response', () => {

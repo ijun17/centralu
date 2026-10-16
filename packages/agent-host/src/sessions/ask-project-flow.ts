@@ -1,5 +1,5 @@
 import type { Delegation } from './child-ownership.js'
-import { finalAnswer } from './app-agents.js'
+import { turnAnswer } from './turn-answer.js'
 import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, readableGrants, taskLine, type AskableProject } from './ask-project.js'
 import { labelOf, lastActiveOf } from './transcript-view.js'
 import type { SessionState } from '@cc/protocol'
@@ -492,7 +492,7 @@ export class AskProjectFlow {
             : `${d.target.name}'s session "${sessionName()}" [${d.sessionId}] did not finish: ${r.error}. Tell the person, or ask again with a clearer task.`,
         }
       }
-      const answer = r.answer ?? finalAnswer(this.host.store.loadMessages(d.sessionId, 50))
+      const answer = r.answer ?? turnAnswer(this.host.store.loadMessages(d.sessionId, 50))
       const { granted, outside } = readableGrants(pathsIn(answer), d.target.path)
       if (granted.length) {
         const set = this.host.readGrants.get(d.callerId) ?? new Set<string>()

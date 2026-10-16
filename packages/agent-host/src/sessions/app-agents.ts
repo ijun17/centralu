@@ -1,4 +1,4 @@
-import type { NormalizedEvent, StoredMessage } from '@cc/protocol'
+import type { NormalizedEvent } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
 
 /**
@@ -8,33 +8,8 @@ import { INTERRUPTED_BY_TOOL } from '../adapters/contract.js'
  * Standing the session up and waiting for it is the manager's job (`SessionManager.runAppAgent`).
  * The frame around the text it sends is the same one used for in-conversation UI messages
  * (`app-messages.ts`'s `appMessageFrame`). What lives here is only what comes after: waiting for the
- * turn's outcome, and the rule for picking the final answer out of the conversation record.
+ * turn's outcome; the rule for picking the final answer out of the record is `turnAnswer` (turn-answer.ts).
  */
-
-/**
- * The final answer of a turn — the agent's text standing after the last tool call at the end of
- * the conversation record.
- *
- * Why it is "the text after the last tool call" and not simply "the last piece of text": an agent
- * writes text, calls a tool, and writes again. Text before a tool call is a plan, not an answer.
- * A reasoning summary (`reasoning`) is skipped since it is not an answer, and the scan stops the
- * moment it meets a tool call, a tool result, an approval, a marker or something a person said.
- * If there is no text at the end (the turn ended on a tool call), the answer is empty — an
- * earlier plan is never handed back pretending to be the answer.
- */
-export function finalAnswer(messages: readonly StoredMessage[]): string {
-  const parts: string[] = []
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i]!
-    if (m.role === 'assistant' && m.kind === 'reasoning') continue
-    if (m.role === 'assistant' && m.kind === 'text') {
-      parts.unshift(String((m.payload as { text?: unknown }).text ?? ''))
-      continue
-    }
-    break
-  }
-  return parts.join('\n\n').trim()
-}
 
 /**
  * One session an app is waiting on for an answer (M4 D-1) — decides the outcome of its turn by
