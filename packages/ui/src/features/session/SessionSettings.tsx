@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { isPlainEscape } from '../../app/keys.js'
+import { useDismiss } from '../../components/useDismiss.js'
 import { ChevronIcon } from '../../components/icons.jsx'
 import type { ModelOption, PermissionPreset, ToolName } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -221,6 +221,7 @@ export function SessionSettings({
     setClosing(true)
   }, [])
   const rootRef = useRef<HTMLSpanElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
 
   const current = models.find((m) => m.id === model)
   // A model not in the list (set directly, or fetched while the list could not be read) is kept
@@ -235,24 +236,7 @@ export function SessionSettings({
    * handled here in one place. (When a confirmation dialog opens, this closes first, so Esc is
    * never consumed by two places at once.)
    */
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) close()
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (!isPlainEscape(e)) return
-      // The inbox and modals must not close along with it — only the innermost open thing closes
-      e.stopPropagation()
-      close()
-    }
-    window.addEventListener('mousedown', onDown, true)
-    window.addEventListener('keydown', onKey, true)
-    return () => {
-      window.removeEventListener('mousedown', onDown, true)
-      window.removeEventListener('keydown', onKey, true)
-    }
-  }, [open, close])
+  useDismiss({ open, onClose: close, refs: [rootRef], returnFocusTo: triggerRef })
 
   // With reduced-motion, animationend never fires — a timer guarantees it finishes
   useEffect(() => {
@@ -297,6 +281,7 @@ export function SessionSettings({
   return (
     <span className="relative flex min-w-0 items-center" ref={rootRef}>
       <button
+        ref={triggerRef}
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}

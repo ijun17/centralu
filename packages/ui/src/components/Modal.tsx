@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react'
-import { isPlainEscape } from '../app/keys.js'
+import { useDismiss } from './useDismiss.js'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store/store.js'
 import { useFocusReturn } from './focusReturn.js'
@@ -49,15 +49,8 @@ export function Modal({
   align?: 'center' | 'top'
 }) {
   useOpenLayer()
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!isPlainEscape(e)) return
-      e.stopPropagation()
-      onClose()
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [onClose])
+  // Escape only: the scrim below takes the outside press, and a modal stays up when the window loses focus
+  useDismiss({ onClose })
 
   return createPortal(
     <div

@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Interruption, SessionState } from '@cc/protocol'
 import { useCapability } from '../app/PlatformProvider.jsx'
+import { useAnchoredPlacement } from './anchored.js'
 
 /**
  * The state indicator (FR-12).
@@ -146,37 +147,13 @@ export function Tooltip({
    * modal's scroll box). An absolute inside the trigger is guaranteed to be clipped by an
    * overflow somewhere among its ancestors — a sidebar button's tooltip (overflow-y-auto) was
    * standing on the exact same mine. Floating it relative to the viewport leaves no box to be
-   * clipped by. The calculation follows the same rule as RowMenu (the sidebar menu): zoom
-   * (--text-zoom) is already multiplied into the rect and would be multiplied again into a fixed
-   * length, so everything is converted to layout px and calculated in one coordinate system.
+   * clipped by. Placed by the same rule as every popover (anchored.ts): `placement` is the side tried first and it
+   * flips when the window has no room there — a default direction, not a guarantee.
    */
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
-  useLayoutEffect(() => {
-    if (!open) {
-      setPos(null)
-      return
-    }
-    const a = anchorRef.current
-    const el = tipRef.current
-    if (!a || !el) return
-    const zoom = Number(getComputedStyle(document.documentElement).getPropertyValue('--text-zoom')) || 1
-    const r = a.getBoundingClientRect()
-    const w = el.offsetWidth
-    const h = el.offsetHeight
-    const winW = window.innerWidth / zoom
-    const winH = window.innerHeight / zoom
-    const GAP = 4
-    const EDGE = 8
-    let top = placement === 'top' ? r.top / zoom - GAP - h : r.bottom / zoom + GAP
-    // Flips to the other side if it would go past the window — placement is a default direction, not a guarantee
-    if (placement === 'bottom' && top + h > winH - EDGE) top = r.top / zoom - GAP - h
-    else if (placement === 'top' && top < EDGE) top = r.bottom / zoom + GAP
-    const left = Math.max(
-      EDGE,
-      Math.min(align === 'right' ? r.right / zoom - w : r.left / zoom, winW - EDGE - w),
-    )
-    setPos({ top, left })
-  }, [open, placement, align])
+  const pos = useAnchoredPlacement(anchorRef, tipRef, open, {
+    align,
+    side: placement === 'top' ? 'above' : 'below',
+  })
   /*
    * Only scrolling an ancestor can move the anchor and make the measured position stale.
    * Conversation auto-follow also emits scroll events during an answer; closing on those

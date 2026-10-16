@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
-import { isPlainEscape } from '../app/keys.js'
+import { useRef, useState, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { GRID_SPAN_MAX, type GridSpan } from '@cc/protocol'
 import { useAnchoredPlacement } from './anchored.js'
+import { useDismiss } from './useDismiss.js'
 
 /**
  * Picking an app panel's span on the grid, in cells (#306) — the panel's top bar and Settings → Apps use the same
@@ -54,30 +54,9 @@ export function SpanButton({
 
   /*
    * Closes on an outside click, Esc, or the window losing focus — a click into an app's view never reaches this
-   * document as a mousedown, but it takes focus out of it.
+   * document as a mousedown, but it takes focus out of it (useDismiss). Esc gives focus back to the button.
    */
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (!buttonRef.current?.contains(t) && !popRef.current?.contains(t)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (!isPlainEscape(e)) return
-      e.stopPropagation()
-      setOpen(false)
-      buttonRef.current?.focus()
-    }
-    const onBlur = () => setOpen(false)
-    window.addEventListener('mousedown', onDown, true)
-    window.addEventListener('keydown', onKey, true)
-    window.addEventListener('blur', onBlur)
-    return () => {
-      window.removeEventListener('mousedown', onDown, true)
-      window.removeEventListener('keydown', onKey, true)
-      window.removeEventListener('blur', onBlur)
-    }
-  }, [open])
+  useDismiss({ open, onClose: () => setOpen(false), refs: [buttonRef, popRef], returnFocusTo: buttonRef })
 
   const hint = clamped && shown ? `This window fits ${spanWords(shown)}, so it stands at that until there is room` : null
   return (

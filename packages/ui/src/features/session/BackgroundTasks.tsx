@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
-import { isPlainEscape } from '../../app/keys.js'
 import { createPortal } from 'react-dom'
 import { backgroundCount } from '@cc/core'
 import type { BackgroundTask } from '@cc/protocol'
 import { useAnchoredPlacement } from '../../components/anchored.js'
+import { useDismiss } from '../../components/useDismiss.js'
 import { ChevronIcon } from '../../components/icons.jsx'
 import { useStore } from '../../store/store.js'
 
@@ -56,27 +56,11 @@ export function BackgroundTasksBadge({
   const shown = count > 0 || ended.length > 0
 
   /*
-   * Closes on an outside click or Esc, like the session settings menu — an open list must not wall off the header.
-   * "Outside" is outside both the button and the list: the list is not inside the button's box in the DOM any more.
+   * Closes on an outside click, Esc or the window losing focus (useDismiss), like the session settings menu — an open
+   * list must not wall off the header. "Outside" is outside both the button and the list: the list is not inside the
+   * button's box in the DOM any more.
    */
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node
-      if (!buttonRef.current?.contains(t) && !listRef.current?.contains(t)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (!isPlainEscape(e)) return
-      e.stopPropagation()
-      setOpen(false)
-    }
-    window.addEventListener('mousedown', onDown, true)
-    window.addEventListener('keydown', onKey, true)
-    return () => {
-      window.removeEventListener('mousedown', onDown, true)
-      window.removeEventListener('keydown', onKey, true)
-    }
-  }, [open])
+  useDismiss({ open, onClose: () => setOpen(false), refs: [buttonRef, listRef], returnFocusTo: buttonRef })
   // The last one cleared — nothing left to hold open
   useEffect(() => {
     if (!shown) setOpen(false)

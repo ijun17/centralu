@@ -1,12 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { isPlainEscape } from '../../app/keys.js'
 import type { DragEvent as ReactDragEvent } from 'react'
 import type { FsEntry } from '@cc/platform/ports'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { useProjectMachine } from '../../store/selectors.js'
 import { useRemoteIde, type RemoteIde } from '../machines/remoteIde.js'
+import { useAnchoredPlacement } from '../../components/anchored.js'
 import { ChevronIcon } from '../../components/icons.jsx'
+import { useDismiss } from '../../components/useDismiss.js'
 import { iconForFile } from './fileIcon.js'
 import { hasDragFiles, hasDragPath, readDragPath, setDragPath } from './dragPath.js'
 import { TabActions } from '../evidence/tabActions.jsx'
@@ -505,54 +506,41 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
   const rootRef = useRef<HTMLDivElement>(null)
 
   /*
-   * Closes on an outside click and on Escape (the same handling as SessionSettings).
+   * Closes on an outside click, on Escape, and when the window loses focus (useDismiss, shared with the other popovers).
    * **It has to exclude itself** — mousedown fires before click, so closing it even for a click
    * inside would make the menu disappear the instant an item is pressed, and the click would land
    * on nothing.
    */
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) close()
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (!isPlainEscape(e)) return
-      // Only the innermost open thing closes — the inbox or a modal must not close along with it
-      e.stopPropagation()
-      close()
-    }
-    window.addEventListener('mousedown', onDown, true)
-    window.addEventListener('keydown', onKey, true)
-    return () => {
-      window.removeEventListener('mousedown', onDown, true)
-      window.removeEventListener('keydown', onKey, true)
-    }
-  }, [close])
+  useDismiss({ onClose: close, refs: [rootRef] })
+  /*
+   * Placed after converting to layout pixels (#183), at the click: the coordinates in `state` are screen pixels already
+   * multiplied by zoom (--text-zoom), but the left/top set here are lengths inside the zoomed root (anchored.ts). The
+   * menu is measured, so near the right or bottom edge of the window it comes up and to the left of the pointer, whatever
+   * its size.
+   */
+  const place = useAnchoredPlacement({ x: state.x, y: state.y }, rootRef, true)
+  const shell = {
+    ref: rootRef,
+    role: 'menu',
+    'data-testid': 'file-menu',
+    className:
+      'fixed z-40 w-56 overflow-y-auto rounded-md border border-line bg-surface-raised shadow-(--shadow-popover)',
+    style: {
+      left: place?.left ?? 0,
+      top: place?.top ?? 0,
+      maxHeight: place?.maxHeight,
+      visibility: place ? 'visible' : 'hidden',
+    } as const,
+  }
 
   const { target } = state
-  /*
-   * Placed after converting to layout pixels (#183) — the same rule as the sidebar menu (RowMenu).
-   * The click coordinates and the window size are screen pixels already multiplied by zoom
-   * (--text-zoom), but the left/top set here are lengths inside the zoomed root, so zoom gets
-   * multiplied in a second time when rendered. Used as-is, the menu appeared below and to the right
-   * of the click at zoom 1.25, and near the right edge of the window it ran off the window entirely.
-   */
-  const zoom = Number(getComputedStyle(document.documentElement).getPropertyValue('--text-zoom')) || 1
   /*
    * A project on a linked machine (#82): neither this computer's file manager nor its trash holds that machine's file,
    * so the menu has the one verb that reaches it. A folder opens as a VS Code folder, a file as a file.
    */
   if (remoteIde) {
     return (
-      <div
-        ref={rootRef}
-        role="menu"
-        data-testid="file-menu"
-        className="fixed z-40 w-56 overflow-hidden rounded-md border border-line bg-surface-raised shadow-(--shadow-popover)"
-        style={{
-          left: Math.min(state.x / zoom, window.innerWidth / zoom - 232),
-          top: Math.min(state.y / zoom, window.innerHeight / zoom - 40),
-        }}
-      >
+      <div {...shell}>
         <button
           type="button"
           role="menuitem"
@@ -570,17 +558,7 @@ function RowMenu({ state, close }: { state: MenuState; close: () => void }) {
     )
   }
   return (
-    <div
-      ref={rootRef}
-      role="menu"
-      data-testid="file-menu"
-      className="fixed z-40 w-56 overflow-hidden rounded-md border border-line bg-surface-raised shadow-(--shadow-popover)"
-      // Opening it near the edge of the screen would push the menu off the window — pulled back inward
-      style={{
-        left: Math.min(state.x / zoom, window.innerWidth / zoom - 232),
-        top: Math.min(state.y / zoom, window.innerHeight / zoom - 76),
-      }}
-    >
+    <div {...shell}>
       <button
         type="button"
         role="menuitem"

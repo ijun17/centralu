@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { RelativeAge } from '../../components/RelativeAge.jsx'
-import { isPlainEscape } from '../../app/keys.js'
+import { useDismiss } from '../../components/useDismiss.js'
 import type { GitCommit, GitFileStatus } from '@cc/protocol'
 import { laneCount, layoutCommits } from '@cc/core'
 import { CommitGraph, ROW_H } from '../../components/CommitGraph.jsx'
@@ -472,21 +472,15 @@ const dropsLeft = (rect: { left: number; width: number }, clientX: number): bool
  */
 function MoreTabs({ gi, hidden, onPick }: { gi: number; hidden: PanelTab[]; onPick: (t: PanelTab) => void }) {
   const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
 
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (!isPlainEscape(e)) return
-      e.stopPropagation()
-      setOpen(false)
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [open])
+  // The backdrop below catches the outside press, and covers an app's view, so there is no blur to wait for
+  useDismiss({ open, onClose: () => setOpen(false), returnFocusTo: triggerRef })
 
   return (
     <div className="relative shrink-0">
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         data-testid={gi === 0 ? 'evidence-tabs-more' : `evidence-tabs-more-${gi}`}

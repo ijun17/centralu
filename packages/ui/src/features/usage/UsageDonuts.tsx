@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { isPlainEscape } from '../../app/keys.js'
+import { useDismiss } from '../../components/useDismiss.js'
 import type { CacheStats, MachineInfo, ToolName, UsageSnapshot } from '@cc/protocol'
 import { MACHINE_STATUS_LABEL, cacheTooltipLine } from '@cc/core'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -208,17 +208,8 @@ export function UsageDonuts() {
   }
   const isOpen = (machine: string | null, tool: ToolName) => open?.machine === machine && open.tool === tool
 
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (!isPlainEscape(e)) return
-      e.stopPropagation()
-      show(null)
-    }
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
+  // The backdrop catches the outside press and covers an app's view, so only Escape is handled here
+  useDismiss({ open: open !== null, onClose: () => show(null) })
 
   /*
    * When disconnected, that fact stands in place of the donuts. One breathing dot and one word
