@@ -2,10 +2,11 @@ import type { Delegation } from './child-ownership.js'
 import { finalAnswer } from './app-agents.js'
 import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, readableGrants, taskLine, type AskableProject } from './ask-project.js'
 import { labelOf, lastActiveOf } from './transcript-view.js'
-import { isInTurn, type SessionState } from '@cc/protocol'
+import type { SessionState } from '@cc/protocol'
 import { NOT_REACHABLE } from '../adapters/contract.js'
 import type { AskProjectResult, RoutedCard, LinkedProject, LinkedSessions } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
+import { linkedTurnEnd, type LinkedTurnEvent } from './linked-turn-end.js'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 
 /** How much of a linked machine's last message is read for an answer; `clipAnswer` then cuts it to the usual size */
@@ -69,29 +70,22 @@ export class AskProjectFlow {
     }
   }
 
-  /** A linked machine's event for a session an ask_project is waiting on: the turn ends as `observeLinked` judges it (#166) */
-  observeLinkedAsk(ask: LinkedAsk, e: { type: string; state?: unknown; error?: { message?: string } }): void {
+  /** A linked machine's event for a session an ask_project is waiting on: the turn ends as `linkedTurnEnd` reads it (#166, #428) */
+  observeLinkedAsk(ask: LinkedAsk, e: LinkedTurnEvent): void {
     if (ask.settled) return
-    const busy = isInTurn(e.state)
-    if (e.type === 'approval_request' || e.type === 'question_request') {
+    const step = linkedTurnEnd(ask.busy, e)
+    if (!step) return
+    if (step.step === 'busy') {
       ask.busy = true
-      ask.notice = e.type === 'approval_request' ? 'it waits on the person to answer an approval there' : 'it waits on the person to answer a question there'
+      if (!step.waits) return
+      ask.notice = step.waits === 'approval' ? 'it waits on the person to answer an approval there' : 'it waits on the person to answer a question there'
       for (const wake of [...ask.wake]) wake()
       return
     }
-    if (e.type === 'approval_resolved' || e.type === 'question_resolved') {
-      ask.notice = undefined
-      return
-    }
-    if (e.type === 'message_delta' || e.type === 'tool_call' || (e.type === 'state_change' && busy)) {
-      ask.busy = true
-      return
-    }
-    if (e.type === 'error' || e.type === 'limit_reached') {
-      ask.settle({ ok: false, error: e.error?.message ?? (e.type === 'limit_reached' ? 'the session reached its usage limit' : 'the session reported an error') })
-      return
-    }
-    if (e.type === 'turn_complete' || (e.type === 'state_change' && ask.busy && !busy)) ask.settle({ ok: true })
+    if (step.step === 'card_closed') ask.notice = undefined
+    else if (step.step === 'completed') ask.settle({ ok: true })
+    else if (step.step === 'failed') ask.settle({ ok: false, error: step.error })
+    else ask.settle({ ok: false, error: 'the session was deleted there before its turn ended' })
   }
 
   /**

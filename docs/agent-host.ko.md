@@ -323,6 +323,9 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
    불렀고, 읽기 전용 조사로 띄운 자식에게 파일 수정까지 맡겼다). 설명이 아니라 답에 둔다. 답은 보이기 전까지 비용이 없다.
 
    허브의 오케스트레이터가 `reportBack`으로 연결된 머신의 세션에 일을 보냈을 때도 같다(#723, `sessions/linked-reports.ts`).
+   머신의 턴이 끝났는지는 그 머신에 맡긴 ask_project와 같은 함수로 읽는다(`linkedTurnEnd`, `sessions/linked-turn-end.ts`, #428):
+   그곳의 승인이나 질문은 도는 턴이고(작업 중 상태도 `isInTurn`으로 같다), 오류와 사용량 한도는 끝나지 못한 턴이다. 중단은 턴이 도는 것을 본 뒤에만 끝나지 못한 턴으로 친다(로컬의 `AgentRunWait`와 같다, #698). 그 전의 중단은 맡긴 일이 아니라 그 앞의 턴을 끝낸 것이다.
+   그곳에서 지워진 세션은 기다리던 ask_project를 끝낸다.
    허브는 머신의 연결이 올라올 때마다(`machine_resync`: 첫 연결, 끊긴 뒤, 허브가 시작한 뒤) 그 머신의 `sessions.list`에서
    세션마다 작업 목록을 통째로 읽는다(`LinkedSessions.backgroundTasks`). 머신은 작업이 바뀔 때만 다시 알리기 때문이다. 그 뒤로는
    머신이 전해 주는 `background_tasks` 이벤트로 목록을 고친다(`applyBackgroundTasks`). 읽는 사이에 온 변경이 더 새것이므로 남긴다. 그 머신의

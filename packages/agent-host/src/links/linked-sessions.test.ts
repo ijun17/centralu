@@ -276,6 +276,29 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
     await Promise.all(cleanup.splice(0).map((c) => c()))
   })
 
+  it("the person stopping the turn before the instruction's is not the instruction's end (#428)", async () => {
+    const h = await hub()
+    await h.send(true)
+    h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'waiting_input', reason: 'interrupted' })
+    await h.settle(0)
+    expect(h.reports()).toEqual([])
+    h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'working' })
+    h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+    await h.settle(1)
+    expect(h.reports()).toEqual([expect.stringContaining('[Centralu] The assigned work finished.')])
+    await Promise.all(cleanup.splice(0).map((c) => c()))
+  })
+
+  it('a question there is a running turn, whose end then reports (#428)', async () => {
+    const h = await hub()
+    await h.send(true)
+    h.mgr.observeLinked({ type: 'question_request', sessionId: 'm1.w1' })
+    h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'idle' })
+    await h.settle(1)
+    expect(h.reports()).toEqual([expect.stringContaining('[Centralu] The assigned work stopped before finishing.')])
+    await Promise.all(cleanup.splice(0).map((c) => c()))
+  })
+
   it('says how the turn ended, reports once, and only what was asked for', async () => {
     const h = await hub()
     await h.send(true)

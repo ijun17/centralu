@@ -1,5 +1,6 @@
-import { applyBackgroundTasks, isInTurn, liveBackgroundTasks, type BackgroundTask, type NormalizedEvent } from '@cc/protocol'
+import { applyBackgroundTasks, liveBackgroundTasks, type BackgroundTask, type NormalizedEvent } from '@cc/protocol'
 import type { LinkedSessions } from '../adapters/contract.js'
+import { linkedTurnEnd } from './linked-turn-end.js'
 import { PAUSED_REPORT_SETTLE_MS, type ChildOwnership, type LinkedReport } from './child-ownership.js'
 
 /** The work a report is about, as `deliverReport` words its first line (#721, #723) */
@@ -37,6 +38,7 @@ export type LinkedEvent = {
   type: string
   sessionId?: unknown
   state?: unknown
+  reason?: unknown
   error?: { message?: string }
   machine?: unknown
   machineId?: unknown
@@ -101,16 +103,14 @@ export class LinkedReports {
       if (wait.paused) this.settleLater(sessionId, wait)
       return
     }
-    const busy = isInTurn(e.state)
-    if (e.type === 'message_delta' || e.type === 'tool_call' || e.type === 'approval_request' || (e.type === 'state_change' && busy)) {
+    const step = linkedTurnEnd(wait.busy, e)
+    if (step?.step === 'busy') {
       wait.busy = true
       // A turn runs: its own end reports
       this.stopSettling(sessionId)
       return
     }
-    const ended =
-      e.type === 'turn_complete' || e.type === 'error' || e.type === 'limit_reached' || (e.type === 'state_change' && wait.busy && !busy)
-    if (!ended) return
+    if (step?.step !== 'completed' && step?.step !== 'failed') return
     // Only a turn that completed is paused: a failed or stopped one is reported as it ended (#698)
     const running = e.type === 'turn_complete' ? this.ownTasksRunning(sessionId) : []
     if (running.length) {

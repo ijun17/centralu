@@ -72,4 +72,47 @@ describe('a linked machine (#700)', () => {
       'm1.s1: the link to Laptop dropped before the turn ended. The task was delivered and may still be running there; read the session once the link is back',
     ])
   })
+
+  /** An ask waiting on `m1.s1`, its outcome as the call would read it */
+  const linkedAsk = () => {
+    const outcomes: unknown[] = []
+    const ask = { busy: false, settled: false, wake: new Set<() => void>(), settle: (r: unknown) => void outcomes.push(r) } as unknown as Parameters<AskProjectFlow['observeLinkedAsk']>[0]
+    ask.settle = (r) => {
+      ask.settled = true
+      outcomes.push(r)
+    }
+    return { ask, outcomes }
+  }
+
+  it('a session deleted there ends the ask, which would otherwise wait for a turn that never ends (#428)', () => {
+    const flow = new AskProjectFlow(hostWith({}))
+    const { ask, outcomes } = linkedAsk()
+    flow.observeLinkedAsk(ask, { type: 'message_delta' })
+    flow.observeLinkedAsk(ask, { type: 'session_deleted' })
+    expect(outcomes).toEqual([{ ok: false, error: 'the session was deleted there before its turn ended' }])
+  })
+
+  it('an interrupted turn there did not finish, as a local agent run reads it (#698, #428)', () => {
+    const flow = new AskProjectFlow(hostWith({}))
+    const stopped = linkedAsk()
+    flow.observeLinkedAsk(stopped.ask, { type: 'message_delta' })
+    flow.observeLinkedAsk(stopped.ask, { type: 'state_change', state: 'waiting_input', reason: 'interrupted' })
+    expect(stopped.outcomes).toEqual([{ ok: false, error: 'the turn was stopped before it finished' }])
+    const byTool = linkedAsk()
+    flow.observeLinkedAsk(byTool.ask, { type: 'tool_call' })
+    flow.observeLinkedAsk(byTool.ask, { type: 'state_change', state: 'waiting_input', reason: 'interrupted_by_tool' })
+    expect(byTool.outcomes).toEqual([{ ok: false, error: 'its tool interrupted the turn before it finished' }])
+  })
+
+  it('a stop before the task\'s turn was seen running ends the turn before it, not this one (#428)', () => {
+    const flow = new AskProjectFlow(hostWith({}))
+    const { ask, outcomes } = linkedAsk()
+    // The person stops the turn that was running when the task went in
+    flow.observeLinkedAsk(ask, { type: 'state_change', state: 'waiting_input', reason: 'interrupted' })
+    expect(outcomes).toEqual([])
+    // The task's own turn then runs and ends
+    flow.observeLinkedAsk(ask, { type: 'state_change', state: 'working' })
+    flow.observeLinkedAsk(ask, { type: 'turn_complete' })
+    expect(outcomes).toEqual([{ ok: true }])
+  })
 })
