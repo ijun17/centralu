@@ -211,7 +211,7 @@ describe('codex approval requests', () => {
 
   it("a file-change item its turn ended without completing is forgotten with that turn, a child's with the child's (#392)", async () => {
     const { handle, events, client } = await createLiveSession()
-    const kept = () => (handle as unknown as { fileChanges: Map<string, unknown> }).fileChanges
+    const kept = () => (handle as unknown as { serverRequests: { fileChanges: Map<string, unknown> } }).serverRequests.fileChanges
     const turn = measuredRequest.params.turnId
     const childItem = { ...measuredItem('inProgress'), id: 'child-fc' }
 

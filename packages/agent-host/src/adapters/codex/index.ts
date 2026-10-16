@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+
 import { execFile } from 'node:child_process'
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
@@ -14,7 +14,6 @@ import { CLIENT_INFO, parseCliVersion } from '@cc/protocol'
 import type {
   AdapterCapabilities,
   ApprovalDecision,
-  ApprovalDetail,
   ApprovalScope,
   SessionActivity,
   ToolDescriptor,
@@ -23,7 +22,7 @@ import { whichTool } from '../../env-path.js'
 import { launchFor } from '../../tool-launch.js'
 import { installedCliVersion } from '../../cli-version.js'
 import { INTERRUPTED_BY_TOOL, type AgentAdapter, type CreateSessionOpts, type DetectResult, type EventSink, type SessionHandle } from '../contract.js'
-import { CodexClient, type ServerRequest } from './client.js'
+import { CodexClient } from './client.js'
 import { withCodexClient } from './short-lived.js'
 import { lastCompactSummary as rolloutLastCompactSummary } from './rollout.js'
 import type { Verbosity } from './generated/Verbosity.js'
@@ -32,27 +31,26 @@ import { imageEventFromDisk } from '../images.js'
 import { readCodexUsage } from './usage-client.js'
 import { listCodexModels } from './models.js'
 import {
-  approvalDetailFrom,
   childSteps,
   CodexChildTracker,
   CODEX_KNOWN_NOTIFICATIONS,
   CompactionMarks,
   CodexRequestInputs,
-  fileChangesOf,
   goalFromCodex,
   launchedThreads,
   normalizeNotification,
   threadSettingsChanged,
   threadSettingsOf,
-  toCodexDecision,
   type CodexThreadSettings,
 } from './normalize.js'
 import { UnmappedTypes } from '../unmapped.js'
-import { PendingCards, adapterNotice, couldNotStop, undeliveredError, undeliveredText } from '../session-kit.js'
-import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
+import { adapterNotice, couldNotStop, undeliveredError, undeliveredText } from '../session-kit.js'
+
 import { sandboxConfig } from './sandbox.js'
 import { withStderrTail } from '../../stream-text.js'
 import { raceTimeout } from '../../timing.js'
+import { CodexRequests } from './server-requests.js'
+import { runningTurnOf, threadIdOf, turnIdOf } from './turn-reads.js'
 import { APP_CALL_WAIT_MS, APP_STARTUP_TIMEOUT_SEC, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, permissionOptionsFor, repoFilesConfig, spawnInKeeper, type AppApprovalMode } from './launch-config.js'
 
 export { APP_CALL_WAIT_MS, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, repoFilesConfig }
@@ -115,33 +113,12 @@ class CodexSession implements SessionHandle {
    * A `turn/completed` with `interrupted` for any other turn was not asked for here, and says so (`INTERRUPTED_BY_TOOL`).
    */
   private interruptsSent: string[] = []
-  /**
-   * Our requestId to the Codex server's request, with the thread and turn it was asked in. Codex ends a request
-   * itself when its turn ends or is interrupted (and says so with `serverRequest/resolved`); the card has to close
-   * with it, or an answer goes to a request id nobody is waiting on.
-   */
-  private approvals = new PendingCards<OpenRequest>()
   /** App servers loaded onto this thread through the bridge — only elicitations under those names go to our cards */
   private appServers = new Set<string>()
   /** Whether this thread was given Centralu's own server — only then is an elicitation under that name ours to accept (#382) */
   private ownServer = false
   /** The approval mode the app bridges on this thread were given, or null when it has none (#382, `checkAppMode`) */
   private appModeLoaded: AppApprovalMode | null = null
-  private reqCounter = 0
-  /**
-   * Part of every request id this handle raises (#683 review): the counter restarts in each process, and after a
-   * swap a window that missed the events between could answer the new process's `codex-req-1` with the old one's.
-   */
-  private readonly reqTag = randomUUID().slice(0, 8)
-  private alwaysAllow = new AlwaysAllowRules()
-  /**
-   * The changes of each file-change item still open, by item id (#169). The approval request for that item
-   * names it and carries nothing else (measured — see approvalDetailFrom), so the card's path and diff come
-   * from here. Forgotten when the item completes, or when its thread's turn ends without completing it (an
-   * interrupted or failed turn: Codex sends no `item/completed` for what it cut off, #392). `thread` is the
-   * thread the item belongs to (the parent's or a child's), null when the notification named none.
-   */
-  private fileChanges = new Map<string, { thread: string | null; changes: { path: string; diff: string }[] }>()
   /**
    * Messages that arrived while a compact/review turn was running (measured while dogfooding,
    * 2026-09-02, MGH session).
@@ -214,6 +191,8 @@ class CodexSession implements SessionHandle {
    * (measured, codex-cli 0.160.0), and one line per server is enough; a server that starts again may fail again later.
    */
   private mcpFailed = new Set<string>()
+  /** The server's requests behind our approval cards (see `CodexRequests`) */
+  private readonly serverRequests: CodexRequests
   /** Thread ready — awaited at construction time to obtain externalId */
   readonly ready: Promise<void>
 
@@ -224,10 +203,18 @@ class CodexSession implements SessionHandle {
     this.sessionId = opts.sessionId
     this.unmapped = new UnmappedTypes('codex', opts.sessionId, CODEX_KNOWN_NOTIFICATIONS)
     this.children = new CodexChildTracker(opts.sessionId)
+    this.serverRequests = new CodexRequests({
+      sessionId: opts.sessionId,
+      emit: (e) => this.emit(e),
+      respond: (id, result) => this.client.respond(id, result),
+      threadId: () => this.threadId,
+      appServers: () => this.appServers,
+      ownServer: () => this.ownServer,
+    })
     this.client = new CodexClient(
       {
         onNotification: (n) => this.onNotification(n),
-        onServerRequest: (r) => this.onServerRequest(r),
+        onServerRequest: (r) => this.serverRequests.onServerRequest(r),
         /*
          * **Do not report a process we closed ourselves as having crashed.**
          *
@@ -645,9 +632,9 @@ class CodexSession implements SessionHandle {
      * (before the thread/start response), a child cannot exist yet, so we let it through.
      */
     // Before the thread filter: a child thread's approval requests do reach us (see above), and its card needs its changes too
-    this.noteFileChange(n)
+    this.serverRequests.noteFileChange(n)
     // Also before the filter, for the same reason: a child's approval card closes with its request
-    this.noteRequestEnded(n)
+    this.serverRequests.noteRequestEnded(n)
     // Also before the filter: a method nobody handles is news whichever thread it came from
     this.unmapped.note(n.method)
     const from = (n.params as { threadId?: unknown } | undefined)?.threadId
@@ -829,58 +816,6 @@ class CodexSession implements SessionHandle {
   }
 
   /**
-   * Closes the cards of server requests Codex ended without our answer. `serverRequest/resolved` names one request
-   * (generated `ServerRequestResolvedNotification`, codex-cli 0.160.0: `{ threadId, requestId }`); a turn that ends
-   * takes every request asked in it, whether or not that notification comes. A request we answered is already out of
-   * `approvals`, so its own `serverRequest/resolved` finds nothing and closes nothing twice.
-   */
-  private noteRequestEnded(n: { method: string; params?: unknown }): void {
-    const p = (n.params ?? {}) as { threadId?: unknown; requestId?: unknown }
-    if (n.method === 'serverRequest/resolved') {
-      if (typeof p.requestId !== 'string' && typeof p.requestId !== 'number') return
-      const serverId = String(p.requestId)
-      this.closeApprovals((a) => String(a.serverId) === serverId)
-      return
-    }
-    if (n.method !== 'turn/completed' && n.method !== 'turn/failed') return
-    const turn = turnIdOf(n.params)
-    if (typeof p.threadId !== 'string' || !turn) return
-    this.closeApprovals((a) => a.threadId === p.threadId && a.turnId === turn)
-  }
-
-  /** Closes the matching cards as denied, without answering Codex: the request is already gone on its side */
-  private closeApprovals(match?: (a: OpenRequest) => boolean): void {
-    this.approvals.release((requestId) => {
-      this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision: 'deny' })
-    }, match)
-  }
-
-  /** Keeps a file-change item's changes until it completes or its turn ends — see `fileChanges` */
-  private noteFileChange(n: { method: string; params?: unknown }): void {
-    const p = (n.params ?? {}) as { item?: Record<string, unknown>; itemId?: unknown; changes?: unknown; threadId?: unknown }
-    const thread = typeof p.threadId === 'string' ? p.threadId : null
-    /*
-     * A turn that ends takes its open items with it: their approval requests end with it too (`noteRequestEnded`), so
-     * nothing reads them again. A thread runs one turn at a time, so every open item of that thread is that turn's. An
-     * item whose notification named no thread is let go with the parent's turn.
-     */
-    if (n.method === 'turn/completed' || n.method === 'turn/failed') {
-      const ended = thread ?? this.threadId
-      for (const [id, c] of this.fileChanges) if (c.thread === ended || (c.thread === null && ended === this.threadId)) this.fileChanges.delete(id)
-      return
-    }
-    // The patch can be revised before it is approved (generated/v2/FileChangePatchUpdatedNotification.ts) — not measured
-    if (n.method === 'item/fileChange/patchUpdated' && typeof p.itemId === 'string') {
-      this.fileChanges.set(p.itemId, { thread, changes: fileChangesOf(p) })
-      return
-    }
-    const item = p.item
-    if (!item || item.type !== 'fileChange' || typeof item.id !== 'string') return
-    if (n.method === 'item/started') this.fileChanges.set(item.id, { thread, changes: fileChangesOf(item) })
-    else if (n.method === 'item/completed') this.fileChanges.delete(item.id)
-  }
-
-  /**
    * Tells the attachment layer when an attached app's tool call starts and ends (M4 B-1 —
    * matching cards to calls on the in-conversation screen).
    *
@@ -901,102 +836,6 @@ class CodexSession implements SessionHandle {
     const tool = typeof item.tool === 'string' ? item.tool : ''
     if (!this.appServers.has(server) || !tool) return
     apps.noteCall(item.id, server, tool, item.arguments ?? (item.invocation as { arguments?: unknown } | undefined)?.arguments ?? {})
-  }
-
-  private onServerRequest(r: { id: number | string; method: string; params?: unknown }): void {
-    /*
-     * **elicitation has a different response shape from an approval.**
-     *
-     * When asking whether to use an MCP server, codex sends an elicitation and waits for an
-     * `{ action }`. We were passing an unknown server request through as `{}`, which made codex
-     * fail to deserialize it with "missing field `action`" and **treat it as a rejection** — the
-     * screen only showed "permission denied", with no way to know the actual cause (measured).
-     *
-     * We accept our own server and reject unknown ones. Silently approving when there is no
-     * screen to ask on would mean deciding on the user's behalf.
-     */
-    if (r.method.toLowerCase().includes('elicitation')) {
-      const p = (typeof r.params === 'object' && r.params !== null ? r.params : {}) as {
-        serverName?: string
-        message?: unknown
-        _meta?: unknown
-      }
-      /*
-       * **Tool approval for an attached app goes to our own approval card** (M4 A-5, decision 5).
-       *
-       * Codex asks whether to use an MCP tool through this same elicitation, and marks in `_meta`
-       * that it is a tool approval. Rejecting it as before would mean the app tool never runs on
-       * Codex, not even once (the same shape as plan "to confirm separately" 2). We only route to
-       * a card for **tool approval on an app server we ourselves loaded onto this thread** — a
-       * third party's server whose name happens to start with `app-` (from the user's
-       * config.toml), and any elicitation that is not a tool approval (an input form), are still
-       * rejected as before.
-       *
-       * Confirmed from source only (logged out, S-3): the string in the installed 0.153.4 binary
-       * is `codex_approval_kind`, while current codex source uses `codex/approval_kind` — we read both.
-       */
-      if (typeof p.serverName === 'string' && this.appServers.has(p.serverName) && approvalKindOf(p._meta) === 'mcp_tool_call') {
-        const requestId = `codex-req-${this.reqTag}-${++this.reqCounter}`
-        this.approvals.set(requestId, { ...requestOrigin(r), elicitation: true })
-        this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId, detail: appApprovalDetail(p.serverName, p.message, p._meta) })
-        return
-      }
-      // Only the server we loaded: without it, a `centralu` server could come from the person's own config.toml (#382)
-      const ours = p.serverName === ORCHESTRATOR_MCP_NAME && this.ownServer
-      this.client.respond(r.id, { action: ours ? 'accept' : 'decline', content: null, _meta: null })
-      return
-    }
-
-    /*
-     * **A permissions request is not answered with a decision** (#169). Its response is
-     * `{ permissions: GrantedPermissionProfile, scope }` (generated/v2/PermissionsRequestApprovalResponse.ts),
-     * so the general path below, which answers `{ decision }`, sent Codex a reply of the wrong shape whatever
-     * the person chose. There is no card that can show a permission profile yet, so it is refused the way
-     * that type allows — nothing granted, for this turn only — and said in the log, so a request that
-     * should have been asked about is one grep away. It only arrives with Codex's `request_permissions_tool`
-     * feature turned on; not measured.
-     */
-    if (r.method === 'item/permissions/requestApproval') {
-      console.error('[codex] permissions request refused, no card for it yet:', JSON.stringify(r.params ?? {}).slice(0, 500))
-      this.client.respond(r.id, { permissions: {}, scope: 'turn' })
-      return
-    }
-
-    if (!r.method.includes('requestApproval') && !r.method.endsWith('Approval')) {
-      /*
-       * A server request that is not an approval is passed through with an empty response (so we
-       * do not stall as the protocol grows). But **we do log what was passed through** (#58) — when
-       * an elicitation broke because of this empty {}, there was not a single log line to go on,
-       * and finding the cause turned into a maze. A request is not a notification: our answer
-       * changes what happens on the other side. The next time this happens, it should take one grep.
-       */
-      console.error('[codex] unknown server request answered with {}:', r.method)
-      this.client.respond(r.id, {})
-      return
-    }
-    const params = (typeof r.params === 'object' && r.params !== null ? r.params : {}) as Record<
-      string,
-      unknown
-    >
-
-    const itemId = typeof params.itemId === 'string' ? params.itemId : ''
-    const detail = approvalDetailFrom(r.method, params, this.fileChanges.get(itemId)?.changes)
-
-    // Does not ask if it matches a saved "always allow" rule (the same rule as C-2)
-    // A request that names no file has no key: a rule saved for "(no path)" would let every such request through
-    const key = alwaysAllowKey(detail)
-    if (key && this.alwaysAllow.allows(key)) {
-      this.client.respond(r.id, { decision: 'accept' })
-      return
-    }
-
-    const requestId = `codex-req-${this.reqTag}-${++this.reqCounter}`
-    this.approvals.set(requestId, requestOrigin(r))
-    this.emit({ type: 'approval_request', sessionId: this.sessionId, requestId, detail })
-  }
-
-  applyRules(matchers: readonly string[]): void {
-    this.alwaysAllow.addAll(matchers)
   }
 
   sendTracked(text: string, observer?: InputObserver): Promise<void> {
@@ -1241,36 +1080,12 @@ class CodexSession implements SessionHandle {
     return this.opts.outputSchema ? { outputSchema: this.opts.outputSchema } : {}
   }
 
-  respondApproval(
-    requestId: string,
-    decision: ApprovalDecision,
-    _scope?: ApprovalScope,
-    matcher?: string,
-  ): boolean {
-    const open = this.approvals.take(requestId)
-    // This map is empty when the thread has been started fresh — a card raised before that has no id here
-    if (open === undefined) return false
-    const serverId = open.serverId
+  respondApproval(requestId: string, decision: ApprovalDecision, _scope?: ApprovalScope, matcher?: string): boolean {
+    return this.serverRequests.respondApproval(requestId, decision, _scope, matcher)
+  }
 
-    if (open.elicitation) {
-      /*
-       * The answer to an app tool approval (M4 A-5). `always` is passed to Codex as "remember
-       * this for the rest of the session" (`_meta.persist: "session"` -> ApprovedForSession).
-       * Confirmed from source only (logged out, S-3): codex's
-       * `parse_mcp_tool_approval_elicitation_response` reads accept together with this value.
-       */
-      this.client.respond(serverId, {
-        action: decision === 'deny' ? 'decline' : 'accept',
-        content: null,
-        _meta: decision === 'always' ? { persist: 'session' } : null,
-      })
-      this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
-      return true
-    }
-    if (decision === 'always' && matcher) this.alwaysAllow.add(matcher)
-    this.client.respond(serverId, { decision: toCodexDecision(decision) })
-    this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
-    return true
+  applyRules(matchers: readonly string[]): void {
+    this.serverRequests.applyRules(matchers)
   }
 
   /** Slash commands (skills) — the app-server's official RPC */
@@ -1339,7 +1154,7 @@ class CodexSession implements SessionHandle {
      * and a refusal sent to a request the interrupt already ended is ignored. A child's request stays open, because
      * stopping this turn does not stop the child (see `stopBackgroundTask`).
      */
-    for (const requestId of this.approvals.ids((a) => a.threadId === null || a.threadId === this.threadId)) {
+    for (const requestId of this.serverRequests.approvals.ids((a) => a.threadId === null || a.threadId === this.threadId)) {
       this.respondApproval(requestId, 'deny')
     }
     // Nothing to stop if no turn is running (this is the case of a stop pressed right after a turn just ended)
@@ -1450,7 +1265,7 @@ class CodexSession implements SessionHandle {
     this.closed = true
     // App attachment closes together with the handle — a new handle gets its own
     this.opts.apps?.close()
-    this.closeApprovals()
+    this.serverRequests.closeApprovals()
     // Said before the process goes, while this handle is still the session's (the manager drops a stale handle's events)
     this.releaseChildren()
     /*
@@ -1506,69 +1321,8 @@ class CodexSession implements SessionHandle {
   }
 }
 
-/** The approval kind named by an elicitation's `_meta` — 0.153.4 uses `codex_approval_kind`, current source uses `codex/approval_kind` */
-function approvalKindOf(meta: unknown): string | null {
-  if (typeof meta !== 'object' || meta === null) return null
-  const m = meta as Record<string, unknown>
-  const kind = m.codex_approval_kind ?? m['codex/approval_kind']
-  return typeof kind === 'string' ? kind : null
-}
-
-/**
- * The content of an app tool approval card — which app's tool, with what arguments. Uses the tool
- * title (`tool_title`) and arguments (`tool_params`) that Codex loads into `_meta`, and falls back
- * to Codex's own sentence (`message`) when those are absent.
- */
-function appApprovalDetail(server: string, message: unknown, meta: unknown): ApprovalDetail {
-  const m = (typeof meta === 'object' && meta !== null ? meta : {}) as Record<string, unknown>
-  const title = typeof m.tool_title === 'string' && m.tool_title ? m.tool_title : typeof message === 'string' ? message : ''
-  const params = m.tool_params === undefined ? '' : ` ${JSON.stringify(m.tool_params).slice(0, 1000)}`
-  return { kind: 'other', raw: `${server} · ${title}${params}` }
-}
-
-/** The turn reported as still running, if any (`thread.turns[].status === 'inProgress'`) — a resume's, or a turns page's */
-function runningTurnOf(res: Record<string, unknown> | undefined): string | null {
-  const turns = (res?.thread as { turns?: unknown } | undefined)?.turns
-  if (!Array.isArray(turns)) return null
-  for (let i = turns.length - 1; i >= 0; i--) {
-    const t = turns[i] as { id?: unknown; status?: unknown }
-    if (t?.status === 'inProgress' && typeof t.id === 'string') return t.id
-  }
-  return null
-}
-
-/** `{turn: {id}}` — the turn/started notification and the turn/start response give it in the same shape */
 /** How many ended turns `endedTurns` keeps: more than can have a `turn/start` response still in flight */
 const ENDED_TURNS_KEPT = 8
-
-/** Where a server request was asked, for closing its card when Codex ends it (see `approvals`) */
-/**
- * A Codex server request behind one of our cards: its id, and the thread and turn it was asked in. `elicitation`
- * marks a card raised for an app tool's approval (M4 A-5), whose answer has a different shape (elicitation's
- * `{ action }`, not `{ decision }`).
- */
-type OpenRequest = { serverId: number | string; threadId: string | null; turnId: string | null; elicitation?: true }
-
-function requestOrigin(r: ServerRequest): OpenRequest {
-  const p = (typeof r.params === 'object' && r.params !== null ? r.params : {}) as { threadId?: unknown; turnId?: unknown }
-  return {
-    serverId: r.id,
-    threadId: typeof p.threadId === 'string' ? p.threadId : null,
-    turnId: typeof p.turnId === 'string' ? p.turnId : null,
-  }
-}
-
-function turnIdOf(payload: unknown): string | null {
-  const turn = (payload as { turn?: { id?: unknown } } | undefined)?.turn
-  return typeof turn?.id === 'string' ? turn.id : null
-}
-
-function threadIdOf(res: Record<string, unknown> | undefined): string | null {
-  if (!res) return null
-  const thread = res.thread as Record<string, unknown> | undefined
-  const id = (thread?.id ?? res.threadId) as string | undefined
-  return typeof id === 'string' ? id : null
-}
 
 /**
  * Codex's settings folder.
