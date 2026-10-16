@@ -450,6 +450,11 @@ Rows that differ by session:
   last edit, and every edit already went through the builder's own approvals. Builders exist only in
   trusted projects and the user folder, whose apps run anyway once trusted, and `check` reaches its
   own app only (`builder` profile), never another.
+- **"Always allow" on an agent's own card** (#838) is remembered as the host's own key for the card standing
+  (`alwaysAllowKey` of `pendingApproval.detail`), never as the matcher the window sent: a window from an older build,
+  during a swap, could send a wider one. A matcher that is not that key remembers nothing, and the call is allowed
+  once. At startup the host deletes saved rules ending in `*`, which an older build read as prefixes; that only
+  narrows what is allowed.
 
 The **Codex `normal` + bypass** cell follows the person's policy, as Claude's does (owner decision
 2026-10-11, #382). With `writes`, the person's `approval_policy = "never"` turned "needs approval"
