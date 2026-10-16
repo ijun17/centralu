@@ -255,8 +255,8 @@ describe('a call stopped by a denied capability is not an app bug', () => {
 
 describe('an app that is gone takes its errors with it (#392)', () => {
   const kept = (r: ExternalApps) => {
-    const i = r as unknown as { errorLog: Map<string, unknown>; errorsSent: Map<string, number> }
-    return { bundles: i.errorLog.size, marks: i.errorsSent.size }
+    const i = (r as unknown as { errorLog: { bundles: Map<string, unknown>; sent: Map<string, number> } }).errorLog
+    return { bundles: i.bundles.size, marks: i.sent.size }
   }
 
   it('when its folder is removed, and when its project is', async () => {

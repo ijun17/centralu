@@ -18,7 +18,7 @@ import type { AppErrorBundle } from '@cc/protocol'
 
 /**
  * The bundle as the host holds it: the protocol's `AppErrorBundle` without `sentAt`, which is kept apart (by kind and
- * time, `errorsSent` in runtime.ts) so a bundle replaced when stderr is re-captured stays sent. A hand copy here had
+ * time, `ErrorLog` in error-log.ts) so a bundle replaced when stderr is re-captured stays sent. A hand copy here had
  * drifted from the protocol's (#428). What its fields hold, as the host fills them:
  *
  * - `message`: a one-line reason — why it failed to start, the shape it ended in, or the failure a tool returned.

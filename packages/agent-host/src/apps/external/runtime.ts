@@ -9,7 +9,8 @@ import { RUN_META, serveBroker } from './broker.js'
 import { BrokerDesk, type BrokerHost, type CapabilityDecisionListed, type CapabilityDenial, type CapabilityOrigin } from './desk.js'
 import { memoryCapabilityBook } from './capabilities.js'
 import { checkScreen, checkTools, formatReport, type AppCheckReport, type CheckFinding, type CheckedTool } from './check.js'
-import { ERRORS_KEPT, errorBundle, type HeldErrorBundle, type SentErrorBundle } from './errors.js'
+import { ErrorLog } from './error-log.js'
+import type { HeldErrorBundle, SentErrorBundle } from './errors.js'
 import { folderFingerprint } from './fingerprint.js'
 import { PROJECT_APPS_PARTS, PROJECT_APPS_REL, USER_APPS_PARTS, USER_APPS_REL, scanApps } from './discovery.js'
 import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError } from './manifest.js'
@@ -70,16 +71,6 @@ import { invalidReason, newEntry, resetLife, type AppEntry, type AppTool, type B
 import { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type AppRunStatus, type ExternalAppsDeps, type RuntimeTiming } from './runtime-types.js'
 
 /**
- * How long it waits to capture stderr once more after a tool failure (C-6). The stack a thrown app
- * error carries goes to stderr, while the failure answer goes to stdout, and the order they arrive in
- * is not guaranteed. Since it is a pipe on the same machine, both arrive within a few milliseconds.
- */
-const STDERR_SETTLE_MS = 150
-
-/** The key for a sent bundle — within one app, a bundle is uniquely (kind, time). Stays the same key even after stderr is re-captured and the bundle is replaced */
-const sentKey = (holdKey: string, b: Pick<HeldErrorBundle, 'kind' | 'at'>): string => `${holdKey}\n${b.kind}\n${b.at}`
-
-/**
  * The reason a new app id is rejected, worded for an agent and a person to read (C-1b). Validation is
  * one single function (`newAppIdProblem`, @cc/protocol) — only the wording is attached here. The new
  * app dialog attaches its own wording to the same validation result (`appIdHint`), while the
@@ -131,15 +122,8 @@ export class ExternalApps {
   private quietTimers = new Map<string, NodeJS.Timeout>()
   /** A reflect in progress — an overlapping call waits on the same one */
   private reloading = new Map<string, Promise<boolean>>()
-  /** Recent error bundles per app name (holdKey), most recent first (C-6) — carried over even when the manifest changes and a new entry is created */
-  private errorLog = new Map<string, HeldErrorBundle[]>()
-  /**
-   * A bundle sent to the building session → the time it was sent (C-6). Kept separately instead of
-   * marked on the bundle because a tool-failure bundle **gets replaced with a new object** shortly
-   * after, when it re-captures stderr (recordError) — a mark written onto the bundle would disappear
-   * at that point.
-   */
-  private errorsSent = new Map<string, number>()
+  /** Recent error bundles per app name (holdKey) and which were sent (C-6) — `error-log.ts` */
+  private errorLog = new ErrorLog(() => this.appsChanged())
   /**
    * Every process this runtime has ever started that has not yet ended. Not just the ones an entry
    * (`Life.proc`) is holding onto: an old process waiting for its call to finish after a new entry was
@@ -222,9 +206,7 @@ export class ExternalApps {
    * UI reads and sends this when a person presses the button (see the comment in errors.ts).
    */
   errors(ref: AppRef): { latest: SentErrorBundle | null; recent: SentErrorBundle[] } {
-    const key = this.holdKey(ref)
-    const recent = (this.errorLog.get(key) ?? []).map((b) => ({ ...b, sentAt: this.errorsSent.get(sentKey(key, b)) ?? null }))
-    return { latest: recent[0] ?? null, recent }
+    return this.errorLog.errors(this.holdKey(ref))
   }
 
   /**
@@ -238,54 +220,16 @@ export class ExternalApps {
    * (errors.ts); what actually sends it is the RPC a person triggers by clicking.
    */
   markErrorSent(ref: AppRef, at: number): HeldErrorBundle | 'sent' | null {
-    const key = this.holdKey(ref)
-    const list = this.errorLog.get(key) ?? []
-    const b = list.find((x) => x.at === at)
-    if (!b) return null
-    const k = sentKey(key, b)
-    if (this.errorsSent.has(k)) return 'sent'
-    // Clears the mark for a bundle that has aged out of the list — a mark has no reason to outlive the bundle it belongs to
-    for (const old of [...this.errorsSent.keys()]) {
-      if (old.startsWith(`${key}\n`) && !list.some((x) => sentKey(key, x) === old)) this.errorsSent.delete(old)
-    }
-    this.errorsSent.set(k, Date.now())
-    return b
+    return this.errorLog.markSent(this.holdKey(ref), at)
   }
 
   unmarkErrorSent(ref: AppRef, at: number): void {
-    const key = this.holdKey(ref)
-    const b = (this.errorLog.get(key) ?? []).find((x) => x.at === at)
-    if (b) this.errorsSent.delete(sentKey(key, b))
+    this.errorLog.unmarkSent(this.holdKey(ref), at)
   }
 
-  /**
-   * Records one error bundle. Since a tool failure's answer can arrive before stderr does (two
-   * separate pipes — a thrown stack goes over stderr, the failure answer over stdout), that process's
-   * stderr is captured once more a little afterward.
-   */
+  /** Records one error bundle for this app (`ErrorLog.record`) */
   private recordError(e: AppEntry, b: Omit<HeldErrorBundle, 'text' | 'denied'> & { denied?: HeldErrorBundle['denied'] }, proc: AppProcess | null = null): void {
-    const key = this.holdKey(e.ref)
-    const app = `${e.manifest?.name ?? e.ref.appId} (${this.label(e.ref)})`
-    const list = this.errorLog.get(key) ?? []
-    let bundle = errorBundle(app, proc ? { ...b, stderr: proc.log.tailLines() } : b)
-    list.unshift(bundle)
-    if (list.length > ERRORS_KEPT) list.length = ERRORS_KEPT
-    this.errorLog.set(key, list)
-    /*
-     * The "time of the last error" the list states has changed — the screen (the error row) sees this
-     * and re-reads the bundle. Why this does not rely on "changed" (emitChanged): a read-only tool's
-     * call never emits it (doing so would turn a screen re-reading on failure into a loop). Failing to
-     * start or dying already announced through the status change, but for a tool failure, this is the
-     * only signal.
-     */
-    this.appsChanged()
-    if (!proc) return
-    setTimeout(() => {
-      const i = list.indexOf(bundle)
-      if (i < 0) return
-      bundle = errorBundle(app, { ...b, stderr: proc.log.tailLines() })
-      list[i] = bundle
-    }, STDERR_SETTLE_MS).unref()
+    this.errorLog.record(this.holdKey(e.ref), `${e.manifest?.name ?? e.ref.appId} (${this.label(e.ref)})`, b, proc)
   }
 
   /**
@@ -1538,15 +1482,9 @@ export class ExternalApps {
     return appKeyOf(ref.projectId, ref.appId)
   }
 
-  /**
-   * An app that is gone (its folder or its project removed) takes its error bundles with it (#392). They are kept
-   * across a manifest change, not across removal: each removed app that had failed left up to ten bundles of stderr
-   * behind for the host's life. A folder put back starts with none, as a new app does.
-   */
+  /** An app that is gone takes its error bundles with it (`ErrorLog.forget`) */
   private forgetErrors(ref: AppRef): void {
-    const key = this.holdKey(ref)
-    this.errorLog.delete(key)
-    for (const k of [...this.errorsSent.keys()]) if (k.startsWith(`${key}\n`)) this.errorsSent.delete(k)
+    this.errorLog.forget(this.holdKey(ref))
   }
 
   private clearIdle(e: AppEntry): void {
@@ -1658,7 +1596,7 @@ export class ExternalApps {
 
   private info(e: AppEntry): ExternalAppInfo {
     const m = e.manifest
-    const lastErrorAt = this.errorLog.get(this.holdKey(e.ref))?.[0]?.at
+    const lastErrorAt = this.errorLog.lastAt(this.holdKey(e.ref))
     return {
       appId: e.ref.appId,
       projectId: e.ref.projectId,
