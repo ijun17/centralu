@@ -513,7 +513,8 @@ const TARGETS: Record<string, Target | undefined> = {
        */
       const subsystem = pe.readUInt16LE(at + 24 + 68)
       if (subsystem !== 2) fail(`centralu.exe is not a GUI program (subsystem ${subsystem}) — it would open a console window`)
-      for (const rel of ['resources/host/main.mjs', 'resources/host/node_modules/node-pty/prebuilds/win32-x64/conpty.node']) {
+      // conpty/conpty.dll: the ConPTY the terminals run on (#849), which conpty.node loads from beside itself
+      for (const rel of ['resources/host/main.mjs', 'resources/host/node_modules/node-pty/prebuilds/win32-x64/conpty.node', 'resources/host/node_modules/node-pty/prebuilds/win32-x64/conpty/conpty.dll']) {
         if (!existsSync(join(dest, rel))) fail(`${rel} is missing from the package — the app would not start its host or its terminal`)
       }
       console.log('  GUI subsystem, host and conpty present')

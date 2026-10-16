@@ -383,7 +383,7 @@ and a Windows one about 2.5 MB less (`centralu.exe`).
 
 | Who | What it does with them |
 |---|---|
-| `release-npm.mts`, in the platform job of that platform | Copies `src-tauri/resources/host` (what the build just bundled, the same folder the platform package's host comes from) into `packaging/npm/host-<platform>/host/`, checks it (`scripts/host-package.mts`: `main.mjs`, `bundle-info.json` for this platform, both native modules, `conpty.node` on Windows, `remote-runtime.json` equal to the pin, `files` exactly `["host"]`, nothing of the window), and publishes it **before** the platform package |
+| `release-npm.mts`, in the platform job of that platform | Copies `src-tauri/resources/host` (what the build just bundled, the same folder the platform package's host comes from) into `packaging/npm/host-<platform>/host/`, checks it (`scripts/host-package.mts`: `main.mjs`, `bundle-info.json` for this platform, both native modules, `conpty.node` and the ConPTY it loads (`conpty/conpty.dll`, `conpty/OpenConsole.exe`) on Windows, `remote-runtime.json` equal to the pin, `files` exactly `["host"]`, nothing of the window), and publishes it **before** the platform package |
 | The shim job | Will not publish the shim until every host-only package is on the registry too, though the shim does not pin them |
 | The hub's installer (`links/install.ts`) | Reads `@centralu/host-<platform>@<v>` from the registry and checks its signature; installs it beside the `centralu` package. Only when the registry answers 404 (a version published before these packages existed) does it take the platform package instead, as before. A signature that does not check out refuses, as for any package |
 | The shim, in a managed install (`findHostEntry`, `platform.mjs`) | `centralu serve` looks for the host in the platform package first (an npm install), then in `@centralu/host-<platform>/host/` |
@@ -665,8 +665,8 @@ target, with three differences, each commented where it is made:
   cannot go out unless they all pass. Drop this exception when the W2 list is empty.
 - Its checks read the PE header instead of a code signature and exec bit: `MZ` and `PE\0\0`
   (the file is what we think it is), the subsystem is GUI (a console-subsystem exe would open
-  a console window on every start), the machine is x86-64, and `main.mjs` and `conpty.node`
-  sit beside it.
+  a console window on every start), the machine is x86-64, and `main.mjs`, `conpty.node`
+  and `conpty/conpty.dll` sit beside it.
 
 **What the launcher does on Windows** (`packaging/npm/centralu/bin/platform.mjs`, tested on
 every OS by `tooling/launcher-platform.test.ts`):

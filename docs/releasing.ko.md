@@ -261,7 +261,7 @@ Linux와 Windows는 먼저 CI에서 나와야 한다 (`dry_run`을 끈 `release.
 
 - `tauri build --no-bundle`로 빌드한다. 배포되는 것은 NSIS 설치 파일이 아니고, 릴리스는 배포하는 것만 빌드한다.
 - `pnpm verify` 대신 `pnpm lint`, `pnpm depcruise`, `pnpm typecheck`를 돌린다. 단위 테스트에는 Windows에서 알려진 실패가 있다(#307의 W2 목록). 전체 `pnpm verify`는 같은 커밋으로 다른 모든 플랫폼 잡과 shim 잡에서 돌고, 그것들이 모두 통과해야만 shim이 나갈 수 있다. W2 목록이 비면 이 예외를 없앤다.
-- 코드 서명과 실행 비트 대신 PE 헤더를 검사한다: `MZ`와 `PE\0\0`(우리가 생각하는 그 파일인지), 서브시스템이 GUI인지(콘솔 서브시스템 exe는 실행할 때마다 콘솔 창을 연다), 머신이 x86-64인지, `main.mjs`와 `conpty.node`가 옆에 있는지.
+- 코드 서명과 실행 비트 대신 PE 헤더를 검사한다: `MZ`와 `PE\0\0`(우리가 생각하는 그 파일인지), 서브시스템이 GUI인지(콘솔 서브시스템 exe는 실행할 때마다 콘솔 창을 연다), 머신이 x86-64인지, `main.mjs`, `conpty.node`, `conpty/conpty.dll`이 옆에 있는지.
 
 **Windows에서 런처가 하는 일** (`packaging/npm/centralu/bin/platform.mjs`, 모든 OS에서 `tooling/launcher-platform.test.ts`가 검사한다):
 

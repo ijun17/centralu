@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CommandRunner } from './commands.js'
-import { alive, cleanUp, plantTreeScript, settle, treePids } from './process-tree.test-helpers.js'
+import { alive, cleanUp, consoleHosts, plantTreeScript, settle, treePids } from './process-tree.test-helpers.js'
 import type { PtyModule } from './terminal.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
@@ -305,6 +305,27 @@ describe.runIf(process.platform === 'win32')('CommandRunner — the whole tree o
      */
     expect(await settle(r.ended, (x) => x, 10_000)).toBe(true)
   }, 60_000 * SLOW)
+
+  /*
+   * #849: with the ConPTY of Windows, every command left its console host (`conhost.exe`, ~7 MB) running until the host
+   * exited, also one that ended on its own: node-pty never closes a pseudoconsole whose shell has ended.
+   */
+  it('a command that ends on its own takes its console host with it', async () => {
+    dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-cmd-conhost-')))
+    const before = consoleHosts()
+    let ended = false
+    const svc = new CommandRunner((f) => {
+      if (f.exitCode !== undefined) ended = true
+    }, ptyModule)
+    // Long enough to see its console host while it runs
+    const command = 'ping -n 4 127.0.0.1 >nul && echo done'
+    svc.run(dir, command)
+    const started = consoleHosts().filter((pid) => !before.includes(pid))
+    expect(started).toHaveLength(1)
+    expect(await settle(() => ended, (x) => x, 30_000)).toBe(true)
+    expect(svc.log(dir, command)!.history).toContain('done')
+    expect(await settle(() => started.filter(alive), (left) => left.length === 0, 20_000)).toEqual([])
+  }, 90_000 * SLOW)
 
   /*
    * #857. node-pty's own Windows kill(), after our taskkill had ended the tree, forked an agent to list the gone shell's

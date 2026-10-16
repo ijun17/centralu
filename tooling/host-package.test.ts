@@ -71,6 +71,8 @@ describe('staging and checking one (release-npm.mts)', () => {
     file('node_modules/better-sqlite3/package.json', '{}')
     file('node_modules/node-pty/package.json', '{}')
     file(`node_modules/node-pty/prebuilds/${platform}/conpty.node`, 'MZ')
+    file(`node_modules/node-pty/prebuilds/${platform}/conpty/conpty.dll`, 'MZ')
+    file(`node_modules/node-pty/prebuilds/${platform}/conpty/OpenConsole.exe`, 'MZ')
     copyFileSync(PIN_FILE, join(at, 'remote-runtime.json'))
     copyFileSync(LAUNCHER_PACKAGE_FILE, join(at, 'centralu-package.json'))
   }
@@ -113,6 +115,8 @@ describe('staging and checking one (release-npm.mts)', () => {
     expect(hostPackageProblems(pkg, 'win32-x64')).toEqual([
       'host/node_modules/better-sqlite3/package.json is missing: centralu serve would not start',
       'host/node_modules/node-pty/prebuilds/win32-x64/conpty.node is missing: centralu serve would not start',
+      'host/node_modules/node-pty/prebuilds/win32-x64/conpty/conpty.dll is missing: centralu serve would not start',
+      'host/node_modules/node-pty/prebuilds/win32-x64/conpty/OpenConsole.exe is missing: centralu serve would not start',
       'the host was bundled for linux-x64, not win32-x64',
       'host/remote-runtime.json differs from packaging/remote-runtime.json: the host was bundled before the Node pin moved',
       'host/centralu-package.json differs from packaging/npm/centralu/package.json: the host was bundled before the Node floor moved',
@@ -120,6 +124,24 @@ describe('staging and checking one (release-npm.mts)', () => {
     ])
     rmSync(join(pkg, 'host', 'centralu-package.json'))
     expect(hostPackageProblems(pkg, 'win32-x64')).toContain('host/centralu-package.json is missing: a hub on this version could not tell which Node a machine needs')
+  })
+
+  /*
+   * #849: a terminal on Windows runs on the ConPTY node-pty ships; without it every tab and command falls back to Windows'
+   * own, whose console host is never closed
+   */
+  it('a Windows host needs the ConPTY its terminals run on', () => {
+    dir = mkdtempSync(join(tmpdir(), 'cc-host-pkg-'))
+    const src = join(dir, 'src')
+    fakeHost(src, 'win32-x64')
+    const pkg = pkgCopy('win32-x64')
+    stageHostPackage(src, pkg)
+    expect(hostPackageProblems(pkg, 'win32-x64')).toEqual([])
+    rmSync(join(pkg, 'host', 'node_modules', 'node-pty', 'prebuilds', 'win32-x64', 'conpty'), { recursive: true })
+    expect(hostPackageProblems(pkg, 'win32-x64')).toEqual([
+      'host/node_modules/node-pty/prebuilds/win32-x64/conpty/conpty.dll is missing: centralu serve would not start',
+      'host/node_modules/node-pty/prebuilds/win32-x64/conpty/OpenConsole.exe is missing: centralu serve would not start',
+    ])
   })
 
   it('refuses a manifest that would ship more or less than host/, or under another name', () => {

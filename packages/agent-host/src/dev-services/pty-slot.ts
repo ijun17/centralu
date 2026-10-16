@@ -1,4 +1,5 @@
 import { ensureToolPath } from '../env-path.js'
+import { usesShippedConpty } from '../os.js'
 import type { CommandTag, TerminalTag } from '../keeper/tags.js'
 import { KILL_GRACE_MS, killTree, stopTree } from './kill-tree.js'
 
@@ -91,8 +92,7 @@ export class PtySlot {
     // A GUI app never inherits the login shell's PATH (a problem already run into when creating a session)
     ensureToolPath()
     try {
-      const { file, args } = launch()
-      const handle = mod.spawn(file, args, {
+      const handle = spawnPty(mod, launch(), {
         name: 'xterm-256color',
         cols: opts.cols,
         rows: opts.rows,
@@ -170,5 +170,28 @@ export class PtySlot {
   /** Lets go of the pty and leaves it running — only a pty the keeper owns can (#280 step 2) */
   detach(): Promise<void> | undefined {
     return this.pty?.detach?.()
+  }
+}
+
+/**
+ * Starts `launch` in a pty from `mod`.
+ *
+ * **Windows (#849): on the ConPTY node-pty ships (`useConptyDll`), not the one in Windows** (`usesShippedConpty`). With
+ * Windows' own, every tab and every command left a `conhost.exe` (~7 MB) running until the host exited: node-pty forgets
+ * the pseudoconsole once its shell has ended, so nothing ever closes it, and the tree kill ends the shell before
+ * node-pty's own kill could (measured on Windows 11). The shipped one (`conpty/OpenConsole.exe`) ends with its shell,
+ * and node-pty's kill of it goes through the process handle instead of a pid listed from the console (#857). A host
+ * whose bundle lacks `conpty.dll` falls back to Windows' own, with a line on stderr, rather than leave every terminal
+ * dead.
+ */
+export function spawnPty(mod: PtyModule, launch: ShellLaunch, opts: Record<string, unknown>, shipped: boolean = usesShippedConpty()): Pty {
+  if (!shipped) return mod.spawn(launch.file, launch.args, opts)
+  try {
+    return mod.spawn(launch.file, launch.args, { ...opts, useConptyDll: true })
+  } catch (err) {
+    // Only a missing or unloadable DLL: any other failure would fail the same way again
+    if (!/conpty\.dll/i.test((err as Error).message)) throw err
+    console.error(`[pty] ${(err as Error).message}; using the console of Windows instead`)
+    return mod.spawn(launch.file, launch.args, opts)
   }
 }

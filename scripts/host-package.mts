@@ -53,7 +53,8 @@ export function hostPackageProblems(pkgDir: string, platform: string, pinFile = 
   if (JSON.stringify(manifest.files) !== JSON.stringify(['host'])) problems.push(`package.json "files" is ${JSON.stringify(manifest.files)}, not ["host"]`)
   const host = join(pkgDir, 'host')
   const needed = ['main.mjs', 'bundle-info.json', 'node_modules/better-sqlite3/package.json', 'node_modules/node-pty/package.json']
-  if (platform.startsWith('win32-')) needed.push(`node_modules/node-pty/prebuilds/${platform}/conpty.node`)
+  // The ConPTY a terminal runs on (#849): conpty.node loads conpty/conpty.dll, which starts OpenConsole.exe
+  if (platform.startsWith('win32-')) for (const f of ['conpty.node', 'conpty/conpty.dll', 'conpty/OpenConsole.exe']) needed.push(`node_modules/node-pty/prebuilds/${platform}/${f}`)
   for (const rel of needed) {
     if (!existsSync(join(host, rel))) problems.push(`host/${rel} is missing: centralu serve would not start`)
   }

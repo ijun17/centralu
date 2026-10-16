@@ -66,6 +66,14 @@ export function locksRunningPrograms(platform: Platform = HOST_PLATFORM): boolea
   return platform === 'win32'
 }
 
+/**
+ * A pty runs on the ConPTY node-pty ships (`useConptyDll`, `conpty/` beside `conpty.node`) rather than the one in the
+ * OS (Windows, #849): Windows' own left a `conhost.exe` per terminal tab and per command until the host exited.
+ */
+export function usesShippedConpty(platform: Platform = HOST_PLATFORM): boolean {
+  return platform === 'win32'
+}
+
 /** A program's file name on `platform`: `codex.exe` on Windows, `codex` elsewhere. */
 export function programFile(name: string, platform: Platform = HOST_PLATFORM): string {
   return platform === 'win32' ? `${name}.exe` : name
