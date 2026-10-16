@@ -947,6 +947,14 @@ export function __resetWarningsForTest(): void {
   warnedImpossible = false
 }
 
+/** The child threads a completed `spawnAgent` call started (`receiverThreadIds`), none for any other item (#222, #843) */
+export function launchedThreads(n: Notification): string[] {
+  if (n.method !== 'item/completed') return []
+  const item = asObj(asObj(n.params).item)
+  if (str(item.type) !== 'collabAgentToolCall' || str(item.tool) !== 'spawnAgent' || !codexItemOk(item)) return []
+  return (Array.isArray(item.receiverThreadIds) ? item.receiverThreadIds : []).filter((t): t is string => typeof t === 'string' && t !== '')
+}
+
 /**
  * A Codex session's background work: its child agents (#290).
  *
@@ -971,8 +979,38 @@ export class CodexChildTracker {
   /** Linked children: thread to its launch call and description. Only these are listed. */
   private readonly linked = new Map<string, { callId: string; description: string }>()
   private lastLive = '[]'
+  /**
+   * Launch cards held open while the children they started run (#843). A `spawnAgent` item completes the moment the
+   * child starts (measured: its `item/completed` names the child's thread before the child has done anything), so its
+   * card closed at once, and the screen, which draws live output only on an open card, never showed the child's steps
+   * (`childSteps`). The result is held until every child it named ends, as a Claude background agent's card stays open
+   * until its `task_notification`.
+   */
+  private readonly held = new Map<string, { result: NormalizedEvent; threads: Set<string> }>()
+  /** Children whose turn already ended, so a launch result arriving after that is not held (the latest few) */
+  private done: string[] = []
 
   constructor(private readonly sessionId: string) {}
+
+  /** A launch call's result, held while the children it started run; false when it goes out now (none still runs) */
+  hold(result: Extract<NormalizedEvent, { type: 'tool_result' }>, threads: readonly string[]): boolean {
+    const running = threads.filter((t) => !this.done.includes(t))
+    if (running.length === 0) return false
+    this.held.set(result.callId, { result, threads: new Set(running) })
+    return true
+  }
+
+  /** A child's turn ended: the launch results that waited only on it go out */
+  private finished(thread: string): NormalizedEvent[] {
+    this.done = [...this.done.slice(-63), thread]
+    const out: NormalizedEvent[] = []
+    for (const [callId, h] of this.held) {
+      if (!h.threads.delete(thread) || h.threads.size > 0) continue
+      this.held.delete(callId)
+      out.push(h.result)
+    }
+    return out
+  }
 
   /** A `spawnAgent` call named this thread. */
   link(thread: string, callId: string, prompt: string): NormalizedEvent[] {
@@ -993,7 +1031,7 @@ export class CodexChildTracker {
         const was = t.active
         t.active = false
         t.turnId = null
-        return was ? this.changed([this.ended(thread, 'failed', 'The child thread hit a system error')]) : []
+        return [...(was ? this.changed([this.ended(thread, 'failed', 'The child thread hit a system error')]) : []), ...this.finished(thread)]
       } else t.active = false
       return this.changed()
     }
@@ -1008,7 +1046,7 @@ export class CodexChildTracker {
       t.turnId = null
       const status = raw === 'interrupted' ? 'stopped' : raw === 'failed' ? 'failed' : 'completed'
       const message = str(asObj(asObj(p.turn).error).message)
-      return this.changed([this.ended(thread, status, message || undefined)])
+      return [...this.changed([this.ended(thread, status, message || undefined)]), ...this.finished(thread)]
     }
     return []
   }
@@ -1025,8 +1063,11 @@ export class CodexChildTracker {
       t.active = false
       t.turnId = null
     }
-    if (live.length === 0) return []
-    return this.changed(live.map((task) => ({ ...task, status: 'stopped' as const, summary: why })))
+    // A launch card still held open closes with the reason, as a Claude agent that never reported back does
+    const held: NormalizedEvent[] = [...this.held.keys()].map((callId) => ({ type: 'tool_result', sessionId: this.sessionId, callId, ok: false, summary: why }))
+    this.held.clear()
+    if (live.length === 0) return held
+    return [...this.changed(live.map((task) => ({ ...task, status: 'stopped' as const, summary: why }))), ...held]
   }
 
   private ended(thread: string, status: 'completed' | 'failed' | 'stopped', summary?: string): BackgroundTask | null {

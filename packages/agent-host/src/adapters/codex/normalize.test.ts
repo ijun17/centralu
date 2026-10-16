@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { __resetWarningsForTest, approvalDetailFrom, CodexRequestInputs, fileChangesOf, CompactionMarks, normalizeNotification, toCodexDecision } from './normalize.js'
+import { __resetWarningsForTest, approvalDetailFrom, CodexChildTracker, CodexRequestInputs, fileChangesOf, CompactionMarks, normalizeNotification, toCodexDecision } from './normalize.js'
 
 /**
  * A-2 contract tests. The fixtures are trimmed-down versions of protocol output **actually
@@ -766,5 +766,27 @@ describe('CodexRequestInputs', () => {
 
   it('gives nothing for a notification without input', () => {
     expect(new CodexRequestInputs().take({ tokenUsage: {} })).toBeUndefined()
+  })
+})
+
+describe('a spawnAgent card held open while its child runs (#843)', () => {
+  const result = { type: 'tool_result' as const, sessionId: S, callId: 'spawn', ok: true, summary: '' }
+  const ended = (thread: string) => ({ method: 'turn/completed', params: { threadId: thread, turn: { id: 'c', status: 'completed' } } })
+
+  it('lets the result go when every child it started ended, and not before', () => {
+    const tracker = new CodexChildTracker(S)
+    expect(tracker.hold(result, ['a', 'b'])).toBe(true)
+    expect(tracker.push('a', ended('a')).filter((e) => e.type === 'tool_result')).toEqual([])
+    expect(tracker.push('b', ended('b')).filter((e) => e.type === 'tool_result')).toEqual([result])
+  })
+
+  it('does not hold for a child that already ended, and closes a held card with the reason when the process goes', () => {
+    const tracker = new CodexChildTracker(S)
+    tracker.push('a', ended('a'))
+    expect(tracker.hold(result, ['a'])).toBe(false)
+    expect(tracker.hold(result, ['b'])).toBe(true)
+    expect(tracker.release('Ended with the session process').filter((e) => e.type === 'tool_result')).toEqual([
+      { type: 'tool_result', sessionId: S, callId: 'spawn', ok: false, summary: 'Ended with the session process' },
+    ])
   })
 })

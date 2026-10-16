@@ -41,6 +41,7 @@ import {
   CodexRequestInputs,
   fileChangesOf,
   goalFromCodex,
+  launchedThreads,
   normalizeNotification,
   threadSettingsChanged,
   threadSettingsOf,
@@ -897,6 +898,8 @@ class CodexSession implements SessionHandle {
         continue
       }
       if (e.type === 'compaction' && !this.compactions.admit(n)) continue
+      // A spawnAgent card stays open while the children it started run, so their steps show on it live (#843)
+      if (e.type === 'tool_result' && this.children.hold(e, launchedThreads(n))) continue
       if (e.type === 'usage_update') {
         const request = this.requests.take(n.params)
         if (request) {
