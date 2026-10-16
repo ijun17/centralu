@@ -4,6 +4,7 @@ import type { UpdateStatus } from '@cc/protocol'
 import type { OrchestratorTools } from '../adapters/contract.js'
 import {
   AGENT_BUDGET_CHARS,
+  FILL,
   AGENT_TOOLS,
   APP_ACCESS_BUDGET_CHARS,
   APP_ACCESS_TOOLS,
@@ -16,6 +17,7 @@ import {
   READER_INSTRUCTIONS,
   READER_TOOLS,
   RESIDENT_BUDGET_CHARS,
+  callForm,
   codexToolInstructionsFor,
   instructionsFor,
   orchestratorToolSchemas,
@@ -125,6 +127,20 @@ describe('Centralu update tool', () => {
     const refused = async () => ({ ok: false, error: 'No update is installed to apply.' })
     const no = await runOrchestratorTool(toolsWith({ updateCentralu: refused }), 'update_centralu', { action: 'apply' }, { sessionId: 's', profile: 'reader' })
     expect(no).toEqual({ isError: true, text: 'Centralu update was not applied: No update is installed to apply.' })
+  })
+
+  it('names apply in the form the seat calls it: through centralu_run where it is a rare command (#850)', async () => {
+    const installed = async () => ({ ok: true, status: { current: '0.1.0', latest: '0.1.1', newer: true, auto: true, autoApply: false, phase: 'restart_required' as const, error: null, checkedAt: null } })
+    const install = { command: 'update_centralu', args: { action: 'install' } }
+    // The orchestrator reaches update_centralu only through centralu_run in the default tier: a bare name is refused
+    const orchestrator = await runOrchestratorTool(toolsWith({ updateCentralu: installed }), 'centralu_run', install, { sessionId: 'o', profile: 'orchestrator' })
+    expect(orchestrator.text).toContain('or centralu_run(command="update_centralu", args={action: "apply"}) does')
+    expect(orchestrator.text).not.toContain('update_centralu with action')
+    const reader = await runOrchestratorTool(toolsWith({ updateCentralu: installed }), 'update_centralu', { action: 'install' }, { sessionId: 's', profile: 'reader' })
+    expect(reader.text).toContain('or update_centralu(action="apply") does')
+    // The person has no tools to name
+    const person = await runOrchestratorTool(toolsWith({ updateCentralu: installed }), 'update_centralu', { action: 'install' })
+    expect(person.text).toBe('Centralu 0.1.1 is installed. The person applies the installed build from Centralu; their automatic-update setting was not changed.')
   })
 })
 
@@ -403,5 +419,19 @@ describe('the resident cost of each profile', () => {
     expect(residentCost('reader', EAGER_DEVELOPER).residentChars).toBe(sentChars(READER_TOOLS) + sentChars(DELEGATE_TOOLS) + sentChars(AGENT_TOOLS) + sentChars(APP_ACCESS_TOOLS))
     const loaded = [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS].filter((t) => !('deferred' in t && t.deferred))
     expect(residentCost('reader', DEFERRED_SERVER).residentChars).toBe(sentChars(loaded))
+  })
+})
+
+describe('callForm (#850)', () => {
+  it('writes the tool, centralu_run for a rare command in the commands tier, and nothing for a tool the seat lacks', () => {
+    const args = { sessionId: 'w-1', card: FILL, text: FILL } as const
+    expect(callForm('orchestrator', 'answer_question', args, 'commands')).toBe('centralu_run(command="answer_question", args={sessionId: "w-1", card: …, text: …})')
+    expect(callForm('orchestrator', 'answer_question', args, 'resident')).toBe('answer_question(sessionId="w-1", card=…, text=…)')
+    expect(callForm('orchestrator', 'answer_question', args, 'deferred')).toBe('answer_question(sessionId="w-1", card=…, text=…)')
+    expect(callForm('reader', 'read_session', { sessionId: 'w-1', around: 42 })).toBe('read_session(sessionId="w-1", around=42)')
+    expect(callForm('scoped', 'answer_question', args)).toBeUndefined()
+    expect(callForm('reader', 'handoff_session', { waitFor: 'h' })).toBeUndefined()
+    expect(callForm('human', 'read_session', {})).toBeUndefined()
+    expect(callForm(null, 'read_session', {})).toBeUndefined()
   })
 })

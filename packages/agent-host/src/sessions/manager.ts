@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { residentCost } from './tool-cost.js'
 import { orchestratorHome, orchestratorRole } from './orchestrator-home.js'
 import { windowAround } from './snippet.js'
-import { commandsFor, profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
+import { profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
 import { answersFrom, cardCall, cardHandle, cardNotice, decisionFrom } from './delegated-cards.js'
 import type { QueuedRequest } from '../dev-services/store.js'
 import type { ToolProfile } from '../apps/contract.js'
@@ -4944,8 +4944,7 @@ export class SessionManager {
   /** The notice of a card (#676), delivered as a report is: marked as from the session, never carrying the card's text */
   private async tellCardRaised(callerId: string, sessionId: string, kind: 'question' | 'approval', requestId: string): Promise<void> {
     const profile = this.toolProfileOf(callerId)
-    const how = profile === null ? 'none' : commandsFor(profile).includes('answer_question') ? 'command' : profileAllows(profile, 'answer_question') ? 'tool' : 'none'
-    const text = cardNotice(kind, sessionId, cardCall(profile, sessionId, how), kind === 'approval' && this.answersApproval(callerId, sessionId, requestId))
+    const text = cardNotice(kind, sessionId, cardCall(profile, sessionId), kind === 'approval' && this.answersApproval(callerId, sessionId, requestId))
     const name = this.meta.get(sessionId)?.name ?? sessionId
     try {
       // Relayed, as a report: the stored line names the source, and the agent reads the same host-written words, which

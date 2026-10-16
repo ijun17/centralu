@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { ApprovalDecision, Question, QuestionAnswer } from '@cc/protocol'
 import type { ToolProfile } from '../apps/contract.js'
+import { callForm, FILL } from './orchestrator-tools.js'
 
 /**
  * Cards in a delegated turn (#676): a session P gave another session A a turn (ask_project, start_agent,
@@ -69,13 +70,12 @@ export function decisionFrom(text: string): ApprovalDecision | null {
  * orchestrator through answer_question (a rare command, so through centralu_run in that tier). A coordinator (#80),
  * which nothing makes any more, only reads it: `canAnswer` is false.
  */
-export function cardCall(profile: ToolProfile | null, sessionId: string, how: 'tool' | 'command' | 'none'): { call: string; canAnswer: boolean } {
+export function cardCall(profile: ToolProfile | null, sessionId: string): { call: string; canAnswer: boolean } {
   if (profile === 'reader') return { call: `agent_session(sessionId="${sessionId}", action="status") shows it; action="answer" answers it`, canAnswer: true }
   const read = `read_session(sessionId="${sessionId}") shows it`
-  if (how === 'none') return { call: read, canAnswer: false }
-  const answer = how === 'command'
-    ? `centralu_run(command="answer_question", args={sessionId: "${sessionId}", text: …})`
-    : `answer_question(sessionId="${sessionId}", text=…)`
+  // The form the seat calls it in (#850): the tool, or centralu_run for a rare command in the commands tier
+  const answer = callForm(profile, 'answer_question', { sessionId, text: FILL })
+  if (!answer) return { call: read, canAnswer: false }
   return { call: `${read}; ${answer} answers it`, canAnswer: true }
 }
 

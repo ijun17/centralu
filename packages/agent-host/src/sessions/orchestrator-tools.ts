@@ -794,8 +794,8 @@ export async function runOrchestratorTool(
     if (!s) return { text: 'Centralu update is unavailable.', isError: true }
     if (action === 'check') return { text: s.newer && s.latest ? `Centralu ${s.latest} is available.` : s.error ?? 'Centralu is up to date.' }
     // The install answers once its target is settled (#645): up to date is a result here, not a failure
-    const applies =
-      'The person applies the installed build from Centralu, or update_centralu with action apply does; their automatic-update setting was not changed.'
+    const apply = callForm(caller.profile, 'update_centralu', { action: 'apply' })
+    const applies = `The person applies the installed build from Centralu${apply ? `, or ${apply} does` : ''}; their automatic-update setting was not changed.`
     if (s.phase === 'failed') return { text: `Centralu update failed: ${s.error}` }
     if (s.phase === 'restart_required') return { text: `Centralu ${s.latest ?? ''} is installed. ${applies}` }
     if (s.phase === 'updating' || s.phase === 'waiting_for_npm') return { text: `Installing Centralu ${s.latest ?? ''}. ${applies}` }
@@ -919,12 +919,8 @@ export async function runOrchestratorTool(
         : ''
     // The cards of a turn this seat gave it (#676), after the conversation: the way to answer depends on the seat
     const answer = caller.profile === 'reader'
-      ? `agent_session(sessionId="${String(args.sessionId)}", action="answer", card=…, text=…)`
-      : caller.profile !== 'human' && commandsFor(caller.profile).includes('answer_question')
-        ? `centralu_run(command="answer_question", args={sessionId: "${String(args.sessionId)}", card: …, text: …})`
-        : caller.profile !== 'human' && profileAllows(caller.profile, 'answer_question')
-          ? `answer_question(sessionId="${String(args.sessionId)}", card=…, text=…)`
-          : undefined
+      ? callForm(caller.profile, 'agent_session', { sessionId: String(args.sessionId), action: 'answer', card: FILL, text: FILL })
+      : callForm(caller.profile, 'answer_question', { sessionId: String(args.sessionId), card: FILL, text: FILL })
     const cards = r.cards?.length
       ? `\n\nWaiting on you in the turn you gave it:\n${cardsText(r.cards)}\n` +
         (answer ? `${answer} answers it. ${ANSWER_FORM}` : 'Only the person can answer it from here; tell them if it matters.')
@@ -968,10 +964,13 @@ export async function runOrchestratorTool(
     const r = await tools.handoffSession(waitFor ? { waitFor } : { sessionId, ...(tool ? { tool } : {}), ...(mode ? { mode } : {}), ...(instructions ? { instructions } : {}) }, signal)
     if (!r.ok) return { text: r.error, isError: true }
     if (r.state === 'writing') {
+      const again = callForm(caller.profile, 'handoff_session', { waitFor: r.handle })
       return {
         text:
           `The handoff of ${trustedJsonText(r.sessionName)} [${r.sessionId}] is still running (its note is being written). ` +
-          `Call handoff_session with waitFor "${r.handle}" to keep waiting; the new session starts when the note is written, whether or not you wait.`,
+          (again
+            ? `Call ${again} to keep waiting; the new session starts when the note is written, whether or not you wait.`
+            : `The new session starts when the note is written (handle ${trustedJsonText(r.handle)}).`),
       }
     }
     return {
@@ -1381,6 +1380,31 @@ export const COMMANDS_INSTRUCTION =
 export function commandsFor(profile: ToolProfile | 'human', tier: RareTier = rareTier): OrchestratorToolName[] {
   if (tier !== 'commands' || profile === 'human') return []
   return (RARE_COMMANDS[profile] ?? []).filter((n) => baseAllows(profile, n))
+}
+
+/** An argument the caller fills in itself, written `…` in a call an answer names */
+export const FILL = Symbol('fill')
+
+/**
+ * The call an answer names, in the form this seat can make it (#850): the tool itself, or centralu_run when it is one of
+ * the seat's rare commands in the `commands` tier; undefined when the seat cannot call it at all (and for the person,
+ * who has no tools). Every answer that tells the model to call a tool names it through this: a bare name the seat
+ * reaches only through centralu_run is refused as "Not a tool of this session".
+ */
+export function callForm(
+  profile: ToolProfile | 'human' | null,
+  tool: string,
+  args: Record<string, string | number | boolean | typeof FILL>,
+  tier: RareTier = rareTier,
+): string | undefined {
+  if (profile === null || profile === 'human') return undefined
+  const value = (v: string | number | boolean | typeof FILL) => (v === FILL ? '…' : JSON.stringify(v))
+  const entries = Object.entries(args)
+  if ((commandsFor(profile, tier) as string[]).includes(tool)) {
+    return `centralu_run(command="${tool}", args={${entries.map(([k, v]) => `${k}: ${value(v)}`).join(', ')}})`
+  }
+  if (!profileAllows(profile, tool, tier)) return undefined
+  return `${tool}(${entries.map(([k, v]) => `${k}=${value(v)}`).join(', ')})`
 }
 
 /** The tools this seat's Claude server defers behind tool search in this tier (the reader set marks its own) */
