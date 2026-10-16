@@ -45,7 +45,7 @@ import type {
   ToolDescriptor,
   UsageSnapshot,
 } from '@cc/protocol'
-import { NO_PATH, isNewerVersion } from '@cc/protocol'
+import { isNewerVersion } from '@cc/protocol'
 import { dataRoot } from '../../data-dir.js'
 import { whichTool } from '../../env-path.js'
 import { launchFor, toolExecutable, type ToolLaunch } from '../../tool-launch.js'
@@ -68,12 +68,12 @@ import { withoutCrossSessionMessaging } from './cross-session.js'
 
 const exec = promisify(execFile)
 
-/** How long a usage probe may take to get its answer, and the wait between its asks (#726) */
 /**
  * The first CLI whose result names every input it folded in (`user_message_uuids`): tracked notes need it (#592).
  * Measured on the installed CLI and the pinned SDK's schema.
  */
 const TRACKED_INPUT_SINCE = '2.1.289'
+/** How long a usage probe may take to get its answer, and the wait between its asks (#726) */
 const PROBE_USAGE_MS = 20_000
 const PROBE_USAGE_RETRY_MS = 500
 const ACCOUNT_CACHE_MS = 60_000
@@ -717,14 +717,14 @@ class ClaudeSession implements SessionHandle {
           const detail = approvalDetail(toolName, toolInput, self.opts.cwd)
           /*
            * The rule's key — for a command it is the full command text, for a file edit it is
-           * **the path** (#170). This matches what the UI carries on "always allow" (a command
-           * uses core's `suggestMatcher`, an edit uses `detail.path`), and the Codex adapter looks
+           * **the path** (#170). This matches what the UI carries on "always allow" (both come
+           * from protocol's `alwaysAllowKey`, #428), and the Codex adapter looks
            * things up by the same rule. This used to look up an edit by `Edit:file_edit`, so a
            * rule saved by path could never match — the same file was asked about again every time
            * it was edited again. Other kinds (`other`) have no key at all: what "always" would
            * even mean for them has not been decided yet.
            */
-          const key = alwaysAllowKey(detail, { skipPath: NO_PATH })
+          const key = alwaysAllowKey(detail)
           if (key && self.alwaysAllow.allows(key)) return { behavior: 'allow' as const, updatedInput: toolInput }
 
           const requestId = `req-${self.reqTag}-${++self.reqCounter}`
