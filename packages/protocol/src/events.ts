@@ -165,7 +165,8 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
   MessageDelta,
   ReasoningDelta,
   /**
-   * The current state of a plan the agent set (measured in #58, codex turn/plan/updated).
+   * The current state of a plan the agent set (measured in #58, codex turn/plan/updated; Claude Code's TodoWrite list
+   * since #843).
    *
    * **A full snapshot arrives every time** — not a delta, so the receiving side never needs to
    * remember the prior state (the same reason as settings_changed). Measured: a plan never

@@ -154,6 +154,31 @@ describe('tool calls (the actual shape from the spike)', () => {
     expect(done.find((e) => e.type === 'files_touched')).toMatchObject({ paths: ['/repo/b.ts'] })
   })
 
+  it("a TodoWrite call is the session's plan as well as its card (#843)", () => {
+    const todos = [
+      { content: 'Read the code', status: 'completed', activeForm: 'Reading the code' },
+      { content: 'Fix the bug', status: 'in_progress', activeForm: 'Fixing the bug' },
+      { content: 'Run the tests', status: 'pending', activeForm: 'Running the tests' },
+    ]
+    const out = n({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'td', name: 'TodoWrite', input: { todos } }] } })
+    expect(out.map((e) => e.type)).toEqual(['tool_call', 'plan_update'])
+    expect(out[1]).toEqual({
+      type: 'plan_update',
+      sessionId: SID,
+      steps: [
+        { text: 'Read the code', status: 'completed' },
+        { text: 'Fix the bug', status: 'inProgress' },
+        { text: 'Run the tests', status: 'pending' },
+      ],
+    })
+    // An emptied list clears the panel; a subagent's list is not the session's plan
+    expect(n({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't2', name: 'TodoWrite', input: { todos: [] } }] } })[1]).toEqual({
+      type: 'plan_update', sessionId: SID, steps: [],
+    })
+    const sub = n({ type: 'assistant', parent_tool_use_id: 'a1', message: { content: [{ type: 'tool_use', id: 't3', name: 'TodoWrite', input: { todos } }] } })
+    expect(sub.some((e) => e.type === 'plan_update')).toBe(false)
+  })
+
   it('Read does not count as touching a file — it emits no files_touched (#185)', () => {
     const out = n({
       type: 'assistant',

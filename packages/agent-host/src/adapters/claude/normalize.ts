@@ -1,6 +1,7 @@
 import type { NormalizedEvent, RequestInput, SessionActivity, TokenUsage } from '@cc/protocol'
 import { TouchedFiles } from '../file-changes.js'
 import { inlineImageEvent, undrawnImageEvent } from '../images.js'
+import { todoWritePlan } from '../plan.js'
 import { toolResultEvent } from '../tool-result.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { ClaudeBackgroundTracker } from './background-tracker.js'
@@ -339,6 +340,8 @@ export function normalizeMessage(
           summary: toolSummary(name, input),
           ...(block.input !== undefined ? { input: block.input } : {}),
         })
+        // The todo list is the session's plan too (#843); a subagent's is not, and its steps keep no plan
+        out.push(...todoWritePlan(sessionId, name, block.input))
       }
     }
     // Usage also comes carried on an assistant message.

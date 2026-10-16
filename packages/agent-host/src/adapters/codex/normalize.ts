@@ -2,6 +2,7 @@ import { asObj, finite, str } from '../../json-value.js'
 import { type ApprovalDetail, type BackgroundTask, type NormalizedEvent, type RequestInput, type SessionGoal, type SubagentStep } from '@cc/protocol'
 import { fileEditDetail, type FileChange } from '../file-changes.js'
 import { mcpImageEvents } from '../images.js'
+import { planUpdate } from '../plan.js'
 import { toolResultEvent } from '../tool-result.js'
 import { noticeWords } from './notices.js'
 
@@ -471,17 +472,9 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * (measured: this turn's items were only userMessage, reasoning, agentMessage and
      * commandExecution).
      */
-    case 'turn/plan/updated': {
-      const steps = (Array.isArray(p.plan) ? p.plan : []).map((raw) => {
-        const it = asObj(raw)
-        const raw_ = str(it.status)
-        // An unknown status falls back to pending — progress display must not die outright over one new status value
-        const status: 'pending' | 'inProgress' | 'completed' =
-          raw_ === 'inProgress' || raw_ === 'completed' ? raw_ : 'pending'
-        return { text: str(it.step), status }
-      })
-      return steps.length > 0 ? [{ type: 'plan_update', sessionId, steps }] : []
-    }
+    case 'turn/plan/updated':
+      // The same steps Claude's TodoWrite gives (adapters/plan.ts)
+      return Array.isArray(p.plan) && p.plan.length > 0 ? [planUpdate(sessionId, p.plan, 'step')] : []
 
     /*
      * Output while a command is running (measured for #58): {threadId, turnId, itemId, delta}.
