@@ -1,5 +1,6 @@
 import { join } from 'node:path'
-import { PrivateJsonFile, isJsonObject } from './private-json-file.js'
+import { isObj } from '../../json-value.js'
+import { PrivateJsonFile } from './private-json-file.js'
 
 /**
  * The values behind app secrets (M4 A-3, from the plan "data and secrets live outside the
@@ -34,7 +35,7 @@ export class SecretStore {
     this.file = new PrivateJsonFile(join(dataRoot, SECRETS_FILE), {
       label: SECRETS_FILE,
       empty: () => ({}),
-      valid: (doc): doc is SecretsDoc => isJsonObject(doc),
+      valid: (doc): doc is SecretsDoc => isObj(doc),
       lost: 'Apps start without secrets until they are entered again',
     })
   }

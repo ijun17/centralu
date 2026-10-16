@@ -170,8 +170,3 @@ function alive(pid: number): boolean {
     return (e as NodeJS.ErrnoException).code === 'EPERM'
   }
 }
-
-/** A JSON object that is not an array: the shape both documents share at the top */
-export function isJsonObject(doc: unknown): doc is Record<string, unknown> {
-  return !!doc && typeof doc === 'object' && !Array.isArray(doc)
-}

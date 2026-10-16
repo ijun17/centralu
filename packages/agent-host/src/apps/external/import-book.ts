@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import { statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AppManifest } from './manifest.js'
-import { PrivateJsonFile, isJsonObject } from './private-json-file.js'
+import { isObj } from '../../json-value.js'
+import { PrivateJsonFile } from './private-json-file.js'
 import { canonicalJson } from './runs.js'
 
 /**
@@ -64,7 +65,7 @@ export class ImportBook {
     this.file = new PrivateJsonFile(join(dataRoot, IMPORTS_FILE), {
       label: IMPORTS_FILE,
       empty: () => ({}),
-      valid: (doc): doc is Doc => isJsonObject(doc),
+      valid: (doc): doc is Doc => isObj(doc),
       lost: 'Imported apps lost their marks',
       indent: 2,
     })
