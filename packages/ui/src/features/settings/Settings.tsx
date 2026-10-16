@@ -7,6 +7,7 @@ import { useMachineName, useTools } from '../../store/selectors.js'
 import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { isPlainEscape } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
+import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import { useAppCatalog, type ExternalCatalogApp } from '../../store/app-catalog.js'
@@ -479,6 +480,7 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
   const openApp = useStore((s) => s.openApp)
   const removeUserApp = useStore((s) => s.removeUserApp)
   const [confirming, setConfirming] = useState(false)
+  const [removing, setRemoving] = useState(false)
   // A linked machine's user-folder app (#82): removed there, so the question names the machine
   const machineName = useMachineName(app.projectId === null ? app.info.machine : null)
   return (
@@ -533,31 +535,28 @@ function ExternalAppRow({ app }: { app: ExternalCatalogApp }) {
       {/* Another machine's user-folder app (#82) is removed on that machine: `machine` names it, so this computer's app of the same id is never touched */}
       {app.projectId === null &&
         (confirming ? (
-          <div className="mt-2 rounded-md border border-line bg-surface-floor px-2.5 py-2" data-testid="external-app-remove-confirm">
-            <p className="text-xs leading-body text-ink-muted">
-              {machineName
+          <InlineConfirm
+            text={
+              machineName
                 ? `Remove ${app.title} from ${machineName}? Its folder moves to the app trash there and agents there lose its tools. Its run records stay. Apps on this computer are not touched.`
-                : `Remove ${app.title}? Its folder moves to the app trash and agents lose its tools. Its run records stay.`}
-            </p>
-            <div className="mt-1.5 flex justify-end gap-2">
-              <button
-                type="button"
-                className="rounded-md px-2 py-0.5 text-xs text-ink-faint transition-colors hover:text-ink"
-                onClick={() => setConfirming(false)}
-                data-testid="external-app-remove-cancel"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="rounded-md border border-line bg-surface-raised px-2 py-0.5 text-xs text-ink transition-colors hover:text-ink-signal"
-                onClick={() => void removeUserApp(app.appId, app.info.machine).then((ok) => ok || setConfirming(false))}
-                data-testid="external-app-remove-yes"
-              >
-                Remove
-              </button>
-            </div>
-          </div>
+                : `Remove ${app.title}? Its folder moves to the app trash and agents lose its tools. Its run records stay.`
+            }
+            yesLabel="Remove"
+            busy={removing}
+            onYes={() => {
+              setRemoving(true)
+              // Busy until the row is gone: it goes with the host's rebroadcast, so a success leaves the button off
+              void removeUserApp(app.appId, app.info.machine).then((ok) => {
+                if (ok) return
+                setRemoving(false)
+                setConfirming(false)
+              })
+            }}
+            onNo={() => setConfirming(false)}
+            testId="external-app-remove-confirm"
+            yesTestId="external-app-remove-yes"
+            noTestId="external-app-remove-cancel"
+          />
         ) : (
           <button
             type="button"

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { HostActivity, MachineInfo } from '@cc/protocol'
 import { autostartRow, hostStartNote, installNote, machineProblem, operationNote, updateStops, versionPrompt } from '@cc/core'
 import { useStore } from '../../store/store.js'
+import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
 import { AddMachineForm, SHELL_LABEL, withCode } from './AddMachineForm.jsx'
 
@@ -53,6 +54,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
   const remove = useStore((s) => s.removeMachine)
   const setToast = useStore((s) => s.setToast)
   const [confirming, setConfirming] = useState(false)
+  const [removing, setRemoving] = useState(false)
   const problem = machineProblem(m)
   const started = hostStartNote(m)
   const operation = operationNote(m)
@@ -76,25 +78,23 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
             </button>
           )}
           {confirming ? (
-            <>
-              <span className="text-xs text-ink-muted">Remove?</span>
-              <button
-                type="button"
-                className="text-xs text-danger hover:text-ink"
-                onClick={() =>
-                  void remove(m.id).catch((e: Error) => {
-                    setConfirming(false)
-                    setToast(`Could not remove ${m.name}: ${e.message}`)
-                  })
-                }
-                data-testid={`machine-remove-yes-${m.id}`}
-              >
-                Remove
-              </button>
-              <button type="button" className="text-xs text-ink-faint hover:text-ink" onClick={() => setConfirming(false)}>
-                Keep
-              </button>
-            </>
+            <InlineConfirm
+              inline
+              text="Remove?"
+              yesLabel="Remove"
+              noLabel="Keep"
+              busy={removing}
+              onYes={() => {
+                setRemoving(true)
+                void remove(m.id).catch((e: Error) => {
+                  setRemoving(false)
+                  setConfirming(false)
+                  setToast(`Could not remove ${m.name}: ${e.message}`)
+                })
+              }}
+              onNo={() => setConfirming(false)}
+              yesTestId={`machine-remove-yes-${m.id}`}
+            />
           ) : (
             <button
               type="button"
@@ -160,19 +160,16 @@ function StopConfirm({ m, action, onCancel, onConfirm }: { m: MachineInfo; actio
     }
   }, [machineActivity, m.id])
   return (
-    <div className="mt-2 rounded-md border border-line bg-surface-floor px-2.5 py-2" data-testid={`machine-stop-confirm-${m.id}`}>
-      <p className="text-xs leading-body text-ink" data-testid={`machine-stop-text-${m.id}`}>
-        {activity === undefined ? `Asking ${m.name} what is running…` : updateStops(m.name, activity).replace(/^Updating/, action)}
-      </p>
-      <div className="mt-2 flex items-center gap-2">
-        <button type="button" className={boxButton} disabled={activity === undefined} onClick={onConfirm} data-testid={`machine-stop-yes-${m.id}`}>
-          {action}
-        </button>
-        <button type="button" className={linkButton} onClick={onCancel}>
-          Cancel
-        </button>
-      </div>
-    </div>
+    <InlineConfirm
+      text={activity === undefined ? `Asking ${m.name} what is running…` : updateStops(m.name, activity).replace(/^Updating/, action)}
+      yesLabel={action}
+      busy={activity === undefined}
+      onYes={onConfirm}
+      onNo={onCancel}
+      testId={`machine-stop-confirm-${m.id}`}
+      yesTestId={`machine-stop-yes-${m.id}`}
+      textTestId={`machine-stop-text-${m.id}`}
+    />
   )
 }
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { TrashedSession } from '@cc/protocol'
 import { messagesToChat, useStore, type ChatItem } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { useToolMeta } from '../../store/selectors.js'
 import { Markdown } from '../session/Markdown.jsx'
 
@@ -216,23 +217,15 @@ function goesWithText(s: TrashedSession): string {
 
 function Confirm({ text, busy, onYes, onNo }: { text: string; busy: boolean; onYes: () => void; onNo: () => void }) {
   return (
-    <div className="mt-2 rounded-md border border-danger/40 bg-danger-bg px-2.5 py-2" data-testid="trash-confirm">
-      <p className="text-xs leading-body text-ink">{text}</p>
-      <div className="mt-2 flex justify-end gap-2">
-        <button type="button" className="rounded-md px-2 py-0.5 text-xs text-ink-faint hover:text-ink" onClick={onNo}>
-          Cancel
-        </button>
-        <button
-          type="button"
-          className="rounded-md border border-danger/40 px-2 py-0.5 text-xs text-danger hover:border-danger/70 disabled:opacity-40"
-          disabled={busy}
-          onClick={onYes}
-          data-testid="trash-confirm-yes"
-        >
-          Delete for good
-        </button>
-      </div>
-    </div>
+    <InlineConfirm
+      text={text}
+      yesLabel="Delete for good"
+      tone="danger"
+      busy={busy}
+      onYes={onYes}
+      onNo={onNo}
+      testId="trash-confirm"
+    />
   )
 }
 
