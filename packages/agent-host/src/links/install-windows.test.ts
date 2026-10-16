@@ -9,7 +9,7 @@ import { installRemote, installScript, type RemoteRuntime } from './install.js'
 import { connectionCommand, SshTunnel } from './tunnel.js'
 import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import { rmFakeDir } from '../fake-exe.test-helpers.js'
-import { WIN_NODE_FILE, WIN_NODE_V, windowsNodeZip, windowsPackages, windowsRemoteEnv, windowsRemoteSsh, windowsRuntime } from './windows-remote.test-helpers.js'
+import { WIN_NODE_FILE, WIN_NODE_V, windowsNodeZip, windowsPackages, windowsRemoteEnv, windowsRemoteSsh, windowsRuntime, pwsh7ModulePath } from './windows-remote.test-helpers.js'
 
 /**
  * This computer as the Windows machine a hub installs on and updates (plan §10.2, §10.5): the
@@ -65,8 +65,8 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
   const events = () => (existsSync(data('events')) ? readFileSync(data('events'), 'utf8').trim().split('\n') : [])
   const running = () => (existsSync(data('running')) ? readFileSync(data('running'), 'utf8') : null)
   const tunnel = (env: Record<string, string> = {}) => new SshTunnel({ target: 'box', remote: { shell: 'powershell' }, ssh: join(root, 'ssh.exe'), env: windowsRemoteEnv(home, env) })
-  const install = (version: string, o: { runtime?: RemoteRuntime } = {}) => {
-    const t = tunnel()
+  const install = (version: string, o: { runtime?: RemoteRuntime; env?: Record<string, string> } = {}) => {
+    const t = tunnel(o.env)
     return installRemote({ exec: (c) => t.exec(c), spec: { shell: 'powershell' }, target: 'box', version, runtime: o.runtime ?? runtime, script: installScript(), registry: { registry: reg.url }, nodeDist: `${reg.url}/dist` })
   }
 
@@ -89,6 +89,14 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       // runs current's centralu.mjs on the Node current names
       const out = execFileSync(connectionCommand({ shell: 'powershell' }), { shell: true, env: windowsRemoteEnv(home), encoding: 'utf8' })
       expect(JSON.parse(out.trim().split(/\r?\n/).at(-1)!)).toEqual({ ran: '9.8.0', argv: ['serve', '--connection'], managed: '1' })
+    }, 120_000)
+
+    it('installs when Windows PowerShell was started from PowerShell 7 and inherited its module path (GitHub runners, an OpenSSH DefaultShell of pwsh)', async () => {
+      // Without the reset the install script's Get-FileHash was "found in the module … but the module could not be loaded"
+      const r = await install('9.9.4', { env: { PSModulePath: pwsh7ModulePath(root) } })
+      expect(r.current).toEqual({ version: '9.9.4', node: WIN_NODE_V })
+      expect(existsSync(remote('node', `v${WIN_NODE_V}`, 'node.exe'))).toBe(true)
+      expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.4 ${WIN_NODE_V}\n`)
     }, 120_000)
 
     it('a version with a host-only package installs that one and never downloads the platform package (owner decision 2)', async () => {

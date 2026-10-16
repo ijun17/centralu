@@ -58,7 +58,10 @@ export function windowsRuntime(zip: Buffer): RemoteRuntime {
 export function windowsRemoteEnv(home: string, over: Record<string, string> = {}): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v
-  return { ...env, USERPROFILE: home, HOME: home, CC_DATA_DIR: join(home, '.centralu'), CC_FAKE_NODE: process.execPath, ...over }
+  const set = { USERPROFILE: home, HOME: home, CC_DATA_DIR: join(home, '.centralu'), CC_FAKE_NODE: process.execPath, ...over }
+  // Windows names are not case-sensitive: `Path` and `PATH` are one variable, and two spellings in one block are a coin toss
+  for (const k of Object.keys(env)) if (Object.keys(set).some((s) => s.toLowerCase() === k.toLowerCase())) delete env[k]
+  return { ...env, ...set }
 }
 
 /**
@@ -75,4 +78,30 @@ export function windowsPackages(version: string, centralu: { mjs: string; serve:
     },
     ...(hostOnly ? [{ name: '@centralu/host-win32-x64', version, files: { 'package.json': JSON.stringify({ name: '@centralu/host-win32-x64', version }), 'host/main.mjs': 'export {}\n' } }] : []),
   ]
+}
+
+/**
+ * The module path a Windows PowerShell inherits when it is started from PowerShell 7 (pwsh), as on
+ * GitHub's runners and on a Windows machine whose OpenSSH `DefaultShell` is pwsh: PowerShell 7's own
+ * module folder comes first, with the 7.x copies of the built-in modules. Windows PowerShell 5.1 finds
+ * `Microsoft.PowerShell.Utility` 7.x there, cannot load it, and `Get-FileHash`, `ConvertTo-Json`,
+ * `Invoke-WebRequest` and `Expand-Archive` are gone ("found in the module … but the module could not
+ * be loaded"). The modules here are stand-ins of that shape (a Core-only manifest, a version above
+ * 5.1's, a binary that is not there), so no PowerShell 7 has to be installed to see it.
+ */
+export function pwsh7ModulePath(dir: string): string {
+  const mod = join(dir, 'pwsh7', 'Modules')
+  for (const [name, guid, cmdlets] of [
+    ['Microsoft.PowerShell.Utility', '1da87e53-152b-403e-98dc-74d7b4d63d59', ['Get-FileHash', 'ConvertTo-Json', 'ConvertFrom-Json', 'Invoke-WebRequest', 'Invoke-RestMethod']],
+    ['Microsoft.PowerShell.Archive', 'eb74e8da-9ae2-482a-a648-e96550fb8733', ['Expand-Archive', 'Compress-Archive']],
+    ['CimCmdlets', 'fb6cc51d-c096-4b38-b78d-0fed6277e8d0', ['Invoke-CimMethod', 'Get-CimInstance']],
+  ] as const) {
+    mkdirSync(join(mod, name), { recursive: true })
+    writeFileSync(
+      join(mod, name, `${name}.psd1`),
+      `@{ ModuleVersion = '7.0.0.0'; GUID = '${guid}'; CompatiblePSEditions = @('Core'); PowerShellVersion = '7.0'; RootModule = '${name}.dll'; CmdletsToExport = @(${cmdlets.map((c) => `'${c}'`).join(', ')}) }\r\n`,
+    )
+  }
+  // Then the rest of what pwsh puts in the variable
+  return [mod, join(process.env.ProgramFiles ?? 'C:\\Program Files', 'PowerShell', 'Modules'), process.env.PSModulePath ?? ''].join(';')
 }

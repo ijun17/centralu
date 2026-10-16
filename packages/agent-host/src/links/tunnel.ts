@@ -220,9 +220,20 @@ export type RemoteSpec = {
 
 export const WSL_DISTRO_RE = /^[A-Za-z0-9._-]{1,64}$/
 
+/**
+ * What every PowerShell script sent to a Windows remote starts with. The first line makes its output UTF-8.
+ * The second gives it the machine's module path: a Windows PowerShell started from PowerShell 7 (pwsh)
+ * inherits pwsh's `PSModulePath`, whose first folder holds 7.x copies of the built-in modules that 5.1
+ * cannot load, and `Get-FileHash`, `ConvertTo-Json`, `Invoke-WebRequest` and `Expand-Archive` are then
+ * "found in the module … but the module could not be loaded". That is every GitHub Windows runner, and a
+ * Windows machine whose OpenSSH `DefaultShell` is pwsh.
+ */
+export const PS_PREAMBLE =
+  "[Console]::OutputEncoding=[Text.Encoding]::UTF8\n$psmp=[Environment]::GetEnvironmentVariable('PSModulePath','Machine'); if ($psmp) { $env:PSModulePath=$psmp }\n"
+
 /** A PowerShell script as one command line any Windows shell passes on untouched (see `RemoteSpec`) */
 export function powershell(script: string): string {
-  const full = `[Console]::OutputEncoding=[Text.Encoding]::UTF8\n${script}`
+  const full = `${PS_PREAMBLE}${script}`
   return `powershell -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(full, 'utf16le').toString('base64')}`
 }
 
@@ -252,7 +263,7 @@ const PS_FROM_STDIN =
 function powershellScript(script: string): RemoteCommand {
   const inline = powershell(script)
   if (inline.length <= WINDOWS_INLINE_MAX) return inline
-  const full = `[Console]::OutputEncoding=[Text.Encoding]::UTF8\n${script}`
+  const full = `${PS_PREAMBLE}${script}`
   return { command: powershell(PS_FROM_STDIN), stdin: Buffer.from(full, 'utf8').toString('base64') }
 }
 

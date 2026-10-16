@@ -45,7 +45,7 @@ function decode(cmd) {
     const w = /wsl\.exe -d '([^']+)' -- bash -lc 'echo ([A-Za-z0-9+/=]+) \| base64 -d \| bash -l'$/.exec(cmd)
     if (w) { shell = 'wsl:' + w[1]; cmd = Buffer.from(w[2], 'base64').toString('utf8') }
   }
-  return { shell, cmd: cmd.replace('[Console]::OutputEncoding=[Text.Encoding]::UTF8\n', '') }
+  return { shell, cmd: cmd.replace(/^\[Console\]::OutputEncoding=[^\n]*\n(\$psmp=[^\n]*\n)?/, '') }
 }
 // FAKE_SSH_STATE, when set, is the remote host: running while the file exists
 const state = process.env.FAKE_SSH_STATE

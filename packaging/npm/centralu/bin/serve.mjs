@@ -936,11 +936,21 @@ export function windowsArg(arg) {
   return `"${s.replace(/(\\+)$/, '$1$1')}"`
 }
 
+/**
+ * The first line of a script run by Windows PowerShell 5.1: the machine's module path. Started from
+ * PowerShell 7 (pwsh, a `DefaultShell` of it, a CI runner), 5.1 inherits pwsh's `PSModulePath`, whose
+ * first folder holds 7.x copies of the built-in modules that 5.1 cannot load: `Invoke-CimMethod` and
+ * `Get-ScheduledTask` are then "found in the module … but the module could not be loaded". Same line as
+ * the hub's (links/tunnel.ts, `PS_PREAMBLE`)
+ */
+const PS_MODULE_PATH = "$psmp = [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine'); if ($psmp) { $env:PSModulePath = $psmp }"
+
 /** The PowerShell that asks WMI to create `commandLine`. Values cross as base64, so no quoting can break */
 export function wmiScript({ commandLine, cwd = null }) {
   const text = (s) => `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(s, 'utf8').toString('base64')}'))`
   return [
     "$ErrorActionPreference = 'Stop'",
+    PS_MODULE_PATH,
     '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
     `$a = @{ CommandLine = ${text(commandLine)} }`,
     ...(cwd ? [`$a.CurrentDirectory = ${text(cwd)}`] : []),
@@ -1501,7 +1511,7 @@ const TASK_WORD = 'CENTRALU-AUTOSTART'
  * on battery too, and with no time limit (the default ends a task after 72 hours).
  */
 export function taskScript(action, { name, run = '' }) {
-  const head = ["$ErrorActionPreference = 'Stop'", '[Console]::OutputEncoding = [Text.Encoding]::UTF8', `$name = ${psText(name)}`]
+  const head = ["$ErrorActionPreference = 'Stop'", PS_MODULE_PATH, '[Console]::OutputEncoding = [Text.Encoding]::UTF8', `$name = ${psText(name)}`]
   const fail = `} catch { "${TASK_WORD}-ERROR $($_.Exception.Message -replace '\\s+', ' ')" }`
   const find = "$t = Get-ScheduledTask -TaskName $name -TaskPath '\\' -ErrorAction SilentlyContinue"
   if (action === 'status') return [...head, 'try {', `  ${find}`, `  if ($t) { "${TASK_WORD} state $($t.State)" } else { '${TASK_WORD} state none' }`, fail].join('\n')

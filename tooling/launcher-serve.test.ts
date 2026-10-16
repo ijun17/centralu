@@ -574,6 +574,8 @@ describe('starting through WMI', () => {
     expect(script).not.toContain("it's here")
     expect(script).toContain(Buffer.from(commandLine, 'utf8').toString('base64'))
     expect(script).toContain('Invoke-CimMethod -ClassName Win32_Process -MethodName Create')
+    // Started from PowerShell 7, 5.1 inherits a module path with 7.x modules it cannot load (links/install-windows.test.ts); the reset is the same defensive line the hub sends
+    expect(script).toContain("GetEnvironmentVariable('PSModulePath', 'Machine')")
   })
 
   it('reads a created process, a refusal code and a thrown error from what the script printed', () => {
