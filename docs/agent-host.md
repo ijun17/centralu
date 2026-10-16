@@ -1634,7 +1634,10 @@ must keep reading an older host's tags: the children outlive the build that spaw
   once the output has ended (at most 1 s after it, `exit-after-drain.ts`), the release of the keeper's record, and a
   detach that waits at most 2 s each for the attach and for the keeper to end the stream. A child whose streams cannot
   be attached is ended (KILL to its group) and released once it has exited: the keeper refuses to release a running
-  child, so releasing it at once left it running with nobody to read or stop it.
+  child, so releasing it at once left it running with nobody to read or stop it. A child adopted from a previous host
+  gets one more attach first, with a 15 s bound (a loaded machine or a keeper handoff can hold the first one past its
+  5 s). If that fails too, an agent is ended, since its session starts a new CLI on the same conversation and two
+  CLIs on one thread conflict; a terminal or a command run is left running in the keeper for the next host.
 
 **What stopping an agent ends.** An agent CLI starts helpers of its own: Claude Code's LSP tool runs
 `typescript-language-server`, which runs `tsserver` (one reached 3.4 GB); MCP servers from the user's config; shells.

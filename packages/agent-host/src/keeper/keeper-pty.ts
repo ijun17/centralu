@@ -31,9 +31,12 @@ export class KeeperPty extends HeldChild {
   private decoder = new StringDecoder('utf8')
   private queued: string[] = []
 
-  private constructor(keeper: KeeperChildren, child: Promise<KeptChild>) {
+  /** A shell or a dev server is the person's: left in the keeper for the next host to take over (`HeldChild`) */
+  protected readonly endsUnreadableAdopted = false
+
+  private constructor(keeper: KeeperChildren, child: Promise<KeptChild>, adopted = false) {
     super(keeper)
-    this.begin(child, ['out'])
+    this.begin(child, ['out'], adopted)
   }
 
   static spawn(keeper: KeeperChildren, file: string, args: string[], opts: KeeperPtySpawnOpts): KeeperPty {
@@ -46,7 +49,7 @@ export class KeeperPty extends HeldChild {
   }
 
   static adopt(keeper: KeeperChildren, child: KeptChild): KeeperPty {
-    return new KeeperPty(keeper, Promise.resolve(child))
+    return new KeeperPty(keeper, Promise.resolve(child), true)
   }
 
   protected attached([sock]: Socket[]): void {

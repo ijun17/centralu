@@ -54,6 +54,8 @@ export type SpawnRequest = {
 }
 
 const REQUEST_TIMEOUT_MS = 15_000
+/** How long an attach may take to be answered */
+export const ATTACH_TIMEOUT_MS = 5000
 
 /** A child service answer line, read off the front of a socket before its raw bytes start. */
 function readAnswer(sock: Socket, timeoutMs: number): Promise<Record<string, unknown>> {
@@ -245,8 +247,8 @@ export class KeeperChildren extends EventEmitter {
    * Half-closing it (`end()`) is a detach: the keeper sends the rest of the current line and then
    * ends the stream, and the child keeps running. Destroying it loses whatever was in flight.
    */
-  async attach(id: string, stream: 'out' | 'err'): Promise<Socket> {
-    const { sock } = await connect(this.path, { op: 'attach', id, stream }, 5000)
+  async attach(id: string, stream: 'out' | 'err', timeoutMs = ATTACH_TIMEOUT_MS): Promise<Socket> {
+    const { sock } = await connect(this.path, { op: 'attach', id, stream }, timeoutMs)
     return sock
   }
 

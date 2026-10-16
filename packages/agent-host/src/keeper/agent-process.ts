@@ -52,7 +52,10 @@ export class KeeperAgentProcess extends HeldChild {
   private queued: { chunk: Buffer; cb: (e?: Error | null) => void }[] = []
   private readonly tail = new Tail(STDERR_TAIL)
 
-  private constructor(keeper: KeeperChildren, child: Promise<KeptChild>) {
+  /** Its session starts a new CLI on the same conversation, and two CLIs on one thread conflict (`HeldChild`) */
+  protected readonly endsUnreadableAdopted = true
+
+  private constructor(keeper: KeeperChildren, child: Promise<KeptChild>, adopted = false) {
     super(keeper)
     this.stdin = new Writable({
       write: (chunk: Buffer, _enc, cb) => this.writeIn(chunk, cb),
@@ -65,7 +68,7 @@ export class KeeperAgentProcess extends HeldChild {
      * it (the SDK reads it only when asked to). What the keeper buffered while no host was attached comes first.
      */
     this.stderr.on('data', (d: Buffer) => this.tail.push(d))
-    this.begin(child, ['out', 'err'])
+    this.begin(child, ['out', 'err'], adopted)
   }
 
   /** Asks the keeper to spawn the process. Returns at once, as `spawn()` does; a failure arrives as `error`. */
@@ -80,7 +83,7 @@ export class KeeperAgentProcess extends HeldChild {
 
   /** Takes over a process the keeper already holds (spawned by a previous host). */
   static adopt(keeper: KeeperChildren, child: KeptChild): KeeperAgentProcess {
-    return new KeeperAgentProcess(keeper, Promise.resolve(child))
+    return new KeeperAgentProcess(keeper, Promise.resolve(child), true)
   }
 
   protected attached([out, err]: Socket[]): void {

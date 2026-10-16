@@ -3,7 +3,7 @@ import type { Socket } from 'node:net'
 import { constants } from 'node:os'
 import { ExitAfterDrain } from '../exit-after-drain.js'
 import { raceTimeout, waitForEvent } from '../timing.js'
-import type { ChildExit, KeeperChildren, KeptChild } from './children-client.js'
+import { ATTACH_TIMEOUT_MS, type ChildExit, type KeeperChildren, type KeptChild } from './children-client.js'
 
 /**
  * What an agent process (`agent-process.ts`) and a pty (`keeper-pty.ts`) the keeper holds have in common (#428): the
@@ -14,10 +14,19 @@ import type { ChildExit, KeeperChildren, KeptChild } from './children-client.js'
  * **A child whose streams cannot be attached is ended, not let go of.** The keeper refuses to release a running child,
  * so releasing one whose attach failed left it running with nobody to read it or stop it. It is signalled (its whole
  * group, KILL) and released once the keeper reports its exit.
+ *
+ * **A child adopted from a previous host gets a second chance first.** It survived a swap or a restart, and its attach
+ * can fail for a moment then: a loaded machine, or a keeper handoff that holds the service still. So the attach is
+ * tried once more with a longer bound (`ADOPT_ATTACH_RETRY_MS`). If that fails too, what happens is the subclass's
+ * call (`endsUnreadableAdopted`): an agent is ended, since its session starts a new CLI on the same conversation and
+ * two CLIs on one thread conflict (codex refuses a second writer); a terminal or a command run is left running in the
+ * keeper, where the next host can take it over, as before this rule.
  */
 
 /** How long a detach waits for the attach still under way, and then for the keeper to end the stream */
 export const DETACH_WAIT_MS = 2000
+/** The bound of the second attach an adopted child gets (see the file header); the first one has `ATTACH_TIMEOUT_MS` */
+export const ADOPT_ATTACH_RETRY_MS = 15_000
 
 /** An `EventEmitter`, since the agent process is one (`ChildProcess`'s `exit` and `error`) */
 export abstract class HeldChild extends EventEmitter {
@@ -36,10 +45,13 @@ export abstract class HeldChild extends EventEmitter {
     super()
   }
 
-  /** Starts following the child: called once, at the end of the subclass's constructor */
-  protected begin(child: Promise<KeptChild>, streams: readonly ('out' | 'err')[]): void {
-    this.ready = this.start(child, streams)
+  /** Starts following the child: called once, at the end of the subclass's constructor. `adopted`: a previous host's */
+  protected begin(child: Promise<KeptChild>, streams: readonly ('out' | 'err')[], adopted = false): void {
+    this.ready = this.start(child, streams, adopted)
   }
+
+  /** Whether an adopted child whose streams still cannot be attached after the second try is ended (see the file header) */
+  protected abstract readonly endsUnreadableAdopted: boolean
 
   /** The streams are attached and wired to the child: the subclass connects them to its surface */
   protected abstract attached(socks: Socket[]): void
@@ -50,7 +62,7 @@ export abstract class HeldChild extends EventEmitter {
   /** The exit is known, before the output has drained (the agent process sets its codes here) */
   protected noteExit(_exit: ChildExit): void {}
 
-  private async start(childP: Promise<KeptChild>, streams: readonly ('out' | 'err')[]): Promise<void> {
+  private async start(childP: Promise<KeptChild>, streams: readonly ('out' | 'err')[], adopted: boolean): Promise<void> {
     let child: KeptChild
     try {
       child = await childP
@@ -64,12 +76,17 @@ export abstract class HeldChild extends EventEmitter {
     this.keeper.once('lost', this.onLost)
     let socks: Socket[]
     try {
-      socks = await Promise.all(streams.map((s) => this.keeper.attach(child.id, s)))
+      socks = await this.attachAll(child.id, streams, ATTACH_TIMEOUT_MS).catch((e: Error) => {
+        if (!adopted || this.detached) throw e
+        console.error(`[keeper] could not attach ${child.id} taken over from a previous host (${e.message}); trying once more`)
+        return this.attachAll(child.id, streams, ADOPT_ATTACH_RETRY_MS)
+      })
     } catch (e) {
       this.unsubscribe()
       // A host letting go meanwhile leaves the child for the next one, which attaches anew
       if (this.detached) return
-      this.abandon(child.id)
+      if (!adopted || this.endsUnreadableAdopted) this.abandon(child)
+      else console.error(`[keeper] left ${child.id} running in the keeper for the next host: its streams did not attach (${(e as Error).message})`)
       return this.failed(e as Error)
     }
     if (this.detached) {
@@ -85,15 +102,26 @@ export abstract class HeldChild extends EventEmitter {
     if (known) this.recordExit(known)
   }
 
+  /** Every stream of the child, or none: one that attached is closed again when another did not */
+  private async attachAll(id: string, streams: readonly ('out' | 'err')[], timeoutMs: number): Promise<Socket[]> {
+    const tries = await Promise.allSettled(streams.map((s) => this.keeper.attach(id, s, timeoutMs)))
+    const failure = tries.find((t) => t.status === 'rejected')
+    if (!failure) return tries.map((t) => (t as PromiseFulfilledResult<Socket>).value)
+    for (const t of tries) if (t.status === 'fulfilled') t.value.destroy()
+    throw failure.reason
+  }
+
   /** Ends a child this host cannot read (see the file header), and releases it once it has exited */
-  private abandon(id: string): void {
+  private abandon(child: KeptChild): void {
+    const id = child.id
     const release = (cid: string) => {
       if (cid !== id) return
       this.keeper.off('exit', release)
       void this.keeper.release(id).catch(() => {})
     }
+    // An adopted child may have exited before this host connected: its exit came with the list, never as an event
+    if (child.exit ?? this.keeper.exitOf(id)) return release(id)
     this.keeper.on('exit', release)
-    if (this.keeper.exitOf(id)) return release(id)
     void this.keeper.signal(id, 'SIGKILL', true).catch((e: Error) => console.error(`[keeper] could not end ${id}, whose streams did not attach: ${e.message}`))
   }
 

@@ -1175,7 +1175,10 @@ sessionId, version?}`(띄운 CLI 버전, #297, §4.6), `{kind:"terminal", id, cw
 - **둘 다** `keeper/held-child.ts` 위에 선다(#428): spawn의 답, 스트림 attach, 출력이 끝난 뒤의 종료 보고(종료 뒤 최대
   1초, `exit-after-drain.ts`), 키퍼 기록의 release, 그리고 attach와 키퍼의 스트림 종료를 각각 최대 2초 기다리는 detach.
   스트림을 attach하지 못한 자식은 끝내고(그룹에 KILL) 끝난 뒤에 release한다. 키퍼는 돌고 있는 자식의 release를 거절하므로,
-  곧바로 release하면 읽을 사람도 멈출 사람도 없이 계속 돌았다.
+  곧바로 release하면 읽을 사람도 멈출 사람도 없이 계속 돌았다. 이전 호스트에게서 이어받은 자식은 그 전에 15초 한도로 attach를
+  한 번 더 시도한다(부하가 큰 기계나 키퍼 넘겨주기 때문에 첫 시도가 5초를 넘길 수 있다). 그래도 실패하면 에이전트는 끝낸다. 그
+  세션이 같은 대화에 새 CLI를 띄우는데, 한 스레드에 CLI 둘이 붙으면 충돌하기 때문이다. 터미널과 명령 실행은 다음 호스트가
+  이어받도록 키퍼에 그대로 둔다.
 
 **에이전트를 멈추면 끝나는 것.** 에이전트 CLI는 자기 도우미를 띄운다: Claude Code의 LSP 도구는
 `typescript-language-server`를 띄우고 그것이 `tsserver`를 띄운다(하나가 3.4 GB까지 갔다). 사용자 설정의 MCP 서버, 셸도
