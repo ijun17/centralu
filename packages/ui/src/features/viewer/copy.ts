@@ -119,20 +119,104 @@ export function selectedText(p: {
 }): string | null {
   const sel = p.selection
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null
+  // A selection made somewhere else is somebody else's copy, whatever anchor was remembered from an earlier one
+  if (!sel.getRangeAt(0).intersectsNode(p.root)) return null
 
-  let anchor = caretAt(sel.anchorNode, sel.anchorOffset) ?? p.lastAnchor
+  // The anchor is the one end that can be gone from the rows with the drag still going: remembered while it was a row.
+  // It is used for an anchor the scrolling walked onto a place in the pane that is on no row (the rows' box), and for a
+  // drag whose focus is in the rows. Not for a selection whose anchor is a container elsewhere (a select-all of the page
+  // starts at `body`): that is no drag of this pane, and what was remembered belongs to an earlier selection.
+  let anchor = caretAt(sel.anchorNode, sel.anchorOffset)
   let focus = caretAt(sel.focusNode, sel.focusOffset)
-  if (!anchor || !focus) {
-    // An endpoint outside the rows entirely — dragged in from the header, or out into the
-    // truncation notice. Fall back to the rows the selection touches, taken whole.
-    const rows = [...p.root.querySelectorAll<HTMLElement>('[data-line]')].filter((r) => sel.containsNode(r, true))
-    // A drag that began in the rows and left the area: the line at the edge it left by
-    if (rows.length === 0 && anchor && !focus) focus = edgeCaret(p.root, sel.focusNode)
-    if (!focus && rows.length === 0) return null
-    anchor ??= { line: Number(rows[0]!.dataset.line), column: 0 }
-    focus ??= { line: Number(rows.at(-1)!.dataset.line), column: LINE_END }
+  const walked = !!sel.anchorNode && p.root.contains(sel.anchorNode)
+  if (!anchor && p.lastAnchor && (walked || focus)) anchor = p.lastAnchor
+  if (!anchor && !focus) {
+    // Both ends outside the rows (a select-all of the page, a drag from the sidebar through the pane to the header):
+    // the rows the selection touches, taken whole
+    const rows = touchedRows(p.root, sel)
+    if (rows.length === 0) return null
+    return buildCopyText(p.lines, { line: Number(rows[0]!.dataset.line), column: 0 }, { line: Number(rows.at(-1)!.dataset.line), column: LINE_END })
   }
-  return buildCopyText(p.lines, anchor, focus)
+  if (!anchor) anchor = missingEnd(p.root, sel, sel.anchorNode, sel.focusNode)
+  else if (!focus) {
+    focus = missingEnd(p.root, sel, sel.focusNode, sel.anchorNode)
+    // WebKit can put the end on text laid over the pane (#424) so that the selection touches no row at all: the pane's
+    // edge by where that text stands, whatever it is next to
+    if (!focus && touchedRows(p.root, sel).length === 0) focus = edgeCaret(p.root, sel.focusNode)
+  }
+  return anchor && focus ? buildCopyText(p.lines, anchor, focus) : null
+}
+
+/** The rows of the pane the selection reaches into, even partly */
+const touchedRows = (root: HTMLElement, sel: Selection): HTMLElement[] =>
+  [...root.querySelectorAll<HTMLElement>('[data-line]')].filter((r) => sel.containsNode(r, true))
+
+/**
+ * Where an end of the selection that is on no row stands in the file, given the end that is on one (`present`).
+ *
+ * - Inside the pane but on no row (the diff's sticky file band, the rows' box): the pane's top or bottom edge, by which
+ *   side of the present end it comes on, the part the person sees selected.
+ * - Wholly above or below the pane: the same edge, the one it left by.
+ * - Over the pane (the composer laid across its bottom, which comes before it in the document, #424): the edge on that
+ *   side of the pane's middle. The document order says nothing here: what is drawn over the pane's lower half is the
+ *   lower end of the drag, wherever it stands in the document.
+ * - Beside the pane (the sidebar, the chat, the evidence panel): by the document order, which is what the browser
+ *   selected. A node that comes before the present end is the start of what is copied, so it is the first line there is
+ *   to take, from its start; one that comes after is the end, so the last line, to its end. Taken the other way round, a
+ *   drag from row 5 out to the sidebar copied the tail of row 5.
+ *
+ * Null when it touches no row and has no edge to read.
+ */
+function missingEnd(root: HTMLElement, sel: Selection, node: Node | null, present: Node | null): Caret | null {
+  if (!node) return null
+  const before = !!present && !!(present.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_PRECEDING)
+  const area = root.getBoundingClientRect()
+  if (root.contains(node)) return paneEdge(root, area, before ? 'top' : 'bottom')
+  // A container that holds the pane (`body` after a select-all) is no place on the screen: only the document order tells
+  const at = node.contains(root) ? null : endRect(node)
+  if (at) {
+    if (at.bottom <= area.top) return paneEdge(root, area, 'top')
+    if (at.top >= area.bottom) return paneEdge(root, area, 'bottom')
+    if (at.right > area.left && at.left < area.right) return paneEdge(root, area, midpoint(at) >= midpoint(area) ? 'bottom' : 'top')
+  }
+  const rows = touchedRows(root, sel)
+  if (rows.length === 0) return null
+  return before ? { line: Number(rows[0]!.dataset.line), column: 0 } : { line: Number(rows.at(-1)!.dataset.line), column: LINE_END }
+}
+
+const midpoint = (r: { top: number; bottom: number }): number => (r.top + r.bottom) / 2
+
+/**
+ * Where an end of a selection stands on the screen, or null when it stands nowhere (no box: hidden, `display: contents`,
+ * an empty text). A text node is measured by its own text, not by its parent, which can be a tall box that straddles the
+ * pane's middle while the line of text is at its top; the zero box of an element that is not drawn is not "above".
+ */
+function endRect(node: Node): DOMRect | null {
+  let r: DOMRect | null
+  if (node.nodeType === Node.TEXT_NODE) {
+    if (typeof document !== 'undefined') {
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      r = range.getBoundingClientRect()
+    } else {
+      r = node.parentElement?.getBoundingClientRect() ?? null
+    }
+  } else {
+    r = (node as Element).getBoundingClientRect()
+  }
+  return r && (r.width > 0 || r.height > 0) ? r : null
+}
+
+/** The first line showing at the top of the pane, or the last showing at its bottom */
+function paneEdge(root: HTMLElement, area: DOMRect, edge: 'top' | 'bottom'): Caret | null {
+  const rows = [...root.querySelectorAll<HTMLElement>('[data-line]')].map((r) => ({ r, box: r.getBoundingClientRect() }))
+  const line = (r: HTMLElement | undefined) => (r ? Number(r.dataset.line) : NaN)
+  if (edge === 'bottom') {
+    const last = line(rows.filter((x) => x.box.top < area.bottom).at(-1)?.r)
+    return Number.isInteger(last) ? { line: last, column: LINE_END } : null
+  }
+  const first = line(rows.find((x) => x.box.bottom > area.top)?.r)
+  return Number.isInteger(first) ? { line: first, column: 0 } : null
 }
 
 /**
@@ -148,16 +232,8 @@ export function selectedText(p: {
  */
 function edgeCaret(root: HTMLElement, node: Node | null): Caret | null {
   if (!node || root.contains(node)) return null
-  const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element)
-  if (!el) return null
-  const at = el.getBoundingClientRect()
+  const at = endRect(node)
+  if (!at) return null
   const area = root.getBoundingClientRect()
-  const rows = [...root.querySelectorAll<HTMLElement>('[data-line]')].map((r) => ({ r, box: r.getBoundingClientRect() }))
-  const line = (r: HTMLElement | undefined) => (r ? Number(r.dataset.line) : NaN)
-  if (at.top + at.height / 2 >= area.top + area.height / 2) {
-    const last = line(rows.filter((x) => x.box.top < area.bottom).at(-1)?.r)
-    return Number.isInteger(last) ? { line: last, column: LINE_END } : null
-  }
-  const first = line(rows.find((x) => x.box.bottom > area.top)?.r)
-  return Number.isInteger(first) ? { line: first, column: 0 } : null
+  return paneEdge(root, area, midpoint(at) >= midpoint(area) ? 'bottom' : 'top')
 }

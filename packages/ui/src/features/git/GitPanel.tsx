@@ -5,7 +5,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { useProjectMachine } from '../../store/selectors.js'
 import { useRemoteIde } from '../machines/remoteIde.js'
-import { caretAt, selectedText, type Caret } from '../viewer/copy.js'
+import { useVirtualCopy } from '../viewer/useVirtualCopy.js'
 import { diffFileLabel, diffPlaceAt, renderableDiffRows, type DiffPlace } from './diff.js'
 
 type SubTab = 'changes' | 'history' | 'branches'
@@ -207,95 +207,26 @@ function DiffView({
   const diffText = data?.diff ?? ''
   const rows = useMemo(() => renderableDiffRows(diffText), [diffText])
   const scrollRef = useRef<HTMLDivElement>(null)
-  const wholeDiff = useRef(false)
-  const anchor = useRef<Caret | null>(null)
+  const rowsRef = useRef<HTMLDivElement>(null)
   const copyLines = useMemo(() => rows.map((r) => ({ text: r.body, prefix: r.marker })), [rows])
-
-  // Match the code viewer's selection contract: recycled DOM rows must not shorten copy.
-  useEffect(() => {
-    wholeDiff.current = false
-    anchor.current = null
-  }, [path, diffText])
-
   /*
-   * ⌘A has to land somewhere.
+   * Copy and ⌘A over rows that are not all mounted: the code viewer's rule (useVirtualCopy), including the focus the
+   * panel takes once per path so ⌘A has somewhere to land (#118).
    *
-   * This panel is not a text field, so it never took focus on its own, and picking a file
-   * **from the evidence sidebar** left focus sitting on that button. From there, ⌘A went to the
-   * document, copy happened without wholeDiff ever being set, and the onCopy handler below
-   * captured only the mounted rows, hijacking the browser's otherwise-correct copy — 60 lines
-   * out of 37,236 (#118). The viewer (CodeViewer) does the same thing for the same reason.
-   *
-   * **Only once per path.** Grabbing it every time would steal focus back while someone is
-   * typing into a search box.
+   * The fact that the diff was truncated is stated by the on-screen notice (`diff-truncation`) — **it is not put into the
+   * clipboard.** The viewer (CodeViewer) does put it there: a file's body is read by a person, and one extra line does
+   * not get in the way of that. A diff is read by `git apply`. Handing that parser a sentence written for a person breaks
+   * it on the spot — worse than a partial patch is a broken one (#122).
    */
-  const focusedFor = useRef<string | null>(null)
-  useEffect(() => {
-    if (!path || data?.binary || focusedFor.current === path) return
-    focusedFor.current = path
-    scrollRef.current?.focus()
-  }, [path, data?.binary])
-  useEffect(() => {
-    const onSelectionChange = () => {
-      const sel = document.getSelection()
-      const root = scrollRef.current
-      if (!sel?.anchorNode || !root?.contains(sel.anchorNode)) return
-      const caret = caretAt(sel.anchorNode, sel.anchorOffset)
-      if (caret || sel.isCollapsed) anchor.current = caret
-    }
-    const onMouseDown = () => { wholeDiff.current = false }
-    const onCopy = (event: ClipboardEvent) => {
-      const root = scrollRef.current
-      if (!root || !path || data?.binary) return
-      const selection = document.getSelection()
-      /*
-       * **It does not block what it cannot count.**
-       *
-       * This listener is attached to document, so it fires for every copy inside the window. If
-       * the selection starts or ends outside this panel, all this code can construct is this
-       * panel's own share of it, and blocking the default behavior with just that would
-       * silently drop the rest. It is more honest to let the browser do what it would have done
-       * anyway.
-       */
-      const spansOutside =
-        !!selection &&
-        (!selection.anchorNode ||
-          !selection.focusNode ||
-          !root.contains(selection.anchorNode) ||
-          !root.contains(selection.focusNode))
-      if (!wholeDiff.current && spansOutside) return
-      /*
-       * The fact that the diff was truncated is stated by the on-screen notice
-       * (`diff-truncation`) — **it is not put into the clipboard.** The viewer (CodeViewer) does
-       * put it there: a file's body is read by a person, and one extra line does not get in the
-       * way of that. A diff is read by `git apply`. Handing that parser a sentence written for a
-       * person breaks it on the spot — worse than a partial patch is a broken one (#122).
-       */
-      const payload = wholeDiff.current
-        ? diffText
-        : selectedText({ selection, root, lines: copyLines, lastAnchor: anchor.current })
-      if (payload === null) return
-      event.preventDefault()
-      event.clipboardData?.setData('text/plain', payload)
-    }
-    document.addEventListener('selectionchange', onSelectionChange)
-    document.addEventListener('mousedown', onMouseDown)
-    document.addEventListener('copy', onCopy)
-    return () => {
-      document.removeEventListener('selectionchange', onSelectionChange)
-      document.removeEventListener('mousedown', onMouseDown)
-      document.removeEventListener('copy', onCopy)
-    }
-  }, [path, diffText, copyLines, data?.binary, data?.truncated])
-  const paintSelection = () => {
-    const root = scrollRef.current
-    const selection = document.getSelection()
-    if (!root || !selection) return
-    const range = document.createRange()
-    range.selectNodeContents(root)
-    selection.removeAllRanges()
-    selection.addRange(range)
-  }
+  const copyProps = useVirtualCopy({
+    scrollRef,
+    rowsRef,
+    lines: copyLines,
+    wholeText: diffText,
+    resetKey: path ?? null,
+    contentKey: diffText,
+    ready: !!path && !data?.binary,
+  })
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -380,13 +311,7 @@ function DiffView({
         className="min-h-0 flex-1 overflow-auto font-mono text-xs leading-[1.5]"
         tabIndex={0}
         onMouseDown={() => scrollRef.current?.focus()}
-        onKeyDown={(event) => {
-          if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.key.toLowerCase() !== 'a') return
-          event.preventDefault()
-          wholeDiff.current = true
-          paintSelection()
-        }}
-        onScroll={() => { if (wholeDiff.current) paintSelection() }}
+        {...copyProps}
       >
         {place.label && (
           /*
@@ -408,7 +333,7 @@ function DiffView({
             <span className="readout text-xs text-ink">{place.label}</span>
           </div>
         )}
-        <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+        <div ref={rowsRef} className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
           {virtualRows.map((v) => {
             const { kind, body } = rows[v.index]!
             const i = v.index
