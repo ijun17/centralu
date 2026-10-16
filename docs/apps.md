@@ -88,7 +88,9 @@ app wrote there while running would reach the whole team.
 - **Data**: the app receives `CENTRALU_APP_DATA`, a folder under `<data folder>/app-data/` created
   before it starts, and `CENTRALU_APP_ID`.
 - **Secrets**: the manifest holds names only. Values live on this machine, in
-  `<data folder>/app-secrets.json` (mode 0600, written through a temporary file created 0600). An
+  `<data folder>/app-secrets.json` (mode 0600, written through a temporary file of its own created
+  0600). A file that cannot be read is moved aside as `app-secrets.json.unreadable-<ms>`, never
+  written over, and apps start without secrets until they are entered again (`private-json-file.ts`). An
   app receives only the names it declares, as environment variables. Values of 4 characters or more
   are replaced by `[redacted:NAME]` in the app's log, run records and error bundles, also where JSON
   escapes them (a multi-line key in an argument, #838).

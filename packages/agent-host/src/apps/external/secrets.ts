@@ -1,5 +1,5 @@
-import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { PrivateJsonFile, isJsonObject } from './private-json-file.js'
 
 /**
  * The values behind app secrets (M4 A-3, from the plan "data and secrets live outside the
@@ -21,15 +21,27 @@ export const SECRETS_FILE = 'app-secrets.json'
 type SecretsDoc = Record<string, Record<string, string>>
 
 export class SecretStore {
-  private path: string
+  /*
+   * An unreadable file is moved aside, not overwritten (#841 item 2): it used to read as empty, and
+   * the next `set()` replaced it, so one damaged byte cost every app every value. Moving it aside
+   * rather than refusing every `set()` until a person repairs it by hand: the copy aside keeps the
+   * values for whoever wants them back, and re-entering a key on the screen is the fix a person can
+   * actually reach. `set()` is refused only while the file could not be moved and is still in place.
+   */
+  private file: PrivateJsonFile<SecretsDoc>
 
   constructor(dataRoot: string) {
-    this.path = join(dataRoot, SECRETS_FILE)
+    this.file = new PrivateJsonFile(join(dataRoot, SECRETS_FILE), {
+      label: SECRETS_FILE,
+      empty: () => ({}),
+      valid: (doc): doc is SecretsDoc => isJsonObject(doc),
+      lost: 'Apps start without secrets until they are entered again',
+    })
   }
 
   /** All values stored for this app (regardless of declaration) */
   all(appKey: string): Record<string, string> {
-    return { ...(this.read()[appKey] ?? {}) }
+    return { ...(this.file.read()[appKey] ?? {}) }
   }
 
   /**
@@ -39,12 +51,12 @@ export class SecretStore {
    * reaching the list side.
    */
   names(appKey: string): Set<string> {
-    return new Set(Object.keys(this.read()[appKey] ?? {}))
+    return new Set(Object.keys(this.file.read()[appKey] ?? {}))
   }
 
   /** The values to hand to the app — only the names its manifest declares */
   forApp(appKey: string, declared: readonly string[]): Record<string, string> {
-    const stored = this.read()[appKey] ?? {}
+    const stored = this.file.read()[appKey] ?? {}
     const out: Record<string, string> = {}
     for (const name of declared) {
       const v = stored[name]
@@ -55,34 +67,13 @@ export class SecretStore {
 
   /** Writes a value (`value`) or clears it (`null`) */
   set(appKey: string, name: string, value: string | null): void {
-    const doc = this.read()
+    const doc = this.file.read()
     const cur = { ...(doc[appKey] ?? {}) }
     if (value === null) delete cur[name]
     else cur[name] = value
     if (Object.keys(cur).length === 0) delete doc[appKey]
     else doc[appKey] = cur
-    /*
-     * The temp file is created **at 0600 from the start** and then moved into place. Writing first
-     * and chmod-ing afterward would leave a window where it is readable at the default permissions
-     * (usually 0644). Tightening it once more after the move covers the case where someone had
-     * already loosened the permissions on an existing file.
-     */
-    const tmp = `${this.path}.tmp`
-    writeFileSync(tmp, JSON.stringify(doc), { mode: 0o600 })
-    renameSync(tmp, this.path)
-    chmodSync(this.path, 0o600)
-  }
-
-  private read(): SecretsDoc {
-    if (!existsSync(this.path)) return {}
-    try {
-      const doc = JSON.parse(readFileSync(this.path, 'utf8')) as unknown
-      return doc && typeof doc === 'object' && !Array.isArray(doc) ? (doc as SecretsDoc) : {}
-    } catch {
-      // A corrupt file is treated as empty — better for an app to say "no secrets" than to guess at values
-      console.error(`[apps] ${SECRETS_FILE} is unreadable; apps start without secrets`)
-      return {}
-    }
+    this.file.write(doc)
   }
 }
 

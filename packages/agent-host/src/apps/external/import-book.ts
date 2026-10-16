@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { AppManifest } from './manifest.js'
+import { PrivateJsonFile, isJsonObject } from './private-json-file.js'
 import { canonicalJson } from './runs.js'
 
 /**
@@ -49,12 +50,25 @@ export function reviewKey(m: Pick<AppManifest, 'server' | 'uses'>): string {
 }
 
 export class ImportBook {
-  private path: string
+  /*
+   * A corrupt file: losing the marks tips things toward an imported app running without
+   * confirmation. So an unreadable file is moved aside instead, and reported. A person can
+   * recover it from the moved-aside original. (There is no way to forcibly withdraw every
+   * confirmation: which apps were imported at all lives in that same file.) The file is 0600
+   * because a source address might be a link containing a token.
+   */
+  private file: PrivateJsonFile<Doc>
   private doc: Doc
 
   constructor(dataRoot: string) {
-    this.path = join(dataRoot, IMPORTS_FILE)
-    this.doc = this.read()
+    this.file = new PrivateJsonFile(join(dataRoot, IMPORTS_FILE), {
+      label: IMPORTS_FILE,
+      empty: () => ({}),
+      valid: (doc): doc is Doc => isJsonObject(doc),
+      lost: 'Imported apps lost their marks',
+      indent: 2,
+    })
+    this.doc = this.file.read()
   }
 
   /**
@@ -116,34 +130,7 @@ export class ImportBook {
     return { ...m, confirmed: null }
   }
 
-  private read(): Doc {
-    if (!existsSync(this.path)) return {}
-    try {
-      const doc = JSON.parse(readFileSync(this.path, 'utf8')) as unknown
-      return doc && typeof doc === 'object' && !Array.isArray(doc) ? (doc as Doc) : {}
-    } catch {
-      /*
-       * A corrupt file — losing the marks tips things toward an imported app running without
-       * confirmation. So an unreadable file is moved aside instead, and reported. A person can
-       * recover it from the moved-aside original. (There is no way to forcibly withdraw every
-       * confirmation: which apps were imported at all lives in that same file.)
-       */
-      const aside = `${this.path}.unreadable-${Date.now()}`
-      try {
-        renameSync(this.path, aside)
-      } catch {
-        // Even if it cannot be moved, it is still unreadable either way
-      }
-      console.error(`[apps] ${IMPORTS_FILE} is unreadable; moved to ${aside}. Imported apps lost their marks`)
-      return {}
-    }
-  }
-
-  /** Creates the temp file at 0600 and moves it into place — a source address might be a link containing a token */
   private write(): void {
-    const tmp = `${this.path}.tmp`
-    writeFileSync(tmp, JSON.stringify(this.doc, null, 2), { mode: 0o600 })
-    renameSync(tmp, this.path)
-    chmodSync(this.path, 0o600)
+    this.file.write(this.doc)
   }
 }

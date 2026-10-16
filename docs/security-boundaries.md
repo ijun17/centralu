@@ -1217,7 +1217,10 @@ Limits:
   an inode came from (the same limit as "Project files and native handoff"). Same-user races
   between checking a file and opening it remain.
 - If `app-imports.json` cannot be read, it is moved aside and the marks are lost: imported apps
-  are then treated as the user's own until they are imported again. The host logs this.
+  are then treated as the user's own until they are imported again. The host logs this. The same
+  holds for `app-secrets.json`, whose values then stay in the moved-aside copy. While a file that
+  cannot be read also cannot be moved aside, writes to it are refused rather than replacing it
+  (`private-json-file.ts`; `private-json-file.test.ts`).
 - App links have been exercised by hand on a built app, not in CI, and are received on macOS only.
 
 ## App views
