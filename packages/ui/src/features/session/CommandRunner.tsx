@@ -1,16 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Terminal as Xterm } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
-import '@xterm/xterm/css/xterm.css'
 import type { SavedCommand } from '@cc/protocol'
-import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { CloseIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { useOpenLayer } from '../../components/Modal.jsx'
 import { isPlainEnter, isPlainEscape } from '../../app/keys.js'
-import { registerTerminalHttpLinks } from '../../components/terminalLinks.js'
-import { followTheme, terminalStyle } from '../../components/terminalTheme.js'
-import { logReplay } from '../../components/logReplay.js'
+import { CommandLogView } from '../../components/CommandLogView.jsx'
 import { useStore } from '../../store/store.js'
 
 const NO_COMMANDS: SavedCommand[] = []
@@ -323,7 +317,13 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
             {/* The selected command's log — re-renders from scratch when runId changes (re-run) */}
             <div className="h-64 min-h-0 shrink" data-testid="run-log">
               {currentRun ? (
-                <LogView key={currentRun.runId} projectId={projectId} command={current} runId={currentRun.runId} />
+                <CommandLogView
+                  key={currentRun.runId}
+                  projectId={projectId}
+                  command={current}
+                  runId={currentRun.runId}
+                  surfaceTestId={`run-log-surface-${currentRun.runId}`}
+                />
               ) : (
                 <p className="px-3 py-2 text-xs text-ink-faint">Not run yet — press Run.</p>
               )}
@@ -333,98 +333,4 @@ export function CommandRunnerOverlay({ projectId, onClose }: { projectId: string
       </div>
     </div>
   )
-}
-
-/**
- * A single log (read-only xterm — the cheapest way to keep color is a terminal emulator).
- * Restoring the screen is the host's log buffer's job: the moment it attaches, it receives all
- * output so far in one shot, and from then on listens to the same stream as a terminal (runId
- * standing in for terminalId).
- */
-function LogView({ projectId, command, runId }: { projectId: string; command: string; runId: string }) {
-  const platform = usePlatform()
-  const hostRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const el = hostRef.current
-    if (!el) return
-
-    const term = new Xterm({
-      // Colours, font and size come from the theme (styles/index.css, --color-term-*)
-      ...terminalStyle(el, 'log'),
-      disableStdin: true,
-      scrollback: 5000,
-      allowProposedApi: true,
-    })
-    const fit = new FitAddon()
-    term.loadAddon(fit)
-    term.open(el)
-    // A new code font changes the cell size: refit, and tell the command its new size
-    const unfollow = followTheme(term, el, 'log', () => syncSize())
-    const links = registerTerminalHttpLinks(term, (url) => {
-      void platform.system
-        .openUrl(url)
-        .catch((e) => useStore.getState().setToast(`Could not open ${url}: ${(e as Error).message}`))
-    })
-
-    const lastDims = { cols: 0, rows: 0 }
-    const syncSize = () => {
-      try {
-        fit.fit()
-      } catch {
-        // There are moments when there is no layout yet — this gets fitted next time around
-      }
-      const { cols, rows } = term
-      if (cols < 2 || rows < 2) return
-      if (cols === lastDims.cols && rows === lastDims.rows) return
-      lastDims.cols = cols
-      lastDims.rows = rows
-      void platform.commands.resize(projectId, command, cols, rows).catch(() => {})
-    }
-    syncSize()
-
-    // All the log so far, in one shot — the stream subscription is set up first so it does not
-    // fall out of order with the chunks that follow
-    const log = logReplay((data) => term.write(data))
-    const offOutput = platform.terminal.onOutput((e) => {
-      if (e.terminalId !== runId) return
-      log.chunk(e.data)
-    })
-    const offExit = platform.terminal.onExit((e) => {
-      if (e.terminalId !== runId) return
-      term.write(`\r\n\x1b[2m— exited${e.exitCode !== null ? ` (${e.exitCode})` : ''} —\x1b[0m\r\n`)
-    })
-    void platform.commands
-      .log(projectId, command)
-      .then((run) => {
-        if (!run) return log.fail()
-        // If a re-run gave it a different runId, this view is about to be replaced anyway — do
-        // not render the stale log
-        if (run.runId !== runId) return log.drop()
-        log.replay(run.history)
-        if (!run.running && run.exitCode !== null) {
-          term.write(`\r\n\x1b[2m— exited (${run.exitCode}) —\x1b[0m\r\n`)
-        }
-      })
-      .catch(() => log.fail())
-
-    let pending = 0
-    const ro = new ResizeObserver(() => {
-      cancelAnimationFrame(pending)
-      pending = requestAnimationFrame(syncSize)
-    })
-    ro.observe(el)
-
-    return () => {
-      cancelAnimationFrame(pending)
-      ro.disconnect()
-      offOutput()
-      offExit()
-      unfollow()
-      links.dispose()
-      term.dispose()
-    }
-  }, [platform, projectId, command, runId])
-
-  return <div ref={hostRef} className="h-full px-1 py-1" data-testid={`run-log-surface-${runId}`} />
 }

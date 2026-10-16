@@ -1,14 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Terminal as Xterm } from '@xterm/xterm'
-import { FitAddon } from '@xterm/addon-fit'
-import '@xterm/xterm/css/xterm.css'
+import type { Terminal as Xterm } from '@xterm/xterm'
 import type { CommandRunInfo, TerminalInfo } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { CloseIcon, PlusIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
-import { registerTerminalHttpLinks } from '../../components/terminalLinks.js'
-import { followTheme, terminalStyle } from '../../components/terminalTheme.js'
-import { logReplay } from '../../components/logReplay.js'
+import { CommandLogView } from '../../components/CommandLogView.jsx'
+import { mountXterm } from '../../components/xterm.js'
 import { useStore } from '../../store/store.js'
 import { TabActions } from './tabActions.jsx'
 
@@ -159,102 +156,15 @@ function CommandTerminal({ projectId, run }: { projectId: string; run: CommandRu
         </span>
       </div>
       <div className="min-h-0 flex-1">
-        <CommandLog projectId={projectId} command={run.command} runId={run.runId} />
+        <CommandLogView
+          projectId={projectId}
+          command={run.command}
+          runId={run.runId}
+          surfaceTestId={`cmd-log-surface-${run.runId}`}
+        />
       </div>
     </div>
   )
-}
-
-/**
- * One command's log (a read-only xterm — the cheapest way there is to keep ANSI color, since it is
- * a terminal emulator). Restoring the view on remount is done by the host's log buffer: the moment
- * it attaches, it receives the entire output so far, and after that it listens on the same stream a
- * terminal uses (with runId standing in for terminalId).
- */
-function CommandLog({ projectId, command, runId }: { projectId: string; command: string; runId: string }) {
-  const platform = usePlatform()
-  const hostRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const el = hostRef.current
-    if (!el) return
-
-    const term = new Xterm({
-      // Colours, font and size come from the theme (styles/index.css, --color-term-*)
-      ...terminalStyle(el, 'log'),
-      disableStdin: true,
-      scrollback: 5000,
-      allowProposedApi: true,
-    })
-    const fit = new FitAddon()
-    term.loadAddon(fit)
-    term.open(el)
-    // A new code font changes the cell size: refit, and tell the command its new size
-    const unfollow = followTheme(term, el, 'log', () => syncSize())
-    const links = registerTerminalHttpLinks(term, (url) => {
-      void platform.system
-        .openUrl(url)
-        .catch((e) => useStore.getState().setToast(`Could not open ${url}: ${(e as Error).message}`))
-    })
-
-    const lastDims = { cols: 0, rows: 0 }
-    const syncSize = () => {
-      try {
-        fit.fit()
-      } catch {
-        // There are times layout does not exist yet — it gets fitted on the next opportunity
-      }
-      const { cols, rows } = term
-      if (cols < 2 || rows < 2) return
-      if (cols === lastDims.cols && rows === lastDims.rows) return
-      lastDims.cols = cols
-      lastDims.rows = rows
-      void platform.commands.resize(projectId, command, cols, rows).catch(() => {})
-    }
-    syncSize()
-
-    // The whole log so far, at once — the stream subscription is set up first so it does not get out of order with the chunks that follow
-    const log = logReplay((data) => term.write(data))
-    const offOutput = platform.terminal.onOutput((e) => {
-      if (e.terminalId !== runId) return
-      log.chunk(e.data)
-    })
-    const offExit = platform.terminal.onExit((e) => {
-      if (e.terminalId !== runId) return
-      term.write(`\r\n\x1b[2m— exited${e.exitCode !== null ? ` (${e.exitCode})` : ''} —\x1b[0m\r\n`)
-    })
-    void platform.commands
-      .log(projectId, command)
-      .then((run) => {
-        if (!run) return log.fail()
-        // If a re-run gave it a different runId, this view is about to be replaced — the old log is not drawn
-        if (run.runId !== runId) return log.drop()
-        log.replay(run.history)
-        if (!run.running && run.exitCode !== null) {
-          term.write(`\r\n\x1b[2m— exited (${run.exitCode}) —\x1b[0m\r\n`)
-        }
-      })
-      .catch(() => log.fail())
-
-    let pending = 0
-    const ro = new ResizeObserver(() => {
-      cancelAnimationFrame(pending)
-      pending = requestAnimationFrame(syncSize)
-    })
-    ro.observe(el)
-
-    return () => {
-      cancelAnimationFrame(pending)
-      ro.disconnect()
-      offOutput()
-      offExit()
-      unfollow()
-      links.dispose()
-      term.dispose()
-    }
-  }, [platform, projectId, command, runId])
-
-  return <div ref={hostRef} className="h-full px-1 py-1" data-testid={`cmd-log-surface-${runId}`} />
 }
 
 /**
@@ -269,15 +179,6 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: (termina
   const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Xterm | null>(null)
   const idRef = useRef(info.terminalId)
-  /**
-   * The size last reported to the shell.
-   *
-   * **The same size must not be sent again.** A pty resize triggers SIGWINCH, and the shell redraws
-   * its prompt. But `fit()` touches the element's layout, which wakes ResizeObserver again, so
-   * without this guard a feedback loop would keep running even when the size never actually changed
-   * — on screen it would look like the prompt line growing endlessly (a finding from dogfooding).
-   */
-  const lastDims = useRef({ cols: 0, rows: 0 })
   /**
    * The past output written only once, on first attach.
    *
@@ -296,81 +197,36 @@ function TerminalView({ info, onClose }: { info: TerminalInfo; onClose: (termina
     const el = hostRef.current
     if (!el) return
 
-    const term = new Xterm({
-      // The strict-grayscale rule belongs to our own screens; it does not take color away from a
-      // shell's own output. Colours, font and size come from the theme (styles/index.css).
-      ...terminalStyle(el, 'shell'),
-      cursorBlink: true,
-      scrollback: 5000,
-      allowProposedApi: true,
-    })
-    const fit = new FitAddon()
-    term.loadAddon(fit)
-    term.open(el)
-    // A new code font changes the cell size: refit, and tell the shell its new size
-    const unfollow = followTheme(term, el, 'shell', () => syncSize())
-    const links = registerTerminalHttpLinks(term, (url) => {
-      void platform.system
-        .openUrl(url)
-        .catch((e) => useStore.getState().setToast(`Could not open ${url}: ${(e as Error).message}`))
-    })
-    termRef.current = term
+    // The strict-grayscale rule belongs to our own screens; it does not take color away from a
+    // shell's own output. Colours, font and size come from the theme (styles/index.css).
+    return mountXterm(el, platform, 'shell', { cursorBlink: true, scrollback: 5000 }, (term, fit) => {
+      termRef.current = term
+      fit()
+      if (historyRef.current) term.write(historyRef.current)
 
-    const safeFit = () => {
-      try {
-        fit.fit()
-      } catch {
-        // There are times layout does not exist yet — it gets fitted on the next opportunity
+      const offOutput = platform.terminal.onOutput((e) => {
+        if (e.terminalId === idRef.current) term.write(e.data)
+      })
+      const offExit = platform.terminal.onExit((e) => {
+        if (e.terminalId !== idRef.current) return
+        setDead(true)
+        term.write(`\r\n\x1b[2m— shell exited${e.exitCode !== null ? ` (${e.exitCode})` : ''} —\x1b[0m\r\n`)
+      })
+      const onData = term.onData((data) => {
+        void platform.terminal.input(idRef.current, data).catch(() => {})
+      })
+
+      return {
+        // The shell is told its new size, which makes it redraw — so only a real change is sent
+        onSize: (cols, rows) => void platform.terminal.resize(idRef.current, cols, rows).catch(() => {}),
+        dispose: () => {
+          onData.dispose()
+          offOutput()
+          offExit()
+          termRef.current = null
+        },
       }
-    }
-    /** Notifies the shell **only when the size has actually changed** */
-    const syncSize = () => {
-      safeFit()
-      const { cols, rows } = term
-      if (cols < 2 || rows < 2) return
-      if (cols === lastDims.current.cols && rows === lastDims.current.rows) return
-      lastDims.current = { cols, rows }
-      void platform.terminal.resize(idRef.current, cols, rows).catch(() => {})
-    }
-
-    safeFit()
-    if (historyRef.current) term.write(historyRef.current)
-    // A new xterm starts at its default size — this must notify once unconditionally, without comparing to a previous value
-    lastDims.current = { cols: 0, rows: 0 }
-    syncSize()
-
-    const offOutput = platform.terminal.onOutput((e) => {
-      if (e.terminalId === idRef.current) term.write(e.data)
     })
-    const offExit = platform.terminal.onExit((e) => {
-      if (e.terminalId !== idRef.current) return
-      setDead(true)
-      term.write(`\r\n\x1b[2m— shell exited${e.exitCode !== null ? ` (${e.exitCode})` : ''} —\x1b[0m\r\n`)
-    })
-    const onData = term.onData((data) => {
-      void platform.terminal.input(idRef.current, data).catch(() => {})
-    })
-
-    // If the panel width or window size changes, the shell has to be told too, or line wrapping
-    // breaks. The observer callback is deferred by one frame to coalesce rapid changes into one.
-    let pending = 0
-    const ro = new ResizeObserver(() => {
-      cancelAnimationFrame(pending)
-      pending = requestAnimationFrame(syncSize)
-    })
-    ro.observe(el)
-
-    return () => {
-      cancelAnimationFrame(pending)
-      ro.disconnect()
-      onData.dispose()
-      offOutput()
-      offExit()
-      unfollow()
-      links.dispose()
-      term.dispose()
-      termRef.current = null
-    }
     // **Identity is terminalId alone.** history or title changing does not cause it to reattach
   }, [platform, info.terminalId])
 
