@@ -20,6 +20,8 @@ import { inTurn } from '../idle.js'
 import {
   gitSummary,
   gitStatusFiles,
+  type GitFileStatus,
+  type GitSummary,
 } from '../dev-services/git.js'
 import type { DelegationFlow } from './delegation-flow.js'
 import type { SessionRecord } from './session-record.js'
@@ -240,15 +242,8 @@ export class AppSessions {
         }
         const project = this.host.store.listProjects().find((p) => p.id === app.projectId)
         if (!project) throw new Error('the project of this app is gone')
-        const summary = await gitSummary(project.path, { trusted: project.trusted })
-        if (summary.denied) throw new Error("Centralu cannot read this project's folder (the system denied access)")
-        if (!summary.isRepo) return { isRepo: false, branch: null, changedFiles: 0, files: [] }
-        return {
-          isRepo: true,
-          branch: summary.branch,
-          changedFiles: summary.changedFiles,
-          files: await gitStatusFiles(project.path, { trusted: project.trusted }),
-        }
+        const trust = { trusted: project.trusted }
+        return gitStatusForApp(await gitSummary(project.path, trust), () => gitStatusFiles(project.path, trust))
       }
     }
   }
@@ -433,5 +428,27 @@ export class AppSessions {
       map[key] = sessionId
     }
     this.host.store.setAppSetting(APP_BUILDERS_KEY, JSON.stringify(map))
+  }
+}
+
+/**
+ * What an app's `git.status` answers for a project's git summary (`HOST_CAPABILITIES`).
+ *
+ * A summary git did not answer (`unknown`, #850 review) is an error with its reason, not "no branch, no changes": an
+ * app would act on a clean tree that is not known to be clean. A count the host stopped at its cap says so (`more`).
+ */
+export async function gitStatusForApp(
+  summary: GitSummary,
+  files: () => Promise<GitFileStatus[]>,
+): Promise<{ isRepo: boolean; branch: string | null; changedFiles: number; more?: true; files: GitFileStatus[] }> {
+  if (summary.denied) throw new Error("Centralu cannot read this project's folder (the system denied access)")
+  if (summary.unknown) throw new Error('git did not answer for this project in time — try again')
+  if (!summary.isRepo) return { isRepo: false, branch: null, changedFiles: 0, files: [] }
+  return {
+    isRepo: true,
+    branch: summary.branch,
+    changedFiles: summary.changedFiles,
+    ...(summary.more ? { more: true as const } : {}),
+    files: await files(),
   }
 }

@@ -78,8 +78,6 @@ export async function gitSummary(cwd: string, trust: GitTrust = {}, limits: Summ
   /** Distinct paths (#850 review): a file staged for removal and still on disk is `1 D.` and `? path`, one file */
   const paths = new Set<string>()
   let more = false
-  /** The last entry of a chunk, cut where the chunk ended */
-  let rest = ''
   /** A rename's entry is followed by its original path, which is not an entry of its own */
   let skipNext = false
   const take = (entry: string) => {
@@ -107,25 +105,20 @@ export async function gitSummary(cwd: string, trust: GitTrust = {}, limits: Summ
     await streamGit(
       cwd,
       ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all'],
-      (chunk) => {
-        const entries = (rest + chunk.toString()).split('\0')
-        rest = entries.pop() ?? ''
-        for (const entry of entries) {
-          take(entry)
-          if (more) return true
-        }
-        return false
+      (entry) => {
+        take(entry.toString('utf8'))
+        return more
       },
       { allowRepoPrograms: trust.trusted === true, timeout: limits.timeoutMs },
     )
-    if (!more && rest) take(rest)
     return { isRepo: true, branch, changedFiles: paths.size, ...(more ? { more: true as const } : {}) }
   } catch (e) {
     const err = e as { stderr?: string; message?: string; code?: unknown; timedOut?: boolean }
     const msg = String(err.stderr || err.message || '')
     // macOS TCC: an unsigned app reading a protected folder ends up here
     if (/Operation not permitted|EPERM|EACCES|permission denied/i.test(msg)) return { isRepo: true, branch: '', changedFiles: 0, denied: true }
-    // What git says of a folder that is no repository, and a machine with no git at all
+    // What git says of a folder that is no repository (in English: `streamGit` reads git under LC_ALL=C, as Git for
+    // Windows and WSL translate it otherwise), and a machine with no git at all
     if (/not a git repository/i.test(msg) || err.code === 'ENOENT') return { isRepo: false, branch: '', changedFiles: 0 }
     /*
      * Anything else (git ran past its time on a slow disk, crashed, refused for another reason) says nothing about
@@ -767,8 +760,8 @@ export async function gitWorktreeDirty(
   limits: SummaryLimits = {},
 ): Promise<{ dirty: boolean; changedFiles: number; more?: true; unknown?: true }> {
   const summary = await gitSummary(path, trust, limits)
-  // Not known to be clean is not clean: removal asks first (#850 review)
-  if (summary.unknown) return { dirty: true, changedFiles: 0, unknown: true }
+  // Not known to be clean is not clean: removal asks first (#850 review). A folder the system denied is not known either
+  if (summary.unknown || summary.denied) return { dirty: true, changedFiles: 0, unknown: true }
   let changedFiles = summary.changedFiles
   if (trust.trusted !== true && summary.isRepo) {
     // `ls-files --stage` reads the index only; mode 160000 is a submodule (a gitlink)

@@ -179,6 +179,85 @@ describe('the change summary on a large or slow tree (#850 review of item 10)', 
     expect((await gitSummary(d, {}, { cap: 30 })).more).toBeUndefined()
   })
 
+  it.skipIf(!posix)('reads git in English: a translated "not a git repository" is still no repository', async () => {
+    const d = mkdtempSync(join(tmpdir(), 'cc-not-git-'))
+    dirs.push(d)
+    // What git prints under a Korean locale, and the English it prints under C
+    const restore = fakeStatus(
+      `if [ "$LC_ALL" = C ]; then echo 'fatal: not a git repository (or any of the parent directories): .git' >&2; else echo 'fatal: 깃 저장소가 아닙니다' >&2; fi; exit 128`,
+    )
+    const previous = process.env.LC_ALL
+    process.env.LC_ALL = 'ko_KR.UTF-8'
+    try {
+      expect(await gitSummary(d, { trusted: true })).toEqual({ isRepo: false, branch: '', changedFiles: 0 })
+    } finally {
+      if (previous === undefined) delete process.env.LC_ALL
+      else process.env.LC_ALL = previous
+      restore()
+    }
+  })
+
+  it.skipIf(!posix)('takes no optional lock: the agent\'s own git add or commit is not refused for index.lock', async () => {
+    const { d, git } = repo()
+    git('commit', '-q', '--allow-empty', '-m', 'init')
+    const seen = join(d, '..', `${d.split('/').pop()}-env`)
+    dirs.push(seen)
+    const restore = fakeStatus(`echo "$GIT_OPTIONAL_LOCKS" > '${seen}'; printf '# branch.head main\\0'; exit 0`)
+    try {
+      await gitSummary(d, { trusted: true })
+      expect(readFileSync(seen, 'utf8').trim()).toBe('0')
+    } finally {
+      restore()
+    }
+  })
+
+  it.skipIf(!posix)('ends when git ends, even if a process git started still holds its output', async () => {
+    const { d, git } = repo()
+    git('commit', '-q', '--allow-empty', '-m', 'init')
+    // A hook or filter left running with git's stdout: the pipe stays open after git exits
+    const restore = fakeStatus(`sleep 20 & printf '# branch.head main\\0? a.ts\\0'; exit 0`)
+    try {
+      expect(await gitSummary(d, { trusted: true })).toEqual({ isRepo: true, branch: 'main', changedFiles: 1 })
+    } finally {
+      restore()
+    }
+  }, 10_000)
+
+  it.skipIf(!posix)('ends when it stops git at the cap, even if a process git started still holds its output', async () => {
+    const { d, git } = repo()
+    git('commit', '-q', '--allow-empty', '-m', 'init')
+    const restore = fakeStatus(`sleep 20 & printf '# branch.head main\\0'; i=0; while :; do printf '? new/%s\\0' $i; i=$((i+1)); done`)
+    try {
+      expect(await gitSummary(d, { trusted: true }, { cap: 10 })).toEqual({ isRepo: true, branch: 'main', changedFiles: 10, more: true })
+    } finally {
+      restore()
+    }
+  }, 10_000)
+
+  it.skipIf(!posix)('reads a path whose character is cut between two chunks of git\'s output as one path', async () => {
+    const { d, git } = repo()
+    git('commit', '-q', '--allow-empty', '-m', 'init')
+    // 가 is EA B0 80: the first write ends inside it. The same path then arrives whole
+    const restore = fakeStatus(`printf '# branch.head main\\0? \\352\\260'; sleep 0.3; printf '\\200.ts\\0? \\352\\260\\200.ts\\0'; exit 0`)
+    try {
+      expect(await gitSummary(d, { trusted: true })).toEqual({ isRepo: true, branch: 'main', changedFiles: 1 })
+    } finally {
+      restore()
+    }
+  })
+
+  it.skipIf(!posix)('does not call a worktree the system denied clean', async () => {
+    const { d, git } = repo()
+    git('commit', '-q', '--allow-empty', '-m', 'init')
+    const restore = fakeStatus(`echo 'fatal: cannot open .git/index: Operation not permitted' >&2; exit 128`)
+    try {
+      expect((await gitSummary(d, { trusted: true })).denied).toBe(true)
+      expect((await gitWorktreeDirty(d, { trusted: true })).dirty).toBe(true)
+    } finally {
+      restore()
+    }
+  })
+
   it('is still "not a repository" for a folder that is not one', async () => {
     const d = mkdtempSync(join(tmpdir(), 'cc-not-git-'))
     dirs.push(d)

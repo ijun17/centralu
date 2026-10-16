@@ -1,10 +1,11 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionInfo } from '@cc/protocol'
 import { PROJECT_APPS, plantApp } from '../apps/external/test-helpers.js'
 import { brokerSaid, brokerWorld, type BrokerWorld } from './app-broker.test-helpers.js'
+import { gitStatusForApp } from './app-sessions.js'
 
 /**
  * Host data (M4 D-3) — what the manager gives back for each name. Checked with a real manager,
@@ -78,6 +79,23 @@ describe('git.status', () => {
     expect(await read(orchestrator, 'app-timer', 'git.status')).toMatchObject({
       isError: true,
       text: 'host_data failed: git.status needs a project — this app lives in your user folder, so there is no project to read',
+    })
+  })
+})
+
+describe('git.status when git does not answer (#850 review)', () => {
+  it('says so instead of "no branch, clean", and keeps "at least" for a capped count', async () => {
+    const unread = vi.fn(async () => [])
+    await expect(gitStatusForApp({ isRepo: true, branch: '', changedFiles: 0, unknown: true }, unread)).rejects.toThrow(
+      'git did not answer for this project in time',
+    )
+    expect(unread).not.toHaveBeenCalled()
+    expect(await gitStatusForApp({ isRepo: true, branch: 'main', changedFiles: 10_000, more: true }, async () => [])).toEqual({
+      isRepo: true,
+      branch: 'main',
+      changedFiles: 10_000,
+      more: true,
+      files: [],
     })
   })
 })
