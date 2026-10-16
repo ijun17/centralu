@@ -164,7 +164,17 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
      * local are one machine here, so its port is taken locally and the tunnel picks another for
      * the local end; a test that needs the same number on both ends names a free port instead.
      */
-    remote = createServer((c) => c.pipe(c))
+    remote = createServer((c) => {
+      /*
+       * A forward ssh that ends resets the connections it holds here. On Windows it always does: the
+       * fake ssh is a launcher in a job object (fake-exe.test-helpers.ts), and ending it terminates the
+       * script, whose sockets close abortively. With no listener the reset reached the test's worker as
+       * an uncaught `read ECONNRESET` and failed the run. The remote's side of a connection is not what
+       * these tests look at, so a reset only ends that connection.
+       */
+      c.on('error', () => c.destroy())
+      c.pipe(c)
+    })
     await new Promise<void>((r) => remote.listen(0, '127.0.0.1', () => r()))
     remotePort = (remote.address() as { port: number }).port
   })
@@ -193,8 +203,9 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     expect(forward!.at(-2)).toBe('--')
     // The forward carries bytes to the remote's port
     const { createConnection } = await import('node:net')
-    const echoed = await new Promise<string>((resolve) => {
+    const echoed = await new Promise<string>((resolve, reject) => {
       const c = createConnection(ep.localPort, '127.0.0.1', () => c.write('ping'))
+      c.on('error', reject)
       c.on('data', (d) => {
         resolve(String(d))
         c.destroy()
@@ -202,6 +213,24 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     })
     expect(echoed).toBe('ping')
     expect(ep.url).toBe(`ws://127.0.0.1:${ep.localPort}`)
+  })
+
+  // What a forward ssh ended on Windows does to the remote's side of a connection; on macOS and Linux only a reset does it
+  it('the fake remote takes a reset connection and goes on answering', async () => {
+    const { createConnection } = await import('node:net')
+    const reset = createConnection(remotePort, '127.0.0.1')
+    await new Promise<void>((r) => reset.once('connect', () => r()))
+    reset.resetAndDestroy()
+    await new Promise<void>((r) => reset.once('close', () => r()))
+    const echoed = await new Promise<string>((resolve, reject) => {
+      const c = createConnection(remotePort, '127.0.0.1', () => c.write('still here'))
+      c.on('error', reject)
+      c.on('data', (d) => {
+        resolve(String(d))
+        c.destroy()
+      })
+    })
+    expect(echoed).toBe('still here')
   })
 
   it('uses the same port number here when it is free, and another one when it is taken', async () => {
