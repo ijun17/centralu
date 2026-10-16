@@ -11,7 +11,7 @@
 //! What it does:
 //!   - holds the host: launches it, restarts it by the same rules the app used, stops it;
 //!   - runs every host from a per-build copy under the data folder (`source.rs`);
-//!   - answers a user-only control socket (`server.rs`) through which the app attaches, learns
+//!   - answers a user-only control socket (`server/`) through which the app attaches, learns
 //!     the host's port, token and build, and asks to stop or switch builds;
 //!   - applies background mode: with it off (the default) the keeper and host stop when the last
 //!     window detaches, as quitting the app always did; with it on they keep running;

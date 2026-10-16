@@ -1255,7 +1255,7 @@ than 10 minutes are left alone.
 Guard: `keeper/keeper/source.rs` `a_copy_a_swap_holds_survives_the_cleanup_a_ready_host_sets_off`;
 `keeper/keeper/source.rs` `a_claimed_copy_is_never_taken_by_a_concurrent_cleanup`; `keeper/keeper/source.rs`
 `a_frozen_keeper_neither_copies_nor_cleans`; `keeper/keeper/source.rs` `the_freeze_waits_for_a_copy_in_progress`;
-`keeper/keeper/server.rs` `the_folders_in_use_are_the_running_the_next_and_a_running_switchs_target`.
+`keeper/keeper/server/tests.rs` `the_folders_in_use_are_the_running_the_next_and_a_running_switchs_target`.
 Platforms: macOS, Linux.
 
 **FI3. A complete copy outlives the folder it came from.**
@@ -1279,7 +1279,7 @@ read-only, reused only while every file matches its manifest, and never replaced
 Guard: `keeper/keeper/carried/tests.rs` `the_keeper_and_host_are_copied_into_content_read_only_with_their_exec_bits`;
 `keeper/keeper/carried/tests.rs` `a_damaged_copy_is_copied_again_only_when_nothing_may_run_from_it`;
 `keeper/keeper/carried/tests.rs` `another_build_of_the_same_version_replaces_the_copy_only_when_nothing_may_run_from_it`;
-`keeper/keeper/server.rs` `a_switch_takes_signed_content_only_from_a_keeper_in_verified_content` (an unsigned copy hands
+`keeper/keeper/server/tests.rs` `a_switch_takes_signed_content_only_from_a_keeper_in_verified_content` (an unsigned copy hands
 over to the next copy; on macOS a folder without a signature still verifies first); `start_plan/tests.rs` "Linux
 release, CC_USE_KEEPER=1"; `scripts/keeper-integration.mjs` `from-a-copy` (the descriptors a window hands over are
 released by a keeper from content and its host, and held by one started elsewhere; `keeper e2e (linux)` runs it).
@@ -1490,7 +1490,7 @@ Platforms: macOS.
 **TC16. A keeper from content verifies the next content itself.**
 Rule: only a keeper whose own executable is `<data>/content/<version>/centralu-keeper` verifies and copies the next
 build before handing over; any other keeper hands over to the executable it is given.
-Guard: `keeper/keeper/server.rs` `a_switch_takes_signed_content_only_from_a_keeper_in_verified_content`;
+Guard: `keeper/keeper/server/tests.rs` `a_switch_takes_signed_content_only_from_a_keeper_in_verified_content`;
 `scripts/keeper-content-integration.mts` check "refused: ${reason}" (run for `content` and `downgrade`).
 Platforms: macOS.
 
@@ -1814,7 +1814,7 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 | 10 | PA11: `taskkill` and PowerShell by System32 path | `host/dev-services/kill-tree.ts` | Windows | 8 |
 | 13 | PA14: a keeper-started codex goes through command resolution | `host/adapters/codex/index.ts` | Windows | 9 |
 | 14 | PA15: a child's environment keeps `SystemRoot` | `host/` spawn sites | Windows | 9 |
-| 29 | LK7: the socket path length is checked before bind | `keeper/keeper/server.rs` | macOS, Linux | 2 |
+| 29 | LK7: the socket path length is checked before bind | `keeper/keeper/server/start.rs` | macOS, Linux | 2 |
 | 33 | SU6: a host group stop ends with KILL to the group | `keeper/host_proc.rs` | macOS, Linux | 2 |
 | 35 | SU8: the window reaps every child | `window/lib.rs` | all | 7 |
 | 36 | KL3: `stopGroup` never fires at our own group | `host/dev-services/kill-tree.ts` | macOS, Linux | 8 |
@@ -1832,7 +1832,7 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 | 51 | HD6: a handoff from an older keeper, in CI | `scripts/keeper-handoff-integration.mjs` | macOS, Linux | 5 |
 | 52 | HD9: B takes over after `ready` only if A is gone | `keeper/keeper/handoff/mod.rs` | macOS, Linux | 5 |
 | 53 | HD11: A reaps at the commit and B completes those children | `keeper/keeper/handoff/mod.rs` | macOS, Linux | 5 |
-| 54 | HD12: a rolled-back handoff still runs the host swap | `keeper/keeper/server.rs` | macOS, Linux | 5 |
+| 54 | HD12: a rolled-back handoff still runs the host swap | `keeper/keeper/server/switch.rs` | macOS, Linux | 5 |
 | 56 | FI5 on the direct path: the AppImage's variables still reach the host the window starts itself | `window/sidecar.rs` | Linux | 4b |
 | 57 | TC2: the responsible process (manual probe, per shell version and major macOS) | `window/shell/` | macOS | 6 |
 | 58 | TC3: a nested shell loses Screen Recording (manual) | `window/shell/` | macOS | 6 |
