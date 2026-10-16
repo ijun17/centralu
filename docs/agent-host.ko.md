@@ -261,7 +261,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 있는지 확인한다. 모르는 이름이면 설치된 도구 목록을 담은 오류를 반환하므로, 어댑터를 추가해도
 이 스키마를 고칠 필요가 없다.
 
-`start_agent` 한 번(`SessionManager.startAgent`, 역시 `DelegationFlow`):
+`start_agent` 한 번(`SessionManager.startAgent`, 역시 start-agent-flow.ts의 `AgentStartFlow`):
 
 1. **Who may.** An ordinary session (`reader` profile) of a trusted project (#382's rule), not one marked `askedBy`:
    depth one, so a child cannot start agents, and neither can a session handling an active ask_project task.
@@ -599,7 +599,7 @@ Centralu는 작업의 종류를 문장에서 추측하지 않는다. 결정은 `
   Map으로 읽는다. 옮기기의 메모리 쪽은 `moveOwner` 한 번의 호출이고, 옮기는 시작 요청의 카드는 그 중간에 매니저가
   위 순서대로 옮긴다. 무엇을 옮길지, 저장소 트랜잭션, `askedBy`와 `parentSessionId`는 매니저에 남는다. 시작할 때는 자기 행을 직접
   다시 읽는다(`restoreReports`, `restoreTurns`, `restoreQueued`). 예전에는 매니저 생성자가 하던 일이다. 서 있는
-  start_agent 요청은 `DelegationFlow.restoreAgentStarts`가 읽으며, 보고 표시와 턴 사이에 불린다.
+  start_agent 요청은 `AgentStartFlow.restoreAgentStarts`가 읽으며, 보고 표시와 턴 사이에 불린다.
 - **창**은 `session_owner`(그 세션의 지금 `askedBy`와 `parentSessionId`)를 듣고 자식을 새 소유자 아래에 둔다. 연결된
   머신의 이벤트는 `Qualifier.event`가 이름을 붙이고, 허브의 미러에도 반영한다.
 

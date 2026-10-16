@@ -352,7 +352,7 @@ completion watcher is reused, or a temporary event reader watches the person's t
 is removed when the observation ends. These observations do not add a `waitsOn` dependency,
 prevent an idle caller from sleeping, or stop the target when the caller is interrupted.
 
-What one `start_agent` call does (`SessionManager.startAgent`, also `DelegationFlow`), with the refusal/card rules
+What one `start_agent` call does (`SessionManager.startAgent`, also `AgentStartFlow` in start-agent-flow.ts), with the refusal/card rules
 below retained for `safe` and `normal`:
 
 1. **Who may.** An ordinary session (`reader` profile) of a trusted project (#382's rule), not one marked `askedBy`:
@@ -951,7 +951,7 @@ new session now takes over the original's **live** work as it is created, before
   `moveOwner`, which runs the manager's card move for the moving start requests in the middle, in the order above.
   What moves, the store's transaction, and `askedBy` / `parentSessionId` stay with the manager. At startup it reads
   its own rows back (`restoreReports`, `restoreTurns`, `restoreQueued`), as the manager's constructor did; the
-  standing start_agent requests are `DelegationFlow.restoreAgentStarts`, called between the reports and the turns.
+  standing start_agent requests are `AgentStartFlow.restoreAgentStarts`, called between the reports and the turns.
 - **The windows** hear `session_owner` (the session's `askedBy` and `parentSessionId` now) and hang the child under
   its new owner; a linked machine's event is qualified (`Qualifier.event`) and patched into the hub's mirror.
 

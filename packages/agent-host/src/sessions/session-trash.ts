@@ -172,13 +172,13 @@ export class SessionTrash {
       if (this.host.agentRuns.get(d.sessionId) === d.wait) this.host.agentRuns.delete(d.sessionId)
     }
     this.host.readGrants.delete(sessionId)
-    this.host.delegationFlow.agentConsents.delete(sessionId)
+    this.host.delegationFlow.starts.agentConsents.delete(sessionId)
     // What a handoff gave away from it, or to it, or the given work itself (#693)
     this.host.children.forgetHandedOver(sessionId)
     // Its start_agent requests (#673): a standing card is withdrawn, with a line saying so if the session is restored
     for (const rec of [...this.host.children.agentStarts.values()]) {
       if (rec.req.callerId !== sessionId) continue
-      this.host.delegationFlow.withdrawAgentStart(rec.req.requestId, 'The session that asked was deleted.', agentStartPersonText(rec.req, 'deleted'))
+      this.host.delegationFlow.starts.withdrawAgentStart(rec.req.requestId, 'The session that asked was deleted.', agentStartPersonText(rec.req, 'deleted'))
       this.host.children.dropAgentStart(rec.req.requestId)
     }
     this.host.updateConsents.delete(sessionId)

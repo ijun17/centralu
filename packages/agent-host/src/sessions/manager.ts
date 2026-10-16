@@ -138,6 +138,7 @@ import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev
 import { AskProjectFlow, type AskProjectHost } from './ask-project-flow.js'
 import { HandoffFlow, type HandoffFlowHost, type HandoffTimings } from './handoff-flow.js'
 import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, HUB_SENDER, agentStartPersonText, taskList } from './delegation-flow.js'
+import type { AgentStartFlow } from './start-agent-flow.js'
 import { RestartPolicy, type RestartHost } from './restart-policy.js'
 import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
 import { canonicalPath, isInside } from '../dev-services/path-guard.js'
@@ -554,7 +555,7 @@ export class SessionManager {
     // A card the previous host left standing over a kept process closes back into its rest here too (#428)
     this.cardRests.restore((id) => !!keeperOpts.keptSessions?.has(id) && this.meta.get(id)?.state === 'waiting_approval')
     this.children.restoreReports(this.meta, keeperOpts.keptSessions)
-    this.delegationFlow.restoreAgentStarts()
+    this.delegationFlow.starts.restoreAgentStarts()
     this.children.restoreTurns(this.meta, keeperOpts.keptSessions)
     this.children.restoreQueued(this.meta, (r) => r.via === 'ask_project' && !this.pairConsented(r.callerSessionId, this.meta.get(r.sessionId)!))
     if (this.children.queued.size) {
@@ -847,7 +848,7 @@ export class SessionManager {
     if (!trusted) {
       for (const rec of [...this.children.agentStarts.values()]) {
         if (rec.ended || rec.req.projectId !== projectId) continue
-        this.delegationFlow.withdrawAgentStart(
+        this.delegationFlow.starts.withdrawAgentStart(
           rec.req.requestId,
           `The person stopped trusting this session's project, so no agent was started. ${ASK_THE_PERSON}`,
           agentStartPersonText(rec.req, 'untrusted'),
@@ -4628,9 +4629,9 @@ export class SessionManager {
     return this.askProjectFlow.askProject(...a)
   }
 
-  /** `DelegationFlow.startAgent` (delegation-flow.ts), kept on the manager for its callers */
-  startAgent(...a: Parameters<DelegationFlow['startAgent']>): ReturnType<DelegationFlow['startAgent']> {
-    return this.delegationFlow.startAgent(...a)
+  /** `AgentStartFlow.startAgent` (start-agent-flow.ts), kept on the manager for its callers */
+  startAgent(...a: Parameters<AgentStartFlow['startAgent']>): ReturnType<AgentStartFlow['startAgent']> {
+    return this.delegationFlow.starts.startAgent(...a)
   }
 
   /** `DelegationFlow.agentSession` (delegation-flow.ts), kept on the manager for its callers */

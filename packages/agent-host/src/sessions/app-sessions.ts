@@ -315,9 +315,9 @@ export class AppSessions {
      * queued inside it: the app's run reads "waiting for memory" as progress (the person sees it in the run log), and the
      * agent starts when memory recovers. Past the gate's bound, or when the call is cancelled, it ends without a session.
      */
-    const short = await this.host.delegationFlow.memoryShort()
+    const short = await this.host.delegationFlow.starts.memoryShort()
     if (short && this.host.memoryGate) {
-      const low = this.host.delegationFlow.lowMemory(short)
+      const low = this.host.delegationFlow.starts.lowMemory(short)
       ctx.progress(`waiting for memory: ${low.available} free, ${low.floor} needed to start the agent`)
       const outcome = await this.host.memoryGate.wait(ctx.signal)
       if (outcome === 'aborted' || ctx.signal.aborted) throw new Error('the request was cancelled before the agent started (it was waiting for memory)')

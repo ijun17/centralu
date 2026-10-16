@@ -84,8 +84,8 @@ describe('what a handoff gave away', () => {
 describe('the place a start holds', () => {
   it("a project's running children and its reserved starts count against the ceiling together", () => {
     const flow = new DelegationFlow(hostWith({ meta, children, uiPreferences: () => ({ agentCeiling: 2 }) as never }))
-    const ceiling = (flow as unknown as { agentCeilingError(c: string, p: string): string | null }).agentCeilingError.bind(flow)
-    const reserve = (flow as unknown as { reservePlace(c: string, p: string): { release: () => void } | { error: string } }).reservePlace.bind(flow)
+    const ceiling = flow.starts.agentCeilingError.bind(flow.starts)
+    const reserve = flow.starts.reservePlace.bind(flow.starts)
     expect(ceiling('caller', 'p1')).toBeNull()
     children.setDelegation('caller>child', { callerId: 'caller', sessionId: 'child', agent: true, settled: false } as unknown as Delegation)
     const place = reserve('caller', 'p1')
@@ -101,7 +101,7 @@ describe('the place a start holds', () => {
 
   it('releasing a place twice gives back one place, not two', () => {
     const flow = new DelegationFlow(hostWith({ meta, children, uiPreferences: () => ({ agentCeiling: 3 }) as never }))
-    const reserve = (flow as unknown as { reservePlace(c: string, p: string): { release: () => void } | { error: string } }).reservePlace.bind(flow)
+    const reserve = flow.starts.reservePlace.bind(flow.starts)
     children.setDelegation('caller>child', { callerId: 'caller', sessionId: 'child', agent: true, settled: false } as unknown as Delegation)
     const a = reserve('caller', 'p1')
     expect(reserve('caller', 'p1')).toHaveProperty('release')
