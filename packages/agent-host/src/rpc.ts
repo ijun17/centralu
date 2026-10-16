@@ -493,7 +493,7 @@ export function createRpcHandler(
     'apps.versions': async (p) => {
       const { appId, projectId } = RpcMethods['apps.versions'].params.parse(p)
       const apps = requireExternalApps()
-      if (projectId === null) return { kind: 'snapshots' as const, snapshots: apps.snapshots({ appId, projectId }).map(({ stamp: _stamp, ...s }) => s) }
+      if (projectId === null) return { kind: 'snapshots' as const, snapshots: apps.snapshots({ appId, projectId }).map(({ stamp: _stamp, depth: _depth, ...s }) => s) }
       const project = (await mgr.listProjects()).find((x) => x.id === projectId)
       const app = apps.list().find((a) => a.appId === appId && a.projectId === projectId)
       if (!project || !app) throw Object.assign(new Error(`There is no such app: ${projectId}/${appId}`), { code: 'internal' })

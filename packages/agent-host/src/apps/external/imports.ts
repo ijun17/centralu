@@ -1,10 +1,11 @@
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, type Dirent } from 'node:fs'
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { isIP } from 'node:net'
 import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { wireJoin, wireSegments, type AppReview } from '@cc/protocol'
 import { assertExistingPathSync, isInside } from '../../dev-services/path-guard.js'
 import { proposedMcpServerNameError } from '../contract.js'
+import { APP_FOLDER_DEPTH, STOP, hiddenName, walkAppFolder } from './folder-walk.js'
 import { reviewKey } from './import-book.js'
 import { MANIFEST_FILE, MAX_MANIFEST_BYTES, parseManifest, type AppManifest } from './manifest.js'
 import { ZipError, readZipEntries, readZipEntry, type ZipEntry } from './zip.js'
@@ -34,7 +35,7 @@ import { ZipError, readZipEntries, readZipEntry, type ZipEntry } from './zip.js'
  *     `.codex/` — these two are settings read by a building session working in the app folder, so a
  *     hook an imported bundle carries in could otherwise run without the person's confirmation. The
  *     folder fingerprint (`fingerprint.ts`) also never treats a dot-name as part of the app's
- *     behavior.
+ *     behavior (`hiddenName`, `folder-walk.ts`).
  */
 
 export const IMPORT_LIMITS = {
@@ -44,8 +45,8 @@ export const IMPORT_LIMITS = {
   totalBytes: 64 * 1024 * 1024,
   /** One file */
   fileBytes: 16 * 1024 * 1024,
-  /** Folder depth */
-  depth: 16,
+  /** Folder depth — the one every reader of an app folder shares */
+  depth: APP_FOLDER_DEPTH,
   /** Character count of one path */
   pathChars: 1024,
   /** The zip file itself (including the download) */
@@ -209,10 +210,8 @@ export function isZip(buf: Buffer): boolean {
   return buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b && ((buf[2] === 3 && buf[3] === 4) || (buf[2] === 5 && buf[3] === 6))
 }
 
-/** A name that is never moved — if even one segment looks like this, everything beneath it is skipped (the "names starting with a dot" from the header comment) */
-function hiddenPart(part: string): boolean {
-  return part.startsWith('.') || part === '__MACOSX'
-}
+/** A name that is never moved — if even one segment looks like this, everything beneath it is skipped (`hiddenName`, the header comment) */
+const hiddenPart = hiddenName
 
 class Tally {
   out: StagedFiles = { files: [], totalBytes: 0, skipped: [] }
@@ -243,49 +242,38 @@ class Tally {
 function copyFolder(root: string, dest: string, limits: ImportLimits): StagedFiles {
   const t = new Tally(limits)
   mkdirSync(dest)
-  const walk = (rel: string, depth: number): void => {
-    let entries: Dirent[]
-    try {
-      entries = readdirSync(rel ? join(root, rel) : root, { withFileTypes: true })
-    } catch (e) {
-      throw new ImportRefused(`Could not read ${rel || root}: ${(e as Error).message}`)
-    }
-    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-    for (const e of entries) {
-      const r = rel ? `${rel}/${e.name}` : e.name
-      if (hiddenPart(e.name)) {
-        t.skip(e.isDirectory() ? `${r}/` : r, 'hidden')
-        continue
-      }
-      const full = join(root, r)
-      const st = lstatSync(full)
-      if (st.isSymbolicLink()) {
+  walkAppFolder(
+    root,
+    {
+      unreadable: (rel, e) => {
+        throw new ImportRefused(`Could not read ${rel || root}: ${(e as Error).message}`)
+      },
+      skipped: (r, isDir) => t.skip(isDir ? `${r}/` : r, 'hidden'),
+      link: (r) => {
         let target: string
         try {
-          target = realpathSync(full)
+          target = realpathSync(join(root, r))
         } catch {
           t.skip(r, 'link to nothing')
-          continue
+          return
         }
         if (!isInside(root, target)) throw new ImportRefused(`${r} is a link to ${target}, outside the folder. Links are not followed; remove it and import again`)
         t.skip(r, 'link')
-        continue
-      }
-      if (st.isDirectory()) {
-        t.depth(r, depth + 1)
-        mkdirSync(join(dest, r))
-        walk(r, depth + 1)
-        continue
-      }
-      if (!st.isFile()) {
-        t.skip(r, 'not a regular file')
-        continue
-      }
-      t.file(r, st.size)
-      writeFileSync(join(dest, r), readRegular(root, r, st.size), { mode: execBits(st.mode) })
-    }
-  }
-  walk('', 0)
+      },
+      tooDeep: (r) => t.depth(r, limits.depth + 1),
+      dir: (r) => void mkdirSync(join(dest, r)),
+      other: (r) => t.skip(r, 'not a regular file'),
+      file: (r) => {
+        const st = lstatSync(join(root, r))
+        // Checked with `lstat` again: the entry may have turned into something else since it was listed
+        if (st.isSymbolicLink() || !st.isFile()) throw new ImportRefused(`${r} changed while it was being read`)
+        t.file(r, st.size)
+        writeFileSync(join(dest, r), readRegular(root, r, st.size), { mode: execBits(st.mode) })
+      },
+    },
+    limits.depth,
+    hiddenName,
+  )
   return t.out
 }
 
@@ -505,45 +493,31 @@ export function reviewOf(
  */
 export function listAppFiles(dir: string, limits: ImportLimits): StagedFiles {
   const out: StagedFiles = { files: [], totalBytes: 0, skipped: [] }
-  const walk = (rel: string, depth: number): boolean => {
-    let entries: Dirent[]
-    try {
-      entries = readdirSync(rel ? join(dir, rel) : dir, { withFileTypes: true })
-    } catch {
-      return true
-    }
-    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-    for (const e of entries) {
-      const r = rel ? `${rel}/${e.name}` : e.name
-      if (hiddenPart(e.name)) {
-        out.skipped.push({ path: e.isDirectory() ? `${r}/` : r, why: 'hidden' })
-        continue
-      }
-      if (e.isSymbolicLink()) {
-        out.skipped.push({ path: r, why: 'link' })
-        continue
-      }
-      if (e.isDirectory()) {
-        if (depth + 1 > limits.depth || !walk(r, depth + 1)) return false
-        continue
-      }
-      if (!e.isFile()) continue
-      if (out.files.length >= limits.files) {
-        out.skipped.push({ path: `${rel || '.'}/…`, why: `more than ${limits.files} files; the rest are not listed` })
-        return false
-      }
-      let bytes = 0
-      try {
-        bytes = lstatSync(join(dir, r)).size
-      } catch {
-        // disappeared while being read
-      }
-      out.files.push({ path: r, bytes })
-      out.totalBytes += bytes
-    }
-    return true
-  }
-  walk('', 0)
+  walkAppFolder(
+    dir,
+    {
+      skipped: (r, isDir) => void out.skipped.push({ path: isDir ? `${r}/` : r, why: 'hidden' }),
+      link: (r) => void out.skipped.push({ path: r, why: 'link' }),
+      tooDeep: () => STOP,
+      file: (r) => {
+        if (out.files.length >= limits.files) {
+          const rel = r.includes('/') ? r.slice(0, r.lastIndexOf('/')) : ''
+          out.skipped.push({ path: `${rel || '.'}/…`, why: `more than ${limits.files} files; the rest are not listed` })
+          return STOP
+        }
+        let bytes = 0
+        try {
+          bytes = lstatSync(join(dir, r)).size
+        } catch {
+          // disappeared while being read
+        }
+        out.files.push({ path: r, bytes })
+        out.totalBytes += bytes
+      },
+    },
+    limits.depth,
+    hiddenName,
+  )
   return out
 }
 

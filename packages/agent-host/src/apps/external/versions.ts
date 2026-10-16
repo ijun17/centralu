@@ -15,6 +15,7 @@ import {
 } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { folderFingerprint, walkCode } from './fingerprint.js'
+import { APP_FOLDER_DEPTH } from './folder-walk.js'
 
 /**
  * Versioning for apps outside git (M4 E-1) — user-folder apps (including imported ones) are not in
@@ -53,7 +54,16 @@ export type Snapshot = {
   bytes: number
   /** Why it was captured — started · imported · before restore */
   reason: string
+  /**
+   * How deep the capture walked (`APP_FOLDER_DEPTH`). Absent on a version an older build captured, which walked 8
+   * folders deep (`LEGACY_DEPTH`): a restore leaves alone what lies deeper than its version looked, since the version
+   * never held it — deleting it there would lose files no version has, if the capture before the restore failed.
+   */
+  depth?: number
 }
+
+/** How deep a version captured before the depth was recorded walked (the fingerprint's old cap) */
+export const LEGACY_DEPTH = 8
 
 export class AppVersions {
   constructor(private root: string) {}
@@ -120,7 +130,7 @@ export class AppVersions {
       }
       const at = Date.now()
       const id = `${at}-${actual.slice(0, 16)}`
-      const snap: Snapshot = { id, at, stamp: actual, files: count, bytes, reason }
+      const snap: Snapshot = { id, at, stamp: actual, files: count, bytes, reason, depth: APP_FOLDER_DEPTH }
       writeFileSync(join(tmp, 'meta.json'), JSON.stringify(snap, null, 2))
       renameSync(tmp, join(appRoot, id))
       this.prune(appId)
@@ -144,14 +154,18 @@ export class AppVersions {
     const want = new Set<string>()
     const wantDirs = new Set<string>()
     walkCode(files, { unreadable: () => {}, more: () => {}, dir: (r) => void wantDirs.add(r), file: (r) => void want.add(r) })
-    // Delete code files not in the version — the fingerprint of the restored folder must match the version's fingerprint
+    // Delete code files not in the version — the fingerprint of the restored folder must match the version's fingerprint. Only as deep as the version looked (`depth`)
     const extraDirs: string[] = []
-    walkCode(dir, {
-      unreadable: () => {},
-      more: () => {},
-      dir: (r) => void (wantDirs.has(r) || extraDirs.push(r)),
-      file: (r) => void (want.has(r) || unlinkSync(join(dir, r))),
-    })
+    walkCode(
+      dir,
+      {
+        unreadable: () => {},
+        more: () => {},
+        dir: (r) => void (wantDirs.has(r) || extraDirs.push(r)),
+        file: (r) => void (want.has(r) || unlinkSync(join(dir, r))),
+      },
+      snap.depth ?? LEGACY_DEPTH,
+    )
     for (const r of extraDirs.sort((a, b) => b.length - a.length)) {
       try {
         rmdirSync(join(dir, r))

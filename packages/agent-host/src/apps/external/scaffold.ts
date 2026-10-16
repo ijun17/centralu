@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { oneLineText } from '@cc/protocol'
+import { walkAppFolder } from './folder-walk.js'
 import { MANIFEST_FILE, parseManifest, type AppManifest } from './manifest.js'
 
 /**
@@ -69,26 +70,23 @@ export function scaffoldApp(templateDir: string, dest: string, spec: ScaffoldSpe
   if (!parsed.ok) throw new Error(`the template's manifest does not pass with these values: ${parsed.error}`)
 
   mkdirSync(dest)
-  copyTree(templateDir, dest, '', spec)
+  copyTree(templateDir, dest, spec)
   writeFileSync(join(dest, MANIFEST_FILE), text)
   return parsed.manifest
 }
 
-function copyTree(from: string, to: string, rel: string, spec: ScaffoldSpec): void {
-  for (const e of readdirSync(join(from, rel), { withFileTypes: true })) {
-    if (e.name === '.DS_Store') continue
-    const src = join(rel, e.name)
-    const out = join(rel, RENAMED[e.name] && rel === '' ? RENAMED[e.name]! : e.name)
-    if (e.isDirectory()) {
-      mkdirSync(join(to, out))
-      copyTree(from, to, src, spec)
-      continue
-    }
-    if (!e.isFile() || (rel === '' && e.name === MANIFEST_FILE)) continue
-    const buf = readFileSync(join(from, src))
-    const verbatim = src === VERBATIM_DIR || src.startsWith(VERBATIM_DIR + '/') || src.startsWith(VERBATIM_DIR + '\\')
-    writeFileSync(join(to, out), verbatim ? buf : fill(buf.toString('utf8'), extname(e.name), spec))
-  }
+function copyTree(from: string, to: string, spec: ScaffoldSpec): void {
+  // The same walk as every other reader of an app folder (`walkAppFolder`): a dot-name (`.DS_Store`) or a `node_modules` left in the template never reaches an app
+  const out = (rel: string) => (Object.hasOwn(RENAMED, rel) ? RENAMED[rel]! : rel)
+  walkAppFolder(from, {
+    dir: (rel) => void mkdirSync(join(to, out(rel))),
+    file: (rel) => {
+      if (rel === MANIFEST_FILE) return
+      const buf = readFileSync(join(from, rel))
+      const verbatim = rel === VERBATIM_DIR || rel.startsWith(VERBATIM_DIR + '/')
+      writeFileSync(join(to, out(rel)), verbatim ? buf : fill(buf.toString('utf8'), extname(rel), spec))
+    },
+  })
 }
 
 /**

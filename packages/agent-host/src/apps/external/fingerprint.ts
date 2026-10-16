@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
-import { readFileSync, readdirSync, statSync, type Dirent } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { APP_FOLDER_DEPTH, STOP, walkAppFolder } from './folder-walk.js'
 
 /**
  * The fingerprint of an app folder (M4 C-4) — answers "has the folder changed since the app
@@ -16,14 +17,13 @@ import { join } from 'node:path'
  * not changed the app, so there is no reason to restart it. Large files are measured by size and
  * timestamp — so measuring one folder never takes more than a few milliseconds.
  *
- * Skipped: names starting with a dot (`.git`, `.gitattributes` — not part of the app's behavior) and
- * `node_modules` (the template never installs one; even if someone installed it manually, this does
- * not walk tens of thousands of entries every time). There are caps on file count and depth.
+ * Skipped: what is never part of an app's code — names starting with a dot, `__MACOSX` and
+ * `node_modules` (`outsideAppCode`, `folder-walk.ts`). There are caps on file count and depth (the
+ * depth is the one every reader of an app folder shares, `APP_FOLDER_DEPTH`).
  */
 
 const CONTENT_MAX_BYTES = 1024 * 1024
 const MAX_FILES = 2_000
-const MAX_DEPTH = 8
 
 /**
  * Walks what the fingerprint measures — the fingerprint and the snapshot mechanism (E-1,
@@ -32,7 +32,7 @@ const MAX_DEPTH = 8
  * and it could no longer be pointed to as "the current version".
  *
  * The skip list and caps are exactly as described above. A link is neither a file nor a folder, so
- * it is never walked (`Dirent` does not follow links).
+ * it is never walked (`walkAppFolder`).
  */
 export type CodeVisit = {
   /** An unreadable folder — the fingerprint measures this too, so a missing folder does not end up looking the same as an existing one */
@@ -40,38 +40,30 @@ export type CodeVisit = {
   dir(rel: string): void
   /** One file (path relative to the app folder) */
   file(rel: string): void
-  /** The file count cap was exceeded — the rest of that folder is skipped */
+  /** The file count cap was exceeded — the rest of the folder is skipped */
   more(): void
 }
 
-export function walkCode(dir: string, v: CodeVisit): void {
+/** `maxDepth` is for a version captured at another depth (`Snapshot.depth`); everything else walks at the shared one */
+export function walkCode(dir: string, v: CodeVisit, maxDepth = APP_FOLDER_DEPTH): void {
   let files = 0
-  const walk = (rel: string, depth: number): void => {
-    let entries: Dirent[]
-    try {
-      entries = readdirSync(rel ? join(dir, rel) : dir, { withFileTypes: true })
-    } catch {
-      v.unreadable(rel)
-      return
-    }
-    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-    for (const e of entries) {
-      if (e.name.startsWith('.') || e.name === 'node_modules') continue
-      const r = rel ? `${rel}/${e.name}` : e.name
-      if (e.isDirectory()) {
-        v.dir(r)
-        if (depth < MAX_DEPTH) walk(r, depth + 1)
-        continue
-      }
-      if (!e.isFile()) continue
-      if (++files > MAX_FILES) {
-        v.more()
-        return
-      }
-      v.file(r)
-    }
-  }
-  walk('', 0)
+  walkAppFolder(
+    dir,
+    {
+      unreadable: (rel) => v.unreadable(rel),
+      dir: (rel) => {
+        v.dir(rel)
+      },
+      file: (rel) => {
+        if (++files > MAX_FILES) {
+          v.more()
+          return STOP
+        }
+        v.file(rel)
+      },
+    },
+    maxDepth,
+  )
 }
 
 export function folderFingerprint(dir: string): string {

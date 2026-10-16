@@ -621,7 +621,8 @@ and "Send to builder".
 - **Reload at the builder's turn end**: the app is not restarted on every file change, because in
   the middle of a turn the code is half edited. When the builder's turn ends (after 300 ms of
   quiet), the host fingerprints the app folder: contents for files up to 1 MiB, size and time above
-  that, dot-files and `node_modules` skipped, at most 2000 files and 8 levels. If it differs from
+  that, dot-files, `__MACOSX` and `node_modules` skipped, at most 2000 files and 16 levels (the
+  depth an import allows, `APP_FOLDER_DEPTH`; one walk for every reader, `walkAppFolder`). If it differs from
   what the running process started from, the app restarts **after its calls in progress finish**,
   even if it was stopped, so the builder's tool list is fresh. The manifest follows the same
   rule: a change to it during the turn is read at the turn's end, when the app stops once and starts
@@ -999,7 +1000,8 @@ commits that touched `.centralu/apps/<id>` (read by the host core with `git log 
 A **user-folder app** (imported ones included) has no git, so the host keeps copies. Each time the
 app starts on code it has not kept yet, and when an app is imported, its folder is copied to
 `<data folder>/app-versions/_user/<id>/`; the five newest stay. The copy covers exactly what the
-folder fingerprint covers (one walk, `walkCode`: no dot-names, no `node_modules`), so a version's
+folder fingerprint covers (one walk, `walkCode`: no dot-names, no `__MACOSX`, no `node_modules`,
+16 levels), so a version's
 fingerprint is the code stamp the list already carries, and the panel marks the version equal to
 the code on disk as **current**. The same code starting again (after idling or a crash) adds
 nothing.
@@ -1007,7 +1009,8 @@ nothing.
 "Restore previous version" (the version just before the current one), or Restore on any row,
 asks once, then `apps.restoreVersion`: the current files are kept as a version first, so a restore
 can be undone; the chosen version is written back (code files it does not hold are removed;
-dot-names and `node_modules` are left alone, and large files get their times back so the
+dot-names and `node_modules` are left alone, and so is anything deeper than the version looked: a
+version an older build kept walked 8 levels, `Snapshot.depth`; large files get their times back so the
 fingerprint matches); the failure count is cleared; and the app restarts on the restored code
 through the same path as a builder's turn end, after its calls in progress, so open views reopen on
 it (§6.3). An imported app restored to a version with a different `server` or `uses` is asked about

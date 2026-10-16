@@ -3,6 +3,7 @@ import { closeSync, existsSync, fstatSync, openSync, readdirSync, readSync, type
 import { join } from 'node:path'
 import { assertExistingPathSync, isMissingPathError } from '../../dev-services/path-guard.js'
 import { MANIFEST_FILE, MAX_MANIFEST_BYTES, parseManifest, type AppManifest } from './manifest.js'
+import { outsideAppCode } from './folder-walk.js'
 
 /**
  * Scans the places apps live (M4 A-2, plan decision 1).
@@ -97,12 +98,12 @@ const SUBFOLDERS_WATCHED = 8
  * not recursive (`DirWatchers`), without this an edit to `ui/index.html` in an editor would go
  * unnoticed. This looks only one level deep: a deeper change is caught by the fingerprint at the
  * end of the building session's turn (`fingerprint.ts`). Folders starting with a dot and
- * `node_modules` are not the app's code.
+ * `node_modules` are not the app's code (`outsideAppCode`).
  */
 function subfoldersOf(root: string, appRel: string): string[] {
   try {
     return readdirSync(join(root, appRel), { withFileTypes: true })
-      .filter((d) => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'node_modules')
+      .filter((d) => d.isDirectory() && !outsideAppCode(d.name))
       .map((d) => `${appRel}/${d.name}`)
       .sort()
       .slice(0, SUBFOLDERS_WATCHED)
