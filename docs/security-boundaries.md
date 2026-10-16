@@ -293,12 +293,17 @@ with only a log line (`[permissions] … session_handoff of <id> … allowed`). 
 session, a session mid-turn, a deletion, or a preset above the original's. The receiving tool is checked before the card
 (an unknown, uninstalled or signed-out tool is refused without one), every name on the card is JSON-quoted, the
 orchestrator's extra words are cut at 400 characters with the cut said, and "always" is recorded only once the call has
-passed every check after the card. Refusals are logged with the caller and the target.
+passed every check after the card. Refusals are logged with the caller and the target, and under `auto` the allowance
+is logged once, by the call that holds the session (#797), so a burst of calls logs one "allowed" and the refusals.
 
 The note defaults to the stored record, so a session's own drift does not write it. The record labels every row
 another session or an app sent (`from`, `fromApp`: a child's report, a parent's or orchestrator's instruction, an app's
 message) with its source and carries its text as one JSON string, as read_session does (#120, #121); only the person's
-rows are `[user]`. The successor's opening is stored and shown as the orchestrator's message (`from`), not the
+rows are `[user]`. That holds per line, as the successor reads the file, not only per row (#797): a row starts only at
+the start of a line, and every later line of any row's text is indented, so the session's own multi-line reply or
+compaction summary cannot make a line that starts with `[user]`. A tool's name and title (a multi-line command, a
+heredoc) and paths are kept to one line with control characters escaped, and the predecessor's name is JSON-quoted in
+the record's header and instructions and in the successor's opening, since a name can hold a newline. The successor's opening is stored and shown as the orchestrator's message (`from`), not the
 person's. In agent mode the request goes in as the orchestrator's message and the reply is read from the store after
 the turn ends. The original is never deleted, and the successor runs under the original's preset, never the
 orchestrator's.

@@ -17,6 +17,8 @@ export type HandoffFlowHost = {
   askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal, card?: { log?: string }): Promise<HostAskAnswer>
   /** Why this tool cannot start a session here (unknown, not installed, signed out), or null */
   toolProblem(tool: string): Promise<string | null>
+  /** The caller's own `auto` (#603): asked with no `boundary` it only answers; with one, it also logs the allowance */
+  autoBoundaryOpen(sessionId: string, boundary?: string): boolean
   cwdFor(m: SessionInfo): string
   createSession(params: {
     projectId: string
@@ -143,7 +145,12 @@ export class HandoffFlow {
     if (problem) return this.refuse(callerId, target.id, `Nothing was handed off: ${problem}`)
 
     let always = false
-    if (!this.always.has(callerId)) {
+    /*
+     * Under `auto` no card is raised, and the allowance is logged only once this call holds the session (#797): a
+     * burst of calls logged "allowed" for each before all but one were refused. Asked here without logging.
+     */
+    const viaAuto = this.host.autoBoundaryOpen(callerId)
+    if (!viaAuto && !this.always.has(callerId)) {
       const decision = await this.host.askHost(
         callerId,
         { kind: 'other', about: SESSION_HANDOFF, raw: this.question(target, tool, mode, instructions) },
@@ -166,6 +173,12 @@ export class HandoffFlow {
     const run: Run = { id: `ho-${randomUUID().slice(0, 8)}`, callerId, targetId: now.id, done: Promise.resolve({ ok: false, error: '' }) }
     this.running.set(now.id, run)
     this.runs.set(run.id, run)
+    // Read again with the log: an orchestrator moved off `auto` meanwhile was never asked, so it gets nothing
+    if (viaAuto && !this.host.autoBoundaryOpen(callerId, `${SESSION_HANDOFF} of ${now.id} (${mode}, to ${tool})`)) {
+      this.running.delete(now.id)
+      this.runs.delete(run.id)
+      return this.refuse(callerId, now.id, 'This session left the auto preset while the handoff was being checked; call again to be asked.')
+    }
     run.done = (mode === 'record' ? this.fromRecord(callerId, now, tool, instructions) : this.fromAgent(callerId, now, tool, instructions)).then((r) => {
       if (this.running.get(now.id) === run) this.running.delete(now.id)
       if (!run.detached) this.runs.delete(run.id)

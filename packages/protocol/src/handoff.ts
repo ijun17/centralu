@@ -53,6 +53,11 @@ function notePreview(note: string): string {
   return head.length < note.trim().length ? `${head.trimEnd()}\n…` : head
 }
 
+/** A name as one JSON string on one line: JSON escapes control characters, and U+2028/U+2029 are escaped too */
+function quotedName(name: string): string {
+  return JSON.stringify(name).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+}
+
 /**
  * The successor's first message (#102) — **hands over the note's location, not the note itself.**
  *
@@ -81,7 +86,8 @@ export function handoffOpening(
   extra?: { from: string; text: string },
 ): string {
   return [
-    `You are taking over from a session named "${predecessor}". It wrote a handoff note for you and it is on disk, outside the project folder: \`${path}\`. Read it before anything else.`,
+    // The name is JSON-quoted on one line: a person or an agent can put a newline in it (#797)
+    `You are taking over from a session named ${quotedName(predecessor)}. It wrote a handoff note for you and it is on disk, outside the project folder: \`${path}\`. Read it before anything else.`,
     '',
     'The note can be long. Read it in pieces (head, tail, byte offsets) or grep it for what you need — you do not have to pull the whole file into one turn.',
     '',

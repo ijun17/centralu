@@ -3950,6 +3950,7 @@ export class SessionManager {
         return self.store
       },
       askHost: (...a) => self.hostCards.askHost(...a),
+      autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
       toolProblem: async (tool) => {
         const adapter = self.adapters.get(tool)
         if (!adapter) return `${JSON.stringify(tool)} is not a tool Centralu runs here`

@@ -350,6 +350,17 @@ describe('handoff_session (#694)', () => {
     expect((opening.payload as { from?: { sessionId: string } }).from?.sessionId).toBe(orch)
   })
 
+  it('a burst under auto logs one allowance, for the call that holds the session (#797)', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { target, orch } = await world('auto')
+    await Promise.all([handoff(orch, { sessionId: target }), handoff(orch, { sessionId: target }), handoff(orch, { sessionId: target })])
+    const lines = log.mock.calls.map((c) => String(c[0]))
+    log.mockRestore()
+    expect(lines.filter((l) => l.includes(`session_handoff of ${target}`) && l.includes('allowed'))).toHaveLength(1)
+    expect(lines.filter((l) => l.includes('is already being handed off'))).toHaveLength(2)
+    expect(named('Long run')).toHaveLength(2)
+  })
+
   it('logs what auto allowed, naming the handoff and its target, and every refusal (#694 review)', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { target, orch } = await world('auto')

@@ -971,7 +971,9 @@ the session to write it (`mode: "agent"`) stays an option in both.
   message is stored and shown as the orchestrator's (`from`, the internal `initialFrom` of `createSession`), not the
   person's. The record labels every row another session or an app sent with its source and carries its text as one JSON
   string, as read_session does; only the person's rows are `[user]`, so a child's report cannot read as the person's
-  instruction in the successor's note. Creating it
+  instruction in the successor's note. A row starts only at the start of a line and its later lines are indented,
+  tool titles and paths stay on one line, and the predecessor's name is JSON-quoted (#797), so no line of the
+  session's own text can start a row either. Creating it
   moves the original's live children (§1.2.5, scope `live`): **the original always stays**, and is told in its
   conversation who took over. The person removes it.
 - **Agent mode** sends the window's prompt (`handoffPrompt`, now in the protocol) as the orchestrator's message, waits

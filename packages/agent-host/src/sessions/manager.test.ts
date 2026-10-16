@@ -5159,7 +5159,7 @@ describe('the dead-agent handoff record (#78)', () => {
      */
     expect(out.path).toBe(join(process.env.CC_DATA_DIR!, 'handoff', p.id, `${s.id}.md`))
     expect(readFileSync(out.path, 'utf8')).toBe(out.text)
-    expect(out.text.split('\n')[0]).toBe(`# Handoff · ${s.name} · codex → claude`)
+    expect(out.text.split('\n')[0]).toBe(`# Handoff · ${JSON.stringify(s.name)} · codex → claude`)
 
     // Once a codex rollout summary arrives — asked by that session's externalId, the summary replaces
     // everything before the pivot.
