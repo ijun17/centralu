@@ -282,7 +282,7 @@ describe('starting another agent in the same project', () => {
       await w.until(() => childrenOf(s).length === 1)
       expect(handleOf(childrenOf(s)[0]!.id)!.opts).toMatchObject({ model: 'gpt-small' })
       const bad = await runOrchestratorTool(tools, 'start_agent', { task: 'x', difficulty: 'hard' }, { sessionId: s, profile: 'reader' })
-      expect(bad).toEqual({ text: 'Give difficulty as light, standard or heavy, or leave it out.', isError: true })
+      expect(bad).toEqual({ text: 'Wrong arguments for start_agent: difficulty: Invalid option: expected one of "light"|"standard"|"heavy".', isError: true })
     })
   })
 

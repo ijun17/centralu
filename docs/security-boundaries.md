@@ -236,7 +236,9 @@ decides both which tools the session sees and which calls run (`profileAllows` i
 `sessions/orchestrator-tools.ts`). Claude's in-process server is built from the profile
 (`adapters/claude/orchestrator-mcp.ts`, `toolDefsFor`); Codex calls through the bridge, and the host
 checks the profile again on every call (`SessionManager.runOrchestratorTool`), so a name the
-session was not given is refused even when the bridge asks for it. The bridge connects with a
+session was not given is refused even when the bridge asks for it. The arguments are checked once
+for both paths, against the tool's one schema (`TOOL_ARGS`, #850): Claude's server checks them against
+the definition it shows, and the bridge hands them over unchecked. The bridge connects with a
 credential for its own session's bridge calls, not with the host's token (owner question 4; "The
 front door" below).
 

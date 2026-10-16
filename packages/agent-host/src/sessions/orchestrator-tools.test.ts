@@ -17,6 +17,7 @@ import {
   READER_INSTRUCTIONS,
   READER_TOOLS,
   RESIDENT_BUDGET_CHARS,
+  TOOL_ARGS,
   callForm,
   codexToolInstructionsFor,
   instructionsFor,
@@ -24,6 +25,8 @@ import {
   profileAllows,
   runOrchestratorTool,
   setReaderInstructions,
+  toolDefsFor,
+  type RareTier,
 } from './orchestrator-tools.js'
 import { TOOL_PROFILES, definitionChars, residentCost, servedDefinitions } from './tool-cost.js'
 
@@ -433,5 +436,44 @@ describe('callForm (#850)', () => {
     expect(callForm('reader', 'handoff_session', { waitFor: 'h' })).toBeUndefined()
     expect(callForm('human', 'read_session', {})).toBeUndefined()
     expect(callForm(null, 'read_session', {})).toBeUndefined()
+  })
+})
+
+describe('arguments (#850)', () => {
+  it('every tool a seat is shown has one schema to run by, and the keys it is shown are that schema\'s', () => {
+    for (const tier of ['resident', 'deferred', 'commands'] as RareTier[]) {
+      for (const profile of TOOL_PROFILES) {
+        for (const def of toolDefsFor(profile, tier)) {
+          const args = (TOOL_ARGS as Record<string, z.ZodObject<z.ZodRawShape>>)[def.name]
+          expect(args, `${profile}/${def.name}`).toBeDefined()
+          expect(Object.keys(args!.shape), `${profile}/${def.name}`).toEqual(expect.arrayContaining(Object.keys(def.schema.shape)))
+        }
+      }
+    }
+  })
+
+  it('refuses a wrong argument on the path no MCP schema checked (Codex\'s bridge) and runs nothing', async () => {
+    const tools = {
+      updateSessionSettings: vi.fn(async () => ({ ok: true })),
+      sendToSession: vi.fn(async () => ({ ok: true })),
+      createSession: vi.fn(async () => ({ ok: true, sessionId: 'n', name: 'New' })),
+      recall: vi.fn(async () => ({ hits: [] })),
+      agentSession: vi.fn(async () => ({ ok: true, state: 'working', sessionId: 'c', sessionName: 'C', tool: 'codex', reported: true })),
+    }
+    const orchestrator = { sessionId: 'o', profile: 'orchestrator' as const }
+    const run = (name: string, args: Record<string, unknown>, caller: { sessionId: string; profile: 'orchestrator' | 'reader' } = orchestrator) =>
+      runOrchestratorTool(tools as unknown as OrchestratorTools, name, args, caller)
+    // Each of these reached the manager before: a number as a model id, a busy choice that silently became none, a tool
+    // that silently became the project's default, a limit given as text
+    expect(await run('update_session_settings', { sessionId: 's', model: 42 })).toEqual({ isError: true, text: expect.stringMatching(/^Wrong arguments for update_session_settings: model: /) })
+    expect(await run('send_to_session', { sessionId: 's', text: 'go', ifBusy: 'later' })).toEqual({ isError: true, text: expect.stringMatching(/^Wrong arguments for send_to_session: ifBusy: /) })
+    expect(await run('create_session', { tool: 42 })).toEqual({ isError: true, text: expect.stringMatching(/^Wrong arguments for create_session: tool: /) })
+    expect(await run('recall', { query: 'parser', limit: '5' })).toEqual({ isError: true, text: expect.stringMatching(/^Wrong arguments for recall: limit: /) })
+    const reader = { sessionId: 'r', profile: 'reader' as const }
+    expect(await run('agent_session', { sessionId: 'c', action: 'send', text: 'go', ifBusy: 'later' }, reader)).toEqual({ isError: true, text: expect.stringMatching(/^Wrong arguments for agent_session: ifBusy: /) })
+    for (const f of Object.values(tools)) expect(f).not.toHaveBeenCalled()
+    // A right one runs, and an argument the tool does not take is dropped, as Claude's MCP drops it
+    expect((await run('send_to_session', { sessionId: 's', text: 'go', ifBusy: 'queue', extra: 1 })).isError).toBeFalsy()
+    expect(tools.sendToSession).toHaveBeenCalledWith('s', 'go', false, 'queue')
   })
 })

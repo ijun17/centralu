@@ -1,8 +1,6 @@
 import { z } from 'zod'
 import { AgentDifficulty, ToolName } from '@cc/protocol'
 import type { BusyChoice, ChildRunResult, AskProjectResult, IfBusy, OrchestratorTools, RoutedCard } from '../adapters/contract.js'
-
-const IF_BUSY: readonly IfBusy[] = ['note', 'queue', 'fork', 'fork_read']
 import { ORCHESTRATOR_MCP_NAME, type ToolCaller, type ToolOutput, type ToolProfile } from '../apps/contract.js'
 import { appGuide, APP_GUIDE_TOPICS, type GuideSeats, type GuideTool } from './app-guide.js'
 import { interruptionWords } from './interruptions.js'
@@ -14,6 +12,14 @@ import { interruptionWords } from './interruptions.js'
 export function trustedJsonText(value: string): string {
   return JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 }
+
+/** What a busy session can be asked to do instead (#677): the contract's IfBusy, as the one schema every tool takes */
+const IF_BUSY = z.enum(['note', 'queue', 'fork', 'fork_read'] as const satisfies readonly IfBusy[])
+// …and every one of them: a value the contract adds and this schema lacks would be refused before the manager saw it
+const _ifBusyComplete: IfBusy extends z.infer<typeof IF_BUSY> ? true : never = true
+
+/** update_centralu's actions: one enum for the orchestrator's definition and the reader's */
+const UPDATE_ACTION = z.enum(['check', 'install', 'apply'])
 
 /*
  * The server name and the naming rule moved to the app runtime contract (M4 A-1) — an external
@@ -40,7 +46,7 @@ export const ORCHESTRATOR_TOOLS = [
     name: 'update_centralu',
     description:
       'Checks for or installs a Centralu update, or applies the installed one (the window relaunches; agents keep running). Never changes the person\'s automatic-update setting.',
-    schema: z.object({ action: z.enum(['check', 'install', 'apply']) }),
+    schema: z.object({ action: UPDATE_ACTION }),
   },
   {
     name: 'list_sessions',
@@ -87,7 +93,7 @@ export const ORCHESTRATOR_TOOLS = [
         .optional()
         .describe('Whether to notify me when that session finishes the work. Set true if the person is waiting for the result.'),
       // #677: a session busy with a turn that is not yours returns the choices, which name this argument; no words here
-      ifBusy: z.enum(['note', 'queue', 'fork', 'fork_read']).optional(),
+      ifBusy: IF_BUSY.optional(),
     }),
   },
   {
@@ -286,7 +292,7 @@ export const READER_TOOLS = [
     name: 'update_centralu',
     // "apply" (#665) needs no words of its own here: 8 characters in every reader's request, and the install answer names it
     description: 'Updates Centralu with consent.',
-    schema: z.object({ action: z.enum(['check', 'install', 'apply']) }),
+    schema: z.object({ action: UPDATE_ACTION }),
     // Updates are rare (#581); keep the definition behind Claude's tool search like app_guide.
     deferred: true,
   },
@@ -397,7 +403,7 @@ export const AGENT_TOOLS = [
       text: z.string().optional(),
       card: z.string().optional(),
       // #677: send to a busy session returns its choices, which name this argument
-      ifBusy: z.enum(['note', 'queue', 'fork', 'fork_read']).optional(),
+      ifBusy: IF_BUSY.optional(),
     }),
     deferred: true,
   },
@@ -761,12 +767,35 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
   }
 }
 
+/** One call of a tool: what it reaches, who called, and the call's own signal where the path has one */
+type ToolCall = { tools: OrchestratorTools; caller: ToolCaller; signal?: AbortSignal }
+
+/** Every tool's arguments as its handler receives them: the output of its one schema in TOOL_ARGS */
+export type OrchestratorToolArgs = { [N in keyof typeof TOOL_ARGS]: z.output<(typeof TOOL_ARGS)[N]> }
+
+type ToolHandlers = { [N in keyof OrchestratorToolArgs]: (args: OrchestratorToolArgs[N], call: ToolCall) => Promise<ToolOutput> | ToolOutput }
+
+/** A string with something in it, trimmed; an empty or blank one is the same as none */
+const filled = (v: string | undefined) => (v?.trim() ? v.trim() : undefined)
+
+/** A schema's complaints, one per argument, the same way for a tool and for a command run through centralu_run */
+function issuesText(error: z.ZodError): string {
+  return error.issues.map((i) => `${i.path.join('.') || '(args)'}: ${i.message}`).join('; ')
+}
+
+/** Tools only a reader has (profileAllows), checked here too since this runner is shared by every seat */
+const READER_ONLY: ReadonlySet<string> = new Set(['ask_project', 'start_agent', 'agent_session'])
+
 /**
  * Runs one tool and turns the result into **text for the model to read**.
  *
  * Why rendering happens here too: if each of the two paths composed its own sentence, the same
  * result would look different. The judgment (what to give) lives in OrchestratorTools, the
  * presentation (how it looks) lives here.
+ *
+ * The arguments are checked here, once, against the tool's schema in TOOL_ARGS (#850): Claude's in-process MCP checks
+ * them against the definition it was shown, but Codex's bridge hands them over as the model wrote them, so without
+ * this a wrong type reached the manager on one path and was refused on the other.
  */
 export async function runOrchestratorTool(
   tools: OrchestratorTools,
@@ -776,9 +805,24 @@ export async function runOrchestratorTool(
   /** The tool call's own signal, where the path has one (Claude's in-process MCP) — ask_project stops the delegated turn on it */
   signal?: AbortSignal,
 ): Promise<ToolOutput> {
-  if (name === 'update_centralu') {
-    const action = args.action
-    if (action !== 'check' && action !== 'install' && action !== 'apply') return { text: 'Give action: check, install or apply.', isError: true }
+  if (READER_ONLY.has(name) && caller.profile !== 'reader') return { text: `Not a tool of this session: ${name}`, isError: true }
+  if (!isToolName(name)) return { text: `Unknown tool: ${name}`, isError: true }
+  const parsed = TOOL_ARGS[name].safeParse(args)
+  if (!parsed.success) return { text: `Wrong arguments for ${name}: ${issuesText(parsed.error)}.`, isError: true }
+  return runParsed(name, parsed.data as OrchestratorToolArgs[typeof name], { tools, caller, signal })
+}
+
+function isToolName(name: string): name is keyof typeof TOOL_ARGS {
+  return Object.hasOwn(TOOL_ARGS, name)
+}
+
+/** A tool whose arguments its schema has already read: the handler itself */
+function runParsed<N extends keyof OrchestratorToolArgs>(name: N, args: OrchestratorToolArgs[N], call: ToolCall): Promise<ToolOutput> {
+  return Promise.resolve(HANDLERS[name](args, call))
+}
+
+const HANDLERS: ToolHandlers = {
+  async update_centralu({ action }, { tools, caller, signal }) {
     const r = tools.updateCentralu ? await tools.updateCentralu(action, signal) : { ok: false, error: 'Update checks are unavailable' }
     if (action === 'apply') {
       if (!r.ok) return { text: `Centralu update was not applied: ${r.error ?? 'unavailable'}`, isError: true }
@@ -801,70 +845,62 @@ export async function runOrchestratorTool(
     if (s.phase === 'updating' || s.phase === 'waiting_for_npm') return { text: `Installing Centralu ${s.latest ?? ''}. ${applies}` }
     if (s.newer && s.latest) return { text: `Centralu ${s.latest} is available, but the install did not start.`, isError: true }
     return { text: s.error ?? 'Centralu is up to date.' }
-  }
-  if (name === 'list_sessions') return listSessionsText(tools, caller)
+  },
 
-  if (name === 'centralu_commands' || name === 'centralu_help' || name === 'centralu_run') return runCommandTool(tools, name, args, caller, signal)
+  list_sessions: (_args, { tools, caller }) => listSessionsText(tools, caller),
 
-  if (name === 'ask_project') {
-    // Only the reader seat has it (profileAllows) — checked here too, since this runner is shared by every seat
-    if (caller.profile !== 'reader') return { text: `Not a tool of this session: ${name}`, isError: true }
-    const project = typeof args.project === 'string' ? args.project.trim() : ''
+  centralu_commands: (args, call) => runCommandTool({ name: 'centralu_commands', args }, call),
+  centralu_help: (args, call) => runCommandTool({ name: 'centralu_help', args }, call),
+  centralu_run: (args, call) => runCommandTool({ name: 'centralu_run', args }, call),
+
+  async ask_project(args, { tools, signal }) {
+    const project = args.project.trim()
     if (!project) return { text: 'Give a project — the name of another Centralu project.', isError: true }
-    const task = typeof args.task === 'string' && args.task.trim() ? args.task : undefined
-    const session = typeof args.session === 'string' && args.session.trim() ? args.session.trim() : undefined
-    if (args.ifBusy !== undefined && args.ifBusy !== 'note' && args.ifBusy !== 'queue') return { text: 'ifBusy is "note" or "queue" for ask_project.', isError: true }
-    const ifBusy = args.ifBusy === 'note' || args.ifBusy === 'queue' ? args.ifBusy : undefined
+    const task = args.task?.trim() ? args.task : undefined
+    const session = filled(args.session)
+    const { ifBusy } = args
     return askProjectText(await tools.askProject({ project, ...(session ? { session } : {}), ...(task ? { task } : {}), ...(ifBusy ? { ifBusy } : {}) }, signal))
-  }
+  },
 
-  if (name === 'start_agent' || name === 'agent_session') {
-    // A reader's alone (profileAllows), checked here too since this runner is shared by every seat
-    if (caller.profile !== 'reader') return { text: `Not a tool of this session: ${name}`, isError: true }
-    const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
-    if (name === 'start_agent') {
-      const task = typeof args.task === 'string' && args.task.trim() ? args.task : undefined
-      if (!task) return { text: 'Give a task: what the new session should do.', isError: true }
-      const tool = str(args.tool)
-      const model = str(args.model)
-      const effort = str(args.effort)
-      const difficulty = AgentDifficulty.safeParse(str(args.difficulty)).data
-      if (str(args.difficulty) && !difficulty) return { text: 'Give difficulty as light, standard or heavy, or leave it out.', isError: true }
-      const branch = str(args.branch)
-      return agentRunText(
-        await tools.startAgent(
-          {
-            task,
-            ...(tool ? { tool } : {}),
-            ...(model ? { model } : {}),
-            ...(effort ? { effort } : {}),
-            ...(difficulty ? { difficulty } : {}),
-            ...(args.wait === false ? { wait: false } : {}),
-            ...(args.worktree === true || branch ? { worktree: true } : {}),
-            ...(branch ? { branch } : {}),
-            ...(typeof args.lsp === 'boolean' ? { lsp: args.lsp } : {}),
-          },
-          signal,
-        ),
-      )
-    }
-    const sessionId = str(args.sessionId)
-    const action = args.action
+  async start_agent(args, { tools, signal }) {
+    const task = args.task.trim() ? args.task : undefined
+    if (!task) return { text: 'Give a task: what the new session should do.', isError: true }
+    const tool = filled(args.tool)
+    const model = filled(args.model)
+    const effort = filled(args.effort)
+    const { difficulty } = args
+    const branch = filled(args.branch)
+    return agentRunText(
+      await tools.startAgent(
+        {
+          task,
+          ...(tool ? { tool } : {}),
+          ...(model ? { model } : {}),
+          ...(effort ? { effort } : {}),
+          ...(difficulty ? { difficulty } : {}),
+          ...(args.wait === false ? { wait: false } : {}),
+          ...(args.worktree === true || branch ? { worktree: true } : {}),
+          ...(branch ? { branch } : {}),
+          ...(typeof args.lsp === 'boolean' ? { lsp: args.lsp } : {}),
+        },
+        signal,
+      ),
+    )
+  },
+
+  async agent_session(args, { tools, signal }) {
+    const sessionId = filled(args.sessionId)
+    const { action, ifBusy } = args
     if (!sessionId) return { text: 'Give the sessionId start_agent returned.', isError: true }
-    if (action !== 'status' && action !== 'send' && action !== 'wait' && action !== 'stop' && action !== 'delete' && action !== 'answer') {
-      return { text: 'Give an action: status, send, wait, stop, delete or answer.', isError: true }
-    }
-    const text = typeof args.text === 'string' && args.text.trim() ? args.text : undefined
+    const text = args.text?.trim() ? args.text : undefined
     if (action === 'send' && !text) return { text: 'Give text: what to send it.', isError: true }
     if (action === 'answer' && !text) return { text: 'Give text: the answer.', isError: true }
-    const card = str(args.card)
-    const ifBusy = IF_BUSY.find((v) => v === args.ifBusy)
+    const card = filled(args.card)
     return agentRunText(await tools.agentSession({ sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}), ...(ifBusy ? { ifBusy } : {}) }, signal))
-  }
+  },
 
-  if (name === 'recall') {
-    const query = String(args.query ?? '')
-    const r = await tools.recall(query, args.limit as number | undefined)
+  async recall({ query, limit }, { tools }) {
+    const r = await tools.recall(query, limit)
     // A machine that is off says it could not be searched, rather than finding nothing (#82, decided 2026-10-03)
     const unsearched = r.notSearched?.length ? `\nNot searched: ${r.notSearched.join('; ')}.` : ''
     if (r.hits.length === 0) return { text: `Nothing was found for "${query}". Try a different word.${unsearched}` }
@@ -883,23 +919,23 @@ export async function runOrchestratorTool(
         )
         .join('\n') + unsearched,
     }
-  }
+  },
 
-  if (name === 'answer_question') {
-    const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : ''
-    const text = typeof args.text === 'string' ? args.text.trim() : ''
+  async answer_question(args, { tools }) {
+    const sessionId = args.sessionId.trim()
+    const text = args.text.trim()
     if (!sessionId || !text) return { text: 'Give sessionId and text: the session and your answer.', isError: true }
-    const card = typeof args.card === 'string' && args.card.trim() ? args.card.trim() : undefined
+    const card = filled(args.card)
     const r = await tools.answerQuestion({ sessionId, text, ...(card ? { card } : {}) })
     if (!r.ok) return { text: r.error, isError: true }
     return { text: `Answered card ${r.state === 'answered' ? r.card : ''} in "${r.sessionName}" [${r.sessionId}]; it goes on.` }
-  }
+  },
 
-  if (name === 'read_session') {
+  async read_session(args, { tools, caller }) {
     // The reader set has no list_sessions — listing is read_session without an id (#320, see READER_TOOLS)
     if (caller.profile === 'reader' && !args.sessionId) return listSessionsText(tools, caller)
-    const r = await tools.readSession(String(args.sessionId ?? ''), args.limit as number | undefined, {
-      around: typeof args.around === 'number' ? args.around : undefined,
+    const r = await tools.readSession(args.sessionId ?? '', args.limit, {
+      around: args.around,
       tools: args.tools === true,
     })
     if (!r.ok) return { text: `Could not read it — ${r.error}`, isError: true }
@@ -926,21 +962,21 @@ export async function runOrchestratorTool(
         (answer ? `${answer} answers it. ${ANSWER_FORM}` : 'Only the person can answer it from here; tell them if it matters.')
       : ''
     return { text: head + (r.lines?.join('\n') || '(no conversation)') + cards }
-  }
+  },
 
-  if (name === 'create_project') {
+  async create_project(args, { tools, signal }) {
     /*
      * The card is the permission (#515): the manager raises it and makes nothing until the person approves, so an
      * instruction carried in through read_session or recall reaches, at most, a card the person reads with the full
      * path on it. The names come back JSON-quoted: the folder's name is whatever the model was given.
      */
-    const folder = typeof args.name === 'string' ? args.name : ''
-    const git = typeof args.git === 'string' && args.git.trim() ? args.git.trim() : undefined
+    const folder = args.name ?? ''
+    const git = filled(args.git)
     if (!folder.trim() && !git) return { text: 'Give a name — the new folder is named by it, and so is the project.', isError: true }
-    const parent = typeof args.parent === 'string' && args.parent.trim() ? args.parent.trim() : undefined
-    const branch = git && typeof args.branch === 'string' && args.branch.trim() ? args.branch.trim() : undefined
+    const parent = filled(args.parent)
+    const branch = git ? filled(args.branch) : undefined
     const source = git ? { git, ...(branch ? { branch } : {}) } : undefined
-    const machine = typeof args.machine === 'string' && args.machine.trim() ? args.machine.trim() : undefined
+    const machine = filled(args.machine)
     const r = await tools.createProject({ name: folder, ...(parent ? { parent } : {}), ...(source ? { source } : {}), ...(machine ? { machine } : {}) }, signal)
     if (!r.ok) return { text: `No project was made: ${r.error}`, isError: true }
     return {
@@ -949,17 +985,14 @@ export async function runOrchestratorTool(
         `${r.machine ? ` on ${r.machine}` : ''}. ` +
         'Start work in it with create_session (project = that id).',
     }
-  }
+  },
 
-  if (name === 'handoff_session') {
-    const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : ''
-    const waitFor = typeof args.waitFor === 'string' && args.waitFor.trim() ? args.waitFor.trim() : undefined
+  async handoff_session(args, { tools, caller, signal }) {
+    const sessionId = args.sessionId?.trim() ?? ''
+    const waitFor = filled(args.waitFor)
     if (!sessionId && !waitFor) return { text: 'Give sessionId: the session to hand off, from list_sessions.', isError: true }
-    if (args.tool !== undefined && !ToolName.safeParse(args.tool).success) return { text: `Not a tool: ${String(args.tool)}`, isError: true }
-    if (args.mode !== undefined && args.mode !== 'record' && args.mode !== 'agent') return { text: 'mode is "record" or "agent".', isError: true }
-    const tool = ToolName.safeParse(args.tool).data
-    const mode = args.mode === 'record' || args.mode === 'agent' ? args.mode : undefined
-    const instructions = typeof args.instructions === 'string' && args.instructions.trim() ? args.instructions : undefined
+    const { tool, mode } = args
+    const instructions = args.instructions?.trim() ? args.instructions : undefined
     if (!tools.handoffSession) return { text: 'This session cannot hand sessions off.', isError: true }
     const r = await tools.handoffSession(waitFor ? { waitFor } : { sessionId, ...(tool ? { tool } : {}), ...(mode ? { mode } : {}), ...(instructions ? { instructions } : {}) }, signal)
     if (!r.ok) return { text: r.error, isError: true }
@@ -979,14 +1012,10 @@ export async function runOrchestratorTool(
         `starting from a note ${r.mode === 'record' ? 'built from the record' : 'the session wrote'} (${trustedJsonText(r.path)}). ` +
         'Live work the original started now answers to the new session. The original stays; removing it is the person\'s call.',
     }
-  }
+  },
 
-  if (name === 'propose_skill') {
-    const spec = {
-      name: String(args.name ?? '').trim(),
-      content: String(args.content ?? ''),
-      why: typeof args.why === 'string' ? args.why : undefined,
-    }
+  async propose_skill(args, { tools }) {
+    const spec = { name: args.name.trim(), content: args.content, why: args.why }
     if (!spec.name || !spec.content.trim()) {
       return { text: 'Give name and content — a procedure with no name cannot be found, and a procedure with no content is not a procedure.', isError: true }
     }
@@ -997,15 +1026,10 @@ export async function runOrchestratorTool(
         `Proposed the "${spec.name}" skill. An approval card appeared on screen, and once the person approves it, it is saved and ` +
         'this session restarts — after the restart, the conversation continues and the skill is carried in the role. It has no effect at all until approved.',
     }
-  }
+  },
 
-  if (name === 'propose_mcp_server') {
-    const spec = {
-      name: String(args.name ?? '').trim(),
-      command: String(args.command ?? '').trim(),
-      args: Array.isArray(args.args) ? args.args.map(String) : [],
-      why: typeof args.why === 'string' ? args.why : undefined,
-    }
+  async propose_mcp_server(args, { tools }) {
+    const spec = { name: args.name.trim(), command: args.command.trim(), args: args.args, why: args.why }
     if (!spec.name || !spec.command) {
       return { text: 'Give name and command — a proposal cannot be made without knowing what to start and how.', isError: true }
     }
@@ -1017,23 +1041,17 @@ export async function runOrchestratorTool(
         `that server becomes a user-folder app and this session restarts — after the restart, the conversation continues and the new tools appear under the app-${spec.name} server. ` +
         'It is not installed until approved.',
     }
-  }
+  },
 
-  if (name === 'check') {
+  async check(_args, { tools }) {
     // The result is a report for the agent to read. Even if there is a problem, the tool call
     // itself succeeds — the verdict is carried in the text.
     const r = await tools.checkApp()
     return { text: r.text }
-  }
+  },
 
-  if (name === 'create_app') {
-    const spec = {
-      id: String(args.id ?? '').trim(),
-      name: String(args.name ?? '').trim(),
-      project: typeof args.project === 'string' && args.project.trim() ? args.project.trim() : undefined,
-      description: typeof args.description === 'string' ? args.description : undefined,
-      tool: ToolName.safeParse(args.tool).data,
-    }
+  async create_app(args, { tools }) {
+    const spec = { id: args.id.trim(), name: args.name.trim(), project: filled(args.project), description: args.description, tool: args.tool }
     if (!spec.id || !spec.name) return { text: 'Give id and name — a folder name and a name to show the person are needed for the app to stand.', isError: true }
     const r = await tools.createApp(spec)
     if (!r.ok) return { text: `Could not create it — ${r.error}`, isError: true }
@@ -1052,84 +1070,16 @@ export async function runOrchestratorTool(
         `It is the app exactly as the template gives it (a counter). In a session it attaches as the app-${r.appId} server. The app comes up the first time it is needed.\n` +
         next,
     }
-  }
+  },
 
-  if (name === 'find_apps' || name === 'attach_app' || name === 'detach_app') return runAppAccess(tools, name, args)
-
-  if (name === 'app_guide') {
-    // Does not go through the manager — text baked into the build plus the tool registry is the whole guide (#30, M4 P-4)
-    return appGuide(typeof args.topic === 'string' ? args.topic : undefined, guideSeats())
-  }
-
-  if (name === 'update_session_settings') {
-    const r = await tools.updateSessionSettings(String(args.sessionId ?? ''), {
-      ...(args.model !== undefined ? { model: args.model as string | null } : {}),
-      ...(args.effort !== undefined ? { effort: args.effort as string | null } : {}),
-      ...(args.verbosity !== undefined ? { verbosity: args.verbosity as string | null } : {}),
-    })
-    return {
-      text: r.ok
-        ? r.deferred
-          ? `Changed: ${args.sessionId} — applies once the turn now running ends. Also notified the screen` // does not cut off the running turn (#164)
-          : `Changed: ${args.sessionId} — also notified the screen` // no change without a trace (#30)
-        : `Could not change it — ${r.error}`,
-      isError: !r.ok,
-    }
-  }
-
-  if (name === 'create_session') {
-    const r = await tools.createSession({
-      project: typeof args.project === 'string' ? args.project : undefined,
-      tool: ToolName.safeParse(args.tool).data,
-      name: typeof args.name === 'string' ? args.name : undefined,
-      firstMessage: typeof args.firstMessage === 'string' ? args.firstMessage : undefined,
-    })
-    return {
-      text: r.ok
-        ? `Created: ${r.name} [${r.sessionId}]` + (typeof args.firstMessage === 'string' ? ' — sent the first instruction' : '')
-        : `Could not create it — ${r.error}`,
-      isError: !r.ok,
-    }
-  }
-
-  if (name === 'send_to_session') {
-    const sessionId = String(args.sessionId ?? '')
-    const reportBack = args.reportBack === true
-    const ifBusy = IF_BUSY.find((v) => v === args.ifBusy)
-    const r = await tools.sendToSession(sessionId, String(args.text ?? ''), reportBack, ifBusy)
-    // A busy session (#677): its choices, or which one ran and its handle
-    if (r.ok && r.busy) {
-      const b = r.busy
-      if (b.state === 'busy') return { text: busyText(b, (c) => `send_to_session with the same text and ifBusy "${c}".`) }
-      if (b.state === 'queued') return { text: queuedText(b) }
-      if (b.state === 'forked') return { text: `Forked [${b.forkedFrom}] into "${b.sessionName}" [${b.sessionId}], which took your instruction; you are told when its turn ends.` }
-      return { text: `Added as a note to the running turn of ${sessionId}${reportBack ? ' (I will let you know once that turn is done)' : ''}.` }
-    }
-    /*
-     * Report the failure as-is. If it silently pretended to succeed, the orchestrator would
-     * believe it had assigned the work and move on, and the person would only see "I asked for
-     * it, and it did not happen."
-     */
-    return {
-      text: r.ok
-        ? `Sent: ${sessionId}${reportBack ? ' (I will let you know once it is done)' : ''}`
-        : `Could not send it — ${r.error}`,
-      isError: !r.ok,
-    }
-  }
-
-  return { text: `Unknown tool: ${name}`, isError: true }
-}
-
-/**
- * The app-access tools' texts (#371 part A). Each result names what to do next, because the tools
- * are deferred: the model that found find_apps learns attach_app from its answer, and detach_app from
- * attach_app's. Names an app or a project chose are JSON-quoted, like a worker's text (#121): a
- * description is the app author's words, not ours.
- */
-async function runAppAccess(tools: OrchestratorTools, name: AppAccessToolName, args: Record<string, unknown>): Promise<ToolOutput> {
-  if (name === 'find_apps') {
-    const query = typeof args.query === 'string' ? args.query.trim() : ''
+  /*
+   * The app-access tools' texts (#371 part A). Each result names what to do next, because the tools
+   * are deferred: the model that found find_apps learns attach_app from its answer, and detach_app from
+   * attach_app's. Names an app or a project chose are JSON-quoted, like a worker's text (#121): a
+   * description is the app author's words, not ours.
+   */
+  async find_apps(args, { tools }) {
+    const query = args.query?.trim() ?? ''
     const r = await tools.findApps(query || undefined)
     if (!r.ok) return { text: r.error, isError: true }
     if (r.apps.length === 0) {
@@ -1150,10 +1100,11 @@ async function runAppAccess(tools: OrchestratorTools, name: AppAccessToolName, a
           )
           .join('\n') + '\nAttach one with attach_app(app="<the name before ·>").',
     }
-  }
-  const app = String(args.app ?? '').trim()
-  if (!app) return { text: 'Give app — a name find_apps gave.', isError: true }
-  if (name === 'attach_app') {
+  },
+
+  async attach_app(args, { tools }) {
+    const app = args.app.trim()
+    if (!app) return { text: 'Give app — a name find_apps gave.', isError: true }
     const r = await tools.attachApp(app)
     if (!r.ok) return { text: `Not attached: ${r.error}`, isError: true }
     const names = r.tools.length ? r.tools.map((t) => `mcp__${r.server}__${t}`).join(', ') : '(it listed none yet)'
@@ -1166,15 +1117,74 @@ async function runAppAccess(tools: OrchestratorTools, name: AppAccessToolName, a
         `${r.already ? 'Already attached' : 'Attached'}: ${app} as the ${r.server} server. Tools: ${names}. ${when}\n` +
         `When you no longer need it, call detach_app(app=${trustedJsonText(app)}) so its tools stop taking up context.`,
     }
-  }
-  const r = await tools.detachApp(app)
-  if (!r.ok) return { text: `Not detached: ${r.error}`, isError: true }
-  return {
-    text:
-      r.when === 'now'
-        ? `Detached ${app}: the ${r.server} tools are gone.`
-        : `Detached ${app}: calls to the ${r.server} tools are refused from now on, and the names leave when this turn ends (the thread restarts).`,
-  }
+  },
+
+  async detach_app(args, { tools }) {
+    const app = args.app.trim()
+    if (!app) return { text: 'Give app — a name find_apps gave.', isError: true }
+    const r = await tools.detachApp(app)
+    if (!r.ok) return { text: `Not detached: ${r.error}`, isError: true }
+    return {
+      text:
+        r.when === 'now'
+          ? `Detached ${app}: the ${r.server} tools are gone.`
+          : `Detached ${app}: calls to the ${r.server} tools are refused from now on, and the names leave when this turn ends (the thread restarts).`,
+    }
+  },
+
+  // Does not go through the manager — text baked into the build plus the tool registry is the whole guide (#30, M4 P-4)
+  app_guide: ({ topic }) => appGuide(topic, guideSeats()),
+
+  async update_session_settings(args, { tools }) {
+    const r = await tools.updateSessionSettings(args.sessionId, {
+      ...(args.model !== undefined ? { model: args.model } : {}),
+      ...(args.effort !== undefined ? { effort: args.effort } : {}),
+      ...(args.verbosity !== undefined ? { verbosity: args.verbosity } : {}),
+    })
+    return {
+      text: r.ok
+        ? r.deferred
+          ? `Changed: ${args.sessionId} — applies once the turn now running ends. Also notified the screen` // does not cut off the running turn (#164)
+          : `Changed: ${args.sessionId} — also notified the screen` // no change without a trace (#30)
+        : `Could not change it — ${r.error}`,
+      isError: !r.ok,
+    }
+  },
+
+  async create_session(args, { tools }) {
+    const r = await tools.createSession({ project: args.project, tool: args.tool, name: args.name, firstMessage: args.firstMessage })
+    return {
+      text: r.ok
+        ? `Created: ${r.name} [${r.sessionId}]` + (args.firstMessage !== undefined ? ' — sent the first instruction' : '')
+        : `Could not create it — ${r.error}`,
+      isError: !r.ok,
+    }
+  },
+
+  async send_to_session(args, { tools }) {
+    const { sessionId, ifBusy } = args
+    const reportBack = args.reportBack === true
+    const r = await tools.sendToSession(sessionId, args.text, reportBack, ifBusy)
+    // A busy session (#677): its choices, or which one ran and its handle
+    if (r.ok && r.busy) {
+      const b = r.busy
+      if (b.state === 'busy') return { text: busyText(b, (c) => `send_to_session with the same text and ifBusy "${c}".`) }
+      if (b.state === 'queued') return { text: queuedText(b) }
+      if (b.state === 'forked') return { text: `Forked [${b.forkedFrom}] into "${b.sessionName}" [${b.sessionId}], which took your instruction; you are told when its turn ends.` }
+      return { text: `Added as a note to the running turn of ${sessionId}${reportBack ? ' (I will let you know once that turn is done)' : ''}.` }
+    }
+    /*
+     * Report the failure as-is. If it silently pretended to succeed, the orchestrator would
+     * believe it had assigned the work and move on, and the person would only see "I asked for
+     * it, and it did not happen."
+     */
+    return {
+      text: r.ok
+        ? `Sent: ${sessionId}${reportBack ? ' (I will let you know once it is done)' : ''}`
+        : `Could not send it — ${r.error}`,
+      isError: !r.ok,
+    }
+  },
 }
 
 /** A command's one line in centralu_commands: its description's first sentence, without emphasis or issue numbers */
@@ -1188,9 +1198,8 @@ function commandDef(name: string) {
   return ORCHESTRATOR_TOOLS.find((t) => t.name === name)
 }
 
-function commandSchemaText(name: string): string {
-  const def = commandDef(name)
-  return def ? JSON.stringify(z.toJSONSchema(def.schema.strict())) : '{}'
+function commandSchemaText(name: OrchestratorToolName): string {
+  return JSON.stringify(z.toJSONSchema(TOOL_ARGS[name].strict()))
 }
 
 /**
@@ -1202,20 +1211,16 @@ function commandSchemaText(name: string): string {
  * valid run is the command itself, through the same runner, so its result, its card and its gates are the
  * ones it has as a tool.
  */
-async function runCommandTool(
-  tools: OrchestratorTools,
-  name: CommandToolName,
-  args: Record<string, unknown>,
-  caller: ToolCaller,
-  signal?: AbortSignal,
-): Promise<ToolOutput> {
+async function runCommandTool(c: { [N in CommandToolName]: { name: N; args: OrchestratorToolArgs[N] } }[CommandToolName], call: ToolCall): Promise<ToolOutput> {
+  const { name } = c
+  const { caller } = call
   const commands = commandsFor(caller.profile)
   if (!commands.length) return { text: `Not a tool of this session: ${name}`, isError: true }
   const known = `Commands: ${commands.join(', ')}.`
-  const command = typeof args.command === 'string' ? args.command.trim() : ''
 
-  if (name === 'centralu_commands') {
-    const words = (typeof args.query === 'string' ? args.query.toLowerCase().match(/[a-z0-9]{3,}/g) : null) ?? []
+  if (c.name === 'centralu_commands') {
+    const { args } = c
+    const words = args.query?.toLowerCase().match(/[a-z0-9]{3,}/g) ?? []
     const line = (c: string) => `- ${c}: ${commandLine(commandDef(c)?.description ?? '')}`
     const hits = words.length ? commands.filter((c) => words.some((w) => `${c.replace(/_/g, ' ')} ${line(c)}`.toLowerCase().includes(w))) : commands
     const head = words.length && !hits.length ? `No command matches ${trustedJsonText(String(args.query))}; every command:\n` : ''
@@ -1224,20 +1229,21 @@ async function runCommandTool(
     }
   }
 
-  if (!(commands as string[]).includes(command)) {
+  const command = c.args.command.trim()
+  const def = commands.includes(command as OrchestratorToolName) ? commandDef(command) : undefined
+  if (!def) {
     if (name === 'centralu_run') logRun(caller, command, 'no such command')
     return { text: `No command ${trustedJsonText(command)} for this session. ${known}`, isError: true }
   }
-  const def = commandDef(command)!
 
-  if (name === 'centralu_help') {
+  if (c.name === 'centralu_help') {
     return {
-      text: `${command}: ${def.description}\nArguments (JSON schema): ${commandSchemaText(command)}\nRun it with centralu_run(command="${command}", args={…}).`,
+      text: `${command}: ${def.description}\nArguments (JSON schema): ${commandSchemaText(def.name)}\nRun it with centralu_run(command="${command}", args={…}).`,
     }
   }
 
   // Codex's exec may hand the arguments over as JSON text rather than an object
-  let raw: unknown = args.args ?? {}
+  let raw: unknown = c.args.args ?? {}
   if (typeof raw === 'string') {
     try {
       raw = JSON.parse(raw)
@@ -1245,18 +1251,19 @@ async function runCommandTool(
       /* answered below, with the schema */
     }
   }
-  const parsed = def.schema.strict().safeParse(raw)
+  const parsed = TOOL_ARGS[def.name].strict().safeParse(raw)
   if (!parsed.success) {
     logRun(caller, command, 'wrong arguments')
     return {
       text:
-        `Wrong arguments for ${command}: ${parsed.error.issues.map((i) => `${i.path.join('.') || '(args)'}: ${i.message}`).join('; ')}.\n` +
-        `Its arguments (JSON schema): ${commandSchemaText(command)}\nCall centralu_run again with args that match.`,
+        `Wrong arguments for ${command}: ${issuesText(parsed.error)}.\n` +
+        `Its arguments (JSON schema): ${commandSchemaText(def.name)}\nCall centralu_run again with args that match.`,
       isError: true,
     }
   }
   logRun(caller, command, 'ran')
-  return runOrchestratorTool(tools, command, parsed.data as Record<string, unknown>, caller, signal)
+  // The command itself, through the same handler its tool has: parsed once, here
+  return runParsed(def.name, parsed.data as OrchestratorToolArgs[typeof def.name], call)
 }
 
 /**
@@ -1371,6 +1378,40 @@ export const COMMAND_TOOLS = [
 ] as const satisfies readonly { name: string; description: string; schema: z.ZodObject<z.ZodRawShape> }[]
 
 export type CommandToolName = (typeof COMMAND_TOOLS)[number]['name']
+
+type ToolDef = { name: string; description: string; schema: z.ZodObject<z.ZodRawShape>; deferred?: boolean }
+
+/** A set of definitions as a table of their schemas by name, keeping each one's type */
+function schemasOf<const D extends readonly ToolDef[]>(defs: D): { [T in D[number] as T['name']]: T['schema'] } {
+  return Object.fromEntries(defs.map((d) => [d.name, d.schema])) as { [T in D[number] as T['name']]: T['schema'] }
+}
+
+const ORCHESTRATOR_ARGS = schemasOf(ORCHESTRATOR_TOOLS)
+
+/**
+ * Each tool's arguments, one schema per tool (#850), read once by runOrchestratorTool on every path and by centralu_run
+ * strictly. A tool's own definition is its schema wherever the definition shows all of it; the definitions some seats
+ * are shown leave arguments out to save words in every request (READER_TOOLS, DELEGATE_TOOLS), and the runner takes
+ * the full set from here, so a seat shown fewer still has the rest run the same way (the test holds the shown keys to
+ * these).
+ */
+export const TOOL_ARGS = {
+  ...ORCHESTRATOR_ARGS,
+  // The reader lists with read_session and no id (#320, READER_TOOLS); the other seats are shown it required
+  read_session: ORCHESTRATOR_ARGS.read_session.partial({ sessionId: true }),
+  ...schemasOf(AGENT_TOOLS),
+  /*
+   * The topic is an enum in the definition (#523), but the guide reads a topic named in other words as the nearest one
+   * and answers an unknown one with the list (appGuide): on a path no schema checked, that reading is the answer
+   */
+  app_guide: ORCHESTRATOR_ARGS.app_guide.extend({ topic: z.string().optional() }),
+  // ifBusy is a bare string in the definition (#677: the busy answer names its values); the runner takes these two
+  ask_project: DELEGATE_TOOLS[0].schema.extend({ ifBusy: z.enum(['note', 'queue'] as const satisfies readonly IfBusy[]).optional() }),
+  ...schemasOf(APP_ACCESS_TOOLS),
+  ...schemasOf(COMMAND_TOOLS),
+  // Codex's exec may hand a command's arguments over as JSON text rather than an object: centralu_run reads either
+  centralu_run: COMMAND_TOOLS[2].schema.extend({ args: z.union([z.record(z.string(), z.unknown()), z.string()]).optional() }),
+}
 
 /** The fixed line the `commands` tier adds to the seat's instructions (#512): the tools alone were not a promise the model would look */
 export const COMMANDS_INSTRUCTION =
