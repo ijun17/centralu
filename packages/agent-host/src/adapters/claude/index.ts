@@ -1,7 +1,6 @@
 import { query, resolveSettings, filterEscalatingDefaultMode, type McpServerConfig, type PermissionMode, type SettingSource } from '@anthropic-ai/claude-agent-sdk'
 import { homedir, tmpdir } from 'node:os'
 import { mkdtemp, readdir, rm, stat } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
@@ -63,6 +62,7 @@ import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, Det
 import { spawnLocalAgent, type LocalSpawnSpec } from '../local-process.js'
 import { withStderrTail } from '../../stream-text.js'
 import { raceTimeout } from '../../timing.js'
+import { newFile } from './new-file.js'
 import { approvalDetail, ClaudeStreamNormalizer } from './normalize.js'
 import { noCodeIntelligenceSettings } from './lsp-plugins.js'
 import { PendingCards, adapterNotice, couldNotStop, undeliveredError } from '../session-kit.js'
@@ -706,8 +706,9 @@ class ClaudeSession implements SessionHandle {
               self.releaseOnCancel(requestId, options?.signal)
             })
           }
-          // Whether a Write makes a new file is said on its card (#843)
-          const detail = approvalDetail(toolName, toolInput, self.opts.cwd, (path) => existsSync(resolve(self.opts.cwd, path)))
+          // Whether a Write makes a new file is said on its card (#843), read without holding the host up (`newFile`)
+          const target = toolName === 'Write' && typeof toolInput.file_path === 'string' ? toolInput.file_path : ''
+          const detail = approvalDetail(toolName, toolInput, self.opts.cwd, target ? await newFile(resolve(self.opts.cwd, target)) : undefined)
           /*
            * The rule's key — for a command it is the full command text, for a file edit it is
            * **the path** (#170). This matches what the UI carries on "always allow" (both come

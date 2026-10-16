@@ -111,30 +111,38 @@ export function resultOutput(content: unknown): string {
 /**
  * What an Edit, Write or NotebookEdit call would do to its file, as Codex's file changes are read (#843). The card
  * showed only the new text, cut at 400 characters: an edit read the same whatever it replaced, and a Write that makes
- * a file the same as one that overwrites it. An Edit is its removed and its added lines; a Write is a new file when
- * none is there (`exists`, read by the adapter, which knows the working folder); a notebook cell is its new source.
+ * a file the same as one that overwrites it. An Edit is its removed and its added lines; a notebook cell is its new
+ * source. A Write is its content: as added lines when it makes a new file (`isNew`, which the adapter finds out, since
+ * it knows the working folder), under a line saying it replaces the whole file when one is there, and under a line
+ * saying it writes the whole file when that is not known. A Write's content is not marked as added to a file it
+ * replaces, since nothing says which of its lines are new.
  */
-export function claudeFileChange(name: string, input: Json, exists?: (path: string) => boolean): FileChange {
+export function claudeFileChange(name: string, input: Json, isNew?: boolean): FileChange {
   const path = str(input.file_path ?? input.notebook_path)
   if (name === 'Edit') {
     const diff = [diffLines('-', str(input.old_string)), diffLines('+', str(input.new_string))].filter(Boolean).join('\n')
     return { path, diff: input.replace_all === true && diff ? `(every occurrence)\n${diff}` : diff }
   }
   if (name === 'Write') {
-    const isNew = path !== '' && exists !== undefined && !exists(path)
-    return { path, diff: diffLines('+', str(input.content)), ...(isNew ? { change: 'add' as const } : {}) }
+    const content = str(input.content)
+    if (isNew === true) return { path, diff: diffLines('+', content), change: 'add' }
+    const head = isNew === false ? '(replaces the whole file)' : '(writes the whole file)'
+    return { path, diff: content ? `${head}\n${content.replace(/\n$/, '')}` : '' }
   }
   const mode = str(input.edit_mode)
   const diff = diffLines('+', str(input.new_source))
   return { path, diff: mode === 'delete' ? `(deletes cell ${str(input.cell_id) || '?'})` : mode === 'insert' ? `(inserts a cell)\n${diff}` : diff }
 }
 
-/** Normalizes an approval request into one of 3 kinds the banner can judge (core/approval decides based on `kind` alone). */
-export function approvalDetail(name: string, input: Json, cwd: string, exists?: (path: string) => boolean): ApprovalDetail {
+/**
+ * Normalizes an approval request into one of 3 kinds the banner can judge (core/approval decides based on `kind` alone).
+ * `isNew` says whether a Write makes its file (`claudeFileChange`); absent when not known.
+ */
+export function approvalDetail(name: string, input: Json, cwd: string, isNew?: boolean): ApprovalDetail {
   // Running outside the sandbox is part of what is asked (#683 review): the card says so, and no list row answers it
   if (name === 'Bash') return { kind: 'command', command: str(input.command), cwd, ...(input.dangerouslyDisableSandbox === true ? { unsandboxed: true } : {}) }
   if (FILE_EDIT_TOOLS.has(name)) {
-    const change = claudeFileChange(name, input, exists)
+    const change = claudeFileChange(name, input, isNew)
     // A call that carries none of the fields read is shown as it came, rather than as an empty card
     return fileEditDetail([change.diff ? change : { ...change, diff: JSON.stringify(input) }])
   }

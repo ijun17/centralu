@@ -312,9 +312,16 @@ describe('normalizing an approval request (input to the banner\'s judgment)', ()
     const edit = approvalDetail('Edit', { file_path: '/a.ts', old_string: 'const a = 1\nconst b = 2', new_string: 'const a = 3' }, '/p')
     expect(edit).toMatchObject({ kind: 'file_edit', path: '/a.ts', diffPreview: '-const a = 1\n-const b = 2\n+const a = 3' })
     expect(edit).not.toHaveProperty('change')
-    const created = approvalDetail('Write', { file_path: '/new.ts', content: 'x\n' }, '/p', () => false)
+    const created = approvalDetail('Write', { file_path: '/new.ts', content: 'x\n' }, '/p', true)
     expect(created).toMatchObject({ kind: 'file_edit', path: '/new.ts', diffPreview: '+x', change: 'add' })
-    expect(approvalDetail('Write', { file_path: '/old.ts', content: 'x' }, '/p', () => true)).not.toHaveProperty('change')
+  })
+
+  it('a Write over a file says it replaces the whole file, and marks none of its lines as added (#843 review)', () => {
+    const replaced = approvalDetail('Write', { file_path: '/old.ts', content: 'a\nb\n' }, '/p', false)
+    expect(replaced).toMatchObject({ kind: 'file_edit', path: '/old.ts', diffPreview: '(replaces the whole file)\na\nb' })
+    expect(replaced).not.toHaveProperty('change')
+    // Not known in time: it says what it does without claiming either
+    expect(approvalDetail('Write', { file_path: '/x.ts', content: 'a' }, '/p')).toMatchObject({ diffPreview: '(writes the whole file)\na' })
   })
 
   it('an edit card carries as much of its diff as a Codex one (#843)', () => {
