@@ -29,7 +29,7 @@ import { withCodexClient } from './short-lived.js'
 import { lastCompactSummary as rolloutLastCompactSummary } from './rollout.js'
 import type { Verbosity } from './generated/Verbosity.js'
 import { listCodexThreads, readCodexHistory } from './history.js'
-import { imageEventFromDisk } from './images.js'
+import { imageEventFromDisk } from '../images.js'
 import { readCodexUsage } from './usage-client.js'
 import { listCodexModels } from './models.js'
 import {
