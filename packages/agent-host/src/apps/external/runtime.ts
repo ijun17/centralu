@@ -4,16 +4,18 @@ import { join } from 'node:path'
 import type { CallToolResult, ListResourcesResult, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
 import { APP_ID_MAX_LENGTH, APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, USER_APP_SCOPE, appKeyOf, appLabel, newAppIdProblem, type AppReview, type ExternalAppInfo, type NewAppIdProblem } from '@cc/protocol'
 import { DirWatchers } from '../../dev-services/watch.js'
-import { AppProcess, AppStartError, type SpawnSpec } from './app-process.js'
+import type { AppProcess, SpawnSpec } from './app-process.js'
 import { RUN_META, serveBroker } from './broker.js'
 import { BrokerDesk, type BrokerHost, type CapabilityDecisionListed, type CapabilityDenial, type CapabilityOrigin } from './desk.js'
 import { memoryCapabilityBook } from './capabilities.js'
 import { checkScreen, checkTools, formatReport, type AppCheckReport, type CheckFinding, type CheckedTool } from './check.js'
+import { AppLifecycle } from './app-lifecycle.js'
 import { ErrorLog } from './error-log.js'
+import { AppUnavailableError } from './unavailable.js'
 import type { HeldErrorBundle, SentErrorBundle } from './errors.js'
 import { folderFingerprint } from './fingerprint.js'
 import { PROJECT_APPS_PARTS, PROJECT_APPS_REL, USER_APPS_PARTS, USER_APPS_REL, scanApps } from './discovery.js'
-import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError } from './manifest.js'
+import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest } from './manifest.js'
 import { RUN_RETENTION_MS, RunRow, announcingLedger, type AgentUse, type AppRunListed } from './runs.js'
 import { appTemplateDir, oneLine, scaffoldApp } from './scaffold.js'
 import { placeAppFolder } from './placement.js'
@@ -21,7 +23,7 @@ import { SecretStore, redactor, secretValueProblem } from './secrets.js'
 import type { AppRef } from './ref.js'
 import { AppHandover } from './handover.js'
 import type { Snapshot } from './versions.js'
-import { resourceUriOf, visibilityOf, type Audience } from './visibility.js'
+import { resourceUriOf, type Audience } from './visibility.js'
 
 /**
  * The external app runtime (M4 A) — **the one file that is the door the core knows external apps
@@ -67,7 +69,7 @@ export { resourceUriOf } from './visibility.js'
 
 /** What the runtime is given and the shape of what a call returns (`runtime-types.ts`) — they leave through this door too */
 export { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type AppRunStatus, type ExternalAppsDeps, type RuntimeTiming } from './runtime-types.js'
-import { invalidReason, newEntry, resetLife, type AppEntry, type AppTool, type Blocker, type OpenRun, type Scope } from './app-entry.js'
+import { invalidReason, newEntry, resetLife, type AppEntry, type Blocker, type OpenRun, type Scope } from './app-entry.js'
 import { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type AppRunStatus, type ExternalAppsDeps, type RuntimeTiming } from './runtime-types.js'
 
 /**
@@ -92,10 +94,8 @@ const CHECK_WHERE: Record<Blocker['kind'], CheckFinding['where']> = {
   failed: 'start',
 }
 
-/** An app that cannot be called — the reason is exactly the message */
-export class AppUnavailableError extends Error {
-  readonly code = 'internal'
-}
+/** An app that cannot be called (`unavailable.ts`) — leaves through this door */
+export { AppUnavailableError } from './unavailable.js'
 
 export class ExternalApps {
   /** Scope key → (app id → entry) */
@@ -106,14 +106,6 @@ export class ExternalApps {
   private secrets: SecretStore
   /** Run id → open run. The broker's gatekeeper asks against this */
   private openRuns = new Map<string, OpenRun>()
-  /**
-   * (scope, app id) → open screen count. Tied to the name rather than the app entry (AppEntry): when
-   * the manifest changes, a new entry is created, but the screen in front of the person stays open the
-   * whole time. Tying this to the entry instead would leave the new entry thinking it has zero
-   * screens, and demote an app with an open screen to idle.
-   */
-  private viewHolds = new Map<string, number>()
-  private pipeSeq = 0
   /** `onAppsChanged` subscribers, and whether a notification is already scheduled for this tick */
   private appsListeners = new Set<() => void>()
   private appsNotePending = false
@@ -124,16 +116,6 @@ export class ExternalApps {
   private reloading = new Map<string, Promise<boolean>>()
   /** Recent error bundles per app name (holdKey) and which were sent (C-6) — `error-log.ts` */
   private errorLog = new ErrorLog(() => this.appsChanged())
-  /**
-   * Every process this runtime has ever started that has not yet ended. Not just the ones an entry
-   * (`Life.proc`) is holding onto: an old process waiting for its call to finish after a new entry was
-   * created because the manifest changed (`haltWhenDrained`), or a process being shut down by a check
-   * or a reflect, belongs to no entry at all. `dispose` ends this list, not the entries — ending only
-   * the entries would leave such a process orphaned under launchd after the host exits (this happened
-   * with three fixture apps left behind after running the check and reflect tests with the fix
-   * disabled).
-   */
-  private spawned = new Set<AppProcess>()
   /** Apps being removed (`removeUserApp`, by `holdKey`) — none of them starts again while its folder moves */
   private removing = new Set<string>()
   /**
@@ -154,8 +136,23 @@ export class ExternalApps {
   /** Handover (E) — the staging area for an imported app and the person's confirmation (`handover.ts`) */
   private handover: AppHandover
 
+  /** An app process's lifecycle (A-3) — `app-lifecycle.ts` */
+  private lifecycle: AppLifecycle
+
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
+    this.lifecycle = new AppLifecycle({
+      timing: this.timing,
+      disposed: () => this.disposed,
+      appsChanged: () => this.appsChanged(),
+      recordError: (e, b, proc) => this.recordError(e, b, proc),
+      blocker: (e, opts) => this.blocker(e, opts),
+      spawnSpec: (e, pipeId) => this.spawnSpec(e, pipeId),
+      snapshot: (appId, dir, stamp) => this.handover.snapshot(appId, dir, 'started', stamp),
+      find: (ref) => this.find(ref),
+      holdKey: (ref) => this.holdKey(ref),
+      label: (ref) => this.label(ref),
+    })
     // Every ledger row passes through this one place — a tool-call row (`call`) and a broker-request row (the desk) alike. So the runs panel's own signal is also produced here, once
     const notify = deps.emitRunsChanged
     if (deps.runs && notify) this.deps = { ...deps, runs: announcingLedger(deps.runs, notify) }
@@ -357,7 +354,7 @@ export class ExternalApps {
    */
   async tools(ref: AppRef, audience?: Audience, sessionId?: string): Promise<Tool[]> {
     const e = this.require(ref)
-    const all = await this.use(e, async () => e.life.tools ?? [], !!sessionId && this.sessionBoundaryOpen(sessionId))
+    const all = await this.lifecycle.use(e, async () => e.life.tools ?? [], !!sessionId && this.sessionBoundaryOpen(sessionId))
     return all.filter((t) => !audience || t.visibility.includes(audience)).map((t) => t.tool)
   }
 
@@ -538,7 +535,7 @@ export class ExternalApps {
     if (opts.signal?.aborted) return done('cancelled', null, 'Cancelled before the call was sent')
 
     try {
-      return await this.use(e, async (proc) => {
+      return await this.lifecycle.use(e, async (proc) => {
         const found = e.life.tools?.find((t) => t.tool.name === name)
         if (!found) return done('rejected', null, `This app has no tool named ${name}`)
         /*
@@ -612,7 +609,7 @@ export class ExternalApps {
    */
   async readResource(ref: AppRef, uri: string): Promise<ReadResourceResult> {
     const e = this.require(ref)
-    return this.use(e, (proc) => proc.client.readResource({ uri }, { timeout: this.timing.connectTimeoutMs }))
+    return this.lifecycle.use(e, (proc) => proc.client.readResource({ uri }, { timeout: this.timing.connectTimeoutMs }))
   }
 
   /**
@@ -624,7 +621,7 @@ export class ExternalApps {
    */
   async listResources(ref: AppRef, maxPages = 20): Promise<ListResourcesResult['resources']> {
     const e = this.require(ref)
-    return this.use(e, async (proc) => {
+    return this.lifecycle.use(e, async (proc) => {
       const out: ListResourcesResult['resources'] = []
       let cursor: string | undefined
       for (let page = 0; page < maxPages; page++) {
@@ -642,21 +639,7 @@ export class ExternalApps {
    * never treated as an idle app — call the returned function to release the hold (close).
    */
   retainView(ref: AppRef): () => void {
-    const e = this.require(ref)
-    const key = this.holdKey(e.ref)
-    this.viewHolds.set(key, (this.viewHolds.get(key) ?? 0) + 1)
-    this.clearIdle(e)
-    let released = false
-    return () => {
-      if (released) return
-      released = true
-      const left = (this.viewHolds.get(key) ?? 1) - 1
-      if (left > 0) this.viewHolds.set(key, left)
-      else this.viewHolds.delete(key)
-      // Not the entry from when this was held, but the **current** entry — if the manifest changed in the meantime, the new entry starts going idle
-      const now = this.find(ref)
-      if (now) this.armIdle(now)
-    }
+    return this.lifecycle.retainView(this.require(ref), ref)
   }
 
   /**
@@ -675,7 +658,7 @@ export class ExternalApps {
     if (!e.manifest) throw new AppUnavailableError(invalidReason(e))
     const home = e.manifest.home
     if (!home) throw new AppUnavailableError('This app has no screen: its manifest names no home tool')
-    const all = await this.use(e, async () => e.life.tools ?? [])
+    const all = await this.lifecycle.use(e, async () => e.life.tools ?? [])
     const found = all.find((t) => t.tool.name === home)
     if (!found) throw new AppUnavailableError(`This app has no screen: its home tool "${home}" is not in its tool list`)
     const ui = resourceUriOf(found.tool)
@@ -704,7 +687,7 @@ export class ExternalApps {
    */
   async restart(ref: AppRef): Promise<void> {
     const e = this.require(ref)
-    await this.halt(e, 'restart requested')
+    await this.lifecycle.halt(e, 'restart requested')
     resetLife(e.life)
     // A stopped app had been detached from sessions — announce so it can attach again. A crashed app's
     // reason is also cleared, changing its status in the list (A-8)
@@ -832,14 +815,14 @@ export class ExternalApps {
     for (;;) {
       if (e.life.inflight === 0) {
         const wasStopped = e.life.gaveUp
-        void this.halt(e, 'check: starting again from the files on disk')
+        void this.lifecycle.halt(e, 'check: starting again from the files on disk')
         resetLife(e.life)
         if (wasStopped) this.appsChanged()
         restarted = true
         break
       }
       const busy = e.life.inflight
-      if (!(await this.drain(e, this.timing.checkDrainMs))) {
+      if (!(await this.lifecycle.drain(e, this.timing.checkDrainMs))) {
         const limit = this.timing.checkDrainMs >= 1000 ? `${Math.round(this.timing.checkDrainMs / 1000)} s` : `${this.timing.checkDrainMs} ms`
         notes.push(
           `${busy} call${busy === 1 ? ' was' : 's were'} still running after ${limit}, so the app was not restarted — ` +
@@ -851,10 +834,10 @@ export class ExternalApps {
 
     let stderr: string | null = null
     try {
-      await this.use(e, async (proc) => {
+      await this.lifecycle.use(e, async (proc) => {
         const listed = await proc.client.listTools(undefined, { timeout: this.timing.connectTimeoutMs })
         proc.tools = listed.tools
-        this.readTools(e, proc)
+        this.lifecycle.readTools(e, proc)
         const t = checkTools(e.manifest!, listed.tools)
         findings.push(...t.findings)
         tools = t.tools
@@ -975,7 +958,7 @@ export class ExternalApps {
     const key = this.holdKey(ref)
     this.removing.add(key)
     try {
-      await this.halt(e, 'app removed', { awaitTree: true })
+      await this.lifecycle.halt(e, 'app removed', { awaitTree: true })
       const trash = join(this.deps.dataRoot, 'app-trash')
       mkdirSync(trash, { recursive: true })
       renameSync(e.dir, join(trash, `${ref.appId}-${Date.now()}`))
@@ -1027,7 +1010,7 @@ export class ExternalApps {
       if (!L.proc && !L.starting) resetLife(L)
       this.appsChanged()
     }
-    if (L.proc || L.starting) void this.haltWhenDrained(e, 'a secret changed; the next need starts it with the new value').then(fresh)
+    if (L.proc || L.starting) void this.lifecycle.haltWhenDrained(e, 'a secret changed; the next need starts it with the new value').then(fresh)
     else fresh()
     // The list's "set / unset" just changed — this announces it without waiting for the app to stop
     this.appsChanged()
@@ -1112,13 +1095,7 @@ export class ExternalApps {
     this.appsListeners.clear()
     const all = [...this.scopes.values()].flatMap((s) => [...s.apps.values()])
     this.scopes.clear()
-    // Within the shutdown budget (Tauri's 3 seconds) — the grace period is shortened, and it does not wait all the way through SIGKILL
-    await Promise.allSettled([
-      ...all.map((e) => this.halt(e, 'host shutting down', { graceMs: 1_000, awaitKill: false })),
-      // Also processes belonging to no entry at all (see the `spawned` comment) — if one is already stopping, this waits for that same stop (stop only ever runs once)
-      ...[...this.spawned].map((p) => p.stop(1_000, { awaitKill: false })),
-    ])
-    this.spawned.clear()
+    await this.lifecycle.stopAll(all)
   }
 
   // ── Reflecting changes (C-4) ─────────────────────────────────────────────────────────────────
@@ -1207,16 +1184,16 @@ export class ExternalApps {
       const L = e.life
       if (L.stamp === null || folderFingerprint(e.dir) === L.stamp) return false
       if (!opts.startIfStopped && !L.proc?.alive) return false
-      while (L.inflight > 0) await this.drain(e, 60_000)
+      while (L.inflight > 0) await this.lifecycle.drain(e, 60_000)
       // The manifest changed and a new entry replaced this one, or it was removed, while waiting — a new entry starts through its own path
       if (this.find(ref) !== e || this.disposed) return false
       const pid = L.proc?.child.pid
       L.proc?.log.note(`reloading: ${opts.why}`)
-      void this.halt(e, opts.why)
+      void this.lifecycle.halt(e, opts.why)
       resetLife(L)
       this.appsChanged()
       try {
-        await this.use(e, async () => {})
+        await this.lifecycle.use(e, async () => {})
         console.error(`[apps] ${this.label(ref)} reloaded (${opts.why})${pid ? `, was pid ${pid}` : ''}`)
         this.deps.emitChanged?.(ref)
       } catch (err) {
@@ -1229,12 +1206,6 @@ export class ExternalApps {
     return p
   }
 
-  /** Stops it only after finishing a call in progress — the way an old entry's process is collected when a manifest change replaces the entry */
-  private async haltWhenDrained(e: AppEntry, why: string): Promise<void> {
-    while (e.life.inflight > 0) await this.drain(e, 60_000)
-    await this.halt(e, why)
-  }
-
   /**
    * Starts a newly created entry with a new manifest (C-4) — for when reading a manifest deferred
    * until the building session's turn end replaces the entry. The old process is stopped by `rescan`
@@ -1244,237 +1215,13 @@ export class ExternalApps {
   private async startNewManifest(e: AppEntry, why: string): Promise<void> {
     if (this.blocker(e) || this.disposed) return
     try {
-      await this.use(e, async () => {})
+      await this.lifecycle.use(e, async () => {})
       console.error(`[apps] ${this.label(e.ref)} started on its new manifest (${why})`)
       this.deps.emitChanged?.(e.ref)
     } catch (err) {
       // Failed to start — the reason is recorded both in the list (crashed) and in an error bundle. The building session's check reads that reason
       console.error(`[apps] ${this.label(e.ref)} did not start on its new manifest: ${(err as Error).message.split('\n')[0]}`)
     }
-  }
-
-  // ── Lifecycle ──────────────────────────────────────────────────────────────────────
-
-  /** An app is never idle while in use — the idle timer is set again once it is done */
-  private async use<T>(e: AppEntry, fn: (proc: AppProcess) => Promise<T>, boundaryOpen = false): Promise<T> {
-    e.life.inflight += 1
-    this.clearIdle(e)
-    try {
-      return await fn(await this.ensureRunning(e, boundaryOpen))
-    } finally {
-      e.life.inflight -= 1
-      if (e.life.inflight === 0) for (const w of e.life.idleWaiters.splice(0)) w()
-      this.armIdle(e)
-    }
-  }
-
-  /**
-   * Waits for every call in progress to finish — resolves true if that happens within `ms`. The
-   * caller has to stop it **in the same tick** it gets this back: yielding even once lets a call that
-   * arrives in the meantime raise inflight again (the caller re-checks this with a while loop).
-   */
-  private drain(e: AppEntry, ms: number): Promise<boolean> {
-    if (e.life.inflight === 0) return Promise.resolve(true)
-    return new Promise((resolve) => {
-      const waiter = () => {
-        clearTimeout(t)
-        resolve(true)
-      }
-      const t = setTimeout(() => {
-        e.life.idleWaiters = e.life.idleWaiters.filter((w) => w !== waiter)
-        resolve(false)
-      }, ms)
-      t.unref()
-      e.life.idleWaiters.push(waiter)
-    })
-  }
-
-  /**
-   * If it is running, returns it; if starting, returns that promise; otherwise starts a new one.
-   *
-   * **Only one starts at a time.** If five simultaneous needs each saw "none exists" and each started
-   * one, five processes would grab hold of the same data folder — the same shape of problem
-   * encountered restoring sessions (see the `resuming` comment in `manager.ts`). Everyone waits on the
-   * same in-progress startup promise instead.
-   */
-  private ensureRunning(e: AppEntry, boundaryOpen = false): Promise<AppProcess> {
-    const L = e.life
-    const blocked = this.blocker(e, { boundaryOpen })
-    if (blocked) throw new AppUnavailableError(blocked.reason)
-    if (L.proc?.alive) return Promise.resolve(L.proc)
-    if (L.starting) return L.starting
-
-    const epoch = L.epoch
-    const p = (async () => {
-      const wait = L.retryAt - Date.now()
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait))
-      if (L.epoch !== epoch || this.disposed) throw new AppUnavailableError('The app changed or was stopped, so this start was abandoned')
-      const usedPrior = L.verdict !== undefined
-      const pipeId = ++this.pipeSeq
-      /*
-       * The fingerprint is measured **before** starting (C-4) — even an app that fails to start has to
-       * be left with "this code was tried once", or turn end would never restart it after a fix.
-       * Measured once more if it starts: so an app that writes something into its own folder while
-       * starting up is never read as "changed" and restarted without end.
-       */
-      L.stamp = folderFingerprint(e.dir)
-      // An app outside git now has the code about to run captured as a version (E-1) — does nothing if it is the same code. The app still starts even if capturing the version fails
-      if (e.ref.projectId === null) this.handover.snapshot(e.ref.appId, e.dir, 'started', L.stamp)
-      let proc: AppProcess
-      try {
-        proc = await AppProcess.start(this.spawnSpec(e, pipeId))
-      } catch (err) {
-        if (L.epoch === epoch) {
-          // If connecting failed with the remembered generation, that memory could be wrong — the next attempt probes again
-          if (usedPrior) L.verdict = undefined
-          this.fail(e, (err as Error).message)
-          const started = err instanceof AppStartError ? err : null
-          this.recordError(e, {
-            kind: 'start',
-            at: Date.now(),
-            message: started?.head ?? (err as Error).message.split('\n')[0]!,
-            stderr: started?.stderr ?? [],
-            tool: null,
-            args: null,
-            runId: null,
-          })
-        }
-        throw new AppUnavailableError((err as Error).message)
-      }
-      if (L.epoch !== epoch || this.disposed) {
-        this.remember(proc)
-        void proc.stop(this.timing.graceMs)
-        throw new AppUnavailableError('The app changed or was stopped, so this start was abandoned')
-      }
-      this.remember(proc)
-      L.verdict = proc.verdict() ?? L.verdict
-      L.stamp = folderFingerprint(e.dir)
-      L.loaded = L.stamp
-      L.proc = proc
-      L.pipeId = pipeId
-      L.lastError = null
-      this.readTools(e, proc)
-      proc.onUnexpectedExit = (reason) => this.crashed(e, proc, reason)
-      return proc
-    })()
-    L.starting = p
-    // Starting, running, and crashed or failed (after failing to start) are all states the list states (A-8)
-    this.appsChanged()
-    const settled = () => {
-      if (L.starting === p) L.starting = null
-      this.appsChanged()
-    }
-    p.then(settled, settled)
-    return p
-  }
-
-  private readTools(e: AppEntry, proc: AppProcess): void {
-    const kept: AppTool[] = []
-    const warnings: string[] = []
-    const drop = (why: string) => {
-      warnings.push(`a tool was dropped — ${why}`)
-      proc.log.note(`tool dropped: ${why}`)
-    }
-    for (const t of proc.tools) {
-      const err = toolNameError(t.name)
-      if (err) {
-        drop(err)
-        continue
-      }
-      const vis = visibilityOf(t)
-      if (!vis.ok) {
-        drop(vis.error)
-        continue
-      }
-      kept.push({ tool: t, visibility: vis.visibility })
-    }
-    if (e.manifest?.home && !kept.some((t) => t.tool.name === e.manifest?.home)) {
-      warnings.push(`the home tool (${e.manifest.home}) is not in the tool list`)
-    }
-    // Only announces when what a session sees (agent-facing tools) has changed — a change to a screen-only tool has nothing to do with a session
-    const forModel = (list: AppTool[] | null) =>
-      list === null ? null : JSON.stringify(list.filter((t) => t.visibility.includes('model')).map((t) => t.tool))
-    const before = forModel(e.life.known)
-    e.life.tools = kept
-    e.life.known = kept
-    e.life.toolWarnings = warnings
-    if (forModel(kept) !== before) this.appsChanged()
-  }
-
-  /**
-   * Counts one failure. Stops it on the third, otherwise defers the next start.
-   *
-   * **Reviving it is the next need's job.** A dead app is never automatically restarted after the
-   * backoff — the same principle as stopping an idle app (A-3): an app process with no one calling it
-   * has no reason to stay running. Backoff is set as "the next startup happens no earlier than this".
-   * A call that arrives in that window waits out the remaining time and then starts it.
-   */
-  private fail(e: AppEntry, reason: string): void {
-    const L = e.life
-    L.failures += 1
-    L.lastError = reason
-    const where = this.label(e.ref)
-    if (L.failures >= this.timing.maxFailures) {
-      L.gaveUp = true
-      // A stopped app never attaches to a session (decision 4) — announce so an already-attached session detaches it
-      this.appsChanged()
-      console.error(`[apps] ${where} stopped after ${L.failures} consecutive failures: ${reason.split('\n')[0]}`)
-    } else {
-      L.retryAt = Date.now() + this.timing.backoffBaseMs * 2 ** (L.failures - 1)
-      console.error(`[apps] ${where} failed (${L.failures}/${this.timing.maxFailures}): ${reason.split('\n')[0]}`)
-    }
-  }
-
-  private crashed(e: AppEntry, proc: AppProcess, reason: string): void {
-    const L = e.life
-    if (L.proc !== proc) return
-    L.proc = null
-    L.tools = null
-    this.clearIdle(e)
-    // If it died after running well for a long time, this is not a consecutive failure — counted from zero
-    if (Date.now() - proc.startedAt >= this.timing.stableMs) L.failures = 0
-    this.fail(e, reason)
-    this.recordError(e, { kind: 'crash', at: Date.now(), message: reason.split('\n')[0]!, stderr: proc.log.tailLines(), tool: null, args: null, runId: null })
-    // Cleans up the pipe and the log, and collects any descendant left in its group
-    void proc.stop(0)
-    // A running app died without warning — the person in front of the screen has to see the reason (A-8, B-6)
-    this.appsChanged()
-  }
-
-  /** Records a started process — every time one is recorded, anything already ended is cleared out (so the list never grows over the host's lifetime) */
-  private remember(proc: AppProcess): void {
-    for (const p of this.spawned) if (!p.alive) this.spawned.delete(p)
-    this.spawned.add(proc)
-  }
-
-  /** Stops it — because it went idle, changed, lost trust, or the host is exiting */
-  private async halt(e: AppEntry, why: string, opts: { graceMs?: number; awaitKill?: boolean; awaitTree?: boolean } = {}): Promise<void> {
-    const L = e.life
-    L.epoch += 1
-    this.clearIdle(e)
-    const proc = L.proc
-    L.proc = null
-    L.tools = null
-    if (!proc) return
-    // A running app is stopping — it is not running in the list from this moment (A-8)
-    this.appsChanged()
-    proc.log.note(`stopping: ${why}`)
-    await proc.stop(opts.graceMs ?? this.timing.graceMs, { awaitKill: opts.awaitKill, awaitTree: opts.awaitTree })
-  }
-
-  private armIdle(e: AppEntry): void {
-    this.clearIdle(e)
-    const L = e.life
-    if (L.inflight > 0 || this.viewsOf(e) > 0 || !L.proc) return
-    L.idle = setTimeout(() => {
-      L.idle = null
-      if (L.inflight === 0 && this.viewsOf(e) === 0) void this.halt(e, `idle for ${this.timing.idleMs}ms`)
-    }, this.timing.idleMs)
-    L.idle.unref()
-  }
-
-  private viewsOf(e: AppEntry): number {
-    return this.viewHolds.get(this.holdKey(e.ref)) ?? 0
   }
 
   /** The key for an open screen. Since this is never used in a path, it does not care about a project id's shape (unlike scopeDir) */
@@ -1485,11 +1232,6 @@ export class ExternalApps {
   /** An app that is gone takes its error bundles with it (`ErrorLog.forget`) */
   private forgetErrors(ref: AppRef): void {
     this.errorLog.forget(this.holdKey(ref))
-  }
-
-  private clearIdle(e: AppEntry): void {
-    if (e.life.idle) clearTimeout(e.life.idle)
-    e.life.idle = null
   }
 
   /**
@@ -1714,7 +1456,7 @@ export class ExternalApps {
         if (prev.scope.trusted !== scope.trusted) changed = true
         prev.scope = scope
         // An app in a project that lost trust is stopped immediately — it stays in the list
-        if (!scope.trusted) void this.halt(prev, 'project is no longer trusted')
+        if (!scope.trusted) void this.lifecycle.halt(prev, 'project is no longer trusted')
         // Did something outside the manifest change (server.mjs, a screen…) (C-4)? Measured only for an app that has started at least once
         else if (prev.life.stamp !== null && folderFingerprint(prev.dir) !== prev.life.stamp) this.folderChanged(prev)
         continue
@@ -1739,7 +1481,7 @@ export class ExternalApps {
           prev.scope = scope
           continue
         }
-        void this.haltWhenDrained(prev, 'manifest changed')
+        void this.lifecycle.haltWhenDrained(prev, 'manifest changed')
       }
       held.apps.set(found.folder, newEntry(scope, found, this.deps.reservedIds))
       changed = true
@@ -1747,7 +1489,7 @@ export class ExternalApps {
     for (const [id, e] of [...held.apps]) {
       if (seen.has(id)) continue
       held.apps.delete(id)
-      void this.halt(e, 'app folder removed')
+      void this.lifecycle.halt(e, 'app folder removed')
       this.forgetErrors(e.ref)
       changed = true
     }
@@ -1760,7 +1502,7 @@ export class ExternalApps {
     this.watchers.setWatched(key, held?.scope.root ?? join(this.deps.dataRoot, USER_APPS_REL), [])
     this.scopes.delete(key)
     for (const e of held?.apps.values() ?? []) {
-      void this.halt(e, 'project removed')
+      void this.lifecycle.halt(e, 'project removed')
       this.forgetErrors(e.ref)
     }
     if (held?.apps.size) this.appsChanged()
