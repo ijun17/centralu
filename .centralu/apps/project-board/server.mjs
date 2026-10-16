@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { McpServer, serveStdio, z, centralu } from './runtime/centralu-app-runtime.mjs'
 import {
+  FATAL,
   GitHubError,
   addContent,
   approveDeployments,
@@ -45,6 +46,7 @@ import {
   workflowRuns,
   viewerLogin,
   cancelWorkflowRun,
+  checkRepo,
 } from './github.mjs'
 import { NO_PERMISSION, canMerge, cleanLog, clip, decideMerge, evaluateChecks, failureLineIndex, firstFailure, matchKnownFailure, squashMessage, workflowCheckNames } from './ci.mjs'
 import { decisionSummary, renderInline, renderMarkdown } from './markdown.mjs'
@@ -54,6 +56,8 @@ import { GitError } from './git.mjs'
 import { StackRefusal, rebaseStack } from './stack.mjs'
 import { ReleaseRefusal, approveRelease, bumpRelease, cancelDuplicateRelease, guarded, rehearseRelease, releaseConfig, releaseStatus, tagRelease } from './release.mjs'
 import { BUMPS } from './versions.mjs'
+import { freshCache } from './cache.mjs'
+import { mapLimit, plural, short, sleep } from './util.mjs'
 
 const UI = 'ui://project-board/index.html'
 
@@ -93,28 +97,10 @@ const CI = {
 // One board in memory, for at most CACHE_MS. A write forgets it, and a read that started before a
 // write never refills it (the generation check), so a tool never answers from a board older than
 // its own last write.
-let cache = null
-let generation = 0
-let inflight = null
-
-async function board({ fresh = false } = {}) {
-  if (!fresh && cache && cache.generation === generation && Date.now() - cache.at < CACHE_MS) return cache.board
-  if (inflight && inflight.generation === generation) return inflight.promise
-  const started = generation
-  const promise = readBoard(config).then((b) => {
-    if (started === generation) cache = { board: b, at: Date.now(), generation: started }
-    return b
-  })
-  inflight = { generation: started, promise }
-  promise.finally(() => {
-    if (inflight?.promise === promise) inflight = null
-  }).catch(() => {})
-  return promise
-}
-const forget = () => {
-  generation += 1
-  cache = null
-}
+// The same cache as the reader's threads (cache.mjs), with one key.
+const boards = freshCache({ ttlMs: CACHE_MS })
+const board = ({ fresh = false } = {}) => boards.get('board', () => readBoard(config), { fresh })
+const forget = () => boards.forget('board')
 
 // --- One write at a time ---------------------------------------------------------------------------
 // An agent may send several calls at once (a live Claude session sent both halves of a round trip
@@ -178,10 +164,13 @@ function linesAnswer(summary, lists, extra = {}) {
   return answer(text.join('\n'), { ...structured, ...extra }, summary)
 }
 
+/** The same answer marked as a failure. */
+const asError = (a) => ({ isError: true, ...a })
+
 /** A failure as an answer: the message says what happened and what to do, and nothing changed. */
 function failure(e, prefix = '') {
   const message = `${prefix}${reason(e)}`
-  return { isError: true, ...answer(message, { error: { kind: e instanceof GitHubError ? e.kind : 'internal', message } }) }
+  return asError(answer(message, { error: { kind: e instanceof GitHubError ? e.kind : 'internal', message } }))
 }
 function reason(e) {
   if (e instanceof GitHubError) return e.message
@@ -189,12 +178,44 @@ function reason(e) {
   return `Unexpected error: ${e?.message ?? e}`
 }
 
+/** A tool's handler that answers what `fn` throws as a failure, after `prefix` (or `prefix(args)`). */
+const answering =
+  (fn, prefix = '') =>
+  async (args, ctx) => {
+    try {
+      return await fn(args, ctx)
+    } catch (e) {
+      return failure(e, typeof prefix === 'function' ? prefix(args) : prefix)
+    }
+  }
+/** The same for the view's tools: the failure as data (`viewFailure`), so the view says why in place. */
+const forView = (fn) => async (args) => {
+  try {
+    return await fn(args)
+  } catch (e) {
+    return viewFailure(e)
+  }
+}
+/** A write's handler: one at a time (`oneAtATime`). */
+const serially = (fn) => (args, ctx) => oneAtATime(() => fn(args, ctx))
+
 // --- Reading items by number ------------------------------------------------------------------------
 const itemRef = z.union([z.string(), z.number()])
 const REF_HELP = '8, "#8", "owner/repo#8" or its URL'
 const detailInput = z.enum(['compact', 'full']).optional().describe('"full" adds type, state, URL and ids; default "compact"')
+const itemInput = itemRef.describe(`The issue or pull request: ${REF_HELP}`)
+const refreshInput = z.boolean().optional().describe('Skip the short cache and ask GitHub now')
+const repoInput = z.string().optional().describe("owner/name; default this project's repository")
+const pathInput = z.string().optional().describe('A checkout of the repository; default the one this app is in')
 
 const matches = (want) => (i) => i.number === want.number && sameRepo(i.repository, want.repo)
+
+/** An issue or pull request asked for (parseItemRef), with the way answers write it. */
+function itemOf(input, defaultRepo = config.repository) {
+  const want = parseItemRef(input, defaultRepo)
+  return { ...want, ref: refOf(want.repo, want.number) }
+}
+const unseen = (ref) => `${ref} is not an issue or pull request this GitHub login can see.`
 
 /**
  * Finds the items asked for, in the order asked, once each. A reference that is not an issue or pull
@@ -206,13 +227,13 @@ function pick(b, inputs) {
   const missing = []
   const seen = new Set()
   for (const input of inputs) {
-    const want = parseItemRef(input, config.repository)
+    const want = itemOf(input)
     const key = `${want.repo.toLowerCase()}#${want.number}`
     if (seen.has(key)) continue
     seen.add(key)
     const item = b.items.find(matches(want))
     if (item) found.push(item)
-    else missing.push(refOf(want.repo, want.number))
+    else missing.push(want.ref)
   }
   return { found, missing }
 }
@@ -262,8 +283,8 @@ function plan(b, { item, items, status, priority, area }, { needFields }) {
     const e = raw !== null && typeof raw === 'object' ? raw : { item: raw }
     const entry = { input: e.item, options: {} }
     try {
-      entry.want = parseItemRef(e.item, config.repository)
-      entry.ref = refOf(entry.want.repo, entry.want.number)
+      entry.want = itemOf(e.item)
+      entry.ref = entry.want.ref
     } catch (err) {
       problems.push(err.message)
       return entry
@@ -287,6 +308,8 @@ function plan(b, { item, items, status, priority, area }, { needFields }) {
 }
 
 const change = (d) => `${d.field} ${none(d.from)} → ${d.to}`
+/** What a failed write did before it failed (`writeFields` puts it on the error). */
+const doneThen = (err) => (err.done?.length ? `${err.done.map(change).join(', ')} done, then ` : '')
 
 /**
  * Applies the planned options to one item, one field at a time, skipping a field that already has
@@ -328,7 +351,7 @@ const LIST_WAITS_MS = [0, 500, 1000, 1500, 2000]
 async function findFresh(itemIds) {
   let last
   for (const ms of LIST_WAITS_MS) {
-    if (ms) await new Promise((r) => setTimeout(r, ms))
+    if (ms) await sleep(ms)
     last = await board({ fresh: true })
     if (itemIds.every((id) => last.items.some((i) => i.itemId === id))) break
   }
@@ -379,7 +402,7 @@ function writeAnswer(b, ok, counts, failed, tail) {
     ['results', '', ok.map((r) => r.line)],
     ['failed', 'Failed:', failed],
   ])
-  return ok.length === 0 && failed.length ? { isError: true, ...a } : a
+  return ok.length === 0 && failed.length ? asError(a) : a
 }
 
 /** Records a failed entry, and when it means the rest would fail too, the entries not tried. */
@@ -393,7 +416,7 @@ function fail(failed, entries, i, text, e) {
 
 const fieldNamesOf = (b) => Object.fromEntries(FIELDS.map((k) => [k, b.fields[k].name]))
 
-const notVisible = (ref) => `${ref} is not an issue or pull request this GitHub login can see. Nothing added.`
+const notVisible = (ref) => `${unseen(ref)} Nothing added.`
 
 /**
  * Adds an entry's issue or pull request to the project, for both writes. Answers null when this login
@@ -459,8 +482,7 @@ async function setItemFields(args) {
       row.line = done.length ? [`${e.ref}${added ? ' added' : ''} ${done.map(change).join(', ')}`, ...same].join('; ') : `${e.ref}${added ? ' added' : ''} unchanged: ${same.join(', ')}`
       rows.push(row)
     } catch (err) {
-      const done = err.done ?? []
-      if (fail(failed, entries, i, `${e.ref}: ${done.length ? `${done.map(change).join(', ')} done, then ` : ''}${reason(err)}`, err)) break
+      if (fail(failed, entries, i, `${e.ref}: ${doneThen(err)}${reason(err)}`, err)) break
     }
   }
   const tail = await readBack(rows)
@@ -537,9 +559,8 @@ async function addItem(args) {
       if (done.length) r.touched = true
       r.line = [r.head, ...(done.length ? [done.map(change).join(', ')] : []), ...same].join('; ')
     } catch (err) {
-      const done = err.done ?? []
       r.failed = true
-      failed.push(`${r.head}; ${done.length ? `${done.map(change).join(', ')} done, then ` : ''}${reason(err)}`)
+      failed.push(`${r.head}; ${doneThen(err)}${reason(err)}`)
       if (stops(err)) stopped = 'its fields were not set after the failure above'
     }
   }
@@ -564,8 +585,6 @@ async function knownFailures() {
   known = { at: Date.now(), ...(await readIssueText(config.repository, CI.knownFailures)) }
   return known
 }
-
-const sha7 = (s) => (s ? String(s).slice(0, 7) : '?')
 
 function rowState(r) {
   const c = r.check
@@ -600,7 +619,7 @@ async function failureDetails(repo, checks) {
     try {
       f = firstFailure(await readJobLog(repo, job))
     } catch (e) {
-      if (e instanceof GitHubError && ['network', 'auth', 'gh-missing'].includes(e.kind)) throw e
+      if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
       lines.push(`${head} ${reason(e)}`)
       continue
     }
@@ -626,7 +645,7 @@ async function failureDetails(repo, checks) {
 function ciLines(what, sha, req, checks, failures = [], detail = 'compact') {
   const c = checks.counts
   const parts = [`${c.passed}/${c.total} passed`, ...(c.failed ? [`${c.failed} failed`] : []), ...(c.pending ? [`${c.pending} pending`] : []), ...(c.missing ? [`${c.missing} not reported yet`] : [])]
-  const summary = `${what} at ${sha7(sha)}: ${checks.verdict} — ${parts.join(', ')}.`
+  const summary = `${what} at ${short(sha)}: ${checks.verdict} — ${parts.join(', ')}.`
   const lines = checks.rows.filter((r) => r.state !== 'passed').map((r) => `${r.name}: ${rowState(r)}`)
   const passed = checks.rows.filter((r) => r.state === 'passed').map((r) => r.name)
   if (detail === 'full' && passed.length) lines.push(`Passed: ${passed.join(', ')}.`)
@@ -640,7 +659,7 @@ function ciLines(what, sha, req, checks, failures = [], detail = 'compact') {
 function ciAnswer(summary, ci, extra = {}, { isError = false } = {}) {
   const text = [summary, ...ci.checks, ...(ci.failures.length ? ['Failures:', ...ci.failures] : [])]
   const a = answer(text.join('\n'), { ...extra, checks: ci.checks, ...(ci.failures.length ? { failures: ci.failures } : {}) }, summary)
-  return isError ? { isError: true, ...a } : a
+  return isError ? asError(a) : a
 }
 
 async function evaluate(repo, sha, req) {
@@ -651,7 +670,7 @@ async function ciStatus({ pr, ref, repo, detail = 'compact' }) {
   if ((pr === undefined) === (ref === undefined)) throw new GitHubError('input', 'Give pr (a pull request) or ref (a branch, tag or commit), one of them.')
   let what, sha, base, target
   if (pr !== undefined) {
-    const want = parseItemRef(pr, config.repository)
+    const want = itemOf(pr)
     target = want.repo
     const p = await readPr(target, want.number)
     what = `PR ${refOf(target, p.number)}${p.state === 'OPEN' ? '' : ` (${String(p.state).toLowerCase()})`}`
@@ -674,16 +693,6 @@ async function ciStatus({ pr, ref, repo, detail = 'compact' }) {
   return ciAnswer(ci.summary, ci, { verdict: checks.verdict, head: sha })
 }
 
-/** Sleeps, or stops early when the call is cancelled. Answers false when cancelled. */
-function sleep(ms, signal) {
-  if (signal?.aborted) return Promise.resolve(false)
-  return new Promise((resolve) => {
-    const t = setTimeout(() => (signal?.removeEventListener('abort', stop), resolve(true)), ms)
-    const stop = () => (clearTimeout(t), resolve(false))
-    signal?.addEventListener('abort', stop, { once: true })
-  })
-}
-
 /**
  * Tells the caller the call is alive. Centralu ends a call after 10 minutes without progress
  * (docs/apps.md §5), and a wait for CI runs up to 40; the message shows under the session's tool card.
@@ -701,11 +710,11 @@ const MERGEABLE_WAIT_MS = 2_000
 const span = (ms) => (ms < 120_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`)
 
 async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranch: del = false, detail = 'compact' }, ctx) {
-  const want = parseItemRef(pr, config.repository)
+  const want = itemOf(pr)
   const repo = want.repo
-  const what = `PR ${refOf(repo, want.number)}`
+  const what = `PR ${want.ref}`
   const refused = (reason, ci, extra = {}) =>
-    ci ? ciAnswer(`Not merged: ${reason}`, ci, { outcome: 'refused', merged: false, ...extra }, { isError: true }) : { isError: true, ...answer(`Not merged: ${reason}`, { outcome: 'refused', merged: false, ...extra }) }
+    ci ? ciAnswer(`Not merged: ${reason}`, ci, { outcome: 'refused', merged: false, ...extra }, { isError: true }) : asError(answer(`Not merged: ${reason}`, { outcome: 'refused', merged: false, ...extra }))
 
   // Who is asking comes first: a contributor's agent gets no further (#386, merge policy).
   const { permissions } = await readRepo(repo)
@@ -746,10 +755,10 @@ async function mergeWhenGreen({ pr, body, wait = false, waitMinutes, deleteBranc
       beat += 1
       progress(ctx, beat, `Waiting for ${what} (${span(Date.now() - started)} so far): ${d.reason}`)
     }
-    if (!(await sleep(pause, signal))) return { isError: true, ...answer('Not merged: cancelled while waiting.', { outcome: 'cancelled', merged: false }) }
+    if (!(await sleep(pause, signal))) return asError(answer('Not merged: cancelled while waiting.', { outcome: 'cancelled', merged: false }))
     p = await readPr(repo, want.number)
     if (p.headRefOid !== firstHead)
-      return refused(`its head moved from ${sha7(firstHead)} to ${sha7(p.headRefOid)} while waiting, so the checks waited on are not the ones that count. Call again to wait on the new commit.`, null, { kind: 'moved' })
+      return refused(`its head moved from ${short(firstHead)} to ${short(p.headRefOid)} while waiting, so the checks waited on are not the ones that count. Call again to wait on the new commit.`, null, { kind: 'moved' })
   }
 }
 
@@ -771,7 +780,7 @@ async function doMerge(repo, what, p, body, del, ci) {
       extra.push(e ? `Branch ${p.headRefName} not deleted: ${e}` : `Deleted branch ${p.headRefName}.`)
     }
   }
-  const summary = `Merged ${what} (squash) as ${sha7(commit)}: "${msg.subject}".${extra.length ? ` ${extra.join(' ')}` : ''}`
+  const summary = `Merged ${what} (squash) as ${short(commit)}: "${msg.subject}".${extra.length ? ` ${extra.join(' ')}` : ''}`
   return ciAnswer(summary, ci, { outcome: 'merged', merged: true, commit, subject: msg.subject })
 }
 
@@ -782,39 +791,11 @@ async function doMerge(repo, what, p, body, del, ci) {
 // started before the post never refills it.
 
 const THREADS_MAX = 40
-const threads = new Map() // key → { at, thread }, oldest first
-const threadReads = new Map() // key → { version, promise }
-const threadVersions = new Map() // key → how many comments this server posted there
+// A thread that is not there (null) is not kept: it is asked again next time
+const threads = freshCache({ ttlMs: CACHE_MS, max: THREADS_MAX, keep: (t) => Boolean(t) })
 const threadKey = (repo, number) => `${String(repo).toLowerCase()}#${number}`
-
-async function thread(repo, number, { fresh = false } = {}) {
-  const key = threadKey(repo, number)
-  const hit = threads.get(key)
-  if (!fresh && hit && Date.now() - hit.at < CACHE_MS) return hit.thread
-  const version = threadVersions.get(key) ?? 0
-  const pending = threadReads.get(key)
-  if (pending && pending.version === version) return pending.promise
-  const promise = readThread(repo, number).then((t) => {
-    if (t && (threadVersions.get(key) ?? 0) === version) {
-      threads.delete(key)
-      threads.set(key, { at: Date.now(), thread: t })
-      while (threads.size > THREADS_MAX) threads.delete(threads.keys().next().value)
-    }
-    return t
-  })
-  threadReads.set(key, { version, promise })
-  promise
-    .finally(() => {
-      if (threadReads.get(key)?.promise === promise) threadReads.delete(key)
-    })
-    .catch(() => {})
-  return promise
-}
-function forgetThread(repo, number) {
-  const key = threadKey(repo, number)
-  threads.delete(key)
-  threadVersions.set(key, (threadVersions.get(key) ?? 0) + 1)
-}
+const thread = (repo, number, { fresh = false } = {}) => threads.get(threadKey(repo, number), () => readThread(repo, number), { fresh })
+const forgetThread = (repo, number) => threads.forget(threadKey(repo, number))
 
 // Rendered once per body: the same thread read again from the cache is not rendered again
 const rendered = new WeakMap()
@@ -845,17 +826,17 @@ function viewFailure(e) {
 }
 
 async function readItem({ item, refresh, comments }) {
-  const want = parseItemRef(item, config.repository)
+  const want = itemOf(item)
   const [t, b] = await Promise.all([thread(want.repo, want.number, { fresh: refresh === true }), board().catch(() => null)])
-  const ref = refOf(want.repo, want.number)
-  if (!t) throw new GitHubError('not-found', `${ref} is not an issue or pull request this GitHub login can see.`)
+  const ref = want.ref
+  if (!t) throw new GitHubError('not-found', unseen(ref))
   const onBoard = b?.items.find(matches(want)) ?? null
   const limit = Math.min(THREAD_MAX_COMMENTS, Math.max(1, Math.floor(comments ?? DEFAULT_COMMENTS)))
   const opts = renderOpts(t)
   const shown = t.comments.slice(-limit)
   const decision = onBoard?.status != null && onBoard.status.toLowerCase() === String(config.decisionStatus).toLowerCase()
   const kind = t.type === 'pull' ? 'pull request' : 'issue'
-  const summary = `${ref} ${t.title} (${kind}, ${t.state.toLowerCase()}): ${t.totalComments} comment${t.totalComments === 1 ? '' : 's'}, ${shown.length} shown.`
+  const summary = `${ref} ${t.title} (${kind}, ${t.state.toLowerCase()}): ${plural(t.totalComments, 'comment')}, ${shown.length} shown.`
   return answer(summary, {
     ok: true,
     item: {
@@ -888,15 +869,15 @@ async function readItem({ item, refresh, comments }) {
 
 /** A compact thread for agents: raw body, then newest comments first, without view-only HTML. */
 async function readDiscussion({ item, comments }) {
-  const want = parseItemRef(item, config.repository)
+  const want = itemOf(item)
   const t = await thread(want.repo, want.number)
   const shown = t?.comments.slice(-Math.min(100, Math.max(1, Math.floor(comments ?? 20)))).reverse() ?? []
-  if (!t) throw new GitHubError('not-found', `${refOf(want.repo, want.number)} is not an issue or pull request this GitHub login can see.`)
-  const summary = `${refOf(want.repo, want.number)} ${t.title}: body and ${shown.length} newest of ${t.totalComments} comments.`
+  if (!t) throw new GitHubError('not-found', unseen(want.ref))
+  const summary = `${want.ref} ${t.title}: body and ${shown.length} newest of ${t.totalComments} comments.`
   const body = String(t.body ?? '').trim()
   const rows = shown.map((c) => `${c.createdAt ?? '?'} ${c.author}: ${c.body}`)
   return linesAnswer(summary, [['body', 'Body:', body ? [body] : ['(empty)']], ['comments', 'Comments, newest first:', rows]], {
-    item: { ref: refOf(want.repo, want.number), type: t.type, state: t.state, url: t.url },
+    item: { ref: want.ref, type: t.type, state: t.state, url: t.url },
     totalComments: t.totalComments,
   })
 }
@@ -911,21 +892,6 @@ async function readFailedJob({ job, repo }) {
   const excerpt = lines.slice(start, Math.min(lines.length, start + 40))
   const summary = `Job ${job}: ${at < 0 ? 'no failure marker found' : `failure near line ${at + 1}`}; ${excerpt.length} log lines shown.`
   return linesAnswer(summary, [['log', '', excerpt]], { job: Number(job), startLine: start + 1 })
-}
-
-/** Runs `fn` over `list` with at most `n` at a time, answers in order. */
-async function mapLimit(list, n, fn) {
-  const out = new Array(list.length)
-  let next = 0
-  await Promise.all(
-    Array.from({ length: Math.min(n, list.length) }, async () => {
-      while (next < list.length) {
-        const i = next++
-        out[i] = await fn(list[i], i)
-      }
-    }),
-  )
-  return out
 }
 
 async function decisionSummaries({ refresh }) {
@@ -943,9 +909,12 @@ async function decisionSummaries({ refresh }) {
     }
   })
   const without = rows.filter((r) => !r.error && !r.decision).length
-  const summary = `${rows.length} item${rows.length === 1 ? '' : 's'} with Status ${decision}${without ? `, ${without} without a summary comment` : ''}.`
+  const summary = `${plural(rows.length, 'item')} with Status ${decision}${without ? `, ${without} without a summary comment` : ''}.`
   return answer(summary, { ok: true, decisionStatus: decision, items: rows, fetchedAt: b.fetchedAt })
 }
+
+/** What keeps a comment off GitHub: the public text rules, or that it is empty. */
+const commentProblems = async (body) => (String(body ?? '').trim() ? publicTextProblems(body, await privateWords(), 'The comment') : ['The comment is empty.'])
 
 /**
  * Posts an agent's comment (the `comment` tool): not empty, in English, no word from the private list,
@@ -954,9 +923,9 @@ async function decisionSummaries({ refresh }) {
  * 2026-10-12: the repository is public).
  */
 async function postItemComment({ item, body }) {
-  const want = parseItemRef(item, config.repository)
-  const ref = refOf(want.repo, want.number)
-  const problems = String(body ?? '').trim() ? publicTextProblems(body, await privateWords(), 'The comment') : ['The comment is empty.']
+  const want = itemOf(item)
+  const ref = want.ref
+  const problems = await commentProblems(body)
   if (problems.length) throw new GitHubError('input', `Not posted on ${ref}: ${problems.join(' ')}`)
   const warnings = foreignBareIssueWarnings(body, want.repo, 'The comment')
   let c
@@ -977,11 +946,11 @@ async function postItemComment({ item, body }) {
 
 /** Edits only a comment belonging to the account gh is using, after all public-text checks pass. */
 async function editItemComment({ item, url, body }) {
-  const want = parseItemRef(item, config.repository)
-  const ref = refOf(want.repo, want.number)
+  const want = itemOf(item)
+  const ref = want.ref
   const id = commentIdOf(url, want.repo, want.number)
   if (id.problem) throw new GitHubError('input', `Not edited: ${id.problem}`)
-  const problems = String(body ?? '').trim() ? publicTextProblems(body, await privateWords(), 'The comment') : ['The comment is empty.']
+  const problems = await commentProblems(body)
   if (problems.length) throw new GitHubError('input', `Not edited on ${ref}: ${problems.join(' ')}`)
   const [before, me] = await Promise.all([readComment(want.repo, id.id), viewerLogin()])
   if (!before || before.number !== want.number) throw new GitHubError('input', `Not edited: GitHub has no comment ${id.id} on ${ref}.`)
@@ -1023,8 +992,8 @@ async function titleOf(want, given) {
 }
 
 async function saveOwnerAnswer({ item, text, title }) {
-  const want = parseItemRef(item, config.repository)
-  const ref = refOf(want.repo, want.number)
+  const want = itemOf(item)
+  const ref = want.ref
   let r
   try {
     r = saveAnswer(await ownerAnswers(), { repository: want.repo, number: want.number, title: await titleOf(want, title), text, now: new Date().toISOString() })
@@ -1040,8 +1009,8 @@ async function saveOwnerAnswer({ item, text, title }) {
 }
 
 async function deleteOwnerAnswer({ item }) {
-  const want = parseItemRef(item, config.repository)
-  const ref = refOf(want.repo, want.number)
+  const want = itemOf(item)
+  const ref = want.ref
   let r
   try {
     r = deleteAnswer(await ownerAnswers(), want.repo, want.number)
@@ -1060,7 +1029,7 @@ async function listOwnerAnswers({ all }) {
       `${refOf(a.repository, a.number)}${a.title ? ` ${a.title}` : ''} — ${a.recordedAt ? `recorded ${a.recordedAt.slice(0, 10)}: ${a.recordedUrl}` : `${NOT_RECORDED}, saved ${(a.updatedAt ?? a.savedAt).slice(0, 16).replace('T', ' ')} UTC`}\n  ${a.text.replace(/\n/g, '\n  ')}`,
   )
   const waiting = unrecorded(list).length
-  const summary = `${waiting} owner answer${waiting === 1 ? '' : 's'} not recorded yet${all ? `, ${list.length} kept` : ''}.${waiting ? ' For each: post the decision on its issue in English with comment, starting "**Decision (owner, YYYY-MM-DD):**" (CONTRIBUTING.md), then mark_answer_recorded with that comment\'s address.' : ''}`
+  const summary = `${plural(waiting, 'owner answer')} not recorded yet${all ? `, ${list.length} kept` : ''}.${waiting ? ' For each: post the decision on its issue in English with comment, starting "**Decision (owner, YYYY-MM-DD):**" (CONTRIBUTING.md), then mark_answer_recorded with that comment\'s address.' : ''}`
   return linesAnswer(summary, [['answers', '', lines]], {
     count: waiting,
     items: shown.map((a) => ({ ref: refOf(a.repository, a.number), repository: a.repository, number: a.number, title: a.title, ...answerView(a) })),
@@ -1068,8 +1037,8 @@ async function listOwnerAnswers({ all }) {
 }
 
 async function markOwnerAnswer({ item, url }) {
-  const want = parseItemRef(item, config.repository)
-  const ref = refOf(want.repo, want.number)
+  const want = itemOf(item)
+  const ref = want.ref
   const id = commentIdOf(url, want.repo, want.number)
   if (id.problem) throw new GitHubError('input', `Not marked: ${id.problem}`)
   const list = await ownerAnswers()
@@ -1114,7 +1083,7 @@ async function editPrivateWords({ add = [], remove = [] }) {
   return { words: next, added, removed }
 }
 const wordsAnswer = (list, head) => answer([head, ...list.map((w) => `- ${w}`)].join('\n'), { count: list.length, words: list }, head)
-const wordCount = (n) => `${n} private word${n === 1 ? '' : 's'}`
+const wordCount = (n) => plural(n, 'private word')
 
 // Where GitHub looks for a pull request template; project.json can name the one to use
 const PR_TEMPLATES = ['.github/PULL_REQUEST_TEMPLATE.md', '.github/pull_request_template.md', 'PULL_REQUEST_TEMPLATE.md', 'docs/PULL_REQUEST_TEMPLATE.md']
@@ -1145,15 +1114,13 @@ async function conventionsOf(repo) {
 
 const repoOf = (repo) => {
   const r = repo ?? config.repository
-  if (!/^[\w.-]+\/[\w.-]+$/.test(String(r))) throw new GitHubError('input', `"${r}" is not a repository; give owner/name.`)
+  checkRepo(r)
   return r
 }
 
 /** Refuses with every problem at once; warnings go along with a success. */
-const refusal = (prefix, problems, extra = {}) => ({
-  isError: true,
-  ...linesAnswer(`${prefix} ${problems.length === 1 ? 'One rule fails' : `${problems.length} rules fail`}; nothing was sent to GitHub.`, [['problems', '', problems]], { ok: false, ...extra }),
-})
+const refusal = (prefix, problems, extra = {}) =>
+  asError(linesAnswer(`${prefix} ${problems.length === 1 ? 'One rule fails' : `${problems.length} rules fail`}; nothing was sent to GitHub.`, [['problems', '', problems]], { ok: false, ...extra }))
 
 async function commitCheck({ message, messages, repo }) {
   const list = messages ?? (message !== undefined ? [message] : null)
@@ -1169,7 +1136,7 @@ async function commitCheck({ message, messages, repo }) {
   })
   const summary = bad.length ? `${bad.length} of ${list.length} refused by ${source}.` : `${list.length === 1 ? 'The message follows' : `All ${list.length} follow`} ${source}.`
   const a = linesAnswer(summary, [['results', '', lines]], { ok: bad.length === 0 })
-  return bad.length ? { isError: true, ...a } : a
+  return bad.length ? asError(a) : a
 }
 
 const PR_SECTIONS = { why: 'Why', whatChanged: 'What changed', verified: 'Verified', usability: 'Usability', notExercised: 'Not exercised', closes: 'Closes' }
@@ -1213,8 +1180,8 @@ async function fileIssue({ title, body, labels, repo, dryRun }) {
 const APP_DIR = fileURLToPath(new URL('.', import.meta.url))
 
 async function restack({ pr, lower, path, push }) {
-  const want = parseItemRef(pr, config.repository)
-  const below = lower === undefined ? undefined : parseItemRef(lower, want.repo)
+  const want = itemOf(pr)
+  const below = lower === undefined ? undefined : itemOf(lower, want.repo)
   if (below && !sameRepo(below.repo, want.repo)) throw new GitHubError('input', 'lower must be a pull request of the same repository.')
   try {
     const r = await rebaseStack(
@@ -1224,7 +1191,7 @@ async function restack({ pr, lower, path, push }) {
     )
     return linesAnswer(r.summary, [['steps', '', r.lines]], { ok: !r.partial, pushed: r.pushed, head: r.rebased, sameTree: r.sameTree })
   } catch (e) {
-    if (e instanceof StackRefusal || e instanceof GitError) return { isError: true, ...answer(`Not restacked: ${e.message}`, { ok: false, pushed: false }) }
+    if (e instanceof StackRefusal || e instanceof GitError) return asError(answer(`Not restacked: ${e.message}`, { ok: false, pushed: false }))
     throw e
   }
 }
@@ -1270,10 +1237,7 @@ async function release(args, step) {
   } catch (e) {
     if (!(e instanceof ReleaseRefusal)) throw e
     const n = e.problems.length
-    return {
-      isError: true,
-      ...linesAnswer(`Release ${step} refused (${n === 1 ? 'one reason' : `${n} reasons`}); nothing was pushed, tagged, started or approved.`, [['problems', '', e.problems]], { ok: false, step }),
-    }
+    return asError(linesAnswer(`Release ${step} refused (${n === 1 ? 'one reason' : `${n} reasons`}); nothing was pushed, tagged, started or approved.`, [['problems', '', e.problems]], { ok: false, step }))
   }
 }
 
@@ -1307,27 +1271,23 @@ serveStdio(() => {
     {
       title: 'Show the board',
       description: 'Open the board and return the project, its Status/Priority/Area options and its items.',
-      inputSchema: z.object({ refresh: z.boolean().optional().describe('Skip the short cache and ask GitHub now') }),
+      inputSchema: z.object({ refresh: refreshInput }),
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: { ui: { resourceUri: UI, visibility: ['app'] } },
     },
-    async ({ refresh }) => {
-      try {
-        const b = await board({ fresh: refresh === true })
-        return answer(`${b.items.length} items. ${where(b)}.`, {
-          ok: true,
-          project: b.project,
-          repository: config.repository,
-          columns: columns(b),
-          decisionStatus: config.decisionStatus,
-          options: { status: b.fields.status.options.map((o) => o.name), priority: b.fields.priority.options.map((o) => o.name), area: b.fields.area.options.map((o) => o.name) },
-          items: b.items,
-          fetchedAt: b.fetchedAt,
-        })
-      } catch (e) {
-        return viewFailure(e)
-      }
-    },
+    forView(async ({ refresh }) => {
+      const b = await board({ fresh: refresh === true })
+      return answer(`${b.items.length} items. ${where(b)}.`, {
+        ok: true,
+        project: b.project,
+        repository: config.repository,
+        columns: columns(b),
+        decisionStatus: config.decisionStatus,
+        options: { status: b.fields.status.options.map((o) => o.name), priority: b.fields.priority.options.map((o) => o.name), area: b.fields.area.options.map((o) => o.name) },
+        items: b.items,
+        fetchedAt: b.fetchedAt,
+      })
+    }),
   )
 
   // The reader. Screen-only: an agent has `gh` and the board's own tools; these answer the view with
@@ -1339,20 +1299,14 @@ serveStdio(() => {
       title: 'Read an issue or pull request',
       description: 'An issue or pull request with its labels, Status/Priority/Area, body and latest comments, rendered for the view.',
       inputSchema: z.object({
-        item: itemRef.describe(`The issue or pull request: ${REF_HELP}`),
-        refresh: z.boolean().optional().describe('Skip the short cache and ask GitHub now'),
+        item: itemInput,
+        refresh: refreshInput,
         comments: z.number().int().positive().max(THREAD_MAX_COMMENTS).optional().describe(`How many of the latest comments; default ${DEFAULT_COMMENTS}`),
       }),
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['app'] } },
     },
-    async (args) => {
-      try {
-        return await readItem(args)
-      } catch (e) {
-        return viewFailure(e)
-      }
-    },
+    forView(readItem),
   )
 
   centralu.tool(
@@ -1361,17 +1315,11 @@ serveStdio(() => {
     {
       title: 'Read an issue or pull request discussion',
       description: 'Read the body and latest comments of an issue or pull request. Compact text; comments are newest first.',
-      inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`), comments: z.number().int().positive().max(100).optional().describe('Newest comments to read; default 20') }),
+      inputSchema: z.object({ item: itemInput, comments: z.number().int().positive().max(100).optional().describe('Newest comments to read; default 20') }),
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    async (args) => {
-      try {
-        return await readDiscussion(args)
-      } catch (e) {
-        return failure(e)
-      }
-    },
+    answering(readDiscussion),
   )
 
   centralu.tool(
@@ -1380,17 +1328,11 @@ serveStdio(() => {
     {
       title: 'Read a failed Actions job log',
       description: 'Read a short log excerpt around the first failure in a GitHub Actions job.',
-      inputSchema: z.object({ job: z.number().int().positive().describe('GitHub Actions job id'), repo: z.string().optional().describe("owner/name; default this project's repository") }),
+      inputSchema: z.object({ job: z.number().int().positive().describe('GitHub Actions job id'), repo: repoInput }),
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    async (args) => {
-      try {
-        return await readFailedJob(args)
-      } catch (e) {
-        return failure(e)
-      }
-    },
+    answering(readFailedJob),
   )
 
   centralu.tool(
@@ -1399,17 +1341,11 @@ serveStdio(() => {
     {
       title: 'What each decision asks',
       description: `The items whose Status is "${config.decisionStatus}", each with the question, options and recommendation of its latest "Decision needed (summary, …)" comment, and whether the owner answered after it.`,
-      inputSchema: z.object({ refresh: z.boolean().optional().describe('Skip the short cache and ask GitHub now') }),
+      inputSchema: z.object({ refresh: refreshInput }),
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['app'] } },
     },
-    async (args) => {
-      try {
-        return await decisionSummaries(args)
-      } catch (e) {
-        return viewFailure(e)
-      }
-    },
+    forView(decisionSummaries),
   )
 
   // The owner's answer, saved on this machine only (never posted as written: the repository is
@@ -1422,21 +1358,14 @@ serveStdio(() => {
       description:
         "Save the person's answer to an item from the screen in this app's data folder on this computer, never on GitHub. Saving again replaces the answer not recorded yet. An agent records the decision on the issue in English and marks the answer recorded.",
       inputSchema: z.object({
-        item: itemRef.describe(`The issue or pull request: ${REF_HELP}`),
+        item: itemInput,
         text: z.string().max(65536).describe('The answer, in any language'),
         title: z.string().max(512).optional().describe("The item's title, kept for the agent's list"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
       _meta: { ui: { visibility: ['app'] } },
     },
-    (args) =>
-      oneAtATime(async () => {
-        try {
-          return await saveOwnerAnswer(args)
-        } catch (e) {
-          return failure(e)
-        }
-      }),
+    serially(answering(saveOwnerAnswer)),
   )
 
   centralu.tool(
@@ -1445,18 +1374,11 @@ serveStdio(() => {
     {
       title: "Delete the owner's answer",
       description: "Delete the person's saved answer to an item, while it is not recorded yet.",
-      inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`) }),
+      inputSchema: z.object({ item: itemInput }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
       _meta: { ui: { visibility: ['app'] } },
     },
-    (args) =>
-      oneAtATime(async () => {
-        try {
-          return await deleteOwnerAnswer(args)
-        } catch (e) {
-          return failure(e)
-        }
-      }),
+    serially(answering(deleteOwnerAnswer)),
   )
 
   centralu.tool(
@@ -1470,13 +1392,7 @@ serveStdio(() => {
       annotations: { readOnlyHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    async (args) => {
-      try {
-        return await listOwnerAnswers(args)
-      } catch (e) {
-        return failure(e)
-      }
-    },
+    answering(listOwnerAnswers),
   )
 
   centralu.tool(
@@ -1486,18 +1402,11 @@ serveStdio(() => {
       title: "Mark the owner's answer recorded",
       description:
         'Mark the owner\'s saved answer on an item recorded, with the address of the English decision comment posted on it with comment (https://github.com/owner/name/issues/N#issuecomment-ID). The comment is read back from GitHub: it must be on that item, hold "Decision (owner, YYYY-MM-DD)" and be in English.',
-      inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`), url: z.string().describe("The decision comment's address on GitHub") }),
+      inputSchema: z.object({ item: itemInput, url: z.string().describe("The decision comment's address on GitHub") }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    (args) =>
-      oneAtATime(async () => {
-        try {
-          return await markOwnerAnswer(args)
-        } catch (e) {
-          return failure(e)
-        }
-      }),
+    serially(answering(markOwnerAnswer)),
   )
 
   centralu.tool(
@@ -1507,18 +1416,11 @@ serveStdio(() => {
       title: 'Comment on an issue or pull request',
       description:
         'Post a comment on an issue or pull request on GitHub, as the gh login. Refused, with nothing posted, when it is empty, not in English (code and > quotes aside), holds a word from the private list, or carries an attribution line (Co-Authored-By, "Generated with"). Answers the comment as GitHub stored it.',
-      inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`), body: z.string().max(65536).describe('The comment, in Markdown') }),
+      inputSchema: z.object({ item: itemInput, body: z.string().max(65536).describe('The comment, in Markdown') }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    (args) =>
-      oneAtATime(async () => {
-        try {
-          return await postItemComment(args)
-        } catch (e) {
-          return failure(e)
-        }
-      }),
+    serially(answering(postItemComment)),
   )
 
   centralu.tool(
@@ -1527,18 +1429,11 @@ serveStdio(() => {
     {
       title: 'Edit your comment',
       description: 'Replace a comment only when it belongs to the gh login. Uses the same English, private-word and attribution checks as comment.',
-      inputSchema: z.object({ item: itemRef.describe(`The issue or pull request: ${REF_HELP}`), url: z.string().describe('The comment address on this item'), body: z.string().max(65536).describe('Replacement Markdown') }),
+      inputSchema: z.object({ item: itemInput, url: z.string().describe('The comment address on this item'), body: z.string().max(65536).describe('Replacement Markdown') }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    (args) =>
-      oneAtATime(async () => {
-        try {
-          return await editItemComment(args)
-        } catch (e) {
-          return failure(e)
-        }
-      }),
+    serially(answering(editItemComment)),
   )
 
   centralu.tool(
@@ -1552,20 +1447,13 @@ serveStdio(() => {
         title: z.string().max(256),
         body: z.string().max(65536).describe('The issue, in Markdown'),
         labels: z.array(z.string()).max(20).optional().describe('Labels; GitHub applies them only for a login that may'),
-        repo: z.string().optional().describe("owner/name; default this project's repository"),
+        repo: repoInput,
         dryRun: z.boolean().optional().describe('Check without filing'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    (args) =>
-      oneAtATime(async () => {
-        try {
-          return await fileIssue(args)
-        } catch (e) {
-          return failure(e, 'Not filed: ')
-        }
-      }),
+    serially(answering(fileIssue, 'Not filed: ')),
   )
 
   centralu.tool(
@@ -1587,20 +1475,13 @@ serveStdio(() => {
         closes: z.string().optional().describe('e.g. "Closes #386", or why there is no issue'),
         sections: z.record(z.string(), z.string()).optional().describe('Any heading of the template by its name, e.g. { "Screenshots": "…" }'),
         draft: z.boolean().optional(),
-        repo: z.string().optional().describe("owner/name; default this project's repository"),
+        repo: repoInput,
         dryRun: z.boolean().optional().describe('Fill and check without opening'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    (args) =>
-      oneAtATime(async () => {
-        try {
-          return await openPr(args)
-        } catch (e) {
-          return failure(e, 'Not opened: ')
-        }
-      }),
+    serially(answering(openPr, 'Not opened: ')),
   )
 
   centralu.tool(
@@ -1618,13 +1499,7 @@ serveStdio(() => {
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    async (args) => {
-      try {
-        return await commitCheck(args)
-      } catch (e) {
-        return failure(e)
-      }
-    },
+    answering(commitCheck),
   )
 
   centralu.tool(
@@ -1637,20 +1512,13 @@ serveStdio(() => {
       inputSchema: z.object({
         pr: itemRef.describe(`The upper pull request: ${REF_HELP}`),
         lower: itemRef.optional().describe('The pull request it was stacked on, when GitHub already moved its base'),
-        path: z.string().optional().describe('A checkout of the repository; default the one this app is in'),
+        path: pathInput,
         push: z.boolean().optional().describe('Push the result and move the base; default false (report only)'),
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    (args) =>
-      oneAtATime(async () => {
-        try {
-          return await restack(args)
-        } catch (e) {
-          return failure(e, 'Not restacked: ')
-        }
-      }),
+    serially(answering(restack, 'Not restacked: ')),
   )
 
   // The release. The status is for agents and the screen (the header's "Release" dialog); the steps
@@ -1662,16 +1530,10 @@ serveStdio(() => {
       title: 'Where the release stands',
       description:
         "Where this repository's release stands, read fresh: the version main declares and whether it is tagged, CI on main, the rehearsal on main's commit, the tag's release run and the environment approvals it waits on, what merged since the last release (the release notes draft), and the next step. Changes nothing.",
-      inputSchema: z.object({ path: z.string().optional().describe('A checkout of the repository; default the one this app is in') }),
+      inputSchema: z.object({ path: pathInput }),
       annotations: { readOnlyHint: true, openWorldHint: true },
     },
-    async (args) => {
-      try {
-        return await release(args, 'status')
-      } catch (e) {
-        return failure(e)
-      }
-    },
+    answering((args) => release(args, 'status')),
   )
 
   centralu.tool(
@@ -1691,19 +1553,12 @@ serveStdio(() => {
         skipRehearsal: z.boolean().optional().describe('tag: tag without a successful rehearsal on the commit; default false'),
         comment: z.string().max(1000).optional().describe('approve: the comment GitHub keeps with the approval'),
         run: z.number().int().positive().optional().describe('cancel_duplicate: the duplicate run id to cancel'),
-        path: z.string().optional().describe('A checkout of the repository; default the one this app is in'),
+        path: pathInput,
       }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    (args) =>
-      oneAtATime(async () => {
-        try {
-          return await release(args, args.step)
-        } catch (e) {
-          return failure(e, `Release ${args.step} stopped: `)
-        }
-      }),
+    serially(answering((args) => release(args, args.step), (args) => `Release ${args.step} stopped: `)),
   )
 
   centralu.tool(
@@ -1734,16 +1589,13 @@ serveStdio(() => {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     },
     // One at a time like every other write: each edit reads the list and writes it whole
-    (args) =>
-      oneAtATime(async () => {
-        try {
-          const r = await editPrivateWords(args)
-          const said = [...(r.added.length ? [`added ${r.added.map((w) => `"${w}"`).join(', ')}`] : []), ...(r.removed.length ? [`removed ${r.removed.map((w) => `"${w}"`).join(', ')}`] : [])].join('; ')
-          return wordsAnswer(r.words, `${said ? `${said[0].toUpperCase()}${said.slice(1)}` : 'Nothing changed'}. ${wordCount(r.words.length)}.`)
-        } catch (e) {
-          return failure(e)
-        }
+    serially(
+      answering(async (args) => {
+        const r = await editPrivateWords(args)
+        const said = [...(r.added.length ? [`added ${r.added.map((w) => `"${w}"`).join(', ')}`] : []), ...(r.removed.length ? [`removed ${r.removed.map((w) => `"${w}"`).join(', ')}`] : [])].join('; ')
+        return wordsAnswer(r.words, `${said ? `${said[0].toUpperCase()}${said.slice(1)}` : 'Nothing changed'}. ${wordCount(r.words.length)}.`)
       }),
+    ),
   )
 
   centralu.tool(
@@ -1763,34 +1615,30 @@ serveStdio(() => {
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    async ({ status, area, priority, numbers, detail }) => {
-      try {
-        const b = await board()
-        const want = {
-          status: status === undefined ? null : resolveOption(b.fields.status, status).name,
-          area: area === undefined ? null : resolveOption(b.fields.area, area).name,
-          priority: priority === undefined ? null : resolveOption(b.fields.priority, priority).name,
-        }
-        const fits = (i) => (!want.status || i.status === want.status) && (!want.area || i.area === want.area) && (!want.priority || i.priority === want.priority)
-        const filters = Object.entries(want).filter(([, v]) => v).map(([k, v]) => `${b.fields[k].name} ${v}`)
-        const cols = want.status ? [want.status] : [...columns(b), ...(b.items.some((i) => !i.status) ? [null] : [])]
-        let items
-        let missing = []
-        if (numbers !== undefined) {
-          const picked = pick(b, numbers)
-          items = picked.found.filter(fits)
-          missing = picked.missing
-          filters.push(`numbers ${numbers.join(', ')}`)
-        } else {
-          items = cols.flatMap((c) => b.items.filter((i) => i.status === c && fits(i)).sort(byPriority))
-        }
-        const counts = cols.map((c) => `${c ?? 'No status'} ${items.filter((i) => i.status === c).length}`)
-        const summary = `${b.project.title}: ${items.length} of ${b.items.length} items${filters.length ? `, filtered by ${filters.join(', ')}` : ''}. ${counts.join(' · ')}.`
-        return itemsAnswer(b, summary, items, detail, [['missing', 'Not in the project:', missing, true]])
-      } catch (e) {
-        return failure(e)
+    answering(async ({ status, area, priority, numbers, detail }) => {
+      const b = await board()
+      const want = {
+        status: status === undefined ? null : resolveOption(b.fields.status, status).name,
+        area: area === undefined ? null : resolveOption(b.fields.area, area).name,
+        priority: priority === undefined ? null : resolveOption(b.fields.priority, priority).name,
       }
-    },
+      const fits = (i) => (!want.status || i.status === want.status) && (!want.area || i.area === want.area) && (!want.priority || i.priority === want.priority)
+      const filters = Object.entries(want).filter(([, v]) => v).map(([k, v]) => `${b.fields[k].name} ${v}`)
+      const cols = want.status ? [want.status] : [...columns(b), ...(b.items.some((i) => !i.status) ? [null] : [])]
+      let items
+      let missing = []
+      if (numbers !== undefined) {
+        const picked = pick(b, numbers)
+        items = picked.found.filter(fits)
+        missing = picked.missing
+        filters.push(`numbers ${numbers.join(', ')}`)
+      } else {
+        items = cols.flatMap((c) => b.items.filter((i) => i.status === c && fits(i)).sort(byPriority))
+      }
+      const counts = cols.map((c) => `${c ?? 'No status'} ${items.filter((i) => i.status === c).length}`)
+      const summary = `${b.project.title}: ${items.length} of ${b.items.length} items${filters.length ? `, filtered by ${filters.join(', ')}` : ''}. ${counts.join(' · ')}.`
+      return itemsAnswer(b, summary, items, detail, [['missing', 'Not in the project:', missing, true]])
+    }),
   )
 
   centralu.tool(
@@ -1804,16 +1652,12 @@ serveStdio(() => {
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    async ({ items: inputs, detail }) => {
-      try {
-        const b = await board()
-        const { found, missing } = pick(b, inputs)
-        const summary = `${b.project.title}: ${found.length} of ${found.length + missing.length} in the project.`
-        return itemsAnswer(b, summary, found, detail, [['missing', 'Not in the project:', missing, true]])
-      } catch (e) {
-        return failure(e)
-      }
-    },
+    answering(async ({ items: inputs, detail }) => {
+      const b = await board()
+      const { found, missing } = pick(b, inputs)
+      const summary = `${b.project.title}: ${found.length} of ${found.length + missing.length} in the project.`
+      return itemsAnswer(b, summary, found, detail, [['missing', 'Not in the project:', missing, true]])
+    }),
   )
 
   centralu.tool(
@@ -1826,22 +1670,18 @@ serveStdio(() => {
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    async ({ area, detail }) => {
-      try {
-        const b = await board()
-        const decision = resolveOption(b.fields.status, config.decisionStatus).name
-        const wantArea = area === undefined ? null : resolveOption(b.fields.area, area).name
-        const items = b.items.filter((i) => i.status === decision && (!wantArea || i.area === wantArea)).sort(byPriority)
-        // An answer the owner saved on this machine and no agent recorded yet shows on its line
-        const waiting = new Set(unrecorded(await ownerAnswers()).map((a) => answerKey(a.repository, a.number)))
-        const answered = (i) => i.number != null && waiting.has(answerKey(i.repository, i.number))
-        const n = items.filter(answered).length
-        const summary = `${b.project.title}: ${items.length} item${items.length === 1 ? '' : 's'} with Status ${decision}${wantArea ? ` in Area ${wantArea}` : ''}${n ? `, ${n} ${NOT_RECORDED} (list_owner_answers)` : ''}.`
-        return itemsAnswer(b, summary, items, detail, [], (i) => (answered(i) ? ` · ${NOT_RECORDED}` : ''))
-      } catch (e) {
-        return failure(e)
-      }
-    },
+    answering(async ({ area, detail }) => {
+      const b = await board()
+      const decision = resolveOption(b.fields.status, config.decisionStatus).name
+      const wantArea = area === undefined ? null : resolveOption(b.fields.area, area).name
+      const items = b.items.filter((i) => i.status === decision && (!wantArea || i.area === wantArea)).sort(byPriority)
+      // An answer the owner saved on this machine and no agent recorded yet shows on its line
+      const waiting = new Set(unrecorded(await ownerAnswers()).map((a) => answerKey(a.repository, a.number)))
+      const answered = (i) => i.number != null && waiting.has(answerKey(i.repository, i.number))
+      const n = items.filter(answered).length
+      const summary = `${b.project.title}: ${plural(items.length, 'item')} with Status ${decision}${wantArea ? ` in Area ${wantArea}` : ''}${n ? `, ${n} ${NOT_RECORDED} (list_owner_answers)` : ''}.`
+      return itemsAnswer(b, summary, items, detail, [], (i) => (answered(i) ? ` · ${NOT_RECORDED}` : ''))
+    }),
   )
 
   // Writes. Visible to agents and to the screen (the board's status menu and drag call this one), so
@@ -1856,7 +1696,7 @@ serveStdio(() => {
       inputSchema: z.object(batchInputs('set')),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
-    (args) => oneAtATime(() => setItemFields(args)),
+    serially(setItemFields),
   )
 
   centralu.tool(
@@ -1870,7 +1710,7 @@ serveStdio(() => {
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    (args) => oneAtATime(() => addItem(args)),
+    serially(addItem),
   )
 
   centralu.tool(
@@ -1889,13 +1729,7 @@ serveStdio(() => {
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    async (args) => {
-      try {
-        return await ciStatus(args)
-      } catch (e) {
-        return failure(e)
-      }
-    },
+    answering(ciStatus),
   )
 
   centralu.tool(
@@ -1916,13 +1750,7 @@ serveStdio(() => {
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
     },
-    async (args, ctx) => {
-      try {
-        return await mergeWhenGreen(args, ctx)
-      } catch (e) {
-        return failure(e, 'Not merged: ')
-      }
-    },
+    answering(mergeWhenGreen, 'Not merged: '),
   )
 
   return server

@@ -34,6 +34,7 @@ import {
   treeOf,
 } from './git.mjs'
 import { bumpText, compareVersions, declaredVersion, filesNamed, nextVersion, parseVersion, releaseNotes, versionLines } from './versions.mjs'
+import { listSome, plural, short, sleep } from './util.mjs'
 
 /** A refusal: nothing was pushed, tagged, started or approved. */
 export class ReleaseRefusal extends Error {
@@ -47,9 +48,7 @@ export class ReleaseRefusal extends Error {
 export const NOT_MAINTAINER =
   "The GitHub account gh is logged in as has no maintain or admin permission on this repository, and releasing is the maintainer's act (#386). Nothing was changed."
 
-const short = (sha) => String(sha ?? '?').slice(0, 7)
-const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
-const list = (xs, max = 6) => `${xs.slice(0, max).join(', ')}${xs.length > max ? ` and ${xs.length - max} more` : ''}`
+const list = (xs) => listSome(xs, 6)
 
 /** project.json `release`, with this repository's layout as the fallback for each part. */
 export function releaseConfig(c = {}) {
@@ -401,13 +400,12 @@ export async function bumpRelease({ repo, dir, cfg, gh, ci, openPr, permissions 
 
 const RUN_LOOKS = 5
 const RUN_LOOK_MS = Number(process.env.PROJECT_BOARD_RUN_LOOK_MS) || 3_000
-const pause = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function findRun(gh, repo, file, filter, match, after) {
   for (let i = 0; i < RUN_LOOKS; i++) {
     const run = (await gh.workflowRuns(repo, file, filter)).find((r) => match(r) && (!after || !r.createdAt || Date.parse(r.createdAt) >= after - 60_000))
     if (run) return run
-    if (i < RUN_LOOKS - 1) await pause(RUN_LOOK_MS)
+    if (i < RUN_LOOKS - 1) await sleep(RUN_LOOK_MS)
   }
   return null
 }

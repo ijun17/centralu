@@ -299,9 +299,10 @@ const firstLine = (e) =>
     .map((l) => l.replace(/^gh:\s*/, '').trim())
     .find(Boolean) ?? 'no message'
 // Failures that say nothing about the thing asked for: gh cannot reach GitHub at all.
-const FATAL = new Set(['network', 'auth', 'gh-missing'])
+export const FATAL = new Set(['network', 'auth', 'gh-missing'])
 
-function checkRepo(repo) {
+/** Refuses anything but owner/name before it reaches a REST path. */
+export function checkRepo(repo) {
   if (!REPO.test(String(repo))) throw new GitHubError('input', `"${repo}" is not a repository; give owner/name.`)
 }
 
