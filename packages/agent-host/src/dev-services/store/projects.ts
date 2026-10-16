@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3'
 import type { ProjectInfo, SavedCommand, ToolDefaults } from '@cc/protocol'
+import { JsonObject, readJson, readJsonList } from './json.js'
+import { z } from 'zod'
 
 /** The projects table: what a project remembers (its commands, worktree setup, tool defaults, trust) and where it sits in the sidebar */
 export class ProjectRecords {
@@ -47,22 +49,15 @@ export class ProjectRecords {
   projectCommands(projectId: string): SavedCommand[] {
     const row = this.db.prepare(`SELECT commands FROM projects WHERE id = ?`).get(projectId) as
       { commands: string } | undefined
-    if (!row) return []
-    try {
-      const parsed = JSON.parse(row.commands) as unknown
-      if (!Array.isArray(parsed)) return []
-      // Old rows are an array of strings (before labels, ~2026-09-06) — upgraded on read, and the next save fixes the new shape
-      return parsed.flatMap((c): SavedCommand[] => {
-        if (typeof c === 'string') return [{ command: c }]
-        if (c && typeof c === 'object' && typeof (c as { command?: unknown }).command === 'string') {
-          const label = (c as { label?: unknown }).label
-          return [{ command: (c as { command: string }).command, ...(typeof label === 'string' && label ? { label } : {}) }]
-        }
-        return []
-      })
-    } catch {
+    // Old rows are an array of strings (before labels, ~2026-09-06) — upgraded on read, and the next save fixes the new shape
+    return readJsonList(row?.commands, z.unknown()).flatMap((c): SavedCommand[] => {
+      if (typeof c === 'string') return [{ command: c }]
+      if (c && typeof c === 'object' && typeof (c as { command?: unknown }).command === 'string') {
+        const label = (c as { label?: unknown }).label
+        return [{ command: (c as { command: string }).command, ...(typeof label === 'string' && label ? { label } : {}) }]
+      }
       return []
-    }
+    })
   }
 
   /** The whole list at once — add and delete both arrive here as "it looks like this now" */
@@ -77,18 +72,13 @@ export class ProjectRecords {
   worktreeSetup(projectId: string): { command: string; copyFiles: string[] } | null {
     const row = this.db.prepare(`SELECT worktree_setup FROM projects WHERE id = ?`).get(projectId) as
       { worktree_setup: string | null } | undefined
-    if (!row?.worktree_setup) return null
-    try {
-      const parsed = JSON.parse(row.worktree_setup) as { command?: unknown; copyFiles?: unknown }
-      const command = typeof parsed.command === 'string' ? parsed.command : ''
-      const copyFiles = Array.isArray(parsed.copyFiles)
-        ? parsed.copyFiles.filter((f): f is string => typeof f === 'string')
-        : []
-      if (!command && copyFiles.length === 0) return null
-      return { command, copyFiles }
-    } catch {
-      return null
-    }
+    const parsed = readJson(row?.worktree_setup, JsonObject, {})
+    const command = typeof parsed.command === 'string' ? parsed.command : ''
+    const copyFiles = Array.isArray(parsed.copyFiles)
+      ? parsed.copyFiles.filter((f): f is string => typeof f === 'string')
+      : []
+    if (!command && copyFiles.length === 0) return null
+    return { command, copyFiles }
   }
 
   setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): void {
@@ -108,16 +98,11 @@ export class ProjectRecords {
   worktreeManager(projectId: string): { sessionId: string; baseBranch: string } | null {
     const row = this.db.prepare(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId) as
       { worktree_manager: string | null } | undefined
-    if (!row?.worktree_manager) return null
-    try {
-      const parsed = JSON.parse(row.worktree_manager) as { sessionId?: unknown; baseBranch?: unknown }
-      if (typeof parsed.sessionId !== 'string' || !parsed.sessionId) return null
-      return {
-        sessionId: parsed.sessionId,
-        baseBranch: typeof parsed.baseBranch === 'string' ? parsed.baseBranch : '',
-      }
-    } catch {
-      return null
+    const parsed = readJson(row?.worktree_manager, JsonObject, {})
+    if (typeof parsed.sessionId !== 'string' || !parsed.sessionId) return null
+    return {
+      sessionId: parsed.sessionId,
+      baseBranch: typeof parsed.baseBranch === 'string' ? parsed.baseBranch : '',
     }
   }
 
@@ -128,13 +113,8 @@ export class ProjectRecords {
   worktreeTrunk(projectId: string): string | null {
     const row = this.db.prepare(`SELECT worktree_manager FROM projects WHERE id = ?`).get(projectId) as
       { worktree_manager: string | null } | undefined
-    if (!row?.worktree_manager) return null
-    try {
-      const parsed = JSON.parse(row.worktree_manager) as { baseBranch?: unknown }
-      return typeof parsed.baseBranch === 'string' && parsed.baseBranch ? parsed.baseBranch : null
-    } catch {
-      return null
-    }
+    const parsed = readJson(row?.worktree_manager, JsonObject, {})
+    return typeof parsed.baseBranch === 'string' && parsed.baseBranch ? parsed.baseBranch : null
   }
 
   /**
@@ -173,23 +153,16 @@ export class ProjectRecords {
   projectToolDefaults(projectId: string): Record<string, ToolDefaults> {
     const row = this.db.prepare(`SELECT default_models FROM projects WHERE id = ?`).get(projectId) as
       { default_models: string | null } | undefined
-    if (!row?.default_models) return {}
-    try {
-      const parsed = JSON.parse(row.default_models) as unknown
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-      const out: Record<string, ToolDefaults> = {}
-      for (const [tool, v] of Object.entries(parsed as Record<string, unknown>)) {
-        if (!v || typeof v !== 'object') continue
-        const { model, effort } = v as { model?: unknown; effort?: unknown }
-        out[tool] = {
-          model: typeof model === 'string' && model ? model : null,
-          effort: typeof effort === 'string' && effort ? effort : null,
-        }
+    const out: Record<string, ToolDefaults> = {}
+    for (const [tool, v] of Object.entries(readJson(row?.default_models, JsonObject, {}))) {
+      if (!v || typeof v !== 'object') continue
+      const { model, effort } = v as { model?: unknown; effort?: unknown }
+      out[tool] = {
+        model: typeof model === 'string' && model ? model : null,
+        effort: typeof effort === 'string' && effort ? effort : null,
       }
-      return out
-    } catch {
-      return {}
     }
+    return out
   }
 
   /** Only one tool's slot is rewritten — another tool's remembered value has nothing to do with this choice (#107) */

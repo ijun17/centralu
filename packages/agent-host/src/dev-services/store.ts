@@ -21,6 +21,8 @@ import { SessionRecords } from './store/sessions.js'
 import { SettingsRecords } from './store/settings.js'
 import { TrashRecords, type TrashedRow, type TrashRecord } from './store/trash.js'
 import { mb, type VacuumDone } from './store/vacuum.js'
+import { z } from 'zod'
+import { readJsonList } from './store/json.js'
 
 // The shapes the store hands out are defined beside the code that reads them; they are named here as they always were
 export type {
@@ -511,13 +513,7 @@ export class Store {
     const row = this.db.prepare(`SELECT value FROM app_settings WHERE key = ?`).get(DEFERRED_KEY) as
       | { value: string }
       | undefined
-    if (!row) return []
-    try {
-      const v: unknown = JSON.parse(row.value)
-      return Array.isArray(v) ? v.filter((n): n is number => Number.isInteger(n) && n > 0) : []
-    } catch {
-      return []
-    }
+    return readJsonList(row?.value, z.number().int().positive())
   }
 
   private writeDeferred(steps: number[]): void {

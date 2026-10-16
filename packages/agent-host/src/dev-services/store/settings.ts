@@ -1,4 +1,23 @@
 import type Database from 'better-sqlite3'
+import { parseJson } from './json.js'
+
+/** The part of the store one setting is read from and written to */
+export type SettingAccess = { appSetting(key: string): string | null; setAppSetting(key: string, value: string): void }
+
+/**
+ * A setting that is on or off, stored as `'true'` or `'false'` (#850). Never written reads as `byDefault` (see
+ * `appSetting`: a default can move later without overruling the one person who turned the thing off), and so does a
+ * value this build cannot read.
+ */
+export function flagSetting(settings: SettingAccess, key: string, byDefault: boolean): { read(): boolean; write(on: boolean): void } {
+  return {
+    read: () => {
+      const v = settings.appSetting(key)
+      return v === 'true' ? true : v === 'false' ? false : byDefault
+    },
+    write: (on) => settings.setAppSetting(key, String(on)),
+  }
+}
 
 /** What belongs to this install: its settings, the workspace snapshot and the cache of a tool's commands */
 export class SettingsRecords {
@@ -17,12 +36,7 @@ export class SettingsRecords {
     const row = this.db
       .prepare(`SELECT commands FROM command_cache WHERE tool = ? AND cwd = ?`)
       .get(tool, cwd) as { commands: string } | undefined
-    if (!row) return null
-    try {
-      return JSON.parse(row.commands) as T
-    } catch {
-      return null
-    }
+    return (parseJson(row?.commands) ?? null) as T | null
   }
 
   /**
@@ -41,12 +55,7 @@ export class SettingsRecords {
   loadWorkspace<T = unknown>(): T | null {
     const row = this.db.prepare(`SELECT layout FROM workspace WHERE id = 1`).get() as
       { layout: string } | undefined
-    if (!row) return null
-    try {
-      return JSON.parse(row.layout) as T
-    } catch {
-      return null
-    }
+    return (parseJson(row?.layout) ?? null) as T | null
   }
 
   /**

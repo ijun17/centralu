@@ -1,6 +1,8 @@
 import type { Store } from '../dev-services/store.js'
 import type { HeadersMirror, MachineRecord, MachineRegistry } from './links.js'
 import type { ProjectOrder } from './router.js'
+import { z } from 'zod'
+import { readJsonList } from '../dev-services/store/json.js'
 
 /**
  * The registry and the headers mirror in the hub's own store (v46, store/linked-machines.ts). One writer per store
@@ -46,14 +48,7 @@ const PROJECT_ORDER_KEY = 'hub.projectOrder'
 
 export function storeProjectOrder(store: Store): ProjectOrder {
   return {
-    read: () => {
-      try {
-        const v: unknown = JSON.parse(store.appSetting(PROJECT_ORDER_KEY) ?? '[]')
-        return Array.isArray(v) ? v.filter((id): id is string => typeof id === 'string') : []
-      } catch {
-        return []
-      }
-    },
+    read: () => readJsonList(store.appSetting(PROJECT_ORDER_KEY), z.string()),
     write: (orderedIds) => store.setAppSetting(PROJECT_ORDER_KEY, JSON.stringify(orderedIds)),
   }
 }

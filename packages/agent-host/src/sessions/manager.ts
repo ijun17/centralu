@@ -149,6 +149,7 @@ import { withTimeout } from './with-timeout.js'
 import { AppSessions, type AppSessionsHost } from './app-sessions.js'
 import { appMessageFrame, type AppMessageSource, type AppMessageVia, type AppViewPlace } from './app-messages.js'
 import { SessionTrash, type SessionTrashHost } from './session-trash.js'
+import { JsonObject, readJson, readJsonObjects } from '../dev-services/store/json.js'
 export { appMessageFrame } from './app-messages.js'
 export type { AppMessageSource, AppMessageVia, AppViewPlace } from './app-messages.js'
 export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './delegation-flow.js'
@@ -1709,12 +1710,7 @@ export class SessionManager {
   private keptBackgroundTasks(sessionId: string): BackgroundTask[] | null {
     const raw = this.store.appSetting(this.backgroundTasksKey(sessionId))
     if (raw === null) return null
-    try {
-      const parsed: unknown = JSON.parse(raw)
-      return Array.isArray(parsed) ? (parsed as BackgroundTask[]).filter((t) => t && typeof t.id === 'string' && t.status === 'running') : []
-    } catch {
-      return []
-    }
+    return readJsonObjects<BackgroundTask>(raw, (t) => typeof t.id === 'string' && t.status === 'running')
   }
 
   private rememberBackgroundTasks(m: SessionInfo): void {
@@ -3540,12 +3536,8 @@ export class SessionManager {
   private storedUiPreferences(): Record<string, unknown> {
     const raw = this.store.appSetting(UI_PREFS_KEY)
     if (raw === null) return {}
-    try {
-      const v: unknown = JSON.parse(raw)
-      if (typeof v === 'object' && v !== null && !Array.isArray(v)) return v as Record<string, unknown>
-    } catch {
-      /* said below */
-    }
+    const v = readJson<JsonObject | null>(raw, JsonObject, null)
+    if (v) return v
     if (!this.brokenPrefsSaid) {
       this.brokenPrefsSaid = true
       console.error(`[agent-host] app_settings.${UI_PREFS_KEY} is not a JSON object; screen preferences read as their defaults until the next change`)

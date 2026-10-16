@@ -19,6 +19,10 @@ export function parseJson(raw: string | null | undefined): unknown {
   }
 }
 
+/** A JSON object (not a list, not null), every field kept */
+export const JsonObject = z.record(z.string(), z.unknown())
+export type JsonObject = z.infer<typeof JsonObject>
+
 /** `raw` read as `schema`; `fallback` when nothing is stored, the text is not JSON, or the value is not that shape */
 export function readJson<T>(raw: string | null | undefined, schema: z.ZodType<T>, fallback: T): T {
   const r = schema.safeParse(parseJson(raw))
@@ -41,6 +45,11 @@ export function readJsonList<T>(raw: string | null | undefined, item: z.ZodType<
   return out
 }
 
-/** A JSON object (not a list, not null), every field kept */
-export const JsonObject = z.record(z.string(), z.unknown())
-export type JsonObject = z.infer<typeof JsonObject>
+/**
+ * `raw` read as a list of objects, the way another build may have left it (#384): a value that is not JSON or not a
+ * list reads as empty, and an element that is not an object or lacks what `has` asks for is skipped. An element keeps
+ * every field it has, so writing the list back after a change does not drop what a newer build added to it.
+ */
+export function readJsonObjects<T extends object>(raw: string | null | undefined, has: (x: JsonObject) => boolean): T[] {
+  return readJsonList(raw, JsonObject).filter(has) as unknown as T[]
+}

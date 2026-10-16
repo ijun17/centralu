@@ -1,4 +1,5 @@
 import { isInTurn, nextStateFor, SessionState, type NormalizedEvent } from '@cc/protocol'
+import { JsonObject, readJson } from '../dev-services/store/json.js'
 
 /**
  * The rest an adapter's card was raised in, so answering it goes back there (#428).
@@ -114,14 +115,7 @@ export const CARD_RESTS_KEY = 'card_rests'
 /** A `RestRecord` on the store's app settings */
 export function appSettingRests(settings: { appSetting(key: string): string | null; setAppSetting(key: string, value: string): void; deleteAppSetting(key: string): void }): RestRecord {
   return {
-    load: () => {
-      try {
-        const v = JSON.parse(settings.appSetting(CARD_RESTS_KEY) ?? '{}') as unknown
-        return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
-      } catch {
-        return {}
-      }
-    },
+    load: () => readJson(settings.appSetting(CARD_RESTS_KEY), JsonObject, {}),
     save: (rests) => (Object.keys(rests).length ? settings.setAppSetting(CARD_RESTS_KEY, JSON.stringify(rests)) : settings.deleteAppSetting(CARD_RESTS_KEY)),
   }
 }

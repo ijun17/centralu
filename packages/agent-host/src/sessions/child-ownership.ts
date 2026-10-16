@@ -3,6 +3,7 @@ import type { ApprovalDetail, BackgroundTask, SessionInfo } from '@cc/protocol'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
 import { inTurn } from '../idle.js'
+import { readJsonObjects } from '../dev-services/store/json.js'
 
 /**
  * How long a report held over a session's own background work (#721), here or on a linked machine (#723), waits, once
@@ -89,14 +90,7 @@ export type PausedTask = { id: string; description: string }
 /** The tasks of a stored pause, or null when there is none (an unreadable value is a pause on nothing known) */
 export function readPausedTasks(raw: string | null): PausedTask[] | null {
   if (raw === null) return null
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed)
-      ? parsed.filter((t): t is PausedTask => !!t && typeof t.id === 'string' && typeof t.description === 'string')
-      : []
-  } catch {
-    return []
-  }
+  return readJsonObjects<PausedTask>(raw, (t) => typeof t.id === 'string' && typeof t.description === 'string')
 }
 
 /** A delegated turn's link (#676): who gave the turn, and the cards it was already told of */

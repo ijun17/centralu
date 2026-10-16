@@ -24,6 +24,7 @@ import {
 import type { DelegationFlow } from './delegation-flow.js'
 import type { SessionRecord } from './session-record.js'
 import type { AppMessageSource, AppMessageVia } from './app-messages.js'
+import { JsonObject, readJson } from '../dev-services/store/json.js'
 
 /** Key for the builder-session directory (APP_BUILDERS_KEY) — an app is identified by (project, id) */
 const builderKey = (ref: AppRef): string => `${ref.projectId ?? '_user'}/${ref.appId}`
@@ -412,13 +413,7 @@ export class AppSessions {
   }
 
   private builderMap(): Record<string, string> {
-    try {
-      const raw = this.host.store.appSetting(APP_BUILDERS_KEY)
-      const map = raw ? (JSON.parse(raw) as unknown) : {}
-      return map && typeof map === 'object' && !Array.isArray(map) ? (map as Record<string, string>) : {}
-    } catch {
-      return {}
-    }
+    return readJson(this.host.store.appSetting(APP_BUILDERS_KEY), JsonObject, {}) as Record<string, string>
   }
 
   /** Records the builder session an app points at. If `sessionId` is null, this clears it — with `only`

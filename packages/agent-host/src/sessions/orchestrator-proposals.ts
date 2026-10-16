@@ -3,6 +3,7 @@ import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ExternalApps } from '../apps/external/runtime.js'
 import type { Store } from '../dev-services/store.js'
 import { proposedMcpServerNameError } from './orchestrator-tools.js'
+import { readJsonObjects } from '../dev-services/store/json.js'
 
 /** One line of app description — within the manifest's cap (2000 characters), so a long command
  * does not turn into the wrong app */
@@ -29,22 +30,8 @@ const SKILL_MAX_CHARS = 2_000
 const isText = (v: unknown): v is string => typeof v === 'string'
 const isTextList = (v: unknown): v is string[] => Array.isArray(v) && v.every(isText)
 
-/**
- * A list kept in one app_settings row, read the way another build may have left it (#384): a row that is not JSON or
- * not a list reads as empty, and an element without the fields this build needs is skipped. An element keeps every
- * field it has, so writing the list back after a change does not drop what a newer build added to it.
- */
-function storedList<T>(raw: string | null, has: (x: Record<string, unknown>) => boolean): T[] {
-  if (!raw) return []
-  let v: unknown
-  try {
-    v = JSON.parse(raw)
-  } catch {
-    return []
-  }
-  if (!Array.isArray(v)) return []
-  return v.filter((x): x is T => typeof x === 'object' && x !== null && !Array.isArray(x) && has(x as Record<string, unknown>))
-}
+/** A list kept in one app_settings row, read the way another build may have left it (#384, `readJsonObjects`) */
+const storedList = readJsonObjects
 
 export interface ProposalResult {
   ok: boolean
@@ -141,17 +128,7 @@ export class OrchestratorProposals {
    * what it would even launch.
    */
   private legacyMcpServers(): { name: string; command: string; args: string[] }[] {
-    try {
-      const raw = this.store.appSetting(LEGACY_MCP_SERVERS_KEY)
-      const list = raw ? (JSON.parse(raw) as unknown) : []
-      if (!Array.isArray(list)) return []
-      return list.filter(
-        (x): x is { name: string; command: string; args: string[] } =>
-          !!x && typeof x.name === 'string' && typeof x.command === 'string' && Array.isArray(x.args) && x.args.every((a: unknown) => typeof a === 'string'),
-      )
-    } catch {
-      return []
-    }
+    return storedList(this.store.appSetting(LEGACY_MCP_SERVERS_KEY), (x) => isText(x.name) && isText(x.command) && isTextList(x.args))
   }
 
   /**

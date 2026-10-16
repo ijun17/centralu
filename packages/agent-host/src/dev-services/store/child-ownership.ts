@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3'
+import { parseJson } from './json.js'
 
 /** A request held for a busy session until its turn ends (#677, `queued_requests`) */
 export type QueuedRequest = {
@@ -50,11 +51,8 @@ export class ChildOwnershipRecords {
       .prepare(`SELECT request_id as requestId, caller_session_id as callerSessionId, request, asked_at as askedAt FROM agent_start_requests ORDER BY asked_at`)
       .all() as { requestId: string; callerSessionId: string; request: string; askedAt: number }[]
     return rows.flatMap((r) => {
-      try {
-        return [{ ...r, request: JSON.parse(r.request) as unknown }]
-      } catch {
-        return []
-      }
+      const request = parseJson(r.request)
+      return request === undefined ? [] : [{ ...r, request }]
     })
   }
 

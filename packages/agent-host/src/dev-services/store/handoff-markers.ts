@@ -1,4 +1,11 @@
 import type Database from 'better-sqlite3'
+import { JsonObject, readJson } from './json.js'
+
+/** The predecessor a stored handoff marker names; null for any other row, or one that cannot be read */
+function handoffFrom(payload: string): string | null {
+  const p = readJson(payload, JsonObject, {})
+  return p.type === 'handoff' && typeof p.fromSessionId === 'string' && p.fromSessionId ? p.fromSessionId : null
+}
 
 /** What the marker messages in a conversation say: a handoff's inheritance, and the notices a session already has */
 export class HandoffMarkers {
@@ -30,12 +37,9 @@ export class HandoffMarkers {
       .all() as { payload: string }[]
     const out = new Set<string>()
     for (const r of rows) {
-      try {
-        const p = JSON.parse(r.payload) as { type?: unknown; fromSessionId?: unknown }
-        if (p.type === 'handoff' && typeof p.fromSessionId === 'string' && p.fromSessionId) out.add(p.fromSessionId)
-      } catch {
-        // A row that cannot be parsed claims nothing — cleanup only holds off when there is a claim
-      }
+      // A row that cannot be parsed claims nothing — cleanup only holds off when there is a claim
+      const from = handoffFrom(r.payload)
+      if (from) out.add(from)
     }
     return out
   }
@@ -73,12 +77,8 @@ export class HandoffMarkers {
       .prepare(`SELECT payload FROM messages WHERE session_id = ? AND kind = 'marker'`)
       .all(sessionId) as { payload: string }[]
     return rows.some((r) => {
-      try {
-        const p = JSON.parse(r.payload) as { type?: unknown; text?: unknown }
-        return p.type === 'notice' && p.text === text
-      } catch {
-        return false
-      }
+      const p = readJson(r.payload, JsonObject, {})
+      return p.type === 'notice' && p.text === text
     })
   }
 
@@ -91,13 +91,6 @@ export class HandoffMarkers {
     const rows = this.db
       .prepare(`SELECT payload FROM messages WHERE session_id = ? AND kind = 'marker'`)
       .all(sessionId) as { payload: string }[]
-    return rows.some((r) => {
-      try {
-        const p = JSON.parse(r.payload) as { type?: unknown; fromSessionId?: unknown }
-        return p.type === 'handoff' && typeof p.fromSessionId === 'string' && !!p.fromSessionId
-      } catch {
-        return false
-      }
-    })
+    return rows.some((r) => handoffFrom(r.payload) !== null)
   }
 }

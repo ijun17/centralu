@@ -53,6 +53,8 @@ import { Router } from './links/router.js'
 import { SshTunnel } from './links/tunnel.js'
 import { storeMirror, storeProjectOrder, storeRegistry } from './links/stored.js'
 import { projectsHome } from './dev-services/project-folder.js'
+import { JsonObject, parseJson, readJson } from './dev-services/store/json.js'
+import { flagSetting } from './dev-services/store/settings.js'
 
 /**
  * Agent Host entry point.
@@ -345,6 +347,10 @@ if (held) {
  */
 const AUTO_UPDATE_CHECK_KEY = 'updates.auto'
 const AUTO_APPLY_UPDATES_KEY = 'updates.autoApply'
+// On by default when nothing has been saved yet: see below
+const autoUpdateCheck = flagSetting(store, AUTO_UPDATE_CHECK_KEY, true)
+// Off unless the person turned it on (#352): installing without a click is asked for, never assumed
+const autoApplyUpdates = flagSetting(store, AUTO_APPLY_UPDATES_KEY, false)
 // Custom themes are files in <data>/themes, watched so a hand edit shows up live (#312, themes.ts)
 const themes = new ThemeFiles(join(dataRoot(), 'themes'), () => events.push({ type: 'themes_changed' }))
 await themes.start().catch((e: Error) => console.error(`[themes] the themes folder is unavailable: ${e.message}`))
@@ -354,11 +360,10 @@ const updates = new UpdateService((status) => events.push({ type: 'update_status
   // is swallowed, leaving it on costs nothing, while leaving it off traps **someone who never once
   // opens settings** on an old version forever — that person is exactly the one most likely to stay
   // stale.
-  readAuto: () => store.appSetting(AUTO_UPDATE_CHECK_KEY) !== 'false',
-  writeAuto: (enabled) => store.setAppSetting(AUTO_UPDATE_CHECK_KEY, String(enabled)),
-  // Off unless the person turned it on (#352): installing without a click is asked for, never assumed
-  readAutoApply: () => store.appSetting(AUTO_APPLY_UPDATES_KEY) === 'true',
-  writeAutoApply: (enabled) => store.setAppSetting(AUTO_APPLY_UPDATES_KEY, String(enabled)),
+  readAuto: autoUpdateCheck.read,
+  writeAuto: autoUpdateCheck.write,
+  readAutoApply: autoApplyUpdates.read,
+  writeAutoApply: autoApplyUpdates.write,
 })
 mgr.useUpdates(updates)
 /*
@@ -374,21 +379,15 @@ mgr.useUpdateApply(updateApply)
  */
 const AUTO_APPLY_AGENT_VERSIONS_KEY = 'agents.autoApplyVersions'
 const AGENT_VERSIONS_SEEN_KEY = 'agents.versionsSeen'
+const autoApplyAgentVersions = flagSetting(store, AUTO_APPLY_AGENT_VERSIONS_KEY, true)
 const agentVersions = new AgentVersionService({
   tools: () => [...adapters.values()].map((a) => ({ tool: a.tool, installedVersion: a.installedVersion?.bind(a) })),
   sessions: mgr,
   // Not listening yet: the first window asks
   publish: (status) => events.push({ type: 'agent_versions', status }),
-  readAutoApply: () => store.appSetting(AUTO_APPLY_AGENT_VERSIONS_KEY) !== 'false',
-  writeAutoApply: (enabled) => store.setAppSetting(AUTO_APPLY_AGENT_VERSIONS_KEY, String(enabled)),
-  readSeen: () => {
-    try {
-      const raw = JSON.parse(store.appSetting(AGENT_VERSIONS_SEEN_KEY) ?? '{}') as unknown
-      return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, string>) : {}
-    } catch {
-      return {}
-    }
-  },
+  readAutoApply: autoApplyAgentVersions.read,
+  writeAutoApply: autoApplyAgentVersions.write,
+  readSeen: () => readJson(store.appSetting(AGENT_VERSIONS_SEEN_KEY), JsonObject, {}) as Record<string, string>,
   writeSeen: (seen) => store.setAppSetting(AGENT_VERSIONS_SEEN_KEY, JSON.stringify(seen)),
 })
 versionsRef.current = agentVersions
@@ -421,12 +420,7 @@ const allowedOrigins = parseAllowedOrigins(process.env.CC_HOST_ALLOWED_ORIGINS) 
  */
 const VIEW_PORTS_KEY = 'apps.viewPorts'
 function parseStoredPortBook(raw: string | null): PortBook | null {
-  if (!raw) return null
-  try {
-    return JSON.parse(raw) as PortBook
-  } catch {
-    return null
-  }
+  return (parseJson(raw) ?? null) as PortBook | null
 }
 const views: ViewHost = new ViewHost({
   secret: httpSecret,

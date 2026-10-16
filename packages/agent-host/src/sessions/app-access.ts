@@ -3,6 +3,7 @@ import { appMcpServerName } from '../apps/contract.js'
 import type { AppRef } from '../apps/external/runtime.js'
 import { TOOL_LIST_WAIT_MS, type AppSessionKey, type OnDemandApps, type SessionAppsHub } from './session-apps.js'
 import { withTimeout } from './with-timeout.js'
+import { readJsonObjects } from '../dev-services/store/json.js'
 
 /**
  * Another project's app tools, on demand (#371 part A) — `find_apps`, `attach_app` and `detach_app`.
@@ -355,21 +356,13 @@ export class AppAccess implements OnDemandApps {
 
 /** A stored list — anything unreadable is dropped rather than trusted (the row is ours, but a hand edit is possible) */
 function parse(raw: string | null): Record_[] {
-  if (!raw) return []
-  try {
-    const v = JSON.parse(raw) as unknown
-    if (!Array.isArray(v)) return []
-    return v.filter(
-      (x): x is Record_ =>
-        !!x &&
-        typeof x === 'object' &&
-        (typeof x.projectId === 'string' || x.projectId === null) &&
-        typeof x.appId === 'string' &&
-        typeof x.server === 'string' &&
-        x.server.startsWith(appMcpServerName('')) &&
-        (x.consent === 'always' || x.consent === 'once' || x.consent === 'none' || x.consent === 'auto'),
-    )
-  } catch {
-    return []
-  }
+  return readJsonObjects<Record_>(
+    raw,
+    (x) =>
+      (typeof x.projectId === 'string' || x.projectId === null) &&
+      typeof x.appId === 'string' &&
+      typeof x.server === 'string' &&
+      x.server.startsWith(appMcpServerName('')) &&
+      (x.consent === 'always' || x.consent === 'once' || x.consent === 'none' || x.consent === 'auto'),
+  )
 }

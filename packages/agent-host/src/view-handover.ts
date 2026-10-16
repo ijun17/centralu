@@ -1,5 +1,6 @@
 import type { InlineViews } from './inline-views.js'
 import type { OpenView, ViewHost } from './views/view-host.js'
+import { JsonObject, readJson } from './dev-services/store/json.js'
 
 /**
  * Open app views across a planned hand-over (#280 option C step 4).
@@ -72,12 +73,7 @@ export function restoreViewHandover(
   const raw = settings.appSetting(VIEW_HANDOVER_KEY)
   if (raw === null) return { restored: 0, skipped: 0 }
   settings.deleteAppSetting(VIEW_HANDOVER_KEY)
-  let record: Partial<HandoverRecord>
-  try {
-    record = JSON.parse(raw) as Partial<HandoverRecord>
-  } catch {
-    return { restored: 0, skipped: 0 }
-  }
+  const record = readJson(raw, JsonObject, {}) as Partial<HandoverRecord>
   const list = Array.isArray(record?.views) ? record.views : []
   // A record from the future (a clock moved back) is as unknown as an old one
   const age = typeof record?.at === 'number' ? now - record.at : Number.NaN
