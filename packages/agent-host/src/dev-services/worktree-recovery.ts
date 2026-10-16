@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { isSessionId } from '@cc/protocol'
 import { dataRoot } from '../data-dir.js'
+import { dataBytes, removeData } from './data-folder.js'
 import { gitFilterListings, runGit, type GitFilterListings, type GitTrust, type RunGitOptions } from './git-exec.js'
 import { assertExistingPath } from './path-guard.js'
 
@@ -20,10 +21,6 @@ export function worktreeRecoveryDir(sessionId: string): string {
   return join(dataRoot(), 'worktree-recovery', sessionId)
 }
 
-export async function clearWorktreeRecovery(sessionId: string): Promise<void> {
-  await rm(worktreeRecoveryDir(sessionId), { recursive: true, force: true })
-}
-
 /**
  * Removal in two steps, so a purge never leaves a trash entry without the files it needs (#647). `stage` moves the
  * session's recovery folder aside before the rows go: it fails where a removal would (a file held open on
@@ -36,7 +33,7 @@ export async function stageWorktreeRecoveryRemoval(sessionId: string): Promise<{
   const staged = `${dir}${PURGING}${randomUUID()}`
   await rename(dir, staged)
   return {
-    commit: () => rm(staged, { recursive: true, force: true, maxRetries: 3 }),
+    commit: () => removeData(staged),
     abort: () => rename(staged, dir),
   }
 }
@@ -60,7 +57,7 @@ export async function repairWorktreeRecoveryRemovals(trashed: (sessionId: string
     // One folder that cannot be touched (a file held open on Windows) is left for the next start; the rest go on
     try {
       if (!trashed(sessionId)) {
-        await rm(staged, { recursive: true, force: true, maxRetries: 3 })
+        await removeData(staged)
         continue
       }
       const dir = join(root, sessionId)
@@ -71,7 +68,7 @@ export async function repairWorktreeRecoveryRemovals(trashed: (sessionId: string
       for (const snapshot of await readdir(staged)) {
         if (!existsSync(join(dir, snapshot))) await rename(join(staged, snapshot), join(dir, snapshot))
       }
-      await rm(staged, { recursive: true, force: true, maxRetries: 3 })
+      await removeData(staged)
     } catch (e) {
       console.error(`[trash] recovery folder ${name} left by an interrupted purge was not repaired, retried at the next start: ${(e as Error).message}`)
     }
@@ -315,14 +312,9 @@ export async function saveWorktreeRecovery(sessionId: string, cwd: string, trunk
   }
 }
 
+/** How much one session's recovery snapshots take — the trash shows what it holds (#204). 0 when it has none */
 export async function worktreeRecoveryBytes(sessionId: string): Promise<number> {
-  const dir = worktreeRecoveryDir(sessionId)
-  if (!existsSync(dir)) return 0
-  const sizes = await Promise.all((await readdir(dir, { recursive: true })).map(async (name) => {
-    const s = await stat(join(dir, name))
-    return s.isFile() ? s.size : 0
-  }))
-  return sizes.reduce((a, b) => a + b, 0)
+  return dataBytes(worktreeRecoveryDir(sessionId))
 }
 
 /** Restore the root branch/worktree; keep patches available if applying them is no longer feasible. */

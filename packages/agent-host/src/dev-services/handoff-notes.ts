@@ -1,8 +1,9 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { lstat, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isProjectId, isSessionId } from '@cc/protocol'
 import { dataRoot } from '../data-dir.js'
+import { dataBytes } from './data-folder.js'
 
 /**
  * Where a handoff note lives (#142) — **under the data folder**,
@@ -52,8 +53,7 @@ export function handoffNotePath(projectId: string, sessionId: string): string {
 
 /** How much one session's note takes — the trash shows what it holds (#204). 0 when it has none */
 export async function handoffNoteBytes(projectId: string, sessionId: string): Promise<number> {
-  const s = await lstat(handoffNotePath(projectId, sessionId)).catch(() => null)
-  return s?.isFile() ? s.size : 0
+  return dataBytes(handoffNotePath(projectId, sessionId))
 }
 
 /** Writes the note and returns its absolute path. The host is always the writer — an agent never writes into this folder */

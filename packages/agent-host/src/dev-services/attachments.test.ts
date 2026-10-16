@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, writeFile, mkdir, rm, utimes } from 'node:fs/promises'
+import { chmod, mkdtemp, readdir, symlink, writeFile, mkdir, rm, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -46,6 +46,35 @@ describe('sweepAttachments', () => {
     expect(await sweepAttachments(900)).toBe(1)
     expect(await readdir(join(dir, 'attachments', 's1'))).toEqual(['new.png'])
     expect(await readdir(join(dir, 'attachments', 's2'))).toEqual(['mid.png'])
+  })
+
+  // chmod cannot stop a removal on Windows, nor for root; a link needs a privilege on Windows
+  const posixUser = process.platform !== 'win32' && process.getuid?.() !== 0 ? it : it.skip
+
+  posixUser('a file that cannot be removed still counts, so the sweep goes on to the next oldest (#841)', async () => {
+    await put('held', 'old.png', 400, 300)
+    await put('s2', 'mid.png', 400, 200)
+    await put('s1', 'new.png', 400, 100)
+    const held = join(dir, 'attachments', 'held')
+    await chmod(held, 0o500)
+    try {
+      // total 1200, cap 900: old cannot go, so mid goes in its place
+      expect(await sweepAttachments(900)).toBe(1)
+      expect(await readdir(held)).toEqual(['old.png'])
+      expect(await readdir(join(dir, 'attachments', 's2'))).toEqual([])
+      expect(await readdir(join(dir, 'attachments', 's1'))).toEqual(['new.png'])
+    } finally {
+      await chmod(held, 0o700)
+    }
+  })
+
+  posixUser('a link in an attachment folder is not counted toward the cap by the size of what it points at', async () => {
+    const outside = join(dir, 'big.bin')
+    await writeFile(outside, Buffer.alloc(5000, 1))
+    await put('s1', 'a.png', 100, 60)
+    await symlink(outside, join(dir, 'attachments', 's1', 'linked.png'))
+    expect(await sweepAttachments(1000)).toBe(0)
+    expect((await readdir(join(dir, 'attachments', 's1'))).sort()).toEqual(['a.png', 'linked.png'])
   })
 
   it('quietly returns 0 even when the folder does not exist yet', async () => {

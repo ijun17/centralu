@@ -1,7 +1,8 @@
-import { mkdir, writeFile, rm } from 'node:fs/promises'
+import { lstat, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { isSessionId, type Attachment } from '@cc/protocol'
 import { dataRoot } from '../data-dir.js'
+import { dataBytes, removeData } from './data-folder.js'
 
 /**
  * Attachment storage (D-1).
@@ -62,21 +63,12 @@ export async function saveAttachment(
 
 /** Removed with the session when it is deleted for good from the trash (#204) — moving it to the trash keeps them */
 export async function clearAttachments(sessionId: string): Promise<void> {
-  await rm(sessionDir(sessionId), { recursive: true, force: true })
+  await removeData(sessionDir(sessionId))
 }
 
 /** How much one session's attachments take — the trash shows what it holds (#204). 0 when there are none */
 export async function attachmentBytes(sessionId: string): Promise<number> {
-  const { readdir, lstat } = await import('node:fs/promises')
-  const dir = sessionDir(sessionId)
-  const names = await readdir(dir).catch(() => [] as string[])
-  let total = 0
-  for (const name of names) {
-    // lstat: a link counts as itself — the folder is ours, and nothing here should follow a link out of it
-    const s = await lstat(join(dir, name)).catch(() => null)
-    if (s?.isFile()) total += s.size
-  }
-  return total
+  return dataBytes(sessionDir(sessionId))
 }
 
 /** The cap on total size — once images started persisting (#40), they could accumulate without limit. The owner's decision: 500MB */
@@ -88,7 +80,6 @@ export const ATTACHMENTS_MAX_BYTES = 500 * 1048576
  * person this policy exists.
  */
 export async function sweepAttachments(maxBytes: number = ATTACHMENTS_MAX_BYTES): Promise<number> {
-  const { readdir, stat, rm: rmFile } = await import('node:fs/promises')
   const files: { path: string; size: number; mtime: number }[] = []
   let dirs: string[]
   try {
@@ -101,7 +92,8 @@ export async function sweepAttachments(maxBytes: number = ATTACHMENTS_MAX_BYTES)
     const names = await readdir(dir).catch(() => [] as string[])
     for (const name of names) {
       const p = join(dir, name)
-      const s = await stat(p).catch(() => null)
+      // lstat, as in `dataBytes`: a link is not an attachment, and what it points at is not ours to count
+      const s = await lstat(p).catch(() => null)
       if (s?.isFile()) files.push({ path: p, size: s.size, mtime: s.mtimeMs })
     }
   }
@@ -111,7 +103,8 @@ export async function sweepAttachments(maxBytes: number = ATTACHMENTS_MAX_BYTES)
   let removed = 0
   for (const f of files) {
     if (total <= maxBytes) break
-    await rmFile(f.path, { force: true }).catch(() => {})
+    // A file that could not be removed still takes its space: the sweep goes on to the next oldest (#841)
+    if (!(await rm(f.path, { force: true }).then(() => true, () => false))) continue
     total -= f.size
     removed++
   }
