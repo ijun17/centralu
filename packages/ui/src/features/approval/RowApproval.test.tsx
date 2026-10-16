@@ -114,7 +114,7 @@ describe('RowApproval', () => {
   it('a card that offers more shows Open, still saying what it asks', () => {
     const agent: ApprovalDetail = { kind: 'agent_start', project: { id: 'p', name: 'site' }, tool: 'Codex', preset: 'safe', text: 'write the parser' }
     const a = render(waiting(agent), { settled: true })
-    expect(a.text).toContain('Start agent Start Codex in site, with safe permissions, to write the parser?')
+    expect(a.text).toContain('Start agent Start Codex in &quot;site&quot;, with safe permissions, to write the parser?')
     expect(button(a.html, 'approve-open')).not.toBeNull()
     expect(button(a.html, 'approve-allow')).toBeNull()
 

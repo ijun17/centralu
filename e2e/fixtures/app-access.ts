@@ -132,7 +132,7 @@ export function appAccessTests(): void {
     )
     const card = page.getByTestId('approval-card')
     await expect(card).toHaveAttribute('data-kind', 'project_access')
-    await expect(card.getByTestId('approval-detail')).toHaveText('Let website use the app Counter from ops?')
+    await expect(card.getByTestId('approval-detail')).toHaveText('Let "website" use the app "Counter" from "ops"?')
     await expect(card).toContainText("The app's tools attach to this session while it uses them.")
     await expect(card.getByTestId('approve-allow')).toBeVisible()
     await expect(card.getByTestId('approve-deny')).toBeVisible()

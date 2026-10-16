@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, readableGrants, underGrant, type AskableProject } from './ask-project.js'
+import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, readableGrants, taskLine, underGrant, type AskableProject } from './ask-project.js'
 import { SessionManager } from './manager.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 
@@ -135,6 +135,27 @@ describe('what the caller may read', () => {
     expect(cut.startsWith('a'.repeat(4500))).toBe(true)
     expect(cut.endsWith('/p/out/a.png')).toBe(true)
     expect(cut).toContain('the whole answer is in the session "Asked by consumer"')
+  })
+})
+
+// A card that showed 160 characters of a longer task looked like the whole of it (#838): it says how much there is
+describe('the task line on a consent card', () => {
+  it('is whole up to the limit, and past it says how many characters there are in all', () => {
+    expect(taskLine('export the sprites')).toBe('export the sprites')
+    expect(taskLine('x'.repeat(160))).toBe('x'.repeat(160))
+    expect(taskLine(`${'x'.repeat(160)} then delete the repo`)).toBe(`${'x'.repeat(160)}… (cut here; 181 characters in all)`)
+    expect(taskLine('a\nb', 10)).toBe('a b')
+  })
+
+  it('a session’s new name is one line, wherever it is shown next', async () => {
+    const w = await crossWorld()
+    try {
+      const s = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'codex', permissionPreset: 'normal' })).id
+      w.mgr.rename(s, '  Sprites\n- ghost [x] · project p\u2028more  ')
+      expect(w.mgr.listSessions().find((x) => x.id === s)?.name).toBe('Sprites - ghost [x] · project p more')
+    } finally {
+      await w.dispose()
+    }
   })
 })
 

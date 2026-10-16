@@ -282,7 +282,7 @@ export function rowApprovalTests() {
       await expect(page.getByTestId(`sidebar-approve-allow-${id}`)).toHaveCount(0)
     }
     // Still says what it asks
-    await expect(page.getByTestId(`sidebar-approval-what-${agents}`)).toContainText('Start Codex in alpha')
+    await expect(page.getByTestId(`sidebar-approval-what-${agents}`)).toContainText('Start Codex in "alpha"')
 
     await openInbox(page)
     for (const id of [agents, files, asking]) {

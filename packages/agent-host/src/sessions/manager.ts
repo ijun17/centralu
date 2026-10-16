@@ -5596,7 +5596,8 @@ export class SessionManager {
   rename(sessionId: string, name: string): void {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
-    const next = name.trim()
+    // One line (#838): a name goes into the model's text (list_sessions, cards, reports), where a line break started a line of its own
+    const next = oneLineText(name)
     // An empty name becomes a row in the list that points at nothing at all — accepting it would create a
     // nameless session
     if (!next) throw Object.assign(new Error('Session name cannot be empty'), { code: 'internal' })

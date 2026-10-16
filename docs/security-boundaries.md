@@ -155,6 +155,10 @@ and `normal` it has these controls ([agent-host.md](agent-host.md) §1.2):
   time X asks Y; only "always" is remembered (store `project_consents`), and Settings revokes it.
   The card names the selected session as well as its project. Without consent no task is delivered.
   The card is the boundary, not the tool's description: a caller steered by injected text can at most raise a card.
+  The card's names (projects, the session, the machine, an app) are JSON-quoted on one line, as the handoff card's
+  are, and the task is one line that says how many characters it has in all when it is cut at 160 (#838): a name
+  could otherwise read as the card's own words, and a cut task looked like the whole of it. start_agent's card quotes
+  its project and branch the same way.
 - **What the delegated session runs is gated by its own project's permissions.** The existing session keeps its own
   preset and project trust; its approvals stand as cards in that session. Under a person's global bypass it runs as freely as that person's
   own sessions there — the owner's decision is that the delegated session may change code in its own
@@ -329,6 +333,10 @@ start a `normal` session carrying it without a card.
 is stored when the person presses it. A proposal under the name of one still waiting is refused, never replaced: a
 second one used to swap the command or text the person was reading for one they never saw. The person dismisses the
 first to free the name.
+
+Names reach the model's text on one line (#838): `list_sessions` keeps a session's, project's and machine's name to
+one line, a session's new name is made one line when it is set, and a builder's role prompt quotes its app's manifest
+name, so a name with a line break cannot add a row or a rule of its own.
 
 A reader's `read_session` without an id lists its project's sessions; that is why it has no
 `list_sessions`. Its read tools see only its own project (`orchestratorToolsFor(…, ownProject)` in `sessions/orchestrator-seat.ts`), and

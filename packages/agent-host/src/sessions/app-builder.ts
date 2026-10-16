@@ -1,5 +1,5 @@
 import { relative } from 'node:path'
-import type { ExternalAppInfo } from '@cc/protocol'
+import { frameField, type ExternalAppInfo } from '@cc/protocol'
 
 /**
  * The role prompt for a building session (M4 C-2) — the guidance a session that creates and edits
@@ -17,13 +17,14 @@ import type { ExternalAppInfo } from '@cc/protocol'
  * every resume (the same physical mechanism as a coordinating session).
  */
 export function builderRole(app: ExternalAppInfo, cwd: string): string {
-  const name = app.name ?? app.appId
+  // The manifest's name is the app author's text: one line and quoted, so it cannot add a rule of its own (#838)
+  const name = JSON.stringify(frameField(app.name ?? app.appId))
   const rel = relative(cwd, app.dir) || '.'
   const where =
     app.projectId === null
       ? `This is a user-folder app (used across several projects). Your working folder is the app folder: ${app.dir}`
       : `This is this project's app (committed to the repository and shared with the team). App folder: ${rel}/ (${app.dir})`
-  return `You are the session that builds the Centralu app "${name}" (id ${app.appId}). ${where}
+  return `You are the session that builds the Centralu app ${name} (id ${app.appId}). ${where}
 The person uses this app as a screen, and an agent calls the same tools as functions. When the
 person says "fix this here," you are the one who fixes it.
 

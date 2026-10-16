@@ -44,7 +44,7 @@ export function askProjectTests(): void {
       })
       const card = page.locator('[data-testid="approval-card"][data-kind="project_access"]')
       await expect(card).toBeVisible()
-      await expect(card.getByTestId('approval-detail')).toHaveText('Let consumer ask toolkit / Sprites to export the sprites?')
+      await expect(card.getByTestId('approval-detail')).toHaveText('Let "consumer" ask "toolkit" / "Sprites" to export the sprites?')
       await expect(card.getByTestId('approve-allow')).toContainText('Allow once')
       await expect(card.getByTestId('approve-always')).toContainText('Always for this pair')
       await expect(card.getByTestId('approve-deny')).toContainText('Deny')
@@ -75,13 +75,13 @@ export function askProjectTests(): void {
         })
       await ask('xp-u', false)
       const card = page.locator('[data-testid="approval-card"][data-kind="project_access"]')
-      await expect(card.getByTestId('approval-detail')).toHaveText('Let consumer ask toolkit (not trusted) to export the sprites?')
+      await expect(card.getByTestId('approval-detail')).toHaveText('Let "consumer" ask "toolkit" (not trusted) to export the sprites?')
       await expect(card.getByTestId('approval-untrusted')).toContainText('You have not trusted toolkit.')
       await page.keyboard.press('n')
       await expect(card).toHaveCount(0)
 
       await ask('xp-t', true)
-      await expect(card.getByTestId('approval-detail')).toHaveText('Let consumer ask toolkit to export the sprites?')
+      await expect(card.getByTestId('approval-detail')).toHaveText('Let "consumer" ask "toolkit" to export the sprites?')
       await expect(card.getByTestId('approval-untrusted')).toHaveCount(0)
     })
 
@@ -102,7 +102,7 @@ export function askProjectTests(): void {
         },
       })
       const card = page.locator('[data-testid="approval-card"][data-kind="project_access"]')
-      await expect(card.getByTestId('approval-detail')).toHaveText('Let consumer ask cc on Windows PC / Sprites to export the sprites?')
+      await expect(card.getByTestId('approval-detail')).toHaveText('Let "consumer" ask "cc" on "Windows PC" / "Sprites" to export the sprites?')
       await expect(card.getByTestId('approve-always')).toHaveCount(0)
       await expect(card).toContainText('Nothing is remembered for a project on another machine')
       // The letter that answers "always" does nothing on this card
@@ -195,7 +195,7 @@ export function askProjectTests(): void {
       await emit(page, caller, { type: 'state_change', state: 'working' })
       await agentCard(page, caller, consumer, 'ag-1')
       const card = page.locator('[data-testid="approval-card"][data-kind="agent_start"]')
-      await expect(card.getByTestId('approval-detail')).toHaveText('Start Codex in consumer, with normal permissions, to write the parser?')
+      await expect(card.getByTestId('approval-detail')).toHaveText('Start Codex in "consumer", with normal permissions, to write the parser?')
       await expect(card.getByTestId('approve-allow')).toContainText('Allow once')
       await expect(card.getByTestId('approve-always')).toContainText('Always for this session')
       await expect(card.getByTestId('approve-always-project')).toContainText('Always for this project')

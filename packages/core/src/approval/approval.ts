@@ -1,4 +1,4 @@
-import { NO_PATH, alwaysAllowKey, matchesAllowRule, type ApprovalDetail, type ApprovalScope } from '@cc/protocol'
+import { NO_PATH, alwaysAllowKey, matchesAllowRule, oneLineText, type ApprovalDetail, type ApprovalScope } from '@cc/protocol'
 
 /**
  * Approval policy (FR-3). "Don't block it, make it visible" — approving in place is not forbidden; only the
@@ -87,10 +87,19 @@ export function suggestMatcher(command: string): string {
  */
 export function projectAccessQuestion(d: Extract<ApprovalDetail, { kind: 'project_access' }>): string {
   // An untrusted target is named as such wherever the question stands (#382): what runs there follows that trust
-  const named = d.to.machine ? `${d.to.name} on ${d.to.machine}` : d.to.name
+  const named = d.to.machine ? `${quoted(d.to.name)} on ${quoted(d.to.machine)}` : quoted(d.to.name)
   const to = d.to.trusted === false ? `${named} (not trusted)` : named
-  if (d.access === 'apps') return `Let ${d.from.name} use ${d.app ? `the app ${d.app.name} from ` : 'apps from '}${to}?`
-  return `Let ${d.from.name} ask ${to}${d.session ? ` / ${d.session.name}` : ''} to ${d.text}?`
+  if (d.access === 'apps') return `Let ${quoted(d.from.name)} use ${d.app ? `the app ${quoted(d.app.name)} from ` : 'apps from '}${to}?`
+  return `Let ${quoted(d.from.name)} ask ${to}${d.session ? ` / ${quoted(d.session.name)}` : ''} to ${d.text}?`
+}
+
+/**
+ * A name in a card's sentence, quoted on one line (#838), as the handoff card quotes its names: a project, session,
+ * app or machine name is text another program or an agent may have chosen (a linked machine's, an auto-named
+ * session), and unquoted it could read as the card's own words ("toolkit to read nothing? Allow").
+ */
+function quoted(name: string): string {
+  return JSON.stringify(oneLineText(name, 120))
 }
 
 /**
@@ -98,7 +107,7 @@ export function projectAccessQuestion(d: Extract<ApprovalDetail, { kind: 'projec
  * notification: which agent, on what, and with which permissions (the caller's own, which is the most it can have).
  */
 export function agentStartQuestion(d: Extract<ApprovalDetail, { kind: 'agent_start' }>): string {
-  const where = d.worktree ? `${d.project.name}, in a new worktree on ${d.worktree.branch},` : `${d.project.name},`
+  const where = d.worktree ? `${quoted(d.project.name)}, in a new worktree on ${quoted(d.worktree.branch)},` : `${quoted(d.project.name)},`
   // A model the person's setting chose for the difficulty the caller named (#729) says so: the person picked it, not the agent
   const model = d.model ? ` (${d.model}${d.difficulty ? `, your choice for ${d.difficulty} work` : ''})` : ''
   return `Start ${d.tool}${model} in ${where} with ${d.preset} permissions, to ${d.text}?`

@@ -26,9 +26,14 @@ export const ANSWER_MAX_CHARS = 6000
 const ANSWER_HEAD_CHARS = 4500
 const ANSWER_TAIL_CHARS = 1200
 
-/** The task as one line on the consent card: the card asks "Let A ask B to <this>?" */
+/**
+ * The task as one line on the consent card: the card asks "Let A ask B to <this>?". Past `max` characters it says how
+ * much there is in all (#838), as `handoff_session`'s card does: a card that showed 160 characters of a longer task
+ * looked like the whole of it, and what followed went unread.
+ */
 export function taskLine(task: string, max = 160): string {
-  return oneLineText(task, max)
+  const flat = oneLineText(task)
+  return flat.length > max ? `${flat.slice(0, max)}… (cut here; ${flat.length} characters in all)` : flat
 }
 
 /**

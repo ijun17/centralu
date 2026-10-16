@@ -1,3 +1,4 @@
+import { frameField } from '@cc/protocol'
 import type { BusyChoice, ChildRunResult, AskProjectResult, OrchestratorTools, RoutedCard } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput } from '../apps/contract.js'
 import { interruptionWords } from './interruptions.js'
@@ -20,7 +21,8 @@ export async function listSessionsText(tools: OrchestratorTools, caller: ToolCal
       .map(
         (s) =>
           // A linked machine's session says where it runs (#82 phase 4), and why the row is only what was last known
-          `- ${s.name} [${s.sessionId}] · project ${s.project}${s.machine ? ` on ${s.machine}` : ''} · ${s.tool} · ${s.waitingOn === 'question' ? 'waiting on a question' : s.state}` +
+          // Names on one line (#838): a session's name is set by rename or an auto-name, and a line break in it made a row of its own
+          `- ${frameField(s.name)} [${s.sessionId}] · project ${frameField(s.project)}${s.machine ? ` on ${frameField(s.machine)}` : ''} · ${s.tool} · ${s.waitingOn === 'question' ? 'waiting on a question' : s.state}` +
           (s.away ? ` · ${s.away}` : '') +
           // A turn cut short by the network or a quit looks like any session at rest (#698)
           (s.interruption ? ` · ${interruptionWords(s.interruption)}` : '') +

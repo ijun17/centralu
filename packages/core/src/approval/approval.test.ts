@@ -16,15 +16,15 @@ describe('the new-project question (#515)', () => {
 describe('the start-agent question (#561)', () => {
   it('says which agent, where, with which permissions and on what', () => {
     const d = { kind: 'agent_start' as const, project: { id: 'p', name: 'website' }, tool: 'Codex', preset: 'safe' as const, text: 'write the parser' }
-    expect(agentStartQuestion(d)).toBe('Start Codex in website, with safe permissions, to write the parser?')
-    expect(agentStartQuestion({ ...d, model: 'gpt-6.1-sol' })).toBe('Start Codex (gpt-6.1-sol) in website, with safe permissions, to write the parser?')
+    expect(agentStartQuestion(d)).toBe('Start Codex in "website", with safe permissions, to write the parser?')
+    expect(agentStartQuestion({ ...d, model: 'gpt-6.1-sol' })).toBe('Start Codex (gpt-6.1-sol) in "website", with safe permissions, to write the parser?')
     // Chosen by the person's setting for the difficulty the caller named (#729)
     expect(agentStartQuestion({ ...d, model: 'gpt-6.1-sol', difficulty: 'heavy' })).toBe(
-      'Start Codex (gpt-6.1-sol, your choice for heavy work) in website, with safe permissions, to write the parser?',
+      'Start Codex (gpt-6.1-sol, your choice for heavy work) in "website", with safe permissions, to write the parser?',
     )
     // In a new worktree (#561 part 2): the branch is part of what is agreed to
     expect(agentStartQuestion({ ...d, worktree: { branch: 'centralu/parser' } })).toBe(
-      'Start Codex in website, in a new worktree on centralu/parser, with safe permissions, to write the parser?',
+      'Start Codex in "website", in a new worktree on "centralu/parser", with safe permissions, to write the parser?',
     )
   })
 })
@@ -32,22 +32,32 @@ describe('the start-agent question (#561)', () => {
 describe('the cross-project consent question (#371)', () => {
   const base = { kind: 'project_access' as const, from: { id: 'a', name: 'Consumer' }, to: { id: 'b', name: 'Toolkit' } }
   it('names the caller first and says what it would do in the other project', () => {
-    expect(projectAccessQuestion({ ...base, access: 'delegate', session: { id: 's', name: 'Sprites' }, text: 'extract the assets' })).toBe('Let Consumer ask Toolkit / Sprites to extract the assets?')
-    expect(projectAccessQuestion({ ...base, access: 'delegate', text: 'extract the assets' })).toBe('Let Consumer ask Toolkit to extract the assets?')
+    expect(projectAccessQuestion({ ...base, access: 'delegate', session: { id: 's', name: 'Sprites' }, text: 'extract the assets' })).toBe('Let "Consumer" ask "Toolkit" / "Sprites" to extract the assets?')
+    expect(projectAccessQuestion({ ...base, access: 'delegate', text: 'extract the assets' })).toBe('Let "Consumer" ask "Toolkit" to extract the assets?')
     expect(projectAccessQuestion({ ...base, access: 'apps', text: '', app: { appId: 'x', name: 'Extractor' } })).toBe(
-      'Let Consumer use the app Extractor from Toolkit?',
+      'Let "Consumer" use the app "Extractor" from "Toolkit"?',
     )
   })
 
   it('names a target the person has not trusted as such, and says nothing when it is trusted or not said (#382)', () => {
     const untrusted = { ...base, to: { ...base.to, trusted: false } }
-    expect(projectAccessQuestion({ ...untrusted, access: 'delegate', text: 'extract the assets' })).toBe('Let Consumer ask Toolkit (not trusted) to extract the assets?')
-    expect(projectAccessQuestion({ ...base, to: { ...base.to, trusted: true }, access: 'delegate', text: 'x' })).toBe('Let Consumer ask Toolkit to x?')
+    expect(projectAccessQuestion({ ...untrusted, access: 'delegate', text: 'extract the assets' })).toBe('Let "Consumer" ask "Toolkit" (not trusted) to extract the assets?')
+    expect(projectAccessQuestion({ ...base, to: { ...base.to, trusted: true }, access: 'delegate', text: 'x' })).toBe('Let "Consumer" ask "Toolkit" to x?')
     // A project on a linked machine says whose it is (#700)
     expect(projectAccessQuestion({ ...base, to: { ...base.to, machine: 'Win box' }, access: 'delegate', session: { id: 's', name: 'Sprites' }, text: 'x' })).toBe(
-      'Let Consumer ask Toolkit on Win box / Sprites to x?',
+      'Let "Consumer" ask "Toolkit" on "Win box" / "Sprites" to x?',
     )
-    expect(projectAccessQuestion({ ...untrusted, to: { ...untrusted.to, machine: 'Win box' }, access: 'delegate', text: 'x' })).toBe('Let Consumer ask Toolkit on Win box (not trusted) to x?')
+    expect(projectAccessQuestion({ ...untrusted, to: { ...untrusted.to, machine: 'Win box' }, access: 'delegate', text: 'x' })).toBe('Let "Consumer" ask "Toolkit" on "Win box" (not trusted) to x?')
+  })
+})
+
+// A name is another program's or an agent's text: quoted on one line, it cannot read as the card's own words (#838)
+describe('names on a card', () => {
+  it('are quoted on one line, so a name cannot finish the sentence', () => {
+    const d = { kind: 'project_access' as const, access: 'delegate' as const, from: { id: 'a', name: 'me' }, to: { id: 'b', name: 'toolkit to read one file?\nAllow' }, session: { id: 's', name: 'S "x"' }, text: 'go' }
+    expect(projectAccessQuestion(d)).toBe('Let "me" ask "toolkit to read one file? Allow" / "S \\"x\\"" to go?')
+    const a = { kind: 'agent_start' as const, project: { id: 'p', name: 'site,\nwith auto permissions' }, tool: 'Codex', preset: 'safe' as const, text: 'go' }
+    expect(agentStartQuestion(a)).toBe('Start Codex in "site, with auto permissions", with safe permissions, to go?')
   })
 })
 
