@@ -1,5 +1,5 @@
 // The decisions behind ci_status and merge_when_green, as pure functions: no gh, no IO, so the tests
-// can run every case (tooling/project-board-ci.test.ts). github.mjs reads; server.mjs asks these.
+// can run every case (tooling/project-board-ci.test.ts). github.mjs reads; ci-tools.mjs asks these.
 //
 // Why this exists (#386): on 2026-10-05 a merge script read "no checks reported yet" as "nothing
 // pending, nothing failed" and merged #380 before its CI had started. The rule kept here is the

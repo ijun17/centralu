@@ -1,7 +1,7 @@
 // The repository's rules for public text, as pure functions (no gh, no IO): what goes into an issue,
-// a comment, a pull request or a commit message (#386 step 2). server.mjs reads the rules' sources
-// from the repository (the commit conventions, the pull request template) and the private word list
-// from the app's data folder, and hands them in; the answers are lists of problems, in words for
+// a comment, a pull request or a commit message (#386 step 2). contribute-tools.mjs reads the rules'
+// sources from the repository (the commit conventions, the pull request template) and the private word
+// list from the app's data folder, and hands them in; the answers are lists of problems, in words for
 // the reader, and an empty list means the text may go.
 import { attributionLines } from './ci.mjs'
 

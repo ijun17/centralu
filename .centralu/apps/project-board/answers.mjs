@@ -1,7 +1,7 @@
 // The owner's answers to "Needs decision" items, kept on this machine only (pure: no IO).
 //
 // The repository is public and the owner answers in their own words and language, so an answer from
-// the screen never goes to GitHub as written. It is saved in this app's data folder (server.mjs,
+// the screen never goes to GitHub as written. It is saved in this app's data folder (decision-tools.mjs,
 // through centralu.readJson/writeJson: outside the repository), and an agent records the decision on
 // the issue in English with `comment`, then marks the answer recorded with that comment's address.
 // Until then the owner can edit or delete it.

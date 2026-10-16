@@ -86,7 +86,7 @@ export function safeHref(raw, base) {
 
 /**
  * An image the view may load: https on GitHub's own image hosts only, the ones the view's CSP
- * declares (server.mjs VIEW_CSP). Anything else becomes a link, so the view never asks another
+ * declares (view-tools.mjs VIEW_CSP). Anything else becomes a link, so the view never asks another
  * server for anything.
  */
 export function imageSrc(raw) {

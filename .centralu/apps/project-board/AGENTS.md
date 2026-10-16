@@ -69,13 +69,13 @@ tools agents use to record the owner's answers.
   page, because the view's CSP allows inline script (docs/apps.md §6.4).
 - **Images** load only from GitHub (`github.com`, `*.githubusercontent.com`): the view's resource
   declares those two as `resourceDomains` in `_meta.ui.csp` on its contents (`viewResource` in
-  server.mjs; the runtime's `uiResource` puts nothing there), and markdown.mjs turns an image on any
+  view-tools.mjs; the runtime's `uiResource` puts nothing there), and markdown.mjs turns an image on any
   other host into a link. An image GitHub will not hand the view (a private repository's upload)
   becomes a link too.
 - **"Needs decision"** (the header's second button) lists the items with that Status, each with the
   Question and Recommendation of its latest `## Decision needed (summary, …)` comment, and
   "Answered" when a `Decision (owner, …)` comment came after it (`decisionSummary` in markdown.mjs,
-  `decision_summaries` in server.mjs).
+  `decision_summaries` in decision-tools.mjs).
 - **The owner's answer never goes to GitHub as written** (owner decision, 2026-10-12: the
   repository is public, and the owner answers in their own words and language). The answer box
   under an item whose Status is the decision status saves it with `save_answer` ("Save answer" or
@@ -104,7 +104,7 @@ tools agents use to record the owner's answers.
 ## CI and merging (#386)
 
 The repository's contribution procedure, kept as code so every agent follows it the same way. The
-decisions are pure functions in `ci.mjs`; `github.mjs` reads GitHub; `server.mjs` puts them together.
+decisions are pure functions in `ci.mjs`; `github.mjs` reads GitHub; `ci-tools.mjs` puts them together.
 `project.json` `ci` names the workflows that hold the required checks, the issue listing known
 intermittent failures (#368), and how long a merge may wait.
 
@@ -270,12 +270,24 @@ step shows on the screen.
 
 - `centralu.app.json` — the manifest. `id` is `project-board` and must stay equal to this folder's
   name. `home` is the tool Centralu calls to open the screen.
-- `server.mjs` — the MCP server. Change it.
+- `server.mjs` — the MCP server: it only registers the tools, from the families below, in `ORDER` (the
+  order agents and the screen list them). A new tool goes in its family's `tools` and in `ORDER`.
+- The tool families, each a `tools` table of `{ config, handler }`: `view-tools.mjs` (`show` and the
+  screen's resource), `board-tools.mjs` (list_items, get_items, set_item_fields, add_item),
+  `reader-tools.mjs` (read_item, read_discussion), `decision-tools.mjs` (the owner's saved answers,
+  decision_summaries, list_needs_decision), `contribute-tools.mjs` (comment, edit_comment, file_issue,
+  open_pr, commit_check, rebase_stack), `ci-tools.mjs` (ci_status, merge_when_green,
+  read_failed_job), `release-tools.mjs` (release_status, release), `words-tools.mjs` (private_words,
+  edit_private_words).
+- What the families share: `config.mjs` (project.json, read once at start), `board.mjs` (the cached
+  board, an item's line in answers, `itemOf` for every reference), `threads.mjs` (the reader's cached
+  threads), `reply.mjs` (answers and failures), `handlers.mjs` (`oneAtATime`, and `answering`,
+  `forView` and `serially`, which every handler goes through).
 - `github.mjs` — every call to GitHub, through `gh`. `project.json` — which project, and the CI settings.
 - `ci.mjs` — the CI and merge decisions as pure functions (no gh, no IO).
 - `markdown.mjs` — GitHub Markdown to safe HTML for the reader, and the decision summary parser (pure).
 - `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
-- `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; server.mjs keeps them in the data folder).
+- `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; decision-tools.mjs keeps them in the data folder).
 - `stack.mjs`, `git.mjs` — rebase_stack's procedure, and local git through `execFile`.
 - `release.mjs`, `versions.mjs` — the release procedure, and the version rules (pure).
 - `cache.mjs`, `util.mjs` — the short cache the board and the threads share, and small helpers
@@ -365,5 +377,5 @@ refusal comes back as that error: show it plainly instead of retrying.
 - Centralu restarts the app once at the end of your turn if this folder changed; calls in progress
   finish first. Agents in other sessions see changed tools from their next turn (Claude) or next
   thread (Codex).
-- Errors in `server.mjs` are printed with file and line. A failure inside `runtime/` is almost always
-  a wrong argument from `server.mjs` — look at the first frame outside `runtime/`.
+- Errors in `server.mjs` and the modules it imports are printed with file and line. A failure inside
+  `runtime/` is almost always a wrong argument from them — look at the first frame outside `runtime/`.
