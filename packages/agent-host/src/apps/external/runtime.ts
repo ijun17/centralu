@@ -306,6 +306,24 @@ type Life = {
 
 type AppTool = { tool: Tool; visibility: Audience[] }
 
+/**
+ * Why an app may not run right now (`ExternalApps.blocker`) — the one answer every door asks: a call, a start, a
+ * check, a reload, and the list's status. `reason` is worded for the person or agent who reads it verbatim.
+ */
+type Blocker = { kind: 'invalid' | 'untrusted' | 'unconfirmed' | 'removing' | 'failed'; reason: string }
+
+/**
+ * Clears what a run of failures left behind — the count, the backoff, the reason, the stop — and the remembered spec
+ * generation. Every door that gives an app a fresh start passes through here: Restart, a check, a reload on changed
+ * files, a restored version, a changed secret. The generation goes too: it describes the code that last connected,
+ * and the SDK warns that a stale one fails (a modern verdict against a server that went back to the 2025 SDK) or,
+ * worse, succeeds silently forever (a legacy verdict against an upgraded server keeps speaking `initialize`). Only
+ * Restart used to clear it, so a check or a reload after switching SDKs kept connecting the old way.
+ */
+function resetLife(L: Life): void {
+  Object.assign(L, { failures: 0, retryAt: 0, lastError: null, gaveUp: false, verdict: undefined })
+}
+
 /** A currently open host → app call */
 type OpenRun = {
   entry: AppEntry
@@ -352,6 +370,18 @@ const APP_ID_PROBLEM: Record<NewAppIdProblem, string> = {
   'server-prefix': `ids starting with "${APP_SERVER_PREFIX}" are how apps attach to sessions — pick another`,
   builtin: 'that id is reserved — pick another',
 }
+
+/** Where a check reports what stops the app from running (`check`) */
+const CHECK_WHERE: Record<Blocker['kind'], CheckFinding['where']> = {
+  invalid: 'centralu.app.json',
+  untrusted: 'trust',
+  unconfirmed: 'review',
+  removing: 'app',
+  failed: 'start',
+}
+
+/** The reason an app with an invalid manifest does not run — the same words for every door */
+const invalidReason = (e: AppEntry): string => `This app's manifest is invalid: ${e.error ?? 'unknown error'}`
 
 /** An app that cannot be called — the reason is exactly the message */
 export class AppUnavailableError extends Error {
@@ -847,12 +877,9 @@ export class ExternalApps {
     }
 
     // Checks that end before anything is sent to the app — do not even need to start a process
-    if (!e.manifest) return done('rejected', null, `This app's manifest is invalid: ${e.error}`)
     const open = caller.kind === 'session' && this.sessionBoundaryOpen(caller.sessionId)
-    if (!e.scope.trusted && !open) return done('rejected', null, "This app's project is not trusted, so Centralu does not call its apps")
-    const held = this.held(e)
-    if (held) return done('rejected', null, held)
-    if (e.life.gaveUp) return done('rejected', null, `This app stopped after failing ${this.timing.maxFailures} times in a row`)
+    const blocked = this.blocker(e, { boundaryOpen: open })
+    if (blocked) return done('rejected', null, blocked.reason)
     let parent: OpenRun | null = null
     if (caller.kind === 'app') {
       parent = this.openRuns.get(caller.parentRunId) ?? null
@@ -995,7 +1022,7 @@ export class ExternalApps {
    */
   async homeView(ref: AppRef): Promise<{ tool: string; resourceUri: string }> {
     const e = this.require(ref)
-    if (!e.manifest) throw new AppUnavailableError(`This app's manifest is invalid: ${e.error ?? 'unknown error'}`)
+    if (!e.manifest) throw new AppUnavailableError(invalidReason(e))
     const home = e.manifest.home
     if (!home) throw new AppUnavailableError('This app has no screen: its manifest names no home tool')
     const all = await this.use(e, async () => e.life.tools ?? [])
@@ -1028,7 +1055,7 @@ export class ExternalApps {
   async restart(ref: AppRef): Promise<void> {
     const e = this.require(ref)
     await this.halt(e, 'restart requested')
-    Object.assign(e.life, { failures: 0, retryAt: 0, lastError: null, gaveUp: false, verdict: undefined })
+    resetLife(e.life)
     // A stopped app had been detached from sessions — announce so it can attach again. A crashed app's
     // reason is also cleared, changing its status in the list (A-8)
     this.appsChanged()
@@ -1143,17 +1170,10 @@ export class ExternalApps {
       return report(null)
     }
     for (const w of e.warnings) findings.push({ level: 'warning', where: 'centralu.app.json', message: w })
-    if (!e.manifest) {
-      findings.push({ level: 'problem', where: 'centralu.app.json', message: e.error ?? 'the manifest is invalid' })
-      return report(null)
-    }
-    if (!e.scope.trusted) {
-      findings.push({ level: 'problem', where: 'trust', message: "this app's project is not trusted, so the app does not start — trust the project to check it" })
-      return report(null)
-    }
-    const held = this.held(e)
-    if (held) {
-      findings.push({ level: 'problem', where: 'review', message: held })
+    // A check gives a stopped app another start (see above), so only what a check cannot clear stops it here
+    const blocked = this.blocker(e, { fresh: true })
+    if (blocked) {
+      findings.push({ level: 'problem', where: CHECK_WHERE[blocked.kind], message: blocked.kind === 'invalid' ? (e.error ?? 'the manifest is invalid') : blocked.reason })
       return report(null)
     }
 
@@ -1163,7 +1183,7 @@ export class ExternalApps {
       if (e.life.inflight === 0) {
         const wasStopped = e.life.gaveUp
         void this.halt(e, 'check: starting again from the files on disk')
-        Object.assign(e.life, { failures: 0, retryAt: 0, lastError: null, gaveUp: false })
+        resetLife(e.life)
         if (wasStopped) this.appsChanged()
         restarted = true
         break
@@ -1350,7 +1370,7 @@ export class ExternalApps {
   updateSecret(ref: AppRef, name: string, value: string | null): void {
     const e = this.require(ref)
     if (value !== null) {
-      if (!e.manifest) throw new AppUnavailableError(`This app's manifest is invalid: ${e.error ?? 'unknown error'}`)
+      if (!e.manifest) throw new AppUnavailableError(invalidReason(e))
       if (!(e.manifest.secrets ?? []).includes(name)) throw new AppUnavailableError(`This app does not declare a secret named ${name}`)
       const problem = secretValueProblem(value)
       if (problem) throw new AppUnavailableError(problem)
@@ -1358,7 +1378,7 @@ export class ExternalApps {
     this.secrets.set(this.appKey(ref), name, value)
     const L = e.life
     const fresh = () => {
-      if (!L.proc && !L.starting) Object.assign(L, { failures: 0, retryAt: 0, lastError: null, gaveUp: false })
+      if (!L.proc && !L.starting) resetLife(L)
       this.appsChanged()
     }
     if (L.proc || L.starting) void this.haltWhenDrained(e, 'a secret changed; the next need starts it with the new value').then(fresh)
@@ -1430,7 +1450,7 @@ export class ExternalApps {
     // A version the person chose — reads that version's manifest right now even if the building session is mid-turn
     this.rescanUser({ now: ref.appId })
     const e = this.require(ref)
-    Object.assign(e.life, { failures: 0, retryAt: 0, lastError: null, gaveUp: false })
+    resetLife(e.life)
     void this.reloadIfChanged(ref, { startIfStopped: true, why: 'a previous version was restored' })
     this.appsChanged()
     return this.info(e)
@@ -1536,7 +1556,8 @@ export class ExternalApps {
     if (running) return running
     const p = (async () => {
       const e = this.find(ref)
-      if (!e || !e.manifest || !e.scope.trusted || this.disposed) return false
+      // A changed folder gives a stopped app another chance (below), so only what that cannot clear stops it here
+      if (!e || this.blocker(e, { fresh: true }) || this.disposed) return false
       const L = e.life
       if (L.stamp === null || folderFingerprint(e.dir) === L.stamp) return false
       if (!opts.startIfStopped && !L.proc?.alive) return false
@@ -1546,7 +1567,7 @@ export class ExternalApps {
       const pid = L.proc?.child.pid
       L.proc?.log.note(`reloading: ${opts.why}`)
       void this.halt(e, opts.why)
-      Object.assign(L, { failures: 0, retryAt: 0, lastError: null, gaveUp: false })
+      resetLife(L)
       this.appsChanged()
       try {
         await this.use(e, async () => {})
@@ -1575,7 +1596,7 @@ export class ExternalApps {
    * `reloadIfChanged`).
    */
   private async startNewManifest(e: AppEntry, why: string): Promise<void> {
-    if (!e.manifest || !e.scope.trusted || this.held(e) || this.disposed) return
+    if (this.blocker(e) || this.disposed) return
     try {
       await this.use(e, async () => {})
       console.error(`[apps] ${this.label(e.ref)} started on its new manifest (${why})`)
@@ -1632,19 +1653,8 @@ export class ExternalApps {
    */
   private ensureRunning(e: AppEntry, boundaryOpen = false): Promise<AppProcess> {
     const L = e.life
-    if (!e.manifest) throw new AppUnavailableError(`The app cannot start — its manifest is invalid: ${e.error}`)
-    if (!e.scope.trusted && !boundaryOpen) {
-      throw new AppUnavailableError("This app's project is not trusted, so the app does not start — trust the project and it will")
-    }
-    // An imported app never starts before a person reviews and enables it (E-3) — checked on every call: if server or uses changes after being enabled, it is blocked starting from the next startup
-    const held = this.held(e)
-    if (held) throw new AppUnavailableError(held)
-    if (this.removing.has(this.holdKey(e.ref))) throw new AppUnavailableError('This app is being removed')
-    if (L.gaveUp) {
-      throw new AppUnavailableError(
-        `The app stopped after failing ${this.timing.maxFailures} times in a row — fix it, then restart it.\n${L.lastError ?? ''}`,
-      )
-    }
+    const blocked = this.blocker(e, { boundaryOpen })
+    if (blocked) throw new AppUnavailableError(blocked.reason)
     if (L.proc?.alive) return Promise.resolve(L.proc)
     if (L.starting) return L.starting
 
@@ -1984,10 +1994,44 @@ export class ExternalApps {
     return { secrets: declared.map((name) => ({ name, set: stored.has(name) })) }
   }
 
+  /**
+   * Why this app may not run right now, or null — **the one rule** a call, a start, a check, a reload and the list's
+   * status all read, so none of them can let through what another refuses. In order:
+   *
+   *   invalid      the manifest did not pass validation
+   *   untrusted    its project is not trusted — unless the calling session's boundary is open (`boundaryOpen`)
+   *   unconfirmed  an imported app the person has not reviewed and enabled (E-3) — checked on every call: if server
+   *                or uses changes after being enabled, it is blocked starting from the next startup
+   *   removing     its folder is moving to the trash (`removeUserApp`) — nothing starts it meanwhile
+   *   failed       it stopped after `maxFailures` failures in a row. `fresh` leaves this out: for a door that is
+   *                about to give the app a fresh start itself (a check, a reload on changed files)
+   */
+  private blocker(e: AppEntry, opts: { boundaryOpen?: boolean; fresh?: boolean } = {}): Blocker | null {
+    if (!e.manifest) return { kind: 'invalid', reason: invalidReason(e) }
+    if (!e.scope.trusted && !opts.boundaryOpen) {
+      return { kind: 'untrusted', reason: "This app's project is not trusted, so the app does not start — trust the project and it will" }
+    }
+    const held = this.held(e)
+    if (held) return { kind: 'unconfirmed', reason: held }
+    if (this.removing.has(this.holdKey(e.ref))) return { kind: 'removing', reason: 'This app is being removed' }
+    if (e.life.gaveUp && !opts.fresh) {
+      return {
+        kind: 'failed',
+        reason: `The app stopped after failing ${this.timing.maxFailures} times in a row — fix it, then restart it.\n${e.life.lastError ?? ''}`,
+      }
+    }
+    return null
+  }
+
   private status(e: AppEntry): ExternalAppInfo['status'] {
-    if (!e.manifest) return 'invalid'
-    if (!e.scope.trusted) return 'untrusted'
-    if (this.held(e)) return 'unconfirmed'
+    const blocked = this.blocker(e)
+    /*
+     * An app being removed has no status of its own: its folder is gone a moment later, and the protocol's list of
+     * statuses is read by a UI that may be a build older than this host (a swap), which would refuse a new value.
+     * It reads as what it is until its folder moves: running while `removeUserApp` stops it, then stopped — or
+     * failed, if it had stopped after repeated failures (`blocker` names removal before that).
+     */
+    if (blocked && blocked.kind !== 'removing') return blocked.kind
     const L = e.life
     if (L.gaveUp) return 'failed'
     if (L.proc?.alive) return 'running'

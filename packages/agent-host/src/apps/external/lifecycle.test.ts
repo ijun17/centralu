@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -149,6 +149,66 @@ describe('the spec generation is remembered per app (S-4)', () => {
     expect(methodsOf(second)).not.toContain('server/discover')
     expect(methodsOf(second)).toContain('tools/list')
     expect(hostLog('notes')).toMatch(/ready: pid \d+ era modern \(2026-07-28\) via cached verdict/)
+  })
+
+  /*
+   * The remembered generation describes the code that last connected. A door that starts the app again from new
+   * files — a check, a reload on a changed folder — probes again, as Restart always did: the files may have moved to
+   * the other SDK generation, and a stale verdict either fails the start or keeps speaking the old protocol.
+   */
+  const methodsOf = (pid: number) => records('notes').filter((r) => r.t === 'method' && r.pid === pid).map((r) => r.method)
+
+  it('a check starts the app from the files on disk and probes the generation again', async () => {
+    plant('notes')
+    make()
+    await rt.tools(ref('notes'))
+    await rt.check(ref('notes'))
+    const [first, second] = starts('notes')
+    expect(second, 'the check restarted the app').toBeDefined()
+    expect(methodsOf(first!.pid)).toContain('server/discover')
+    expect(methodsOf(second!.pid)).toContain('server/discover')
+  })
+
+  it("a reload on a changed folder at the builder's turn end probes the generation again", async () => {
+    const dir = plant('notes')
+    make({ turnEndDebounceMs: 10 })
+    await rt.tools(ref('notes'))
+    writeFileSync(join(dir, 'notes.txt'), 'edited by the builder')
+    rt.builderTurnEnded(ref('notes'))
+    await until(() => starts('notes').length, (n) => n === 2)
+    const second = starts('notes')[1]!.pid
+    await until(() => methodsOf(second), (m) => m.includes('tools/list'))
+    expect(methodsOf(second)).toContain('server/discover')
+  })
+})
+
+describe('an app being removed', () => {
+  it('refuses a call while its folder moves — a policy refusal, not a failed call', async () => {
+    plantApp(join(dataRoot, 'apps'), 'scratch', {
+      server: { command: process.execPath, args: [FIXTURE, '--log', join(appLogs, 'scratch.jsonl'), '--mode', 'normal'] },
+    })
+    make()
+    const user = { projectId: null, appId: 'scratch' }
+    await rt.tools(user)
+    const removal = rt.removeUserApp(user)
+    const out = await rt.call(user, 'echo', { text: 'hi' }, { kind: 'view' })
+    await removal
+    expect(out).toMatchObject({ status: 'rejected', error: 'This app is being removed' })
+  })
+
+  it('reads as it was while its folder moves — an app stopped after repeated failures stays failed', async () => {
+    plantApp(join(dataRoot, 'apps'), 'broken', {
+      server: { command: process.execPath, args: [FIXTURE, '--log', join(appLogs, 'broken.jsonl'), '--mode', 'crash-on-start'] },
+    })
+    make({ maxFailures: 1 })
+    const user = { projectId: null, appId: 'broken' }
+    await expect(rt.tools(user)).rejects.toThrow()
+    const listed = () => rt.list().find((a) => a.appId === 'broken')?.status
+    expect(listed()).toBe('failed')
+    const removal = rt.removeUserApp(user)
+    expect(listed()).toBe('failed')
+    await removal
+    expect(listed()).toBeUndefined()
   })
 })
 
