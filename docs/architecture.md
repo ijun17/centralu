@@ -57,7 +57,7 @@ events to core's reducer and the host's copy and compares what a reconnect hands
 In the packages, the apps and the npm launcher, reading `process.platform` (or `os.platform()`) and comparing
 anything with an OS name (`=== 'win32'`, `case 'darwin':`) is a lint error outside `PLATFORM_MODULES` in
 `eslint.config.js`: `os.ts` (the host's questions named for what differs: `hasPs`, `clonesFiles`,
-`locksRunningPrograms`, `pathsOf`, `installedCopyPath`), `env-path.ts` and `tool-launch.ts` (finding and starting a
+`locksRunningPrograms`, `pathsOf`, `installedCopyPath`, `systemTool`), `env-path.ts` and `tool-launch.ts` (finding and starting a
 tool), `dev-services/kill-tree.ts` (ending a process tree; `hasProcessGroups`), `dev-services/terminal.ts` (the
 shell), `adapters/claude/exe-link.ts` (Claude Code's Windows start; `windowsStart`), `dev-services/project-folder.ts` (a new
 project's default location, `~/Centralu`, and folder-name rules, #515) and the launcher's `platform.mjs`.

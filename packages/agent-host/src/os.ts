@@ -27,6 +27,32 @@ export function hasPs(platform: Platform = HOST_PLATFORM): boolean {
   return platform !== 'win32'
 }
 
+/** Where Windows lives when `%SystemRoot%` cannot be used */
+const DEFAULT_SYSTEM_ROOT = 'C:\\Windows'
+
+/** A whole Windows path from a drive's root (`C:\…`): not relative, not drive-relative (`C:x`), not a share */
+function driveAbsolute(p: string | undefined): p is string {
+  return typeof p === 'string' && /^[A-Za-z]:[\\/]/.test(p)
+}
+
+/**
+ * A Windows system program by its full path under `%SystemRoot%\System32` (taskkill, PowerShell, cmd), so it is
+ * never looked up by name: Windows looks a bare or relative name up in the working directory first, and the host runs
+ * in a project's folder, where a planted `taskkill.exe` would run.
+ *
+ * A `SystemRoot` that is not a whole path from a drive's root is not used: an empty one made `System32\taskkill.exe`
+ * a path relative to the working directory (#428). `C:\Windows` is used instead.
+ */
+export function systemTool(segments: readonly string[], env: Record<string, string | undefined> = process.env): string {
+  const root = driveAbsolute(env.SystemRoot) ? env.SystemRoot : DEFAULT_SYSTEM_ROOT
+  return win32.join(root, 'System32', ...segments)
+}
+
+/** `%ComSpec%` when it is a whole path from a drive's root, else cmd.exe under `systemTool` (the same rule) */
+export function commandInterpreter(env: Record<string, string | undefined> = process.env): string {
+  return driveAbsolute(env.ComSpec) ? env.ComSpec : systemTool(['cmd.exe'], env)
+}
+
 /** `cp -c` clones a folder with APFS's clonefile: macOS only. */
 export function clonesFiles(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'darwin'

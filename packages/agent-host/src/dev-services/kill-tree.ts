@@ -1,6 +1,6 @@
 import { execFile, execFileSync } from 'node:child_process'
-import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { systemTool } from '../os.js'
 import { descendants } from './proc-table.js'
 
 /**
@@ -155,7 +155,7 @@ export function hasProcessGroups(platform: NodeJS.Platform = process.platform): 
 const REAL_OS: KillOs = {
   platform: process.platform,
   taskkill: (pid) => {
-    const exe = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe')
+    const exe = systemTool(['taskkill.exe'])
     execFileSync(exe, ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', timeout: 5000, windowsHide: true })
   },
 }
@@ -352,7 +352,7 @@ const LIST_PROCESSES =
   "Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() } }"
 const REAL_LEFTOVER_OS: LeftoverOs = {
   listProcesses: async () => {
-    const exe = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+    const exe = systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'])
     const { stdout } = await runFile(exe, ['-NoProfile', '-NonInteractive', '-Command', LIST_PROCESSES], { timeout: 10_000, windowsHide: true })
     return parseWinProcs(stdout)
   },

@@ -1462,6 +1462,11 @@ tests. What differs from macOS and Linux, and what holds it:
   manifest command are spawned by the absolute path found on PATH (`tool-launch.ts` `programPath`,
   `resolveCommand`; tests in `tool-launch.test.ts`), and PATH lookups skip relative entries
   (`env-path.ts`, and `node`/`code` in the Rust shell).
+- **System programs by their whole path.** taskkill, Windows PowerShell and cmd.exe are named under
+  `%SystemRoot%\System32` (`os.ts` `systemTool`, `commandInterpreter`; `%ComSpec%` for cmd). A `SystemRoot` or
+  `ComSpec` that is not a whole path from a drive's root (empty, relative, drive-relative like `C:x`, rooted without
+  a drive) is not used and `C:\Windows` is (#428): an empty `SystemRoot` made taskkill's path
+  `System32\taskkill.exe`, which Windows looks up in the working directory, the project's folder (`os.test.ts`).
 - **Tool shims are read, not shelled.** npm and pnpm install a tool as a `.cmd` file, which Node
   starts only through `cmd.exe`, and cmd.exe would read `%`, `^`, `&` and quotes in our arguments
   (JSON, prompts) as its own syntax. The shim is read for the `.js` or `.exe` it starts, and that

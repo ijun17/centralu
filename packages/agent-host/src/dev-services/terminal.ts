@@ -1,8 +1,8 @@
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
-import { win32 } from 'node:path'
 import { whichTool } from '../env-path.js'
+import { commandInterpreter, systemTool } from '../os.js'
 import { PtySlot, type Pty, type PtyModule, type PtyStreamSink, type ShellLaunch } from './pty-slot.js'
 import { idNumber, type TerminalTag } from '../keeper/tags.js'
 
@@ -241,10 +241,6 @@ export type { ShellLaunch } from './pty-slot.js'
 
 type ShellEnv = Record<string, string | undefined>
 
-function systemFolder(env: ShellEnv): string {
-  return win32.join(env.SystemRoot || 'C:\\Windows', 'System32')
-}
-
 /**
  * The shell a terminal tab runs.
  *
@@ -262,7 +258,7 @@ export function interactiveShell(
   if (platform !== 'win32') return { file: shellPath(), args: ['-l'] }
   const pwsh = find('pwsh')
   if (pwsh) return { file: pwsh, args: ['-NoLogo'] }
-  return { file: win32.join(systemFolder(env), 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args: ['-NoLogo'] }
+  return { file: systemTool(['WindowsPowerShell', 'v1.0', 'powershell.exe'], env), args: ['-NoLogo'] }
 }
 
 /**
@@ -277,7 +273,7 @@ export function interactiveShell(
  */
 export function commandShell(command: string, platform: NodeJS.Platform = process.platform, env: ShellEnv = process.env): ShellLaunch {
   if (platform !== 'win32') return { file: shellPath(), args: ['-lc', command] }
-  return { file: env.ComSpec || win32.join(systemFolder(env), 'cmd.exe'), args: `/d /s /c "${command}"` }
+  return { file: commandInterpreter(env), args: `/d /s /c "${command}"` }
 }
 
 /** The shell the user normally uses (macOS and Linux). This is what keeps their aliases and prompt showing up as-is */
