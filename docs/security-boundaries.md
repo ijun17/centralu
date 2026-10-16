@@ -143,7 +143,10 @@ and destination paths use the project path guards, and dependency links outside 
 On Windows the copy is a walk that never follows a link (#849): a junction (pnpm without Developer Mode, npm and
 yarn workspaces) is made again as a junction to the same place in the worktree, and a link whose target is outside
 the project is not made at all. `cpSync` had copied every junction as a real folder, an outside one included, and two
-junctions pointing at each other ended the host.
+junctions pointing at each other ended the host. What is a link is taken from the folder's listing, not from `lstat`:
+a junction to a volume path (`\??\Volume{…}\…`), which needs no privilege to make, is one `lstat` follows and calls a
+folder, because libuv cannot read its target. Such a link is left out, and a folder walked twice, a tree deeper than
+256 folders or one of more than 2,000,000 entries stops the copy.
 This avoids automatic registry access and install scripts in the host. It does not validate dependency code:
 running tests still executes the project's installed dependencies. Missing or incompatible source dependencies
 need the project's explicit setup command or an install by the child under its preset.

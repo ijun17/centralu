@@ -1,4 +1,5 @@
-import { realpathSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { lstatSync, realpathSync, rmdirSync, symlinkSync } from 'node:fs'
 import { lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -122,6 +123,57 @@ describe.skipIf(process.platform !== 'win32')('junctions on Windows', () => {
     expect(real(join(child, 'node_modules', 'one', 'to-two'))).toBe(real(join(child, 'node_modules', 'two')))
     expect(real(join(child, 'node_modules', 'two', 'to-one'))).toBe(real(join(child, 'node_modules', 'one')))
     expect(await readFile(join(child, 'node_modules', 'dep', 'index.js'), 'utf8')).toBe('original')
+  })
+
+  /*
+   * A junction to a volume path (`\??\Volume{…}\…`) instead of a drive letter needs no privilege to make, and libuv
+   * cannot read it: readlink fails and lstat follows it and reports a plain folder. The walk took it for one, and
+   * copied what it led to: a folder outside the project as real files, or, led back into the project's own
+   * node_modules, itself inside itself until the path was too long.
+   */
+  describe('a junction to a volume path, which readlink cannot read', () => {
+    const made: string[] = []
+    // Removed as links: a recursive rm, like lstat, would go through them into what they lead to
+    afterEach(() => {
+      for (const link of made.splice(0)) rmdirSync(link)
+    })
+    const viaVolume = (path: string) => {
+      const mountvol = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'mountvol.exe')
+      const volume = spawnSync(mountvol, [path.slice(0, 2), '/L'], { encoding: 'utf8' }).stdout.trim()
+      expect(volume).toMatch(/^\\\\\?\\Volume\{[0-9a-f-]+\}\\$/i)
+      return volume + real(path).slice(3)
+    }
+    const junction = (target: string, at: string) => {
+      symlinkSync(viaVolume(target), at, 'junction')
+      made.push(at)
+      // What the walk had to go by
+      expect(lstatSync(at).isSymbolicLink()).toBe(false)
+    }
+
+    it('leaves out one that leads outside the project, instead of copying that folder in', async () => {
+      await lock()
+      await installed()
+      const outside = join(root, 'outside')
+      await mkdir(outside)
+      await writeFile(join(outside, 'secret.txt'), 'outside')
+      junction(outside, join(main, 'node_modules', 'elsewhere'))
+
+      await prepareWorktreeDependencies(main, child)
+
+      await expect(lstat(join(child, 'node_modules', 'elsewhere'))).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(await readFile(join(child, 'node_modules', 'dep', 'index.js'), 'utf8')).toBe('original')
+    })
+
+    it('leaves out one that leads back into the copy, instead of copying it into itself', async () => {
+      await lock()
+      await installed()
+      junction(join(main, 'node_modules'), join(main, 'node_modules', 'again'))
+
+      await prepareWorktreeDependencies(main, child)
+
+      await expect(lstat(join(child, 'node_modules', 'again'))).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(await readFile(join(child, 'node_modules', 'dep', 'index.js'), 'utf8')).toBe('original')
+    })
   })
 })
 

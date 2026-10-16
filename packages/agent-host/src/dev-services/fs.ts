@@ -404,34 +404,64 @@ export type CopyTreeOptions = {
  * A junction's target is an absolute path into the project, so it is made again pointing at the same place in the
  * worktree. A relative symlink is kept as written, as `verbatimSymlinks` does elsewhere. A link whose target is not
  * inside `links.from`, once resolved, is not made at all: it would be a window out of the worktree.
+ *
+ * What is a link is taken from the folder's listing, never from `lstat`. libuv lists every reparse point as a link,
+ * but `lstat` calls one a link only when it can read the target: a junction to a volume path (`\??\Volume{…}\…`,
+ * `\??\GLOBALROOT\…`), which anyone can make, came back as a plain folder, and the walk copied what it led to (a
+ * folder outside the project as real files, or the project's own node_modules into itself until the path was too
+ * long). A link whose target cannot be read is left out. A folder already walked, too deep a tree and too many
+ * entries stop the copy as a last guard.
  */
 async function copyTreeWindows(src: string, dst: string, links: { from: string; to: string }): Promise<void> {
   const from = canonicalPath(links.from)
   const to = canonicalPath(links.to)
-  const pending: [string, string][] = [[src, dst]]
+  // `src` itself is a real path (resolveExisting), so lstat can be asked about it
+  const top = await lstat(src)
+  const kind = (e: { isSymbolicLink(): boolean; isDirectory(): boolean; isFile(): boolean }): CopyKind =>
+    e.isSymbolicLink() ? 'link' : e.isDirectory() ? 'folder' : e.isFile() ? 'file' : 'other'
+  const pending: { source: string; target: string; kind: CopyKind; depth: number }[] = [
+    { source: src, target: dst, kind: kind(top), depth: 0 },
+  ]
+  const walked = new Set<string>()
+  let entries = 0
   while (pending.length > 0) {
-    const [source, target] = pending.pop()!
-    const info = await lstat(source)
-    if (info.isSymbolicLink()) {
-      if (!(await copyLinkWindows(source, target, from, to))) {
-        console.error(`[copy] link left out (points outside ${links.from}): ${source}`)
+    const { source, target, kind: what, depth } = pending.pop()!
+    if (++entries > MAX_COPY_ENTRIES) throw new Error(`more than ${MAX_COPY_ENTRIES} entries in ${src}; the copy stopped`)
+    if (what === 'link') {
+      const left = await copyLinkWindows(source, target, from, to)
+      if (left) console.error(`[copy] link left out (${left}): ${source}`)
+    } else if (what === 'folder') {
+      if (depth > MAX_COPY_DEPTH) throw new Error(`${source} is more than ${MAX_COPY_DEPTH} folders deep; the copy stopped`)
+      const real = await realpath(source)
+      if (walked.has(real)) {
+        console.error(`[copy] folder left out (already copied from ${real}): ${source}`)
+        continue
       }
-    } else if (info.isDirectory()) {
+      walked.add(real)
       await mkdir(target, { recursive: true })
-      for (const name of await readdir(source)) pending.push([join(source, name), join(target, name)])
-    } else if (info.isFile()) {
+      for (const entry of await readdir(source, { withFileTypes: true })) {
+        pending.push({ source: join(source, entry.name), target: join(target, entry.name), kind: kind(entry), depth: depth + 1 })
+      }
+    } else if (what === 'file') {
       await copyFile(source, target)
     }
     // Anything else (a socket, a device) is not something a copy can carry
   }
 }
 
-/** Makes the link `source` again at `target`; false when it points outside `from` and was left out */
-async function copyLinkWindows(source: string, target: string, from: string, to: string): Promise<boolean> {
-  const written = await readlink(source)
+type CopyKind = 'link' | 'folder' | 'file' | 'other'
+
+/** Guards against a walk that never ends; a project's node_modules is far below both (this repository: about 10^5) */
+const MAX_COPY_ENTRIES = 2_000_000
+const MAX_COPY_DEPTH = 256
+
+/** Makes the link `source` again at `target`; or says why it was left out */
+async function copyLinkWindows(source: string, target: string, from: string, to: string): Promise<string | null> {
+  const written = await readlink(source).catch(() => null)
+  if (written === null) return 'its target cannot be read'
   // Where it really leads, so a short name or another case of the project folder still counts as inside it
   const real = canonicalPath(resolve(dirname(source), written))
-  if (!isInside(from, real)) return false
+  if (!isInside(from, real)) return `points outside ${from}`
   const folder = await stat(real).then(
     (s) => s.isDirectory(),
     () => true, // dangling: a junction is the only link made without a privilege, and its target may still appear
@@ -439,7 +469,7 @@ async function copyLinkWindows(source: string, target: string, from: string, to:
   if (!isAbsolute(written)) {
     try {
       await symlink(written, target, folder ? 'dir' : 'file')
-      return true
+      return null
     } catch (e) {
       // Without Developer Mode or administrator rights a symlink cannot be made; a junction or a copy can
       if ((e as NodeJS.ErrnoException).code !== 'EPERM') throw e
@@ -447,7 +477,7 @@ async function copyLinkWindows(source: string, target: string, from: string, to:
   }
   if (folder) await symlink(join(to, relative(from, real)), target, 'junction')
   else await copyFile(real, target)
-  return true
+  return null
 }
 
 /** A macOS clonefile copy. Returns false wherever it cannot happen (a different volume, not APFS, not macOS) */
