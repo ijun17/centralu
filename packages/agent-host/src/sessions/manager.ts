@@ -5795,6 +5795,9 @@ export class SessionManager {
     this.store.setAppSetting('orchestrator_tool', tool)
   }
 
+  /** The orchestrator being created (#839): a second ask while it is made waits on this one, never makes another */
+  private orchestratorCreating: Promise<SessionInfo> | null = null
+
   async orchestrator(): Promise<SessionInfo> {
     const known = this.store.orchestratorId()
     if (known) {
@@ -5802,6 +5805,15 @@ export class SessionManager {
       if (m) return m
       // The id remains but the session is gone — the marker alone is cleared, and a new one is created
     }
+    if (this.orchestratorCreating) return this.orchestratorCreating
+    const creating = this.createOrchestrator().finally(() => {
+      if (this.orchestratorCreating === creating) this.orchestratorCreating = null
+    })
+    this.orchestratorCreating = creating
+    return creating
+  }
+
+  private async createOrchestrator(): Promise<SessionInfo> {
 
     /*
      * The tool follows the choice made on the onboarding screen (configureOrchestrator) — hardcoding
