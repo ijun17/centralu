@@ -7,8 +7,9 @@ import type { AppProcess, SpawnSpec } from './app-process.js'
 import { serveBroker } from './broker.js'
 import { BrokerDesk, type BrokerHost, type CapabilityDecisionListed } from './desk.js'
 import { memoryCapabilityBook } from './capabilities.js'
-import { checkScreen, checkTools, formatReport, type AppCheckReport, type CheckFinding, type CheckedTool } from './check.js'
+import type { AppCheckReport } from './check.js'
 import { AppCalls, type AppCallOptions } from './app-calls.js'
+import { checkApp } from './app-check.js'
 import { AppLifecycle } from './app-lifecycle.js'
 import { ChangeReflector } from './change-reflector.js'
 import { ErrorLog } from './error-log.js'
@@ -84,15 +85,6 @@ const APP_ID_PROBLEM: Record<NewAppIdProblem, string> = {
   reserved: `ids starting with "${RESERVED_NAME_PREFIX}" belong to Centralu itself`,
   'server-prefix': `ids starting with "${APP_SERVER_PREFIX}" are how apps attach to sessions — pick another`,
   builtin: 'that id is reserved — pick another',
-}
-
-/** Where a check reports what stops the app from running (`check`) */
-const CHECK_WHERE: Record<Blocker['kind'], CheckFinding['where']> = {
-  invalid: 'centralu.app.json',
-  untrusted: 'trust',
-  unconfirmed: 'review',
-  removing: 'app',
-  failed: 'start',
 }
 
 /** Joins together the text parts of a result (`app-calls.ts`) — leaves through this door */
@@ -600,81 +592,22 @@ export class ExternalApps {
    * again if idle). A check never calls a tool, so it leaves no row in the run ledger.
    */
   async check(ref: AppRef): Promise<AppCheckReport> {
-    const label = appLabel(ref)
-    const findings: CheckFinding[] = []
-    const notes: string[] = []
-    let tools: CheckedTool[] = []
-    const screens: { uri: string; chars: number }[] = []
-    let procLine: string | null = null
-    const report = (stderr: string | null) => formatReport(label, { findings, tools, screens }, { process: procLine, notes, stderr })
-
-    const key = ref.projectId ?? USER_SCOPE
-    // A check is a request to read the current files right now — even a manifest change deferred because it was mid-turn is read now (C-4, `rescan`'s `now`)
-    if (this.scopes.has(key)) this.rescan(key, { now: ref.appId })
-    else this.refresh()
-    const e = this.find(ref)
-    if (!e) {
-      findings.push({ level: 'problem', where: 'app', message: 'there is no such app — its folder was removed or renamed' })
-      return report(null)
-    }
-    for (const w of e.warnings) findings.push({ level: 'warning', where: 'centralu.app.json', message: w })
-    // A check gives a stopped app another start (see above), so only what a check cannot clear stops it here
-    const blocked = this.blocker(e, { fresh: true })
-    if (blocked) {
-      findings.push({ level: 'problem', where: CHECK_WHERE[blocked.kind], message: blocked.kind === 'invalid' ? (e.error ?? 'the manifest is invalid') : blocked.reason })
-      return report(null)
-    }
-
-    // Restarts with the current files — stopped in **the very same tick** the call finishes (see the comment on drain)
-    let restarted = false
-    for (;;) {
-      if (e.life.inflight === 0) {
-        const wasStopped = e.life.gaveUp
-        void this.lifecycle.halt(e, 'check: starting again from the files on disk')
-        resetLife(e.life)
-        if (wasStopped) this.appsChanged()
-        restarted = true
-        break
-      }
-      const busy = e.life.inflight
-      if (!(await this.lifecycle.drain(e, this.timing.checkDrainMs))) {
-        const limit = this.timing.checkDrainMs >= 1000 ? `${Math.round(this.timing.checkDrainMs / 1000)} s` : `${this.timing.checkDrainMs} ms`
-        notes.push(
-          `${busy} call${busy === 1 ? ' was' : 's were'} still running after ${limit}, so the app was not restarted — ` +
-            'this report is about the process that was already running, which may not have your latest code',
-        )
-        break
-      }
-    }
-
-    let stderr: string | null = null
-    try {
-      await this.lifecycle.use(e, async (proc) => {
-        const listed = await proc.client.listTools(undefined, { timeout: this.timing.connectTimeoutMs })
-        proc.tools = listed.tools
-        this.lifecycle.readTools(e, proc)
-        const t = checkTools(e.manifest!, listed.tools)
-        findings.push(...t.findings)
-        tools = t.tools
-        for (const uri of t.screens) {
-          let read: ReadResourceResult | Error
-          try {
-            read = await proc.client.readResource({ uri }, { timeout: this.timing.connectTimeoutMs })
-          } catch (err) {
-            read = err as Error
-          }
-          const s = checkScreen(uri, read)
-          findings.push(...s.findings)
-          screens.push({ uri, chars: s.chars })
-        }
-        procLine = `pid ${proc.child.pid}, ${proc.client.getProtocolEra()} (${proc.client.getNegotiatedProtocolVersion()}), ${restarted ? 'restarted from the files on disk' : 'the process that was already running'}`
-        stderr = proc.log.tail() || null
-      })
-    } catch (err) {
-      // Failed to start — the reason already includes the tail of stderr (AppProcess.start)
-      findings.push({ level: 'problem', where: 'start', message: (err as Error).message })
-    }
-    return report(stderr)
+    return checkApp(
+      {
+        timing: this.timing,
+        lifecycle: this.lifecycle,
+        rescanNow: (r) => {
+          const key = r.projectId ?? USER_SCOPE
+          // A check is a request to read the current files right now — even a manifest change deferred because it was mid-turn is read now (C-4, `rescan`'s `now`)
+          if (this.scopes.has(key)) this.rescan(key, { now: r.appId })
+          else this.refresh()
+        },
+        find: (r) => this.find(r),
+        blocker: (e, opts) => this.blocker(e, opts),
+        appsChanged: () => this.appsChanged(),
+      },
+      ref,
+    )
   }
 
   /**
