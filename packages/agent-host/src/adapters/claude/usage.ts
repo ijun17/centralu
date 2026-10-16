@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { UsageSnapshot, UsageWindow } from '@cc/protocol'
 import { withTimeout } from '../../timing.js'
+import { filled, finite } from '../../json-value.js'
 
 /**
  * Claude usage and limits (FR-9).
@@ -34,8 +35,6 @@ type RawLimit = {
   scope?: { model?: { id?: unknown; display_name?: unknown } | null } | null
 }
 
-const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
-const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 
 /** Response shape to our shape. This is the boundary that keeps the tool's type from leaking out. */
 export function toSnapshot(raw: unknown): UsageSnapshot {
@@ -44,21 +43,21 @@ export function toSnapshot(raw: unknown): UsageSnapshot {
 
   const windows: UsageWindow[] = []
   for (const l of limits) {
-    const kind = str(l.kind)
-    const percent = num(l.percent)
+    const kind = filled(l.kind)
+    const percent = finite(l.percent) ?? null
     if (!kind || percent === null) continue
-    const model = str(l.scope?.model?.display_name) ?? str(l.scope?.model?.id)
+    const model = filled(l.scope?.model?.display_name) ?? filled(l.scope?.model?.id)
     windows.push({
       id: kind,
       label: LABEL[kind] ?? kind,
       percent: Math.max(0, Math.min(100, percent)),
-      resetsAt: str(l.resets_at),
+      resetsAt: filled(l.resets_at),
       scope: model,
     })
   }
 
   return {
-    plan: str(res.subscription_type),
+    plan: filled(res.subscription_type),
     windows,
     // Claude's plan limits have no daily window (measured). Leaving it empty makes the UI collapse that row.
     daily: [],
@@ -121,8 +120,8 @@ export async function readUsageFromAny(
 export function accountFingerprint(status: unknown): string | null {
   const s = (status ?? {}) as { loggedIn?: unknown; orgId?: unknown; email?: unknown }
   if (s.loggedIn !== true) return null
-  const org = str(s.orgId)
-  const email = str(s.email)
+  const org = filled(s.orgId)
+  const email = filled(s.email)
   if (!org || !email) return null
   return createHash('sha256').update(`claude\0${org}\0${email.toLowerCase()}`).digest('hex').slice(0, 32)
 }

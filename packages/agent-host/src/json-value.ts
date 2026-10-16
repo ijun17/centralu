@@ -19,6 +19,12 @@ export const asObj = (v: unknown): Obj => (isObj(v) ? v : {})
 /** A string as it is, empty included; `fallback` ('' unless given) for anything else */
 export const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback)
 
+/** Whether a value is a string with at least one character in it (whitespace counts) */
+export const isFilled = (v: unknown): v is string => typeof v === 'string' && v.length > 0
+
+/** A string with at least one character in it, as it is; null for anything else, an empty string included */
+export const filled = (v: unknown): string | null => (isFilled(v) ? v : null)
+
 /** A string with something other than whitespace in it, trimmed; undefined for anything else, a blank string included */
 export const trimmed = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
 

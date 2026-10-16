@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { handoffNoteDir, handoffNotePath, sweepHandoffNotes, writeHandoffNote } from './handoff-notes.js'
+import { handoffNoteDir, handoffNotePath, sweepHandoffNotes, writeHandoffNote, writeHandoffNoteSync } from './handoff-notes.js'
 
 /**
  * Where a handoff note lives (#142) — under the data folder at
@@ -46,6 +46,30 @@ describe('where a note lives (#142)', () => {
       expect(existsSync(join(data, 'handoff', 'p1', 'gone.md'))).toBe(false) // the orphan was removed
       expect(readdirSync(outside)).toEqual(['NOTES.md']) // what is past the link is untouched
       expect(readFileSync(join(outside, 'NOTES.md'), 'utf8')).toBe('outside text')
+    } finally {
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('a note written over a link (#850)', () => {
+  /*
+   * The note's spot is cleared with the data folder's removal (recursive, so Node honours its Windows retries). A link
+   * sitting there must go as itself: what it points at is not the host's to delete.
+   */
+  it.skipIf(process.platform === 'win32')('removes a link to a folder at the note spot, never the folder it points at', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'cc-handoff-outside-'))
+    try {
+      writeFileSync(join(outside, 'keep.txt'), 'keep')
+      mkdirSync(handoffNoteDir('p1'), { recursive: true })
+      symlinkSync(outside, handoffNotePath('p1', 's1'))
+      await writeHandoffNote('p1', 's1', 'async')
+      expect(readFileSync(handoffNotePath('p1', 's1'), 'utf8')).toBe('async')
+      rmSync(handoffNotePath('p1', 's1'))
+      symlinkSync(outside, handoffNotePath('p1', 's1'))
+      writeHandoffNoteSync('p1', 's1', 'sync')
+      expect(readFileSync(handoffNotePath('p1', 's1'), 'utf8')).toBe('sync')
+      expect(readFileSync(join(outside, 'keep.txt'), 'utf8')).toBe('keep')
     } finally {
       rmSync(outside, { recursive: true, force: true })
     }

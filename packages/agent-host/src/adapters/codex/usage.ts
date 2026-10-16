@@ -1,4 +1,5 @@
 import type { UsageSnapshot, UsageWindow } from '@cc/protocol'
+import { filled, finite } from '../../json-value.js'
 
 /**
  * Codex usage and limits (FR-9).
@@ -11,8 +12,6 @@ import type { UsageSnapshot, UsageWindow } from '@cc/protocol'
  * **Only subscription limits are covered.** credits (additional billing) are out of scope and not read.
  */
 
-const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
-const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 
 /** Builds a human-readable name from the window length (minutes) — the tool does not give a name */
 function labelFor(mins: number | null): string {
@@ -24,10 +23,10 @@ function labelFor(mins: number | null): string {
 
 function toWindow(id: string, raw: unknown): UsageWindow | null {
   const w = (raw ?? {}) as { usedPercent?: unknown; windowDurationMins?: unknown; resetsAt?: unknown }
-  const percent = num(w.usedPercent)
+  const percent = finite(w.usedPercent) ?? null
   if (percent === null) return null
-  const mins = num(w.windowDurationMins)
-  const resets = num(w.resetsAt)
+  const mins = finite(w.windowDurationMins) ?? null
+  const resets = finite(w.resetsAt) ?? null
   return {
     id,
     label: labelFor(mins),
@@ -51,10 +50,10 @@ export function toSnapshot(rateLimits: unknown, usage: unknown): UsageSnapshot {
   const daily: { date: string; tokens: number }[] = []
   for (const b of buckets) {
     const row = (b ?? {}) as { startDate?: unknown; tokens?: unknown }
-    const date = str(row.startDate)
-    const tokens = num(row.tokens)
+    const date = filled(row.startDate)
+    const tokens = finite(row.tokens) ?? null
     if (date && tokens !== null) daily.push({ date, tokens })
   }
 
-  return { plan: str(snap.planType), windows, daily }
+  return { plan: filled(snap.planType), windows, daily }
 }

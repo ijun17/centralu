@@ -1,3 +1,4 @@
+import { rmSync } from 'node:fs'
 import { lstat, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -30,4 +31,12 @@ export async function dataBytes(path: string): Promise<number> {
  */
 export async function removeData(path: string): Promise<void> {
   await rm(path, { recursive: true, force: true, maxRetries: 3 })
+}
+
+/**
+ * `removeData` without an await, for a write that must not yield (`writeHandoffNoteSync`). `recursive` is what makes
+ * Node honour `maxRetries` at all: without it the option is ignored.
+ */
+export function removeDataSync(path: string): void {
+  rmSync(path, { recursive: true, force: true, maxRetries: 3 })
 }

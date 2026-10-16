@@ -1,9 +1,9 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdir, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { isProjectId, isSessionId } from '@cc/protocol'
 import { dataRoot } from '../data-dir.js'
-import { dataBytes } from './data-folder.js'
+import { dataBytes, removeData, removeDataSync } from './data-folder.js'
 
 /**
  * Where a handoff note lives (#142) — **under the data folder**,
@@ -61,7 +61,7 @@ export async function writeHandoffNote(projectId: string, sessionId: string, tex
   const path = handoffNotePath(projectId, sessionId)
   await mkdir(handoffNoteDir(projectId), { recursive: true })
   // Whatever is already there is removed first (#104) — a link sitting at that spot would have the write follow it
-  await rm(path, { force: true })
+  await removeData(path)
   await writeFile(path, text, 'utf8')
   return path
 }
@@ -74,7 +74,7 @@ export async function writeHandoffNote(projectId: string, sessionId: string, tex
 export function writeHandoffNoteSync(projectId: string, sessionId: string, text: string): string {
   const path = handoffNotePath(projectId, sessionId)
   mkdirSync(handoffNoteDir(projectId), { recursive: true })
-  rmSync(path, { force: true })
+  removeDataSync(path)
   writeFileSync(path, text, 'utf8')
   return path
 }
@@ -112,7 +112,7 @@ export async function sweepHandoffNotes(owned: (sessionId: string) => boolean, p
       if (!e.isFile() || !e.name.endsWith('.md')) continue
       const owner = e.name.slice(0, -'.md'.length)
       if (owned(owner)) continue
-      await rm(join(dir, e.name), { force: true }).catch(() => {})
+      await removeData(join(dir, e.name)).catch(() => {})
     }
   }
 }
