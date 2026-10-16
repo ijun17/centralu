@@ -1,5 +1,6 @@
 import { NO_PATH, type ApprovalDetail, type BackgroundTask, type NormalizedEvent, type RequestInput, type SessionGoal, type SubagentStep } from '@cc/protocol'
 import { asObj, finite, str } from '../../json-value.js'
+import { toolResultEvent } from '../tool-result.js'
 import { noticeWords } from './notices.js'
 
 /**
@@ -58,6 +59,17 @@ function resultSummary(item: Record<string, unknown>): string {
     }
   }
   return ''
+}
+
+/**
+ * Whether a completed tool item went through (#843). Every status but `completed` says it did not: a command or a
+ * file change the person declined ends `declined` (generated v2 `CommandExecutionStatus`, `PatchApplyStatus`), a
+ * collab call `interrupted` (`CollabAgentToolCallStatus`), and any of them `failed`. Only `failed` was read, so a
+ * declined command or edit closed its card as green. A dynamic tool also says `success: false`.
+ */
+export function codexItemOk(item: Record<string, unknown>): boolean {
+  const status = str(item.status)
+  return status !== 'failed' && status !== 'declined' && status !== 'interrupted' && item.success !== false
 }
 
 /**
@@ -574,18 +586,10 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
         return path ? [{ type: 'message_image', sessionId, mime: '', data: '', path }] : []
       }
       const s = itemSummary(item)
-      // The card shows the first 2,000 characters; the result's record is all of it (#221)
-      const output = resultSummary(item)
-      const out: NormalizedEvent[] = [
-        {
-          type: 'tool_result',
-          sessionId,
-          callId: str(item.id),
-          ok: str(item.status) !== 'failed',
-          summary: output.slice(0, 2000),
-          ...(output ? { output } : {}),
-        },
-      ]
+      // The card shows the opening; the result's record is all of it (#221). A declined or interrupted item usually
+      // carries no output, so its card says which it was rather than fail blank (#843)
+      const ending = str(item.status) === 'declined' ? 'Declined' : str(item.status) === 'interrupted' ? 'Interrupted' : ''
+      const out: NormalizedEvent[] = [toolResultEvent(sessionId, str(item.id), codexItemOk(item), resultSummary(item) || ending)]
       // If a file was actually changed, announce it for conflict detection and highlighting (FR-2, FR-5)
       if (s.paths.length > 0) out.push({ type: 'files_touched', sessionId, paths: s.paths })
       return out

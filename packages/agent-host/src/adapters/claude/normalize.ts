@@ -1,4 +1,5 @@
 import type { NormalizedEvent, RequestInput, SessionActivity, TokenUsage } from '@cc/protocol'
+import { toolResultEvent } from '../tool-result.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { ClaudeBackgroundTracker } from './background-tracker.js'
 import { ClaudeGoalTracker } from './goal-tracker.js'
@@ -387,15 +388,12 @@ export function normalizeMessage(
     for (const block of content) {
       if (str(block.type) === 'tool_result') {
         const c = block.content
-        const output = agentDone ?? resultOutput(c)
-        out.push({
-          type: 'tool_result',
-          sessionId,
-          callId: str(block.tool_use_id),
-          ok: block.is_error !== true,
-          summary: agentDone?.slice(0, 300) ?? (typeof c === 'string' ? c : JSON.stringify(c ?? '')).slice(0, 300),
-          ...(output ? { output } : {}),
-        })
+        /*
+         * The card reads the answer as the record does (#843): a list of blocks used to be cut out of its JSON, so a
+         * card, and every session reading it (read_session, recall, the handoff record), got `[{"type":"text",…` or
+         * an image's base64 instead of the text.
+         */
+        out.push(toolResultEvent(sessionId, str(block.tool_use_id), block.is_error !== true, agentDone ?? resultOutput(c)))
         /*
          * An image carried in a tool result (#40). This is where one arrives when a screenshot is
          * taken or an image file is Read — the measured shape:
@@ -795,14 +793,7 @@ export class ClaudeStreamNormalizer {
        * one field.) So the whole of it is the result's record, as for a foreground agent.
        */
       const output = agentReport(str(m.summary), agentStats(usage.tool_uses, usage.duration_ms, status))
-      const done: NormalizedEvent = {
-        type: 'tool_result',
-        sessionId: this.sessionId,
-        callId,
-        ok: status === 'completed',
-        summary: output.slice(0, 300),
-        ...(output ? { output } : {}),
-      }
+      const done = toolResultEvent(this.sessionId, callId, status === 'completed', output)
       if (!this.textStreamed && !this.reasoningStreamed) return [...tasks, done]
       this.deferred.push(done)
       return tasks

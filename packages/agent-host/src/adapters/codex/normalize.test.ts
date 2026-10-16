@@ -127,6 +127,17 @@ describe('streaming and tool calls', () => {
     expect(out[0]).toMatchObject({ type: 'tool_result', ok: false })
   })
 
+  it('a declined command or edit, and an interrupted agent call, close as not ok and say so (#843)', () => {
+    const declined = n('item/completed', { item: { type: 'commandExecution', id: 'e', status: 'declined', command: 'rm -rf build', aggregatedOutput: null } })
+    expect(declined[0]).toMatchObject({ type: 'tool_result', ok: false, summary: 'Declined' })
+    const edit = n('item/completed', { item: { type: 'fileChange', id: 'f', status: 'declined', changes: [{ path: 'src/a.ts', diff: '+1', kind: { type: 'update' } }] } })
+    expect(edit[0]).toMatchObject({ type: 'tool_result', ok: false, summary: 'Declined' })
+    const agent = n('item/completed', { item: { type: 'collabAgentToolCall', id: 'c', tool: 'wait', status: 'interrupted' } })
+    expect(agent[0]).toMatchObject({ type: 'tool_result', ok: false, summary: 'Interrupted' })
+    const dynamic = n('item/completed', { item: { type: 'dynamicToolCall', id: 'd', tool: 't', status: 'completed', success: false } })
+    expect(dynamic[0]).toMatchObject({ type: 'tool_result', ok: false })
+  })
+
   /*
    * An MCP call's answer is carried in a **different place** from commandExecution (result and
    * error). Because that place was not read, a failed MCP card was red with not a single

@@ -4,6 +4,7 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
+import { RESULT_SUMMARY_CHARS } from '../tool-result.js'
 import { ClaudeStreamNormalizer, approvalDetail, normalizeMessage, toolSummary } from './normalize.js'
 
 const SID = 's1'
@@ -157,6 +158,28 @@ describe('tool calls (the actual shape from the spike)', () => {
     expect(out[0]).toMatchObject({ type: 'tool_result', callId: 'tu1', ok: true, summary: 'M0_SPIKE_OK' })
     const err = n({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'nope', is_error: true }] } })
     expect(err[0]).toMatchObject({ ok: false })
+  })
+
+  it('a result of text blocks reads as its text on the card, not as their JSON (#843)', () => {
+    const out = n({
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'tu1',
+            content: [{ type: 'text', text: 'Answer from the session' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aWJs' } }],
+          },
+        ],
+      },
+    })
+    expect(out[0]).toMatchObject({ type: 'tool_result', summary: 'Answer from the session', output: 'Answer from the session' })
+  })
+
+  it('cuts a card at the same length as every other tool, and keeps the whole answer (#843)', () => {
+    const long = 'x'.repeat(RESULT_SUMMARY_CHARS + 500)
+    const out = n({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: long }] } })
+    expect(out[0]).toMatchObject({ summary: long.slice(0, RESULT_SUMMARY_CHARS), output: long })
   })
 
   /*
@@ -441,8 +464,8 @@ describe('streamed thinking is not repeated from the finished message', () => {
 })
 
 /*
- * A tool call is kept whole (#221). The card's summary stays as it was — a result's first 300 characters, a file
- * edit's path — and the record goes in `output` and `input`.
+ * A tool call is kept whole (#221). The card's summary stays as it was — a result's opening (`RESULT_SUMMARY_CHARS`), a
+ * file edit's path — and the record goes in `output` and `input`.
  */
 describe('the whole record of a tool call (#221)', () => {
   const resultOf = (content: unknown, extra: Record<string, unknown> = {}) =>
@@ -451,11 +474,11 @@ describe('the whole record of a tool call (#221)', () => {
       output?: string
     }
 
-  it('a result keeps its whole output, and the card still shows the first 300 characters', () => {
-    const log = `${'compiling…\n'.repeat(100)}error TS2322: the conclusion is at the end`
+  it('a result keeps its whole output, and the card still shows its opening', () => {
+    const log = `${'compiling…\n'.repeat(300)}error TS2322: the conclusion is at the end`
     const result = resultOf(log)
-    expect(log.length).toBeGreaterThan(300)
-    expect(result.summary).toBe(log.slice(0, 300))
+    expect(log.length).toBeGreaterThan(RESULT_SUMMARY_CHARS)
+    expect(result.summary).toBe(log.slice(0, RESULT_SUMMARY_CHARS))
     expect(result.output).toBe(log)
   })
 
@@ -491,11 +514,11 @@ describe('the whole record of a tool call (#221)', () => {
   })
 
   it('a finished foreground agent keeps its whole report, not the head the card shows', () => {
-    const report = `## Findings\n\n${'A long paragraph of the report. '.repeat(40)}\n\nThe conclusion is at the end.`
+    const report = `## Findings\n\n${'A long paragraph of the report. '.repeat(100)}\n\nThe conclusion is at the end.`
     const result = resultOf([{ type: 'text', text: `[Subagent hand-back] The text below is the final report…\n\n${report}` }], {
       tool_use_result: { status: 'completed', agentId: 'a1', content: [{ type: 'text', text: report }], totalToolUseCount: 3, totalDurationMs: 4000 },
     })
-    expect(result.summary).toBe(`3 tool uses · 4s\n\n${report}`.slice(0, 300))
+    expect(result.summary).toBe(`3 tool uses · 4s\n\n${report}`.slice(0, RESULT_SUMMARY_CHARS))
     expect(result.output).toBe(`3 tool uses · 4s\n\n${report}`)
   })
 
@@ -515,7 +538,7 @@ describe('the whole record of a tool call (#221)', () => {
       summary: report,
       usage: { tool_uses: 2, duration_ms: 9000 },
     }) as { summary: string; output?: string }[]
-    expect(done?.summary).toBe(`2 tool uses · 9s\n\n${report}`.slice(0, 300))
+    expect(done?.summary).toBe(`2 tool uses · 9s\n\n${report}`.slice(0, RESULT_SUMMARY_CHARS))
     expect(done?.output).toBe(`2 tool uses · 9s\n\n${report}`)
   })
 })

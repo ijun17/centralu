@@ -101,7 +101,7 @@ type NormalizedEvent =
 
 **A tool call's `summary` is its card; `input` and `output` are its record, and they never leave the host**
 ([#221](https://github.com/ijun17/centralu/issues/221)). The adapter sends both: `summary` is what the card shows (a
-command, a path, the first 300 characters of a Claude result or 2,000 of a Codex one), `input` is what the tool received
+command, a path, the first 2,000 characters of a result, the same for both tools), `input` is what the tool received
 (a Write's content, an Edit's both sides, Codex's file changes with their diffs) and `output` is the whole text it
 answered, images excluded (they are attachments, #40). The host stores the event as it came and strips `input` and
 `output` from everything it sends — the event stream and the history pages (`messages.load`, `trash.read`) — so on this

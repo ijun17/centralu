@@ -92,13 +92,13 @@ export function agentStats(toolUses: unknown, durationMs: unknown, status?: stri
 /**
  * An agent card's result body — the step count plus the opening of the report.
  *
- * A card's result is cut at 300 characters for every tool (see `tool_result` below). An agent's
+ * A card's result is cut at `RESULT_SUMMARY_CHARS` for every tool (adapters/tool-result.ts). An agent's
  * report routinely runs to tens of thousands of characters (dogfooding: 15-24KB), so only the
  * opening lands on the card, while the parent receives the full text and writes it in its own
  * words — if the card rendered the full text too, that is exactly what "the answer appears
  * twice" means.
  *
- * This returns the report uncut: its first 300 characters are the card's `summary`, and the whole of it is the
+ * This returns the report uncut: its opening is the card's `summary`, and the whole of it is the
  * result's `output`, the record (#221).
  */
 export function agentReport(report: string, stats: string): string {
@@ -109,8 +109,8 @@ export function agentReport(report: string, stats: string): string {
  * The whole text of a `tool_result` block — its `output` (#221): the string itself, or the blocks' text joined.
  *
  * Images are left out: they are saved as attachments (#40), and base64 would make the row as large as the picture.
- * So is any other block that carries base64 (a document, say). Other blocks are kept as their JSON, which is how the
- * card's summary has always shown them. Measured on this machine's transcripts (2026-09-30), a result is a string
+ * So is any other block that carries base64 (a document, say). Other blocks are kept as their JSON. The card's
+ * summary is the opening of this text too (#843). Measured on this machine's transcripts (2026-09-30), a result is a string
  * (25,150), text blocks (3,167), an image (493), image and text (26) or a `tool_reference` from ToolSearch (235);
  * joining only the text would leave a ToolSearch result empty.
  */
