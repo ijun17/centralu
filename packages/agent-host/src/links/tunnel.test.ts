@@ -20,6 +20,7 @@ import {
   type RemoteSpec,
   type SshTunnelOptions,
 } from './tunnel.js'
+import { fakeExe, rmFakeDir } from '../fake-exe.test-helpers.js'
 
 /**
  * The ssh transport (#82, docs/plans/remote-hub.md §2) against a fake `ssh` on PATH: a Node script
@@ -69,7 +70,7 @@ if (L !== -1) {
   // A remote command after the target: a link-bound host runs in this session, and ends with it
   const remote = args[args.indexOf('--') + 2]
   if (remote && / serve($|[;} ])/.test(decode(remote).cmd)) {
-    fs.appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ hosting: decode(remote).shell, run: decode(remote).cmd }) + '\n')
+    fs.appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify({ hosting: decode(remote).shell, run: decode(remote).cmd, pid: process.pid }) + '\n')
     if (state) fs.writeFileSync(state, 'link-bound')
     process.on('SIGTERM', () => { if (state) fs.rmSync(state, { force: true }); process.exit(0) })
   }
@@ -151,13 +152,13 @@ const freePort = () =>
     })
   })
 
-describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake ssh (#82)', () => {
+describe('the ssh transport, against a fake ssh (#82)', () => {
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'cc-fake-ssh-'))
     log = join(dir, 'log.jsonl')
     writeFileSync(log, '')
-    writeFileSync(join(dir, 'ssh'), FAKE_SSH)
-    chmodSync(join(dir, 'ssh'), 0o755)
+    // A real ssh.exe-shaped program on Windows, the script itself elsewhere (fake-exe.test-helpers.ts)
+    fakeExe(dir, 'ssh', FAKE_SSH)
     /*
      * The "remote host": an echo server, which is enough to see bytes cross a forward. Remote and
      * local are one machine here, so its port is taken locally and the tunnel picks another for
@@ -171,7 +172,7 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
   afterEach(async () => {
     await Promise.all(tunnels.splice(0).map((t) => t.close()))
     await new Promise<void>((r) => remote.close(() => r()))
-    rmSync(dir, { recursive: true, force: true })
+    rmFakeDir(dir)
   })
 
   it('asks the remote for its connection line in batch mode, then forwards on loopback only', async () => {
@@ -282,9 +283,7 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
 
   it('feeds a command\'s stdin to ssh and closes it, for scripts too long for one Windows command line', async () => {
     // A stand-in ssh that echoes back what reached its stdin, and the command it was given
-    const echo = join(dir, 'echo-ssh')
-    writeFileSync(echo, `#!/usr/bin/env node\nlet b='';process.stdin.on('data',(d)=>b+=d);process.stdin.on('end',()=>{process.stdout.write(JSON.stringify({cmd:process.argv.at(-1),stdin:b}))})\n`)
-    chmodSync(echo, 0o755)
+    const echo = fakeExe(dir, 'echo-ssh', `let b='';process.stdin.on('data',(d)=>b+=d);process.stdin.on('end',()=>{process.stdout.write(JSON.stringify({cmd:process.argv.at(-1),stdin:b}))})\n`)
     const t = new SshTunnel({ target: 'box', ssh: echo, env: process.env })
     tunnels.push(t)
     const big = 'A'.repeat(50_000)
@@ -450,7 +449,7 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
       expect(started.note).toMatch(/did not start Centralu through WMI/)
       const ep = await t.open()
       expect(ep.line.hostRunning).toBe(true)
-      const hosting = (logged() as { hosting?: string; run?: string }[]).filter((x) => x.hosting)
+      const hosting = (logged() as { hosting?: string; run?: string; pid?: number }[]).filter((x) => x.hosting)
       expect(hosting).toHaveLength(1)
       expect(hosting[0]!.hosting).toBe('powershell')
       expect(hosting[0]!.run).toContain('{ & centralu.cmd serve }')
@@ -458,7 +457,11 @@ describe.skipIf(process.platform === 'win32')('the ssh transport, against a fake
       expect(forward).toContain('-T')
       expect(forward).not.toContain('-N')
       await t.close()
-      expect(existsSync(stateFile())).toBe(false)
+      // The host is the ssh session's process: it is gone with the link. Windows ends ssh outright,
+      // with no SIGTERM for the fake to clean up its marker file on, so the process is what shows it there.
+      const pid = hosting[0]!.pid!
+      await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 10_000 })
+      if (process.platform !== 'win32') expect(existsSync(stateFile())).toBe(false)
     }, 30_000)
 
     it('says why a start failed, and that a remote too old for --detach has to be started there', async () => {
@@ -495,7 +498,8 @@ describe('the remote command per shell (#82)', () => {
     expect(connectionCommand({ shell: 'posix', command: 'x' })).toBe('x serve --connection')
   })
 
-  // Run by a real sh, as a POSIX remote would: the order is the shell's, not a string's
+  // Run by a real sh, as a POSIX remote would: the order is the shell's, not a string's. Skipped on
+  // Windows because the script is the remote's, and a Windows machine has no /bin/sh of its own to be that remote.
   it.skipIf(process.platform === 'win32')('runs the managed launcher before centralu on PATH and before the launcher serve keeps (plan §10.1)', () => {
     const home = mkdtempSync(join(tmpdir(), 'cc-lookup-'))
     try {
