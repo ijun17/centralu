@@ -169,14 +169,24 @@ const REAL_OS: KillOs = {
  * restart, a removed project's terminals and shutdown all silently did nothing, and a throw from a
  * pty that was not ready yet surfaced later as an uncaught exception that shut the whole host down.
  * Without a signal, a pty closes its console and a ChildProcess is terminated.
+ *
+ * **Only when taskkill did not end the tree** (#857). node-pty's `kill()` on the console ConPTY of
+ * Windows itself forks an agent that attaches to the shell's console to list its processes, and 5 s
+ * later `process.kill`s each one by pid. After our taskkill the shell is gone: the agent failed with
+ * "AttachConsole failed" on the host's stderr at every Stop, restart and tab close, and the late
+ * kill went to a pid Windows may have handed to someone else by then (measured on Windows 11). The
+ * pty still releases itself once its shell has ended (its exit closes the output pipe and reports
+ * the exit), so nothing is lost by leaving it alone. A tree taskkill could not end (no pid, a
+ * timeout) still gets `kill()`, the one thing left to try.
  */
 function shootWindows(handle: KillablePty, os: KillOs): void {
   const pid = handle.pid
   if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0) {
     try {
       os.taskkill(pid)
+      return
     } catch {
-      // already gone (taskkill exits non-zero for a pid that is not there)
+      // already gone (taskkill exits non-zero for a pid that is not there), or it could not end it
     }
   }
   try {

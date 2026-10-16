@@ -305,4 +305,34 @@ describe.runIf(process.platform === 'win32')('CommandRunner — the whole tree o
      */
     expect(await settle(r.ended, (x) => x, 10_000)).toBe(true)
   }, 60_000 * SLOW)
+
+  /*
+   * #857. node-pty's own Windows kill(), after our taskkill had ended the tree, forked an agent to list the gone shell's
+   * console ("AttachConsole failed" on the host's stderr) and 5 s later process.kill()ed the shell's pid, which Windows
+   * may have given to another process by then. Both are watched for well past those 5 s.
+   */
+  it('Stop leaves no late kill by pid and no console-list agent behind (#857)', async () => {
+    // node-pty forks through the CommonJS module object, so the spy goes there; it still forks
+    const childProcess = createRequire(import.meta.url)('node:child_process') as typeof import('node:child_process')
+    const fork = vi.spyOn(childProcess, 'fork')
+    const kills: number[] = []
+    const realKill = process.kill.bind(process)
+    const kill = vi.spyOn(process, 'kill').mockImplementation((pid: number, signal?: string | number) => {
+      // Signal 0 only asks whether a pid is alive (this test's own `alive`)
+      if (signal !== 0) kills.push(pid)
+      return realKill(pid, signal)
+    })
+    try {
+      const r = await runTree()
+      const shell = pids[0]!
+      r.svc.stop(dir, r.command)
+      expect(await settle(() => pids.filter(alive), (left) => left.length === 0, 15_000)).toEqual([])
+      expect(await settle(r.ended, (x) => x, 10_000)).toBe(true)
+      await new Promise((done) => setTimeout(done, 7_000))
+      expect({ forks: fork.mock.calls.map((c) => String(c[0])), lateKills: kills.filter((pid) => pid === shell) }).toEqual({ forks: [], lateKills: [] })
+    } finally {
+      fork.mockRestore()
+      kill.mockRestore()
+    }
+  }, 90_000 * SLOW)
 })

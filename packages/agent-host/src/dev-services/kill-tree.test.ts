@@ -302,12 +302,16 @@ describe('ending a tree on Windows', () => {
     return { os, ended }
   }
 
-  it('the tree goes with taskkill, and the pty is closed without a signal', () => {
+  /*
+   * #857: node-pty's own Windows kill() lists the console of a shell taskkill already ended (an "AttachConsole failed"
+   * on the host's stderr) and process.kill()s that pid 5 s later, when Windows may have given it to someone else.
+   */
+  it('the tree goes with taskkill, and the pty is not killed again by pid after it (#857)', () => {
     const { os, ended } = fakeOs()
     const pty = windowsPty(4242)
     killTree(pty.handle, 'SIGKILL', os)
     expect(ended).toEqual([4242])
-    expect(pty.calls).toEqual([undefined])
+    expect(pty.calls).toEqual([])
   })
 
   it('Stop is one forceful shot: no second shot by pid after the grace period', async () => {
@@ -316,10 +320,10 @@ describe('ending a tree on Windows', () => {
     stopTree(pty.handle, 10, () => true, os)
     await new Promise((r) => setTimeout(r, 40))
     expect(ended).toEqual([4242])
-    expect(pty.calls).toEqual([undefined])
+    expect(pty.calls).toEqual([])
   })
 
-  it('a handle with no pid is still closed', () => {
+  it('a handle with no pid is closed without a signal', () => {
     const { os, ended } = fakeOs()
     const pty = windowsPty(undefined)
     killTree(pty.handle, 'SIGTERM', os)
@@ -327,7 +331,7 @@ describe('ending a tree on Windows', () => {
     expect(pty.calls).toEqual([undefined])
   })
 
-  it('a taskkill that fails (the process already ended) does not stop the pty from closing', () => {
+  it('a taskkill that fails (the process already ended, or it could not end it) leaves the pty to close itself', () => {
     const pty = windowsPty(4242)
     const os: KillOs = {
       platform: 'win32',
