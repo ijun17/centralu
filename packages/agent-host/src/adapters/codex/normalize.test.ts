@@ -204,6 +204,19 @@ describe('streaming and tool calls', () => {
     expect(title.endsWith('…}')).toBe(true)
   })
 
+  it("an MCP tool's image is drawn after its card, not dropped (#843)", () => {
+    const out = n('item/completed', {
+      item: {
+        type: 'mcpToolCall', id: 'm5', server: 'browser', tool: 'screenshot', status: 'completed',
+        result: { content: [{ type: 'text', text: 'Took a screenshot' }, { type: 'image', data: 'aWJs', mimeType: 'image/jpeg' }], structuredContent: null },
+      },
+    })
+    expect(out).toMatchObject([
+      { type: 'tool_result', ok: true, summary: 'Took a screenshot' },
+      { type: 'message_image', sessionId: S, mime: 'image/jpeg', data: 'aWJs' },
+    ])
+  })
+
   it('an MCP failure carries a reason — an empty card says nothing', () => {
     const out = n('item/completed', {
       item: {

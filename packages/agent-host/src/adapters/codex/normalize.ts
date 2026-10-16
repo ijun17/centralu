@@ -1,6 +1,7 @@
 import { asObj, finite, str } from '../../json-value.js'
 import { type ApprovalDetail, type BackgroundTask, type NormalizedEvent, type RequestInput, type SessionGoal, type SubagentStep } from '@cc/protocol'
 import { fileEditDetail, type FileChange } from '../file-changes.js'
+import { mcpImageEvents } from '../images.js'
 import { toolResultEvent } from '../tool-result.js'
 import { noticeWords } from './notices.js'
 
@@ -565,6 +566,8 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       // carries no output, so its card says which it was rather than fail blank (#843)
       const ending = str(item.status) === 'declined' ? 'Declined' : str(item.status) === 'interrupted' ? 'Interrupted' : ''
       const out: NormalizedEvent[] = [toolResultEvent(sessionId, str(item.id), codexItemOk(item), resultSummary(item) || ending)]
+      // An MCP tool's images (a browser's screenshot, say) come after its card, as Claude's do (#40, #843)
+      if (type === 'mcpToolCall') out.push(...mcpImageEvents(sessionId, asObj(item.result).content))
       /*
        * If a file was actually changed, announce it for conflict detection and highlighting (FR-2, FR-5). Only a change
        * that went through changed it (#843): a declined or failed one used to mark its files all the same. A move

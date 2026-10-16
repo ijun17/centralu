@@ -1,5 +1,6 @@
 import type { NormalizedEvent, RequestInput, SessionActivity, TokenUsage } from '@cc/protocol'
 import { TouchedFiles } from '../file-changes.js'
+import { inlineImageEvent, undrawnImageEvent } from '../images.js'
 import { toolResultEvent } from '../tool-result.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { ClaudeBackgroundTracker } from './background-tracker.js'
@@ -411,23 +412,11 @@ export function normalizeMessage(
              * existing image-failure cases (too large, file missing).
              */
             if (str(source.type) !== 'base64' || !str(source.data)) {
-              out.push({
-                type: 'message_image', sessionId, mime: '', data: '',
-                note: `Cannot display an image of this format yet (source: ${str(source.type) || 'none'})`,
-              })
+              out.push(undrawnImageEvent(sessionId, `Cannot display an image of this format yet (source: ${str(source.type) || 'none'})`))
               continue
             }
-            const data = str(source.data)
-            const mime = str(source.media_type) || 'image/png'
-            // ~11M base64 characters is roughly an 8MB original. Beyond that, this explains why it is not shown instead of rendering it.
-            if (data.length > 11_000_000) {
-              out.push({
-                type: 'message_image', sessionId, mime, data: '',
-                note: `Image is too large (~${Math.round((data.length * 3) / 4 / 1048576)}MB)`,
-              })
-            } else {
-              out.push({ type: 'message_image', sessionId, mime, data })
-            }
+            // Beyond the ceiling every image is held to (adapters/images.ts), this explains why it is not shown instead of rendering it
+            out.push(inlineImageEvent(sessionId, str(source.media_type), str(source.data)))
           }
         }
       }

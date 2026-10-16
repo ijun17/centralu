@@ -5,6 +5,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import { DIFF_PREVIEW_CHARS } from '../file-changes.js'
+import { IMAGE_MAX_BYTES } from '../images.js'
 import { RESULT_SUMMARY_CHARS } from '../tool-result.js'
 import { ClaudeStreamNormalizer, approvalDetail, normalizeMessage, toolSummary } from './normalize.js'
 
@@ -237,7 +238,8 @@ describe('tool calls (the actual shape from the spike)', () => {
   })
 
   it('an image that is too large explains why instead of rendering it', () => {
-    const big = 'a'.repeat(11_000_001)
+    // One byte over the ceiling an image read from disk is held to (#843: the two used to differ)
+    const big = 'a'.repeat(Math.ceil(((IMAGE_MAX_BYTES + 1) * 4) / 3) + 4)
     const out = n({
       type: 'user',
       message: {
@@ -247,7 +249,13 @@ describe('tool calls (the actual shape from the spike)', () => {
       },
     })
     const img = out.find((e) => e.type === 'message_image')
-    expect(img).toMatchObject({ data: '', note: expect.stringContaining('too large') })
+    expect(img).toMatchObject({ data: '', note: 'Image is too large (8MB)' })
+    const under = 'a'.repeat(Math.floor((IMAGE_MAX_BYTES * 4) / 3))
+    const drawn = n({
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', content: [{ type: 'image', source: { type: 'base64', data: under, media_type: 'image/png' } }] }] },
+    }).find((e) => e.type === 'message_image')
+    expect(drawn).toMatchObject({ data: under })
   })
 
   it('a non-base64 image source becomes a visible failure (#58 — it used to vanish silently)', () => {
