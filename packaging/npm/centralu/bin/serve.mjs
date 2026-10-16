@@ -297,7 +297,26 @@ export function launcherScript(platform, execPath, cliPath) {
   if (platform === 'win32') {
     // A batch file reads every % as the start of a variable (`100% cli.mjs" %*` came out as `100*`); %% is a literal one
     const lit = (v) => String(v).replaceAll('%', '%%')
-    return `@echo off\r\nrem Written by \`centralu serve\`: reaches this install without npm's folder on PATH.\r\n"${lit(execPath)}" "${lit(cliPath)}" %*\r\n`
+    /*
+     * The file is UTF-8, and cmd.exe reads each line of a batch file in the console's code page as it reaches it: 949
+     * on a Korean Windows, where a profile folder named in Korean came out as other characters and node found no
+     * centralu.mjs there (#849). So the lines before the paths, all ASCII, switch the console to UTF-8 (65001), and the
+     * code page it had is put back after node ends, since the console is the shell's that ran this. chcp is named by
+     * its full path: the shell's PATH may not have System32 on it.
+     */
+    return [
+      '@echo off',
+      "rem Written by `centralu serve`: reaches this install without npm's folder on PATH.",
+      'setlocal',
+      'set "CENTRALU_CP="',
+      `for /f "tokens=2 delims=:." %%c in ('%SystemRoot%\\System32\\chcp.com') do set /a "CENTRALU_CP=%%c" >nul 2>&1`,
+      '%SystemRoot%\\System32\\chcp.com 65001 >nul 2>&1',
+      `"${lit(execPath)}" "${lit(cliPath)}" %*`,
+      'set "CENTRALU_RC=%ERRORLEVEL%"',
+      'if defined CENTRALU_CP %SystemRoot%\\System32\\chcp.com %CENTRALU_CP% >nul 2>&1',
+      'exit /b %CENTRALU_RC%',
+      '',
+    ].join('\r\n')
   }
   const q = (v) => `'${String(v).replaceAll("'", "'\\''")}'`
   return (

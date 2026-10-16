@@ -1561,6 +1561,9 @@ stdout에는 그 줄만 나가고, 설명할 것은 stderr로 간다. 명령을 
 쓴다. `serve`와 `--connection`이 이것을 절대 경로로 이 설치와 이 Node에 맞춰 둔다. nvm과 Homebrew에서는 그 경로에
 버전이 들어 있으므로, Node를 올린 뒤에는 대화형 셸에서 `centralu serve`(또는 `--connection`)를 한 번 돌려 다시 쓰기
 전까지 이 런처가 실패한다.
+Windows에서는 UTF-8로 쓴 `centralu.cmd`다. cmd.exe는 배치 파일을 콘솔의 코드 페이지로 읽으므로, 이 파일은 경로가
+있는 줄 앞에서 콘솔을 UTF-8(`chcp 65001`)로 바꾸고 끝난 뒤 원래 코드 페이지로 돌려 놓는다. 그러지 않으면 한글 이름의
+프로필 폴더(코드 페이지 949)에서 node가 없는 경로를 찾았다(#849, `launcher-cmd.test.ts`).
 
 | 결정 | 이유 |
 |---|---|
