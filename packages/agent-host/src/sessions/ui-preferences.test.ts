@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_UI_PREFERENCES } from '@cc/protocol'
+import { DEFAULT_UI_PREFERENCES, agentDepthOf } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
 import { SessionManager } from './manager.js'
 
@@ -34,6 +34,19 @@ describe('screen preferences across builds', () => {
     expect(out.sendWithModifierEnter).toBe(true)
     // ...but writing a different field leaves the newer build's choices where they were
     expect(row()).toEqual({ textSize: 1, themeMode: 'sepia-of-the-future', laterField: { a: 1 }, sendWithModifierEnter: true })
+  })
+
+  it('the agent depth survives a restart; a record from before it, or with a value out of range, reads as 1 (#867)', () => {
+    const store = new Store()
+    store.setAppSetting(KEY, JSON.stringify({ sendWithModifierEnter: true }))
+    expect(agentDepthOf(new SessionManager(store, new Map(), () => {}).uiPreferences())).toBe(1)
+    new SessionManager(store, new Map(), () => {}).setUiPreferences({ agentDepth: 3 })
+    // A new manager over the same database: what a restarted host reads
+    expect(new SessionManager(store, new Map(), () => {}).uiPreferences()).toMatchObject({ agentDepth: 3, sendWithModifierEnter: true })
+    for (const bad of [0, 4, 2.5, '2', null]) {
+      store.setAppSetting(KEY, JSON.stringify({ agentDepth: bad }))
+      expect(agentDepthOf(new SessionManager(store, new Map(), () => {}).uiPreferences())).toBe(1)
+    }
   })
 
   it('a broken row reads as the defaults, says so once with the row name, and the next change replaces it', () => {

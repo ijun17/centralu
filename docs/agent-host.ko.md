@@ -189,9 +189,10 @@ orchestrator, which belongs to no project, retains its own create-session tool.
 호출 한 번이 하는 일(`SessionManager.askProject`, 실제로는 `sessions/ask-project-flow.ts`의 `AskProjectFlow`, #428):
 
 1. **The project.** Name or id of another registered project. Its own project is refused; an unknown
-   name lists the other projects. Under `safe`/`normal`, an untrusted caller cannot ask, and a child
-   started by another session or a session currently handling a cross-project task cannot delegate
-   again (depth one). Under `auto` (#603), the caller's own preset opens and logs those boundaries.
+   name lists the other projects. Under `safe`/`normal`, an untrusted caller cannot ask; under `auto` (#603), the
+   caller's own preset opens and logs that boundary. Under every preset, a session at the agent depth cannot delegate
+   (#867): at the default of 1, a child started by another session or a session currently handling a cross-project
+   task.
 2. **The session.** `session` names an ordinary session by name or id. Orchestrators, builders and
    app agents are excluded. Without it, exactly one ordinary session is selected; otherwise the call
    lists the candidates with id, name, state and last activity and asks the caller to name one.
@@ -280,8 +281,10 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 
 `start_agent` 한 번(`SessionManager.startAgent`, 역시 start-agent-flow.ts의 `AgentStartFlow`):
 
-1. **Who may.** An ordinary session (`reader` profile) of a trusted project (#382's rule), not one marked `askedBy`:
-   depth one, so a child cannot start agents, and neither can a session handling an active ask_project task.
+1. **Who may.** An ordinary session (`reader` profile) of a trusted project (#382's rule), above the agent depth
+   (#867): 설정 → Orchestrator → How deep agents may start agents(1~3, 기본 1, `prefs.agentDepth`). 사람이 시작한
+   세션이 깊이 0이고, `askedBy`나 끝나지 않은 위임(ask_project, fork, agent_session)으로 이어진 세션은 그보다 하나
+   깊다. 그 깊이 이상인 세션은 `auto`를 포함한 모든 프리셋에서 거절되고, 오류가 설정 이름과 위치를 말한다.
 2. **몇 개.** 한 프로젝트에서 동시에 도는 자식은 `AGENT_CEILING`(4)까지, 그 프로젝트의 모든 세션을 합쳐 센다.
    부모가 준 턴이 도는 동안 센다. 카드 전과 후에 두 번 본다. 카드 뒤의 확인은 자리도 함께 잡는다(#673 리뷰,
    `agentStartReserved`). 확인과 예약을 동기 한 단계로 하고, 자식의 위임이 그 자리를 세기 시작할 때까지 `createSession`

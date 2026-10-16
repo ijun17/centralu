@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PermissionPreset } from '@cc/protocol'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 
+const DEPTH_SETTING = 'How deep agents may start agents'
+
 /** Every opened host boundary reads the caller's own preset; no global or project grant is manufactured. */
 describe('auto Centralu boundaries (#603)', () => {
   let w: CrossWorld
@@ -73,7 +75,9 @@ describe('auto Centralu boundaries (#603)', () => {
     },
   )
 
-  it('auto children cascade into agents and projects, including untrusted callers and targets', async () => {
+  it('auto children cascade into agents and projects, including untrusted callers and targets, as deep as the agent depth', async () => {
+    // A child starts agents and asks projects only from an agent depth of 2 (#867)
+    w.mgr.setUiPreferences({ agentDepth: 2 })
     const parent = await session()
     w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const first = await start(parent)
@@ -118,10 +122,10 @@ describe('auto Centralu boundaries (#603)', () => {
   it.each(['safe', 'normal'] as const)('%s refuses depth and untrusted delegation', async (preset) => {
     const parent = await session('auto')
     const child = await session(preset, parent)
-    expect(await start(child)).toMatchObject({ ok: false, error: expect.stringContaining('itself started') })
+    expect(await start(child)).toMatchObject({ ok: false, error: expect.stringContaining(DEPTH_SETTING) })
     expect(await w.mgr.askProject(child, { project: w.target.id, task: 'x' })).toMatchObject({
       ok: false,
-      error: expect.stringContaining('itself started'),
+      error: expect.stringContaining(DEPTH_SETTING),
     })
     const own = await session(preset)
     w.mgr.setProjectTrusted(w.caller.id, false)
@@ -129,6 +133,61 @@ describe('auto Centralu boundaries (#603)', () => {
     expect(await w.mgr.askProject(own, { project: w.target.id, task: 'x' })).toMatchObject({
       ok: false,
       error: expect.stringContaining('not trusted'),
+    })
+  })
+
+  /*
+   * How deep agents may start agents (#867). `auto` used to open this boundary: round-4 refactor sessions under auto each
+   * started sessions of their own, twelve ran at once and the load average reached 216 (#862). Now a setting, 1 by
+   * default, that no preset crosses.
+   */
+  describe('the agent depth (#867)', () => {
+    const levelsBelow = (n: number) => `This session is ${n} level${n === 1 ? '' : 's'} below a session the person started`
+    /** An auto chain from a session the person started down to `depth`; the last one's id */
+    const chainTo = async (depth: number) => {
+      let id = await session('auto')
+      for (let level = 1; level <= depth; level++) {
+        const r = await start(id)
+        if (!r.ok) throw new Error(`level ${level}: ${r.error}`)
+        id = r.sessionId
+      }
+      return id
+    }
+
+    it('at the default 1, an auto child cannot start agents nor ask a project, and is told the setting and where it is', async () => {
+      expect(w.mgr.uiPreferences().agentDepth).toBeUndefined()
+      const child = await chainTo(1)
+      const r = await start(child)
+      expect(r).toEqual({
+        ok: false,
+        error: `${levelsBelow(1)}, and "${DEPTH_SETTING}" in Settings → Orchestrator is 1, so it cannot start agents. Say in your answer what is needed instead; the person can raise that setting.`,
+      })
+      expect(await w.mgr.askProject(child, { project: w.target.id, task: 'x' })).toMatchObject({
+        ok: false,
+        error: expect.stringContaining(`${levelsBelow(1)}, and "${DEPTH_SETTING}" in Settings → Orchestrator is 1, so it cannot ask a project`),
+      })
+      expect(w.mgr.listSessions().filter((s) => s.askedBy === child)).toEqual([])
+      expect(w.events.filter((e) => e.type === 'approval_request')).toEqual([])
+    })
+
+    // Every value, each against the level right above it and the first one at it
+    it.each([1, 2, 3])('at %i, auto sessions above it start agents and the first one at it is refused', async (limit) => {
+      w.mgr.setUiPreferences({ agentDepth: limit })
+      const above = await chainTo(limit - 1)
+      const r = await start(above)
+      expect(r).toMatchObject({ ok: true, state: 'working' })
+      const at = r.ok ? r.sessionId : ''
+      expect(await start(at)).toMatchObject({ ok: false, error: expect.stringContaining(`${levelsBelow(limit)}, and "${DEPTH_SETTING}" in Settings → Orchestrator is ${limit}`) })
+      expect(w.mgr.listSessions().filter((s) => s.askedBy === at)).toEqual([])
+    })
+
+    it('is read at each call: lowering it refuses the next start, raising it allows it again', async () => {
+      w.mgr.setUiPreferences({ agentDepth: 3 })
+      const grandchild = await chainTo(2)
+      w.mgr.setUiPreferences({ agentDepth: 2 })
+      expect(await start(grandchild)).toMatchObject({ ok: false, error: expect.stringContaining(DEPTH_SETTING) })
+      w.mgr.setUiPreferences({ agentDepth: 3 })
+      expect(await start(grandchild)).toMatchObject({ ok: true })
     })
   })
 

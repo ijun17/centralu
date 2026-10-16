@@ -604,7 +604,7 @@ sequenceDiagram
   end
 ```
 
-Depth is one: a session working on another project's task cannot ask a third project. A session in a turn that is
+At the default agent depth of 1 (a setting, up to 3, that no preset crosses, #867), a session working on another project's task cannot ask a third project. A session in a turn that is
 not the caller's gets nothing sent; the caller gets the choices instead ([agent-host.md](agent-host.md) §1.2.3). A new
 task cannot replace unfinished work in the same session. Read grants live in the host's memory and end with it. Stopping the caller stops the delegated turn.
 Detail: [agent-host.md](agent-host.md) §1.2.

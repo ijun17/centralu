@@ -112,6 +112,39 @@ test('Settings: running agents per project supports preset defaults and a rememb
   await expect.poll(() => page.evaluate(() => (window as any).__store.getState().prefs.agentCeiling)).toBe(null)
 })
 
+test('Settings: how deep agents may start agents is a slider from 1 to 3, starting at 1 and remembered (#867)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const open = async () => {
+    await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+    await page.getByTestId('settings-tab-orchestrator').click()
+  }
+  const saved = () => page.evaluate(() => (window as any).__store.getState().prefs.agentDepth ?? null)
+  await open()
+  const slider = page.getByRole('slider', { name: 'How deep agents may start agents' })
+  const shown = page.getByTestId('settings-agent-depth-value')
+  // Nothing saved reads as 1
+  await expect(slider).toHaveValue('1')
+  await expect(shown).toHaveText('1')
+  await expect(page.getByText('At 1, only the sessions you start can start agents', { exact: false })).toBeVisible()
+  // By the keyboard, as a person moves it: it stops at 3
+  await slider.focus()
+  for (const [key, value] of [['ArrowRight', 2], ['ArrowRight', 3], ['ArrowRight', 3]] as const) {
+    await page.keyboard.press(key)
+    await expect.poll(saved).toBe(value)
+    await expect(shown).toHaveText(String(value))
+  }
+  await page.reload()
+  await open()
+  await expect(slider).toHaveValue('3')
+  await expect(shown).toHaveText('3')
+  await slider.focus()
+  await page.keyboard.press('ArrowLeft')
+  await page.keyboard.press('ArrowLeft')
+  await page.keyboard.press('ArrowLeft')
+  await expect.poll(saved).toBe(1)
+  await expect(shown).toHaveText('1')
+})
+
 test('Settings: a model and effort per tool and difficulty for the agents a session starts (#729)', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
   const open = async () => {

@@ -334,7 +334,7 @@ export const DELEGATE_BUDGET_CHARS = 450
 /**
  * Other agents in the same project (#561) — an ordinary session starts a Claude or Codex session on a task and works
  * with it. Its own set with its own budget, like ask_project's, because it acts: the consent card, the caller's
- * preset as the child's ceiling, depth one and the per-project count are the manager's (`startAgent`), not words here.
+ * preset as the child's ceiling, the agent depth (#867) and the per-project count are the manager's (`startAgent`), not words here.
  *
  * Two tools, as the issue proposed: starting is the request a person makes in words ("have Codex write it"), so it is
  * loaded; working with a child already started is reached from start_agent's own answer, which names agent_session,

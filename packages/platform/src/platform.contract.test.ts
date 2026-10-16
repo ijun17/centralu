@@ -26,7 +26,7 @@ import { broadcastAppChanges } from '../../agent-host/src/app-change-events.js'
 import { storeRunLedger } from '../../agent-host/src/app-run-ledger.js'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../../agent-host/src/adapters/contract.js'
 import type { ApprovalDecision, NormalizedEvent, ToolName } from '@cc/protocol'
-import { APP_VERSION, DEFAULT_UI_PREFERENCES } from '@cc/protocol'
+import { APP_VERSION, DEFAULT_UI_PREFERENCES, agentDepthOf } from '@cc/protocol'
 import type { Platform } from './ports/index.js'
 import { createMockPlatform } from './mock/index.js'
 import { createWebPlatform } from './web/index.js'
@@ -559,6 +559,23 @@ describe.each([
       fresh.offerUpdate(APP_VERSION)
       const s = await fresh.platform.updates.apply()
       expect(s).toMatchObject({ phase: 'idle', latest: APP_VERSION, newer: false, error: null })
+    } finally {
+      await fresh.cleanup()
+    }
+  })
+
+  /**
+   * How deep agents may start agents (#867): nothing saved reads as 1 on both, a saved value is kept and read back, and
+   * a value out of range is not saved.
+   */
+  it('the agent depth reads as 1 until set, keeps what is set, and refuses a value out of range (#867)', async () => {
+    const fresh = await make()
+    try {
+      expect(agentDepthOf(await fresh.platform.prefs.load())).toBe(1)
+      expect((await fresh.platform.prefs.save({ agentDepth: 3 })).agentDepth).toBe(3)
+      expect(agentDepthOf(await fresh.platform.prefs.load())).toBe(3)
+      await fresh.platform.prefs.save({ agentDepth: 4 }).catch(() => null)
+      expect(agentDepthOf(await fresh.platform.prefs.load())).not.toBe(4)
     } finally {
       await fresh.cleanup()
     }

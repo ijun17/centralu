@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { SessionInfo, ToolName, ToolStatus } from '@cc/protocol'
+import { MAX_AGENT_DEPTH, agentDepthOf, type SessionInfo, type ToolName, type ToolStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -835,6 +835,8 @@ function OrchestratorSettings() {
 function SessionToolsSwitch() {
   const on = useStore((s) => s.prefs.sessionTools)
   const ceiling = useStore((s) => s.prefs.agentCeiling)
+  // How deep agents may start agents (#867): nothing saved is 1, and every preset keeps to it
+  const depth = useStore((s) => agentDepthOf(s.prefs))
   const setPrefs = useStore((s) => s.setPrefs)
   return (
     <div className="mt-6 border-t border-line pt-4">
@@ -870,6 +872,25 @@ function SessionToolsSwitch() {
       </label>
       <p className="mt-1 text-xs leading-body text-ink-faint">
         Leave empty for the preset default: unlimited under auto, four otherwise. Zero means unlimited.
+      </p>
+      <label className="mt-4 flex items-center gap-2 text-sm text-ink-muted">
+        How deep agents may start agents
+        <input
+          type="range"
+          min={1}
+          max={MAX_AGENT_DEPTH}
+          step={1}
+          className="w-24 accent-line-strong"
+          data-testid="settings-agent-depth"
+          value={depth}
+          onChange={(e) => void setPrefs({ agentDepth: Number(e.target.value) })}
+        />
+        <span className="readout w-3 text-ink" data-testid="settings-agent-depth-value" aria-hidden>
+          {depth}
+        </span>
+      </label>
+      <p className="mt-1 text-xs leading-body text-ink-faint">
+        At 1, only the sessions you start can start agents; each step lets the agents below do the same. Auto stays within it.
       </p>
       <AgentModelsSection />
     </div>
