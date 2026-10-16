@@ -285,6 +285,10 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
    (#867): 설정 → Orchestrator → How deep agents may start agents(1~3, 기본 1, `prefs.agentDepth`). 사람이 시작한
    세션이 깊이 0이고, `askedBy`나 끝나지 않은 위임(ask_project, fork, agent_session)으로 이어진 세션은 그보다 하나
    깊다. 그 깊이 이상인 세션은 `auto`를 포함한 모든 프리셋에서 거절되고, 오류가 설정 이름과 위치를 말한다.
+   오케스트레이터가 만든 포크(`askedBy` 없이 `forkedFrom`만 있음)는 계속 1로 세고, `auto` 호출자가 agent_session으로
+   일을 준 세션은 그 위임이 끝날 때까지 한 단계 깊다. 다른 세션이 시작한 세션은 시작할 때의 깊이를
+   `app_settings`의 `agent_depth:<id>`에 기록하고(영구 삭제 때 함께 지움) 그보다 얕아지지 않는다. 그래서 사슬의
+   가운데를 지워도 아래 세션이 에이전트를 시작할 수 있게 되지 않는다.
 2. **몇 개.** 한 프로젝트에서 동시에 도는 자식은 `AGENT_CEILING`(4)까지, 그 프로젝트의 모든 세션을 합쳐 센다.
    부모가 준 턴이 도는 동안 센다. 카드 전과 후에 두 번 본다. 카드 뒤의 확인은 자리도 함께 잡는다(#673 리뷰,
    `agentStartReserved`). 확인과 예약을 동기 한 단계로 하고, 자식의 위임이 그 자리를 세기 시작할 때까지 `createSession`

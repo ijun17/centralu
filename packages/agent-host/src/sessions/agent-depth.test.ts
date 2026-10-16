@@ -28,8 +28,15 @@ describe('how deep a session is below the one the person started (#867)', () => 
     expect(sessionDepth('f', meta, [delegation('c', 'f')])).toBe(2)
   })
 
-  it('a parent that is gone still counts the level it was', () => {
-    expect(sessionDepth('c', metaOf({ c: { askedBy: 'deleted' } }), [])).toBe(1)
+  it('a deleted parent does not make a session shallower than it was started (#897 review)', () => {
+    // g was started two levels down; its parent c is gone, so its links alone say 1
+    const meta = metaOf({ p: {}, g: { askedBy: 'c' } })
+    expect(sessionDepth('g', meta, [])).toBe(1)
+    expect(sessionDepth('g', meta, [], (id) => (id === 'g' ? 2 : 0))).toBe(2)
+    // A recorded ancestor counts for what hangs below it too
+    expect(sessionDepth('x', metaOf({ x: { askedBy: 'g' } }), [], (id) => (id === 'g' ? 2 : 0))).toBe(3)
+    // The links still win when they are deeper than the record
+    expect(sessionDepth('g', metaOf({ p: {}, c: { askedBy: 'p' }, g: { askedBy: 'c' } }), [], (id) => (id === 'g' ? 1 : 0))).toBe(2)
   })
 
   it('two sessions giving each other tasks count once, not forever', () => {
@@ -43,6 +50,7 @@ describe('the refusal (#867)', () => {
     meta: metaOf(links),
     children: { delegations: new Map<string, ReturnType<typeof delegation>>() },
     uiPreferences: () => ({ agentDepth }),
+    store: { appSetting: () => null, setAppSetting: () => {} },
   })
   const chain = { p: {}, c: { askedBy: 'p' }, g: { askedBy: 'c' }, gg: { askedBy: 'g' } }
 

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PermissionPreset } from '@cc/protocol'
+import type { ModelOption, PermissionPreset } from '@cc/protocol'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 
 const DEPTH_SETTING = 'How deep agents may start agents'
@@ -179,6 +179,50 @@ describe('auto Centralu boundaries (#603)', () => {
       const at = r.ok ? r.sessionId : ''
       expect(await start(at)).toMatchObject({ ok: false, error: expect.stringContaining(`${levelsBelow(limit)}, and "${DEPTH_SETTING}" in Settings → Orchestrator is ${limit}`) })
       expect(w.mgr.listSessions().filter((s) => s.askedBy === at)).toEqual([])
+    })
+
+    /*
+     * The first gate, before anything is read or asked (#897 review): the later re-read (`agentStartGateError`) refuses
+     * the same caller, so only this shows whether the start got as far as the tool's detection, a model check, a card
+     * or the consent `auto` opens and logs for it.
+     */
+    it.each(['auto', 'safe'] as const)('%s: a caller at it is refused before the tool is detected, a model checked or a card raised', async (preset) => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+      w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+      const parent = await session(preset)
+      const child = await w.mgr.startAgent(parent, { task: 'check', wait: false }, AbortSignal.timeout(5000))
+      if (!child.ok) throw new Error(child.error)
+      const claude = w.adapters.get('claude')!
+      const detect = vi.spyOn(claude, 'detect')
+      const models = vi.fn(async (): Promise<ModelOption[]> => [{ id: 'm', label: 'm', efforts: [], defaultEffort: null, tiers: [] }])
+      claude.listModels = models
+      log.mockClear()
+      expect(await w.mgr.startAgent(child.sessionId, { task: 'deeper', model: 'm', wait: false }, AbortSignal.timeout(5000))).toMatchObject({
+        ok: false,
+        error: expect.stringContaining(DEPTH_SETTING),
+      })
+      expect(detect).not.toHaveBeenCalled()
+      expect(models).not.toHaveBeenCalled()
+      expect(w.mgr.listSessions().find((s) => s.id === child.sessionId)?.pendingApproval).toBeFalsy()
+      expect(log.mock.calls.flat().join('\n')).not.toContain('agent_start')
+    })
+
+    it('deleting the middle of a chain does not let the grandchild start agents; its depth outlives the parent (#897 review)', async () => {
+      w.mgr.setUiPreferences({ agentDepth: 2 })
+      const top = await session('auto')
+      const middle = await start(top)
+      if (!middle.ok) throw new Error(middle.error)
+      const bottom = await start(middle.sessionId)
+      if (!bottom.ok) throw new Error(bottom.error)
+      expect(await start(bottom.sessionId)).toMatchObject({ ok: false, error: expect.stringContaining('2 levels below') })
+      await w.mgr.trashSession(middle.sessionId)
+      expect(w.mgr.listSessions().some((s) => s.id === middle.sessionId)).toBe(false)
+      expect(w.mgr.listSessions().find((s) => s.id === bottom.sessionId)?.askedBy).toBe(middle.sessionId)
+      expect(await start(bottom.sessionId)).toMatchObject({ ok: false, error: expect.stringContaining('2 levels below') })
+      // The record goes with the session when the trash is emptied of it, and only its own
+      expect(await w.store.purgeSession(middle.sessionId)).toBe(true)
+      expect(w.store.appSetting(`agent_depth:${middle.sessionId}`)).toBeNull()
+      expect(w.store.appSetting(`agent_depth:${bottom.sessionId}`)).toBe('2')
     })
 
     it('is read at each call: lowering it refuses the next start, raising it allows it again', async () => {

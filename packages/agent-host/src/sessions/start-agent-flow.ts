@@ -3,7 +3,7 @@ import type { AgentStartRecord, AgentStartRequest, Delegation, LowMemory } from 
 import { ASK_WAIT_MS, taskLine } from './ask-project.js'
 import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentName, presetWithin } from './start-agent.js'
 import { labelOf } from './transcript-view.js'
-import { agentDepthRefusal } from './agent-depth.js'
+import { agentDepthRefusal, recordAgentDepth } from './agent-depth.js'
 import type {
   ApprovalDetail,
   ModelOption,
@@ -528,6 +528,8 @@ export class AgentStartFlow {
     } catch (e) {
       return done({ ok: false, error: `Could not start the session: ${(e as Error).message}` })
     }
+    // Its depth stays even when the caller is deleted later (#897 review)
+    recordAgentDepth(this.host, child.id, callerId)
     // Making the session took a while: what the start rests on is read again, with no wait before the delegation
     const callerNow = this.host.meta.get(callerId)
     const late = this.agentStartGateError(callerId, project.id) ??

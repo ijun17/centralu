@@ -5,7 +5,7 @@ import { turnAnswer } from './turn-answer.js'
 import { ASK_WAIT_MS, clipAnswer, pathsIn, readableGrants, taskLine } from './ask-project.js'
 import { agentFrame, agentNoteFrame, presetWithin } from './start-agent.js'
 import { labelOf } from './transcript-view.js'
-import { agentDepthRefusal } from './agent-depth.js'
+import { agentDepthRefusal, recordAgentDepth } from './agent-depth.js'
 import type {
   BackgroundTask,
   PermissionPreset,
@@ -621,6 +621,8 @@ export class DelegationFlow {
       } catch (e) {
         return { ok: false, error: `Could not start the fork of "${target.name}": ${(e as Error).message}` }
       }
+      // Its depth stays even when the requester is deleted later (#897 review)
+      recordAgentDepth(this.host, child.id, callerId)
       // Copying and making the session took a while: the gates are read again, with no wait before the delegation
       const lateGate = this.forkTrustError(callerId, target)
       const cap = lateGate ? undefined : lowest(this.host.meta.get(callerId)!.permissionPreset, this.host.meta.get(target.id)!.permissionPreset)

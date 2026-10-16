@@ -373,7 +373,13 @@ below retained for `safe` and `normal`:
    persists `prefs.agentDepth`; a record without it reads as 1 (`agentDepthOf`), so it needs no store migration. A
    session the person started is depth 0; one marked `askedBy`, or working on a task another session gave it (an
    unsettled delegation: ask_project, a fork, agent_session), is one deeper than that session, the deepest link
-   counting, and a fork whose requester is gone is at least 1. A caller at the setting's depth or deeper is refused
+   counting, and a fork whose requester is gone is at least 1. Two consequences beyond `auto`: a fork the orchestrator
+   made has `forkedFrom` but no `askedBy`, so it counts 1 for good and cannot start agents at the default (it could
+   before); a session an `auto` caller reaches through agent_session counts one deeper while that delegation is
+   unsettled. A child or fork records the depth it was started at (`agent_depth:<id>` in `app_settings`, an app
+   setting rather than a column, so an older build leaves it alone; `purgeSession` deletes it), and its depth is never
+   less than that: deleting the middle of a chain does not make the rest of it shallower. Sessions made before this
+   build have no record and count by their links alone. A caller at the setting's depth or deeper is refused
    under every preset, `auto` included, with an error that names the setting and where it is; at 1, a child cannot
    start agents, and neither can a session handling an active ask_project task. The setting is read at each call
    (and again after the card, below), so lowering it applies to the next start. Forks and ask_project read the same.
