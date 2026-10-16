@@ -1183,6 +1183,42 @@ describe('starting another agent in the same project', () => {
     })
 
     /*
+     * Its turn over, a child kept a background loop running (#718): `delete` refused "still working — stop it or wait
+     * first" and `stop` answered that nothing was running, so the caller had no way out. `delete` now names the work and
+     * `stop` stops it; a timer the tool holds (`/loop`), which `stop` cannot reach, does not hold `delete`.
+     */
+    it('a child at rest with only background work left: delete names it, stop stops it, then delete goes through (#718)', async () => {
+      repo()
+      allowProject()
+      const s = await session()
+      await w.mgr.startAgent(s, { task: 'worktree task', branch: 'feat/looping', wait: false })
+      const c = childrenOf(s)[0]!
+      const h = handleOf(c.id)!
+      h.answer('done')
+      expect(await w.mgr.agentSession(s, { sessionId: c.id, action: 'wait' })).toMatchObject({ ok: true, state: 'done' })
+      const poll = { id: 'bg-poll', kind: 'shell' as const, description: 'until gh run view 7; do sleep 15; done', status: 'running' as const, stoppable: true }
+      const loop = { id: 'schedule-wakeup-1', kind: 'other' as const, description: 'Wakes itself at 12:00 (/loop)', status: 'running' as const, stoppable: false, timer: true }
+      const stopped: string[] = []
+      ;(h as unknown as { stopBackgroundTask(id: string): Promise<void> }).stopBackgroundTask = async (id) => {
+        stopped.push(id)
+        h.event({ type: 'background_tasks', sessionId: c.id, live: [loop], ended: [{ ...poll, status: 'stopped' }] })
+      }
+      h.event({ type: 'background_tasks', sessionId: c.id, live: [poll, loop] })
+
+      const refused = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
+      expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('background work is still running: until gh run view 7; do sleep 15; done') })
+      expect(!refused.ok && refused.error).toContain('agent_session(action="stop") stops it')
+      expect(!refused.ok && refused.error).not.toContain('Wakes itself')
+
+      const r = await w.mgr.agentSession(s, { sessionId: c.id, action: 'stop' })
+      expect(r).toMatchObject({ ok: true, state: 'stopped', notice: expect.stringContaining('Stopped its background work: until gh run view 7; do sleep 15; done.') })
+      expect(stopped).toEqual(['bg-poll'])
+
+      expect(await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted' })
+      expect(w.store.trashedSession(c.id)).not.toBeNull()
+    })
+
+    /*
      * A manager checks whether its worktree branches were merged when it starts, without waiting, and that check runs
      * gh in the project's folder. The check used to outlive the manager: on windows-2022, where gh is installed and
      * can take 10 s, removing the project right after the test failed with EPERM (#368).

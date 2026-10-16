@@ -817,6 +817,8 @@ export class DelegationFlow {
           if ((!d || d.settled) && !observing && this.host.children.pausedReports.has(child.id) && this.host.children.awaitingReport.get(child.id) === callerId) {
             return this.stopPausedWork(child)
           }
+          // Its turn over, only its own background work left (#718): that is what is running, and what delete waits on
+          if ((!d || d.settled) && !observing && this.host.ownTasksRunning(child.id).length) return this.stopOwnWork(child, this.host.ownTasksRunning(child.id), false)
           if (!d || d.settled) return { ok: false, error: `Nothing you gave "${child.name}" is running.` }
           if (!observing && this.host.children.awaitingReport.get(child.id) === callerId) this.host.children.clearReport(child.id)
           d.stop('the session that started it stopped it', observing)
@@ -1537,10 +1539,19 @@ export class DelegationFlow {
    * waiting. The tasks it paused on that still run are stopped where the tool can stop them one by one, and the report
    * is taken down; the turns their ending may start are the child's own. What could not be stopped is named.
    */
-  private async stopPausedWork(child: SessionInfo): Promise<ChildRunResult> {
+  private stopPausedWork(child: SessionInfo): Promise<ChildRunResult> {
     const held = new Set((this.host.children.pausedReports.get(child.id) ?? []).map((t) => t.id))
     const running = this.host.ownTasksRunning(child.id).filter((t) => held.has(t.id))
     this.host.children.clearReport(child.id)
+    return this.stopOwnWork(child, running, true)
+  }
+
+  /**
+   * Stops a child's own background work one task at a time, where the tool can (`stopBackgroundTask`), and names what
+   * it could not stop. `paused`: the work a paused report waited on (#721), whose report is already down; otherwise
+   * the work a child at rest still runs (#718), which keeps its worktree from being cleaned up.
+   */
+  private async stopOwnWork(child: SessionInfo, running: readonly BackgroundTask[], paused: boolean): Promise<ChildRunResult> {
     const stopped: BackgroundTask[] = []
     const left: BackgroundTask[] = []
     for (const t of running) {
@@ -1552,9 +1563,9 @@ export class DelegationFlow {
       }
     }
     const notice = [
-      stopped.length ? `Stopped its background work: ${taskList(stopped)}.` : 'None of the background work it paused on was still running.',
+      stopped.length ? `Stopped its background work: ${taskList(stopped)}.` : paused ? 'None of the background work it paused on was still running.' : '',
       left.length ? `Not stoppable from here, still running: ${taskList(left)}; the person can stop it, or you can ask the child to stop it.` : '',
-      'You will not be told more about this work.',
+      paused ? 'You will not be told more about this work.' : '',
     ].filter(Boolean).join(' ')
     return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool, notice }
   }
