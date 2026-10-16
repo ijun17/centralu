@@ -1,8 +1,9 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { fakeExe, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 
 /**
@@ -125,9 +126,8 @@ beforeEach(() => {
   mkdirSync(join(root, 'bin'))
   mkdirSync(join(root, 'data'))
   mkdirSync(join(root, 'node'))
-  symlinkSync(process.execPath, join(root, 'node', 'node'))
-  writeFileSync(join(root, 'bin', 'gh'), FAKE_GH)
-  chmodSync(join(root, 'bin', 'gh'), 0o755)
+  linkNode(join(root, 'node'))
+  fakeExe(join(root, 'bin'), 'gh', FAKE_GH)
   statePath = join(root, 'project.json')
   logPath = join(root, 'gh.log')
   writeFileSync(statePath, JSON.stringify(project()))
@@ -137,19 +137,19 @@ beforeEach(() => {
 afterEach(async () => {
   await rt?.dispose()
   rt = null
-  rmSync(root, { recursive: true, force: true })
+  rmFakeDir(root)
 })
 
 /** The runtime the host uses, on this repository, with `gh` resolving to the fake (or to nothing) */
 function runtime(withGh = true) {
   // node through a link of its own, so the folder node lives in (often Homebrew's, which holds the
   // real gh too) is never on this PATH
-  const path = withGh ? `${join(root, 'bin')}:${join(root, 'node')}` : join(root, 'node')
+  const path = withGh ? `${join(root, 'bin')}${delimiter}${join(root, 'node')}` : join(root, 'node')
   rt = new ExternalApps({
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: { PATH: path, HOME: root, FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath },
+    env: { PATH: path, HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath },
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 5_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
@@ -170,9 +170,7 @@ const setMode = (mode: string) => patchState({ mode })
 const writtenItems = () => ghCalls().filter((a) => a.some((x) => x.includes('updateProjectV2ItemFieldValue'))).map((a) => a.find((x) => x.startsWith('item='))!.slice(5))
 const stored = (id: string) => (JSON.parse(readFileSync(statePath, 'utf8')) as ReturnType<typeof project>).items.find((i) => i.id === id)
 
-// The fake `gh` is a sh script, node is reached through a symlink and PATH is joined with `:`; the
-// board app is this repository's own tool, run from macOS. Not on Windows (#14).
-describe.skipIf(process.platform === 'win32')('the project board app', { timeout: 30_000 }, () => {
+describe('the project board app', { timeout: 30_000 }, () => {
   it('passes check: every tool annotated, the screen served with its bridge, show as an app-only home', async () => {
     const r = await runtime().check(ref)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])

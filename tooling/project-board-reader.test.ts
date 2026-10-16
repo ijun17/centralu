@@ -1,8 +1,9 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { fakeExe, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import { buildViewCsp } from '../packages/agent-host/src/views/csp.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
@@ -367,9 +368,8 @@ beforeEach(() => {
   mkdirSync(join(root, 'bin'))
   mkdirSync(join(root, 'data'))
   mkdirSync(join(root, 'node'))
-  symlinkSync(process.execPath, join(root, 'node', 'node'))
-  writeFileSync(join(root, 'bin', 'gh'), FAKE_GH)
-  chmodSync(join(root, 'bin', 'gh'), 0o755)
+  linkNode(join(root, 'node'))
+  fakeExe(join(root, 'bin'), 'gh', FAKE_GH)
   statePath = join(root, 'state.json')
   logPath = join(root, 'gh.log')
   writeFileSync(statePath, JSON.stringify(state()))
@@ -379,7 +379,7 @@ beforeEach(() => {
 afterEach(async () => {
   await rt?.dispose()
   rt = null
-  rmSync(root, { recursive: true, force: true })
+  rmFakeDir(root)
 })
 
 function runtime() {
@@ -387,7 +387,7 @@ function runtime() {
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: { PATH: `${join(root, 'bin')}:${join(root, 'node')}`, HOME: root, FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath },
+    env: { PATH: `${join(root, 'bin')}${delimiter}${join(root, 'node')}`, HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath },
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 5_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
@@ -414,7 +414,7 @@ const patch = (fn: (s: ReturnType<typeof state>) => void) => {
   writeFileSync(statePath, JSON.stringify(s))
 }
 
-describe.skipIf(process.platform === 'win32')('the board app reads and answers items', { timeout: 60_000 }, () => {
+describe('the board app reads and answers items', { timeout: 60_000 }, () => {
   it('passes check, and its screen declares GitHub image hosts, and only those, in the CSP Centralu reads', async () => {
     const r = await runtime().check(ref)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])

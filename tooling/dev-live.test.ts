@@ -183,6 +183,9 @@ async function freePort(): Promise<number> {
 /**
  * The real launch path, in a child process that plays the command: a driver imports `launchVite` and
  * points it at a fake Vite entry, which records what it got and stops only when a signal reaches it.
+ *
+ * Not on Windows: `dev:live` stops there before it starts Vite (no keeper to ask), and the test is about
+ * POSIX signals, which Windows does not have.
  */
 describe.skipIf(process.platform === 'win32')('dev:live: launching Vite', () => {
   const ROOT = resolve(import.meta.dirname, '..')

@@ -1,16 +1,18 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+import { fakeExe, linkNode, rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 
-const ROOT = new URL('../', import.meta.url).pathname
+const ROOT = fileURLToPath(new URL('../', import.meta.url))
 const SCRIPT = join(ROOT, '.centralu/apps/project-board/bin/wait-checks.mjs')
 const SHA = 'abc1234' + '0'.repeat(33)
 let dir = ''
 
 afterEach(() => {
-  if (dir) rmSync(dir, { recursive: true, force: true })
+  if (dir) rmFakeDir(dir)
   dir = ''
 })
 
@@ -19,9 +21,8 @@ function run(args: string[], conclusion = 'success', direct = false, pending = f
   const bin = join(dir, 'bin')
   const node = join(dir, 'node')
   mkdirSync(bin)
-  mkdirSync(node)
-  symlinkSync(process.execPath, join(node, 'node'))
-  writeFileSync(join(bin, 'gh'), String.raw`#!/usr/bin/env node
+  linkNode(node)
+  fakeExe(bin, 'gh', String.raw`#!/usr/bin/env node
 const fs = require('node:fs')
 const a = process.argv.slice(2)
 const log = process.env.FAKE_GH_LOG
@@ -55,22 +56,22 @@ else if (a[1].includes('/commits/')) {
   process.stdout.write(JSON.stringify({ sha: scenario === 'moving' && resolved ? 'def5678' : process.env.FAKE_SHA }))
 } else process.exit(2)
 `)
-  chmodSync(join(bin, 'gh'), 0o755)
   const result = spawnSync(direct ? SCRIPT : process.execPath, direct ? args : [SCRIPT, ...args], {
     encoding: 'utf8', timeout: 25_000,
-    env: { ...process.env, PATH: `${bin}:${node}`, PROJECT_BOARD_WAIT_POLL_MS: '1', FAKE_GH_LOG: join(dir, 'calls'), FAKE_CONCLUSION: conclusion, FAKE_SHA: SHA, FAKE_SCENARIO: scenario, FAKE_PENDING: pending ? '1' : '' },
+    env: { ...process.env, PATH: `${bin}${delimiter}${node}`, PROJECT_BOARD_WAIT_POLL_MS: '1', FAKE_GH_LOG: join(dir, 'calls'), FAKE_CONCLUSION: conclusion, FAKE_SHA: SHA, FAKE_SCENARIO: scenario, FAKE_PENDING: pending ? '1' : '' },
   })
   return { ...result, calls: () => readFileSync(join(dir, 'calls'), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as string[]) }
 }
 
-describe.skipIf(process.platform === 'win32')('wait-checks', { timeout: 30_000 }, () => {
+describe('wait-checks', { timeout: 30_000 }, () => {
   it.each(['77', '#77', 'ijun17/centralu#77'])('keeps the pull request form %s', (pr) => {
     const r = run([pr])
     expect(r.status).toBe(0)
     expect(r.stdout.trim()).toBe('ijun17/centralu#77: 2/2 checks passed.')
   })
 
-  it('runs directly through its executable shebang', () => {
+  // Windows starts no program through a `#!` line, so there is no direct run to check there
+  it.skipIf(process.platform === 'win32')('runs directly through its executable shebang', () => {
     const r = run(['77'], 'success', true)
     expect(r.error).toBeUndefined()
     expect(r.status).toBe(0)

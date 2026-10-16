@@ -56,7 +56,7 @@ function put(dir: string, rel: string, bytes: string | Buffer, mode = 0o644) {
 const opts = { appVersion: '0.1.0-beta.12', platform: 'test-platform' }
 
 describe('the writer and the Rust verifier agree', () => {
-  // The fixture's executable bit does not survive a Windows checkout, and nothing signs there.
+  // The fixture's executable bit does not survive a Windows checkout, and nothing signs there (the macOS shell reads this content).
   it.skipIf(process.platform === 'win32')('the writer produces exactly the manifest bytes the Rust fixture verifies', () => {
     const dir = join(WRITER, 'content')
     const committed = readFileSync(join(dir, MANIFEST_NAME))
@@ -151,8 +151,8 @@ describe('the manifest', () => {
     return { dir, keys, ...out }
   }
 
-  // Windows has no exec bit to read.
-  it.skipIf(process.platform === 'win32')('lists every regular file with its size, hash and exec bit, sorted by bytes', () => {
+  // Windows has no exec bit to read: every file there is not executable, and the rest of the listing is the same.
+  it('lists every regular file with its size, hash and exec bit, sorted by bytes', () => {
     const { manifest } = signed({ 'b.sh': '#!/bin/sh\n', 'B': 'upper', '_': '', 'a/z': 'z', 'a/y/x': 'x' })
     const m = JSON.parse(manifest.toString('utf8'))
     expect(Object.keys(m)).toEqual(['format', 'appVersion', 'platform', 'minShellVersion', 'files'])
@@ -160,7 +160,7 @@ describe('the manifest', () => {
     expect(m.minShellVersion).toBe(1)
     expect(m.files.map((f: { path: string }) => f.path)).toEqual(['B', '_', 'a/y/x', 'a/z', 'b.sh'])
     const sh = m.files.find((f: { path: string }) => f.path === 'b.sh')
-    expect(sh).toEqual({ path: 'b.sh', size: 10, sha256: createHash('sha256').update('#!/bin/sh\n').digest('hex'), executable: true })
+    expect(sh).toEqual({ path: 'b.sh', size: 10, sha256: createHash('sha256').update('#!/bin/sh\n').digest('hex'), executable: process.platform !== 'win32' })
     expect(m.files.find((f: { path: string }) => f.path === '_').size).toBe(0)
     expect(manifest.toString('utf8').endsWith('}\n')).toBe(true)
   })
@@ -221,13 +221,20 @@ describe('the manifest', () => {
 })
 
 describe('the writer refuses what the verifier would refuse', () => {
-  it.skipIf(process.platform === 'win32')('a symlink', () => {
+  it('a symlink', (ctx) => {
     const dir = temp()
     put(dir, 'real', 'x')
-    symlinkSync('real', join(dir, 'link'))
+    try {
+      symlinkSync('real', join(dir, 'link'))
+    } catch (err) {
+      // Windows lets only an administrator, or Developer Mode, make one
+      if (process.platform === 'win32' && (err as NodeJS.ErrnoException).code === 'EPERM') return ctx.skip()
+      throw err
+    }
     expect(() => buildManifest(dir, opts)).toThrow(/symlink/)
   })
 
+  // Windows cannot hold a file named with a backslash or a control character, so there is nothing to refuse there
   it.skipIf(process.platform === 'win32')('a name with a backslash or a control character', () => {
     for (const name of ['a\\b', 'a\nb']) {
       const dir = temp()

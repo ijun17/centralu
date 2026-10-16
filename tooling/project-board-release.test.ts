@@ -1,20 +1,18 @@
 import { execFileSync } from 'node:child_process'
 import {
-  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
-  rmSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { fakeExe, gitWrapper, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import { APP_VERSION } from '../packages/protocol/src/brand.js'
 import {
@@ -276,8 +274,9 @@ type State = {
 
 const ref: AppRef = { projectId: 'p1', appId: 'project-board' }
 const agent: AppCaller = { kind: 'session', sessionId: 's1' }
-const GIT_BIN = join(execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(), 'git')
 let root = ''
+/** Where git is, when the PATH has to be told (gitWrapper) */
+let gitDirs: string[] = []
 let rt: ExternalApps | null = null
 let statePath = ''
 let logPath = ''
@@ -285,11 +284,9 @@ let logPath = ''
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-project-board-release-')))
   for (const d of ['bin', 'data', 'node']) mkdirSync(join(root, d))
-  symlinkSync(process.execPath, join(root, 'node', 'node'))
-  writeFileSync(join(root, 'bin', 'gh'), FAKE_GH)
-  writeFileSync(join(root, 'bin', 'git'), `#!/bin/sh\nexec "${GIT_BIN}" "$@"\n`)
-  chmodSync(join(root, 'bin', 'gh'), 0o755)
-  chmodSync(join(root, 'bin', 'git'), 0o755)
+  linkNode(join(root, 'node'))
+  fakeExe(join(root, 'bin'), 'gh', FAKE_GH)
+  gitDirs = gitWrapper(join(root, 'bin'))
   statePath = join(root, 'state.json')
   logPath = join(root, 'gh.log')
   const state: State = {
@@ -308,7 +305,7 @@ beforeEach(() => {
 afterEach(async () => {
   await rt?.dispose()
   rt = null
-  rmSync(root, { recursive: true, force: true })
+  rmFakeDir(root)
 })
 
 function runtime(ignore?: string[]) {
@@ -325,7 +322,7 @@ function runtime(ignore?: string[]) {
     projects: () => [{ id: 'p1', path: projectPath, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: { PATH: `${join(root, 'bin')}:${join(root, 'node')}`, HOME: root, FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, GIT_CONFIG_NOSYSTEM: '1', PROJECT_BOARD_RUN_LOOK_MS: '10' },
+    env: { PATH: [join(root, 'bin'), join(root, 'node'), ...gitDirs].join(delimiter), HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, GIT_CONFIG_NOSYSTEM: '1', PROJECT_BOARD_RUN_LOOK_MS: '10' },
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 5_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
@@ -435,7 +432,7 @@ function bumpEvidence(s: Repo, { differentTree = false } = {}) {
   return prHead
 }
 
-describe.skipIf(process.platform === 'win32')('release', { timeout: 60_000 }, () => {
+describe('release', { timeout: 60_000 }, () => {
   it.each(['pending', 'none'] as const)('accepts the bump PR same tree when main CI is %s, in both steps', async (ci) => {
     const s = repo({ bumped: true })
     // Release jobs can share CI names; their separate event is not PR CI evidence.
@@ -841,6 +838,8 @@ describe.skipIf(process.platform === 'win32')('release', { timeout: 60_000 }, ()
 
   it('reports every embedded version by file and line in tracked text of any type', async () => {
     const s = repo()
+    // A colon or a newline in a name is not allowed on Windows; spaces are, and need the same care
+    const odd = process.platform === 'win32' ? 'custom/spaces and  more spaces' : 'custom/spaces and:colon\nnewline'
     const pins: Record<string, string> = {
       'e2e/control-loop.spec.ts': `// local update\nconst local = '${APP_VERSION}.local.1'\n`,
       'src/candidate.ts': `const candidate = "${APP_VERSION}.local.3"\n`,
@@ -850,7 +849,7 @@ describe.skipIf(process.platform === 'win32')('release', { timeout: 60_000 }, ()
       '.release-version': `v${APP_VERSION}\n`,
       'custom/pin.unusual': `version: ${APP_VERSION}\n`,
       'fixtures/unlisted.json': `"${APP_VERSION}"\n`,
-      'custom/spaces and:colon\nnewline': `header\n${APP_VERSION}.local.2\n`,
+      [odd]: `header\n${APP_VERSION}.local.2\n`,
       'src/multiple.ts': `// one\r\n'${APP_VERSION}' + '${APP_VERSION}+build'\r\n// two\r\n'${APP_VERSION}.local.4'\r\n`,
     }
     for (const [path, text] of Object.entries(pins)) write(s.work, path, text)
@@ -871,7 +870,7 @@ describe.skipIf(process.platform === 'win32')('release', { timeout: 60_000 }, ()
           '.release-version:1',
           'custom/pin.unusual:1',
           'fixtures/unlisted.json:1',
-          'custom/spaces and:colon\nnewline:2',
+          `${odd}:2`,
           'src/multiple.ts:2',
           'src/multiple.ts:4',
         ].sort(),

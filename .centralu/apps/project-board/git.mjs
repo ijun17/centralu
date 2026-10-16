@@ -5,7 +5,7 @@
 import { execFile } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve as resolvePath } from 'node:path'
 
 export class GitError extends Error {
   constructor(message, stderr = '', code = null) {
@@ -51,7 +51,8 @@ export function git(cwd, args, { input, timeoutMs = 120_000, env } = {}) {
 
 const out = async (cwd, args) => (await git(cwd, args)).trim()
 
-export const topLevel = (dir) => out(dir, ['rev-parse', '--show-toplevel'])
+/** The checkout's root, written the way this machine writes paths: git answers `C:/Users/me/x` on Windows */
+export const topLevel = async (dir) => resolvePath(await out(dir, ['rev-parse', '--show-toplevel']))
 
 /** The remote whose configured address is github.com's `repo`, or null. Read as written, before insteadOf. */
 export async function remoteFor(dir, repo) {
@@ -83,7 +84,8 @@ export async function fetchRefs(dir, remote, refs, space = 'refs/centralu-restac
     await git(dir, ['fetch', '--no-tags', '--quiet', remote, ...specs])
     return await Promise.all(names.map((n) => out(dir, ['rev-parse', '--verify', `${n}^{commit}`])))
   } finally {
-    await Promise.all(names.map((n) => git(dir, ['update-ref', '-d', n]).catch(() => {})))
+    // One after the other: each takes git's lock on the ref store, and at once on Windows under load one of three missed it and stayed behind
+    for (const n of names) await git(dir, ['update-ref', '-d', n]).catch(() => {})
   }
 }
 

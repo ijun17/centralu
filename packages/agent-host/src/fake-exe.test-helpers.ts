@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 /**
  * A stand-in for a program the code under test starts by name (`ssh`, `gh`): a Node script that
@@ -167,4 +167,54 @@ export function fakeExe(dir: string, name: string, source: string): string {
  */
 export function rmFakeDir(dir: string): void {
   rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 })
+}
+
+/**
+ * Puts this Node into `dir` as `node` (a symlink; on Windows `node.exe`, a hard link or else a copy),
+ * so a PATH made of `dir` alone finds Node and none of the other tools that live beside the machine's
+ * own copy (Homebrew's `gh`, for one).
+ */
+export function linkNode(dir: string): void {
+  mkdirSync(dir, { recursive: true })
+  if (process.platform !== 'win32') return symlinkSync(process.execPath, join(dir, 'node'))
+  const exe = join(dir, 'node.exe')
+  try {
+    linkSync(process.execPath, exe)
+  } catch {
+    // another volume, or a file system without hard links
+    copyFileSync(process.execPath, exe)
+  }
+}
+
+/**
+ * What a Windows program needs of its environment to start at all (`SystemRoot` above all: without it
+ * Winsock, crypto and most DLL loads fail), for a test that hands a child a minimal `env`. Nothing
+ * elsewhere.
+ */
+export function windowsSystemEnv(): Record<string, string> {
+  if (process.platform !== 'win32') return {}
+  const out: Record<string, string> = {}
+  for (const k of ['SystemRoot', 'windir', 'SystemDrive', 'ComSpec', 'PATHEXT', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ProgramFiles', 'ProgramData']) {
+    const v = process.env[k]
+    if (v !== undefined) out[k] = v
+  }
+  return out
+}
+
+/**
+ * Makes git reachable on a PATH of `dir`, the folder of `linkNode` and nothing else the machine has:
+ * returns the folders to add after them. On POSIX that is none: `dir` gets an `sh` wrapper around the real
+ * git, so the folder git lives in (Homebrew's often holds the real `gh` too) is never on the PATH. On
+ * Windows git's own folder comes last, after `dir`, where a fake `gh` beats any real one; a wrapper there
+ * would be an exe starting Node for each of the hundreds of git calls a release test makes, and took
+ * the suite from about one minute to six.
+ */
+export function gitWrapper(dir: string): string[] {
+  if (process.platform !== 'win32') {
+    const gitBin = join(execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(), 'git')
+    writeFileSync(join(dir, 'git'), `#!/bin/sh\nexec "${gitBin}" "$@"\n`)
+    chmodSync(join(dir, 'git'), 0o755)
+    return []
+  }
+  return [dirname(execFileSync('where.exe', ['git.exe'], { encoding: 'utf8' }).split(/\r?\n/)[0]!.trim())]
 }

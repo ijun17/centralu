@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { fakeExe, gitWrapper, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import {
   commitProblems,
@@ -17,6 +18,8 @@ import {
   subjectProblems,
   // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 } from '../.centralu/apps/project-board/rules.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
+import { topLevel } from '../.centralu/apps/project-board/git.mjs'
 
 /**
  * The project board's contribution tools (#386 step 2): comment, file_issue, open_pr, commit_check,
@@ -201,6 +204,8 @@ fail('fake gh: unexpected call ' + JSON.stringify(args) + '\n')
 const ref: AppRef = { projectId: 'p1', appId: 'project-board' }
 const agent: AppCaller = { kind: 'session', sessionId: 's1' }
 let root = ''
+/** Where git is, when the PATH has to be told (gitWrapper) */
+let gitDirs: string[] = []
 let rt: ExternalApps | null = null
 let statePath = ''
 let logPath = ''
@@ -228,16 +233,13 @@ const pr = (number: number, extra: Partial<Pr>): Pr => ({
  * git as the app finds it on its PATH: the real binary, called through a wrapper, so the folder git
  * lives in (Homebrew's often holds the real gh too) is never on the app's PATH.
  */
-const GIT_BIN = join(execFileSync('git', ['--exec-path'], { encoding: 'utf8' }).trim(), 'git')
 
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-project-board-contribute-')))
   for (const d of ['bin', 'data', 'node']) mkdirSync(join(root, d))
-  symlinkSync(process.execPath, join(root, 'node', 'node'))
-  writeFileSync(join(root, 'bin', 'gh'), FAKE_GH)
-  writeFileSync(join(root, 'bin', 'git'), `#!/bin/sh\nexec "${GIT_BIN}" "$@"\n`)
-  chmodSync(join(root, 'bin', 'gh'), 0o755)
-  chmodSync(join(root, 'bin', 'git'), 0o755)
+  linkNode(join(root, 'node'))
+  fakeExe(join(root, 'bin'), 'gh', FAKE_GH)
+  gitDirs = gitWrapper(join(root, 'bin'))
   statePath = join(root, 'state.json')
   logPath = join(root, 'gh.log')
   const state: State = {
@@ -252,7 +254,7 @@ beforeEach(() => {
 afterEach(async () => {
   await rt?.dispose()
   rt = null
-  rmSync(root, { recursive: true, force: true })
+  rmFakeDir(root)
 })
 
 function runtime() {
@@ -260,7 +262,7 @@ function runtime() {
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: { PATH: `${join(root, 'bin')}:${join(root, 'node')}`, HOME: root, FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, GIT_CONFIG_NOSYSTEM: '1' },
+    env: { PATH: [join(root, 'bin'), join(root, 'node'), ...gitDirs].join(delimiter), HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, GIT_CONFIG_NOSYSTEM: '1' },
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 5_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
@@ -288,7 +290,7 @@ function filesNamed(dir: string, name: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? filesNamed(join(dir, e.name), name) : e.name === name ? [join(dir, e.name)] : []))
 }
 
-describe.skipIf(process.platform === 'win32')('the board app carries the contribution procedure', { timeout: 60_000 }, () => {
+describe('the board app carries the contribution procedure', { timeout: 60_000 }, () => {
   it('passes check, with the new tools annotated and open to agents', async () => {
     const r = await runtime().check(ref)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])
@@ -525,7 +527,27 @@ function stack({ mainMoves = 'none', stale = false }: { mainMoves?: 'none' | 'ot
 const checkout = (work: string) => ({ branch: g(work, 'branch', '--show-current'), head: g(work, 'rev-parse', 'HEAD'), status: g(work, 'status', '--porcelain') })
 const leftovers = (work: string) => ({ worktrees: g(work, 'worktree', 'list').split('\n').length, refs: g(work, 'for-each-ref', 'refs/centralu-restack') })
 
-describe.skipIf(process.platform === 'win32')('rebase_stack', { timeout: 60_000 }, () => {
+describe('topLevel on a real repository', { timeout: 60_000 }, () => {
+  const bare = () => {
+    const origin = join(root, 'origin.git')
+    const work = join(root, 'work')
+    g(root, 'init', '-q', '--bare', '-b', 'main', origin)
+    g(root, 'init', '-q', '-b', 'main', work)
+    g(work, 'config', 'user.name', 'Tester')
+    g(work, 'config', 'user.email', 'tester@example.test')
+    g(work, 'config', 'commit.gpgsign', 'false')
+    g(work, 'remote', 'add', 'origin', origin)
+    commit(work, 'a.txt', 'a\n', 'base')
+    return { origin, work }
+  }
+
+  it('names the checkout the way the machine writes paths, not the way git does', async () => {
+    const { work } = bare()
+    expect(await topLevel(work)).toBe(work)
+  })
+})
+
+describe('rebase_stack', { timeout: 60_000 }, () => {
   it('reports a restack without pushing: the change and the tree are the tested ones, and the checkout is untouched', async () => {
     const s = stack()
     const before = checkout(s.work)

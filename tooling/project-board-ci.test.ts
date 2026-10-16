@@ -1,9 +1,10 @@
 import { runInNewContext } from 'node:vm'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { fakeExe, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import {
   decideMerge,
@@ -419,9 +420,8 @@ let logPath = ''
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-project-board-ci-')))
   for (const d of ['bin', 'data', 'node']) mkdirSync(join(root, d))
-  symlinkSync(process.execPath, join(root, 'node', 'node'))
-  writeFileSync(join(root, 'bin', 'gh'), FAKE_GH)
-  chmodSync(join(root, 'bin', 'gh'), 0o755)
+  linkNode(join(root, 'node'))
+  fakeExe(join(root, 'bin'), 'gh', FAKE_GH)
   statePath = join(root, 'gh-state.json')
   logPath = join(root, 'gh.log')
   writeFileSync(logPath, '')
@@ -430,7 +430,7 @@ beforeEach(() => {
 afterEach(async () => {
   await rt?.dispose()
   rt = null
-  rmSync(root, { recursive: true, force: true })
+  rmFakeDir(root)
 })
 
 function runtime(state: Record<string, unknown>) {
@@ -439,7 +439,7 @@ function runtime(state: Record<string, unknown>) {
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: { PATH: `${join(root, 'bin')}:${join(root, 'node')}`, HOME: root, FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, PROJECT_BOARD_CI_POLL_MS: '250' },
+    env: { PATH: `${join(root, 'bin')}${delimiter}${join(root, 'node')}`, HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, PROJECT_BOARD_CI_POLL_MS: '250' },
     // The product's probe and call limits: a shorter one only adds a way to fail under load (#368)
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, connectTimeoutMs: 10_000 },
   })
@@ -455,8 +455,7 @@ async function call(name: string, args: Record<string, unknown>, progress?: stri
 const ghCalls = () => readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as string[])
 const merges = () => (JSON.parse(readFileSync(statePath, 'utf8')) as { merges?: string[][] }).merges ?? []
 
-// The fake gh is a node script reached through PATH joined with `:`, like the board's test (#14)
-describe.skipIf(process.platform === 'win32')('the project board app: ci_status and merge_when_green', { timeout: 30_000 }, () => {
+describe('the project board app: ci_status and merge_when_green', { timeout: 30_000 }, () => {
   it('passes check with ci_status as a read and merge_when_green as a change, both for agents only', async () => {
     const r = await runtime(ghState()).check(ref)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])
