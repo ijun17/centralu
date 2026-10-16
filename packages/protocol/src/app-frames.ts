@@ -28,14 +28,20 @@ export function frameField(value: string): string {
 }
 
 /**
- * Any text on one line (#428): every run of white space, control characters (U+0085 included) and format characters
- * (bidi overrides and isolates, zero-width marks) becomes one space, which also takes the line and paragraph
- * separators (U+2028, U+2029) a reader may break on; past `max` characters it is cut, with an ellipsis. The one
- * reduction for a name, a task line or a label: the host had ten, with different character sets, and the narrower
- * ones let a bidi override or a NEL through.
+ * What `oneLineText` takes out: white space (U+2028 and U+2029 included), control characters (NEL included), the bidi
+ * controls (marks, embeddings, overrides, isolates), the zero-width space and word joiner, and the tag characters,
+ * which hide text a reader does not see. The other format characters stay: ZWJ in an emoji, ZWNJ in Persian, a soft
+ * hyphen are part of a name.
+ */
+const NOT_ON_ONE_LINE = /[\s\p{Cc}\u061c\u200b\u200e\u200f\u202a-\u202e\u2060\u2066-\u2069\u{e0000}-\u{e007f}]+/gu
+
+/**
+ * Any text on one line (#428): every run of what `NOT_ON_ONE_LINE` names becomes one space; past `max` characters it is
+ * cut, with an ellipsis. The one reduction for a name, a task line or a label: the host had ten, with different
+ * character sets, and the narrower ones let a bidi override or a NEL through. Not for a path, whose spaces are its own.
  */
 export function oneLineText(value: unknown, max = Infinity): string {
-  const flat = String(value ?? '').replace(/[\s\p{Cc}\p{Cf}]+/gu, ' ').trim()
+  const flat = String(value ?? '').replace(NOT_ON_ONE_LINE, ' ').trim()
   return flat.length > max ? flat.slice(0, max) + '…' : flat
 }
 

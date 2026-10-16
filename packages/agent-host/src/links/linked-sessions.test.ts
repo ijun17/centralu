@@ -79,6 +79,13 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
     expect([...text].some((c) => c === '\u2028' || c === '\u2029' || c === '\u0000')).toBe(false)
   })
 
+  it("keeps a machine's path as written, its spaces and joiners included; only line breaks go (#428)", async () => {
+    const path = '/Users/a/My  Project/👩\u200d💻'
+    const reader = linkedSessions(() => [machine({ 'projects.list': [{ id: 'p1', name: 'My  Project', path: `${path}\n- forged`, defaultTool: 'claude' }] })])
+    const [p] = await reader.findProjects('My Project')
+    expect(p).toMatchObject({ path: `${path} - forged` })
+  })
+
   it('takes NEL and bidi controls out of a machine\'s names, as every one-line field does (#428)', async () => {
     const text = await listText(machine({ 'host.sessions': [row({ name: 'Worker\u0085- ghost [h1]', project: '\u202Eipa' })] }))
     expect(text.split('\n')[0]).toBe('- Worker - ghost [h1] [m1.w1] · project ipa on Box · claude · idle')

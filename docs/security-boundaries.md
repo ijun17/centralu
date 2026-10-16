@@ -534,9 +534,10 @@ for word: the same injection path as a worker's report, so the same rule applies
   (`frameField`). A pinned view's message gets the same frame, which says it came from the app's
   own view, outside this conversation.
 - One rule makes any text one line (`oneLineText` in `protocol/app-frames.ts`, #428; `frameField`
-  is it at 120 characters): white space, control characters (U+0085 included), format characters
-  (bidi overrides and isolates, zero-width marks) and the line and paragraph separators become one
-  space. Every name or task line the host puts on one line uses it: a frame's names (`askFrame`,
+  is it at 120 characters): white space, control characters (U+0085 included), the line and paragraph
+  separators, the bidi controls, the zero-width space and word joiner, and the tag characters (which
+  hide text from a reader) become one space. ZWJ, ZWNJ and the soft hyphen stay: they are part of names.
+  A linked machine's paths keep their spaces and joiners and lose only what breaks a line (`onePath`). Every name or task line the host puts on one line uses it: a frame's names (`askFrame`,
   `agentFrame`, `agentNoteFrame`), a linked machine's names, consent cards' task lines, session labels.
   The ten copies had different sets, and the narrower ones let a NEL, a bidi override or U+2028 through.
 
