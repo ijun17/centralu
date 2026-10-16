@@ -41,6 +41,13 @@ describe('a multi-line secret in the app log, masked line by line', () => {
     expect(logged[3]).toBe('}')
   })
 
+  // One long line and a short one (#945 review): counting only the long lines took it for a one-line value
+  it('masks the one long line of a value whose other lines are short', () => {
+    const value = 'abcdefghijklmnopqrstuvwxyz0123\nend'
+    const redact = redactor({ K: value })
+    expect(value.split('\n').map(redact)).toEqual(['[redacted:K]', 'end'])
+  })
+
   it('a one-line value is not split', () => {
     expect(redactor({ T: 'plain-token-value-1234' })('x plain-token-value-1234 y')).toBe('x [redacted:T] y')
   })

@@ -80,12 +80,14 @@ describe('approval rules persist (C-2)', () => {
    * What is remembered is the host's key for the card, not what the window sent (#838 review): a window from before
    * #838, during a swap, sends a command ending in `*` or a flagged command as its matcher.
    */
-  // Which commands have a key at all (a flagged one, one ending in *) is protocol's `alwaysAllowKey` (#908)
-  it('remembers nothing the card’s key is not: a wider matcher, another command, an answer to no card', async () => {
+  it('remembers nothing the card’s key is not: a wider matcher, another command, a flagged command, one ending in *', async () => {
     const { mgr, session, ask, command, f } = await setup()
     const cases: [ApprovalDetail, string][] = [
       [command('npm test'), 'npm test*'],
       [command('npm test'), 'rm -rf /'],
+      // No key at all since #908: a window from before it sends the command as the matcher
+      [command('npm test', { unsandboxed: true }), 'npm test'],
+      [command('cat logs/*'), 'cat logs/*'],
     ]
     for (const [i, [detail, matcher]] of cases.entries()) {
       ask(`req-${i}`, detail)
@@ -96,7 +98,7 @@ describe('approval rules persist (C-2)', () => {
     mgr.respondApproval(session.id, 'req-other', 'always', 'project', 'ls')
     expect(mgr.listApprovalRules()).toEqual([])
     // The call itself is allowed, and the adapter is given no matcher to keep
-    expect(f.given).toEqual([undefined, undefined, undefined])
+    expect(f.given).toEqual([undefined, undefined, undefined, undefined, undefined])
   })
 
   it('a session-scoped rule is injected only into that session', async () => {

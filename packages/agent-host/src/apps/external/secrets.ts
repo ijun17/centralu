@@ -129,8 +129,10 @@ export function redactor(secrets: Record<string, string>): (text: string) => str
     .flatMap(([name, v]): [string, string][] => {
       const escaped = JSON.stringify(v).slice(1, -1)
       const forms: [string, string][] = escaped === v ? [[name, v]] : [[name, v], [name, escaped]]
-      const lines = v.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length >= SECRET_LINE_MIN_CHARS)
-      return lines.length > 1 ? [...forms, ...lines.map((l): [string, string] => [name, l])] : forms
+      // A value with a line break in it, however many of its lines are long enough to mask (#945 review)
+      if (!/[\r\n]/.test(v)) return forms
+      const lines = v.split(/\r?\n|\r/).map((l) => l.trim()).filter((l) => l.length >= SECRET_LINE_MIN_CHARS)
+      return [...forms, ...lines.map((l): [string, string] => [name, l])]
     })
     .sort((a, b) => b[1].length - a[1].length)
   if (pairs.length === 0) return (t) => t

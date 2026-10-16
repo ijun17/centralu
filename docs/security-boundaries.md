@@ -478,7 +478,8 @@ on its card, and a rule an older build saved for one allows nothing now, so it a
 A host from an earlier build, serving the same store during a swap or after a downgrade, would read such a rule as a
 prefix, so this build never writes one. A command the card flags (outside the sandbox, network access, input to a running terminal) has no key
 either: the card offers no "always", and a rule for the same text does not let it through, since the rule cannot tell
-it from the plain command.
+it from the plain command. What the host remembers is its own key for the card, whatever the window sends (see "Always
+allow" on an agent's own card, above).
 
 ### Turning things off
 

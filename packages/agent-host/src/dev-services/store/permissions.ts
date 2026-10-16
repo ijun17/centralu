@@ -52,9 +52,9 @@ export class PermissionRecords {
   }
 
   /**
-   * Deletes every "always allow" rule whose matcher ends in `*` (#838): a build before #838 read such a rule as a prefix,
-   * and this build gives a command ending in `*` no key, so none of them allows anything here; left in the store, they
-   * would widen again under a build that reads them as before. Deleting only narrows: an older build serving the same
+   * Deletes every "always allow" rule whose matcher ends in `*` (#838): a build before #908 read such a rule as a prefix.
+   * Since #908 a command ending in `*` has no key and a rule matches exactly, so none of them allows anything; left in
+   * the store, they would widen again under a build that reads them as before. Deleting only narrows: an older build serving the same
    * store asks for those commands again. Returns how many went.
    */
   dropWildcardApprovalRules(): number {

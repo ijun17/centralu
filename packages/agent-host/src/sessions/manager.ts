@@ -574,7 +574,7 @@ export class SessionManager {
     // Not awaited here; a purge or restore waits for it, so neither reads the folder while it is still aside
     this.recoveryRepair = repairWorktreeRecoveryRemovals((id) => store.isTrashed(id)).catch((e) => console.error(`[trash] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
     this.nameUnnamedWorktrees()
-    // "Always allow" rules ending in `*` (#838): none allows anything in this build, and an older one read them as prefixes
+    // "Always allow" rules ending in `*` (#838): since #908 none allows anything, and an older build read them as prefixes
     const wildcards = store.dropWildcardApprovalRules()
     if (wildcards > 0) console.error(`[permissions] removed ${wildcards} "always allow" rule(s) ending in * (#838): their commands are asked again`)
     /*
