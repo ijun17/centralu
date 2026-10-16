@@ -41,8 +41,8 @@ export function ProjectSessionDialogs({
         <ConfirmHandoff
           name={sessions.find((s) => s.id === handingOff)?.name ?? 'Session'}
           tool={sessions.find((s) => s.id === handingOff)?.tool ?? project.defaultTool ?? ''}
-          // Determining a dead session (#78): asking a session that has errored or hit a rate limit
-          // to write a handoff note is asking someone who cannot respond for a will — the transcript mode is pre-selected
+          // Determining a dead session (#78): one that has errored or hit a rate limit — the other tool is
+          // pre-selected and the original is kept (the note comes from the record for every session, #694)
           dead={(() => {
             const s = sessions.find((x) => x.id === handingOff)
             return s ? s.state === 'error' || !!s.limit : false

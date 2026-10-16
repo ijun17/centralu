@@ -323,7 +323,8 @@ uxTask({
   },
   goal: async (page) => {
     await expect(page.getByTestId('confirm-handoff')).toBeHidden()
-    await expect(page.getByTestId('chat-stream')).toContainText('handoff note')
+    // The note comes from the record by default (#694): the successor opens with it
+    await expect(page.getByTestId('chat-stream')).toContainText('Handoff Record')
   },
   budget: { operators: 20, M: 4, seconds: 12.9 },
 })

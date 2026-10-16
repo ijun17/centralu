@@ -26,7 +26,7 @@ export function ConfirmHandoff({
 }: {
   name: string
   tool: ToolName
-  /** A session unable to respond due to an error or a rate limit (#78) — all three defaults (mode, target, deletion) flip together */
+  /** A session unable to respond due to an error or a rate limit (#78) — the target and deletion defaults flip together */
   dead: boolean
   /** A card currently up (#174) — while one is up, the agent cannot be asked. The record mode does not ask, so it goes through as is */
   blocked: 'question' | 'approval' | null
@@ -34,16 +34,19 @@ export function ConfirmHandoff({
   onCancel: () => void
 }) {
   /*
-   * Defaults are inverted for a dead session (#78): mode defaults to record (no asking), the
-   * target defaults to **the other tool** (if the service is down and that is why the handoff is
-   * happening, defaulting to the same tool is a one-click trap), and deletion defaults to off
-   * (keep the original until the successor is confirmed working). Only the initial values are
-   * flipped — changing one radio afterward never silently changes another selection (no silent
-   * actions).
+   * The note comes from the record by default, for every session (owner decision on #694): the
+   * session being replaced is the one least likely to summarize correctly, and a note it writes can
+   * carry its drift or injected text. Asking the agent stays one click away.
+   *
+   * Defaults are inverted for a dead session (#78): the target defaults to **the other tool** (if
+   * the service is down and that is why the handoff is happening, defaulting to the same tool is a
+   * one-click trap), and deletion defaults to off (keep the original until the successor is
+   * confirmed working). Only the initial values are flipped — changing one radio afterward never
+   * silently changes another selection (no silent actions).
    */
   const tools = useTools()
   const otherTool = tools.find((t) => t.name !== tool)?.name ?? tool
-  const [mode, setMode] = useState<'agent' | 'record'>(dead ? 'record' : 'agent')
+  const [mode, setMode] = useState<'agent' | 'record'>('record')
   const [heirTool, setHeirTool] = useState<ToolName>(dead ? otherTool : tool)
   const [deleteOld, setDeleteOld] = useState(!dead)
   const toolLabel = useToolMeta(tool).label
@@ -53,7 +56,7 @@ export function ConfirmHandoff({
         <p className="text-md text-ink">Hand off to a fresh session?</p>
         <p className="mt-1.5 truncate text-sm text-ink-muted">{name}</p>
 
-        {/* Where the note comes from — a live session writes it itself, a dead one has the app build it from the transcript (#78) */}
+        {/* Where the note comes from — the app builds it from the transcript by default (#694), or the session writes it itself */}
         <p className="mt-3 text-2xs uppercase text-ink-faint">Handoff note</p>
         <div className="mt-1 flex gap-1.5" role="radiogroup" aria-label="Handoff note source">
           {(
@@ -82,7 +85,7 @@ export function ConfirmHandoff({
         <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="handoff-mode-note">
           {mode === 'agent'
             ? 'This session writes a handoff note, the app saves it outside the project, then a fresh session starts by reading it.'
-            : 'The app builds the note from its stored conversation — this session is not asked. Use this when the agent cannot respond (outage, limits).'}
+            : 'The app builds the note from its stored conversation — this session is not asked, so its drift cannot leak into the note.'}
         </p>
         {mode === 'agent' && blocked && (
           <p className="mt-2 text-xs leading-body text-ink-signal" data-testid="handoff-blocked">

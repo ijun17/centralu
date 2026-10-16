@@ -2280,6 +2280,9 @@ test('handoff: the note starts a new session and the old one moves to the trash 
   // The receiving agent defaults to the current tool, and deletion defaults to on
   await expect(page.getByTestId('handoff-tool-claude')).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('handoff-delete-toggle').locator('input')).toBeChecked()
+  // The note comes from the record by default, for a live session too (#694): asking the agent is chosen
+  await expect(page.getByTestId('handoff-mode-record')).toHaveAttribute('aria-checked', 'true')
+  await page.getByTestId('handoff-mode-agent').click()
   await page.getByTestId('confirm-handoff-yes').click()
 
   // The handoff request enters the conversation as an ordinary message
@@ -2316,8 +2319,9 @@ test('handoff: the note starts a new session and the old one moves to the trash 
 
 /*
  * Handoff from a dead agent (#78): a session whose service has crashed cannot be asked to write
- * a note. Seeing that state flips all three dialog defaults at once — mode becomes record, the
- * target becomes the opposite tool, and deletion becomes off. Confirming asks the dead session
+ * a note. The note comes from the record (every session's default since #694), and seeing that
+ * state flips the other two dialog defaults — the target becomes the opposite tool, and deletion
+ * becomes off. Confirming asks the dead session
  * for nothing at all, and the host's record becomes the successor's first message.
  */
 test('Handoff from a dead session: record mode is preselected, nothing is asked, and the original remains (#78)', async ({
@@ -2339,7 +2343,7 @@ test('Handoff from a dead session: record mode is preselected, nothing is asked,
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`handoff-session-${id}`).click()
 
-  // All three defaults are flipped: record mode, the opposite tool, deletion off
+  // Record mode (every session's default since #694), and the two flipped defaults: the opposite tool, deletion off
   await expect(page.getByTestId('handoff-mode-record')).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('handoff-tool-codex')).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('handoff-delete-toggle').locator('input')).not.toBeChecked()
@@ -9402,6 +9406,10 @@ test('A session with an open question cannot be asked for a handoff note, but re
 
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`handoff-session-${id}`).click()
+  // The record is the default (#694), which asks nothing, so nothing blocks it
+  await expect(page.getByTestId('handoff-mode-record')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('handoff-blocked')).toHaveCount(0)
+  await page.getByTestId('handoff-mode-agent').click()
   await expect(page.getByTestId('handoff-blocked')).toContainText('waiting on a question')
   await expect(page.getByTestId('confirm-handoff-yes')).toBeDisabled()
   await page.getByTestId('handoff-mode-record').click()

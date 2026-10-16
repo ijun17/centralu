@@ -3189,7 +3189,7 @@ describe('handing off and starting fresh', () => {
     const old = oldRepoNote(mock, 'ho-s1')
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-s1')
+    const done = useStore.getState().handoffSession('ho-s1', { mode: 'agent' })
     // A handoff request is never hidden — it enters as the session's own ordinary message
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s1'] ?? []).some((i) => i.kind === 'user')).toBe(true)
@@ -3238,7 +3238,7 @@ describe('handing off and starting fresh', () => {
     await mock.agents.setGridView(['ho-g1', 'ho-g2', 'ho-g3'].map(sessionGridPanel))
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-g2')
+    const done = useStore.getState().handoffSession('ho-g2', { mode: 'agent' })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-g2'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
@@ -3283,13 +3283,32 @@ describe('handing off and starting fresh', () => {
     expect([...mock.sessions.values()].some((r) => r.name === 'Dead Mea' && r.id !== 'ho-r1')).toBe(true)
   })
 
+  /*
+   * The note comes from the record unless the caller asks the agent (owner decision on #694): a live session that
+   * could answer is still not asked, since it is the one least likely to summarize itself correctly.
+   */
+  it('builds the note from the record by default, even for a live session, and keeps the original (#694)', async () => {
+    const mock = new MockPlatform()
+    const proj = await mock.projects.add('/tmp/ho-default')
+    mock.sessions.set('ho-d1', sessionInfo('ho-d1', { projectId: proj.id, name: 'Live Mea', tool: 'claude', state: 'idle' }))
+    await useStore.getState().attach(mock)
+
+    await useStore.getState().handoffSession('ho-d1')
+
+    expect((useStore.getState().chat['ho-d1'] ?? []).some((i) => i.kind === 'user')).toBe(false)
+    expect(mock.lastCreateParams?.handoff?.note).toContain('Handoff Record')
+    expect(mock.lastCreateParams?.tool).toBe('claude')
+    expect(mock.sessions.has('ho-d1')).toBe(true)
+    expect(mock.lastCreateParams?.handoff?.removesOriginal).toBeUndefined()
+  })
+
   it('deletes nothing if the session errors while writing — destruction only follows success', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho2')
     mock.sessions.set('ho-s2', sessionInfo('ho-s2', { projectId: proj.id, name: 'Mea 2' }))
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-s2')
+    const done = useStore.getState().handoffSession('ho-s2', { mode: 'agent' })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s2'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
@@ -3307,7 +3326,7 @@ describe('handing off and starting fresh', () => {
     mock.sessions.set('ho-s5', sessionInfo('ho-s5', { projectId: proj.id, name: 'Switching', tool: 'codex', model: 'gpt-5.6', effort: 'high' }))
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-s5', { tool: 'claude' })
+    const done = useStore.getState().handoffSession('ho-s5', { mode: 'agent', tool: 'claude' })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s5'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
@@ -3329,7 +3348,7 @@ describe('handing off and starting fresh', () => {
     mock.sessions.set('ho-s6', sessionInfo('ho-s6', { projectId: proj.id, name: 'Branch' }))
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-s6', { deleteOld: false })
+    const done = useStore.getState().handoffSession('ho-s6', { mode: 'agent', deleteOld: false })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-s6'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
@@ -3351,7 +3370,7 @@ describe('handing off and starting fresh', () => {
     mock.sessions.set('ho-s4', sessionInfo('ho-s4', { projectId: proj.id, name: 'Mea 4', state: 'working' }))
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-s4')
+    const done = useStore.getState().handoffSession('ho-s4', { mode: 'agent' })
     // The running turn has not ended yet — the prompt is never sent, only that turn's report streams in
     await new Promise((r) => setTimeout(r, 700))
     mock.emit({ type: 'message_delta', sessionId: 'ho-s4', role: 'assistant', text: 'Applied: report on the previous task' } as NormalizedEvent)
@@ -3386,7 +3405,7 @@ describe('handing off and starting fresh', () => {
     mock.sessions.set('ho-big', sessionInfo('ho-big', { projectId: proj.id, name: 'a session that lived long' }))
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-big')
+    const done = useStore.getState().handoffSession('ho-big', { mode: 'agent' })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-big'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
@@ -3421,7 +3440,7 @@ describe('handing off and starting fresh', () => {
     mock.sessions.set('ho-sw', sessionInfo('ho-sw', { projectId: proj.id, name: 'Cleanup' }))
     await useStore.getState().attach(mock)
 
-    const done = useStore.getState().handoffSession('ho-sw', { deleteOld: false })
+    const done = useStore.getState().handoffSession('ho-sw', { mode: 'agent', deleteOld: false })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-sw'] ?? []).some((i) => i.kind === 'user')).toBe(true)
     })
@@ -3458,8 +3477,8 @@ describe('handing off and starting fresh', () => {
     await useStore.getState().attach(mock)
 
     // Both are started side by side — doing them one after the other would never surface this bug at all
-    const a = useStore.getState().handoffSession('ho-a', { deleteOld: false })
-    const b = useStore.getState().handoffSession('ho-b', { deleteOld: false })
+    const a = useStore.getState().handoffSession('ho-a', { mode: 'agent', deleteOld: false })
+    const b = useStore.getState().handoffSession('ho-b', { mode: 'agent', deleteOld: false })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-a'] ?? []).some((i) => i.kind === 'user')).toBe(true)
       expect((useStore.getState().chat['ho-b'] ?? []).some((i) => i.kind === 'user')).toBe(true)
@@ -3512,7 +3531,7 @@ describe('handing off and starting fresh', () => {
     mock.emit({ type: 'turn_complete', sessionId: 'ho-st' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-st', state: 'waiting_input' } as NormalizedEvent)
 
-    const done = useStore.getState().handoffSession('ho-st', { deleteOld: false })
+    const done = useStore.getState().handoffSession('ho-st', { mode: 'agent', deleteOld: false })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-st'] ?? []).filter((i) => i.kind === 'user').length).toBe(2)
     })
@@ -3548,7 +3567,7 @@ describe('handing off and starting fresh', () => {
     mock.emit({ type: 'turn_complete', sessionId: 'ho-lag' } as NormalizedEvent)
     mock.emit({ type: 'state_change', sessionId: 'ho-lag', state: 'waiting_input' } as NormalizedEvent)
 
-    const done = useStore.getState().handoffSession('ho-lag', { deleteOld: false })
+    const done = useStore.getState().handoffSession('ho-lag', { mode: 'agent', deleteOld: false })
     await vi.waitFor(() => {
       expect((useStore.getState().chat['ho-lag'] ?? []).filter((i) => i.kind === 'user').length).toBe(2)
     })
@@ -4563,7 +4582,7 @@ describe('an open question and the composer (#174)', () => {
       projects: { ...st.projects, [proj.id]: proj },
       sessions: { ...st.sessions, q174: { ...st.sessions.q174!, projectId: proj.id } },
     }))
-    await useStore.getState().handoffSession('q174')
+    await useStore.getState().handoffSession('q174', { mode: 'agent' })
     expect(answered).not.toHaveBeenCalled()
     expect(sent).not.toHaveBeenCalled()
     expect(useStore.getState().toast).toBe('Answer the open question first, or hand off from the record')
