@@ -135,7 +135,7 @@ intermittent failures (#368), and how long a merge may wait.
 ### Waiting without blocking
 
 Start `node .centralu/apps/project-board/bin/wait-checks.mjs <pr>` in the background instead of
-holding an MCP call open (or give `owner/repo#pr`). Use `--ref <branch|sha>` instead to wait for
+holding an MCP call open (or give `owner/repo#pr` or its URL: the forms the tools take, `parseItemRef`). Use `--ref <branch|sha>` instead to wait for
 a branch or commit in the configured repository; the ref is resolved once and its pinned SHA is printed with the label.
 It allows two minutes for workflow registration and waits for active workflows before deciding
 on checks. `--timeout-minutes <minutes>` sets the overall deadline (default 90 minutes), including
