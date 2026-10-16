@@ -656,7 +656,12 @@ describe('projects', () => {
     } finally {
       rmSync(planted.root, { recursive: true, force: true, maxRetries: 5 })
     }
-  })
+    /*
+     * Its own limit, because the work is the point: a planted repository and every door that reads it, each a real
+     * git process (about twenty). That took 2.3 to 4.0 s on windows-2022 and 17.4 s once on a loaded runner, past the
+     * 15 s default (#845); nothing here waits on time, so there is nothing to wait on instead.
+     */
+  }, 30_000 * SLOW)
 
   /*
    * The last tool chosen becomes that project's default (2026-08-27 flow review).
