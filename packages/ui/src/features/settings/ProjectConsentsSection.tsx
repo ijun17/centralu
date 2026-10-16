@@ -39,7 +39,7 @@ export function ProjectConsentsSection() {
         listed here; revoke it and the next request asks again.
       </p>
       {error && <p className="mt-2 text-sm text-ink-faint">{error}</p>}
-      {read.error !== null ? (
+      {read.error !== null && (
         <LoadFailed
           what="the list"
           error={read.error}
@@ -47,8 +47,9 @@ export function ProjectConsentsSection() {
           className="mt-2"
           testId="project-consents-failed"
         />
-      ) : list === undefined ? (
-        <p className="mt-2 text-sm text-ink-faint">Loading…</p>
+      )}
+      {list === undefined ? (
+        read.error === null && <p className="mt-2 text-sm text-ink-faint">Loading…</p>
       ) : list.length === 0 ? (
         <p className="mt-2 text-sm text-ink-faint" data-testid="project-consents-empty">
           No project may reach another yet

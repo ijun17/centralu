@@ -41,6 +41,27 @@ describe('createLoader (#850 item 8)', () => {
     expect(h.shown()).toEqual({ data: undefined, error: null, loading: true })
   })
 
+  it('a failed refresh keeps the last answer and shows the error beside it; a new subject that fails shows none', async () => {
+    const h = harness<string[]>()
+    const first = h.loader.read(h.ask, false)
+    h.asked[0]!.resolve(['a.ts'])
+    await first
+    const refresh = h.loader.read(h.ask, true)
+    h.asked[1]!.reject(new Error('the host did not answer'))
+    await refresh
+    expect(h.shown()).toEqual({ data: ['a.ts'], error: 'the host did not answer', loading: false })
+    // The next answer clears the error
+    const again = h.loader.read(h.ask, true)
+    h.asked[2]!.resolve(['a.ts', 'b.ts'])
+    await again
+    expect(h.shown()).toEqual({ data: ['a.ts', 'b.ts'], error: null, loading: false })
+    // Another subject: what was shown belongs to the old one
+    const other = h.loader.read(h.ask, false)
+    h.asked[3]!.reject(new Error('gone'))
+    await other
+    expect(h.shown()).toEqual({ data: undefined, error: 'gone', loading: false })
+  })
+
   it('drops the answer to an older question, whichever arrives first', async () => {
     const h = harness<string>()
     const older = h.loader.read(h.ask, false)

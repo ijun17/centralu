@@ -790,11 +790,8 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
         </TabActions>
       )}
 
-      {denied ? (
-        <p className="px-3 pb-2 text-xs leading-body text-ink-muted" data-testid="evidence-git-denied">
-          Folder access permission required — System Settings → Privacy & Security → Files and Folders
-        </p>
-      ) : status.error !== null ? (
+      {/* Beside the last list when a refresh failed, in its place when there is none */}
+      {!denied && status.error !== null && (
         <LoadFailed
           what="the changes"
           error={status.error}
@@ -802,8 +799,13 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
           className="px-3 pb-2"
           testId="evidence-git-failed"
         />
+      )}
+      {denied ? (
+        <p className="px-3 pb-2 text-xs leading-body text-ink-muted" data-testid="evidence-git-denied">
+          Folder access permission required — System Settings → Privacy & Security → Files and Folders
+        </p>
       ) : files === undefined ? (
-        <p className="px-3 pb-2 text-xs text-ink-faint">Loading…</p>
+        status.error === null && <p className="px-3 pb-2 text-xs text-ink-faint">Loading…</p>
       ) : files.length === 0 ? (
         <p className="px-3 pb-2 text-xs text-ink-faint" data-testid="evidence-clean">
           No changes
@@ -1021,35 +1023,42 @@ function CommitHistory({ projectId }: { projectId: string }) {
     return { rows, lanes: laneCount(rows) }
   }, [commits])
 
-  // A failed read used to be drawn as "No commits yet" (#850 item 8)
-  if (log.error !== null) {
-    return (
-      <LoadFailed
-        what="the history"
-        error={log.error}
-        onRetry={() => void log.reload()}
-        className="px-3 py-2"
-        testId="evidence-history-failed"
-      />
-    )
-  }
+  /*
+   * A failed read used to be drawn as "No commits yet" (#850 item 8). It stands in place of the history when there is
+   * none, and above the last one when a refresh failed
+   */
+  const failed = log.error !== null && (
+    <LoadFailed
+      what="the history"
+      error={log.error}
+      onRetry={() => void log.reload()}
+      className="px-3 py-2"
+      testId="evidence-history-failed"
+    />
+  )
   if (commits === undefined) {
     return (
-      <p className="px-3 py-2 text-xs text-ink-faint" data-testid="evidence-history">
-        Loading…
-      </p>
+      failed || (
+        <p className="px-3 py-2 text-xs text-ink-faint" data-testid="evidence-history">
+          Loading…
+        </p>
+      )
     )
   }
   if (commits.length === 0) {
     return (
-      <p className="px-3 py-2 text-xs text-ink-faint" data-testid="evidence-history-empty">
-        No commits yet
-      </p>
+      <>
+        {failed}
+        <p className="px-3 py-2 text-xs text-ink-faint" data-testid="evidence-history-empty">
+          No commits yet
+        </p>
+      </>
     )
   }
 
   return (
     <section className="flex min-h-0 flex-1 flex-col" data-testid="evidence-history">
+      {failed}
       <ul className="min-h-0 flex-1 overflow-y-auto">
         {commits.map((c, i) => (
           <li key={c.sha}>

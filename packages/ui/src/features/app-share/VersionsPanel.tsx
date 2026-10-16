@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { AppSnapshot, AppVersions } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useLoad } from '../../app/useLoad.js'
@@ -34,6 +34,8 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
   const read = useLoad(() => platform.apps.versions(app.appId, app.projectId, machine), [platform, app.appId, app.projectId, machine], [app.info.codeStamp])
   const versions: AppVersions | null = read.data ?? null
   const error = restoreError ?? read.error
+  // A list read again after a failed restore clears that failure, as it did before useLoad
+  useEffect(() => setRestoreError(null), [read.data])
 
   const restore = async (snap: AppSnapshot) => {
     setBusy(true)

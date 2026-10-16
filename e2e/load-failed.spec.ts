@@ -71,3 +71,21 @@ test('settings say a failed read of the always-allow rules failed, not that ther
   await page.getByTestId('rules-failed-retry').click()
   await expect(page.getByTestId('rules-empty')).toBeVisible()
 })
+
+test('a refresh of the changes that fails keeps the last list, with the error beside it', async ({ page }) => {
+  await setup(page, ['/tmp/alpha'])
+  await page.evaluate(() => {
+    ;(window as any).__mock.gitState.files = [{ path: 'a.ts', staged: false, status: 'M' }]
+  })
+  await newSession(page, 'alpha')
+  await expect(page.getByTestId('evidence-change-count')).toHaveText('1')
+
+  await failing(page, 'git', 'status', 'git did not answer')
+  // A turn's end reads the list again
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    for (const s of [...m.sessions.values()] as any[]) m.emit({ type: 'turn_complete', sessionId: s.id })
+  })
+  await expect(page.getByTestId('evidence-git-failed')).toContainText('git did not answer')
+  await expect(page.getByTestId('evidence-git').getByText('a.ts')).toBeVisible()
+})

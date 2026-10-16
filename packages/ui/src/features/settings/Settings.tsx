@@ -315,7 +315,7 @@ export function Settings() {
                   Pressing <Kbd>a</Kbd> on an approval adds an always-allow rule here. Delete any of them
                   anytime.
                 </p>
-                {rules.error !== null ? (
+                {rules.error !== null && (
                   <LoadFailed
                     what="the rules"
                     error={rules.error}
@@ -323,8 +323,9 @@ export function Settings() {
                     className="mt-2"
                     testId="rules-failed"
                   />
-                ) : rules.data === undefined ? (
-                  <p className="mt-2 text-sm text-ink-faint">Loading…</p>
+                )}
+                {rules.data === undefined ? (
+                  rules.error === null && <p className="mt-2 text-sm text-ink-faint">Loading…</p>
                 ) : rules.data.length === 0 ? (
                   <p className="mt-2 text-sm text-ink-faint" data-testid="rules-empty">
                     No saved rules

@@ -2,9 +2,12 @@ import { useCallback, useEffect, useRef, useState, type DependencyList } from 'r
 
 /** What a screen knows about something it reads when it shows (`useLoad`) */
 export type Loaded<T> = {
-  /** The last answer; undefined before the first one arrives, after a failure, and while a new subject is read */
+  /**
+   * The last answer; undefined before the first one arrives, while a new subject is read, and after a new subject
+   * failed. A failed refresh keeps it, beside `error`
+   */
   data: T | undefined
-  /** Why the last read failed; null when it did not */
+  /** Why the last read failed; null when it did not. Set together with `data` when a refresh failed */
   error: string | null
   /** A read is in flight */
   loading: boolean
@@ -54,7 +57,8 @@ export function createLoader<T>(show: (update: (shown: Loaded<T>) => Loaded<T>) 
         const data = await pending
         if (id === current) show(() => ({ data, error: null, loading: false }))
       } catch (e) {
-        if (id === current) show(() => ({ data: undefined, error: loadErrorText(e), loading: false }))
+        // A refresh that failed leaves the last answer beside its error (#850 review); a new subject has none to keep
+        if (id === current) show((s) => ({ data: keep ? s.data : undefined, error: loadErrorText(e), loading: false }))
       }
     },
     /** Makes every answer still on its way late (the subject changed, the screen went away) */
@@ -71,7 +75,8 @@ export function createLoader<T>(show: (update: (shown: Loaded<T>) => Loaded<T>) 
  * `.catch` that most often set an empty list. That last part is why a failed read looked like an empty one: the
  * evidence panel said "No changes" and "No commits yet", and settings said "No saved rules", when the host had not
  * answered at all. Here a failure is an `error`, never an empty `data`, and the screen says what failed
- * (`LoadFailed`).
+ * (`LoadFailed`). A refresh that fails keeps what was shown, with the error beside it: the list is still what it was
+ * a moment ago, and the line says it may be out of date.
  *
  * - `read` asks the question; when it returns null there is nothing to ask (yet), and the load is idle. Written
  *   inline, so `exhaustive-deps` sees what it uses.
