@@ -7,6 +7,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { whichTool } from '../../env-path.js'
 import { AppProcess, AppStartError } from './app-process.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
 
@@ -144,5 +145,44 @@ describe("a manifest's command as a path in the app folder", () => {
     // Windows refuses to delete a file that is still open: the log is closed, with no retries to wait it out
     rmSync(join(dir, 'logs'), { recursive: true })
     rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+  }, 30_000 * SLOW)
+})
+
+/**
+ * #849: a Python app writes its stderr in the locale's code page, the ANSI one on Windows, and the host reads it as UTF-8:
+ * on a Korean machine every Korean line of its crash reason reached the person as U+FFFD.
+ */
+describe("a Python app's stderr", () => {
+  const found = whichTool(process.platform === 'win32' ? 'python' : 'python3')
+  // Not the Microsoft Store's stand-in, which offers to install Python instead of running anything
+  const python = found && !/[\\/]WindowsApps[\\/]/i.test(found) ? found : null
+  // Each of these apps exits before it is ready: what is read is the failed start's stderr
+  const start = async (command: string, args: string[], env: NodeJS.ProcessEnv): Promise<AppStartError> => {
+    const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-app-py-')))
+    return (await AppProcess.start({
+      command,
+      args,
+      cwd: dir,
+      env,
+      logPath: join(dir, 'app.log'),
+      logMaxBytes: 1024 * 1024,
+      redact: (t) => t,
+      probeTimeoutMs: 10_000,
+      connectTimeoutMs: 10_000,
+      exitWaitMs: 10_000,
+    }).catch((e: unknown) => e)) as AppStartError
+  }
+  const printEnv = "process.stderr.write('PYTHONUTF8=' + process.env.PYTHONUTF8 + String.fromCharCode(10)); process.exit(3)"
+
+  it("an app runs with Python's UTF-8 mode on, unless its own environment says otherwise", async () => {
+    expect((await start(process.execPath, ['-e', printEnv], { ...process.env, PYTHONUTF8: undefined })).stderr).toEqual(['PYTHONUTF8=1'])
+    expect((await start(process.execPath, ['-e', printEnv], { ...process.env, PYTHONUTF8: '0' })).stderr).toEqual(['PYTHONUTF8=0'])
+  }, 30_000 * SLOW)
+
+  it.runIf(python !== null)('reaches the log as the app wrote it, Korean included', async () => {
+    const env = { ...process.env, PYTHONUTF8: undefined, PYTHONIOENCODING: undefined }
+    const err = await start(python!, ['-c', "import sys; print('실패: 한글 설정 오류', file=sys.stderr); sys.exit(3)"], env)
+    expect(err).toBeInstanceOf(AppStartError)
+    expect(err.stderr).toEqual(['실패: 한글 설정 오류'])
   }, 30_000 * SLOW)
 })

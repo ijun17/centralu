@@ -159,7 +159,7 @@ export class AppProcess {
       launch = resolveCommand(spec.command, spec.env, undefined, spec.cwd)
       started = spawnGrouped(launch.command, [...launch.args, ...spec.args], {
         cwd: spec.cwd,
-        env: spec.env,
+        env: withUtf8Python(spec.env),
         /*
          * fd 3 is the broker pipe, and the one stdio pipe used in both directions. On Windows a plain
          * 'pipe' reaches the child as a synchronous handle, and Windows serialises I/O on a
@@ -317,6 +317,20 @@ export class AppProcess {
     const ended = await sweepExited({ pid, spawnedAt: this.spawnedAt, exitedAt: this.exitedAt ?? Date.now() })
     if (ended.length > 0) this.log.note(`ended ${ended.length} process(es) it left running: ${ended.join(', ')}`)
   }
+}
+
+/**
+ * An app's environment with Python's UTF-8 mode on, unless the app's environment already says (#849).
+ *
+ * The host reads an app's stderr as UTF-8 (`AppLog`). Python writes a pipe in the locale's code page instead, which on
+ * Windows is the ANSI one: on a Korean machine every Korean line of a Python app's stderr (its crash reason) reached the
+ * log and the person as U+FFFD. `PYTHONUTF8=1` (PEP 540, Python 3.7+) makes its standard streams UTF-8 everywhere; off
+ * Windows, where the locale is UTF-8 already, it changes nothing a person sees. Other programs ignore it.
+ */
+export function withUtf8Python(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  // Windows spells names in any case, and a copy of its environment is a plain object
+  if (Object.entries(env).some(([k, v]) => v !== undefined && k.toUpperCase() === 'PYTHONUTF8')) return env
+  return { ...env, PYTHONUTF8: '1' }
 }
 
 function describeExit(e: ExitInfo): string {
