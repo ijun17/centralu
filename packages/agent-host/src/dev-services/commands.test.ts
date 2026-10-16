@@ -298,5 +298,11 @@ describe.runIf(process.platform === 'win32')('CommandRunner — the whole tree o
     const r = await runTree()
     r.svc.disposeAll()
     expect(await settle(() => pids.filter(alive), (left) => left.length === 0, 15_000)).toEqual([])
+    /*
+     * And the pty has reported its end, as the Stop test waits for. Until then its console host still has the
+     * folder as its working directory, and removing the folder failed with EBUSY on windows-2022 after 21 s of
+     * rmSync's retries (#845). The slot still reports the exit after disposeAll (PtySlot.kill leaves the handle).
+     */
+    expect(await settle(r.ended, (x) => x, 10_000)).toBe(true)
   }, 60_000 * SLOW)
 })
