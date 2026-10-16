@@ -295,7 +295,9 @@ export function rotateServeToken(dataDir, platform = process.platform) {
  */
 export function launcherScript(platform, execPath, cliPath) {
   if (platform === 'win32') {
-    return `@echo off\r\nrem Written by \`centralu serve\`: reaches this install without npm's folder on PATH.\r\n"${execPath}" "${cliPath}" %*\r\n`
+    // A batch file reads every % as the start of a variable (`100% cli.mjs" %*` came out as `100*`); %% is a literal one
+    const lit = (v) => String(v).replaceAll('%', '%%')
+    return `@echo off\r\nrem Written by \`centralu serve\`: reaches this install without npm's folder on PATH.\r\n"${lit(execPath)}" "${lit(cliPath)}" %*\r\n`
   }
   const q = (v) => `'${String(v).replaceAll("'", "'\\''")}'`
   return (

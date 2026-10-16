@@ -114,6 +114,8 @@ describe('the data folder and the state file', () => {
     expect(serveDataDir({ CC_DATA_DIR: '/srv/cc' }, '/home/me')).toBe('/srv/cc')
   })
 
+  // Permission bits are POSIX's. On Windows serve sets none and the file sits under the profile folder, whose ACL
+  // already limits it to the person, SYSTEM and administrators.
   it.skipIf(!POSIX)('creates the token file readable by its owner only (0600)', () => {
     const d = tempDir()
     ensureServeState(d)
@@ -233,6 +235,21 @@ describe('the launcher for non-interactive SSH shells', () => {
     expect(statSync(file).mode & 0o777).toBe(0o755)
     // An empty PATH stands in for the SSH shell that has neither npm's folder nor node
     const r = spawnSync('/bin/sh', [file, 'serve', '--connection'], { encoding: 'utf8', env: { PATH: '' } })
+    expect(r.status).toBe(0)
+    expect(JSON.parse(r.stdout)).toEqual(['serve', '--connection'])
+  })
+
+  // The same launcher on Windows is a .cmd, run by cmd.exe as ssh's default shell runs it, with a PATH that has
+  // nothing on it: node and the CLI are named by absolute path. A quote cannot be in a Windows file name; an
+  // apostrophe, spaces and a percent sign can, and are what cmd.exe is most likely to mangle.
+  it.skipIf(POSIX)('runs the CLI from a .cmd by absolute paths, even with an apostrophe, spaces and a percent sign in them', () => {
+    const d = tempDir()
+    const cli = join(d, "it's a 100% cli.mjs")
+    writeFileSync(cli, 'console.log(JSON.stringify(process.argv.slice(2)))\n')
+    const file = ensureLauncher(d, { cliPath: cli })
+    expect(file).toBe(join(d, 'bin', 'centralu.cmd'))
+    const r = spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/c', file, 'serve', '--connection'], { encoding: 'utf8', env: { PATH: '', SystemRoot: process.env.SystemRoot } })
+    expect(r.stderr).toBe('')
     expect(r.status).toBe(0)
     expect(JSON.parse(r.stdout)).toEqual(['serve', '--connection'])
   })
@@ -366,8 +383,8 @@ describe('the port serve starts on (#482)', () => {
 })
 
 describe('centralu serve, end to end (a host from source, a temporary data folder)', () => {
-  it.skipIf(!POSIX)(
-    'serves on 127.0.0.1 with its token, reports itself in --connection, refuses a second serve, and stops on SIGTERM',
+  it(
+    'serves on 127.0.0.1 with its token, reports itself in --connection, refuses a second serve, and stops on SIGTERM (--stop on Windows)',
     async () => {
       const d = tempDir()
       const before = await connection(d)
@@ -388,7 +405,10 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       expect(await second.exited).toBe(1)
       expect(second.out.stderr).toContain(`centralu serve is already running for ${d} on 127.0.0.1:${port}`)
 
-      s.child.kill('SIGTERM')
+      // Windows has no SIGTERM to send: killing the launcher would end it without a word. The way it is
+      // asked to stop there is the one the hub uses on a Windows machine, `centralu serve --stop`
+      if (POSIX) s.child.kill('SIGTERM')
+      else expect((await cli(d, ['--stop'])).line.stop).toMatchObject({ ok: true, wasRunning: true })
       expect(await s.exited).toBe(0)
       expect(s.out.stderr).toContain('[agent-host] shutting down')
       // The ready line carries the token; serve passes it to no one
@@ -399,6 +419,8 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     90_000,
   )
 
+  // Windows cannot send a Ctrl+C to one process from Node (the console delivers it to the whole group), and serve
+  // leaves it to the host there, which shares the console
   it.skipIf(!POSIX)(
     'passes Ctrl+C (SIGINT) to the host, which shuts down cleanly',
     async () => {
@@ -414,7 +436,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     90_000,
   )
 
-  it.skipIf(!POSIX)(
+  it(
     'takes the host down when the launcher itself is killed, instead of leaving it unsupervised',
     async () => {
       const d = tempDir()
@@ -441,7 +463,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     90_000,
   )
 
-  it.skipIf(!POSIX)(
+  it(
     'refuses to start on a data folder another host owns, and names its pid',
     async () => {
       const d = tempDir()
@@ -458,7 +480,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     },
     90_000,
   )
-  it.skipIf(!POSIX)(
+  it(
     'starts on the next free port when another program holds the recorded one, and reports that port (#482)',
     async () => {
       const d = tempDir()
@@ -480,7 +502,8 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
         const info = await connection(d)
         expect(info).toMatchObject({ port: held + 1, hostRunning: true })
         expect(await hello(held + 1, String(info.token))).toMatchObject({ kind: 'hello_ok' })
-        s.child.kill('SIGTERM')
+        if (POSIX) s.child.kill('SIGTERM')
+        else await cli(d, ['--stop'])
         expect(await s.exited).toBe(0)
       } finally {
         await new Promise((r) => blocker.close(r))
@@ -488,7 +511,7 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
     },
     90_000,
   )
-  it.skipIf(!POSIX)(
+  it(
     'gives serve\'s advice, not a developer\'s, when the port given with --port is taken (#482)',
     async () => {
       const d = tempDir()
@@ -654,6 +677,7 @@ describe('the install field and the managed launcher (remote-hub.md §10.1)', ()
     return { l, launcher }
   }
 
+  // The sh launcher; the Windows .cmd one is the test after it
   it.skipIf(!POSIX)('runs the version current names on its Node, marked managed, and follows current when it moves', () => {
     const { l, launcher } = managedInstall(process.platform)
     writeFileSync(l.current, '1.0.0 24.0.0\n')
@@ -773,6 +797,8 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
     120_000,
   )
 
+  // The process group is POSIX's. Windows has no group to kill at once; its counterpart is the first test above, where the
+  // host started through WMI belongs to no session at all
   it.skipIf(!POSIX)(
     'outlives the process group of the session that started it',
     async () => {
