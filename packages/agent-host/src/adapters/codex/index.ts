@@ -1613,6 +1613,19 @@ class CodexSession implements SessionHandle {
     return unsent > 0 ? ` — ${undeliveredText(unsent, 'were sent while it was opening')}` : ''
   }
 
+  /**
+   * Closed or let go while a lazy resume was still waking (#428). The client's dispose or detach rejects the pending
+   * resume, so `ready` fails after the handle is closed, and neither send's catch (it leaves a failed start to
+   * watchBackgroundStart) nor watchBackgroundStart (it returns once closed) would speak for the messages sent
+   * meanwhile. They are said here, and marked stopped so a start that still lands does not send them.
+   */
+  private reportUnsentWhileWaking(when: string): void {
+    if (this.started) return
+    const unsent = this.sendsIssued - this.sendsStopped
+    this.sendsStopped = this.sendsIssued
+    if (unsent > 0) this.emit(undeliveredError(this.sessionId, unsent, when))
+  }
+
   /** Does not silently drop a pending approval (same reason as the claude adapter — the screen would be stuck holding the card) */
   async dispose(): Promise<void> {
     this.closed = true
@@ -1635,17 +1648,7 @@ class CodexSession implements SessionHandle {
       this.pendingInputs = []
       this.emit(undeliveredError(this.sessionId, n, 'were sent during compaction'))
     }
-    /*
-     * Closed while a lazy resume was still waking (#428): the client's dispose rejects the pending resume, so `ready`
-     * fails after `closed` is set, and neither send's catch (it leaves a failed start to watchBackgroundStart) nor
-     * watchBackgroundStart (it returns once closed) would speak for the messages sent meanwhile. They are said here,
-     * and marked stopped so a start that still lands does not send them.
-     */
-    if (!this.started) {
-      const unsent = this.sendsIssued - this.sendsStopped
-      this.sendsStopped = this.sendsIssued
-      if (unsent > 0) this.emit(undeliveredError(this.sessionId, unsent, 'were sent while it was opening'))
-    }
+    this.reportUnsentWhileWaking('were sent while it was opening')
     await this.client.dispose()
   }
 
@@ -1679,6 +1682,8 @@ class CodexSession implements SessionHandle {
    * codex exit. The bridge processes codex started for this thread stay with codex.
    */
   async detach(): Promise<void> {
+    // The next host resumes the thread, but not the messages this one held behind a resume still waking (#428)
+    this.reportUnsentWhileWaking('were sent while it was opening, as Centralu restarted,')
     this.opts.apps?.close()
     await this.client.detach()
     this.closed = true

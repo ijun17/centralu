@@ -39,6 +39,7 @@ vi.mock('./client.js', () => ({
     notify(): void {}
     respond(): void {}
     async dispose(): Promise<void> {}
+    async detach(): Promise<void> {}
   },
 }))
 
@@ -178,6 +179,34 @@ describe('codex lazy resume — like Claude', () => {
         type: 'error',
         sessionId: 's6',
         error: { code: 'internal', message: expect.stringMatching(/^2 message\(s\) .* not delivered/), retryable: false },
+      },
+    ])
+    expect(methods()).not.toContain('turn/start')
+  })
+
+  /*
+   * A host swap goes through detach, not dispose: the next host resumes the thread, but the messages this host held
+   * behind its still-waking resume go nowhere. Said here, while this host still records the session's events; the
+   * client's detach then rejects the pending resume, and nothing says them again.
+   */
+  it('a host swap while it wakes says the messages sent meanwhile were not delivered, once', { timeout: 10_000 }, async () => {
+    state.hang.add('thread/resume')
+    const events: NormalizedEvent[] = []
+    const h = await new CodexAdapter().createSession(
+      { sessionId: 's8', cwd: '/tmp', permissionPreset: 'normal', resumeExternalId: 'big-thread' },
+      (e) => events.push(e),
+    )
+    h.send('message while it wakes')
+    await h.detach!()
+    state.rejecters.get('thread/resume')!(new Error('request abandoned: this host let go of codex'))
+    await tick()
+    await tick()
+    const errors = events.filter((e) => e.type === 'error')
+    expect(errors).toEqual([
+      {
+        type: 'error',
+        sessionId: 's8',
+        error: { code: 'internal', message: expect.stringMatching(/^1 message\(s\) .* not delivered/), retryable: false },
       },
     ])
     expect(methods()).not.toContain('turn/start')
