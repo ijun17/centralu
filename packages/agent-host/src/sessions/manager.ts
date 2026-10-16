@@ -2457,6 +2457,15 @@ export class SessionManager {
          */
         // The queued request being delivered started its turn (#684 review): only now is it off the queue and the store
         if (!wasBusy && inTurn(m.state)) this.children.queuedTurnStarted(m.id)
+        /*
+         * Or the tool refused it outright (#839): an error or a usage limit, and no turn starts. The request is done with
+         * all the same, and this is its turn's end: its requester is told, the turn it owned is released, the next request
+         * goes in. Left delivering, the session counted as busy for every requester and its queue never moved again.
+         */
+        if (!wasBusy && !inTurn(m.state) && (e.type === 'error' || e.type === 'limit_reached') && this.children.delivering.has(m.id)) {
+          this.children.queuedTurnStarted(m.id)
+          endedTurn = true
+        }
         if (wasBusy && !inTurn(m.state)) {
           endedTurn = true
           const ref = this.appSessions.builderRefOf(m)
@@ -5112,6 +5121,9 @@ export class SessionManager {
     }
     // Reserved before the first await: the session is busy from here, and this is the only drain for it
     this.children.startDelivering(sessionId, r.id)
+    // The requester is told when the turn ends, as for work it did not wait on. Marked before the input goes in: a tool
+    // that refuses it at once ends the request inside `deliver`, and that end is the one reported (#839)
+    this.children.markReport(sessionId, caller.id)
     const from = { sessionId: caller.id, name: labelOf(this.store, caller) }
     const project = this.store.listProjects().find((p) => p.id === m.projectId)
     const target = { id: m.projectId ?? '', name: project?.name ?? '', path: this.store.sessionCwd(m.id) ?? m.worktree?.path ?? project?.path ?? '' }
@@ -5128,13 +5140,13 @@ export class SessionManager {
         const callerProject = this.store.listProjects().find((p) => p.id === caller.projectId)?.name ?? 'another project'
         await this.deliver(sessionId, askFrame(callerProject, r.text), undefined, from, false)
       }
-      // The requester is told when the turn ends, as for work it did not wait on
-      this.children.markReport(sessionId, caller.id)
       // Its turn may have started without this host seeing the step into it
       if (inTurn(this.meta.get(sessionId)?.state ?? 'idle')) this.children.queuedTurnStarted(sessionId)
     } catch (e) {
       // Leaving: the row stays, marked, and the next host delivers it
       if (this.handingOver || this.disposing) return
+      // Said once, below, rather than as a report too
+      if (this.children.awaitingReport.get(sessionId) === caller.id) this.children.clearReport(sessionId)
       if (d) {
         d.wait.fail(e as Error)
       } else this.children.releaseTurn(sessionId, caller.id)
