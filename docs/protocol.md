@@ -60,7 +60,7 @@ type NormalizedEvent =
       from?, label?, audience?: 'you'|'centralu', summary?, items?, hint? }  // #304: text the tool wants read, one line; #342: made readable
   // in-turn progress (display-only, never persisted)
   | { type: 'activity';         sessionId, activity|null }      // compacting / reviewing / retrying (codex reconnecting, claude api_retry)
-  | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated, claude TodoWrite (#843), a snapshot
+  | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated, claude's TodoWrite or task list (#843), a snapshot
   | { type: 'tool_output_delta';sessionId, callId, text }       // #58: live command output tail; #98: a subagent's steps, on the Agent call that spawned it
   // what a native subagent did — kept apart from the conversation (#222)
   | { type: 'subagent_event';   sessionId, parentCallId, step: SubagentStep, stepSeq? }  // step: a message_delta, reasoning_delta, tool_call or tool_result

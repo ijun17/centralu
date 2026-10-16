@@ -60,7 +60,7 @@ type NormalizedEvent =
       from?, label?, audience?: 'you'|'centralu', summary?, items?, hint? }  // #304: 도구가 읽히길 바라는 글, 한 줄. #342: 읽기 쉽게
   // 턴 안의 진행 상황 (표시 전용, 영속되지 않는다)
   | { type: 'activity';         sessionId, activity|null }      // 압축 중 / 리뷰 중 / 재시도 중 (codex 재연결, claude api_retry)
-  | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated, claude TodoWrite (#843) 스냅샷
+  | { type: 'plan_update';      sessionId, steps: {text, status}[] }  // #58: codex turn/plan/updated, claude TodoWrite 또는 작업 목록 (#843) 스냅샷
   | { type: 'tool_output_delta';sessionId, callId, text }       // #58: 실행 중 명령 출력의 꼬리 · #98: 서브에이전트의 걸음 (띄운 Agent 호출에)
   // 네이티브 서브에이전트가 한 일 — 대화와 따로 남는다 (#222)
   | { type: 'subagent_event';   sessionId, parentCallId, step: SubagentStep, stepSeq? }  // step: message_delta, reasoning_delta, tool_call, tool_result 중 하나

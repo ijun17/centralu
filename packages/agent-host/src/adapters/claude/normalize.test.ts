@@ -871,3 +871,49 @@ describe('a model request, for prompt cache accounting', () => {
     expect(requests(out)).toEqual([])
   })
 })
+
+/*
+ * Claude Code's task tools as the plan (#843). The bundled CLI offers TaskCreate/TaskUpdate rather than TodoWrite
+ * unless CLAUDE_CODE_ENABLE_TASKS is false. Shapes from transcripts (CLI 2.1.223): a TaskCreate's id comes only with
+ * its result, in `tool_use_result.task` and in the text.
+ */
+describe("Claude Code's task list as the session's plan (#843)", () => {
+  const use = (id: string, name: string, input: unknown, extra: Record<string, unknown> = {}) => ({
+    type: 'assistant', ...extra, message: { id: `m-${id}`, content: [{ type: 'tool_use', id, name, input }] },
+  })
+  const result = (id: string, text: string, record?: unknown, extra: Record<string, unknown> = {}) => ({
+    type: 'user', ...extra, message: { content: [{ type: 'tool_result', tool_use_id: id, content: text }] }, ...(record ? { tool_use_result: record } : {}),
+  })
+  const plans = (events: NormalizedEvent[]) => events.flatMap((e) => (e.type === 'plan_update' ? [e.steps] : []))
+
+  it('creates tasks from their results, and follows their updates', () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    expect(plans(stream.push(use('c1', 'TaskCreate', { subject: 'Read the code', description: 'd' })))).toEqual([])
+    expect(plans(stream.push(result('c1', 'Task #1 created successfully: Read the code', { task: { id: '1', subject: 'Read the code' } })))).toEqual([
+      [{ text: 'Read the code', status: 'pending' }],
+    ])
+    stream.push(use('c2', 'TaskCreate', { subject: 'Fix the bug', description: 'd' }))
+    // Without the record (a message carrying several results), the id is read from the text
+    expect(plans(stream.push(result('c2', 'Task #2 created successfully: Fix the bug')))).toEqual([
+      [{ text: 'Read the code', status: 'pending' }, { text: 'Fix the bug', status: 'pending' }],
+    ])
+    stream.push(use('u1', 'TaskUpdate', { taskId: '1', status: 'completed' }))
+    stream.push(use('u2', 'TaskUpdate', { taskId: '2', status: 'in_progress' }))
+    const updated = [...stream.push(result('u1', 'Updated task #1 status')), ...stream.push(result('u2', 'Updated task #2 status'))]
+    expect(plans(updated).at(-1)).toEqual([{ text: 'Read the code', status: 'completed' }, { text: 'Fix the bug', status: 'inProgress' }])
+    stream.push(use('u3', 'TaskUpdate', { taskId: '1', status: 'deleted' }))
+    expect(plans(stream.push(result('u3', 'Updated task #1 deleted')))).toEqual([[{ text: 'Fix the bug', status: 'inProgress' }]])
+  })
+
+  it('takes a TaskList as the whole list, and ignores a failed call and a subagent', () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    stream.push(use('l1', 'TaskList', {}))
+    expect(plans(stream.push(result('l1', '#1 [completed] A', { tasks: [{ id: '1', subject: 'A', status: 'completed', blockedBy: [] }, { id: '2', subject: 'B', status: 'pending', blockedBy: [] }] })))).toEqual([
+      [{ text: 'A', status: 'completed' }, { text: 'B', status: 'pending' }],
+    ])
+    stream.push(use('u1', 'TaskUpdate', { taskId: '2', status: 'completed' }))
+    expect(plans(stream.push({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'u1', content: 'Task not found', is_error: true }] } }))).toEqual([])
+    stream.push(use('s1', 'TaskCreate', { subject: 'Sub', description: 'd' }, { parent_tool_use_id: 'agent' }))
+    expect(plans(stream.push(result('s1', 'Task #3 created successfully: Sub', { task: { id: '3', subject: 'Sub' } }, { parent_tool_use_id: 'agent' })))).toEqual([])
+  })
+})

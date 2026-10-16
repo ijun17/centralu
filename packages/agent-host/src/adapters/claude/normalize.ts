@@ -9,6 +9,7 @@ import { UnmappedTypes } from '../unmapped.js'
 import { ClaudeBackgroundTracker } from './background-tracker.js'
 import { ClaudeGoalTracker } from './goal-tracker.js'
 import { str, type Json } from './json.js'
+import { ClaudeTaskPlan } from './task-plan.js'
 import { agentReport, agentStats, approvalDetail, editedPaths, resultOutput, toolSummary } from './tool-summary.js'
 
 export { ClaudeBackgroundTracker, ClaudeGoalTracker, approvalDetail, toolSummary }
@@ -631,6 +632,8 @@ export class ClaudeStreamNormalizer {
   /** The last turn result's reading, the process's total then, and the parent's requests since (see `withRequest`) */
   private resultTokens: TokenUsage | null = null
   private sinceResult: TokenUsage = NO_TOKENS
+  /** Claude Code's task list, kept as the plan (see `followTasks`) */
+  private readonly taskPlan: ClaudeTaskPlan
   /** Edits whose result has not come yet (see `touch`) */
   private readonly touched: TouchedFiles
   /** The session's /goal, read off the stream (see `ClaudeGoalTracker`). */
@@ -665,6 +668,7 @@ export class ClaudeStreamNormalizer {
   ) {
     this.goal = new ClaudeGoalTracker(sessionId)
     this.touched = new TouchedFiles(sessionId)
+    this.taskPlan = new ClaudeTaskPlan(sessionId)
     this.unmapped = new UnmappedTypes('claude', sessionId, CLAUDE_KNOWN_TYPES)
     this.tasks = new ClaudeBackgroundTracker(sessionId)
   }
@@ -769,6 +773,22 @@ export class ClaudeStreamNormalizer {
     return out
   }
 
+  /**
+   * The task list as the plan (`ClaudeTaskPlan`, #843), from the parent's own calls: a subagent's tasks are not the
+   * session's plan. The message's `tool_use_result` is read only when it carries one result.
+   */
+  private followTasks(m: Json, events: NormalizedEvent[]): NormalizedEvent[] {
+    const results = (((m.message as Json | undefined)?.content ?? []) as Json[]).filter((b) => str(b?.type) === 'tool_result')
+    const record = results.length === 1 && typeof m.tool_use_result === 'object' && m.tool_use_result !== null ? (m.tool_use_result as Json) : undefined
+    const out: NormalizedEvent[] = []
+    for (const e of events) {
+      out.push(e)
+      if (e.type === 'tool_call') this.taskPlan.call(e.callId, e.summary.tool, e.input)
+      else if (e.type === 'tool_result') out.push(...this.taskPlan.result(e.callId, e.ok, e.output ?? '', record))
+    }
+    return out
+  }
+
   /** The adapter interrupted the turn (see `stopping` above). */
   stopped(): void {
     this.stopping = true
@@ -852,6 +872,7 @@ export class ClaudeStreamNormalizer {
       }
     }
     events = this.touch(events)
+    if (!subagent) events = this.followTasks(m, events)
     if (subagent) return events
     events = this.followRetry(type, events)
     if (type === 'result' && this.refusal !== null) {
