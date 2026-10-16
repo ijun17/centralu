@@ -1395,6 +1395,11 @@ export class SessionManager {
         from.sink,
       )
       from.own(handle)
+      // The host began leaving while it came up (#839): its handles are let go of, so this one is stopped here
+      if (this.lettingGo()) {
+        await handle.dispose().catch(() => {})
+        throw new Error('Centralu is restarting or quitting')
+      }
     } catch (err) {
       this.record.unborn.delete(id)
       apps?.close()
@@ -1582,7 +1587,14 @@ export class SessionManager {
     const going = this.sleeping.get(sessionId)
     if (going) await going
     const inflight = this.resuming.get(sessionId)
-    if (inflight) return inflight
+    if (inflight) {
+      // A kept process with a wake already under way would run beside the one it brings up (#839): stopped, unused
+      if (adopt) {
+        console.error(`[agent-host] kept process for ${sessionId.slice(0, 8)} met a wake already under way; stopping it`)
+        adopt.kill('SIGTERM')
+      }
+      return inflight
+    }
     const p = this.doResumeSession(sessionId, adopt).finally(() => this.resuming.delete(sessionId))
     this.resuming.set(sessionId, p)
     return p
@@ -1812,8 +1824,11 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
-    // If it is already alive, use it as-is (never create a duplicate process)
-    if (this.handles.has(sessionId)) return { session: m, resumed: true }
+    // If it is already alive, use it as-is (never create a duplicate process); a kept process offered too is stopped (#839)
+    if (this.handles.has(sessionId)) {
+      adopt?.kill('SIGTERM')
+      return { session: m, resumed: true }
+    }
 
     const tool = m.tool
     const adapter = this.adapters.get(tool)
@@ -1995,6 +2010,8 @@ export class SessionManager {
         this.leaving.get(sessionId) ??
         (!this.meta.has(sessionId) ? 'The session was deleted while waking'
         : m.tool !== tool ? 'The session switched tools while waking'
+        // The host is leaving (#839): its handles are let go of, so one registered now would be nobody's
+        : this.lettingGo() ? 'Centralu is restarting or quitting'
         : null)
       if (leaving) {
         // Waits for it to close — whichever side is deleting it goes on to delete the tool-side conversation
@@ -3058,6 +3075,7 @@ export class SessionManager {
    */
   async switchTool(sessionId: string, tool: ToolName): Promise<SessionInfo> {
     if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    this.refuseWhileLettingGo()
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
     if (m.tool === tool) return { ...m, live: this.handles.has(sessionId) }
@@ -3752,6 +3770,7 @@ export class SessionManager {
     cause?: RebuildCause,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
     if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    this.refuseWhileLettingGo()
     if (cause) {
       this.restartPolicy.restartReasons.set(sessionId, cause)
       if (cause === 'launch_settings') console.error(`[sessions] restarting ${sessionId}: launch settings changed or previously unrecorded`)
@@ -3996,6 +4015,9 @@ export class SessionManager {
         return self.children
       },
       cleanUpWorktreeChild: (...a) => self.worktrees.cleanUpWorktreeChild(...a),
+      get lettingGo() {
+        return self.lettingGo()
+      },
       get closing() {
         return self.disposing || self.handingOver
       },
@@ -5679,7 +5701,31 @@ export class SessionManager {
     )
   }
 
+  /**
+   * The handles are being let go of (#839): a quit sweeping them (`disposeAll`), or a handover (`detachAll`). A process
+   * that comes up now is missed by the sweep, so whoever started it stops it, and no process is swapped for another.
+   * Only during the quit's sweep, not after: a manager stopped this way is woken again in tests, and a quitting host
+   * exits once the sweep is done.
+   */
+  private sweepingHandles = false
+  private lettingGo(): boolean {
+    return this.sweepingHandles || this.handingOver
+  }
+  /** Refuses a process swap asked for while the handles are let go of (#839): it would stop a process the keeper keeps */
+  private refuseWhileLettingGo(): void {
+    if (this.lettingGo()) throw Object.assign(new Error('Centralu is restarting or quitting; try again once it is back'), { code: 'internal' })
+  }
+
   async disposeAll(): Promise<void> {
+    this.sweepingHandles = true
+    try {
+      await this.disposeEverything()
+    } finally {
+      this.sweepingHandles = false
+    }
+  }
+
+  private async disposeEverything(): Promise<void> {
     // The cards it closes below are not the person's answers: a standing start_agent request stays stored (#673)
     this.disposing = true
     this.leaveHost('Centralu is shutting down')

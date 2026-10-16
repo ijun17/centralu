@@ -33,6 +33,7 @@ beforeEach(() => {
     handles: new Map([['s', {} as SessionHandle]]),
     backgroundTasksKey: (id) => `background_tasks:${id}`,
     inputsHeld: () => false,
+    lettingGo: false,
     onEvent: () => {},
     rememberBackgroundTasks: () => {},
     scheduleDrain: () => {},

@@ -34,6 +34,8 @@ export type RestartHost = {
   readonly children: ChildOwnership
   readonly handles: Map<string, SessionHandle>
   inputsHeld: (sessionId: string) => boolean
+  /** The host is quitting or handing over (#839): no process is replaced then */
+  readonly lettingGo: boolean
   readonly meta: Map<string, SessionInfo>
   onEvent: (raw: NormalizedEvent, from?: SessionHandle | null) => void
   rememberBackgroundTasks: (m: SessionInfo) => void
@@ -195,6 +197,8 @@ export class RestartPolicy {
   applyDeferredRestart(sessionId: string): void {
     // The same boundaries free a busy session for the request queued for it (#677)
     if (this.host.children.queued.has(sessionId)) this.host.scheduleDrain(sessionId)
+    // Not while the host leaves (#839): a restart now would stop a process the keeper keeps for the next host, or start one nobody stops
+    if (this.host.lettingGo) return
     const session = this.host.meta.get(sessionId)
     if (!session || inTurn(session.state) || this.deferredRestarts.has(sessionId) || this.host.inputsHeld(sessionId) || !this.restartAfterTurn.has(sessionId)) return
     const hold = this.backgroundHolds.get(sessionId)
