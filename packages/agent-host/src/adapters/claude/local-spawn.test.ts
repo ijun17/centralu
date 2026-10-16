@@ -34,7 +34,6 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 
 const { ClaudeAdapter } = await import('./index.js')
 
-const unix = process.platform !== 'win32'
 // Real processes: a node start costs seconds on a loaded machine
 vi.setConfig({ testTimeout: 30_000 })
 const started: number[] = []
@@ -51,7 +50,7 @@ async function session() {
   return { handle, events, spawn }
 }
 
-describe.skipIf(!unix)('a Claude session without a keeper', () => {
+describe('a Claude session without a keeper', () => {
   it('spawns the CLI itself, and stopping it ends the helper the CLI leaves behind', async () => {
     const { handle, spawn } = await session()
     expect(spawn).toBeTypeOf('function')

@@ -6,6 +6,11 @@ import type { Readable } from 'node:stream'
  * The helper is an ordinary child: it shares the CLI's process group and is never stopped by the
  * CLI, so a CLI that ends leaves it behind unless whoever stops the CLI reaches it too.
  *
+ * On Windows the helper is started `detached`. A child Node starts there otherwise joins Node's
+ * kill-on-close job and dies with the CLI whatever the host does, so the fake would prove nothing;
+ * detached, it stands for a helper started outside that job (by a native CLI, a Python MCP server),
+ * which only the host's own cleanup ends. Elsewhere it stays in the CLI's process group.
+ *
  * The CLI prints the helper's pid as its first line, then:
  *   - `ignoreTerm`: both it and its helper ignore SIGTERM, so only SIGKILL ends them;
  *   - `crash`: it exits by itself once the helper is up (no one asked it to stop);
@@ -18,7 +23,7 @@ export function fakeAgentCli(opts: { ignoreTerm?: boolean; crash?: boolean; pidF
     "const { spawn } = require('node:child_process')",
     ignore,
     // The pid is given once the helper runs its script, so a signal never finds it half started
-    `const helper = spawn(process.execPath, ['-e', ${JSON.stringify(`${ignore}console.log('up'); setInterval(() => {}, 1000)`)}], { stdio: ['ignore', 'pipe', 'ignore'] })`,
+    `const helper = spawn(process.execPath, ['-e', ${JSON.stringify(`${ignore}console.log('up'); setInterval(() => {}, 1000)`)}], { stdio: ['ignore', 'pipe', 'ignore'], detached: process.platform === 'win32' })`,
     // A crash comes once the pid is out, however long the helper took to start
     `helper.stdout.once('data', () => { ${toFile} process.stdout.write(helper.pid + '\\n'); helper.stdout.destroy(); ${opts.crash ? 'setTimeout(() => process.exit(3), 100)' : ''} })`,
     "process.stdin.on('end', () => process.exit(0))",
