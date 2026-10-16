@@ -19,6 +19,7 @@ import { TypographySection } from './TypographySection.jsx'
 import { AgentCliUpdates, UpdatesSection } from './UpdatesSection.jsx'
 import { SleepSection } from './SleepSection.jsx'
 import { MachinesSection } from './MachinesSection.jsx'
+import { AgentModelsSection } from './AgentModelsSection.jsx'
 import type { BackgroundPort } from '@cc/platform/ports'
 
 type Rule = {
@@ -897,6 +898,7 @@ function SessionToolsSwitch() {
       <p className="mt-1 text-xs leading-body text-ink-faint">
         Leave empty for the preset default: unlimited under auto, four otherwise. Zero means unlimited.
       </p>
+      <AgentModelsSection />
     </div>
   )
 }

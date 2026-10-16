@@ -6,7 +6,7 @@ import type { PermissionPreset } from '@cc/protocol'
 import { AGENT_TOOLS, runOrchestratorTool } from './orchestrator-tools.js'
 import { ASK_WAIT_MS } from './ask-project.js'
 import { CrossAdapter, crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
-import { AGENT_CEILING, agentBranch, agentNoteFrame, presetWithin } from './start-agent.js'
+import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, presetWithin } from './start-agent.js'
 import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
 import { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './manager.js'
@@ -31,6 +31,34 @@ describe('the preset rule', () => {
     for (const [i, parent] of order.entries()) {
       for (const [j, child] of order.entries()) expect(presetWithin(child, parent)).toBe(j <= i)
     }
+  })
+})
+
+describe('the model a child starts on (#107, #729)', () => {
+  const remembered = { model: 'sonnet', effort: 'low' }
+  const setting = { heavy: { model: 'opus', effort: 'max' }, light: { model: 'haiku' } }
+  it('a model named wins; its effort is the one named, or the remembered one only for the remembered model', () => {
+    expect(agentChoice({ model: 'fable', difficulty: 'heavy' }, remembered, setting)).toEqual({ model: 'fable' })
+    expect(agentChoice({ model: 'sonnet', difficulty: 'heavy' }, remembered, setting)).toEqual({ model: 'sonnet', effort: 'low' })
+    expect(agentChoice({ model: 'fable', effort: 'high' }, remembered, setting)).toEqual({ model: 'fable', effort: 'high' })
+  })
+  it('a difficulty takes the person\'s choice for it, and says so; an effort named still wins', () => {
+    expect(agentChoice({ difficulty: 'heavy' }, remembered, setting)).toEqual({ model: 'opus', effort: 'max', difficulty: 'heavy' })
+    expect(agentChoice({ difficulty: 'heavy', effort: 'high' }, remembered, setting)).toEqual({ model: 'opus', effort: 'high', difficulty: 'heavy' })
+    // No effort chosen with it: the model's own default, not the remembered model's effort
+    expect(agentChoice({ difficulty: 'light' }, remembered, setting)).toEqual({ model: 'haiku', difficulty: 'light' })
+  })
+  it('a difficulty with nothing chosen, or no difficulty, is the project\'s remembered choice', () => {
+    expect(agentChoice({ difficulty: 'standard' }, remembered, setting)).toEqual({ model: 'sonnet', effort: 'low' })
+    expect(agentChoice({ difficulty: 'heavy' }, remembered, undefined)).toEqual({ model: 'sonnet', effort: 'low' })
+    expect(agentChoice({}, remembered, setting)).toEqual({ model: 'sonnet', effort: 'low' })
+    expect(agentChoice({}, undefined, setting)).toEqual({})
+  })
+})
+
+describe('the frame a child gets (#729)', () => {
+  it('asks it to wait for its own background work that ends inside its turn', () => {
+    expect(agentFrame('parent', 'run the tests')).toContain('Wait for your own background work that ends (a test run, a build) inside your turn before you answer.')
   })
 })
 
@@ -155,6 +183,57 @@ describe('starting another agent in the same project', () => {
     expect(agentCard(s)!.detail).toMatchObject({ kind: 'agent_start', preset: 'safe' })
     w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow')
     expect(await p).toMatchObject({ ok: true, state: 'working' })
+  })
+
+  describe('a difficulty instead of a model (#729)', () => {
+    const option = (id: string, efforts: string[] = ['low', 'high']): ModelOption => ({ id, label: id, efforts, defaultEffort: 'low', tiers: [] })
+    beforeEach(() => {
+      w.adapters.get('codex')!.listModels = async () => [option('gpt-big', ['low', 'high', 'xhigh']), option('gpt-small')]
+      w.mgr.setUiPreferences({ agentModels: { codex: { heavy: { model: 'gpt-big', effort: 'xhigh' }, light: { model: 'gpt-small' } } } })
+    })
+
+    it('starts the person\'s model and effort for that tool and difficulty, and the card names both', async () => {
+      const s = await session('safe')
+      const p = w.mgr.startAgent(s, { task: 'design the store', tool: 'codex', difficulty: 'heavy', wait: false })
+      await w.until(() => !!agentCard(s))
+      expect(agentCard(s)!.detail).toMatchObject({ kind: 'agent_start', model: 'gpt-big', difficulty: 'heavy' })
+      w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow')
+      expect(await p).toMatchObject({ ok: true, state: 'working' })
+      const c = childrenOf(s)[0]!
+      expect(handleOf(c.id)!.opts).toMatchObject({ model: 'gpt-big', effort: 'xhigh' })
+    })
+
+    it('a model named still wins, and the card does not credit the setting', async () => {
+      const s = await session('safe')
+      const p = w.mgr.startAgent(s, { task: 'design it', tool: 'codex', model: 'gpt-small', difficulty: 'heavy', wait: false })
+      await w.until(() => !!agentCard(s))
+      expect(agentCard(s)!.detail).toMatchObject({ model: 'gpt-small' })
+      expect(agentCard(s)!.detail).not.toHaveProperty('difficulty')
+      w.mgr.respondApproval(s, agentCard(s)!.requestId, 'allow')
+      await p
+      expect(handleOf(childrenOf(s)[0]!.id)!.opts).toMatchObject({ model: 'gpt-small' })
+    })
+
+    it('a chosen model the tool no longer lists is refused with the list, and says whose choice it was', async () => {
+      w.mgr.setUiPreferences({ agentModels: { codex: { heavy: { model: 'gpt-retired' } } } })
+      const s = await session()
+      const r = await w.mgr.startAgent(s, { task: 'design it', tool: 'codex', difficulty: 'heavy', wait: false })
+      expect(r).toMatchObject({ ok: false, error: expect.stringContaining('has no model "gpt-retired". Its models: gpt-big, gpt-small') })
+      expect(!r.ok && r.error).toContain("the person's choice for heavy work in Settings → Orchestrator")
+      expect(childrenOf(s)).toHaveLength(0)
+    })
+
+    it('arrives from the tool call: the served schema takes it and the runner passes it on', async () => {
+      const s = await session()
+      const args = AGENT_TOOLS[0].schema.parse({ task: 'check it', tool: 'codex', difficulty: 'light', wait: false })
+      const startAgent = (opts: Parameters<typeof w.mgr.startAgent>[1]) => w.mgr.startAgent(s, opts)
+      const tools = { startAgent } as import('../adapters/contract.js').OrchestratorTools
+      expect((await runOrchestratorTool(tools, 'start_agent', args, { sessionId: s, profile: 'reader' })).isError).not.toBe(true)
+      await w.until(() => childrenOf(s).length === 1)
+      expect(handleOf(childrenOf(s)[0]!.id)!.opts).toMatchObject({ model: 'gpt-small' })
+      const bad = await runOrchestratorTool(tools, 'start_agent', { task: 'x', difficulty: 'hard' }, { sessionId: s, profile: 'reader' })
+      expect(bad).toEqual({ text: 'Give difficulty as light, standard or heavy, or leave it out.', isError: true })
+    })
   })
 
   it('past its setup bound the card stays: the call answers "pending" with a handle, and a later approval starts the child with its report (#673)', async () => {

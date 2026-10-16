@@ -1955,6 +1955,41 @@ test('Settings: running agents per project supports preset defaults and a rememb
   await expect.poll(() => page.evaluate(() => (window as any).__store.getState().prefs.agentCeiling)).toBe(null)
 })
 
+test('Settings: a model and effort per tool and difficulty for the agents a session starts (#729)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  const open = async () => {
+    await page.evaluate(() => (window as any).__store.getState().toggleSettings(true))
+    await page.getByTestId('settings-tab-orchestrator').click()
+  }
+  const chosen = () => page.evaluate(() => (window as any).__store.getState().prefs.agentModels ?? null)
+  await open()
+  const heavy = page.getByTestId('settings-agent-model-codex-heavy')
+  await expect(heavy).toHaveValue('')
+  // The effort belongs to a model: none until one is chosen
+  await expect(page.getByTestId('settings-agent-model-codex-heavy-effort')).toHaveCount(0)
+  await heavy.selectOption('gpt-5.6-terra')
+  await expect.poll(chosen).toEqual({ codex: { heavy: { model: 'gpt-5.6-terra' } } })
+  await page.getByTestId('settings-agent-model-codex-heavy-effort').selectOption('high')
+  await expect.poll(chosen).toEqual({ codex: { heavy: { model: 'gpt-5.6-terra', effort: 'high' } } })
+
+  // A model the list does not show (Claude lists its models only while a session runs): typed under Other…
+  await page.getByTestId('settings-agent-model-claude-light').selectOption({ label: 'Other…' })
+  await page.getByTestId('settings-agent-model-claude-light-other').fill('opus-next')
+  await page.getByTestId('settings-agent-model-claude-light-other').press('Enter')
+  await expect.poll(chosen).toEqual({ codex: { heavy: { model: 'gpt-5.6-terra', effort: 'high' } }, claude: { light: { model: 'opus-next' } } })
+
+  await page.reload()
+  await open()
+  await expect(heavy).toHaveValue('gpt-5.6-terra')
+  await expect(page.getByTestId('settings-agent-model-codex-heavy-effort')).toHaveValue('high')
+  await expect(page.getByTestId('settings-agent-model-claude-light')).toHaveValue('opus-next')
+  // A new model drops the old one's effort; Default removes the choice
+  await heavy.selectOption('gpt-5.6-terra-mini')
+  await expect.poll(chosen).toEqual({ codex: { heavy: { model: 'gpt-5.6-terra-mini' } }, claude: { light: { model: 'opus-next' } } })
+  await heavy.selectOption('')
+  await expect.poll(chosen).toEqual({ codex: {}, claude: { light: { model: 'opus-next' } } })
+})
+
 /*
  * The relationship between text size (zoom) and vh (dogfooding finding: "when I bump up the text
  * size, the session's composer disappears"). vh is not affected by zoom, so zooming in made the

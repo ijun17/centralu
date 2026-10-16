@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ToolName } from '@cc/protocol'
+import { AgentDifficulty, ToolName } from '@cc/protocol'
 import type { BusyChoice, ChildRunResult, AskProjectResult, IfBusy, OrchestratorTools, RoutedCard } from '../adapters/contract.js'
 
 const IF_BUSY: readonly IfBusy[] = ['note', 'queue', 'fork', 'fork_read']
@@ -344,10 +344,20 @@ export const AGENT_TOOLS = [
       tool: z.string().optional(),
       model: z.string().optional(),
       effort: z.string().optional(),
+      /*
+       * #729: the person picks a model per tool and difficulty in Settings, so a caller says how hard the job is and
+       * needs no model names. The guidance is here, not in an answer, because it is needed before the first call; the
+       * words cost every request (AGENT_BUDGET_CHARS)
+       */
+      difficulty: AgentDifficulty.optional().describe('Instead of model. light: lookups, small fixes, reviews; heavy: design, security, data loss.'),
       wait: z.boolean().optional().describe('false: do not wait; you are told when it ends.'),
-      // A new worktree (#561 part 2): a boolean and a name rather than a workspace enum, each cheaper and either alone
-      // enough (a branch implies the worktree; without one the branch is named from the job)
-      worktree: z.boolean().optional(),
+      /*
+       * A new worktree (#561 part 2): a boolean and a name rather than a workspace enum, each cheaper and either alone
+       * enough (a branch implies the worktree; without one the branch is named from the job). When to ask for one is
+       * #729's guidance: a worktree for work that ends in a pull request or runs beside other edits; none for research
+       * or for edits the person watches live in their own checkout (UI work under a dev server)
+       */
+      worktree: z.boolean().optional().describe('For edits ending in a PR; not research or edits watched live.'),
       branch: z.string().optional(),
       /*
        * Code intelligence (#686): a child starts without its CLI's language server unless this is true. No description:
@@ -380,8 +390,11 @@ export const AGENT_TOOLS = [
  * The ceiling for AGENT_TOOLS, counted like READER_BUDGET_CHARS (both tools, since Codex loads them). Measured in
  * docs/tool-cost.md. 1,000 until #676/#677 gave agent_session `answer`, `card` and `ifBusy` (1,060 with them, no words
  * added: the answers that need them name them). Claude defers agent_session, so its every request does not carry them.
+ * 1,100 until #729: start_agent's `difficulty` and the words on it and on `worktree` (551 → 804 characters, the set
+ * 1,085 → 1,338), loaded on Claude, so every ordinary Claude request carries the 253. Guidance a caller needs before
+ * its first call has no answer to ride in.
  */
-export const AGENT_BUDGET_CHARS = 1100
+export const AGENT_BUDGET_CHARS = 1350
 
 /**
  * Another project's app tools, on demand (#371 part A) — rides with the reader set, so a project's
@@ -492,6 +505,7 @@ export const READER_BUDGET_CHARS = 1750
  * Like READER_BUDGET_CHARS, raising one is a decision about that seat's every request. The worktree manager's
  * seat went with the role (#561 part 3). Scoped rises from 2,350 to 2,400 for send_to_session's `ifBusy` (#677, an
  * enum with no words: 2,330 on Claude, 2,382 on Codex); nothing makes a new coordinator since #372.
+ * The reader rises with AGENT_BUDGET_CHARS for #729 (4,200 → 4,450): Claude 2,313 → 2,566, Codex 4,150 → 4,403.
  */
 export const RESIDENT_BUDGET_CHARS: Record<ToolProfile, number> = {
   orchestrator: 9_500,
@@ -796,6 +810,8 @@ export async function runOrchestratorTool(
       const tool = str(args.tool)
       const model = str(args.model)
       const effort = str(args.effort)
+      const difficulty = AgentDifficulty.safeParse(str(args.difficulty)).data
+      if (str(args.difficulty) && !difficulty) return { text: 'Give difficulty as light, standard or heavy, or leave it out.', isError: true }
       const branch = str(args.branch)
       return agentRunText(
         await tools.startAgent(
@@ -804,6 +820,7 @@ export async function runOrchestratorTool(
             ...(tool ? { tool } : {}),
             ...(model ? { model } : {}),
             ...(effort ? { effort } : {}),
+            ...(difficulty ? { difficulty } : {}),
             ...(args.wait === false ? { wait: false } : {}),
             ...(args.worktree === true || branch ? { worktree: true } : {}),
             ...(branch ? { branch } : {}),

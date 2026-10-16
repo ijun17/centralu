@@ -18,6 +18,10 @@ describe('the start-agent question (#561)', () => {
     const d = { kind: 'agent_start' as const, project: { id: 'p', name: 'website' }, tool: 'Codex', preset: 'safe' as const, text: 'write the parser' }
     expect(agentStartQuestion(d)).toBe('Start Codex in website, with safe permissions, to write the parser?')
     expect(agentStartQuestion({ ...d, model: 'gpt-6.1-sol' })).toBe('Start Codex (gpt-6.1-sol) in website, with safe permissions, to write the parser?')
+    // Chosen by the person's setting for the difficulty the caller named (#729)
+    expect(agentStartQuestion({ ...d, model: 'gpt-6.1-sol', difficulty: 'heavy' })).toBe(
+      'Start Codex (gpt-6.1-sol, your choice for heavy work) in website, with safe permissions, to write the parser?',
+    )
     // In a new worktree (#561 part 2): the branch is part of what is agreed to
     expect(agentStartQuestion({ ...d, worktree: { branch: 'centralu/parser' } })).toBe(
       'Start Codex in website, in a new worktree on centralu/parser, with safe permissions, to write the parser?',

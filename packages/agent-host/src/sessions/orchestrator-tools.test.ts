@@ -161,9 +161,10 @@ describe('the reader set', () => {
       expect(servedDefinitions('reader', EAGER_DEVELOPER).find((t) => t.name.endsWith(`__${name}`))?.resident, name).toBe(true)
     }
     // #581 adds only its pointer to Claude's every-request cost; the definition must stay deferred.
-    // 2,300 until #686's start_agent `lsp` (2,288 -> 2,313, the argument's name and type only)
+    // 2,300 until #686's start_agent `lsp` (2,288 -> 2,313, the argument's name and type only); 2,350 until #729's
+    // `difficulty` and the words on it and on `worktree` (2,313 -> 2,566)
     const claude = residentCost('reader', DEFERRED_SERVER)
-    expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2350)
+    expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2600)
   })
 
   it('leaves the instructions out when CC_READER_INSTRUCTIONS=0 asks it to (measurement)', () => {

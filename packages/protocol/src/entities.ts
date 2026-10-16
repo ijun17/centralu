@@ -614,6 +614,26 @@ export const ApprovalScope = z.enum(['session', 'project'])
 export type ApprovalScope = z.infer<typeof ApprovalScope>
 
 /**
+ * How hard a job start_agent hands over is (#729): what a calling agent says instead of naming a model, so the
+ * person's own choice of model per tool applies (`UiPreferences.agentModels`). Light: lookups, small fixes, reviews of
+ * small changes. Heavy: design, security boundaries, data-loss risk, large refactors. Standard: the rest.
+ */
+export const AgentDifficulty = z.enum(['light', 'standard', 'heavy'])
+export type AgentDifficulty = z.infer<typeof AgentDifficulty>
+
+/** One difficulty's model for one tool (#729). The effort belongs to the model, as a project's remembered one does (#107) */
+export const AgentModelChoice = z.object({ model: z.string().min(1).max(200), effort: z.string().min(1).max(80).optional() })
+export type AgentModelChoice = z.infer<typeof AgentModelChoice>
+
+/** Per tool (a registry name), per difficulty: what start_agent runs when a caller names a difficulty and no model */
+export const AgentModels = z.record(z.string().max(80), z.object({
+  light: AgentModelChoice.optional(),
+  standard: AgentModelChoice.optional(),
+  heavy: AgentModelChoice.optional(),
+}))
+export type AgentModels = z.infer<typeof AgentModels>
+
+/**
  * The detail of an approval request. Adapters normalize a tool's raw format into these three
  * kinds. core/approval looks only at kind to judge whether inline approval from the banner is
  * possible (FR-3).
@@ -715,6 +735,8 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
     /** The agent CLI the new session runs, and its model when the caller named one */
     tool: z.string(),
     model: z.string().optional(),
+    /** The difficulty the caller named (#729), which chose `model` from the person's setting; absent from older hosts */
+    difficulty: AgentDifficulty.optional(),
     /** The permission preset the new session gets: the caller's own, never more */
     preset: PermissionPreset,
     /** A new worktree the session works in (#561 part 2), on this branch; absent: the caller's own folder */
@@ -1445,6 +1467,12 @@ export const UiPreferences = z.object({
   sessionTools: z.boolean(),
   /** Running children per project: null uses preset defaults (auto unlimited, otherwise 4); 0 is unlimited. */
   agentCeiling: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+  /**
+   * The model and effort start_agent uses per tool and difficulty (#729), when the caller names a difficulty and no
+   * model. A difficulty with nothing chosen falls back to the project's remembered choice, as a call without one does.
+   * Optional, like agentCeiling: a record from before it has none. The patch carries the whole map.
+   */
+  agentModels: AgentModels.optional(),
   /**
    * The sidebar groups the person folded (#666): the children of a session (`session:<id>`) and the
    * sessions of an app (`app:<key>`). Only folded groups are listed, so a group nobody touched is

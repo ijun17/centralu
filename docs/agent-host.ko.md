@@ -235,7 +235,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 
 | 도구 | 인자 → 돌아오는 것 |
 |---|---|
-| `start_agent` | `{ task, tool?: string, model?, effort?, wait?, worktree?, branch?, lsp? }` → 자식의 id와 이름, 그리고 답(`done`) 또는 `working`. 사람의 카드가 서 있는 동안에는 요청 핸들과 함께 `pending`(#673), 허락된 시작이 메모리를 기다리는 동안에는 `lowMemory`가 붙은 `pending`(§1.2.4, #686). `lsp: true`는 자식의 코드 인텔리전스를 켠 채로 둔다(§1.2.4) |
+| `start_agent` | `{ task, tool?: string, model?, effort?, difficulty?: light\|standard\|heavy, wait?, worktree?, branch?, lsp? }` → 자식의 id와 이름, 그리고 답(`done`) 또는 `working`. 사람의 카드가 서 있는 동안에는 요청 핸들과 함께 `pending`(#673), 허락된 시작이 메모리를 기다리는 동안에는 `lowMemory`가 붙은 `pending`(§1.2.4, #686). `lsp: true`는 자식의 코드 인텔리전스를 켠 채로 둔다(§1.2.4) |
 | `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete\|answer, text?, card?, ifBusy? }` → 같은 상태들, 더해서 `at_rest`(부른 세션이 준 일이 돌지 않음, 마지막 답), `asking`과 `answered`(부른 세션이 준 턴의 카드, §1.2.2, #676), `busy`와 `queued`(부른 세션의 턴이 아닌 턴으로 바쁜 세션에 보낸 것, §1.2.3, #677), `stopped`, `deleted`(병합되고 깨끗한 워크트리 자식을 치움, 3부) |
 
 선택 인자 `tool`은 레지스트리 이름이다. 스키마는 문자열을 받고, 호출할 때 현재 레지스트리에
@@ -254,7 +254,16 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
    (`agentStartGateError`)과 프리셋 규칙을 한 번 더 읽는다. 통과하지 못한 세션은 일을 받지 않고 휴지통으로 간다. 사람의 카드를
    기다리는 요청은 자리를 차지하지 않는다. 몇 시간 서 있을 수 있으므로, 허용될 때 센다.
 3. **고르기.** `tool`은 프로젝트의 도구, `model`과 `effort`는 그 도구에 대해 프로젝트가 기억한 선택(#107)이
-   기본이다. 도구의 목록에 없는 모델이나 effort는 목록과 함께 거절한다(`agentChoiceError`).
+   기본이다. `model` 없이 `difficulty`를 주면(#729) 사람이 설정 → Orchestrator → Models for the agents a session
+   starts에서 그 도구와 난이도에 고른 모델과 effort를 쓴다(`prefs.agentModels`, 패치 하나에 맵 전체. 그 난이도에 고른
+   것이 없으면 기억한 선택으로 돌아간다). 이름을 댄 모델이 여전히 이긴다. 설정이 고른 모델은 카드에
+   "(gpt-6, your choice for heavy work)"처럼 적히고, 이름을 댄 것처럼 검사한다. 그래서 사라진 모델은 목록과 함께,
+   "the person's choice … tell them, or name a model"라는 말을 붙여 거절한다(`sessions/start-agent.ts`의
+   `agentChoice`). `difficulty`와 `worktree`에 붙은 말은 #729가 청한 느슨한 안내다(에이전트는 무시할 수 있고, 프로젝트의
+   AGENTS.md가 이긴다). 조회, 작은 수정, 리뷰는 light, 설계, 보안, 데이터 손실은 heavy. 풀 리퀘스트로 끝나는 수정에는
+   작업 트리, 조사나 사람이 자기 체크아웃에서 지켜보는 수정에는 작업 트리 없이. 부르는 쪽이 첫 호출 전에 알아야 하므로
+   답이 아니라 스키마에 둔다. 자식의 틀(`agentFrame`)은 끝나는 자기 백그라운드 작업(테스트, 빌드)을 턴 안에서 기다린 뒤
+   답하라고 청한다(아래 7번). 도구의 목록에 없는 모델이나 effort는 목록과 함께 거절한다(`agentChoiceError`).
    이 검사는 호출을 붙잡지 않는다(#660). 캐시된 목록을 쓰고(한 번에 하나만 읽고, 늦게 와도 보관하고, 실패하면 1분간
    다시 읽지 않는다) 없으면 최대 `START_AGENT_MODEL_CHECK_MS`(3초)만 기다린다. 그때까지 목록이 없으면 준 이름 그대로
    자식을 띄우고 답에 검사하지 못했다고 적는다.
@@ -321,7 +330,7 @@ Codex에 넘기고 결과만 검토하는 식이다. 앱이 보여 주지 않는
 턴도 멈춘다. 계속 돌게 둔 자식(`wait: false`, 또는 한도를 넘긴 것)은 자기 세션이라 부모의 멈춤이 닿지 않고 자기
 멈춤 버튼이 있다. 부르는 세션을 지우면 기다림과 세션 동의는 사라지고, 자식은 턴과 링크를 지킨다.
 
-**크기.** 두 정의는 1,085자(`AGENT_BUDGET_CHARS` 1,100. 설명 없이 붙은 #686의 `lsp` 전에는 1,060자, #677의 `ifBusy` 전에는 990자, #676의 `answer` 동작과 `card` 전에는 956자, 레지스트리 이름 스키마 전에는 992자, 작업 트리 인자 전에는 918자, `delete` 전에는 974자). Claude는 `start_agent`를 올려 두고 `agent_session`을 미룬다
+**크기.** 두 정의는 1,338자(`AGENT_BUDGET_CHARS` 1,350. #729의 `difficulty`와 그것과 `worktree`에 붙은 말 전에는 1,085자로, 평범한 Claude 요청마다 253자가 늘어 그 상주하는 Centralu 몫이 2,313자에서 2,566자가 된다. 설명 없이 붙은 #686의 `lsp` 전에는 1,060자, #677의 `ifBusy` 전에는 990자, #676의 `answer` 동작과 `card` 전에는 956자, 레지스트리 이름 스키마 전에는 992자, 작업 트리 인자 전에는 918자, `delete` 전에는 974자). Claude는 `start_agent`를 올려 두고 `agent_session`을 미룬다
 (`start_agent`의 모든 답이 그 이름을 댄다). 잰 값은 tool-cost.md에 있다.
 
 **stdout은 예약되어 있다.** `main.ts`가 딱 한 줄을 찍는다: Tauri 수퍼바이저가 포트와 인증

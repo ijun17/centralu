@@ -101,7 +101,9 @@ export function projectAccessQuestion(d: Extract<ApprovalDetail, { kind: 'projec
  */
 export function agentStartQuestion(d: Extract<ApprovalDetail, { kind: 'agent_start' }>): string {
   const where = d.worktree ? `${d.project.name}, in a new worktree on ${d.worktree.branch},` : `${d.project.name},`
-  return `Start ${d.tool}${d.model ? ` (${d.model})` : ''} in ${where} with ${d.preset} permissions, to ${d.text}?`
+  // A model the person's setting chose for the difficulty the caller named (#729) says so: the person picked it, not the agent
+  const model = d.model ? ` (${d.model}${d.difficulty ? `, your choice for ${d.difficulty} work` : ''})` : ''
+  return `Start ${d.tool}${model} in ${where} with ${d.preset} permissions, to ${d.text}?`
 }
 
 /** The question an update card asks (#581) */

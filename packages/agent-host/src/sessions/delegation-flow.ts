@@ -5,7 +5,7 @@ import type { AgentStartRecord, AgentStartRequest, ChildOwnership, Delegation, L
 import type { AppRef } from '../apps/external/runtime.js'
 import { AgentRunWait, finalAnswer } from './app-agents.js'
 import { ASK_WAIT_MS, clipAnswer, pathsIn, readableGrants, taskLine } from './ask-project.js'
-import { AGENT_CEILING, agentBranch, agentFrame, agentNoteFrame, agentName, presetWithin } from './start-agent.js'
+import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentNoteFrame, agentName, presetWithin } from './start-agent.js'
 import { labelOf } from './transcript-view.js'
 import type {
   ApprovalDetail,
@@ -447,13 +447,14 @@ export class DelegationFlow {
     if (!adapter) return done({ ok: false, error: `No agent named "${tool}" here. Installed tools: ${[...this.host.adapters.keys()].join(', ') || 'none'}.` })
     const full = this.agentCeilingError(callerId, project.id)
     if (full) return done({ ok: false, error: full })
-    // The project's remembered choice for that tool (#107), as a session the person opens there gets. A remembered
-    // effort belongs to the remembered model: with another model named, that model's default effort is used
-    const remembered = this.host.store.projectToolDefaults(project.id)[tool]
-    const model = opts.model ?? remembered?.model ?? undefined
-    const effort = opts.effort ?? (!opts.model || opts.model === remembered?.model ? (remembered?.effort ?? undefined) : undefined)
-    const checked = await this.agentChoiceError(tool, opts.model, opts.effort, model)
-    if (checked.error) return done({ ok: false, error: checked.error })
+    // The model named, else the person's for the difficulty named (#729), else the project's remembered one (#107)
+    const { model, effort, difficulty } = agentChoice(opts, this.host.store.projectToolDefaults(project.id)[tool], this.host.uiPreferences().agentModels?.[tool])
+    // A setting's choice is checked as a named one is: a model retired since it was picked is refused with the list
+    const checked = await this.agentChoiceError(tool, difficulty ? model : opts.model, difficulty ? effort : opts.effort, model)
+    if (checked.error) {
+      const whose = difficulty ? ` That is the person's choice for ${difficulty} work in Settings → Orchestrator: tell them, or name a model.` : ''
+      return done({ ok: false, error: checked.error + whose })
+    }
     const unchecked = checked.unchecked
     progress.unchecked = unchecked
     const found = await adapter.detect()
@@ -468,6 +469,7 @@ export class DelegationFlow {
       project: { id: project.id, name: project.name },
       tool: adapter.descriptor.label,
       ...(model ? { model } : {}),
+      ...(difficulty ? { difficulty } : {}),
       preset: caller.permissionPreset,
       ...(worktree ? { worktree: { branch: worktree.branch } } : {}),
       text: taskLine(opts.task),

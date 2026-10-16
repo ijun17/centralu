@@ -1,5 +1,6 @@
 import type {
   AdapterCapabilities,
+  AgentDifficulty,
   BackgroundTask,
   ModelOption,
   UsageSnapshot,
@@ -276,7 +277,18 @@ export type ChildRunResult =
  * start_agent's arguments (#561): the task; the tool, model and effort when the caller picks them; a new worktree (part 2);
  * and code intelligence (#686), off for a child unless `lsp` is true
  */
-export type StartAgentOpts = { task: string; tool?: string; model?: string; effort?: string; wait?: boolean; worktree?: boolean; branch?: string; lsp?: boolean }
+export type StartAgentOpts = {
+  task: string
+  tool?: string
+  model?: string
+  effort?: string
+  /** #729: without `model`, the person's model for this tool and difficulty (prefs.agentModels) */
+  difficulty?: AgentDifficulty
+  wait?: boolean
+  worktree?: boolean
+  branch?: string
+  lsp?: boolean
+}
 
 /** agent_session's arguments (#561) */
 export type AgentSessionOpts = {

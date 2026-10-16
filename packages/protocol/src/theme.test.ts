@@ -52,6 +52,12 @@ describe('screen preferences, field by field', () => {
     })
   })
 
+  it('the agent models per tool and difficulty (#729) read as written; a malformed map falls back alone', () => {
+    const agentModels = { codex: { heavy: { model: 'gpt-big', effort: 'high' } }, claude: { light: { model: 'haiku' } } }
+    expect(parseUiPreferences({ agentModels, sessionTools: false })).toEqual({ ...DEFAULT_UI_PREFERENCES, agentModels, sessionTools: false })
+    expect(parseUiPreferences({ agentModels: { codex: { heavy: { model: '' } } }, sessionTools: false })).toEqual({ ...DEFAULT_UI_PREFERENCES, sessionTools: false })
+  })
+
   it('a blob from before themes reads with the theme defaults', () => {
     expect(parseUiPreferences({ sendWithModifierEnter: true })).toEqual({ ...DEFAULT_UI_PREFERENCES, sendWithModifierEnter: true })
   })
