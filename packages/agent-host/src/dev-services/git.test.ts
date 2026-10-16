@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { changedFileCount } from '@cc/protocol'
 import { join } from 'node:path'
 import { GIT_DIFF_MAX_CHARS, gitWorktreeDirty, gitBranches, gitCheckout, gitCommit, gitCommitDetail, gitDiff, gitIgnoredEntries, gitStage, gitStatusFiles, gitSummary, treeBytes } from './git.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * porcelain v2 parsing is checked against real git output — a hand-written string could
@@ -154,7 +155,7 @@ describe('the change summary on a large or slow tree (#850 review of item 10)', 
     } finally {
       restore()
     }
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it.skipIf(!posix)('a status that does not answer in time is unknown, not "not a repository"', async () => {
     const { d, git } = repo()
@@ -169,7 +170,7 @@ describe('the change summary on a large or slow tree (#850 review of item 10)', 
     } finally {
       restore()
     }
-  }, 30_000)
+  }, 30_000 * SLOW)
 
   it('stops at the cap with real git, and says there is more', async () => {
     const { d } = repo()
@@ -221,7 +222,7 @@ describe('the change summary on a large or slow tree (#850 review of item 10)', 
     } finally {
       restore()
     }
-  }, 10_000)
+  }, 10_000 * SLOW)
 
   it.skipIf(!posix)('ends when it stops git at the cap, even if a process git started still holds its output', async () => {
     const { d, git } = repo()
@@ -232,7 +233,7 @@ describe('the change summary on a large or slow tree (#850 review of item 10)', 
     } finally {
       restore()
     }
-  }, 10_000)
+  }, 10_000 * SLOW)
 
   it.skipIf(!posix)('reads a path whose character is cut between two chunks of git\'s output as one path', async () => {
     const { d, git } = repo()

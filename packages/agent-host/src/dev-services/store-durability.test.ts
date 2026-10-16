@@ -193,7 +193,11 @@ describe('the WAL', () => {
       const t0 = Date.now()
       expect(s.checkpoint()).toBe(false)
       expect(Date.now() - t0).toBeLessThan(BUSY_MS / 2)
-      // And the store's own wait is back for everything else
+      /*
+       * The checkpoint drops the wait to 0 for itself and puts back whatever the connection had, here 20 s rather than
+       * the store's 5 s: a checkpoint that left 0, or reset it to the store's default, would fail this. With the restore
+       * taken out of Store.checkpoint it does (expected +0 to be 20000).
+       */
       expect(db.pragma('busy_timeout', { simple: true })).toBe(BUSY_MS)
       reader.exec('COMMIT')
       reader.close()
