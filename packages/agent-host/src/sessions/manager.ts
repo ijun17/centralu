@@ -153,6 +153,10 @@ export { appMessageFrame } from './app-messages.js'
 export type { AppMessageSource, AppMessageVia, AppViewPlace } from './app-messages.js'
 export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './delegation-flow.js'
 
+/** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
+type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost
+
 /**
  * One piece of the original's live work a handoff moved to the session that took over (#693), as the handoff note
  * lists it: a session (started with start_agent, forked, or asked in another project), or a start_agent request still
@@ -467,18 +471,18 @@ export class SessionManager {
   ) {
     this.children = new ChildOwnership(store)
     this.cardRests = new CardRests(appSettingRests(store))
-    this.delegationFlow = new DelegationFlow(this.delegationHost())
-    this.handoffFlow = new HandoffFlow(this.handoffFlowHost(), keeperOpts.handoffTimings)
-    this.askProjectFlow = new AskProjectFlow(this.askProjectHost())
-    this.externals = new ExternalConversations(this.externalConversationsHost())
-    this.record = new SessionRecord(this.sessionRecordHost())
-    this.toolQueries = new ToolQueries(this.toolQueriesHost())
-    this.appSessions = new AppSessions(this.appSessionsHost())
-    this.trash = new SessionTrash(this.sessionTrashHost())
-    this.restartPolicy = new RestartPolicy(this.restartHost())
-    this.worktrees = new WorktreeSessions(this.worktreeHost())
-    this.hostCards = new HostCards(this.hostCardsHost())
-    this.linkedReports = new LinkedReports(this.linkedReportsHost())
+    this.delegationFlow = new DelegationFlow(this.parts())
+    this.handoffFlow = new HandoffFlow(this.parts(), keeperOpts.handoffTimings)
+    this.askProjectFlow = new AskProjectFlow(this.parts())
+    this.externals = new ExternalConversations(this.parts())
+    this.record = new SessionRecord(this.parts())
+    this.toolQueries = new ToolQueries(this.parts())
+    this.appSessions = new AppSessions(this.parts())
+    this.trash = new SessionTrash(this.parts())
+    this.restartPolicy = new RestartPolicy(this.parts())
+    this.worktrees = new WorktreeSessions(this.parts())
+    this.hostCards = new HostCards(this.parts())
+    this.linkedReports = new LinkedReports(this.parts())
     this.proposals = new OrchestratorProposals(
       this.store,
       () => this.appsHub?.rt,
@@ -3937,174 +3941,109 @@ export class SessionManager {
     }
   }
 
-  /** What `HandoffFlow` reaches of this manager (#694): its state read when used, its operations called through */
-  private handoffFlowHost(): HandoffFlowHost {
+  private partsHost: ManagerParts | undefined
+  /**
+   * What the modules moved out of this manager reach of it (#428), one object for all of them, made once on first use.
+   * Each module's own host type (`HandoffFlowHost`, `HostCardsHost`, `DelegationHost`, …) picks what it may use; this
+   * is the one place that says how each name reaches the manager. Its fields are getters, read when used and never
+   * kept: `reorderSessions` replaces `meta`, and a kept map would leave a module on the old one (#757 review). Each
+   * module used to get an object of its own, twelve of them repeating the same getters.
+   */
+  private parts(): ManagerParts {
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
     const self = this
-    return {
-      get meta() {
-        return self.meta
-      },
-      get store() {
-        return self.store
-      },
-      askHost: (...a) => self.hostCards.askHost(...a),
-      autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
-      toolProblem: async (tool) => {
-        const adapter = self.adapters.get(tool)
-        if (!adapter) return `${JSON.stringify(tool)} is not a tool Centralu runs here`
-        const d = await adapter.detect().catch((e: Error) => ({ installed: false, loggedIn: false, detail: e.message }))
-        return d.installed && d.loggedIn ? null : `${tool} cannot start a session here: ${d.detail}`
-      },
-      cwdFor: (...a) => self.cwdFor(...a),
-      createSession: (params) => self.createSession(params),
-      rename: (...a) => self.rename(...a),
-      send: (...a) => self.send(...a),
-      exportHandoffRecord: (...a) => self.exportHandoffRecord(...a),
-      exportHandoffNote: (...a) => self.exportHandoffNote(...a),
-      onEvent: (e) => self.onEvent(e),
-      get turnObservers() {
-        return self.turnObservers
-      },
-    }
-  }
-
-  /** What `HostCards` reaches of this manager (#428): its state read when used, its operations called through */
-  private hostCardsHost(): HostCardsHost {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
-    const self = this
-    return {
-      applyStateHint: (...a) => self.applyStateHint(...a),
-      settleState: (...a) => self.settleState(...a),
-      autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
-      get emit() {
-        return self.emit
-      },
-      get meta() {
-        return self.meta
-      },
-      onEvent: (...a) => self.onEvent(...a),
-      get store() {
-        return self.store
-      },
-    }
-  }
-
-  /** What `WorktreeSessions` reaches of this manager (#428): its state read when used, its operations called through */
-  private worktreeHost(): WorktreeHost {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
-    const self = this
-    return {
-      get agentRuns() {
-        return self.agentRuns
-      },
-      autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
-      cwdOf: (...a) => self.cwdOf(...a),
-      gitTrust: (...a) => self.gitTrust(...a),
-      get handles() {
-        return self.handles
-      },
-      get meta() {
-        return self.meta
-      },
-      onEvent: (...a) => self.onEvent(...a),
-      projectTrusted: (...a) => self.projectTrusted(...a),
-      get restartPolicy() {
-        return self.restartPolicy
-      },
-      get resuming() {
-        return self.resuming
-      },
-      get running() {
-        return self.running
-      },
-      sessionsInside: (...a) => self.sessionsInside(...a),
-      get store() {
-        return self.store
-      },
-      trashSession: (...a) => self.trashSession(...a),
-      get trashing() {
-        return self.trash.trashing
-      },
-      trunkOf: (...a) => self.trunkOf(...a),
-      get worktreeRoot() {
-        return self.worktreeRoot
-      },
-    }
-  }
-
-  /** What `RestartPolicy` reaches of this manager (#428): its state read when used, its operations called through */
-  private restartHost(): RestartHost {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
-    const self = this
-    return {
-      backgroundTasksKey: (...a) => self.backgroundTasksKey(...a),
-      get children() {
-        return self.children
-      },
-      get handles() {
-        return self.handles
-      },
-      inputsHeld: (...a) => self.inputsHeld(...a),
-      get meta() {
-        return self.meta
-      },
-      onEvent: (...a) => self.onEvent(...a),
-      rememberBackgroundTasks: (...a) => self.rememberBackgroundTasks(...a),
-      restartSession: (...a) => self.restartSession(...a),
-      get running() {
-        return self.running
-      },
-      scheduleDrain: (...a) => self.scheduleDrain(...a),
-      get store() {
-        return self.store
-      },
-    }
-  }
-
-  /** What `SessionTrash` reaches of this manager (#428): its state read when used, its operations called through */
-  private sessionTrashHost(): SessionTrashHost {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
-    const self = this
-    return {
+    return (this.partsHost ??= {
       get adapters() {
         return self.adapters
       },
       get agentRuns() {
         return self.agentRuns
       },
+      answerRoutedCard: (...a) => self.answerRoutedCard(...a),
+      applyDeferredRestart: (...a) => self.restartPolicy.applyDeferredRestart(...a),
+      applyStateHint: (...a) => self.applyStateHint(...a),
+      askHost: (...a) => self.hostCards.askHost(...a),
       get appsHub() {
         return self.appsHub
+      },
+      autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
+      awaitTurn: (...a) => self.delegationFlow.awaitTurn(...a),
+      backgroundTasksKey: (...a) => self.backgroundTasksKey(...a),
+      builderRefOf: (...a) => self.appSessions.builderRefOf(...a),
+      busyAnswer: (...a) => self.busyAnswer(...a),
+      busyChoices: (...a) => self.busyChoices(...a),
+      busyForCaller: (...a) => self.busyForCaller(...a),
+      get cacheLedger() {
+        return self.cacheLedger
       },
       get children() {
         return self.children
       },
+      cleanUpWorktreeChild: (...a) => self.worktrees.cleanUpWorktreeChild(...a),
+      get closing() {
+        return self.disposing || self.handingOver
+      },
+      createSession: (...a) => self.createSession(...a),
+      cwdFor: (...a) => self.cwdFor(...a),
+      cwdOf: (...a) => self.cwdOf(...a),
+      defaultToolFor: (...a) => self.defaultToolFor(...a),
       get delegationFlow() {
         return self.delegationFlow
+      },
+      deliver: (...a) => self.deliver(...a),
+      deliverReport: (...a) => self.deliverReport(...a),
+      get disposing() {
+        return self.disposing
       },
       get emit() {
         return self.emit
       },
-      forgetCommits: (...a) => self.forgetCommits(...a),
+      enqueue: (...a) => self.enqueue(...a),
+      ensureProjectAccess: (...a) => self.ensureProjectAccess(...a),
+      exportHandoffNote: (...a) => self.exportHandoffNote(...a),
+      exportHandoffRecord: (...a) => self.exportHandoffRecord(...a),
+      firstTool: (...a) => self.firstTool(...a),
       forgetCardRest: (id) => self.cardRests.forget(id),
+      forgetCommits: (...a) => self.forgetCommits(...a),
       gitTrust: (...a) => self.gitTrust(...a),
+      grantReads: (...a) => self.delegationFlow.grantReads(...a),
+      handedOverReply: (...a) => self.delegationFlow.handedOverReply(...a),
+      get handingOver() {
+        return self.handingOver
+      },
       get handles() {
         return self.handles
       },
       handoffHeir: (...a) => self.handoffHeir(...a),
+      hasSession: (id) => self.meta.has(id),
       get hostCards() {
         return self.hostCards
       },
+      inputsHeld: (...a) => self.inputsHeld(...a),
+      get linkedReader() {
+        return self.linkedReader
+      },
+      listSessions: (...a) => self.listSessions(...a),
       loadMessages: (...a) => self.loadMessages(...a),
+      get memoryGate() {
+        return self.memoryGate
+      },
       get meta() {
         return self.meta
       },
+      modelsWithin: (...a) => self.toolQueries.modelsWithin(...a),
       moveChildren: (...a) => self.moveChildren(...a),
-      onEvent: (...a) => self.onEvent(...a),
+      observeCommit: (...a) => self.observeCommit(...a),
+      onEvent: (e: NormalizedEvent, from?: SessionHandle | null) => self.onEvent(e, from),
+      ownTasksRunning: (...a) => self.ownTasksRunning(...a),
+      pauseReport: (...a) => self.pauseReport(...a),
+      pausedTasksNow: (...a) => self.pausedTasksNow(...a),
       get prCheckedAt() {
         return self.prCheckedAt
       },
       projectInfo: (...a) => self.projectInfo(...a),
+      projectTrusted: (...a) => self.projectTrusted(...a),
+      queuedOf: (...a) => self.queuedOf(...a),
       get quitNotices() {
         return self.quitNotices
       },
@@ -4120,20 +4059,50 @@ export class SessionManager {
       get recoveryRepair() {
         return self.recoveryRepair
       },
+      rememberBackgroundTasks: (...a) => self.rememberBackgroundTasks(...a),
+      rename: (...a) => self.rename(...a),
+      reportBackIfAwaited: (...a) => self.reportBackIfAwaited(...a),
       get restartPolicy() {
         return self.restartPolicy
       },
+      restartSession: (...a) => self.restartSession(...a),
+      get resuming() {
+        return self.resuming
+      },
+      routedCards: (...a) => self.routedCards(...a),
       get running() {
         return self.running
       },
+      scheduleDrain: (...a) => self.scheduleDrain(...a),
+      send: (...a) => self.send(...a),
+      sessionsInside: (...a) => self.sessionsInside(...a),
+      settleState: (...a) => self.settleState(...a),
+      sleepSession: (...a) => self.sleepSession(...a),
+      startDelegation: (...a) => self.delegationFlow.startDelegation(...a),
+      stopBackgroundTask: (...a) => self.stopBackgroundTask(...a),
       stopWatchingReconnect: (...a) => self.stopWatchingReconnect(...a),
       get store() {
         return self.store
       },
       sweepOrphanHandoffNotes: (...a) => self.sweepOrphanHandoffNotes(...a),
+      tellSession: (...a) => self.tellSession(...a),
+      toolProblem: async (tool) => {
+        const adapter = self.adapters.get(tool)
+        if (!adapter) return `${JSON.stringify(tool)} is not a tool Centralu runs here`
+        const d = await adapter.detect().catch((e: Error) => ({ installed: false, loggedIn: false, detail: e.message }))
+        return d.installed && d.loggedIn ? null : `${tool} cannot start a session here: ${d.detail}`
+      },
+      trashSession: (...a) => self.trashSession(...a),
+      get trashing() {
+        return self.trash.trashing
+      },
+      trunkOf: (...a) => self.trunkOf(...a),
       get turnObservers() {
         return self.turnObservers
       },
+      uiPreferences: (...a) => self.uiPreferences(...a),
+      untilCard: (...a) => self.untilCard(...a),
+      untilHandedOver: (...a) => self.delegationFlow.untilHandedOver(...a),
       untilWakeWithdrawn: (...a) => self.untilWakeWithdrawn(...a),
       get updateApplyConsents() {
         return self.updateApplyConsents
@@ -4141,274 +4110,14 @@ export class SessionManager {
       get updateConsents() {
         return self.updateConsents
       },
+      withdrawHostAsk: (...a) => self.hostCards.withdrawHostAsk(...a),
+      get worktreeRoot() {
+        return self.worktreeRoot
+      },
       get worktrees() {
         return self.worktrees
       },
-    }
-  }
-
-  /** What `AppSessions` reaches of this manager (#428): its state read when used, its operations called through */
-  private appSessionsHost(): AppSessionsHost {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
-    const self = this
-    return {
-      get adapters() {
-        return self.adapters
-      },
-      get agentRuns() {
-        return self.agentRuns
-      },
-      get appsHub() {
-        return self.appsHub
-      },
-      createSession: (...a) => self.createSession(...a),
-      defaultToolFor: (...a) => self.defaultToolFor(...a),
-      get delegationFlow() {
-        return self.delegationFlow
-      },
-      deliver: (...a) => self.deliver(...a),
-      get handles() {
-        return self.handles
-      },
-      listSessions: (...a) => self.listSessions(...a),
-      get memoryGate() {
-        return self.memoryGate
-      },
-      get meta() {
-        return self.meta
-      },
-      onEvent: (...a) => self.onEvent(...a),
-      get record() {
-        return self.record
-      },
-      rename: (...a) => self.rename(...a),
-      get running() {
-        return self.running
-      },
-      get store() {
-        return self.store
-      },
-    }
-  }
-
-  /** What `ToolQueries` reaches of this manager (#428): its state read when used, its operations called through */
-  private toolQueriesHost(): ToolQueriesHost {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
-    const self = this
-    return {
-      get adapters() {
-        return self.adapters
-      },
-      get cacheLedger() {
-        return self.cacheLedger
-      },
-      cwdFor: (...a) => self.cwdFor(...a),
-      get handles() {
-        return self.handles
-      },
-      get meta() {
-        return self.meta
-      },
-      get store() {
-        return self.store
-      },
-    }
-  }
-
-  /** What `SessionRecord` reaches of this manager (#428): its state read when used, its operations called through */
-  private sessionRecordHost(): SessionRecordHost {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
-    const self = this
-    return {
-      get cacheLedger() {
-        return self.cacheLedger
-      },
-      get emit() {
-        return self.emit
-      },
-      get meta() {
-        return self.meta
-      },
-      observeCommit: (...a) => self.observeCommit(...a),
-      get running() {
-        return self.running
-      },
-      get store() {
-        return self.store
-      },
-    }
-  }
-
-  /** What `ExternalConversations` reaches of this manager (#428): its state read when used, its operations called through */
-  private externalConversationsHost(): ExternalConversationsHost {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
-    const self = this
-    return {
-      get adapters() {
-        return self.adapters
-      },
-      cwdFor: (...a) => self.cwdFor(...a),
-      get emit() {
-        return self.emit
-      },
-      get handles() {
-        return self.handles
-      },
-      get meta() {
-        return self.meta
-      },
-      get store() {
-        return self.store
-      },
-    }
-  }
-
-  /** What `AskProjectFlow` reaches (#428): this manager's state read when used, its and the delegation flow's operations */
-  private askProjectHost(): AskProjectHost {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
-    const self = this
-    return {
-      get agentRuns() {
-        return self.agentRuns
-      },
-      applyDeferredRestart: (...a) => self.restartPolicy.applyDeferredRestart(...a),
-      askHost: (...a) => self.hostCards.askHost(...a),
-      autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
-      builderRefOf: (...a) => self.appSessions.builderRefOf(...a),
-      busyAnswer: (...a) => self.busyAnswer(...a),
-      busyChoices: (...a) => self.busyChoices(...a),
-      busyForCaller: (...a) => self.busyForCaller(...a),
-      get children() {
-        return self.children
-      },
-      deliver: (...a) => self.deliver(...a),
-      enqueue: (...a) => self.enqueue(...a),
-      ensureProjectAccess: (...a) => self.ensureProjectAccess(...a),
-      awaitTurn: (...a) => self.delegationFlow.awaitTurn(...a),
-      grantReads: (...a) => self.delegationFlow.grantReads(...a),
-      handedOverReply: (...a) => self.delegationFlow.handedOverReply(...a),
-      get linkedReader() {
-        return self.linkedReader
-      },
-      get meta() {
-        return self.meta
-      },
-      queuedOf: (...a) => self.queuedOf(...a),
-      get readGrants() {
-        return self.readGrants
-      },
-      routedCards: (...a) => self.routedCards(...a),
-      startDelegation: (...a) => self.delegationFlow.startDelegation(...a),
-      get store() {
-        return self.store
-      },
-      untilCard: (...a) => self.untilCard(...a),
-      untilHandedOver: (...a) => self.delegationFlow.untilHandedOver(...a),
-    }
-  }
-
-  /** What `LinkedReports` reaches of this manager (#428, #723): its state read when used */
-  private linkedReportsHost(): LinkedReportsHost {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
-    const self = this
-    return {
-      get children() {
-        return self.children
-      },
-      get linkedReader() {
-        return self.linkedReader
-      },
-      get closing() {
-        return self.disposing || self.handingOver
-      },
-      hasSession: (id) => self.meta.has(id),
-      deliverReport: (...a) => self.deliverReport(...a),
-    }
-  }
-
-  /** What `DelegationFlow` reaches of this manager (#428): its state read when used, its operations called through */
-  private delegationHost(): DelegationHost {
-    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
-    const self = this
-    return {
-      get adapters() {
-        return self.adapters
-      },
-      get agentRuns() {
-        return self.agentRuns
-      },
-      answerRoutedCard: (...a) => self.answerRoutedCard(...a),
-      applyDeferredRestart: (...a) => self.restartPolicy.applyDeferredRestart(...a),
-      askHost: (...a) => self.hostCards.askHost(...a),
-      autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
-      builderRefOf: (...a) => self.appSessions.builderRefOf(...a),
-      busyAnswer: (...a) => self.busyAnswer(...a),
-      busyChoices: (...a) => self.busyChoices(...a),
-      busyForCaller: (...a) => self.busyForCaller(...a),
-      get children() {
-        return self.children
-      },
-      cleanUpWorktreeChild: (...a) => self.worktrees.cleanUpWorktreeChild(...a),
-      createSession: (...a) => self.createSession(...a),
-      cwdFor: (...a) => self.cwdFor(...a),
-      deliver: (...a) => self.deliver(...a),
-      tellSession: (...a) => self.tellSession(...a),
-      get disposing() {
-        return self.disposing
-      },
-      get emit() {
-        return self.emit
-      },
-      enqueue: (...a) => self.enqueue(...a),
-      ensureProjectAccess: (...a) => self.ensureProjectAccess(...a),
-      firstTool: (...a) => self.firstTool(...a),
-      gitTrust: (...a) => self.gitTrust(...a),
-      get handingOver() {
-        return self.handingOver
-      },
-      get handles() {
-        return self.handles
-      },
-      get linkedReader() {
-        return self.linkedReader
-      },
-      get memoryGate() {
-        return self.memoryGate
-      },
-      get meta() {
-        return self.meta
-      },
-      modelsWithin: (...a) => self.toolQueries.modelsWithin(...a),
-      onEvent: (...a) => self.onEvent(...a),
-      ownTasksRunning: (...a) => self.ownTasksRunning(...a),
-      pauseReport: (...a) => self.pauseReport(...a),
-      pausedTasksNow: (...a) => self.pausedTasksNow(...a),
-      queuedOf: (...a) => self.queuedOf(...a),
-      get readGrants() {
-        return self.readGrants
-      },
-      rename: (...a) => self.rename(...a),
-      reportBackIfAwaited: (...a) => self.reportBackIfAwaited(...a),
-      routedCards: (...a) => self.routedCards(...a),
-      get running() {
-        return self.running
-      },
-      sleepSession: (...a) => self.sleepSession(...a),
-      stopBackgroundTask: (...a) => self.stopBackgroundTask(...a),
-      get store() {
-        return self.store
-      },
-      trashSession: (...a) => self.trashSession(...a),
-      get trashing() {
-        return self.trash.trashing
-      },
-      get turnObservers() {
-        return self.turnObservers
-      },
-      uiPreferences: (...a) => self.uiPreferences(...a),
-      untilCard: (...a) => self.untilCard(...a),
-      withdrawHostAsk: (...a) => self.hostCards.withdrawHostAsk(...a),
-    }
+    })
   }
 
   private seatHost: OrchestratorSeatHost | undefined
