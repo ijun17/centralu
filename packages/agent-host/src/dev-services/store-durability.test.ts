@@ -24,7 +24,7 @@ function storeFile(): string {
 }
 afterEach(() => {
   vi.restoreAllMocks()
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
 })
 
 function raw<T>(file: string, f: (db: Database.Database) => T): T {
@@ -182,7 +182,8 @@ describe('the WAL', () => {
       reader.prepare('SELECT COUNT(*) FROM projects').get()
       const t0 = Date.now()
       expect(s.checkpoint()).toBe(false)
-      expect(Date.now() - t0).toBeLessThan(1000)
+      // "Without waiting" means not the 5 s busy timeout; half of it leaves room for a slow Windows runner (1,078 ms seen)
+      expect(Date.now() - t0).toBeLessThan(2500)
       reader.exec('COMMIT')
     } finally {
       reader.close()
