@@ -39,11 +39,11 @@ function session(over: Partial<SessionSummary> = {}): SessionSummary {
   } as unknown as SessionSummary
 }
 
-function render(s: SessionSummary, inApp: boolean, nested = false) {
+function render(s: SessionSummary, inApp: boolean, nested = false, depth = nested ? 1 : 0) {
   return renderToStaticMarkup(
     <PlatformProvider platform={platform}>
       <SessionListRow
-        row={{ s, nested, children: [], folded: false }}
+        row={{ s, nested, depth, children: [], folded: false }}
         projectId="p1"
         inApp={inApp}
         onReorder={() => {}}
@@ -76,5 +76,8 @@ describe('SessionListRow', () => {
     expect(render(session(), false)).toContain('data-level="1"')
     expect(render(session(), true)).toContain('data-level="2"')
     expect(render(session(), true, true)).toContain('data-level="3"')
+    // A child's own child stands one step further in (#862), and nothing goes past the deepest level drawn
+    expect(render(session(), false, true, 2)).toContain('data-level="3"')
+    expect(render(session(), true, true, 9)).toContain('data-level="5"')
   })
 })

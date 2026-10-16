@@ -5,7 +5,7 @@ import { useStore } from '../../../store/store.js'
 import { BackgroundMark } from '../../session/BackgroundTasks.jsx'
 import { DotsIcon } from '../../../components/icons.jsx'
 import { groupAttention } from '../fold.js'
-import { ROW_MENU_PAD, ROW_PAD } from '../layout.js'
+import { MAX_LEVEL, ROW_MENU_PAD, ROW_PAD, type INDENT } from '../layout.js'
 import { GroupToggle } from './GroupToggle.jsx'
 import { FoldedMark } from '../marks/FoldedMark.jsx'
 import { foldKeys } from './groupFold.js'
@@ -22,7 +22,7 @@ import type { TreeRow } from '../tree.js'
  * test id) and what a drop on it does (`onReorder`).
  */
 export function SessionListRow({
-  row: { s, nested, children, folded: childrenFolded },
+  row: { s, nested, depth, children, folded: childrenFolded },
   projectId,
   inApp = false,
   onReorder,
@@ -58,8 +58,8 @@ export function SessionListRow({
     <SessionRow
       id={s.id}
       projectId={projectId}
-      nested={inApp ? (nested ? 2 : 1) : nested}
-      level={inApp ? (nested ? 3 : 2) : nested ? 2 : 1}
+      nested={inApp ? depth + 1 : nested}
+      level={Math.min((inApp ? 2 : 1) + depth, MAX_LEVEL) as keyof typeof INDENT}
       below={approvalLine(s, renaming, () => focusSession(s.id))}
       /*
        * A child row cannot be dragged — position is membership (#69). Letting a row

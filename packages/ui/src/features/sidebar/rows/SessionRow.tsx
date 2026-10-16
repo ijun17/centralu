@@ -39,11 +39,12 @@ export function SessionRow({
   nested?: boolean | number
   /**
    * How far in the row stands (#666): 1 for a session of a project, one more for the children it started, and for
-   * the sessions of an app (the app row is the level-1 item), one more again for theirs. Every level is 16px, the
+   * the sessions of an app (the app row is the level-1 item), one more again for theirs, and one more for each step
+   * further in a child's own children hang (#862), up to `MAX_LEVEL`. Every level is 16px, the
    * width of the chevron's gutter, so the tool mark of a level starts at one column. Levels 2 and up also carry the
    * guide line that ties a row to what it hangs under; level 1 hangs under the project's tinted group instead.
    */
-  level: 1 | 2 | 3
+  level: keyof typeof INDENT
   children: ReactNode
   /**
    * A second line under the row (#543: what its approval asks, with Allow and Deny). The row's own line is a box of

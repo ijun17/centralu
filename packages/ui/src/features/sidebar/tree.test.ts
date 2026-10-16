@@ -3,7 +3,7 @@ import type { SessionSummary } from '@cc/core'
 import { appSessionsNeedAttention, groupProjectAppSessions, orderAsTree, treeRows } from './tree.js'
 
 const s = (id: string, over: Partial<SessionSummary> = {}) => ({ id, parentSessionId: null, askedBy: null, ...over }) as SessionSummary
-const shape = (list: SessionSummary[]) => orderAsTree(list).map(({ s, nested }) => (nested ? `  ${s.id}` : s.id))
+const shape = (list: SessionSummary[]) => orderAsTree(list).map(({ s, depth }) => `${'  '.repeat(depth)}${s.id}`)
 
 /** The sidebar groups a session's children under it by who started them (owner decision 2026-10-12, #561) */
 describe('orderAsTree', () => {
@@ -34,16 +34,31 @@ describe('orderAsTree', () => {
     expect(shape([s('mgr'), s('wt', { parentSessionId: 'mgr' })])).toEqual(['mgr', '  wt'])
   })
 
-  it('leaves at the top level a session asked by another project, one whose parent is gone, and a grandchild', () => {
+  it('leaves at the top level a session asked by another project and one whose parent is gone', () => {
     expect(
       shape([
         s('asked', { askedBy: 'a-session-of-another-project' }),
         s('orphan', { askedBy: 'deleted' }),
         s('root'),
         s('child', { askedBy: 'root' }),
-        s('grandchild', { askedBy: 'child' }),
       ]),
-    ).toEqual(['asked', 'orphan', 'root', '  child', 'grandchild'])
+    ).toEqual(['asked', 'orphan', 'root', '  child'])
+  })
+
+  it('hangs a child\'s own children one step further in, not at the top level beside their grandparent (#862)', () => {
+    expect(
+      shape([
+        s('orchestrator'),
+        s('grandchild', { askedBy: 'area-c', parentSessionId: 'area-c' }),
+        s('area-c', { askedBy: 'orchestrator', parentSessionId: 'orchestrator' }),
+        s('area-d', { askedBy: 'orchestrator' }),
+        s('great-grandchild', { askedBy: 'grandchild' }),
+      ]),
+    ).toEqual(['orchestrator', '  area-c', '    grandchild', '      great-grandchild', '  area-d'])
+  })
+
+  it('draws every session once even if the links make a loop, after the sessions that hang under nothing', () => {
+    expect(shape([s('a', { askedBy: 'b' }), s('b', { askedBy: 'a' }), s('c')])).toEqual(['c', 'a', '  b'])
   })
 
   it('puts listed project-app sessions under their app and leaves a removed app in the project tree', () => {
@@ -75,8 +90,9 @@ describe('orderAsTree', () => {
 /** A folded parent keeps its row and its children's count; the children leave the rows (#666) */
 describe('treeRows', () => {
   const list = [s('parent'), s('kid-1', { askedBy: 'parent' }), s('kid-2', { parentSessionId: 'parent' }), s('plain')]
-  const shapeRows = (folded: string[]) =>
-    treeRows(list, (id) => folded.includes(id)).map((r) => `${r.nested ? '  ' : ''}${r.s.id}${r.children.length ? `(${r.children.length}${r.folded ? ' folded' : ''})` : ''}`)
+  const rowsOf = (sessions: SessionSummary[], folded: string[]) =>
+    treeRows(sessions, (id) => folded.includes(id)).map((r) => `${'  '.repeat(r.depth)}${r.s.id}${r.children.length ? `(${r.children.length}${r.folded ? ' folded' : ''})` : ''}`)
+  const shapeRows = (folded: string[]) => rowsOf(list, folded)
 
   it('lists the children under an open parent, with their count on the parent', () => {
     expect(shapeRows([])).toEqual(['parent(2)', '  kid-1', '  kid-2', 'plain'])
@@ -88,5 +104,16 @@ describe('treeRows', () => {
 
   it('folds nothing for a session that has no children', () => {
     expect(shapeRows(['plain', 'kid-1'])).toEqual(['parent(2)', '  kid-1', '  kid-2', 'plain'])
+  })
+
+  const deep = [s('top'), s('mid', { askedBy: 'top' }), s('leaf', { askedBy: 'mid' }), s('next', { askedBy: 'top' })]
+
+  it('gives each row its own children, a grandchild under its parent (#862)', () => {
+    expect(rowsOf(deep, [])).toEqual(['top(2)', '  mid(1)', '    leaf', '  next'])
+  })
+
+  it('hides everything under a folded row, its children\'s children too', () => {
+    expect(rowsOf(deep, ['top'])).toEqual(['top(2 folded)'])
+    expect(rowsOf(deep, ['mid'])).toEqual(['top(2)', '  mid(1 folded)', '  next'])
   })
 })

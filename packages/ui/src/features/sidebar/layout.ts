@@ -14,7 +14,9 @@ import type { CSSProperties } from 'react'
  * glyph keeps a few pixels of air from the name it belongs to instead of touching it (it used to end on the name's
  * first letter in the project row).
  */
-export const INDENT = { 1: 'ml-[18px]', 2: 'ml-[34px]', 3: 'ml-[50px]' } as const
+export const INDENT = { 1: 'ml-[18px]', 2: 'ml-[34px]', 3: 'ml-[50px]', 4: 'ml-[66px]', 5: 'ml-[82px]' } as const
+/** The deepest level drawn: a session further in than this stands at it, still under its nearest drawn ancestor (#862) */
+export const MAX_LEVEL = 5
 /** The guide line a nested row hangs from: 1px just outside its band, so it adds nothing to the row's width */
 export const GUIDE = 'before:absolute before:inset-y-0 before:-left-px before:w-px before:bg-line/60 before:content-[""]'
 /**
