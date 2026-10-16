@@ -132,6 +132,14 @@ async function world(preset: 'normal' | 'auto' = 'normal') {
 const handoff = (orch: string, args: Record<string, unknown>) => mgr.runOrchestratorTool(orch, 'centralu_run', { command: 'handoff_session', args })
 
 describe('handoff_session (#694)', () => {
+  it('called by its bare name, as the bridge can, is refused with the call that runs it (#850)', async () => {
+    const { target, orch } = await world('auto')
+    await expect(mgr.runOrchestratorTool(orch, 'handoff_session', { sessionId: target })).rejects.toThrow(
+      'Not a tool of this session: handoff_session. It is one of this session\'s commands: centralu_run(command="handoff_session", args={…}) runs it',
+    )
+    expect(named('Long run')).toHaveLength(1)
+  })
+
   it('under auto: the note comes from the record, the successor takes the name and the instructions, and the original stays', async () => {
     const { target, orch } = await world('auto')
     const r = await handoff(orch, { sessionId: target, tool: 'codex', instructions: 'Finish the parser, then stop.' })

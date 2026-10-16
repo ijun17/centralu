@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { residentCost } from './tool-cost.js'
 import { orchestratorHome, orchestratorRole } from './orchestrator-home.js'
 import { windowAround } from './snippet.js'
-import { profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
+import { notAToolText, profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
 import { answersFrom, cardCall, cardHandle, cardNotice, decisionFrom } from './delegated-cards.js'
 import type { QueuedRequest } from '../dev-services/store.js'
 import type { ToolProfile } from '../apps/contract.js'
@@ -5353,7 +5353,7 @@ export class SessionManager {
      * check is made again on the execution side too.
      */
     if (!profileAllows(profile, name)) {
-      throw Object.assign(new Error(`Not a tool of this session: ${name}`), { code: 'internal' })
+      throw Object.assign(new Error(notAToolText(profile, name)), { code: 'internal' })
     }
     return runOrchestratorTool(tools()!, name, args, { sessionId, profile })
   }

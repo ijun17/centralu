@@ -1407,6 +1407,16 @@ export function callForm(
   return `${tool}(${entries.map(([k, v]) => `${k}=${value(v)}`).join(', ')})`
 }
 
+/**
+ * The refusal of a tool this seat was not given (#69). A name that is one of the seat's rare commands in the
+ * `commands` tier says how it runs (#850): the model named it bare, most likely from words that did.
+ */
+export function notAToolText(profile: ToolProfile | 'human', name: string, tier: RareTier = rareTier): string {
+  const refused = `Not a tool of this session: ${name}`
+  if (!(commandsFor(profile, tier) as string[]).includes(name)) return refused
+  return `${refused}. It is one of this session's commands: centralu_run(command="${name}", args={…}) runs it, and centralu_help(command="${name}") gives its arguments.`
+}
+
 /** The tools this seat's Claude server defers behind tool search in this tier (the reader set marks its own) */
 function deferredFor(profile: ToolProfile, tier: RareTier): readonly string[] {
   return tier === 'deferred' ? (RARE_COMMANDS[profile] ?? []) : []

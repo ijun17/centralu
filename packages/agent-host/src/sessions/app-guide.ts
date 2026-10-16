@@ -76,7 +76,7 @@ One session = one agent process (Claude Code or Codex).
 - Handoff: session's ⋯ → Hand off to a fresh session… — the app builds a note from the stored
   conversation (or, if you choose, the current session writes it), and the new session starts from
   that note. You can choose the receiving tool. The orchestrator can hand a session off too
-  (handoff_session), after you approve its card; the original stays. A worktree session cannot be
+  (its handoff_session command), after you approve its card; the original stays. A worktree session cannot be
   handed off yet.
 - Deleting: session's ⋯ → Delete session…. By default this also deletes the conversation file on
   the tool's side. Turning that option off leaves the conversation on the tool, so it can be loaded
@@ -140,7 +140,7 @@ Once installed, the desktop app offers "Apply now": it relaunches into the new v
 agents, terminals and commands keep going. "Apply updates automatically when idle" (off by default)
 installs a new version without a click and applies it once no session is working or waiting, no
 terminal or command is running, and the person is not typing. An agent can ask for the same Apply now
-(update_centralu, action apply): under auto it applies, under normal the person is asked on a card,
+(update_centralu's apply action): under auto it applies, under normal the person is asked on a card,
 under safe it is refused, and it never applies what the button would not offer. With it on, a failed install is tried
 again after 10 minutes, then 1 hour, then every 6 hours; the error stays until the next attempt.
 From the terminal: \`centralu update\`. \`centralu install --force\` replaces a kept local build.`,
