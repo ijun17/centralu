@@ -2594,11 +2594,19 @@ export class SessionManager {
      * the same whether the reporting side is a manager or a coordinator (#120). In other words, the
      * raw report is record/screen provenance, and the vendor turn is the trust boundary.
      */
-    const project = target.projectId
-      ? (this.store.listProjects().find((p) => p.id === target.projectId)?.name ?? '(project no longer exists)')
-      : '(none)'
+    const { name, project } = this.reportedAs(target)
     const work = paused ? { paused: running, stoppable: target.askedBy === orchestratorId } : settled ? { settled } : undefined
-    await this.deliverReport(orchestratorId, sessionId, target.name, project, answer !== undefined ? clipPreview(answer, 600) : previewOf(this.store, sessionId, 600), ending, work)
+    await this.deliverReport(orchestratorId, sessionId, name, project, answer !== undefined ? clipPreview(answer, 600) : previewOf(this.store, sessionId, 600), ending, work)
+  }
+
+  /**
+   * How a report names the session it is about, and its project: as read_session lists it (`labelOf`), so a resumed
+   * conversation is not named by its compaction summary's first line. The two report paths used to name it each, and
+   * a finished turn's report used the raw name.
+   */
+  private reportedAs(m: SessionInfo): { name: string; project: string } {
+    const project = m.projectId ? (this.store.listProjects().find((p) => p.id === m.projectId)?.name ?? '(project no longer exists)') : '(none)'
+    return { name: labelOf(this.store, m), project }
   }
 
   /**
@@ -2622,8 +2630,8 @@ export class SessionManager {
     const askerInfo = this.meta.get(asker)
     if (!askerInfo || askerInfo.interruption?.reason === 'quit') return
     console.error(`[sessions] ${sessionId.slice(0, 8)} stopped (${stop.reason}) in a turn no report was owed for; telling ${asker.slice(0, 8)}, which started it`)
-    const project = m.projectId ? (this.store.listProjects().find((p) => p.id === m.projectId)?.name ?? '(project no longer exists)') : '(none)'
-    await this.deliverReport(asker, sessionId, labelOf(this.store, m), project, previewOf(this.store, sessionId, 600), { type: stop.reason === 'network' ? 'error' : 'state_change' })
+    const { name, project } = this.reportedAs(m)
+    await this.deliverReport(asker, sessionId, name, project, previewOf(this.store, sessionId, 600), { type: stop.reason === 'network' ? 'error' : 'state_change' })
   }
 
   /**

@@ -410,6 +410,26 @@ describe('a turn a quit stopped (#698)', () => {
   })
 })
 
+describe('the session a report names', () => {
+  it('is named as read_session lists it, whichever way the turn ended', async () => {
+    const a = host()
+    const { parent, child } = await parentAndChild(a)
+    // A resumed conversation's name is its compaction summary's first line, which the orchestrator's list never shows
+    a.mgr.rename(child, 'This session is being continued from a previous conversation that ran out of context.')
+    const listed = (await a.mgr.runOrchestratorTool(parent, 'read_session', {})).text
+    expect(listed).toContain('(resumed session)')
+    const kid = a.claude.handles.get(child)!
+    kid.answer('done')
+    await until(() => reportsTo(parent, child).length === 1)
+    kid.ownTurnFails(ECONNREFUSED)
+    await until(() => reportsTo(parent, child).length === 2)
+    for (const report of reportsTo(parent, child)) {
+      expect(report).not.toContain('This session is being continued')
+      expect(report).toContain('(resumed session)')
+    }
+  })
+})
+
 describe('a tool reconnecting for too long (#698)', () => {
   async function working(a: ReturnType<typeof host>) {
     const project = await a.mgr.addProject(root)
