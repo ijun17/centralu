@@ -174,6 +174,7 @@ export function readableGrants(paths: readonly string[], projectRoot: string): {
 export function underGrant(path: string, grants: Iterable<string>, cwd: string): boolean {
   // Canonical as the grants are, so a short name, another case or a link to the root reads the same path (#428)
   const r = canonicalPath(resolve(cwd, path))
-  for (const g of grants) if (isInside(g, r)) return true
+  // Each grant too, so one made in another spelling reads the same place
+  for (const g of grants) if (isInside(canonicalPath(g), r)) return true
   return false
 }

@@ -69,7 +69,8 @@ describe('what the caller may read', () => {
   let root: string
   let project: string
   beforeEach(() => {
-    root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-grant-')))
+    // The real spelling grants are made in: on Windows the long name for the runner's `RUNNER~1`
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-grant-')))
     project = join(root, 'toolkit')
     mkdirSync(join(project, 'out'), { recursive: true })
     writeFileSync(join(project, 'out', 'a.png'), 'x')
