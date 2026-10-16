@@ -626,6 +626,20 @@ function askProjectText(r: AskProjectResult): ToolOutput {
 }
 
 /**
+ * Said wherever the caller will be told of the end (#747). A parent seen on 2026-10-15 called `status` more than ten
+ * times in a row while its child worked, though the end is announced on its own. Here rather than in agent_session's
+ * description: an answer costs nothing until it is shown, and the description rides in every request.
+ */
+const NO_POLLING = 'Wait for that notice rather than checking with status; check only if a long time passes without it.'
+
+/**
+ * Said wherever an answer names `send` (#747). The same parent gave two children it had started for read-only research
+ * the editing work as well: their names, set from the first task, no longer said what they did in the person's list.
+ */
+const NEW_ROLE_NEW_AGENT =
+  'For another kind of work (say, editing files after read-only research), start a new agent instead: its name and role came from its first task.'
+
+/**
  * What the model reads back from start_agent and agent_session (#561). The child's answer is fenced like ask_project's
  * (JSON-quoted, one line): it is another session's words. Each state names the next call, which is how a model that
  * has only start_agent loaded finds agent_session.
@@ -640,7 +654,7 @@ function agentRunText(r: ChildRunResult): ToolOutput {
         `queued: low memory. No session yet: starting ${r.tool} is allowed and waits for memory (${r.lowMemory.available} free, ` +
         `${r.lowMemory.floor} needed; request ${r.sessionId}). It starts when memory frees up, and you will be told when its turn ends; ` +
         `if memory stays low for ${r.lowMemory.maxWaitMinutes} minutes it gives up and you will be told. Carry on with other work, and do not ` +
-        'do this with your own subagents instead. ' +
+        `do this with your own subagents instead. ${NO_POLLING} ` +
         `agent_session(sessionId="${r.sessionId}", action="status") shows where it stands, action="wait" waits, action="stop" withdraws it.`,
     }
   }
@@ -649,7 +663,7 @@ function agentRunText(r: ChildRunResult): ToolOutput {
       text:
         `No session yet: starting ${r.tool} is waiting for the person's answer on the card in your session (request ${r.sessionId}). ` +
         'Carry on with other work, and do not do this with your own subagents instead. If they allow it, the session starts and ' +
-        'you will be told when its turn ends; if they refuse or it is withdrawn, you will be told. ' +
+        `you will be told when its turn ends; if they refuse or it is withdrawn, you will be told. ${NO_POLLING} ` +
         `agent_session(sessionId="${r.sessionId}", action="status") shows where it stands, action="wait" waits for the answer, ` +
         'action="stop" withdraws the request.',
     }
@@ -666,7 +680,7 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
       return {
         text:
           `${who} is working on it${r.notice ? ` — ${r.notice}` : ''}. ` +
-          (r.reported ? 'You will be told when it ends; ' : '') +
+          (r.reported ? `You will be told when it ends. ${NO_POLLING} ` : '') +
           `agent_session(sessionId="${r.sessionId}", action="wait") waits for its answer, action="stop" stops it.`,
       }
     case 'asking':
@@ -702,14 +716,14 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
         text:
           `${who} is not working on anything you gave it (${r.sessionState}${r.interruption ? `, ${interruptionWords(r.interruption)}` : ''}). Its last answer, as JSON:\n${trustedJsonText(r.answer || '(no final text)')}\n` +
           (r.notice ? `${r.notice}\n` : '') +
-          `agent_session(sessionId="${r.sessionId}", action="send", text=…) gives it more.`,
+          `agent_session(sessionId="${r.sessionId}", action="send", text=…) gives it more. ${NEW_ROLE_NEW_AGENT}`,
       }
     case 'done': {
       const lines = [`${who} answered, as JSON:`, trustedJsonText(r.answer || '(no final text)')]
       if (r.notice) lines.push(r.notice)
       if (r.readable.length) lines.push(`You can read these now: ${r.readable.join(', ')}`)
       if (r.outside.length) lines.push(`Named outside its folder (not opened for you): ${r.outside.join(', ')}`)
-      lines.push(`agent_session(sessionId="${r.sessionId}", action="send", text=…) continues with it.`)
+      lines.push(`agent_session(sessionId="${r.sessionId}", action="send", text=…) continues with it. ${NEW_ROLE_NEW_AGENT}`)
       return { text: lines.join('\n') }
     }
   }

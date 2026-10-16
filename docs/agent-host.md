@@ -402,6 +402,11 @@ below retained for `safe` and `normal`:
    already finished its turn during the swap, so a later turn the person starts there is never reported as the
    assigned work (#166); that answer stays readable through `agent_session`. Paths the
    answer names inside the child's folder become readable to the caller, as ask_project's do.
+   Each answer that promises the notice (`working` with the report armed, `pending`) says to wait for it rather than
+   check with `status`, which is for a long silence only; each that names `send` (`done`, `at_rest`) says to start a
+   new agent for another kind of work, since the child's name and role came from its first task (#747: a parent
+   called `status` more than ten times in a row, and sent read-only research children the editing). In the answers,
+   not the descriptions: an answer costs nothing until it is shown.
 7. **Work that waits on its own background tasks** (#721). The caller hears of the work's last turn end, not its
    first. On 2026-10-15 six children backgrounded `pnpm verify` and ended a turn "waiting for verify to finish"; that
    turn used up the report, the turn the verify's completion started finished the work and told no one, and the

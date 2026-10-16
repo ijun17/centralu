@@ -315,6 +315,41 @@ describe('the agent set', () => {
     expect(sentChars(AGENT_TOOLS)).toBeLessThanOrEqual(AGENT_BUDGET_CHARS)
   })
 
+  /*
+   * #747: a parent called status more than ten times in a row while its child worked, though the end is announced on
+   * its own. Every answer that promises the notice says to wait for it; an observer's (`reported: false`) promises none.
+   */
+  it('tells the caller to wait for the end notice, not to check with status, wherever one is promised', async () => {
+    const base = { ok: true as const, sessionId: 'c', sessionName: 'Check', tool: 'codex' }
+    const answers = [
+      { ...base, state: 'working' as const, reported: true },
+      { ...base, state: 'pending' as const },
+      { ...base, state: 'pending' as const, lowMemory: { available: '1 GB', floor: '2 GB', maxWaitMinutes: 30 } },
+    ]
+    for (const a of answers) {
+      const r = await runOrchestratorTool(toolsWith({ startAgent: async () => a }), 'start_agent', { task: 'check' }, { sessionId: 's', profile: 'reader' })
+      expect(r.text, JSON.stringify(a)).toContain('Wait for that notice rather than checking with status')
+    }
+    const observer = await runOrchestratorTool(
+      toolsWith({ agentSession: async () => ({ ...base, state: 'working', reported: false }) }),
+      'agent_session', { sessionId: 'c', action: 'status' }, { sessionId: 's', profile: 'reader' },
+    )
+    expect(observer.text).not.toContain('Wait for that notice')
+  })
+
+  // #747: two children started for read-only research were sent the editing as well, and their names stopped saying what they did
+  it.each([
+    ['done', { state: 'done' as const, answer: 'found it', readable: [], outside: [] }],
+    ['at_rest', { state: 'at_rest' as const, answer: 'found it', sessionState: 'idle' }],
+  ])('%s: names a new agent, not send, for another kind of work', async (_, state) => {
+    const r = await runOrchestratorTool(
+      toolsWith({ agentSession: async () => ({ ok: true, sessionId: 'c', sessionName: 'Research', tool: 'codex', ...state }) }),
+      'agent_session', { sessionId: 'c', action: 'status' }, { sessionId: 's', profile: 'reader' },
+    )
+    expect(r.text).toContain('action="send"')
+    expect(r.text).toMatch(/For another kind of work \(say, editing files after read-only research\), start a new agent instead/)
+  })
+
   it('is no tool of any directing seat', async () => {
     const tools = toolsWith({ startAgent: async () => ({ ok: false, error: 'x' }) })
     for (const profile of ['orchestrator', 'scoped', 'builder'] as const) {
