@@ -1,3 +1,4 @@
+import { vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -121,7 +122,7 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-app-broker-')))
   const repo = join(root, 'repo')
   const dataRoot = join(root, 'data')
-  process.env.CC_DATA_DIR = dataRoot
+  vi.stubEnv('CC_DATA_DIR', dataRoot)
   mkdirSync(dataRoot)
   execFileSync('git', ['init', '-q', '-b', 'main', repo], { cwd: root })
   const store = new Store()

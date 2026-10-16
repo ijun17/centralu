@@ -1,7 +1,9 @@
-import { existsSync, readdirSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, dirname } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { basename, dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { describe, expect, it, vi } from 'vitest'
 
 /*
  * The data folder tests run against (#368). A folder shared by every test file let one file's
@@ -17,5 +19,36 @@ describe('the data folder a test file runs against', () => {
     expect(existsSync(dir)).toBe(true)
     // Nothing else has written into it: this file has not started a host or a manager
     expect(readdirSync(dir)).toEqual([])
+  })
+})
+
+/*
+ * A test that needs a data folder of its own stubs it (#845): vitest undoes the stub before the next test
+ * (`unstubEnvs` in vitest.config.ts). Assigning `process.env.CC_DATA_DIR` by hand is what went wrong: a test
+ * file deleted it after each test, leaving what ran next on the real `~/.centralu`, and another restored a
+ * saved `undefined`, which Node stores as the string "undefined", a folder in the current directory.
+ */
+describe('a data folder a test sets for itself', () => {
+  const own = process.env.CC_DATA_DIR
+  it('is a stub (this one points it elsewhere)', () => {
+    vi.stubEnv('CC_DATA_DIR', join(tmpdir(), 'somewhere-else'))
+    expect(process.env.CC_DATA_DIR).toBe(join(tmpdir(), 'somewhere-else'))
+  })
+  it('and the next test is back on the file\'s own folder', () => {
+    expect(process.env.CC_DATA_DIR).toBe(own)
+  })
+
+  it('is never assigned or deleted by hand in a test file', () => {
+    const root = fileURLToPath(new URL('..', import.meta.url))
+    const files = execFileSync('git', ['ls-files', 'packages/*.test.ts', 'packages/*.test.tsx', 'tooling/*.test.ts', 'packages/*.test-helpers.ts'], { cwd: root, encoding: 'utf8' })
+      .trim()
+      .split('\n')
+    expect(files.length).toBeGreaterThan(100)
+    const byHand = files.flatMap((f) =>
+      readFileSync(join(root, f), 'utf8')
+        .split('\n')
+        .flatMap((line, i) => (/(\bdelete\s+process\.env\.CC_DATA_DIR\b|process\.env\.CC_DATA_DIR\s*=[^=])/.test(line) ? [`${f}:${i + 1}`] : [])),
+    )
+    expect(byHand).toEqual([])
   })
 })

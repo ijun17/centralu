@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { storeRunLedger } from '../app-run-ledger.js'
@@ -77,7 +77,7 @@ beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-mcp-apps-')))
   dataRoot = join(root, 'data')
   repo = join(root, 'repo')
-  process.env.CC_DATA_DIR = dataRoot
+  vi.stubEnv('CC_DATA_DIR', dataRoot)
   mkdirSync(dataRoot)
   mkdirSync(repo)
   execFileSync('git', ['init', '-q', '-b', 'main', repo], { cwd: root })

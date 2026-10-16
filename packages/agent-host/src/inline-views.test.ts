@@ -153,7 +153,7 @@ beforeEach(() => {
   repo = join(root, 'repo')
   logs = join(root, 'logs')
   const dataRoot = join(root, 'data')
-  process.env.CC_DATA_DIR = dataRoot
+  vi.stubEnv('CC_DATA_DIR', dataRoot)
   for (const d of [dataRoot, logs]) mkdirSync(d)
   execFileSync('git', ['init', '-q', '-b', 'main', repo], { cwd: root })
   writeFileSync(join(repo, 'a.txt'), 'hello\n')

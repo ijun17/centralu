@@ -75,7 +75,7 @@ beforeEach(async () => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-codex-seats-')))
   repo = join(root, 'repo')
   const dataRoot = join(root, 'data')
-  process.env.CC_DATA_DIR = dataRoot
+  vi.stubEnv('CC_DATA_DIR', dataRoot)
   mkdirSync(dataRoot)
   execFileSync('git', ['init', '-q', '-b', 'main', repo], { cwd: root })
   store = new Store()

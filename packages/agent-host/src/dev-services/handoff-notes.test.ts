@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -10,14 +10,11 @@ import { handoffNoteDir, handoffNotePath, sweepHandoffNotes, writeHandoffNote } 
  * exactly one segment is denied a spot.
  */
 let data: string
-let prev: string | undefined
 beforeEach(() => {
   data = mkdtempSync(join(tmpdir(), 'cc-handoff-notes-'))
-  prev = process.env.CC_DATA_DIR
-  process.env.CC_DATA_DIR = data
+  vi.stubEnv('CC_DATA_DIR', data)
 })
 afterEach(() => {
-  process.env.CC_DATA_DIR = prev
   rmSync(data, { recursive: true, force: true })
 })
 

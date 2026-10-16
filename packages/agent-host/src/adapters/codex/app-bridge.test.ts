@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WebSocket } from 'ws'
 import { PROTOCOL_VERSION, type AdapterCapabilities, type SessionInfo, type ToolName } from '@cc/protocol'
 import { storeRunLedger } from '../../app-run-ledger.js'
@@ -105,7 +105,7 @@ beforeEach(async () => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-apps-bridge-')))
   const proj = join(root, 'proj')
   const dataRoot = join(root, 'data')
-  process.env.CC_DATA_DIR = dataRoot
+  vi.stubEnv('CC_DATA_DIR', dataRoot)
   mkdirSync(proj)
   mkdirSync(dataRoot)
   gate = join(root, 'notes.gate')

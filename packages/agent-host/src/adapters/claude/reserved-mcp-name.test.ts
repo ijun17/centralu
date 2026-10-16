@@ -50,7 +50,7 @@ let mgr: InstanceType<typeof SessionManager>
 
 beforeEach(() => {
   // So the orchestrator home does not get created in the real home directory (sessions come up here).
-  process.env.CC_DATA_DIR = mkdtempSync(join(tmpdir(), 'cc-93-'))
+  vi.stubEnv('CC_DATA_DIR', mkdtempSync(join(tmpdir(), 'cc-93-')))
   captured.options = null
   store = new Store()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', new ClaudeAdapter()]])

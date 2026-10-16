@@ -1203,8 +1203,7 @@ describe('deleting a session', () => {
    */
   it('a delete request ends at the boundary when the session id is not a path segment (#94)', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cc-del94-'))
-    const before = process.env.CC_DATA_DIR
-    process.env.CC_DATA_DIR = join(root, 'data')
+    vi.stubEnv('CC_DATA_DIR', join(root, 'data'))
     const victim = join(root, 'Documents')
     mkdirSync(victim, { recursive: true })
     writeFileSync(join(victim, 'taxes.txt'), 'important')
@@ -1212,8 +1211,6 @@ describe('deleting a session', () => {
       await expect(rpc('agents.deleteSession', { sessionId: '../../Documents' })).rejects.toThrow()
       expect(readdirSync(victim)).toEqual(['taxes.txt'])
     } finally {
-      if (before === undefined) delete process.env.CC_DATA_DIR
-      else process.env.CC_DATA_DIR = before
       rmSync(root, { recursive: true, force: true })
     }
   })
@@ -3631,12 +3628,11 @@ describe('worktree sessions', () => {
     const inRecoveryFolder = async (run: () => Promise<void>) => {
       const previous = process.env.CC_DATA_DIR
       // Backslashes reproduce Windows JSON escaping on every OS, without a fake filesystem.
-      process.env.CC_DATA_DIR = join(root, 'recovery\\files')
+      vi.stubEnv('CC_DATA_DIR', join(root, 'recovery\\files'))
       try {
         await run()
       } finally {
-        if (previous === undefined) delete process.env.CC_DATA_DIR
-        else process.env.CC_DATA_DIR = previous
+        vi.stubEnv('CC_DATA_DIR', previous)
       }
     }
 
@@ -5684,7 +5680,6 @@ describe('a failed turn is recorded (#107)', () => {
 describe("a handoff note does not race its reader (#106)", () => {
   let dir: string
   let data: string
-  let prevData: string | undefined
   let pid = ''
   // The note lives in the data folder (#142) — each test uses its own data folder.
   const note = (id: string) => join(data, 'handoff', pid, `${id}.md`)
@@ -5696,11 +5691,9 @@ describe("a handoff note does not race its reader (#106)", () => {
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'cc-handoff-'))
     data = mkdtempSync(join(tmpdir(), 'cc-handoff-data-'))
-    prevData = process.env.CC_DATA_DIR
-    process.env.CC_DATA_DIR = data
+    vi.stubEnv('CC_DATA_DIR', data)
   })
   afterEach(() => {
-    process.env.CC_DATA_DIR = prevData
     rmSync(dir, { recursive: true, force: true })
     rmSync(data, { recursive: true, force: true })
   })
@@ -5823,12 +5816,10 @@ describe('a handoff note lives in the data folder (#142)', () => {
   let repo: string
   let outside: string
   let data: string
-  let prevData: string | undefined
 
   beforeEach(() => {
     data = mkdtempSync(join(tmpdir(), 'cc-142-data-'))
-    prevData = process.env.CC_DATA_DIR
-    process.env.CC_DATA_DIR = data
+    vi.stubEnv('CC_DATA_DIR', data)
     // A real repository — commits README.md and a `.centralu/handoff` link pointing at the repository root.
     repo = realpathSync(mkdtempSync(join(tmpdir(), 'cc-142-repo-')))
     outside = realpathSync(mkdtempSync(join(tmpdir(), 'cc-142-outside-')))
@@ -5843,7 +5834,6 @@ describe('a handoff note lives in the data folder (#142)', () => {
     writeFileSync(join(outside, 'NOTES.md'), 'a note outside the repository')
   })
   afterEach(() => {
-    process.env.CC_DATA_DIR = prevData
     for (const d of [repo, outside, data]) rmSync(d, { recursive: true, force: true })
   })
 

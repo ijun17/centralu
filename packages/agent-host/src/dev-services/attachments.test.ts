@@ -2,7 +2,7 @@ import { mkdtemp, readdir, writeFile, mkdir, rm, utimes } from 'node:fs/promises
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearAttachments, saveAttachment, sweepAttachments } from './attachments.js'
 
 /**
@@ -14,10 +14,9 @@ import { clearAttachments, saveAttachment, sweepAttachments } from './attachment
 let dir: string
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'cc-att-'))
-  process.env.CC_DATA_DIR = dir
+  vi.stubEnv('CC_DATA_DIR', dir)
 })
 afterEach(async () => {
-  delete process.env.CC_DATA_DIR
   await rm(dir, { recursive: true, force: true })
 })
 
