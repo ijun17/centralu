@@ -235,7 +235,8 @@ const pr = (number: number, extra: Partial<Pr>): Pr => ({
  */
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-project-board-contribute-')))
+  // The long form of the folder, which is what git answers: a runner's temp folder is named with 8.3 (RUNNER~1)
+  root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-project-board-contribute-')))
   for (const d of ['bin', 'data', 'node']) mkdirSync(join(root, d))
   linkNode(join(root, 'node'))
   fakeExe(join(root, 'bin'), 'gh', FAKE_GH)

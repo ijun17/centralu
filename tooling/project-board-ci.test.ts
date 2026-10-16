@@ -418,7 +418,7 @@ let statePath = ''
 let logPath = ''
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-project-board-ci-')))
+  root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-project-board-ci-')))
   for (const d of ['bin', 'data', 'node']) mkdirSync(join(root, d))
   linkNode(join(root, 'node'))
   fakeExe(join(root, 'bin'), 'gh', FAKE_GH)

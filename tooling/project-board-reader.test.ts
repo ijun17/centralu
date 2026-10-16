@@ -364,7 +364,7 @@ let statePath = ''
 let logPath = ''
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-project-board-reader-')))
+  root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-project-board-reader-')))
   mkdirSync(join(root, 'bin'))
   mkdirSync(join(root, 'data'))
   mkdirSync(join(root, 'node'))
