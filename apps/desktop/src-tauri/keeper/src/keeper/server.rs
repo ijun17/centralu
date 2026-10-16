@@ -753,8 +753,7 @@ fn reply(stream: &mut UnixStream, v: &Value) {
 }
 
 fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
-    if let Err(who) = os::peer_is_this_user(&stream) {
-        log(&format!("refused a connection from another user ({who})"));
+    if !accept::from_this_user(&stream, log) {
         return;
     }
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));

@@ -70,6 +70,18 @@ impl AcceptErrors {
     }
 }
 
+/// Whether the peer of a connection on a user-only socket is this user; one that is not is logged,
+/// and the caller drops it.
+pub(super) fn from_this_user(stream: &std::os::unix::net::UnixStream, log: fn(&str)) -> bool {
+    match crate::os::peer_is_this_user(stream) {
+        Ok(()) => true,
+        Err(who) => {
+            log(&format!("refused a connection from another user ({who})"));
+            false
+        }
+    }
+}
+
 /// Starts a thread for one connection, or returns why the OS refused one (the caller drops the
 /// connection and undoes its bookkeeping) instead of panicking (`thread::spawn`).
 pub(super) fn spawn<F: FnOnce() + Send + 'static>(name: &str, f: F) -> io::Result<()> {

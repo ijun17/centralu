@@ -64,7 +64,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 
 use self::buffer::{BufState, OutBuf, Policy, LINES_CAP, RING_CAP, TAIL_CAP};
-use super::accept::AcceptErrors;
+use super::accept::{self, AcceptErrors};
+use super::client::json_line;
 use super::handoff::pack::{Pack, Shifted};
 use crate::os;
 use crate::os::children as proc;
@@ -142,8 +143,7 @@ impl Children {
         listener.set_nonblocking(true)?;
         let (wake_r, wake_w) = pipe()?;
         let shared = Arc::new(Shared { cmds: Mutex::new(Vec::new()), wake: wake_w, sock: sock.clone() });
-        let reactor = Reactor::new(listener, wake_r, shared.clone())?;
-        thread::Builder::new().name("keeper-children".into()).spawn(move || reactor.run())?;
+        Reactor::new(listener, wake_r, shared.clone())?.start()?;
         log(&format!("listening on {}", sock.display()));
         Ok(Children { shared: Some(shared) })
     }
@@ -254,10 +254,8 @@ impl Pending {
         for &(pid, st) in reaped {
             self.reactor.watch.know(pid, st);
         }
-        let sock = self.shared.sock.clone();
-        let reactor = self.reactor;
-        thread::Builder::new().name("keeper-children".into()).spawn(move || reactor.run())?;
-        log(&format!("took over {} from the previous keeper", sock.display()));
+        self.reactor.start()?;
+        log(&format!("took over {} from the previous keeper", self.shared.sock.display()));
         Ok(Children { shared: Some(self.shared) })
     }
 }
@@ -340,6 +338,31 @@ impl Child {
         }
     }
 
+    fn buf_ref(&self, w: Which) -> &OutBuf {
+        match w {
+            Which::Out => &self.out,
+            Which::Err => &self.err,
+        }
+    }
+
+    /// The descriptor a stream is read from, while it is open.
+    fn out_fd(&self, w: Which) -> Option<RawFd> {
+        match w {
+            Which::Out => self.out_fd.as_ref(),
+            Which::Err => self.err_fd.as_ref(),
+        }
+        .map(|f| f.as_raw_fd())
+    }
+
+    /// The stream ended: what is buffered is all there will be.
+    fn end_stream(&mut self, w: Which) {
+        self.buf(w).eof = true;
+        match w {
+            Which::Out => self.out_fd = None,
+            Which::Err => self.err_fd = None,
+        }
+    }
+
     fn reader(&mut self, w: Which) -> &mut Option<u64> {
         match w {
             Which::Out => &mut self.out_reader,
@@ -365,6 +388,11 @@ impl Child {
             "attached": self.out_reader.is_some(),
         })
     }
+}
+
+/// A request's failure answer.
+fn fail(msg: String) -> Value {
+    json!({ "ok": false, "error": msg })
 }
 
 fn child_id(n: u64) -> String {
@@ -523,6 +551,26 @@ enum RoleState {
     Attach { child: u64, which: Which, detaching: bool },
 }
 
+impl From<&Role> for RoleState {
+    fn from(r: &Role) -> Self {
+        match *r {
+            Role::Hello => RoleState::Hello,
+            Role::Control => RoleState::Control,
+            Role::Attach { child, which, detaching } => RoleState::Attach { child, which, detaching },
+        }
+    }
+}
+
+impl From<RoleState> for Role {
+    fn from(r: RoleState) -> Self {
+        match r {
+            RoleState::Hello => Role::Hello,
+            RoleState::Control => Role::Control,
+            RoleState::Attach { child, which, detaching } => Role::Attach { child, which, detaching },
+        }
+    }
+}
+
 impl Reactor {
     fn new(listener: UnixListener, wake: OwnedFd, shared: Arc<Shared>) -> io::Result<Self> {
         Ok(Reactor {
@@ -594,11 +642,7 @@ impl Reactor {
             conns.push(ConnState {
                 id,
                 fd: pack.fd(&conn.stream).map_err(e)?,
-                role: match conn.role {
-                    Role::Hello => RoleState::Hello,
-                    Role::Control => RoleState::Control,
-                    Role::Attach { child, which, detaching } => RoleState::Attach { child, which, detaching },
-                },
+                role: RoleState::from(&conn.role),
                 rbuf: pack.blob(conn.rbuf.clone()),
                 wbuf: pack.blob(conn.wbuf.clone()),
             });
@@ -672,14 +716,14 @@ impl Reactor {
             let fd = u.fd(c.fd)?;
             let stream = UnixStream::from(fd);
             stream.set_nonblocking(true).map_err(|e| e.to_string())?;
-            let role = match c.role {
-                RoleState::Hello => Role::Hello,
-                RoleState::Control => Role::Control,
-                RoleState::Attach { child, which, detaching } => Role::Attach { child, which, detaching },
-            };
-            r.conns.insert(c.id, Conn { stream, role, rbuf: u.blob(c.rbuf)?, wbuf: u.blob(c.wbuf)? });
+            r.conns.insert(c.id, Conn { stream, role: c.role.into(), rbuf: u.blob(c.rbuf)?, wbuf: u.blob(c.wbuf)? });
         }
         Ok(r)
+    }
+
+    /// Runs the reactor on a thread of its own, the only one that touches its descriptors.
+    fn start(self) -> io::Result<()> {
+        thread::Builder::new().name("keeper-children".into()).spawn(move || self.run()).map(|_| ())
     }
 
     fn run(mut self) {
@@ -832,11 +876,7 @@ impl Reactor {
                         if room {
                             ev |= libc::POLLIN;
                         }
-                        let b = match which {
-                            Which::Out => &c.out,
-                            Which::Err => &c.err,
-                        };
-                        if !b.sendable(detaching).is_empty() {
+                        if !c.buf_ref(which).sendable(detaching).is_empty() {
                             want_out = true;
                         }
                     }
@@ -861,14 +901,7 @@ impl Reactor {
         for cmd in cmds {
             match cmd {
                 Cmd::AskHostStop(done) => {
-                    let line = event_line(&json!({ "event": "stop" }));
-                    let mut any = false;
-                    for conn in self.conns.values_mut() {
-                        if let Role::Control = conn.role {
-                            conn.wbuf.extend_from_slice(&line);
-                            any = true;
-                        }
-                    }
+                    let any = self.tell_hosts(&json!({ "event": "stop" }));
                     log(if any { "asked the host to stop its children" } else { "no host connected to stop its children" });
                     self.host_stop_waiters.push(done);
                 }
@@ -925,8 +958,7 @@ impl Reactor {
             match self.listener.accept() {
                 Ok((stream, _)) => {
                     self.accept_errors.accepted();
-                    if let Err(who) = os::peer_is_this_user(&stream) {
-                        log(&format!("refused a connection from another user ({who})"));
+                    if !accept::from_this_user(&stream, log) {
                         continue;
                     }
                     if stream.set_nonblocking(true).is_err() {
@@ -950,11 +982,7 @@ impl Reactor {
 
     fn read_child(&mut self, n: u64, which: Which) {
         let Some(c) = self.children.get_mut(&n) else { return };
-        let fd = match which {
-            Which::Out => c.out_fd.as_ref().map(|f| f.as_raw_fd()),
-            Which::Err => c.err_fd.as_ref().map(|f| f.as_raw_fd()),
-        };
-        let Some(fd) = fd else { return };
+        let Some(fd) = c.out_fd(which) else { return };
         let mut tmp = vec![0u8; 64 * 1024];
         let mut eof = false;
         // Bounded per wakeup so one chatty child cannot starve the others.
@@ -975,11 +1003,7 @@ impl Reactor {
             }
         }
         if eof {
-            c.buf(which).eof = true;
-            match which {
-                Which::Out => c.out_fd = None,
-                Which::Err => c.err_fd = None,
-            }
+            c.end_stream(which);
         }
     }
 
@@ -1054,7 +1078,7 @@ impl Reactor {
                         Ok(v) => v,
                         Err(e) => {
                             let r = json!({ "ok": false, "error": format!("not JSON: {e}") });
-                            conn.wbuf.extend_from_slice(&event_line(&r));
+                            conn.wbuf.extend_from_slice(&json_line(&r));
                             continue;
                         }
                     };
@@ -1067,7 +1091,7 @@ impl Reactor {
                             resp["rid"] = rid.clone();
                         }
                         if let Some(conn) = self.conns.get_mut(&id) {
-                            conn.wbuf.extend_from_slice(&event_line(&resp));
+                            conn.wbuf.extend_from_slice(&json_line(&resp));
                         }
                     }
                 }
@@ -1080,7 +1104,7 @@ impl Reactor {
         let op = req.get("op").and_then(Value::as_str).unwrap_or("");
         let refuse = |me: &mut Self, msg: String| {
             if let Some(conn) = me.conns.get_mut(&id) {
-                conn.wbuf.extend_from_slice(&event_line(&json!({ "ok": false, "error": msg })));
+                conn.wbuf.extend_from_slice(&json_line(&json!({ "ok": false, "error": msg })));
                 let _ = flush_raw(&mut conn.stream, &mut conn.wbuf);
             }
             me.drop_conn(id, Flush::Close);
@@ -1093,7 +1117,7 @@ impl Reactor {
                 if let Some(conn) = self.conns.get_mut(&id) {
                     conn.role = Role::Control;
                     let r = json!({ "ok": true, "protocol": CHILDREN_PROTOCOL, "keeperPid": std::process::id() });
-                    conn.wbuf.extend_from_slice(&event_line(&r));
+                    conn.wbuf.extend_from_slice(&json_line(&r));
                 }
             }
             "attach" => {
@@ -1116,23 +1140,26 @@ impl Reactor {
                 let info = c.info(n);
                 if let Some(conn) = self.conns.get_mut(&id) {
                     conn.role = Role::Attach { child: n, which, detaching: false };
-                    conn.wbuf.extend_from_slice(&event_line(&json!({ "ok": true, "child": info })));
+                    conn.wbuf.extend_from_slice(&json_line(&json!({ "ok": true, "child": info })));
                 }
                 // The previous reader, if it is still there, is a host that has been replaced.
                 if let Some(old) = old.filter(|&o| o != id) {
-                    if let Some(conn) = self.conns.remove(&old) {
-                        let _ = conn.stream.shutdown(Shutdown::Both);
-                    }
+                    self.close_conn(old);
                 }
             }
             other => refuse(self, format!("unknown first op {other:?}")),
         }
     }
 
+    /// The child a request names by `id`, or the answer saying why there is none.
+    fn named(&mut self, req: &Value, op: &str) -> Result<&mut Child, Value> {
+        let Some(n) = parse_child_id(req.get("id")) else { return Err(fail(format!("{op} needs an id"))) };
+        self.children.get_mut(&n).ok_or_else(|| fail(format!("no child {}", child_id(n))))
+    }
+
     /// One control request. Every answer carries `ok`.
     fn request(&mut self, req: &Value) -> Value {
         let op = req.get("op").and_then(Value::as_str).unwrap_or("");
-        let fail = |msg: String| json!({ "ok": false, "error": msg });
         match op {
             "list" => {
                 let list: Vec<Value> = self.children.iter().map(|(&n, c)| c.info(n)).collect();
@@ -1143,8 +1170,10 @@ impl Reactor {
                 Err(e) => fail(e),
             },
             "signal" => {
-                let Some(n) = parse_child_id(req.get("id")) else { return fail("signal needs an id".into()) };
-                let Some(c) = self.children.get(&n) else { return fail(format!("no child {}", child_id(n))) };
+                let c = match self.named(req, op) {
+                    Ok(c) => c,
+                    Err(answer) => return answer,
+                };
                 let name = req.get("signal").and_then(Value::as_str).unwrap_or("SIGTERM");
                 let Some(sig) = proc::signal_number(name) else { return fail(format!("signal {name:?} is not allowed")) };
                 // An exited child's pid may already belong to someone else.
@@ -1158,8 +1187,10 @@ impl Reactor {
                 }
             }
             "close_stdin" => {
-                let Some(n) = parse_child_id(req.get("id")) else { return fail("close_stdin needs an id".into()) };
-                let Some(c) = self.children.get_mut(&n) else { return fail(format!("no child {}", child_id(n))) };
+                let c = match self.named(req, op) {
+                    Ok(c) => c,
+                    Err(answer) => return answer,
+                };
                 if c.kind != Kind::Pipes {
                     return fail("a pty has no stdin of its own to close".into());
                 }
@@ -1170,8 +1201,10 @@ impl Reactor {
                 json!({ "ok": true })
             }
             "resize" => {
-                let Some(n) = parse_child_id(req.get("id")) else { return fail("resize needs an id".into()) };
-                let Some(c) = self.children.get_mut(&n) else { return fail(format!("no child {}", child_id(n))) };
+                let c = match self.named(req, op) {
+                    Ok(c) => c,
+                    Err(answer) => return answer,
+                };
                 let cols = req.get("cols").and_then(Value::as_u64).unwrap_or(0).min(u16::MAX as u64) as u16;
                 let rows = req.get("rows").and_then(Value::as_u64).unwrap_or(0).min(u16::MAX as u64) as u16;
                 if c.kind != Kind::Pty || cols < 2 || rows < 2 {
@@ -1188,8 +1221,10 @@ impl Reactor {
                 }
             }
             "set_tag" => {
-                let Some(n) = parse_child_id(req.get("id")) else { return fail("set_tag needs an id".into()) };
-                let Some(c) = self.children.get_mut(&n) else { return fail(format!("no child {}", child_id(n))) };
+                let c = match self.named(req, op) {
+                    Ok(c) => c,
+                    Err(answer) => return answer,
+                };
                 c.tag = req.get("tag").cloned().unwrap_or(Value::Null);
                 json!({ "ok": true })
             }
@@ -1276,9 +1311,7 @@ impl Reactor {
     fn remove_child(&mut self, n: u64) {
         let Some(c) = self.children.remove(&n) else { return };
         for id in [c.out_reader, c.err_reader].into_iter().flatten() {
-            if let Some(conn) = self.conns.remove(&id) {
-                let _ = conn.stream.shutdown(Shutdown::Both);
-            }
+            self.close_conn(id);
         }
     }
 
@@ -1313,12 +1346,26 @@ impl Reactor {
                 }
                 self.sweeps.push(Sweep { pgid: pid, due: Instant::now() + SWEEP_GRACE });
             }
-            let line = event_line(&json!({ "event": "exit", "id": child_id(n), "code": st.code, "signal": st.signal }));
-            for conn in self.conns.values_mut() {
-                if let Role::Control = conn.role {
-                    conn.wbuf.extend_from_slice(&line);
-                }
-            }
+            self.tell_hosts(&json!({ "event": "exit", "id": child_id(n), "code": st.code, "signal": st.signal }));
+        }
+    }
+
+    /// Queues an event for every control connection (every host). Returns whether there was one.
+    fn tell_hosts(&mut self, event: &Value) -> bool {
+        let line = json_line(event);
+        let mut any = false;
+        for conn in self.conns.values_mut().filter(|c| matches!(c.role, Role::Control)) {
+            conn.wbuf.extend_from_slice(&line);
+            any = true;
+        }
+        any
+    }
+
+    /// Ends a connection at once, both ways: a reader replaced by a new attach, or the reader of a
+    /// child that is released.
+    fn close_conn(&mut self, id: u64) {
+        if let Some(conn) = self.conns.remove(&id) {
+            let _ = conn.stream.shutdown(Shutdown::Both);
         }
     }
 
@@ -1546,11 +1593,6 @@ fn flush_raw(stream: &mut UnixStream, wbuf: &mut Vec<u8>) -> io::Result<bool> {
     Ok(true)
 }
 
-fn event_line(v: &Value) -> Vec<u8> {
-    let mut l = serde_json::to_vec(v).unwrap_or_default();
-    l.push(b'\n');
-    l
-}
 
 #[cfg(test)]
 mod tests;

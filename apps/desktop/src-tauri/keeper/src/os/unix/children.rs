@@ -52,15 +52,7 @@ fn command(cmd: &str, args: &[String], cwd: &str, env: &HashMap<String, String>)
 pub fn spawn_pipes(cmd: &str, args: &[String], cwd: &str, env: &HashMap<String, String>) -> io::Result<Spawned> {
     let mut c = command(cmd, args, cwd, env);
     c.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    // SAFETY: setsid is async-signal-safe, which is all pre_exec requires.
-    unsafe {
-        c.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
+    crate::os::new_session(&mut c);
     let mut child = c.spawn()?;
     let pid = child.id() as i32;
     let stdin: OwnedFd = child.stdin.take().ok_or_else(|| io::Error::other("no stdin pipe"))?.into();

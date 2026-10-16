@@ -37,7 +37,7 @@ impl Control {
         c
     }
     fn send(&mut self, v: &Value) {
-        self.w.write_all(&event_line(v)).unwrap();
+        self.w.write_all(&json_line(v)).unwrap();
     }
     fn line(&mut self) -> Value {
         let mut l = String::new();
@@ -83,7 +83,7 @@ impl Control {
 fn attach(data: &Path, id: &str, stream: &str) -> (UnixStream, Value) {
     let mut s = UnixStream::connect(socket_path(data)).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-    s.write_all(&event_line(&json!({ "op": "attach", "protocol": CHILDREN_PROTOCOL, "id": id, "stream": stream })))
+    s.write_all(&json_line(&json!({ "op": "attach", "protocol": CHILDREN_PROTOCOL, "id": id, "stream": stream })))
         .unwrap();
     // The answer line, read one byte at a time so no raw output is swallowed with it.
     let mut line = Vec::new();
