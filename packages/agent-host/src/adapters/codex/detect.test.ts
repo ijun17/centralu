@@ -1,7 +1,7 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 /**
  * The codex CLI itself honors `CODEX_HOME`, but our own detect() was hard-coding the home path —
@@ -20,23 +20,18 @@ vi.mock('../../env-path.js', () => ({ whichTool: () => '/usr/local/bin/codex' })
 
 const { CodexAdapter } = await import('./index.js')
 
-const original = process.env.CODEX_HOME
-afterEach(() => {
-  if (original === undefined) delete process.env.CODEX_HOME
-  else process.env.CODEX_HOME = original
-})
 
 describe('the settings folder codex detect() looks at', () => {
   it('treats an auth.json inside CODEX_HOME as being logged in', async () => {
     const home = mkdtempSync(join(tmpdir(), 'codex-home-'))
     writeFileSync(join(home, 'auth.json'), '{}')
-    process.env.CODEX_HOME = home
+    vi.stubEnv('CODEX_HOME', home)
 
     expect(await new CodexAdapter().detect()).toMatchObject({ installed: true, loggedIn: true })
   })
 
   it('when CODEX_HOME is empty, not logged in even if the real home has an auth.json (must look at the same place as the CLI)', async () => {
-    process.env.CODEX_HOME = mkdtempSync(join(tmpdir(), 'codex-home-empty-'))
+    vi.stubEnv('CODEX_HOME', mkdtempSync(join(tmpdir(), 'codex-home-empty-')))
 
     const d = await new CodexAdapter().detect()
 
@@ -44,10 +39,20 @@ describe('the settings folder codex detect() looks at', () => {
     expect(d.detail).toContain('login required')
   })
 
+  /*
+   * The home folder is a temporary one here (#845): this used to read the person's real `~/.codex`, so it could only
+   * check that detect() answered, whatever this machine's login state was.
+   */
   it('treats an empty string as unset — falls back to the home folder', async () => {
-    process.env.CODEX_HOME = '   '
+    const home = mkdtempSync(join(tmpdir(), 'codex-user-home-'))
+    mkdirSync(join(home, '.codex'))
+    writeFileSync(join(home, '.codex', 'auth.json'), '{}')
+    // os.homedir() reads HOME on macOS and Linux, USERPROFILE on Windows
+    vi.stubEnv('HOME', home)
+    vi.stubEnv('USERPROFILE', home)
+    expect(homedir()).toBe(home)
+    vi.stubEnv('CODEX_HOME', '   ')
 
-    // The actual value depends on this machine's real login state, so this only checks that "it answers without breaking"
-    expect(await new CodexAdapter().detect()).toMatchObject({ tool: 'codex', installed: true })
+    expect(await new CodexAdapter().detect()).toMatchObject({ tool: 'codex', installed: true, loggedIn: true })
   })
 })
