@@ -736,16 +736,8 @@ export class SessionManager {
     } catch (e) {
       return { ok: false, error: (e as Error).message }
     }
-    const decision = await this.hostCards.askHost(
-      sessionId,
-      { kind: 'project_create', name: target.name, path: target.path, ...(spec.source ? { source: spec.source } : {}) },
-      signal,
-    )
-    if (decision === 'deny') return { ok: false, error: 'The person did not approve it. Do not ask again unless they tell you to.' }
-    if (decision === null) return { ok: false, error: 'The card was withdrawn before the person answered, so nothing was made.' }
-    if (spec.source) {
-      this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'cloning', text: `Cloning ${spec.source.git} into ${target.path}…` })
-    }
+    const refused = await this.askProjectCreate(sessionId, { name: target.name, path: target.path }, spec.source, target.path, signal)
+    if (refused) return { ok: false, error: refused }
     try {
       const info = await this.createProject(target.name, spec.parent, spec.source)
       return { ok: true, projectId: info.id, name: info.name, path: info.path }
@@ -768,18 +760,29 @@ export class SessionManager {
   ): Promise<{ ok: true; projectId: string; name: string; path: string; machine: string } | { ok: false; error: string }> {
     const preview = await reader.previewProject(machine.id, spec)
     if (!preview.ok) return preview
-    const decision = await this.hostCards.askHost(
-      sessionId,
-      { kind: 'project_create', name: preview.name, path: preview.path, ...(spec.source ? { source: spec.source } : {}), machine: machine.name },
-      signal,
-    )
-    if (decision === 'deny') return { ok: false, error: 'The person did not approve it. Do not ask again unless they tell you to.' }
-    if (decision === null) return { ok: false, error: 'The card was withdrawn before the person answered, so nothing was made.' }
-    if (spec.source) {
-      this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'cloning', text: `Cloning ${spec.source.git} into ${preview.path} on ${machine.name}…` })
-    }
+    const refused = await this.askProjectCreate(sessionId, { name: preview.name, path: preview.path, machine: machine.name }, spec.source, `${preview.path} on ${machine.name}`, signal)
+    if (refused) return { ok: false, error: refused }
     const made = await reader.createProject(machine.id, spec)
     return made.ok ? { ...made, machine: machine.name } : made
+  }
+
+  /**
+   * create_project's card (#515), here or for a linked machine: the person's refusal or a withdrawn card as the error
+   * the orchestrator reads, or null once allowed. A clone says so in the conversation while it runs (into `where`),
+   * since it can take minutes.
+   */
+  private async askProjectCreate(
+    sessionId: string,
+    card: { name: string; path: string; machine?: string },
+    source: GitSource | undefined,
+    where: string,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    const decision = await this.hostCards.askHost(sessionId, { kind: 'project_create', name: card.name, path: card.path, ...(source ? { source } : {}), ...(card.machine ? { machine: card.machine } : {}) }, signal)
+    if (decision === 'deny') return 'The person did not approve it. Do not ask again unless they tell you to.'
+    if (decision === null) return 'The card was withdrawn before the person answered, so nothing was made.'
+    if (source) this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'cloning', text: `Cloning ${source.git} into ${where}…` })
+    return null
   }
 
   /**
@@ -818,7 +821,7 @@ export class SessionManager {
       (a, b) => Number(!!b.parentSessionId) - Number(!!a.parentSessionId),
     )
     for (const s of leavesFirst) await this.trashSession(s.id).catch(() => {})
-    const root = this.store.listProjects().find((p) => p.id === projectId)?.path
+    const root = this.projectRow(projectId)?.path
     this.store.deleteProject(projectId)
     // What was held for the project's folder goes with it (#392): its watchers and its `@` file index
     this.watchers.drop(projectId)
@@ -841,7 +844,7 @@ export class SessionManager {
    * why. The flag is written before this returns; the promise settles when the idle restarts are done.
    */
   setProjectTrusted(projectId: string, trusted: boolean): Promise<void> {
-    const was = this.store.listProjects().find((p) => p.id === projectId)?.trusted
+    const was = this.projectRow(projectId)?.trusted
     if (!this.store.setProjectTrusted(projectId, trusted)) {
       throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
     }
@@ -937,7 +940,7 @@ export class SessionManager {
      * default_tool column was never read anywhere — and since nothing wrote to it either, nobody
      * noticed (2026-08-27, caught by a test while adding the remember-tool feature).
      */
-    const row = this.store.listProjects().find((p) => p.id === id)
+    const row = this.projectRow(id)
     const git = await gitSummary(path, { trusted: row?.trusted ?? false })
     const stored = row?.defaultTool
     return {
@@ -981,9 +984,7 @@ export class SessionManager {
    * through it would put a permission prompt in front of what the person just typed.
    */
   setProjectCommands(projectId: string, commands: readonly SavedCommand[]): SavedCommand[] {
-    if (!this.store.listProjects().some((p) => p.id === projectId)) {
-      throw Object.assign(new Error('Project not found'), { code: 'internal' })
-    }
+    this.requireProject(projectId)
     // Drop empty commands, and turn an empty alias into no alias — the label is display-only, so all it needs
     // is normalizing
     const clean = commands.flatMap((c): SavedCommand[] => {
@@ -1001,9 +1002,7 @@ export class SessionManager {
 
   /** Worktree provisioning settings (#69) — saved by the new session window's worktree section */
   setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): void {
-    if (!this.store.listProjects().some((p) => p.id === projectId)) {
-      throw Object.assign(new Error('Project not found'), { code: 'internal' })
-    }
+    this.requireProject(projectId)
     const clean = setup
       ? { command: setup.command.trim(), copyFiles: setup.copyFiles.map((f) => f.trim()).filter(Boolean) }
       : null
@@ -1190,8 +1189,7 @@ export class SessionManager {
    * which is exactly the quiet cost that keeps this out of the hot path.
    */
   async projectGitStatus(projectId: string): Promise<ProjectInfo> {
-    const p = this.store.listProjects().find((x) => x.id === projectId)
-    if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
+    const p = this.requireProject(projectId)
     /*
      * Merge detection (#69) piggybacks here — the UI's call is debounced to fire whenever a turn
      * ends, which happens to be the same rhythm as "something just moved". A merge done in a
@@ -1446,7 +1444,7 @@ export class SessionManager {
     // The tool of an agent an app asked for (M4 D-1) is the app's choice — it never moves the person's
     // default
     if (params.projectId && !params.appAgent) {
-      const owner = this.store.listProjects().find((p) => p.id === params.projectId)
+      const owner = this.projectRow(params.projectId)
       if (owner && owner.defaultTool !== params.tool) {
         this.store.setProjectDefaultTool(params.projectId, params.tool)
         this.emit({ type: 'projects_changed' })
@@ -1807,9 +1805,7 @@ export class SessionManager {
     sessionId: string,
     adopt?: AgentProcess,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string; lockedElsewhere?: boolean }> {
-    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
-    const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    const m = this.openSession(sessionId)
 
     // If it is already alive, use it as-is (never create a duplicate process)
     if (this.handles.has(sessionId)) return { session: m, resumed: true }
@@ -1860,7 +1856,7 @@ export class SessionManager {
      * ("Could not resume the conversation: Project not found" — measured). It was, in effect, a
      * session that could only be created but never resumed.
      */
-    const project = m.projectId === null ? null : this.store.listProjects().find((p) => p.id === m.projectId)
+    const project = m.projectId === null ? null : this.projectRow(m.projectId)
     if (m.projectId !== null && !project) return { session: m, resumed: false, reason: 'Project not found' }
     const cwd = this.cwdFor(m)
 
@@ -2104,9 +2100,7 @@ export class SessionManager {
    * exactly as it was, and only what happens from here on piles up in the copy.
    */
   async forkConversation(sessionId: string): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
-    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
-    const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    const m = this.openSession(sessionId)
 
     const source = m.externalId ?? m.importedFrom
     if (!source) {
@@ -2257,9 +2251,7 @@ export class SessionManager {
     s: { model?: string | null; effort?: string | null; verbosity?: string | null; serviceTier?: string | null; permissionPreset?: PermissionPreset },
     by: 'person' | 'orchestrator' = 'person',
   ): Promise<SessionInfo & { applied: SettingsApplied }> {
-    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
-    const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    const m = this.openSession(sessionId)
 
     // Another model reads none of this one's cache (§6.1), whether it applies live or through a restart
     if (s.model !== undefined && s.model !== m.model) this.cacheLedger.note(sessionId, 'model_change')
@@ -2609,7 +2601,7 @@ export class SessionManager {
    * a finished turn's report used the raw name.
    */
   private reportedAs(m: SessionInfo): { name: string; project: string } {
-    const project = m.projectId ? (this.store.listProjects().find((p) => p.id === m.projectId)?.name ?? '(project no longer exists)') : '(none)'
+    const project = m.projectId ? (this.projectRow(m.projectId)?.name ?? '(project no longer exists)') : '(none)'
     return { name: labelOf(this.store, m), project }
   }
 
@@ -2947,9 +2939,7 @@ export class SessionManager {
   ): Promise<void> {
     const restarting = this.restartPolicy.deferredRestarts.get(sessionId)
     if (restarting) await restarting
-    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
-    const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    const m = this.openSession(sessionId)
 
     if (!this.handles.has(sessionId)) {
       const r = await this.resumeSession(sessionId)
@@ -2960,7 +2950,7 @@ export class SessionManager {
       }
     }
 
-    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    this.notBeingRemoved(sessionId)
     const h = this.requireHandle(sessionId)
     // A message from the person is always a message boundary — continuing after an interrupt means everything
     // before it is one chunk (#66)
@@ -3043,9 +3033,7 @@ export class SessionManager {
    * untouched, and only the tool underneath it is swapped.
    */
   async switchTool(sessionId: string, tool: ToolName): Promise<SessionInfo> {
-    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
-    const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    const m = this.openSession(sessionId)
     if (m.tool === tool) return { ...m, live: this.handles.has(sessionId) }
 
     const adapter = this.adapters.get(tool)
@@ -3313,8 +3301,7 @@ export class SessionManager {
    * alongside it so the caller can pull out the first few lines as a preview.
    */
   async exportHandoffRecord(sessionId: string, toTool?: string): Promise<{ text: string; path: string }> {
-    const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    const m = this.sessionOf(sessionId)
     if (!m.projectId) throw Object.assign(new Error('Only project sessions can hand off'), { code: 'internal' })
     const rows = this.store.loadMessages(sessionId, 1_000_000)
     // Pivot = the last **successful** compaction marker — a failed compaction folded nothing at all
@@ -3354,8 +3341,7 @@ export class SessionManager {
    * text at that point could be a status update in progress rather than the note.
    */
   async exportHandoffNote(sessionId: string, afterSeq: number): Promise<{ text: string; path: string } | null> {
-    const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    const m = this.sessionOf(sessionId)
     if (!m.projectId) throw Object.assign(new Error('Only project sessions can hand off'), { code: 'internal' })
     if (inTurn(m.state)) return null
     let note = ''
@@ -3410,8 +3396,7 @@ export class SessionManager {
 
   private cwdOf(projectId: string | null): string {
     if (projectId === null) return orchestratorHome()
-    const p = this.store.listProjects().find((x) => x.id === projectId)
-    if (!p) throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
+    const p = this.requireProject(projectId)
     return p.path
   }
 
@@ -3633,8 +3618,7 @@ export class SessionManager {
 
   /** Takes the ended tasks off the session's list (#290); the running ones stay. */
   clearBackgroundTasks(sessionId: string): void {
-    const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    const m = this.sessionOf(sessionId)
     const e: NormalizedEvent = { type: 'background_tasks', sessionId, live: m.backgroundTasks.filter((t) => t.status === 'running'), clearEnded: true }
     m.backgroundTasks = applyBackgroundTasks(m.backgroundTasks, e)
     this.emit(e)
@@ -3647,8 +3631,7 @@ export class SessionManager {
    */
   sessionIdle(sessionId: string): SessionIdle {
     if (this.worktrees.worktreeCleanupBlocks(sessionId)) return { idle: false, reason: 'turn' }
-    const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    const m = this.sessionOf(sessionId)
     if (this.inputsHeld(sessionId)) return { idle: false, reason: 'turn' }
     return sessionIdle(m, {
       running: this.handles.has(sessionId),
@@ -3735,7 +3718,7 @@ export class SessionManager {
     /** What made the restart, for the cache's rebuild cause (§6.1); a plain new process when absent */
     cause?: RebuildCause,
   ): Promise<{ session: SessionInfo; resumed: boolean; reason?: string }> {
-    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+    this.notBeingRemoved(sessionId)
     if (cause) {
       this.restartPolicy.restartReasons.set(sessionId, cause)
       if (cause === 'launch_settings') console.error(`[sessions] restarting ${sessionId}: launch settings changed or previously unrecorded`)
@@ -3847,23 +3830,12 @@ export class SessionManager {
   async refreshToolDefinitions(): Promise<void> {
     // Apply unknown/changed launch policy first: the same restart also refreshes tool definitions.
     await this.refreshLaunchSettings()
-    for (const session of this.meta.values()) {
-      const next = this.toolPrefixHash(session.id)
-      if (!next || this.store.appSetting(this.toolPrefixKey(session.id)) === next) continue
-      if (!this.handles.has(session.id)) {
-        this.store.setAppSetting(this.toolPrefixKey(session.id), next)
-        continue
-      }
+    for (const session of [...this.meta.values()]) {
       /*
        * Only a turn holds this restart (#648): the definitions are what the process may call, so an idle session takes
        * them now, background work or not, and the conversation says what stopped (`noticeBackgroundStopped`).
        */
-      if (inTurn(session.state)) {
-        this.restartPolicy.restartAfterTurn.add(session.id)
-        this.restartPolicy.definitionsRestartAfterTurn.add(session.id)
-        continue
-      }
-      await this.restartSession(session.id, 'instructions').catch(() => {})
+      await this.applyWhenChanged(session, this.toolPrefixKey(session.id), this.toolPrefixHash(session.id), this.restartPolicy.definitionsRestartAfterTurn, 'instructions')
     }
   }
 
@@ -3877,22 +3849,39 @@ export class SessionManager {
       if (projectId !== undefined && session.projectId !== projectId) continue
       const cwd = this.store.sessionCwd(session.id)
       if (!cwd) continue
-      const next = this.launchSettingsFingerprint(session, cwd)
       // Earlier builds did not record launch settings: a kept process's policy is unknown.
-      if (!next || this.store.appSetting(this.launchSettingsKey(session.id)) === next) continue
-      if (!this.handles.has(session.id)) {
-        this.store.setAppSetting(this.launchSettingsKey(session.id), next)
-        continue
-      }
-      if (trustChange) this.restartPolicy.trustRestartNotice.add(session.id)
       // A safety change too, so the same rule as the definitions above
-      if (inTurn(session.state)) {
-        this.restartPolicy.restartAfterTurn.add(session.id)
-        this.restartPolicy.launchSettingsRestartAfterTurn.add(session.id)
-        continue
-      }
-      await this.restartSession(session.id, 'launch_settings').catch(() => {})
+      await this.applyWhenChanged(session, this.launchSettingsKey(session.id), this.launchSettingsFingerprint(session, cwd), this.restartPolicy.launchSettingsRestartAfterTurn, 'launch_settings', () => {
+        if (trustChange) this.restartPolicy.trustRestartNotice.add(session.id)
+      })
     }
+  }
+
+  /**
+   * What a live process was started with, as stored under `key`, against what it would start with now (`next`): the
+   * same, nothing; a session with no process takes `next` on its next start, so it is only written down; a process in
+   * a turn restarts when the turn ends (`deferred` says why); an idle one restarts now. The rule both refreshes keep.
+   */
+  private async applyWhenChanged(
+    session: SessionInfo,
+    key: string,
+    next: string | null,
+    deferred: Set<string>,
+    cause: RebuildCause,
+    beforeRestart?: () => void,
+  ): Promise<void> {
+    if (!next || this.store.appSetting(key) === next) return
+    if (!this.handles.has(session.id)) {
+      this.store.setAppSetting(key, next)
+      return
+    }
+    beforeRestart?.()
+    if (inTurn(session.state)) {
+      this.restartPolicy.restartAfterTurn.add(session.id)
+      deferred.add(session.id)
+      return
+    }
+    await this.restartSession(session.id, cause).catch(() => {})
   }
 
   /**
@@ -4205,7 +4194,7 @@ export class SessionManager {
    */
   private defaultToolFor(projectId: string | null): ToolName | null {
     if (projectId !== null) {
-      const project = this.store.listProjects().find((p) => p.id === projectId)
+      const project = this.projectRow(projectId)
       return this.firstTool(project?.defaultTool)
     }
     return this.firstTool(this.store.appSetting('orchestrator_tool'))
@@ -4473,8 +4462,7 @@ export class SessionManager {
       if (s.pendingApproval) return 'waiting for an approval'
       if (s.pendingQuestions.length) return 'waiting on a question'
       if (s.state === 'waiting_approval') return 'waiting for an approval'
-      const run = this.agentRuns.get(s.id)
-      if (inTurn(s.state) || (run && !run.finished)) return queuedBy.has(s.id) && this.children.turnOwners.get(s.id)?.callerId !== from ? 'busy; your request is queued' : 'working'
+      if (this.turnRunning(s)) return queuedBy.has(s.id) && this.children.turnOwners.get(s.id)?.callerId !== from ? 'busy; your request is queued' : 'working'
       if (queuedBy.has(s.id)) return 'your request is queued'
       // Its turn ended while its own background work runs (#721): the report waits for that work's end
       if (this.children.awaitingReport.get(s.id) === from && this.children.pausedReports.has(s.id)) return 'paused on its own background work; its report comes when that work ends'
@@ -4738,9 +4726,7 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     if (!m) return false
     if (this.children.queued.get(sessionId)?.length || this.children.delivering.has(sessionId)) return true
-    const run = this.agentRuns.get(sessionId)
-    const running = inTurn(m.state) || (!!run && !run.finished)
-    if (!running) return false
+    if (!this.turnRunning(m)) return false
     return this.children.turnOwners.get(sessionId)?.callerId !== callerId
   }
 
@@ -4752,7 +4738,7 @@ export class SessionManager {
     const auto = this.meta.get(callerId)?.permissionPreset === 'auto'
     const adapter = this.adapters.get(target.tool)
     const midTurn = !!adapter?.capabilities.midTurnInput && !!this.handles.get(target.id)?.sendTracked
-    const running = inTurn(target.state) || (!!this.agentRuns.get(target.id) && !this.agentRuns.get(target.id)!.finished)
+    const running = this.turnRunning(target)
     const noteWhy = !auto
       ? 'only a session whose permission preset is auto adds a note to a turn that is not its own (#606)'
       : !running
@@ -4811,9 +4797,8 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     const list = this.children.queued.get(sessionId)
     if (!m || !list?.length) return
-    const run = this.agentRuns.get(sessionId)
     // A deferred restart is not waited out here: `deliver` waits for it, and its end schedules this again
-    if (inTurn(m.state) || (run && !run.finished) || this.inputsHeld(sessionId) || this.trash.trashing.has(sessionId)) return
+    if (this.turnRunning(m) || this.inputsHeld(sessionId) || this.trash.trashing.has(sessionId)) return
     const r = list[0]!
     const caller = this.meta.get(r.callerSessionId)
     if (!caller) {
@@ -4830,7 +4815,7 @@ export class SessionManager {
     // Reserved before the first await: the session is busy from here, and this is the only drain for it
     this.children.startDelivering(sessionId, r.id)
     const from = { sessionId: caller.id, name: labelOf(this.store, caller) }
-    const project = this.store.listProjects().find((p) => p.id === m.projectId)
+    const project = this.projectRow(m.projectId)
     const target = { id: m.projectId ?? '', name: project?.name ?? '', path: this.store.sessionCwd(m.id) ?? m.worktree?.path ?? project?.path ?? '' }
     let d: Delegation | undefined
     try {
@@ -4842,7 +4827,7 @@ export class SessionManager {
         await this.deliver(sessionId, agentFrame(from.name, r.text), undefined, from, false)
       } else {
         d = this.delegationFlow.startDelegation(`${caller.id}>${target.id}>${sessionId}`, caller.id, sessionId, target, false)
-        const callerProject = this.store.listProjects().find((p) => p.id === caller.projectId)?.name ?? 'another project'
+        const callerProject = this.projectRow(caller.projectId)?.name ?? 'another project'
         await this.deliver(sessionId, askFrame(callerProject, r.text), undefined, from, false)
       }
       // The requester is told when the turn ends, as for work it did not wait on
@@ -4872,7 +4857,7 @@ export class SessionManager {
   private queuedGateError(r: QueuedRequest, caller: SessionInfo, target: SessionInfo): string | null {
     const auto = caller.permissionPreset === 'auto'
     if (r.via === 'ask_project') {
-      const project = this.store.listProjects().find((p) => p.id === target.projectId)
+      const project = this.projectRow(target.projectId)
       const gate = this.askProjectFlow.askGateError(caller.id) ?? (project ? null : 'The project asked was removed from Centralu.')
       if (gate) return gate
       if (!auto && r.openedByAuto && !this.pairConsented(caller.id, target)) {
@@ -5180,8 +5165,7 @@ export class SessionManager {
    * sees it (a session stood up by an app gets none), and what its live agent actually has.
    */
   appReach(sessionId: string, ref: AppRef): AppReach {
-    const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    const m = this.sessionOf(sessionId)
     if (!this.appsHub) return { reachable: false, reason: 'unavailable' }
     const key = this.isAppAgentSession(m) ? null : { id: m.id, kind: m.kind, projectId: m.projectId, builderOf: this.appSessions.builderRefOf(m) }
     return this.appsHub.reach(key, ref, this.handles.get(sessionId))
@@ -5346,9 +5330,7 @@ export class SessionManager {
 
   /** Sets the project's worktree trunk (`worktrees.setTrunk`, #76; the manager's dialog chose it before #561 part 3) */
   async setWorktreeTrunk(projectId: string, baseBranch: string): Promise<void> {
-    if (!this.store.listProjects().some((p) => p.id === projectId)) {
-      throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
-    }
+    this.requireProject(projectId)
     const branch = baseBranch.trim()
     if (!branch) throw Object.assign(new Error('Pick the branch worktrees should fork from'), { code: 'internal' })
     if (!(await gitValidBranchName(branch))) throw Object.assign(new Error(`Not a branch name: ${branch}`), { code: 'internal' })
@@ -5554,8 +5536,7 @@ export class SessionManager {
    * the RPC still reported `{ ok: true }` — the name never changed, but the screen wore the face of success.
    */
   rename(sessionId: string, name: string): void {
-    const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    const m = this.sessionOf(sessionId)
     const next = name.trim()
     // An empty name becomes a row in the list that points at nothing at all — accepting it would create a
     // nameless session
@@ -5584,8 +5565,7 @@ export class SessionManager {
    * A relative path is read against the folder the session runs in, as the agent that wrote it meant it.
    */
   async messageImage(sessionId: string, written: string): Promise<MessageImage> {
-    const m = this.meta.get(sessionId)
-    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    const m = this.sessionOf(sessionId)
     if (!this.repliesName(sessionId, written)) {
       return { ok: false, reason: 'not_mentioned', message: 'No reply in this session names this path, so it is not read' }
     }
@@ -5722,6 +5702,45 @@ export class SessionManager {
     this.hostCards.appQuestions.clear()
     this.appAccess?.dispose()
     this.appsHub?.dispose()
+  }
+
+  /** A session's row, or `session_not_found` */
+  private sessionOf(sessionId: string): SessionInfo {
+    const m = this.meta.get(sessionId)
+    if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+    return m
+  }
+
+  /** Refuses a session whose worktree, or the worktree its folder is in, is being removed (#647) */
+  private notBeingRemoved(sessionId: string): void {
+    if (this.worktrees.worktreeCleanupBlocks(sessionId)) throw Object.assign(new Error('The session worktree is being removed'), { code: 'internal' })
+  }
+
+  /** A session that may be woken, sent to or changed now: it exists and no worktree removal holds it (#647) */
+  private openSession(sessionId: string): SessionInfo {
+    this.notBeingRemoved(sessionId)
+    return this.sessionOf(sessionId)
+  }
+
+  /** A registered project's row, read now (trust and paths change under a running host) */
+  private projectRow(projectId: string | null | undefined): ReturnType<Store['listProjects']>[number] | undefined {
+    return projectId ? this.store.listProjects().find((p) => p.id === projectId) : undefined
+  }
+
+  /** A registered project's row, or `Project not found` */
+  private requireProject(projectId: string): ReturnType<Store['listProjects']>[number] {
+    const p = this.projectRow(projectId)
+    if (!p) throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
+    return p
+  }
+
+  /**
+   * Whether a turn runs in the session for anyone (#677): its state says so, or a wait on it (an app's run, a
+   * delegation) has not settled yet, which a turn that has not stepped into `working` already holds
+   */
+  private turnRunning(m: SessionInfo): boolean {
+    const run = this.agentRuns.get(m.id)
+    return inTurn(m.state) || (!!run && !run.finished)
   }
 
   private requireHandle(sessionId: string): SessionHandle {
