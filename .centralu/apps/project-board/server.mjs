@@ -972,8 +972,13 @@ async function editItemComment({ item, url, body }) {
   const [before, me] = await Promise.all([readComment(want.repo, id.id), viewerLogin()])
   if (!before || before.number !== want.number) throw new GitHubError('input', `Not edited: GitHub has no comment ${id.id} on ${ref}.`)
   if (String(before.author).toLowerCase() !== String(me).toLowerCase()) throw new GitHubError('input', `Not edited: comment ${id.id} belongs to ${before.author}, not the gh account ${me}.`)
-  const c = await editComment(want.repo, id.id, body)
-  forgetThread(want.repo, want.number)
+  let c
+  try {
+    c = await editComment(want.repo, id.id, body)
+  } finally {
+    // As for a post: an edit cut off on the way back may have landed, so the cached thread goes either way
+    forgetThread(want.repo, want.number)
+  }
   const warnings = foreignBareIssueWarnings(body, want.repo, 'The comment')
   return linesAnswer(`Edited your comment on ${ref}${c.url ? `: ${c.url}` : ''}.`, [['warnings', 'Warnings:', warnings]], { ok: true, ref, comment: c })
 }
