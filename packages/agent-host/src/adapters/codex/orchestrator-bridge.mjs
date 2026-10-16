@@ -224,6 +224,12 @@ if (!URL_ || !TOKEN || !SESSION_ID) {
   process.exit(1)
 }
 
+/*
+ * Decode stdin as one UTF-8 stream, not chunk by chunk: a pipe can split a multibyte character (Korean, an
+ * emoji) between two chunks, and `buf += chunk` on raw Buffers would turn each half into U+FFFD: the tool's
+ * arguments would reach the host with the person's text silently corrupted.
+ */
+process.stdin.setEncoding('utf8')
 let buf = ''
 process.stdin.on('data', (chunk) => {
   buf += chunk

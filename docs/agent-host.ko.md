@@ -152,7 +152,9 @@ Centralu 안에서 도는 에이전트는 Centralu의 기능을 먼저 쓴다. �
 묶음을 받은 Codex 세션은 stdio 다리를 띄우므로, #320 이후 모든 Codex 세션이 node 프로세스를
 하나 더 띄운다(유휴 시 상주 메모리 약 40 MB). 다리는 `default_tools_approval_mode: 'approve'`를
 건다: 우리 도구는 Claude 쪽처럼 묻지 않으며, 이것이 없으면 auto(`approvalPolicy: never`)의
-Codex가 모든 호출을 스스로 거절했다. `scripts/smoke-reader.mts`가 실제 모델로 처음부터 끝까지
+Codex가 모든 호출을 스스로 거절했다. 다리는 stdin을 하나의 UTF-8 흐름으로 읽는다: 파이프는
+여러 바이트로 된 글자를 두 덩어리 사이에서 자를 수 있고, 덩어리마다 따로 읽으면 도구 인자에 U+FFFD가
+들어갔다. `scripts/smoke-reader.mts`가 실제 모델로 처음부터 끝까지
 돌린다(Codex는 `TOOL=codex`).
 
 ### 1.2 다른 프로젝트에 맡기기 (`ask_project`, #371 B)

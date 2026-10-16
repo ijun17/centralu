@@ -173,6 +173,8 @@ A Codex session with a bundle starts the stdio bridge, so since #320 every Codex
 one more node process (about 40 MB resident, idle). The bridge sets
 `default_tools_approval_mode: 'approve'`: our tools are never asked about, as on the Claude side,
 and without it Codex in auto (`approvalPolicy: never`) refused every call on its own.
+The bridge decodes its stdin as one UTF-8 stream: a pipe can split a multibyte character between
+two chunks, and decoding each chunk on its own put U+FFFD into the tool's arguments.
 `scripts/smoke-reader.mts` runs the set end to end with a real model (`TOOL=codex` for Codex).
 
 ### 1.2 Asking another project (`ask_project`, #371 part B)
