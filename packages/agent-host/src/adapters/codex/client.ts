@@ -3,6 +3,7 @@ import { codexLaunch } from './native.js'
 import type { AgentProcess } from '../contract.js'
 import { spawnLocalAgent } from '../local-process.js'
 import { waitForExit } from '../../timing.js'
+import { lineSplitter, PendingRequests } from '../../transport/json-lines.js'
 
 /**
  * A JSON-RPC client for `codex app-server` (stdio, newline-delimited).
@@ -45,7 +46,7 @@ export class CodexClient {
    * request. codex echoes string ids back as given.
    */
   private readonly idPrefix = `${randomBytes(3).toString('hex')}-`
-  private pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
+  private pending = new PendingRequests()
   private closed = false
   /** A flag to call onExit only once (both 'error' and 'exit' can fire) */
   private finished = false
@@ -89,9 +90,7 @@ export class CodexClient {
       if (this.finished) return
       this.finished = true
       this.closed = true
-      const why = `codex app-server failed to start: ${err.message}`
-      for (const [, p] of this.pending) p.reject(new Error(why))
-      this.pending.clear()
+      this.pending.rejectAll(new Error(`codex app-server failed to start: ${err.message}`))
       this.handlers.onExit(null, false)
     })
     // A stdin write after a failed spawn also throws a stream 'error' — swallowed here since it is already handled above
@@ -108,19 +107,11 @@ export class CodexClient {
      * Capturing the raw stream directly clears codex of blame — the line arrived whole. What did
      * the splitting was our own readline. So this switches to a buffer that only splits at
      * newlines. Is concatenating a 23MB string not wasteful? This code only runs when a response
-     * arrives, and a line that huge happens once, at the moment of resume.
+     * arrives, and a line that huge happens once, at the moment of resume. No `maxLine`, for the same reason
+     * (`transport/json-lines.ts`).
      */
-    let stdoutBuf = ''
-    this.proc.stdout.setEncoding('utf8')
-    this.proc.stdout.on('data', (chunk: string) => {
-      stdoutBuf += chunk
-      let nl
-      while ((nl = stdoutBuf.indexOf('\n')) >= 0) {
-        const line = stdoutBuf.slice(0, nl)
-        stdoutBuf = stdoutBuf.slice(nl + 1)
-        this.onLine(line)
-      }
-    })
+    const lines = lineSplitter((line) => this.onLine(line))
+    this.proc.stdout.on('data', (chunk: Buffer | string) => lines.push(chunk))
     this.proc.stderr?.on('data', (d) => {
       const s = String(d).trim()
       if (s) console.error('[codex]', s.slice(0, 500))
@@ -140,9 +131,7 @@ export class CodexClient {
       const unexpected = !this.closed
       this.closed = true
       // Letting it pass silently would leave whoever was waiting stuck forever — reject with a reason either way
-      const why = unexpected ? 'codex app-server exited' : 'request cancelled while closing the codex connection'
-      for (const [, p] of this.pending) p.reject(new Error(why))
-      this.pending.clear()
+      this.pending.rejectAll(new Error(unexpected ? 'codex app-server exited' : 'request cancelled while closing the codex connection'))
       this.handlers.onExit(code, !unexpected)
     })
   }
@@ -175,9 +164,7 @@ export class CodexClient {
        * be a new bug.
        */
       if (line.startsWith('{')) {
-        const why = `codex sent a frame this client could not parse (${line.length.toLocaleString()} bytes) — a waiting reply may have been destroyed`
-        for (const [, p] of this.pending) p.reject(new Error(why))
-        this.pending.clear()
+        this.pending.rejectAll(new Error(`codex sent a frame this client could not parse (${line.length.toLocaleString()} bytes) — a waiting reply may have been destroyed`))
       }
       console.error('[codex] non-JSON output:', line.slice(0, 200))
       return
@@ -186,11 +173,8 @@ export class CodexClient {
     const id = msg.id as string | number | undefined
     // A response (to a request we sent)
     if (id !== undefined && msg.method === undefined) {
-      const p = this.pending.get(String(id))
-      if (!p) return
-      this.pending.delete(String(id))
-      if (msg.error) p.reject(new Error(JSON.stringify(msg.error)))
-      else p.resolve(msg.result)
+      if (msg.error) this.pending.reject(id, new Error(JSON.stringify(msg.error)))
+      else this.pending.resolve(id, msg.result)
       return
     }
     // A server-to-client request (approval, etc.)
@@ -208,26 +192,12 @@ export class CodexClient {
     if (this.closed) return Promise.reject(new Error('codex app-server has already exited'))
     const id = `${this.idPrefix}${this.nextId++}`
     this.write({ id, method, params })
-    return new Promise<T>((resolve, reject) => {
-      /*
-       * The timer goes with the request however it settles. Left running after an answer, every request kept a
-       * closure (and its answer's caller) alive for the full timeout: a session streaming `turn/start` and approval
-       * traffic held one per request for 120 s.
-       */
-      const timer = setTimeout(() => {
-        if (this.pending.delete(id)) reject(new Error(`No response for ${method}`))
-      }, timeoutMs)
-      this.pending.set(id, {
-        resolve: (v) => {
-          clearTimeout(timer)
-          resolve(v as T)
-        },
-        reject: (e) => {
-          clearTimeout(timer)
-          reject(e)
-        },
-      })
-    })
+    /*
+     * The timer goes with the request however it settles (`PendingRequests`). Left running after an answer, every
+     * request kept a closure (and its answer's caller) alive for the full timeout: a session streaming `turn/start` and
+     * approval traffic held one per request for 120 s.
+     */
+    return this.pending.wait(id, timeoutMs, `No response for ${method}`) as Promise<T>
   }
 
   /** The end of what the app-server wrote to stderr, when its process keeps it (`AgentProcess.stderrTail`) */
@@ -284,7 +254,6 @@ export class CodexClient {
     await this.proc.detach?.()
     this.closed = true
     this.finished = true
-    for (const [, p] of this.pending) p.reject(new Error('request abandoned: this host let go of codex'))
-    this.pending.clear()
+    this.pending.rejectAll(new Error('request abandoned: this host let go of codex'))
   }
 }

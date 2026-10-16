@@ -2,6 +2,7 @@ import type { Readable } from 'node:stream'
 import { DEFAULT_DRAIN_MS, type Drain, type DrainReport } from './drain.js'
 import type { StoreInspection } from './dev-services/store.js'
 import { bridgeToken } from './transport/bridge-token.js'
+import { lineSplitter } from './transport/json-lines.js'
 
 /**
  * The host's half of a blue-green swap (#280, option C step 3).
@@ -78,14 +79,17 @@ export type ControlMessage = { op: string; timeoutMs?: number }
  * ending (the keeper went away) rejects every waiter; the caller decides what that means.
  */
 export class ControlChannel {
-  private buf = ''
   private handlers = new Map<string, (m: ControlMessage) => void>()
   private waiters = new Map<string, { resolve: (m: ControlMessage) => void; reject: (e: Error) => void }[]>()
   private ended = false
 
   constructor(input: Readable) {
-    input.setEncoding?.('utf8')
-    input.on('data', (chunk: string | Buffer) => this.feed(String(chunk)))
+    // A peer that never sends a newline does not get to grow this without bound: past MAX_LINE, its line is not JSON
+    const lines = lineSplitter((line) => {
+      const l = line.trim()
+      if (l) this.dispatch(l)
+    }, { maxLine: MAX_LINE })
+    input.on('data', (chunk: string | Buffer) => lines.push(chunk))
     const end = () => this.end()
     input.on('end', end)
     input.on('close', end)
@@ -103,19 +107,6 @@ export class ControlChannel {
       list.push({ resolve, reject })
       this.waiters.set(op, list)
     })
-  }
-
-  private feed(chunk: string): void {
-    this.buf += chunk
-    for (;;) {
-      const nl = this.buf.indexOf('\n')
-      if (nl < 0) break
-      const line = this.buf.slice(0, nl).trim()
-      this.buf = this.buf.slice(nl + 1)
-      if (line) this.dispatch(line)
-    }
-    // A peer that never sends a newline does not get to grow this without bound
-    if (this.buf.length > MAX_LINE) this.buf = ''
   }
 
   private dispatch(line: string): void {

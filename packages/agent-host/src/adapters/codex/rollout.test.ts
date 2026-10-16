@@ -61,6 +61,12 @@ describe("codex rollout's compact summary (#78)", () => {
     expect(s).not.toContain('first summary')
   })
 
+  /** JSON leaves U+2028 raw inside a string, and readline ended a line there: the summary was a broken line, skipped (#428) */
+  it('reads a summary holding a line separator, which JSON leaves raw', async () => {
+    put('t-ls', [compactedLine('', 'pasted from a web page:\u2028 ' + SUMMARY)])
+    expect(await lastCompactSummary('t-ls', dir)).toContain('pasted from a web page:\u2028 ')
+  })
+
   it('a short fragment, a broken line, or no compaction at all — all give null, a failure lying down quietly while the builder falls back', async () => {
     // Under 200 characters is not a summary, but a preserved ordinary message
     put('t-short', [compactedLine('', 'short')])

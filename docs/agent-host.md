@@ -16,7 +16,8 @@ agent-host/src/
 ├─ rpc.ts               # RPC method dispatch
 ├─ transport/
 │  ├─ server.ts         # ws server, handshake, RPC routing
-│  └─ event-log.ts      # assigns seq, ring buffer, afterSeq replay (protocol §1)
+│  ├─ event-log.ts      # assigns seq, ring buffer, afterSeq replay (protocol §1)
+│  └─ json-lines.ts     # newline-delimited JSON: split at \n only (never readline, which also splits at U+2028), pending requests (#428)
 ├─ adapters/
 │  ├─ contract.ts       # AgentAdapter interface + capability types
 │  ├─ claude/           # based on the Claude Agent SDK (incl. orchestrator-mcp.ts)

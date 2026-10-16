@@ -13,7 +13,8 @@ agent-host/src/
 ├─ rpc.ts               # RPC 메서드 분배
 ├─ transport/
 │  ├─ server.ts         # ws 서버, 핸드셰이크, RPC 라우팅
-│  └─ event-log.ts      # seq 부여, 링 버퍼, afterSeq 재생 (protocol §1)
+│  ├─ event-log.ts      # seq 부여, 링 버퍼, afterSeq 재생 (protocol §1)
+│  └─ json-lines.ts     # 줄 단위 JSON: \n에서만 나눈다(U+2028에서도 끊는 readline은 쓰지 않는다), 대기 중인 요청 (#428)
 ├─ adapters/
 │  ├─ contract.ts       # AgentAdapter 인터페이스 + 능력 타입
 │  ├─ claude/           # Claude Agent SDK 기반 (orchestrator-mcp.ts 포함)

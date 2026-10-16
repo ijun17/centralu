@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { createConnection, type Socket } from 'node:net'
+import { lineSplitter, PendingRequests } from '../transport/json-lines.js'
 
 /**
  * The host's side of the keeper's child service (#280, option C step 2).
@@ -51,8 +52,6 @@ export type SpawnRequest = {
   rows?: number
   tag: unknown
 }
-
-type Pending = { resolve: (v: Record<string, unknown>) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }
 
 const REQUEST_TIMEOUT_MS = 15_000
 
@@ -130,8 +129,7 @@ function connect(path: string, first: Record<string, unknown>, timeoutMs: number
  */
 export class KeeperChildren extends EventEmitter {
   private nextRid = 1
-  private pending = new Map<number, Pending>()
-  private buf = ''
+  private pending = new PendingRequests<Record<string, unknown>>()
   private closed = false
   /** Exits already reported — a listener that subscribes late (right after a spawn) still learns of one. */
   private exits = new Map<string, ChildExit>()
@@ -142,8 +140,8 @@ export class KeeperChildren extends EventEmitter {
     readonly keeperPid: number,
   ) {
     super()
-    sock.setEncoding('utf8')
-    sock.on('data', (d: string) => this.onData(d))
+    const lines = lineSplitter((line) => this.onLine(line))
+    sock.on('data', (d: Buffer) => lines.push(d))
     const gone = () => this.onLost()
     sock.on('close', gone)
     sock.on('error', gone)
@@ -156,48 +154,34 @@ export class KeeperChildren extends EventEmitter {
     return new KeeperChildren(path, sock, Number(answer.keeperPid) || 0)
   }
 
-  private onData(d: string): void {
-    this.buf += d
-    let nl
-    while ((nl = this.buf.indexOf('\n')) >= 0) {
-      const line = this.buf.slice(0, nl)
-      this.buf = this.buf.slice(nl + 1)
-      if (!line.trim()) continue
-      let msg: Record<string, unknown>
-      try {
-        msg = JSON.parse(line) as Record<string, unknown>
-      } catch {
-        console.error('[keeper] the child service sent a line that is not JSON:', line.slice(0, 200))
-        continue
-      }
-      if (typeof msg.event === 'string') {
-        if (msg.event === 'exit' && typeof msg.id === 'string') {
-          const exit = { code: (msg.code as number | null) ?? null, signal: (msg.signal as number | null) ?? null }
-          this.exits.set(msg.id, exit)
-          this.emit('exit', msg.id, exit)
-        } else if (msg.event === 'stop') {
-          this.emit('stop')
-        }
-        continue
-      }
-      const rid = Number(msg.rid)
-      const p = this.pending.get(rid)
-      if (!p) continue
-      this.pending.delete(rid)
-      clearTimeout(p.timer)
-      if (msg.ok === true) p.resolve(msg)
-      else p.reject(new Error(String(msg.error ?? 'the keeper refused')))
+  private onLine(line: string): void {
+    if (!line.trim()) return
+    let msg: Record<string, unknown>
+    try {
+      msg = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      console.error('[keeper] the child service sent a line that is not JSON:', line.slice(0, 200))
+      return
     }
+    if (typeof msg.event === 'string') {
+      if (msg.event === 'exit' && typeof msg.id === 'string') {
+        const exit = { code: (msg.code as number | null) ?? null, signal: (msg.signal as number | null) ?? null }
+        this.exits.set(msg.id, exit)
+        this.emit('exit', msg.id, exit)
+      } else if (msg.event === 'stop') {
+        this.emit('stop')
+      }
+      return
+    }
+    const rid = Number(msg.rid)
+    if (msg.ok === true) this.pending.resolve(rid, msg)
+    else this.pending.reject(rid, new Error(String(msg.error ?? 'the keeper refused')))
   }
 
   private onLost(): void {
     if (this.closed) return
     this.closed = true
-    for (const [, p] of this.pending) {
-      clearTimeout(p.timer)
-      p.reject(new Error('the connection to the keeper was lost'))
-    }
-    this.pending.clear()
+    this.pending.rejectAll(new Error('the connection to the keeper was lost'))
     this.emit('lost')
   }
 
@@ -208,14 +192,9 @@ export class KeeperChildren extends EventEmitter {
   private request(op: string, body: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
     if (this.closed) return Promise.reject(new Error('the connection to the keeper was lost'))
     const rid = this.nextRid++
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        if (this.pending.delete(rid)) reject(new Error(`the keeper did not answer ${op}`))
-      }, REQUEST_TIMEOUT_MS)
-      timer.unref()
-      this.pending.set(rid, { resolve, reject, timer })
-      this.sock.write(`${JSON.stringify({ ...body, op, rid })}\n`)
-    })
+    const answer = this.pending.wait(rid, REQUEST_TIMEOUT_MS, `the keeper did not answer ${op}`)
+    this.sock.write(`${JSON.stringify({ ...body, op, rid })}\n`)
+    return answer
   }
 
   async spawn(req: SpawnRequest): Promise<KeptChild> {

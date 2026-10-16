@@ -1,8 +1,8 @@
 import { createReadStream } from 'node:fs'
 import { readdir } from 'node:fs/promises'
-import { createInterface } from 'node:readline'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { readLines } from '../../transport/json-lines.js'
 
 /**
  * The last compact summary of a dead codex process (#78) — **from the rollout file, with no
@@ -92,8 +92,8 @@ export async function lastCompactSummary(
   if (!path) return null
   try {
     let last: string | null = null
-    const rl = createInterface({ input: createReadStream(path, 'utf8'), crlfDelay: Infinity })
-    for await (const line of rl) {
+    // Not readline, which also ends a line at a U+2028 inside a JSON string (`readLines`)
+    for await (const line of readLines(createReadStream(path))) {
       if (!line.includes('"compacted"')) continue
       try {
         const j = JSON.parse(line) as { type?: string; payload?: unknown }
