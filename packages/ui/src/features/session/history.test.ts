@@ -18,6 +18,16 @@ describe('collecting sent messages', () => {
     expect(sentMessages([user(1, 'a'), user(2, 'b'), user(3, 'a')])).toEqual(['a', 'b', 'a'])
   })
 
+  it('a message another session or an app view sent is not something I said (#745)', () => {
+    const chat: ChatItem[] = [
+      user(1, 'mine before'),
+      { kind: 'user', seq: 2, text: 'Fix issue #12. Rules: …', from: { sessionId: 's-parent', name: 'orchestrator' } },
+      { kind: 'user', seq: 3, text: 'Open the board', fromApp: { appId: 'board', projectId: null, name: 'Board' } },
+      user(4, 'mine after'),
+    ]
+    expect(sentMessages(chat)).toEqual(['mine before', 'mine after'])
+  })
+
   it('tool and approval entries are not something I said', () => {
     const chat: ChatItem[] = [
       { kind: 'tool', seq: 1, tool: 'Bash', title: 'ls', readOnly: true },

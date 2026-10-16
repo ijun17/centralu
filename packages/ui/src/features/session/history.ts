@@ -24,6 +24,12 @@ export function sentMessages(chat: ChatItem[]): string[] {
   const out: string[] = []
   for (const item of chat) {
     if (item.kind !== 'user') continue
+    /*
+     * Only what the person sent here (#745). A brief another session sent through Centralu's tools (start_agent,
+     * agent_session, ask_project: `from`) or a message an app view wrote (`fromApp`) sits in the same list as a user
+     * message, but the person never typed it, and recalling it buried their own last message under it.
+     */
+    if (item.from || item.fromApp) continue
     if (out[out.length - 1] === item.text) continue
     out.push(item.text)
   }

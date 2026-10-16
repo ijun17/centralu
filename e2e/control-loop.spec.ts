@@ -7823,6 +7823,31 @@ async function sendMessage(page: Page, body: string) {
 }
 
 /**
+ * Arrow keys recall only what the person sent (#745): a brief another session sent through Centralu's tools, or a
+ * message an app view wrote, is in the conversation as a user message but was never typed here.
+ */
+test('arrow up skips messages other sessions and app views sent (#745)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'first prompt')
+  await emitEvent(page, 0, {
+    type: 'user_message', seq: 991, text: 'Fix issue #12. Rules: run the tests first.',
+    from: { sessionId: 'parent-session', name: 'parent session' },
+  })
+  await emitEvent(page, 0, {
+    type: 'user_message', seq: 992, text: 'Open the board',
+    fromApp: { appId: 'board', projectId: null, name: 'Board' },
+  })
+  await expect(page.getByTestId('msg-user-from')).toHaveCount(1)
+
+  const input = page.getByTestId('prompt-input')
+  await input.click()
+  await input.press('ArrowUp')
+  await expect(input).toHaveValue('first prompt')
+  await input.press('ArrowUp')
+  await expect(input).toHaveValue('first prompt')
+})
+
+/**
  * Arrow keys recall what was sent (#38).
  *
  * Exactly like a shell. No separate history is stored — the conversation itself already holds
