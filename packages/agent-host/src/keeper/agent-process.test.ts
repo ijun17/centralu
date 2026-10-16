@@ -16,6 +16,7 @@ let children: KeeperChildren
 /*
  * The keeper is macOS and Linux only: on Windows the host runs on the direct path and nothing connects to a keeper
  * (docs/agent-host.md). Its service is a unix-domain socket, which this fake cannot listen on there (EACCES) (#14).
+ * The direct path's agent processes are adapters/local-process.test.ts, which runs there.
  */
 const keeperless = process.platform === 'win32'
 

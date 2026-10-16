@@ -73,7 +73,8 @@ let keeper: FakeKeeper | undefined
 let store: Store | undefined
 const helds: HeldChildren[] = []
 
-// The keeper is macOS and Linux only (docs/agent-host.md §4.3); its service is a unix-domain socket
+// The keeper is macOS and Linux only (docs/agent-host.md §4.3); its service is a unix-domain socket. Sleep without a
+// keeper, the Windows path, is direct-process.test.ts
 const keeperless = process.platform === 'win32'
 
 beforeEach(async () => {

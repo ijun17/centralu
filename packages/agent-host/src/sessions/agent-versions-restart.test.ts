@@ -86,7 +86,7 @@ const helds: HeldChildren[] = []
  * The keeper is macOS and Linux only: on Windows the host runs on the direct path and nothing connects to a keeper
  * (docs/agent-host.md). Its service is a unix-domain socket, which the fake cannot listen on there (EACCES) (#14).
  * What #297 needs on Windows — reading the installed version and the idle rule — is in cli-version.test.ts and
- * agent-versions.test.ts, which run everywhere.
+ * agent-versions.test.ts, which run everywhere; the move itself, with real processes, in direct-process.test.ts.
  */
 const keeperless = process.platform === 'win32'
 
