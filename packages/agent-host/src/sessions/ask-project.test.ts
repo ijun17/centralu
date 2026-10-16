@@ -320,8 +320,15 @@ describe('asking another project', () => {
     expect(await first).toMatchObject({ ok: true, answer: 'original answer' })
   })
 
+  /*
+   * A store from before #614 holds sessions another project asked for, marked with that asker. Store step v55 clears
+   * the mark (#844; it ran at every host start before): the store is put back to v54 and its steps run again, as the
+   * next build's first open of it would.
+   */
   it.each(['live', 'trashed', 'purged'] as const)('restores old cross-project asked sessions as ordinary sessions when their caller is %s', async (ownerState) => {
     const caller = await w.callerSession()
+    const sibling = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'codex', permissionPreset: 'normal' })
+    const child = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'codex', permissionPreset: 'normal', askedBy: sibling.id })
     const original = w.mgr.listSessions().find((s) => s.id === targetSession)!
     await w.mgr.send(targetSession, askFrame(w.caller.name, 'old task'), undefined, { sessionId: caller, name: 'Old caller' })
     handleOf(targetSession)!.answer('old history')
@@ -329,9 +336,14 @@ describe('asking another project', () => {
     if (ownerState !== 'live') await w.mgr.trashSession(caller)
     if (ownerState === 'purged') await w.mgr.purgeSession(caller)
     await w.mgr.disposeAll()
+    const raw = w.store as unknown as { db: { pragma(s: string): unknown }; migrate(): void; migrationsRun: number }
+    raw.db.pragma('user_version = 54')
+    raw.migrate()
     w.mgr = new SessionManager(w.store, w.adapters, (e) => w.events.push(e), undefined, join(w.target.path, 'test-worktrees'))
+    // A start_agent child of its own project keeps its asker
+    expect(w.mgr.listSessions().find((s) => s.id === child.id)?.askedBy).toBe(sibling.id)
     const restored = w.mgr.listSessions().find((s) => s.id === targetSession)!
-    expect(restored.askedBy).toBeUndefined()
+    expect(restored.askedBy).toBeNull()
     expect(restored.name).toBe('Asked by consumer · 10:00')
     expect(w.store.loadMessages(targetSession, 10)).toContainEqual(expect.objectContaining({ payload: expect.objectContaining({ text: 'old history' }) }))
     expect(w.store.listSessions().find((s) => s.id === targetSession)?.askedBy).toBeNull()

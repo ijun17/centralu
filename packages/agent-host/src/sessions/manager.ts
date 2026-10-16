@@ -512,9 +512,7 @@ export class SessionManager {
     const LIVE_ONLY: SessionState[] = ['working', 'waiting_approval']
     /** Sessions this start found mid-turn with no process (#698): whoever gave them the turn is told once */
     const stoppedByQuit: SessionInfo[] = []
-    const storedSessions = store.listSessions()
-    const storedProjects = new Map(storedSessions.map((s) => [s.id, s.projectId]))
-    for (const s of storedSessions) {
+    for (const s of store.listSessions()) {
       /*
        * Except where the process **does** still exist (#280 step 2): the keeper kept it through the
        * restart and `adoptKept` re-attaches it. That state is true; if the adoption fails, it is reset
@@ -522,14 +520,8 @@ export class SessionManager {
        */
       const stale = LIVE_ONLY.includes(s.state) && !keeperOpts.keptSessions?.has(s.id)
       const fixed = stale ? { ...s, state: 'idle' as const, waitingSince: null } : s
-      // Old cross-project ownership must also go when its caller has been trashed or purged.
-      const ownerProject = fixed.askedBy ? storedProjects.get(fixed.askedBy) ?? store.trashedSession(fixed.askedBy)?.record.projectId : undefined
-      const first = fixed.askedBy && ownerProject === undefined ? store.loadMessagesFrom(fixed.id, 0, 1)[0]?.payload as { text?: string; from?: { sessionId: string } } | undefined : undefined
-      const oldAsk = fixed.askedBy && (ownerProject !== undefined ? ownerProject !== fixed.projectId
-        : first?.from?.sessionId === fixed.askedBy && first.text?.includes("through Centralu's ask_project"))
-      if (oldAsk) delete fixed.askedBy
+      // Old cross-project ownership (#614) is cleared by store step v55, no longer here (#844)
       this.meta.set(s.id, fixed)
-      if (oldAsk) store.upsertSession(fixed)
       if (stale) {
         console.error(`[agent-host] stale state reset: ${s.id.slice(0, 8)} ${s.state} -> idle`)
         // No window is attached yet: the marker and the interruption are read with the conversation and the list
