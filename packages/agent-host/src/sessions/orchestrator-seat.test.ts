@@ -55,6 +55,7 @@ beforeEach(() => {
     autoBoundaryOpen: vi.fn(() => true),
     createProjectAsked: vi.fn(),
     createProjectOnMachine: vi.fn(),
+    handoff: vi.fn(async () => ({ ok: false as const, error: 'reached the flow' })),
     builderRefOf: vi.fn(() => null),
     checkApp: vi.fn(),
     createApp: vi.fn(),
@@ -80,6 +81,22 @@ describe('the scope of a seat', () => {
     expect((await orchestratorToolsFor(host, 'a', undefined, true).listSessions()).map((s) => s.sessionId)).toEqual(['a2'])
     meta.set('loose', session('loose', { projectId: null }))
     expect(await orchestratorToolsFor(host, 'orch', undefined, true).listSessions()).toEqual([])
+  })
+
+  it('only the central orchestrator reaches a handoff, of a session on this computer in its view (#694)', async () => {
+    const central = orchestratorToolsFor(host, 'orch')
+    expect(await central.handoffSession!({ sessionId: 'orch' })).toEqual({ ok: false, error: 'An orchestrator does not hand itself off; the person does that.' })
+    expect(await central.handoffSession!({ sessionId: 'nobody' })).toEqual({ ok: false, error: 'Not a session this app manages: nobody' })
+    // A lead, a project's reader view and a hub's view of this host never reach the flow, even for a session they see
+    for (const seat of [orchestratorToolsFor(host, 'orch', ['a']), orchestratorToolsFor(host, 'b', undefined, true), orchestratorToolsFor(host, 'orch', undefined, false, true)]) {
+      expect(await seat.handoffSession!({ sessionId: 'a' })).toEqual({ ok: false, error: 'Only the orchestrator hands sessions off' })
+    }
+    // A linked machine's session is handed off there
+    linked = { machineOf: (id: string) => (id === 'far' ? { id: 'm1', name: 'Far' } : null) } as unknown as LinkedSessions
+    expect(await central.handoffSession!({ sessionId: 'far' })).toEqual({ ok: false, error: 'That session runs on a linked machine; hand it off there.' })
+    expect(host.handoff).not.toHaveBeenCalled()
+    expect(await central.handoffSession!({ sessionId: 'a', mode: 'agent', instructions: 'go on' })).toEqual({ ok: false, error: 'reached the flow' })
+    expect(host.handoff).toHaveBeenCalledWith('orch', meta.get('a'), { mode: 'agent', instructions: 'go on' }, undefined)
   })
 
   it('never reads or sends to itself', async () => {

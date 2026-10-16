@@ -9,6 +9,8 @@ import { z } from 'zod'
 import {
   ApprovalDetail,
   CENTRALU_APPLY,
+  SESSION_HANDOFF,
+  sessionOnlyAlways,
   CENTRALU_APPLY_QUESTION,
   applyBackgroundTasks,
   ATTACHMENT_MAX_BASE64,
@@ -561,5 +563,16 @@ describe('the apply card in a released window (#665)', () => {
   it('would have been dropped as an update card with a new action', () => {
     expect(released.safeParse({ kind: 'centralu_update', action: 'apply' }).success).toBe(false)
     expect(ApprovalDetail.safeParse({ kind: 'centralu_update', action: 'apply' }).success).toBe(false)
+  })
+})
+
+/** The cards whose "always" is for the asking session only (#694): a window keeps it there, and the host remembers it there */
+describe('sessionOnlyAlways (#581, #665, #694)', () => {
+  it('is an update, an apply and a handoff, and no other card', () => {
+    expect(sessionOnlyAlways({ kind: 'centralu_update', action: 'install' })).toBe(true)
+    expect(sessionOnlyAlways({ kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY })).toBe(true)
+    expect(sessionOnlyAlways({ kind: 'other', raw: 'Allow the orchestrator to hand off?', about: SESSION_HANDOFF })).toBe(true)
+    expect(sessionOnlyAlways({ kind: 'other', raw: 'Something else?' })).toBe(false)
+    expect(sessionOnlyAlways({ kind: 'command', command: 'ls', cwd: '/tmp' })).toBe(false)
   })
 })

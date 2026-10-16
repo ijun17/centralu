@@ -308,6 +308,16 @@ export type AgentSessionOpts = {
   card?: string
 }
 
+/**
+ * What handoff_session answers (#694): refused, done (the successor is `sessionId`, named as the original `from`), or
+ * the session is still writing its note (agent mode past the call's bound): calling again with the same session waits
+ * on it.
+ */
+export type HandoffResult =
+  | { ok: false; error: string }
+  | { ok: true; state: 'done'; sessionId: string; sessionName: string; tool: ToolName; mode: 'record' | 'agent'; from: string; path: string }
+  | { ok: true; state: 'writing'; sessionId: string; sessionName: string }
+
 export type OrchestratorTools = {
   /**
    * Checks or starts installing Centralu itself; ordinary sessions need the person's consent first. "apply" (#665) asks
@@ -456,6 +466,15 @@ export type OrchestratorTools = {
     spec: { name: string; parent?: string; source?: { git: string; branch?: string }; machine?: string },
     signal?: AbortSignal,
   ): Promise<{ ok: true; projectId: string; name: string; path: string; machine?: string } | { ok: false; error: string }>
+  /**
+   * Hands a session off to a fresh one (#694), the orchestrator's alone: the note from the record by default or written
+   * by the session (`mode: 'agent'`), the original's live children moved to the successor (#693), the original kept.
+   * The rules of who may hand off what are `HandoffFlow`'s (handoff-flow.ts). Absent on seats that cannot hand off.
+   */
+  handoffSession?(
+    spec: { sessionId: string; tool?: ToolName; mode?: 'record' | 'agent'; instructions?: string },
+    signal?: AbortSignal,
+  ): Promise<HandoffResult>
   /**
    * Checks its own app (M4 C-3) — for a session that creates an app only. Which app is decided by
    * the calling session itself (the app it is creating): it takes no name, so there is no way to

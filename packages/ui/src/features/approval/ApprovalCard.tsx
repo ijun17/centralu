@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { isCentraluApply, type ApprovalDetail } from '@cc/protocol'
+import { isCentraluApply, SESSION_HANDOFF, sessionOnlyAlways, type ApprovalDetail } from '@cc/protocol'
 import { agentStartQuestion, approvalNotes, centraluUpdateQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
 import { inFlightKey, useStore } from '../../store/store.js'
 import { useShortcut } from '../../app/shortcut.js'
@@ -27,8 +27,8 @@ export function ApprovalCard({
   const busy = useStore((s) => !!s.approvalsInFlight[inFlightKey(sessionId, requestId)])
   const sc = useShortcut()
   const inComposer = useComposerFocused(sessionId)
-  // An update card (#581) or an agent's apply card (#665): its "always" is for this session only, never the project
-  const updateCard = detail.kind === 'centralu_update' || isCentraluApply(detail)
+  // An update card (#581), an agent's apply card (#665) or the orchestrator's handoff card (#694): its "always" is for this session only, never the project
+  const updateCard = sessionOnlyAlways(detail)
   const keys: AnswerKeys = inComposer
     ? { allow: sc(...APPROVAL_COMBOS.allow), deny: sc(...APPROVAL_COMBOS.deny), always: sc(...APPROVAL_COMBOS.always) }
     : BARE_KEYS
@@ -56,8 +56,8 @@ export function ApprovalCard({
         e.preventDefault()
         return
       }
-      // An update grant is deliberately per-session only; it must not become an app-wide setting.
-      if (detail.kind === 'centralu_update' || isCentraluApply(detail)) {
+      // An update or handoff grant is deliberately per-session only; it must not become an app-wide setting.
+      if (sessionOnlyAlways(detail)) {
         void respond(sessionId, requestId, action.decision)
         e.preventDefault()
         return
@@ -147,7 +147,9 @@ export function ApprovalCard({
           title={
             isCentraluApply(detail)
               ? 'Allow this session to apply Centralu updates while it is running'
-              : detail.kind === 'centralu_update'
+              : detail.kind === 'other' && detail.about === SESSION_HANDOFF
+                ? 'Allow this session to hand off sessions while it is running'
+                : detail.kind === 'centralu_update'
                 ? 'Allow Centralu updates from this session while it is running'
                 : `Hold ${sc('alt')} and click to apply to the whole project`
           }

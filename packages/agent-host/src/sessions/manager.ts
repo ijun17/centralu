@@ -57,7 +57,7 @@ import {
   applyBackgroundTasks,
   CENTRALU_APPLY,
   CENTRALU_APPLY_QUESTION,
-  isCentraluApply,
+  sessionOnlyAlways,
   liveBackgroundTasks,
   DATA_DIR,
   // The frame's single-line field (#120) — lives in protocol (app-frames.ts) because the mock
@@ -129,6 +129,7 @@ import { mentions, readMessageImage, resolveWrittenPath, writtenForms } from '..
 import { handoffNoteDir, sweepHandoffNotes, writeHandoffNote, writeHandoffNoteSync } from '../dev-services/handoff-notes.js'
 import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
 import { AskProjectFlow, type AskProjectHost } from './ask-project-flow.js'
+import { HandoffFlow, type HandoffFlowHost, type HandoffTimings } from './handoff-flow.js'
 import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, HUB_SENDER, agentStartPersonText, taskList } from './delegation-flow.js'
 import { RestartPolicy, type RestartHost } from './restart-policy.js'
 import { WorktreeSessions, type WorktreeHost, canonicalPath, insideFolder } from './worktree-sessions.js'
@@ -295,6 +296,8 @@ export class SessionManager {
   private readonly children: ChildOwnership
   /** The work one session gives another: ask_project, start_agent, agent_session (delegation-flow.ts) */
   private readonly delegationFlow: DelegationFlow
+  /** The orchestrator's handoff_session (#694): who may hand off what, and the handoff itself */
+  private readonly handoffFlow: HandoffFlow
   /** ask_project, here or on a linked machine (ask-project-flow.ts) */
   private readonly askProjectFlow: AskProjectFlow
   /** The conversations a tool keeps on its own side: listing, holders, import and catch-up (external-conversations.ts) */
@@ -450,10 +453,13 @@ export class SessionManager {
       processes?: AgentProcessHost
       /** Sessions whose tool process a previous host left running — their live state is not reset (see below) */
       keptSessions?: ReadonlySet<string>
+      /** How handoff_session waits for an agent's note (#694); tests shorten it */
+      handoffTimings?: HandoffTimings
     } = {},
   ) {
     this.children = new ChildOwnership(store)
     this.delegationFlow = new DelegationFlow(this.delegationHost())
+    this.handoffFlow = new HandoffFlow(this.handoffFlowHost(), keeperOpts.handoffTimings)
     this.askProjectFlow = new AskProjectFlow(this.askProjectHost())
     this.externals = new ExternalConversations(this.externalConversationsHost())
     this.record = new SessionRecord(this.sessionRecordHost())
@@ -3123,9 +3129,9 @@ export class SessionManager {
     const ask = this.hostCards.hostAsks.get(requestId)
     if (ask && ask.sessionId === sessionId) {
       this.hostCards.hostAsks.delete(requestId)
-      // A new project (#515) has nothing to remember either: "always" makes this one, as allow does
-      const keepsAlways =
-        ask.detail.kind === 'project_access' || ask.detail.kind === 'agent_start' || ask.detail.kind === 'centralu_update' || isCentraluApply(ask.detail)
+      // A new project (#515) has nothing to remember either: "always" makes this one, as allow does. An update, an apply
+      // and a handoff (#694) keep theirs for the asking session
+      const keepsAlways = ask.detail.kind === 'project_access' || ask.detail.kind === 'agent_start' || sessionOnlyAlways(ask.detail)
       const answer = !keepsAlways && decision === 'always' ? 'allow' : decision
       this.hostCards.restAfterCard(ask)
       this.onEvent({ type: 'approval_resolved', sessionId, requestId, decision: answer })
@@ -3926,6 +3932,28 @@ export class SessionManager {
     }
   }
 
+  /** What `HandoffFlow` reaches of this manager (#694): its state read when used, its operations called through */
+  private handoffFlowHost(): HandoffFlowHost {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
+    const self = this
+    return {
+      get meta() {
+        return self.meta
+      },
+      get store() {
+        return self.store
+      },
+      askHost: (...a) => self.hostCards.askHost(...a),
+      cwdFor: (...a) => self.cwdFor(...a),
+      createSession: (params) => self.createSession(params),
+      rename: (...a) => self.rename(...a),
+      send: (...a) => self.send(...a),
+      exportHandoffRecord: (...a) => self.exportHandoffRecord(...a),
+      exportHandoffNote: (...a) => self.exportHandoffNote(...a),
+      onEvent: (e) => self.onEvent(e),
+    }
+  }
+
   /** What `HostCards` reaches of this manager (#428): its state read when used, its operations called through */
   private hostCardsHost(): HostCardsHost {
     // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
@@ -4403,6 +4431,7 @@ export class SessionManager {
       autoBoundaryOpen: (sessionId, boundary) => this.autoBoundaryOpen(sessionId, boundary),
       createProjectAsked: (sessionId, spec, signal) => this.createProjectAsked(sessionId, spec, signal),
       createProjectOnMachine: (sessionId, reader, machine, spec, signal) => this.createProjectOnMachine(sessionId, reader, machine, spec, signal),
+      handoff: (callerId, target, opts, signal) => this.handoffFlow.handoff(callerId, target, opts, signal),
       builderRefOf: (m) => this.appSessions.builderRefOf(m),
       checkApp: (ref) => this.checkApp(ref),
       createApp: (params) => this.createApp(params),
@@ -4694,8 +4723,10 @@ export class SessionManager {
    * owed the report that wait had taken down), and a later agent_session or ask_project about one of them says so.
    *
    * **No permission check here.** The caller must have established that the new session may take over the original:
-   * today only the person's handoff calls this; an agent-facing handoff (the orchestrator tools of #694) must check
-   * its own authority over the original before it does.
+   * the person's handoff (the window's RPC), and the orchestrator's handoff_session (#694), which reaches this through
+   * `createSession` only after `HandoffFlow` has checked its authority over the original (the central orchestrator, a
+   * project's ordinary session in its view, not mid-turn, the person's card unless `auto`). Any other agent-facing path
+   * must check its own authority the same way before it does.
    */
   private moveChildren(from: string, to: string, scope: 'live' | 'all' | 'removed'): MovedChild[] {
     const original = this.meta.get(from)

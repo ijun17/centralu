@@ -164,6 +164,22 @@ export const ORCHESTRATOR_TOOLS = [
     }),
   },
   {
+    /*
+     * #694. A rare command (RARE_COMMANDS): asked for a few times in a seat's life, so it costs its line in
+     * centralu_commands, not a definition in every request. Who may hand off what is HandoffFlow's (handoff-flow.ts).
+     */
+    name: 'handoff_session',
+    description:
+      'Hands a session off to a fresh one that starts from a note: built from its stored conversation by default, or written by the session (mode "agent"). ' +
+      'Its live children move to the new session; the original stays. Refused while it is mid-turn; asks the person unless you are auto.',
+    schema: z.object({
+      sessionId: z.string().describe('The session id from list_sessions.'),
+      tool: ToolName.optional().describe("The new session's tool. If omitted, the same tool."),
+      mode: z.enum(['record', 'agent']).optional().describe('Where the note comes from. record (default) asks the session nothing.'),
+      instructions: z.string().optional().describe('Extra words for the new session, read after the note.'),
+    }),
+  },
+  {
     name: 'propose_skill',
     description:
       '**Proposes** a reusable working procedure (a skill) to the person (#71) — when you keep getting the same request, or discover a way of working unique to this user. ' +
@@ -542,6 +558,7 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
   'If a new capability like browser automation is needed, **propose** it with propose_mcp_server — if the person approves, the app installs it and restarts you. The conversation continues after the restart.',
   'If you keep getting the same request, or discover a way of working unique to this user, **propose** a procedure with propose_skill — an approved skill is always carried in your role from then on.',
+  'To replace a session that has drifted, or move its work to the other CLI, hand it off with handoff_session.',
   'If you do not know the answer to a question about the app, do not guess; point to a GitHub issue: https://github.com/ijun17/centralu/issues',
   'Putting the seq recall gave into read_session\'s around jumps straight to the spot you found — it does not read the whole session.',
   'When something like "last time" or "back then, over there" comes up, look for the past conversation with recall —',
@@ -937,6 +954,32 @@ export async function runOrchestratorTool(
     }
   }
 
+  if (name === 'handoff_session') {
+    const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : ''
+    if (!sessionId) return { text: 'Give sessionId: the session to hand off, from list_sessions.', isError: true }
+    if (args.tool !== undefined && !ToolName.safeParse(args.tool).success) return { text: `Not a tool: ${String(args.tool)}`, isError: true }
+    if (args.mode !== undefined && args.mode !== 'record' && args.mode !== 'agent') return { text: 'mode is "record" or "agent".', isError: true }
+    const tool = ToolName.safeParse(args.tool).data
+    const mode = args.mode === 'record' || args.mode === 'agent' ? args.mode : undefined
+    const instructions = typeof args.instructions === 'string' && args.instructions.trim() ? args.instructions : undefined
+    if (!tools.handoffSession) return { text: 'This session cannot hand sessions off.', isError: true }
+    const r = await tools.handoffSession({ sessionId, ...(tool ? { tool } : {}), ...(mode ? { mode } : {}), ...(instructions ? { instructions } : {}) }, signal)
+    if (!r.ok) return { text: r.error, isError: true }
+    if (r.state === 'writing') {
+      return {
+        text:
+          `${trustedJsonText(r.sessionName)} [${r.sessionId}] is still writing its handoff note. Call handoff_session again with the same sessionId to keep waiting; ` +
+          'the new session starts when the note is written, whether or not you wait.',
+      }
+    }
+    return {
+      text:
+        `Handed off ${trustedJsonText(r.sessionName)} [${r.from}] to a fresh ${r.tool} session [${r.sessionId}] of the same name, ` +
+        `starting from a note ${r.mode === 'record' ? 'built from the record' : 'the session wrote'} (${trustedJsonText(r.path)}). ` +
+        'Live work the original started now answers to the new session. The original stays; removing it is the person\'s call.',
+    }
+  }
+
   if (name === 'propose_skill') {
     const spec = {
       name: String(args.name ?? '').trim(),
@@ -1299,7 +1342,7 @@ export function currentRareTier(): RareTier {
  * a session or a project).
  */
 export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly OrchestratorToolName[]>> = {
-  orchestrator: ['create_app', 'propose_skill', 'propose_mcp_server', 'update_centralu', 'answer_question'],
+  orchestrator: ['create_app', 'propose_skill', 'propose_mcp_server', 'update_centralu', 'answer_question', 'handoff_session'],
 }
 
 /**

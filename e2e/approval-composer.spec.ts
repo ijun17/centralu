@@ -51,6 +51,28 @@ test('Centralu update consent offers session-only always by keyboard and click (
   expect(await page.evaluate(() => (window as any).__mock.approvalScopes)).toEqual([null, 'session'])
 })
 
+test("the orchestrator's handoff card keeps its always to the asking session, by keyboard and click (#694)", async ({ page }) => {
+  const sid = await sessionTyping(page)
+  const card = page.getByTestId('approval-card')
+  const handoff = (requestId: string) => page.evaluate(
+    ([sessionId, id]) => (window as any).__mock.requestApproval(sessionId, { kind: 'other', about: 'session_handoff', raw: 'Allow the orchestrator to hand off "Long run" to a fresh codex session?' }, id),
+    [sid, requestId] as const,
+  )
+  await handoff('ho-key')
+  await expect(page.getByTestId('approval-detail')).toContainText('hand off "Long run"')
+  await expect(card).not.toContainText('whole project')
+  await expect(card.getByTestId('approve-always')).toHaveAttribute('title', 'Allow this session to hand off sessions while it is running')
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  await page.keyboard.press('Alt+a')
+  await expect.poll(() => answers(page)).toEqual([{ sessionId: sid, requestId: 'ho-key', decision: 'always' }])
+  expect(await page.evaluate(() => (window as any).__mock.approvalScopes)).toEqual([null])
+
+  await handoff('ho-click')
+  await page.getByTestId('approve-always').click({ modifiers: ['Alt'] })
+  await expect.poll(() => answers(page)).toHaveLength(2)
+  expect(await page.evaluate(() => (window as any).__mock.approvalScopes)).toEqual([null, 'session'])
+})
+
 test('in the composer, y/n/a are typed and mod+⇧Y / mod+⇧D / mod+⇧L answer the card, which shows them', async ({ page }) => {
   const sid = await sessionTyping(page)
   const input = page.getByTestId('prompt-input')

@@ -269,6 +269,7 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `update_session_settings` | yes | — | — | — | — |
 | `create_project` | yes | — | — | — | — |
 | `create_session` | yes | — | — | — | — |
+| `handoff_session` | yes | — | — | — | — |
 | `propose_skill` | yes | — | — | — | — |
 | `propose_mcp_server` | yes | — | — | — | — |
 | `check` | — | — | yes | — | — |
@@ -280,6 +281,15 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `attach_app` | — | — | — | yes | — |
 | `detach_app` | — | — | — | yes | — |
 <!-- tool-matrix:end -->
+
+`handoff_session` (#694) is the orchestrator's alone, and among its commands the one that acts on another session's
+place in the person's work: it starts a successor from a note and moves the original's live children to it. Its
+authority is checked before anything moves (`HandoffFlow`; `moveChildren` checks none itself): the central
+orchestrator, a project's ordinary session of this computer in its view, not mid-turn, and the person's card unless the
+orchestrator is `auto`. Injected text can at most raise that card. The note defaults to the stored record, so a
+session's own drift or injected text does not write it; in agent mode the request goes in as the orchestrator's message
+and the reply is read from the store after the turn ends. The original is never deleted, and the successor runs under
+the original's preset, never the orchestrator's.
 
 A reader's `read_session` without an id lists its project's sessions; that is why it has no
 `list_sessions`. Its read tools see only its own project (`orchestratorToolsFor(…, ownProject)` in `sessions/orchestrator-seat.ts`), and
@@ -359,6 +369,7 @@ processes after adoption, at idle or when their current turn finishes (#589).
 | `agent_session` answer / `answer_question`, an approval in a turn the caller gave (#676), target `normal` or `auto` | refused | refused | refused | open | refused | refused | refused | open | `answersApproval`: the caller's own preset at the answer; never an app agent or a host-raised card; allow or deny, never always |
 | The same, target `safe` or an app's agent | refused | refused | refused | refused | refused | refused | refused | refused | `answersApproval` (#679 review): the caller's `auto` never raises the target's permissions; the caller is told only |
 | `agent_session` send, to a child the person raised above the caller's preset | refused | refused | refused | refused | refused | refused | refused | refused | `agentSession` (`presetWithin`) |
+| `handoff_session` (the orchestrator hands a session off, #694) | asks (a card naming the target, the receiving tool, the note's source, the new session's preset and the extra words; "always" for this orchestrator while the host serves it) | asks | asks | open | asks | asks | asks | open | `HandoffFlow.handoff` (`sessions/handoff-flow.ts`) → `askHost`, an `other` card with `about: "session_handoff"`; the central orchestrator only (`profileAllows`, and the seat refuses any other view); the target must be a project's ordinary session of this computer in its view, not itself, an orchestrator or coordinator, an app's session or a worktree session, and not mid-turn (refused without a card, checked again after it); the original is never deleted, its live children move to the successor (`moveChildren`, scope `live`), and the successor keeps the original's preset |
 | `create_project` (the orchestrator makes a new project, empty or a clone) | asks (a card with the full path and, for a clone, the repository, every time) | asks | asks | open | asks | asks | asks | open | `SessionManager.createProjectAsked` → `askHost`; the folder is made only after "Create", and never over anything already there (`projectFolderTarget`, `makeProjectFolder`); by default in `~/Centralu`, a folder of the home that macOS does not protect, so making one raises no OS permission prompt (the Desktop did); a clone takes https, ssh and scp-like addresses only, never `ext::`, `file://` or a local path (`gitSourceError`), clones no submodules and never asks for a sign-in (`project-clone.ts`) |
 | `attach_app`, another project's shared app, first time for the pair | asks (consent card) | asks | asks | open | asks | asks | asks | open | `AppAccess.attach` → `ensureProjectAccess(…, 'apps', …)` |
 | `attach_app`, an untrusted target project's shared app | refused | refused | refused | open | refused | refused | refused | open | `AppAccess`, `SessionAppsHub` and runtime startup/call gates use the caller's preset; auto does not mark the project trusted |

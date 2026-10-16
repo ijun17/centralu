@@ -797,6 +797,18 @@ export function isCentraluApply(d: ApprovalDetail): boolean {
   return d.kind === 'other' && d.about === CENTRALU_APPLY
 }
 
+/**
+ * The `about` of the orchestrator's handoff card (#694, handoff_session), on an `other` detail: the question is the
+ * whole card in every build, and a window that knows the name keeps its "always" to the asking session, as an apply
+ * card's is (the host remembers it for that session while it serves it, never for a project).
+ */
+export const SESSION_HANDOFF = 'session_handoff'
+
+/** A card whose "always" is for the asking session only (#581, #665, #694): an update, an apply, a handoff */
+export function sessionOnlyAlways(d: ApprovalDetail): boolean {
+  return d.kind === 'centralu_update' || (d.kind === 'other' && (d.about === CENTRALU_APPLY || d.about === SESSION_HANDOFF))
+}
+
 /** One remembered "always" from one project to another (#371) — a row of Settings' list, with the names as they are now */
 export const ProjectConsent = z.object({
   fromProjectId: z.string(),

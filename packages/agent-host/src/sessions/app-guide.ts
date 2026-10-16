@@ -73,9 +73,11 @@ One session = one agent process (Claude Code or Codex).
   process — choosing the session, clicking the input box, or sending it a message wakes it back up.
 - Worktree option (git repositories only): turning on "Run in a git worktree" in the New session
   window runs the session in a separate directory and branch, avoiding file conflicts.
-- Handoff: session's ⋯ → Hand off to a fresh session… — the current session writes a note, and the
-  new session starts from that note. You can choose the receiving tool. A worktree session cannot
-  be handed off yet.
+- Handoff: session's ⋯ → Hand off to a fresh session… — the app builds a note from the stored
+  conversation (or, if you choose, the current session writes it), and the new session starts from
+  that note. You can choose the receiving tool. The orchestrator can hand a session off too
+  (handoff_session), after you approve its card; the original stays. A worktree session cannot be
+  handed off yet.
 - Deleting: session's ⋯ → Delete session…. By default this also deletes the conversation file on
   the tool's side. Turning that option off leaves the conversation on the tool, so it can be loaded
   again from the past-conversation list in the New session window.

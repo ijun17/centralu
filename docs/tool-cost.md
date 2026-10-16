@@ -584,6 +584,12 @@ decision rather than headroom. The haiku numbers above stand: a seat on haiku re
 through the tier. `CC_RARE_COMMANDS=resident` and `=deferred` stay selectable, and `pnpm measure:tools --rare`
 defaults to the host's default (`commands`), so a run made before this date with no `--rare` measured `resident`.
 
+**`handoff_session` (#694)** joined the rare commands: its definition rides in no request, only its line in
+`centralu_commands`. What it adds to every orchestrator request is one instruction line naming it (107 characters and
+its newline), since the instructions are what a model that cannot see a rare command goes looking with. Measured
+2026-10-16 with `residentCost`: 6,642 resident definition characters and 2,102 of instructions on Claude (8,744), 2,154
+on Codex (8,796), under the 9,500 ceiling. Its selection through the tier was not measured live.
+
 **Not measured.** Opus as the orchestrator's model; B (deferral) on Sonnet; the Korean set on haiku and on Codex;
 Codex in round 2; a command used late in a long orchestrator conversation; app tools behind `app_tools`/`app_call`
 (#512's app tier); B with `propose_skill` loaded; the proposal cards on screen in the real app (the unit tests cover
