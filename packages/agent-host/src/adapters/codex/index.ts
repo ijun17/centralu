@@ -39,7 +39,7 @@ import {
   type CodexThreadSettings,
 } from './normalize.js'
 import { UnmappedTypes } from '../unmapped.js'
-import { adapterNotice, couldNotStop, undeliveredError, undeliveredText } from '../session-kit.js'
+import { couldNotStop, undeliveredError, undeliveredText } from '../session-kit.js'
 
 import { sandboxConfig } from './sandbox.js'
 import { withStderrTail } from '../../stream-text.js'
@@ -47,6 +47,7 @@ import { raceTimeout } from '../../timing.js'
 import { CodexRequests } from './server-requests.js'
 import { CodexServers } from './thread-servers.js'
 import { CodexChildThreads } from './child-threads.js'
+import { CodexSlashCommands } from './slash-commands.js'
 import { runningTurnOf, threadIdOf, turnIdOf } from './turn-reads.js'
 import { APP_CALL_WAIT_MS, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, permissionOptionsFor, repoFilesConfig, spawnInKeeper } from './launch-config.js'
 
@@ -149,6 +150,8 @@ class CodexSession implements SessionHandle {
   private started = false
   /** Notification methods this session received that nothing maps or ignores on purpose, said once each in host.log (#58) */
   private readonly unmapped: UnmappedTypes
+  /** /compact, /review and /goal (see `CodexSlashCommands`) */
+  private readonly slashCommands: CodexSlashCommands
   /** The child threads and the steps they send (see `CodexChildThreads`) */
   private readonly childThreads: CodexChildThreads
   /** One compaction marker per compaction, from the item, the deprecated notification, or both (#303) */
@@ -170,6 +173,16 @@ class CodexSession implements SessionHandle {
   ) {
     this.sessionId = opts.sessionId
     this.unmapped = new UnmappedTypes('codex', opts.sessionId, CODEX_KNOWN_NOTIFICATIONS)
+    this.slashCommands = new CodexSlashCommands({
+      sessionId: opts.sessionId,
+      emit: (e) => this.emit(e),
+      request: (method, params) => this.client.request(method, params),
+      threadId: () => this.threadId,
+      setBlockingTurn: (on) => {
+        this.blockingTurn = on
+      },
+      flushPending: () => this.flushPending(),
+    })
     this.childThreads = new CodexChildThreads({ sessionId: opts.sessionId, emit: (e) => this.emit(e) })
     this.threadServers = new CodexServers({
       sessionId: opts.sessionId,
@@ -607,118 +620,8 @@ class CodexSession implements SessionHandle {
           this.pendingInputs.push({ text, receipt })
           return
         }
-        /*
-         * **compact is a function, not a message** (a dogfooding observation nailed it exactly —
-         * "it does not work by sending a message"). In the codex CLI, /compact runs compaction
-         * without going into the conversation, but the app-server path has no such slash-command
-         * handler — sending it through turn/start makes the model **read the literal characters**
-         * "/compact". There is a dedicated RPC instead: thread/compact/start
-         * (generated/ClientRequest.ts). Measured: it answers {} immediately and proceeds
-         * turn/started -> contextCompaction item started -> completed -> turn/completed, which our
-         * existing normalize plumbing (the compacting indicator, the completion marker) already
-         * receives as-is. (No `thread/compacted` on 0.147.0, 0.153.4 or 0.160.0 — #303.)
-         */
-        if (text.trim() === '/compact') {
-          this.blockingTurn = true
-          return this.client
-            .request('thread/compact/start', { threadId: this.threadId })
-            .catch((e: unknown) => {
-              // Waiting on a turn that failed to start would lock the queue forever — unblock and flush what piled up
-              this.blockingTurn = false
-              this.flushPending()
-              throw e
-            })
-        }
-        /*
-         * /review is the same kind of thing (the review/start RPC). Measured: with no argument it
-         * is the same "review what has changed right now" default as the codex CLI; with an
-         * argument it follows that instruction instead (custom). The result usually arrives like a
-         * turn — the review body streams as agentMessage (existing plumbing), and its start and end
-         * arrive as enteredReviewMode/exitedReviewMode items (normalize turns these into activity).
-         * Since upstream also classifies review turns as unsteerable ("cannot steer a review turn"),
-         * we guard it with the same queue as compact.
-         */
-        if (text.trim() === '/review' || text.trim().startsWith('/review ')) {
-          const instructions = text.trim().slice('/review'.length).trim()
-          this.blockingTurn = true
-          return this.client
-            .request('review/start', {
-              threadId: this.threadId,
-              target: instructions ? { type: 'custom', instructions } : { type: 'uncommittedChanges' },
-            })
-            .catch((e: unknown) => {
-              this.blockingTurn = false
-              this.flushPending()
-              throw e
-            })
-        }
-        /*
-         * /goal is also a function (2026-09-07 — the same #58 family as /compact and /review).
-         * Sending it through turn/start makes the model read the literal characters "/goal". There
-         * are three dedicated RPCs: thread/goal/set, get and clear. The state change comes back as
-         * a thread/goal/updated|cleared notification, which is what draws the badge — here we only
-         * leave a one-line confirmation in the chat (if a local command's answer is invisible,
-         * there is no way to know it ran — a lesson from claude's local_command_output). This is
-         * not a turn, so blockingTurn is not set.
-         */
-        if (text.trim() === '/goal' || text.trim().startsWith('/goal ')) {
-          const arg = text.trim().slice('/goal'.length).trim()
-          // Its own message, not a continuation of the model's open reply (`adapterNotice`)
-          const say = (line: string) => this.emit(adapterNotice(this.sessionId, line))
-          if (!arg) {
-            return this.client
-              .request<{ goal: { objective?: string; status?: string } | null }>('thread/goal/get', {
-                threadId: this.threadId,
-              })
-              .then((r) =>
-                say(
-                  r.goal ? `Goal (${r.goal.status ?? 'active'}): ${r.goal.objective ?? ''}` : 'No goal set.',
-                ),
-              )
-          }
-          if (arg === 'clear') {
-            return this.client
-              .request('thread/goal/clear', { threadId: this.threadId })
-              .then(() => say('Goal cleared.'))
-          }
-          /*
-           * **State the status the response actually gave, verbatim** (dogfooding 2026-09-08:
-           * "it looks registered but does not do anything").
-           *
-           * Measured: if the thread already has a finished goal, setting a new objective made
-           * codex leave status as complete while only swapping in the new objective. If we had
-           * just answered "Goal set" at that point, the screen would say it worked while the goal
-           * loop never actually ran — and no badge would appear either, since our own rule is that
-           * a completed goal does not raise a badge.
-           */
-          const setGoal = () =>
-            this.client.request<{ goal?: { status?: string } }>('thread/goal/set', {
-              threadId: this.threadId as string,
-              objective: arg,
-            })
-          const statusOf = (r: { goal?: { status?: string } }) =>
-            typeof r?.goal?.status === 'string' ? r.goal.status : 'active'
-          return setGoal().then(async (first) => {
-            /*
-             * **Setting a new goal on top of a finished one leaves it finished** (measured 2026-09-08).
-             *
-             * That thread had a goal the model had marked complete on its own two days earlier, and
-             * setting a new objective made codex swap in only the objective while leaving status at
-             * complete. A completed goal drives nothing, so to a person it looks like "it is
-             * registered but does not do anything".
-             *
-             * The person writing a new goal **means to start over**. So we clear it once and set it
-             * again — and if it is still not active after that, we state that status rather than
-             * making one up.
-             */
-            let status = statusOf(first)
-            if (status !== 'active') {
-              await this.client.request('thread/goal/clear', { threadId: this.threadId }).catch(() => {})
-              status = statusOf(await setGoal())
-            }
-            say(status === 'active' ? `Goal set: ${arg}` : `Goal set (${status}): ${arg}`)
-          })
-        }
+        const command = this.slashCommands.run(text)
+        if (command) return command
         if (receipt) this.inputGroups.set(receipt.id, [receipt])
         return (
           this.client
