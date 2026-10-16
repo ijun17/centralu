@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fakeServe } from './fake-serve.test-helpers.js'
 import { fakeRegistry, sha256, tarGz, type FakePackage, type FakeRegistry } from './fake-registry.test-helpers.js'
 import { installRemote, installScript, type RemoteRuntime } from './install.js'
 import { SshTunnel } from './tunnel.js'
@@ -22,38 +23,6 @@ const SERVE_MJS = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../
 const NODE_V = '24.21.0'
 const NODE_FILE = `node-v${NODE_V}-linux-x64.tar.gz`
 
-const fakeServe = (version: string) => `import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-const d = process.env.CC_DATA_DIR || process.env.HOME + '/.centralu'
-const a = process.argv.slice(2).join(' ')
-const log = (s) => appendFileSync(d + '/events', s + '\\n')
-if (a === 'serve --stop') {
-  const was = existsSync(d + '/running')
-  log('stop ' + (was ? readFileSync(d + '/running', 'utf8') : '-'))
-  rmSync(d + '/running', { force: true })
-  console.log(JSON.stringify({ v: 1, stop: process.env.FAKE_STOP_FAILS ? { ok: false, wasRunning: true, message: 'the host on 127.0.0.1:4141 is still running' } : { ok: true, wasRunning: was } }))
-} else if (a === 'serve --detach') {
-  log('start ${version}')
-  if (process.env.FAKE_BROKEN === '${version}') {
-    appendFileSync(d + '/host.log', 'host ${version}: the store was written by a newer Centralu\\n')
-    console.log(JSON.stringify({ v: 1, detach: { ok: false, reason: 'exited', message: 'the host exited before it answered' } }))
-  } else {
-    writeFileSync(d + '/running', '${version}')
-    console.log(JSON.stringify({ v: 1, port: 4141, token: 't', version: '${version}', protocolVersion: 1, dataDir: d, hostRunning: true, detach: { ok: true, how: 'setsid' } }))
-  }
-} else if (a === 'serve --autostart off') {
-  log('autostart off')
-  if (process.env.FAKE_NO_AUTOSTART) {
-    console.error('unknown option for serve: --autostart')
-    process.exitCode = 2
-  } else if (process.env.FAKE_AUTOSTART_FAILS) {
-    console.log(JSON.stringify({ v: 1, autostart: { ok: false, on: true, how: 'systemd', linger: null, message: 'Failed to connect to bus' } }))
-  } else {
-    rmSync(d + '/autostart', { force: true })
-    console.log(JSON.stringify({ v: 1, autostart: { ok: true, on: false, how: 'systemd', linger: null } }))
-  }
-} else console.log('unexpected ' + a)
-`
-
 describe('parseStopLine', () => {
   it('reads serve --stop’s line under anything else it printed, and nothing else', () => {
     expect(parseStopLine('motd\n{"v":1,"stop":{"ok":true,"wasRunning":true,"how":"asked"}}\n')).toEqual({ ok: true, wasRunning: true, message: null })
@@ -72,6 +41,7 @@ describe('stopRemoteHost tells a person which shim to type (#688)', () => {
   })
 })
 
+// A Linux remote played by this machine's sh (see install.test.ts); the Windows counterpart is install-windows.test.ts.
 describe.skipIf(process.platform === 'win32')('update, rollback and uninstall over a fake ssh into a real sh (plan §10.5)', () => {
   let root: string
   let home: string

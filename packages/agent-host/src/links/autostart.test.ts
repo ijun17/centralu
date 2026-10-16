@@ -15,7 +15,8 @@ import { autostartCommand, parseConnectionLine, WINDOWS_INLINE_MAX, type RemoteR
 const decode = (cmd: string) => Buffer.from(cmd.split('-EncodedCommand ')[1]!, 'base64').toString('utf16le')
 
 describe('the autostart command per shell', () => {
-  // Run by a real sh, as a POSIX remote would: the Centralu that answers is the one the link's lookup finds
+  // Run by a real sh, as a POSIX remote would: the Centralu that answers is the one the link's lookup finds.
+  // Skipped on Windows because the script is the remote's, and a Windows machine has no /bin/sh of its own to be that remote.
   it.skipIf(process.platform === 'win32')('a POSIX remote asks the managed launcher first, through the link’s own lookup', () => {
     const home = mkdtempSync(join(tmpdir(), 'cc-autostart-lookup-'))
     try {

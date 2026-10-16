@@ -262,6 +262,8 @@ describe('remote-install.mjs: replacing a version folder and naming pointers', (
   })
 })
 
+// A Linux remote, played by this machine's sh, uname and tar. Windows has none of them to be that remote; its counterpart,
+// a Windows remote played by a real PowerShell, is install-windows.test.ts.
 describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh into a real sh (plan §10.2)', () => {
   let root: string
   let home: string

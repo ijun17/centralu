@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -62,9 +62,18 @@ static class Launcher {
   }
 
   static int Main(string[] args) {
-    // <this exe>.target: the node binary on line 1, the script on line 2
-    var target = File.ReadAllLines(System.Reflection.Assembly.GetExecutingAssembly().Location + ".target");
-    var cmd = new StringBuilder(Quote(target[0]) + " " + Quote(target[1]));
+    // <this exe>.target: the node binary on line 1, the script on line 2. Without one, this exe is a
+    // node.exe in an archive (fakeNodeExe): the node binary is CC_FAKE_NODE, and there is no script
+    var self = System.Reflection.Assembly.GetExecutingAssembly().Location;
+    string node, script = null;
+    if (File.Exists(self + ".target")) {
+      var target = File.ReadAllLines(self + ".target");
+      node = target[0];
+      if (target.Length > 1 && target[1].Length > 0) script = target[1];
+    } else node = Environment.GetEnvironmentVariable("CC_FAKE_NODE");
+    if (node == null) { Console.Error.WriteLine("fake exe: no .target file and no CC_FAKE_NODE"); return 127; }
+    var cmd = new StringBuilder(Quote(node));
+    if (script != null) cmd.Append(' ').Append(Quote(script));
     foreach (var a in args) cmd.Append(' ').Append(Quote(a));
 
     var si = new STARTUPINFO();
@@ -121,6 +130,14 @@ function launcher(): string {
     rmSync(src, { force: true })
   }
   return (launcherCache = exe)
+}
+
+/**
+ * The launcher itself, to be a `node.exe` inside an archive: it runs the Node in `CC_FAKE_NODE` (the
+ * environment of whoever runs it) with the arguments it was given. Windows only.
+ */
+export function fakeNodeExe(): Buffer {
+  return readFileSync(launcher())
 }
 
 /**
