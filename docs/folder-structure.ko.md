@@ -113,6 +113,10 @@ centralu/
 │        ├─ transport/          # WS 서버, 세션 핸드셰이크, 이벤트 로그
 │        ├─ adapters/           # claude/, codex/ + 공통 어댑터 계약(contract.ts). 도구마다의 사용량 읽기(usage.ts)와
 │        │                      #   오케스트레이터의 MCP 서버(claude/orchestrator-mcp.ts, codex/orchestrator-bridge.mjs)
+│        │                      #   도구마다 index.ts가 어댑터, session.ts가 세션이고, 세션에서 떼어 낸 부분이 옆에 있다
+│        │                      #   (#850): claude/ session-cards, session-servers, permissions; codex/ server-requests,
+│        │                      #   thread-servers, child-threads, slash-commands, launch-config. 두 도구가 함께 쓰는 것:
+│        │                      #   tool-result, file-changes, images, plan, token-usage, tool-titles, retry-activity, session-kit (#843)
 │        ├─ sessions/           # SessionManager(manager.ts)와 거기서 떼어 낸 부분(#428): child-ownership, delegation-flow(start_agent는 start-agent-flow, 매니저에서 닿는 것은 delegation-host), ask-project-flow, handoff-flow, handoff-record, external-conversations, session-record, tool-queries, app-sessions, app-messages, session-trash, host-cards, card-rest, delegated-cards, interruptions, sleep, turn-answer, linked-reports, orchestrator-seat, restart-policy, worktree-sessions, transcript-view, orchestrator-proposals; 세션 앱(session-apps, app-access, app-agents, app-builder, app-guide); 오케스트레이터 도구의 실행부(orchestrator-tools)와 거기서 떼어 낸 부분(#850): tool-definitions, tool-seats, tool-answers, tool-profiles
 │        ├─ apps/external/      # 외부 앱: 매니페스트, 찾기, 실행, 브로커, capability (apps.ko.md)
 │        ├─ views/              # 앱 뷰: 뷰 호스트, 그 CSP, 프록시 페이지

@@ -112,6 +112,11 @@ centralu/
 │        ├─ adapters/           # claude/, codex/ + the common adapter contract (contract.ts); each tool's usage
 │        │                      #   reader (usage.ts) and the orchestrator's MCP server (claude/orchestrator-mcp.ts,
 │        │                      #   codex/orchestrator-bridge.mjs)
+│        │                      #   each tool's index.ts is the adapter, session.ts its session, with the session's
+│        │                      #   parts beside it (#850): claude/ session-cards, session-servers, permissions;
+│        │                      #   codex/ server-requests, thread-servers, child-threads, slash-commands,
+│        │                      #   launch-config. Shared by both: tool-result, file-changes, images, plan,
+│        │                      #   token-usage, tool-titles, retry-activity, session-kit (#843)
 │        ├─ sessions/           # SessionManager (manager.ts) and the parts moved out of it (#428): child-ownership, delegation-flow (start_agent in start-agent-flow, what it reaches of the manager in delegation-host), ask-project-flow, handoff-flow, handoff-record, external-conversations, session-record, tool-queries, app-sessions, app-messages, session-trash, host-cards, card-rest, delegated-cards, interruptions, sleep, turn-answer, linked-reports, orchestrator-seat, restart-policy, worktree-sessions, transcript-view, orchestrator-proposals; the session apps (session-apps, app-access, app-agents, app-builder, app-guide); the orchestrator tools' runner (orchestrator-tools) and the parts moved out of it (#850): tool-definitions, tool-seats, tool-answers, tool-profiles
 │        ├─ apps/external/      # external apps: manifest, discovery, runs, broker, capabilities (apps.md)
 │        ├─ views/              # app views: the view host, its CSP, the proxy page

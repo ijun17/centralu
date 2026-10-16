@@ -381,7 +381,7 @@ processes after adoption, at idle or when their current turn finishes (#589).
 
 | Call | Claude `safe` | Claude `normal` | Claude `normal` + bypass | Claude `auto` | Codex `safe` | Codex `normal` | Codex `normal` + bypass | Codex `auto` | Enforced in |
 |---|---|---|---|---|---|---|---|---|---|
-| A Centralu tool the profile has | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `isOrchestratorTool` and only when the session was given the server, checked before auto's refusal (`adapters/claude/index.ts`). Codex: `default_tools_approval_mode: 'approve'` on the bridge, and an elicitation for it accepted only on a thread that has it (`adapters/codex/index.ts`, `mcpConfig`, `onServerRequest`) |
+| A Centralu tool the profile has | allowed | allowed | allowed | open | allowed | allowed | allowed | open | Claude: `canUseTool`, `isOrchestratorTool` and only when the session was given the server, checked before auto's refusal (`adapters/claude/session-cards.ts`). Codex: `default_tools_approval_mode: 'approve'` on the bridge, and an elicitation for it accepted only on a thread that has it (`adapters/codex/thread-servers.ts` `mcpConfig`, `adapters/codex/server-requests.ts` `onServerRequest`) |
 | A Centralu tool the profile does not have | refused | refused | refused | refused | refused | refused | refused | refused | `profileAllows` (exposure and execution) |
 | `ask_project`, first time for a pair of projects | asks (consent card) | asks | asks | open | asks | asks | asks | open | `ensureProjectAccess` in `SessionManager.askProject`; "always" is kept in `project_consents` |
 | `ask_project` from a session that was itself asked | refused | refused | refused | open | refused | refused | refused | open | `askProject` (depth one) |
@@ -420,7 +420,7 @@ Rows that differ by session:
   person's bypass on both CLIs (owner decision 2026-10-11, #382). On Codex `~/.codex` loads, so the
   person's `approval_policy` applies. On Claude (`settingSources: []`) only the person's own
   `defaultMode` is carried, read from the user tier with the SDK's merge engine
-  (`personsDefaultMode` in `adapters/claude/index.ts`); their `CLAUDE.md`, hooks and rules stay out,
+  (`personsDefaultMode` in `adapters/claude/permissions.ts`); their `CLAUDE.md`, hooks and rules stay out,
   and a mode written in the orchestrator's own folder does not count. The direction is decision 1's:
   the person's global choice applies to every session that runs under `normal`, and someone who wants
   a card from the orchestrator has `safe`.
