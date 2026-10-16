@@ -176,16 +176,26 @@ function withPathExt(path: string, env: Record<string, string | undefined>, deps
  * with the project as its working directory, so a `git.exe` committed at a repository's root would
  * have run on the first status read of a freshly added project (#14). A found path is remembered;
  * a miss is asked again next time, so a git installed while the app runs is picked up.
+ *
+ * **Never a `.cmd` or `.bat`** (#849): Node refuses to spawn one (EINVAL), so a `gh.cmd` or `git.cmd`
+ * first on PATH made every call throw, `gitBranchPr` too, which is documented not to. Such a file is
+ * taken as the `.exe` it starts (a package manager's shim), or else the first `.exe` on PATH; with
+ * neither, the name, which the spawn reports as missing.
  */
 export function programPath(
   name: string,
   platform: NodeJS.Platform = process.platform,
-  find: (name: string) => string | null = (n) => whichTool(n),
+  find: (name: string, pathExt?: string) => string | null = (n, pathExt) => whichTool(n, pathExt ? { ...process.env, PATHEXT: pathExt } : process.env),
+  launch: (path: string) => ToolLaunch = (p) => launchFor(p),
 ): string {
   if (platform !== 'win32') return name
   const known = programs.get(name)
   if (known) return known
-  const found = find(name)
+  let found = find(name)
+  if (found && /\.(cmd|bat)$/i.test(found)) {
+    const started = launch(found)
+    found = started.args.length === 0 && /\.(exe|com)$/i.test(started.command) ? started.command : find(name, '.COM;.EXE')
+  }
   if (found) programs.set(name, found)
   return found ?? name
 }

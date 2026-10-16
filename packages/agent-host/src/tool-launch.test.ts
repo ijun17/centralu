@@ -207,6 +207,22 @@ describe('a program the host runs in a project folder', () => {
   it('off Windows the bare name, as before', () => {
     expect(programPath('git', 'darwin', () => '/opt/homebrew/bin/git')).toBe('git')
   })
+
+  /*
+   * #849: Node refuses to spawn a .cmd (EINVAL), so a gh.cmd or git.cmd first on PATH made every call throw, gitBranchPr
+   * too, which is documented not to.
+   */
+  it('never a .cmd: the .exe its shim starts, else the first .exe on PATH, else the name', () => {
+    const shim = 'C:\\Users\\me\\scoop\\shims\\gh.cmd'
+    const exe = 'C:\\Users\\me\\scoop\\apps\\gh\\current\\bin\\gh.exe'
+    const later = 'C:\\Program Files\\GitHub CLI\\gh.exe'
+    const find = (pathExt: boolean) => (_n: string, exts?: string) => (exts === undefined ? shim : pathExt ? later : null)
+    expect(programPath('gh', 'win32', find(true), () => ({ command: exe, args: [] }))).toBe(exe)
+    __forgetPrograms()
+    expect(programPath('gh', 'win32', find(true), () => ({ command: NODE, args: ['C:\\x\\gh.js'] }))).toBe(later)
+    __forgetPrograms()
+    expect(programPath('gh', 'win32', find(false), (p) => ({ command: p, args: [] }))).toBe('gh')
+  })
 })
 
 describe("Node's own npm.cmd and npx.cmd", () => {

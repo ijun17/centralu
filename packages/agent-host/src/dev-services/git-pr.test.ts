@@ -132,3 +132,26 @@ describe('gh stopped by an abort (#368)', () => {
     if (process.platform === 'win32') await until(() => !alive(child), 5_000)
   })
 })
+
+/*
+ * #849: a gh.cmd first on PATH (a wrapper, a package manager's shim of a script) was handed to the spawn, which Node
+ * refuses on Windows with EINVAL: gitBranchPr threw, though it is documented never to.
+ */
+describe('a gh that is a batch file', () => {
+  let root = ''
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    __forgetPrograms()
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
+  })
+
+  it('is no gh to run: the answer is that gh is unavailable, never a throw', async () => {
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-gh-cmd-')))
+    const bin = join(root, 'bin')
+    mkdirSync(bin)
+    writeFileSync(join(bin, 'gh.cmd'), '@echo {}\r\n')
+    vi.stubEnv('PATH', bin)
+    __forgetPrograms()
+    await expect(gitBranchPr(root, 'feat/x')).resolves.toBe('unavailable')
+  })
+})
