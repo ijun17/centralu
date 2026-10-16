@@ -550,13 +550,14 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       // An MCP tool's images (a browser's screenshot, say) come after its card, as Claude's do (#40, #843)
       if (type === 'mcpToolCall') out.push(...mcpImageEvents(sessionId, asObj(item.result).content))
       /*
-       * If a file was actually changed, announce it for conflict detection and highlighting (FR-2, FR-5). Only a change
-       * that went through changed it (#843): a declined or failed one used to mark its files all the same. A move
-       * changes the file it leaves and the one it makes, and only the first was named.
+       * If a file was actually changed, announce it for conflict detection and highlighting (FR-2, FR-5). A declined
+       * change wrote nothing (#843), so it marks nothing. A failed one is marked all the same: a patch is applied file by
+       * file, and the item does not say which of its files were written before it failed. A move changes the file it
+       * leaves and the one it makes, and only the first was named.
        */
       const moved = type === 'fileChange' ? fileChangesOf(item).flatMap((c) => (c.movePath ? [c.movePath] : [])) : []
       const paths = [...s.paths, ...moved]
-      if (paths.length > 0 && codexItemOk(item)) out.push({ type: 'files_touched', sessionId, paths })
+      if (paths.length > 0 && str(item.status) !== 'declined') out.push({ type: 'files_touched', sessionId, paths })
       return out
     }
 
