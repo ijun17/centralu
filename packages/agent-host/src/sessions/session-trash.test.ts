@@ -68,3 +68,18 @@ describe('the trash itself', () => {
     await expect(trash.readTrashed('s', 10)).rejects.toThrow('Not in the trash: s')
   })
 })
+
+describe('a restore or purge while the delete still runs (#839)', () => {
+  it('is refused: the delete has put the session in the trash, and its last steps are still to come', async () => {
+    const worktrees = { worktreeCleanup: new Map<string, string>() } as unknown as WorktreeSessions
+    const trash = trashWith({ worktrees })
+    let finish!: () => void
+    // The store has moved it to the trash and is dropping its index in chunks; the deleted event is still to come
+    privates(trash).trashSessionOnce = () => new Promise<void>((r) => (finish = r))
+    const deleting = trash.trashSession('s')
+    await expect(privates(trash).trashOp('s', async () => 'restored')).rejects.toThrow('That session is already being restored or deleted')
+    finish()
+    await deleting
+    await expect(privates(trash).trashOp('s', async () => 'restored')).resolves.toBe('restored')
+  })
+})

@@ -244,7 +244,8 @@ export class SessionTrash {
   private readonly trashBusy = new Set<string>()
 
   private async trashOp<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
-    if (this.trashBusy.has(sessionId) || this.host.worktrees.worktreeCleanup.has(sessionId)) {
+    // A delete still running counts (#839): the session is in the trash before its last steps, which would undo a restore
+    if (this.trashBusy.has(sessionId) || this.trashing.has(sessionId) || this.host.worktrees.worktreeCleanup.has(sessionId)) {
       throw Object.assign(new Error('That session is already being restored or deleted'), { code: 'internal' })
     }
     this.trashBusy.add(sessionId)
