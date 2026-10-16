@@ -1,7 +1,6 @@
-import { CLIENT_INFO } from '@cc/protocol'
 import type { ExternalSessionSummary, HistoryMessage } from '../contract.js'
 import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
-import { CodexClient } from './client.js'
+import { withCodexClient } from './short-lived.js'
 
 /**
  * Reading a previous thread Codex has kept.
@@ -24,28 +23,6 @@ export function isUnknownMethod(err: unknown): boolean {
   return /-32601|method not found|unknown method|unsupported method|not supported/i.test(m)
 }
 
-/**
- * A short-lived client for listing lookups. Kept separate from the session process — piling
- * lookup traffic onto a thread that is mid-conversation would slow that thread down, and if
- * something fails, there would be no telling which side died.
- */
-async function withClient<T>(cwd: string, command: string, fn: (c: CodexClient) => Promise<T>): Promise<T> {
-  const client = new CodexClient(
-    { onNotification: () => {}, onServerRequest: (r) => client.respond(r.id, {}), onExit: () => {} },
-    { cwd, command },
-  )
-  try {
-    await client.request('initialize', {
-      clientInfo: CLIENT_INFO,
-      capabilities: null,
-    })
-    client.notify('initialized')
-    return await fn(client)
-  } finally {
-    await client.dispose().catch(() => {})
-  }
-}
-
 const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
 const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 /** codex uses Unix time in seconds — our own storage unit is ms */
@@ -59,7 +36,7 @@ export async function listCodexThreads(
   limit: number,
   command: string,
 ): Promise<ExternalSessionSummary[]> {
-  return withClient(cwd, command, async (client) => {
+  return withCodexClient({ cwd, command }, async (client) => {
     let res: { data?: unknown }
     try {
       res = await client.request<{ data?: unknown }>('thread/list', {
@@ -81,7 +58,7 @@ export async function readCodexHistory(
   limit: number,
   command: string,
 ): Promise<HistoryMessage[]> {
-  return withClient(cwd, command, (client) => readThreadHistory((method, params) => client.request(method, params), externalId, limit))
+  return withCodexClient({ cwd, command }, (client) => readThreadHistory((method, params) => client.request(method, params), externalId, limit))
 }
 
 /** Turns per `thread/turns/list` page. A page is bounded by its turns' size, not by the whole thread's */

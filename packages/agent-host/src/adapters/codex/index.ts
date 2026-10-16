@@ -25,6 +25,7 @@ import { codexLaunch } from './native.js'
 import { installedCliVersion } from '../../cli-version.js'
 import { INTERRUPTED_BY_TOOL, type AgentAdapter, type AgentProcess, type CreateSessionOpts, type DetectResult, type EventSink, type ProcessSource, type SessionHandle } from '../contract.js'
 import { CodexClient, type ServerRequest } from './client.js'
+import { withCodexClient } from './short-lived.js'
 import { lastCompactSummary as rolloutLastCompactSummary } from './rollout.js'
 import type { Verbosity } from './generated/Verbosity.js'
 import { listCodexThreads, readCodexHistory } from './history.js'
@@ -1849,25 +1850,14 @@ export class CodexAdapter implements AgentAdapter {
    * The original is left untouched. Codex leaves the provenance on the new thread as `forkedFromId`.
    */
   async forkConversation(externalId: string, cwd: string): Promise<string> {
-    const client = new CodexClient(
-      { onNotification: () => {}, onServerRequest: (r) => client.respond(r.id, {}), onExit: () => {} },
-      { cwd, command: whichTool('codex') ?? 'codex' },
-    )
-    try {
-      await client.request('initialize', {
-        clientInfo: CLIENT_INFO,
-        capabilities: null,
-      })
-      client.notify('initialized')
+    return withCodexClient({ cwd, command: whichTool('codex') ?? 'codex' }, async (client) => {
       // Only the new id is read: the forked history stays with Codex (#342, the same deprecation as resume's)
       const res = await client.request<Record<string, unknown>>('thread/fork', { threadId: externalId, excludeTurns: true })
       const forked = threadIdOf(res)
       // Claiming a fork happened without giving a new id leaves nothing to continue from — falling back to the original silently would just be locked again
       if (!forked) throw new Error('codex forked the conversation but returned no thread id')
       return forked
-    } finally {
-      await client.dispose()
-    }
+    })
   }
 
   /**
@@ -1877,35 +1867,29 @@ export class CodexAdapter implements AgentAdapter {
    * disappears here).
    */
   async deleteExternalConversation(externalId: string, cwd: string): Promise<void> {
-    const client = new CodexClient(
-      { onNotification: () => {}, onServerRequest: (r) => client.respond(r.id, {}), onExit: () => {} },
-      { cwd, command: whichTool('codex') ?? 'codex' },
-    )
-    try {
-      await client.request('initialize', { clientInfo: CLIENT_INFO, capabilities: null })
-      client.notify('initialized')
-      await client.request('thread/delete', { threadId: externalId })
-    } catch (e) {
-      /*
-       * **Asking to delete something that does not exist is not a failure** (dogfooding
-       * 2026-09-07: trying to delete a worktree session that had been created by mistake gave
-       * "Could not delete: no rollout found for thread id …").
-       *
-       * Measured: codex only issues the thread id at thread/start and writes the rollout file on
-       * **the first turn**. So a session that never had a single message exchanged has no file to
-       * delete, and thread/delete rejects it with -32600. Throwing that rejection as-is would stop
-       * the manager here and leave neither the session row nor the worktree deleted — the more
-       * mistaken the session, the less deletable it would become.
-       *
-       * The goal ("make sure nothing is left on the tool side") is already achieved, so we treat
-       * this as success. Any other failure is still thrown — the rule that answering "deleted"
-       * while the original still exists is the worst outcome (per the manager's own comment) still
-       * holds.
-       */
-      if (!/no rollout found/i.test((e as Error).message)) throw e
-    } finally {
-      await client.dispose()
-    }
+    await withCodexClient({ cwd, command: whichTool('codex') ?? 'codex' }, async (client) => {
+      try {
+        await client.request('thread/delete', { threadId: externalId })
+      } catch (e) {
+        /*
+         * **Asking to delete something that does not exist is not a failure** (dogfooding
+         * 2026-09-07: trying to delete a worktree session that had been created by mistake gave
+         * "Could not delete: no rollout found for thread id …").
+         *
+         * Measured: codex only issues the thread id at thread/start and writes the rollout file on
+         * **the first turn**. So a session that never had a single message exchanged has no file to
+         * delete, and thread/delete rejects it with -32600. Throwing that rejection as-is would stop
+         * the manager here and leave neither the session row nor the worktree deleted — the more
+         * mistaken the session, the less deletable it would become.
+         *
+         * The goal ("make sure nothing is left on the tool side") is already achieved, so we treat
+         * this as success. Any other failure is still thrown — the rule that answering "deleted"
+         * while the original still exists is the worst outcome (per the manager's own comment) still
+         * holds.
+         */
+        if (!/no rollout found/i.test((e as Error).message)) throw e
+      }
+    })
   }
 
   /** The last compact summary of a dead codex process (#78) — read from the rollout file, with no binary involved (rollout.ts) */

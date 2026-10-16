@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   requests: [] as string[],
   fail: null as string | null,
   disposed: 0,
+  disposeFails: false,
 }))
 
 vi.mock('./client.js', () => ({
@@ -23,12 +24,14 @@ vi.mock('./client.js', () => ({
     request(method: string): Promise<unknown> {
       state.requests.push(method)
       if (method === 'thread/delete' && state.fail) return Promise.reject(new Error(state.fail))
+      if (method === 'thread/fork') return Promise.resolve({ thread: { id: 't2' } })
       return Promise.resolve({})
     }
     notify(): void {}
     respond(): void {}
     async dispose(): Promise<void> {
       state.disposed++
+      if (state.disposeFails) throw new Error('the close failed')
     }
   },
 }))
@@ -39,6 +42,7 @@ beforeEach(() => {
   state.requests.length = 0
   state.fail = null
   state.disposed = 0
+  state.disposeFails = false
 })
 
 describe('codex deleteExternalConversation', () => {
@@ -61,5 +65,19 @@ describe('codex deleteExternalConversation', () => {
     state.fail = '{"code":-32600,"message":"no rollout found for thread id x"}'
     await new CodexAdapter().deleteExternalConversation('t1', '/tmp')
     expect(state.disposed).toBe(1)
+  })
+})
+
+/** The fork and the delete closed their client with a bare `await client.dispose()`, whose failure replaced the outcome (#428) */
+describe('a short-lived codex client that fails to close', () => {
+  it('still answers the fork it made', async () => {
+    state.disposeFails = true
+    await expect(new CodexAdapter().forkConversation('t1', '/tmp')).resolves.toBe('t2')
+    expect(state.disposed).toBe(1)
+  })
+
+  it('still reports the delete as done', async () => {
+    state.disposeFails = true
+    await expect(new CodexAdapter().deleteExternalConversation('t1', '/tmp')).resolves.toBeUndefined()
   })
 })

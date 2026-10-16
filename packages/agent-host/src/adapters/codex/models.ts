@@ -1,7 +1,6 @@
-import { CLIENT_INFO } from '@cc/protocol'
 import type { ModelOption } from '@cc/protocol'
 import { homedir } from 'node:os'
-import { CodexClient } from './client.js'
+import { withCodexClient } from './short-lived.js'
 import { isUnknownMethod, UNSUPPORTED } from './history.js'
 
 /**
@@ -47,16 +46,7 @@ export async function collectModels(
 }
 
 export async function listCodexModels(command: string): Promise<ModelOption[]> {
-  const client = new CodexClient(
-    { onNotification: () => {}, onServerRequest: (r) => client.respond(r.id, {}), onExit: () => {} },
-    { cwd: homedir(), command },
-  )
-  try {
-    await client.request('initialize', {
-      clientInfo: CLIENT_INFO,
-      capabilities: null,
-    })
-    client.notify('initialized')
+  return withCodexClient({ cwd: homedir(), command }, async (client) => {
     /*
      * **Reads all the way to the end.** The response has a nextCursor — reading only the first
      * page silently drops the later models. This is exactly the kind of bug a short-looking list
@@ -80,9 +70,7 @@ export async function listCodexModels(command: string): Promise<ModelOption[]> {
         throw isUnknownMethod(err) ? new Error(UNSUPPORTED) : err
       }
     })
-  } finally {
-    await client.dispose().catch(() => {})
-  }
+  })
 }
 
 /** Response into our own type. Split out as a pure function so a format change is caught without starting codex */
