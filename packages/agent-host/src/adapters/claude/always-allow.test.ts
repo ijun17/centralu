@@ -59,6 +59,22 @@ describe('"Always allow" for Claude file edits (#170)', () => {
     await handle.dispose()
   })
 
+  /*
+   * One rule for both adapters (#428): "always" with no matcher remembers nothing. Claude used to fall back to the
+   * command text, a rule the manager never saved (it saves only a matcher it was given) and the screen never named:
+   * live until the process restarted, then gone.
+   */
+  it('"always" with no matcher allows this call and remembers nothing', async () => {
+    const { handle, canUseTool, asks } = await session()
+    const first = canUseTool('Bash', { command: 'npm test' })
+    const ask = asks()[0] as Extract<NormalizedEvent, { type: 'approval_request' }>
+    handle.respondApproval(ask.requestId, 'always', 'session')
+    expect((await first).behavior).toBe('allow')
+    expect(await answer(canUseTool('Bash', { command: 'npm test' }))).toBe('still asking')
+    expect(asks()).toHaveLength(2)
+    await handle.dispose()
+  })
+
   it('also honors the path rules (applyRules) saved and restored after a restart', async () => {
     const { handle, canUseTool, asks } = await session()
     handle.applyRules!(['/x/a.ts'])

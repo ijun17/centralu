@@ -2,8 +2,13 @@ import type { ApprovalDetail } from '@cc/protocol'
 
 /**
  * The "always allow" rules of one session, shared by the Claude and Codex adapters. Seeded with the saved rules at
- * session start (`addAll`), and grows with each 'always' response (`add`). What each adapter adds on 'always' differs
- * and stays at its call site.
+ * session start (`addAll`), and grows with each 'always' response (`add`).
+ *
+ * **One rule for both adapters: 'always' adds the matcher it was given, and nothing without one.** The matcher is
+ * what the UI computed and showed ("Always allow in this session: …"), and the manager saves exactly that matcher, so
+ * the rule here, the saved rule and the screen are the same. Claude used to fall back to the command text when no
+ * matcher came: a rule nobody saved or named, live until the process restarted (#428). An 'always' without a matcher
+ * (a kind the UI has no matcher for) allows that one call.
  */
 export class AlwaysAllowRules {
   private readonly matchers = new Set<string>()

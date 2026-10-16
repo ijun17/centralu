@@ -45,7 +45,7 @@ import type {
   ToolDescriptor,
   UsageSnapshot,
 } from '@cc/protocol'
-import { NO_PATH } from '@cc/protocol'
+import { NO_PATH, isNewerVersion } from '@cc/protocol'
 import { dataRoot } from '../../data-dir.js'
 import { whichTool } from '../../env-path.js'
 import { launchFor, toolExecutable, type ToolLaunch } from '../../tool-launch.js'
@@ -69,6 +69,11 @@ import { withoutCrossSessionMessaging } from './cross-session.js'
 const exec = promisify(execFile)
 
 /** How long a usage probe may take to get its answer, and the wait between its asks (#726) */
+/**
+ * The first CLI whose result names every input it folded in (`user_message_uuids`): tracked notes need it (#592).
+ * Measured on the installed CLI and the pinned SDK's schema.
+ */
+const TRACKED_INPUT_SINCE = '2.1.289'
 const PROBE_USAGE_MS = 20_000
 const PROBE_USAGE_RETRY_MS = 500
 const ACCOUNT_CACHE_MS = 60_000
@@ -778,9 +783,10 @@ class ClaudeSession implements SessionHandle {
             // the installed CLI and pinned SDK schema). The single UUID only names the first input.
             // Refuse older/unknown protocols before a note is recorded, rather than guessing from
             // results: background task notifications legitimately produce results without IDs.
-            const version = typeof m.claude_code_version === 'string' ? /^(\d+)\.(\d+)\.(\d+)$/.exec(m.claude_code_version) : null
-            const supported = version && (Number(version[1]) > 2 || (Number(version[1]) === 2 &&
-              (Number(version[2]) > 1 || (Number(version[2]) === 1 && Number(version[3]) >= 289))))
+            // Compared as semver (`isNewerVersion`), so a suffixed version (`2.1.290-beta.1`) is read, not refused;
+            // anything that does not start like a version stays unknown, and unknown is refused
+            const version = typeof m.claude_code_version === 'string' ? /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?/.exec(m.claude_code_version.trim())?.[0] : undefined
+            const supported = !!version && !isNewerVersion(TRACKED_INPUT_SINCE, version)
             if (supported && Array.isArray(m.capabilities) && m.capabilities.includes('interrupt_receipt_v1') && m.capabilities.includes('interrupt_cancel_queued_v1')) {
               this.sendTracked = (text, observer) => {
                 const receipt = this.inputReceipts.create(observer)
@@ -1090,13 +1096,9 @@ class ClaudeSession implements SessionHandle {
     if (decision === 'deny') {
       p.resolve({ behavior: 'deny', message: 'Denied by user' })
     } else {
-      if (decision === 'always') {
-        // The matcher is computed by core and sent by the UI (agent-host never imports core — a boundary rule).
-        // If none is given, this falls back to the full command text.
-        const cmd = (p.input as { command?: string }).command
-        const m = matcher ?? cmd
-        if (m) this.alwaysAllow.add(m)
-      }
+      // The matcher is computed by core and sent by the UI (agent-host never imports core — a boundary rule).
+      // None given remembers nothing (always-allow.ts)
+      if (decision === 'always' && matcher) this.alwaysAllow.add(matcher)
       p.resolve({ behavior: 'allow', updatedInput: p.input })
     }
     this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
@@ -1642,20 +1644,17 @@ export class ClaudeAdapter implements AgentAdapter {
   async detect(): Promise<DetectResult> {
     const path = whichTool('claude')
     try {
-      let launch = launchFor(path ?? 'claude')
       /*
        * On Windows the version and sign-in are asked of the program sessions will start (#353): the
        * link, placed here already, so the first session does not wait for it, and npm's file is never
        * the one held. npm's placeholder is named as what it is, with the fix, rather than "not found".
        */
-      const exe = this.launch.windows ? this.launch.executable() : null
-      if (exe && /\.exe$/i.test(exe)) {
-        try {
-          launch = { command: this.launch.links.prepare(exe).path, args: [] }
-        } catch (err) {
-          if (!(err instanceof ClaudePlaceholderError)) throw err
-          return { tool: 'claude', installed: false, loggedIn: false, detail: err.message }
-        }
+      let launch: ToolLaunch
+      try {
+        launch = this.statusLaunch()
+      } catch (err) {
+        if (!(err instanceof ClaudePlaceholderError)) throw err
+        return { tool: 'claude', installed: false, loggedIn: false, detail: err.message }
       }
       const { stdout } = await exec(launch.command, [...launch.args, '--version'], { timeout: 5000 })
       // Shows which install is actually being used — reduces confusion in an environment with several versions installed.

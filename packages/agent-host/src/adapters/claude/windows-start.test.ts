@@ -257,6 +257,26 @@ describe('where a Windows Claude session starts from (#353)', () => {
     await handle.dispose()
   })
 
+  /*
+   * The gate is a version comparison, not a pattern (#428): a strict `^\d+\.\d+\.\d+$` turned tracked notes off
+   * without a word for any CLI reporting a suffixed version, newer or not.
+   */
+  it.each(['2.1.290-beta.1', '2.2.0', '3.0.0+build.7'])('offers tracked notes on a newer CLI that reports %s', async (version) => {
+    sdk.version = version
+    const { handle, cli } = await session(adapter())
+    expect(handle.sendTracked).toBeDefined()
+    cli.end()
+    await handle.dispose()
+  })
+
+  it.each(['2.1.289-beta.1', '2.0.999'])('still refuses an older one that reports %s', async (version) => {
+    sdk.version = version
+    const { handle, cli } = await session(adapter())
+    expect(handle.sendTracked).toBeUndefined()
+    cli.end()
+    await handle.dispose()
+  })
+
   it('does not offer tracked notes without the startup cancellation-receipt protocol', async () => {
     sdk.capabilities = []
     const { handle, cli } = await session(adapter())

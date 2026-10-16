@@ -540,7 +540,8 @@ turn id, even if that response follows its completion notification;
 notes during compact/review can share a later turn. Claude stamps input UUIDs and uses the result's
 `user_message_uuids` to identify consumed notes, including folded batches. Receipts complete only by matching
 UUIDs: a sign-in-race retry can reorder delivery, and a capped list never proves an omitted input was consumed. At initialization, the adapter
-requires the verified CLI protocol (2.1.289 or newer) and its `interrupt_receipt_v1` and
+requires the verified CLI protocol (2.1.289 or newer, compared as semver, so a suffixed version such as
+`2.1.290-beta.1` counts) and its `interrupt_receipt_v1` and
 `interrupt_cancel_queued_v1` capabilities before exposing `sendTracked`. Older or unknown producers keep the
 mid-turn refusal: the single `user_message_uuid` names the turn's first input and cannot confirm a folded note.
 Results without input IDs belong to synthetic turns (including background-task notifications) and neither
@@ -1208,6 +1209,9 @@ Implementation rules:
   Open cards are a `PendingCards`: every way a card goes (answered, withdrawn by the CLI, the turn stopped, the handle
   closed) goes through `take` or `release`, which removes it before it is closed, and the adapter says
   `approval_resolved` / `question_resolved` there. A Stop that did not reach the CLI is `couldNotStop`.
+- **"Always allow" adds the matcher the answer carried, and nothing without one** (`always-allow.ts`, both adapters).
+  The UI computes and shows the matcher and the manager saves exactly it, so the live rule, the saved rule and the
+  screen agree. Claude used to fall back to the command text: a rule nobody saved or named, gone at the next restart.
 - Process management (spawning the CLI, crash detection) is the adapter's own responsibility. A crash is emitted as an `error` event and the host does not die.
 - A capability is not necessarily a static declaration; it can be **decided at detect() time** (e.g. if whether approvals work depends on the Codex version, decide after detecting the version — the C4 response).
 
