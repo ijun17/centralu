@@ -898,7 +898,7 @@ gate happens in one place, the broker desk (`desk.ts`).
 
 ## 11. RPCs and events
 
-The schemas are in `packages/protocol/src/commands.ts` and `events.ts`.
+The schemas are in `packages/protocol/src/commands/methods/apps.ts` (the `apps.*` methods), `entities/apps.ts` and `events.ts`.
 
 | RPC | What |
 |---|---|

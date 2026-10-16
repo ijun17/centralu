@@ -38,8 +38,10 @@ centralu/
 │  ├─ protocol/                 # the shared language: event and command schemas (zod, its only dependency)
 │  │  └─ src/
 │  │     ├─ events.ts           # the NormalizedEvent family
-│  │     ├─ commands.ts         # request/response RPC (RpcMethods), kept whole; re-exports commands/
-│  │     ├─ commands/           # the shapes its methods carry: sessions (SessionInfo), projects, files
+│  │     ├─ commands.ts         # request/response RPC (RpcMethods), spread from commands/methods/; re-exports commands/
+│  │     ├─ commands/           # the shapes its methods carry: sessions (SessionInfo), projects, files; methods/
+│  │     │                      #   holds the methods by concept: sessions, orchestrator, projects, terminal, apps,
+│  │     │                      #   host, settings
 │  │     ├─ entities.ts         # shared types such as SessionState, ApprovalDetail, UpdateStatus: re-exports entities/
 │  │     ├─ entities/           # one module per concept: ids, sessions, grid, apps, tools, approvals, usage,
 │  │     │                      #   git, errors, updates, preferences

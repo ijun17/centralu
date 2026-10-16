@@ -49,7 +49,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 휴지통 | 지운 세션을 영영 사라지기 전 한동안 두는 곳 | `sessions.deleted_at`, `trash`; product-spec FR-22 | 보관 |
 | 가져온 세션 | 도구가 Centralu 밖에서 시작한 대화를 이어 가는 세션 | `SessionInfo.importedFrom`; [agent-host.ko.md](agent-host.ko.md) §8 | |
 | 인계(세션) | 새 후임 세션(어느 도구든)이 노트를 통해 전임의 일을 넘겨받는 것. 노트는 저장된 대화에서 모델 없이 만들거나(#78, #694부터 기본), 에이전트가 직접 쓴다. 사람은 세션 메뉴에서 인계를 시작하고, 중앙 오케스트레이터는 `handoff_session`으로 시작한다. 오케스트레이터의 인계는 `auto`가 아니면 사람의 카드를 거치고, 턴 도중에는 하지 않으며, 전임을 항상 남긴다(#694). 노트는 파일 `<data>/handoff/<project>/<session>.md`이고 후임의 첫 메시지가 그 경로를 가리킨다. 전임의 살아 있는 자식(일하는 중, 기다리는 중, 큐에 든 것, 보고나 읽기가 남은 것, 아직 서 있는 시작 카드)은 후임의 것이 되고 노트 맨 앞에 나열된다. 정리된 자식은 전임이 남을 때만 남는다(#693). 창은 전임을 기본으로 남긴다(#694 전에는 기본으로 지웠다). 전임을 지우면 정리된 자식까지 모든 자식이 후임에게 간다. 인계할 때 가거나, 전임을 나중에 지울 때 간다(#738) | `handoff` 이벤트, `packages/protocol/src/events.ts`; `packages/agent-host/src/dev-services/handoff-notes.ts`, `sessions/handoff-record.ts`, `sessions/handoff-flow.ts` | (키퍼 인계와 다르다, §1.5) |
-| 도구 바꾸기 | 세션(이름, 순서, 기록, 패널)은 그대로 두고 그 아래의 에이전트 도구만 바꾸는 것. 새 도구는 새 스레드로 시작한다. 옛 도구의 대화는 에이전트에게 넘어가지 않고, 기록만 화면에 남는다 | `agents.switchTool`, `packages/protocol/src/commands.ts`; `switchTool`, `manager.ts` | |
+| 도구 바꾸기 | 세션(이름, 순서, 기록, 패널)은 그대로 두고 그 아래의 에이전트 도구만 바꾸는 것. 새 도구는 새 스레드로 시작한다. 옛 도구의 대화는 에이전트에게 넘어가지 않고, 기록만 화면에 남는다 | `agents.switchTool`, `packages/protocol/src/commands/methods/sessions.ts`; `switchTool`, `manager.ts` | |
 | 목표 | 세션에 정한 목적. 도구가 판정한다. 살아 있는 동안만 | `SessionGoal`, `entities/sessions.ts` | |
 | 백그라운드 작업 | 에이전트가 자기 프로세스 안에 돌려 둔 일(서브에이전트, 셸). 살아 있는 동안만 | `BackgroundTask`, `entities/sessions.ts` | |
 
@@ -60,7 +60,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 턴 | 메시지 하나에서 `turn_complete`까지, 에이전트가 한 번 도는 것 | `turn_complete`, `events.ts` | |
 | 중단 | 여기서 아무도 멈추라고 하지 않았는데 마지막 턴이 끝까지 가지 못한 이유: `network`(모델의 API에 닿지 못함), `quit`(턴 도중에 Centralu가 종료되거나 컴퓨터가 재시작됨), `interrupted`(도구가 턴을 중단함), `reconnecting`(아직 일하는 중이지만 5분 넘게 다시 연결하는 중). 상태와 따로 있고, 세션이 다시 일하면 지워진다. 사람이 직접 누른 Stop은 여기에 들지 않는다(#698) | `SessionInfo.interruption`, `interruption` 이벤트; `sessions.interruption`(스토어 v53); `sessions/interruptions.ts`; [agent-host.ko.md](agent-host.ko.md) §4.6.2 | stopped, stalled |
 | 정규화된 이벤트 | 어댑터가 도구의 출력을 바꿔 놓은 것: 델타, 도구 호출과 결과, 승인, 질문, 상태 변화. UI와 스토어가 읽는 단 하나의 흐름 | `NormalizedEvent`, `packages/protocol/src/events.ts` | |
-| 메시지 | 대화에 저장된 한 줄. 세션 안에서 번호(`seq`)가 붙는다. 종류: 글, 도구 호출, 도구 결과, 승인, 표지, 이미지, 추론, 앱 화면 | `StoredMessage`, `commands.ts` | |
+| 메시지 | 대화에 저장된 한 줄. 세션 안에서 번호(`seq`)가 붙는다. 종류: 글, 도구 호출, 도구 결과, 승인, 표지, 이미지, 추론, 앱 화면 | `StoredMessage`, `commands/sessions.ts` | |
 | 도구 호출 / 도구 결과 | 에이전트가 도구를 쓴 것과 돌아온 것. `callId`로 짝을 짓고, 도구 카드 하나로 그린다 | `tool_call`, `tool_result`, `events.ts` | |
 | 서브에이전트 단계 | 에이전트가 띄운 서브에이전트(Claude의 Task)의 한 걸음. 띄운 도구 호출에 매달리고, 대화의 번호에는 들어가지 않는다 | `subagent_event`, `events.ts`; `subagent_messages`(스토어 v41) | |
 | 승인 | 에이전트가 하려는 일에 대해 기다리는 예/아니오. 한 세션에 한 번에 하나까지 | `pendingApproval`, `ApprovalDetail`, `entities/approvals.ts` | 권한 요청 |

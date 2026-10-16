@@ -375,7 +375,7 @@ MCP Apps의 화면에는 상태가 없다. 화면은 모두 도구 호출 한 �
 
 ## 11. RPC와 이벤트
 
-스키마는 `packages/protocol/src/commands.ts`와 `events.ts`에 있다.
+스키마는 `packages/protocol/src/commands/methods/apps.ts`(`apps.*` 메서드), `entities/apps.ts`, `events.ts`에 있다.
 
 | RPC | 무엇 |
 |---|---|
