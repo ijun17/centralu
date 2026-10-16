@@ -2460,9 +2460,11 @@ export class SessionManager {
         /*
          * Or the tool refused it outright (#839): an error or a usage limit, and no turn starts. The request is done with
          * all the same, and this is its turn's end: its requester is told, the turn it owned is released, the next request
-         * goes in. Left delivering, the session counted as busy for every requester and its queue never moved again.
+         * goes in. Left delivering, the session counted as busy for every requester and its queue never moved again. Only
+         * once the input was handed to the process: one the tool reports while the session wakes for it (Codex's account-wide
+         * limit, a crash) refuses nothing yet, and the input still goes in or the delivery fails on its own.
          */
-        if (!wasBusy && !inTurn(m.state) && (e.type === 'error' || e.type === 'limit_reached') && this.children.delivering.has(m.id)) {
+        if (!wasBusy && !inTurn(m.state) && (e.type === 'error' || e.type === 'limit_reached') && this.children.delivering.has(m.id) && this.queuedHandedIn.has(m.id)) {
           this.children.queuedTurnStarted(m.id)
           endedTurn = true
         }
@@ -5087,6 +5089,9 @@ export class SessionManager {
     return { state: 'queued', sessionId: target.id, sessionName: target.name, queueId: r.id, position }
   }
 
+  /** Sessions whose queued request being delivered has been handed to the process (#839): only then can the tool refuse it */
+  private readonly queuedHandedIn = new Set<string>()
+
   /** After the event that freed the session has run its course (reports, observers), the next queued request goes in */
   private scheduleDrain(sessionId: string): void {
     setTimeout(() => void this.drainQueue(sessionId), 0)
@@ -5121,9 +5126,17 @@ export class SessionManager {
     }
     // Reserved before the first await: the session is busy from here, and this is the only drain for it
     this.children.startDelivering(sessionId, r.id)
-    // The requester is told when the turn ends, as for work it did not wait on. Marked before the input goes in: a tool
-    // that refuses it at once ends the request inside `deliver`, and that end is the one reported (#839)
-    this.children.markReport(sessionId, caller.id)
+    this.queuedHandedIn.delete(sessionId)
+    /*
+     * The input goes to the process here, after any wake (#839). The requester is told when the turn ends, as for work it
+     * did not wait on: marked as the input is handed in, so a tool that refuses it at once ends the request with that
+     * end reported, and a delivery that fails before (a crash while waking) is said once, as not delivered.
+     */
+    const handIn = (h: SessionHandle, input: string) => {
+      this.children.markReport(sessionId, caller.id)
+      this.queuedHandedIn.add(sessionId)
+      h.send(input)
+    }
     const from = { sessionId: caller.id, name: labelOf(this.store, caller) }
     const project = this.store.listProjects().find((p) => p.id === m.projectId)
     const target = { id: m.projectId ?? '', name: project?.name ?? '', path: this.store.sessionCwd(m.id) ?? m.worktree?.path ?? project?.path ?? '' }
@@ -5131,14 +5144,14 @@ export class SessionManager {
     try {
       if (r.via === 'send_to_session') {
         this.children.ownTurn(sessionId, caller.id, true)
-        await this.send(sessionId, r.text, undefined, from)
+        await this.deliver(sessionId, r.text, undefined, from, false, undefined, 'inline', handIn)
       } else if (r.via === 'agent_session') {
         d = this.delegationFlow.startDelegation(`${caller.id}>${sessionId}`, caller.id, sessionId, target, true)
-        await this.deliver(sessionId, agentFrame(from.name, r.text), undefined, from, false)
+        await this.deliver(sessionId, agentFrame(from.name, r.text), undefined, from, false, undefined, 'inline', handIn)
       } else {
         d = this.delegationFlow.startDelegation(`${caller.id}>${target.id}>${sessionId}`, caller.id, sessionId, target, false)
         const callerProject = this.store.listProjects().find((p) => p.id === caller.projectId)?.name ?? 'another project'
-        await this.deliver(sessionId, askFrame(callerProject, r.text), undefined, from, false)
+        await this.deliver(sessionId, askFrame(callerProject, r.text), undefined, from, false, undefined, 'inline', handIn)
       }
       // Its turn may have started without this host seeing the step into it
       if (inTurn(this.meta.get(sessionId)?.state ?? 'idle')) this.children.queuedTurnStarted(sessionId)

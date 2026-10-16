@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
+import type { HistoryMessage } from '../adapters/contract.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
 
 /**
@@ -123,4 +124,46 @@ describe('a queued request whose turn never starts (#839)', () => {
     await new Promise((r) => setImmediate(r))
     expect(told(b, a)).toHaveLength(before + 1)
   })
+
+  /**
+   * The queued request goes in through a wake (#839 review): the person's turn ends with its process, so the drain wakes
+   * the session, and the wake's catch-up is held until the test lets it go. Returns the release.
+   */
+  const queuedThroughWake = async () => {
+    const { a, b } = await busyChild()
+    expect(await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'add the index', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
+    let release!: (h: HistoryMessage[]) => void
+    let reading = false
+    Object.assign(w.adapters.get('claude')!, { readExternalHistory: () => ((reading = true), new Promise<HistoryMessage[]>((r) => (release = r))) })
+    const before = told(b, a).length
+    handleOf(a).event({ type: 'error', sessionId: a, error: { code: 'adapter_crashed', message: 'the process exited', retryable: true } })
+    await w.until(() => reading)
+    return { a, b, before, release: () => release([]) }
+  }
+
+  it('a usage limit the tool reports during the wake, before the input goes in, does not end the request', async () => {
+    const { a, b, before, release } = await queuedThroughWake()
+    // Codex reports an account-wide limit change at any moment
+    handleOf(a).event({ type: 'limit_reached', sessionId: a })
+    expect(w.store.listQueuedRequests()).toHaveLength(1)
+    release()
+    await w.until(() => handleOf(a).sent.some((t) => t.includes('add the index')))
+    expect(told(b, a)).toHaveLength(before)
+    // The turn it started is the one reported
+    handleOf(a).answer('index added')
+    await w.until(() => told(b, a).length === before + 1)
+    expect(told(b, a).at(-1)).toContain('The assigned work finished')
+  })
+
+  it('a crash during the wake is said once, as not delivered', async () => {
+    const { a, b, before, release } = await queuedThroughWake()
+    handleOf(a).event({ type: 'error', sessionId: a, error: { code: 'adapter_crashed', message: 'the process exited again', retryable: true } })
+    release()
+    const notDelivered = () => w.store.loadMessages(b, 50).filter((m) => JSON.stringify(m.payload).includes('was not delivered'))
+    await w.until(() => notDelivered().length === 1)
+    await new Promise((r) => setImmediate(r))
+    expect(told(b, a)).toHaveLength(before)
+    expect(notDelivered()).toHaveLength(1)
+  })
+
 })
