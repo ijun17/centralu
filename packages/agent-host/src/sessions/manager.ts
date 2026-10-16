@@ -2047,7 +2047,14 @@ export class SessionManager {
       if (project && !adopt) {
         // Even if catch-up stalls, the session is already alive — do not block on it, leave it for next time
         const tCatchupFrom = Date.now()
-        added = await withTimeout(this.externals.syncImportedHistory(m, adapter), 10_000, 'History catch-up').catch(() => 0)
+        const catchingUp = this.externals.syncImportedHistory(m, adapter)
+        added = await withTimeout(catchingUp, 10_000, 'History catch-up').catch(() => {
+          // Past the bound it goes on, and what it adds lands later: the windows are told then (#839)
+          void catchingUp.then((late) => {
+            if (late > 0 && this.meta.has(sessionId)) this.emit({ type: 'history_synced', sessionId, added: late })
+          }, () => {})
+          return 0
+        })
         tCatchup = Date.now() - tCatchupFrom
         if (added > 0) this.emit({ type: 'history_synced', sessionId, added })
       }
@@ -2939,6 +2946,12 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     if (!m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
 
+    /*
+     * A wake in progress is waited out, through the same call as the send that woke it (#839): its process is registered
+     * before the catch-up, and the message that woke it goes in only after that. Going straight to the process, a second
+     * send overtook it.
+     */
+    if (this.resuming.has(sessionId) && this.handles.has(sessionId)) await this.resumeSession(sessionId)
     if (!this.handles.has(sessionId)) {
       const r = await this.resumeSession(sessionId)
       if (!r.resumed) {
