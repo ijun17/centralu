@@ -1719,15 +1719,17 @@ serveStdio(() => {
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     },
-    async (args) => {
-      try {
-        const r = await editPrivateWords(args)
-        const said = [...(r.added.length ? [`added ${r.added.map((w) => `"${w}"`).join(', ')}`] : []), ...(r.removed.length ? [`removed ${r.removed.map((w) => `"${w}"`).join(', ')}`] : [])].join('; ')
-        return wordsAnswer(r.words, `${said ? `${said[0].toUpperCase()}${said.slice(1)}` : 'Nothing changed'}. ${wordCount(r.words.length)}.`)
-      } catch (e) {
-        return failure(e)
-      }
-    },
+    // One at a time like every other write: each edit reads the list and writes it whole
+    (args) =>
+      oneAtATime(async () => {
+        try {
+          const r = await editPrivateWords(args)
+          const said = [...(r.added.length ? [`added ${r.added.map((w) => `"${w}"`).join(', ')}`] : []), ...(r.removed.length ? [`removed ${r.removed.map((w) => `"${w}"`).join(', ')}`] : [])].join('; ')
+          return wordsAnswer(r.words, `${said ? `${said[0].toUpperCase()}${said.slice(1)}` : 'Nothing changed'}. ${wordCount(r.words.length)}.`)
+        } catch (e) {
+          return failure(e)
+        }
+      }),
   )
 
   centralu.tool(
