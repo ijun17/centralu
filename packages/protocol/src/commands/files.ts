@@ -65,5 +65,5 @@ export const MessageImage = z.discriminatedUnion('ok', [
 export type MessageImage = z.infer<typeof MessageImage>
 
 /** What `fs.resolve` resolves a path for (#838) */
-export const FsResolvePurpose = z.enum(['trash', 'reveal', 'open'])
+export const FsResolvePurpose = z.enum(['trash', 'reveal', 'open', 'project'])
 export type FsResolvePurpose = z.infer<typeof FsResolvePurpose>

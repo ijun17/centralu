@@ -224,12 +224,12 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
     if (!platform || !get().projects[projectId]) return
     if (deleteFiles) {
       /*
-       * `'.'` is the project root — the host's `resolveExisting` resolves relative to the root and
-       * refuses anything outside it, so no absolute path is built and passed here. The hand that
-       * deletes lives in the shell (Rust), and what that hand does is **move to trash** (the fs
-       * port's rule: "Not a delete — that is the whole decision").
+       * The project folder has a door of its own (#838): the file tree's trash refuses the project folder, so a link in
+       * a repository (`old-build -> .`) cannot send it there. The host resolves it, so no absolute path is built here.
+       * The hand that deletes lives in the shell (Rust), and what that hand does is **move to trash** (the fs port's
+       * rule: "Not a delete — that is the whole decision").
        */
-      const r = await platform.fs.trash(projectId, '.')
+      const r = await platform.fs.trashProjectFolder(projectId)
       if (!r.supported) throw new Error(r.reason ?? 'This build cannot delete files')
     }
     await platform.projects.remove(projectId)

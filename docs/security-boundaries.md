@@ -1492,9 +1492,12 @@ resolved, the last segment is taken as it is, a link included, and the project f
 check (`assert_safe_native_entry`) allows a link only as that last segment, and the `trash` crate canonicalizes only the
 parent, so a link is trashed as the link. For **reveal** and **open in an IDE** it is what the entry is
 (`resolveTarget`): a link is followed, its target checked inside the project, and the project folder refused. Before,
-both followed the last link, so an untrusted repository's `old-build -> .` sent the project folder to the trash. A
-window from before this change sends no purpose and gets `resolveTarget`: the project folder is refused, and a link to
-something else inside the project is still trashed as its target until the window is updated. Opening in an IDE does not fall
+both followed the last link, so an untrusted repository's `old-build -> .` sent the project folder to the trash. The
+project folder itself goes to the trash through one door only, "Delete project and trash folder"
+(`trashProjectFolder`, `purpose: 'project'`, which takes no path). A window from before this change sends no purpose
+and gets `resolveTarget`: the project folder is refused, except as the literal root (`.`) its delete dialog sends, and
+a link to something else inside the project is still trashed as its target until the window is updated. The shell
+also refuses a path that ends in a separator or `.`, which its component check would otherwise drop (`link/`). Opening in an IDE does not fall
 back to a generic OS opener that could execute repository-authored content. A linked machine's project is opened
 with a VS Code Remote-SSH link instead (#82): VS Code connects over the person's ssh and, by default, asks before opening a remote file
 or folder from a link (`security.promptForRemoteFileProtocolHandling`); the hub hands it a path and never reads or runs the file itself.

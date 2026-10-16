@@ -10,6 +10,8 @@ export class FilesMock {
   watchedDirs = new Map<string, string[]>()
   /** For tests: what was sent to the trash and what was opened in the file manager (#18/#19) */
   readonly trashed: string[] = []
+  /** Projects whose whole folder went to the trash (`trashProjectFolder`, #838) */
+  readonly trashedProjects: string[] = []
   readonly revealed: string[] = []
   readonly revealedImages: string[] = []
 
@@ -32,6 +34,11 @@ export class FilesMock {
     trash: async (_projectId: string, path: string) => {
       this.memoryFs.trash(path)
       this.trashed.push(path)
+      return { supported: true }
+    },
+    trashProjectFolder: async (projectId: string) => {
+      this.memoryFs.trash('.')
+      this.trashedProjects.push(projectId)
       return { supported: true }
     },
     revealMessageImage: async (file: string) => {

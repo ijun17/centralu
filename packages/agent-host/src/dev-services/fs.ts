@@ -239,6 +239,16 @@ export async function resolveTarget(root: string, rel: string): Promise<string> 
 const PROJECT_FOLDER_ITSELF = 'That is the project folder itself, not an entry in it'
 
 /**
+ * The project folder itself, for "Delete project and trash folder" (`fs.resolve` with `purpose: 'project'`, #838): the
+ * one place the trash may be handed the whole folder. Its real path, so no link is handed to the shell.
+ */
+export async function resolveProjectFolder(root: string): Promise<string> {
+  const folder = await realpath(root)
+  if (!(await stat(folder)).isDirectory()) throw new UnsafePathError('The project folder is not a folder')
+  return folder
+}
+
+/**
  * The .gitignore decision is left to git itself.
  * Calling check-ignore per file would spawn a process per file, so this asks **once per
  * directory** instead. If git is missing or this is not a repository, everything is treated as

@@ -464,6 +464,19 @@ describe('sidebar folding (#205)', () => {
     expect([...(folds(mock) ?? [])].sort()).toEqual([a.id, c.id].sort())
   })
 
+  // The folder goes through its own door (#838 review): the file tree's trash refuses the project folder
+  it('deleting a project with its folder trashes the folder through its own door, then removes the project', async () => {
+    const mock = new MockPlatform()
+    const a = await mock.projects.add('/tmp/trash-whole')
+    await useStore.getState().attach(mock)
+
+    await useStore.getState().deleteProject(a.id, true)
+
+    expect(mock.trashedProjects).toEqual([a.id])
+    expect(mock.trashed).toEqual([])
+    expect(useStore.getState().projects[a.id]).toBeUndefined()
+  })
+
   it('a deleted project leaves no fold behind', async () => {
     const mock = new MockPlatform()
     const a = await mock.projects.add('/tmp/fold-gone')

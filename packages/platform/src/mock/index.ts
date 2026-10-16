@@ -363,6 +363,7 @@ export class MockPlatform implements Platform {
   get watchedDirs() { return this.filesMock.watchedDirs }
   set watchedDirs(value: FilesMock['watchedDirs']) { this.filesMock.watchedDirs = value }
   get trashed() { return this.filesMock.trashed }
+  get trashedProjects() { return this.filesMock.trashedProjects }
   get revealed() { return this.filesMock.revealed }
   get revealedImages() { return this.filesMock.revealedImages }
 

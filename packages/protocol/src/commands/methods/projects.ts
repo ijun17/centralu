@@ -115,9 +115,10 @@ export const projectMethods = {
       projectId: ProjectId,
       path: z.string(),
       /**
-       * What the path is for (#838). `trash`: the entry itself, a link included, never what it points at. Otherwise
-       * (reveal, open in an IDE, or absent from an older window) what it is, a link followed inside the project. Never
-       * the project folder either way.
+       * What the path is for (#838). `trash`: the entry itself, a link included, never what it points at. `project`:
+       * the project folder itself, for "Delete project and trash folder" only (the path is ignored). Otherwise (reveal,
+       * open in an IDE, or absent from an older window) what it is, a link followed inside the project. The project
+       * folder only for `project`, and for an older window's literal root (`.`), which only its delete dialog sends.
        */
       purpose: FsResolvePurpose.optional(),
     }),

@@ -494,6 +494,12 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
         await opts.nativeFiles.trash(abs)
         return { supported: true }
       },
+      trashProjectFolder: async (projectId) => {
+        if (!opts.nativeFiles) return { supported: false, reason: NO_DESKTOP_TRASH }
+        const { path: abs } = await rpc.call('fs.resolve', { projectId, path: '.', purpose: 'project' })
+        await opts.nativeFiles.trash(abs)
+        return { supported: true }
+      },
       reveal: async (projectId, path) => {
         if (!opts.nativeFiles) return { supported: false, reason: NO_DESKTOP_REVEAL }
         const { path: abs } = await rpc.call('fs.resolve', { projectId, path, purpose: 'reveal' })

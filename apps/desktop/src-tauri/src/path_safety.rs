@@ -9,6 +9,7 @@ pub enum NativePathError {
     ParentTraversal(PathBuf),
     Metadata { path: PathBuf, message: String },
     SymlinkComponent(PathBuf),
+    TrailingSeparator(PathBuf),
 }
 
 impl fmt::Display for NativePathError {
@@ -28,8 +29,22 @@ impl fmt::Display for NativePathError {
             Self::SymlinkComponent(path) => {
                 write!(f, "path component is a symbolic link: {}", path.display())
             }
+            Self::TrailingSeparator(path) => {
+                write!(f, "path ends in a separator or `.`: {}", path.display())
+            }
         }
     }
+}
+
+/// Whether the path as written ends in a separator, or in a `.` component.
+fn ends_like_a_folder(path: &Path) -> bool {
+    let text = path.as_os_str().to_string_lossy();
+    let separators: &[char] = if cfg!(windows) { &['/', '\\'] } else { &['/'] };
+    if path.parent().is_some() && text.ends_with(separators) {
+        return true;
+    }
+    let last = text.rsplit(separators).next().unwrap_or("");
+    last == "."
 }
 
 pub fn assert_safe_native_path(path: &Path) -> Result<(), NativePathError> {
@@ -47,6 +62,11 @@ pub fn assert_safe_native_entry(path: &Path) -> Result<(), NativePathError> {
 fn check_native_path(path: &Path, final_link_allowed: bool) -> Result<(), NativePathError> {
     if !path.is_absolute() {
         return Err(NativePathError::NonAbsolute(path.to_path_buf()));
+    }
+    // `components()` drops a trailing separator and a trailing `.`: `link/` and `link/.` would be checked as `link`
+    // (whose final link the entry check allows) while the OS follows the link (#838 review). Refused as written.
+    if ends_like_a_folder(path) {
+        return Err(NativePathError::TrailingSeparator(path.to_path_buf()));
     }
 
     let last = path.components().count().saturating_sub(1);
@@ -282,5 +302,26 @@ mod tests {
         let up = PathBuf::from(format!("{}{sep}..{sep}x", temp.path().display()));
         assert!(matches!(assert_safe_native_entry(&up), Err(NativePathError::ParentTraversal(_))));
         assert!(matches!(assert_safe_native_path(&link), Err(NativePathError::SymlinkComponent(_))));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_trailing_separator_or_dot_that_components_would_drop() {
+        // Given: a link to a folder, written with a trailing `/` or `/.`, which the OS follows
+        let temp = TempTree::new("trailing");
+        let dir = temp.path().join("dir");
+        fs::create_dir(&dir).expect("test directory should be created");
+        let link = temp.path().join("link");
+        std::os::unix::fs::symlink(&dir, &link).expect("test symlink should be created");
+        let slash = PathBuf::from(format!("{}/", link.display()));
+        let dot = PathBuf::from(format!("{}/.", link.display()));
+
+        // Then: both checks refuse them as written; the plain link is still the entry it was
+        for p in [&slash, &dot] {
+            assert!(matches!(assert_safe_native_entry(p), Err(NativePathError::TrailingSeparator(_))));
+            assert!(matches!(assert_safe_native_path(p), Err(NativePathError::TrailingSeparator(_))));
+        }
+        assert_eq!(assert_safe_native_entry(&link), Ok(()));
+        assert_eq!(assert_safe_native_path(&dir), Ok(()));
     }
 }

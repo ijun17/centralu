@@ -50,6 +50,11 @@ export interface FsPort {
    * A browser has no trash and cannot be given one.
    */
   trash(projectId: string, relPath: string): Promise<{ supported: boolean; reason?: string }>
+  /**
+   * Move the project's whole folder to the OS trash: "Delete project and trash folder" only (#838). The file tree's
+   * `trash` never reaches the project folder; this is the one way there, and it takes no path.
+   */
+  trashProjectFolder(projectId: string): Promise<{ supported: boolean; reason?: string }>
   /** Show it in the desktop's file manager (#19). Unsupported in a browser, with a reason */
   reveal(projectId: string, relPath: string): Promise<{ supported: boolean; reason?: string }>
   /**

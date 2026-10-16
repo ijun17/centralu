@@ -191,6 +191,18 @@ describe('surface 5 — paths passed through to the OS', () => {
     }
   })
 
+  // "Delete project and trash folder" has its own door (#838 review): the file tree's trash never reaches the folder
+  it('the project folder goes to the trash only through its own purpose, or an older window’s literal root', async () => {
+    symlinkSync('.', join(root, 'old-build'), 'dir')
+    const folder = { path: realpathSync(root) }
+    await expect(rpc('fs.resolve', { projectId, path: 'anything', purpose: 'project' })).resolves.toEqual(folder)
+    // An older window's dialog sends '.' with no purpose
+    await expect(rpc('fs.resolve', { projectId, path: '.' })).resolves.toEqual(folder)
+    // The file tree never: not with the trash purpose, and not through a link with none
+    await expect(rpc('fs.resolve', { projectId, path: '.', purpose: 'trash' })).rejects.toThrow(/project folder itself/)
+    await expect(rpc('fs.resolve', { projectId, path: 'old-build' })).rejects.toThrow(/project folder itself/)
+  })
+
   it('the trash gets a link that points outside as the link, and still refuses a folder link in the middle', async () => {
     await expect(rpc('fs.resolve', { projectId, path: 'leakfile', purpose: 'trash' })).resolves.toEqual({ path: join(realpathSync(root), 'leakfile') })
     for (const path of ['leak/secret.txt', 'nest/leak/secret.txt', 'link/../evil/secret.txt']) {
