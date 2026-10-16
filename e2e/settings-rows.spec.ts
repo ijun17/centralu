@@ -54,3 +54,26 @@ test('a rule that cannot be deleted says so and stays listed', async ({ page }) 
   await expect(page.getByTestId('rules-list')).toContainText('Bash(npm test)')
   expect(unhandled).toEqual([])
 })
+
+test('a consent revoked and granted again while Settings stay open is listed again', async ({ page }) => {
+  await page.goto('/?mock=1')
+  await expect(page.getByTestId('intro')).toBeVisible()
+  const consent = { fromProjectId: 'p1', fromName: 'alpha', toProjectId: 'p2', toName: 'beta', kind: 'delegate', decidedAt: Date.now() }
+  await page.evaluate((c) => {
+    ;(window as any).__mock.consentsList = [c]
+    ;(window as any).__store.getState().toggleSettings(true)
+  }, consent)
+  await page.getByTestId('settings-tab-permissions').click()
+  const row = page.getByTestId('project-consent-p1>p2>delegate')
+  await expect(row).toBeVisible()
+
+  await page.getByTestId('revoke-consent-p1>p2>delegate').click()
+  await expect(row).toHaveCount(0)
+  // The same pair allowed again (a card answered "always" elsewhere): the host says so
+  await page.evaluate((c) => {
+    const m = (window as any).__mock
+    m.consentsList = [{ ...c, decidedAt: Date.now() }]
+    m.emit({ type: 'project_consents_changed' })
+  }, consent)
+  await expect(row).toBeVisible()
+})

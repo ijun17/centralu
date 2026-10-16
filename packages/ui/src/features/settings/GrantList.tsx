@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { Load } from '../../app/useLoad.js'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { formatDay } from '../../app/format.js'
@@ -9,7 +9,7 @@ import { formatDay } from '../../app/format.js'
  *
  * The two lists were written twice, and the rules' copy had no error handling: a delete the host refused was an
  * unhandled rejection, and the row stayed with nothing said. Here a refused take-back says why and the row stays; one
- * taken back leaves at once and the list is read again. A row's button takes no second press while its take-back runs.
+ * taken back leaves at once and the list is read again, which then decides what is shown. A row's button takes no second press while its take-back runs.
  */
 export function GrantList<T>({
   load,
@@ -32,7 +32,13 @@ export function GrantList<T>({
   empty: string
   testIds: { list: string; empty: string; failed: string; error: string; row?: (item: T) => string }
 }) {
+  /** Taken back here and not yet gone from a re-read list: hidden at once instead of after the read */
   const [gone, setGone] = useState<string[]>([])
+  /*
+   * A list read anew is the host's word: what it holds is shown, even under a key taken back earlier (a consent revoked
+   * and granted again while Settings stays open, #850 review).
+   */
+  useEffect(() => setGone([]), [load.data])
   const [running, setRunning] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
 
@@ -60,10 +66,12 @@ export function GrantList<T>({
           {error}
         </p>
       )}
-      {load.error !== null ? (
+      {/* Beside the last list when a refresh failed, in its place when there is none */}
+      {load.error !== null && (
         <LoadFailed what={what} error={load.error} onRetry={() => void load.reload()} className="mt-2" testId={testIds.failed} />
-      ) : list === undefined ? (
-        <p className="mt-2 text-sm text-ink-faint">Loading…</p>
+      )}
+      {list === undefined ? (
+        load.error === null && <p className="mt-2 text-sm text-ink-faint">Loading…</p>
       ) : list.length === 0 ? (
         <p className="mt-2 text-sm text-ink-faint" data-testid={testIds.empty}>
           {empty}
