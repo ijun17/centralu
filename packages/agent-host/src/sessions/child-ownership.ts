@@ -1,8 +1,16 @@
 import { randomUUID } from 'node:crypto'
-import type { ApprovalDetail, SessionInfo } from '@cc/protocol'
+import type { ApprovalDetail, BackgroundTask, SessionInfo } from '@cc/protocol'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import type { AgentRunWait } from './app-agents.js'
 import { inTurn } from '../idle.js'
+
+/**
+ * How long a report held over a session's own background work (#721), here or on a linked machine (#723), waits, once
+ * that work has ended with no turn running, for the turn its ending may start. Claude starts that turn within a second
+ * of the task's end (its task-notification); a task the person stopped by hand starts none, and the report then goes
+ * out with the last answer.
+ */
+export const PAUSED_REPORT_SETTLE_MS = 60_000
 
 /**
  * A start_agent request waiting on the person's card (#673), as stored in `agent_start_requests`: everything the start
@@ -94,8 +102,11 @@ export function readPausedTasks(raw: string | null): PausedTask[] | null {
 /** A delegated turn's link (#676): who gave the turn, and the cards it was already told of */
 export type TurnOwner = { callerId: string; untilTurnEnd: boolean; told: Set<string>; turnId: string }
 
-/** A linked machine's session an orchestrator asked to hear about (#82 phase 4) */
-export type LinkedReport = { orchestratorId: string; busy: boolean }
+/**
+ * A linked machine's session an orchestrator asked to hear about (#82 phase 4). `paused`: the session's own background
+ * work a completed turn there ended with (#723); the report stays owed until a turn ends with none of it left
+ */
+export type LinkedReport = { orchestratorId: string; busy: boolean; paused?: BackgroundTask[] }
 
 /** What one owner change moves (`ChildOwnership.moveOwner`), as the session manager chose it */
 export type OwnerMove = {

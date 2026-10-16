@@ -9,7 +9,8 @@ import type { QueuedRequest } from '../dev-services/store.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
-import { ChildOwnership, type Delegation } from './child-ownership.js'
+import { ChildOwnership, PAUSED_REPORT_SETTLE_MS, type Delegation } from './child-ownership.js'
+import { LinkedReports, type LinkedEvent, type LinkedReportsHost, type ReportWork } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
 import { SessionAppsHub } from './session-apps.js'
 import { AppAccess, writeShared } from './app-access.js'
@@ -203,12 +204,8 @@ function untrustedSourceSessionNotification(sourceSessionId: string): string {
   )
 }
 
-/**
- * How long a report held over a session's own background work (#721) waits, once that work has ended with no turn
- * running, for the turn its ending may start. Claude starts that turn within a second of the task's end (its
- * task-notification); a task the person stopped by hand starts none, and the report then goes out with the last answer.
- */
-export const PAUSED_REPORT_SETTLE_MS = 60_000
+// Lives with the paused reports it times (child-ownership.ts), here and for a linked machine's (#723)
+export { PAUSED_REPORT_SETTLE_MS }
 /** The first line of a report held over the session's own background work (#721) */
 function pausedReportLine(running: readonly BackgroundTask[], stoppable: boolean): string {
   return (
@@ -216,6 +213,16 @@ function pausedReportLine(running: readonly BackgroundTask[], stoppable: boolean
     'If that work is a server or watcher it leaves running, the answer below may be its final one. ' +
     'A final report follows only if that work ends' +
     (stoppable ? '; agent_session(action="stop") on it stops that work and ends the wait.\n' : '.\n')
+  )
+}
+/**
+ * The first line of a linked machine's paused report whose link dropped before the work ended (#723): the hub cannot see
+ * that end, so the report goes out now
+ */
+function linkLostReportLine(machine: string, paused: readonly BackgroundTask[]): string {
+  return (
+    `[Centralu] The assigned work paused on its own background work (${taskList(paused)}), and the link to ${frameField(machine)} dropped before that work ended, ` +
+    'so its end will not be reported. It may still be running there; read the session once the link is back.\n'
   )
 }
 /** The first line of a paused report settled with no turn after its work ended (#721): how that work ended */
@@ -297,6 +304,8 @@ export class SessionManager {
   private readonly worktrees: WorktreeSessions
   /** The cards the host raises in a session's approval slot, and the screen's capability questions (host-cards.ts) */
   private readonly hostCards: HostCards
+  /** The orchestrator's reports from linked machines' sessions, and the work they pause on (linked-reports.ts) */
+  private readonly linkedReports: LinkedReports
   /** Holds the session's owed report over its own background work (#721); the mark itself stays as it is */
   private pauseReport(sessionId: string, running: readonly BackgroundTask[]): void {
     this.children.pauseReport(sessionId, running)
@@ -445,6 +454,7 @@ export class SessionManager {
     this.restartPolicy = new RestartPolicy(this.restartHost())
     this.worktrees = new WorktreeSessions(this.worktreeHost())
     this.hostCards = new HostCards(this.hostCardsHost())
+    this.linkedReports = new LinkedReports(this.linkedReportsHost())
     this.proposals = new OrchestratorProposals(
       this.store,
       () => this.appsHub?.rt,
@@ -1084,35 +1094,18 @@ export class SessionManager {
   }
 
   /**
-   * A linked machine's event, as the hub relays it to its windows (qualified, links.ts). The end of a turn the
-   * orchestrator is waiting on becomes its report, as `reportBackIfAwaited` does for this host's sessions: on
-   * however the turn ended (#166), once, and then the watch is cleared.
+   * A linked machine's event, as the hub relays it to its windows (qualified, links.ts). An ask_project task's turn
+   * there ends as `observeLinkedAsk` judges it; the end of a turn the orchestrator is waiting on becomes its report, as
+   * `reportBackIfAwaited` does for this host's sessions, with the same pause over the session's own background work
+   * (#723, `LinkedReports`).
    */
-  observeLinked(e: { type: string; sessionId?: unknown; state?: unknown; error?: { message?: string }; machine?: unknown }): void {
-    if (e.type === 'machine_status') return this.askProjectFlow.observeLinkLoss(e.machine)
-    if (typeof e.sessionId !== 'string') return
-    const ask = this.askProjectFlow.linkedAsks.get(e.sessionId)
-    if (ask) this.askProjectFlow.observeLinkedAsk(ask, e)
-    const wait = this.children.linkedReports.get(e.sessionId)
-    if (!wait) return
-    const busy = e.state === 'working' || e.state === 'waiting_approval'
-    if (e.type === 'message_delta' || e.type === 'tool_call' || e.type === 'approval_request' || (e.type === 'state_change' && busy)) {
-      wait.busy = true
-      return
+  observeLinked(e: LinkedEvent): void {
+    if (e.type === 'machine_status') this.askProjectFlow.observeLinkLoss(e.machine)
+    else if (typeof e.sessionId === 'string') {
+      const ask = this.askProjectFlow.linkedAsks.get(e.sessionId)
+      if (ask) this.askProjectFlow.observeLinkedAsk(ask, e)
     }
-    const ended =
-      e.type === 'turn_complete' || e.type === 'error' || e.type === 'limit_reached' || (e.type === 'state_change' && wait.busy && !busy)
-    if (!ended) return
-    this.children.dropLinkedReport(e.sessionId)
-    void this.reportLinked(e.sessionId, wait.orchestratorId, e)
-  }
-
-  private async reportLinked(sessionId: string, orchestratorId: string, ending: { type: string; error?: { message?: string } }): Promise<void> {
-    const reader = this.linkedReader
-    if (!reader || !this.meta.has(orchestratorId)) return
-    const about = reader.describe(sessionId) ?? { name: sessionId, project: '(unknown)' }
-    const preview = await reader.lastWords(sessionId, 600).catch(() => '')
-    await this.deliverReport(orchestratorId, sessionId, about.name, about.project, preview, ending as Pick<NormalizedEvent, 'type'>)
+    this.linkedReports.observe(e)
   }
 
   /**
@@ -2672,9 +2665,9 @@ export class SessionManager {
     /**
      * The session's own background work (#721): `paused`, what its turn ended with (the report is still owed, and
      * `stoppable` when the caller can stop it with agent_session); `settled`, the paused work's tasks that ended with no
-     * turn after them
+     * turn after them; `linkLost`, a linked machine's paused work whose link dropped before it ended (#723)
      */
-    work?: { paused: readonly BackgroundTask[]; stoppable: boolean } | { settled: readonly BackgroundTask[] },
+    work?: ReportWork,
   ): Promise<void> {
     /*
      * How it ended is stated on the first line (#166) — writing a failed run as "it finished" makes
@@ -2688,7 +2681,8 @@ export class SessionManager {
     const stop = this.meta.get(sessionId)?.interruption
     const cutShort = stop?.reason === 'network' || stop?.reason === 'interrupted' || stop?.reason === 'quit'
     const outcome =
-      work && 'paused' in work ? pausedReportLine(work.paused, work.stoppable)
+      work && 'linkLost' in work ? linkLostReportLine(work.linkLost, work.paused)
+      : work && 'paused' in work ? pausedReportLine(work.paused, work.stoppable)
       : work && 'settled' in work ? settledReportLine(work.settled)
       : stop?.reason === 'network' ? `[Centralu] The assigned work stopped before finishing: a network error ended its turn.\n`
       : stop?.reason === 'interrupted' ? `[Centralu] The assigned work stopped before finishing: its tool interrupted the turn.\n`
@@ -4252,6 +4246,25 @@ export class SessionManager {
       },
       untilCard: (...a) => self.untilCard(...a),
       untilHandedOver: (...a) => self.delegationFlow.untilHandedOver(...a),
+    }
+  }
+
+  /** What `LinkedReports` reaches of this manager (#428, #723): its state read when used */
+  private linkedReportsHost(): LinkedReportsHost {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- the getters below read this manager's fields when used
+    const self = this
+    return {
+      get children() {
+        return self.children
+      },
+      get linkedReader() {
+        return self.linkedReader
+      },
+      get closing() {
+        return self.disposing || self.handingOver
+      },
+      hasSession: (id) => self.meta.has(id),
+      deliverReport: (...a) => self.deliverReport(...a),
     }
   }
 
@@ -5864,6 +5877,7 @@ export class SessionManager {
     for (const id of [...this.reconnecting.keys()]) this.stopWatchingReconnect(id)
     // So do the waits of paused reports (#721): the work ends with its process, and the next start drops the mark
     this.stopSettlingPausedReports()
+    this.linkedReports.dispose()
     // So does a start waiting for memory (#686)
     this.memoryGate?.close()
     this.watchers.close()
@@ -5916,6 +5930,7 @@ export class SessionManager {
     this.mergeChecksStop.abort()
     // A paused report's wait is the next host's, which starts it again on adoption (#721)
     this.stopSettlingPausedReports()
+    this.linkedReports.dispose()
     // A start waiting for memory stays stored for the next host (#686)
     this.memoryGate?.close()
     for (const run of [...this.agentRuns.values()]) run.fail(new Error('Centralu is restarting'))

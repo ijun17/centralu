@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
-import { SessionManager } from '../sessions/manager.js'
+import { PAUSED_REPORT_SETTLE_MS, SessionManager } from '../sessions/manager.js'
 import { runOrchestratorTool } from '../sessions/orchestrator-tools.js'
 import { takeInTurns } from '../sessions/snippet.js'
 import type { LinkedSessions, OrchestratorTools } from '../adapters/contract.js'
@@ -287,5 +287,165 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
     await h.settle(0)
     expect(h.reports()).toEqual([])
     await Promise.all(cleanup.splice(0).map((c) => c()))
+  })
+
+  /*
+   * A session there that ends its turn while its own background work runs has not finished (#723, as #721 here): the
+   * orchestrator hears that the work paused, once, and its report comes at the turn end with none of that work left.
+   */
+  describe('work that waits on its own background tasks there (#723)', () => {
+    const verify = { id: 'bg-verify', kind: 'shell', description: 'pnpm verify', status: 'running' }
+    const tasks = (live: object[], ended?: object[]) => ({ type: 'background_tasks', sessionId: 'm1.w1', live, ...(ended ? { ended } : {}) })
+    /** A turn of the machine's session: it works, and ends */
+    const turn = (h: Awaited<ReturnType<typeof hub>>) => {
+      h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
+      h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+      h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'waiting_input' })
+    }
+    afterEach(async () => {
+      vi.useRealTimers()
+      await Promise.all(cleanup.splice(0).map((c) => c()))
+    })
+
+    it('is told once that the work paused, and reports the turn end with none of that work left', async () => {
+      const h = await hub()
+      await h.send(true)
+      h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
+      h.mgr.observeLinked(tasks([verify]))
+      h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+      h.mgr.observeLinked({ type: 'state_change', sessionId: 'm1.w1', state: 'waiting_input' })
+      await h.settle(1)
+      expect(h.reports()).toHaveLength(1)
+      expect(h.reports()[0]).toContain('[Centralu] The assigned work paused: its turn ended while its own background work is still running (pnpm verify).')
+      expect(h.reports()[0]).toContain('A final report follows only if that work ends.')
+      // The orchestrator has no agent_session to stop it with
+      expect(h.reports()[0]).not.toContain('agent_session')
+      // A turn that ends while the work still runs says nothing more
+      turn(h)
+      await h.settle(1)
+      expect(h.reports()).toHaveLength(1)
+      // The work ends, and the turn its ending starts finishes
+      h.mgr.observeLinked(tasks([], [{ ...verify, status: 'completed' }]))
+      turn(h)
+      await h.settle(2)
+      expect(h.reports()).toHaveLength(2)
+      expect(h.reports()[1]).toMatch(/^\[Centralu\] The assigned work finished\./)
+      // Told once: a later turn there is not the assigned work
+      turn(h)
+      await h.settle(2)
+      expect(h.reports()).toHaveLength(2)
+    })
+
+    it('knows work started before it was asked, and a timer the tool holds does not hold the report', async () => {
+      const h = await hub()
+      const loop = { id: 'schedule-wakeup-1', kind: 'other', description: 'Wakes itself at 12:00 (/loop)', status: 'running', stoppable: false, timer: true }
+      h.mgr.observeLinked(tasks([verify, loop]))
+      await h.send(true)
+      turn(h)
+      await h.settle(1)
+      expect(h.reports()[0]).toContain('still running (pnpm verify)')
+      h.mgr.observeLinked(tasks([loop], [{ ...verify, status: 'completed' }]))
+      turn(h)
+      await h.settle(2)
+      expect(h.reports()[1]).toMatch(/^\[Centralu\] The assigned work finished\./)
+    })
+
+    it('a failed turn is reported as it ended, work running or not', async () => {
+      const h = await hub()
+      await h.send(true)
+      h.mgr.observeLinked(tasks([verify]))
+      h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
+      h.mgr.observeLinked({ type: 'error', sessionId: 'm1.w1', error: { message: 'the CLI crashed' } })
+      await h.settle(1)
+      expect(h.reports()).toEqual([expect.stringMatching(/^\[Centralu\] The assigned work failed\./)])
+    })
+
+    it('work that ends with no turn after it settles the report a while later, saying how it ended', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const h = await hub()
+      const flush = async (n: number) => {
+        for (let i = 0; i < 50 && h.reports().length < n; i++) await vi.advanceTimersByTimeAsync(0)
+      }
+      await h.send(true)
+      h.mgr.observeLinked(tasks([verify]))
+      turn(h)
+      await flush(1)
+      expect(h.reports()).toHaveLength(1)
+      // The person stops it there by hand: no turn follows
+      h.mgr.observeLinked(tasks([], [{ ...verify, status: 'stopped' }]))
+      await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS - 1_000)
+      expect(h.reports()).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(2_000)
+      await flush(2)
+      expect(h.reports()[1]).toContain("[Centralu] The assigned work's background work ended (pnpm verify: stopped) and no turn followed, so the work may not have finished")
+      // Settled: the turn that comes late is not reported again
+      turn(h)
+      await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
+      expect(h.reports()).toHaveLength(2)
+    })
+
+    it('a turn that starts before the settle wait is up reports at its own end, and the wait does not', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const h = await hub()
+      const flush = async (n: number) => {
+        for (let i = 0; i < 50 && h.reports().length < n; i++) await vi.advanceTimersByTimeAsync(0)
+      }
+      await h.send(true)
+      h.mgr.observeLinked(tasks([verify]))
+      turn(h)
+      await flush(1)
+      h.mgr.observeLinked(tasks([], [{ ...verify, status: 'completed' }]))
+      h.mgr.observeLinked({ type: 'message_delta', sessionId: 'm1.w1' })
+      await vi.advanceTimersByTimeAsync(PAUSED_REPORT_SETTLE_MS * 2)
+      expect(h.reports()).toHaveLength(1)
+      h.mgr.observeLinked({ type: 'turn_complete', sessionId: 'm1.w1' })
+      await flush(2)
+      expect(h.reports()[1]).toMatch(/^\[Centralu\] The assigned work finished\./)
+    })
+
+    it('a new instruction to it ends the pause: the old work owes nothing more', async () => {
+      const h = await hub()
+      await h.send(true)
+      h.mgr.observeLinked(tasks([verify]))
+      turn(h)
+      await h.settle(1)
+      await h.send(false)
+      h.mgr.observeLinked(tasks([], [{ ...verify, status: 'completed' }]))
+      turn(h)
+      await h.settle(1)
+      expect(h.reports()).toHaveLength(1)
+    })
+
+    it('the link dropping while the work is paused settles the report with a sentence, and the next machine event is no report', async () => {
+      const h = await hub()
+      await h.send(true)
+      h.mgr.observeLinked(tasks([verify]))
+      turn(h)
+      await h.settle(1)
+      // Another machine's link says nothing about this one's work
+      h.mgr.observeLinked({ type: 'machine_status', machine: { id: 'm2', name: 'Laptop', status: 'disconnected' } })
+      await h.settle(1)
+      expect(h.reports()).toHaveLength(1)
+      h.mgr.observeLinked({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'disconnected' } })
+      await h.settle(2)
+      expect(h.reports()).toHaveLength(2)
+      expect(h.reports()[1]).toContain('[Centralu] The assigned work paused on its own background work (pnpm verify), and the link to Box dropped before that work ended')
+      expect(h.reports()[1]).toContain('read the session once the link is back')
+      h.mgr.observeLinked({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'connected' } })
+      turn(h)
+      await h.settle(2)
+      expect(h.reports()).toHaveLength(2)
+    })
+
+    it('after the link dropped, work it listed before is not taken as still running', async () => {
+      const h = await hub()
+      h.mgr.observeLinked(tasks([verify]))
+      h.mgr.observeLinked({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'disconnected' } })
+      h.mgr.observeLinked({ type: 'machine_status', machine: { id: 'm1', name: 'Box', status: 'connected' } })
+      await h.send(true)
+      turn(h)
+      await h.settle(1)
+      expect(h.reports()).toEqual([expect.stringMatching(/^\[Centralu\] The assigned work finished\./)])
+    })
   })
 })
