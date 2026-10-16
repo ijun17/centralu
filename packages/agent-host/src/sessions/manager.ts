@@ -3057,6 +3057,7 @@ export class SessionManager {
       // The message in progress ends here — kept and indexed (#66), but only once the old process is gone, so its
       // last deltas grow the open row instead of opening a second one (#213, restartSession's comment)
       this.record.closeStream(sessionId)
+      this.endTurnWithProcess(sessionId)
     }
 
     m.tool = tool
@@ -3752,6 +3753,7 @@ export class SessionManager {
        * anything later is dropped (#157). No await between here and the new handle, so the new process starts its own row.
        */
       this.record.closeStream(sessionId)
+      this.endTurnWithProcess(sessionId)
     }
     /*
      * A process was dropped and no new one took its place (#648): every window is told, as a sleep tells it. Before
@@ -3770,6 +3772,18 @@ export class SessionManager {
     })
     if (!r.resumed) dropped(r.reason ?? 'unknown')
     return r
+  }
+
+  /**
+   * A turn its process took with it (#839): a restart or a tool switch disposed the process mid-turn. Claude's dispose
+   * says nothing of the turn, and the new process is stated `idle` by the host (`settleState`), which no wait reads as
+   * a turn's end. So the turn ends here as a Stop ends it, through `onEvent`: a delegation on it settles as stopped and
+   * frees its place under the agent limit, its caller is told, the turn's owner and the queue are released. Called
+   * once the old handle is gone, so a turn end the old process did send is not repeated.
+   */
+  private endTurnWithProcess(sessionId: string): void {
+    const m = this.meta.get(sessionId)
+    if (m && inTurn(m.state)) this.onEvent({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
   }
 
   /** The persisted prefix a process was started with. It is separate from SessionInfo: a screen never needs it. */
