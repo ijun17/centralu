@@ -1630,6 +1630,11 @@ must keep reading an older host's tags: the children outlive the build that spaw
   node-pty's surface) instead of node-pty; stopping or closing them walks the process tree (`kill-tree.ts`), which
   works from anywhere. Closing a terminal takes the tree before the shell gets its hang-up: a dev server started
   from it is in a group of its own (job control), and one that ignored the hang-up used to be left running.
+- **Both** stand on `keeper/held-child.ts` (#428): the spawn's answer, the attach of their streams, the exit reported
+  once the output has ended (at most 1 s after it, `exit-after-drain.ts`), the release of the keeper's record, and a
+  detach that waits at most 2 s each for the attach and for the keeper to end the stream. A child whose streams cannot
+  be attached is ended (KILL to its group) and released once it has exited: the keeper refuses to release a running
+  child, so releasing it at once left it running with nobody to read or stop it.
 
 **What stopping an agent ends.** An agent CLI starts helpers of its own: Claude Code's LSP tool runs
 `typescript-language-server`, which runs `tsserver` (one reached 3.4 GB); MCP servers from the user's config; shells.

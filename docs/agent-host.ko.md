@@ -1172,6 +1172,10 @@ sessionId, version?}`(띄운 CLI 버전, #297, §4.6), `{kind:"terminal", id, cw
   받는다. 멈추거나 닫을 때는 프로세스 트리를 걷는다(`kill-tree.ts`). 어디서든 통한다. 터미널을 닫을 때는 셸이 끊김
   신호를 받기 전에 트리를 잡는다: 거기서 띄운 개발 서버는 자기 그룹에 있고(작업 제어), 끊김 신호를 무시하는 서버는 예전에
   계속 돌고 있었다.
+- **둘 다** `keeper/held-child.ts` 위에 선다(#428): spawn의 답, 스트림 attach, 출력이 끝난 뒤의 종료 보고(종료 뒤 최대
+  1초, `exit-after-drain.ts`), 키퍼 기록의 release, 그리고 attach와 키퍼의 스트림 종료를 각각 최대 2초 기다리는 detach.
+  스트림을 attach하지 못한 자식은 끝내고(그룹에 KILL) 끝난 뒤에 release한다. 키퍼는 돌고 있는 자식의 release를 거절하므로,
+  곧바로 release하면 읽을 사람도 멈출 사람도 없이 계속 돌았다.
 
 **에이전트를 멈추면 끝나는 것.** 에이전트 CLI는 자기 도우미를 띄운다: Claude Code의 LSP 도구는
 `typescript-language-server`를 띄우고 그것이 `tsserver`를 띄운다(하나가 3.4 GB까지 갔다). 사용자 설정의 MCP 서버, 셸도

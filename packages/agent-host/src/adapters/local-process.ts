@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events'
 import type { Readable, Writable } from 'node:stream'
 import { KILL_GRACE_MS, hasProcessGroups, killTree, stopTree, type KillOs, type LeftoverOs } from '../dev-services/kill-tree.js'
 import { killHandle, spawnGrouped, sweepExited } from '../dev-services/grouped-child.js'
+import { ExitAfterDrain } from '../exit-after-drain.js'
 import { Tail } from '../stream-text.js'
 import type { AgentProcess, AgentSpawnSpec } from './contract.js'
 
@@ -39,8 +40,6 @@ export type LocalSpawnSpec = AgentSpawnSpec & {
   signal?: AbortSignal
 }
 
-/** How long an exit waits for the last of stdout before it is reported anyway */
-const EXIT_AFTER_OUTPUT_MS = 1000
 /** The end of stderr kept for a failure message: the SDK only keeps it for processes it spawns itself */
 const STDERR_TAIL = 8 * 1024
 
@@ -50,7 +49,8 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
   readonly stderr: Readable | null
   killed = false
   private readonly tail = new Tail(STDERR_TAIL)
-  private exitReported = false
+  /** Reported once the output has all arrived, so a reader never sees the exit before the last line */
+  private readonly exitReport = new ExitAfterDrain(() => this.emit('exit', this.child.exitCode, this.child.signalCode))
 
   private constructor(
     private readonly child: ChildProcess,
@@ -130,15 +130,8 @@ export class LocalAgentProcess extends EventEmitter implements AgentProcess {
 
   private onExit(): void {
     this.sweep()
-    // Reported once the output has all arrived, so a reader never sees the exit before the last line
-    const report = () => {
-      if (this.exitReported) return
-      this.exitReported = true
-      this.emit('exit', this.child.exitCode, this.child.signalCode)
-    }
-    if (this.stdout.readableEnded) return report()
-    this.stdout.once('end', report)
-    setTimeout(report, EXIT_AFTER_OUTPUT_MS).unref()
+    if (!this.stdout.readableEnded) this.stdout.once('end', () => this.exitReport.drained())
+    this.exitReport.exited(this.stdout.readableEnded)
   }
 
   /** What the CLI left running once it has exited, however it ended */

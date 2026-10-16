@@ -8,6 +8,7 @@ import { KILL_GRACE_MS, hasProcessGroups, stopTree } from '../../dev-services/ki
 import { killHandle, spawnGrouped, sweepExited } from '../../dev-services/grouped-child.js'
 import { rotateIfLarge } from '../../log-file.js'
 import { LineTail, lineSplitter } from '../../stream-text.js'
+import { ExitAfterDrain } from '../../exit-after-drain.js'
 import { resolveCommand } from '../../tool-launch.js'
 import { StreamTransport } from './stream-transport.js'
 
@@ -45,6 +46,13 @@ export type SpawnSpec = {
    */
   serveFd3?: (fd3: Socket, note: (line: string) => void) => () => void
 }
+
+/**
+ * How long an app's exit waits for `close` (every pipe closed) before it is reported anyway. Shorter than an agent's
+ * `EXIT_AFTER_OUTPUT_MS`: a failed start waits only `RuntimeTiming.startExitWaitMs` (250 ms) for the exit, and the
+ * reason it reports needs the stderr flushed by then.
+ */
+const EXIT_AFTER_CLOSE_MS = 150
 
 export type ExitInfo = { code: number | null; signal: string | null; error: string | null }
 
@@ -109,17 +117,15 @@ export class AppProcess {
        * grandchild the app spawned inherited the pipe and is holding it open, 'close' never comes. So
        * a short cap is used instead.
        */
-      let done = false
       const finish = () => {
-        if (done) return
-        done = true
         this.log.flush()
         this.log.note(`exited (${describeExit(info)})`)
         for (const w of this.exitWaiters.splice(0)) w()
         if (!this.stopping) this.onUnexpectedExit?.(this.reason(`exited (${describeExit(info)})`))
       }
-      child.once('close', finish)
-      setTimeout(finish, 150).unref()
+      const report = new ExitAfterDrain(finish, EXIT_AFTER_CLOSE_MS)
+      child.once('close', () => report.drained())
+      report.exited()
     }
     child.once('exit', (code, signal) => settle({ code, signal, error: null }))
     child.once('error', (e) => settle({ code: null, signal: null, error: e.message }))

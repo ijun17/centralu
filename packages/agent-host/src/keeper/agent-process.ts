@@ -1,10 +1,9 @@
-import { EventEmitter } from 'node:events'
 import type { Socket } from 'node:net'
 import { constants } from 'node:os'
 import { PassThrough, Writable } from 'node:stream'
 import { Tail } from '../stream-text.js'
-import { raceTimeout, waitForEvent } from '../timing.js'
 import type { ChildExit, KeeperChildren, KeptChild } from './children-client.js'
+import { HeldChild } from './held-child.js'
 import type { AgentTag } from './tags.js'
 
 /**
@@ -38,38 +37,23 @@ const SIGNAL_NAMES = new Map<number, NodeJS.Signals>(
 
 export type SpawnSpec = { command: string; args: string[]; cwd?: string; env: Record<string, string | undefined> }
 
-/** How long an exit waits for the last of stdout before it is reported anyway */
-const EXIT_AFTER_OUTPUT_MS = 1000
-/** How long a detach waits for the keeper to end the stream */
-const DETACH_WAIT_MS = 2000
 /** The end of stderr kept for a failure message, as `local-process.ts` keeps it */
 const STDERR_TAIL = 8 * 1024
 
-export class KeeperAgentProcess extends EventEmitter {
+export class KeeperAgentProcess extends HeldChild {
   readonly stdout = new PassThrough()
   readonly stderr = new PassThrough()
   readonly stdin: Writable
-  pid: number | undefined
   exitCode: number | null = null
   signalCode: NodeJS.Signals | null = null
   killed = false
-  /** The keeper's id for this child, once the spawn has answered */
-  childId: string | null = null
   private out: Socket | null = null
   private err: Socket | null = null
-  private detached = false
-  private exitReported = false
-  private exitTimer: NodeJS.Timeout | null = null
-  private outEnded = false
   private queued: { chunk: Buffer; cb: (e?: Error | null) => void }[] = []
-  private readonly ready: Promise<void>
   private readonly tail = new Tail(STDERR_TAIL)
 
-  private constructor(
-    private keeper: KeeperChildren,
-    child: Promise<KeptChild>,
-  ) {
-    super()
+  private constructor(keeper: KeeperChildren, child: Promise<KeptChild>) {
+    super(keeper)
     this.stdin = new Writable({
       write: (chunk: Buffer, _enc, cb) => this.writeIn(chunk, cb),
       final: (cb) => this.endIn(cb),
@@ -81,7 +65,7 @@ export class KeeperAgentProcess extends EventEmitter {
      * it (the SDK reads it only when asked to). What the keeper buffered while no host was attached comes first.
      */
     this.stderr.on('data', (d: Buffer) => this.tail.push(d))
-    this.ready = this.start(child)
+    this.begin(child, ['out', 'err'])
   }
 
   /** Asks the keeper to spawn the process. Returns at once, as `spawn()` does; a failure arrives as `error`. */
@@ -99,42 +83,12 @@ export class KeeperAgentProcess extends EventEmitter {
     return new KeeperAgentProcess(keeper, Promise.resolve(child))
   }
 
-  private async start(childP: Promise<KeptChild>): Promise<void> {
-    let child: KeptChild
-    try {
-      child = await childP
-    } catch (e) {
-      return this.fail(e as Error)
-    }
-    this.childId = child.id
-    this.pid = child.pid
-    this.keeper.on('exit', this.onChildExit)
-    this.keeper.once('lost', this.onLost)
-    let out: Socket
-    let err: Socket
-    try {
-      ;[out, err] = await Promise.all([this.keeper.attach(child.id, 'out'), this.keeper.attach(child.id, 'err')])
-    } catch (e) {
-      return this.fail(e as Error)
-    }
-    if (this.detached) {
-      out.destroy()
-      err.destroy()
-      return
-    }
-    this.out = out
-    this.err = err
-    out.pipe(this.stdout)
-    err.pipe(this.stderr)
-    out.on('end', () => {
-      this.outEnded = true
-      if (this.exitCode !== null || this.signalCode !== null) this.reportExit()
-    })
-    out.on('error', () => {})
-    err.on('error', () => {})
-    const known = child.exit ?? this.keeper.exitOf(child.id)
-    if (known) this.recordExit(known)
-    for (const q of this.queued.splice(0)) out.write(q.chunk, q.cb)
+  protected attached([out, err]: Socket[]): void {
+    this.out = out!
+    this.err = err!
+    out!.pipe(this.stdout)
+    err!.pipe(this.stderr)
+    for (const q of this.queued.splice(0)) out!.write(q.chunk, q.cb)
   }
 
   /** The end of what the CLI wrote to stderr */
@@ -142,7 +96,7 @@ export class KeeperAgentProcess extends EventEmitter {
     return this.tail.text
   }
 
-  private fail(e: Error): void {
+  protected failed(e: Error): void {
     process.nextTick(() => {
       if (this.listenerCount('error') > 0) this.emit('error', e)
       else console.error('[keeper] agent process failed:', e.message)
@@ -170,33 +124,13 @@ export class KeeperAgentProcess extends EventEmitter {
       )
   }
 
-  private onChildExit = (id: string, exit: ChildExit): void => {
-    if (id === this.childId) this.recordExit(exit)
-  }
-
-  /** The keeper is gone, and with it the pipes this process wrote to: it cannot be alive. */
-  private onLost = (): void => {
-    if (this.detached || this.exitCode !== null || this.signalCode !== null) return
-    this.recordExit({ code: null, signal: constants.signals.SIGHUP })
-  }
-
-  private recordExit(exit: ChildExit): void {
+  protected override noteExit(exit: ChildExit): void {
     this.exitCode = exit.code
     this.signalCode = exit.signal !== null ? (SIGNAL_NAMES.get(exit.signal) ?? 'SIGTERM') : null
-    // Reported once the output has all arrived, so a reader never sees the exit before the last line
-    if (this.outEnded || !this.out) return this.reportExit()
-    this.exitTimer ??= setTimeout(() => this.reportExit(), EXIT_AFTER_OUTPUT_MS)
   }
 
-  private reportExit(): void {
-    if (this.exitReported || this.detached) return
-    this.exitReported = true
-    if (this.exitTimer) clearTimeout(this.exitTimer)
-    this.keeper.off('exit', this.onChildExit)
-    this.keeper.off('lost', this.onLost)
+  protected exited(): void {
     this.emit('exit', this.exitCode, this.signalCode)
-    // Its output is all here: the keeper's record has nothing more to give anyone
-    if (this.childId) void this.keeper.release(this.childId).catch(() => {})
   }
 
   /**
@@ -207,34 +141,13 @@ export class KeeperAgentProcess extends EventEmitter {
    * group once the CLI has exited (`keeper/children/mod.rs`, `Sweep`).
    */
   kill(signal: NodeJS.Signals = 'SIGTERM'): boolean {
-    if (this.detached || hostLeaving || this.exitCode !== null || this.signalCode !== null) return false
+    if (this.gone || hostLeaving) return false
     this.killed = true
-    void this.ready
-      .then(() => (this.childId ? this.keeper.signal(this.childId, signal, true) : undefined))
-      .catch((e: Error) => console.error(`[keeper] could not signal ${this.childId ?? 'an agent'}: ${e.message}`))
+    this.signalChild(signal, true, 'an agent')
     return true
   }
 
-  /**
-   * Lets go of the process and leaves it running for the next host. Output that arrives until the
-   * keeper ends the stream is still delivered to `stdout`, so whoever reads it keeps reading until
-   * this resolves.
-   */
-  async detach(): Promise<void> {
-    if (this.detached) return
-    this.detached = true
-    this.keeper.off('exit', this.onChildExit)
-    this.keeper.off('lost', this.onLost)
-    if (this.exitTimer) clearTimeout(this.exitTimer)
-    await raceTimeout(this.ready, DETACH_WAIT_MS, undefined)
-    const out = this.out
-    if (!out) return
-    if (!out.readableEnded && !out.destroyed) {
-      const ended = waitForEvent(out, ['end', 'close'], DETACH_WAIT_MS)
-      out.end()
-      await ended
-    }
-    out.destroy()
+  protected override detachedStreams(): void {
     this.err?.destroy()
   }
 }

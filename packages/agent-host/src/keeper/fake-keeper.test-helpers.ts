@@ -20,6 +20,8 @@ export class FakeKeeper {
   readonly requests: Record<string, unknown>[] = []
   /** Attach connections that half-closed (a host detaching) */
   readonly detaches: string[] = []
+  /** Refuses every attach, as a keeper whose stream could not be opened does */
+  refuseAttach = false
   private server: Server
   private controls = new Set<Socket>()
   private sockets = new Set<Socket>()
@@ -110,6 +112,7 @@ export class FakeKeeper {
         }
         const c = this.children.get(String(req.id))
         if (!c) return void s.end(`${JSON.stringify({ ok: false, error: 'no child' })}\n`)
+        if (this.refuseAttach) return void s.end(`${JSON.stringify({ ok: false, error: 'attach refused' })}\n`)
         role = 'attach'
         attached = String(req.id)
         s.write(`${JSON.stringify({ ok: true, child: this.info(attached) })}\n`)
@@ -141,6 +144,8 @@ export class FakeKeeper {
           c?.proc.stdin!.end()
           return reply({})
         case 'release':
+          // The keeper's own rule: a running child is not released (signal it first)
+          if (c && c.exit === null) return s.write(`${JSON.stringify({ rid: req.rid, ok: false, error: 'still running' })}\n`)
           this.children.delete(String(req.id))
           return reply({})
         default:
