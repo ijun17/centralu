@@ -215,6 +215,16 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     expect(await h.mgr.agentSession(parent, { sessionId: settled, action: 'status' })).toMatchObject({ ok: true, sessionId: settled })
   })
 
+  it('names a child blocked on a question as waiting on one in the note (#428)', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const child = await startChild(h, parent, 'pick a name')
+    h.mgr.rename(child, 'Name the thing')
+    h.claude.handles.get(child)!.emitEvent({ type: 'question_request', sessionId: child, requestId: 'q1', questions: [{ question: 'Which?', header: 'Pick', multiSelect: false, options: [{ label: 'A', description: '' }] }] })
+    await handOff(h, project, parent, false)
+    expect(readFileSync(handoffNotePath(project, parent), 'utf8')).toContain(`"Name the thing" — waiting on a question — handle: ${child}`)
+  })
+
   it('moves a child paused on its own background work (#721): the note says so, and the end is reported to the new session', async () => {
     const h = host()
     ;(h.claude.capabilities as { backgroundTasks: boolean }).backgroundTasks = true

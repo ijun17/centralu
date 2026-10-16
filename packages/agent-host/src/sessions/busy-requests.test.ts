@@ -68,6 +68,36 @@ describe('requests to a busy session (#677)', () => {
     expect(text).toContain('ifBusy="queue"')
   })
 
+  const QUESTION = [{ question: 'Which?', header: 'Pick', multiSelect: false, options: [{ label: 'A', description: '' }] }]
+
+  it('names an open question as one in the busy answer (#428)', async () => {
+    const { a, b } = await busyChild()
+    handleOf(a).event({ type: 'question_request', sessionId: a, requestId: 'q1', questions: QUESTION })
+    expect(await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'more work' })).toMatchObject({ state: 'busy', sessionState: 'waiting on a question' })
+  })
+
+  it('a request queued behind a card raised between turns goes in once the card is answered (#428)', async () => {
+    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    const b = await session()
+    const started = await w.mgr.startAgent(b, { task: 'first job', wait: false })
+    if (!started.ok) throw new Error(started.error)
+    const a = started.sessionId
+    handleOf(a).answer('first job done')
+    await w.mgr.agentSession(b, { sessionId: a, action: 'wait' })
+    // Between turns, the tool asks the person something (a background agent, say)
+    handleOf(a).event({ type: 'question_request', sessionId: a, requestId: 'q-bg', questions: QUESTION })
+    expect(await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'add the index', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
+    // The drain queuing schedules runs while the card stands, and holds the request
+    await new Promise((r) => setTimeout(r, 20))
+    const sent = handleOf(a).sent.length
+    expect(handleOf(a).sent.at(-1)).not.toContain('add the index')
+    // Answered: the session goes back to rest by the host's own statement, not a turn's end, and the request goes in
+    handleOf(a).event({ type: 'question_resolved', sessionId: a, requestId: 'q-bg' })
+    expect(info(a).state).toBe('waiting_input')
+    await w.until(() => handleOf(a).sent.length === sent + 1)
+    expect(handleOf(a).sent.at(-1)).toContain('add the index')
+  })
+
   it('a note joins the running turn for an auto requester only', async () => {
     const { a, b } = await busyChild('auto')
     const noted = await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'use Chromium', ifBusy: 'note' })

@@ -40,6 +40,8 @@ export type SessionTrashHost = {
   readonly delegationFlow: DelegationFlow
   readonly emit: (e: NormalizedEvent) => void
   forgetCommits: (sessionId: string) => void
+  /** The rest a card of it was raised in, if one is remembered (`CardRests`) */
+  forgetCardRest: (sessionId: string) => void
   gitTrust: (projectId: string | null) => { trusted: boolean; }
   readonly handles: Map<string, SessionHandle>
   handoffHeir: (sessionId: string) => string | null
@@ -220,6 +222,7 @@ export class SessionTrash {
     for (const [child, owner] of [...this.host.children.turnOwners]) if (owner.callerId === sessionId) this.host.children.releaseTurn(child)
     this.host.children.dropObserverNotesOf(sessionId)
     this.host.forgetCommits(sessionId)
+    this.host.forgetCardRest(sessionId)
     this.host.stopWatchingReconnect(sessionId)
     this.host.quitNotices = this.host.quitNotices.filter((n) => n.sessionId !== sessionId && n.requester !== sessionId)
     this.host.meta.delete(sessionId)

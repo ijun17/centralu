@@ -97,7 +97,7 @@ import { Store } from '../dev-services/store.js'
 import type { UpdateService } from '../updates.js'
 import type { UpdateApplyBroker } from '../update-apply.js'
 import { inTurn, sessionIdle, type SessionIdle } from '../idle.js'
-import { CardRests } from './card-rest.js'
+import { appSettingRests, CardRests } from './card-rest.js'
 import {
   gitSummary,
   gitStatusFiles,
@@ -462,6 +462,7 @@ export class SessionManager {
     } = {},
   ) {
     this.children = new ChildOwnership(store)
+    this.cardRests = new CardRests(appSettingRests(store))
     this.delegationFlow = new DelegationFlow(this.delegationHost())
     this.handoffFlow = new HandoffFlow(this.handoffFlowHost(), keeperOpts.handoffTimings)
     this.askProjectFlow = new AskProjectFlow(this.askProjectHost())
@@ -546,6 +547,8 @@ export class SessionManager {
       const requester = [marks.get(s.id), turnGivers.get(s.id), s.askedBy].find((id): id is string => !!id && id !== s.id && this.meta.has(id))
       if (requester) this.quitNotices.push({ sessionId: s.id, requester })
     }
+    // A card the previous host left standing over a kept process closes back into its rest here too (#428)
+    this.cardRests.restore((id) => !!keeperOpts.keptSessions?.has(id) && this.meta.get(id)?.state === 'waiting_approval')
     this.children.restoreReports(this.meta, keeperOpts.keptSessions)
     this.delegationFlow.restoreAgentStarts()
     this.children.restoreTurns(this.meta, keeperOpts.keptSessions)
@@ -2755,8 +2758,8 @@ export class SessionManager {
     this.trackLiveFacts(e, m)
   }
 
-  /** The rest an adapter's card raised between turns was raised in (`CardRests`, card-rest.ts) */
-  private cardRests = new CardRests()
+  /** The rest an adapter's card raised between turns was raised in (`CardRests`, card-rest.ts), written to the store */
+  private cardRests: CardRests
 
   /**
    * An adapter's card raised between turns closes back into that rest once answered (#428), as the host's own cards do
@@ -2775,9 +2778,13 @@ export class SessionManager {
    * no turn ended.
    */
   private settleState(m: SessionInfo, change: Extract<NormalizedEvent, { type: 'state_change' }>): void {
+    // The host has said what the state is: no card rest or asked-for turn of before stands over it
+    this.cardRests.forget(m.id)
     this.applyStateHint(change, m)
     this.store.upsertSession(m)
     this.emit(change)
+    // At rest by a statement, not a turn's end that `onEvent` would see: a request queued for it goes in now (#677)
+    if (!inTurn(m.state) && this.children.queued.has(m.id)) this.scheduleDrain(m.id)
   }
 
   /**
@@ -3956,6 +3963,7 @@ export class SessionManager {
     const self = this
     return {
       applyStateHint: (...a) => self.applyStateHint(...a),
+      settleState: (...a) => self.settleState(...a),
       autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
       get emit() {
         return self.emit
@@ -4066,6 +4074,7 @@ export class SessionManager {
         return self.emit
       },
       forgetCommits: (...a) => self.forgetCommits(...a),
+      forgetCardRest: (id) => self.cardRests.forget(id),
       gitTrust: (...a) => self.gitTrust(...a),
       get handles() {
         return self.handles

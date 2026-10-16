@@ -422,7 +422,12 @@ except `error` itself, and every state but `idle` may go to `idle` when the proc
   (`restAfterCard`, #673), and `limited` is one of them. Only that statement takes the edge: a `limit_reached` (Codex
   reports its limits at any time) records the limit but leaves a session on its card.
 - A card an adapter raised while no turn ran closes back into the rest it was raised in too (`CardRests`,
-  `agent-host/src/sessions/card-rest.ts`); inside a turn, answering the last card means working again.
+  `agent-host/src/sessions/card-rest.ts`); inside a turn, answering the last card means working again. The rest is
+  written to the `card_rests` app setting, so a card that stands through a host swap (the keeper keeps the process,
+  the next host adopts it) still closes into it; a start that adopts nothing drops it. Input the host delivers counts
+  as a turn asked for until the tool next moves the state, at most `ASK_WINDOW_MS`, so a tool that raises a card
+  before announcing its turn keeps that card in the turn. Closing into a rest drains a request queued for the session
+  (#677), as a turn's end does.
 - A `tool_result` moves nothing: it closes a call and starts no turn. Results also arrive after a turn ended (a
   background agent released as its process closes), and read as work they left a session working with nothing to end
   it (#428).

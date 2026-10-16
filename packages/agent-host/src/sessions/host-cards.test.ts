@@ -33,6 +33,10 @@ beforeEach(() => {
       if (e.type === 'approval_request') m.pendingApproval = { requestId: e.requestId, detail: e.detail }
       if (e.type === 'state_change') m.state = e.state
     },
+    settleState: (m, e) => {
+      m.state = e.state
+      events.push(e)
+    },
     onEvent: (e) => {
       events.push(e)
       const m = e.sessionId ? meta.get(e.sessionId) : undefined

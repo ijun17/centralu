@@ -37,6 +37,8 @@ export type HostAskAnswer = 'allow' | 'always' | 'always_project' | 'deny' | nul
  */
 export type HostCardsHost = {
   applyStateHint: (e: NormalizedEvent, m: SessionInfo) => void
+  /** A state the host states itself: applied, stored, broadcast, and a queued request drained if it is now at rest */
+  settleState: (m: SessionInfo, change: Extract<NormalizedEvent, { type: 'state_change' }>) => void
   autoBoundaryOpen: (sessionId: string, boundary?: string) => boolean
   readonly emit: (e: NormalizedEvent) => void
   readonly meta: Map<string, SessionInfo>
@@ -191,10 +193,8 @@ export class HostCards {
   restAfterCard(ask: HostAsk): void {
     const m = this.host.meta.get(ask.sessionId)
     if (!ask.restState || m?.pendingApproval?.requestId !== ask.requestId) return
-    const e = { type: 'state_change' as const, sessionId: ask.sessionId, state: ask.restState }
-    this.host.applyStateHint(e, m)
-    this.host.store.upsertSession(m)
-    this.host.emit(e)
+    // Through the manager's settleState: a request queued while the card stood goes in once it closes (#677)
+    this.host.settleState(m, { type: 'state_change', sessionId: ask.sessionId, state: ask.restState })
   }
 
   /** Screen-originated capability questions still awaiting an answer (M4 D-4) */
