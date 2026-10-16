@@ -113,6 +113,11 @@ export class ChildOwnershipRecords {
       .run(r.id, r.sessionId, r.callerSessionId, r.via, r.text, r.queuedAt, r.openedByAuto ? 1 : 0)
   }
 
+  /** A queued ask that now rests on its requester's `auto` alone (#838): the mark the delivery gate reads */
+  markQueuedOpenedByAuto(id: string): void {
+    this.db.prepare(`UPDATE queued_requests SET opened_by_auto = 1 WHERE id = ?`).run(id)
+  }
+
   markQueuedDelivering(id: string, at: number | null): void {
     this.db.prepare(`UPDATE queued_requests SET delivering_at = ? WHERE id = ?`).run(at, id)
   }

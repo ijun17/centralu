@@ -132,6 +132,7 @@ type OwnershipStore = Pick<
   | 'addQueuedRequest'
   | 'removeQueuedRequest'
   | 'markQueuedDelivering'
+  | 'markQueuedOpenedByAuto'
   | 'listReportMarks'
   | 'appSetting'
   | 'listDelegatedTurns'
@@ -376,6 +377,12 @@ export class ChildOwnership {
     this.queues.set(r.sessionId, list)
     this.store.addQueuedRequest(r)
     return list.length
+  }
+  /** Marks a queued ask as resting on its requester's `auto` alone, here and in the store (#838) */
+  markOpenedByAuto(r: QueuedRequest): void {
+    if (r.openedByAuto === true) return
+    r.openedByAuto = true
+    this.store.markQueuedOpenedByAuto(r.id)
   }
   /** A request the previous host left, read back at startup (the store already holds it) */
   adoptQueued(r: QueuedRequest): void {

@@ -989,6 +989,10 @@ export class Store {
     return this.children.markQueuedDelivering(id, at)
   }
 
+  markQueuedOpenedByAuto(id: string): void {
+    return this.children.markQueuedOpenedByAuto(id)
+  }
+
   removeQueuedRequest(id: string): void {
     return this.children.removeQueuedRequest(id)
   }

@@ -5229,6 +5229,19 @@ export class SessionManager {
       queued(r, this.meta.get(r.callerSessionId)?.projectId, this.meta.get(r.sessionId)?.projectId),
     )
     for (const r of dropped) void this.tellQueuedFailed(r.callerSessionId, r.sessionId, why)
+    /*
+     * A request kept only because its caller is `auto` now rests on `auto` alone (#838): the consent or trust it was
+     * queued under is gone. Marked, and stored, so moving the caller off `auto` drops it (`dropOpenedByAuto`) and the
+     * delivery gate refuses it, on this host or the next. Unmarked, an ask queued under a remembered consent was
+     * delivered after the person revoked the consent and the caller left `auto`.
+     */
+    for (const list of this.children.queued.values()) {
+      for (const r of list) {
+        if (r.via === 'ask_project' && kept(r.callerSessionId) && queued(r, this.meta.get(r.callerSessionId)?.projectId, this.meta.get(r.sessionId)?.projectId)) {
+          this.children.markOpenedByAuto(r)
+        }
+      }
+    }
   }
 
   /** A queued request could not be delivered (#677): said in the requester's session, as a report is */

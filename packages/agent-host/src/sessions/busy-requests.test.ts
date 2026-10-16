@@ -285,6 +285,38 @@ describe('requests to a busy session (#677)', () => {
       await w.until(() => told(asker))
     })
 
+    /*
+     * Queued under a remembered consent, then the person revoked it while the caller was auto: the row stayed, as auto's
+     * reach does, but nothing marked it as resting on auto alone, so it was delivered once the caller left auto (#838).
+     */
+    const consentedThenRevoked = async () => {
+      const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
+      w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+      const asker = await w.callerSession()
+      await w.mgr.updateSettings(asker, { permissionPreset: 'auto' })
+      await w.mgr.send(target, "the person's own work")
+      expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
+      w.mgr.revokeProjectConsent(w.caller.id, w.target.id, 'delegate')
+      // Kept, as auto's reach is
+      expect(w.store.listQueuedRequests()).toHaveLength(1)
+      return { target, asker }
+    }
+
+    it('an ask whose consent the person revoked while the caller was auto is dropped when the caller leaves auto', async () => {
+      const { target, asker } = await consentedThenRevoked()
+      await lower(asker)
+      expect(w.store.listQueuedRequests()).toEqual([])
+      await endsWithNothingDelivered(target)
+      await w.until(() => told(asker))
+    })
+
+    it('the same ask is refused at delivery when the caller is no longer auto', async () => {
+      const { target, asker } = await consentedThenRevoked()
+      lowerQuietly(asker)
+      await endsWithNothingDelivered(target)
+      await w.until(() => told(asker))
+    })
+
     it('an ask the pair has consent for still goes in', async () => {
       const { target, asker } = await autoAsk()
       w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
