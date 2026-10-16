@@ -1,5 +1,6 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { createConnection, createServer } from 'node:net'
+import { win32 } from 'node:path'
 import type { RemoteShell } from '@cc/protocol'
 import { Tail } from '../stream-text.js'
 import { endChild, runSsh, type SshRunResult } from './ssh-run.js'
@@ -762,11 +763,60 @@ function withoutClixml(s: string): string[] {
  * error in CLIXML when its output is not a console, and a Node crash ends with `Node.js v22.x`,
  * which says nothing. Those are skipped; a line that names an error wins over the last one.
  */
-export function lastLine(s: string): string {
+export function lastLine(s: string, ansi: (bytes: Buffer) => string | null = ansiText): string {
   const lines = withoutClixml(s)
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith('**') && !/^Node\.js v\d/.test(l) && !/^at /.test(l))
-  return [...lines].reverse().find((l) => /error|denied|refused|timed out|not found|cannot|could not/i.test(l)) ?? lines.at(-1) ?? ''
+  const line = [...lines].reverse().find((l) => /error|denied|refused|timed out|not found|cannot|could not/i.test(l)) ?? lines.at(-1) ?? ''
+  return unescapeBytes(line, ansi)
+}
+
+/**
+ * A line of ssh's own with the bytes it would not print put back as text (#849).
+ *
+ * ssh writes the bytes of its messages that it does not take for printable text as octal escapes (OpenSSH's `strnvis`).
+ * Windows' OpenSSH gets a system error's text in the ANSI code page, so on a Korean machine "Could not resolve hostname
+ * x: 알려진 호스트가 없습니다." reached the person as `x: \276\313\267\301…` (measured with OpenSSH_for_Windows 9.5p2).
+ * A run of escapes is read as UTF-8, or else in the ANSI code page. Only a run of bytes from 0x80 up is ssh's: it prints
+ * ASCII as it is, so `\123` in a Windows path (`C:\123\x`) stays as written.
+ */
+export function unescapeBytes(line: string, ansi: (bytes: Buffer) => string | null = ansiText): string {
+  return line.replace(/(?:\\[23][0-7]{2})+/g, (run) => {
+    const bytes = Buffer.from(run.slice(1).split('\\').map((o) => parseInt(o, 8)))
+    try {
+      return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    } catch {
+      return ansi(bytes) ?? run
+    }
+  })
+}
+
+/** TextDecoder's names for the ANSI code pages whose number is not its name (`windows-1252` and the like are) */
+const CODE_PAGE_NAMES: Record<string, string> = { '932': 'shift_jis', '936': 'gbk', '949': 'euc-kr', '950': 'big5', '65001': 'utf-8' }
+let ansiDecoder: TextDecoder | null | undefined
+
+/**
+ * Bytes in this Windows machine's ANSI code page as text; null elsewhere, or when they do not decode. The code page is
+ * read from the registry once, the first time it is needed: a failed ssh is rare, and Node has no other way to ask.
+ */
+function ansiText(bytes: Buffer): string | null {
+  if (ansiDecoder === undefined) {
+    ansiDecoder = null
+    if (process.platform !== 'win32') return null
+    try {
+      const root = process.env.SystemRoot && win32.isAbsolute(process.env.SystemRoot) ? process.env.SystemRoot : 'C:\\Windows'
+      const out = execFileSync(win32.join(root, 'System32', 'reg.exe'), ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Nls\\CodePage', '/v', 'ACP'], { encoding: 'utf8', timeout: 5000, windowsHide: true })
+      const page = /\bACP\s+REG_SZ\s+(\d+)/.exec(out)?.[1]
+      if (page) ansiDecoder = new TextDecoder(CODE_PAGE_NAMES[page] ?? `windows-${page}`, { fatal: true })
+    } catch {
+      // no registry answer, or a code page TextDecoder does not know: the escapes stay
+    }
+  }
+  try {
+    return ansiDecoder?.decode(bytes) ?? null
+  } catch {
+    return null
+  }
 }
 
 function accepts(port: number): Promise<boolean> {

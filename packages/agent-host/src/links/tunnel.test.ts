@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -613,6 +613,35 @@ describe('the remote command per shell (#82)', () => {
     expect(lastLine('some error text that was cut_x000D__x000A_')).toBe('')
     expect(lastLine('<S S="Error">Cloning into x</S></Objs>')).toBe('')
   })
+
+  /*
+   * #849: ssh writes the bytes of its messages it does not print as octal escapes, and Windows' OpenSSH has a system
+   * error's text in the ANSI code page: on a Korean machine the reason reached the person as `\276\313\267\301…`
+   * (measured with OpenSSH_for_Windows 9.5p2, code page 949).
+   */
+  it("puts ssh's octal escapes back as text, in UTF-8 or the machine's ANSI code page", () => {
+    const cp949 = (bytes: Buffer) => new TextDecoder('euc-kr', { fatal: true }).decode(bytes)
+    const measured = 'ssh: Could not resolve hostname x.invalid: \\276\\313\\267\\301\\301\\370 \\310\\243\\275\\272\\306\\256\\260\\241 \\276\\370\\275\\300\\264\\317\\264\\331.\r\n'
+    expect(lastLine(measured, cp949)).toBe('ssh: Could not resolve hostname x.invalid: 알려진 호스트가 없습니다.')
+    // UTF-8 needs no code page
+    expect(lastLine('ssh: x: \\354\\227\\260\\352\\262\\260 \\352\\261\\260\\353\\266\\200\n', () => null)).toBe('ssh: x: 연결 거부')
+    // Escapes of ASCII are never ssh's (it prints ASCII as it is): a Windows path keeps its backslashes
+    expect(lastLine('Could not open C:\\123\\101 file\n', cp949)).toBe('Could not open C:\\123\\101 file')
+    // Bytes that are text in neither stay as they came
+    expect(lastLine('error: \\377\\377\n', () => null)).toBe('error: \\377\\377')
+  })
+
+  it.runIf(process.platform === 'win32' && existsSync(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe')))(
+    "on Windows, the reason Windows' own ssh gives has no octal escapes left in it",
+    () => {
+      const ssh = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'OpenSSH', 'ssh.exe')
+      const run = spawnSync(ssh, ['-F', 'none', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', 'cc-no-such-host.invalid', 'true'], { encoding: 'utf8', windowsHide: true, timeout: 30_000 })
+      const why = lastLine(run.stderr)
+      expect(why).toMatch(/cc-no-such-host\.invalid/)
+      expect(why).not.toMatch(/\\[0-7]{3}/)
+    },
+    40_000 * SLOW,
+  )
 })
 
 // The line says the running host can prove it holds the token (#838); only `true` counts, anything else is absent
