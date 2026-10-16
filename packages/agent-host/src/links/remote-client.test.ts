@@ -202,6 +202,25 @@ describe('a host asked to prove it holds the token (#838)', () => {
     expect(seen.hellos).toHaveLength(1)
   })
 
+  // A machine rolled back to a build from before #838 closes on `prove` (4001): a refusal, so the line is read again
+  it('a host that refuses the prove is reported as a refusal, not retried', async () => {
+    const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+    await new Promise<void>((r) => wss.once('listening', () => r()))
+    cleanups.push(() => new Promise<void>((r) => wss.close(() => r())))
+    let opened = 0
+    wss.on('connection', (ws) => {
+      opened++
+      ws.on('message', () => ws.close(4001, 'not a hello'))
+    })
+    const { c, seen } = client((wss.address() as { port: number }).port, { proveHost: true })
+    c.connect()
+    await until(() => seen.refusals.length === 1)
+    await new Promise((r) => setTimeout(r, 300))
+    expect(seen.refusals).toEqual([expect.objectContaining({ code: 4001 })])
+    expect(opened).toBe(1)
+    expect(seen.downs).toEqual([])
+  })
+
   it('a program on the port that cannot prove it never receives the token', async () => {
     for (const answer of [
       () => undefined,

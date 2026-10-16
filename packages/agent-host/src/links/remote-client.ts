@@ -139,8 +139,14 @@ export class RemoteClient {
     ws.on('close', (code, reason) => {
       if (this.ws !== ws) return
       if (this.proving !== null) {
-        // Closed before it proved anything: not this machine's host, or one that cannot prove (it said it could)
         this.proving = null
+        /*
+         * Refused the `prove` (4001 "not a hello", or 4002): a host that cannot prove, such as a machine rolled back to a
+         * build from before #838 whose line still said it could. Reported as a refusal, so the link reads the connection
+         * line again rather than retrying the same prove for as long as the hub runs.
+         */
+        if (code === 4001 || code === 4002) return this.onClose(ws, code, Buffer.from("the host did not answer a proof of its token"))
+        // Closed otherwise before it proved anything: not this machine's host, or one that went away
         return this.lost(ws, `the forward's port closed before the host proved it holds the token (${code})`)
       }
       this.onClose(ws, code, reason)

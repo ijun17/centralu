@@ -589,15 +589,72 @@ export function mismatchServerVersion(message) {
 }
 
 /**
+ * Whether the installed host answers a `prove` (#838): a bundle says so in `bundle-info.json` (`hostProof`), a host run
+ * from source has `transport/host-proof.ts`. The connection line's `proof` is this, not a live answer: a program another
+ * account put on the port could otherwise answer the probe so as to make the line say no, and the hub send the token.
+ */
+export function hostProvesOf(entry) {
+  try {
+    return JSON.parse(readFileSync(join(dirname(entry), 'bundle-info.json'), 'utf8')).hostProof === 1
+  } catch {
+    // not a bundle; try the source below
+  }
+  return existsSync(join(dirname(entry), 'transport', 'host-proof.ts'))
+}
+
+/** The answer a host holding `token` gives to a `prove` of `nonce` (the host's `hostProof`) */
+function proofOf(token, nonce) {
+  return createHmac('sha256', token).update(`centralu host proof v1\0${nonce}`).digest('base64url')
+}
+
+/**
+ * Opens a socket to the host and says hello with the token, the way `probeHost` and `askHostToStop` do. With `prove`
+ * (the installed host can, `hostProvesOf`), the host first proves it holds the token (#838), and the token goes out only
+ * then: whatever else listens on the port (another account's program, while the host is down) never sees it.
+ * `on.hello(ws)` runs after the hello is sent; `on.unproven()` when the proof did not come.
+ */
+function helloSocket({ port, token, protocolVersion, prove, WebSocketImpl, on }) {
+  const ws = new WebSocketImpl(`ws://127.0.0.1:${port}`)
+  const nonce = prove ? randomBytes(24).toString('base64url') : null
+  // Proving only once the socket is open: a port where nothing listens is gone, not unproven
+  let proving = false
+  const hello = () => ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: protocolVersion ?? 0 }))
+  ws.onopen = () => {
+    if (!prove) return hello()
+    proving = true
+    ws.send(JSON.stringify({ kind: 'prove', nonce }))
+  }
+  ws.onmessage = (ev) => {
+    let m
+    try {
+      m = JSON.parse(String(ev.data))
+    } catch {
+      m = null
+    }
+    if (proving) {
+      proving = false
+      if (m?.kind === 'proof' && m.nonce === nonce && m.mac === proofOf(token, nonce)) return hello()
+      return on.unproven()
+    }
+    if (m) on.message(m)
+  }
+  ws.onerror = () => (proving ? on.unproven() : on.gone())
+  ws.onclose = () => (proving ? on.unproven() : on.gone())
+  return ws
+}
+
+/**
  * Whether a host that holds this token answers on the port: a real hello, not a TCP connect, so a
  * stranger's program on the same port does not count, and the answer carries the running host's
  * own protocol and version (which differ from the installed package's after an `npm i -g` the
- * host was not restarted for).
+ * host was not restarted for). With `prove` the host proves it holds the token first (#838).
  *
- * `{ running, protocolVersion?, version? }`. Node 22.4+ has a global WebSocket; on an older 22
- * this falls back to a TCP connect and reports only `running`.
+ * `{ running, protocolVersion?, version?, unproven? }`. `unproven`: something answered on the port but did not prove
+ * it holds the token, so it was not sent: another program, or a host from before #838 still running after an update
+ * (`heldHere` tells those apart by the data folder's lock). Node 22.4+ has a global WebSocket; on an older 22 this falls
+ * back to a TCP connect and reports only `running`.
  */
-export function probeHost({ port, token, protocolVersion, timeoutMs = 2000, WebSocketImpl = globalThis.WebSocket }) {
+export function probeHost({ port, token, protocolVersion, prove = false, timeoutMs = 2000, WebSocketImpl = globalThis.WebSocket }) {
   if (typeof WebSocketImpl !== 'function') return tcpProbe(port, timeoutMs)
   return new Promise((resolve) => {
     let ws = null
@@ -615,78 +672,41 @@ export function probeHost({ port, token, protocolVersion, timeoutMs = 2000, WebS
     }
     const timer = setTimeout(() => done({ running: false }), timeoutMs)
     try {
-      ws = new WebSocketImpl(`ws://127.0.0.1:${port}`)
+      ws = helloSocket({
+        port, token, protocolVersion, prove, WebSocketImpl,
+        on: {
+          unproven: () => done({ running: false, unproven: true }),
+          gone: () => done({ running: false }),
+          message: (m) => {
+            if (m.kind === 'hello_ok') {
+              done({
+                running: true,
+                protocolVersion: Number.isInteger(m.protocolVersion) ? m.protocolVersion : undefined,
+                version: typeof m.build?.version === 'string' ? m.build.version : undefined,
+              })
+            } else if (m.kind === 'res' && m.ok === false && m.error?.code === 'version_mismatch') {
+              // The token was right (it is checked first), so this is our host, on another protocol
+              done({ running: true, protocolVersion: mismatchServerVersion(m.error.message) ?? undefined })
+            }
+          },
+        },
+      })
     } catch {
       done({ running: false })
-      return
     }
-    ws.onopen = () => ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: protocolVersion ?? 0 }))
-    ws.onmessage = (ev) => {
-      let m
-      try {
-        m = JSON.parse(String(ev.data))
-      } catch {
-        return
-      }
-      if (m?.kind === 'hello_ok') {
-        done({
-          running: true,
-          protocolVersion: Number.isInteger(m.protocolVersion) ? m.protocolVersion : undefined,
-          version: typeof m.build?.version === 'string' ? m.build.version : undefined,
-        })
-      } else if (m?.kind === 'res' && m.ok === false && m.error?.code === 'version_mismatch') {
-        // The token was right (it is checked first), so this is our host, on another protocol
-        done({ running: true, protocolVersion: mismatchServerVersion(m.error.message) ?? undefined })
-      }
-    }
-    ws.onerror = () => done({ running: false })
-    ws.onclose = () => done({ running: false })
   })
 }
 
 /**
- * Whether the host on the port answers a `prove` with the HMAC of a fresh nonce under the token (#838): only then does
- * the connection line say `proof`, and the hub ask for it before sending the token. A host from before it closes the
- * socket ("not a hello"), which reads as false, and the hub sends hello as it always did.
+ * A probe that did not prove the token, while this data folder's host is alive (`host.lock`): a host from before #838
+ * still running after an update. It is running, and is not sent the token; a hub asking it for a proof is refused
+ * until it restarts. Without a live lock holder, what answered is not ours.
  */
-export function proveHost({ port, token, timeoutMs = 2000, WebSocketImpl = globalThis.WebSocket }) {
-  if (typeof WebSocketImpl !== 'function') return Promise.resolve(false)
-  const nonce = randomBytes(24).toString('base64url')
-  const want = createHmac('sha256', token).update(`centralu host proof v1\0${nonce}`).digest('base64url')
-  return new Promise((resolve) => {
-    let ws = null
-    let settled = false
-    const done = (result) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      try {
-        ws?.close()
-      } catch {
-        // already closed
-      }
-      resolve(result)
-    }
-    const timer = setTimeout(() => done(false), timeoutMs)
-    try {
-      ws = new WebSocketImpl(`ws://127.0.0.1:${port}`)
-    } catch {
-      done(false)
-      return
-    }
-    ws.onopen = () => ws.send(JSON.stringify({ kind: 'prove', nonce }))
-    ws.onmessage = (ev) => {
-      let m
-      try {
-        m = JSON.parse(String(ev.data))
-      } catch {
-        return done(false)
-      }
-      done(m?.kind === 'proof' && m.nonce === nonce && m.mac === want)
-    }
-    ws.onerror = () => done(false)
-    ws.onclose = () => done(false)
-  })
+export function heldHere(probe, dataDir) {
+  if (probe.running) return true
+  if (!probe.unproven) return false
+  const pid = lockHolderPid(dataDir)
+  return !!pid && isAlive(pid)
 }
 
 function tcpProbe(port, timeoutMs) {
@@ -737,10 +757,11 @@ function say(line) {
 async function describe({ env, dataDir, state, entry, version }) {
   const port = state.port ?? DEFAULT_SERVE_PORT
   const installed = protocolVersionOf(entry)
-  const probe = await probeHost({ port, token: state.token, protocolVersion: installed })
+  // Whether the installed host proves it holds the token (#838): asked of the running one before its hello, and said in the line
+  const proof = hostProvesOf(entry)
+  const probe = await probeHost({ port, token: state.token, protocolVersion: installed, prove: proof })
   const protocolVersion = (probe.running ? probe.protocolVersion : undefined) ?? installed
   if (protocolVersion === null) return null
-  const proof = probe.running ? await proveHost({ port, token: state.token }) : false
   return {
     proof,
     port,
@@ -748,7 +769,7 @@ async function describe({ env, dataDir, state, entry, version }) {
     version: (probe.running ? probe.version : undefined) ?? version,
     protocolVersion,
     dataDir,
-    hostRunning: probe.running,
+    hostRunning: heldHere(probe, dataDir),
     install: installInfo(dataDir, env),
     autostart: autostartInfo(dataDir, process.platform, env),
   }
@@ -811,8 +832,8 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
   // A serve that is already up answers on the port it recorded; say so before starting a host that
   // would only fail on the data folder's lock with a less specific message.
   const recorded = state.port ?? DEFAULT_SERVE_PORT
-  const existing = await probeHost({ port: recorded, token: state.token, protocolVersion })
-  if (existing.running) {
+  const existing = await probeHost({ port: recorded, token: state.token, protocolVersion, prove: hostProvesOf(entry) })
+  if (heldHere(existing, dataDir)) {
     const pid = lockHolderPid(dataDir)
     say(`centralu serve is already running for ${dataDir} on 127.0.0.1:${recorded}${pid ? ` (pid ${pid})` : ''}. Not starting a second one.`)
     return 1
@@ -1266,7 +1287,7 @@ export async function runDetachedChild({ spec, ...opts }) {
  * `{ ok: true }` once the host took it, `{ ok: false, message, protocolVersion? }` otherwise; the
  * last names the host's protocol when the hello was refused for it, so the caller can ask again.
  */
-export function askHostToStop({ port, token, protocolVersion, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
+export function askHostToStop({ port, token, protocolVersion, prove = false, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
   if (typeof WebSocketImpl !== 'function') return Promise.resolve({ ok: false, message: `Node ${process.version} has no WebSocket to ask with` })
   return new Promise((resolve) => {
     let ws = null
@@ -1284,28 +1305,25 @@ export function askHostToStop({ port, token, protocolVersion, timeoutMs = 5000, 
     }
     const timer = setTimeout(() => done({ ok: false, message: 'no answer in time' }), timeoutMs)
     try {
-      ws = new WebSocketImpl(`ws://127.0.0.1:${port}`)
+      // With `prove`, the token goes out only to a host that proved it holds it (#838)
+      ws = helloSocket({
+        port, token, protocolVersion, prove, WebSocketImpl,
+        on: {
+          unproven: () => done({ ok: false, message: 'what answers on the port did not prove it holds the token' }),
+          gone: () => done({ ok: false, message: 'the connection closed' }),
+          message: (m) => {
+            if (m.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'stop', method: 'host.stop', params: {} }))
+            else if (m.kind === 'res' && m.id === 'stop') done(m.ok ? { ok: true } : { ok: false, message: m.error?.message ?? 'refused' })
+            else if (m.kind === 'res' && m.ok === false) {
+              const pv = m.error?.code === 'version_mismatch' ? (m.error?.data?.protocolVersion ?? mismatchServerVersion(m.error.message)) : null
+              done({ ok: false, message: m.error?.message ?? 'refused', ...(Number.isInteger(pv) ? { protocolVersion: pv } : {}) })
+            }
+          },
+        },
+      })
     } catch (e) {
       done({ ok: false, message: e.message })
-      return
     }
-    ws.onopen = () => ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: protocolVersion ?? 0 }))
-    ws.onmessage = (ev) => {
-      let m
-      try {
-        m = JSON.parse(String(ev.data))
-      } catch {
-        return
-      }
-      if (m?.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'stop', method: 'host.stop', params: {} }))
-      else if (m?.kind === 'res' && m.id === 'stop') done(m.ok ? { ok: true } : { ok: false, message: m.error?.message ?? 'refused' })
-      else if (m?.kind === 'res' && m.ok === false) {
-        const pv = m.error?.code === 'version_mismatch' ? (m.error?.data?.protocolVersion ?? mismatchServerVersion(m.error.message)) : null
-        done({ ok: false, message: m.error?.message ?? 'refused', ...(Number.isInteger(pv) ? { protocolVersion: pv } : {}) })
-      }
-    }
-    ws.onerror = () => done({ ok: false, message: 'could not connect' })
-    ws.onclose = () => done({ ok: false, message: 'the connection closed' })
   })
 }
 
@@ -1354,9 +1372,10 @@ export async function runStop({
   if (!state) return report({ ok: true, wasRunning: false, message: `no centralu serve has run for ${dataDir}` })
   const port = state.port ?? DEFAULT_SERVE_PORT
   const installed = protocolVersionOf(entry) ?? 0
-  const probe = () => probeHost({ port, token: state.token, protocolVersion: installed })
+  const prove = hostProvesOf(entry)
+  const probe = () => probeHost({ port, token: state.token, protocolVersion: installed, prove })
   const first = await probe()
-  if (!first.running) return report({ ok: true, wasRunning: false, message: `centralu serve is not running for ${dataDir}` })
+  if (!heldHere(first, dataDir)) return report({ ok: true, wasRunning: false, message: `centralu serve is not running for ${dataDir}` })
 
   const hostPid = lockHolderPid(dataDir)
   const launcher = readServePid(dataDir)
@@ -1364,8 +1383,8 @@ export async function runStop({
   const launcherPid = launcher && hostPid && launcher.hostPid === hostPid ? launcher.pid : null
   const down = async () => !(await probe()).running && !(hostPid && isAlive(hostPid))
 
-  let asked = await askHostToStop({ port, token: state.token, protocolVersion: first.protocolVersion ?? installed })
-  if (!asked.ok && asked.protocolVersion !== undefined) asked = await askHostToStop({ port, token: state.token, protocolVersion: asked.protocolVersion })
+  let asked = await askHostToStop({ port, token: state.token, protocolVersion: first.protocolVersion ?? installed, prove })
+  if (!asked.ok && asked.protocolVersion !== undefined) asked = await askHostToStop({ port, token: state.token, protocolVersion: asked.protocolVersion, prove })
   let how = 'asked'
   let stopped = asked.ok && (await waitUntil(down, timeoutMs))
   let note = asked.ok ? null : `the host did not take the request to stop (${asked.message})`

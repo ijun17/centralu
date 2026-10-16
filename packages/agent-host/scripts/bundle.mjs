@@ -255,6 +255,8 @@ writeFileSync(
     {
       commit: buildId(),
       protocolVersion: protocolVersion(),
+      // The host answers a `prove` before hello (#838): `centralu serve` reads this to say `proof` in the connection line
+      hostProof: 1,
       builtAt: new Date().toISOString(),
       runtime: 'system-node',
       platform: process.platform,
