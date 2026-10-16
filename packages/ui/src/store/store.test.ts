@@ -1112,7 +1112,7 @@ describe('the cursor for a session where an event arrives before history (#79)',
     mock.sessions.set('a79', sessionInfo('a79'))
     await useStore.getState().attach(mock)
     // Measures the next render key and creates a session 200 lines longer than that — the key lands inside the middle of the stored numbers
-    mock.emit({ sessionId: 'a79-probe', type: 'tool_call', callId: 'p', summary: { tool: 'Read', title: 'probe', readOnly: true } } as never)
+    mock.emit({ sessionId: 'a79-probe', type: 'tool_call', callId: 'p', summary: { tool: 'Read', title: 'probe' } } as never)
     const n = useStore.getState().chat['a79-probe']![0]!.seq + over
     mock.messages.set('a79', rows('a79', n))
 
@@ -1176,9 +1176,9 @@ describe('the cursor for a session where an event arrives before history (#79)',
     mock.emit({ type: 'session_created', sessionId: 'app79', session: info } as never)
     const fromApp = { appId: 'notes', projectId: 'p1', name: 'Notes' }
     mock.emit({ type: 'user_message', sessionId: 'app79', seq: 0, text: 'Make a note', fromApp } as never)
-    mock.emit({ type: 'tool_call', sessionId: 'app79', callId: 'r', summary: { tool: 'Read', title: 'Read note.md', readOnly: true } } as never)
+    mock.emit({ type: 'tool_call', sessionId: 'app79', callId: 'r', summary: { tool: 'Read', title: 'Read note.md' } } as never)
     mock.emit({ type: 'tool_result', sessionId: 'app79', callId: 'r', ok: true, summary: 'empty' } as never)
-    mock.emit({ type: 'tool_call', sessionId: 'app79', callId: 'w', summary: { tool: 'Write', title: 'Write note.md', readOnly: false } } as never)
+    mock.emit({ type: 'tool_call', sessionId: 'app79', callId: 'w', summary: { tool: 'Write', title: 'Write note.md' } } as never)
     mock.emit({ type: 'tool_result', sessionId: 'app79', callId: 'w', ok: true, summary: 'written' } as never)
     mock.emit(delta('app79', 'Done.'))
     mock.emit({ type: 'turn_complete', sessionId: 'app79' } as never)
@@ -1231,7 +1231,7 @@ describe('the cursor for a session where an event arrives before history (#79)',
     mock.sessions.set('q79', sessionInfo('q79'))
     mock.messages.set('q79', [
       ...rows('q79', 8),
-      { sessionId: 'q79', seq: 9, role: 'system', kind: 'tool_call', payload: { callId: 'c9', summary: { tool: 'Read', title: 'T9', readOnly: true } }, ts: 9 },
+      { sessionId: 'q79', seq: 9, role: 'system', kind: 'tool_call', payload: { callId: 'c9', summary: { tool: 'Read', title: 'T9' } }, ts: 9 },
       { sessionId: 'q79', seq: 10, role: 'system', kind: 'marker', payload: { type: 'compaction', sessionId: 'q79', failed: false }, ts: 10 },
     ])
     await useStore.getState().attach(mock)
@@ -1241,7 +1241,7 @@ describe('the cursor for a session where an event arrives before history (#79)',
     // An event for the same row, held in the pen, was replayed later than the page
     for (const e of [
       { type: 'user_message', sessionId: 'q79', seq: 8, text: 'L8' },
-      { type: 'tool_call', sessionId: 'q79', seq: 9, callId: 'c9', summary: { tool: 'Read', title: 'T9', readOnly: true } },
+      { type: 'tool_call', sessionId: 'q79', seq: 9, callId: 'c9', summary: { tool: 'Read', title: 'T9' } },
       { type: 'compaction', sessionId: 'q79', seq: 10, failed: false },
     ]) useStore.getState().dispatchEvent(e as NormalizedEvent)
 
@@ -1335,7 +1335,7 @@ describe('the cursor for a session where an event arrives before history (#79)',
 
     // 60 tool calls follow while it is being viewed — all 50 rows left when leaving are live rows
     for (let i = 121; i <= 180; i++) {
-      mock.emit({ sessionId: 't79', type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `L${i}`, readOnly: true } } as never)
+      mock.emit({ sessionId: 't79', type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `L${i}` } } as never)
     }
     useStore.getState().focusSession('t79-other')
     expect(useStore.getState().chat['t79']).toHaveLength(50)
@@ -1354,7 +1354,7 @@ describe('the cursor for a session where an event arrives before history (#79)',
 
     // A worker nobody opens — the trim on losing focus never reaches it
     for (let i = 1; i <= 300; i++) {
-      mock.emit({ sessionId: 'off-bg', type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `L${i}`, readOnly: true } } as never)
+      mock.emit({ sessionId: 'off-bg', type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `L${i}` } } as never)
     }
     expect(useStore.getState().chat['off-bg']!.length).toBeLessThanOrEqual(100)
 
@@ -1371,7 +1371,7 @@ describe('the cursor for a session where an event arrives before history (#79)',
     await vi.waitFor(() => expect(useStore.getState().history['off-focused']).toBeDefined())
 
     for (let i = 1; i <= 300; i++) {
-      mock.emit({ sessionId: 'off-focused', type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `L${i}`, readOnly: true } } as never)
+      mock.emit({ sessionId: 'off-focused', type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `L${i}` } } as never)
     }
     expect(useStore.getState().chat['off-focused']).toHaveLength(300)
   })
@@ -1402,7 +1402,7 @@ describe('the cursor for a session where an event arrives before history (#79)',
 
     // Meanwhile the session keeps working off screen, past the point where it would be cut
     for (let i = 131; i <= 190; i++) {
-      mock.emit({ sessionId: 'off-paging', type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `L${i}`, readOnly: true } } as never)
+      mock.emit({ sessionId: 'off-paging', type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `L${i}` } } as never)
     }
     release()
     await paging
@@ -1477,7 +1477,7 @@ describe('the cursor for a session where an event arrives before history (#79)',
 
       // Looking elsewhere does not take focus: the session stays focused, only the view changes
       useStore.getState().setView(view)
-      mock.emit({ sessionId: 'off-kept', type: 'tool_call', callId: 'c151', summary: { tool: 'Read', title: 'L151', readOnly: true } } as never)
+      mock.emit({ sessionId: 'off-kept', type: 'tool_call', callId: 'c151', summary: { tool: 'Read', title: 'L151' } } as never)
 
       const st = useStore.getState()
       expect(st.focusedSessionId).toBe('off-kept')
@@ -2124,7 +2124,7 @@ describe('messagesToChat — restoring tool output', () => {
     seq,
     role: 'system' as const,
     kind: 'tool_call' as const,
-    payload: { type: 'tool_call', summary: { tool: 'Bash', title: 'pnpm test', readOnly: true } },
+    payload: { type: 'tool_call', summary: { tool: 'Bash', title: 'pnpm test' } },
     ts: 0,
   })
   const result = (seq: number, summary: string, ok = true) => ({
@@ -2145,7 +2145,7 @@ describe('messagesToChat — restoring tool output', () => {
   it('a restored card keeps the files its call named, so their paths are links as they were live', () => {
     const named = {
       ...call(1),
-      payload: { type: 'tool_call', summary: { tool: 'Read', title: 'Read: /repo/a.ts', readOnly: true, paths: ['/repo/a.ts'] } },
+      payload: { type: 'tool_call', summary: { tool: 'Read', title: 'Read: /repo/a.ts', paths: ['/repo/a.ts'] } },
     }
     expect(messagesToChat([named])[0]).toMatchObject({ kind: 'tool', paths: ['/repo/a.ts'] })
     // A call that named none (and a row written before `paths` was kept) carries no field
@@ -2177,11 +2177,11 @@ describe('messagesToChat — restoring tool output', () => {
 describe('a tool row finds its pair by callId — beside an open agent card (#98)', () => {
   const agentCall = {
     type: 'tool_call', callId: 'toolu_agent',
-    summary: { tool: 'Agent', title: 'Research the build', readOnly: false, paths: [] },
+    summary: { tool: 'Agent', title: 'Research the build', paths: [] },
   }
   const bashCall = {
     type: 'tool_call', callId: 'toolu_bash',
-    summary: { tool: 'Bash', title: 'git status', readOnly: false, paths: [] },
+    summary: { tool: 'Bash', title: 'git status', paths: [] },
   }
   const bashDone = { type: 'tool_result', callId: 'toolu_bash', ok: true, summary: 'nothing to commit' }
   const agentDone = { type: 'tool_result', callId: 'toolu_agent', ok: true, summary: '3 tool uses · 2m 14s\n\nI checked all 13 items' }
@@ -2246,7 +2246,7 @@ describe('a subagent\'s steps under its launch card (#222)', () => {
   const step = (sessionId: string, s: object) =>
     ({ type: 'subagent_event', sessionId, parentCallId: AGENT, step: { sessionId, ...s } }) as NormalizedEvent
   const grep = (sessionId: string) =>
-    step(sessionId, { type: 'tool_call', callId: 'toolu_sub', summary: { tool: 'Grep', title: 'Grep: boundaries', readOnly: true, paths: [] } })
+    step(sessionId, { type: 'tool_call', callId: 'toolu_sub', summary: { tool: 'Grep', title: 'Grep: boundaries', paths: [] } })
   const grepDone = (sessionId: string) => step(sessionId, { type: 'tool_result', callId: 'toolu_sub', ok: true, summary: 'tooling/boundaries.test.ts' })
   const said = (sessionId: string, text: string) => step(sessionId, { type: 'message_delta', role: 'assistant', text })
 
@@ -2254,7 +2254,7 @@ describe('a subagent\'s steps under its launch card (#222)', () => {
     const mock = new MockPlatform()
     mock.sessions.set(s, sessionInfo(s))
     await useStore.getState().attach(mock)
-    mock.emit({ sessionId: s, type: 'tool_call', callId: AGENT, summary: { tool: 'Agent', title: 'Research', readOnly: true, paths: [] } } as NormalizedEvent)
+    mock.emit({ sessionId: s, type: 'tool_call', callId: AGENT, summary: { tool: 'Agent', title: 'Research', paths: [] } } as NormalizedEvent)
     return mock
   }
   const steps = (s: string) => messagesToChat(useStore.getState().subagentSteps[s]?.[AGENT]?.rows ?? []).map(line)
@@ -2341,7 +2341,7 @@ describe('a subagent\'s steps under its launch card (#222)', () => {
     useStore.getState().toggleSubagentSteps(s, AGENT)
     useStore.getState().focusSession('sub-seen')
     for (let i = 1; i <= 300; i++) {
-      mock.emit({ sessionId: s, type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `L${i}`, readOnly: true } } as never)
+      mock.emit({ sessionId: s, type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `L${i}` } } as never)
     }
     expect(useStore.getState().chat[s]!.length).toBeLessThanOrEqual(100)
     expect(useStore.getState().subagentSteps[s]?.[AGENT]).toBeUndefined()
@@ -2558,7 +2558,7 @@ describe('a conversation item\'s identity — only a changed row becomes a new o
     await useStore.getState().attach(mock)
     useStore.getState().dispatchEvent({
       type: 'tool_call', sessionId: s, callId: 'c1',
-      summary: { tool: 'Read', title: 'a.ts', readOnly: true, paths: [] },
+      summary: { tool: 'Read', title: 'a.ts', paths: [] },
     } as NormalizedEvent)
     useStore.getState().dispatchEvent(delta(s, 'reading'))
     const before = idOf(s)
@@ -3746,7 +3746,7 @@ describe('MCP server suggestions', () => {
     // The order the host really has: the call starts (the event goes out), and only then is the proposal saved
     mock.emit({
       type: 'tool_call', sessionId: 'mcp-s1', callId: 'c1',
-      summary: { tool: 'mcp__centralu__propose_mcp_server', title: 'playwright', readOnly: true, paths: [] },
+      summary: { tool: 'mcp__centralu__propose_mcp_server', title: 'playwright', paths: [] },
     } as NormalizedEvent)
     await Promise.resolve()
     expect(useStore.getState().mcpProposals).toEqual([])
@@ -3768,7 +3768,7 @@ describe('MCP server suggestions', () => {
     for (const tool of ['mcp__centralu__propose_mcp_server', 'mcp__centralu__propose_skill', 'centralu_run']) {
       mock.emit({
         type: 'tool_call', sessionId: 'mcp-s2', callId: tool,
-        summary: { tool, title: tool, readOnly: false, paths: [] },
+        summary: { tool, title: tool, paths: [] },
       } as NormalizedEvent)
     }
     await Promise.resolve()
@@ -3785,7 +3785,7 @@ describe('MCP server suggestions', () => {
     await useStore.getState().attach(mock)
     mock.sessions.set('mcp-s3b', sessionInfo('mcp-s3b'))
     const call = (tool: string, callId: string, sessionId = 'mcp-s3') =>
-      mock.emit({ type: 'tool_call', sessionId, callId, summary: { tool, title: tool, readOnly: false, paths: [] } } as NormalizedEvent)
+      mock.emit({ type: 'tool_call', sessionId, callId, summary: { tool, title: tool, paths: [] } } as NormalizedEvent)
     const result = (callId: string, sessionId = 'mcp-s3') => mock.emit({ type: 'tool_result', sessionId, callId, ok: true, summary: '' } as NormalizedEvent)
     const read = vi.spyOn(mock.agents, 'mcpProposals')
 
@@ -3888,7 +3888,7 @@ describe('skill suggestions', () => {
 
     mock.emit({
       type: 'tool_call', sessionId: 'sk-s1', callId: 'c1',
-      summary: { tool: 'mcp__centralu__propose_skill', title: 'weekly-report', readOnly: true, paths: [] },
+      summary: { tool: 'mcp__centralu__propose_skill', title: 'weekly-report', paths: [] },
     } as NormalizedEvent)
     await Promise.resolve()
     mock.saveProposal({ skill: { name: 'weekly-report', content: 'a summary every Friday', why: 'a recurring request' } })
@@ -4146,7 +4146,7 @@ describe('inlineViewsFromHistory — a past card\'s app view slot', () => {
   const row = (seq: number, payload: Record<string, unknown>) =>
     ({ sessionId: 's-hist', seq, role: 'system' as const, kind: 'app_view' as const, payload, ts: 0 })
   const call = (seq: number, callId: string) =>
-    ({ sessionId: 's-hist', seq, role: 'system' as const, kind: 'tool_call' as const, payload: { type: 'tool_call', callId, summary: { tool: 'mcp__app-viewer__show', title: 'show', readOnly: false, paths: [] } }, ts: 0 })
+    ({ sessionId: 's-hist', seq, role: 'system' as const, kind: 'tool_call' as const, payload: { type: 'tool_call', callId, summary: { tool: 'mcp__app-viewer__show', title: 'show', paths: [] } }, ts: 0 })
 
   it('an open becomes a placeholder of unknown reopenability, a rejection a placeholder with only a reason — the same card lets the later row win', () => {
     const msgs = [
@@ -5365,7 +5365,7 @@ describe('back and forward between screens (#374)', () => {
  */
 describe('the pen for events before registration is bounded (#392)', () => {
   const call = (sessionId: string, i: number) =>
-    ({ sessionId, type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `read ${i}`, readOnly: true } }) as NormalizedEvent
+    ({ sessionId, type: 'tool_call', callId: `c${i}`, summary: { tool: 'Read', title: `read ${i}` } }) as NormalizedEvent
 
   it('holds at most PENDING_EVENTS_MAX events for one session, the newest, at every count around the cap', async () => {
     for (const n of [1, PENDING_EVENTS_MAX - 1, PENDING_EVENTS_MAX, PENDING_EVENTS_MAX + 1, 2 * PENDING_EVENTS_MAX + 1]) {

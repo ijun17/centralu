@@ -102,15 +102,16 @@ describe('streaming and tool calls', () => {
         type: 'tool_call',
         sessionId: S,
         callId: 'exec-1',
-        summary: { tool: 'Bash', title: "/bin/zsh -lc 'npm test'", readOnly: false, paths: [] },
+        summary: { tool: 'Bash', title: "/bin/zsh -lc 'npm test'", paths: [] },
         input: { command: "/bin/zsh -lc 'npm test'", cwd: '/tmp' },
       },
     ])
   })
 
-  it('a read-only command gives a collapse hint', () => {
-    const out = n('item/started', { item: { type: 'commandExecution', id: 'e', command: "/bin/zsh -lc 'ls -la'" } })
-    expect(out[0]).toMatchObject({ summary: { readOnly: true } })
+  // Nothing reads it and every card folds; this guess called every `git` command read-only, `git push` too (#428)
+  it('a command carries no read-only guess', () => {
+    const out = n('item/started', { item: { type: 'commandExecution', id: 'e', command: "/bin/zsh -lc 'git push'" } })
+    expect((out[0] as { summary: object }).summary).not.toHaveProperty('readOnly')
   })
 
   it('fileChange completed → tool_result + files_touched (for conflict detection)', () => {

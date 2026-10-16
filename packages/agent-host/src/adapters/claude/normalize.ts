@@ -9,7 +9,6 @@ export type ClaudeLaunchedSettings = { model: string | null; effort: string | nu
  * possible). SDK types end here — only protocol types ever leave.
  */
 
-const READ_ONLY = new Set(['Read', 'Grep', 'Glob', 'NotebookRead', 'WebFetch', 'WebSearch', 'TodoWrite', 'Task'])
 const FILE_EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 
 type Json = Record<string, unknown>
@@ -60,7 +59,7 @@ export function toolSummary(name: string, input: Json): ToolSummary {
    * which (a dogfooding session: all three showed the same line).
    */
   else if (name === 'Agent' || name === 'Task') title = str(input.description, name)
-  return { tool: name, title, readOnly: READ_ONLY.has(name), paths }
+  return { tool: name, title, paths }
 }
 
 /**

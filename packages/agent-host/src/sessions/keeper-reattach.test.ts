@@ -104,8 +104,8 @@ async function workingSession(h: ReturnType<typeof host>): Promise<string> {
   const handle = h.claude.last
   handle.emit({ type: 'state_change', sessionId: s.id, state: 'working' })
   // The orchestrator's tool was called and the host died before it answered
-  handle.emit({ type: 'tool_call', sessionId: s.id, callId: 'call-lost', summary: { tool: 'mcp__centralu__list_sessions', title: 'list', readOnly: true, paths: [] } })
-  handle.emit({ type: 'tool_call', sessionId: s.id, callId: 'call-done', summary: { tool: 'Bash', title: 'ls', readOnly: false, paths: [] } })
+  handle.emit({ type: 'tool_call', sessionId: s.id, callId: 'call-lost', summary: { tool: 'mcp__centralu__list_sessions', title: 'list', paths: [] } })
+  handle.emit({ type: 'tool_call', sessionId: s.id, callId: 'call-done', summary: { tool: 'Bash', title: 'ls', paths: [] } })
   handle.emit({ type: 'tool_result', sessionId: s.id, callId: 'call-done', ok: true, summary: 'a' })
   return s.id
 }

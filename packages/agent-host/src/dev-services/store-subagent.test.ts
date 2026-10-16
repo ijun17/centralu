@@ -37,7 +37,7 @@ const steps = (s: Store, sessionId = 's1', parent = AGENT) => [
   s.appendSubagentMessage(sessionId, parent, { role: 'assistant', kind: 'reasoning', payload: { type: 'reasoning_delta', sessionId, text: 'look at the zebracorn tests' }, ts: 1 }),
   s.appendSubagentMessage(sessionId, parent, {
     role: 'system', kind: 'tool_call',
-    payload: { type: 'tool_call', sessionId, callId: 'sub1', summary: { tool: 'Grep', title: 'Grep: zebracorn', readOnly: true, paths: [] }, input: { pattern: 'zebracorn' } },
+    payload: { type: 'tool_call', sessionId, callId: 'sub1', summary: { tool: 'Grep', title: 'Grep: zebracorn', paths: [] }, input: { pattern: 'zebracorn' } },
     ts: 2,
   }),
   s.appendSubagentMessage(sessionId, parent, {
@@ -52,7 +52,7 @@ const conversation: StoredMessage[] = [
   { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: 'research the zebracorn tests' }, ts: 1 },
   {
     sessionId: 's1', seq: 2, role: 'system', kind: 'tool_call',
-    payload: { type: 'tool_call', sessionId: 's1', callId: AGENT, summary: { tool: 'Agent', title: 'Research', readOnly: true, paths: [] } },
+    payload: { type: 'tool_call', sessionId: 's1', callId: AGENT, summary: { tool: 'Agent', title: 'Research', paths: [] } },
     ts: 2,
   },
 ]
@@ -75,7 +75,7 @@ describe('a subagent\'s steps are kept under the call that launched it (#222)', 
     steps(s)
     const tools = (rows: StoredMessage[]) => rows.filter((r) => r.kind === 'tool_call' || r.kind === 'tool_result').map((r) => r.payload)
     expect(tools(s.loadSubagentMessages('s1', AGENT))).toEqual([
-      { type: 'tool_call', sessionId: 's1', callId: 'sub1', summary: { tool: 'Grep', title: 'Grep: zebracorn', readOnly: true, paths: [] } },
+      { type: 'tool_call', sessionId: 's1', callId: 'sub1', summary: { tool: 'Grep', title: 'Grep: zebracorn', paths: [] } },
       { type: 'tool_result', sessionId: 's1', callId: 'sub1', ok: true, summary: OUTPUT.slice(0, 300) },
     ])
     expect(tools(s.loadSubagentMessages('s1', AGENT, { full: true }))).toMatchObject([{ input: { pattern: 'zebracorn' } }, { output: OUTPUT }])

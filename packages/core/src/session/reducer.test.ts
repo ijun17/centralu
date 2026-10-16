@@ -9,7 +9,7 @@ const ev = (e: Record<string, unknown>) => ({ sessionId: 's1', ...e }) as Normal
 /** The event sequence of one real turn (in the order observed in the spike) */
 const TURN: NormalizedEvent[] = [
   ev({ type: 'message_delta', role: 'assistant', text: 'the task ' }),
-  ev({ type: 'tool_call', callId: 'c1', summary: { tool: 'Bash', title: 'npm run build', readOnly: false, paths: [] } }),
+  ev({ type: 'tool_call', callId: 'c1', summary: { tool: 'Bash', title: 'npm run build', paths: [] } }),
   ev({ type: 'approval_request', requestId: 'r1', detail: { kind: 'command', command: 'npm run build', cwd: '/p' } }),
   ev({ type: 'approval_resolved', requestId: 'r1', decision: 'allow' }),
   ev({ type: 'tool_result', callId: 'c1', ok: true, summary: 'exit 0' }),

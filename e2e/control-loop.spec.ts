@@ -367,7 +367,7 @@ test('Tool card: read-only calls are collapsed, mutating calls are expanded (T5-
   await emitEvent(page, 0, {
     type: 'tool_call',
     callId: 'c1',
-    summary: { tool: 'Read', title: 'Read: a.ts', readOnly: true, paths: [] },
+    summary: { tool: 'Read', title: 'Read: a.ts', paths: [] },
   })
   await emitEvent(page, 0, {
     type: 'tool_result',
@@ -932,7 +932,7 @@ test('Messages in unfocused sessions are trimmed (D-2 windowing)', async ({ page
         type: 'tool_call',
         sessionId: id,
         callId: `c${i}`,
-        summary: { tool: 'Read', title: `file ${i}`, readOnly: true, paths: [] },
+        summary: { tool: 'Read', title: `file ${i}`, paths: [] },
       })
     }
   }, longId)
@@ -3411,14 +3411,14 @@ test('A session whose events arrive first: an older-conversation path stands eve
         type: 'tool_call',
         sessionId: f,
         callId: 'r',
-        summary: { tool: 'Read', title: 'Read note.md', readOnly: true, paths: [] },
+        summary: { tool: 'Read', title: 'Read note.md', paths: [] },
       })
       m.emit({ type: 'tool_result', sessionId: f, callId: 'r', ok: true, summary: 'empty' })
       m.emit({
         type: 'tool_call',
         sessionId: f,
         callId: 'w',
-        summary: { tool: 'Write', title: 'Write note.md', readOnly: false, paths: [] },
+        summary: { tool: 'Write', title: 'Write note.md', paths: [] },
       })
       m.emit({ type: 'tool_result', sessionId: f, callId: 'w', ok: true, summary: 'written' })
       m.emit({ type: 'message_delta', sessionId: f, role: 'assistant', text: 'Noted.' })
@@ -3530,7 +3530,7 @@ test('Tool cards collapse and expand without an inner scrollbar', async ({ page 
       type: 'tool_call',
       sessionId: sid,
       callId: 'c1',
-      summary: { tool: 'Bash', title: 'pnpm test', readOnly: true, paths: [] },
+      summary: { tool: 'Bash', title: 'pnpm test', paths: [] },
     })
     m.emit({
       type: 'tool_result',
@@ -3580,7 +3580,7 @@ test('A single blob with no newlines still stops at three lines when collapsed',
       type: 'tool_call',
       sessionId: sid,
       callId: 'c1',
-      summary: { tool: 'mcp__resource__upload', title: 'upload', readOnly: false, paths: [] },
+      summary: { tool: 'mcp__resource__upload', title: 'upload', paths: [] },
     })
     // A response with not a single newline — logically 1 line, dozens on screen
     const blob = JSON.stringify({
@@ -6269,7 +6269,7 @@ test('Tool cards appear collapsed whether Bash or Edit', async ({ page }) => {
   await emitEvent(page, 0, {
     type: 'tool_call',
     callId: 'c1',
-    summary: { tool: 'Bash', title: 'npm run build', readOnly: false, paths: [] },
+    summary: { tool: 'Bash', title: 'npm run build', paths: [] },
   })
   await emitEvent(page, 0, {
     type: 'tool_result',
@@ -6809,7 +6809,6 @@ test('Live tool output streams as a tail, and switches to the result once comple
     summary: {
       tool: 'Bash',
       title: 'for i in 1 2 3; do echo tick $i; sleep 1; done',
-      readOnly: false,
       paths: [],
     },
   })
@@ -8684,7 +8683,6 @@ test('Worktree proposal: a line stays in the conversation, + lights up, and the 
       summary: {
         tool: 'mcp__centralu__propose_worktree_session',
         title: 'feat/proposed-work',
-        readOnly: false,
         paths: [],
       },
     })
@@ -8925,7 +8923,6 @@ test('Two worktree proposals fill in order across two dialog openings', async ({
         summary: {
           tool: 'mcp__centralu__propose_worktree_session',
           title: branch,
-          readOnly: false,
           paths: [],
         },
       })

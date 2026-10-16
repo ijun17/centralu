@@ -197,7 +197,7 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
     type: 'tool_call',
     sessionId: working.id,
     callId: 'demo-1',
-    summary: { tool: 'Read', title: 'packages/ui/src/styles/index.css', readOnly: true, paths: [] },
+    summary: { tool: 'Read', title: 'packages/ui/src/styles/index.css', paths: [] },
   })
   mock.emit({ type: 'tool_result', sessionId: working.id, callId: 'demo-1', ok: true, summary: 'z-index: 1' })
   mock.emit({
@@ -484,7 +484,7 @@ async function seedShot(mock: MockPlatform): Promise<void> {
     type: 'tool_call',
     sessionId: working.id,
     callId: 'shot-1',
-    summary: { tool: 'Grep', title: 'isRetryable( across src', readOnly: true, paths: [] },
+    summary: { tool: 'Grep', title: 'isRetryable( across src', paths: [] },
   })
   mock.emit({ type: 'tool_result', sessionId: working.id, callId: 'shot-1', ok: true, summary: '3 files' })
   mock.emit({
@@ -618,7 +618,7 @@ function tool(
   title: string,
   result: string,
 ): void {
-  mock.emit({ type: 'tool_call', sessionId, callId, summary: { tool: name, title, readOnly: true, paths: [] } })
+  mock.emit({ type: 'tool_call', sessionId, callId, summary: { tool: name, title, paths: [] } })
   mock.emit({ type: 'tool_result', sessionId, callId, ok: true, summary: result })
 }
 
@@ -652,7 +652,7 @@ function installResponder(mock: MockPlatform): void {
             type: 'tool_call',
             sessionId,
             callId: `demo-${Date.now()}`,
-            summary: { tool: 'Grep', title: text.slice(0, 40) || 'search', readOnly: true, paths: [] },
+            summary: { tool: 'Grep', title: text.slice(0, 40) || 'search', paths: [] },
           }),
       ],
       [

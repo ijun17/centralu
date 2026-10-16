@@ -31,7 +31,7 @@ const session = (id: string, over: Partial<SessionSummary> = {}) =>
   ({ id, projectId: 'p1', name: `Session ${id}`, state: 'idle', ...over }) as SessionSummary
 const project = (id: string, name: string) => ({ id, name }) as ProjectInfo
 const tool = (over: Partial<Extract<ChatItem, { kind: 'tool' }>> = {}): ChatItem =>
-  ({ kind: 'tool', seq: 1, tool: 'Bash', title: 'ls -la', readOnly: true, ...over })
+  ({ kind: 'tool', seq: 1, tool: 'Bash', title: 'ls -la', ...over })
 const stored = (seq: number, kind: StoredMessage['kind'], payload: unknown, role: StoredMessage['role'] = 'assistant'): StoredMessage =>
   ({ sessionId: 'sub', seq, role, kind, payload, ts: 0 })
 
@@ -205,7 +205,7 @@ describe('ChatRow: tool cards', () => {
             error: null,
             rows: [
               stored(1, 'text', { text: 'Looking' }),
-              stored(2, 'tool_call', { callId: 'sub-1', summary: { tool: 'Read', title: 'README.md', readOnly: true } }),
+              stored(2, 'tool_call', { callId: 'sub-1', summary: { tool: 'Read', title: 'README.md' } }),
               stored(3, 'tool_result', { callId: 'sub-1', summary: '# Title', ok: true }),
             ],
           },

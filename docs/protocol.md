@@ -109,6 +109,11 @@ wire the two fields are always absent. They are declared here because the stored
 the store that asks for them by name (`Store.loadMessages(…, { full: true })`) gets this shape. Why they stay behind:
 [security-boundaries.md](security-boundaries.md#tool-output-in-the-store).
 
+`ToolSummary.readOnly` is no longer set or read ([#428](https://github.com/ijun17/centralu/issues/428)). It was a
+hint to collapse a read-only tool's card, but every card folds now, nothing on the screen read it, and the two adapters'
+guesses had drifted apart (Codex called every `git` command read-only, `git push` included). The field stays in the
+schema, optional, so events and stored records from older builds still parse; a reader must not rely on it.
+
 **A native subagent's steps are one wrapper kind, not the parent's events with a flag**
 ([#222](https://github.com/ijun17/centralu/issues/222)). Claude Code's `Agent` tool and Codex's `spawn_agent` run a
 subagent whose text, reasoning, tool calls and results reach the host on the parent's stream. Each becomes a

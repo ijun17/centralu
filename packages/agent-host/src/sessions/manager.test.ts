@@ -79,12 +79,12 @@ class FakeHandle implements SessionHandle {
       type: 'tool_call',
       sessionId: this.sessionId,
       callId: `c-${title.length}`,
-      summary: { tool, title, readOnly: false, paths: [] },
+      summary: { tool, title, paths: [] },
     })
   }
   /** A tool call and its result with their whole record (#221), as the adapters send them */
   emitToolRecord(callId: string, title: string, input: unknown, output: string) {
-    this.emit({ type: 'tool_call', sessionId: this.sessionId, callId, summary: { tool: 'Bash', title, readOnly: false, paths: [] }, input })
+    this.emit({ type: 'tool_call', sessionId: this.sessionId, callId, summary: { tool: 'Bash', title, paths: [] }, input })
     this.emit({ type: 'tool_result', sessionId: this.sessionId, callId, ok: true, summary: output.slice(0, 300), output })
   }
   /**
@@ -5270,7 +5270,7 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
     ({ type: 'subagent_event', sessionId, parentCallId: AGENT, step: { sessionId, ...s } }) as NormalizedEvent
   const subagentWork = (sessionId: string): NormalizedEvent[] => [
     step(sessionId, { type: 'reasoning_delta', text: `first ${THOUGHT}` }),
-    step(sessionId, { type: 'tool_call', callId: 'toolu_sub', summary: { tool: 'Grep', title: 'Grep: boundaries', readOnly: true, paths: [] }, input: { pattern: INPUT_SECRET } }),
+    step(sessionId, { type: 'tool_call', callId: 'toolu_sub', summary: { tool: 'Grep', title: 'Grep: boundaries', paths: [] }, input: { pattern: INPUT_SECRET } }),
     step(sessionId, { type: 'tool_result', callId: 'toolu_sub', ok: true, summary: output.slice(0, 300), output }),
     step(sessionId, { type: 'message_delta', role: 'assistant', text: `The boundaries test holds. ${WORDS}` }),
   ]
@@ -5281,7 +5281,7 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
     await rpc('agents.send', { sessionId: a.id, text: 'look into the boundaries test' })
     const h = adapter.handleOf(a.id)!
-    h.emitEvent({ type: 'tool_call', sessionId: a.id, callId: AGENT, summary: { tool: 'Agent', title: 'Research the boundaries', readOnly: true, paths: [] } })
+    h.emitEvent({ type: 'tool_call', sessionId: a.id, callId: AGENT, summary: { tool: 'Agent', title: 'Research the boundaries', paths: [] } })
     h.emitDelta('While it works, ')
     const lastSeq = () => store.listSessions().find((s) => s.id === a.id)!.lastSeq
     const before = lastSeq()

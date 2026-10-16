@@ -58,7 +58,6 @@ export type ChatItem = (
       seq: number
       tool: string
       title: string
-      readOnly: boolean
       /** The files the call names (the host's `ToolSummary.paths`), so the card can link them; absent when none */
       paths?: string[]
       callId?: string
@@ -215,7 +214,6 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
           ...stored(e.seq),
           tool: e.summary.tool,
           title: e.summary.title,
-          readOnly: e.summary.readOnly,
           ...(e.summary.paths?.length ? { paths: e.summary.paths } : {}),
           ...(e.callId ? { callId: e.callId } : {}),
         },
@@ -524,7 +522,7 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
       if (typeof e.type === 'string' && !KNOWN_MARKERS.has(e.type)) continue
       items.push({ kind: 'mark', seq: m.seq, storedSeq: m.seq, ...markerParts(e) })
     } else if (m.kind === 'tool_call') {
-      const e = m.payload as { callId?: string; summary?: { tool: string; title: string; readOnly: boolean; paths?: string[] } }
+      const e = m.payload as { callId?: string; summary?: { tool: string; title: string; paths?: string[] } }
       if (e.summary)
         items.push({
           kind: 'tool',
@@ -532,7 +530,6 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
           storedSeq: m.seq,
           tool: e.summary.tool,
           title: e.summary.title,
-          readOnly: e.summary.readOnly,
           ...(e.summary.paths?.length ? { paths: e.summary.paths } : {}),
           ...(e.callId ? { callId: e.callId } : {}),
         })

@@ -109,7 +109,7 @@ const toolCard = (page: Page, sid: string, callId: string, tool: string) =>
     type: 'tool_call',
     sessionId: sid,
     callId,
-    summary: { tool, title: callId, readOnly: false, paths: [] },
+    summary: { tool, title: callId, paths: [] },
   })
 
 const rowOf = (page: Page, callId: string): Locator =>

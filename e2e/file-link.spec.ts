@@ -319,7 +319,7 @@ async function agentCalls(page: Page, tool: string, title: string, paths: string
     ({ tool, title, paths, callId }) => {
       const m = (window as any).__mock
       const id = (window as any).__store.getState().focusedSessionId
-      m.emit({ type: 'tool_call', sessionId: id, callId, summary: { tool, title, readOnly: tool === 'Read', paths } })
+      m.emit({ type: 'tool_call', sessionId: id, callId, summary: { tool, title, paths } })
       m.emit({ type: 'tool_result', sessionId: id, callId, ok: true, summary: 'done' })
     },
     { tool, title, paths, callId },

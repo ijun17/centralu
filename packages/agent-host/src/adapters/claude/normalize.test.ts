@@ -108,7 +108,7 @@ describe('tool calls (the actual shape from the spike)', () => {
       type: 'assistant',
       message: { content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'npm run build' } }] },
     })
-    expect(out[0]).toMatchObject({ type: 'tool_call', callId: 'tu1', summary: { tool: 'Bash', title: 'npm run build', readOnly: false } })
+    expect(out[0]).toMatchObject({ type: 'tool_call', callId: 'tu1', summary: { tool: 'Bash', title: 'npm run build' } })
   })
 
   it('a Write tool_use becomes a tool_call plus files_touched (for conflict detection)', () => {
@@ -147,9 +147,9 @@ describe('tool calls (the actual shape from the spike)', () => {
     expect(toolSummary('mcp__centralu__centralu_run', {}).tool).toBe('mcp__centralu__centralu_run')
   })
 
-  it('a read-only tool is marked readOnly (card-collapsing policy)', () => {
-    expect(toolSummary('Read', { file_path: '/a.ts' }).readOnly).toBe(true)
-    expect(toolSummary('Bash', { command: 'ls' }).readOnly).toBe(false)
+  // Nothing reads it and every card folds; the two adapters' guesses had drifted (#428)
+  it('a summary carries no read-only guess', () => {
+    expect(toolSummary('Read', { file_path: '/a.ts' })).not.toHaveProperty('readOnly')
   })
 
   it('tool_result decides ok', () => {

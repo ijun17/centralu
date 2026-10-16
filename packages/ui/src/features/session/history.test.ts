@@ -30,7 +30,7 @@ describe('collecting sent messages', () => {
 
   it('tool and approval entries are not something I said', () => {
     const chat: ChatItem[] = [
-      { kind: 'tool', seq: 1, tool: 'Bash', title: 'ls', readOnly: true },
+      { kind: 'tool', seq: 1, tool: 'Bash', title: 'ls' },
       { kind: 'mark', seq: 2, text: 'compacted' },
       user(3, 'what I actually said'),
     ]

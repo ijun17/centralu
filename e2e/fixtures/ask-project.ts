@@ -117,7 +117,7 @@ export function askProjectTests(): void {
     test('the caller\'s card opens the existing session and the task shows its caller', async ({ page }) => {
       const { caller, toolkit } = await start(page)
       await emit(page, caller, { type: 'state_change', state: 'working' })
-      await emit(page, caller, { type: 'tool_call', callId: 'ask-1', summary: { tool: 'mcp__centralu__ask_project', title: 'toolkit', readOnly: false, paths: [] } })
+      await emit(page, caller, { type: 'tool_call', callId: 'ask-1', summary: { tool: 'mcp__centralu__ask_project', title: 'toolkit', paths: [] } })
       // An existing ordinary session receives a task with visible caller provenance
       await page.evaluate(
         ([d, p]) =>

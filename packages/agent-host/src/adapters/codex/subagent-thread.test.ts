@@ -124,7 +124,7 @@ describe("what a codex child agent did is kept under the spawnAgent card that la
     { type: 'reasoning_delta', sessionId: 's1', text: "**Confirming exact 'pong' response**" },
     {
       type: 'tool_call', sessionId: 's1', callId: 'exec-cmd',
-      summary: { tool: 'Bash', title: "/bin/zsh -lc 'echo pong-from-child'", readOnly: false, paths: [] },
+      summary: { tool: 'Bash', title: "/bin/zsh -lc 'echo pong-from-child'", paths: [] },
       input: { command: "/bin/zsh -lc 'echo pong-from-child'", cwd: '/tmp' },
     },
     { type: 'tool_result', sessionId: 's1', callId: 'exec-cmd', ok: true, summary: 'pong-from-child\n', output: 'pong-from-child\n' },

@@ -458,15 +458,15 @@ describe('what a subagent did is kept under the card that launched it (#222)', (
     expect(steps(events)).toEqual([
       {
         type: 'tool_call', sessionId: 's1', callId: SUB_1,
-        summary: { tool: 'Bash', title: "sed -n '56,200p' tooling/boundaries.test.ts", readOnly: false, paths: [] },
+        summary: { tool: 'Bash', title: "sed -n '56,200p' tooling/boundaries.test.ts", paths: [] },
         input: { command: "sed -n '56,200p' tooling/boundaries.test.ts" },
       },
       { type: 'tool_result', sessionId: 's1', callId: SUB_1, ok: true, summary: "describe('ui layer boundary', () => {", output: "describe('ui layer boundary', () => {" },
-      { type: 'tool_call', sessionId: 's1', callId: SUB_2, summary: { tool: 'Grep', title: 'Grep: boundaries', readOnly: true, paths: [] }, input: { pattern: 'boundaries' } },
+      { type: 'tool_call', sessionId: 's1', callId: SUB_2, summary: { tool: 'Grep', title: 'Grep: boundaries', paths: [] }, input: { pattern: 'boundaries' } },
       { type: 'tool_result', sessionId: 's1', callId: SUB_2, ok: true, summary: 'tooling/boundaries.test.ts', output: 'tooling/boundaries.test.ts' },
       {
         type: 'tool_call', sessionId: 's1', callId: SUB_EDIT,
-        summary: { tool: 'Edit', title: 'Edit: /repo/tooling/boundaries.test.ts', readOnly: false, paths: ['/repo/tooling/boundaries.test.ts'] },
+        summary: { tool: 'Edit', title: 'Edit: /repo/tooling/boundaries.test.ts', paths: ['/repo/tooling/boundaries.test.ts'] },
         input: { file_path: '/repo/tooling/boundaries.test.ts', old_string: 'a', new_string: 'b' },
       },
       { type: 'tool_result', sessionId: 's1', callId: SUB_EDIT, ok: true, summary: 'ok', output: 'ok' },

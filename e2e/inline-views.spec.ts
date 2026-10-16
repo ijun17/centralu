@@ -101,7 +101,7 @@ const toolCall = (sid: string, callId: string, tool: string) => ({
   type: 'tool_call',
   sessionId: sid,
   callId,
-  summary: { tool, title: callId, readOnly: false, paths: [] },
+  summary: { tool, title: callId, paths: [] },
 })
 /** As if the host opened it — opens an instance on the real ViewHost and streams `open` */
 async function openInline(page: Page, pid: string, sid: string, callId: string, toolInput: Record<string, unknown>): Promise<string> {

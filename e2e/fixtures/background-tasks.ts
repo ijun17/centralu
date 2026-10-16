@@ -78,7 +78,7 @@ async function start(page: Page): Promise<string> {
   await setup(page, ['/tmp/alpha'])
   const id = await newSession(page, 'alpha')
   // A turn running, with the agent's launch card in the conversation — the card whose steps the list links to
-  await emit(page, id, { type: 'tool_call', callId: AGENT.parentCallId, summary: { tool: 'Agent', title: AGENT.description, readOnly: true, paths: [] } })
+  await emit(page, id, { type: 'tool_call', callId: AGENT.parentCallId, summary: { tool: 'Agent', title: AGENT.description, paths: [] } })
   await emit(page, id, { type: 'subagent_event', parentCallId: AGENT.parentCallId, step: { type: 'message_delta', sessionId: id, role: 'assistant', text: 'Sleeping for the probe.' } })
   await emit(page, id, { type: 'background_tasks', live: [AGENT, SHELL, WATCH] })
   return id
@@ -220,7 +220,7 @@ export function backgroundTasksTests(): void {
       await setup(page, ['/tmp/alpha'])
       const ids = [await newSession(page, 'alpha'), await newSession(page, 'alpha'), await newSession(page, 'alpha')]
       const id = ids[2]!
-      await emit(page, id, { type: 'tool_call', callId: AGENT.parentCallId, summary: { tool: 'Agent', title: AGENT.description, readOnly: true, paths: [] } })
+      await emit(page, id, { type: 'tool_call', callId: AGENT.parentCallId, summary: { tool: 'Agent', title: AGENT.description, paths: [] } })
       await emit(page, id, { type: 'background_tasks', live: [AGENT, SHELL] })
       await expect.poll(() => page.evaluate((sid) => (window as any).__store.getState().sessions[sid]?.state, id)).toBe('working')
       await page.evaluate(([sid, all]) => {

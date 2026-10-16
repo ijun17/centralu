@@ -127,7 +127,7 @@ uxTask({
         const root: string = s.projects[s.sessions[sid].projectId].path
         m.fsState.files = { ...m.fsState.files, [path]: ':root {\n  --ring: 1;\n}\n' }
         const callId = 'ux-read'
-        m.emit({ type: 'tool_call', sessionId: sid, callId, summary: { tool: 'Read', title: `Read: ${root}/${path}`, readOnly: true, paths: [`${root}/${path}`] } })
+        m.emit({ type: 'tool_call', sessionId: sid, callId, summary: { tool: 'Read', title: `Read: ${root}/${path}`, paths: [`${root}/${path}`] } })
         m.emit({ type: 'tool_result', sessionId: sid, callId, ok: true, summary: ':root {' })
       },
       { path: STYLES, sid: await sessionId(page, OPEN) },

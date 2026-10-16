@@ -556,10 +556,9 @@ async function stream(
           ? {
               tool: 'Agent',
               title: 'Look for the memory that is never given back',
-              readOnly: false,
               paths: [],
             }
-          : { tool: 'Bash', title: 'pnpm exec vitest run --maxWorkers=4', readOnly: false, paths: [] },
+          : { tool: 'Bash', title: 'pnpm exec vitest run --maxWorkers=4', paths: [] },
       })
       for (let i = 0; i < 20; i++) {
         if (subagent) {
@@ -575,7 +574,6 @@ async function stream(
               summary: {
                 tool: 'Read',
                 title: `Read: packages/ui/src/store/file-${i}.ts`,
-                readOnly: true,
                 paths: [],
               },
             },

@@ -28,9 +28,9 @@ describe('appendChat — live events', () => {
 
   it("the parent's result goes to the parent's card and the agent's steps to the agent's card (#98)", () => {
     const items = feed([
-      { type: 'tool_call', callId: 'toolu_agent', summary: { tool: 'Agent', title: 'Research', readOnly: false, paths: [] } },
+      { type: 'tool_call', callId: 'toolu_agent', summary: { tool: 'Agent', title: 'Research', paths: [] } },
       { type: 'tool_output_delta', callId: 'toolu_agent', text: 'Running in the background\n' },
-      { type: 'tool_call', callId: 'toolu_bash', summary: { tool: 'Bash', title: 'git status', readOnly: false, paths: [] } },
+      { type: 'tool_call', callId: 'toolu_bash', summary: { tool: 'Bash', title: 'git status', paths: [] } },
       { type: 'tool_output_delta', callId: 'toolu_agent', text: 'Grep: boundaries\n' },
       { type: 'tool_result', callId: 'toolu_bash', ok: true, summary: 'nothing to commit' },
     ])
@@ -41,8 +41,8 @@ describe('appendChat — live events', () => {
   })
 
   it('an event for a row history already brought in is not drawn a second time (#79)', () => {
-    const restored = messagesToChat([row(3, 'tool_call', { callId: 'c1', summary: { tool: 'Bash', title: 'ls', readOnly: true } })])
-    const items = feed([{ type: 'tool_call', callId: 'c1', seq: 3, summary: { tool: 'Bash', title: 'ls', readOnly: true, paths: [] } }], restored)
+    const restored = messagesToChat([row(3, 'tool_call', { callId: 'c1', summary: { tool: 'Bash', title: 'ls' } })])
+    const items = feed([{ type: 'tool_call', callId: 'c1', seq: 3, summary: { tool: 'Bash', title: 'ls', paths: [] } }], restored)
     expect(items).toBe(restored)
   })
 
@@ -97,7 +97,7 @@ describe('appendChat — one copy per streamed delta (#364)', () => {
     ['message_delta', { type: 'message_delta', role: 'assistant', text: 'Hel', seq: 2000 }, { type: 'message_delta', role: 'assistant', text: 'lo', seq: 2000 }],
     ['reasoning_delta', { type: 'reasoning_delta', text: 'Thin', seq: 2000 }, { type: 'reasoning_delta', text: 'king', seq: 2000 }],
   ] as const
-  const call = { type: 'tool_call', callId: 'c1', summary: { tool: 'Bash', title: 'ls', readOnly: true, paths: [] } }
+  const call = { type: 'tool_call', callId: 'c1', summary: { tool: 'Bash', title: 'ls', paths: [] } }
   const toolDeltas = [
     ['tool_output_delta', call, { type: 'tool_output_delta', callId: 'c1', text: 'a.txt\n' }],
     ['tool_result', call, { type: 'tool_result', callId: 'c1', ok: true, summary: 'a.txt' }],
@@ -115,7 +115,7 @@ describe('appendChat — one copy per streamed delta (#364)', () => {
 })
 
 describe('messagesToChat — restoration', () => {
-  const call = (seq: number) => row(seq, 'tool_call', { type: 'tool_call', summary: { tool: 'Bash', title: 'pnpm test', readOnly: true } })
+  const call = (seq: number) => row(seq, 'tool_call', { type: 'tool_call', summary: { tool: 'Bash', title: 'pnpm test' } })
   const result = (seq: number, summary: string, ok = true) => row(seq, 'tool_result', { type: 'tool_result', callId: 'c1', ok, summary })
 
   it('with several calls, results pair in the order they were emitted — never swapped', () => {

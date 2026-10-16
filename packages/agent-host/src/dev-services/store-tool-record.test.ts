@@ -40,7 +40,7 @@ const conversation = (sessionId: string, from = 1): StoredMessage[] => [
   { sessionId, seq: from + 1, role: 'assistant', kind: 'reasoning', payload: { text: 'the build script lives in the workspace' }, ts: 2 },
   {
     sessionId, seq: from + 2, role: 'system', kind: 'tool_call',
-    payload: { type: 'tool_call', sessionId, callId: 'c1', summary: { tool: 'Bash', title: COMMAND, readOnly: false, paths: [] }, input: INPUT },
+    payload: { type: 'tool_call', sessionId, callId: 'c1', summary: { tool: 'Bash', title: COMMAND, paths: [] }, input: INPUT },
     ts: 3,
   },
   {
@@ -92,7 +92,7 @@ describe('the store keeps the whole record and reads back the card (#221)', () =
     // What every reader gets: the card, for the page and for `loadMessagesFrom` alike
     for (const rows of [s.loadMessages('s1'), s.loadMessagesFrom('s1', 0)]) {
       expect(card(rows)).toEqual([
-        { type: 'tool_call', sessionId: 's1', callId: 'c1', summary: { tool: 'Bash', title: COMMAND, readOnly: false, paths: [] } },
+        { type: 'tool_call', sessionId: 's1', callId: 'c1', summary: { tool: 'Bash', title: COMMAND, paths: [] } },
         { type: 'tool_result', sessionId: 's1', callId: 'c1', ok: false, summary: OUTPUT.slice(0, 300) },
       ])
     }
@@ -136,7 +136,7 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
     await s.trashSession('gone', KEEP_ALL)
     const calls: StoredMessage[] = Array.from({ length: 400 }, (_, i) => ({
       sessionId: 's1', seq: 100 + i, role: 'system', kind: 'tool_call',
-      payload: { type: 'tool_call', sessionId: 's1', callId: `c${i}`, summary: { tool: 'Bash', title: COMMAND, readOnly: false, paths: [] } },
+      payload: { type: 'tool_call', sessionId: 's1', callId: `c${i}`, summary: { tool: 'Bash', title: COMMAND, paths: [] } },
       ts: 100 + i,
     }))
     s.appendMessages(calls)

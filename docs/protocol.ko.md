@@ -106,6 +106,11 @@ type NormalizedEvent =
 묻는 저장소의 독자(`Store.loadMessages(…, { full: true })`)가 이 모양을 받기 때문이다. 왜 남겨 두는지는
 [security-boundaries.md](security-boundaries.md#tool-output-in-the-store)에 있다.
 
+`ToolSummary.readOnly`는 이제 채우지도 읽지도 않는다([#428](https://github.com/ijun17/centralu/issues/428)). 읽기 전용
+도구의 카드를 접으라는 힌트였지만, 이제 모든 카드가 접히고, 화면은 이 값을 읽지 않았으며, 두 어댑터의 추측은 서로
+어긋나 있었다(Codex는 `git push`를 포함한 모든 `git` 명령을 읽기 전용으로 봤다). 예전 빌드의 이벤트와 저장된 기록이 계속
+읽히도록 필드는 스키마에 선택 항목으로 남는다. 읽는 쪽은 이 값에 기대면 안 된다.
+
 **네이티브 서브에이전트의 걸음은 부모 이벤트에 붙인 표시가 아니라 감싸는 종류 하나다**
 ([#222](https://github.com/ijun17/centralu/issues/222)). Claude Code의 `Agent` 도구와 Codex의 `spawn_agent`가 띄운
 서브에이전트의 글, 추론, 도구 호출과 결과는 부모의 스트림으로 host에 온다. 각각은 `subagent_event`가 된다. `step`은 부모의

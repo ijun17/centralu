@@ -513,7 +513,7 @@ const toolCall = (sid: string, callId: string, tool: string) => ({
   type: 'tool_call',
   sessionId: sid,
   callId,
-  summary: { tool, title: callId, readOnly: false, paths: [] },
+  summary: { tool, title: callId, paths: [] },
 })
 /** The conversation row that card is on — the card and the view live on the same row */
 const rowOf = (page: Page, callId: string) => page.locator('[data-index]').filter({ has: page.getByTestId('tool-card').filter({ hasText: callId }) })

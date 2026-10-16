@@ -85,15 +85,15 @@ function itemInput(item: Record<string, unknown>): Record<string, unknown> {
 }
 
 /** A tool-call item, into a human-readable line (the conversation card's title) */
-function itemSummary(item: Record<string, unknown>): { tool: string; title: string; readOnly: boolean; paths: string[] } {
+function itemSummary(item: Record<string, unknown>): { tool: string; title: string; paths: string[] } {
   const type = str(item.type)
   if (type === 'commandExecution') {
     const cmd = str(item.command)
-    return { tool: 'Bash', title: cmd, readOnly: isReadOnlyCommand(cmd), paths: [] }
+    return { tool: 'Bash', title: cmd, paths: [] }
   }
   if (type === 'fileChange') {
     const paths = fileChangesOf(item).map((c) => c.path).filter(Boolean)
-    return { tool: 'Edit', title: paths.join(', ') || 'Edit files', readOnly: false, paths }
+    return { tool: 'Edit', title: paths.join(', ') || 'Edit files', paths }
   }
   if (type === 'mcpToolCall') {
     /*
@@ -126,7 +126,7 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
       } catch {
         /* If the arguments are not JSON, the card names no project — it still finds the session it asked */
       }
-      return { tool, title: project || tool, readOnly: false, paths: [] }
+      return { tool, title: project || tool, paths: [] }
     }
     // Worktree proposal (#69) — the branch name is the title, and that title is the only channel for the UI's prefill
     if (tool.endsWith('propose_worktree_session')) {
@@ -138,7 +138,7 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
       } catch {
         /* If the arguments are not JSON, the card just shows up with no name — the window opens with a blank name */
       }
-      return { tool, title: branch || tool, readOnly: false, paths: [] }
+      return { tool, title: branch || tool, paths: [] }
     }
     /*
      * **The arguments go on the title too** (dogfooding 2026-09-08).
@@ -155,12 +155,11 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
     return {
       tool: tool || 'MCP',
       title: args ? `${name} ${args}` : name,
-      readOnly: false,
       paths: [],
     }
   }
   if (type === 'webSearch') {
-    return { tool: 'WebSearch', title: str(item.query), readOnly: true, paths: [] }
+    return { tool: 'WebSearch', title: str(item.query), paths: [] }
   }
   /*
    * A collab call (generated/v2/ThreadItem.ts `collabAgentToolCall`): spawning a child agent, waiting for it, sending
@@ -171,9 +170,9 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
   if (type === 'collabAgentToolCall') {
     const tool = str(item.tool) || type
     const line = str(item.prompt).split('\n')[0] ?? ''
-    return { tool, title: line.length > 200 ? `${line.slice(0, 200)} …` : line || tool, readOnly: true, paths: [] }
+    return { tool, title: line.length > 200 ? `${line.slice(0, 200)} …` : line || tool, paths: [] }
   }
-  return { tool: type || 'tool', title: str(item.title) || type, readOnly: true, paths: [] }
+  return { tool: type || 'tool', title: str(item.title) || type, paths: [] }
 }
 
 /**
@@ -198,12 +197,6 @@ function argsPreview(raw: unknown): string {
     .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
     .join(', ')
   return `{${body.length > 80 ? `${body.slice(0, 79)}…` : body}}`
-}
-
-/** A read-only command collapses its card (same intent as core's policy — this only supplies the hint) */
-function isReadOnlyCommand(cmd: string): boolean {
-  const head = cmd.replace(/^\/bin\/\w*sh\s+-l?c\s+'?/, '').trimStart().split(/\s+/)[0] ?? ''
-  return ['ls', 'cat', 'pwd', 'grep', 'rg', 'find', 'head', 'tail', 'wc', 'git'].includes(head)
 }
 
 /**

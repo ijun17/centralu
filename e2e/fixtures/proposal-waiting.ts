@@ -44,7 +44,7 @@ async function proposeAfterToolCall(page: Page, orc: string, spec: Record<string
   await page.evaluate(
     ({ sid, t }) => {
       const m = (window as any).__mock as Mock
-      m.emit({ type: 'tool_call', sessionId: sid, callId: `call-${t}`, summary: { tool: t, title: t, readOnly: true, paths: [] } })
+      m.emit({ type: 'tool_call', sessionId: sid, callId: `call-${t}`, summary: { tool: t, title: t, paths: [] } })
       m.emit({ type: 'session_title', sessionId: sid, title: `after ${t}`, auto: false })
     },
     { sid: orc, t: tool },

@@ -230,7 +230,7 @@ async function openInline(page: Page, h: Harness, sid: string): Promise<string> 
   await expect(page.getByTestId('session-view')).toBeVisible()
   await page.evaluate(
     (e) => (window as any).__mock.emit(e),
-    { type: 'tool_call', sessionId: sid, callId: 'toolu_show', summary: { tool: `mcp__app-${APP}__show`, title: 'show', readOnly: true, paths: [] } },
+    { type: 'tool_call', sessionId: sid, callId: 'toolu_show', summary: { tool: `mcp__app-${APP}__show`, title: 'show', paths: [] } },
   )
   await h.agentShows(sid, 'toolu_show')
   await expect(page.getByTestId('inline-view').getByTestId('app-frame')).toHaveAttribute('data-phase', 'ready')

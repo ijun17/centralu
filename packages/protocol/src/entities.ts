@@ -856,8 +856,12 @@ export const ToolSummary = z.object({
   tool: z.string(),
   /** A one-line summary (the full command, a file path, etc.) */
   title: z.string(),
-  /** A read-only tool collapses by default in the UI (FR-3's collapse policy) */
-  readOnly: z.boolean().default(false),
+  /**
+   * No longer set or read (#428). It was meant to collapse a read-only tool's card (FR-3), but every card folds now
+   * (core/approval.ts), and the two adapters' classifiers had drifted (Codex counted every `git` command, `git push`
+   * included, as read-only). Kept, optional, so events and stored records from older builds still parse.
+   */
+  readOnly: z.boolean().optional(),
   paths: z.array(z.string()).default([]),
 })
 export type ToolSummary = z.infer<typeof ToolSummary>
