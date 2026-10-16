@@ -101,6 +101,13 @@ describe('what the caller may read', () => {
     expect(underGrant(join(project, 'out', 'link.txt'), grants, '/')).toBe(false)
   })
 
+  it('a granted folder later swapped for a link opens nothing new: the grant is the folder it was (#428)', () => {
+    const grants = readableGrants([join(project, 'out')], project).granted
+    rmSync(join(project, 'out'), { recursive: true, force: true })
+    symlinkSync(root, join(project, 'out'))
+    expect(underGrant(join(project, 'out', 'secret.txt'), grants, '/')).toBe(false)
+  })
+
   it('reads a path in another spelling of the same place as the grant: a link to the root, another case (#428)', () => {
     const grants = readableGrants([join(project, 'out')], project).granted
     // The temp folder as the system names it can be a link (macOS: /var is /private/var); a file not made yet included

@@ -178,7 +178,8 @@ and `normal` it has these controls ([agent-host.md](agent-host.md) §1.2):
 - **The answer is someone else's words**, JSON-quoted for the caller like a worker's preview.
 - **Files come back by name, and only from inside the target project.** A named path is granted
   to the caller only if it exists inside the target project's folder after resolving symlinks
-  (`canonicalPath`, so the grant and a later read compare in one spelling), and
+  (`canonicalPath`, so the grant and a later read compare in one spelling; the grant is kept as it
+  was made and never resolved again, so a link swapped in for a granted folder opens nothing new), and
   never the project root itself; a file opens that file, a folder what is under it. A path outside
   is listed and not opened (Claude then asks the person before reading it; Codex does not restrict
   reads at all, so for a Codex caller the grant changes nothing and the residual is the same as any
