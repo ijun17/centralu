@@ -74,6 +74,14 @@ export function usesShippedConpty(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'win32'
 }
 
+/**
+ * A folder being watched cannot be renamed or moved, and neither can any folder above it (Windows, #849): the watch
+ * holds the folder open. There a project is watched by one recursive watch on its root instead of one per folder.
+ */
+export function locksWatchedFolders(platform: Platform = HOST_PLATFORM): boolean {
+  return platform === 'win32'
+}
+
 /** A program's file name on `platform`: `codex.exe` on Windows, `codex` elsewhere. */
 export function programFile(name: string, platform: Platform = HOST_PLATFORM): string {
   return platform === 'win32' ? `${name}.exe` : name

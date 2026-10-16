@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DirWatchers, MAX_WATCHED_DIRS } from './watch.js'
@@ -144,6 +144,35 @@ describe('DirWatchers — watches only expanded directories (#34)', () => {
     expect(w.setWatched('p1', root, ['dangling'])).toBe(0)
     await new Promise((r) => setTimeout(r, 120))
     expect(got).toEqual([])
+  })
+
+  /*
+   * #849: on Windows a watcher per expanded folder held each one open, so renaming or moving it, or a folder above it,
+   * failed with EPERM, from the file tree, an agent's `mv` and git alike.
+   */
+  it('an expanded folder and the folders above it can still be renamed, and the change is reported', async () => {
+    const root = realpathSync.native(tmp())
+    mkdirSync(join(root, 'src', 'components'), { recursive: true })
+    const got: string[][] = []
+    const w = makeWatcher((_p, d) => got.push(d))
+    expect(w.setWatched('p1', root, ['', 'src', 'src/components'])).toBe(3)
+    await new Promise((r) => setTimeout(r, 300))
+
+    renameSync(join(root, 'src'), join(root, 'lib'))
+    await until(() => got.flat().includes(''))
+    expect(got.flat()).toContain('')
+
+    // Expanded again where it is now, it is watched as before
+    got.length = 0
+    expect(w.setWatched('p1', root, ['', 'lib', 'lib/components'])).toBe(3)
+    await new Promise((r) => setTimeout(r, 300))
+    for (let i = 0; i < 30 && !got.flat().includes('lib/components'); i++) {
+      writeFileSync(join(root, 'lib', 'components', `new${i}.ts`), 'x')
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    expect(got.flat()).toContain('lib/components')
+    renameSync(join(root, 'lib', 'components'), join(root, 'lib', 'parts'))
+    renameSync(join(root, 'lib'), join(root, 'src'))
   })
 
   it('hitting the cap returns the number actually kept — it never silently truncates', () => {

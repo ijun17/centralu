@@ -1,4 +1,7 @@
 import { lstatSync, watch, type FSWatcher } from 'node:fs'
+import { resolve } from 'node:path'
+import { wireJoin, wireParent } from '@cc/protocol'
+import { locksWatchedFolders } from '../os.js'
 import { safeJoin } from './fs.js'
 import { assertExistingPathSync, isMissingPathError } from './path-guard.js'
 
@@ -27,9 +30,14 @@ import { assertExistingPathSync, isMissingPathError } from './path-guard.js'
  */
 export const MAX_WATCHED_DIRS = 256
 
+/**
+ * One project's watch set: the expanded folders, each with a watcher of its own, or (`locksWatchedFolders`, Windows)
+ * none of their own and one recursive watcher on the root (`tree`) that stands in for all of them.
+ */
+type ProjectWatch = { dirs: Map<string, FSWatcher | null>; tree: { root: string; watcher: FSWatcher } | null }
+
 export class DirWatchers {
-  /** projectId -> (relative path -> watcher) */
-  private byProject = new Map<string, Map<string, FSWatcher>>()
+  private byProject = new Map<string, ProjectWatch>()
   private pending = new Map<string, Set<string>>()
   private timers = new Map<string, ReturnType<typeof setTimeout>>()
   private closed = false
@@ -37,6 +45,14 @@ export class DirWatchers {
   constructor(
     private onChange: (projectId: string, dirs: string[]) => void,
     private flushMs = 300,
+    /**
+     * Windows (#849): a watcher per expanded folder held each one open, so renaming or moving it or any folder above
+     * it failed with EPERM, from the file tree, an agent's `mv` or git alike (measured: `src` with `src/components`
+     * expanded). One recursive watcher on the root holds only the root, and its events are matched to the expanded
+     * folders here. Windows watches a tree natively (one handle, no walk), so the reason for not watching recursively
+     * elsewhere (above) does not apply there.
+     */
+    private oneTree = locksWatchedFolders(),
   ) {}
 
   /**
@@ -48,18 +64,18 @@ export class DirWatchers {
   setWatched(projectId: string, root: string, rels: readonly string[]): number {
     if (this.closed) return 0
     const want = new Set([...new Set(rels)].slice(0, MAX_WATCHED_DIRS))
-    const cur = this.byProject.get(projectId) ?? new Map<string, FSWatcher>()
+    const cur = this.byProject.get(projectId) ?? { dirs: new Map<string, FSWatcher | null>(), tree: null }
     this.byProject.set(projectId, cur)
 
-    for (const [rel, w] of cur) {
+    for (const [rel, w] of cur.dirs) {
       if (!want.has(rel)) {
-        w.close()
-        cur.delete(rel)
+        w?.close()
+        cur.dirs.delete(rel)
       }
     }
 
     for (const rel of want) {
-      if (cur.has(rel)) continue
+      if (cur.dirs.has(rel)) continue
       let abs = ''
       try {
         // the same rule as every other fs path in the tree — neither outside the project nor a link can be watched
@@ -68,6 +84,10 @@ export class DirWatchers {
         if (!info.isDirectory()) continue
       } catch (error) {
         if (isMissingPathError(error) && !isSymlink(abs)) this.schedule(projectId, rel)
+        continue
+      }
+      if (this.oneTree) {
+        cur.dirs.set(rel, null)
         continue
       }
       let w: FSWatcher
@@ -86,12 +106,58 @@ export class DirWatchers {
       w.on('error', () => {
         // the directory being watched has disappeared — the watcher is removed, and the screen is told
         w.close()
-        cur.delete(rel)
+        cur.dirs.delete(rel)
         this.schedule(projectId, rel)
       })
-      cur.set(rel, w)
+      cur.dirs.set(rel, w)
     }
-    return cur.size
+    if (this.oneTree) this.watchTree(projectId, cur, root)
+    return cur.dirs.size
+  }
+
+  /** The one recursive watcher of a project whose folders are not watched one by one: there while any folder is expanded */
+  private watchTree(projectId: string, cur: ProjectWatch, root: string): void {
+    const abs = resolve(root)
+    if (cur.tree && (cur.dirs.size === 0 || cur.tree.root !== abs)) {
+      cur.tree.watcher.close()
+      cur.tree = null
+    }
+    if (cur.tree || cur.dirs.size === 0) return
+    const lost = () => {
+      // the root itself is gone: every expanded folder went with it, and the screen is told about each
+      cur.tree?.watcher.close()
+      cur.tree = null
+      for (const rel of cur.dirs.keys()) this.schedule(projectId, rel)
+      cur.dirs.clear()
+    }
+    let watcher: FSWatcher
+    try {
+      watcher = watch(abs, { recursive: true }, (event, name) => this.treeEvent(projectId, cur, event, name))
+    } catch {
+      return lost()
+    }
+    watcher.on('error', lost)
+    cur.tree = { root: abs, watcher }
+  }
+
+  /**
+   * One event of a project's recursive watcher, as the watchers of single folders would have reported it: the folder
+   * an entry changed in, the entry itself when it is an expanded folder (deleted or renamed), and on a rename every
+   * expanded folder under it, which moved or went with it. No name (the OS dropped events) reports them all.
+   */
+  private treeEvent(projectId: string, cur: ProjectWatch, event: string, name: string | null): void {
+    if (cur.dirs.size === 0) return
+    if (!name) {
+      for (const rel of cur.dirs.keys()) this.schedule(projectId, rel)
+      return
+    }
+    // The OS's separator (a backslash on Windows) to the wire's, which the expanded folders are named in
+    const rel = wireJoin(...name.split(/[\\/]+/))
+    const parent = wireParent(rel)
+    if (cur.dirs.has(parent)) this.schedule(projectId, parent)
+    if (cur.dirs.has(rel)) this.schedule(projectId, rel)
+    if (event !== 'rename') return
+    for (const dir of cur.dirs.keys()) if (dir.startsWith(`${rel}/`)) this.schedule(projectId, dir)
   }
 
   private schedule(projectId: string, rel: string): void {
@@ -116,7 +182,8 @@ export class DirWatchers {
    * and nothing can unwatch it afterwards: the screen's unwatch names a project the host no longer knows.
    */
   drop(projectId: string): void {
-    for (const w of this.byProject.get(projectId)?.values() ?? []) w.close()
+    const cur = this.byProject.get(projectId)
+    if (cur) closeAll(cur)
     this.byProject.delete(projectId)
     const t = this.timers.get(projectId)
     if (t) clearTimeout(t)
@@ -126,17 +193,22 @@ export class DirWatchers {
 
   /** How many directories of this project are being watched */
   watchedCount(projectId: string): number {
-    return this.byProject.get(projectId)?.size ?? 0
+    return this.byProject.get(projectId)?.dirs.size ?? 0
   }
 
   close(): void {
     this.closed = true
-    for (const m of this.byProject.values()) for (const w of m.values()) w.close()
+    for (const cur of this.byProject.values()) closeAll(cur)
     this.byProject.clear()
     for (const t of this.timers.values()) clearTimeout(t)
     this.timers.clear()
     this.pending.clear()
   }
+}
+
+function closeAll(cur: ProjectWatch): void {
+  for (const w of cur.dirs.values()) w?.close()
+  cur.tree?.watcher.close()
 }
 
 function isSymlink(path: string): boolean {
