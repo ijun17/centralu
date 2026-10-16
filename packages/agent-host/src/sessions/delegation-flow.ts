@@ -34,6 +34,7 @@ import {
   gitValidBranchName,
 } from '../dev-services/git.js'
 import type { HostAsk, HostAskAnswer } from './host-cards.js'
+import { raceBound } from './with-timeout.js'
 
 /** How long start_agent waits for a model list to check the model and effort asked for, before it starts anyway (#660) */
 export const START_AGENT_MODEL_CHECK_MS = 3_000
@@ -376,6 +377,7 @@ export class DelegationFlow {
     const onAbort = () => ctl.abort()
     signal?.addEventListener('abort', onAbort, { once: true })
     if (signal?.aborted) ctl.abort()
+    // Not `raceBound` (#428): what the bound answers is decided inside its timer, in the same instant as a card's answer
     let timer: ReturnType<typeof setTimeout> | undefined
     const late = new Promise<ChildRunResult>((resolve) => {
       timer = setTimeout(() => {
@@ -990,24 +992,10 @@ export class DelegationFlow {
         return { ok: false, error: `No session yet: request ${id} is still waiting for ${on}. Send once it has started.` }
       }
       if (action === 'wait') {
-        let timer: ReturnType<typeof setTimeout> | undefined
-        let onAbort: (() => void) | undefined
         const owner = rec.req.callerId
         const leaving = this.untilHandedOver(rec)
-        const r = await Promise.race([
-          leaving.gone,
-          rec.done,
-          new Promise<void>((resolve) => (timer = setTimeout(resolve, ASK_WAIT_MS))),
-          new Promise<void>((resolve) => {
-            if (!signal) return
-            onAbort = resolve
-            if (signal.aborted) resolve()
-            else signal.addEventListener('abort', onAbort, { once: true })
-          }),
-        ])
-        clearTimeout(timer)
+        const r = await raceBound(Promise.race([leaving.gone, rec.done]), ASK_WAIT_MS, signal)
         leaving.done()
-        if (onAbort) signal?.removeEventListener('abort', onAbort)
         // A handoff gave the request to the session that took over (#693)
         if (r === 'handedOver') return this.handedOverReply(owner, id)
         // Read again: the person may have answered while this waited
@@ -1619,22 +1607,13 @@ export class DelegationFlow {
     const standing = observing || d.settled ? [] : this.host.routedCards(d.sessionId, d.callerId)
     if (standing.length) return this.agentAsking(d, standing)
     const name = () => this.host.meta.get(d.sessionId)?.name ?? d.sessionId
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let onAbort: (() => void) | undefined
-    const bound = new Promise<'bound'>((resolve) => (timer = setTimeout(() => resolve('bound'), boundMs)))
-    const aborted = new Promise<'aborted'>((resolve) => {
-      if (!signal) return
-      onAbort = () => resolve('aborted')
-      if (signal.aborted) onAbort()
-      else signal.addEventListener('abort', onAbort, { once: true })
-    })
     const card = observing ? undefined : this.host.untilCard(d.sessionId, d.callerId)
     // A handoff that gives the child away ends this wait (#693): the answer is the new owner's, never read twice
     const owner = d.callerId
     const leaving = observing ? undefined : this.untilHandedOver(d)
     if (!observing) d.waiters = (d.waiters ?? 0) + 1
     try {
-      const r = await Promise.race([d.outcome, bound, aborted, ...(card ? [card.asked] : []), ...(leaving ? [leaving.gone] : [])])
+      const r = await raceBound(d.outcome, boundMs, signal, ...(card ? [card.asked] : []), ...(leaving ? [leaving.gone] : []))
       if (!observing) d.waiters = (d.waiters ?? 1) - 1
       if (r === 'handedOver') return this.handedOverReply(owner, d.sessionId)
       if (r === 'asked') {
@@ -1688,8 +1667,6 @@ export class DelegationFlow {
     } finally {
       card?.done()
       leaving?.done()
-      clearTimeout(timer)
-      if (onAbort) signal?.removeEventListener('abort', onAbort)
     }
   }
 

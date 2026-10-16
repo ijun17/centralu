@@ -232,6 +232,10 @@ bridge wait of 280 s. It then answers still working, naming the session and how 
 to continue waiting, even if another session was opened meanwhile. Multiple outstanding tasks need
 an explicit session. A new task cannot replace unfinished work in the same session.
 
+Every bounded wait (ask_project's, start_agent's and agent_session's, a start request's, a handoff's) is one race,
+`raceBound` in `sessions/with-timeout.ts` (#428): the outcome, the bound, the call's cancellation (also one that came
+before the wait) and the wait's own wakes. Unlike `withTimeout` it never rejects: the bound is an answer.
+
 **Stop.** Stop on the caller reaches delegated work only while that caller is actually waiting
 (`waiters > 0`), as for `start_agent`; after a bounded call returns still working, the target keeps
 running. If the task joined an already-running turn, Stop or call cancellation ends only the caller's

@@ -211,6 +211,10 @@ bridge wait of 280 s. It then answers still working, naming the session and how 
 to continue waiting, even if another session was opened meanwhile. Multiple outstanding tasks need
 an explicit session. A new task cannot replace unfinished work in the same session.
 
+제한 시간이 있는 기다림(ask_project, start_agent, agent_session, 시작 요청, 핸드오프)은 모두 `sessions/with-timeout.ts`의
+`raceBound` 경합 하나를 쓴다(#428): 결과, 제한 시간, 호출의 취소(기다리기 전에 이미 취소된 것도), 그 기다림이 깨어나는 계기를
+겨룬다. `withTimeout`과 달리 거부하지 않는다: 제한 시간에 닿는 것도 하나의 답이다.
+
 **Stop.** Stop on the caller reaches delegated work only while that caller is actually waiting
 (`waiters > 0`), as for `start_agent`; after a bounded call returns still working, the target keeps
 running. If the task joined an already-running turn, Stop or call cancellation ends only the caller's

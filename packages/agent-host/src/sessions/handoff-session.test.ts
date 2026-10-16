@@ -8,6 +8,7 @@ import { handoffPrompt, SESSION_HANDOFF, type AdapterCapabilities, type Normaliz
 import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
+import { HandoffFlow, type HandoffFlowHost } from './handoff-flow.js'
 
 /**
  * The orchestrator's handoff_session (#694) over the real manager: who may hand off what, the person's card unless
@@ -372,5 +373,24 @@ describe('handoff_session (#694)', () => {
     expect(lines.some((l) => l.includes(`session_handoff of ${target}`) && l.includes('allowed'))).toBe(true)
     expect(lines.some((l) => l.includes(`handoff_session by ${orch.slice(0, 8)} of ${target.slice(0, 8)} refused`) && l.includes('nope'))).toBe(true)
     expect(lines.some((l) => l.includes(`handoff_session by ${orch.slice(0, 8)} of ${orch.slice(0, 8)} refused`))).toBe(true)
+  })
+})
+
+describe('the handoff wait (#428)', () => {
+  it('a call cancelled before its wait answers "still running" at once, not at the call bound', async () => {
+    const target = { id: 't', name: 'Long run', kind: 'worker', projectId: 'p', state: 'idle', pendingApproval: null, pendingQuestions: [] } as unknown as SessionInfo
+    const flow = new HandoffFlow({
+      meta: new Map([['t', target]]),
+      store,
+      autoBoundaryOpen: () => true,
+      toolProblem: async () => null,
+      send: async () => {},
+      exportHandoffNote: async () => null,
+    } as unknown as HandoffFlowHost, { pollMs: 5, callMs: 60_000, noteMs: 200 })
+    const ctl = new AbortController()
+    ctl.abort()
+    const t0 = Date.now()
+    expect(await flow.handoff('orch', target, { mode: 'agent' }, ctl.signal)).toMatchObject({ ok: true, state: 'writing', sessionId: 't' })
+    expect(Date.now() - t0).toBeLessThan(2_000)
   })
 })

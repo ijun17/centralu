@@ -7,6 +7,7 @@ import { NOT_REACHABLE } from '../adapters/contract.js'
 import type { AskProjectResult, RoutedCard, LinkedProject, LinkedSessions } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
 import { linkedTurnEnd, type LinkedTurnEvent } from './linked-turn-end.js'
+import { raceBound } from './with-timeout.js'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
 
 /** How much of a linked machine's last message is read for an answer; `clipAnswer` then cuts it to the usual size */
@@ -421,19 +422,10 @@ export class AskProjectFlow {
       ...(ask.notice ? { notice: ask.notice } : {}),
     })
     if (!ask.settled && ask.notice) return working()
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let onAbort: (() => void) | undefined
     let wake: (() => void) | undefined
-    const bound = new Promise<'bound'>((resolve) => (timer = setTimeout(() => resolve('bound'), ASK_WAIT_MS)))
-    const aborted = new Promise<'aborted'>((resolve) => {
-      if (!signal) return
-      onAbort = () => resolve('aborted')
-      if (signal.aborted) onAbort()
-      else signal.addEventListener('abort', onAbort, { once: true })
-    })
     const asked = new Promise<'asked'>((resolve) => ask.wake.add((wake = () => resolve('asked'))))
     try {
-      const r = await Promise.race([ask.outcome, bound, aborted, asked])
+      const r = await raceBound(ask.outcome, ASK_WAIT_MS, signal, asked)
       if (r === 'asked' || r === 'bound') return working()
       if (r === 'aborted') {
         // The turn runs on the machine and this host cannot stop it from here: the call stops waiting and says so
@@ -456,34 +448,23 @@ export class AskProjectFlow {
       }
     } finally {
       if (wake) ask.wake.delete(wake)
-      clearTimeout(timer)
-      if (onAbort) signal?.removeEventListener('abort', onAbort)
     }
   }
 
   /** Waits for a delegation up to the bound, and turns its outcome into what the caller reads */
   private async awaitDelegation(key: string, d: Delegation, signal?: AbortSignal): Promise<AskProjectResult> {
     const sessionName = () => this.host.meta.get(d.sessionId)?.name ?? d.sessionId
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let onAbort: (() => void) | undefined
     const asking = (cards: RoutedCard[]): AskProjectResult => ({ ok: true, state: 'asking', project: d.target.name, sessionId: d.sessionId, sessionName: sessionName(), cards })
     // A card waiting on the caller comes first (#676), before and during the wait
     const standing = d.settled ? [] : this.host.routedCards(d.sessionId, d.callerId)
     if (standing.length) return asking(standing)
-    const bound = new Promise<'bound'>((resolve) => (timer = setTimeout(() => resolve('bound'), ASK_WAIT_MS)))
-    const aborted = new Promise<'aborted'>((resolve) => {
-      if (!signal) return
-      onAbort = () => resolve('aborted')
-      if (signal.aborted) onAbort()
-      else signal.addEventListener('abort', onAbort, { once: true })
-    })
     const card = this.host.untilCard(d.sessionId, d.callerId)
     // A handoff that gives the delegation away ends this wait (#693)
     const owner = d.callerId
     const leaving = this.host.untilHandedOver(d)
     d.waiters = (d.waiters ?? 0) + 1
     try {
-      const r = await Promise.race([d.outcome, ...(d.waitCancelled ? [d.waitCancelled] : []), bound, aborted, card.asked, leaving.gone])
+      const r = await raceBound(d.outcome, ASK_WAIT_MS, signal, ...(d.waitCancelled ? [d.waitCancelled] : []), card.asked, leaving.gone)
       if (r === 'handedOver') return this.host.handedOverReply(owner, d.sessionId)
       if (r === 'asked') {
         const cards = this.host.routedCards(d.sessionId, d.callerId)
@@ -532,8 +513,6 @@ export class AskProjectFlow {
       card.done()
       leaving.done()
       d.waiters = (d.waiters ?? 1) - 1
-      clearTimeout(timer)
-      if (onAbort) signal?.removeEventListener('abort', onAbort)
     }
   }
 }

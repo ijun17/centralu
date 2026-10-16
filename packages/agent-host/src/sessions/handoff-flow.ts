@@ -5,6 +5,7 @@ import type { Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
 import type { HostAsk, HostAskAnswer } from './host-cards.js'
 import { trustedJsonText } from './orchestrator-tools.js'
+import { raceBound } from './with-timeout.js'
 
 /**
  * What the handoff flow reaches of the session manager (#428), each member read when used: the manager builds it with
@@ -222,17 +223,8 @@ export class HandoffFlow {
       return run.result
     }
     const left = Math.max(0, this.timings.callMs - (Date.now() - started))
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let onAbort: (() => void) | undefined
-    const later = new Promise<null>((resolve) => {
-      timer = setTimeout(() => resolve(null), left)
-      onAbort = () => resolve(null)
-      signal?.addEventListener('abort', onAbort, { once: true })
-    })
-    const r = await Promise.race([run.done, later])
-    clearTimeout(timer)
-    if (onAbort) signal?.removeEventListener('abort', onAbort)
-    if (r) {
+    const r = await raceBound(run.done, left, signal)
+    if (r !== 'bound' && r !== 'aborted') {
       this.runs.delete(run.id)
       return r
     }
