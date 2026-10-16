@@ -1537,6 +1537,7 @@ export class SessionManager {
       info.lastReadSeq = seq // Something we sent counts as read
       this.store.upsertSession(info)
       this.emit({ type: 'user_message', sessionId: id, seq, text: params.initialPrompt, ...(from ? { from } : {}) })
+      this.cardRests.turnAsked(id)
       handle.send(params.initialPrompt)
     }
     return info
@@ -3003,6 +3004,8 @@ export class SessionManager {
         : attachments?.length
           ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
           : text
+    // A turn is asked for now, whether or not the tool announces it before its first card (`CardRests`)
+    this.cardRests.turnAsked(sessionId)
     if (sendInput) sendInput(h, adapterText)
     else h.send(adapterText)
   }

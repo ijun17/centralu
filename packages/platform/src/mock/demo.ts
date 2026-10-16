@@ -280,8 +280,12 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
   if (scene === 'grid') {
     // The grid scene's purpose is the screen with several panels — collapsing, the ring, and reading space all show up here
     const extra = await session(mock, centralu.id, 'claude', 'Put together the release notes')
+    /*
+     * Left at rest, as the scene has always shown it: the mock's list used to ignore a state_change, so the
+     * "working" said here never reached the screen. Now that the mock keeps the host's rules (#428), saying it would
+     * put a second panel mid-response.
+     */
     talk(mock, extra.id, [['user', "Write release notes from this week's commits."]])
-    mock.emit({ type: 'state_change', sessionId: extra.id, state: 'working' })
     const panels = [working.id, approving.id, asking.id, extra.id]
     await mock.agents.setGridView(panels.map((sessionId) => ({ kind: 'session' as const, sessionId })))
     /*

@@ -14,15 +14,30 @@ import { isInTurn, nextStateFor, type NormalizedEvent, type SessionState } from 
  */
 export class CardRests {
   private rests = new Map<string, SessionState>()
+  /**
+   * Sessions the host just gave input to: a turn is asked for even before the tool says so, and a card it raises
+   * first (a tool that does not announce its turn) belongs to that turn, not to a rest.
+   */
+  private asked = new Set<string>()
+
+  /** The host delivered input to the session: whatever comes next is that turn's */
+  turnAsked(sessionId: string): void {
+    this.asked.add(sessionId)
+    this.rests.delete(sessionId)
+  }
 
   /** Called with each event of a session, and the state it was in before the event */
   note(e: NormalizedEvent, sessionId: string, before: SessionState): void {
     if (e.type === 'approval_request' || e.type === 'question_request') {
-      if (!isInTurn(before) && !this.rests.has(sessionId)) this.rests.set(sessionId, before)
+      if (!isInTurn(before) && !this.asked.has(sessionId) && !this.rests.has(sessionId)) this.rests.set(sessionId, before)
       return
     }
-    // Anything else that moves the state (a turn starting or ending, an error) leaves no rest to go back to
-    if (e.type !== 'approval_resolved' && e.type !== 'question_resolved' && nextStateFor(e) !== null) this.rests.delete(sessionId)
+    // Anything else that moves the state (a turn starting or ending, an error) leaves no rest to go back to, and the
+    // tool has now spoken for the turn it was asked for
+    if (e.type !== 'approval_resolved' && e.type !== 'question_resolved' && nextStateFor(e) !== null) {
+      this.rests.delete(sessionId)
+      this.asked.delete(sessionId)
+    }
   }
 
   /**
@@ -42,5 +57,6 @@ export class CardRests {
 
   forget(sessionId: string): void {
     this.rests.delete(sessionId)
+    this.asked.delete(sessionId)
   }
 }

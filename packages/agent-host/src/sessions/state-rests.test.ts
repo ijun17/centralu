@@ -31,6 +31,8 @@ class Handle implements SessionHandle {
   externalId: string
   /** A background agent's card still open: closing the process releases it, as claude's `releaseAgents` does */
   backgroundCall: string | null = null
+  /** A tool that does not announce its turn: the first thing it says is a card */
+  quiet = false
   constructor(
     readonly sessionId: string,
     readonly emit: EventSink,
@@ -42,7 +44,7 @@ class Handle implements SessionHandle {
     this.emit({ sessionId: this.sessionId, ...e } as NormalizedEvent)
   }
   send() {
-    this.ev({ type: 'state_change', state: 'working' })
+    if (!this.quiet) this.ev({ type: 'state_change', state: 'working' })
   }
   turn() {
     this.ev({ type: 'message_delta', role: 'assistant', text: 'done' })
@@ -171,6 +173,17 @@ describe('a session at rest stays at rest (#428)', () => {
     h.ev({ type: 'question_request', requestId: 'q3', questions: QUESTION })
     mgr.answerQuestion(s.id, 'q2', [{ question: 'Which?', answers: ['A'] }])
     mgr.answerQuestion(s.id, 'q3', [{ question: 'Which?', answers: ['A'] }])
+    expect(info().state).toBe('working')
+  })
+
+  it('a card that comes first after input belongs to that turn, though the tool never said it began', async () => {
+    const { mgr, s, h, info } = await session()
+    h.turn()
+    h.quiet = true
+    await mgr.send(s.id, 'please approve')
+    h.ev({ type: 'approval_request', requestId: 'r1', detail: { kind: 'command', command: 'ls', cwd: '/' } })
+    mgr.respondApproval(s.id, 'r1', 'allow')
+    // Its answer comes next: the session is still in that turn, not back at rest
     expect(info().state).toBe('working')
   })
 
