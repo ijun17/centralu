@@ -1,3 +1,4 @@
+import { isInTurn } from '@cc/core'
 import { useLabelNow } from '../../app/useLabelNow.js'
 import { nextWaitingTick } from '../../app/labelClock.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -163,7 +164,7 @@ export function Inbox() {
                     Continue (#698): a turn the network, a quit or its tool cut short goes on with one message; the agent
                     still has its conversation. Never sent by itself: a resent turn can repeat a push or a release.
                   */}
-                  {canContinue(it.interruption) && it.state !== 'working' && it.state !== 'waiting_approval' && (
+                  {canContinue(it.interruption) && !isInTurn(it.state) && (
                     <button
                       className="mr-1.5 shrink-0 rounded border border-line px-2 py-0.5 text-xs text-ink hover:bg-surface-hover"
                       onClick={() => void send(it.id, CONTINUE_TEXT)}

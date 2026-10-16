@@ -249,6 +249,8 @@ describe('asking another project', () => {
 
   it.each(['working', 'waiting_approval'] as const)('returns the choices for a busy session (%s), with no note when its CLI cannot take one (#677)', async (state) => {
     const caller = await autoCaller()
+    // Through working: the host keeps the window's table (#428), and idle → waiting_approval is not in it
+    handleOf(targetSession)!.event({ type: 'state_change', sessionId: targetSession, state: 'working' })
     handleOf(targetSession)!.event({ type: 'state_change', sessionId: targetSession, state })
     w.adapters.get('codex')!.capabilities.midTurnInput = false
     expect(await w.mgr.askProject(caller, { project: w.target.id, task: 'export' })).toMatchObject({

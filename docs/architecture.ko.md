@@ -49,6 +49,12 @@
 
 핵심은 이것이다: **구현을 아는 유일한 곳은 apps 엔트리 포인트다.** 나머지 전부는 인터페이스와 스키마만 안다.
 
+**프로세스 양쪽이 함께 쓰는 순수 규칙은 core가 아니라 protocol에 둔다.** 호스트는 core를 가져올 수 없기 때문이다.
+경로를 wire에 적는 방식(`protocol/paths.ts`)과 세션 상태 기계(`protocol/session-state.ts`: 전이 표, `isWaiting`,
+`isInTurn`, `stepSessionState`)가 그런 규칙이고, core는 상태 기계를 예전 이름 그대로 다시 내보낸다. 한쪽에 따로 둔
+사본은 어긋나므로(#428), `core/session/state-parity.test.ts`가 같은 이벤트를 core의 리듀서와 호스트의 사본에 넣고
+재연결 때 돌려주는 값을 비교한다.
+
 **어느 OS인지는 플랫폼 모듈에서만 묻는다** (`local/platform-checks`, `tooling/eslint-platform-checks.js`). 패키지, 앱,
 npm 런처에서 `process.platform`(또는 `os.platform()`)을 읽거나 무엇이든 OS 이름과 비교하는 것(`=== 'win32'`,
 `case 'darwin':`)은 `eslint.config.js`의 `PLATFORM_MODULES` 밖에서는 린트 에러다: `os.ts`(다른 점의 이름으로 묻는

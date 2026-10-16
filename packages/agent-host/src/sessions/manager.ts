@@ -55,6 +55,7 @@ import type {
 } from '@cc/protocol'
 import {
   applyBackgroundTasks,
+  applySessionState,
   CENTRALU_APPLY,
   CENTRALU_APPLY_QUESTION,
   sessionOnlyAlways,
@@ -1755,7 +1756,7 @@ export class SessionManager {
         if (this.children.queued.has(k.sessionId)) this.scheduleDrain(k.sessionId)
         if (!r.resumed) {
           console.error(`[agent-host] could not re-attach ${k.sessionId.slice(0, 8)}: ${r.reason ?? 'unknown'}`)
-          if (m.state === 'working' || m.state === 'waiting_approval') {
+          if (inTurn(m.state)) {
             m.state = 'idle'
             m.waitingSince = null
             this.markStoppedByQuit(m, true)
@@ -2741,42 +2742,10 @@ export class SessionManager {
     }
   }
 
-  /**
-   * A state hint, for storage.
-   * Authority over the live state belongs to the UI (the core reducer) — since agent-host never
-   * imports core (docs/architecture.md §2), only the minimal hint needed for restore (M1.5) is
-   * recorded here. Deciding transition rules is not done here — that belongs to core.
-   */
+  /** A state hint, for storage: the core reducer's rules on the host's copy (`applySessionState`, protocol session-state.ts) */
   private applyStateHint(e: NormalizedEvent, m: SessionInfo): void {
+    applySessionState(m, e, Date.now())
     this.trackLiveFacts(e, m)
-    const hint =
-      e.type === 'approval_request' ? 'waiting_approval'
-      : e.type === 'turn_complete' ? 'waiting_input'
-      : e.type === 'limit_reached' ? 'limited'
-      : e.type === 'error' ? 'error'
-      : e.type === 'state_change' ? e.state
-      : e.type === 'message_delta' || e.type === 'tool_call' ? 'working'
-      : null
-    if (!hint) return
-    const prev = m.state
-    m.state = hint
-    const waiting = hint === 'waiting_approval' || hint === 'waiting_input' || hint === 'error'
-    m.waitingSince = waiting ? (m.waitingSince ?? Date.now()) : null
-    // The same clearing rules as the core reducer (docs/state-management.md §2):
-    // a kind of busy never outlives being busy, recovering removes the limit banner, and a card for
-    // a requestId that has died (ended by an error, an interrupt, or recovery) is torn down too,
-    // since clicking it would have nowhere to answer — a reconnect restore must never bring a dead
-    // card back to life.
-    if (hint !== 'working' && e.type !== 'activity') m.activity = null
-    if (hint === 'working' || hint === 'idle') m.limit = null
-    const cardsDead =
-      hint === 'error' ||
-      ((hint === 'working' || hint === 'idle') && prev !== hint) ||
-      (prev === 'waiting_approval' && hint === 'waiting_input')
-    if (cardsDead) {
-      m.pendingApproval = null
-      m.pendingQuestions = []
-    }
   }
 
   /**
@@ -2785,28 +2754,11 @@ export class SessionManager {
    * While SessionInfo had none of these fields, a UI that disconnected and came back received only
    * state=waiting_approval, and **had no payload to draw the approval card with** — with no requestId
    * either, it could not even respond. These are never put in the DB (upsert does not know these
-   * fields) — if the host restarts, they really are gone.
+   * fields) — if the host restarts, they really are gone. The cards, the activity and the limit are set with the
+   * state they belong to (`applySessionState`, protocol session-state.ts); these are the rest.
    */
   private trackLiveFacts(e: NormalizedEvent, m: SessionInfo): void {
     switch (e.type) {
-      case 'approval_request':
-        m.pendingApproval = { requestId: e.requestId, detail: e.detail }
-        break
-      case 'approval_resolved':
-        if (m.pendingApproval?.requestId === e.requestId) m.pendingApproval = null
-        break
-      case 'question_request':
-        m.pendingQuestions = [...m.pendingQuestions, { requestId: e.requestId, questions: e.questions }]
-        break
-      case 'question_resolved':
-        m.pendingQuestions = m.pendingQuestions.filter((q) => q.requestId !== e.requestId)
-        break
-      case 'activity':
-        m.activity = e.activity
-        break
-      case 'limit_reached':
-        m.limit = { resumeAt: e.resumeAt, usedPercent: e.usedPercent, windowMins: e.windowMins }
-        break
       case 'usage_update':
         m.usage = e.tokens
         if (e.request) this.cacheLedger.record(m.tool, m.id, e.request)
@@ -4753,8 +4705,10 @@ export class SessionManager {
     const queuedBy = removed ? new Set<string>() : new Set([...this.children.queued.values()].flat().filter((r) => r.callerSessionId === from).map((r) => r.sessionId))
     const delegated = [...this.children.delegations.values()].filter((d) => d.callerId === from)
     const stateOf = (s: SessionInfo): string | null => {
-      if (s.pendingApproval || s.state === 'waiting_approval') return 'waiting for an approval'
+      // A question blocks the session as an approval does (waiting_approval), so its own list is read first
+      if (s.pendingApproval) return 'waiting for an approval'
       if (s.pendingQuestions.length) return 'waiting on a question'
+      if (s.state === 'waiting_approval') return 'waiting for an approval'
       const run = this.agentRuns.get(s.id)
       if (inTurn(s.state) || (run && !run.finished)) return queuedBy.has(s.id) && this.children.turnOwners.get(s.id)?.callerId !== from ? 'busy; your request is queued' : 'working'
       if (queuedBy.has(s.id)) return 'your request is queued'

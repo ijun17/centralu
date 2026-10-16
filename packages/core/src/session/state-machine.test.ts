@@ -93,6 +93,12 @@ describe('blocking illegal transitions', () => {
     expect(r.state).toBe('waiting_input')
   })
 
+  it('a card raised between turns closes back into limited, the rest it was raised in (#673)', () => {
+    // restAfterCard (host-cards.ts) sends that rest before the card's resolve; refused, the resolve read as "back to work"
+    const r = transition('waiting_approval', ev({ type: 'state_change', state: 'limited' } as never))
+    expect(r).toEqual({ state: 'limited', illegal: false })
+  })
+
   it('a transition to the same state is always legal (idempotent)', () => {
     for (const s of Object.keys(URGENCY) as SessionState[]) expect(canTransition(s, s)).toBe(true)
   })

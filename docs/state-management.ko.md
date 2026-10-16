@@ -46,7 +46,7 @@ interface AppStore {
 ```
 
 - **왜 zustand인가**: 이벤트는 React 렌더 사이클 밖(WS 콜백)에서 도착한다. zustand는 React 밖에서의 `store.setState`를 허용하고, 구독 단위를 selector로 잘라 리렌더를 제어할 수 있다. ([tech-stack.ko.md](tech-stack.ko.md) 참고)
-- 세션 상태 전이는 반드시 `core/session`의 전이 테이블을 거친다. 불법 전이(예: `state_change`가 주장하는 `idle → waiting_approval`)는 dev 모드에서는 throw하고, prod에서는 로그만 남기고 무시한다. 단 **호스트가 보내 오는 사실(fact)인 `approval_request`/`question_request`는 예외다** — 승인 요청이 실제로 존재하는데 테이블이 막아 버리면 인박스에도 배지에도 영영 나타나지 않고 에이전트는 계속 블록된다(측정됨). 이 둘은 어떤 상태에서든 `waiting_approval`로 전이한다.
+- 세션 상태 전이는 반드시 전이 테이블(`protocol/session-state.ts`, `core/session`이 다시 내보낸다. 호스트도 자기 사본에 같은 규칙을 돌린다. [domain-model.ko.md](domain-model.ko.md) §3)을 거친다. 불법 전이(예: `state_change`가 주장하는 `idle → waiting_approval`)는 dev 모드에서는 throw하고, prod에서는 로그만 남기고 무시한다. 단 **호스트가 보내 오는 사실(fact)인 `approval_request`/`question_request`는 예외다** — 승인 요청이 실제로 존재하는데 테이블이 막아 버리면 인박스에도 배지에도 영영 나타나지 않고 에이전트는 계속 블록된다(측정됨). 이 둘은 어떤 상태에서든 `waiting_approval`로 전이한다.
 
 ## 3. 파생 상태 규칙 (버그의 절반이 여기서 막힌다)
 

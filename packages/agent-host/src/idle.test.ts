@@ -22,4 +22,14 @@ describe('activityCounts (host.activity, for the "Update <machine>" prompt)', ()
     expect(hostBusy(idle)).toBe(false)
     expect(Object.values(activityCounts(idle)).every((n) => n === 0)).toBe(true)
   })
+
+  it('counts a question as a question though it blocks the session as an approval does (#428)', () => {
+    // The host keeps a session with an open question in waiting_approval, as the window does (protocol session-state.ts)
+    const s: ActivitySnapshot = {
+      sessions: [live({ state: 'waiting_approval', pendingQuestions: [{ requestId: 'q', questions: [] }] })],
+      terminals: 0,
+      commandRuns: 0,
+    }
+    expect(activityCounts(s)).toMatchObject({ approvals: 0, questions: 1 })
+  })
 })

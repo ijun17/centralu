@@ -1,4 +1,4 @@
-import type { NormalizedEvent, SessionInfo, StoredMessage } from '@cc/protocol'
+import { applySessionState, type NormalizedEvent, type SessionInfo, type StoredMessage } from '@cc/protocol'
 import type { MockClock } from './clock.js'
 
 /**
@@ -56,32 +56,14 @@ export class SessionStore {
 
   /** Folds an event into the session it belongs to, the way the host's live facts do */
   applyLiveFacts(s: SessionInfo, event: NormalizedEvent): void {
-    if (event.type === 'approval_request') {
-      s.state = 'waiting_approval'
-      s.waitingSince ??= this.clock.now()
-      s.pendingApproval = { requestId: event.requestId, detail: event.detail }
-    } else if (event.type === 'approval_resolved') {
-      if (s.pendingApproval?.requestId === event.requestId) s.pendingApproval = null
-    } else if (event.type === 'question_request') {
-      /*
-       * The same rule as the real thing (manager.trackLiveFacts): a live question
-       * **stays on the session**. Only emitting it as an event would make the card
-       * disappear on every path that re-fetches the list (reconnect, refresh) — if it
-       * stays in the real thing but disappears only in the mock, that difference shows up
-       * on screen only.
-       */
-      s.state = 'waiting_input'
-      s.waitingSince ??= this.clock.now()
-      s.pendingQuestions = [...s.pendingQuestions, { requestId: event.requestId, questions: event.questions }]
-    } else if (event.type === 'question_resolved') {
-      s.pendingQuestions = s.pendingQuestions.filter((q) => q.requestId !== event.requestId)
-    } else if (event.type === 'turn_complete') {
-      s.state = 'waiting_input'
-      s.waitingSince ??= this.clock.now()
-    } else if (event.type === 'message_delta' || event.type === 'tool_call') {
-      s.state = 'working'
-      s.waitingSince = null
-    } else if (event.type === 'worktree_merged') {
+    /*
+     * The same rules as the real thing (`applySessionState`, protocol session-state.ts): the state, when the wait
+     * began, and the live cards **stay on the session**. Only emitting them as events would make a card disappear on
+     * every path that re-fetches the list (reconnect, refresh) — if it stays in the real thing but disappears only in
+     * the mock, that difference shows up on screen only. A copy kept here left a question in waiting_input (#428).
+     */
+    applySessionState(s, event, this.clock.now())
+    if (event.type === 'worktree_merged') {
       // The same rule as the real thing (#69): must stay in the list after a reconnect too
       s.worktreeMerged = true
     } else if (event.type === 'worktree_pr') {

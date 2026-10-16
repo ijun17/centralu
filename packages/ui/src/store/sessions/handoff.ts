@@ -1,4 +1,4 @@
-import { gridSessionIds, type SessionSummary } from '@cc/core'
+import { gridSessionIds, isInTurn, type SessionSummary } from '@cc/core'
 import { handoffOpening, handoffPrompt } from '@cc/protocol'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
 import { EMPTY_DRAFT } from '../state.js'
@@ -142,7 +142,7 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
         if (cur.state === 'error') throw new Error('the session hit an error while writing the note')
         if (Date.now() > deadline) throw new Error('timed out waiting for the handoff note')
         if (st.connection !== 'connected') continue // No decision is made while disconnected
-        if (cur.state === 'working' || cur.state === 'waiting_approval') continue
+        if (isInTurn(cur.state)) continue
         const got = await s.platform.agents.exportHandoffNote(sessionId, before).catch(() => null)
         if (got) {
           note = got.text

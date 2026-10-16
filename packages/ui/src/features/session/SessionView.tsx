@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { DragEvent, ReactNode } from 'react'
-import { shouldMarkRead } from '@cc/core'
+import { isInTurn, shouldMarkRead } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { useFocusedSession } from '../../store/selectors.js'
 import { Kbd, canContinue } from '../../components/primitives.jsx'
@@ -400,7 +400,7 @@ export function SessionPane({
         own interrupt. Said above the composer with the one action that goes on, since the state alone (error, idle,
         waiting for input) looks the same as a turn that ended.
       */}
-      {canContinue(session.interruption) && session.state !== 'working' && session.state !== 'waiting_approval' && !away && (
+      {canContinue(session.interruption) && !isInTurn(session.state) && !away && (
         <InterruptedNote sessionId={session.id} interruption={session.interruption} />
       )}
 

@@ -12,7 +12,7 @@ import type {
   SessionState,
   TokenUsage,
 } from '@cc/protocol'
-import { transition } from './state-machine.js'
+import { stepSessionState } from './state-machine.js'
 
 /**
  * A session's summary state (docs/state-management.md §2).
@@ -182,19 +182,10 @@ const truncate = (s: string) => (s.length > PREVIEW_MAX ? s.slice(0, PREVIEW_MAX
  */
 export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: number): SessionSummary {
   /*
-   * Answering one card while another is still open (an approval and a question, or two questions) leaves the agent
-   * blocked on the other: the session stays waiting_approval and keeps that card. Taken as a transition to working,
-   * the recovery rule below cleared every card, so an unanswered question vanished when an approval next to it was
-   * answered, and the agent sat waiting on a question nobody could see. The host does the same (manager.ts
-   * `respondApproval`: working again only when no card is left).
+   * The state, when the wait began, and what the change takes down with it: the rules both sides run
+   * (`stepSessionState`, protocol session-state.ts), so the state the host keeps for a reconnect is the one shown here.
    */
-  const { state, illegal } = otherCardOpen(s, event) ? { state: s.state, illegal: false } : transition(s.state, event)
-  const stateChanged = state !== s.state
-
-  // Record when the wait began (what the inbox order and the elapsed time are based on)
-  const wasWaiting = s.state === 'waiting_approval' || s.state === 'waiting_input' || s.state === 'error'
-  const isWaitingNow = state === 'waiting_approval' || state === 'waiting_input' || state === 'error'
-  const waitingSince = isWaitingNow ? (wasWaiting && s.waitingSince != null ? s.waitingSince : now) : null
+  const { state, illegal, changed: stateChanged, waitingSince, recovered, cardsDead } = stepSessionState(s, event, now)
 
   /*
    * What it is busy with cannot outlive its being busy.
@@ -217,30 +208,6 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
     : state === 'working' ? s.plan
     : null
 
-  /*
-   * When the session recovers, the banners come down with it.
-   *
-   * limit and lastError are what the "blocked right now" banner stands on. If they stayed after the limit
-   * lifted, or after the session came back from an error and started working again, the screen would go on
-   * claiming it is blocked, which is a lie — entering working or idle is itself recovery, so they are
-   * cleared at that moment.
-   */
-  const recovered = !illegal && stateChanged && (state === 'working' || state === 'idle')
-  /*
-   * Approval and question cards live **only while they can be answered**.
-   *
-   * error is not the only way a requestId dies: an interrupt while waiting for approval (turn_complete →
-   * waiting_input), a return to idle through resume, and working resuming all finish that request off too.
-   * Leave the card up and a click tries to answer a dead request and throws — the state (visibility) and the
-   * payload (whether it can be acted on) must not drift apart. If the request is still valid after recovery,
-   * the host sends it again, and `transition` (state-machine.ts) lets an approval or question request through
-   * from any state, so the card comes back. A new request is set up again by the switch below, on top of this
-   * clearing.
-   */
-  const cardsDead =
-    !illegal &&
-    stateChanged &&
-    (state === 'error' || recovered || (s.state === 'waiting_approval' && state === 'waiting_input'))
   const next: SessionSummary = illegal
     ? { ...s }
     : {
@@ -328,18 +295,6 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
     default:
       return next
   }
-}
-
-/** Whether a resolve leaves some other approval or question card of a waiting session still open */
-function otherCardOpen(s: SessionSummary, event: NormalizedEvent): boolean {
-  if (s.state !== 'waiting_approval') return false
-  if (event.type === 'approval_resolved') {
-    return (s.pendingApproval !== null && s.pendingApproval.requestId !== event.requestId) || s.pendingQuestions.length > 0
-  }
-  if (event.type === 'question_resolved') {
-    return s.pendingApproval !== null || s.pendingQuestions.some((q) => q.requestId !== event.requestId)
-  }
-  return false
 }
 
 /** Advances seq when a message is stored (what read/unread is based on) */

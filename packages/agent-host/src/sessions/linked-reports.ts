@@ -1,4 +1,4 @@
-import { applyBackgroundTasks, liveBackgroundTasks, type BackgroundTask, type NormalizedEvent } from '@cc/protocol'
+import { applyBackgroundTasks, isInTurn, liveBackgroundTasks, type BackgroundTask, type NormalizedEvent } from '@cc/protocol'
 import type { LinkedSessions } from '../adapters/contract.js'
 import { PAUSED_REPORT_SETTLE_MS, type ChildOwnership, type LinkedReport } from './child-ownership.js'
 
@@ -101,7 +101,7 @@ export class LinkedReports {
       if (wait.paused) this.settleLater(sessionId, wait)
       return
     }
-    const busy = e.state === 'working' || e.state === 'waiting_approval'
+    const busy = isInTurn(e.state)
     if (e.type === 'message_delta' || e.type === 'tool_call' || e.type === 'approval_request' || (e.type === 'state_change' && busy)) {
       wait.busy = true
       // A turn runs: its own end reports

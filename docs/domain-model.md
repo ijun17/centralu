@@ -382,8 +382,10 @@ Where it is stored:
 
 ## 3. Session state
 
-`packages/core/src/session/state-machine.ts`. Every change of state goes through this table; the UI never infers a
-state with its own conditions.
+`packages/protocol/src/session-state.ts`, re-exported by `packages/core/src/session/state-machine.ts`. Every change of
+state goes through this table; the UI never infers a state with its own conditions. The host keeps the same state for a
+reconnecting window and the next host after a swap, and runs the same rules on its copy (`applySessionState`, which the
+host's `applyStateHint` and the mock's list run), so a reconnect never hands back a state the window was not showing (#428).
 
 ```mermaid
 stateDiagram-v2
@@ -409,12 +411,15 @@ except `error` itself, and every state but `idle` may go to `idle` when the proc
 |---|---|
 | `idle` | `working`, `error` |
 | `working` | `waiting_approval`, `waiting_input`, `limited`, `error`, `idle` |
-| `waiting_approval` | `working`, `waiting_input`, `error`, `idle` |
+| `waiting_approval` | `working`, `waiting_input`, `limited`, `error`, `idle` |
 | `waiting_input` | `working`, `error`, `idle` |
 | `limited` | `working`, `idle`, `error` |
 | `error` | `working`, `idle` |
 
-- `waiting_approval` covers both an approval and a question: both block the agent on the person.
+- `waiting_approval` covers both an approval and a question: both block the agent on the person. In a turn
+  (`isInTurn`) means `working` or `waiting_approval`.
+- `waiting_approval → limited`: a card the host raised between turns closes back into the rest it was raised in
+  (`restAfterCard`, #673), and `limited` is one of them.
 - `waiting_input` means the turn ended. It counts as waiting (`isWaiting`), so it stands in the inbox, but its
   urgency is below `error` (`URGENCY`): an approval blocks the agent, a finished turn does not.
 - An `approval_request` or `question_request` is applied in **any** state: it is a fact the host received, not an

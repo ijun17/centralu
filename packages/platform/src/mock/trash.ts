@@ -1,4 +1,4 @@
-import type { ProjectInfo, SessionInfo, StoredMessage } from '@cc/protocol'
+import { isInTurn, type ProjectInfo, type SessionInfo, type StoredMessage } from '@cc/protocol'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
 import type { ProjectStore } from './project-store.js'
@@ -92,7 +92,7 @@ export class TrashMock {
           registered = this.projectStore.withGit(p)
         }
       }
-      const live = ['working', 'waiting_approval'].includes(t.session.state)
+      const live = isInTurn(t.session.state)
       const session: SessionInfo = { ...t.session, projectId, ...(live ? { state: 'idle' as const, waitingSince: null } : {}) }
       this.trashBin.delete(sessionId)
       this.store.sessions.set(sessionId, session)

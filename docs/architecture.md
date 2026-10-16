@@ -47,6 +47,12 @@ Large changes were **expected** in this project from the start. The architecture
 
 The heart of it: **the only place that knows an implementation is the apps entry point.** Everything else knows only interfaces and schemas.
 
+**A pure rule both sides of the process run lives in protocol**, not in core: the host may not import core. How a
+path is spelled on the wire (`protocol/paths.ts`) and the session state machine (`protocol/session-state.ts`: the
+transition table, `isWaiting`, `isInTurn`, `stepSessionState`) are such rules; core re-exports the state machine
+under its old names. A copy kept on one side drifts (#428), so `core/session/state-parity.test.ts` feeds the same
+events to core's reducer and the host's copy and compares what a reconnect hands back.
+
 **Which OS this is is asked in platform modules only** (`local/platform-checks`, `tooling/eslint-platform-checks.js`).
 In the packages, the apps and the npm launcher, reading `process.platform` (or `os.platform()`) and comparing
 anything with an OS name (`=== 'win32'`, `case 'darwin':`) is a lint error outside `PLATFORM_MODULES` in

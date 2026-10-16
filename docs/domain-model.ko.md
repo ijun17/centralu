@@ -379,8 +379,10 @@ classDiagram
 
 ## 3. 세션 상태
 
-`packages/core/src/session/state-machine.ts`. 상태가 바뀌는 일은 모두 이 표를 거친다. UI가 자기 조건문으로 상태를
-짐작하는 일은 없다.
+`packages/protocol/src/session-state.ts`이고, `packages/core/src/session/state-machine.ts`가 다시 내보낸다. 상태가
+바뀌는 일은 모두 이 표를 거친다. UI가 자기 조건문으로 상태를 짐작하는 일은 없다. 호스트는 다시 연결하는 창과 교체 뒤의
+다음 호스트를 위해 같은 상태를 들고 있고, 그 사본에도 같은 규칙을 돌린다(`applySessionState`. 호스트의
+`applyStateHint`와 mock의 목록이 이것을 돌린다). 그래서 재연결은 창이 보여 주지 않던 상태를 돌려주지 않는다(#428).
 
 ```mermaid
 stateDiagram-v2
@@ -406,12 +408,15 @@ stateDiagram-v2
 |---|---|
 | `idle` | `working`, `error` |
 | `working` | `waiting_approval`, `waiting_input`, `limited`, `error`, `idle` |
-| `waiting_approval` | `working`, `waiting_input`, `error`, `idle` |
+| `waiting_approval` | `working`, `waiting_input`, `limited`, `error`, `idle` |
 | `waiting_input` | `working`, `error`, `idle` |
 | `limited` | `working`, `idle`, `error` |
 | `error` | `working`, `idle` |
 
-- `waiting_approval`은 승인과 질문을 둘 다 덮는다. 둘 다 에이전트를 사람 앞에서 멈춰 세운다.
+- `waiting_approval`은 승인과 질문을 둘 다 덮는다. 둘 다 에이전트를 사람 앞에서 멈춰 세운다. 턴 안에 있다는 것
+  (`isInTurn`)은 `working`이거나 `waiting_approval`이라는 뜻이다.
+- `waiting_approval → limited`: 호스트가 턴 사이에 띄운 카드는 닫히면 띄울 때의 쉬는 상태로 돌아가고(`restAfterCard`,
+  #673), `limited`도 그런 상태다.
 - `waiting_input`은 턴이 끝났다는 뜻이다. 기다림으로 치므로(`isWaiting`) 인박스에 서지만, 급한 정도는 `error`보다
   낮다(`URGENCY`). 승인은 에이전트를 막고, 끝난 턴은 막지 않는다.
 - `approval_request`나 `question_request`는 **어느** 상태에서든 적용한다. 짐작이 아니라 호스트가 받은 사실이고,

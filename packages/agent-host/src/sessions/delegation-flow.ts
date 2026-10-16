@@ -795,7 +795,7 @@ export class DelegationFlow {
     if (!d && this.host.autoBoundaryOpen(callerId)) {
       const existing = [...this.host.children.delegations.values()].find((run) => run.sessionId === child.id && !run.settled)
       if (existing) d = existing
-      else if (opts.action !== 'delete' && (child.state === 'working' || child.state === 'waiting_approval')) {
+      else if (opts.action !== 'delete' && inTurn(child.state)) {
         const observation = this.observeTurn(child, opts.action !== 'status')
         d = observation.run
         releaseObservation = observation.release
@@ -842,7 +842,7 @@ export class DelegationFlow {
         }
         case 'delete': {
           if (!child.worktree) {
-            const busy = child.state === 'working' || child.state === 'waiting_approval' ||
+            const busy = inTurn(child.state) ||
               !!child.pendingApproval || child.pendingQuestions.length > 0 ||
               (this.host.agentRuns.has(child.id) && !this.host.agentRuns.get(child.id)!.finished)
             if (!this.host.trashing.has(child.id) && busy && (!d || d.settled || d.callerId !== callerId)) {
@@ -938,7 +938,7 @@ export class DelegationFlow {
             const working = this.agentWorking(d, false, observing)
             return working.ok && observing ? { ...working, via: 'note' } : working
           }
-          if (child.state === 'working' || child.state === 'waiting_approval' || (this.host.agentRuns.has(child.id) && !this.host.agentRuns.get(child.id)!.finished)) {
+          if (inTurn(child.state) || (this.host.agentRuns.has(child.id) && !this.host.agentRuns.get(child.id)!.finished)) {
             return { ok: false, error: `"${child.name}" is busy with something else (the person may be using it). Try again later.` }
           }
           // An answer the caller never came back for gives way to the new message

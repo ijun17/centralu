@@ -1,4 +1,4 @@
-import type { SessionInfo, ToolName } from '@cc/protocol'
+import { isInTurn, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { AgentPort } from '../ports/index.js'
 import type { SessionStore } from './session-store.js'
 
@@ -34,7 +34,7 @@ export class HandoffMock {
     exportHandoffNote: async (sessionId: string, afterSeq: number) => {
       const s = this.store.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
-      if (s.state === 'working' || s.state === 'waiting_approval') return null
+      if (isInTurn(s.state)) return null
       let note = ''
       let asked = false
       for (const r of this.store.messages.get(sessionId) ?? []) {

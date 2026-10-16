@@ -2,7 +2,7 @@ import type { Delegation } from './child-ownership.js'
 import { finalAnswer } from './app-agents.js'
 import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, readableGrants, taskLine, type AskableProject } from './ask-project.js'
 import { labelOf, lastActiveOf } from './transcript-view.js'
-import type { SessionState } from '@cc/protocol'
+import { isInTurn, type SessionState } from '@cc/protocol'
 import { NOT_REACHABLE } from '../adapters/contract.js'
 import type { AskProjectResult, RoutedCard, LinkedProject, LinkedSessions } from '../adapters/contract.js'
 import { inTurn } from '../idle.js'
@@ -72,7 +72,7 @@ export class AskProjectFlow {
   /** A linked machine's event for a session an ask_project is waiting on: the turn ends as `observeLinked` judges it (#166) */
   observeLinkedAsk(ask: LinkedAsk, e: { type: string; state?: unknown; error?: { message?: string } }): void {
     if (ask.settled) return
-    const busy = e.state === 'working' || e.state === 'waiting_approval'
+    const busy = isInTurn(e.state)
     if (e.type === 'approval_request' || e.type === 'question_request') {
       ask.busy = true
       ask.notice = e.type === 'approval_request' ? 'it waits on the person to answer an approval there' : 'it waits on the person to answer a question there'

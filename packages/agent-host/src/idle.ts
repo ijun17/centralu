@@ -1,4 +1,4 @@
-import { liveBackgroundTasks, type HostActivity, type SessionInfo, type SessionState } from '@cc/protocol'
+import { isInTurn, liveBackgroundTasks, type HostActivity, type SessionInfo, type SessionState } from '@cc/protocol'
 
 /**
  * The one rule for "is anything running that a person would lose" (#280, #352).
@@ -15,19 +15,17 @@ import { liveBackgroundTasks, type HostActivity, type SessionInfo, type SessionS
  */
 
 /**
- * The states in which a turn is running: someone would lose it if the host went away.
+ * The states in which a turn is running: someone would lose it if the host went away
+ * (`isInTurn`, protocol session-state.ts).
  *
- * Not `waiting_input`. That is what `turn_complete` leaves (sessions/manager.ts, `applyStateHint`)
+ * Not `waiting_input`. That is what `turn_complete` leaves (`applySessionState`, protocol session-state.ts)
  * until the next message: the turn is over and its answer is stored. Counting it made every session
  * that had ever answered read as busy, so the keeper's idle exit and "Apply updates automatically
  * when idle" (#352) waited for a message nobody was going to send. A question waiting for an answer
- * is counted by itself (`pendingQuestions`), not by a state that also means "finished".
+ * is counted by itself (`pendingQuestions`) as well as by its state, so it holds even where the state
+ * is not known.
  */
-const BUSY_STATES: ReadonlySet<SessionState> = new Set(['working', 'waiting_approval'])
-
-/** In a turn — producing an answer or waiting for approval. Anything else (awaiting input, idle,
- * limit hit, error) means the turn is over (C-4) */
-export const inTurn = (state: SessionState): boolean => state === 'working' || state === 'waiting_approval'
+export const inTurn = (state: SessionState): boolean => isInTurn(state)
 
 /**
  * One session as the idle rule reads it (not the protocol's `SessionActivity`, what a working session is busy with). The fields past `state` and `live` are optional so a
@@ -51,7 +49,7 @@ export type ActivitySnapshot = {
 export function sessionBusy(s: IdleActivity): boolean {
   if (s.live !== true) return false
   return (
-    BUSY_STATES.has(s.state) ||
+    inTurn(s.state) ||
     !!s.pendingApproval ||
     (s.pendingQuestions?.length ?? 0) > 0 ||
     liveBackgroundTasks(s.backgroundTasks ?? []).length > 0
@@ -84,9 +82,11 @@ export function activityCounts(s: ActivitySnapshot): HostActivity {
   const c: HostActivity = { working: 0, approvals: 0, questions: 0, background: 0, terminals: s.terminals, commandRuns: s.commandRuns }
   for (const x of s.sessions) {
     if (!sessionBusy(x)) continue
-    if (x.pendingApproval || x.state === 'waiting_approval') c.approvals++
+    // A question blocks the session as an approval does (waiting_approval), so its own list is read before the state
+    if (x.pendingApproval) c.approvals++
     else if ((x.pendingQuestions?.length ?? 0) > 0) c.questions++
-    else if (BUSY_STATES.has(x.state)) c.working++
+    else if (x.state === 'waiting_approval') c.approvals++
+    else if (inTurn(x.state)) c.working++
     else c.background++
   }
   return c
@@ -119,7 +119,7 @@ export function sessionIdle(
 ): SessionIdle {
   if (s.pendingApproval) return { idle: false, reason: 'approval' }
   if (s.pendingQuestions.length > 0) return { idle: false, reason: 'question' }
-  if (s.state === 'working' || s.state === 'waiting_approval') return { idle: false, reason: 'turn' }
+  if (inTurn(s.state)) return { idle: false, reason: 'turn' }
   if (!process.running) return { idle: true }
   if (liveBackgroundTasks(s.backgroundTasks).length > 0) return { idle: false, reason: 'background' }
   if (!process.reportsBackground) return { idle: false, reason: 'background_unknown' }
