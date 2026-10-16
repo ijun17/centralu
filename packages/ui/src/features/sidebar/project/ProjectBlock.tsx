@@ -129,7 +129,7 @@ export function ProjectBlock({ projectId }: { projectId: string }) {
       {deleting && <DeleteProjectDialog project={project} onClose={() => setDeleting(false)} />}
 
       <ProjectSessionDialogs
-        project={project}
+        defaultTool={project.defaultTool ?? ''}
         sessions={sessions}
         confirming={confirming}
         setConfirming={setConfirming}

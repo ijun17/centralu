@@ -1,18 +1,18 @@
-import type { ProjectInfo } from '@cc/protocol'
 import type { SessionSummary } from '@cc/core'
 import { handoffBlockedBy, useStore } from '../../../store/store.js'
 import { ConfirmHandoff } from '../dialogs/ConfirmHandoff.jsx'
 import { ConfirmDelete } from '../dialogs/ConfirmDelete.jsx'
 
 export function ProjectSessionDialogs({
-  project,
+  defaultTool,
   sessions,
   confirming,
   setConfirming,
   handingOff,
   setHandingOff,
 }: {
-  project: ProjectInfo
+  /** What a session with no tool of its own is said to use: the project's default, or '' */
+  defaultTool: string
   sessions: SessionSummary[]
   confirming: string | null
   setConfirming: (id: string | null) => void
@@ -28,7 +28,7 @@ export function ProjectSessionDialogs({
           sessionId={confirming}
           name={sessions.find((s) => s.id === confirming)?.name ?? 'Session'}
           // This session's own tool, not the project default — this sentence states where the transcript ends up, so it must not be wrong
-          tool={sessions.find((s) => s.id === confirming)?.tool ?? project.defaultTool ?? ''}
+          tool={sessions.find((s) => s.id === confirming)?.tool ?? defaultTool}
           onCancel={() => setConfirming(null)}
           onConfirm={(deleteWorktree, deleteExternal) => {
             void deleteSession(confirming, deleteWorktree, deleteExternal)
@@ -40,7 +40,7 @@ export function ProjectSessionDialogs({
       {handingOff && (
         <ConfirmHandoff
           name={sessions.find((s) => s.id === handingOff)?.name ?? 'Session'}
-          tool={sessions.find((s) => s.id === handingOff)?.tool ?? project.defaultTool ?? ''}
+          tool={sessions.find((s) => s.id === handingOff)?.tool ?? defaultTool}
           // Determining a dead session (#78): one that has errored or hit a rate limit — the other tool is
           // pre-selected (the note from the record and keeping the original are every session's defaults, #694)
           dead={(() => {
