@@ -26,7 +26,7 @@ import { clipPreview } from './turn-answer.js'
 import { RECONNECTING_FLAG_MS, interruptionAfter } from './interruptions.js'
 import { homedir } from 'node:os'
 import { basename, join, relative, resolve, sep } from 'node:path'
-import { existsSync, rmSync, statSync } from 'node:fs'
+import { existsSync, realpathSync, rmSync, statSync } from 'node:fs'
 import type {
   RebuildCause,
   AppReach,
@@ -639,13 +639,32 @@ export class SessionManager {
     return this.projectInfo(id, at)
   }
 
-  /** The project kept for this folder, in whatever spelling it was kept: by case and real long name where paths fold case */
+  /**
+   * The project kept for this folder, in whatever spelling it was kept. Where paths fold case (Windows), two spellings
+   * are one folder when their real paths are equal: `realpathSync.native` gives the case on disk and the long name for
+   * a short one. Case is not folded by JS's rules, which join names Windows keeps apart (the Kelvin sign lowers to k)
+   * and would merge two folders of a case-sensitive directory; only a kept path that is gone is matched by ASCII case.
+   * Only a kept path that could name this folder is resolved (equal but for ASCII case, or with a short name in it),
+   * and never one on a share, which may not answer: a registration does not touch every project's folder.
+   */
   private projectAt(path: string): { id: string; path: string } | undefined {
     const exact = this.store.findProjectByPath(path)
     if (exact) return { id: exact.id, path }
-    const key = (p: string) => (foldsPathCase() ? canonicalPath(p).toLowerCase() : resolve(p))
-    const want = key(path)
-    return this.store.listProjects().find((p) => key(p.path) === want)
+    const kept = this.store.listProjects()
+    if (!foldsPathCase()) return kept.find((p) => resolve(p.path) === path)
+    const ascii = (p: string) => p.replace(/[A-Z]/g, (c) => c.toLowerCase())
+    const real = canonicalPath(path)
+    const near = new Set([ascii(path), ascii(real)])
+    return kept.find((p) => {
+      const spelled = resolve(p.path)
+      if (!near.has(ascii(spelled)) && !spelled.includes('~')) return false
+      if (spelled.startsWith('\\\\')) return ascii(spelled) === ascii(real)
+      try {
+        return realpathSync.native(spelled) === real
+      } catch {
+        return ascii(spelled) === ascii(real)
+      }
+    })
   }
 
   /**

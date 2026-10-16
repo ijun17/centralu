@@ -563,6 +563,29 @@ describe('projects', () => {
    * #849: `C:\proj\`, `c:\proj` and `C:\Proj` were registered as three projects of one folder. A trailing separator does
    * that anywhere; case, the drive letter's included, and a short name (`RUNNER~1`) only where paths fold case.
    */
+  /*
+   * #849 review: the folder match folded case with JS's rules, where the Kelvin sign (U+212A) lowers to k. Windows
+   * keeps the two apart, so two folders became one project. Only the real spelling on disk is compared now.
+   */
+  it('keeps two folders apart whose names only JS folds together', async () => {
+    const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-two-projects-')))
+    try {
+      const kelvin = join(dir, 'Keep')
+      const plain = join(dir, 'keep')
+      mkdirSync(kelvin)
+      // A file system that folds them too (APFS) has one folder here, and nothing to keep apart
+      if (!existsSync(plain)) {
+        mkdirSync(plain)
+        const one = (await rpc('projects.add', { path: kelvin })) as { id: string }
+        const two = (await rpc('projects.add', { path: plain })) as { id: string }
+        expect(two.id).not.toBe(one.id)
+        expect(((await rpc('projects.list', {})) as unknown[]).length).toBe(2)
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('registers one folder as one project, whatever the spelling', async () => {
     const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-one-project-long-name-')))
     try {
