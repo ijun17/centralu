@@ -13,24 +13,29 @@ let build: ShellHostBuild = {
 }
 const params = new URLSearchParams(location.search)
 const scenario = params.get('scenario')
+// A window not started by "Apply now": nothing switches by itself (e2e/first-paint-fonts.spec.ts)
+if (scenario === 'plain') build.relaunched = false
 const prior = params.get('prior')
 if (prior === 'done' || prior === 'failed') {
   build.swap = { phase: prior, target: build.host!, startedAt: 0, message: 'Previous swap failed' }
 }
 let timedSwitch: { finalBeforeTimeout?: 'done' | 'failed' } | null = null
 const calls: string[] = []
+/** Every command the window asked the shell, in order (the switch requests are in `calls` too) */
+const asked: string[] = []
 let requestError: string | null = null
 const report = async (patch: Partial<ShellHostBuild>) => {
   build = { ...build, ...patch }
   await emit('host-build', build)
 }
 Object.assign(window, { __relaunch: {
-  calls, report,
+  calls, asked, report,
   rejectRequest: (message: string) => { requestError = message },
   timeoutNextSwitch: (finalBeforeTimeout?: 'done' | 'failed') => { timedSwitch = { finalBeforeTimeout } },
 } })
 mockWindows('main')
 mockIPC(async (cmd) => {
+  asked.push(cmd)
   if (cmd === 'host_info') return { port: 1, token: 'test-only' }
   if (cmd === 'host_build') return build
   if (cmd === 'host_error') return null

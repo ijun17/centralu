@@ -7,4 +7,5 @@ export type { AppFrameHandle, AppFrameMessage, AppFrameProps, AppFrameTeardown }
 export { confirmKeyAction } from './app/keys.js'
 export { applyCachedTheme } from './app/theme.js'
 export { applyCachedTypography, applyTypography, typographyOf } from './app/typography.js'
+export { prepareFirstPaint } from './app/firstPaint.js'
 export { ShellBanner } from './components/ShellBanner.js'

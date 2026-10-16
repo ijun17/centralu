@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App, applyCachedTheme, applyCachedTypography, confirmKeyAction, useStore } from '@cc/ui'
+import { App, confirmKeyAction, prepareFirstPaint, useStore } from '@cc/ui'
 import {
   autoSwitch,
   buildBar,
@@ -30,9 +30,10 @@ import '../../../packages/ui/src/styles/index.css'
  * createTauriPlatform line.
  */
 // The theme the last run chose, before anything is drawn — even the waiting-for-host screen
-// should open in it, and the preferences only arrive once the host answers (theme.ts)
-applyCachedTheme()
-applyCachedTypography()
+// should open in it, and the preferences only arrive once the host answers (theme.ts). The app
+// itself is drawn once the bundled fonts are in, as in apps/web (firstPaint.ts says why); the
+// waiting screen does not wait for them.
+const firstPaint = prepareFirstPaint()
 
 const root = createRoot(document.getElementById('root')!)
 
@@ -49,6 +50,7 @@ function boot() {
   root.render(<Starting />)
   createTauriPlatform()
     .then(async (platform) => {
+      await firstPaint
       root.render(<DesktopRoot platform={platform} />)
       await registerGlobalShortcut()
     })
