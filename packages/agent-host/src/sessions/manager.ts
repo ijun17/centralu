@@ -2115,8 +2115,11 @@ export class SessionManager {
       return { session: m, resumed: false, reason: `${m.tool} cannot fork a conversation` }
     }
 
+    const tool = m.tool
     try {
       const forked = await adapter.forkConversation(source, this.cwdFor(m))
+      // Deleted or switched while the tool forked (#839): the copy read before is not written back
+      if (this.meta.get(sessionId) !== m || m.tool !== tool) return { session: m, resumed: false, reason: 'The session was deleted or switched tools while its conversation was forked' }
       m.externalId = forked
       this.store.upsertSession(m)
     } catch (err) {
@@ -3062,10 +3065,21 @@ export class SessionManager {
     if (!d.installed || !d.loggedIn) {
       throw Object.assign(new Error(`Cannot use ${tool}: ${d.detail}`), { code: 'tool_not_installed' })
     }
+    /*
+     * Read again after each wait (#839): a session deleted meanwhile is not written back from the copy read before it
+     * (its row in the trash took the new tool), nor one another switch moved first
+     */
+    const from = m.tool
+    const stillHere = () => {
+      if (this.meta.get(sessionId) !== m) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
+      if (m.tool !== from) throw Object.assign(new Error(`The session switched to ${m.tool} meanwhile`), { code: 'internal' })
+    }
+    stillHere()
 
     const old = this.handles.get(sessionId)
     if (old) {
       await old.dispose().catch(() => {})
+      stillHere()
       this.handles.delete(sessionId)
       this.running.delete(sessionId)
       // The message in progress ends here — kept and indexed (#66), but only once the old process is gone, so its
