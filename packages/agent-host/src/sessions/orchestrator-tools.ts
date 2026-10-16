@@ -807,9 +807,30 @@ export async function runOrchestratorTool(
 ): Promise<ToolOutput> {
   if (READER_ONLY.has(name) && caller.profile !== 'reader') return { text: `Not a tool of this session: ${name}`, isError: true }
   if (!isToolName(name)) return { text: `Unknown tool: ${name}`, isError: true }
-  const parsed = TOOL_ARGS[name].safeParse(args)
-  if (!parsed.success) return { text: `Wrong arguments for ${name}: ${issuesText(parsed.error)}.`, isError: true }
+  const parsed = TOOL_ARGS[name].safeParse(leftOut(TOOL_ARGS[name], args))
+  if (!parsed.success) {
+    // A run of a command that fails on its own arguments is still a wrong run, as one that fails on the command's
+    if (name === 'centralu_run') logRun(caller, typeof args.command === 'string' ? args.command : '', 'wrong arguments')
+    return { text: `Wrong arguments for ${name}: ${issuesText(parsed.error)}.`, isError: true }
+  }
   return runParsed(name, parsed.data as OrchestratorToolArgs[typeof name], { tools, caller, signal })
+}
+
+/**
+ * What a model writes for an argument it means to leave out (#850 review): Codex models often send null for an optional
+ * field, and a blank string stood for "none" in the runner before a schema read the arguments (start_agent's
+ * `difficulty: ""`). Either is taken as left out where the field would refuse it but takes no value at all; a field
+ * that takes null keeps it (update_session_settings: null is the tool's default). A string such as "false" or "5" for a
+ * boolean or a number is not read as one: it is refused, as Claude's schema refuses it.
+ */
+function leftOut(schema: z.ZodObject<z.ZodRawShape>, args: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(args).filter(([key, v]) => {
+      const field = schema.shape[key]
+      const blank = v === null || (typeof v === 'string' && !v.trim())
+      return !(field && blank && !z.safeParse(field, v).success && z.safeParse(field, undefined).success)
+    }),
+  )
 }
 
 function isToolName(name: string): name is keyof typeof TOOL_ARGS {
@@ -1251,7 +1272,10 @@ async function runCommandTool(c: { [N in CommandToolName]: { name: N; args: Orch
       /* answered below, with the schema */
     }
   }
-  const parsed = TOOL_ARGS[def.name].strict().safeParse(raw)
+  // `null` (or JSON text "null") for the arguments of a command that takes none to speak of: none given
+  if (raw === null) raw = {}
+  const args = TOOL_ARGS[def.name].strict()
+  const parsed = args.safeParse(typeof raw === 'object' && !Array.isArray(raw) ? leftOut(args, raw as Record<string, unknown>) : raw)
   if (!parsed.success) {
     logRun(caller, command, 'wrong arguments')
     return {

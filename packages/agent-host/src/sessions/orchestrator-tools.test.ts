@@ -439,6 +439,14 @@ describe('callForm (#850)', () => {
   })
 })
 
+/** A schema as JSON schema without its words: what a field takes, not how it is described */
+function bare(schema: z.ZodType): { properties: Record<string, unknown>; required?: string[] } {
+  return JSON.parse(JSON.stringify(z.toJSONSchema(schema), (key, v: unknown) => (key === 'description' ? undefined : v)))
+}
+
+/** Arguments the runner reads otherwise than a seat is shown them, each on purpose and said in TOOL_ARGS */
+const READ_OTHERWISE = new Set(['app_guide.topic', 'ask_project.ifBusy', 'centralu_run.args'])
+
 describe('arguments (#850)', () => {
   it('every tool a seat is shown has one schema to run by, and the keys it is shown are that schema\'s', () => {
     for (const tier of ['resident', 'deferred', 'commands'] as RareTier[]) {
@@ -447,8 +455,54 @@ describe('arguments (#850)', () => {
           const args = (TOOL_ARGS as Record<string, z.ZodObject<z.ZodRawShape>>)[def.name]
           expect(args, `${profile}/${def.name}`).toBeDefined()
           expect(Object.keys(args!.shape), `${profile}/${def.name}`).toEqual(expect.arrayContaining(Object.keys(def.schema.shape)))
+          // …of the same type, unless read otherwise on purpose (TOOL_ARGS says why), and never required where it is not shown required
+          const shown = bare(def.schema)
+          const runs = bare(args!)
+          for (const key of Object.keys(def.schema.shape)) {
+            if (READ_OTHERWISE.has(`${def.name}.${key}`)) continue
+            expect(runs.properties[key], `${profile}/${def.name}.${key}`).toEqual(shown.properties[key])
+          }
+          expect(shown.required ?? [], `${profile}/${def.name}`).toEqual(expect.arrayContaining(runs.required ?? []))
         }
       }
+    }
+  })
+
+  it('takes null, and a blank where the field refuses it, as left out, as a Codex model means it (#850 review)', async () => {
+    const tools = {
+      startAgent: vi.fn(async () => ({ ok: true, state: 'working', sessionId: 'c', sessionName: 'C', tool: 'codex', reported: true })),
+      agentSession: vi.fn(async () => ({ ok: true, state: 'working', sessionId: 'c', sessionName: 'C', tool: 'codex', reported: true })),
+      updateSessionSettings: vi.fn(async () => ({ ok: true })),
+      proposeSkill: vi.fn(async () => ({ ok: true })),
+    }
+    const run = (name: string, args: Record<string, unknown>, profile: 'orchestrator' | 'reader') =>
+      runOrchestratorTool(tools as unknown as OrchestratorTools, name, args, { sessionId: 'x', profile })
+    expect((await run('start_agent', { task: 'go', model: null, tool: null, difficulty: '', wait: null }, 'reader')).isError).toBeFalsy()
+    expect(tools.startAgent).toHaveBeenCalledWith({ task: 'go' }, undefined)
+    expect((await run('agent_session', { sessionId: 'c', action: 'wait', text: null, card: null, ifBusy: null }, 'reader')).isError).toBeFalsy()
+    expect(tools.agentSession).toHaveBeenCalledWith({ sessionId: 'c', action: 'wait' }, undefined)
+    expect((await run('centralu_commands', { query: null }, 'orchestrator')).text).toContain('- propose_skill:')
+    // null where the field takes it is kept: the tool's default model
+    await run('update_session_settings', { sessionId: 's', model: null }, 'orchestrator')
+    expect(tools.updateSessionSettings).toHaveBeenCalledWith('s', { model: null })
+    // centralu_run with no arguments object reads the command's own schema, not "args: Invalid input"
+    for (const args of [null, 'null']) {
+      const none = await run('centralu_run', { command: 'propose_skill', args }, 'orchestrator')
+      expect(none).toEqual({ isError: true, text: expect.stringMatching(/^Wrong arguments for propose_skill: name: /) })
+    }
+    expect((await run('centralu_run', { command: 'propose_skill', args: { name: 'weekly', content: 'Steps.', why: null } }, 'orchestrator')).isError).toBeFalsy()
+    expect(tools.proposeSkill).toHaveBeenCalledWith({ name: 'weekly', content: 'Steps.', why: undefined })
+    // A string for a boolean is not read as one: refused, as Claude's schema refuses it
+    expect(await run('start_agent', { task: 'go', wait: 'false' }, 'reader')).toEqual({ isError: true, text: expect.stringMatching(/^Wrong arguments for start_agent: wait: /) })
+  })
+
+  it('logs a centralu_run that fails on its own arguments as a wrong run', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await runOrchestratorTool({} as OrchestratorTools, 'centralu_run', { command: 'create_app', args: 5 }, { sessionId: 'o', profile: 'orchestrator' })
+      expect(log).toHaveBeenCalledWith('[commands] o centralu_run "create_app": wrong arguments')
+    } finally {
+      log.mockRestore()
     }
   })
 
