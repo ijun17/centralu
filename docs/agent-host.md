@@ -1630,6 +1630,8 @@ must keep reading an older host's tags: the children outlive the build that spaw
   node-pty's surface) instead of node-pty; stopping or closing them walks the process tree (`kill-tree.ts`), which
   works from anywhere. Closing a terminal takes the tree before the shell gets its hang-up: a dev server started
   from it is in a group of its own (job control), and one that ignored the hang-up used to be left running.
+  Both hold each pty in a `PtySlot` (`dev-services/pty-slot.ts`, #428): its output (256 KiB), its exit, its tree
+  stopped, and a failed start, node-pty not loading included, said on screen and followed by an exit.
 - **Both** stand on `keeper/held-child.ts` (#428): the spawn's answer, the attach of their streams, the exit reported
   once the output has ended (at most 1 s after it, `exit-after-drain.ts`), the release of the keeper's record, and a
   detach that waits at most 2 s each for the attach and for the keeper to end the stream. A child whose streams cannot

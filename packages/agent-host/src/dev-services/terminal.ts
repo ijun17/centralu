@@ -2,8 +2,8 @@ import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
 import { win32 } from 'node:path'
-import { ensureToolPath, whichTool } from '../env-path.js'
-import { KILL_GRACE_MS, killTree, stopTree } from './kill-tree.js'
+import { whichTool } from '../env-path.js'
+import { PtySlot, type Pty, type PtyModule, type PtyStreamSink, type ShellLaunch } from './pty-slot.js'
 import { idNumber, type TerminalTag } from '../keeper/tags.js'
 
 /**
@@ -21,34 +21,10 @@ import { idNumber, type TerminalTag } from '../keeper/tags.js'
 
 const require = createRequire(import.meta.url)
 
-/** Only the part of node-pty's surface we actually use (native types are never exported outward) */
-export type Pty = {
-  pid?: number
-  onData(cb: (data: string) => void): void
-  onExit(cb: (e: { exitCode: number }) => void): void
-  write(data: string): void
-  resize(cols: number, rows: number): void
-  kill(signal?: string): void
-  /** Lets go of the pty and leaves the shell running — only a pty the keeper owns can (#280 step 2) */
-  detach?(): Promise<void>
-}
-/**
- * node-pty, or the keeper's pty service with the same surface (#280 step 2, `keeper/keeper-pty.ts`).
- * The spawn options also carry a `tag`, which node-pty ignores and the keeper stores for the next host.
- */
-export type PtyModule = {
-  spawn(file: string, args: string[] | string, opts: Record<string, unknown>): Pty
-}
+export type { Pty, PtyModule } from './pty-slot.js'
 
 /** A terminal a previous host left running in the keeper, to be taken over at startup */
 export type KeptTerminal = { id: string; cwd: string; pty: Pty; cols: number; rows: number }
-
-/**
- * The scrollback cap. Once exceeded, the oldest part is dropped.
- * A single build log commonly reaches tens of MB, and holding all of it would fill the host's
- * memory with logs instead of conversation.
- */
-const SCROLLBACK_BYTES = 256 * 1024
 
 export type TerminalHandle = {
   id: string
@@ -59,17 +35,17 @@ export type TerminalHandle = {
   alive: boolean
 }
 
+/** A terminal: its shell's pty and scrollback (`PtySlot`, whose cap is the scrollback's), and what the screen shows */
 type Entry = {
   id: string
   cwd: string
   title: string
-  pty: Pty | null
-  buffer: string
+  slot: PtySlot
   cols: number
   rows: number
 }
 
-export type TerminalSink = (e: { terminalId: string; data?: string; exitCode?: number | null }) => void
+export type TerminalSink = PtyStreamSink
 
 export class TerminalService {
   /** One directory can have several terminals. Their order is the order they stack on screen */
@@ -93,12 +69,12 @@ export class TerminalService {
     for (const k of sorted) {
       if (this.byId.has(k.id)) continue
       const siblings = this.byCwd.get(k.cwd) ?? []
-      const entry: Entry = { id: k.id, cwd: k.cwd, title: `Terminal ${siblings.length + 1}`, pty: null, buffer: '', cols: k.cols, rows: k.rows }
+      const entry = this.entry(k.id, k.cwd, `Terminal ${siblings.length + 1}`, k.cols, k.rows)
       siblings.push(entry)
       this.byCwd.set(k.cwd, siblings)
       this.byId.set(entry.id, entry)
       this.counter = Math.max(this.counter, idNumber(k.id))
-      this.wire(entry, k.pty)
+      entry.slot.wire(k.pty)
     }
   }
 
@@ -107,7 +83,7 @@ export class TerminalService {
    * signalling anything. The next host takes them over with `adopt`.
    */
   async detachAll(): Promise<void> {
-    await Promise.allSettled([...this.byId.values()].map((e) => e.pty?.detach?.()))
+    await Promise.allSettled([...this.byId.values()].map((e) => e.slot.detach()))
     this.byCwd.clear()
     this.byId.clear()
   }
@@ -120,16 +96,8 @@ export class TerminalService {
   /** Opens one more terminal */
   create(cwd: string, cols: number, rows: number): TerminalHandle {
     const siblings = this.byCwd.get(cwd) ?? []
-    const entry: Entry = {
-      id: `term-${++this.counter}`,
-      cwd,
-      // Numbered by position — deleting and recreating still continues 1, 2, 3
-      title: `Terminal ${siblings.length + 1}`,
-      pty: null,
-      buffer: '',
-      cols,
-      rows,
-    }
+    // Numbered by position — deleting and recreating still continues 1, 2, 3
+    const entry = this.entry(`term-${++this.counter}`, cwd, `Terminal ${siblings.length + 1}`, cols, rows)
     siblings.push(entry)
     this.byCwd.set(cwd, siblings)
     this.byId.set(entry.id, entry)
@@ -148,9 +116,9 @@ export class TerminalService {
      * children are no longer under it); then the shell gets the hang-up a closing terminal sends, which
      * an interactive shell ends on (it ignores TERM).
      */
-    const handle = e.pty
+    const handle = e.slot.pty
     if (handle) {
-      stopTree(handle, KILL_GRACE_MS, () => e.pty === handle)
+      e.slot.stop()
       if (process.platform !== 'win32') {
         try {
           handle.kill()
@@ -170,7 +138,7 @@ export class TerminalService {
   }
 
   input(terminalId: string, data: string): void {
-    this.byId.get(terminalId)?.pty?.write(data)
+    this.byId.get(terminalId)?.slot.write(data)
   }
 
   resize(terminalId: string, cols: number, rows: number): void {
@@ -184,10 +152,9 @@ export class TerminalService {
     if (!e) return null
     // Killing only the shell leaves whatever is running under it behind — kill it as a whole tree
     // (kill-tree.ts). This handle is being discarded here, so once the grace period passes it is
-    // an unconditional SIGKILL.
-    if (e.pty) stopTree(e.pty, KILL_GRACE_MS, () => true)
-    e.pty = null
-    this.append(e, '\r\n[2m— shell restarted —[0m\r\n')
+    // an unconditional SIGKILL (`PtySlot.discard`).
+    e.slot.discard()
+    e.slot.append('\r\n\x1b[2m— shell restarted —\x1b[0m\r\n')
     this.start(e, cols, rows)
     return this.toHandle(e)
   }
@@ -204,11 +171,17 @@ export class TerminalService {
    */
   closeCwd(cwd: string): void {
     for (const e of this.byCwd.get(cwd) ?? []) {
-      const handle = e.pty
-      if (handle) stopTree(handle, KILL_GRACE_MS, () => e.pty === handle)
+      e.slot.stop()
       this.byId.delete(e.id)
     }
     this.byCwd.delete(cwd)
+  }
+
+  /** Open terminals with a live shell — counted by the keeper's idle rule (#280, keeper-link.ts) */
+  liveCount(): number {
+    let n = 0
+    for (const e of this.byId.values()) if (e.slot.alive) n++
+    return n
   }
 
   /**
@@ -220,15 +193,8 @@ export class TerminalService {
    * unchanged — the exact symptom of a port still held after the app was closed (measured
    * 2026-09-07).
    */
-  /** Open terminals with a live shell — counted by the keeper's idle rule (#280, keeper-link.ts) */
-  liveCount(): number {
-    let n = 0
-    for (const e of this.byId.values()) if (e.pty) n++
-    return n
-  }
-
   disposeAll(): void {
-    for (const e of this.byId.values()) if (e.pty) killTree(e.pty, 'SIGKILL')
+    for (const e of this.byId.values()) e.slot.kill()
     this.byCwd.clear()
     this.byId.clear()
   }
@@ -243,89 +209,35 @@ export class TerminalService {
     return this.ptys ?? (require('node-pty') as PtyModule)
   }
 
+  private entry(id: string, cwd: string, title: string, cols: number, rows: number): Entry {
+    return { id, cwd, title, slot: new PtySlot(id, this.emit), cols, rows }
+  }
+
   private toHandle(e: Entry): TerminalHandle {
-    return { id: e.id, cwd: e.cwd, title: e.title, history: () => e.buffer, alive: !!e.pty }
+    return { id: e.id, cwd: e.cwd, title: e.title, history: () => e.slot.output, alive: e.slot.alive }
   }
 
   private doResize(e: Entry, cols: number, rows: number): void {
     if (cols < 2 || rows < 2) return
     e.cols = cols
     e.rows = rows
-    try {
-      e.pty?.resize(cols, rows)
-    } catch {
-      // it may be in the process of dying — a resize failure is no reason to lose the terminal
-    }
+    e.slot.resize(cols, rows)
   }
 
   private start(e: Entry, cols: number, rows: number): void {
     e.cols = cols
     e.rows = rows
-
-    let pty: PtyModule
-    try {
-      pty = this.loadPty()
-    } catch (err) {
-      this.append(e, `\r\n[2mCould not open terminal: ${(err as Error).message}[0m\r\n`)
-      return
-    }
-
-    // A GUI app never inherits the login shell's PATH (a problem already run into when creating a session)
-    ensureToolPath()
-
-    try {
-      const shell = interactiveShell()
-      const handle = pty.spawn(shell.file, shell.args, {
-        name: 'xterm-256color',
-        cols,
-        rows,
-        cwd: e.cwd,
-        env: { ...process.env, TERM: 'xterm-256color' },
-        // What the next host needs to take this terminal over from the keeper (ignored by node-pty)
-        tag: { kind: 'terminal', id: e.id, cwd: e.cwd } satisfies TerminalTag,
-      })
-      this.wire(e, handle)
-    } catch (err) {
+    e.slot.start(
+      () => this.loadPty(),
+      () => interactiveShell(),
+      { cols, rows, cwd: e.cwd, tag: { kind: 'terminal', id: e.id, cwd: e.cwd } satisfies TerminalTag },
       // this never fails silently — an empty black screen with no message leaves no way to know the cause
-      const msg = `\r\n[2mCould not start shell: ${(err as Error).message}[0m\r\n`
-      this.append(e, msg)
-      this.emit({ terminalId: e.id, data: msg })
-      this.emit({ terminalId: e.id, exitCode: null })
-    }
-  }
-
-  private wire(e: Entry, handle: Pty): void {
-    e.pty = handle
-    handle.onData((data) => {
-      // The last output the old shell spits out after a restart is discarded — it must never mix into the new shell's screen
-      if (e.pty !== handle) return
-      this.append(e, data)
-      this.emit({ terminalId: e.id, data })
-    })
-    handle.onExit(({ exitCode }) => {
-      /*
-       * **This clears the slot only when it is still that slot's owner.**
-       *
-       * When restart() kills the old pty, its onExit arrives late — **after** the new pty has
-       * already taken the slot. Unconditionally setting e.pty = null would mark the just-launched
-       * new shell as dead, turning restart into a button that kills the terminal forever.
-       */
-      if (e.pty !== handle) return
-      e.pty = null
-      this.emit({ terminalId: e.id, exitCode: exitCode ?? null })
-    })
-  }
-
-  private append(e: Entry, data: string): void {
-    e.buffer += data
-    if (e.buffer.length > SCROLLBACK_BYTES) {
-      e.buffer = e.buffer.slice(e.buffer.length - SCROLLBACK_BYTES)
-    }
+      (stage, message) => `\r\n\x1b[2m${stage === 'load' ? 'Could not open terminal' : 'Could not start shell'}: ${message}\x1b[0m\r\n`,
+    )
   }
 }
 
-/** A program and its arguments, as node-pty takes them. A string is a ready-made Windows command line, passed verbatim */
-export type ShellLaunch = { file: string; args: string[] | string }
+export type { ShellLaunch } from './pty-slot.js'
 
 type ShellEnv = Record<string, string | undefined>
 

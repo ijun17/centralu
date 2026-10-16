@@ -323,6 +323,22 @@ describe('when a shell ends or fails to launch', () => {
     expect(h.history()).toContain('posix_spawnp failed')
     expect(seen.some((e) => e.data?.includes('posix_spawnp failed'))).toBe(true)
   })
+
+  /** It was only written to the history: the screen, already attached, waited for a shell that never came (#428) */
+  it('says so on screen and ends the stream when node-pty itself does not load', () => {
+    const seen: { terminalId: string; data?: string; exitCode?: number | null }[] = []
+    const svc = new TerminalService((e) => seen.push(e))
+    ;(svc as unknown as { loadPty: () => unknown }).loadPty = () => {
+      throw new Error('Cannot find module node-pty')
+    }
+    const h = svc.create(tmp(), 80, 24)
+    expect(h.alive).toBe(false)
+    expect(h.history()).toContain('Could not open terminal: Cannot find module node-pty')
+    expect(seen).toEqual([
+      { terminalId: h.id, data: expect.stringContaining('Could not open terminal: Cannot find module node-pty') },
+      { terminalId: h.id, exitCode: null },
+    ])
+  })
 })
 
 describe('shell selection', () => {

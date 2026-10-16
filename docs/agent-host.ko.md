@@ -1171,7 +1171,8 @@ sessionId, version?}`(띄운 CLI 버전, #297, §4.6), `{kind:"terminal", id, cw
 - **터미널과 명령.** `TerminalService`와 `CommandRunner`는 node-pty 대신 키퍼의 pty 모듈(`KeeperPty`, node-pty의 표면)을
   받는다. 멈추거나 닫을 때는 프로세스 트리를 걷는다(`kill-tree.ts`). 어디서든 통한다. 터미널을 닫을 때는 셸이 끊김
   신호를 받기 전에 트리를 잡는다: 거기서 띄운 개발 서버는 자기 그룹에 있고(작업 제어), 끊김 신호를 무시하는 서버는 예전에
-  계속 돌고 있었다.
+  계속 돌고 있었다. 둘 다 pty를 `PtySlot`(`dev-services/pty-slot.ts`, #428)에 담는다: 출력(256 KiB), 종료, 트리 멈춤, 그리고
+  실패한 시작(node-pty를 불러오지 못한 경우 포함)은 화면에 알리고 종료를 보낸다.
 - **둘 다** `keeper/held-child.ts` 위에 선다(#428): spawn의 답, 스트림 attach, 출력이 끝난 뒤의 종료 보고(종료 뒤 최대
   1초, `exit-after-drain.ts`), 키퍼 기록의 release, 그리고 attach와 키퍼의 스트림 종료를 각각 최대 2초 기다리는 detach.
   스트림을 attach하지 못한 자식은 끝내고(그룹에 KILL) 끝난 뒤에 release한다. 키퍼는 돌고 있는 자식의 release를 거절하므로,
