@@ -180,6 +180,30 @@ describe('readMessageImage', () => {
     }
   })
 
+  /*
+   * #849: a path written as `\\…` is refused before anything is touched, but a local link can lead there too, and
+   * realpath following it is already the connection (SMB, with the person's sign-in offered). The links here name this
+   * machine's own administrative share, so the old code reached only localhost; the image behind them is real, so
+   * following them would have shown it.
+   */
+  it.skipIf(process.platform !== 'win32')('refuses a link, or a folder link along the path, that leads to a share, without following it', async () => {
+    writeFileSync(join(dir, 'real.png'), PNG)
+    const share = `\\\\localhost\\${dir[0]}$${dir.slice(2)}`
+    symlinkSync(`${share}\\real.png`, join(dir, 'shot.png'), 'file')
+    symlinkSync(`\\\\?\\UNC\\localhost\\${dir[0]}$${dir.slice(2)}\\real.png`, join(dir, 'device.png'), 'file')
+    symlinkSync(share, join(dir, 'remote'), 'dir')
+    mkdirSync(join(dir, 'local'))
+    symlinkSync(join(dir, 'shot.png'), join(dir, 'local', 'hop.png'), 'file')
+    for (const path of [join(dir, 'shot.png'), join(dir, 'device.png'), join(dir, 'remote', 'real.png'), join(dir, 'local', 'hop.png')]) {
+      const got = await readMessageImage(path)
+      expect(got, path).toMatchObject({ ok: false, reason: 'not_found', message: expect.stringContaining('not on this machine') })
+      expect(got, path).not.toHaveProperty('file')
+    }
+    // A local link is still followed
+    symlinkSync(join(dir, 'real.png'), join(dir, 'local', 'near.png'), 'file')
+    expect(await readMessageImage(join(dir, 'local', 'near.png'))).toMatchObject({ ok: true, file: join(dir, 'real.png') })
+  })
+
   it('refuses a PNG past the real 10 MB cap without reading it', async () => {
     const big = Buffer.alloc(IMAGE_PREVIEW_MAX_BYTES + 1)
     PNG.copy(big)

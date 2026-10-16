@@ -1500,8 +1500,12 @@ Since the file can be anywhere, the project root is not the boundary here. Three
   resolves to `\\…`: a UNC share (`\\server\share`, `//server/share`, and `file://server/share`, which Node turns into
   that UNC path on Windows rather than refusing it) or a `\\?\` / `\\.\` device path. Reading one would have the host
   reach out to whichever machine a reply named, and Windows offers that machine the person's sign-in. This is decided
-  on the resolved path, so a relative path in a session whose folder is a share is refused too. A drive letter mapped to
-  a share is read like any other drive: the person mapped it.
+  on the resolved path, so a relative path in a session whose folder is a share is refused too. A local link that leads
+  there (`shot.png -> \\host\share\x.png`, or a folder link earlier in the path) is refused as well, before `realpath`
+  follows it, since following it is already the connection: on Windows every link along the path is read with `lstat`
+  and `readlink`, a local target is followed by hand, and a `\\…` one ends the walk (`linkToElsewhere`, #849). What
+  `realpath` answers is checked again. A drive letter mapped to a share is read like any other drive: the person mapped
+  it. A junction to a volume with no drive letter (`\\?\Volume{…}\`) is refused with the rest.
 
 The path is resolved once (`~`, a path relative to the session's folder, a `file://` URL, then `realpath`), and that
 resolved string is the one opened, with `O_NOFOLLOW`, once; the type, the size and the signature are all read through
