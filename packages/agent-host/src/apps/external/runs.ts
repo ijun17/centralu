@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import type { CallToolResult } from '@modelcontextprotocol/client'
 import type { AgentUse } from '@cc/protocol'
 
 /**
@@ -121,6 +122,80 @@ export function announcingLedger(inner: RunLedger, announce: (app: { projectId: 
       tell(open.get(id))
       open.delete(id)
     },
+  }
+}
+
+/**
+ * One run's row, from the moment it starts to its outcome (A-6, D-6) — a tool call's row
+ * (`ExternalApps.call`) and a broker request's row (the desk) alike, so both are kept under the same
+ * rules: arguments as a masked summary and a hash, the error masked, and the original input kept
+ * only for a failure (the most recent `FAILURES_KEPT`). A failed input is needed by the building
+ * agent to fix things.
+ *
+ * A row is created the first time it is needed (`open`): a tool call opens it as the call comes in,
+ * a broker request when its kind needs a running row (see `BrokerDesk.handle`). Closing opens it
+ * first if it never was, and only the first close counts. Without a ledger, nothing is written.
+ */
+export class RunRow {
+  readonly id: string
+  private described: ReturnType<typeof describeArgs> | null = null
+  private closed = false
+  /** Tokens an agent spent — overwritten every time the tool reports it (it is a cumulative value). Written when this closes */
+  used: AgentTokens | null = null
+
+  constructor(
+    private ledger: RunLedger | null,
+    private head: Pick<AppRunRow, 'id' | 'projectId' | 'appId' | 'kind' | 'tool' | 'callerKind' | 'callerSessionId' | 'parentRunId' | 'createdAt'>,
+    private args: unknown,
+    private redact: (text: string) => string,
+  ) {
+    this.id = head.id
+  }
+
+  open(): void {
+    if (this.described || !this.ledger) return
+    this.described = describeArgs(this.args, this.redact)
+    this.ledger.begin({
+      ...this.head,
+      status: 'running',
+      durationMs: null,
+      argsDigest: this.described.digest,
+      argsSummary: this.described.summary,
+      error: null,
+      sessionId: null,
+    })
+  }
+
+  /** Links the agent session this request started — the moment the session exists, before it ends */
+  link(sessionId: string): void {
+    this.open()
+    this.ledger?.link(this.id, sessionId)
+  }
+
+  /** The masked one-line summary of the arguments — also what an error bundle quotes (C-6), with or without a ledger */
+  summary(): string {
+    return (this.described ?? describeArgs(this.args, this.redact)).summary
+  }
+
+  close(status: Exclude<AppRunRow['status'], 'running'>, error: string | null, result: CallToolResult | null = null): void {
+    if (this.closed || !this.ledger) return
+    this.closed = true
+    this.open()
+    const t0 = this.head.createdAt
+    this.ledger.end(this.id, { status, durationMs: Date.now() - t0, error: error === null ? null : this.redact(error), tokens: this.used })
+    if (status === 'error') {
+      this.ledger.keepFailure(
+        {
+          runId: this.id,
+          projectId: this.head.projectId,
+          appId: this.head.appId,
+          args: this.described!.json,
+          result: result ? this.redact(JSON.stringify(result)) : null,
+          createdAt: t0,
+        },
+        FAILURES_KEPT,
+      )
+    }
   }
 }
 

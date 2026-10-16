@@ -15,7 +15,7 @@ import {
 } from './capabilities.js'
 import type { AppManifest } from './manifest.js'
 import type { AppRef } from './ref.js'
-import { FAILURES_KEPT, describeArgs, type AgentTokens, type AppRunRow, type RunLedger } from './runs.js'
+import { RunRow, type AgentTokens, type RunLedger } from './runs.js'
 
 /**
  * The broker desk (M4 D) — the **one place** that resolves what an app requests over fd 3.
@@ -285,73 +285,24 @@ const firstText = (r: CallToolResult): string => r.content.find((c): c is { type
  * call_app, only if it ends without ever reaching the called app (if it does reach it, that app's own
  * row is the record).
  */
-class BrokerRow {
-  readonly id = `run_${randomUUID()}`
-  private readonly t0 = Date.now()
-  private described: ReturnType<typeof describeArgs> | null = null
-  private closed = false
-
-  constructor(
-    private ledger: RunLedger | null,
-    private app: AppRef,
-    private tool: BrokerToolName,
-    private args: Record<string, unknown>,
-    private parentRunId: string | null,
-    private redact: (text: string) => string,
-  ) {}
-
-  open(): void {
-    if (this.described || !this.ledger) return
-    this.described = describeArgs(this.args, this.redact)
-    this.ledger.begin({
-      id: this.id,
-      projectId: this.app.projectId,
-      appId: this.app.appId,
+function brokerRow(ledger: RunLedger | null, app: AppRef, tool: BrokerToolName, args: Record<string, unknown>, parentRunId: string | null, redact: (text: string) => string): RunRow {
+  return new RunRow(
+    ledger,
+    {
+      id: `run_${randomUUID()}`,
+      projectId: app.projectId,
+      appId: app.appId,
       kind: 'broker',
-      tool: this.tool,
+      tool,
       // The requester is this app — who started the chain comes from walking up through parents
       callerKind: 'app',
       callerSessionId: null,
-      parentRunId: this.parentRunId,
-      status: 'running',
-      durationMs: null,
-      argsDigest: this.described.digest,
-      argsSummary: this.described.summary,
-      error: null,
-      createdAt: this.t0,
-      sessionId: null,
-    })
-  }
-
-  /** Links the agent session this request started — the moment the session exists, before it ends */
-  link(sessionId: string): void {
-    this.open()
-    this.ledger?.link(this.id, sessionId)
-  }
-
-  /** Tokens the agent spent — overwritten every time the tool reports it (it is a cumulative value). Written when this closes */
-  used: AgentTokens | null = null
-
-  close(status: Exclude<AppRunRow['status'], 'running'>, error: string | null, result: CallToolResult | null = null): void {
-    if (this.closed || !this.ledger) return
-    this.closed = true
-    this.open()
-    this.ledger.end(this.id, { status, durationMs: Date.now() - this.t0, error: error === null ? null : this.redact(error), tokens: this.used })
-    // The input (text, schema) of a failed request needs to be seen by the agent fixing the app — under the same rule as a tool call, keeping only the most recent
-    if (status === 'error') {
-      this.ledger.keepFailure(
-        {
-          runId: this.id,
-          projectId: this.app.projectId,
-          appId: this.app.appId,
-          args: this.described!.json,
-          result: result ? this.redact(JSON.stringify(result)) : null,
-          createdAt: this.t0,
-        },
-        FAILURES_KEPT,
-      )
-    }
-  }
+      parentRunId,
+      createdAt: Date.now(),
+    },
+    args,
+    redact,
+  )
 }
 
 /**
@@ -426,7 +377,7 @@ export class BrokerDesk {
    * app do in my name".
    */
   async handle(app: DeskApp, tool: BrokerToolName, args: Record<string, unknown>, call: BrokerCall): Promise<CallToolResult> {
-    const row = new BrokerRow(this.ledger, app.ref, tool, args, call.parentRunId, this.apps.redactor(app.ref))
+    const row = brokerRow(this.ledger, app.ref, tool, args, call.parentRunId, this.apps.redactor(app.ref))
     if (tool !== 'call_app') row.open()
     try {
       const a =
@@ -446,7 +397,7 @@ export class BrokerDesk {
    * survives only inside the reason text.
    */
   refused(app: DeskApp, tool: BrokerToolName, args: Record<string, unknown>, why: string): void {
-    new BrokerRow(this.ledger, app.ref, tool, args, null, this.apps.redactor(app.ref)).close('rejected', why)
+    brokerRow(this.ledger, app.ref, tool, args, null, this.apps.redactor(app.ref)).close('rejected', why)
   }
 
   /**
@@ -484,7 +435,7 @@ export class BrokerDesk {
    * trusts this answer and writes it into its own state — what it receives is what we verified, not
    * merely what the tool promised.
    */
-  private async runAgent(app: DeskApp, raw: Record<string, unknown>, call: BrokerCall, row: BrokerRow): Promise<Answer> {
+  private async runAgent(app: DeskApp, raw: Record<string, unknown>, call: BrokerCall, row: RunRow): Promise<Answer> {
     const parsed = RunAgentArgs.safeParse(raw)
     if (!parsed.success) return fail(`run_agent: ${parsed.error.issues.map((i) => i.message).join('; ')}`)
     const { prompt, tool: requested, schema } = parsed.data

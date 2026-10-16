@@ -13,7 +13,7 @@ import { ERRORS_KEPT, errorBundle, type HeldErrorBundle, type SentErrorBundle } 
 import { folderFingerprint } from './fingerprint.js'
 import { PROJECT_APPS_PARTS, PROJECT_APPS_REL, USER_APPS_PARTS, USER_APPS_REL, scanApps, type ScannedApp } from './discovery.js'
 import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError, type AppManifest } from './manifest.js'
-import { FAILURES_KEPT, RUN_RETENTION_MS, announcingLedger, describeArgs, type AgentUse, type AppRunListed, type RunLedger } from './runs.js'
+import { RUN_RETENTION_MS, RunRow, announcingLedger, type AgentUse, type AppRunListed, type RunLedger } from './runs.js'
 import { appTemplateDir, oneLine, scaffoldApp } from './scaffold.js'
 import { placeAppFolder } from './placement.js'
 import { SecretStore, redactor, secretValueProblem } from './secrets.js'
@@ -462,7 +462,7 @@ export class ExternalApps {
       {
         has: (ref) => this.find(ref) !== undefined,
         name: (ref) => this.find(ref)?.manifest?.name ?? ref.appId,
-        redactor: (ref) => redactor(this.secrets.all(this.appKey(ref))),
+        redactor: (ref) => this.masker(ref),
         origin: (runId) => this.chainOrigin(runId),
         chain: (runId) => this.chainOf(runId),
         denied: (runId, d) => {
@@ -800,25 +800,24 @@ export class ExternalApps {
      * ends — a denial is also a row. What is masked is every secret stored for this app: whichever of
      * the arguments, the result, or the failure reason it ends up mixed into, only the name survives.
      */
-    const redact = this.deps.runs ? redactor(this.secrets.all(this.appKey(e.ref))) : (t: string) => t
-    const described = this.deps.runs ? describeArgs(args, redact) : null
-    this.deps.runs?.begin({
-      id: runId,
-      projectId: e.ref.projectId,
-      appId: e.ref.appId,
-      kind: 'tool',
-      sessionId: null,
-      tool: name,
-      callerKind: caller.kind,
-      callerSessionId: caller.kind === 'session' ? caller.sessionId : null,
-      parentRunId: caller.kind === 'app' ? caller.parentRunId : null,
-      status: 'running',
-      durationMs: null,
-      argsDigest: described?.digest ?? '',
-      argsSummary: described?.summary ?? '',
-      error: null,
-      createdAt: t0,
-    })
+    const redact = this.masker(e.ref)
+    const row = new RunRow(
+      this.deps.runs ?? null,
+      {
+        id: runId,
+        projectId: e.ref.projectId,
+        appId: e.ref.appId,
+        kind: 'tool',
+        tool: name,
+        callerKind: caller.kind,
+        callerSessionId: caller.kind === 'session' ? caller.sessionId : null,
+        parentRunId: caller.kind === 'app' ? caller.parentRunId : null,
+        createdAt: t0,
+      },
+      args,
+      redact,
+    )
+    row.open()
     /** Whether it was actually sent to the app — "changed" only fires for a call that reached the app (a denial, cancellation while starting, or a failed startup changes nothing) */
     let sent = false
     /*
@@ -845,16 +844,15 @@ export class ExternalApps {
        * the building session's prompt.
        */
       if (status === 'error' && sent) {
-        const hide = this.deps.runs ? redact : redactor(this.secrets.all(this.appKey(e.ref)))
         this.recordError(
           e,
           {
             kind: 'tool',
             at: Date.now(),
-            message: hide(error ?? '').split('\n')[0]!,
+            message: redact(error ?? '').split('\n')[0]!,
             stderr: [],
             tool: name,
-            args: (described ?? describeArgs(args, hide)).summary,
+            args: row.summary(),
             runId,
             denied: denial && { appId: denial.app.appId, projectId: denial.app.projectId, name: denial.name, capability: denial.capability, text: denial.text },
           },
@@ -862,17 +860,7 @@ export class ExternalApps {
         )
       }
       const durationMs = Date.now() - t0
-      const ledger = this.deps.runs
-      if (ledger && described) {
-        ledger.end(runId, { status, durationMs, error: error === null ? null : redact(error) })
-        // A failed input is needed by the building agent to fix things — kept only for the most recent, and masked
-        if (status === 'error') {
-          ledger.keepFailure(
-            { runId, projectId: e.ref.projectId, appId: e.ref.appId, args: described.json, result: result ? redact(JSON.stringify(result)) : null, createdAt: t0 },
-            FAILURES_KEPT,
-          )
-        }
-      }
+      row.close(status, error, result)
       if (sent && !readOnly) this.deps.emitChanged?.(e.ref, caller)
       return { runId, status, result, error, durationMs }
     }
@@ -1880,7 +1868,7 @@ export class ExternalApps {
       logPath: join(this.deps.dataRoot, 'app-logs', scopeDir, `${e.ref.appId}.log`),
       logMaxBytes: this.timing.logMaxBytes,
       // Masks every stored value, even one absent from the declaration — masking it costs nothing
-      redact: redactor(this.secrets.all(appKey)),
+      redact: this.masker(e.ref),
       prior: e.life.verdict,
       probeTimeoutMs: this.timing.probeTimeoutMs,
       connectTimeoutMs: this.timing.connectTimeoutMs,
@@ -1919,6 +1907,16 @@ export class ExternalApps {
     if (ref.projectId === null) return USER_SCOPE
     if (!/^[A-Za-z0-9-]+$/.test(ref.projectId)) throw new AppUnavailableError(`This project id cannot be used in a path: ${ref.projectId}`)
     return ref.projectId
+  }
+
+  /**
+   * The function that masks every secret stored for this app (A-3, A-6) — whichever of a run's
+   * arguments, its result, its failure reason or the app's own log a value ends up mixed into, only
+   * its name survives. Built from the stored values at the moment it is asked for: a tool call's row,
+   * a broker request's row and a starting process each take their own.
+   */
+  private masker(ref: AppRef): (text: string) => string {
+    return redactor(this.secrets.all(this.appKey(ref)))
   }
 
   private appKey(ref: AppRef): string {
