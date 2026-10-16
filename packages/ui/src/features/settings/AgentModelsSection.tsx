@@ -13,8 +13,13 @@ const LEVELS: { id: AgentDifficulty; label: string }[] = [
 
 const OTHER = '\u0000other'
 
-/** The same look as the other controls of this block (the running-agents field) and Background's select */
+/**
+ * Background's select, at one width per column: Claude's and Codex's rows line up, and a row does not move when the
+ * model list arrives after the first paint
+ */
 const SELECT = 'rounded-md border border-line bg-surface-floor px-1.5 py-0.5 text-sm text-ink'
+const MODEL_SELECT = `${SELECT} w-44`
+const EFFORT_SELECT = `${SELECT} w-32`
 
 /**
  * Which model a session's start_agent runs per tool and difficulty (#729). A calling agent says how hard the job is
@@ -43,7 +48,8 @@ export function AgentModelsSection() {
       <p className="mt-1 text-xs leading-body text-ink-faint">
         A session starting an agent can say how hard the job is instead of naming a model. Light: lookups, small fixes,
         reviews of small changes. Heavy: design, security, risk of losing data, large refactors. Default keeps the
-        project&apos;s last choice; a model the session names itself still wins.
+        project&apos;s last choice; a model the session names itself still wins. Efforts come from the tool&apos;s model
+        list, which Claude Code gives only while one of its sessions runs.
       </p>
       {tools.map((t) => (
         <ToolRows key={t.name} tool={t} chosen={models?.[t.name]} onPick={(level, choice) => pick(t.name, level, choice)} />
@@ -99,12 +105,14 @@ function LevelRow({
   const [draft, setDraft] = useState('')
   // A model chosen before and no longer listed (or typed, or a list not read yet) stays shown as itself
   const options = value && !models.some((m) => m.id === value.model) ? [...models, { id: value.model, label: value.model, efforts: [] }] : models
-  const efforts = options.find((m) => m.id === value?.model)?.efforts ?? []
+  // A model the list does not show (typed under Other…) is offered every effort the tool's listed models have
+  const efforts = models.find((m) => m.id === value?.model)?.efforts ?? [...new Set(models.flatMap((m) => m.efforts))]
   const effortOptions = value?.effort && !efforts.includes(value.effort) ? [...efforts, value.effort] : efforts
   const commit = () => {
     const model = draft.trim()
-    if (!model) return
+    // Left empty: back to the select as it was, rather than a field nothing will fill
     setOther(false)
+    if (!model) return
     if (model !== value?.model) onPick({ model })
   }
   return (
@@ -112,7 +120,7 @@ function LevelRow({
       <span>{label}</span>
       <div className="flex flex-wrap items-center gap-2">
         <select
-          className={SELECT}
+          className={MODEL_SELECT}
           aria-label={`${label} model`}
           data-testid={testId}
           value={other ? OTHER : (value?.model ?? '')}
@@ -156,7 +164,7 @@ function LevelRow({
         )}
         {value && !other && effortOptions.length > 0 && (
           <select
-            className={SELECT}
+            className={EFFORT_SELECT}
             aria-label={`${label} effort`}
             data-testid={`${testId}-effort`}
             value={value.effort ?? ''}

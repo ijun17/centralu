@@ -1977,17 +1977,30 @@ test('Settings: a model and effort per tool and difficulty for the agents a sess
   await page.getByTestId('settings-agent-model-claude-light-other').fill('opus-next')
   await page.getByTestId('settings-agent-model-claude-light-other').press('Enter')
   await expect.poll(chosen).toEqual({ codex: { heavy: { model: 'gpt-5.6-terra', effort: 'high' } }, claude: { light: { model: 'opus-next' } } })
+  // A typed model is offered every effort the tool's listed models have
+  await page.getByTestId('settings-agent-model-claude-light-effort').selectOption('max')
+  await expect.poll(chosen).toEqual({ codex: { heavy: { model: 'gpt-5.6-terra', effort: 'high' } }, claude: { light: { model: 'opus-next', effort: 'max' } } })
+  // Other… left empty goes back to the select as it was
+  const standard = page.getByTestId('settings-agent-model-claude-standard')
+  await standard.selectOption({ label: 'Other…' })
+  await page.getByTestId('settings-agent-model-claude-standard-other').blur()
+  await expect(page.getByTestId('settings-agent-model-claude-standard-other')).toHaveCount(0)
+  await expect(standard).toHaveValue('')
+  // One width per column, whatever the model's name or whether a list arrived
+  const widths = await page.locator('[data-testid^="settings-agent-model-"]:not([data-testid$="-effort"]):not([data-testid$="-other"])').evaluateAll((els) => [...new Set(els.filter((e) => e.tagName === 'SELECT').map((e) => e.getBoundingClientRect().width))])
+  expect(widths).toHaveLength(1)
 
   await page.reload()
   await open()
   await expect(heavy).toHaveValue('gpt-5.6-terra')
   await expect(page.getByTestId('settings-agent-model-codex-heavy-effort')).toHaveValue('high')
   await expect(page.getByTestId('settings-agent-model-claude-light')).toHaveValue('opus-next')
+  await expect(page.getByTestId('settings-agent-model-claude-light-effort')).toHaveValue('max')
   // A new model drops the old one's effort; Default removes the choice
   await heavy.selectOption('gpt-5.6-terra-mini')
-  await expect.poll(chosen).toEqual({ codex: { heavy: { model: 'gpt-5.6-terra-mini' } }, claude: { light: { model: 'opus-next' } } })
+  await expect.poll(chosen).toEqual({ codex: { heavy: { model: 'gpt-5.6-terra-mini' } }, claude: { light: { model: 'opus-next', effort: 'max' } } })
   await heavy.selectOption('')
-  await expect.poll(chosen).toEqual({ codex: {}, claude: { light: { model: 'opus-next' } } })
+  await expect.poll(chosen).toEqual({ codex: {}, claude: { light: { model: 'opus-next', effort: 'max' } } })
 })
 
 /*

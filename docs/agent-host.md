@@ -347,22 +347,27 @@ below retained for `safe` and `normal`:
    are read again with no wait before its delegation; a session that fails them gets no task and goes to the trash. A request still waiting on the
    person's card holds no place: it may stand for hours, and is counted when it is approved.
 3. **Choice.** `tool` defaults to the project's tool; `model` and `effort` to that tool's remembered choice for the
-   project (#107). A `difficulty` with no `model` (#729) takes the person's model and effort for that tool and
-   difficulty instead, from Settings → Orchestrator → Models for the agents a session starts (`prefs.agentModels`, the
-   whole map in one patch; nothing chosen for it falls back to the remembered choice). A model named still wins. The
-   card names a model the setting chose, "(gpt-6, your choice for heavy work)", and the setting's model and effort are
-   checked as named ones are, so a retired one is refused with the list and the words "the person's choice … tell
-   them, or name a model" (`agentChoice` in `sessions/start-agent.ts`). The words on `difficulty` and `worktree` are
-   the loose guidance #729 asked for (an agent may ignore them, and a project's AGENTS.md wins): light for lookups,
-   small fixes and reviews, heavy for design, security and data loss; a worktree for edits that end in a pull
-   request, none for research or edits the person watches live. They are in the schema, not in an answer, because a
-   caller needs them before its first call. The child's frame (`agentFrame`) asks it to wait for its own background
-   work that ends (a test run, a build) inside its turn before it answers (§7 below). A model or effort the tool's list does not have is refused with the list (`agentChoiceError`;
+   project (#107). A model or effort the tool's list does not have is refused with the list (`agentChoiceError`;
    an alias the ids or labels contain passes, and a tool that cannot list passes all). The check never holds the call
    (#660): it uses the cached list (one read at a time, kept whenever it arrives, a failed read not retried for a
    minute) and waits at most `START_AGENT_MODEL_CHECK_MS` (3 s) for a missing one; without a list in time the child
    starts on the name as given and the answer says it was not checked (an empty list is said to be empty). A name the
    cached list lacks is refused only after a fresh read (the CLI may have been updated).
+
+   **By difficulty** (#729). A `difficulty` with no `model` takes the person's model and effort for that tool and
+   difficulty instead, from Settings → Orchestrator → Models for the agents a session starts (`prefs.agentModels`, the
+   whole map in one patch; nothing chosen for it falls back to the remembered choice). A model named still wins
+   (`agentChoice` in `sessions/start-agent.ts`). The card names a model the setting chose, "(gpt-6, your choice for
+   heavy work)". The setting's model and effort are checked as named ones are: a retired one is refused with the list,
+   and the refusal adds "That is the person's choice for heavy work …: tell them, or name a model" only when the
+   setting's own model or effort is at fault, not an effort the caller named; one that could not be checked says to
+   name a model if the first turn fails, not to start again without it, since the caller never named it.
+
+   The words on `difficulty` and `worktree` are the loose guidance #729 asked for (an agent may ignore them, and a
+   project's AGENTS.md wins): light for lookups, small fixes and reviews, heavy for design, security and data loss; a
+   worktree for edits that end in a pull request, none for research or edits the person watches live. They are in the
+   schema, not in an answer, because a caller needs them before its first call. The child's frame (`agentFrame`) asks
+   it to wait for its own background work that ends (a test run, a build) inside its turn before it answers (§7 below).
 4. **Consent** (`ensureAgentConsent`). **The project's trust is the consent for a `normal` caller** (#673, owner
    decision 2026-10-14): trusting the project (#655) was already the person's decision about it, and a card in a
    session they were not looking at only made the session work alone. Read at each call, nothing remembered; no
@@ -412,9 +417,10 @@ below retained for `safe` and `normal`:
    already finished its turn during the swap, so a later turn the person starts there is never reported as the
    assigned work (#166); that answer stays readable through `agent_session`. Paths the
    answer names inside the child's folder become readable to the caller, as ask_project's do.
-   Each answer that promises the notice (`working` with the report armed, `pending`) says to wait for it rather than
-   check with `status`, which is for a long silence only; each that names `send` (`done`, `at_rest`) says to start a
-   new agent for another kind of work, since the child's name and role came from its first task (#747: a parent
+   Each answer that promises the notice (`working` with the report armed, `pending`) says not to check with `status`
+   meanwhile, and that `wait` is the one call that blocks until the end; `pending` no longer names `status`. Each that
+   names `send` (`done`, `at_rest`) says to start a new agent for another kind of work, with the task written in full,
+   since it starts without the old one's context and the old one's name and role came from its first task (#747: a parent
    called `status` more than ten times in a row, and sent read-only research children the editing). In the answers,
    not the descriptions: an answer costs nothing until it is shown.
 7. **Work that waits on its own background tasks** (#721). The caller hears of the work's last turn end, not its
@@ -653,7 +659,7 @@ must use `purgeSession` if added. Gitlinks found only in older merged superproje
 follow-up ([#623](https://github.com/ijun17/centralu/issues/623)); a superproject merge does not prove
 that module commits were pushed. Writes by other programs during capture are outside this session's lock.
 
-**Size.** The two definitions are 1,338 characters (`AGENT_BUDGET_CHARS` 1,350; 1,085 before #729's `difficulty` and the words on it and on `worktree`, +253 in every ordinary Claude request, whose resident Centralu part goes from 2,313 to 2,566 characters; 1,060 before #686's `lsp`, which carries no description; 990 before #677's `ifBusy`, 956 before #676's `answer` action and `card`, 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
+**Size.** The two definitions are 1,332 characters (`AGENT_BUDGET_CHARS` 1,350; 1,085 before #729's `difficulty` and the words on it and on `worktree`, +247 characters and +68 tokens, measured, in every ordinary Claude request, whose resident Centralu part goes from 2,313 to 2,560 characters; 1,060 before #686's `lsp`, which carries no description; 990 before #677's `ifBusy`, 956 before #676's `answer` action and `card`, 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
 made in words, like ask_project's, which deferred was not found) and defers `agent_session`, which every
 `start_agent` answer names; Codex reaches both through its `exec` tool. Measured in tool-cost.md §10: +170 tokens per ordinary Claude request (412 → 582); "Have Codex …" reached `start_agent` 3 of 3 on Claude, "another agent" went to each CLI's own sub-agents. No `name` argument: the child
 is named from its task and the person renames it.

@@ -633,15 +633,21 @@ Codex. The orchestrator lost `propose_worktree_session`: 10,029 → 9,278 reside
 
 **#729: `difficulty`, and when to use a worktree (2026-10-16).** `start_agent` gained `difficulty` (light, standard,
 heavy: the person's model per tool and difficulty applies) with a description saying when to use which and to use it
-instead of `model`, and `worktree` gained one saying when to use it. Counted with `residentCost` (the budget tests'
-function), not measured live: `start_agent` 551 → 804 characters, the agent set 1,085 → 1,338 (`AGENT_BUDGET_CHARS`
-1,100 → 1,350), the reader seat 2,313 → 2,566 resident on Claude, where `start_agent` is loaded (the test's ceiling
-2,350 → 2,600), and 4,150 → 4,403 on Codex (`RESIDENT_BUDGET_CHARS.reader` 4,200 → 4,450). At the ratio of the
-first row above (+170 tokens for `start_agent`'s 506 characters, the one loaded on Claude) that is about 85 tokens in
-every ordinary Claude request. The guidance is in the
-schema because a caller needs it before its first call; #747's guidance, needed after one, went into the answers at
-no resident cost. Not measured: whether models then pass `difficulty` rather than `model`, and pick a worktree as
-described.
+instead of `model`, and `worktree` gained one saying when to use it. Characters (`residentCost`): `start_agent` 551 →
+798, the agent set 1,085 → 1,332 (`AGENT_BUDGET_CHARS` 1,100 → 1,350), the reader seat 2,313 → 2,560 resident on
+Claude, where `start_agent` is loaded (the test's ceiling 2,350 → 2,600), and 4,150 → 4,397 on Codex
+(`RESIDENT_BUDGET_CHARS.reader` 4,200 → 4,450). Measured with `pnpm measure:tools --live --cli claude --kinds
+none,reader --phases resident --reps 2` on #747's head (a9b981e2) and on this change, Claude Code 2.1.289 on haiku,
+then `--compare`:
+
+| | Claude: Centralu's own tokens, first request (both runs equal) |
+|---|---|
+| before | 764 |
+| with `difficulty` and the two descriptions | **832 (+68)** |
+
+The guidance is in the schema because a caller needs it before its first call; #747's guidance, needed after one, went
+into the answers at no resident cost. Not measured: whether models then pass `difficulty` rather than `model`, and
+pick a worktree as described; Codex (it reaches MCP tools through `exec`, §6).
 
 ## 11. Centralu's features first: instructions for ordinary sessions, and the orchestrator's preamble (#564, 2026-10-12)
 

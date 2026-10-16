@@ -162,7 +162,7 @@ describe('the reader set', () => {
     }
     // #581 adds only its pointer to Claude's every-request cost; the definition must stay deferred.
     // 2,300 until #686's start_agent `lsp` (2,288 -> 2,313, the argument's name and type only); 2,350 until #729's
-    // `difficulty` and the words on it and on `worktree` (2,313 -> 2,566)
+    // `difficulty` and the words on it and on `worktree` (2,313 -> 2,560; 68 tokens measured live)
     const claude = residentCost('reader', DEFERRED_SERVER)
     expect(claude.residentChars + claude.instructionsChars).toBeLessThanOrEqual(2600)
   })
@@ -329,13 +329,15 @@ describe('the agent set', () => {
     ]
     for (const a of answers) {
       const r = await runOrchestratorTool(toolsWith({ startAgent: async () => a }), 'start_agent', { task: 'check' }, { sessionId: 's', profile: 'reader' })
-      expect(r.text, JSON.stringify(a)).toContain('Wait for that notice rather than checking with status')
+      expect(r.text, JSON.stringify(a)).toContain('Do not check on it with status meanwhile. With nothing else to do, wait is the one call that blocks until the end: agent_session(sessionId="c", action="wait")')
+      // No pointer to the call it was just told not to make
+      expect(r.text, JSON.stringify(a)).not.toContain('action="status"')
     }
     const observer = await runOrchestratorTool(
       toolsWith({ agentSession: async () => ({ ...base, state: 'working', reported: false }) }),
       'agent_session', { sessionId: 'c', action: 'status' }, { sessionId: 's', profile: 'reader' },
     )
-    expect(observer.text).not.toContain('Wait for that notice')
+    expect(observer.text).not.toContain('Do not check on it with status')
   })
 
   // #747: two children started for read-only research were sent the editing as well, and their names stopped saying what they did
@@ -348,7 +350,7 @@ describe('the agent set', () => {
       'agent_session', { sessionId: 'c', action: 'status' }, { sessionId: 's', profile: 'reader' },
     )
     expect(r.text).toContain('action="send"')
-    expect(r.text).toMatch(/For another kind of work \(say, editing files after read-only research\), start a new agent instead/)
+    expect(r.text).toMatch(/For another kind of work \(say, editing files after read-only research\), start a new agent instead, with the task written in full: it starts without this one's context/)
   })
 
   it('is no tool of any directing seat', async () => {
