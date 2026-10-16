@@ -320,8 +320,8 @@ export function createRpcHandler(
       return mgr.importFile(projectId, toDir, name, dataBase64)
     },
     'fs.resolve': async (p) => {
-      const { projectId, path } = RpcMethods['fs.resolve'].params.parse(p)
-      return { path: await mgr.resolveFile(projectId, path) }
+      const { projectId, path, purpose } = RpcMethods['fs.resolve'].params.parse(p)
+      return { path: await mgr.resolveFile(projectId, path, purpose) }
     },
     'messages.search': async (p) => {
       const { query, limit } = RpcMethods['messages.search'].params.parse(p)

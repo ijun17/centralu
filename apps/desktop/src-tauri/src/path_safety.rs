@@ -33,12 +33,25 @@ impl fmt::Display for NativePathError {
 }
 
 pub fn assert_safe_native_path(path: &Path) -> Result<(), NativePathError> {
+    check_native_path(path, false)
+}
+
+/// The same checks for a path whose **last** component may itself be a symbolic link: the trash
+/// moves an entry, and a link is moved as the link, never what it points at (#838). The host
+/// resolves the folder the entry sits in and hands over the entry itself (`resolveEntry`), so a
+/// link anywhere before the last component is still refused here.
+pub fn assert_safe_native_entry(path: &Path) -> Result<(), NativePathError> {
+    check_native_path(path, true)
+}
+
+fn check_native_path(path: &Path, final_link_allowed: bool) -> Result<(), NativePathError> {
     if !path.is_absolute() {
         return Err(NativePathError::NonAbsolute(path.to_path_buf()));
     }
 
+    let last = path.components().count().saturating_sub(1);
     let mut current = PathBuf::new();
-    for component in path.components() {
+    for (index, component) in path.components().enumerate() {
         match component {
             Component::Prefix(prefix) => current.push(prefix.as_os_str()),
             Component::RootDir => current.push(component.as_os_str()),
@@ -54,7 +67,7 @@ pub fn assert_safe_native_path(path: &Path) -> Result<(), NativePathError> {
                         message: error.to_string(),
                     }
                 })?;
-                if metadata.file_type().is_symlink() {
+                if metadata.file_type().is_symlink() && !(final_link_allowed && index == last) {
                     return Err(NativePathError::SymlinkComponent(current));
                 }
             }
@@ -66,7 +79,7 @@ pub fn assert_safe_native_path(path: &Path) -> Result<(), NativePathError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{assert_safe_native_path, NativePathError};
+    use super::{assert_safe_native_entry, assert_safe_native_path, NativePathError};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -245,5 +258,29 @@ mod tests {
         assert!(
             matches!(result, Err(NativePathError::SymlinkComponent(component)) if component == pivot)
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn trash_entry_accepts_a_final_symlink_but_not_an_intermediate_one() {
+        // Given: a link as the last component (what the trash moves, #838), and one in the middle.
+        let temp = TempTree::new("entry-symlink");
+        let dir = temp.path().join("dir");
+        fs::create_dir(&dir).expect("test directory should be created");
+        let link = temp.path().join("old-build");
+        std::os::unix::fs::symlink(temp.path(), &link).expect("test symlink should be created");
+        let pivot = temp.path().join("pivot");
+        std::os::unix::fs::symlink(&dir, &pivot).expect("test symlink should be created");
+        fs::write(dir.join("file.txt"), b"x").expect("test file should be written");
+
+        // Then: the entry check takes the final link as the entry, still refuses a middle one,
+        // traversal and a relative path; the ordinary check refuses the final link as before.
+        assert_eq!(assert_safe_native_entry(&link), Ok(()));
+        assert!(matches!(assert_safe_native_entry(&pivot.join("file.txt")), Err(NativePathError::SymlinkComponent(p)) if p == pivot));
+        assert!(matches!(assert_safe_native_entry(Path::new("relative")), Err(NativePathError::NonAbsolute(_))));
+        let sep = std::path::MAIN_SEPARATOR;
+        let up = PathBuf::from(format!("{}{sep}..{sep}x", temp.path().display()));
+        assert!(matches!(assert_safe_native_entry(&up), Err(NativePathError::ParentTraversal(_))));
+        assert!(matches!(assert_safe_native_path(&link), Err(NativePathError::SymlinkComponent(_))));
     }
 }

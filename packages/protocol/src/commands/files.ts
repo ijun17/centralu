@@ -63,3 +63,7 @@ export const MessageImage = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(false), reason: MessageImageRefusal, message: z.string(), file: z.string().optional() }),
 ])
 export type MessageImage = z.infer<typeof MessageImage>
+
+/** What `fs.resolve` resolves a path for (#838) */
+export const FsResolvePurpose = z.enum(['trash', 'reveal', 'open'])
+export type FsResolvePurpose = z.infer<typeof FsResolvePurpose>

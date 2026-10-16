@@ -53,6 +53,7 @@ import type {
   UiPreferencesPatch,
   SettingsApplied,
   GitSource,
+  FsResolvePurpose,
 } from '@cc/protocol'
 import {
   applyBackgroundTasks,
@@ -130,6 +131,7 @@ import {
   moveEntry,
   readTextFile,
   resolveEntry,
+  resolveTarget,
 } from '../dev-services/fs.js'
 import { DirWatchers } from '../dev-services/watch.js'
 import { invalidateFileIndex } from '../dev-services/file-search.js'
@@ -3582,10 +3584,11 @@ export class SessionManager {
   importFile(projectId: string, toDir: string, name: string, dataBase64: string) {
     return importFile(this.cwdOf(projectId), toDir, name, Buffer.from(dataBase64, 'base64'))
   }
-  /** The absolute path handed to the OS by the desktop shell (trash, file manager). Built by the side that
-   * knows the project: the entry itself, a link not followed to its target (#838) */
-  resolveFile(projectId: string, path: string) {
-    return resolveEntry(this.cwdOf(projectId), path)
+  /** The absolute path handed to the OS by the desktop shell (trash, file manager, IDE). Built by the side that
+   * knows the project: for the trash the entry itself, a link included; otherwise what it is, a link followed inside the
+   * project; never the project folder (#838) */
+  resolveFile(projectId: string, path: string, purpose?: FsResolvePurpose) {
+    return purpose === 'trash' ? resolveEntry(this.cwdOf(projectId), path) : resolveTarget(this.cwdOf(projectId), path)
   }
 
   saveWorkspace(layout: Record<string, unknown>): void {

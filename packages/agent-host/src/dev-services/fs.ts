@@ -198,39 +198,45 @@ export async function resolveExisting(root: string, rel: string): Promise<string
 }
 
 /**
- * The absolute path of an entry of the project, **itself**: the path the desktop shell trashes, reveals or opens in an
- * IDE (`fs.resolve`, #838).
+ * The absolute path of an entry of the project, **itself**, for the trash (`fs.resolve` with `purpose: 'trash'`, #838).
  *
- * `resolveExisting` follows a link at the end of the path to its target, which is right for reading a file but wrong
- * here: trashing `old-build -> .` (a link a repository can carry) sent the project folder itself to the trash, and a
- * link to a file or folder trashed that instead of the link. So the folder the entry sits in is resolved (links in the
- * middle of the path are followed, inside the project only, as everywhere), the last segment is taken as it is after
- * an `lstat`, and the project folder itself is refused. A link at the end is refused too: the shell's own check
- * refuses a link, and an IDE handed one would open where it leads. One that leads outside says so, as before.
+ * The folder the entry sits in is resolved (links in the middle of the path are followed, inside the project only, as
+ * everywhere), and the last segment is taken as it is after an `lstat`, a link included: trashing a link moves the
+ * link, never what it points at. `resolveExisting` followed the last segment, so an untrusted repository's
+ * `old-build -> .` sent the project folder itself to the trash. The project folder is refused, and so is a path that
+ * folds to it (`''`, `.`, `a/..`). The shell's trash check allows a link only as the last segment.
  */
 export async function resolveEntry(root: string, rel: string): Promise<string> {
   const parts = pathParts(root, rel)
   const name = parts.at(-1)
-  if (name === undefined) throw new UnsafePathError('That is the project folder itself, not an entry in it')
+  if (name === undefined) throw new UnsafePathError(PROJECT_FOLDER_ITSELF)
   if (name === '..') throw new UnsafePathError('Path is outside the project')
   const parentRel = wireJoin(...parts.slice(0, -1))
   const parent = await resolveExisting(root, parentRel)
   const parentInfo = await stat(parent, { bigint: true })
   if (!parentInfo.isDirectory()) throw new UnsafePathError(`${parentRel || '.'} is not a folder`)
   const entry = join(parent, name)
-  const info = await lstat(entry).catch((error: NodeJS.ErrnoException) => {
+  await lstat(entry).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT' || error.code === 'ENOTDIR') throw new MissingPathError(rel)
     throw error
   })
-  if (info.isSymbolicLink()) {
-    // Where it leads is checked first, so a link out of the project is refused as one
-    await resolveExisting(root, rel)
-    throw new UnsafePathError(`${rel} is a link: Centralu does not trash, reveal or open a link, so it never acts on where one leads`)
-  }
-  // The checked string is the used one: the entry is a child of a folder inside the project, never the folder itself
+  // The checked string is the used one: a child of a folder inside the project, never the folder itself
   if (!isInside(parent, entry) || entry === parent) throw new UnsafePathError('Path is outside the project')
   return entry
 }
+
+/**
+ * The absolute path of what an entry is, for revealing it or opening it in an IDE (`fs.resolve` without a trash
+ * purpose): a link is followed to its target, which has to be inside the project (`CLAUDE.md -> AGENTS.md` opens
+ * `AGENTS.md`), and never the project folder itself (#838: `old-build -> .`).
+ */
+export async function resolveTarget(root: string, rel: string): Promise<string> {
+  const target = await resolveExisting(root, rel)
+  if (target === (await realpath(root))) throw new UnsafePathError(PROJECT_FOLDER_ITSELF)
+  return target
+}
+
+const PROJECT_FOLDER_ITSELF = 'That is the project folder itself, not an entry in it'
 
 /**
  * The .gitignore decision is left to git itself.

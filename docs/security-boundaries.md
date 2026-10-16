@@ -1486,12 +1486,15 @@ Existing filesystem targets are checked against the canonical project root. Syml
 resolving inside that root are supported; outside targets and dangling links are rejected.
 Text/image reads require a regular-file descriptor, bound allocation/read size, and compare
 opened-file identity. Native reveal/trash checks are additional absolute/no-symlink checks;
-they are **not** independent proof of project containment. The path the host hands them is the entry itself
-(`resolveEntry`, #838): its folder is resolved, its last segment is not followed, and the project folder itself is
-refused. Following a link at the end, an untrusted repository's `old-build -> .` sent the project folder to the
-trash. A link at the end is now refused (one leading outside is refused as outside, as before): the shell's own check
-refuses a link, and an IDE handed one would open where it leads, so a link is neither trashed, revealed nor opened
-from the tree, and its target never is. Opening in an IDE does not fall
+they are **not** independent proof of project containment. What the host hands them depends on what it is for
+(`fs.resolve`'s `purpose`, #838). For the **trash** it is the entry itself (`resolveEntry`): the folder it sits in is
+resolved, the last segment is taken as it is, a link included, and the project folder is refused; the shell's trash
+check (`assert_safe_native_entry`) allows a link only as that last segment, and the `trash` crate canonicalizes only the
+parent, so a link is trashed as the link. For **reveal** and **open in an IDE** it is what the entry is
+(`resolveTarget`): a link is followed, its target checked inside the project, and the project folder refused. Before,
+both followed the last link, so an untrusted repository's `old-build -> .` sent the project folder to the trash. A
+window from before this change sends no purpose and gets `resolveTarget`: the project folder is refused, and a link to
+something else inside the project is still trashed as its target until the window is updated. Opening in an IDE does not fall
 back to a generic OS opener that could execute repository-authored content. A linked machine's project is opened
 with a VS Code Remote-SSH link instead (#82): VS Code connects over the person's ssh and, by default, asks before opening a remote file
 or folder from a link (`security.promptForRemoteFileProtocolHandling`); the hub hands it a path and never reads or runs the file itself.

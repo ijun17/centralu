@@ -287,7 +287,9 @@ fn reveal_path(path: String) -> Result<(), String> {
 #[tauri::command]
 fn trash_path(path: String) -> Result<(), String> {
     let native_path = std::path::Path::new(&path);
-    assert_safe_native_path(native_path).map_err(|e| e.to_string())?;
+    // The entry itself, a link included (#838): the `trash` crate canonicalizes only the parent,
+    // so a link is moved as the link and what it points at stays where it is
+    path_safety::assert_safe_native_entry(native_path).map_err(|e| e.to_string())?;
     send_to_trash(native_path).map_err(|e| e.to_string())
 }
 

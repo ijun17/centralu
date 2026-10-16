@@ -489,13 +489,14 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       */
       trash: async (projectId, path) => {
         if (!opts.nativeFiles) return { supported: false, reason: NO_DESKTOP_TRASH }
-        const { path: abs } = await rpc.call('fs.resolve', { projectId, path })
+        // The entry itself, a link included, never what it points at (#838)
+        const { path: abs } = await rpc.call('fs.resolve', { projectId, path, purpose: 'trash' })
         await opts.nativeFiles.trash(abs)
         return { supported: true }
       },
       reveal: async (projectId, path) => {
         if (!opts.nativeFiles) return { supported: false, reason: NO_DESKTOP_REVEAL }
-        const { path: abs } = await rpc.call('fs.resolve', { projectId, path })
+        const { path: abs } = await rpc.call('fs.resolve', { projectId, path, purpose: 'reveal' })
         await opts.nativeFiles.reveal(abs)
         return { supported: true }
       },
