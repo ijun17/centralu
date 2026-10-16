@@ -16,3 +16,18 @@ let notices = 0
 export function adapterNotice(sessionId: string, text: string): NormalizedEvent {
   return { type: 'message_delta', sessionId, role: 'assistant', messageId: `centralu-notice-${++notices}`, text }
 }
+
+/**
+ * What a message the person sent and the CLI never read is called, by when it was left behind (`when`, read after
+ * the count: "were still queued when the session closed"). The screen already shows such a message as sent (the
+ * manager records it first), so dropping it silently leaves "sent, but the agent never read it" (the 2026-09-02 loss
+ * incident): every place that lets one go says so with this text.
+ */
+export function undeliveredText(count: number, when: string): string {
+  return `${count} message(s) ${when} and were not delivered — please resend`
+}
+
+/** `undeliveredText` as the error event a session shows (`internal`, not retryable: only a resend brings it back) */
+export function undeliveredError(sessionId: string, count: number, when: string): NormalizedEvent {
+  return { type: 'error', sessionId, error: { code: 'internal', message: undeliveredText(count, when), retryable: false } }
+}

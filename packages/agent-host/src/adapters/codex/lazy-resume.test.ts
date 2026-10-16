@@ -145,12 +145,73 @@ describe('codex lazy resume — like Claude', () => {
         sessionId: 's5',
         error: {
           code: 'conversation_locked',
-          message: expect.stringMatching(/already open elsewhere.*1 message\(s\) sent while it was opening were not delivered/),
+          message: expect.stringMatching(/already open elsewhere.*1 message\(s\) were sent while it was opening and were not delivered/),
           retryable: true,
         },
       },
     ])
     expect(methods()).not.toContain('turn/start')
+  })
+
+  /*
+   * Closed while it was still waking (#428): the person moved on, a swap retired the handle. The real client rejects
+   * the pending thread/resume when it is disposed, so ready fails after `closed` is set, and both places that used to
+   * speak for the messages stayed quiet (send's catch defers to watchBackgroundStart, which returns once closed). The
+   * screen showed them as sent; Claude's rule is that a message is never dropped silently.
+   */
+  it('closing it while it wakes says the messages sent meanwhile were not delivered, once', { timeout: 10_000 }, async () => {
+    state.hang.add('thread/resume')
+    const events: NormalizedEvent[] = []
+    const h = await new CodexAdapter().createSession(
+      { sessionId: 's6', cwd: '/tmp', permissionPreset: 'normal', resumeExternalId: 'big-thread' },
+      (e) => events.push(e),
+    )
+    h.send('first message while it wakes')
+    h.send('second message while it wakes')
+    await h.dispose()
+    state.rejecters.get('thread/resume')!(new Error('request cancelled while closing the codex connection'))
+    await tick()
+    await tick()
+    const errors = events.filter((e) => e.type === 'error')
+    expect(errors).toEqual([
+      {
+        type: 'error',
+        sessionId: 's6',
+        error: { code: 'internal', message: expect.stringMatching(/^2 message\(s\) .* not delivered/), retryable: false },
+      },
+    ])
+    expect(methods()).not.toContain('turn/start')
+  })
+
+  // The same when the resume outlives its cap: the crash that retires the handle names the messages, once
+  it('a resume past its cap names the messages sent meanwhile in the crash, once', { timeout: 10_000 }, async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      state.hang.add('thread/resume')
+      const events: NormalizedEvent[] = []
+      const h = await new CodexAdapter().createSession(
+        { sessionId: 's7', cwd: '/tmp', permissionPreset: 'normal', resumeExternalId: 'slow-thread' },
+        (e) => events.push(e),
+      )
+      h.send('message while it wakes')
+      await vi.advanceTimersByTimeAsync(150_000)
+      state.rejecters.get('thread/resume')!(new Error('request cancelled while closing the codex connection'))
+      await vi.advanceTimersByTimeAsync(0)
+      const errors = events.filter((e) => e.type === 'error')
+      expect(errors).toEqual([
+        {
+          type: 'error',
+          sessionId: 's7',
+          error: {
+            code: 'adapter_crashed',
+            message: expect.stringMatching(/did not finish within 150s — 1 message\(s\) were sent while it was opening and were not delivered/),
+            retryable: true,
+          },
+        },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('adapter_crashed is raised when a background resume fails — does not leave a silent zombie', { timeout: 10_000 }, async () => {

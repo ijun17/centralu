@@ -47,7 +47,7 @@ import {
   type CodexThreadSettings,
 } from './normalize.js'
 import { UnmappedTypes } from '../unmapped.js'
-import { adapterNotice } from '../session-kit.js'
+import { adapterNotice, undeliveredError, undeliveredText } from '../session-kit.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { sandboxConfig } from './sandbox.js'
 
@@ -355,6 +355,8 @@ class CodexSession implements SessionHandle {
    * watchBackgroundStart reports that once, counting the messages it swallowed (#168, item 5).
    */
   private startFailed = false
+  /** The thread came up (`ready` resolved). Until then, every message sent is still waiting on it */
+  private started = false
   /**
    * Child threads (#222): a child's thread id, to the `spawnAgent` item that launched it. Its steps are kept under
    * that card. Learned from the item's `receiverThreadIds` on `item/completed` (the `item/started` has an empty list).
@@ -434,9 +436,14 @@ class CodexSession implements SessionHandle {
     )
     this.ready = this.start()
     // Registered before any send's continuation, so the flag is set by the time a send's catch runs
-    this.ready.catch(() => {
-      this.startFailed = true
-    })
+    this.ready.then(
+      () => {
+        this.started = true
+      },
+      () => {
+        this.startFailed = true
+      },
+    )
   }
 
   private async start(): Promise<void> {
@@ -1562,7 +1569,7 @@ class CodexSession implements SessionHandle {
         sessionId: this.sessionId,
         error: {
           code: 'adapter_crashed',
-          message: `Resuming codex did not finish within ${BACKGROUND_RESUME_CAP_MS / 1000}s`,
+          message: `Resuming codex did not finish within ${BACKGROUND_RESUME_CAP_MS / 1000}s${this.unsentNote()}`,
           retryable: true,
         },
       })
@@ -1583,8 +1590,7 @@ class CodexSession implements SessionHandle {
          * Messages sent meanwhile were never delivered (send stays quiet about them, so the
          * failure is said once): the person is told, since the screen shows them as sent.
          */
-        const unsent = this.sendsIssued - this.sendsStopped
-        const note = unsent > 0 ? ` — ${unsent} message(s) sent while it was opening were not delivered` : ''
+        const note = this.unsentNote()
         const locked = e.code === 'conversation_locked'
         this.emit({
           type: 'error',
@@ -1594,6 +1600,17 @@ class CodexSession implements SessionHandle {
         void this.dispose().catch(() => {})
       },
     )
+  }
+
+  /**
+   * The messages sent while the thread was opening, as a note for the error that ends the handle, and marked stopped
+   * so dispose (which follows) does not say them again and a start that still lands does not send them. Inside that
+   * one error rather than after it: once the manager retires the handle, a later event from it may not be heard.
+   */
+  private unsentNote(): string {
+    const unsent = this.sendsIssued - this.sendsStopped
+    this.sendsStopped = this.sendsIssued
+    return unsent > 0 ? ` — ${undeliveredText(unsent, 'were sent while it was opening')}` : ''
   }
 
   /** Does not silently drop a pending approval (same reason as the claude adapter — the screen would be stuck holding the card) */
@@ -1616,15 +1633,18 @@ class CodexSession implements SessionHandle {
     if (this.pendingInputs.length > 0) {
       const n = this.pendingInputs.length
       this.pendingInputs = []
-      this.emit({
-        type: 'error',
-        sessionId: this.sessionId,
-        error: {
-          code: 'internal',
-          message: `${n} message(s) sent during compaction were not delivered — please resend`,
-          retryable: false,
-        },
-      })
+      this.emit(undeliveredError(this.sessionId, n, 'were sent during compaction'))
+    }
+    /*
+     * Closed while a lazy resume was still waking (#428): the client's dispose rejects the pending resume, so `ready`
+     * fails after `closed` is set, and neither send's catch (it leaves a failed start to watchBackgroundStart) nor
+     * watchBackgroundStart (it returns once closed) would speak for the messages sent meanwhile. They are said here,
+     * and marked stopped so a start that still lands does not send them.
+     */
+    if (!this.started) {
+      const unsent = this.sendsIssued - this.sendsStopped
+      this.sendsStopped = this.sendsIssued
+      if (unsent > 0) this.emit(undeliveredError(this.sessionId, unsent, 'were sent while it was opening'))
     }
     await this.client.dispose()
   }

@@ -823,6 +823,11 @@ interface AdapterCapabilities {
   됐기 때문이다. Centralu가 직접 대화에 남기는 한 줄(`/goal` 확인이나 거절)은 `adapterNotice`다: 자기 `messageId`
   (`centralu-notice-<n>`, 호스트 전체에서 센다)를 가진 assistant 메시지라서, 기록이 모델의 열린 답에 이어 붙이지 않는다.
   Codex의 `/goal` 답은 메시지를 밝히지 않아 턴 중간에 그 답에 붙었다.
+  사람이 보냈지만 CLI가 끝내 읽지 못할 메시지는 버리지 않고 `undeliveredError` / `undeliveredText`로 말한다("N
+  message(s) were still queued when the session closed and were not delivered — please resend"): 화면은 이미 보낸
+  것으로 보여 주기 때문이다. Codex가 지연 재개로 깨어나는 중에 닫히면, 그사이 보낸 메시지가 아무 말 없이 사라졌다
+  (그 메시지를 대신 말하던 두 곳이 서로에게 미뤘다). 이제 `dispose`가 말하고, 재개가 실패하거나 한도를 넘기면 핸들을
+  물리는 오류 하나 안에 그 메시지를 적는다.
 - 프로세스 관리(CLI spawn, 크래시 감지)는 어댑터 자신의 책임이다. 크래시는 `error` 이벤트로 방출되고 호스트는 죽지 않는다.
 - capability는 반드시 정적 선언일 필요가 없다 — **detect() 시점에 결정**할 수도 있다 (예: 승인 동작 여부가 Codex 버전에 달려 있다면, 버전을 감지한 뒤 결정한다 — C4에 대한 대응).
 

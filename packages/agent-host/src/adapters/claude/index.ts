@@ -62,7 +62,7 @@ import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, Det
 import { LocalAgentProcess, spawnLocalAgent, type LocalSpawnSpec } from '../local-process.js'
 import { approvalDetail, ClaudeStreamNormalizer } from './normalize.js'
 import { noCodeIntelligenceSettings } from './lsp-plugins.js'
-import { adapterNotice } from '../session-kit.js'
+import { adapterNotice, undeliveredError } from '../session-kit.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { withoutCrossSessionMessaging } from './cross-session.js'
 
@@ -1048,15 +1048,7 @@ class ClaudeSession implements SessionHandle {
         return
       }
       // Closed while it waited: the same rule as dispose's queue — a message is never dropped silently
-      this.emit({
-        type: 'error',
-        sessionId: this.sessionId,
-        error: {
-          code: 'internal',
-          message: '1 message(s) were still queued when the session closed and were not delivered — please resend',
-          retryable: false,
-        },
-      })
+      this.emit(undeliveredError(this.sessionId, 1, 'were still queued when the session closed'))
     }))
     void gate.then(() => {
       if (this.sendGate === gate) this.sendGate = null
@@ -1317,11 +1309,7 @@ class ClaudeSession implements SessionHandle {
   }
 
   private reportUndelivered(count: number): void {
-    if (!count) return
-    this.emit({
-      type: 'error', sessionId: this.sessionId,
-      error: { code: 'internal', message: `${count} message(s) were still queued when the turn stopped and were not delivered — please resend`, retryable: false },
-    })
+    if (count) this.emit(undeliveredError(this.sessionId, count, 'were still queued when the turn stopped'))
   }
 
   /**
@@ -1361,17 +1349,8 @@ class ClaudeSession implements SessionHandle {
     // A turn waiting out its delay after the sign-in race (#353) holds messages the same way
     const held = this.queue.length + this.cancelRetry()
     if (held > 0) {
-      const n = held
       this.queue.length = 0
-      this.emit({
-        type: 'error',
-        sessionId: this.sessionId,
-        error: {
-          code: 'internal',
-          message: `${n} message(s) were still queued when the session closed and were not delivered — please resend`,
-          retryable: false,
-        },
-      })
+      this.emit(undeliveredError(this.sessionId, held, 'were still queued when the session closed'))
     }
     for (const [id, p] of this.pending) {
       p.resolve({ behavior: 'deny', message: 'Session closed' })

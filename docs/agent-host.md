@@ -1197,6 +1197,11 @@ Implementation rules:
   drifted into bugs. A line Centralu itself says in a chat (a `/goal` confirmation or refusal) is `adapterNotice`: an
   assistant message with its own `messageId` (`centralu-notice-<n>`, counted across the host), so the record never
   joins it onto the model's open reply. Codex's `/goal` replies named no message and were glued onto it mid-turn.
+  A message the person sent that the CLI will never read is said with `undeliveredError` / `undeliveredText` ("N
+  message(s) were still queued when the session closed and were not delivered — please resend"), never dropped: the
+  screen already shows it as sent. Codex closed while a lazy resume was still waking used to drop the messages sent
+  meanwhile without a word (both places that spoke for them stood aside for each other); `dispose` now says them, and a
+  resume that fails or outlives its cap names them inside the one error that retires the handle.
 - Process management (spawning the CLI, crash detection) is the adapter's own responsibility. A crash is emitted as an `error` event and the host does not die.
 - A capability is not necessarily a static declaration; it can be **decided at detect() time** (e.g. if whether approvals work depends on the Codex version, decide after detecting the version — the C4 response).
 
