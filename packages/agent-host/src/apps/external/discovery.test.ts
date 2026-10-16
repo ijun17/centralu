@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps } from './runtime.js'
 import { MANIFEST_FILE } from './manifest.js'
 import { PROJECT_APPS, plantApp } from './test-helpers.js'
+import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /**
  * Discovery and trust (M4 A-2).
@@ -176,7 +177,7 @@ describe('folder watching', () => {
     rt.refresh()
     await expectHeard(heard, '.centralu/apps/notes', () => plantApp(apps, 'notes', { name: 'Renamed notes' }))
     await expectHeard(heard, '.centralu/apps', () => rmSync(join(apps, 'notes'), { recursive: true }), () => plantApp(apps, 'notes'))
-  }, 3 * EVENT_DEADLINE_MS + 5_000)
+  }, (3 * EVENT_DEADLINE_MS + 5_000) * SLOW)
 
   it('the list follows once an event is received — injects the exact event watching would deliver and checks it with no waiting', () => {
     const deliver = watcher().onChange

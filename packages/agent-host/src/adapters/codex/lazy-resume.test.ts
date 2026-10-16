@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
+import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /**
  * Resume works like Claude's — we do not make the person wait for it (dogfooding: the same 122MB
@@ -57,7 +58,7 @@ beforeEach(() => {
 })
 
 describe('codex lazy resume — like Claude', () => {
-  it('for a large thread, the handle comes out first after 3 seconds, and a message waits in the queue until delivered', { timeout: 10_000 }, async () => {
+  it('for a large thread, the handle comes out first after 3 seconds, and a message waits in the queue until delivered', { timeout: 10_000 * SLOW }, async () => {
     state.hang.add('thread/resume')
     const events: NormalizedEvent[] = []
     const adapter = new CodexAdapter()
@@ -91,7 +92,7 @@ describe('codex lazy resume — like Claude', () => {
    * message queued up behind it went out as turn/start once resume finished — the turn started
    * after the person had already stopped it.
    */
-  it('a Stop pressed before resume finishes reclaims the queued message, and a message sent after it still goes out (#168)', { timeout: 10_000 }, async () => {
+  it('a Stop pressed before resume finishes reclaims the queued message, and a message sent after it still goes out (#168)', { timeout: 10_000 * SLOW }, async () => {
     state.hang.add('thread/resume')
     const events: NormalizedEvent[] = []
     const h = await new CodexAdapter().createSession(
@@ -127,7 +128,7 @@ describe('codex lazy resume — like Claude', () => {
    * failure a second time as `internal`. The rejection text is codex-cli 0.153.4's (measured
    * 2026-10-03: -32600 from a second app-server resuming a held thread).
    */
-  it('a lock error after the window keeps conversation_locked, said once, naming the message it swallowed (#168)', { timeout: 10_000 }, async () => {
+  it('a lock error after the window keeps conversation_locked, said once, naming the message it swallowed (#168)', { timeout: 10_000 * SLOW }, async () => {
     state.hang.add('thread/resume')
     const events: NormalizedEvent[] = []
     const h = await new CodexAdapter().createSession(
@@ -160,7 +161,7 @@ describe('codex lazy resume — like Claude', () => {
    * speak for the messages stayed quiet (send's catch defers to watchBackgroundStart, which returns once closed). The
    * screen showed them as sent; Claude's rule is that a message is never dropped silently.
    */
-  it('closing it while it wakes says the messages sent meanwhile were not delivered, once', { timeout: 10_000 }, async () => {
+  it('closing it while it wakes says the messages sent meanwhile were not delivered, once', { timeout: 10_000 * SLOW }, async () => {
     state.hang.add('thread/resume')
     const events: NormalizedEvent[] = []
     const h = await new CodexAdapter().createSession(
@@ -189,7 +190,7 @@ describe('codex lazy resume — like Claude', () => {
    * behind its still-waking resume go nowhere. Said here, while this host still records the session's events; the
    * client's detach then rejects the pending resume, and nothing says them again.
    */
-  it('a host swap while it wakes says the messages sent meanwhile were not delivered, once', { timeout: 10_000 }, async () => {
+  it('a host swap while it wakes says the messages sent meanwhile were not delivered, once', { timeout: 10_000 * SLOW }, async () => {
     state.hang.add('thread/resume')
     const events: NormalizedEvent[] = []
     const h = await new CodexAdapter().createSession(
@@ -213,7 +214,7 @@ describe('codex lazy resume — like Claude', () => {
   })
 
   // The same when the resume outlives its cap: the crash that retires the handle names the messages, once
-  it('a resume past its cap names the messages sent meanwhile in the crash, once', { timeout: 10_000 }, async () => {
+  it('a resume past its cap names the messages sent meanwhile in the crash, once', { timeout: 10_000 * SLOW }, async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
       state.hang.add('thread/resume')
@@ -243,7 +244,7 @@ describe('codex lazy resume — like Claude', () => {
     }
   })
 
-  it('adapter_crashed is raised when a background resume fails — does not leave a silent zombie', { timeout: 10_000 }, async () => {
+  it('adapter_crashed is raised when a background resume fails — does not leave a silent zombie', { timeout: 10_000 * SLOW }, async () => {
     state.hang.add('thread/resume')
     const events: NormalizedEvent[] = []
     const adapter = new CodexAdapter()

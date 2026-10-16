@@ -4,6 +4,7 @@ import { delimiter, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { __forgetPrograms } from '../tool-launch.js'
 import { gitBranchPr } from './git.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 const alive = (pid: number) => {
   try {
@@ -62,7 +63,7 @@ describe('gh stopped by an abort (#368)', () => {
   })
 
   // Starting a Node binary as gh, which then starts another, takes seconds on a loaded machine: the bound is that wait's
-  it('ends gh and what it started, and returns once gh is gone', { timeout: 30_000 }, async () => {
+  it('ends gh and what it started, and returns once gh is gone', { timeout: 30_000 * SLOW }, async () => {
     root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-gh-abort-')))
     const bin = join(root, 'bin')
     const project = join(root, 'project')
@@ -99,7 +100,7 @@ describe('gh stopped by an abort (#368)', () => {
   // macOS and Linux: the tree kill does not reach a child that left gh's group, and one holding gh's output kept
   // `close` from coming for as long as it ran, which held the host's shutdown with it. Windows (#849): the child is
   // outside gh's job, so only `taskkill /T` ends it, and it must, since it holds the output open
-  it('returns once gh is gone even while a child it started holds its output', { timeout: 30_000 }, async () => {
+  it('returns once gh is gone even while a child it started holds its output', { timeout: 30_000 * SLOW }, async () => {
     root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-gh-abort-')))
     const bin = join(root, 'bin')
     const project = join(root, 'project')

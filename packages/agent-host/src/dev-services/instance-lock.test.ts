@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { OWNERSHIP_FILE, acquireInstanceLock, lockConflictMessage, processStartTime } from './instance-lock.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * If two hosts use the same data folder, each carries a different session list while writing to
@@ -111,7 +112,7 @@ describe('the lock-conflict message reaches the supervisor', () => {
     } finally {
       if (held.ok) held.release()
     }
-  }, 60_000)
+  }, 60_000 * SLOW)
 })
 
 /*
@@ -170,7 +171,7 @@ setTimeout(() => process.exit(0), ${holdMs})
       owner.kill()
       await owner.exited
     }
-  }, 20_000)
+  }, 20_000 * SLOW)
 
   it('the operating system releases ownership when the owner is SIGKILLed — the next host starts', async () => {
     const db = dbIn()
@@ -182,7 +183,7 @@ setTimeout(() => process.exit(0), ${holdMs})
     const r = acquireInstanceLock(db)
     expect(r.ok).toBe(true)
     if (r.ok) r.release()
-  }, 20_000)
+  }, 20_000 * SLOW)
 
   it('of hosts started at the same moment, exactly one owns the folder', async () => {
     const db = dbIn()
@@ -195,7 +196,7 @@ setTimeout(() => process.exit(0), ${holdMs})
       for (const c of contenders) c.kill()
       await Promise.all(contenders.map((c) => c.exited))
     }
-  }, 30_000)
+  }, 30_000 * SLOW)
 
   it('an ownership file that cannot be read refuses the start instead of guessing', () => {
     const db = dbIn()
@@ -229,7 +230,7 @@ process.exit(0)
     )
     const r = spawnSync(process.execPath, ['--expose-gc', '--import', 'tsx', script], { cwd: root, encoding: 'utf8', timeout: 30_000 })
     expect(r.stdout.trim()).toBe('still held')
-  }, 30_000)
+  }, 30_000 * SLOW)
 })
 
 /*

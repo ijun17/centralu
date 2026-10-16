@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { AppProcess, AppStartError } from './app-process.js'
+import { SLOW } from '../../../../../tooling/test-timing.js'
 
 async function expectStartFailsQuietly(command: string, args: string[], timing: { probeTimeoutMs: number; connectTimeoutMs: number; exitWaitMs: number }): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'cc-app-epipe-'))
@@ -56,7 +57,7 @@ describe('writing to an app that closed its stdin', () => {
       'Start-Sleep -Seconds 1',
     ].join('; ')
     await expectStartFailsQuietly(powershell, ['-NoProfile', '-NonInteractive', '-Command', script], { probeTimeoutMs: 60_000, connectTimeoutMs: 60_000, exitWaitMs: 5_000 })
-  }, 90_000)
+  }, 90_000 * SLOW)
 })
 
 /** An app's crash reason (#428): its last stderr lines as it wrote them, whatever the pipe's chunks were */

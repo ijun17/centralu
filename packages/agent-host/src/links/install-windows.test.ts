@@ -10,6 +10,7 @@ import { connectionCommand, SshTunnel } from './tunnel.js'
 import { rollbackRemote, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
 import { rmFakeDir } from '../fake-exe.test-helpers.js'
 import { WIN_NODE_FILE, WIN_NODE_V, windowsNodeZip, windowsPackages, windowsRemoteEnv, windowsRemoteSsh, windowsRuntime, pwsh7ModulePath } from './windows-remote.test-helpers.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * This computer as the Windows machine a hub installs on and updates (plan §10.2, §10.5): the
@@ -53,7 +54,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
     ])
     reg.addNodeArchive(WIN_NODE_V, WIN_NODE_FILE, zip)
     runtime = windowsRuntime(zip)
-  }, 120_000)
+  }, 120_000 * SLOW)
   afterAll(async () => {
     await reg.close()
     rmFakeDir(root)
@@ -89,7 +90,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       // runs current's centralu.mjs on the Node current names
       const out = execFileSync(connectionCommand({ shell: 'powershell' }), { shell: true, env: windowsRemoteEnv(home), encoding: 'utf8' })
       expect(JSON.parse(out.trim().split(/\r?\n/).at(-1)!)).toEqual({ ran: '9.8.0', argv: ['serve', '--connection'], managed: '1' })
-    }, 120_000)
+    }, 120_000 * SLOW)
 
     it('installs when Windows PowerShell was started from PowerShell 7 and inherited its module path (GitHub runners, an OpenSSH DefaultShell of pwsh)', async () => {
       // Without the reset the install script's Get-FileHash was "found in the module … but the module could not be loaded"
@@ -97,7 +98,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       expect(r.current).toEqual({ version: '9.9.4', node: WIN_NODE_V })
       expect(existsSync(remote('node', `v${WIN_NODE_V}`, 'node.exe'))).toBe(true)
       expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.4 ${WIN_NODE_V}\n`)
-    }, 120_000)
+    }, 120_000 * SLOW)
 
     it('a version with a host-only package installs that one and never downloads the platform package (owner decision 2)', async () => {
       const hits = reg.hits.length
@@ -108,7 +109,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       expect(asked.filter((h) => h.startsWith('/@centralu/win32-x64/'))).toEqual([])
       expect(existsSync(remote('versions', '9.9.4', 'node_modules', '@centralu', 'host-win32-x64', 'host', 'main.mjs'))).toBe(true)
       expect(existsSync(remote('versions', '9.9.4', 'node_modules', '@centralu', 'win32-x64'))).toBe(false)
-    }, 120_000)
+    }, 120_000 * SLOW)
 
     it('refuses a Node archive whose SHA-256 is not the pinned one, and leaves nothing', async () => {
       const wrong = { node: { version: WIN_NODE_V, archives: { 'win32-x64': { file: WIN_NODE_FILE, sha256: 'f'.repeat(64) } } } }
@@ -116,7 +117,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       expect(existsSync(remote('node'))).toBe(false)
       expect(existsSync(remote('current'))).toBe(false)
       expect(readdirSync(remote()).filter((n) => n.startsWith('.'))).toEqual([])
-    }, 120_000)
+    }, 120_000 * SLOW)
 
     it('refuses a package whose bytes are not what the signed metadata names, and keeps what runs', async () => {
       await install('9.9.1')
@@ -129,7 +130,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       expect(existsSync(remote('versions', '9.9.6'))).toBe(false)
       expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${WIN_NODE_V}\n`)
       expect(readdirSync(remote()).filter((n) => n.startsWith('.'))).toEqual([])
-    }, 120_000)
+    }, 120_000 * SLOW)
 
     it('refuses before downloading anything when registry metadata fails its signature', async () => {
       const hits = reg.hits.length
@@ -137,7 +138,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       await expect(install('9.9.7')).rejects.toThrow(/signature on centralu@9\.9\.7 does not check out/)
       expect(reg.hits.slice(hits).filter((h) => h.startsWith('/dist/') || h.endsWith('.tgz'))).toEqual([])
       expect(existsSync(remote('node'))).toBe(false)
-    }, 120_000)
+    }, 120_000 * SLOW)
   })
 
   describe('updating, rolling back and uninstalling', () => {
@@ -189,7 +190,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       // A third version removes the first only once it answered
       expect(await update('9.9.3').done).toMatchObject({ current: { version: '9.9.3' }, previous: { version: '9.9.2' }, removed: ['9.9.1'] })
       expect(readdirSync(remote('versions')).sort()).toEqual(['9.9.2', '9.9.3'])
-    }, 180_000)
+    }, 180_000 * SLOW)
 
     it('names a version folder a running program holds, instead of failing, and removes it once the program is gone', async () => {
       await installedAndRunning()
@@ -208,7 +209,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       }
       // The next update's prune takes it
       expect(await update('9.9.1').done).toMatchObject({ current: { version: '9.9.1' } })
-    }, 240_000)
+    }, 240_000 * SLOW)
 
     it('puts the old version back and starts it when the new one does not answer, with the end of its log', async () => {
       await installedAndRunning()
@@ -222,7 +223,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${WIN_NODE_V}\n`)
       expect(existsSync(remote('previous'))).toBe(false)
       expect(readdirSync(remote('versions')).sort()).toEqual(['9.9.1', '9.9.2'])
-    }, 180_000)
+    }, 180_000 * SLOW)
 
     it('rolls back one step: previous becomes current, and there is no previous left to go back to', async () => {
       await installedAndRunning()
@@ -235,7 +236,7 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       expect(events()).toEqual(['stop 9.9.2', 'start 9.9.1'])
       expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${WIN_NODE_V}\n`)
       expect(existsSync(remote('previous'))).toBe(false)
-    }, 180_000)
+    }, 180_000 * SLOW)
 
     it('uninstalls: stops the host, removes <data>\\remote, keeps the rest of the data', async () => {
       await installedAndRunning()
@@ -250,6 +251,6 @@ describe.runIf(process.platform === 'win32' && process.arch === 'x64')('installi
       expect(existsSync(remote())).toBe(false)
       expect(existsSync(data('serve.json'))).toBe(true)
       expect(running()).toBeNull()
-    }, 120_000)
+    }, 120_000 * SLOW)
   })
 })

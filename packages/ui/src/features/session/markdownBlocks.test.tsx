@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { MarkdownBlock } from './Markdown.jsx'
 import { advanceSplit, piecesOf, wholeSplit, type MarkdownSplit } from './markdownBlocks.js'
+import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /*
  * A streamed reply is drawn in pieces (#364): the blocks that can no longer change, each rendered once, and the one
@@ -120,7 +121,7 @@ describe('a streamed reply drawn in pieces', () => {
         expect(renderPieces(split), `seed ${seed}, after ${JSON.stringify(sofar)}`).toBe(render(sofar))
       })
     }
-  }, MANY_RENDERS)
+  }, MANY_RENDERS * SLOW)
 
   it('ends identical to one parse of the whole reply, over many more random cuts', () => {
     for (let seed = 100; seed < 400; seed++) {
@@ -129,7 +130,7 @@ describe('a streamed reply drawn in pieces', () => {
       const split = stream(text, cuts(text, random, 1 + Math.floor(random() * 60)))
       expect(renderPieces(split), `seed ${seed}`).toBe(render(text))
     }
-  }, MANY_RENDERS)
+  }, MANY_RENDERS * SLOW)
 
   it('keeps a code fence whole while blank lines inside it arrive, and splits after it closes', () => {
     const text = 'Before.\n\n```ts\nconst a = 1\n\n\nconst b = 2\n```\n\nAfter.\n'
@@ -160,7 +161,7 @@ describe('a streamed reply drawn in pieces', () => {
           expect(renderPieces(split), `seed ${seed}, after ${JSON.stringify(sofar)}`).toBe(render(sofar))
         })
     }
-  }, MANY_RENDERS)
+  }, MANY_RENDERS * SLOW)
 
   it('does not split a reply with a link reference or footnote definition, which reaches back to earlier blocks', () => {
     for (const text of [

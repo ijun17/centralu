@@ -11,6 +11,7 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { CrossAdapter } from './cross-project.test-helpers.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * Cloning a repository as a new project (#515), end to end with the machine's real git: a local bare repository is
@@ -130,32 +131,32 @@ describe('projects.create with a git source', () => {
     expect(existsSync(join(info.path, 'dev.txt'))).toBe(false)
     expect(((await rpc('projects.list', {})) as { path: string }[]).map((p) => p.path)).toEqual([info.path])
     expect(events.some((e) => e.type === 'projects_changed')).toBe(true)
-  }, 30_000)
+  }, 30_000 * SLOW)
 
   it('registers a clone as untrusted: its contents come from outside, so the person decides (#655)', async () => {
     const info = (await rpc('projects.create', { name: '', source: { git: `${base}/game.git` } })) as { id: string; trusted: boolean }
     expect(info.trusted).toBe(false)
     expect(((await rpc('projects.list', {})) as { id: string; trusted: boolean }[]).find((p) => p.id === info.id)?.trusted).toBe(false)
-  }, 30_000)
+  }, 30_000 * SLOW)
 
   it('checks out the branch asked for, under the name given', async () => {
     const info = (await rpc('projects.create', { name: 'game-dev', source: { git: `${base}/game.git`, branch: 'dev' } })) as { path: string }
     expect(info.path).toBe(join(centralu, 'game-dev'))
     expect(readFileSync(join(info.path, 'dev.txt'), 'utf8')).toBe('dev\n')
-  }, 30_000)
+  }, 30_000 * SLOW)
 
   it('a repository that needs a sign-in fails at once with one sentence, never asking, and leaves nothing', async () => {
     await expect(rpc('projects.create', { name: '', source: { git: `${base}/private/secret.git` } })).rejects.toThrow(/needs a sign-in this machine does not have saved/)
     expect(readdirSync(centralu)).toEqual([])
     expect((await rpc('projects.list', {})) as unknown[]).toEqual([])
-  }, 30_000)
+  }, 30_000 * SLOW)
 
   it('a failed clone removes the folder it made and registers nothing', async () => {
     await expect(rpc('projects.create', { name: 'gone', source: { git: `${base}/nothing-here.git` } })).rejects.toThrow(/no repository at/)
     await expect(rpc('projects.create', { name: 'nobranch', source: { git: `${base}/game.git`, branch: 'nope' } })).rejects.toThrow()
     expect(readdirSync(centralu)).toEqual([])
     expect((await rpc('projects.list', {})) as unknown[]).toEqual([])
-  }, 30_000)
+  }, 30_000 * SLOW)
 
   it('never clones into a folder that is there', async () => {
     mkdirSync(join(centralu, 'game'))
@@ -197,7 +198,7 @@ describe('create_project with git (the orchestrator)', () => {
     expect(r.text).toContain('a clone of')
     expect(readFileSync(join(centralu, 'game', 'dev.txt'), 'utf8')).toBe('dev\n')
     expect(events.some((e) => e.type === 'notice' && e.sessionId === orc.id && /Cloning/.test(e.text))).toBe(true)
-  }, 30_000)
+  }, 30_000 * SLOW)
 })
 /**
  * A TLS certificate and key for tests only (#515): a self-signed `localhost` / `127.0.0.1` certificate valid until

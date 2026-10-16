@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { hasPs } from '../os.js'
 import { insideAny, noTty, parseLsofCwd, parsePsRows, pickStrays, stopStrays } from './strays.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * Choosing a leftover process (user request, 2026-09-07).
@@ -212,5 +213,5 @@ describe('stopStrays', () => {
       if (pid && alive(pid)) process.kill(pid, 'SIGKILL')
       rmSync(dir, { recursive: true, force: true })
     }
-  }, 30_000)
+  }, 30_000 * SLOW)
 })

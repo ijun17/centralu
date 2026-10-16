@@ -1,20 +1,12 @@
 import { defineConfig } from 'vitest/config'
 import { fileURLToPath } from 'node:url'
+// Windows gets three times the time limits (#368); a test that sets its own limit multiplies by the same
+import { SLOW } from './tooling/test-timing.js'
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url))
 
 const EXCLUDE = ['**/node_modules/**', 'spike/**', 'e2e/**']
 const APP_RUNTIME = 'packages/agent-host/src/apps/external/**/*.test.ts'
-
-/*
- * **Windows gets three times the time limits** (#368). Since #360 the Windows unit tests block a
- * PR, and the tests that spawn git or Node processes there (worktree sessions, app versions, the
- * app runtime) take several times longer on windows-2022 than on macOS or Linux: process start
- * and file locks are slower. On 2026-10-05 three runs failed at the 5s/10s limits
- * (`app-versions`, `manager` worktree sessions) and passed on rerun. A real hang still fails, just
- * later; macOS and Linux keep their limits.
- */
-const SLOW = process.platform === 'win32' ? 3 : 1
 
 export default defineConfig({
   resolve: {

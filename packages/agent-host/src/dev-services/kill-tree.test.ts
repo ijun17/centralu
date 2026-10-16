@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { collectOrphansWindows, killTargets, killTree, orphansOf, parsePs, parseWinProcs, stopTree, survivorTargets, type KillOs } from './kill-tree.js'
 import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from './process-tree.test-helpers.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * Choosing targets for a tree kill (the conclusion of what was measured on 2026-09-07).
@@ -221,15 +222,15 @@ describe.skipIf(process.platform === 'win32')('stopTree — a real tree (#149)',
 
   it('even when the grandchild is in root\'s group (zsh -lc, an app process) and the caller saw root end, it is hit by SIGKILL after the grace period', async () => {
     await expectTreeGone(false, 'until-it-exits')
-  }, 15_000)
+  }, 15_000 * SLOW)
 
   it('even when the grandchild is in its own group from job control — with alive always true, like a terminal tab', async () => {
     await expectTreeGone(true, 'always')
-  }, 15_000)
+  }, 15_000 * SLOW)
 
   it('even when the grandchild is in its own group from job control — with a caller that saw root end', async () => {
     await expectTreeGone(true, 'until-it-exits')
-  }, 15_000)
+  }, 15_000 * SLOW)
 })
 
 /**
@@ -266,13 +267,13 @@ describe.runIf(process.platform === 'win32')('stopTree and killTree — a real t
     stopTree(t.handle, 500, () => !t.exited())
     expect(await settleOn(t.exited, (x) => x, 10_000)).toBe(true)
     expect(await settleOn(() => pids.filter(isAlive), (left) => left.length === 0, 10_000)).toEqual([])
-  }, 40_000)
+  }, 40_000 * SLOW)
 
   it('a shutdown (killTree) ends the root and every process under it', async () => {
     const t = await plant()
     killTree(t.handle, 'SIGKILL')
     expect(await settleOn(() => pids.filter(isAlive), (left) => left.length === 0, 10_000)).toEqual([])
-  }, 40_000)
+  }, 40_000 * SLOW)
 })
 
 /**

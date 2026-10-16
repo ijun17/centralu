@@ -4,6 +4,7 @@ import { KeeperChildren } from './children-client.js'
 import { KeeperPty } from './keeper-pty.js'
 import { FakeKeeper } from './fake-keeper.test-helpers.js'
 import { alive, fakeAgentCli, goneWithin, helperPid, killLeftovers } from '../adapters/fake-agent-cli.test-helpers.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * The host's side of the keeper's child service (#280 step 2): a process the keeper holds behaves
@@ -194,7 +195,7 @@ describe.skipIf(keeperless)('stopping an agent the keeper holds', () => {
     await exited
     expect(await goneWithin(helper, 5000)).toBe(true)
     expect(keeper.ops('signal')[0]).toMatchObject({ signal: 'SIGTERM', group: true })
-  }, 30_000)
+  }, 30_000 * SLOW)
 
   it('ends a helper that ignores TERM with the KILL that follows', async () => {
     const p = KeeperAgentProcess.spawn(children, { ...fakeAgentCli({ ignoreTerm: true }), env: process.env }, tag)
@@ -208,7 +209,7 @@ describe.skipIf(keeperless)('stopping an agent the keeper holds', () => {
     p.kill('SIGKILL')
     await exited
     expect(await goneWithin(helper, 5000)).toBe(true)
-  }, 30_000)
+  }, 30_000 * SLOW)
 })
 
 describe.skipIf(keeperless)('a pty the keeper holds', () => {

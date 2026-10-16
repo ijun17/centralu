@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { bridgePath } from './bridge-path.js'
+import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /**
  * The Codex bridge reads its stdin as one UTF-8 stream. A pipe can split a multibyte character between two
@@ -71,5 +72,5 @@ describe('the Codex bridge reading its stdin', () => {
 
     expect((await answered(7)).result?.isError).toBe(false)
     expect(seen).toEqual([{ text: '한국어' }])
-  }, 20_000)
+  }, 20_000 * SLOW)
 })

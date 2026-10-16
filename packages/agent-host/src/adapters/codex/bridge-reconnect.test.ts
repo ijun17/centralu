@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { bridgePath } from './bridge-path.js'
+import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /**
  * The Codex bridge across a host swap (#280 step 3).
@@ -71,5 +72,5 @@ describe('the Codex bridge across a host swap (#280 step 3)', () => {
     expect(second.answer.result.isError).toBe(false)
     expect(second.answer.result.content[0]!.text).toBe('from the next host')
     expect(connections).toBe(2)
-  }, 20_000)
+  }, 20_000 * SLOW)
 })

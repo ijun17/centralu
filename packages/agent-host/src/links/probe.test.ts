@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { parseProbe, probeCommand, probeTarget } from './probe.js'
 import { WINDOWS_INLINE_MAX } from './tunnel.js'
 import { fakeExe, rmFakeDir } from '../fake-exe.test-helpers.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * The probe the Add machine dialog runs when the person picks a host (#514), against a fake `ssh`
@@ -169,7 +170,7 @@ describe('what it tells apart', () => {
     const left = alive()
     if (left) process.kill(pid, 'SIGKILL')
     expect(left).toBe(false)
-  }, 20_000)
+  }, 20_000 * SLOW)
 
   it('reads a reason whose character arrives in two pieces as one character (#428)', async () => {
     expect(await probe('split')).toMatchObject({ reachable: true, os: null, error: '접속 거부: 계정이 잠겼습니다' })

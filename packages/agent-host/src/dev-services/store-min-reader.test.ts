@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Store, StoreTooNewError, storeTooNewMessage } from './store.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 const dirs: string[] = []
 function storeFile(): string {
@@ -203,5 +204,5 @@ describe('which builds can still read the store (#292)', () => {
     expect(r.stdout).toContain('This data was written by a newer Centralu.')
     expect(r.stdout).toContain(`store version ${KNOWN + 1} on; this Centralu knows store versions up to ${KNOWN}`)
     expect(r.stdout).not.toContain('"ready":true')
-  }, 60_000)
+  }, 60_000 * SLOW)
 })

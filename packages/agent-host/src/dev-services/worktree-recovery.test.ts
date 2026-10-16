@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as gitModule from './git-exec.js'
 import { clearRecoveredBranchMark, repairWorktreeRecoveryRemovals, restoreWorktreeRecovery, saveWorktreeRecovery, worktreeRecoveryDir } from './worktree-recovery.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 const git = (cwd: string, args: string[]) => execFileSync('git', [
   '-c', 'user.name=Recovery test', '-c', 'user.email=recovery@example.test', '-c', 'core.autocrlf=false', ...args,
@@ -178,7 +179,7 @@ describe('worktree recovery follow-ups (#608)', () => {
       git(dir, ['init', '-q', recovered])
       git(recovered, ['fetch', bundle, `${ref}:refs/heads/recovered`])
       expect(git(recovered, ['show', 'recovered:file.txt'])).toBe('module work')
-    }, process.platform === 'win32' ? 90_000 : 30_000,
+    }, 30_000 * SLOW,
   )
 
   it.each(['switched', 'detached', 'occupied'])(
@@ -210,7 +211,7 @@ describe('worktree recovery follow-ups (#608)', () => {
       const refs = git(repo, ['for-each-ref', '--format=%(refname)', 'refs/heads/recovered/'])
       await restoreWorktreeRecovery(sessionId, repo, child, branch, recovery, {})
       expect(git(repo, ['for-each-ref', '--format=%(refname)', 'refs/heads/recovered/'])).toBe(refs)
-    }, process.platform === 'win32' ? 90_000 : 30_000,
+    }, 30_000 * SLOW,
   )
 
   it.each(['working', 'staged', 'both'])(
@@ -228,7 +229,7 @@ describe('worktree recovery follow-ups (#608)', () => {
       expect(restored.notice).toContain('manual recovery')
       expect(readFileSync(join(child, 'file.txt'), 'utf8')).toBe('base\n')
       expect(git(child, ['show', ':file.txt'])).toBe('base')
-    }, process.platform === 'win32' ? 90_000 : 30_000,
+    }, 30_000 * SLOW,
   )
   it.each(['original', 'recovered'])(
     'retries a restore whose failed first attempt left the %s branch behind (#647)', async (name) => {
@@ -255,7 +256,7 @@ describe('worktree recovery follow-ups (#608)', () => {
       expect(git(repo, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/recovered/'])).toBe(expected)
       // The original name the first attempt created is left as it is, like any branch the person could have made
       if (name === 'original') expect(git(repo, ['rev-parse', branch])).toBe(tip)
-    }, process.platform === 'win32' ? 90_000 : 30_000,
+    }, 30_000 * SLOW,
   )
 
   it('does not adopt a recovery-named branch the person made, even at the saved tip (#647)', async () => {
@@ -269,7 +270,7 @@ describe('worktree recovery follow-ups (#608)', () => {
     expect(restored.branch).toBe(`recovered/${sessionId}-1`)
     expect(git(repo, ['rev-parse', `refs/centralu/recovered/recovered/${sessionId}-1`])).toBe(tip)
     expect(() => git(repo, ['rev-parse', '--verify', `refs/centralu/recovered/recovered/${sessionId}`])).toThrow()
-  }, process.platform === 'win32' ? 90_000 : 30_000)
+  }, 30_000 * SLOW)
 
   it('does not adopt a recovery branch the person deleted and made again at the saved tip (#647)', async () => {
     git(repo, ['worktree', 'add', '-b', branch, child])
@@ -285,7 +286,7 @@ describe('worktree recovery follow-ups (#608)', () => {
     git(repo, ['branch', `recovered/${sessionId}`, tip])
     const again = await restoreWorktreeRecovery(sessionId, repo, child, branch, recovery, {})
     expect(again.branch).toBe(`recovered/${sessionId}-1`)
-  }, process.platform === 'win32' ? 90_000 : 30_000)
+  }, 30_000 * SLOW)
 
   it('drops the mark together with its recovery branch (#647)', async () => {
     git(repo, ['worktree', 'add', '-b', branch, child])
@@ -298,7 +299,7 @@ describe('worktree recovery follow-ups (#608)', () => {
     await clearRecoveredBranchMark(repo, restored.branch)
     expect(git(repo, ['for-each-ref', '--format=%(refname)', 'refs/centralu/'])).toBe('')
     await clearRecoveredBranchMark(repo, branch)
-  }, process.platform === 'win32' ? 90_000 : 30_000)
+  }, 30_000 * SLOW)
 
   it('repairs the other folders when one folder left by a purge cannot be repaired (#647)', async () => {
     const root = join(dir, 'data', 'worktree-recovery')
@@ -330,7 +331,7 @@ describe('worktree recovery follow-ups (#608)', () => {
     expect(restored.branch).toBe(`recovered/${sessionId}-1`)
     expect(git(child, ['rev-parse', 'HEAD'])).toBe(tip)
     expect(git(repo, ['rev-parse', `recovered/${sessionId}`])).toBe(git(repo, ['rev-parse', 'main']))
-  }, process.platform === 'win32' ? 90_000 : 30_000)
+  }, 30_000 * SLOW)
 
   it.each(['history', 'index'])('review: ignores unfetched gitlinks from the %s before deleting', async (location) => {
     const { source, module } = moduleFixture()
@@ -342,7 +343,7 @@ describe('worktree recovery follow-ups (#608)', () => {
     remove()
     expect(existsSync(child)).toBe(false)
     expect(recovery.commits).toBe(location === 'history' ? 1 : 0)
-  }, process.platform === 'win32' ? 90_000 : 30_000)
+  }, 30_000 * SLOW)
 
   it('review: preserves old-path gitlinks after git mv with a stable custom module name', async () => {
     const { base, module } = moduleFixture()
@@ -371,7 +372,7 @@ describe('worktree recovery follow-ups (#608)', () => {
     git(dir, ['init', '-q', recovered])
     git(recovered, ['fetch', bundle, `${ref}:refs/heads/recovered`])
     expect(git(recovered, ['show', 'recovered:file.txt'])).toBe('only recorded under old name')
-  }, process.platform === 'win32' ? 90_000 : 30_000)
+  }, 30_000 * SLOW)
 
   it('review: scans a long missing-trunk history and a tree larger than the stdout limit in bounded calls', async () => {
     const inputGit = (args: string[], input: string) => execFileSync('git', [
@@ -403,7 +404,7 @@ describe('worktree recovery follow-ups (#608)', () => {
     } finally {
       calls.mockRestore()
     }
-  }, process.platform === 'win32' ? 180_000 : 60_000)
+  }, 60_000 * SLOW)
 
   it.each(['working', 'staged', 'both'])('review: reports previously applied %s patches on a store-restore retry', async (patches) => {
     git(repo, ['worktree', 'add', '-b', branch, child])
@@ -421,7 +422,7 @@ describe('worktree recovery follow-ups (#608)', () => {
     expect(retry.notice).not.toContain('may still need manual recovery')
     expect(git(child, ['show', ':file.txt'])).toBe(index)
     expect(readFileSync(join(child, 'file.txt'), 'utf8')).toBe('edits after the interruption\n')
-  }, process.platform === 'win32' ? 90_000 : 30_000)
+  }, 30_000 * SLOW)
 
   it.each(['combined', 'dense-combined'])('re-review: preserves merge-only gitlinks with log.diffMerges=%s', async (format) => {
     const { base, module } = moduleFixture()
@@ -454,7 +455,7 @@ describe('worktree recovery follow-ups (#608)', () => {
     git(dir, ['init', '-q', recovered])
     git(recovered, ['fetch', bundle, `${ref}:refs/heads/recovered`])
     expect(git(recovered, ['show', 'recovered:file.txt'])).toBe('only merge M records T')
-  }, process.platform === 'win32' ? 90_000 : 30_000)
+  }, 30_000 * SLOW)
 
   it('re-review: keeps a thousand gitlinks off Windows command lines and in the bundle', async () => {
     const { module, base } = moduleFixture()
@@ -498,7 +499,7 @@ describe('worktree recovery follow-ups (#608)', () => {
     remove()
     const heads = git(repo, ['bundle', 'list-heads', bundle])
     for (const tip of tips) expect(heads).toContain(`${tip} refs/centralu-recovery/`)
-  }, process.platform === 'win32' ? 180_000 : 60_000)
+  }, 60_000 * SLOW)
 
   it.each([true, false])('re-review: checking partial-clone gitlinks stays local (lazy-fetch switch supported: %s)', async (supportsSwitch) => {
     const { source, module } = moduleFixture()
@@ -529,6 +530,6 @@ describe('worktree recovery follow-ups (#608)', () => {
     })).toContain('missing')
     expect(recovery!.commits).toBe(1)
     remove()
-  }, process.platform === 'win32' ? 90_000 : 30_000)
+  }, 30_000 * SLOW)
 
 })

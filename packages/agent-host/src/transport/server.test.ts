@@ -8,6 +8,7 @@ import { HostServer, parseAllowedOrigins, versionMismatchMessage, type HostServe
 import { deriveHttpSecret, sameSecret, secretError, type HttpRoute } from './http.js'
 import { bridgeToken } from './bridge-token.js'
 import { hostProof } from './host-proof.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 const TOKEN = 'test-token'
 let server: HostServer | null = null
@@ -576,7 +577,7 @@ describe('handshake', () => {
     expect(c.frames[2]).toMatchObject({ kind: 'res', id: '2', ok: true })
     expect(seen).toEqual([ATTACHMENT_MAX_BASE64, dropped.length])
     c.ws.close()
-  }, 30_000)
+  }, 30_000 * SLOW)
 })
 
 describe('RPC round trip', () => {
@@ -1263,7 +1264,7 @@ describe('bounded outbound work (#82)', () => {
     await expect(stalledClosed).resolves.toBe(1006)
     expect(stalled.frames.filter((f) => f.kind === 'event').length).toBeLessThan(200)
     healthy.ws.close()
-  }, 15_000)
+  }, 15_000 * SLOW)
 
   it('a socket that never says hello is closed after the handshake deadline', async () => {
     const { port } = await start(undefined, { handshakeTimeoutMs: 50 })

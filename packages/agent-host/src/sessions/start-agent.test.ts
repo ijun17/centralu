@@ -11,6 +11,7 @@ import { SessionManager } from './manager.js'
 import { createRpcHandler } from '../rpc.js'
 import { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './manager.js'
 import type { ModelOption } from '@cc/protocol'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * start_agent and agent_session (#561): an ordinary session starts another agent in its own project — behind the
@@ -153,7 +154,7 @@ describe('starting another agent in the same project', () => {
       const again = await w.mgr.startAgent(s, { task: 'and again', tool: 'codex', model: 'gpt-x', wait: false })
       expect(again).toMatchObject({ ok: true })
       expect(calls.n).toBe(1)
-    }, 20_000)
+    }, 20_000 * SLOW)
 
     it('keeps a list that arrives after the bound, and checks the next call against it', async () => {
       allowProject()
@@ -171,7 +172,7 @@ describe('starting another agent in the same project', () => {
       expect(await w.mgr.startAgent(s, { task: 'three', tool: 'codex', model: 'gpt-real', effort: 'high', wait: false })).toMatchObject({ ok: true })
       // The slow read, and the fresh one the refusal waited on; the valid name needed neither
       expect(calls.n).toBe(2)
-    }, 20_000)
+    }, 20_000 * SLOW)
   })
 
   it('in a trusted project a normal session starts the child without a card (#673)', async () => {
@@ -271,7 +272,7 @@ describe('starting another agent in the same project', () => {
       const notice = r.ok ? (r.notice ?? '') : ''
       expect(notice).toContain("name a model (it is the person's choice for heavy work in Settings → Orchestrator)")
       expect(notice).not.toContain('start again without it')
-    }, 20_000)
+    }, 20_000 * SLOW)
 
     it('arrives from the tool call: the served schema takes it and the runner passes it on', async () => {
       const s = await session()

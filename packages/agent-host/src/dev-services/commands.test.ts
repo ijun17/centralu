@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { CommandRunner } from './commands.js'
 import { alive, cleanUp, plantTreeScript, settle, treePids } from './process-tree.test-helpers.js'
 import type { PtyModule } from './terminal.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * The contract for the frequently used command runner (#60):
@@ -291,11 +292,11 @@ describe.runIf(process.platform === 'win32')('CommandRunner — the whole tree o
     expect(await settle(() => pids.filter(alive), (left) => left.length === 0, 15_000)).toEqual([])
     expect(await settle(r.ended, (x) => x, 10_000)).toBe(true)
     expect(r.svc.log(dir, r.command)!.running).toBe(false)
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it('an app shutdown (disposeAll) ends the whole tree too', async () => {
     const r = await runTree()
     r.svc.disposeAll()
     expect(await settle(() => pids.filter(alive), (left) => left.length === 0, 15_000)).toEqual([])
-  }, 60_000)
+  }, 60_000 * SLOW)
 })

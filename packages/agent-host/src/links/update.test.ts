@@ -7,6 +7,7 @@ import { fakeRegistry, fakeServe, sha256, tarGz, type FakePackage, type FakeRegi
 import { installRemote, installScript, type RemoteRuntime } from './install.js'
 import { SshTunnel } from './tunnel.js'
 import { parseStopLine, rollbackRemote, stopRemoteHost, uninstallRemote, updateRemote, type HostControl, type UpdateStep } from './update.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * Update, rollback and uninstall (plan §10.5, phase 3 step 4) against the installer's harness: a fake
@@ -142,7 +143,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     // A third version removes the first only once it answered
     expect(await update('9.9.3').done).toMatchObject({ current: { version: '9.9.3' }, previous: { version: '9.9.2' }, removed: ['9.9.1'] })
     expect(readdirSync(remote('versions')).sort()).toEqual(['9.9.2', '9.9.3'])
-  }, 90_000)
+  }, 90_000 * SLOW)
 
   it('touches nothing that runs when the old host will not stop: the new version waits beside', async () => {
     await installedAndRunning()
@@ -151,7 +152,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     expect(existsSync(remote('previous'))).toBe(false)
     expect(existsSync(remote('versions', '9.9.2', 'install.json'))).toBe(true)
     expect(events()).toEqual(['stop 9.9.1'])
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it('puts the old version back and starts it when the new one does not answer, with the end of its log', async () => {
     await installedAndRunning()
@@ -166,7 +167,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${NODE_V}\n`)
     expect(existsSync(remote('previous'))).toBe(false)
     expect(readdirSync(remote('versions')).sort()).toEqual(['9.9.1', '9.9.2'])
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it('rolls back one step: previous becomes current, and there is no previous left to go back to', async () => {
     await installedAndRunning()
@@ -184,7 +185,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     const hits = reg.hits.length
     await update('9.9.2').done
     expect(reg.hits.slice(hits).filter((h) => h.endsWith('.tgz'))).toEqual([])
-  }, 90_000)
+  }, 90_000 * SLOW)
 
   it('a first update over an install of its own (npm) leaves nothing to point back to when it fails', async () => {
     const { seen, done } = update('9.9.2', { FAKE_BROKEN: '9.9.2' })
@@ -193,7 +194,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     // No pointer and no launcher: the lookup finds whatever ran there before
     expect(existsSync(remote('current'))).toBe(false)
     expect(existsSync(remote('bin', 'centralu'))).toBe(false)
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it('uninstalls: stops the host, removes <data>/remote, keeps the rest of the data', async () => {
     await installedAndRunning()
@@ -213,7 +214,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     expect(existsSync(remote())).toBe(false)
     expect(existsSync(data('serve.json'))).toBe(true)
     expect(running()).toBeNull()
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it('does not uninstall when the boot entry would not go: it would start a launcher that is gone at every boot', async () => {
     await installedAndRunning()
@@ -221,7 +222,7 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     await expect(uninstallRemote(control({ FAKE_AUTOSTART_FAILS: '1' }).c)).rejects.toThrow('Centralu on box could not stop starting at boot: Failed to connect to bus')
     expect(existsSync(remote('versions', '9.9.1', 'install.json'))).toBe(true)
     expect(existsSync(data('autostart'))).toBe(true)
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it('uninstalls a version that predates --autostart: it cannot have written an entry from here', async () => {
     await installedAndRunning()
@@ -229,5 +230,5 @@ describe.skipIf(process.platform === 'win32')('update, rollback and uninstall ov
     expect(await uninstallRemote(c)).toEqual({ stopped: true })
     expect(seen).toEqual(['hold', 'stop', 'autostart', 'remove'])
     expect(existsSync(remote())).toBe(false)
-  }, 60_000)
+  }, 60_000 * SLOW)
 })

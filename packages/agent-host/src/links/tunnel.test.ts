@@ -21,6 +21,7 @@ import {
   type SshTunnelOptions,
 } from './tunnel.js'
 import { fakeExe, rmFakeDir } from '../fake-exe.test-helpers.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * The ssh transport (#82, docs/plans/remote-hub.md §2) against a fake `ssh` on PATH: a Node script
@@ -341,7 +342,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       await expect(starting).rejects.toThrow(/did not finish within 5 seconds/)
       // The ssh itself is gone, not only the wait for it
       await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 10_000 })
-    }, 30_000)
+    }, 30_000 * SLOW)
 
     it('puts the deadline on asking for the connection line too', async () => {
       const t = tunnel({ FAKE_SSH_HANG: '1', FAKE_SSH_LINE: line({ port: await freePort() }) }, undefined, { commandTimeoutMs: 300 })
@@ -365,7 +366,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       const limits = { detachTimeoutMs: 1500, execTimeoutMs: 60_000 }
       await expect(tunnel(slow, undefined, limits).startHost()).rejects.toThrow(/did not finish within/)
       expect((await tunnel(slow, undefined, limits).exec('true')).stdout).toBe('slow ok\n')
-    }, 30_000)
+    }, 30_000 * SLOW)
 
     it('reads a character that arrives in two pieces as one character', async () => {
       const r = await tunnel({ FAKE_SSH_SPLIT: '1' }).exec('true')
@@ -468,7 +469,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       const forwards = (logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L'))
       expect(forwards[0]).toContain('-N')
       expect(forwards.at(-1)!.at(-1)).toBe('wsl.exe -d Ubuntu-24.04 --exec sleep infinity')
-    }, 30_000)
+    }, 30_000 * SLOW)
 
     it('where WMI is blocked, runs the host in the forward’s own session instead, and it ends with the link', async () => {
       const t = tunnel({ FAKE_SSH_STATE: stateFile(), FAKE_SSH_DETACH: 'blocked', FAKE_SSH_LINE: line({ port: await freePort() }) }, { shell: 'powershell' })
@@ -491,7 +492,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       const pid = hosting[0]!.pid!
       await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 10_000 })
       if (process.platform !== 'win32') expect(existsSync(stateFile())).toBe(false)
-    }, 30_000)
+    }, 30_000 * SLOW)
 
     it('says why a start failed, and that a remote too old for --detach has to be started there', async () => {
       const at = async (how: string) => {
@@ -501,7 +502,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       await expect(at('exited')).rejects.toThrow(/exited \(1\) before its host answered/)
       await expect(at('old')).rejects.toThrow(/too old to be started from here: run `centralu serve` there/)
       await expect(tunnel({ FAKE_SSH_HAS: '' }).startHost()).rejects.toThrow(/not installed on box/)
-    }, 30_000)
+    }, 30_000 * SLOW)
 
     it('tells a Node below the floor from other failures: the launcher’s refusal, and a host that crashed at startup (#699)', async () => {
       const at = async (how: string) => {
@@ -512,7 +513,7 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
       expect(await at('crashed')).toMatchObject({ name: 'NodeTooOld', kind: 'crashed', found: null })
       // Any other exit stays an ordinary failure
       expect(await at('exited')).not.toMatchObject({ name: 'NodeTooOld' })
-    }, 30_000)
+    }, 30_000 * SLOW)
   })
 })
 

@@ -10,6 +10,7 @@ import { installCommand, installRemote, installScript, nodeCommand, preflight, p
 import { connectionCommand, SshTunnel, WINDOWS_INLINE_MAX, type RemoteCommand, type RemoteSpec } from './tunnel.js'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { findHostEntry } from '../../../../packaging/npm/centralu/bin/platform.mjs'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * The installer of plan §10.2 (#82, phase 3 step 3). The scripts run for real: a fake `ssh` hands
@@ -365,7 +366,7 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
     // The hub's lookup now finds the managed launcher, which runs current's centralu.mjs on its Node
     const out = execFileSync('/bin/sh', ['-c', connectionCommand({ shell: 'posix' })], { env: env(), encoding: 'utf8' })
     expect(JSON.parse(out)).toEqual({ ran: '9.9.1', argv: ['serve', '--connection'], managed: '1' })
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it('a version published before the host-only packages comes from its platform package, after asking for the host-only one', async () => {
     const hits = reg.hits.length
@@ -374,7 +375,7 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
     expect(asked).toContain('/@centralu/host-linux-x64/9.9.1')
     expect(asked).toContain('/@centralu/linux-x64/-/linux-x64-9.9.1.tgz')
     expect(JSON.parse(readFileSync(remote('versions', '9.9.1', 'install.json'), 'utf8')).packages.map((p: { name: string }) => p.name)).toEqual(['centralu', '@centralu/linux-x64'])
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it('a version with a host-only package installs that one and never downloads the platform package (owner decision 2)', async () => {
     const hits = reg.hits.length
@@ -400,7 +401,7 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
       exists: existsSync,
     })
     expect(found).toEqual({ entry: realpathSync(v('node_modules', '@centralu', 'host-linux-x64', 'host', 'main.mjs')) })
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it('falls back only when the host-only package is not published: a bad signature on it refuses', async () => {
     const hits = reg.hits.length
@@ -410,7 +411,7 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
     expect(asked.filter((h) => h.startsWith('/@centralu/linux-x64/'))).toEqual([])
     expect(asked.filter((h) => h.startsWith('/dist/') || h.endsWith('.tgz'))).toEqual([])
     expect(existsSync(remote('current'))).toBe(false)
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it('keeps current and previous only: a third version removes the first', async () => {
     await install('9.9.1')
@@ -423,7 +424,7 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
     expect(readdirSync(remote('versions')).sort()).toEqual(['9.9.2', '9.9.3'])
     // The launcher was written once and never again (S8)
     expect(readFileSync(remote('bin', 'centralu'))).toEqual(launcher)
-  }, 90_000)
+  }, 90_000 * SLOW)
 
   it('refuses a Node archive whose SHA-256 is not the pinned one, and leaves nothing', async () => {
     const wrong = { node: { version: NODE_V, archives: { 'linux-x64': { file: NODE_FILE, sha256: 'f'.repeat(64) } } } }
@@ -431,7 +432,7 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
     expect(existsSync(remote('node'))).toBe(false)
     expect(existsSync(remote('current'))).toBe(false)
     expect(readdirSync(remote()).filter((n) => n.startsWith('.'))).toEqual([])
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it('refuses a package whose bytes are not what the signed metadata names, and keeps what runs', async () => {
     await install('9.9.1')
@@ -445,7 +446,7 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
     expect(readFileSync(remote('current'), 'utf8')).toBe(`9.9.1 ${NODE_V}\n`)
     expect(existsSync(remote('previous'))).toBe(false)
     expect(readdirSync(remote()).filter((n) => n.startsWith('.'))).toEqual([])
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it('refuses before downloading anything: an old glibc there, or registry metadata whose signature fails', async () => {
     const hits = reg.hits.length
@@ -455,5 +456,5 @@ describe.skipIf(process.platform === 'win32')('installRemote over a fake ssh int
     await expect(install('9.9.3')).rejects.toThrow(/signature on centralu@9\.9\.3 does not check out/)
     expect(reg.hits.slice(hits).filter((h) => h.startsWith('/dist/') || h.endsWith('.tgz'))).toEqual([])
     expect(existsSync(remote('node'))).toBe(false)
-  }, 60_000)
+  }, 60_000 * SLOW)
 })

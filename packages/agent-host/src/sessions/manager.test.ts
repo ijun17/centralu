@@ -38,6 +38,7 @@ import { normalizeNotification } from '../adapters/codex/normalize.js'
 import { createRpcHandler } from '../rpc.js'
 import { UpdateService } from '../updates.js'
 import { UpdateApplyBroker } from '../update-apply.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 class FakeHandle implements SessionHandle {
   externalId: string | null = 'ext-1'
@@ -3723,7 +3724,7 @@ describe('worktree sessions', () => {
       expect(existsSync(dir)).toBe(true)
       expect(await wtMgr.emptyTrash()).toEqual({ purged: 1, failed: [] })
       expect(existsSync(worktreeRecoveryDir(s.id))).toBe(false)
-    }), process.platform === 'win32' ? 45_000 : 15_000)
+    }), 15_000 * SLOW)
 
     it('keeps unmerged commits in a self-contained bundle and restores the branch', async () => {
       const { s, managerId } = await makeChild('feat/unmerged')
@@ -3794,7 +3795,7 @@ describe('worktree sessions', () => {
       expect(existsSync(join(dir, '1.bundle'))).toBe(true)
       await wtMgr.restoreSession(s.id)
       expect(events.some((e) => e.type === 'notice' && e.sessionId === s.id && e.text.includes('Submodule recovery is manual'))).toBe(true)
-    }, process.platform === 'win32' ? 45_000 : 15_000)
+    }, 15_000 * SLOW)
 
     it('refuses a working child, and refuses removal when its process cannot be disposed', async () => {
       const { s, managerId } = await makeChild('feat/still-working')
@@ -4131,7 +4132,7 @@ describe('worktree sessions', () => {
       expect(lstatSync(join(saved(s).dir, '0.patch')).size).toBeGreaterThan(32 * 1024 * 1024)
       await wtMgr.restoreSession(s.id)
       expect(readFileSync(path).equals(bytes)).toBe(true)
-    }, process.platform === 'win32' ? 90_000 : 30_000)
+    }, 30_000 * SLOW)
 
     it.each([-1, 0, 1])('review: enforces the input cap at the limit plus %i bytes before any git add', async (delta) => {
       const { s, managerId } = await makeChild('feat/too-large')
@@ -4158,7 +4159,7 @@ describe('worktree sessions', () => {
       } finally {
         git.mockRestore()
       }
-    }, process.platform === 'win32' ? 90_000 : 30_000)
+    }, 30_000 * SLOW)
 
     it.each(['switched', 'detached'] as const)('review: bundles both HEAD and the stored branch when the child is %s', async (mode) => {
       const { s, managerId } = await makeChild(`feat/stored-${mode}`)
@@ -4213,7 +4214,7 @@ describe('worktree sessions', () => {
       g(root, ['clone', '-q', '-c', 'core.autocrlf=false', join(dir, '1.bundle'), recovered])
       expect(g(recovered, ['rev-parse', 'HEAD']).trim()).toBe(tip)
       expect(readFileSync(join(recovered, 'module.txt'), 'utf8')).toBe('local S\n')
-    }, process.platform === 'win32' ? 45_000 : 15_000)
+    }, 15_000 * SLOW)
 
     it.each(['worktree', 'branch'] as const)('review: reports deleted with a warning when %s removal fails after trashing', async (failure) => {
       const { s, managerId } = await makeChild(`feat/leftover-${failure}`)
@@ -4269,7 +4270,7 @@ describe('worktree sessions', () => {
       const restoreNotice = events.filter((e) => e.type === 'notice' && e.sessionId === s.id && e.label === 'worktree recovery').at(-1)!
       expect(restoreNotice).toMatchObject({ text: expect.stringContaining('Recovery files remain') })
       expect((restoreNotice as { text: string }).text).not.toContain('could not all be applied')
-    }, process.platform === 'win32' ? 45_000 : 15_000)
+    }, 15_000 * SLOW)
 
     it('only the session that started it cleans it up, and a session the person made is no one\'s to delete', async () => {
       const { profileAllows, orchestratorToolSchemas } = await import('./orchestrator-tools.js')

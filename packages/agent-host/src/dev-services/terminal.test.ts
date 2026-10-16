@@ -6,6 +6,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { alive as isAlive, cleanUp, plantTreeScript, settle, treePids } from './process-tree.test-helpers.js'
 import { TerminalService, commandShell, interactiveShell, shellPath, shortCwd, type PtyModule } from './terminal.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * The terminal has one core rule: **its identity is its cwd.**
@@ -200,7 +201,7 @@ describe('multiple terminals', () => {
         }
       }
     }
-  }, 30_000)
+  }, 30_000 * SLOW)
 
   /*
    * The same on Windows (#849), with the real pty (ConPTY) and the real shell a tab runs (PowerShell). The server is
@@ -240,7 +241,7 @@ describe('multiple terminals', () => {
 
     svc.close(t.id)
     expect(await settle(() => pids.filter(isAlive), (left) => left.length === 0, 15_000)).toEqual([])
-  }, 120_000)
+  }, 120_000 * SLOW)
 
   it('closing the last one leaves the list empty', () => {
     const fake = fakePty()

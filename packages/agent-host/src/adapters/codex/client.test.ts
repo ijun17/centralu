@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentProcess } from '../contract.js'
 import { CodexClient } from './client.js'
+import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /**
  * **A shutdown we caused is not the same as the other side dying.**
@@ -104,7 +105,7 @@ describe('CodexClient stream truncation', () => {
     } finally {
       await client.dispose()
     }
-  }, 30_000)
+  }, 30_000 * SLOW)
 })
 
 /**

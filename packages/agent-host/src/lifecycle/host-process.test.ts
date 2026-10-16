@@ -15,6 +15,7 @@ import { WebSocket } from 'ws'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { acquireInstanceLock } from '../dev-services/instance-lock.js'
 import { LAUNCH_VARIABLES } from './launch-env.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 const ROOT = fileURLToPath(new URL('../../../../', import.meta.url))
 const MAIN = 'packages/agent-host/src/main.ts'
@@ -147,7 +148,7 @@ describe('the host process, started for real', () => {
     expect(probe.includes('launcher-token-not-for-children')).toBe(false)
     host.p.kill('SIGTERM')
     expect(await host.exited).toBe(0)
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it.runIf(!posix)("Windows: an agent CLI the host runs, from an npm .cmd shim, sees none of the launcher's variables (ST16)", async () => {
     const s = setup()
@@ -175,7 +176,7 @@ describe('the host process, started for real', () => {
     }
     host.p.stdin!.end()
     expect(await host.exited).toBe(0)
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it('the log is on before PATH and the lock: a refused start says why in host.log, after the banner (HO3)', () => {
     const s = setup()
@@ -197,7 +198,7 @@ describe('the host process, started for real', () => {
     } finally {
       if (owner.ok) owner.release()
     }
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it('without --watch-parent the end of stdin means nothing, and a signal still shuts it down (HO7)', async () => {
     const s = setup()
@@ -211,7 +212,7 @@ describe('the host process, started for real', () => {
     host.p.kill('SIGTERM')
     expect(await host.exited).toBe(0)
     expect(s.log()).toContain('[agent-host] shutting down (pid')
-  }, 60_000)
+  }, 60_000 * SLOW)
 
   it('with --watch-parent the end of stdin is the parent gone, and the host shuts down (HO7)', async () => {
     const s = setup()
@@ -220,5 +221,5 @@ describe('the host process, started for real', () => {
     host.p.stdin!.end()
     expect(await host.exited).toBe(0)
     expect(s.log()).toContain('parent process exited; shutting down')
-  }, 60_000)
+  }, 60_000 * SLOW)
 })

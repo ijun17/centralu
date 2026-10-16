@@ -18,6 +18,7 @@ import { HostServer } from './transport/server.js'
 import { OriginPorts, type PortBook } from './views/origin-ports.js'
 import { ViewHost } from './views/view-host.js'
 import { withDragRelay } from './views/drag-relay.js'
+import { SLOW } from '../../../tooling/test-timing.js'
 
 /**
  * The seam between app views and the external app runtime (M4 B-3 ↔ A) — the exact
@@ -266,7 +267,7 @@ describe("a removed app's origin server goes with it (#392)", () => {
     await expect.poll(() => listening(mapper.port), { timeout: 3_000 }).toBe(false)
     expect(await listening(atlas.port)).toBe(true)
     expect(book!.assigned['p1/mapper']).toBe(mapper.port)
-  }, 20_000)
+  }, 20_000 * SLOW)
 
   it('closes when the app is removed with no view open, and an app put back is served on its own port again', async () => {
     plant('mapper', { view: { origin: 'app' } })
@@ -283,5 +284,5 @@ describe("a removed app's origin server goes with it (#392)", () => {
     const again = await originPort('mapper')
     expect(again.port).toBe(first.port)
     expect(await listening(again.port)).toBe(true)
-  }, 20_000)
+  }, 20_000 * SLOW)
 })

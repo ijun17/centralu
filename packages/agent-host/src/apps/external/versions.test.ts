@@ -8,6 +8,7 @@ import { MANIFEST_FILE, MANIFEST_VERSION } from './manifest.js'
 import { ExternalApps, type AppRef } from './runtime.js'
 import { AppVersions, VERSIONS_KEPT, VERSIONS_REL } from './versions.js'
 import { until } from './test-helpers.js'
+import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /**
  * Versioning for apps outside git (M4 E-1) — exercised with a real app process (env-app.mjs). This
@@ -77,7 +78,7 @@ afterEach(async () => {
 describe('a version is captured when the code changes and starts', () => {
   // Eight real starts of the app, ~230 ms each with nothing to wait out between them: ~2 s alone,
   // past 5 s on a loaded machine, so this test gets more room than vitest's 5 s default
-  it('one version at first start, unchanged after starting again with the same code, one more version for changed code — only the most recent 5 are kept', { timeout: 10_000 }, async () => {
+  it('one version at first start, unchanged after starting again with the same code, one more version for changed code — only the most recent 5 are kept', { timeout: 10_000 * SLOW }, async () => {
     make()
     expect(rt.snapshots(ref)).toEqual([])
     expect(await running()).toBe('v1')

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { THEME_SCHEMA_FILE, themeFileJsonSchema } from '@cc/protocol'
 import { ThemeFiles } from './themes.js'
+import { SLOW } from '../../../tooling/test-timing.js'
 
 let root: string
 let dir: string
@@ -117,7 +118,7 @@ describe('the themes folder (#312)', () => {
     await waitFor(() => changes > before)
     await quiet()
     expect(changes).toBe(before + 1)
-  }, 30_000)
+  }, 30_000 * SLOW)
 
   it('imports a file from elsewhere as it is, and refuses one that is not a theme', async () => {
     const outside = join(root, 'Shared Theme.json')
