@@ -90,10 +90,16 @@ describe('the link client (#82)', () => {
 
   it('a call fails at once while the link is down, instead of waiting for it', async () => {
     const { port } = await host()
-    const { c } = client(port)
-    const t0 = Date.now()
-    await expect(c.call('sessions.list', {})).rejects.toMatchObject({ retryable: true, message: expect.stringMatching(/not reachable/) })
-    expect(Date.now() - t0).toBeLessThan(100)
+    const { c } = client(port, { callTimeoutMs: 60_000 })
+    /*
+     * "At once" is asserted as "before any timer could run", not as a wall-clock bound: 100 ms on a
+     * loaded machine fails for load, and a call that waited for a short timer would still pass it (#845).
+     */
+    const outcome = await Promise.race([
+      c.call('sessions.list', {}).then(() => 'answered', (e: unknown) => e),
+      new Promise((r) => setImmediate(() => r('still waiting'))),
+    ])
+    expect(outcome).toMatchObject({ retryable: true, message: expect.stringMatching(/not reachable/) })
   })
 
   it('forwards a call and its answer, and a remote failure keeps its code, retry flag and data', async () => {

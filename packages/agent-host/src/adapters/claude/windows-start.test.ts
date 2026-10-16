@@ -582,22 +582,32 @@ describe('the host on its way out, on Windows (#353)', () => {
     expect(gone).toBe(true)
   })
 
+  /*
+   * The two below run on fake timers: a wall-clock bound on an instant path fails on a loaded machine
+   * for reasons that have nothing to do with the cap (#845), and fake timers say exactly how long it waited.
+   */
   it('never longer than its cap', async () => {
     const a = adapter({ exitGraceMs: 30 })
     const { handle } = await session(a)
     await handle.dispose() // the stream never ends: a process mid-turn
-    const t0 = Date.now()
-    await a.settle()
-    expect(Date.now() - t0).toBeLessThan(200)
+    vi.useFakeTimers()
+    let settled = false
+    void a.settle().then(() => (settled = true))
+    await vi.advanceTimersByTimeAsync(29)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(settled).toBe(true)
   })
 
   it('off Windows nothing waits', async () => {
     const a = adapter({ platform: 'darwin', exitGraceMs: 5000 })
     const { handle } = await session(a)
     await handle.dispose()
-    const t0 = Date.now()
-    await a.settle()
-    expect(Date.now() - t0).toBeLessThan(50)
+    vi.useFakeTimers()
+    let settled = false
+    void a.settle().then(() => (settled = true))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(settled).toBe(true)
   })
 
   it('the link a session ran from is released when its process ends', async () => {
