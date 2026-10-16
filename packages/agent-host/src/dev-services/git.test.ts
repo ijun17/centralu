@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { changedFileCount } from '@cc/protocol'
 import { join } from 'node:path'
-import { GIT_DIFF_MAX_CHARS, gitWorktreeDirty, gitBranches, gitCheckout, gitCommit, gitCommitDetail, gitDiff, gitStage, gitStatusFiles, gitSummary } from './git.js'
+import { GIT_DIFF_MAX_CHARS, gitWorktreeDirty, gitBranches, gitCheckout, gitCommit, gitCommitDetail, gitDiff, gitIgnoredEntries, gitStage, gitStatusFiles, gitSummary } from './git.js'
 
 /**
  * porcelain v2 parsing is checked against real git output — a hand-written string could
@@ -580,5 +580,39 @@ describe('the diff cap counts characters and is one named value (#134)', () => {
     const detail = await gitCommitDetail(d, sha)
     expect(detail.truncated).toBe(true)
     expect(detail.diff.length).toBe(GIT_DIFF_MAX_CHARS)
+  })
+})
+
+/*
+ * #849: the sizes beside the copy candidates. Given a bare name, Windows looks in the child's working folder before
+ * PATH, and du ran with the project as that folder, so a `du.exe` committed to a repository ran on the first look at
+ * this list (and with none planted, Windows has no du on PATH, so every size was empty). The planted one here is a
+ * copy of node, which prints nothing for `-sk`: had it run, there would be no sizes.
+ */
+describe('the sizes of ignored entries', () => {
+  it('measures them without running a du planted in the project', async () => {
+    const { d } = repo()
+    writeFileSync(join(d, '.gitignore'), 'build/\n')
+    mkdirSync(join(d, 'build', 'deep'), { recursive: true })
+    writeFileSync(join(d, 'build', 'a.bin'), Buffer.alloc(1000))
+    writeFileSync(join(d, 'build', 'deep', 'b.bin'), Buffer.alloc(500))
+    for (const name of ['du.exe', 'du']) {
+      try {
+        linkSync(process.execPath, join(d, name))
+      } catch {
+        copyFileSync(process.execPath, join(d, name))
+      }
+    }
+    // Set, it stops Windows looking in the working folder first; a person's environment rarely has it
+    const noCwd = process.env.NoDefaultCurrentDirectoryInExePath
+    delete process.env.NoDefaultCurrentDirectoryInExePath
+    let entries
+    try {
+      entries = await gitIgnoredEntries(d)
+    } finally {
+      if (noCwd !== undefined) process.env.NoDefaultCurrentDirectoryInExePath = noCwd
+    }
+    // du counts blocks on disk, the file system walk bytes: either way at least what was written
+    expect(entries.find((e) => e.path === 'build/')?.bytes).toBeGreaterThanOrEqual(1500)
   })
 })

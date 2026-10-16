@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
-import { isAbsolute, relative, resolve } from 'node:path'
+import { lstat, readdir } from 'node:fs/promises'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { assertExistingPath, isInside, isMissingPathError } from './path-guard.js'
 import type { GitBranch, GitCommit, GitFileStatus } from '@cc/protocol'
@@ -8,6 +9,7 @@ import { killTree } from './kill-tree.js'
 import { killHandle } from './grouped-child.js'
 import { programPath } from '../tool-launch.js'
 import { raceTimeout } from '../timing.js'
+import { measuresWithDu } from '../os.js'
 
 const exec = promisify(execFile)
 
@@ -392,14 +394,27 @@ export async function gitIgnoredEntries(
 
   /*
    * The size is included, because the judgment a person actually makes from this list is
-   * "this one is too big." One call to du asks for all of them, and if it takes too long the
-   * list is returned without sizes (the size is only a nicety, and it would be backwards for
-   * that to freeze the window).
+   * "this one is too big." If measuring takes too long the list is returned without sizes (the
+   * size is only a nicety, and it would be backwards for that to freeze the window).
    */
+  const listed = paths.slice(0, limit)
+  const sizes = measuresWithDu() ? await duSizes(cwd, listed) : await walkedSizes(cwd, listed)
+
+  return paths
+    .slice(0, limit)
+    .map((p) => ({ path: p, bytes: sizes.get(p.replace(/\/$/, '')) ?? null }))
+    .sort((a, b) => (b.bytes ?? 0) - (a.bytes ?? 0))
+}
+
+/** How long measuring the ignored entries may take before the list goes without sizes */
+const SIZE_BUDGET_MS = 5000
+
+/** One call to du asks for all of them; keyed by the path without its trailing slash */
+async function duSizes(cwd: string, paths: string[]): Promise<Map<string, number>> {
   const sizes = new Map<string, number>()
   try {
     const out = await new Promise<string>((resolve, reject) => {
-      execFile('du', ['-sk', ...paths.slice(0, limit)], { cwd, timeout: 5000, maxBuffer: 1 << 20 }, (err, stdout) =>
+      execFile('du', ['-sk', ...paths], { cwd, timeout: SIZE_BUDGET_MS, maxBuffer: 1 << 20 }, (err, stdout) =>
         // du exits non-zero if even one entry cannot be read — whatever it did print is used anyway
         stdout ? resolve(stdout) : reject(err),
       )
@@ -412,11 +427,45 @@ export async function gitIgnoredEntries(
   } catch {
     // proceed without sizes
   }
+  return sizes
+}
 
-  return paths
-    .slice(0, limit)
-    .map((p) => ({ path: p, bytes: sizes.get(p.replace(/\/$/, '')) ?? null }))
-    .sort((a, b) => (b.bytes ?? 0) - (a.bytes ?? 0))
+/**
+ * The same sizes read from the file system, where du is not run (`measuresWithDu`, Windows, #849): bytes in files, not
+ * blocks on disk, and a link counts as itself, never as what it leads to. An entry not finished within the budget has
+ * no size, as one du did not reach.
+ */
+async function walkedSizes(cwd: string, paths: string[]): Promise<Map<string, number>> {
+  const deadline = Date.now() + SIZE_BUDGET_MS
+  const sizes = new Map<string, number>()
+  for (const path of paths) {
+    const key = path.replace(/\/$/, '')
+    const bytes = await treeBytes(resolve(cwd, key), deadline)
+    if (bytes !== null) sizes.set(key, bytes)
+  }
+  return sizes
+}
+
+async function treeBytes(path: string, deadline: number): Promise<number | null> {
+  const top = await lstat(path).catch(() => null)
+  if (!top) return null
+  if (!top.isDirectory()) return top.size
+  let total = 0
+  const folders = [path]
+  while (folders.length > 0) {
+    if (Date.now() > deadline) return null
+    const folder = folders.pop()!
+    const entries = await readdir(folder, { withFileTypes: true }).catch(() => [])
+    const files: string[] = []
+    for (const entry of entries) {
+      // A junction or symlink is not a directory here, so it is measured as a link and not walked into
+      if (entry.isDirectory()) folders.push(join(folder, entry.name))
+      else files.push(join(folder, entry.name))
+    }
+    const each = await Promise.all(files.map((file) => lstat(file).then((s) => s.size, () => 0)))
+    for (const bytes of each) total += bytes
+  }
+  return total
 }
 
 /**

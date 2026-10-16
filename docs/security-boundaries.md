@@ -1532,7 +1532,9 @@ tests. What differs from macOS and Linux, and what holds it:
   committed at a repository's root would run on the first status read. `git`, `gh` and an app's
   manifest command are spawned by the absolute path found on PATH (`tool-launch.ts` `programPath`,
   `resolveCommand`; tests in `tool-launch.test.ts`), and PATH lookups skip relative entries
-  (`env-path.ts`, and `node`/`code` in the Rust shell).
+  (`env-path.ts`, and `node`/`code` in the Rust shell). `du`, which sized the copy candidates by
+  bare name with the project as its folder, is not run on Windows at all: the sizes are read from
+  the file system there (`measuresWithDu`, #849; `git.test.ts` plants a `du.exe`).
 - **System programs by their whole path.** taskkill, Windows PowerShell and cmd.exe are named under
   `%SystemRoot%\System32` (`os.ts` `systemTool`, `commandInterpreter`; `%ComSpec%` for cmd). A `SystemRoot` or
   `ComSpec` that is not a whole path from a drive's root (empty, relative, drive-relative like `C:x`, rooted without

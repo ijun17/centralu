@@ -166,3 +166,12 @@ export function availableMemorySource(
 export function cpKeepsLinks(platform: Platform = HOST_PLATFORM): boolean {
   return platform !== 'win32'
 }
+
+/**
+ * Folder sizes are asked of `du` (#849). Not on Windows: it has none on PATH (Git for Windows keeps one in `usr\bin`,
+ * which is not), and given a bare name it looks in the child's working folder first, so a `du.exe` in the project ran.
+ * There the sizes are read from the file system.
+ */
+export function measuresWithDu(platform: Platform = HOST_PLATFORM): boolean {
+  return platform !== 'win32'
+}
