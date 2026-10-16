@@ -221,6 +221,18 @@ describe('auto Centralu boundaries (#603)', () => {
       expect(await start(s)).toMatchObject({ ok: true, state: 'working' })
     })
 
+    // The mark goes with the turn that consumed the hub's task, not with another turn that happens to end first (#935 review)
+    it('a turn end that is not the hub task’s leaves the depth in place', async () => {
+      const s = await session('auto')
+      await w.mgr.sendFromHub(s, 'a task from the hub', 'Orchestrator on Hub mac', { depth: 1 })
+      // A turn ends without the hub's input being the one it consumed
+      handle(s).answer('an earlier turn', false)
+      expect(await start(s)).toMatchObject({ ok: false, error: expect.stringContaining(levelsBelow(1)) })
+      handle(s).answer('done')
+      await w.until(() => w.store.appSetting(`hub_ask_depth:${s}`) === null)
+      expect(await start(s)).toMatchObject({ ok: true, state: 'working' })
+    })
+
     it('an instruction a linked machine’s orchestrator sends is not an ask: the session keeps its own depth', async () => {
       const s = await session('auto')
       await w.mgr.sendFromHub(s, 'an instruction', 'Orchestrator on Hub mac')
