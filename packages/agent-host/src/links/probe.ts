@@ -1,5 +1,5 @@
-import { spawn } from 'node:child_process'
 import type { MachineProbe } from '@cc/protocol'
+import { runSsh, SshRunFailure } from './ssh-run.js'
 import { lastLine, powershell, WSL_DISTRO_RE } from './tunnel.js'
 
 /**
@@ -96,24 +96,16 @@ export function probeTarget(target: string, opts: ProbeOptions = {}): Promise<Ma
     return Promise.reject(Object.assign(new Error('Not an ssh target: use a host alias from ~/.ssh/config, or user@host'), { code: 'internal' }))
   }
   const args = [...(opts.configFile ? ['-F', opts.configFile] : []), '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '--', t, probeCommand()]
-  return new Promise((resolve) => {
-    let stdout = ''
-    let stderr = ''
-    let done = false
-    const finish = (run: { code: number | null; stdout: string; stderr: string }) => {
-      if (done) return
-      done = true
-      clearTimeout(timer)
-      resolve(parseProbe(t, run))
-    }
-    const child = spawn(opts.ssh ?? 'ssh', args, { env: opts.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] })
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM')
-      finish({ code: 255, stdout: '', stderr: `ssh to ${t} did not answer in time` })
-    }, opts.timeoutMs ?? 30_000)
-    child.stdout!.on('data', (d: Buffer) => (stdout += String(d)))
-    child.stderr!.on('data', (d: Buffer) => (stderr += String(d)))
-    child.once('error', (e) => finish({ code: 255, stdout: '', stderr: `Could not run ssh: ${e.message}` }))
-    child.once('close', (code) => finish({ code, stdout, stderr }))
-  })
+  /*
+   * A run that did not get to its end is not reached: what it says is the reason. The probe's answer is a few short
+   * lines, so the default bounds on output are far past it.
+   */
+  return runSsh({ ssh: opts.ssh, args, env: opts.env, timeoutMs: opts.timeoutMs ?? 30_000, label: t }).then(
+    (run) => parseProbe(t, run),
+    (e: unknown) => {
+      const kind = e instanceof SshRunFailure ? e.kind : 'spawn'
+      const why = kind === 'timeout' ? `ssh to ${t} did not answer in time` : kind === 'spawn' ? `Could not run ssh: ${(e as Error).message}` : (e as Error).message
+      return parseProbe(t, { code: 255, stdout: '', stderr: why })
+    },
+  )
 }

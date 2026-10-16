@@ -18,6 +18,8 @@ const args = process.argv.slice(2)
 fs.appendFileSync(process.env.FAKE_SSH_LOG, JSON.stringify(args) + '\n')
 const as = process.env.FAKE_AS
 if (as === 'hang') { setInterval(() => {}, 1 << 30); return }
+// A reason whose first character's bytes arrive in two chunks
+if (as === 'split') { const b = Buffer.from('접속 거부: 계정이 잠겼습니다\n'); process.stderr.write(b.subarray(0, 4)); setTimeout(() => { process.stderr.write(b.subarray(4)); process.exit(1) }, 200); return }
 if (as === 'unreachable') { process.stderr.write('ijun1: Permission denied (publickey,password,keyboard-interactive).\n'); process.exit(255) }
 const cmd = args[args.length - 1]
 const enc = 'powershell -NoProfile -NonInteractive -EncodedCommand '
@@ -142,6 +144,38 @@ describe('what it tells apart', () => {
 
   viaFake('an answer it does not recognise: reached, nothing told, what came back said', async () => {
     expect(await probe('odd')).toMatchObject({ reachable: true, os: null, error: 'This account is restricted' })
+  })
+
+  /** The probe sent TERM alone: an ssh that ignored it ran on with nobody waiting for it (#428) */
+  viaFake('an ssh that ignores TERM past its deadline is KILLed', async () => {
+    const pidFile = join(dir, 'pid')
+    /*
+     * An ssh that ignores TERM, as one stuck in a ProxyCommand can. A shell, so TERM is ignored from its first
+     * instant: a Node fake on a loaded machine could still be starting when the deadline's TERM came, and die of it
+     */
+    const stubborn = join(dir, 'ssh-stubborn')
+    writeFileSync(stubborn, `#!/bin/sh\ntrap '' TERM\necho $$ > "${pidFile}"\nwhile :; do sleep 1; done\n`)
+    chmodSync(stubborn, 0o755)
+    const r = await probeTarget('ijun1', { ssh: stubborn, env: process.env, timeoutMs: 2000 })
+    expect(r).toMatchObject({ reachable: false, error: 'ssh to ijun1 did not answer in time' })
+    const pid = Number(readFileSync(pidFile, 'utf8'))
+    const alive = () => {
+      try {
+        process.kill(pid, 0)
+        return true
+      } catch {
+        return false
+      }
+    }
+    // The KILL follows the TERM after 2 s (`SSH_KILL_GRACE_MS`)
+    for (let i = 0; i < 100 && alive(); i++) await new Promise((res) => setTimeout(res, 50))
+    const left = alive()
+    if (left) process.kill(pid, 'SIGKILL')
+    expect(left).toBe(false)
+  }, 20_000)
+
+  viaFake('reads a reason whose character arrives in two pieces as one character (#428)', async () => {
+    expect(await probe('split')).toMatchObject({ reachable: true, os: null, error: '접속 거부: 계정이 잠겼습니다' })
   })
 
   viaFake('an ssh that never answers is ended and reported as not reached', async () => {

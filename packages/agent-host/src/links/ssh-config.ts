@@ -1,7 +1,7 @@
-import { spawn } from 'node:child_process'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, normalize, parse, sep } from 'node:path'
+import { runSsh, SshRunFailure } from './ssh-run.js'
 import { lastLine } from './tunnel.js'
 
 /**
@@ -228,28 +228,15 @@ export type SshGOptions = {
 
 /** `ssh -G -- <alias>`: no connection, no key loaded (ssh exits after printing its configuration) */
 export function resolveAlias(alias: string, opts: SshGOptions = {}): Promise<ResolvedHost> {
-  return new Promise((resolve) => {
-    const args = [...(opts.configFile ? ['-F', opts.configFile] : []), '-G', '--', alias]
-    let stdout = ''
-    let stderr = ''
-    let done = false
-    const finish = (r: ResolvedHost) => {
-      if (done) return
-      done = true
-      clearTimeout(timer)
-      resolve(r)
-    }
-    const none = (error: string): ResolvedHost => ({ hostName: null, user: null, port: null, error })
-    const child = spawn(opts.ssh ?? 'ssh', args, { env: opts.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] })
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL')
-      finish(none('ssh -G did not answer'))
-    }, opts.timeoutMs ?? 5_000)
-    child.stdout!.on('data', (d: Buffer) => (stdout += String(d)))
-    child.stderr!.on('data', (d: Buffer) => (stderr += String(d)))
-    child.once('error', (e) => finish(none(`Could not run ssh: ${e.message}`)))
-    child.once('close', (code) => finish(code === 0 ? { ...parseSshG(stdout), error: null } : none(lastLine(stderr) || `ssh -G exited ${code}`)))
-  })
+  const args = [...(opts.configFile ? ['-F', opts.configFile] : []), '-G', '--', alias]
+  const none = (error: string): ResolvedHost => ({ hostName: null, user: null, port: null, error })
+  return runSsh({ ssh: opts.ssh, args, env: opts.env, timeoutMs: opts.timeoutMs ?? 5_000, label: alias }).then(
+    ({ code, stdout, stderr }) => (code === 0 ? { ...parseSshG(stdout), error: null } : none(lastLine(stderr) || `ssh -G exited ${code}`)),
+    (e: unknown) => {
+      const kind = e instanceof SshRunFailure ? e.kind : 'spawn'
+      return none(kind === 'timeout' ? 'ssh -G did not answer' : kind === 'spawn' ? `Could not run ssh: ${(e as Error).message}` : (e as Error).message)
+    },
+  )
 }
 
 /** The most aliases listed, each one `ssh -G`; a config past it is said in a note */

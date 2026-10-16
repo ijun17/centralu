@@ -2260,7 +2260,10 @@ ssh -N -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o
 autostart step (the managed Windows install downloads about 30 MB of Node inside one step, which a slow link needs
 minutes for). Past its deadline, or once stdout is longer than 1 MiB, the ssh is stopped and the call rejects. Of stderr
 only the end is kept: 64 KiB for an asking ssh, 16 KiB for the forward, whose ssh lives as long as the link and carries
-a link-bound host's log. Output is decoded as a stream, so a character split between two chunks stays whole.
+a link-bound host's log. Output is decoded as a stream, so a character split between two chunks stays whole. The
+machine probe and `ssh -G` run through the same runner with their own deadlines (`runSsh`, `links/ssh-run.ts`). Every
+ssh this host stops, at a deadline, at a forward that did not come up or at `close()`, gets SIGTERM and, 2 s later,
+SIGKILL if it is still there (`endChild`).
 
 **A machine with no host running is started** (plan §10.9, decision 7). When the connection line says
 `hostRunning: false`, the link goes to `starting`, runs `centralu serve --detach` through the same lookup as the

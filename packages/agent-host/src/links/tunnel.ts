@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { createConnection, createServer } from 'node:net'
 import type { RemoteShell } from '@cc/protocol'
 import { Tail } from '../stream-text.js'
+import { endChild, runSsh, type SshRunResult } from './ssh-run.js'
 import { isHostCrash, NodeTooOld } from './node-floor.js'
 
 /**
@@ -585,7 +586,7 @@ export class SshTunnel implements Tunnel {
 
   async close(): Promise<void> {
     this.closing = true
-    for (const c of this.asking) c.kill('SIGTERM')
+    for (const c of this.asking) void endChild(c)
     await this.stopChild()
   }
 
@@ -594,54 +595,17 @@ export class SshTunnel implements Tunnel {
   }
 
   /**
-   * Runs ssh to the end and answers what it printed, within bounds. Past `timeoutMs`, or once stdout is
-   * longer than `STDOUT_LIMIT` characters, the ssh is stopped and this rejects: `ConnectTimeout` only
+   * Runs ssh to the end and answers what it printed, within bounds (`runSsh`). Past `timeoutMs`, or once stdout is
+   * longer than `SSH_STDOUT_LIMIT` characters, the ssh is stopped and this rejects: `ConnectTimeout` only
    * bounds the connection, and a remote command that never ends, or never stops printing, would
-   * otherwise hold the call and its memory for good. Only the end of stderr is kept (`STDERR_KEEP`);
-   * what it is read for is the last line.
+   * otherwise hold the call and its memory for good. Only the end of stderr is kept (`SSH_STDERR_KEEP`);
+   * what it is read for is the last line. Closing the tunnel ends the ssh runs still in flight.
    */
-  private run(args: string[], stdin: string | undefined, timeoutMs: number): Promise<{ code: number | null; stdout: string; stderr: string }> {
-    return new Promise((resolve, reject) => {
-      const child = spawn(this.opts.ssh ?? 'ssh', args, { env: this.opts.env ?? process.env, stdio: [stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] })
-      if (stdin !== undefined) {
-        // A remote that exits before reading it all closes the pipe: that is its answer, not ours to throw
-        child.stdin!.on('error', () => {})
-        child.stdin!.end(stdin)
-      }
-      this.asking.add(child)
-      child.once('exit', () => this.asking.delete(child))
-      let stdout = ''
-      const stderr = new Tail(STDERR_KEEP)
-      let failed = false
-      const stop = (message: string) => {
-        if (failed) return
-        failed = true
-        clearTimeout(deadline)
-        child.kill('SIGTERM')
-        setTimeout(() => child.kill('SIGKILL'), 2000).unref()
-        this.asking.delete(child)
-        reject(new Error(message))
-      }
-      const deadline = setTimeout(() => stop(`ssh to ${this.opts.target} did not finish within ${timeoutMs >= 1000 ? `${Math.round(timeoutMs / 1000)} seconds` : `${timeoutMs} ms`}`), timeoutMs)
-      // Decoded as a stream: a character that arrives in two chunks is one character
-      child.stdout!.setEncoding('utf8')
-      child.stderr!.setEncoding('utf8')
-      child.stdout!.on('data', (d: string) => {
-        if (failed) return
-        stdout += d
-        if (stdout.length > STDOUT_LIMIT) stop(`ssh to ${this.opts.target} printed more than ${STDOUT_LIMIT / 1024 / 1024} MiB`)
-      })
-      child.stderr!.on('data', (d: string) => stderr.push(d))
-      // An ssh that could not start (ENOENT) emits no 'exit', only 'error' and 'close'
-      child.once('error', (e) => {
-        clearTimeout(deadline)
-        this.asking.delete(child)
-        reject(e)
-      })
-      child.once('close', (code) => {
-        clearTimeout(deadline)
-        resolve({ code, stdout, stderr: stderr.text })
-      })
+  private run(args: string[], stdin: string | undefined, timeoutMs: number): Promise<SshRunResult> {
+    let child: ChildProcess | null = null
+    // Once the run has settled, a stopped ssh is `endChild`'s to finish: closing has nothing more to end
+    return runSsh({ ssh: this.opts.ssh, args, env: this.opts.env, stdin, timeoutMs, label: this.opts.target, onChild: (c) => this.asking.add((child = c)) }).finally(() => {
+      if (child) this.asking.delete(child)
     })
   }
 
@@ -720,7 +684,7 @@ export class SshTunnel implements Tunnel {
           }
           if (Date.now() > deadline) {
             this.ended.add(child)
-            child.kill('SIGTERM')
+            void endChild(child)
             return fail(`The ssh forward to ${this.opts.target} did not come up in time`)
           }
           await new Promise((r) => setTimeout(r, 100))
@@ -735,14 +699,7 @@ export class SshTunnel implements Tunnel {
     this.child = null
     if (!child || child.exitCode !== null || child.signalCode !== null) return
     this.ended.add(child)
-    await new Promise<void>((resolve) => {
-      child.once('exit', () => resolve())
-      child.kill('SIGTERM')
-      setTimeout(() => {
-        child.kill('SIGKILL')
-        resolve()
-      }, 2000).unref()
-    })
+    await endChild(child)
   }
 }
 
@@ -760,10 +717,6 @@ export const SSH_DETACH_TIMEOUT_MS = 120_000
  * for that: this is far past what a working link needs, and only ends a step that is stuck.
  */
 export const SSH_EXEC_TIMEOUT_MS = 30 * 60_000
-/** The most characters an asking ssh may print on stdout before it is stopped: the answers read from it are a line or a log tail */
-const STDOUT_LIMIT = 1024 * 1024
-/** How much of the end of an asking ssh's stderr is kept */
-const STDERR_KEEP = 64 * 1024
 /** How much of the end of the forward's stderr is kept, for as long as the link lives */
 const FORWARD_STDERR_KEEP = 16 * 1024
 

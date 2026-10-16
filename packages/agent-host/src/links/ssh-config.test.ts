@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, sep } from 'node:path'
-import { expandGlob, isConcreteAlias, listSshHosts, MAX_HOSTS, parseSshG, readSshConfig, splitConfigLine, type ResolvedHost } from './ssh-config.js'
+import { expandGlob, isConcreteAlias, listSshHosts, MAX_HOSTS, parseSshG, readSshConfig, resolveAlias, splitConfigLine, type ResolvedHost } from './ssh-config.js'
 
 /**
  * The ssh config the Add machine dialog lists (#514): read the way OpenSSH reads it, in a temporary
@@ -171,6 +171,16 @@ describe('resolving each alias with ssh -G', () => {
       { alias: 'broken', file: T('~/.ssh/config'), line: 2, hostName: null, user: null, port: null },
     ])
     expect(readFileSync(log, 'utf8').trim().split('\n').sort()).toEqual(['-G -- box', '-G -- broken', '-G -- lab'])
+  })
+
+  /** Each chunk was decoded on its own, so a character split between two turned into U+FFFD (#428) */
+  it.skipIf(!posix)('reads a reason from ssh -G whose character arrives in two pieces as one character', async () => {
+    const fake = write(
+      'bin/ssh-split',
+      `#!/usr/bin/env node\nconst b = Buffer.from('설정 오류: 잘못된 줄\\n'); process.stderr.write(b.subarray(0, 4)); setTimeout(() => { process.stderr.write(b.subarray(4)); process.exit(255) }, 200)\n`,
+    )
+    chmodSync(fake, 0o755)
+    expect(await resolveAlias('box', { ssh: fake })).toEqual({ hostName: null, user: null, port: null, error: '설정 오류: 잘못된 줄' })
   })
 
   it('says so when ssh cannot resolve any of them (no ssh on this computer)', async () => {
