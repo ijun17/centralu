@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CallToolResult, ListResourcesResult, PriorDiscovery, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
 import { APP_ID_MAX_LENGTH, APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, newAppIdProblem, type AppReview, type ExternalAppInfo, type NewAppIdProblem } from '@cc/protocol'
@@ -14,7 +14,8 @@ import { folderFingerprint } from './fingerprint.js'
 import { PROJECT_APPS_PARTS, PROJECT_APPS_REL, USER_APPS_PARTS, USER_APPS_REL, scanApps, type ScannedApp } from './discovery.js'
 import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError, type AppManifest } from './manifest.js'
 import { FAILURES_KEPT, RUN_RETENTION_MS, announcingLedger, describeArgs, type AgentUse, type AppRunListed, type RunLedger } from './runs.js'
-import { appTemplateDir, ensureDirInside, oneLine, scaffoldApp } from './scaffold.js'
+import { appTemplateDir, oneLine, scaffoldApp } from './scaffold.js'
+import { placeAppFolder } from './placement.js'
 import { SecretStore, redactor, secretValueProblem } from './secrets.js'
 import type { AppRef } from './ref.js'
 import { AppHandover, type HandoverOptions } from './handover.js'
@@ -1078,8 +1079,10 @@ export class ExternalApps {
    * app is returned as-is (calling this again produces the same result: when a move was interrupted
    * partway and runs again), and if different, this refuses (a person-made app is never overwritten).
    *
-   * How it is written: to a temp folder starting with a dot (skipped by discovery), then renamed —
-   * there is never a moment where discovery could read a half-written manifest as "a broken app".
+   * How it is written: through `placeAppFolder` — to a temp folder starting with a dot (skipped by
+   * discovery), then renamed, so there is never a moment where discovery could read a half-written
+   * manifest as "a broken app"; the parent is created through the path guard, so an `apps/` that is
+   * a link pointing outside the data folder stops it. The data folder is also created right away.
    * Rescanned immediately after writing: on the user side, nothing is watched while `apps/` does not
    * exist yet (watching the data folder itself would wake up on every write to store.db), so watching
    * never catches the very first app. **This never starts it** — it starts the first time it is
@@ -1105,8 +1108,7 @@ export class ExternalApps {
 
     this.rescanUser()
     const ref: AppRef = { projectId: null, appId: spec.id }
-    const parent = join(this.deps.dataRoot, USER_APPS_REL)
-    const dir = join(parent, spec.id)
+    const dir = join(this.deps.dataRoot, ...USER_APPS_PARTS, spec.id)
     const held = this.find(ref)
     if (held || existsSync(dir)) {
       const same =
@@ -1116,16 +1118,15 @@ export class ExternalApps {
       throw new AppUnavailableError(`Your user folder already has an app "${spec.id}" — use another name, or remove that app first`)
     }
 
-    mkdirSync(parent, { recursive: true })
-    const staging = join(parent, `.${spec.id}.${randomUUID()}`)
-    mkdirSync(staging)
     try {
-      writeFileSync(join(staging, MANIFEST_FILE), text + '\n')
-      renameSync(staging, dir)
+      placeAppFolder(this.deps.dataRoot, null, spec.id, (staging) => {
+        mkdirSync(staging)
+        writeFileSync(join(staging, MANIFEST_FILE), text + '\n')
+      })
     } catch (err) {
-      rmSync(staging, { recursive: true, force: true })
       throw new AppUnavailableError(`Could not write the app folder: ${(err as Error).message}`)
     }
+    mkdirSync(this.dataDirOf(ref), { recursive: true })
     this.rescanUser()
     const made = this.find(ref)
     if (!made) throw new AppUnavailableError(`The app folder was written, but discovery did not find it: ${dir}`)
@@ -1249,8 +1250,8 @@ export class ExternalApps {
    *   - **an id that already exists**: even a folder standing there with an invalid manifest belongs
    *     to a person or an agent — never overwritten.
    *
-   * Writing follows the same method as `installUserApp`: expanded into a temp folder starting with a
-   * dot, then renamed (so discovery never sees a half-written app). The parent folder is created one
+   * Writing follows the same method as `installUserApp` (`placeAppFolder`): expanded into a temp
+   * folder starting with a dot, then renamed (so discovery never sees a half-written app). The parent folder is created one
    * segment at a time through the path guard (`ensureDirInside` — stops if `.centralu` is a link
    * pointing outside). The data folder is also created right away. Rescanned immediately after
    * writing — watching might not be looking at that location yet. **This never starts it** — it
@@ -1285,15 +1286,11 @@ export class ExternalApps {
       throw new AppUnavailableError(`An app "${spec.id}" already exists (${dir}) — use another id`)
     }
 
-    let staging: string | null = null
     try {
-      const parent = ensureDirInside(root, parts)
-      staging = join(parent, `.${spec.id}.${randomUUID()}`)
-      scaffoldApp(this.deps.templateDir ?? appTemplateDir(), staging, { id: spec.id, name, description })
-      renameSync(staging, dir)
-      staging = null
+      placeAppFolder(root, spec.projectId, spec.id, (staging) => {
+        scaffoldApp(this.deps.templateDir ?? appTemplateDir(), staging, { id: spec.id, name, description })
+      })
     } catch (err) {
-      if (staging) rmSync(staging, { recursive: true, force: true })
       throw new AppUnavailableError(`Could not make the app folder: ${(err as Error).message}`)
     }
     mkdirSync(this.dataDirOf(ref), { recursive: true })

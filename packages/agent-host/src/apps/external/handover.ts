@@ -21,7 +21,7 @@ import {
   type StagedFiles,
 } from './imports.js'
 import type { AppManifest } from './manifest.js'
-import { ensureDirInside } from './scaffold.js'
+import { appsFolderOf } from './placement.js'
 import { folderFingerprint } from './fingerprint.js'
 import { AppVersions, VERSIONS_REL, type Snapshot } from './versions.js'
 
@@ -163,7 +163,7 @@ export class AppHandover {
     const { manifest } = readStagedManifest(s.appDir, this.host.reservedIds)
     if (reviewKey(manifest) !== s.review.reviewKey) throw new ImportRefused('The app changed while it was waiting. Review it again')
     this.refuseTaken(id)
-    const dir = join(ensureDirInside(this.host.dataRoot, ['apps']), id)
+    const dir = join(appsFolderOf(this.host.dataRoot, null), id)
     /*
      * The mark is written before the folder appears (#838). A rename first left a window, and on a failed mark a
      * folder for good, in which the app sat in the user folder with no mark: the person's own app, run without the

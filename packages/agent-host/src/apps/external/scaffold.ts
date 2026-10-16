@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { oneLineText } from '@cc/protocol'
-import { assertExistingPathSync, isMissingPathError } from '../../dev-services/path-guard.js'
 import { MANIFEST_FILE, parseManifest, type AppManifest } from './manifest.js'
 
 /**
@@ -110,25 +109,4 @@ function escapeHtml(s: string): string {
 /** Reduces a person-supplied name or description to one line — so a line break cannot cut off a code comment */
 export function oneLine(s: string): string {
   return oneLineText(s)
-}
-
-/**
- * Creates the folders down to `<root>/<parts…>` **one segment at a time** — checking at each
- * segment whether it is a link that escapes the root. Creating it all at once with `mkdir -p` would
- * mean an app gets written outside the repository whenever `.centralu` inside a project is a link
- * pointing elsewhere (the same link that discovery and watching reject with their guard — creation
- * has to agree with them).
- */
-export function ensureDirInside(root: string, parts: readonly string[]): string {
-  for (let i = 1; i <= parts.length; i++) {
-    const prefix = join(...parts.slice(0, i))
-    try {
-      if (!assertExistingPathSync(root, prefix).isDirectory()) throw new Error(`${prefix} is not a folder`)
-    } catch (err) {
-      if (!isMissingPathError(err)) throw err
-      mkdirSync(join(root, prefix))
-      assertExistingPathSync(root, prefix)
-    }
-  }
-  return join(root, ...parts)
 }
