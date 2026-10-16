@@ -42,7 +42,7 @@ const ref = (appId: string): AppRef => ({ projectId: 'p1', appId })
 /** The id of a run currently open for that app — waits until the call is sent to the app (peeks inside the runtime) */
 const openRunOf = (appId: string) =>
   until(
-    () => [...(rt as unknown as { openRuns: Map<string, { entry: { ref: AppRef } }> }).openRuns].find(([, r]) => r.entry.ref.appId === appId)?.[0],
+    () => [...(rt as unknown as { calls: { openRuns: Map<string, { entry: { ref: AppRef } }> } }).calls.openRuns].find(([, r]) => r.entry.ref.appId === appId)?.[0],
     (id) => id !== undefined,
   ) as Promise<string>
 const VIEW: AppCaller = { kind: 'view' }

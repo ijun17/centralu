@@ -34,7 +34,7 @@ let rt: ExternalApps
 const ref: AppRef = { projectId: 'p1', appId: 'notes' }
 /** Waits until a run that was actually sent to (opened on) the app exists — the record's running entry appears before the app finishes starting */
 const sentRun = () =>
-  until(() => [...(rt as unknown as { openRuns: Map<string, unknown> }).openRuns.keys()][0], (id) => id !== undefined) as Promise<string>
+  until(() => [...(rt as unknown as { calls: { openRuns: Map<string, unknown> } }).calls.openRuns.keys()][0], (id) => id !== undefined) as Promise<string>
 const runs = () => rt.runs(ref, 500) as AppRun[]
 const byId = (id: string) => runs().find((r) => r.id === id)!
 

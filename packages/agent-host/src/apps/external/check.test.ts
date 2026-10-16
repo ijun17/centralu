@@ -202,7 +202,7 @@ describe('a check never leaves the app in a strange state', () => {
     const r = make()
     await r.tools(ref('busy'))
     const call = r.call(ref('busy'), 'hold', {}, { kind: 'session', sessionId: 's1' })
-    await until(() => (r as unknown as { openRuns: Map<string, unknown> }).openRuns.size, (n) => n === 1)
+    await until(() => (r as unknown as { calls: { openRuns: Map<string, unknown> } }).calls.openRuns.size, (n) => n === 1)
     // The code changes in the meantime — one more tool is added
     writeFileSync(join(dir, 'server.mjs'), readFileSync(join(dir, 'server.mjs'), 'utf8').replace("  return server\n", "  centralu.tool(server, 'added', { description: 'New', annotations: { readOnlyHint: true } }, async () => ({ content: [] }))\n  return server\n"))
     let checked = false
@@ -231,7 +231,7 @@ describe('a check never leaves the app in a strange state', () => {
     )
     const r = make({ checkDrainMs: 200 })
     const call = r.call(ref('slow'), 'hold', {}, { kind: 'session', sessionId: 's1' })
-    await until(() => (r as unknown as { openRuns: Map<string, unknown> }).openRuns.size, (n) => n === 1)
+    await until(() => (r as unknown as { calls: { openRuns: Map<string, unknown> } }).calls.openRuns.size, (n) => n === 1)
     const rep = await r.check(ref('slow'))
     expect(rep.text).toContain(
       '- note: 1 call was still running after 200 ms, so the app was not restarted — this report is about the process that was already running, which may not have your latest code',

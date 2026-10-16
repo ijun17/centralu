@@ -1,14 +1,14 @@
-import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { CallToolResult, ListResourcesResult, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
+import type { ListResourcesResult, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
 import { APP_ID_MAX_LENGTH, APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, USER_APP_SCOPE, appKeyOf, appLabel, newAppIdProblem, type AppReview, type ExternalAppInfo, type NewAppIdProblem } from '@cc/protocol'
 import { DirWatchers } from '../../dev-services/watch.js'
 import type { AppProcess, SpawnSpec } from './app-process.js'
-import { RUN_META, serveBroker } from './broker.js'
-import { BrokerDesk, type BrokerHost, type CapabilityDecisionListed, type CapabilityDenial, type CapabilityOrigin } from './desk.js'
+import { serveBroker } from './broker.js'
+import { BrokerDesk, type BrokerHost, type CapabilityDecisionListed } from './desk.js'
 import { memoryCapabilityBook } from './capabilities.js'
 import { checkScreen, checkTools, formatReport, type AppCheckReport, type CheckFinding, type CheckedTool } from './check.js'
+import { AppCalls, type AppCallOptions } from './app-calls.js'
 import { AppLifecycle } from './app-lifecycle.js'
 import { ChangeReflector } from './change-reflector.js'
 import { ErrorLog } from './error-log.js'
@@ -17,7 +17,7 @@ import type { HeldErrorBundle, SentErrorBundle } from './errors.js'
 import { folderFingerprint } from './fingerprint.js'
 import { PROJECT_APPS_PARTS, PROJECT_APPS_REL, USER_APPS_PARTS, USER_APPS_REL, scanApps } from './discovery.js'
 import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest } from './manifest.js'
-import { RUN_RETENTION_MS, RunRow, announcingLedger, type AgentUse, type AppRunListed } from './runs.js'
+import { RUN_RETENTION_MS, announcingLedger, type AgentUse, type AppRunListed } from './runs.js'
 import { appTemplateDir, oneLine, scaffoldApp } from './scaffold.js'
 import { placeAppFolder } from './placement.js'
 import { SecretStore, redactor, secretValueProblem } from './secrets.js'
@@ -70,8 +70,8 @@ export { resourceUriOf } from './visibility.js'
 
 /** What the runtime is given and the shape of what a call returns (`runtime-types.ts`) — they leave through this door too */
 export { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type AppRunStatus, type ExternalAppsDeps, type RuntimeTiming } from './runtime-types.js'
-import { invalidReason, newEntry, resetLife, type AppEntry, type Blocker, type OpenRun, type Scope } from './app-entry.js'
-import { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type AppRunStatus, type ExternalAppsDeps, type RuntimeTiming } from './runtime-types.js'
+import { invalidReason, newEntry, resetLife, type AppEntry, type Blocker, type Scope } from './app-entry.js'
+import { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type ExternalAppsDeps, type RuntimeTiming } from './runtime-types.js'
 
 /**
  * The reason a new app id is rejected, worded for an agent and a person to read (C-1b). Validation is
@@ -95,6 +95,8 @@ const CHECK_WHERE: Record<Blocker['kind'], CheckFinding['where']> = {
   failed: 'start',
 }
 
+/** Joins together the text parts of a result (`app-calls.ts`) — leaves through this door */
+export { resultText } from './app-calls.js'
 /** An app that cannot be called (`unavailable.ts`) — leaves through this door */
 export { AppUnavailableError } from './unavailable.js'
 
@@ -105,8 +107,6 @@ export class ExternalApps {
   private disposed = false
   private timing: RuntimeTiming
   private secrets: SecretStore
-  /** Run id → open run. The broker's gatekeeper asks against this */
-  private openRuns = new Map<string, OpenRun>()
   /** `onAppsChanged` subscribers, and whether a notification is already scheduled for this tick */
   private appsListeners = new Set<() => void>()
   private appsNotePending = false
@@ -114,15 +114,6 @@ export class ExternalApps {
   private errorLog = new ErrorLog(() => this.appsChanged())
   /** Apps being removed (`removeUserApp`, by `holdKey`) — none of them starts again while its folder moves */
   private removing = new Set<string>()
-  /**
-   * Open run → the person denied this run's request (or one further down its chain) (D-4) — recorded
-   * by the desk. If that run ends in failure, this is attached to that failure's error bundle (it is
-   * not a bug in the app, it is the person's decision), and if the run belongs to an app that called
-   * another, it is passed up to the parent: if A called B, B's request was denied so B failed, and
-   * that is why A failed, then the reason A's screen states is that same denial. Cleared once the run
-   * ends.
-   */
-  private denials = new Map<string, CapabilityDenial>()
   /**
    * The broker desk (D) — the one place that resolves what an app requests over fd 3. A call between
    * apps (D-2) goes through this runtime's single path (`call`). Constructed in the constructor —
@@ -136,6 +127,8 @@ export class ExternalApps {
   private lifecycle: AppLifecycle
   /** Reflecting a changed app folder (C-4) — `change-reflector.ts` */
   private reflector: ChangeReflector
+  /** The single path an app's tool is called through, and the runs it holds open (A-4) — `app-calls.ts` */
+  private calls: AppCalls
 
   constructor(private deps: ExternalAppsDeps) {
     this.timing = { ...DEFAULT_TIMING, ...deps.timing }
@@ -170,16 +163,24 @@ export class ExternalApps {
     // Every ledger row passes through this one place — a tool-call row (`call`) and a broker-request row (the desk) alike. So the runs panel's own signal is also produced here, once
     const notify = deps.emitRunsChanged
     if (deps.runs && notify) this.deps = { ...deps, runs: announcingLedger(deps.runs, notify) }
+    this.calls = new AppCalls({
+      timing: this.timing,
+      lifecycle: this.lifecycle,
+      runs: this.deps.runs ?? null,
+      blocker: (e, opts) => this.blocker(e, opts),
+      boundaryOpen: (sessionId) => this.sessionBoundaryOpen(sessionId),
+      masker: (ref) => this.masker(ref),
+      recordError: (e, b, proc) => this.recordError(e, b, proc),
+      emitChanged: (ref, caller) => this.deps.emitChanged?.(ref, caller),
+    })
     this.desk = new BrokerDesk(
       {
         has: (ref) => this.find(ref) !== undefined,
         name: (ref) => this.find(ref)?.manifest?.name ?? ref.appId,
         redactor: (ref) => this.masker(ref),
-        origin: (runId) => this.chainOrigin(runId),
-        chain: (runId) => this.chainOf(runId),
-        denied: (runId, d) => {
-          if (this.openRuns.has(runId) && !this.denials.has(runId)) this.denials.set(runId, d)
-        },
+        origin: (runId) => this.calls.chainOrigin(runId),
+        chain: (runId) => this.calls.chainOf(runId),
+        denied: (runId, d) => this.calls.denied(runId, d),
         call: (ref, tool, args, caller, opts) => this.call(ref, tool, args, caller, opts),
       },
       deps.permissions ?? memoryCapabilityBook(),
@@ -269,21 +270,6 @@ export class ExternalApps {
   }
 
   /**
-   * The chain leading up to this run (D-5) — the (app, tool) pairs from the call that started the
-   * chain to this run. Only open runs are followed: a call beneath it lives only while its parent is
-   * open (it is cancelled once the parent ends), so a running request's chain is never broken.
-   */
-  private chainOf(runId: string): { ref: AppRef; tool: string }[] {
-    const path: { ref: AppRef; tool: string }[] = []
-    let run = this.openRuns.get(runId)
-    for (let hops = 0; run && hops < 32; hops++) {
-      path.unshift({ ref: run.entry.ref, tool: run.tool })
-      run = run.caller.kind === 'app' ? this.openRuns.get(run.caller.parentRunId) : undefined
-    }
-    return path
-  }
-
-  /**
    * The agent usage one app has requested (D-5) — over the last day, and over the 30 days records are
    * kept. Read by the runs panel (`apps.usage`).
    */
@@ -295,20 +281,6 @@ export class ExternalApps {
       day: ledger?.agentUse(ref.projectId, ref.appId, now - 24 * 60 * 60 * 1000) ?? none,
       month: ledger?.agentUse(ref.projectId, ref.appId, now - RUN_RETENTION_MS) ?? none,
     }
-  }
-
-  /**
-   * Who started this run's chain (D-4) — walking up through parents to the first caller that is not
-   * an app. For a screen, the answer is that screen's app (the question is attributed to its fixed
-   * screen). If a parent along the way has already ended, this cannot be followed — returns null.
-   */
-  private chainOrigin(runId: string): CapabilityOrigin | null {
-    let run = this.openRuns.get(runId)
-    for (let hops = 0; run && run.caller.kind === 'app' && hops < 32; hops++) run = this.openRuns.get(run.caller.parentRunId)
-    if (!run) return null
-    if (run.caller.kind === 'session') return { kind: 'session', sessionId: run.caller.sessionId }
-    if (run.caller.kind === 'view') return { kind: 'view', app: run.entry.ref }
-    return null
   }
 
   /** One app's run records, most recent first (B-7) — records are still readable even for an app whose folder is gone */
@@ -441,179 +413,8 @@ export class ExternalApps {
    * the "changed" notification, and the ledger (A-6) all happen exactly once per call, through the
    * same code — with two paths, one of them eventually misses a check.
    */
-  async call(
-    ref: AppRef,
-    name: string,
-    args: Record<string, unknown>,
-    caller: AppCaller,
-    opts: {
-      signal?: AbortSignal
-      /**
-       * Called once, the moment a run id is decided — used by a caller that needs the id before the
-       * outcome is known (A-5's "long-running calls": returning "still running, run id is …" before
-       * Codex's cap, rather than waiting for the outcome).
-       */
-      onRun?: (runId: string) => void
-      /**
-       * The text of a progress notification the app sent for this call (D) — a line the broker sent
-       * the app, like "waiting on the person's approval in session X", is relayed up through this call
-       * by the template's helper. Moved to somewhere the caller can display it (a session's tool card).
-       * A wordless keepalive notification is never passed through.
-       */
-      onProgress?: (message: string) => void
-    } = {},
-  ): Promise<AppCallOutcome> {
-    const e = this.require(ref)
-    const runId = `run_${randomUUID()}`
-    opts.onRun?.(runId)
-    const t0 = Date.now()
-    /*
-     * A row is created as `running` the moment a call comes in, and corrected with its outcome when it
-     * ends — a denial is also a row. What is masked is every secret stored for this app: whichever of
-     * the arguments, the result, or the failure reason it ends up mixed into, only the name survives.
-     */
-    const redact = this.masker(e.ref)
-    const row = new RunRow(
-      this.deps.runs ?? null,
-      {
-        id: runId,
-        projectId: e.ref.projectId,
-        appId: e.ref.appId,
-        kind: 'tool',
-        tool: name,
-        callerKind: caller.kind,
-        callerSessionId: caller.kind === 'session' ? caller.sessionId : null,
-        parentRunId: caller.kind === 'app' ? caller.parentRunId : null,
-        createdAt: t0,
-      },
-      args,
-      redact,
-    )
-    row.open()
-    /** Whether it was actually sent to the app — "changed" only fires for a call that reached the app (a denial, cancellation while starting, or a failed startup changes nothing) */
-    let sent = false
-    /*
-     * Is this a read-only tool (`readOnlyHint: true`)? Reading changes nothing, so "changed" is never
-     * emitted for it either. Measured (65acb43): the template screen re-calls `show` on every
-     * notification, and that `show` itself emits another notification, so a single screen called
-     * `show` roughly 700 times per second (618 run-ledger rows in one second, 2035 in three seconds).
-     * A tool with no annotation is treated as one that can change something, following MCP's own
-     * default — if the wrong choice here is "does not notify", the screen shows a stale value.
-     */
-    let readOnly = false
-    /** The process that received this call — its stderr is attached to the error bundle if the call fails (C-6) */
-    let callee: AppProcess | null = null
-    const done = (status: AppRunStatus, result: CallToolResult | null, error: string | null): AppCallOutcome => {
-      const denial = this.denials.get(runId) ?? null
-      this.denials.delete(runId)
-      if (denial && status !== 'ok' && caller.kind === 'app' && this.openRuns.has(caller.parentRunId) && !this.denials.has(caller.parentRunId)) {
-        this.denials.set(caller.parentRunId, denial)
-      }
-      /*
-       * A call that reached the app failed (C-6) — this records only what could plausibly be the app's
-       * own fault. A denial is policy, and a failure to start was already recorded separately by the
-       * startup path. Arguments are masked under the same rule as the ledger — this bundle can become
-       * the building session's prompt.
-       */
-      if (status === 'error' && sent) {
-        this.recordError(
-          e,
-          {
-            kind: 'tool',
-            at: Date.now(),
-            message: redact(error ?? '').split('\n')[0]!,
-            stderr: [],
-            tool: name,
-            args: row.summary(),
-            runId,
-            denied: denial && { appId: denial.app.appId, projectId: denial.app.projectId, name: denial.name, capability: denial.capability, text: denial.text },
-          },
-          callee,
-        )
-      }
-      const durationMs = Date.now() - t0
-      row.close(status, error, result)
-      if (sent && !readOnly) this.deps.emitChanged?.(e.ref, caller)
-      return { runId, status, result, error, durationMs }
-    }
-
-    // Checks that end before anything is sent to the app — do not even need to start a process
-    const open = caller.kind === 'session' && this.sessionBoundaryOpen(caller.sessionId)
-    const blocked = this.blocker(e, { boundaryOpen: open })
-    if (blocked) return done('rejected', null, blocked.reason)
-    let parent: OpenRun | null = null
-    if (caller.kind === 'app') {
-      parent = this.openRuns.get(caller.parentRunId) ?? null
-      if (!parent) return done('rejected', null, `The run that asked for this call is not open: ${caller.parentRunId}`)
-    }
-    if (opts.signal?.aborted) return done('cancelled', null, 'Cancelled before the call was sent')
-
-    try {
-      return await this.lifecycle.use(e, async (proc) => {
-        const found = e.life.tools?.find((t) => t.tool.name === name)
-        if (!found) return done('rejected', null, `This app has no tool named ${name}`)
-        /*
-         * A screen may call only `app` tools, and an agent or another app only `model` tools. A session
-         * only ever receives `model` tools in its list to begin with (A-5), but a tool could still be
-         * called if its name is known — hiding something from the list and blocking the call are
-         * different things, and the blocking happens here.
-         */
-        const need: Audience = caller.kind === 'view' ? 'app' : 'model'
-        if (!found.visibility.includes(need)) {
-          return done('rejected', null, `${name} is not open to ${need === 'app' ? 'views' : 'agents'} (visibility: ${JSON.stringify(found.visibility)})`)
-        }
-
-        const upstream = [opts.signal, parent?.abort.signal].filter((x): x is AbortSignal => !!x)
-        /*
-         * If it was cancelled while the app was starting, this is never sent. Measured: a call
-         * cancelled while starting ran a 5-second tool to completion anyway — a listener attached to a
-         * signal that has already fired is never called.
-         */
-        if (upstream.some((sig) => sig.aborted)) return done('cancelled', null, 'Cancelled while the app was starting')
-        const abort = new AbortController()
-        const onUp = () => abort.abort(new Error('the caller cancelled this call'))
-        for (const sig of upstream) sig.addEventListener('abort', onUp, { once: true })
-        this.openRuns.set(runId, { entry: e, pipeId: e.life.pipeId, tool: name, caller, abort })
-        sent = true
-        readOnly = found.tool.annotations?.readOnlyHint === true
-        callee = proc
-        try {
-          /*
-           * Why `onprogress` is provided: the MCP SDK only attaches a progress token to a request when
-           * this is present (in the client's request — without a token, the app has no way to send a
-           * progress notification). So until now, `resetTimeoutOnProgress` did nothing at all. While an
-           * app requests an agent and waits (D-1, which can take minutes), the template's helper has to
-           * relay that wait up as this call's own progress, or the call gets cut off at
-           * `callTimeoutMs`. If the notification carries a message, it is passed to the caller
-           * (`onProgress`) — while the app waits on a person, the calling session's card can state what
-           * it is waiting for. Before this, it was dropped here and never reached anywhere.
-           */
-          const result = await proc.client.callTool(
-            { name, arguments: args, _meta: { [RUN_META]: runId } },
-            {
-              signal: abort.signal,
-              timeout: this.timing.callTimeoutMs,
-              resetTimeoutOnProgress: true,
-              onprogress: (p) => {
-                if (typeof p.message === 'string' && p.message.trim()) opts.onProgress?.(p.message)
-              },
-            },
-          )
-          return result.isError ? done('error', result, resultText(result) || 'The tool returned an error with no text') : done('ok', result, null)
-        } catch (err) {
-          if (abort.signal.aborted) return done('cancelled', null, 'The caller cancelled this call')
-          return done('error', null, (err as Error).message)
-        } finally {
-          this.openRuns.delete(runId)
-          // When a run ends, the broker work beneath it also ends — so nothing is left behind even if the app answered without waiting
-          abort.abort()
-          for (const sig of upstream) sig.removeEventListener('abort', onUp)
-        }
-      }, open)
-    } catch (err) {
-      // Failed to start (a failed startup, or changed while backing off) — never reached the app, but this is not a policy denial
-      return done('error', null, (err as Error).message)
-    }
+  async call(ref: AppRef, name: string, args: Record<string, unknown>, caller: AppCaller, opts: AppCallOptions = {}): Promise<AppCallOutcome> {
+    return this.calls.call(this.require(ref), name, args, caller, opts)
   }
 
   /**
@@ -1169,7 +970,7 @@ export class ExternalApps {
           {
             // Only this pipe's app, and a run open on this pipe — someone else's id and a dead process's id both fail
             openRun: (runId) => {
-              const run = this.openRuns.get(runId)
+              const run = this.calls.openRuns.get(runId)
               return run && run.entry === e && run.pipeId === pipeId ? run.abort.signal : null
             },
             note,
@@ -1400,11 +1201,4 @@ export class ExternalApps {
     }
     if (held?.apps.size) this.appsChanged()
   }
-}
-
-/** Joins together the text parts of a result — becomes the one line a person reads (RPC's `text`) and a failure's reason */
-export function resultText(result: CallToolResult): string {
-  return result.content
-    .map((c) => (c.type === 'text' ? c.text : `[${c.type}]`))
-    .join('\n')
 }
