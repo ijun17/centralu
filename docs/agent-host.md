@@ -1651,7 +1651,7 @@ They share the CLI's process group, which `setsid` made the CLI's own, so the gr
 nothing else. A stop signals that group: the host's TERM, and the KILL that follows when the CLI is still there after
 its grace (the SDK's 5 s; codex's 2 s after EOF), reach the helpers too. And whenever an agent exits, however it ended
 (a stop, a crash, a CLI that does not clean up), the keeper sweeps its group: TERM at once, KILL 2 s later to whatever
-is still in it (`Sweep`, `keeper/children/mod.rs`). Before, only the CLI's pid was signalled, and what it left was
+is still in it (`Sweep`, `keeper/children/stop.rs`). Before, only the CLI's pid was signalled, and what it left was
 reparented to launchd/init and kept running with its memory. A group number is not reused while anyone is in it, and
 no sweep is sent while any process holds the CLI's pid (its zombie not yet reaped, or the number given to someone
 else), so a sweep never reaches another group; the keeper's own group is never a target (#350). A sweep still
