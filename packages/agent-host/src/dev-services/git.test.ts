@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { tmpdir } from 'node:os'
 import { changedFileCount } from '@cc/protocol'
 import { join } from 'node:path'
-import { GIT_DIFF_MAX_CHARS, gitBranches, gitCheckout, gitCommit, gitCommitDetail, gitDiff, gitStage, gitStatusFiles, gitSummary } from './git.js'
+import { GIT_DIFF_MAX_CHARS, gitWorktreeDirty, gitBranches, gitCheckout, gitCommit, gitCommitDetail, gitDiff, gitStage, gitStatusFiles, gitSummary } from './git.js'
 
 /**
  * porcelain v2 parsing is checked against real git output — a hand-written string could
@@ -118,6 +118,82 @@ describe('gitStatusFiles — porcelain v2', () => {
 
     const files = await gitStatusFiles(d)
     expect(files).toEqual([{ path: 'a.txt', staged: false, status: 'M' }])
+  })
+})
+
+/**
+ * A fake git on PATH that answers `status` with `script` and passes every other call to the real one (POSIX only:
+ * on Windows the host spawns git by its absolute path).
+ */
+function fakeStatus(script: string): () => void {
+  const dir = mkdtempSync(join(tmpdir(), 'cc-git-status-'))
+  dirs.push(dir)
+  const real = execFileSync('sh', ['-c', 'command -v git']).toString().trim()
+  writeFileSync(join(dir, 'git'), `#!/bin/sh\nfor a in "$@"; do if [ "$a" = status ]; then ${script}; fi; done\nexec "${real}" "$@"\n`)
+  chmodSync(join(dir, 'git'), 0o755)
+  const previous = process.env.PATH
+  process.env.PATH = `${dir}:${previous ?? ''}`
+  return () => {
+    process.env.PATH = previous
+  }
+}
+
+describe('the change summary on a large or slow tree (#850 review of item 10)', () => {
+  const posix = process.platform !== 'win32'
+
+  it.skipIf(!posix)('counts an endless list of untracked files up to its cap, still a repository', async () => {
+    const { d, git } = repo()
+    git('commit', '-q', '--allow-empty', '-m', 'init')
+    // More than the 32 MB a buffered read holds: it used to overflow and read as "not a repository"
+    const restore = fakeStatus(
+      `printf '# branch.oid 0\\0# branch.head main\\0'; i=0; while :; do printf '? new/%s-%0200d\\0' $i 0; i=$((i+1)); done`,
+    )
+    try {
+      const summary = await gitSummary(d, { trusted: true }, { cap: 1000 })
+      expect(summary).toEqual({ isRepo: true, branch: 'main', changedFiles: 1000, more: true })
+    } finally {
+      restore()
+    }
+  }, 60_000)
+
+  it.skipIf(!posix)('a status that does not answer in time is unknown, not "not a repository"', async () => {
+    const { d, git } = repo()
+    git('commit', '-q', '--allow-empty', '-m', 'init')
+    const restore = fakeStatus('exec sleep 30')
+    try {
+      const summary = await gitSummary(d, { trusted: true }, { timeoutMs: 500 })
+      expect(summary.isRepo).toBe(true)
+      expect(summary.unknown).toBe(true)
+      // A worktree whose count is unknown is not called clean: removal asks first
+      expect((await gitWorktreeDirty(d, { trusted: true }, { timeoutMs: 500 })).dirty).toBe(true)
+    } finally {
+      restore()
+    }
+  }, 30_000)
+
+  it('stops at the cap with real git, and says there is more', async () => {
+    const { d } = repo()
+    mkdirSync(join(d, 'many'))
+    for (let i = 0; i < 30; i++) writeFileSync(join(d, 'many', `f${i}.ts`), '')
+    expect(await gitSummary(d, {}, { cap: 10 })).toMatchObject({ isRepo: true, changedFiles: 10, more: true })
+    expect((await gitSummary(d, {}, { cap: 30 })).more).toBeUndefined()
+  })
+
+  it('is still "not a repository" for a folder that is not one', async () => {
+    const d = mkdtempSync(join(tmpdir(), 'cc-not-git-'))
+    dirs.push(d)
+    expect(await gitSummary(d)).toMatchObject({ isRepo: false, changedFiles: 0 })
+  })
+
+  it('counts a file staged for removal and still on disk once, as the panel does', async () => {
+    const { d, git } = repo()
+    writeFileSync(join(d, 'a.ts'), 'a\n')
+    git('add', '.')
+    git('commit', '-qm', 'init')
+    // `1 D.` for the index and `? a.ts` for the file still there: one file
+    git('rm', '-q', '--cached', 'a.ts')
+    expect(changedFileCount(await gitStatusFiles(d))).toBe(1)
+    expect((await gitSummary(d)).changedFiles).toBe(1)
   })
 })
 

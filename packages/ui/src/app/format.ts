@@ -33,6 +33,9 @@ export const formatBytes = (n: number): string => scaled(n, 1024, BYTE_UNITS)
 /** A count in a few characters, for tokens: 812, 1.5k, 12.4k, 540k, 1.9M */
 export const formatCount = (n: number): string => scaled(n, 1000, COUNT_UNITS)
 
+/** A count of changed files, "10k+" when the host stopped counting at its cap (`more`, #850 review) */
+export const formatChangedCount = (n: number, more?: boolean): string => (more ? `${formatCount(n)}+` : String(n))
+
 /**
  * A length of time, in one style: the two largest units that matter, no space before a unit ("1.5s", "3m 20s", "2h 5m",
  * "3d 4h"). Eight places each wrote their own and disagreed: "42 s" beside "42s", "75h 3m" past a day, "125.0 s",

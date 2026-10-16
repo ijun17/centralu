@@ -1,5 +1,6 @@
 import type { ProjectInfo } from '@cc/protocol'
 import { Tooltip } from '../../../components/primitives.jsx'
+import { formatChangedCount } from '../../../app/format.js'
 
 /**
  * Marks placed on the name line — they claim no new vertical space.
@@ -11,6 +12,7 @@ import { Tooltip } from '../../../components/primitives.jsx'
  */
 export function ProjectMarks({ project }: { project: ProjectInfo }) {
   const changed = project.git?.changedFiles ?? 0
+  const count = formatChangedCount(changed, project.git?.more)
   const denied = project.git?.denied === true
 
   return (
@@ -27,10 +29,10 @@ export function ProjectMarks({ project }: { project: ProjectInfo }) {
     <span className="readout flex shrink-0 items-center gap-1.5 text-2xs text-ink-faint">
       {changed > 0 && (
         <Tooltip
-          content={`${changed} uncommitted file${changed > 1 ? 's' : ''}`}
+          content={`${count} uncommitted file${changed > 1 ? 's' : ''}`}
           testId={`mark-changed-tip-${project.name}`}
         >
-          <span data-testid={`mark-changed-${project.name}`}>{changed}</span>
+          <span data-testid={`mark-changed-${project.name}`}>{count}</span>
         </Tooltip>
       )}
       {denied && (

@@ -1,4 +1,5 @@
 import type { ProjectInfo } from '@cc/protocol'
+import { formatChangedCount } from '../../../app/format.js'
 
 /** Tooltip content — claims no space by default, but answers everything when asked */
 export function ProjectDetail({ project }: { project: ProjectInfo }) {
@@ -17,7 +18,7 @@ export function ProjectDetail({ project }: { project: ProjectInfo }) {
         ) : project.git ? (
           <>
             <span className="text-ink">{project.git.branch}</span>
-            {project.git.changedFiles > 0 && <span> · {project.git.changedFiles} changed</span>}
+            {project.git.changedFiles > 0 && <span> · {formatChangedCount(project.git.changedFiles, project.git.more)} changed</span>}
           </>
         ) : (
           <span>not a git repo</span>

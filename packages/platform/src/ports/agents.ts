@@ -76,7 +76,9 @@ export interface AgentPort {
    */
   deleteSession(sessionId: string, deleteWorktree?: boolean, deleteExternal?: boolean): Promise<void>
   /** The material needed to ask the person whether it is fine to delete. Null if it is not a worktree session */
-  worktreeStatus(sessionId: string): Promise<{ path: string; branch: string; dirty: boolean; changedFiles: number } | null>
+  worktreeStatus(
+    sessionId: string,
+  ): Promise<{ path: string; branch: string; dirty: boolean; changedFiles: number; more?: boolean; unknown?: boolean } | null>
   /**
    * A dead-agent handoff record (#78) — the host creates it without calling that session's
    * tool. The host writes it to the notes location in the data folder and returns the

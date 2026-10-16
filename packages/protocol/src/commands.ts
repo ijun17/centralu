@@ -535,6 +535,10 @@ export const ProjectInfo = z.object({
       isRepo: z.boolean(),
       /** The OS blocked access — reported distinctly from "not a repository" (measured in F-1) */
       denied: z.boolean().optional(),
+      /** More files changed than `changedFiles`: the host stops counting at its cap (#850 review) */
+      more: z.boolean().optional(),
+      /** git did not answer in time: the count is not known, and the last known one still stands (#850 review) */
+      unknown: z.boolean().optional(),
     })
     .nullable()
     .default(null),
@@ -871,7 +875,16 @@ export const RpcMethods = {
   'agents.worktreeStatus': {
     params: z.object({ sessionId: SessionId }),
     result: z
-      .object({ path: z.string(), branch: z.string(), dirty: z.boolean(), changedFiles: z.number() })
+      .object({
+        path: z.string(),
+        branch: z.string(),
+        dirty: z.boolean(),
+        changedFiles: z.number(),
+        /** At least `changedFiles` (the host's count stopped at its cap) */
+        more: z.boolean().optional(),
+        /** git did not answer: `dirty` is true because clean is not known (#850 review) */
+        unknown: z.boolean().optional(),
+      })
       .nullable(),
   },
   /**

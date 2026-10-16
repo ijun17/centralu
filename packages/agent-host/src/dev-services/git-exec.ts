@@ -7,8 +7,8 @@ import { programPath } from '../tool-launch.js'
 const exec = promisify(execFile)
 
 /**
- * The one place the host starts git (#407). Every git call goes through `runGit`; a test fails
- * if a source file under `src/` starts git any other way (`git-exec.test.ts`).
+ * The one place the host starts git (#407). Every git call goes through `runGit` (or `streamGit`, for an answer read
+ * as it arrives); a test fails if a source file under `src/` starts git any other way (`git-exec.test.ts`).
  *
  * **Before a project is trusted, git may not run anything the repository chose.** A folder
  * copied from somewhere (a zip, a shared drive) carries its own `.git/config` and `.git/hooks`,
@@ -231,4 +231,52 @@ export async function runGit(cwd: string, args: string[], opts: RunGitOptions = 
   }
   const { stdout } = await run
   return stdout
+}
+
+/** Why a streamed read ended without git's own answer: it ran past its time, or the caller stopped it */
+export type StreamGitEnd = 'done' | 'stopped'
+
+/**
+ * Runs git and hands its stdout over as it arrives, holding none of it (#850 review of item 10). `onChunk` returns
+ * true to stop: git is ended and the read settles as `'stopped'`. For an answer of unknown size that is read once,
+ * such as a status count, where a buffered read (`runGit`) would overflow its `maxBuffer` on a large tree.
+ *
+ * Rejects with git's stderr (bounded) and exit code when git fails, and with `{ timedOut: true }` when it does not
+ * answer within `timeout`. Only the stdout is unbuffered; the call is otherwise the one `runGit` makes.
+ */
+export async function streamGit(
+  cwd: string,
+  args: string[],
+  onChunk: (chunk: Buffer) => boolean,
+  opts: Pick<RunGitOptions, 'allowRepoPrograms' | 'timeout' | 'filters'> = {},
+): Promise<StreamGitEnd> {
+  const argv = await gitArgv(cwd, args, opts.allowRepoPrograms, opts.filters)
+  return new Promise<StreamGitEnd>((resolve, reject) => {
+    const child = spawn(programPath('git'), argv, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    let ended: StreamGitEnd | 'timedOut' | null = null
+    const end = (why: StreamGitEnd | 'timedOut') => {
+      if (ended) return
+      ended = why
+      child.kill()
+    }
+    const timer = setTimeout(() => end('timedOut'), opts.timeout ?? DEFAULTS.timeout)
+    let stderr = ''
+    child.stderr!.on('data', (chunk: Buffer) => {
+      if (stderr.length < 64 * 1024) stderr += chunk.toString()
+    })
+    child.stdout!.on('data', (chunk: Buffer) => {
+      if (!ended && onChunk(chunk)) end('stopped')
+    })
+    child.on('error', (e) => {
+      clearTimeout(timer)
+      reject(e)
+    })
+    child.on('close', (code, signal) => {
+      clearTimeout(timer)
+      if (ended === 'stopped') resolve('stopped')
+      else if (ended === 'timedOut') reject(Object.assign(new Error('git did not answer in time'), { timedOut: true, stderr }))
+      else if (code === 0) resolve('done')
+      else reject(Object.assign(new Error(stderr || `Git exited with ${code ?? signal}`), { code, stderr }))
+    })
+  })
 }

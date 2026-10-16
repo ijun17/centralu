@@ -111,7 +111,9 @@ function sameGit(a: ProjectInfo['git'], b: ProjectInfo['git']): boolean {
     a.branch === b.branch &&
     a.changedFiles === b.changedFiles &&
     a.isRepo === b.isRepo &&
-    a.denied === b.denied
+    a.denied === b.denied &&
+    a.more === b.more &&
+    a.unknown === b.unknown
   )
 }
 
@@ -293,6 +295,8 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
                * identical text.
                */
               if (!cur || sameGit(cur.git, git)) return {}
+              // git did not answer in time: the last count still stands rather than reading as none (#850 review)
+              if (git?.unknown && cur.git) return {}
               /*
                * **Only `git` is taken from the answer.** The host rebuilds the rest of
                * ProjectInfo from its own defaults, so swallowing the whole row would let a

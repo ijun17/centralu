@@ -5561,3 +5561,27 @@ describe('newSessionProjectOf (#529)', () => {
     expect(newSessionProjectOf({ ...base, projects: {} })).toBeNull()
   })
 })
+
+describe('a project git count the host could not read (#850 review of item 10)', () => {
+  it('keeps the last count instead of reading as no changes, and takes a known one again', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    const project = { id: 'git-unknown', path: '/tmp/git-unknown', name: 'git-unknown', git: { branch: 'main', changedFiles: 3, isRepo: true } }
+    useStore.setState((s) => ({ projects: { ...s.projects, [project.id]: project as never } }))
+    const answer = vi.spyOn(mock.projects, 'gitStatus')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      answer.mockResolvedValueOnce({ ...project, git: { branch: '', changedFiles: 0, isRepo: true, unknown: true } } as never)
+      useStore.getState().refreshProjectGit(project.id)
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(useStore.getState().projects[project.id]!.git).toEqual(project.git)
+
+      answer.mockResolvedValueOnce({ ...project, git: { branch: 'main', changedFiles: 10_000, isRepo: true, more: true } } as never)
+      useStore.getState().refreshProjectGit(project.id)
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(useStore.getState().projects[project.id]!.git).toEqual({ branch: 'main', changedFiles: 10_000, isRepo: true, more: true })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

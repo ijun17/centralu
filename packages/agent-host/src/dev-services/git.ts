@@ -3,7 +3,7 @@ import { isAbsolute, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { assertExistingPath, isInside, isMissingPathError } from './path-guard.js'
 import type { GitBranch, GitCommit, GitFileStatus } from '@cc/protocol'
-import { runGit, type GitTrust } from './git-exec.js'
+import { runGit, streamGit, type GitTrust } from './git-exec.js'
 import { killTree } from './kill-tree.js'
 import { programPath } from '../tool-launch.js'
 import { raceTimeout } from '../timing.js'
@@ -26,7 +26,16 @@ const exec = promisify(execFile)
  * user needs to do is the opposite in each case (grant permission vs. nothing at all).
  * A situation actually run into, measured against the shipped `.app` (F-1).
  */
-export type GitSummary = { isRepo: boolean; branch: string; changedFiles: number; denied?: boolean }
+export type GitSummary = {
+  isRepo: boolean
+  branch: string
+  changedFiles: number
+  denied?: boolean
+  /** More files changed than `changedFiles`, which stopped at the cap (`SUMMARY_CAP`) */
+  more?: true
+  /** git did not answer (a timeout, a crash): neither the count nor "clean" is known */
+  unknown?: true
+}
 // The git panel's shapes are the protocol's (FR-4); a hand copy here had already lost `sessionName` (#428)
 export type { GitBranch, GitCommit, GitFileStatus, GitTrust }
 
@@ -57,26 +66,74 @@ async function isRepo(cwd: string): Promise<boolean> {
   }
 }
 
-export async function gitSummary(cwd: string, trust: GitTrust = {}): Promise<GitSummary> {
+/** The most changed files a summary counts; past it the count says "at least" (`more`) and git is stopped */
+export const SUMMARY_CAP = 10_000
+
+/** A summary's bounds, for tests: how many files to count before stopping, and how long git may take */
+export type SummaryLimits = { cap?: number; timeoutMs?: number }
+
+export async function gitSummary(cwd: string, trust: GitTrust = {}, limits: SummaryLimits = {}): Promise<GitSummary> {
+  const cap = limits.cap ?? SUMMARY_CAP
+  let branch = '(detached)'
+  /** Distinct paths (#850 review): a file staged for removal and still on disk is `1 D.` and `? path`, one file */
+  const paths = new Set<string>()
+  let more = false
+  /** The last entry of a chunk, cut where the chunk ended */
+  let rest = ''
+  /** A rename's entry is followed by its original path, which is not an entry of its own */
+  let skipNext = false
+  const take = (entry: string) => {
+    if (skipNext) {
+      skipNext = false
+      return
+    }
+    if (entry.startsWith('# branch.head ')) branch = entry.slice('# branch.head '.length).trim()
+    if (!entry || entry.startsWith('#')) return
+    const kind = entry[0]
+    // 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path> · 2 … <X><score> <path>␀<orig> · u … <h3> <path> · ? <path>
+    const fields = kind === '1' ? 8 : kind === '2' ? 9 : kind === 'u' ? 10 : 1
+    if (kind === '2') skipNext = true
+    if (paths.size < cap) paths.add(entry.split(' ').slice(fields).join(' '))
+    else if (!paths.has(entry.split(' ').slice(fields).join(' '))) more = true
+  }
   try {
     /*
      * Untracked files one by one, as the panel lists them (`gitStatusFiles`): by default git names a new folder once,
-     * and the sidebar said 1 where the panel listed its files (#850 item 10). One line per path, so a partly staged
-     * file counts once here too (`changedFileCount`).
+     * and the sidebar said 1 where the panel listed its files (#850 item 10).
+     *
+     * Read as it arrives and stopped at the cap (#850 review): an un-ignored folder of 150,000 files made this answer
+     * megabytes long, and a buffered read past its 32 MB said "not a repository".
      */
-    const stdout = await git(cwd, ['status', '--porcelain=v2', '--branch', '--untracked-files=all'], trust)
-    let branch = '(detached)'
-    let changed = 0
-    for (const line of stdout.split('\n')) {
-      if (line.startsWith('# branch.head ')) branch = line.slice('# branch.head '.length).trim()
-      else if (line && !line.startsWith('#')) changed++
-    }
-    return { isRepo: true, branch, changedFiles: changed }
+    await streamGit(
+      cwd,
+      ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all'],
+      (chunk) => {
+        const entries = (rest + chunk.toString()).split('\0')
+        rest = entries.pop() ?? ''
+        for (const entry of entries) {
+          take(entry)
+          if (more) return true
+        }
+        return false
+      },
+      { allowRepoPrograms: trust.trusted === true, timeout: limits.timeoutMs },
+    )
+    if (!more && rest) take(rest)
+    return { isRepo: true, branch, changedFiles: paths.size, ...(more ? { more: true as const } : {}) }
   } catch (e) {
-    const msg = String((e as { stderr?: string; message?: string }).stderr ?? (e as Error).message ?? '')
+    const err = e as { stderr?: string; message?: string; code?: unknown; timedOut?: boolean }
+    const msg = String(err.stderr || err.message || '')
     // macOS TCC: an unsigned app reading a protected folder ends up here
-    const denied = /Operation not permitted|EPERM|EACCES|permission denied/i.test(msg)
-    return { isRepo: denied, branch: '', changedFiles: 0, denied }
+    if (/Operation not permitted|EPERM|EACCES|permission denied/i.test(msg)) return { isRepo: true, branch: '', changedFiles: 0, denied: true }
+    // What git says of a folder that is no repository, and a machine with no git at all
+    if (/not a git repository/i.test(msg) || err.code === 'ENOENT') return { isRepo: false, branch: '', changedFiles: 0 }
+    /*
+     * Anything else (git ran past its time on a slow disk, crashed, refused for another reason) says nothing about
+     * whether this is a repository (#850 review). This summary is also the "is this a repository" check for new
+     * worktrees and the "is this worktree clean" check before removing one: an unknown count must read as neither
+     * "no repository" nor "clean".
+     */
+    return { isRepo: true, branch: '', changedFiles: 0, unknown: true }
   }
 }
 
@@ -704,15 +761,21 @@ export async function gitBranchDelete(repoCwd: string, branch: string, trust: Gi
  * rather than guessing. A worktree is only created in a trusted project, so this is the case of
  * trust taken away afterwards.
  */
-export async function gitWorktreeDirty(path: string, trust: GitTrust = {}): Promise<{ dirty: boolean; changedFiles: number }> {
-  const summary = await gitSummary(path, trust)
+export async function gitWorktreeDirty(
+  path: string,
+  trust: GitTrust = {},
+  limits: SummaryLimits = {},
+): Promise<{ dirty: boolean; changedFiles: number; more?: true; unknown?: true }> {
+  const summary = await gitSummary(path, trust, limits)
+  // Not known to be clean is not clean: removal asks first (#850 review)
+  if (summary.unknown) return { dirty: true, changedFiles: 0, unknown: true }
   let changedFiles = summary.changedFiles
   if (trust.trusted !== true && summary.isRepo) {
     // `ls-files --stage` reads the index only; mode 160000 is a submodule (a gitlink)
     const staged = await git(path, ['ls-files', '--stage', '-z']).catch(() => '')
     changedFiles += staged.split('\0').filter((line) => line.startsWith('160000 ')).length
   }
-  return { dirty: changedFiles > 0, changedFiles }
+  return { dirty: changedFiles > 0, changedFiles, ...(summary.more ? { more: true as const } : {}) }
 }
 
 /**

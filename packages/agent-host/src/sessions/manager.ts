@@ -3277,14 +3277,16 @@ export class SessionManager {
    */
   async worktreeStatus(
     sessionId: string,
-  ): Promise<{ path: string; branch: string; dirty: boolean; changedFiles: number } | null> {
+  ): Promise<{ path: string; branch: string; dirty: boolean; changedFiles: number; more?: true; unknown?: true } | null> {
     const m = this.meta.get(sessionId)
     if (!m?.worktree) return null
-    const { dirty, changedFiles } = await gitWorktreeDirty(m.worktree.path, this.gitTrust(m.projectId)).catch(() => ({
-      dirty: false,
+    // A failed read is not a clean worktree: the delete dialog then warns instead of removing quietly (#850 review)
+    const state = await gitWorktreeDirty(m.worktree.path, this.gitTrust(m.projectId)).catch(() => ({
+      dirty: true,
       changedFiles: 0,
+      unknown: true as const,
     }))
-    return { ...m.worktree, dirty, changedFiles }
+    return { ...m.worktree, ...state }
   }
 
   /**
