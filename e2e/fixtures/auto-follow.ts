@@ -72,7 +72,7 @@ async function staysPut(page: Page) {
 export function autoFollowTests(): void {
   test.describe('following the bottom of the conversation', () => {
     /*
-     * The burst from "Scrolling pins the current turn's own message to the top" (control-loop):
+     * The burst from "Scrolling pins the current turn's own message to the top" (control-conversation-scroll):
      * two long questions, then a 60-paragraph answer emitted in one go. In WebKit the list let go
      * of the bottom on its own in about 1 run in 30 and stopped 914px short. The virtual
      * scroller's compensation for the answer row measuring 860px taller was written from a scroll

@@ -66,7 +66,7 @@ test('a search hit beyond the newest history page loads, highlights, and holds i
 
 test('a search hit opens an asleep session without waking it (#590)', async ({ page }) => {
   const { target, needle } = await longSearchableSession(page)
-  // Asleep on both sides, as control-loop does: the mock's record too, so a refetch on opening cannot bring it back live
+  // Asleep on both sides, as the control-*.spec.ts scenarios do: the mock's record too, so a refetch on opening cannot bring it back live
   await page.evaluate((sid) => {
     const m = (window as any).__mock
     const store = (window as any).__store

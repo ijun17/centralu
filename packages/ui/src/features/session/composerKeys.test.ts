@@ -4,7 +4,7 @@ import { isComposerSendKey, type ComposerKey } from './composerKeys.js'
 /**
  * With the setting off, behavior **must not differ from before by even a single character**,
  * and with it on, Enter must never be read as send. Both are pinned down here as values — how
- * it actually behaves in a real composer lives in e2e (control-loop).
+ * it actually behaves in a real composer lives in e2e (control-composer.spec.ts and control-settings.spec.ts).
  */
 const key = (over: Partial<ComposerKey> = {}): ComposerKey => ({
   key: 'Enter',

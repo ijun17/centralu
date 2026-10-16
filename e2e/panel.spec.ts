@@ -1320,7 +1320,7 @@ test('clicking a different panel\'s composer in the grid moves the picked sessio
  *
  * Playwright's dragAndDrop is atomic — it cannot look at the screen mid-drag. So the drag
  * events are dispatched by hand, sharing one DataTransfer the way a real drag does
- * (same technique as control-loop.spec.ts).
+ * (same technique as fixtures/control.ts dropFile).
  */
 
 /** The panel order as the user sees it — DOM order is React's render order */

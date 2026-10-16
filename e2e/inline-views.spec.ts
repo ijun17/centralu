@@ -342,7 +342,7 @@ test('a view that cannot be reopened states the reason and withdraws Reopen — 
  * calling the tool again. If the host has restarted and is not holding it, only "Open app" (the
  * pinned view) remains.
  *
- * Reopening is simulated the same way as control-loop.spec.ts: the in-memory conversation is
+ * Reopening is simulated the same way as the control-*.spec.ts scenarios: the in-memory conversation is
  * cleared and read back from storage. The mock persists the card and the app-view row the way the
  * host does, and keeps the call's input and result separately, in memory.
  */
