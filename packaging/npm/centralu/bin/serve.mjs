@@ -937,13 +937,13 @@ export function windowsArg(arg) {
 }
 
 /**
- * The first line of a script run by Windows PowerShell 5.1: the machine's module path. Started from
+ * The first line of a script run by Windows PowerShell 5.1: its own module path. Started from
  * PowerShell 7 (pwsh, a `DefaultShell` of it, a CI runner), 5.1 inherits pwsh's `PSModulePath`, whose
  * first folder holds 7.x copies of the built-in modules that 5.1 cannot load: `Invoke-CimMethod` and
  * `Get-ScheduledTask` are then "found in the module … but the module could not be loaded". Same line as
  * the hub's (links/tunnel.ts, `PS_PREAMBLE`)
  */
-const PS_MODULE_PATH = "$psmp = [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine'); if ($psmp) { $env:PSModulePath = $psmp }"
+const PS_MODULE_PATH = "if ($env:PSModulePath -match '\\x5cPowerShell\\x5c') { $env:PSModulePath = \"$env:ProgramFiles\\WindowsPowerShell\\Modules;$PSHOME\\Modules\" }"
 
 /** The PowerShell that asks WMI to create `commandLine`. Values cross as base64, so no quoting can break */
 export function wmiScript({ commandLine, cwd = null }) {

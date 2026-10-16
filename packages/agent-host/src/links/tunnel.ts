@@ -227,9 +227,15 @@ export const WSL_DISTRO_RE = /^[A-Za-z0-9._-]{1,64}$/
  * cannot load, and `Get-FileHash`, `ConvertTo-Json`, `Invoke-WebRequest` and `Expand-Archive` are then
  * "found in the module … but the module could not be loaded". That is every GitHub Windows runner, and a
  * Windows machine whose OpenSSH `DefaultShell` is pwsh.
+ *
+ * Only a path with a `\PowerShell\` folder in it (7's: `Program Files\PowerShell\7\Modules`, `Documents\PowerShell\Modules`;
+ * Windows PowerShell's are all `\WindowsPowerShell\`) is replaced, by the two folders Windows PowerShell 5.1 has by
+ * default. Not by `[Environment]::GetEnvironmentVariable('PSModulePath', 'Machine')`: a script that merely contained
+ * that call made the installer's step that runs Node take 5 to 7 s instead of 1.2 s on a Windows 11 PC (measured
+ * 2026-10-16, against five other one-line additions that all stayed at 1.2 s), and the same on every start after it.
  */
 export const PS_PREAMBLE =
-  "[Console]::OutputEncoding=[Text.Encoding]::UTF8\n$psmp=[Environment]::GetEnvironmentVariable('PSModulePath','Machine'); if ($psmp) { $env:PSModulePath=$psmp }\n"
+  "[Console]::OutputEncoding=[Text.Encoding]::UTF8\nif ($env:PSModulePath -match '\\x5cPowerShell\\x5c') { $env:PSModulePath=\"$env:ProgramFiles\\WindowsPowerShell\\Modules;$PSHOME\\Modules\" }\n"
 
 /** A PowerShell script as one command line any Windows shell passes on untouched (see `RemoteSpec`) */
 export function powershell(script: string): string {
