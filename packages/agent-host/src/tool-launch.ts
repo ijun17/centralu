@@ -42,7 +42,14 @@ const realDeps = (): Deps => ({
   },
 })
 
-export function launchFor(path: string, deps: Deps = realDeps()): ToolLaunch {
+/**
+ * A batch shim may start another one (#849): Yarn v1's global bin (`%LOCALAPPDATA%\Yarn\bin\claude.cmd`) is one line,
+ * `@"%~dp0\..\Data\global\node_modules\.bin\claude.cmd" %*`, whose target is npm's cmd-shim. That one is followed too, up
+ * to this many shims deep, so a loop of shims ends.
+ */
+const MAX_SHIM_DEPTH = 3
+
+export function launchFor(path: string, deps: Deps = realDeps(), depth = 0): ToolLaunch {
   const plain = { command: path, args: [] }
   if (deps.platform !== 'win32' || !/\.(cmd|bat)$/i.test(path)) return plain
   let text: string
@@ -57,6 +64,10 @@ export function launchFor(path: string, deps: Deps = realDeps()): ToolLaunch {
   if (!target || !deps.exists(target)) return plain
   if (/\.(c|m)?js$/i.test(target)) return { command: deps.node, args: [target] }
   if (/\.exe$/i.test(target)) return { command: target, args: [] }
+  if (/\.(cmd|bat)$/i.test(target) && depth + 1 < MAX_SHIM_DEPTH) {
+    const inner = launchFor(target, deps, depth + 1)
+    if (inner.command !== target) return inner
+  }
   return plain
 }
 

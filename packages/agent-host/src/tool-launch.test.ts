@@ -159,6 +159,32 @@ describe('how a tool found on PATH is started', () => {
   it('off Windows nothing is rewritten', () => {
     expect(launchFor('/usr/local/bin/codex', deps({}, 'darwin'))).toEqual({ command: '/usr/local/bin/codex', args: [] })
   })
+
+  /*
+   * #849: Yarn v1's global bin is a shim of a shim, so claude and codex installed with `yarn global add` showed as not
+   * installed, or failed with EINVAL, the outer .cmd being all there was to spawn.
+   */
+  const yarnBin = 'C:\\Users\\me\\AppData\\Local\\Yarn\\bin'
+  const yarnDotBin = 'C:\\Users\\me\\AppData\\Local\\Yarn\\Data\\global\\node_modules\\.bin'
+  const yarnEntry = 'C:\\Users\\me\\AppData\\Local\\Yarn\\Data\\global\\node_modules\\@openai\\codex\\bin\\codex.js'
+  const YARN_SHIM = '@"%~dp0\\..\\Data\\global\\node_modules\\.bin\\codex.cmd"   %*\r\n'
+  const DOT_BIN_SHIM = NPM_SHIM.replace('%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js', '%dp0%\\..\\@openai\\codex\\bin\\codex.js')
+
+  it('a shim that starts another shim (Yarn v1 global bin) is followed to the program', () => {
+    const files = { [`${yarnBin}\\codex.cmd`]: YARN_SHIM, [`${yarnDotBin}\\codex.cmd`]: DOT_BIN_SHIM, [yarnEntry]: '' }
+    expect(launchFor(`${yarnBin}\\codex.cmd`, deps(files))).toEqual({ command: NODE, args: [yarnEntry] })
+  })
+
+  it('a loop of shims, or one deeper than three, is left as it is', () => {
+    const a = `${dir}\\a.cmd`
+    const b = `${dir}\\b.cmd`
+    expect(launchFor(a, deps({ [a]: '@"%~dp0\\b.cmd" %*', [b]: '@"%~dp0\\a.cmd" %*' }))).toEqual({ command: a, args: [] })
+    const chain = (n: number) => `${dir}\\s${n}.cmd`
+    const files: Record<string, string> = { [entry]: '' }
+    for (let n = 0; n < 4; n++) files[chain(n)] = n < 3 ? `@"%~dp0\\s${n + 1}.cmd" %*` : NPM_SHIM
+    expect(launchFor(chain(1), deps(files))).toEqual({ command: NODE, args: [entry] })
+    expect(launchFor(chain(0), deps(files))).toEqual({ command: chain(0), args: [] })
+  })
 })
 
 describe('a program the host runs in a project folder', () => {
