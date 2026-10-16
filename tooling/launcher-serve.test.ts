@@ -404,9 +404,12 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       const before = await connection(d)
       expect(before).toMatchObject({ v: 1, port: DEFAULT_SERVE_PORT, protocolVersion: PROTOCOL_VERSION, dataDir: d, hostRunning: false })
 
+      // The data folder as an older build left it (#838): the host makes it its owner's only
+      chmodSync(d, 0o755)
       const port = await freePort()
       const s = serve(d, ['--port', String(port)])
       await s.until(/listening on 127\.0\.0\.1:\d+/)
+      expect(statSync(d).mode & 0o777).toBe(0o700)
 
       const info = await connection(d)
       // proof (#838): the running host answered a prove, so the hub will ask it to before sending the token

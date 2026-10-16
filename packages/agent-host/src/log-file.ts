@@ -65,7 +65,7 @@ export function teeStderrToFile(path: string, maxBytes: number = MAX_LOG_BYTES):
   let written = sizeOf(path)
   let fd: number | null = null
   try {
-    fd = openSync(path, 'a')
+    fd = openSync(path, 'a', 0o600)
   } catch {
     return () => {}
   }
@@ -93,7 +93,7 @@ export function teeStderrToFile(path: string, maxBytes: number = MAX_LOG_BYTES):
       /* If the rollover fails, keep writing to the same file — a large file beats no log */
     }
     try {
-      fd = openSync(path, 'a')
+      fd = openSync(path, 'a', 0o600)
     } catch {
       /* If it cannot be opened, only the file side goes quiet — the original stderr path is still alive */
     }
@@ -155,7 +155,7 @@ export function hostLogPath(dataDir: string): string {
 /** Appends a single line without keeping the file handle open (for when the stream cannot be trusted, as right before exit) */
 export function appendLine(path: string, line: string): void {
   try {
-    const fd = openSync(path, 'a')
+    const fd = openSync(path, 'a', 0o600)
     try {
       writeSync(fd, line.endsWith('\n') ? line : `${line}\n`)
     } finally {

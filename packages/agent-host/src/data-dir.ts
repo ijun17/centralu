@@ -1,7 +1,8 @@
-import { existsSync, renameSync } from 'node:fs'
+import { chmodSync, existsSync, lstatSync, mkdirSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { DATA_DIR } from '@cc/protocol'
+import { HOST_PLATFORM, modesGuardFiles, type Platform } from './os.js'
 
 /**
  * Moves the pre-rename data folder to its new name (`~/.control-center` → `~/.centralu`). (legacy-name)
@@ -51,4 +52,41 @@ export function migrateLegacyDataDir(from: string, to: string): boolean {
  */
 export function dataRoot(): string {
   return process.env.CC_DATA_DIR || join(homedir(), DATA_DIR)
+}
+
+/** The files directly in the data folder that hold conversations, tokens or their traces: the store and the host's logs */
+const PRIVATE_FILES = ['store.db', 'store.db-wal', 'store.db-shm', 'host.log', 'host.log.1', 'host-errors.log']
+
+/**
+ * Makes the data folder readable by its owner only (#838): the folder 0700, the store and the logs in it 0600.
+ *
+ * It was 0755 with `store.db` and `host.log` 0644, so on a machine with other accounts any of them could read every
+ * conversation, the remembered consents and what the log says. The folder's own mode is what protects the rest: a
+ * file a build writes later with the default mode (an older one serving during a swap, SQLite's WAL, an app's data)
+ * is still behind a folder only its owner can enter. The files named are tightened too, for a copy of the folder
+ * made elsewhere.
+ *
+ * Not `umask(0o077)`: the host's umask is every agent's and every terminal's, and the files they write in the
+ * person's projects must keep the person's own modes. Only what is the owner's and not a link is changed, and only
+ * on POSIX: Windows keeps the profile folder's ACL, which is already per user.
+ * @returns what was changed, for one log line
+ */
+export function keepDataFolderPrivate(dir: string, platform: Platform = HOST_PLATFORM): string[] {
+  if (!modesGuardFiles(platform)) return []
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  const changed: string[] = []
+  const uid = process.getuid?.()
+  const tighten = (path: string, mode: number) => {
+    try {
+      const st = lstatSync(path)
+      if (st.isSymbolicLink() || (uid !== undefined && st.uid !== uid) || (st.mode & 0o077) === 0) return
+      chmodSync(path, mode)
+      changed.push(`${path} ${(st.mode & 0o777).toString(8)} -> ${mode.toString(8)}`)
+    } catch {
+      // Not there, or not ours to change: the host still starts
+    }
+  }
+  tighten(dir, 0o700)
+  for (const name of PRIVATE_FILES) tighten(join(dir, name), 0o600)
+  return changed
 }

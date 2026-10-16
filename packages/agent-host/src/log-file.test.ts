@@ -133,6 +133,22 @@ describe('the host log file', () => {
  * no trace of having run. The lint rule (`no-console` in eslint.config.js) is the guard on
  * the writing side; this is the guard on the plumbing side.
  */
+// A new log is its owner's only (#838): it was 0644, readable by every account on the machine
+describe.skipIf(process.platform === 'win32')('a new log file’s mode', () => {
+  it('is 0600 for the host log, after a rollover too', () => {
+    const path = hostLogPath(tmp())
+    const stop = teeStderrToFile(path, 64)
+    try {
+      process.stderr.write(`${'x'.repeat(100)}\n`)
+      process.stderr.write('after the rollover\n')
+    } finally {
+      stop()
+    }
+    expect(statSync(path).mode & 0o777).toBe(0o600)
+    expect(statSync(`${path}.1`).mode & 0o777).toBe(0o600)
+  })
+})
+
 describe('stdout does not leak into the file', () => {
   it('teeStderrToFile does not touch stdout — the token goes out that way', () => {
     const path = hostLogPath(tmp())

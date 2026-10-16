@@ -735,6 +735,20 @@ Limits:
 - The Windows null-device hooks path is covered by the Windows CI job running these tests; no
   person has run it on a Windows machine.
 
+## The data folder (#838)
+
+The data folder (`~/.centralu`, or `CC_DATA_DIR`) holds every conversation (`store.db`), the remembered consents and
+the host's log. It was `0755` with `store.db` and `host.log` `0644`, readable by every account on the machine. At each
+start the host makes it its owner's only (`keepDataFolderPrivate` in `data-dir.ts`, before the store or the log opens):
+the folder `0700`, and `store.db`, its WAL and SHM files and the host's logs `0600` when they are wider; a new
+`host.log` is created `0600`. Only what the owner owns and what is not a link is changed, only for the data folder
+itself (a `--db` elsewhere is left alone), and not on Windows, whose profile folder's ACL is already per user.
+
+The folder's own mode is what protects the rest: a file written later with the default mode (an older build serving
+during a swap, an app's data, SQLite) is still behind a folder only its owner can enter, and an older build never
+widens the folder again. The host's `umask` is not changed: it is every agent's and every terminal's, and the files
+they write in the person's projects keep the person's own modes.
+
 ## Local transport
 
 The host listens on loopback and requires a token that is not blank — whitespace-only is

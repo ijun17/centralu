@@ -84,6 +84,14 @@ export function rustTarget(platform: Platform = HOST_PLATFORM, arch: string = pr
   return null
 }
 
+/**
+ * A file's mode bits say which accounts may read it (POSIX). Windows ignores them for that: who may read a file there is
+ * its ACL, which a profile folder already gives to its owner alone (#838, `keepDataFolderPrivate`).
+ */
+export function modesGuardFiles(platform: Platform = HOST_PLATFORM): boolean {
+  return platform !== 'win32'
+}
+
 /** File names that differ only by case are one file (Windows): comparing two spellings of a path folds case first. */
 export function foldsPathCase(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'win32'
