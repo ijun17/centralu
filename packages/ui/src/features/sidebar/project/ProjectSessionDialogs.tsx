@@ -42,7 +42,7 @@ export function ProjectSessionDialogs({
           name={sessions.find((s) => s.id === handingOff)?.name ?? 'Session'}
           tool={sessions.find((s) => s.id === handingOff)?.tool ?? project.defaultTool ?? ''}
           // Determining a dead session (#78): one that has errored or hit a rate limit — the other tool is
-          // pre-selected and the original is kept (the note comes from the record for every session, #694)
+          // pre-selected (the note from the record and keeping the original are every session's defaults, #694)
           dead={(() => {
             const s = sessions.find((x) => x.id === handingOff)
             return s ? s.state === 'error' || !!s.limit : false

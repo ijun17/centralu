@@ -1224,6 +1224,11 @@ export class SessionManager {
        */
       kind?: Exclude<SessionInfo['kind'], 'coordinator'>
       /**
+       * Who sent `initialPrompt`, when it is not the person (#694: the orchestrator's handoff_session). Not in the RPC
+       * contract: a window's first message is the person's. Stored and broadcast as that sender's, as `send`'s `from`.
+       */
+      initialFrom?: { sessionId: string; name: string }
+      /**
        * Role text pinned on the row and reapplied on every wake — filled only by `createAppBuilder`. A coordinator's
        * role rode here too; nothing creates a coordinator since the control app went (#372), and one already in a
        * store wakes through `resumeSession` with its own row.
@@ -1520,13 +1525,14 @@ export class SessionManager {
     }
     if (params.initialPrompt) {
       const seq = this.store.nextSeq(id)
+      const from = params.initialFrom
       this.store.appendMessages([
-        { sessionId: id, seq, role: 'user', kind: 'text', payload: { text: params.initialPrompt }, ts: Date.now() },
+        { sessionId: id, seq, role: 'user', kind: 'text', payload: { text: params.initialPrompt, ...(from ? { from } : {}) }, ts: Date.now() },
       ])
       info.lastSeq = seq
       info.lastReadSeq = seq // Something we sent counts as read
       this.store.upsertSession(info)
-      this.emit({ type: 'user_message', sessionId: id, seq, text: params.initialPrompt })
+      this.emit({ type: 'user_message', sessionId: id, seq, text: params.initialPrompt, ...(from ? { from } : {}) })
       handle.send(params.initialPrompt)
     }
     return info
@@ -3944,6 +3950,12 @@ export class SessionManager {
         return self.store
       },
       askHost: (...a) => self.hostCards.askHost(...a),
+      toolProblem: async (tool) => {
+        const adapter = self.adapters.get(tool)
+        if (!adapter) return `${JSON.stringify(tool)} is not a tool Centralu runs here`
+        const d = await adapter.detect().catch((e: Error) => ({ installed: false, loggedIn: false, detail: e.message }))
+        return d.installed && d.loggedIn ? null : `${tool} cannot start a session here: ${d.detail}`
+      },
       cwdFor: (...a) => self.cwdFor(...a),
       createSession: (params) => self.createSession(params),
       rename: (...a) => self.rename(...a),
@@ -4432,6 +4444,7 @@ export class SessionManager {
       createProjectAsked: (sessionId, spec, signal) => this.createProjectAsked(sessionId, spec, signal),
       createProjectOnMachine: (sessionId, reader, machine, spec, signal) => this.createProjectOnMachine(sessionId, reader, machine, spec, signal),
       handoff: (callerId, target, opts, signal) => this.handoffFlow.handoff(callerId, target, opts, signal),
+      handoffWait: (callerId, handle, signal) => this.handoffFlow.wait(callerId, handle, signal),
       builderRefOf: (m) => this.appSessions.builderRefOf(m),
       checkApp: (ref) => this.checkApp(ref),
       createApp: (params) => this.createApp(params),

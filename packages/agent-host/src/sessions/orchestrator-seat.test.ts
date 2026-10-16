@@ -56,6 +56,7 @@ beforeEach(() => {
     createProjectAsked: vi.fn(),
     createProjectOnMachine: vi.fn(),
     handoff: vi.fn(async () => ({ ok: false as const, error: 'reached the flow' })),
+    handoffWait: vi.fn(async () => ({ ok: false as const, error: 'reached the wait' })),
     builderRefOf: vi.fn(() => null),
     checkApp: vi.fn(),
     createApp: vi.fn(),

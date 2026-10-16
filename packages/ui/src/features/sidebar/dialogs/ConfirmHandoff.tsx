@@ -26,7 +26,7 @@ export function ConfirmHandoff({
 }: {
   name: string
   tool: ToolName
-  /** A session unable to respond due to an error or a rate limit (#78) — the target and deletion defaults flip together */
+  /** A session unable to respond due to an error or a rate limit (#78) — the receiving tool defaults to the other one */
   dead: boolean
   /** A card currently up (#174) — while one is up, the agent cannot be asked. The record mode does not ask, so it goes through as is */
   blocked: 'question' | 'approval' | null
@@ -38,17 +38,21 @@ export function ConfirmHandoff({
    * session being replaced is the one least likely to summarize correctly, and a note it writes can
    * carry its drift or injected text. Asking the agent stays one click away.
    *
-   * Defaults are inverted for a dead session (#78): the target defaults to **the other tool** (if
-   * the service is down and that is why the handoff is happening, defaulting to the same tool is a
-   * one-click trap), and deletion defaults to off (keep the original until the successor is
-   * confirmed working). Only the initial values are flipped — changing one radio afterward never
-   * silently changes another selection (no silent actions).
+   * Deletion defaults to off, with the note from the record: the original stays until the
+   * successor is confirmed working (#78's pairing, kept when record became every session's
+   * default, #694 review). Before #694 a live session defaulted to asking the agent and deleting;
+   * the record with deletion was never a default, and a live original is not trashed by default now.
+   *
+   * For a dead session (#78) the target defaults to **the other tool**: if the service is down and
+   * that is why the handoff is happening, defaulting to the same tool is a one-click trap. Only the
+   * initial values are set — changing one radio afterward never silently changes another selection
+   * (no silent actions).
    */
   const tools = useTools()
   const otherTool = tools.find((t) => t.name !== tool)?.name ?? tool
   const [mode, setMode] = useState<'agent' | 'record'>('record')
   const [heirTool, setHeirTool] = useState<ToolName>(dead ? otherTool : tool)
-  const [deleteOld, setDeleteOld] = useState(!dead)
+  const [deleteOld, setDeleteOld] = useState(false)
   const toolLabel = useToolMeta(tool).label
   return (
     <Modal onClose={onCancel} testId="confirm-handoff">

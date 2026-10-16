@@ -100,7 +100,7 @@ export const CreateSessionParams = z.object({
        */
       fromSessionId: SessionId.optional(),
       /**
-       * The window removes the predecessor right after this session is created (the handoff's default, #738). The
+       * The window removes the predecessor right after this session is created (when the person leaves its delete box checked, #738). The
        * host then gives this session **every** child of the predecessor, settled ones too, and lists them all in the
        * note: a settled child left with a session about to be removed would belong to nobody. Without it (a handoff
        * that keeps the predecessor, or an old frame) only the live children move (#693); the settled ones follow

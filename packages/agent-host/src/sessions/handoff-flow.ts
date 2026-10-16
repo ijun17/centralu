@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { handoffOpening, handoffPrompt, SESSION_HANDOFF, type NormalizedEvent, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { HandoffResult } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
@@ -12,7 +13,10 @@ import { trustedJsonText } from './orchestrator-tools.js'
 export type HandoffFlowHost = {
   readonly meta: ReadonlyMap<string, SessionInfo>
   readonly store: Store
-  askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal): Promise<HostAskAnswer>
+  /** `log`: what the auto log line names instead of the card's kind (#694 review) */
+  askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal, card?: { log?: string }): Promise<HostAskAnswer>
+  /** Why this tool cannot start a session here (unknown, not installed, signed out), or null */
+  toolProblem(tool: string): Promise<string | null>
   cwdFor(m: SessionInfo): string
   createSession(params: {
     projectId: string
@@ -24,6 +28,8 @@ export type HandoffFlowHost = {
     serviceTier?: string
     permissionPreset: SessionInfo['permissionPreset']
     initialPrompt: string
+    /** Who sent the opening: the orchestrator, so it is stored and shown as its words, never the person's (FR-11) */
+    initialFrom: { sessionId: string; name: string }
     handoff: { from: string; note: string; fromSessionId: string }
   }): Promise<SessionInfo>
   rename(sessionId: string, name: string): void
@@ -45,7 +51,20 @@ export type HandoffTimings = {
 
 const TIMINGS: HandoffTimings = { pollMs: 500, callMs: 240_000, noteMs: 10 * 60_000 }
 
-type InFlight = { callerId: string; done: Promise<HandoffResult>; result?: HandoffResult }
+/**
+ * One handoff the tool started. `done` is the whole of it (the record or the agent's note, then the successor), so a
+ * second call that finds it waits on the same work and never starts another successor.
+ */
+type Run = {
+  /** The handle a "still running" answer gives, for waiting on this run and no other */
+  id: string
+  callerId: string
+  targetId: string
+  done: Promise<HandoffResult>
+  /** A call answered "still running": the result is kept for that handle until read, or until it expires */
+  detached?: boolean
+  result?: HandoffResult
+}
 
 /**
  * The orchestrator's handoff_session (#694): a session is handed to a fresh one, which starts from a note, as the
@@ -68,7 +87,9 @@ type InFlight = { callerId: string; done: Promise<HandoffResult>; result?: Hando
  */
 export class HandoffFlow {
   /** Handoffs running now, by the session being handed off: two at once would start two successors */
-  private readonly inFlight = new Map<string, InFlight>()
+  private readonly running = new Map<string, Run>()
+  /** Runs by handle: running ones, and finished ones a call was told to wait on, until read or expired */
+  private readonly runs = new Map<string, Run>()
   /** Orchestrators the person told "always" on a handoff card, while this host serves them */
   private readonly always = new Set<string>()
 
@@ -81,6 +102,7 @@ export class HandoffFlow {
   private refusal(callerId: string, target: SessionInfo, mode: 'record' | 'agent'): string | null {
     const name = trustedJsonText(target.name)
     if (target.id === callerId) return 'An orchestrator does not hand itself off; the person does that.'
+    if (this.running.has(target.id)) return `${name} is already being handed off.`
     if (target.kind !== 'worker' || !target.projectId) return `${name} is not a project's ordinary session, so it cannot be handed off.`
     if (target.appId) return `${name} belongs to an app (its builder or an agent it started); only the person hands those off.`
     if (target.worktree) return `${name} works in a worktree, and worktree sessions cannot hand off yet: merge or delete it first.`
@@ -91,6 +113,19 @@ export class HandoffFlow {
     return null
   }
 
+  /** A refusal, logged with who asked and for which session (#694 review) */
+  private refuse(callerId: string, targetId: string, error: string): HandoffResult {
+    console.error(`[agent-host] handoff_session by ${callerId.slice(0, 8)} of ${targetId.slice(0, 8)} refused: ${error}`)
+    return { ok: false, error }
+  }
+
+  /** Waits again on a run a "still running" answer named, which only its caller may do */
+  async wait(callerId: string, handle: string, signal?: AbortSignal): Promise<HandoffResult> {
+    const run = this.runs.get(handle)
+    if (!run || run.callerId !== callerId) return { ok: false, error: `No handoff of yours has the handle ${trustedJsonText(handle)}: it finished and its result was read, or it expired.` }
+    return this.waitOn(run, Date.now(), signal)
+  }
+
   async handoff(
     callerId: string,
     target: SessionInfo,
@@ -98,63 +133,81 @@ export class HandoffFlow {
     signal?: AbortSignal,
   ): Promise<HandoffResult> {
     const started = Date.now()
-    let running = this.inFlight.get(target.id)
-    // A handoff that ended with nobody back for its result does not hold the session from another orchestrator
-    if (running?.result && running.callerId !== callerId) {
-      this.inFlight.delete(target.id)
-      running = undefined
-    }
-    // The same orchestrator calling again waits on its handoff still running, or picks up how it ended
-    if (running) return running.callerId === callerId ? this.waitOn(target.id, running, started, signal) : { ok: false, error: `${trustedJsonText(target.name)} is already being handed off.` }
     const mode = opts.mode ?? 'record'
     const tool = opts.tool ?? target.tool
     const instructions = opts.instructions?.trim() || undefined
     const refused = this.refusal(callerId, target, mode)
-    if (refused) return { ok: false, error: refused }
+    if (refused) return this.refuse(callerId, target.id, refused)
+    // The tool is checked before any card: a name that cannot start a session never reaches the person's eyes (#694 review)
+    const problem = await this.host.toolProblem(tool)
+    if (problem) return this.refuse(callerId, target.id, `Nothing was handed off: ${problem}`)
 
+    let always = false
     if (!this.always.has(callerId)) {
-      const decision = await this.host.askHost(callerId, { kind: 'other', about: SESSION_HANDOFF, raw: this.question(target, tool, mode, instructions) }, signal)
-      if (decision === 'deny') return { ok: false, error: `The person did not allow handing off ${trustedJsonText(target.name)}. Do not ask again unless they tell you to.` }
-      if (decision === null) return { ok: false, error: 'The card was withdrawn before the person answered, so nothing was handed off.' }
-      if (decision === 'always' || decision === 'always_project') this.always.add(callerId)
+      const decision = await this.host.askHost(
+        callerId,
+        { kind: 'other', about: SESSION_HANDOFF, raw: this.question(target, tool, mode, instructions) },
+        signal,
+        { log: `${SESSION_HANDOFF} of ${target.id} (${mode}, to ${tool})` },
+      )
+      if (decision === 'deny') return this.refuse(callerId, target.id, `The person did not allow handing off ${trustedJsonText(target.name)}. Do not ask again unless they tell you to.`)
+      if (decision === null) return this.refuse(callerId, target.id, 'The card was withdrawn before the person answered, so nothing was handed off.')
+      always = decision === 'always' || decision === 'always_project'
     }
     // Read again: the target may have started a turn, gone, or been handed off while the card stood
     const now = this.host.meta.get(target.id)
-    if (!now) return { ok: false, error: `${trustedJsonText(target.name)} is gone.` }
-    const again = this.inFlight.has(now.id) ? `${trustedJsonText(now.name)} is already being handed off.` : this.refusal(callerId, now, mode)
-    if (again) return { ok: false, error: again }
+    if (!now) return this.refuse(callerId, target.id, `${trustedJsonText(target.name)} is gone.`)
+    const again = this.refusal(callerId, now, mode)
+    if (again) return this.refuse(callerId, now.id, again)
+    // "Always" counts only for a call that went through every check (#694 review): a refused one grants nothing
+    if (always) this.always.add(callerId)
 
-    const entry: InFlight = { callerId, done: Promise.resolve({ ok: false, error: 'not started' }) }
-    this.inFlight.set(now.id, entry)
-    if (mode === 'record') {
-      try {
-        const note = await this.host.exportHandoffRecord(now.id, tool)
-        return await this.succeed(callerId, now, tool, note, 'record', instructions)
-      } catch (e) {
-        return { ok: false, error: `Nothing was handed off: ${(e as Error).message}` }
-      } finally {
-        this.inFlight.delete(now.id)
+    // Claimed before anything is awaited, and held until the whole handoff ends
+    const run: Run = { id: `ho-${randomUUID().slice(0, 8)}`, callerId, targetId: now.id, done: Promise.resolve({ ok: false, error: '' }) }
+    this.running.set(now.id, run)
+    this.runs.set(run.id, run)
+    run.done = (mode === 'record' ? this.fromRecord(callerId, now, tool, instructions) : this.fromAgent(callerId, now, tool, instructions)).then((r) => {
+      if (this.running.get(now.id) === run) this.running.delete(now.id)
+      if (!run.detached) this.runs.delete(run.id)
+      else {
+        run.result = r
+        // Kept for its handle, not forever: unread past the note's own bound, it goes
+        setTimeout(() => this.runs.get(run.id) === run && this.runs.delete(run.id), this.timings.noteMs).unref?.()
       }
-    }
-
-    /*
-     * Agent mode: the session is asked, as the window asks it, with the orchestrator named as the sender. The note is
-     * read from the store once the turn ends (`exportHandoffNote`), never from the screen. The call waits under the
-     * Codex bridge's bound; past it, the handoff goes on and the same call picks it up.
-     */
-    const before = this.host.store.loadMessages(now.id, 1).at(-1)?.seq ?? 0
-    try {
-      await this.host.send(now.id, handoffPrompt(), undefined, { sessionId: callerId, name: this.host.meta.get(callerId)?.name ?? 'Orchestrator' })
-    } catch (e) {
-      this.inFlight.delete(now.id)
-      return { ok: false, error: `Could not ask ${trustedJsonText(now.name)} for its note: ${(e as Error).message}` }
-    }
-    entry.done = this.awaitNote(callerId, now, tool, before, instructions).then((r) => (entry.result = r))
-    return this.waitOn(now.id, entry, started, signal)
+      return r
+    })
+    return this.waitOn(run, started, signal)
   }
 
-  /** Waits on a running handoff for what is left of the call's bound: its result once (then forgotten), or "still writing" */
-  private async waitOn(targetId: string, entry: InFlight, started: number, signal?: AbortSignal): Promise<HandoffResult> {
+  private async fromRecord(callerId: string, target: SessionInfo, tool: ToolName, instructions: string | undefined): Promise<HandoffResult> {
+    try {
+      const note = await this.host.exportHandoffRecord(target.id, tool)
+      return await this.succeed(callerId, target, tool, note, 'record', instructions)
+    } catch (e) {
+      return { ok: false, error: `Nothing was handed off: ${(e as Error).message}` }
+    }
+  }
+
+  /**
+   * Agent mode: the session is asked, as the window asks it, with the orchestrator named as the sender. The note is
+   * read from the store once the turn ends (`exportHandoffNote`), never from the screen.
+   */
+  private async fromAgent(callerId: string, target: SessionInfo, tool: ToolName, instructions: string | undefined): Promise<HandoffResult> {
+    const before = this.host.store.loadMessages(target.id, 1).at(-1)?.seq ?? 0
+    try {
+      await this.host.send(target.id, handoffPrompt(), undefined, { sessionId: callerId, name: this.host.meta.get(callerId)?.name ?? 'Orchestrator' })
+    } catch (e) {
+      return { ok: false, error: `Could not ask ${trustedJsonText(target.name)} for its note: ${(e as Error).message}` }
+    }
+    return this.awaitNote(callerId, target, tool, before, instructions)
+  }
+
+  /** Waits on a run for what is left of the call's bound: its result once (then forgotten), or "still running" with its handle */
+  private async waitOn(run: Run, started: number, signal?: AbortSignal): Promise<HandoffResult> {
+    if (run.result) {
+      this.runs.delete(run.id)
+      return run.result
+    }
     const left = Math.max(0, this.timings.callMs - (Date.now() - started))
     let timer: ReturnType<typeof setTimeout> | undefined
     let onAbort: (() => void) | undefined
@@ -163,15 +216,16 @@ export class HandoffFlow {
       onAbort = () => resolve(null)
       signal?.addEventListener('abort', onAbort, { once: true })
     })
-    const r = await Promise.race([entry.done, later])
+    const r = await Promise.race([run.done, later])
     clearTimeout(timer)
     if (onAbort) signal?.removeEventListener('abort', onAbort)
     if (r) {
-      if (this.inFlight.get(targetId) === entry) this.inFlight.delete(targetId)
+      this.runs.delete(run.id)
       return r
     }
-    const target = this.host.meta.get(targetId)
-    return { ok: true, state: 'writing', sessionId: targetId, sessionName: target?.name ?? targetId }
+    run.detached = true
+    const target = this.host.meta.get(run.targetId)
+    return { ok: true, state: 'writing', sessionId: run.targetId, sessionName: target?.name ?? run.targetId, handle: run.id }
   }
 
   /** Waits for the agent's note, then starts the successor. Never throws: a failure is the result */
@@ -218,6 +272,7 @@ export class HandoffFlow {
       ...(same && target.serviceTier ? { serviceTier: target.serviceTier } : {}),
       permissionPreset: target.permissionPreset,
       initialPrompt: handoffOpening(target.name, note.text, note.path, instructions ? { from: `The orchestrator (${JSON.stringify(callerName)})`, text: instructions } : undefined),
+      initialFrom: { sessionId: callerId, name: callerName },
       handoff: { from: target.name, note: note.text, fromSessionId: target.id },
     })
     this.host.rename(info.id, target.name)
@@ -229,14 +284,22 @@ export class HandoffFlow {
     return { ok: true, state: 'done', sessionId: info.id, sessionName: target.name, tool, mode, from: target.id, path: note.path }
   }
 
-  /** The card's one question: what is handed off, to what, from which note, and what stays */
+  /**
+   * The card's one question: what is handed off, to what, from which note, and what stays. Every name in it is someone
+   * else's text (the target's name, the tool the model asked for, its words), so each is JSON-quoted on one line and
+   * cannot read as the card's own sentence (#694 review); the words are cut at 400 characters and say so.
+   */
   private question(target: SessionInfo, tool: ToolName, mode: 'record' | 'agent', instructions: string | undefined): string {
-    const name = JSON.stringify(target.name)
+    const name = trustedJsonText(target.name)
+    const words = instructions
+      ? ` The orchestrator adds, as JSON: ${trustedJsonText(instructions.slice(0, 400))}` +
+        (instructions.length > 400 ? ` (cut here; ${instructions.length} characters in all, given whole to the new session).` : '')
+      : ''
     return (
-      `Allow the orchestrator to hand off ${name} to a fresh ${tool} session? ` +
+      `Allow the orchestrator to hand off the session ${name} to a fresh session of the tool ${trustedJsonText(tool)}? ` +
       (mode === 'record' ? 'The note is built from its stored conversation; the session is not asked. ' : 'The session is asked to write the note first. ') +
       `${name} stays, the live work it started moves to the new session, and the new session runs under the ${target.permissionPreset} preset.` +
-      (instructions ? ` The orchestrator adds, as JSON: ${trustedJsonText(instructions.slice(0, 400))}` : '')
+      words
     )
   }
 }

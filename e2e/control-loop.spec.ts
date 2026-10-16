@@ -2276,13 +2276,15 @@ test('handoff: the note starts a new session and the old one moves to the trash 
 
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`handoff-session-${id}`).click()
-  await expect(page.getByTestId('handoff-warning')).toContainText('moves to the trash')
-  // The receiving agent defaults to the current tool, and deletion defaults to on
+  // The receiving agent defaults to the current tool. The note comes from the record by default, for a live session
+  // too, and the original is kept by default, as the record has always been (#694): asking the agent and deleting are chosen
   await expect(page.getByTestId('handoff-tool-claude')).toHaveAttribute('aria-checked', 'true')
-  await expect(page.getByTestId('handoff-delete-toggle').locator('input')).toBeChecked()
-  // The note comes from the record by default, for a live session too (#694): asking the agent is chosen
   await expect(page.getByTestId('handoff-mode-record')).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('handoff-delete-toggle').locator('input')).not.toBeChecked()
+  await expect(page.getByTestId('handoff-keep-note')).toBeVisible()
   await page.getByTestId('handoff-mode-agent').click()
+  await page.getByTestId('handoff-delete-toggle').locator('input').check()
+  await expect(page.getByTestId('handoff-warning')).toContainText('moves to the trash')
   await page.getByTestId('confirm-handoff-yes').click()
 
   // The handoff request enters the conversation as an ordinary message
@@ -2319,9 +2321,8 @@ test('handoff: the note starts a new session and the old one moves to the trash 
 
 /*
  * Handoff from a dead agent (#78): a session whose service has crashed cannot be asked to write
- * a note. The note comes from the record (every session's default since #694), and seeing that
- * state flips the other two dialog defaults — the target becomes the opposite tool, and deletion
- * becomes off. Confirming asks the dead session
+ * a note. The note comes from the record and the original is kept (every session's defaults since
+ * #694), and seeing that state flips the target to the opposite tool. Confirming asks the dead session
  * for nothing at all, and the host's record becomes the successor's first message.
  */
 test('Handoff from a dead session: record mode is preselected, nothing is asked, and the original remains (#78)', async ({
@@ -2343,7 +2344,7 @@ test('Handoff from a dead session: record mode is preselected, nothing is asked,
   await page.getByTestId(`session-menu-${id}`).click()
   await page.getByTestId(`handoff-session-${id}`).click()
 
-  // Record mode (every session's default since #694), and the two flipped defaults: the opposite tool, deletion off
+  // Record mode and keeping the original (every session's defaults since #694), and the opposite tool
   await expect(page.getByTestId('handoff-mode-record')).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('handoff-tool-codex')).toHaveAttribute('aria-checked', 'true')
   await expect(page.getByTestId('handoff-delete-toggle').locator('input')).not.toBeChecked()

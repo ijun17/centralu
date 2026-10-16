@@ -875,7 +875,7 @@ new session now takes over the original's **live** work as it is created, before
   still in use, though (finished, reported, waiting for its orchestrator's next instruction), and left with an original
   that goes it belonged to nobody: `askedBy` named a removed session, the sidebar showed it at the top level, its next
   report was owed to the removed session, and a successor that is not `auto` could not `agent_session` it (#738). So:
-  - **A handoff that removes the original** (the window's default) says so (`handoff.removesOriginal`, an addition to
+  - **A handoff that removes the original** (chosen in the window; its default until #694) says so (`handoff.removesOriginal`, an addition to
     `createSession`), and every child moves as the session is created, settled ones too, listed in the note as
     "finished; waiting for more work". It is the same move in the same transaction; only `stateOf` gives a settled
     child a state instead of passing it over. The window removes the original as a separate, last step (`store.handoff`,
@@ -935,7 +935,8 @@ new session now takes over the original's **live** work as it is created, before
 
 Handoff was the session menu's alone (⋯ → Hand off to a fresh session…). The central orchestrator now has it as a tool,
 so it can replace a session that has drifted, or move its work to the other CLI, the way the person does. The note is
-**from the record by default**, in the tool and in the window alike (owner decision on #694): the session being
+**from the record by default**, in the tool and in the window alike (owner decision on #694; the window still keeps
+the original by default, the pairing the record mode always had): the session being
 replaced is the one least likely to summarize correctly (repeated compaction, stale state, a summary carrying injected
 text), and the record mode asks it nothing (`exportHandoffRecord`, `sessions/handoff-record.ts`, unchanged). Asking
 the session to write it (`mode: "agent"`) stays an option in both.
@@ -954,20 +955,32 @@ the session to write it (`mode: "agent"`) stays an option in both.
   - A target mid-turn (working, waiting on an approval or a question) is refused, without a card: a handoff never cuts
     a running turn. A target in an error state cannot write a note, so `agent` is refused there with a pointer to the
     record.
+  - The receiving tool is checked first (`toolProblem`: an adapter, installed and signed in): a tool that cannot start
+    a session is refused before any card, so a name the model made up never reaches the person's eyes.
   - The person's consent is a card in the orchestrator's own session for each handoff (`askHost`, an `other` card with
     `about: "session_handoff"`), naming the target, the receiving tool, where the note comes from, the preset the new
-    session runs under and the extra words. Under the orchestrator's own `auto` the boundary is open (#603) and logged.
-    "Always" lasts for that orchestrator while this host serves it, never for a project (`sessionOnlyAlways`), as an
-    update's does. Every check runs again after the card: a turn started while the card stood is not cut short.
+    session runs under and the extra words. Every name on it is someone else's text and is JSON-quoted; the extra words
+    are cut at 400 characters and the card says so and gives the full length. Under the orchestrator's own `auto` the
+    boundary is open (#603) and logged as `session_handoff of <target>`. "Always" lasts for that orchestrator while this
+    host serves it, never for a project (`sessionOnlyAlways`), as an update's does, and is recorded only for a call that
+    passed every check after the card. Every check runs again after the card: a turn started while the card stood is
+    not cut short. Every refusal is logged with the caller and the target.
 - **What it does** is the window's handoff without the deletion: the note is written to the same file
   (`<data>/handoff/<project>/<session>.md`), the successor is created with the original's settings (none of the
-  tool-specific ones when the tool changes), the original's preset and name, and the note as its marker. Creating it
+  tool-specific ones when the tool changes), the original's preset and name, and the note as its marker. Its opening
+  message is stored and shown as the orchestrator's (`from`, the internal `initialFrom` of `createSession`), not the
+  person's. The record labels every row another session or an app sent with its source and carries its text as one JSON
+  string, as read_session does; only the person's rows are `[user]`, so a child's report cannot read as the person's
+  instruction in the successor's note. Creating it
   moves the original's live children (§1.2.5, scope `live`): **the original always stays**, and is told in its
   conversation who took over. The person removes it.
 - **Agent mode** sends the window's prompt (`handoffPrompt`, now in the protocol) as the orchestrator's message, waits
   for the turn to end and reads the note from the store (`exportHandoffNote`). The call waits up to 240 seconds, under
-  the Codex bridge's 280; past that it answers "still writing", the handoff goes on, and calling again with the same
-  session waits on it (one handoff per session at a time). The note may take ten minutes, as in the window.
+  the Codex bridge's 280; past that it answers "still running" with a handle, the handoff goes on, and calling again
+  with `waitFor` set to that handle waits on that run. The handle's result is read once and kept at most ten minutes;
+  a run nobody waits on frees its session when it ends, so a later call on that session is a new handoff. One handoff
+  per session at a time: the session is claimed before anything is awaited and freed when the whole run ends, and a
+  call that finds it claimed is refused. The note may take ten minutes, as in the window.
 - **Not done**: the grid slot is not swapped (the window does that for its own handoff), and a host swap while an agent
   is writing its note drops the handoff (the request and the note stay in that session's conversation; call again).
   The card waits like `create_project`'s, so on Codex a card left standing past the bridge's bound ends the call there

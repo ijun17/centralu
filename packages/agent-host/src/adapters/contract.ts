@@ -310,13 +310,13 @@ export type AgentSessionOpts = {
 
 /**
  * What handoff_session answers (#694): refused, done (the successor is `sessionId`, named as the original `from`), or
- * the session is still writing its note (agent mode past the call's bound): calling again with the same session waits
- * on it.
+ * still running past the call's bound (agent mode's note, most often): calling again with `waitFor: handle` waits on
+ * that run and no other.
  */
 export type HandoffResult =
   | { ok: false; error: string }
   | { ok: true; state: 'done'; sessionId: string; sessionName: string; tool: ToolName; mode: 'record' | 'agent'; from: string; path: string }
-  | { ok: true; state: 'writing'; sessionId: string; sessionName: string }
+  | { ok: true; state: 'writing'; sessionId: string; sessionName: string; handle: string }
 
 export type OrchestratorTools = {
   /**
@@ -472,7 +472,7 @@ export type OrchestratorTools = {
    * The rules of who may hand off what are `HandoffFlow`'s (handoff-flow.ts). Absent on seats that cannot hand off.
    */
   handoffSession?(
-    spec: { sessionId: string; tool?: ToolName; mode?: 'record' | 'agent'; instructions?: string },
+    spec: { sessionId?: string; tool?: ToolName; mode?: 'record' | 'agent'; instructions?: string; waitFor?: string },
     signal?: AbortSignal,
   ): Promise<HandoffResult>
   /**

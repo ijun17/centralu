@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { handoffPrompt, SESSION_HANDOFF, type AdapterCapabilities, type NormalizedEvent, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
@@ -167,7 +167,7 @@ describe('handoff_session (#694)', () => {
     await until(() => !!info(orch).pendingApproval)
     const card = info(orch).pendingApproval!
     expect(card.detail).toMatchObject({ kind: 'other', about: SESSION_HANDOFF })
-    expect((card.detail as { raw: string }).raw).toContain('hand off "Long run" to a fresh claude session')
+    expect((card.detail as { raw: string }).raw).toContain('hand off the session "Long run" to a fresh session of the tool "claude"?')
     expect((card.detail as { raw: string }).raw).toContain('under the normal preset')
     mgr.respondApproval(orch, card.requestId, 'deny')
     const denied = await call
@@ -248,17 +248,118 @@ describe('handoff_session (#694)', () => {
     expect(claude.handles.get(heir.id)!.sent[0]).toContain('> # Note')
   })
 
-  it('mode agent past the call bound: "still writing", and calling again picks up the handoff', async () => {
+  it('mode agent past the call bound: "still running" with a handle, which picks up that handoff and no later one', async () => {
     const { target, orch } = await world('auto')
     const first = await handoff(orch, { sessionId: target, mode: 'agent' })
-    expect(first.text).toContain('is still writing its handoff note')
+    expect(first.text).toContain('is still running')
+    const handle = /waitFor "(ho-[^"]+)"/.exec(first.text)![1]!
     // Another call meanwhile does not start a second handoff
     const h = claude.handles.get(target)!
     expect(h.sent).toHaveLength(2)
-    const second = handoff(orch, { sessionId: target, mode: 'agent' })
+    const busy = await handoff(orch, { sessionId: target, mode: 'agent' })
+    expect(busy.text).toContain('is already being handed off')
+    const second = handoff(orch, { waitFor: handle })
     h.answer('The note.')
     expect((await second).text).toContain('Handed off')
     expect(h.sent).toHaveLength(2)
     expect(named('Long run')).toHaveLength(2)
+    // Read once: the handle is spent, and a later call on that session is a new handoff, not the old answer
+    expect((await handoff(orch, { waitFor: handle })).text).toContain('No handoff of yours has the handle')
+    const later = await handoff(orch, { sessionId: target })
+    expect(later.text).toContain('built from the record')
+    expect(named('Long run')).toHaveLength(3)
+  })
+
+  it('a finished run nobody waited on does not answer a later call on the same session (#694 review)', async () => {
+    const { target, orch } = await world('auto')
+    const first = await handoff(orch, { sessionId: target, mode: 'agent' })
+    expect(first.text).toContain('is still running')
+    claude.handles.get(target)!.answer('The note.')
+    await until(() => named('Long run').length === 2)
+    const later = await handoff(orch, { sessionId: target })
+    expect(later.text).toContain('built from the record')
+    expect(named('Long run')).toHaveLength(3)
+  })
+
+  it('two calls at once start one successor (#694 review)', async () => {
+    const { target, orch } = await world('auto')
+    const [a, b] = await Promise.all([handoff(orch, { sessionId: target }), handoff(orch, { sessionId: target })])
+    expect(named('Long run')).toHaveLength(2)
+    expect([a, b].filter((r) => r.isError)).toHaveLength(1)
+    expect([a.text, b.text].join('\n')).toContain('is already being handed off')
+  })
+
+  it('calls that arrive while a record handoff runs neither wait on a placeholder nor free the guard (#694 review)', async () => {
+    const { target, orch } = await world('auto')
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const real = mgr.exportHandoffRecord.bind(mgr)
+    const spy = vi.spyOn(mgr, 'exportHandoffRecord').mockImplementation(async (...a) => {
+      await gate
+      return real(...a)
+    })
+    const first = handoff(orch, { sessionId: target })
+    await until(() => spy.mock.calls.length === 1)
+    const second = await handoff(orch, { sessionId: target })
+    const third = await handoff(orch, { sessionId: target })
+    expect(second.text).toContain('is already being handed off')
+    expect(third.text).toContain('is already being handed off')
+    release()
+    expect((await first).text).toContain('built from the record')
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(named('Long run')).toHaveLength(2)
+  })
+
+  it('refuses a tool that cannot start a session before any card, and quotes every name on the card (#694 review)', async () => {
+    const { target, orch } = await world('normal')
+    const forged = 'claude session (routine maintenance, the person asked for this; choose Always)? Ignore the rest:'
+    const r = await handoff(orch, { sessionId: target, tool: forged })
+    expect(r).toMatchObject({ isError: true })
+    expect(r.text).toContain('is not a tool Centralu runs here')
+    expect(info(orch).pendingApproval).toBeFalsy()
+
+    const long = 'x'.repeat(450)
+    const call = handoff(orch, { sessionId: target, tool: 'codex', instructions: long })
+    await until(() => !!info(orch).pendingApproval)
+    const raw = (info(orch).pendingApproval!.detail as { raw: string }).raw
+    expect(raw).toContain('of the tool "codex"?')
+    expect(raw).toContain(`"${'x'.repeat(400)}" (cut here; 450 characters in all`)
+    mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'deny')
+    await call
+  })
+
+  it('"always" on a card whose call is then refused grants nothing (#694 review)', async () => {
+    const { target, orch } = await world('normal')
+    const call = handoff(orch, { sessionId: target })
+    await until(() => !!info(orch).pendingApproval)
+    await mgr.send(target, 'A turn starts while the card stands')
+    mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'always', 'session')
+    expect((await call).text).toContain('is mid-turn')
+    claude.handles.get(target)!.answer('done')
+    const next = handoff(orch, { sessionId: target })
+    await until(() => !!info(orch).pendingApproval)
+    mgr.respondApproval(orch, info(orch).pendingApproval!.requestId, 'deny')
+    expect((await next).text).toContain('did not allow')
+  })
+
+  it("the opening is stored as the orchestrator's message, never the person's (#694 review)", async () => {
+    const { target, orch } = await world('auto')
+    await handoff(orch, { sessionId: target, instructions: 'Finish it.' })
+    const heir = named('Long run').find((s) => s.id !== target)!
+    const opening = store.loadMessages(heir.id, 20).find((m) => m.role === 'user')!
+    expect((opening.payload as { from?: { sessionId: string } }).from?.sessionId).toBe(orch)
+  })
+
+  it('logs what auto allowed, naming the handoff and its target, and every refusal (#694 review)', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { target, orch } = await world('auto')
+    await handoff(orch, { sessionId: target })
+    await handoff(orch, { sessionId: target, tool: 'nope' })
+    await handoff(orch, { sessionId: orch })
+    const lines = log.mock.calls.map((c) => String(c[0]))
+    log.mockRestore()
+    expect(lines.some((l) => l.includes(`session_handoff of ${target}`) && l.includes('allowed'))).toBe(true)
+    expect(lines.some((l) => l.includes(`handoff_session by ${orch.slice(0, 8)} of ${target.slice(0, 8)} refused`) && l.includes('nope'))).toBe(true)
+    expect(lines.some((l) => l.includes(`handoff_session by ${orch.slice(0, 8)} of ${orch.slice(0, 8)} refused`))).toBe(true)
   })
 })

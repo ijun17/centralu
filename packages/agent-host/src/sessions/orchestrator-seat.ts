@@ -72,6 +72,8 @@ export type OrchestratorSeatHost = {
     opts: { tool?: ToolName; mode?: 'record' | 'agent'; instructions?: string },
     signal?: AbortSignal,
   ): Promise<HandoffResult>
+  /** handoff_session's waitFor (#694): `HandoffFlow.wait` */
+  handoffWait(callerId: string, handle: string, signal?: AbortSignal): Promise<HandoffResult>
   builderRefOf(m: Pick<SessionInfo, 'id' | 'appId' | 'projectId'>): AppRef | null
   checkApp(ref: AppRef): Promise<AppCheckReport>
   createApp(params: {
@@ -483,11 +485,23 @@ export function orchestratorToolsFor(
      * (which sessions, mid-turn, the person's card) is HandoffFlow's.
      */
     handoffSession: async (spec, signal) => {
-      if (!central) return { ok: false, error: 'Only the orchestrator hands sessions off' }
-      if (spec.sessionId === orchestratorId) return { ok: false, error: 'An orchestrator does not hand itself off; the person does that.' }
-      if (remoteOf(spec.sessionId)) return { ok: false, error: 'That session runs on a linked machine; hand it off there.' }
-      const target = host.meta.get(spec.sessionId)
-      if (!target || !inScope(target)) return { ok: false, error: scopeError(spec.sessionId) }
+      if (!central) {
+        console.error(`[agent-host] handoff_session by ${orchestratorId.slice(0, 8)} refused: not the central orchestrator`)
+        return { ok: false, error: 'Only the orchestrator hands sessions off' }
+      }
+      // Waiting on a run a "still running" answer named: its own runs only (`HandoffFlow.wait`)
+      if (spec.waitFor) return host.handoffWait(orchestratorId, spec.waitFor, signal)
+      if (!spec.sessionId) return { ok: false, error: 'Give sessionId: the session to hand off, from list_sessions.' }
+      const id = spec.sessionId
+      // Every refusal is logged with who asked and for which session, as the flow's are (#694 review)
+      const refuse = (error: string) => {
+        console.error(`[agent-host] handoff_session by ${orchestratorId.slice(0, 8)} of ${id.slice(0, 8)} refused: ${error}`)
+        return { ok: false as const, error }
+      }
+      if (id === orchestratorId) return refuse('An orchestrator does not hand itself off; the person does that.')
+      if (remoteOf(id)) return refuse('That session runs on a linked machine; hand it off there.')
+      const target = host.meta.get(id)
+      if (!target || !inScope(target)) return refuse(scopeError(id))
       return host.handoff(orchestratorId, target, { ...(spec.tool ? { tool: spec.tool } : {}), ...(spec.mode ? { mode: spec.mode } : {}), ...(spec.instructions ? { instructions: spec.instructions } : {}) }, signal)
     },
 

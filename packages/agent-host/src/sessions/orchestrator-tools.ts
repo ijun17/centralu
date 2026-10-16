@@ -173,10 +173,11 @@ export const ORCHESTRATOR_TOOLS = [
       'Hands a session off to a fresh one that starts from a note: built from its stored conversation by default, or written by the session (mode "agent"). ' +
       'Its live children move to the new session; the original stays. Refused while it is mid-turn; asks the person unless you are auto.',
     schema: z.object({
-      sessionId: z.string().describe('The session id from list_sessions.'),
+      sessionId: z.string().optional().describe('The session id from list_sessions.'),
       tool: ToolName.optional().describe("The new session's tool. If omitted, the same tool."),
       mode: z.enum(['record', 'agent']).optional().describe('Where the note comes from. record (default) asks the session nothing.'),
       instructions: z.string().optional().describe('Extra words for the new session, read after the note.'),
+      waitFor: z.string().optional().describe('The handle a "still running" answer gave: waits on that handoff.'),
     }),
   },
   {
@@ -956,20 +957,21 @@ export async function runOrchestratorTool(
 
   if (name === 'handoff_session') {
     const sessionId = typeof args.sessionId === 'string' ? args.sessionId.trim() : ''
-    if (!sessionId) return { text: 'Give sessionId: the session to hand off, from list_sessions.', isError: true }
+    const waitFor = typeof args.waitFor === 'string' && args.waitFor.trim() ? args.waitFor.trim() : undefined
+    if (!sessionId && !waitFor) return { text: 'Give sessionId: the session to hand off, from list_sessions.', isError: true }
     if (args.tool !== undefined && !ToolName.safeParse(args.tool).success) return { text: `Not a tool: ${String(args.tool)}`, isError: true }
     if (args.mode !== undefined && args.mode !== 'record' && args.mode !== 'agent') return { text: 'mode is "record" or "agent".', isError: true }
     const tool = ToolName.safeParse(args.tool).data
     const mode = args.mode === 'record' || args.mode === 'agent' ? args.mode : undefined
     const instructions = typeof args.instructions === 'string' && args.instructions.trim() ? args.instructions : undefined
     if (!tools.handoffSession) return { text: 'This session cannot hand sessions off.', isError: true }
-    const r = await tools.handoffSession({ sessionId, ...(tool ? { tool } : {}), ...(mode ? { mode } : {}), ...(instructions ? { instructions } : {}) }, signal)
+    const r = await tools.handoffSession(waitFor ? { waitFor } : { sessionId, ...(tool ? { tool } : {}), ...(mode ? { mode } : {}), ...(instructions ? { instructions } : {}) }, signal)
     if (!r.ok) return { text: r.error, isError: true }
     if (r.state === 'writing') {
       return {
         text:
-          `${trustedJsonText(r.sessionName)} [${r.sessionId}] is still writing its handoff note. Call handoff_session again with the same sessionId to keep waiting; ` +
-          'the new session starts when the note is written, whether or not you wait.',
+          `The handoff of ${trustedJsonText(r.sessionName)} [${r.sessionId}] is still running (its note is being written). ` +
+          `Call handoff_session with waitFor "${r.handle}" to keep waiting; the new session starts when the note is written, whether or not you wait.`,
       }
     }
     return {
