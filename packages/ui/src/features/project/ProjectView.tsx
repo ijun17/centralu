@@ -10,6 +10,7 @@ import { DragRegion } from '../../components/DragRegion.jsx'
 import { lookOf } from '../session/look.js'
 import { PANEL_MIME, SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../sidebar/reorder.js'
 import { GRID_GAP, wholePixelTracks } from '../grid/tracks.js'
+import { panelClass, usePanelCards } from '../grid/panelCards.js'
 import { useRealSize } from '../grid/real-size.js'
 import { placeSlots } from '../pinned-app/slots.js'
 import { AppPanel } from '../pinned-app/AppPanel.jsx'
@@ -52,9 +53,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
   /** Which side of which panel the pointer is on — the preview order derives from this (GridView, #53) */
   const [over, setOver] = useState<{ id: string; before: boolean } | null>(null)
   const [dragging, setDragging] = useState<string | null>(null)
-  const cards = useRef(new Map<string, HTMLDivElement>())
-  /** Conversation scroll positions, taken right before a reorder — GridView has the measurement */
-  const scrolls = useRef(new Map<string, number>())
+  const { place, snapshotScroll, liftPanel } = usePanelCards()
 
   // The sidebar's order is the natural one: its sessions, then its apps
   const present = useMemo(
@@ -63,23 +62,6 @@ export function ProjectView({ projectId }: { projectId: string }) {
   )
   const visible = useMemo(() => arrangePanels(present, saved), [present, saved])
   const appsById = useMemo(() => new Map(apps.map((a) => [a.appId, a])), [apps])
-
-  // Same as GridView: moving a DOM node resets its scroll, so it is put back before paint
-  useLayoutEffect(() => {
-    if (scrolls.current.size === 0) return
-    for (const [id, top] of scrolls.current) {
-      const sc = cards.current.get(id)?.querySelector('[data-testid="chat-stream"]')
-      if (sc && sc.scrollTop !== top) sc.scrollTop = top
-    }
-    scrolls.current.clear()
-  })
-  const snapshotScroll = () => {
-    scrolls.current.clear()
-    for (const [id, el] of cards.current) {
-      const sc = el.querySelector('[data-testid="chat-stream"]')
-      if (sc) scrolls.current.set(id, sc.scrollTop)
-    }
-  }
 
   /*
    * Any drag's end clears the panel it was last over: a sidebar row let go somewhere else never reaches this screen's
@@ -129,11 +111,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
     if (p?.kind === 'session') e.dataTransfer.setData(SESSION_MIME, p.id)
     e.dataTransfer.effectAllowed = 'move'
     // The panel is lifted, not its header (GridView)
-    const card = cards.current.get(id)
-    if (card) {
-      const r = card.getBoundingClientRect()
-      e.dataTransfer.setDragImage(card, e.clientX - r.left, e.clientY - r.top)
-    }
+    liftPanel(id, e)
     setDragging(id)
   }
   const endDrag = () => {
@@ -238,14 +216,9 @@ export function ProjectView({ projectId }: { projectId: string }) {
               return (
                 <div
                   key={id}
-                  ref={(el) => {
-                    if (el) cards.current.set(id, el)
-                    else cards.current.delete(id)
-                  }}
-                  // The grid's panel, class for class — the border (#208), the isolation and the colours are its reasons
-                  className={`cc-panel relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-line-strong bg-surface-floor transition-opacity ${
-                    dragging === id ? 'opacity-40' : ''
-                  }`}
+                  ref={place(id)}
+                  // The grid's panel, class for class (panelClass)
+                  className={panelClass(dragging === id)}
                   data-look={look}
                   data-testid={`project-panel-${id}`}
                   data-drop={over?.id === id ? (over.before ? 'before' : 'after') : undefined}

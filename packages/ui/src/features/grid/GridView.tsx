@@ -24,6 +24,7 @@ import { APP_MIME, SESSION_MIME, dropsBefore, moveTo as reorderIds } from '../si
 import { AppPanel } from '../pinned-app/AppPanel.jsx'
 import { placeSlots } from '../pinned-app/slots.js'
 import { GRID_GAP, wholePixelTracks } from './tracks.js'
+import { panelClass, usePanelCards } from './panelCards.js'
 import { useRealSize } from './real-size.js'
 import { droppedGridList, droppedGridPanel, gridTakes } from './drop.js'
 
@@ -91,31 +92,7 @@ export function GridView() {
   const [over, setOver] = useState<{ id: string; before: boolean } | null>(null)
   /** The panel currently being dragged. The original is dimmed to show "this is what is moving" */
   const [dragging, setDragging] = useState<string | null>(null)
-  /** Reference used to lift the **whole panel**, not just the header, while dragging */
-  const cards = useRef(new Map<string, HTMLDivElement>())
-  /** Conversation scroll positions, taken right before a reorder — see the layout effect below */
-  const scrolls = useRef(new Map<string, number>())
-
-  /*
-    Reordering panels moves DOM nodes, and the browser resets a moved node's scrollable
-    descendants to scrollTop 0 — scroll is layout state, not a DOM property (measured: a
-    pane scrolled to 40 came back at 0 after one insertBefore; the node itself survived,
-    so `key={id}` was not the culprit and React never learns anything happened — no effect
-    in the pane re-runs). Every reflow step would kick each conversation back to the top.
-
-    So the handlers below snapshot every pane's conversation scroll *before* changing the
-    order, and this effect puts the values back before paint. It only acts when a snapshot
-    was explicitly taken: restoring on every render would clobber a scroll the user made
-    while a message streamed in.
-  */
-  useLayoutEffect(() => {
-    if (scrolls.current.size === 0) return
-    for (const [id, top] of scrolls.current) {
-      const sc = cards.current.get(id)?.querySelector('[data-testid="chat-stream"]')
-      if (sc && sc.scrollTop !== top) sc.scrollTop = top
-    }
-    scrolls.current.clear()
-  })
+  const { cardOf, place, snapshotScroll, liftPanel } = usePanelCards()
 
   /*
    * Put focus on the selected panel's composer.
@@ -129,20 +106,9 @@ export function GridView() {
    */
   useEffect(() => {
     if (!focusedSessionId) return
-    const input = cards.current
-      .get(focusedSessionId)
-      ?.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')
+    const input = cardOf(focusedSessionId)?.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')
     input?.focus()
-  }, [focusedSessionId])
-
-  /** Call before any state change that can reorder the panels */
-  const snapshotScroll = () => {
-    scrolls.current.clear()
-    for (const [id, el] of cards.current) {
-      const sc = el.querySelector('[data-testid="chat-stream"]')
-      if (sc) scrolls.current.set(id, sc.scrollTop)
-    }
-  }
+  }, [focusedSessionId, cardOf])
 
   /*
    * Do not draw a deleted session, or an app the list does not have, even if it is still in the layout (leave the
@@ -245,18 +211,7 @@ export function GridView() {
     if (p.kind === 'session') e.dataTransfer.setData(SESSION_MIME, p.sessionId)
     else e.dataTransfer.setData(APP_MIME, appKeyOf(p.projectId, p.appId, p.machine))
     e.dataTransfer.effectAllowed = 'move'
-    /*
-       What is being dragged is **the panel**, not the header.
-       Because the draggable element is the header, the browser picked up only the
-       header and carried it around — the panel stayed put and only a thin strip
-       followed the pointer, so nobody could tell what was actually being moved
-       (dogfooding). This swaps the drag image over to the panel.
-     */
-    const card = cards.current.get(id)
-    if (card) {
-      const r = card.getBoundingClientRect()
-      e.dataTransfer.setDragImage(card, e.clientX - r.left, e.clientY - r.top)
-    }
+    liftPanel(id, e)
     setDragging(id)
   }
 
@@ -329,10 +284,7 @@ export function GridView() {
             return (
               <div
                 key={id}
-                ref={(el) => {
-                  if (el) cards.current.set(id, el)
-                  else cards.current.delete(id)
-                }}
+                ref={place(id)}
                 /*
                 A panel wears the same four looks as the sidebar's mark (`lookOf`, styles/index.css `.cc-panel`):
                 with several panels on screen, a single small indicator is not something the eye can
@@ -347,26 +299,7 @@ export function GridView() {
                 focus outline already say where the person is typing. Only the look of the
                 session's state remains.
               */
-                /*
-                The panel's border is brighter than any line inside the panel (user's
-                observation, 2026-09-11). Before, the panel was `line` and the folded input card
-                was `line-strong`, so **what was inside was brighter than the vessel holding it**,
-                and the eye went to the card's curve before the panel's boundary. The two are
-                swapped — the panel goes up to `line-strong` and the card goes down to `line`.
-              */
-                /*
-                isolate: the panel contains its own stacking layer.
-                The spinning border sits at z-30, because it has to be above the folded composer
-                (z-20) inside the panel. But without the panel forming a stacking context, that
-                30 leaked outside the panel, and the border was drawn over the file/git overlay
-                (z-20) (user's observation). Raising the overlay's number to win would also work,
-                but then whoever next picks a number starts the same race over again. For
-                "highest within the panel" to actually be true, the panel has to be a fence —
-                the same fence the mark's ring needed.
-              */
-                className={`cc-panel relative isolate flex min-h-0 flex-col overflow-hidden rounded-lg border border-line-strong bg-surface-floor transition-opacity ${
-                  dragging === id ? 'opacity-40' : ''
-                }`}
+                className={panelClass(dragging === id)}
                 data-look={look}
                 /*
                   Placed by hand rather than by the browser's auto-flow, because a spanning panel's place has to be
