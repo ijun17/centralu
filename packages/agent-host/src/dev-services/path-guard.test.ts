@@ -86,4 +86,12 @@ describe('isInside (#428)', () => {
     expect(isInside('C:\\Work\\Proj', 'D:\\Work\\Proj\\a', win32)).toBe(false)
     expect(isInside('C:\\Work\\Proj', '\\\\evil\\share\\Proj\\a', win32)).toBe(false)
   })
+
+  // A drive root as the project (#849): judged by a prefix with a separator added, `D:\` became `D:\\` and held nothing
+  it('takes a drive root as holding everything on that drive, and nothing on another', () => {
+    expect(isInside('D:\\', 'D:\\src\\a.ts', win32)).toBe(true)
+    expect(isInside('D:\\', 'd:\\', win32)).toBe(true)
+    expect(isInside('D:\\', 'C:\\src', win32)).toBe(false)
+    expect(pathParts('D:\\', 'src\\a.ts', win32)).toEqual(['src', 'a.ts'])
+  })
 })
