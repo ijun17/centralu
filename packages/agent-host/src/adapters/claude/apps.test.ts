@@ -5,6 +5,7 @@ import * as kit from '../../apps/external/test-helpers.js'
 import { SessionAppsHub, type AppSessionKey } from '../../sessions/session-apps.js'
 import { attachWorld, type AttachWorld } from '../../sessions/session-apps.test-helpers.js'
 import type { CreateSessionOpts, OrchestratorTools, SessionHandle } from '../contract.js'
+import { answerOrCard } from '../approval-outcome.test-helpers.js'
 
 /**
  * An external app attached to a Claude session (M4 A-5) — one in-process proxy server per app.
@@ -64,11 +65,17 @@ let handle: SessionHandle | null = null
 const WORKER: AppSessionKey = { id: 'claude-s1', kind: 'worker', projectId: 'p1' }
 const servers = () => (captured.options?.mcpServers ?? {}) as Record<string, { type?: string; name?: string; instance?: unknown }>
 
+/** Approval cards the last session raised for the person */
+let cards = 0
+
 async function start(key: AppSessionKey, over: Partial<CreateSessionOpts> = {}) {
+  cards = 0
   handle = await new ClaudeAdapter().createSession(
     // A project's apps attach only in a trusted project (decision 4) — this session belongs to a trusted project, matching what the manager passes.
     { sessionId: key.id, cwd: '/tmp', permissionPreset: 'normal', projectTrusted: key.projectId !== null, apps: hub.attach(key), ...over },
-    () => {},
+    (e) => {
+      if (e.type === 'approval_request') cards++
+    },
   )
   return handle
 }
@@ -297,11 +304,12 @@ describe('an attached app changing is followed without a restart', () => {
  * own.
  */
 describe('approval of app tools — read-only x preset', () => {
-  /** The real approval callback. If there is no answer within 200ms, it asked the person (the approval card came up). */
+  /** The real approval callback: its answer, or 'asked-the-human' once it raised an approval card */
   async function decide(toolName: string): Promise<unknown> {
     const canUseTool = captured.options?.canUseTool as ((n: string, i: Record<string, unknown>) => Promise<unknown>) | undefined
     expect(typeof canUseTool).toBe('function')
-    return Promise.race([canUseTool!(toolName, { to: 1 }), new Promise((r) => setTimeout(() => r('asked-the-human'), 200))])
+    const r = await answerOrCard(() => canUseTool!(toolName, { to: 1 }), () => cards)
+    return r === 'still asking' ? 'asked-the-human' : r
   }
   const ALLOW = { behavior: 'allow', updatedInput: { to: 1 } }
 

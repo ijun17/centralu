@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type { NormalizedEvent, ToolName } from '@cc/protocol'
 import type { AgentAdapter } from '../contract.js'
 import { DEFAULT_RARE_TIER, setRareTier } from '../../sessions/orchestrator-tools.js'
+import { answerOrCard } from '../approval-outcome.test-helpers.js'
 
 /**
  * Can a proposed MCP server take the orchestrator's own name (#93)?
@@ -47,6 +48,8 @@ const { ORCHESTRATOR_TOOLS } = await import('../../sessions/orchestrator-tools.j
 
 let store: InstanceType<typeof Store>
 let mgr: InstanceType<typeof SessionManager>
+/** Every event the sessions sent, where an approval card for the person shows up */
+let seen: NormalizedEvent[] = []
 
 beforeEach(() => {
   // So the orchestrator home does not get created in the real home directory (sessions come up here).
@@ -54,22 +57,21 @@ beforeEach(() => {
   captured.options = null
   store = new Store()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', new ClaudeAdapter()]])
-  mgr = new SessionManager(store, adapters, (_e: NormalizedEvent) => {})
+  seen = []
+  mgr = new SessionManager(store, adapters, (e: NormalizedEvent) => seen.push(e))
 })
 
 /** The MCP server map carried by the last session that came up. */
 const servers = () => (captured.options?.mcpServers ?? {}) as Record<string, { type?: string }>
 
-/** The real approval callback. If there is no answer within 200ms, it asked the person (the approval card came up). */
+/** The real approval callback: its answer, or 'asked-the-human' once it raised an approval card */
 async function decide(toolName: string): Promise<unknown> {
   const canUseTool = captured.options?.canUseTool as
     | ((n: string, i: Record<string, unknown>) => Promise<unknown>)
     | undefined
   expect(typeof canUseTool).toBe('function')
-  return Promise.race([
-    canUseTool!(toolName, { url: 'http://evil' }),
-    new Promise((r) => setTimeout(() => r('asked-the-human'), 200)),
-  ])
+  const r = await answerOrCard(() => canUseTool!(toolName, { url: 'http://evil' }), () => seen.filter((e) => e.type === 'approval_request').length)
+  return r === 'still asking' ? 'asked-the-human' : r
 }
 
 /*
@@ -168,7 +170,7 @@ describe('the orchestrator name cannot be proposed (#93)', () => {
    * agent asks for everything but reads; a server merely named like ours used to skip the card.
    */
   it("a session that was not given Centralu's server asks about a tool named like one of ours", async () => {
-    await new ClaudeAdapter().createSession({ sessionId: 'app-agent', cwd: '/x', permissionPreset: 'safe' }, () => {})
+    await new ClaudeAdapter().createSession({ sessionId: 'app-agent', cwd: '/x', permissionPreset: 'safe' }, (e) => seen.push(e))
     expect(servers()).not.toHaveProperty('centralu')
     expect(await decide('mcp__centralu__list_sessions')).toBe('asked-the-human')
   })

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
+import { settledNow } from '../approval-outcome.test-helpers.js'
 
 /**
  * Request ids are unique across processes (#683 review). The counter restarts in each process, so a window that
@@ -36,7 +37,6 @@ async function processOf(sessionId: string) {
   return { handle, canUseTool: sdk.canUseTool!, ids }
 }
 
-const settled = (p: Promise<unknown>) => Promise.race([p.then(() => 'answered'), new Promise((r) => setTimeout(() => r('still asking'), 20))])
 
 describe('Claude request ids across a process swap (#683 review)', () => {
   it("the old process's first request id does not answer the new process's first request", async () => {
@@ -53,7 +53,7 @@ describe('Claude request ids across a process swap (#683 review)', () => {
     expect(newId).not.toBe(oldId)
     // An Allow from a row still drawn from the old request is refused as gone, and the new command stays unanswered
     expect(next.handle.respondApproval(oldId!, 'allow')).toBe(false)
-    expect(await settled(asked)).toBe('still asking')
+    expect(await settledNow(asked)).toBe('still asking')
     await next.handle.dispose()
   })
 

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
+import { answerOrCard } from '../approval-outcome.test-helpers.js'
 
 /**
  * "Always allow" for file edits (#170). The UI sends the path as the matcher for a file edit, and
@@ -29,20 +30,22 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 const { ClaudeAdapter } = await import('./index.js')
 
 const EDIT = { file_path: '/x/a.ts', old_string: 'a', new_string: 'b' }
-/** The callback's answer — while still asking the person, no answer arrives. */
-const answer = (p: Promise<{ behavior: string }>) =>
-  Promise.race([p.then((r) => r.behavior), new Promise<string>((r) => setTimeout(() => r('still asking'), 20))])
 
 async function session() {
   const events: NormalizedEvent[] = []
   const handle = await new ClaudeAdapter().createSession({ sessionId: 's1', cwd: '/x', permissionPreset: 'safe' }, (e) => events.push(e))
   const asks = () => events.filter((e) => e.type === 'approval_request')
-  return { handle, canUseTool: sdk.canUseTool!, asks }
+  /** The callback's answer, or 'still asking' once it raised a card for the person */
+  const answer = async (name: string, input: Record<string, unknown>) => {
+    const r = await answerOrCard(() => sdk.canUseTool!(name, input), () => asks().length)
+    return r === 'still asking' ? r : r.behavior
+  }
+  return { handle, canUseTool: sdk.canUseTool!, asks, answer }
 }
 
 describe('"Always allow" for Claude file edits (#170)', () => {
   it('does not ask again for the next edit to an always-allowed path — other files still get asked', async () => {
-    const { handle, canUseTool, asks } = await session()
+    const { handle, canUseTool, asks, answer } = await session()
     const first = canUseTool('Edit', EDIT)
     const ask = asks()[0] as Extract<NormalizedEvent, { type: 'approval_request' }>
     expect(ask.detail).toMatchObject({ kind: 'file_edit', path: '/x/a.ts' })
@@ -51,7 +54,7 @@ describe('"Always allow" for Claude file edits (#170)', () => {
     handle.respondApproval(ask.requestId, 'always', 'session', '/x/a.ts')
     expect((await first).behavior).toBe('allow')
 
-    expect(await answer(canUseTool('Edit', { ...EDIT, new_string: 'c' }))).toBe('allow')
+    expect(await answer('Edit', { ...EDIT, new_string: 'c' })).toBe('allow')
     expect(asks()).toHaveLength(1)
 
     void canUseTool('Edit', { ...EDIT, file_path: '/x/b.ts' })
@@ -65,24 +68,24 @@ describe('"Always allow" for Claude file edits (#170)', () => {
    * live until the process restarted, then gone.
    */
   it('"always" with no matcher allows this call and remembers nothing', async () => {
-    const { handle, canUseTool, asks } = await session()
+    const { handle, canUseTool, asks, answer } = await session()
     const first = canUseTool('Bash', { command: 'npm test' })
     const ask = asks()[0] as Extract<NormalizedEvent, { type: 'approval_request' }>
     handle.respondApproval(ask.requestId, 'always', 'session')
     expect((await first).behavior).toBe('allow')
-    expect(await answer(canUseTool('Bash', { command: 'npm test' }))).toBe('still asking')
+    expect(await answer('Bash', { command: 'npm test' })).toBe('still asking')
     expect(asks()).toHaveLength(2)
     await handle.dispose()
   })
 
   // The UI's matcher for a command is trimmed (core's suggestMatcher); the key it is matched against must be too (#428)
   it('a command with surrounding whitespace matches the rule made from it', async () => {
-    const { handle, canUseTool, asks } = await session()
+    const { handle, canUseTool, asks, answer } = await session()
     const first = canUseTool('Bash', { command: ' npm test\n' })
     const ask = asks()[0] as Extract<NormalizedEvent, { type: 'approval_request' }>
     handle.respondApproval(ask.requestId, 'always', 'session', 'npm test')
     expect((await first).behavior).toBe('allow')
-    expect(await answer(canUseTool('Bash', { command: ' npm test\n' }))).toBe('allow')
+    expect(await answer('Bash', { command: ' npm test\n' })).toBe('allow')
     expect(asks()).toHaveLength(1)
     await handle.dispose()
   })
@@ -114,9 +117,9 @@ describe('"Always allow" for Claude file edits (#170)', () => {
   })
 
   it('also honors the path rules (applyRules) saved and restored after a restart', async () => {
-    const { handle, canUseTool, asks } = await session()
+    const { handle, asks, answer } = await session()
     handle.applyRules!(['/x/a.ts'])
-    expect(await answer(canUseTool('Write', { file_path: '/x/a.ts', content: 'new' }))).toBe('allow')
+    expect(await answer('Write', { file_path: '/x/a.ts', content: 'new' })).toBe('allow')
     expect(asks()).toHaveLength(0)
     await handle.dispose()
   })

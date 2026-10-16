@@ -22,6 +22,9 @@ module.exports = {
           // Files in the app template are used **by being copied into an app folder**
           // (scaffold.ts). Nothing imports them from inside the template itself.
           'agent-host/app-template/',
+          // Shared by test files only, which this cruise leaves out (doNotFollow below); one with no imports of its own
+          // looks unused from here
+          '\\.test-helpers\\.ts$',
         ],
       },
       to: {},

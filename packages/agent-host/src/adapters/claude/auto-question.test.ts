@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
+import { answerOrCard } from '../approval-outcome.test-helpers.js'
 
 /**
  * Choice cards for auto sessions (#171). Auto did not pass a `canUseTool` callback, so when the
@@ -50,11 +51,9 @@ describe('AskUserQuestion in auto sessions (#171)', () => {
   it('denies every other request that reaches the callback, as old-style auto did — no card, no approval', async () => {
     const events: NormalizedEvent[] = []
     const handle = await new ClaudeAdapter().createSession({ sessionId: 's2', cwd: '/x', permissionPreset: 'auto' }, (e) => events.push(e))
-    const r = await Promise.race([
-      sdk.options!.canUseTool!('Bash', { command: 'touch cc-auto-probe.txt' }),
-      new Promise<{ behavior: string }>((res) => setTimeout(() => res({ behavior: 'still asking' }), 20)),
-    ])
-    expect(r.behavior).toBe('deny')
+    const asks = () => events.filter((e) => e.type === 'approval_request').length
+    const r = await answerOrCard(() => sdk.options!.canUseTool!('Bash', { command: 'touch cc-auto-probe.txt' }), asks)
+    expect(r).toMatchObject({ behavior: 'deny' })
     expect(events.some((e) => e.type === 'approval_request')).toBe(false)
     await handle.dispose()
   })
