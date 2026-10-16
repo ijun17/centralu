@@ -29,6 +29,8 @@ export function ApprovalCard({
   const inComposer = useComposerFocused(sessionId)
   // An update card (#581), an agent's apply card (#665) or the orchestrator's handoff card (#694): its "always" is for this session only, never the project
   const updateCard = sessionOnlyAlways(detail)
+  // An edit whose file is unknown has nothing to remember (#428): no button, and `a` does nothing
+  const canAlways = offersAlways(detail)
   const keys: AnswerKeys = inComposer
     ? { allow: sc(...APPROVAL_COMBOS.allow), deny: sc(...APPROVAL_COMBOS.deny), always: sc(...APPROVAL_COMBOS.always) }
     : BARE_KEYS
@@ -49,7 +51,7 @@ export function ApprovalCard({
       // Nor does a new project (#515): it is one folder, made once — there is nothing to always allow
       if ((detail.kind === 'capability' || detail.kind === 'project_create') && action.decision === 'always') return
       // Nor does an edit whose file is unknown (#428): there is no path to remember
-      if (!offersAlways(detail) && action.decision === 'always') return
+      if (!canAlways && action.decision === 'always') return
       // Nor does a project of another machine (#700): the consent is for this call, nothing is remembered for it
       if (detail.kind === 'project_access' && detail.to.machine && action.decision === 'always') return
       // A cross-project consent's "always" is for the pair (#371) — there is no session or project scope to pick
@@ -70,7 +72,7 @@ export function ApprovalCard({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [sessionId, requestId, detail, respond])
+  }, [sessionId, requestId, detail, canAlways, respond])
 
   if (detail.kind === 'project_access') {
     return (
@@ -141,7 +143,7 @@ export function ApprovalCard({
       <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
         <ActionKey k={keys.allow} label="Allow" onClick={() => void respond(sessionId, requestId, 'allow')} testId="approve-allow" disabled={busy} />
         <ActionKey k={keys.deny} label="Deny" onClick={() => void respond(sessionId, requestId, 'deny')} testId="approve-deny" disabled={busy} />
-        {offersAlways(detail) && <ActionKey
+        {canAlways && <ActionKey
           k={keys.always}
           label="Always allow"
           testId="approve-always"
@@ -158,7 +160,7 @@ export function ApprovalCard({
           onClick={(alt) => void respond(sessionId, requestId, 'always', updateCard ? 'session' : alt ? 'project' : 'session')}
         />}
         {/* Project scope is ⌥a, a letter: from the composer it stays a click with ⌥ held (the button's title says so) */}
-        {!inComposer && !updateCard && offersAlways(detail) && (
+        {!inComposer && !updateCard && canAlways && (
           <span className="ml-auto text-2xs text-ink-faint">
             <Kbd alt /> <Kbd>a</Kbd> whole project
           </span>
