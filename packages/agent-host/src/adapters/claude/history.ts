@@ -1,4 +1,5 @@
 import type { ExternalSessionSummary, HistoryMessage } from '../contract.js'
+import { finite, trimmed } from '../../json-value.js'
 import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
 
 /**
@@ -55,8 +56,6 @@ export function __setSessionApiForTest(api: SessionApi | null | undefined): void
   cached = api
 }
 
-const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
-const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 
 export async function listClaudeSessions(cwd: string, limit: number): Promise<ExternalSessionSummary[]> {
   const sdk = await sessionApi()
@@ -77,7 +76,7 @@ export async function listClaudeSessions(cwd: string, limit: number): Promise<Ex
   if (!Array.isArray(rows)) return []
   const out: ExternalSessionSummary[] = []
   for (const r of rows) {
-    const id = str(r?.sessionId)
+    const id = trimmed(r?.sessionId)
     if (!id) continue
     out.push({
       externalId: id,
@@ -86,9 +85,9 @@ export async function listClaudeSessions(cwd: string, limit: number): Promise<Ex
         [r.customTitle, r.summary, r.firstPrompt]
           .map((c) => (typeof c === 'string' ? cleanTitle(c) : ''))
           .find((c) => c.length > 0) ?? 'Untitled session',
-      updatedAt: num(r.lastModified) ?? Date.now(),
-      createdAt: num(r.createdAt),
-      branch: str(r.gitBranch),
+      updatedAt: finite(r.lastModified) ?? Date.now(),
+      createdAt: finite(r.createdAt),
+      branch: trimmed(r.gitBranch),
     })
   }
   return out

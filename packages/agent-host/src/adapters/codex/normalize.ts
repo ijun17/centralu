@@ -1,4 +1,5 @@
 import { NO_PATH, type ApprovalDetail, type BackgroundTask, type NormalizedEvent, type RequestInput, type SessionGoal, type SubagentStep } from '@cc/protocol'
+import { asObj, finite, str } from '../../json-value.js'
 import { noticeWords } from './notices.js'
 
 /**
@@ -9,12 +10,9 @@ import { noticeWords } from './notices.js'
  */
 
 type Notification = { method: string; params?: unknown }
-const obj = (v: unknown): Record<string, unknown> => (typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {})
-const str = (v: unknown): string => (typeof v === 'string' ? v : '')
-const num = (v: unknown): number | undefined => (typeof v === 'number' ? v : undefined)
 /** An object, or JSON text of one; anything else is empty */
 const jsonObject = (v: unknown): Record<string, unknown> => {
-  if (typeof v !== 'string') return Array.isArray(v) ? {} : obj(v)
+  if (typeof v !== 'string') return asObj(v)
   try {
     return jsonObject(JSON.parse(v) as unknown)
   } catch {
@@ -39,18 +37,18 @@ function resultSummary(item: Record<string, unknown>): string {
   const direct = str(item.aggregatedOutput) || str(item.output)
   if (direct) return direct
 
-  const err = str(obj(item.error).message)
+  const err = str(asObj(item.error).message)
   if (err) return err
 
-  const content = obj(item.result).content
+  const content = asObj(item.result).content
   if (Array.isArray(content)) {
     const text = content
-      .map((c) => str(obj(c).text))
+      .map((c) => str(asObj(c).text))
       .filter(Boolean)
       .join('\n')
     if (text) return text
   }
-  const structured = obj(item.result).structuredContent
+  const structured = asObj(item.result).structuredContent
   // Some servers only give a structured answer — one line of JSON beats an empty card
   if (structured && typeof structured === 'object') {
     try {
@@ -101,7 +99,7 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
      * to read invocation.tool, which made every one of Codex's MCP calls collapse into a single
      * 'MCP' — this surfaced while running the orchestrator on Codex.
      */
-    const tool = str(item.tool) || str(obj(item.invocation).tool)
+    const tool = str(item.tool) || str(asObj(item.invocation).tool)
     const server = str(item.server)
     /*
      * A command run through centralu_run (#512) is summarized as the command, the same rule as toolSummary on
@@ -109,20 +107,20 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
      * stays centralu_run; the screen re-reads both proposal lists for such a call.
      */
     if (tool === 'centralu_run' && (!server || server === 'centralu')) {
-      const args = jsonObject(item.arguments ?? obj(item.invocation).arguments)
+      const args = jsonObject(item.arguments ?? asObj(item.invocation).arguments)
       const command = str(args.command).trim()
       if (/^[a-z]+(?:_[a-z]+)*$/.test(command)) {
         const inner = jsonObject(args.args)
-        return itemSummary({ ...item, tool: command, arguments: inner, invocation: { ...obj(item.invocation), tool: command, arguments: inner } })
+        return itemSummary({ ...item, tool: command, arguments: inner, invocation: { ...asObj(item.invocation), tool: command, arguments: inner } })
       }
     }
     // ask_project (#371) — the project asked is the title, the same rule as toolSummary on the claude side
     if (tool === 'ask_project' && (!server || server === 'centralu')) {
-      const rawArgs = item.arguments ?? obj(item.invocation).arguments
+      const rawArgs = item.arguments ?? asObj(item.invocation).arguments
       let project = ''
       try {
         const parsed = typeof rawArgs === 'string' ? (JSON.parse(rawArgs) as unknown) : rawArgs
-        project = str(obj(parsed).project)
+        project = str(asObj(parsed).project)
       } catch {
         /* If the arguments are not JSON, the card names no project — it still finds the session it asked */
       }
@@ -130,11 +128,11 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
     }
     // Worktree proposal (#69) — the branch name is the title, and that title is the only channel for the UI's prefill
     if (tool.endsWith('propose_worktree_session')) {
-      const rawArgs = obj(item.invocation).arguments
+      const rawArgs = asObj(item.invocation).arguments
       let branch = ''
       try {
         const parsed = typeof rawArgs === 'string' ? (JSON.parse(rawArgs) as unknown) : rawArgs
-        branch = str(obj(parsed).branch)
+        branch = str(asObj(parsed).branch)
       } catch {
         /* If the arguments are not JSON, the card just shows up with no name — the window opens with a blank name */
       }
@@ -150,7 +148,7 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
      * and a person had to open the rollout file to find out. With arguments on the card, that
      * difference is visible at a glance.
      */
-    const args = argsPreview(item.arguments ?? obj(item.invocation).arguments)
+    const args = argsPreview(item.arguments ?? asObj(item.invocation).arguments)
     const name = [server, tool].filter(Boolean).join(': ') || str(item.title) || 'MCP tool'
     return {
       tool: tool || 'MCP',
@@ -208,7 +206,7 @@ export type FileChange = { path: string; diff: string; change?: 'add' | 'update'
 
 export function fileChangesOf(item: Record<string, unknown>): FileChange[] {
   const changes = Array.isArray(item.changes) ? item.changes : []
-  return changes.map((c) => ({ path: str(obj(c).path), diff: str(obj(c).diff), ...changeKindOf(obj(obj(c).kind)) }))
+  return changes.map((c) => ({ path: str(asObj(c).path), diff: str(asObj(c).diff), ...changeKindOf(asObj(asObj(c).kind)) }))
 }
 
 /**
@@ -253,14 +251,14 @@ export function approvalDetailFrom(
   itemChanges?: readonly FileChange[],
 ): ApprovalDetail {
   if (method === 'item/commandExecution/requestApproval') {
-    const item = obj(params.item)
+    const item = asObj(params.item)
     /*
      * Everything else the request says is kept (#683 review; generated v2 `CommandExecutionRequestApprovalParams`):
      * a network approval carries its host in `networkApprovalContext` and may have no command at all, `kind:
      * 'writeStdin'` is input to a terminal already running, and `reason` is why the agent asks. Dropping them drew a
      * card that read `Run ` and nothing, which a list row could then allow.
      */
-    const net = obj(params.networkApprovalContext)
+    const net = asObj(params.networkApprovalContext)
     return {
       kind: 'command',
       command: str(item.command) || str(params.command),
@@ -272,11 +270,11 @@ export function approvalDetailFrom(
   }
   if (method === 'item/fileChange/requestApproval') return fileEditDetail(itemChanges ?? [])
   if (method === 'applyPatchApproval') {
-    const changes = Object.entries(obj(params.fileChanges)).map(([path, c]) => ({
+    const changes = Object.entries(asObj(params.fileChanges)).map(([path, c]) => ({
       path,
-      diff: str(obj(c).unified_diff) || str(obj(c).content),
+      diff: str(asObj(c).unified_diff) || str(asObj(c).content),
       // generated FileChange: the same `type` (add, delete, update with move_path) as the v2 kind
-      ...changeKindOf(obj(c)),
+      ...changeKindOf(asObj(c)),
     }))
     return fileEditDetail(changes)
   }
@@ -397,7 +395,7 @@ export class CompactionMarks {
   /** Whether this notification's compaction marker should be emitted */
   admit(n: Notification): boolean {
     const kind = n.method === 'thread/compacted' ? 'notice' : 'item'
-    const turn = str(obj(n.params).turnId)
+    const turn = str(asObj(n.params).turnId)
     const waiting = this.open.get(turn)
     if (waiting && waiting.kind !== kind) {
       if (--waiting.count === 0) this.open.delete(turn)
@@ -425,14 +423,14 @@ export class CodexRequestInputs {
   private lastTotal: string | null = null
 
   take(params: unknown): RequestInput | undefined {
-    const usage = obj(obj(params).tokenUsage)
-    const total = obj(usage.total)
-    const at = [total.totalTokens, total.inputTokens, total.cachedInputTokens, total.outputTokens].map((v) => num(v) ?? 0).join(',')
+    const usage = asObj(asObj(params).tokenUsage)
+    const total = asObj(usage.total)
+    const at = [total.totalTokens, total.inputTokens, total.cachedInputTokens, total.outputTokens].map((v) => finite(v) ?? 0).join(',')
     if (at === this.lastTotal) return undefined
     this.lastTotal = at
-    const last = obj(usage.last)
-    const input = num(last.inputTokens) ?? 0
-    const cached = Math.min(num(last.cachedInputTokens) ?? 0, input)
+    const last = asObj(usage.last)
+    const input = finite(last.inputTokens) ?? 0
+    const cached = Math.min(finite(last.cachedInputTokens) ?? 0, input)
     if (input <= 0) return undefined
     return { inputTokens: input - cached, cacheReadTokens: cached }
   }
@@ -442,7 +440,7 @@ export class CodexRequestInputs {
 const messageIdOf = (id: unknown): { messageId?: string } => (typeof id === 'string' && id ? { messageId: id } : {})
 
 export function normalizeNotification(sessionId: string, n: Notification): NormalizedEvent[] {
-  const p = obj(n.params)
+  const p = asObj(n.params)
 
   switch (n.method) {
     /*
@@ -487,7 +485,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      */
     case 'turn/plan/updated': {
       const steps = (Array.isArray(p.plan) ? p.plan : []).map((raw) => {
-        const it = obj(raw)
+        const it = asObj(raw)
         const raw_ = str(it.status)
         // An unknown status falls back to pending — progress display must not die outright over one new status value
         const status: 'pending' | 'inProgress' | 'completed' =
@@ -509,7 +507,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
     }
 
     case 'item/started': {
-      const item = obj(p.item)
+      const item = asObj(p.item)
       const type = str(item.type)
       if (type === 'userMessage' || type === 'reasoning' || type === 'agentMessage') return []
       /*
@@ -533,7 +531,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
     }
 
     case 'item/completed': {
-      const item = obj(p.item)
+      const item = asObj(p.item)
       const type = str(item.type)
       if (type === 'agentMessage') {
         // A fallback for when the streamed deltas were missed (empty when deltas already arrived, to avoid duplicating)
@@ -615,8 +613,8 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * (`INTERRUPTED_BY_TOOL`).
      */
     case 'turn/completed': {
-      const turn = obj(p.turn)
-      const failure = obj(turn.error)
+      const turn = asObj(p.turn)
+      const failure = asObj(turn.error)
       if (str(turn.status) === 'interrupted' && !failure.message) return [{ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' }]
       if (str(turn.status) !== 'failed' && !failure.message) return [{ type: 'turn_complete', sessionId }]
       const detail = str(failure.additionalDetails)
@@ -637,7 +635,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
       return [{ type: 'state_change', sessionId, state: 'working' }]
 
     case 'thread/tokenUsage/updated': {
-      const usage = obj(obj(p.tokenUsage).total)
+      const usage = asObj(asObj(p.tokenUsage).total)
       /*
        * Context occupancy comes from `last`, not `total`.
        *
@@ -648,10 +646,10 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
        * was noticed. Cumulative spend is a billing number and stays with `usage_update`;
        * how full the window is describes one request.
        */
-      const lastTurn = obj(obj(p.tokenUsage).last)
-      const input = num(usage.inputTokens) ?? 0
-      const output = num(usage.outputTokens) ?? 0
-      const cached = num(usage.cachedInputTokens) ?? 0
+      const lastTurn = asObj(asObj(p.tokenUsage).last)
+      const input = finite(usage.inputTokens) ?? 0
+      const output = finite(usage.outputTokens) ?? 0
+      const cached = finite(usage.cachedInputTokens) ?? 0
       /*
        * The field is `modelContextWindow`, on the tokenUsage object — see
        * generated/v2/ThreadTokenUsage.ts. We read `contextWindow` for a long time, found
@@ -662,9 +660,9 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
        * The older names stay in the chain because a running Codex may predate the rename,
        * and reading a field that isn't there costs nothing.
        */
-      const usageObj = obj(p.tokenUsage)
+      const usageObj = asObj(p.tokenUsage)
       const window =
-        num(usageObj.modelContextWindow) ?? num(p.contextWindow) ?? num(usageObj.contextWindow)
+        finite(usageObj.modelContextWindow) ?? finite(p.contextWindow) ?? finite(usageObj.contextWindow)
       const events: NormalizedEvent[] = [
         /*
          * Codex counts cached input inside `inputTokens` (its `totalTokens` is input + output). The protocol's
@@ -672,7 +670,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
          */
         { type: 'usage_update', sessionId, tokens: { inputTokens: Math.max(0, input - cached), outputTokens: output, cacheReadTokens: cached, cacheCreationTokens: 0 } },
       ]
-      const occupied = num(lastTurn.totalTokens)
+      const occupied = finite(lastTurn.totalTokens)
       if (window && occupied !== undefined && occupied <= window) {
         events.push({ type: 'context_update', sessionId, used: occupied, window, exactness: 'exact' })
       } else if (window && occupied !== undefined) {
@@ -703,18 +701,18 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * reads it separately through `agents.usage`.
      */
     case 'account/rateLimits/updated': {
-      const snapshot = obj(p.rateLimits)
+      const snapshot = asObj(p.rateLimits)
       const reached = str(snapshot.rateLimitReachedType) !== '' || snapshot.spendControlReached === true
       if (!reached) return []
 
-      const primary = obj(snapshot.primary)
-      const resetsAt = num(primary.resetsAt)
+      const primary = asObj(snapshot.primary)
+      const resetsAt = finite(primary.resetsAt)
       return [
         {
           type: 'limit_reached',
           sessionId,
-          usedPercent: num(primary.usedPercent),
-          windowMins: num(primary.windowDurationMins),
+          usedPercent: finite(primary.usedPercent),
+          windowMins: finite(primary.windowDurationMins),
           resumeAt: resetsAt ? new Date(resetsAt * 1000).toISOString() : undefined,
         },
       ]
@@ -736,7 +734,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * basis for the badge.
      */
     case 'thread/goal/updated':
-      return [{ type: 'goal', sessionId, goal: goalFromCodex(obj(p.goal)) }]
+      return [{ type: 'goal', sessionId, goal: goalFromCodex(asObj(p.goal)) }]
 
     case 'thread/goal/cleared':
       return [{ type: 'goal', sessionId, goal: null }]
@@ -819,9 +817,9 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
      * and sent the last two only.
      */
     case 'error': {
-      const message = str(obj(p.error).message) || str(p.message) || 'Unknown error'
+      const message = str(asObj(p.error).message) || str(p.message) || 'Unknown error'
       if (p.willRetry === true) {
-        const why = str(obj(p.error).additionalDetails)
+        const why = str(asObj(p.error).additionalDetails)
         console.error(`[codex] ${sessionId.slice(0, 8)} retrying after: ${message}${why ? ` (${why})` : ''}`)
         return [{ type: 'activity', sessionId, activity: 'retrying' }]
       }
@@ -853,7 +851,7 @@ export function normalizeNotification(sessionId: string, n: Notification): Norma
  */
 export function childSteps(sessionId: string, parentCallId: string, n: Notification): NormalizedEvent[] {
   if (n.method !== 'item/started' && n.method !== 'item/completed') return []
-  const item = obj(obj(n.params).item)
+  const item = asObj(asObj(n.params).item)
   const type = str(item.type)
   const step = (s: SubagentStep): NormalizedEvent => ({ type: 'subagent_event', sessionId, parentCallId, step: s })
   if (type === 'agentMessage') {
@@ -861,7 +859,7 @@ export function childSteps(sessionId: string, parentCallId: string, n: Notificat
     return text ? [step({ type: 'message_delta', sessionId, role: 'assistant', text, ...messageIdOf(item.id) })] : []
   }
   if (type === 'reasoning') {
-    const parts = n.method === 'item/completed' && Array.isArray(item.summary) ? item.summary.map(str).filter(Boolean) : []
+    const parts = n.method === 'item/completed' && Array.isArray(item.summary) ? item.summary.map((x) => str(x)).filter(Boolean) : []
     return parts.length ? [step({ type: 'reasoning_delta', sessionId, text: parts.join('\n\n') })] : []
   }
   const out: NormalizedEvent[] = []
@@ -878,7 +876,7 @@ export type CodexThreadSettings = { model: string | null; effort: string | null;
 /** The settings a `thread/start` or `thread/resume` answer says the thread runs with (top level, as answered on 0.160.0). */
 export function threadSettingsOf(res: Record<string, unknown> | undefined): CodexThreadSettings | null {
   if (!res) return null
-  const thread = obj(res.thread)
+  const thread = asObj(res.thread)
   const model = str(res.model) || str(thread.model)
   if (!model) return null
   return {
@@ -903,7 +901,7 @@ export function threadSettingsChanged(
   params: unknown,
   launched: { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null },
 ): { next: CodexThreadSettings | null; events: NormalizedEvent[] } {
-  const s = obj(obj(params).threadSettings)
+  const s = asObj(asObj(params).threadSettings)
   const next: CodexThreadSettings = {
     model: str(s.model) || null,
     effort: str(s.effort) || null,
@@ -1014,11 +1012,11 @@ export class CodexChildTracker {
 
   /** A notification from a thread that is not the parent's. */
   push(thread: string, n: Notification): NormalizedEvent[] {
-    const p = obj(n.params)
+    const p = asObj(n.params)
     const t = this.threads.get(thread) ?? { active: false, turnId: null }
     this.threads.set(thread, t)
     if (n.method === 'thread/status/changed') {
-      const type = str(obj(p.status).type)
+      const type = str(asObj(p.status).type)
       if (type === 'active') t.active = true
       else if (type === 'systemError') {
         const was = t.active
@@ -1030,15 +1028,15 @@ export class CodexChildTracker {
     }
     if (n.method === 'turn/started') {
       t.active = true
-      t.turnId = str(obj(p.turn).id) || t.turnId
+      t.turnId = str(asObj(p.turn).id) || t.turnId
       return this.changed()
     }
     if (n.method === 'turn/completed') {
-      const raw = str(obj(p.turn).status)
+      const raw = str(asObj(p.turn).status)
       t.active = false
       t.turnId = null
       const status = raw === 'interrupted' ? 'stopped' : raw === 'failed' ? 'failed' : 'completed'
-      const message = str(obj(obj(p.turn).error).message)
+      const message = str(asObj(asObj(p.turn).error).message)
       return this.changed([this.ended(thread, status, message || undefined)])
     }
     return []

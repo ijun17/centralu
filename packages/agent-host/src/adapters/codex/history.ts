@@ -1,4 +1,5 @@
 import type { ExternalSessionSummary, HistoryMessage } from '../contract.js'
+import { finite, trimmed } from '../../json-value.js'
 import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
 import { withCodexClient } from './short-lived.js'
 
@@ -23,11 +24,9 @@ export function isUnknownMethod(err: unknown): boolean {
   return /-32601|method not found|unknown method|unsupported method|not supported/i.test(m)
 }
 
-const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
-const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
 /** codex uses Unix time in seconds — our own storage unit is ms */
 const ms = (sec: unknown): number | undefined => {
-  const n = num(sec)
+  const n = finite(sec)
   return n === undefined ? undefined : Math.round(n * 1000)
 }
 
@@ -141,10 +140,10 @@ export function threadListToSummaries(data: unknown, cwd: string): ExternalSessi
   const out: ExternalSessionSummary[] = []
   for (const r of rows) {
     const row = (r ?? {}) as Record<string, unknown>
-    const id = str(row.id)
+    const id = trimmed(row.id)
     if (!id) continue
     // The server filters by cwd, but an older version might ignore it, so this filters once more
-    if (str(row.cwd) && str(row.cwd) !== cwd) continue
+    if (trimmed(row.cwd) && trimmed(row.cwd) !== cwd) continue
     out.push({
       externalId: id,
       /*
@@ -156,7 +155,7 @@ export function threadListToSummaries(data: unknown, cwd: string): ExternalSessi
        * visible. (There are cases where instructions injected by the harness get mixed in, and
        * only those are stripped out.)
        */
-      title: cleanTitle(str(row.preview) ?? '') || 'Untitled session',
+      title: cleanTitle(trimmed(row.preview) ?? '') || 'Untitled session',
       updatedAt: ms(row.updatedAt) ?? ms(row.recencyAt) ?? Date.now(),
       createdAt: ms(row.createdAt),
     })
@@ -195,7 +194,7 @@ function itemToMessage(item: unknown, ts?: number): HistoryMessage | null {
   const it = (item ?? {}) as Record<string, unknown>
   if (it.type === 'contextCompaction') return { role: 'system', marker: 'compaction', ts }
   if (it.type === 'agentMessage') {
-    const text = str(it.text)
+    const text = trimmed(it.text)
     return text ? { role: 'assistant', text, ts } : null
   }
   if (it.type === 'userMessage') {
@@ -212,7 +211,7 @@ function userInputText(content: unknown): string {
   const parts: string[] = []
   for (const c of content) {
     const block = (c ?? {}) as Record<string, unknown>
-    const text = str(block.text)
+    const text = trimmed(block.text)
     if (text && (block.type === 'text' || block.type === 'input_text' || block.type === undefined)) {
       parts.push(text)
     }

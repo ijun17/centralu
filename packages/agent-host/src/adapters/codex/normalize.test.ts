@@ -589,6 +589,12 @@ describe('approval request conversion (the basis for approving right from the ba
     })
   })
 
+  it('reads a list where an object was meant as empty, not as files named 0, 1, … (#850)', () => {
+    // `obj` took a list for an object here, where the links' `isObj` did not: its indices became the card's paths
+    const d = approvalDetailFrom('applyPatchApproval', { fileChanges: [{ type: 'update', unified_diff: '-a\n+b\n' }] })
+    expect(d).toEqual({ kind: 'file_edit', path: '(no path)', diffPreview: '', multi: false })
+  })
+
   // #683 review: these were dropped, so a network approval drew `Run ` and nothing, and a delete read as an edit
   it('keeps what a command approval says beyond its command: the network host, stdin, the reason', () => {
     expect(

@@ -2,6 +2,7 @@ import { resolveSettings, type SettingSource } from '@anthropic-ai/claude-agent-
 import { access, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { isObj } from '../../json-value.js'
 
 /**
  * Claude Code's code intelligence, turned off for one session (#686, `CreateSessionOpts.noCodeIntelligence`).
@@ -39,11 +40,10 @@ async function readJson(path: string): Promise<unknown> {
   }
 }
 
-const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
 /** A manifest's `lspServers`: an object of servers, or a path to a file of them */
 const declares = (manifest: unknown): boolean =>
-  isObject(manifest) && (isObject(manifest.lspServers) ? Object.keys(manifest.lspServers).length > 0 : typeof manifest.lspServers === 'string')
+  isObj(manifest) && (isObj(manifest.lspServers) ? Object.keys(manifest.lspServers).length > 0 : typeof manifest.lspServers === 'string')
 
 /** Whether the plugin `id` (`name@marketplace`) declares language servers, by the files under `configDir` */
 export async function declaresLspServers(id: string, configDir: string): Promise<boolean> {
@@ -53,9 +53,9 @@ export async function declaresLspServers(id: string, configDir: string): Promise
   const marketplace = id.slice(at + 1)
   // The installed copy: its own manifest, or a .lsp.json at its root
   const installed = await readJson(join(configDir, 'plugins', 'installed_plugins.json'))
-  const entries = isObject(installed) && isObject(installed.plugins) ? installed.plugins[id] : undefined
+  const entries = isObj(installed) && isObj(installed.plugins) ? installed.plugins[id] : undefined
   for (const entry of Array.isArray(entries) ? entries : []) {
-    const path = isObject(entry) && typeof entry.installPath === 'string' ? entry.installPath : null
+    const path = isObj(entry) && typeof entry.installPath === 'string' ? entry.installPath : null
     if (!path) continue
     if (declares(await readJson(join(path, '.claude-plugin', 'plugin.json')))) return true
     try {
@@ -67,16 +67,16 @@ export async function declaresLspServers(id: string, configDir: string): Promise
   }
   // The marketplace's entry for it
   const known = await readJson(join(configDir, 'plugins', 'known_marketplaces.json'))
-  const place = isObject(known) && isObject(known[marketplace]) ? known[marketplace].installLocation : undefined
+  const place = isObj(known) && isObj(known[marketplace]) ? known[marketplace].installLocation : undefined
   if (typeof place !== 'string') return false
   const listing = await readJson(join(place, '.claude-plugin', 'marketplace.json'))
-  const plugins = isObject(listing) && Array.isArray(listing.plugins) ? listing.plugins : []
-  return plugins.some((p) => isObject(p) && p.name === name && declares(p))
+  const plugins = isObj(listing) && Array.isArray(listing.plugins) ? listing.plugins : []
+  return plugins.some((p) => isObj(p) && p.name === name && declares(p))
 }
 
 /** The plugin ids `enabledPlugins` turns on: `true`, or the extended forms (a version list, an object) */
 export function enabledPluginIds(enabled: unknown): string[] {
-  if (!isObject(enabled)) return []
+  if (!isObj(enabled)) return []
   return Object.entries(enabled)
     .filter(([, v]) => v !== false && v !== null && v !== undefined)
     .map(([id]) => id)

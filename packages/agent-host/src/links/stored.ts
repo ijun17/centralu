@@ -1,4 +1,5 @@
 import type { Store } from '../dev-services/store.js'
+import { isObj } from '../json-value.js'
 import type { HeadersMirror, MachineRecord, MachineRegistry } from './links.js'
 import type { ProjectOrder } from './router.js'
 
@@ -21,7 +22,7 @@ const kindOf = (k: 'sessions' | 'projects') => (k === 'sessions' ? 'session' : '
 
 /** Rows without an id are not headers the hub can answer for; they are left out */
 const withIds = (list: unknown[]) =>
-  list.filter((x): x is { id: string } => typeof x === 'object' && x !== null && typeof (x as { id?: unknown }).id === 'string')
+  list.filter((x): x is { id: string } => isObj(x) && typeof x.id === 'string')
 
 export function storeMirror(store: Store): HeadersMirror {
   return {

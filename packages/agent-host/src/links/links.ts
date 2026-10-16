@@ -25,7 +25,7 @@ import { RemoteClient, type RemoteClientOptions, type RemoteHello } from './remo
 import type { RoutedMachine } from './router.js'
 import { shimNames, type Endpoint, type HostStart, type RemoteAutostart, type RemoteCommand, type RemoteInstall, type RemoteRun, type RemoteSpec, type Tunnel } from './tunnel.js'
 import { acceptanceKey, compareVersions, mayConnect } from './versions.js'
-import { isObj } from './obj.js'
+import { isObj } from '../json-value.js'
 
 /**
  * The hub's links to other machines (docs/plans/remote-hub.md §2, §5): one `LinkedMachine` per

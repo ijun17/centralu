@@ -1,5 +1,5 @@
 import { qualify } from './machine-ids.js'
-import { isObj, type Obj } from './obj.js'
+import { isObj, type Obj } from '../json-value.js'
 
 /**
  * Rewrites what one linked machine says into the hub's terms, and the hub's terms back into the

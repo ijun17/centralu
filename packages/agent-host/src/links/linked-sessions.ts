@@ -5,7 +5,7 @@ import { trustedJsonText } from '../sessions/orchestrator-tools.js'
 import { clipPreview } from '../sessions/turn-answer.js'
 import { splitQualified } from './machine-ids.js'
 import type { RoutedMachine, RpcHandler } from './router.js'
-import { isObj } from './obj.js'
+import { isObj } from '../json-value.js'
 import { raceTimeout } from '../timing.js'
 
 /** Without a router (the reading tests), nothing that acts is reachable */

@@ -1,5 +1,5 @@
 import type { RpcMethodName } from '@cc/protocol'
-import { isObj, type Obj } from './obj.js'
+import { isObj, type Obj } from '../json-value.js'
 import type { Qualifier } from './qualifier.js'
 
 /**

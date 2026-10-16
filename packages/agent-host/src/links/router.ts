@@ -2,7 +2,7 @@ import { RpcMethods, type RpcMethodName } from '@cc/protocol'
 import { decodeNumber, encodeNumber, splitQualified } from './machine-ids.js'
 import type { Qualifier } from './qualifier.js'
 import { ROUTES, type Route } from './routes.js'
-import { isObj, type Obj } from './obj.js'
+import { isObj, type Obj } from '../json-value.js'
 
 /**
  * The hub's request router (docs/plans/remote-hub.md §5): one function in front of
