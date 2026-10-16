@@ -41,7 +41,9 @@ centralu/
 │  │  └─ src/
 │  │     ├─ events.ts           # the NormalizedEvent family
 │  │     ├─ commands.ts         # request/response RPC (RpcMethods), SessionInfo
-│  │     ├─ entities.ts         # shared types such as SessionState, ApprovalDetail, UpdateStatus
+│  │     ├─ entities.ts         # shared types such as SessionState, ApprovalDetail, UpdateStatus: re-exports entities/
+│  │     ├─ entities/           # one module per concept: ids, sessions, grid, apps, tools, approvals, usage,
+│  │     │                      #   git, errors, updates, preferences
 │  │     ├─ envelope.ts         # the WS frames, PROTOCOL_VERSION
 │  │     ├─ tolerant.ts         # parseTolerant: how a client reads another build's answer (protocol.md §4)
 │  │     ├─ session-state.ts    # the session state machine's rules, run by both core and the host

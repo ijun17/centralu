@@ -40,7 +40,8 @@ const ruleIds = (msgs: { ruleId?: string | null }[]) => msgs.map((m) => m.ruleId
  * that cannot be explained in the file it governs is a rule that gets deleted.
  */
 describe('protocol does not know about vendors', () => {
-  const sources = readdirSync(PROTOCOL_SRC)
+  // Recursive: entities.ts and commands.ts re-export modules kept in folders of their own (#850)
+  const sources = readdirSync(PROTOCOL_SRC, { recursive: true, encoding: 'utf8' })
     .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
     .map((f) => ({ file: f, code: stripComments(readFileSync(join(PROTOCOL_SRC, f), 'utf8')) }))
 

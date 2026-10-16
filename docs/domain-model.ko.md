@@ -31,7 +31,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 프로젝트 | Centralu에 등록한 폴더. 세션, 규칙, 동의, 앱, 저장한 명령, 커밋 귀속이 여기에 달린다. git 저장소가 아니어도 된다 | `ProjectInfo`, `packages/protocol/src/commands.ts` | 워크스페이스, 레포 |
 | 신뢰한 프로젝트 | 사람이 예라고 답한 프로젝트. 신뢰해야 그 앱이 돌고 저장소 설정(`.claude/`)이 적용된다. 새 프로젝트는 신뢰하지 않은 채로 시작한다. Centralu가 직접 만든 빈 폴더만 예외다 | `projects.trusted`; [apps.ko.md](apps.ko.md) §3 | |
 | 세션 | 에이전트 도구 하나와의 대화 하나. 자기 프로세스(살아 있을 때), 상태, 모델, 권한 프리셋을 가진다 | `SessionInfo`, `packages/protocol/src/commands.ts` | 채팅, 스레드, 에이전트 |
-| 에이전트 도구 | 세션이 돌리는 CLI: Claude Code 또는 Codex. 세 번째를 더할 수 있게 문자열이다 | `ToolName`, `packages/protocol/src/entities.ts`; 어댑터는 `packages/agent-host/src/adapters/` | 모델, 프로바이더 |
+| 에이전트 도구 | 세션이 돌리는 CLI: Claude Code 또는 Codex. 세 번째를 더할 수 있게 문자열이다 | `ToolName`, `packages/protocol/src/entities/ids.ts`; 어댑터는 `packages/agent-host/src/adapters/` | 모델, 프로바이더 |
 | 어댑터 | 에이전트 도구 하나를 공통 계약으로 감싸고, 그 출력을 정규화된 이벤트로 바꾸는 모듈 | `AgentAdapter`, `packages/agent-host/src/adapters/contract.ts` | 드라이버 |
 | 세션 종류 | 세션이 무엇으로 만들어지는가: `worker`(평범한 세션 전부), `orchestrator`, `coordinator`. 그대로 저장하지 않는다. `is_orchestrator`와 코디네이터의 구성원 목록이 있는지에서 읽어 낸다 | `SessionKind`, `packages/protocol/src/commands.ts`; 읽어 내는 곳은 `readSessions`, `packages/agent-host/src/dev-services/store/sessions.ts` | |
 | 오케스트레이터 | 앱 전체에 하나뿐인, 모든 세션을 보고 지휘하는 세션. 어느 프로젝트에도 속하지 않는다 | `kind: 'orchestrator'`; `packages/agent-host/src/sessions/orchestrator-tools.ts`, `orchestrator-home.ts` | 프로젝트 오케스트레이터(폐지) |
@@ -43,15 +43,15 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 위임된 세션 | `<<role>>` 다른 프로젝트의 세션이 `ask_project`로 일을 준, 이미 있는 평범한 세션. Centralu는 그 일을 위해 다른 프로젝트에 세션을 만들지 않고(#614) 표시도 붙이지 않는다. 부탁한 세션은 대화 속 그 일의 `from`이고, 일은 맡긴 턴으로 돈다. #614 이전에는 `ask_project`가 세션을 세우거나 다시 쓰고 `askedBy`로 표시했으며, 그 표시는 지워진다 | `askProject`, `packages/agent-host/src/sessions/ask-project-flow.ts`; `askFrame`, `ask-project.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2 | 델리게이트 |
 | 띄운 에이전트(자식) | `<<role>>` 같은 프로젝트의 다른 세션이 `start_agent`로 띄운 세션(#561). 그 세션의 폴더에서 그 세션의 프리셋으로 돈다. `askedBy`로 표시하며, 띄운 세션이 `agent_session`으로 다룰 수 있는 건 이 세션들뿐이다. 다른 프로젝트의 일을 하는 세션처럼 에이전트를 띄우거나 프로젝트에 부탁하지 못한다 | `SessionInfo.askedBy`; `sessions/start-agent-flow.ts`의 `startAgent`, `sessions/delegation-flow.ts`의 `agentSession`(둘 다 `manager.ts`를 거쳐 닿는다); `packages/agent-host/src/sessions/start-agent.ts`; [agent-host.ko.md](agent-host.ko.md) §1.2.1 | 자식, 워커 |
 | 도구 프로필 | 세션이 받는 Centralu 자체 도구(`centralu` MCP 서버) 묶음: `orchestrator`, `scoped`, `builder`, `reader`, 또는 없음(워크트리 매니저의 `manager`는 평범한 세션에 접혀 들어갔다, #561) | `toolProfileFor`, `packages/agent-host/src/sessions/tool-profiles.ts` (`manager.ts`의 `toolProfileOf`가 묻는다); [agent-host.ko.md](agent-host.ko.md) §1.1 | |
-| 권한 프리셋 | 에이전트가 묻지 않고 해도 되는 범위: `safe`, `normal`, `auto` | `PermissionPreset`, `entities.ts` | 모드 |
+| 권한 프리셋 | 에이전트가 묻지 않고 해도 되는 범위: `safe`, `normal`, `auto` | `PermissionPreset`, `entities/approvals.ts` | 모드 |
 | 살아 있음 | 세션에 지금 프로세스가 있는가. 살아 있지 않은 세션은 말을 걸면 이어 띄운다 | `SessionInfo.live` | 보관(FR-20은 폐지) |
 | 잠듦 | 호스트가 유휴 세션의 프로세스를 끝냈거나(#568, 기본 15분) 재시작 뒤 아무것도 깨우지 않아 살아 있지 않은 상태. 입력하거나 메시지를 보내면 깨어난다. 고르기만 해서는 깨어나지 않는다 | `session_live`, `sessions/sleep.ts` | dormant, suspended, hibernated |
 | 휴지통 | 지운 세션을 영영 사라지기 전 한동안 두는 곳 | `sessions.deleted_at`, `trash`; product-spec FR-22 | 보관 |
 | 가져온 세션 | 도구가 Centralu 밖에서 시작한 대화를 이어 가는 세션 | `SessionInfo.importedFrom`; [agent-host.ko.md](agent-host.ko.md) §8 | |
 | 인계(세션) | 새 후임 세션(어느 도구든)이 노트를 통해 전임의 일을 넘겨받는 것. 노트는 저장된 대화에서 모델 없이 만들거나(#78, #694부터 기본), 에이전트가 직접 쓴다. 사람은 세션 메뉴에서 인계를 시작하고, 중앙 오케스트레이터는 `handoff_session`으로 시작한다. 오케스트레이터의 인계는 `auto`가 아니면 사람의 카드를 거치고, 턴 도중에는 하지 않으며, 전임을 항상 남긴다(#694). 노트는 파일 `<data>/handoff/<project>/<session>.md`이고 후임의 첫 메시지가 그 경로를 가리킨다. 전임의 살아 있는 자식(일하는 중, 기다리는 중, 큐에 든 것, 보고나 읽기가 남은 것, 아직 서 있는 시작 카드)은 후임의 것이 되고 노트 맨 앞에 나열된다. 정리된 자식은 전임이 남을 때만 남는다(#693). 창은 전임을 기본으로 남긴다(#694 전에는 기본으로 지웠다). 전임을 지우면 정리된 자식까지 모든 자식이 후임에게 간다. 인계할 때 가거나, 전임을 나중에 지울 때 간다(#738) | `handoff` 이벤트, `packages/protocol/src/events.ts`; `packages/agent-host/src/dev-services/handoff-notes.ts`, `sessions/handoff-record.ts`, `sessions/handoff-flow.ts` | (키퍼 인계와 다르다, §1.5) |
 | 도구 바꾸기 | 세션(이름, 순서, 기록, 패널)은 그대로 두고 그 아래의 에이전트 도구만 바꾸는 것. 새 도구는 새 스레드로 시작한다. 옛 도구의 대화는 에이전트에게 넘어가지 않고, 기록만 화면에 남는다 | `agents.switchTool`, `packages/protocol/src/commands.ts`; `switchTool`, `manager.ts` | |
-| 목표 | 세션에 정한 목적. 도구가 판정한다. 살아 있는 동안만 | `SessionGoal`, `entities.ts` | |
-| 백그라운드 작업 | 에이전트가 자기 프로세스 안에 돌려 둔 일(서브에이전트, 셸). 살아 있는 동안만 | `BackgroundTask`, `entities.ts` | |
+| 목표 | 세션에 정한 목적. 도구가 판정한다. 살아 있는 동안만 | `SessionGoal`, `entities/sessions.ts` | |
+| 백그라운드 작업 | 에이전트가 자기 프로세스 안에 돌려 둔 일(서브에이전트, 셸). 살아 있는 동안만 | `BackgroundTask`, `entities/sessions.ts` | |
 
 ### 1.2 대화
 
@@ -63,11 +63,11 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 메시지 | 대화에 저장된 한 줄. 세션 안에서 번호(`seq`)가 붙는다. 종류: 글, 도구 호출, 도구 결과, 승인, 표지, 이미지, 추론, 앱 화면 | `StoredMessage`, `commands.ts` | |
 | 도구 호출 / 도구 결과 | 에이전트가 도구를 쓴 것과 돌아온 것. `callId`로 짝을 짓고, 도구 카드 하나로 그린다 | `tool_call`, `tool_result`, `events.ts` | |
 | 서브에이전트 단계 | 에이전트가 띄운 서브에이전트(Claude의 Task)의 한 걸음. 띄운 도구 호출에 매달리고, 대화의 번호에는 들어가지 않는다 | `subagent_event`, `events.ts`; `subagent_messages`(스토어 v41) | |
-| 승인 | 에이전트가 하려는 일에 대해 기다리는 예/아니오. 한 세션에 한 번에 하나까지 | `pendingApproval`, `ApprovalDetail`, `entities.ts` | 권한 요청 |
-| 승인 내용 | 무엇을 묻는가: `command`, `file_edit`, `other`(어댑터가 올린다. 호스트의 적용·인계 카드도 `about`을 달고 여기에 실린다), `capability`, `project_access`, `agent_start`, `centralu_update`, `project_create`(호스트가 올린다) | `ApprovalDetail`, `entities.ts` | |
+| 승인 | 에이전트가 하려는 일에 대해 기다리는 예/아니오. 한 세션에 한 번에 하나까지 | `pendingApproval`, `ApprovalDetail`, `entities/approvals.ts` | 권한 요청 |
+| 승인 내용 | 무엇을 묻는가: `command`, `file_edit`, `other`(어댑터가 올린다. 호스트의 적용·인계 카드도 `about`을 달고 여기에 실린다), `capability`, `project_access`, `agent_start`, `centralu_update`, `project_create`(호스트가 올린다) | `ApprovalDetail`, `entities/approvals.ts` | |
 | 승인 규칙 | 명령에 대해 기억해 둔 "항상 허용". `*`가 든 패턴으로 맞추고, 세션이나 프로젝트 범위를 가진다. 허용만 저장하고, 어댑터가 묻기 전에 확인한다 | `ApprovalRule`, `packages/core/src/approval/approval.ts`; `rulesFor`, `manager.ts` | 허용 목록 |
-| 질문 | 에이전트가 사람에게 고르라고 내놓는 선택지(AskUserQuestion). `agents.answerQuestion`으로 답한다. 몇 개든 기다릴 수 있다 | `Question`, `pendingQuestions`, `entities.ts` | 프롬프트 |
-| 프로젝트 동의 | 한 프로젝트가 다른 프로젝트에 닿도록 기억해 둔 "항상": `delegate`(`ask_project`) 또는 `apps`(공유된 앱 붙이기). 또는 자기 자신에게 `agents`(그 프로젝트의 세션이 에이전트를 띄워도 됨, #561) | `ProjectConsent`, `entities.ts`; `project_consents`(스토어 v44) | |
+| 질문 | 에이전트가 사람에게 고르라고 내놓는 선택지(AskUserQuestion). `agents.answerQuestion`으로 답한다. 몇 개든 기다릴 수 있다 | `Question`, `pendingQuestions`, `entities/sessions.ts` | 프롬프트 |
+| 프로젝트 동의 | 한 프로젝트가 다른 프로젝트에 닿도록 기억해 둔 "항상": `delegate`(`ask_project`) 또는 `apps`(공유된 앱 붙이기). 또는 자기 자신에게 `agents`(그 프로젝트의 세션이 에이전트를 띄워도 됨, #561) | `ProjectConsent`, `entities/approvals.ts`; `project_consents`(스토어 v44) | |
 | 읽기 허락 | 위임된 세션의 답이 이름을 댄, 대상 프로젝트 안의 경로. 이 호스트가 도는 동안 호출한 쪽이 읽을 수 있다 | `readGrants`(`manager.ts`가 쥐고 `sessions/delegation-host.ts`로 넘긴다), `readableGrants`, `ask-project.ts` | |
 | 보고 표지 | "끝나면 알려 준다": 일을 준 세션에게 턴이 끝났다는 보고를 빚진 세션(`start_agent`가 기다림을 넘겼을 때, `reportBack`을 켠 `send_to_session`). 보고하면 지우고, 호스트 교체를 넘겨 살아남는다(#646) | `awaitingReport`, `pausedReports`, `sessions/child-ownership.ts`; `report_marks`(스토어 v49) | |
 | 맡긴 턴 | 다른 세션의 일이 시작한 턴(`ask_project`, `start_agent`, `agent_session` send, 쉬는 세션에 보낸 `send_to_session`). 도는 동안 그 턴의 카드는 맡긴 세션에게도 간다: 답할 수 있는 질문, 알림만 받는 승인(#676). 턴과 함께 끝나고, 호스트 교체를 넘겨 살아남는다 | `turnOwners`, `sessions/child-ownership.ts`; `delegated_turns`(스토어 v51) | |
@@ -85,16 +85,16 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 사용자 폴더 앱 | `<data>/apps/<id>/`에 있는 앱(프로젝트 없음): 여러 프로젝트에서 쓰는 것, 가져온 것, 승인한 MCP 서버 | `packages/agent-host/src/apps/external/discovery.ts` | 전역 앱 |
 | 공유한 앱 | 자기 프로젝트가 다른 프로젝트의 세션도 붙일 수 있게 열어 둔 프로젝트 앱 | 설정 `app_shared:<project>/<app>`, `packages/agent-host/src/sessions/app-access.ts` | 공개 앱 |
 | 붙이기 | 세션이 기본으로 받는 것 말고도, 필요할 때 앱의 도구를 주는 것(`find_apps`, `attach_app`, `detach_app`) | `packages/agent-host/src/sessions/app-access.ts`, `session-apps.ts`; [apps.ko.md](apps.ko.md) §9.4 | 설치 |
-| 앱 상태 | 매번 새로 따진다. 처음 맞는 것이 이긴다: `invalid`, `untrusted`, `unconfirmed`, `failed`, `running`, `starting`, `crashed`, `stopped` | `ExternalAppStatus`, `entities.ts`; `ExternalApps.status`, `runtime.ts` | |
+| 앱 상태 | 매번 새로 따진다. 처음 맞는 것이 이긴다: `invalid`, `untrusted`, `unconfirmed`, `failed`, `running`, `starting`, `crashed`, `stopped` | `ExternalAppStatus`, `entities/apps.ts`; `ExternalApps.status`, `runtime.ts` | |
 | 확인 전 | 사람이 아직 켜지 않은, 또는 그 뒤 `server`나 `uses`가 바뀐 가져온 사용자 폴더 앱 | `packages/agent-host/src/apps/external/import-book.ts` | |
 | 화면 | 앱의 화면(MCP Apps `ui://` 리소스). 열린 하나하나는 자기 id를 가진 **화면 인스턴스**다 | `packages/agent-host/src/views/view-host.ts` | iframe |
 | 대화 안 화면 | 그 화면을 낸 호출의 도구 카드 아래에 열리는 화면 | `app_view` 이벤트, `events.ts`; `packages/agent-host/src/inline-views.ts` | |
 | 고정 화면 | 매니페스트의 `home` 도구가 앱 화면에 여는 화면(프로젝트 화면의 패널도 이것을 같이 쓴다) | `packages/agent-host/src/app-home-view.ts` | 홈 페이지 |
-| 앱 패널 | 그리드에 놓은 앱. 자기 화면 인스턴스와 차지하는 칸을 가진다 | `GridPanel`(`kind: 'app'`), `GridSpan`, `entities.ts`; `packages/core/src/grid/span.ts` | 위젯 |
-| 차지하는 칸 | 앱 패널이 차지하는 그리드 칸 수(열 × 행, 각각 1–4). 놓은 자리의 선택, 사람의 설정, 매니페스트의 `view.span`, 1 × 1 순으로 정한다 | `GridSpan`, `entities.ts` | 크기 |
-| 앱 실행 | 기록된 호출 하나: 화면, 세션, 다른 앱이 부른 앱 도구(`kind: tool`), 또는 앱이 Centralu에 부탁한 것(`kind: broker`). `parentRunId`로 사슬을 이룬다 | `AppRun`, `entities.ts`; `packages/agent-host/src/apps/external/runs.ts` | |
+| 앱 패널 | 그리드에 놓은 앱. 자기 화면 인스턴스와 차지하는 칸을 가진다 | `GridPanel`(`kind: 'app'`), `GridSpan`, `entities/grid.ts`; `packages/core/src/grid/span.ts` | 위젯 |
+| 차지하는 칸 | 앱 패널이 차지하는 그리드 칸 수(열 × 행, 각각 1–4). 놓은 자리의 선택, 사람의 설정, 매니페스트의 `view.span`, 1 × 1 순으로 정한다 | `GridSpan`, `entities/grid.ts` | 크기 |
+| 앱 실행 | 기록된 호출 하나: 화면, 세션, 다른 앱이 부른 앱 도구(`kind: tool`), 또는 앱이 Centralu에 부탁한 것(`kind: broker`). `parentRunId`로 사슬을 이룬다 | `AppRun`, `entities/apps.ts`; `packages/agent-host/src/apps/external/runs.ts` | |
 | 중개자 | 호스트가 앱에게 fd 3으로 내주는 MCP 서버: `run_agent`, `call_app`, `host_data` | `packages/agent-host/src/apps/external/broker.ts`, `desk.ts` | |
-| 능력 | 앱이 중개자에게 부탁할 수 있는 것: `agent:<tool>`, `app:<scope>/<id>`, `host:<name>`. 매니페스트의 `uses`에 선언하고, 사람이 앱마다 한 번 허락한다 | `packages/agent-host/src/apps/external/capabilities.ts`; `AppPermission`, `entities.ts` | 권한(그것은 승인이다) |
+| 능력 | 앱이 중개자에게 부탁할 수 있는 것: `agent:<tool>`, `app:<scope>/<id>`, `host:<name>`. 매니페스트의 `uses`에 선언하고, 사람이 앱마다 한 번 허락한다 | `packages/agent-host/src/apps/external/capabilities.ts`; `AppPermission`, `entities/apps.ts` | 권한(그것은 승인이다) |
 | 앱 비밀 | 앱의 매니페스트가 이름을 댄 값. 이 기기의 `<data>/app-secrets.json`에 두고, 스토어에는 두지 않는다 | `packages/agent-host/src/apps/external/secrets.ts` | |
 | 앱 버전 | 사용자 폴더 앱의 보관본(5개까지), 또는 프로젝트 앱의 git 이력 | `packages/agent-host/src/apps/external/versions.ts` | |
 | 앱 안내서 | 도구로 내준 Centralu 자체의 사용 안내서(`app_guide`). 앱 하나의 안내서가 아니다 | `packages/agent-host/src/sessions/app-guide.ts` | |
