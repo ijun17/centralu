@@ -1,7 +1,7 @@
 /** T1-2 done criteria: whether the schema is actually applied and CRUD works */
-import { describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
-import { mkdtempSync, rmSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { GridPanel, SessionInfo, StoredMessage } from '@cc/protocol'
@@ -14,6 +14,27 @@ import { Store } from './store.js'
  * a new step bills no chore in these tests. What the list holds is pinned in `store-migrations.golden.json`.
  */
 const LATEST_SCHEMA = new Store().latestKnownVersion
+
+/*
+ * A file store at the newest schema, for a test that builds an older one from it or reopens it (#845). Opening a new
+ * file runs every step, each its own commit flushed to disk: 1–2 s on windows-2022, and once 15.4 s on a loaded
+ * runner, which ran a v42 test past its limit. The steps run once per test file, into a template, and each test
+ * starts from a copy of it. A test about what opening a new file runs still opens one with `new Store(file)`.
+ */
+let template: string | null = null
+afterAll(() => {
+  if (template) rmSync(join(template, '..'), { recursive: true, force: true })
+})
+function newestStore(file: string): Store {
+  if (!template) {
+    template = join(mkdtempSync(join(tmpdir(), 'cc-store-template-')), 'store.db')
+    new Store(template).close()
+    // close() folds the WAL into the file, so the file alone is the whole store
+    if (existsSync(`${template}-wal`)) expect(statSync(`${template}-wal`).size).toBe(0)
+  }
+  copyFileSync(template, file)
+  return new Store(file)
+}
 
 function seeded() {
   const s = new Store()
@@ -570,7 +591,7 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v42-'))
     const file = join(dir, 'store.db')
     try {
-      const fresh = new Store(file)
+      const fresh = newestStore(file)
       fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       for (const id of ['s1', 's2', 's3']) gridSession(fresh, id, 'p1')
       fresh.close()
@@ -607,7 +628,7 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v42-old-'))
     const file = join(dir, 'store.db')
     try {
-      const s = new Store(file)
+      const s = newestStore(file)
       s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       for (const id of ['s1', 's2']) gridSession(s, id, 'p1')
       s.setGridView([ap('p1', 'slider'), sp('s1')])
@@ -692,7 +713,7 @@ describe('migration v43 — an app panel keeps its span', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v43-'))
     const file = join(dir, 'store.db')
     try {
-      const fresh = new Store(file)
+      const fresh = newestStore(file)
       fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       gridSession(fresh, 's1', 'p1')
       fresh.close()
@@ -807,7 +828,7 @@ describe('the orchestrator marker (kind)', () => {
     const file = join(dir, 'store.db')
 
     // Build a v25 state: one project orchestrator plus one central orchestrator
-    const before = new Store(file)
+    const before = newestStore(file)
     before.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     mk(before, 'proj-orc', 'p1', 'orchestrator')
     mk(before, 'central', null, 'orchestrator')
@@ -1041,7 +1062,7 @@ describe('v15 migration — remembers the shell commands a project registered', 
     const dir = mkdtempSync(join(tmpdir(), 'cc-v15-bad-'))
     const file = join(dir, 'store.db')
 
-    const first = new Store(file)
+    const first = newestStore(file)
     first.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     first.close()
 
@@ -1316,7 +1337,7 @@ describe('v21 migration — merges delta rows into messages', () => {
   const oldDbWithDeltas = () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v21-'))
     const file = join(dir, 'store.db')
-    const s = new Store(file)
+    const s = newestStore(file)
     s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     s.upsertSession({
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: 'New session',
@@ -1428,7 +1449,7 @@ describe('v29 migration — narrows a trampled timestamp using its neighbor', ()
   it('fixes only a ts later than a later row\'s, and leaves an intact ts untouched', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v29-'))
     const file = join(dir, 'store.db')
-    const s0 = new Store(file)
+    const s0 = newestStore(file)
     s0.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     s0.upsertSession({
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'Session',
@@ -1991,7 +2012,7 @@ describe('the trash (#204)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v39-'))
     const file = join(dir, 'store.db')
     try {
-      const fresh = new Store(file)
+      const fresh = newestStore(file)
       fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       fresh.close()
       // Take the store back to v38: no trash columns
@@ -2068,7 +2089,7 @@ describe('migration v48 — worktree sessions become their former manager\'s sta
     const dir = mkdtempSync(join(tmpdir(), 'cc-v48-'))
     const file = join(dir, 'store.db')
     try {
-      const fresh = new Store(file)
+      const fresh = newestStore(file)
       fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       const base = { ...seeded().listSessions()[0]!, projectId: 'p1' }
       const wt = (branch: string) => ({ path: `/tmp/wt/${branch}`, branch, base: 'abc' })
