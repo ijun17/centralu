@@ -260,6 +260,8 @@ if (args[0] === 'api' && args[1] === '-X' && args[2] === 'PATCH') {
       c.body = JSON.parse(stdin).body
       c.createdAt = '2026-10-12T11:00:00Z'
       save()
+      // patchThenOffline: GitHub stored the edit, and the answer was lost on the way back
+      if (st.patchThenOffline) fail('error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com\n')
       process.stdout.write(JSON.stringify({ id: c.restId, node_id: c.id, html_url: c.url, body: c.body, updated_at: c.createdAt, user: c.author }))
       process.exit(0)
     }
@@ -662,6 +664,22 @@ describe.skipIf(process.platform === 'win32')('the board app reads and answers i
     expect(ghCalls().filter((c) => c.args.includes('PATCH'))).toEqual([
       { args: ['api', '-X', 'PATCH', 'repos/ijun17/centralu/issues/comments/1', '--input', '-'], stdin: JSON.stringify({ body: 'Clarified in English.' }) },
     ])
+  })
+
+  /*
+   * An edit cut off on the way back may have landed on GitHub (restWrite says so), like a post. The
+   * cached thread must go either way, or the reader keeps showing the old text until the cache runs out.
+   */
+  it('forgets the cached thread when an edit fails after GitHub may have stored it', async () => {
+    runtime()
+    patch((s) => Object.assign(s as object, { viewer: 'coordinator', patchThenOffline: true }))
+    const url = 'https://github.com/ijun17/centralu/issues/113#issuecomment-1'
+    expect((await call('read_item', { item: 113 })).data.comments[0].html).toContain('Comment 1')
+    const edited = await call('edit_comment', { item: 113, url, body: 'Clarified in English.' }, agent)
+    expect(edited.isError).toBe(true)
+    expect(edited.text).toContain('may have gone through anyway')
+    const after = await call('read_item', { item: 113 })
+    expect(after.data.comments[0].html).toContain('Clarified in English.')
   })
 
   /*
