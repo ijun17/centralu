@@ -444,7 +444,7 @@ describe('importFile — a file dragged in from outside', () => {
   it('refuses on Windows a name Windows does not take as a file\'s, and writes nothing', async () => {
     const windows = process.platform === 'win32' ? [undefined, 'win32' as const] : ['win32' as const]
     for (const platform of windows) {
-      for (const bad of ['nul', 'aux.c', 'CONOUT$', 'notes.', 'notes ', 'notes.txt:payload']) {
+      for (const bad of ['nul', 'aux.c', 'nul .txt', 'CONOUT$', 'notes.', 'notes ', 'notes.txt:payload']) {
         await expect(importFile(root, '', bad, Buffer.from('x'), platform), bad).rejects.toThrow(/Windows/)
       }
     }

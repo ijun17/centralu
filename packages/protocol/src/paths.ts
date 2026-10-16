@@ -140,10 +140,11 @@ export function repoNameOf(url: string): string {
 }
 
 /**
- * Reserved device names on Windows, alone or before an extension (`CON`, `con.txt`, `COM1`), and the console's own
- * two, which are reserved as they are (`CONIN$`, `CONOUT$`; #849)
+ * Reserved device names on Windows, alone or before an extension (`CON`, `con.txt`, `COM1`), also with spaces between
+ * (`nul .txt`: Windows drops them when it reads the name), and the console's own two, which are reserved as they are
+ * (`CONIN$`, `CONOUT$`; #849)
  */
-const WINDOWS_RESERVED_NAME = /^(?:(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?|conin\$|conout\$)$/i
+const WINDOWS_RESERVED_NAME = /^(?:(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]) *(\..*)?|conin\$|conout\$)$/i
 /** The longest name most file systems take (255 bytes on ext4 and APFS) */
 const MAX_FOLDER_NAME_BYTES = 255
 

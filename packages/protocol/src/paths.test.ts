@@ -63,12 +63,13 @@ describe('a new folder name', () => {
   })
 
   it('refuses the reserved Windows device names on every machine, with or without an extension', () => {
-    for (const bad of ['CON', 'con', 'nul', 'Aux.txt', 'COM1', 'lpt9', 'com¹', 'CONIN$', 'conout$']) {
+    for (const bad of ['CON', 'con', 'nul', 'Aux.txt', 'COM1', 'lpt9', 'com¹', 'CONIN$', 'conout$', 'nul .txt', 'Aux  .c', 'com1 ']) {
       expect(folderNameError(bad, false), bad).toMatch(/Windows/)
       expect(folderNameError(bad, true), bad).toMatch(/Windows/)
     }
     expect(folderNameError('console', false)).toBeNull()
     expect(folderNameError('conin', false)).toBeNull()
+    expect(folderNameError('console .txt', false)).toBeNull()
     expect(folderNameError('com10', false)).toBeNull()
   })
 
