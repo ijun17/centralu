@@ -1,5 +1,6 @@
 import WebSocket from 'ws'
 import { HostBuild, PROTOCOL_VERSION, ProtocolError, parseServerFrame } from '@cc/protocol'
+import { proofNonce, provesToken } from '../transport/host-proof.js'
 
 /**
  * The hub's connection to one linked machine's host (docs/plans/remote-hub.md §2, §5).
@@ -54,6 +55,11 @@ export type RemoteClientOptions = {
   maxBackoffMs?: number
   /** The protocol number sent in hello. Only tests set it */
   protocolVersion?: number
+  /**
+   * The host must prove it holds the token before the token is sent (#838): its connection line says it can
+   * (`ConnectionLine.proof`). Whatever listens on the forward's local port and cannot prove it never sees the token.
+   */
+  proveHost?: boolean
 }
 
 export type RemoteClientEvents = {
@@ -65,6 +71,15 @@ export type RemoteClientEvents = {
 }
 
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000
+
+/** A frame's JSON, or null when it is not JSON */
+function parseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw) as unknown
+  } catch {
+    return null
+  }
+}
 const DEFAULT_CALL_TIMEOUT_MS = 200_000
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
@@ -103,41 +118,74 @@ export class RemoteClient {
     this.clearTimers()
     this.ready = false
     this.refusal = undefined
+    this.proving = null
     const ws = new this.WS(this.opts.url)
     this.ws = ws
     this.handshakeTimer = setTimeout(() => this.lost(ws, 'no answer to hello'), this.opts.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS)
     ws.on('open', () => {
       if (this.ws !== ws) return
-      ws.send(
-        JSON.stringify({
-          kind: 'hello',
-          token: this.opts.token,
-          protocolVersion: this.opts.protocolVersion ?? PROTOCOL_VERSION,
-          ...(this.cursorValid ? { afterSeq: this.lastSeq, ...(this.epoch ? { streamEpoch: this.epoch } : {}) } : {}),
-        }),
-      )
+      if (this.opts.proveHost) {
+        this.proving = proofNonce()
+        ws.send(JSON.stringify({ kind: 'prove', nonce: this.proving }))
+        return
+      }
+      this.sendHello(ws)
     })
     ws.on('message', (data) => {
       if (this.ws !== ws) return
+      if (this.proving !== null) return this.onProof(ws, String(data))
       this.onFrame(String(data))
     })
     ws.on('close', (code, reason) => {
       if (this.ws !== ws) return
-      if (code === 4001 || code === 4002) {
-        this.detach(ws)
-        this.ws = null
-        this.ready = false
-        this.clearTimers()
-        this.failAll(`The host refused the link: ${this.refusal?.message ?? String(reason)}`)
-        // Not retried: the same hello gets the same answer (the link decides what to do next)
-        this.on.refused?.({ code, reason: String(reason), ...(this.refusal ? { error: this.refusal } : {}) })
-        return
+      if (this.proving !== null) {
+        // Closed before it proved anything: not this machine's host, or one that cannot prove (it said it could)
+        this.proving = null
+        return this.lost(ws, `the forward's port closed before the host proved it holds the token (${code})`)
       }
-      this.lost(ws, `closed (${code})`)
+      this.onClose(ws, code, reason)
     })
     ws.on('error', () => {
       /* 'close' follows */
     })
+  }
+
+  /** The nonce of the `prove` this socket sent, until the host's proof arrives (#838) */
+  private proving: string | null = null
+
+  /** The host's answer to `prove`: the token goes out only once it is proven; anything else drops the socket */
+  private onProof(ws: WebSocket, raw: string): void {
+    const nonce = this.proving!
+    this.proving = null
+    const f = parseJson(raw) as { kind?: unknown; nonce?: unknown; mac?: unknown } | null
+    if (f?.kind === 'proof' && f.nonce === nonce && provesToken(this.opts.token, nonce, f.mac)) return this.sendHello(ws)
+    // Something else holds the port (another account's program, #838): it never gets the token
+    this.lost(ws, "the forward's port answered without proving it is the machine's host")
+  }
+
+  private sendHello(ws: WebSocket): void {
+    ws.send(
+      JSON.stringify({
+        kind: 'hello',
+        token: this.opts.token,
+        protocolVersion: this.opts.protocolVersion ?? PROTOCOL_VERSION,
+        ...(this.cursorValid ? { afterSeq: this.lastSeq, ...(this.epoch ? { streamEpoch: this.epoch } : {}) } : {}),
+      }),
+    )
+  }
+
+  private onClose(ws: WebSocket, code: number, reason: Buffer): void {
+    if (code === 4001 || code === 4002) {
+      this.detach(ws)
+      this.ws = null
+      this.ready = false
+      this.clearTimers()
+      this.failAll(`The host refused the link: ${this.refusal?.message ?? String(reason)}`)
+      // Not retried: the same hello gets the same answer (the link decides what to do next)
+      this.on.refused?.({ code, reason: String(reason), ...(this.refusal ? { error: this.refusal } : {}) })
+      return
+    }
+    this.lost(ws, `closed (${code})`)
   }
 
   /** Points the client at another address or token (the tunnel came back on another port, or the token rotated) */

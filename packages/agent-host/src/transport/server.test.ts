@@ -7,6 +7,7 @@ import { ATTACHMENT_MAX_BASE64, PROTOCOL_VERSION, parseServerFrame, type Normali
 import { HostServer, parseAllowedOrigins, versionMismatchMessage, type HostServerOptions, type RpcHandler } from './server.js'
 import { deriveHttpSecret, sameSecret, secretError, type HttpRoute } from './http.js'
 import { bridgeToken } from './bridge-token.js'
+import { hostProof } from './host-proof.js'
 
 const TOKEN = 'test-token'
 let server: HostServer | null = null
@@ -394,6 +395,46 @@ describe('handshake', () => {
     await c.open()
     c.send({ kind: 'rpc', id: '1', method: 'sessions.list', params: {} })
     expect(await c.closed()).toBe(4001)
+  })
+
+  /*
+   * The hub's forward listens on a loopback port another account can take first (#838), so the hub asks the host to
+   * prove it holds the token before sending it. The answer lets nothing in; a hello still has to follow.
+   */
+  it('answers one prove before hello with the HMAC of the nonce, and still takes the hello after it', async () => {
+    const { port } = await start()
+    const c = connect(port)
+    await c.open()
+    const nonce = 'n'.repeat(32)
+    c.send({ kind: 'prove', nonce })
+    await c.wait(() => c.frames.length > 0)
+    expect(c.frames[0]).toEqual({ kind: 'proof', nonce, mac: hostProof(TOKEN, nonce) })
+    expect(JSON.stringify(c.frames)).not.toContain(TOKEN)
+    c.send({ kind: 'rpc', id: '1', method: 'sessions.list', params: {} })
+    expect(await c.closed()).toBe(4001)
+
+    const d = connect(port)
+    await d.open()
+    d.send({ kind: 'prove', nonce })
+    await d.wait(() => d.frames.length > 0)
+    d.send({ kind: 'hello', token: TOKEN, protocolVersion: PROTOCOL_VERSION })
+    await d.wait(() => d.frames.length > 1)
+    expect(d.frames[1]).toMatchObject({ kind: 'hello_ok' })
+    d.ws.close()
+  })
+
+  it('refuses a second prove on one socket, and a nonce that is not base64url', async () => {
+    const { port } = await start()
+    const c = connect(port)
+    await c.open()
+    c.send({ kind: 'prove', nonce: 'a'.repeat(32) })
+    await c.wait(() => c.frames.length > 0)
+    c.send({ kind: 'prove', nonce: 'b'.repeat(32) })
+    expect(await c.closed()).toBe(4001)
+    const d = connect(port)
+    await d.open()
+    d.send({ kind: 'prove', nonce: 'bridge token v1\u0000s1' })
+    expect(await d.closed()).toBe(4001)
   })
 
   it('closes a socket whose first frame is not a hello, whatever it is instead', async () => {

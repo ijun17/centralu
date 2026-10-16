@@ -401,7 +401,7 @@ export class LinkedMachine implements RoutedMachine {
         resolve(v)
       }
       const client = new RemoteClient(
-        { ...this.deps.client, url: e.url, token: e.token, handshakeTimeoutMs: 5_000, callTimeoutMs: 5_000 },
+        { ...this.deps.client, url: e.url, token: e.token, proveHost: e.line.proof === true, handshakeTimeoutMs: 5_000, callTimeoutMs: 5_000 },
         { hello: () => void client.call('host.activity', {}).then(read, () => null).then(done), refused: () => done(null) },
       )
       const timer = setTimeout(() => done(null), 8_000)
@@ -697,7 +697,8 @@ export class LinkedMachine implements RoutedMachine {
 
   private connectClient(endpoint: Endpoint): void {
     const client = new RemoteClient(
-      { ...this.deps.client, url: endpoint.url, token: endpoint.token },
+      // A host that can prove it holds the token is asked to, before the token goes out (#838)
+      { ...this.deps.client, url: endpoint.url, token: endpoint.token, proveHost: endpoint.line.proof === true },
       {
         hello: (h) => void this.onHello(client, h),
         event: (e) => this.onEvent(e),

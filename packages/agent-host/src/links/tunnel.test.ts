@@ -613,3 +613,12 @@ describe('the remote command per shell (#82)', () => {
     expect(lastLine('<S S="Error">Cloning into x</S></Objs>')).toBe('')
   })
 })
+
+// The line says the running host can prove it holds the token (#838); only `true` counts, anything else is absent
+describe('the proof field of the connection line', () => {
+  it('is read only when it is exactly true', () => {
+    const base = { v: 1, port: 17175, token: 't', version: '1', protocolVersion: 1, dataDir: '/d', hostRunning: true }
+    expect(parseConnectionLine(JSON.stringify({ ...base, proof: true })).proof).toBe(true)
+    for (const proof of [undefined, false, 'true', 1]) expect(parseConnectionLine(JSON.stringify({ ...base, proof })).proof).toBeUndefined()
+  })
+})

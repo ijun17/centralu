@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { WebSocketServer } from 'ws'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
@@ -1379,5 +1380,35 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
       ok: false,
       error: expect.stringMatching(/the link to Remote box dropped before the turn ended.*may still be running there/),
     })
+  })
+})
+
+/*
+ * The forward's local end is a loopback port another account on the hub can take first (#838). A remote whose line says
+ * `proof` is asked to prove it holds the token before the hello carries it there.
+ */
+describe('a link to a host that can prove it holds the token', () => {
+  it('comes up with the real host', async () => {
+    const remote = await remoteHost()
+    const hub = await hubHost(() => lineFor(remote.port, { proof: true }))
+    await until(() => status(hub) === 'connected')
+  })
+
+  it('never sends the token to whatever else holds the port', async () => {
+    const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+    await new Promise<void>((r) => wss.once('listening', () => r()))
+    cleanups.push(() => new Promise<void>((r) => wss.close(() => r())))
+    const got: string[] = []
+    // It answers like a host would after a hello, and with a proof it cannot make
+    wss.on('connection', (ws) => ws.on('message', (d) => {
+      got.push(String(d))
+      const f = JSON.parse(String(d)) as { kind: string; nonce?: string }
+      ws.send(JSON.stringify(f.kind === 'prove' ? { kind: 'proof', nonce: f.nonce, mac: 'A'.repeat(43) } : { kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, resyncRequired: false, currentSeq: 0 }))
+    }))
+    const hub = await hubHost(() => lineFor((wss.address() as { port: number }).port, { proof: true }))
+    await until(() => got.length >= 2)
+    expect(got.join('\n')).not.toContain(`"${TOKEN}"`)
+    expect(got.every((g) => JSON.parse(g).kind === 'prove')).toBe(true)
+    expect(status(hub)).not.toBe('connected')
   })
 })

@@ -164,6 +164,13 @@ describe('the connection line', () => {
     expect(line).not.toContain('\n')
   })
 
+  // Only a host that proved it holds the token is marked (#838); a line without it gets the hello as before
+  it('says proof only when the running host proved it', () => {
+    const base = { port: 17175, token: 't', version: '1.2.3', protocolVersion: 1, dataDir: '/d', hostRunning: true }
+    expect(JSON.parse(connectionLine({ ...base, proof: true }))).toMatchObject({ proof: true })
+    expect(JSON.parse(connectionLine({ ...base, proof: false }))).not.toHaveProperty('proof')
+  })
+
   it('has a default port below the ephemeral ranges and the host’s view origin ports', () => {
     expect(DEFAULT_SERVE_PORT).toBeLessThan(20000)
     expect(DEFAULT_SERVE_PORT).toBeGreaterThan(1024)
@@ -395,7 +402,9 @@ describe('centralu serve, end to end (a host from source, a temporary data folde
       await s.until(/listening on 127\.0\.0\.1:\d+/)
 
       const info = await connection(d)
-      expect(info).toMatchObject({ v: 1, port, token: before.token, protocolVersion: PROTOCOL_VERSION, dataDir: d, hostRunning: true })
+      // proof (#838): the running host answered a prove, so the hub will ask it to before sending the token
+      expect(info).toMatchObject({ v: 1, port, token: before.token, protocolVersion: PROTOCOL_VERSION, dataDir: d, hostRunning: true, proof: true })
+      expect(before.proof).toBeUndefined()
 
       const ok = await hello(port, String(info.token))
       expect(ok).toMatchObject({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION })

@@ -92,11 +92,31 @@ export const TerminalExit = z.object({
 })
 export type TerminalExit = z.infer<typeof TerminalExit>
 
-export const ClientFrame = z.discriminatedUnion('kind', [HelloClient, RpcRequest])
+/**
+ * Before hello, a client may ask the host to prove it holds the token, without either side sending it (#838): the
+ * hub's ssh forward listens on a loopback port any local account can take first, and the hello carries the token.
+ * The host answers `proof` with an HMAC of the nonce under its token (`hostProof` in agent-host). At most one per
+ * socket, and it authenticates nothing: a hello still has to follow.
+ */
+export const ProveClient = z.object({
+  kind: z.literal('prove'),
+  /** Fresh random, base64url: the HMAC's input after a fixed label, so no other value derived from the token can be asked for */
+  nonce: z.string().regex(/^[A-Za-z0-9_-]{22,128}$/),
+})
+export type ProveClient = z.infer<typeof ProveClient>
+
+export const ProofServer = z.object({
+  kind: z.literal('proof'),
+  nonce: z.string(),
+  mac: z.string(),
+})
+export type ProofServer = z.infer<typeof ProofServer>
+
+export const ClientFrame = z.discriminatedUnion('kind', [HelloClient, ProveClient, RpcRequest])
 export type ClientFrame = z.infer<typeof ClientFrame>
 
 // 'res' splits into two branches by ok, so discriminatedUnion('kind') does not work here — use a plain union
-export const ServerFrame = z.union([HelloServer, EventPush, RpcResponse, TerminalPush, TerminalExit])
+export const ServerFrame = z.union([HelloServer, ProofServer, EventPush, RpcResponse, TerminalPush, TerminalExit])
 export type ServerFrame = z.infer<typeof ServerFrame>
 
 export function parseClientFrame(raw: unknown) {

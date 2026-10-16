@@ -789,6 +789,16 @@ A host started with `centralu serve` on another machine is reached by the app th
   keyring prompt on that machine.
 - **What the client must not do:** forward with a wildcard bind address (`-L 0.0.0.0:…`) or `GatewayPorts`, which
   would expose the host's port on the client's network with only the token in front of it.
+- **Other users on the person's computer** (#838). The forward's local end is a loopback port, and any account there
+  can listen on it first: the forward counts as up when something accepts on the port, and the hub's hello carries
+  the remote's token. So before the hello the hub asks the host to prove it holds the token (`prove`: an HMAC of a
+  fresh nonce under the token, with a label no other derived secret uses, `transport/host-proof.ts`), and sends the
+  hello only to a host that does. Something else on the port gets a nonce, never the token, and the link reports
+  itself down. The hub asks only when the connection line says the running host can (`proof`, written by
+  `serve --connection`, which runs over SSH and asks the host itself); a remote from before #838 has no `proof`
+  and gets the hello as before, so on such a remote this hole stays open until it is updated. A Unix-socket forward
+  in a 0700 folder was the other choice; it was not taken because a Windows hub's Node cannot connect to the
+  AF_UNIX socket OpenSSH would create there, while the proof works with every hub and every remote.
 
 ## The keeper's control socket
 

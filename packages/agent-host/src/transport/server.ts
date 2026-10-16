@@ -11,6 +11,7 @@ import {
 import { EventLog } from './event-log.js'
 import { createHttpHandler, sameSecret, type HttpGate } from './http.js'
 import { bridgeRefusal, bridgeSessionOf } from './bridge-token.js'
+import { hostProof } from './host-proof.js'
 import { DrainCut, type Drain } from '../drain.js'
 
 /**
@@ -438,6 +439,8 @@ export class HostServer {
     let authed = false
     /** The session whose bridge credential this socket said hello with; null for the front door's token */
     let bridgeOf: string | null = null
+    /** Whether this socket already asked for the host's proof (`prove`, #838): once, before hello */
+    let proved = false
     const client = ++this.lastClient
     // A socket that never says hello is closed, not kept forever (#82). Its slot is given back when it is gone ('close' below), not before
     this.handshakeTimers.set(
@@ -477,6 +480,19 @@ export class HostServer {
       if (!frame.success) {
         if (!authed) return this.refuse(ws, CLOSE_AUTH, 'not a hello')
         return this.sendError(ws, null, { code: 'internal', message: 'Unknown frame', retryable: false })
+      }
+
+      if (frame.data.kind === 'prove') {
+        /*
+         * The hub asks this host to show it holds the token before it sends it (#838): the forward to a linked
+         * machine listens on a loopback port another account can take first. Once per socket, before hello, and it
+         * lets nothing in: the answer reveals the token to no one, and a hello must still follow.
+         */
+        if (authed) return
+        if (proved) return this.refuse(ws, CLOSE_AUTH, 'not a hello')
+        proved = true
+        this.sendTo(ws, JSON.stringify({ kind: 'proof', nonce: frame.data.nonce, mac: hostProof(this.opts.token, frame.data.nonce) }))
+        return
       }
 
       if (frame.data.kind === 'hello') {

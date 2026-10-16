@@ -33,6 +33,11 @@ export type ConnectionLine = {
    * owner decision 4). Absent from a remote that predates it
    */
   autostart?: RemoteAutostart
+  /**
+   * The running host answered a `prove` (#838), so the hub asks it to prove it holds the token before sending it
+   * (`RemoteClientOptions.proveHost`). Absent from a remote that predates it, which gets the hello as before
+   */
+  proof?: boolean
 }
 
 /**
@@ -125,6 +130,7 @@ export function parseConnectionLine(stdout: string): ConnectionLine {
         hostRunning: o.hostRunning === true,
         ...(install ? { install } : {}),
         ...(autostart ? { autostart } : {}),
+        ...((o as { proof?: unknown }).proof === true ? { proof: true } : {}),
       }
     }
   }

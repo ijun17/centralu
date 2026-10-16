@@ -172,3 +172,51 @@ describe('the link client (#82)', () => {
     expect(seen.terms).toEqual([{ terminalId: 'term-1', data: 'hi' }, { terminalId: 'term-1', exitCode: 0 }])
   })
 })
+
+/*
+ * The hub's ssh forward listens on a loopback port that another account on the hub can take first (#838). The hello
+ * carries the remote's token, so a host that can prove it holds the token is asked to before the hello goes out.
+ */
+describe('a host asked to prove it holds the token (#838)', () => {
+  /** What holds the forward's port instead of the host: it records what it is sent and answers as told */
+  async function squatter(answer: (frame: Record<string, unknown>) => unknown) {
+    const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+    await new Promise<void>((r) => wss.once('listening', () => r()))
+    const got: string[] = []
+    wss.on('connection', (ws) => {
+      ws.on('message', (d) => {
+        got.push(String(d))
+        const reply = answer(JSON.parse(String(d)) as Record<string, unknown>)
+        if (reply !== undefined) ws.send(JSON.stringify(reply))
+      })
+    })
+    cleanups.push(() => new Promise<void>((r) => wss.close(() => r())))
+    return { port: (wss.address() as { port: number }).port, got }
+  }
+
+  it('the real host proves it, and the link comes up as before', async () => {
+    const { port } = await host()
+    const { c, seen } = client(port, { proveHost: true })
+    c.connect()
+    await until(() => c.connected)
+    expect(seen.hellos).toHaveLength(1)
+  })
+
+  it('a program on the port that cannot prove it never receives the token', async () => {
+    for (const answer of [
+      () => undefined,
+      (f: Record<string, unknown>) => ({ kind: 'proof', nonce: f.nonce, mac: 'x'.repeat(43) }),
+      () => ({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, resyncRequired: false, currentSeq: 0 }),
+    ]) {
+      const s = await squatter(answer)
+      const { c } = client(s.port, { proveHost: true, handshakeTimeoutMs: 300 })
+      c.connect()
+      await until(() => s.got.length > 0)
+      await new Promise((r) => setTimeout(r, 400))
+      expect(c.connected).toBe(false)
+      expect(s.got.join('\n')).not.toContain(TOKEN)
+      expect(JSON.parse(s.got[0]!)).toMatchObject({ kind: 'prove' })
+      c.close()
+    }
+  })
+})

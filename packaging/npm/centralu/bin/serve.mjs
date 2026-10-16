@@ -16,7 +16,7 @@
  * directory, so this ships automatically.
  */
 import { spawn } from 'node:child_process'
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, writeSync, closeSync } from 'node:fs'
 import { connect, createServer } from 'node:net'
 import { userInfo } from 'node:os'
@@ -400,7 +400,7 @@ export function protocolVersionOf(entry) {
  * `install` (additive, the line stays `v: 1`) says what runs this command (`installInfo`); `detach`
  * is added by `--detach` only.
  */
-export function connectionLine({ port, token, version, protocolVersion, dataDir, hostRunning, install, autostart, detach }) {
+export function connectionLine({ port, token, version, protocolVersion, dataDir, hostRunning, install, autostart, detach, proof }) {
   return JSON.stringify({
     v: 1,
     port,
@@ -412,6 +412,8 @@ export function connectionLine({ port, token, version, protocolVersion, dataDir,
     ...(install ? { install } : {}),
     ...(autostart ? { autostart } : {}),
     ...(detach ? { detach } : {}),
+    // The running host proves it holds the token before the hub sends it (#838); absent: the hub sends hello as before
+    ...(proof ? { proof: true } : {}),
   })
 }
 
@@ -642,6 +644,51 @@ export function probeHost({ port, token, protocolVersion, timeoutMs = 2000, WebS
   })
 }
 
+/**
+ * Whether the host on the port answers a `prove` with the HMAC of a fresh nonce under the token (#838): only then does
+ * the connection line say `proof`, and the hub ask for it before sending the token. A host from before it closes the
+ * socket ("not a hello"), which reads as false, and the hub sends hello as it always did.
+ */
+export function proveHost({ port, token, timeoutMs = 2000, WebSocketImpl = globalThis.WebSocket }) {
+  if (typeof WebSocketImpl !== 'function') return Promise.resolve(false)
+  const nonce = randomBytes(24).toString('base64url')
+  const want = createHmac('sha256', token).update(`centralu host proof v1\0${nonce}`).digest('base64url')
+  return new Promise((resolve) => {
+    let ws = null
+    let settled = false
+    const done = (result) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try {
+        ws?.close()
+      } catch {
+        // already closed
+      }
+      resolve(result)
+    }
+    const timer = setTimeout(() => done(false), timeoutMs)
+    try {
+      ws = new WebSocketImpl(`ws://127.0.0.1:${port}`)
+    } catch {
+      done(false)
+      return
+    }
+    ws.onopen = () => ws.send(JSON.stringify({ kind: 'prove', nonce }))
+    ws.onmessage = (ev) => {
+      let m
+      try {
+        m = JSON.parse(String(ev.data))
+      } catch {
+        return done(false)
+      }
+      done(m?.kind === 'proof' && m.nonce === nonce && m.mac === want)
+    }
+    ws.onerror = () => done(false)
+    ws.onclose = () => done(false)
+  })
+}
+
 function tcpProbe(port, timeoutMs) {
   return new Promise((resolve) => {
     const s = connect({ host: '127.0.0.1', port })
@@ -693,7 +740,9 @@ async function describe({ env, dataDir, state, entry, version }) {
   const probe = await probeHost({ port, token: state.token, protocolVersion: installed })
   const protocolVersion = (probe.running ? probe.protocolVersion : undefined) ?? installed
   if (protocolVersion === null) return null
+  const proof = probe.running ? await proveHost({ port, token: state.token }) : false
   return {
+    proof,
     port,
     token: state.token,
     version: (probe.running ? probe.version : undefined) ?? version,
