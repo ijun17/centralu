@@ -599,13 +599,32 @@ test('Unread indicator and marking as read (T5-6, FR-16)', async ({ page }) => {
     session object, so it never accumulated the 3 seconds while a turn was running (dogfooding
     finding: "the white dot while the session is running").
 
-    The test's time limit must be **below** that 3 seconds. Leaving it at the default (5 seconds)
-    lets the read timer clear the marker first and the poll catch it afterward and pass — that is
-    exactly what happened with the code before the actual fix. What is being asked is "did it turn
-    on even briefly", so this checks within those 3 seconds.
+    What is being asked is "did it turn on even briefly", and a poll cannot answer that: the read
+    timer clears the marker after 3 seconds, so a poll that comes late (a loaded machine) sees it
+    off and passes, which is exactly what happened with the code before the actual fix. An
+    observer installed before the events records every value the attribute takes.
+
+    The new content has to be a new row. One more chunk of the message already streaming grows
+    that row and carries its number, so it never makes anything unread to begin with (#845): a
+    tool call closes the row, and the text after it starts another.
   */
+  const seqOf = () => page.evaluate((id) => (window as any).__store.getState().sessions[id] as { lastSeq: number }, sessionId)
+  const before = await seqOf()
+  await row.evaluate((el) => {
+    const w = window as any
+    w.__unreadSeen = el.getAttribute('data-unread') === 'true'
+    new MutationObserver(() => {
+      if (el.getAttribute('data-unread') === 'true') w.__unreadSeen = true
+    }).observe(el, { attributes: true, attributeFilter: ['data-unread'] })
+  })
+  await emitEvent(page, 0, { type: 'tool_call', callId: 'watch-1', summary: { tool: 'Read', title: 'Read: b.ts', paths: [] } })
   await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: 'more came in while watching' })
-  await expect(row).not.toHaveAttribute('data-unread', 'true', { timeout: 1000 })
+  await expect(page.getByText('more came in while watching')).toBeVisible()
+  // New rows, so the store did count something unread: only the screen keeps it off the row being watched
+  expect((await seqOf()).lastSeq).toBeGreaterThan(before.lastSeq)
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  expect(await page.evaluate(() => (window as any).__unreadSeen)).toBe(false)
+  expect(await row.evaluate((el) => el.isConnected)).toBe(true)
 })
 
 test('Context gauge and limit display (FR-14, FR-9)', async ({ page }) => {
