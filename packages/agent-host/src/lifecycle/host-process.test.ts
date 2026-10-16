@@ -1,15 +1,18 @@
 /**
  * The host's start and ending, run for real: `main.ts` started as the keeper and the window start
  * it, with a login shell of the test's own as the first child it spawns (docs/runtime-lessons.md
- * ST16, HO3, HO7). These are the rules a unit test of one module cannot see, because they are about
- * the order `main.ts` takes its steps in.
+ * ST16, HO3, HO7); on Windows, which asks no login shell, an agent CLI of the test's own that the
+ * host runs when asked which agents are installed. These are the rules a unit test of one module
+ * cannot see, because they are about the order `main.ts` takes its steps in.
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
+import { WebSocket } from 'ws'
+import { PROTOCOL_VERSION } from '@cc/protocol'
 import { acquireInstanceLock } from '../dev-services/instance-lock.js'
 import { LAUNCH_VARIABLES } from './launch-env.js'
 
@@ -25,6 +28,9 @@ afterEach(() => {
 /**
  * A data folder, and a login shell that writes the environment it was given to `probe-env` and
  * answers the PATH probe with a folder of its own: the host's first child, spawned by the PATH step.
+ *
+ * Windows asks no login shell (PA6). Its PATH step adds the folders the tools' installers write to,
+ * so one of them is made to exist (`%APPDATA%\npm`) for the step to have something to say.
  */
 function setup() {
   const dir = mkdtempSync(join(tmpdir(), 'cc-lifecycle-'))
@@ -32,20 +38,32 @@ function setup() {
   const tools = join(dir, 'tools')
   writeFileSync(shell, `#!/bin/sh\nenv > "${join(dir, 'probe-env')}"\necho "__CC_PATH__:${tools}"\n`)
   chmodSync(shell, 0o755)
+  const appData = join(dir, 'appdata')
+  mkdirSync(join(appData, 'npm'), { recursive: true })
   return {
     dir,
     db: join(dir, 'store.db'),
     shell,
+    appData,
     probeEnv: () => readFileSync(join(dir, 'probe-env'), 'utf8'),
     log: () => (existsSync(join(dir, 'host.log')) ? readFileSync(join(dir, 'host.log'), 'utf8') : ''),
   }
 }
 
 function env(s: ReturnType<typeof setup>, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  return { ...process.env, CC_DATA_DIR: s.dir, SHELL: s.shell, CI: '1', ...extra }
+  return { ...withoutPath(process.env), PATH: process.env.PATH, CC_DATA_DIR: s.dir, SHELL: s.shell, APPDATA: s.appData, CI: '1', ...extra }
 }
 
-/** Starts the host and resolves once its ready line is out */
+/**
+ * The environment without its PATH, so one can be set: on Windows a copy of `process.env` keeps the
+ * spelling Windows stored (`Path`), and a `PATH` added beside it makes two, of which the child sees
+ * either.
+ */
+function withoutPath(e: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(e).filter(([k]) => k.toUpperCase() !== 'PATH'))
+}
+
+/** Starts the host and resolves with its port once its ready line is out */
 function startHost(s: ReturnType<typeof setup>, args: string[], extra: Record<string, string> = {}) {
   const p = spawn(process.execPath, ['--import', 'tsx', MAIN, '--db', s.db, '--port', '0', ...args], {
     cwd: ROOT,
@@ -57,10 +75,14 @@ function startHost(s: ReturnType<typeof setup>, args: string[], extra: Record<st
   let err = ''
   p.stderr!.on('data', (d: Buffer) => (err += String(d)))
   const exited = new Promise<number | null>((resolve) => p.once('exit', (code) => resolve(code)))
-  const ready = new Promise<void>((resolve, reject) => {
+  const ready = new Promise<number>((resolve, reject) => {
     p.stdout!.on('data', (d: Buffer) => {
       out += String(d)
-      if (out.includes('"ready":true')) resolve()
+      const line = out
+        .split('\n')
+        .map((l) => l.trim())
+        .find((l) => l.includes('"ready":true') && l.endsWith('}'))
+      if (line) resolve((JSON.parse(line) as { port: number }).port)
     })
     void exited.then((code) => reject(new Error(`the host exited (${code}) before its ready line:\n${err}`)))
   })
@@ -69,8 +91,47 @@ function startHost(s: ReturnType<typeof setup>, args: string[], extra: Record<st
 
 const settle = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-describe.skipIf(!posix)('the host process, started for real', () => {
-  it("the first child the host spawns sees none of the launcher's variables, the token least of all (ST16)", async () => {
+/**
+ * An agent CLI as `npm i -g` installs it on Windows, a `.cmd` shim beside its script, that writes
+ * the arguments and environment it was given to `<out>/<name>-<pid>.json` and answers `--version`.
+ */
+function fakeCliOnPath(dir: string, name: string): string {
+  const bin = join(dir, 'bin')
+  const out = join(dir, 'cli-runs')
+  mkdirSync(join(bin, 'node_modules'), { recursive: true })
+  mkdirSync(out, { recursive: true })
+  writeFileSync(
+    join(bin, 'node_modules', `${name}.js`),
+    `require('node:fs').writeFileSync(${JSON.stringify(join(out, name))} + '-' + process.pid + '.json', JSON.stringify({ argv: process.argv.slice(2), env: process.env }))\nconsole.log('1.0.0')\n`,
+  )
+  writeFileSync(join(bin, `${name}.cmd`), `@ECHO off\r\nnode  "%~dp0\\node_modules\\${name}.js" %*\r\n`)
+  return bin
+}
+
+/** Asks a running host one RPC over its WebSocket, as a window does */
+async function rpc(port: number, token: string, method: string, params: unknown): Promise<unknown> {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}`)
+  try {
+    return await new Promise((resolve, reject) => {
+      ws.on('error', reject)
+      ws.on('open', () => ws.send(JSON.stringify({ kind: 'hello', token, protocolVersion: PROTOCOL_VERSION })))
+      ws.on('message', (raw) => {
+        const msg = JSON.parse(String(raw)) as { kind: string; id?: string; ok?: boolean; result?: unknown; error?: unknown }
+        if (msg.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: '1', method, params }))
+        else if (msg.kind === 'res' && msg.id === '1') {
+          if (msg.ok) resolve(msg.result)
+          else reject(new Error(JSON.stringify(msg.error)))
+        }
+      })
+    })
+  } finally {
+    ws.close()
+  }
+}
+
+describe('the host process, started for real', () => {
+  // Windows asks no login shell (PA6), so the host spawns nothing of its own at start; the test below asks it to
+  it.skipIf(!posix)("the first child the host spawns sees none of the launcher's variables, the token least of all (ST16)", async () => {
     const s = setup()
     const host = startHost(s, [], {
       CC_HOST_TOKEN: 'launcher-token-not-for-children',
@@ -85,6 +146,34 @@ describe.skipIf(!posix)('the host process, started for real', () => {
     expect(names.filter((n) => (LAUNCH_VARIABLES as readonly string[]).includes(n!))).toEqual([])
     expect(probe.includes('launcher-token-not-for-children')).toBe(false)
     host.p.kill('SIGTERM')
+    expect(await host.exited).toBe(0)
+  }, 60_000)
+
+  it.runIf(!posix)("Windows: an agent CLI the host runs, from an npm .cmd shim, sees none of the launcher's variables (ST16)", async () => {
+    const s = setup()
+    const token = 'launcher-token-not-for-children'
+    const bin = fakeCliOnPath(s.dir, 'claude')
+    // How the window starts it on Windows: the variables, and stdin as the line to the parent
+    const host = startHost(s, ['--watch-parent'], {
+      PATH: `${bin};${process.env.PATH}`,
+      CC_HOST_TOKEN: token,
+      CC_HOST_SOURCE: 'content',
+      CC_FRONT_DOOR: 'ws://127.0.0.1:1',
+      CC_SERVE: '1',
+    })
+    const port = await host.ready
+    // The window's question "which agents are installed": the host runs `claude --version` and its sign-in check
+    const detected = (await rpc(port, token, 'agents.detect', {})) as { name: string; installed: boolean }[]
+    expect(detected.find((t) => t.name === 'claude')?.installed).toBe(true)
+    const runs = readdirSync(join(s.dir, 'cli-runs'))
+    expect(runs.length).toBeGreaterThan(0)
+    for (const run of runs) {
+      const seen = JSON.parse(readFileSync(join(s.dir, 'cli-runs', run), 'utf8')) as { env: Record<string, string> }
+      // Compared by name: a failure must not print the test runner's own environment
+      expect(Object.keys(seen.env).filter((n) => (LAUNCH_VARIABLES as readonly string[]).includes(n.toUpperCase()))).toEqual([])
+      expect(Object.values(seen.env).some((v) => v.includes(token))).toBe(false)
+    }
+    host.p.stdin!.end()
     expect(await host.exited).toBe(0)
   }, 60_000)
 
@@ -103,7 +192,7 @@ describe.skipIf(!posix)('the host process, started for real', () => {
       const log = s.log()
       const banner = log.indexOf('[agent-host] started')
       expect(banner).toBeGreaterThanOrEqual(0)
-      expect(log.indexOf('PATH augmented (login shell)')).toBeGreaterThan(banner)
+      expect(log.indexOf(`PATH augmented (${posix ? 'login shell' : 'default candidates'})`)).toBeGreaterThan(banner)
       expect(log.indexOf('Another Centralu is already using this data')).toBeGreaterThan(banner)
     } finally {
       if (owner.ok) owner.release()
@@ -117,6 +206,8 @@ describe.skipIf(!posix)('the host process, started for real', () => {
     host.p.stdin!.end()
     await settle(1500)
     expect(host.p.exitCode).toBeNull()
+    // Windows has no signal to send: Node's kill there is TerminateProcess, which no handler sees
+    if (!posix) return
     host.p.kill('SIGTERM')
     expect(await host.exited).toBe(0)
     expect(s.log()).toContain('[agent-host] shutting down (pid')
