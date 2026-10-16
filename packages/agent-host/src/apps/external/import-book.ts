@@ -78,7 +78,7 @@ export class ImportBook {
    * an app through Centralu drops its mark (`drop`), so an app the person makes under that id afterwards is unmarked.
    */
   get(appId: string, dir: string): ImportMark | null {
-    const m = this.doc[appId]
+    const m = this.current()[appId]
     if (!m) return null
     try {
       return this.matchingMark(m, statSync(dir, { bigint: true }).ino.toString()) ?? { ...m, confirmed: null }
@@ -90,6 +90,7 @@ export class ImportBook {
   /** Records that this was imported — recorded as disabled */
   mark(appId: string, dir: string, source: string, at = Date.now()): void {
     const ino = statSync(dir, { bigint: true }).ino
+    this.current()
     // Keep the legacy number: the previous host compares statSync(dir).ino === m.ino.
     // Replacing it with a string would drop the import mark and bypass that host's gate.
     this.doc[appId] = { source, importedAt: at, ino: Number(ino), inoExact: ino.toString(), confirmed: null }
@@ -98,7 +99,7 @@ export class ImportBook {
 
   /** Records that the person enabled it — the declaration seen at that time, together with its key */
   confirm(appId: string, dir: string, manifest: Pick<AppManifest, 'server' | 'uses'>, at = Date.now()): void {
-    const m = this.doc[appId]
+    const m = this.current()[appId]
     if (!m) return
     const ino = statSync(dir, { bigint: true }).ino
     /*
@@ -116,7 +117,7 @@ export class ImportBook {
   }
 
   drop(appId: string): void {
-    if (!(appId in this.doc)) return
+    if (!(appId in this.current())) return
     delete this.doc[appId]
     this.write()
   }
@@ -128,6 +129,16 @@ export class ImportBook {
     // would make AppHandover.gate trust it as a user-folder app. Preserve the import
     // mark and require review; the stored record stays untouched until an explicit write.
     return { ...m, confirmed: null }
+  }
+
+  /**
+   * The marks, read again while the last read could not use the file (a read error, or a damaged file
+   * that could not be moved aside): once it can be read, its marks are back, and a write never puts a
+   * document built from the empty stand-in over them.
+   */
+  private current(): Doc {
+    if (this.file.unreadable) this.doc = this.file.read()
+    return this.doc
   }
 
   private write(): void {

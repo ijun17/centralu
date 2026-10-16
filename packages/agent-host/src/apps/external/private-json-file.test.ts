@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -74,7 +74,7 @@ describe.each(owners)('$file', ({ file, write, wrote }) => {
     vi.useFakeTimers({ toFake: ['Date'], now: 1_700_000_000_000 })
     mkdirSync(join(dataRoot, `${file}.unreadable-1700000000000`, 'held'), { recursive: true })
 
-    expect(write).toThrow(/could not be read and could not be moved aside/)
+    expect(write).toThrow(/could not be read, so it was not overwritten/)
     expect(readFileSync(path, 'utf8')).toBe(DAMAGED)
 
     // Once the obstacle is gone, the next write moves the file aside and goes ahead
@@ -110,5 +110,85 @@ describe('the secrets store reads a damaged file as empty without losing it', ()
     // Said once: the second read finds no file, which is the empty document
     store.names('p1/keys')
     expect(vi.mocked(console.error)).toHaveBeenCalledTimes(1)
+  })
+})
+
+// chmod cannot take read permission away on Windows, nor from root
+const posixUser = process.platform !== 'win32' && process.getuid?.() !== 0 ? it : it.skip
+
+describe('a file that cannot be read at all is left where it is', () => {
+  posixUser('a valid secrets file without read permission survives a read and a refused write, and is used once readable', () => {
+    new SecretStore(dataRoot).set('p1/keys', 'API_KEY', 'sk-kept-value')
+    const path = join(dataRoot, SECRETS_FILE)
+    const before = readFileSync(path, 'utf8')
+    chmodSync(path, 0o000)
+    try {
+      const store = new SecretStore(dataRoot)
+      expect(store.names('p1/keys').size).toBe(0)
+      expect(() => store.set('p1/keys', 'OTHER', 'sk-other-value')).toThrow(/could not be read, so it was not overwritten/)
+      expect(readdirSync(dataRoot).filter((n) => n.includes('.unreadable-'))).toEqual([])
+      chmodSync(path, 0o600)
+      expect(readFileSync(path, 'utf8')).toBe(before)
+
+      // Readable again: the next read uses it, and a write keeps what it held
+      store.set('p1/keys', 'OTHER', 'sk-other-value')
+      expect(store.forApp('p1/keys', ['API_KEY', 'OTHER'])).toEqual({ API_KEY: 'sk-kept-value', OTHER: 'sk-other-value' })
+    } finally {
+      if (existsSync(path)) chmodSync(path, 0o600)
+    }
+  })
+
+  posixUser('the import marks read again once the file can be read, and a write never replaces them with the empty stand-in', () => {
+    new ImportBook(dataRoot).mark('notes', appDir, 'https://example.com/notes.zip', 10)
+    const path = join(dataRoot, IMPORTS_FILE)
+    const before = readFileSync(path, 'utf8')
+    const other = join(dataRoot, 'other-app')
+    mkdirSync(other)
+    chmodSync(path, 0o000)
+    try {
+      const book = new ImportBook(dataRoot)
+      expect(() => book.mark('other', other, 'https://example.com/other.zip', 20)).toThrow(/could not be read/)
+      chmodSync(path, 0o600)
+      expect(readFileSync(path, 'utf8')).toBe(before)
+
+      book.mark('other', other, 'https://example.com/other.zip', 20)
+      expect(book.get('notes', appDir)).toMatchObject({ source: 'https://example.com/notes.zip' })
+      expect(Object.keys(JSON.parse(readFileSync(path, 'utf8'))).sort()).toEqual(['notes', 'other'])
+    } finally {
+      if (existsSync(path)) chmodSync(path, 0o600)
+    }
+  })
+})
+
+describe('temp files a crashed write left behind', () => {
+  it.each(owners)('$file: removed when their writer is gone or they are over a minute old; a write in progress is kept', ({ file }) => {
+    const path = join(dataRoot, file)
+    const old = new Date(Date.now() - 5 * 60_000)
+    const plant = (name: string, age?: Date) => {
+      writeFileSync(join(dataRoot, name), 'sk-left-behind', { mode: 0o600 })
+      if (age) utimesSync(join(dataRoot, name), age, age)
+    }
+    // No process has this pid: the write that made it crashed
+    plant(`${file}.2147483646-0badc0de.tmp`)
+    // A live writer's, but minutes old: no write takes that long
+    plant(`${file}.${process.pid}-abcdef01.tmp`, old)
+    // The fixed name of an older build, minutes old
+    plant(`${file}.tmp`, old)
+    // The other host of a swap, writing right now
+    plant(`${file}.${process.ppid}-12345678.tmp`)
+    // Not a temp name this file uses
+    plant(`${file}.backup.tmp`, old)
+
+    if (file === SECRETS_FILE) new SecretStore(dataRoot)
+    else new ImportBook(dataRoot)
+
+    expect(readdirSync(dataRoot).filter((n) => n.endsWith('.tmp')).sort()).toEqual([`${file}.${process.ppid}-12345678.tmp`, `${file}.backup.tmp`].sort())
+    expect(existsSync(path)).toBe(false)
+  })
+
+  it('a fresh file under the fixed name of an older build is kept: that build may be writing it during a swap', () => {
+    writeFileSync(join(dataRoot, `${SECRETS_FILE}.tmp`), 'the old host, half written')
+    new SecretStore(dataRoot)
+    expect(readFileSync(join(dataRoot, `${SECRETS_FILE}.tmp`), 'utf8')).toBe('the old host, half written')
   })
 })
