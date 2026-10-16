@@ -3,6 +3,7 @@
 import { readFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { DEFAULT_TIMEOUT_MS, waitForChecks } from '../wait-checks.mjs'
+import { parseItemRef } from '../github.mjs'
 
 const args = process.argv.slice(2)
 const timeoutAt = args.indexOf('--timeout-minutes')
@@ -15,12 +16,18 @@ if (timeoutAt >= 0) {
   args.splice(timeoutAt, 2)
 }
 const ref = args[0] === '--ref' && args.length === 2 && args[1] && !args[1].startsWith('-') ? args[1] : null
-const match = args.length === 1 ? /^(?:([\w.-]+\/[\w.-]+))?#?(\d+)$/.exec(args[0]) : null
-if (!validTimeout || (!ref && !match)) {
-  console.error('Usage: node .centralu/apps/project-board/bin/wait-checks.mjs <pr|owner/repo#pr> | --ref <branch|sha> [--timeout-minutes <minutes>]')
+const config = JSON.parse(await readFile(new URL('../project.json', import.meta.url), 'utf8'))
+// A pull request in the forms the board's tools take (parseItemRef): 8, #8, owner/repo#8 or its URL
+let pr = null
+try {
+  if (args.length === 1 && !ref) pr = parseItemRef(args[0], config.repository)
+} catch {
+  // refused below with the usage
+}
+if (!validTimeout || (!ref && !pr)) {
+  console.error('Usage: node .centralu/apps/project-board/bin/wait-checks.mjs <pr|owner/repo#pr|PR URL> | --ref <branch|sha> [--timeout-minutes <minutes>]')
   process.exit(2)
 }
-const config = JSON.parse(await readFile(new URL('../project.json', import.meta.url), 'utf8'))
 const gh = (args, { timeoutMs }) =>
   new Promise((resolve, reject) =>
     execFile('gh', args, {
@@ -33,9 +40,9 @@ const gh = (args, { timeoutMs }) =>
     ),
   )
 const result = await waitForChecks({
-  repo: match?.[1] ?? config.repository,
+  repo: pr?.repo ?? config.repository,
   ref,
-  number: match ? Number(match[2]) : null,
+  number: pr?.number ?? null,
   timeoutMs,
   pollMs: Math.max(1_000, Number(process.env.PROJECT_BOARD_WAIT_POLL_MS) || 30_000),
 }, { gh, onRetry: (message) => console.error(message) })
