@@ -181,6 +181,8 @@ export class TrashRecords {
       this.db.prepare(`DELETE FROM queued_requests WHERE session_id = ? OR caller_session_id = ?`).run(sessionId, sessionId)
       // The depth it was started at (#867, `agentDepthKey` in sessions/agent-depth.ts)
       this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(`agent_depth:${sessionId}`)
+      // A hub's task mark (#838, `hubAskDepthKey`)
+      this.db.prepare(`DELETE FROM app_settings WHERE key = ?`).run(`hub_ask_depth:${sessionId}`)
       this.db.prepare(`DELETE FROM sessions WHERE id = ? AND deleted_at IS NOT NULL`).run(sessionId)
       return true
     })

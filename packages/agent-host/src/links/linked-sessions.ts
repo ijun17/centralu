@@ -172,11 +172,11 @@ export function linkedSessions(
   }
 
   return {
-    async send(sessionId, text, fromName) {
+    async send(sessionId, text, fromName, ask) {
       const m = owner(sessionId)
       if (!m) return { ok: false, error: `Not a session of a linked machine: ${sessionId}` }
       return attempt(m, async () => {
-        await m.call('host.send', { sessionId: m.q.strip(sessionId, 'The session'), text, from: { name: hubName ? `${fromName} on ${hubName}` : fromName } })
+        await m.call('host.send', { sessionId: m.q.strip(sessionId, 'The session'), text, from: { name: hubName ? `${fromName} on ${hubName}` : fromName }, ...(ask ? { ask } : {}) })
         return {}
       })
     },

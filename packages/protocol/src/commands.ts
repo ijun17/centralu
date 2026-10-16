@@ -2242,7 +2242,16 @@ export const RpcMethods = {
    * a hub is shown (not this host's orchestrator or coordinators). Asked by the hub directly, never routed
    */
   'host.send': {
-    params: z.object({ sessionId: SessionId, text: z.string(), from: z.object({ name: z.string() }) }),
+    params: z.object({
+      sessionId: SessionId,
+      text: z.string(),
+      from: z.object({ name: z.string() }),
+      /**
+       * The text is an ask_project task (#838 item 12), and the session works on it at this agent depth until its turn
+       * ends: the hub's caller's depth, plus one. Absent from an older hub, and from an orchestrator's instruction.
+       */
+      ask: z.object({ depth: z.number().int().min(1).max(64) }).optional(),
+    }),
     result: z.object({ ok: z.literal(true) }),
   },
   /**

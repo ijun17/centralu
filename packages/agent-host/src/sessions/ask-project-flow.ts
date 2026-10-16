@@ -8,7 +8,7 @@ import { inTurn } from '../idle.js'
 import { linkedTurnEnd, type LinkedTurnEvent } from './linked-turn-end.js'
 import { raceBound } from './with-timeout.js'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
-import { agentDepthRefusal } from './agent-depth.js'
+import { agentDepthRefusal, depthOf } from './agent-depth.js'
 
 /** How much of a linked machine's last message is read for an answer; `clipAnswer` then cuts it to the usual size */
 const ANSWER_READ_MAX_CHARS = 100_000
@@ -410,7 +410,8 @@ export class AskProjectFlow {
     }
     // Registered before the send: the machine's first events can reach the hub before its answer does
     this.linkedAsks.set(chosen.id, ask)
-    const sent = await reader.send(chosen.id, askFrame(callerProject, opts.task), labelOf(this.host.store, this.host.meta.get(callerId)!))
+    // The machine counts its session one level below the caller while it works on this (#838): the depth holds across machines
+    const sent = await reader.send(chosen.id, askFrame(callerProject, opts.task), labelOf(this.host.store, this.host.meta.get(callerId)!), { depth: depthOf(this.host, callerId) + 1 })
     if (!sent.ok) {
       if (this.linkedAsks.get(chosen.id) === ask) this.linkedAsks.delete(chosen.id)
       return { ok: false, error: `Could not hand the task to ${label}: ${sent.error}` }

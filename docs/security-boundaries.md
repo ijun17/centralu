@@ -163,7 +163,11 @@ and `normal` it has these controls ([agent-host.md](agent-host.md) §1.2):
   project. The task arrives framed as sent by another session, never as the person.
 - **The agent depth** (#867). A session handling an active cross-project task is one level deeper than its asker, so
   at the default depth of 1 it cannot ask a third project, and two projects that consented to each other cannot pass a
-  task back and forth without a person. No preset opens it.
+  task back and forth without a person. No preset opens it. The same holds across machines (#838 item 12): a hub asking
+  a linked machine's session sends the depth that session works at (`host.send`'s `ask`, the caller's depth plus one),
+  and the machine counts it until that turn ends (`hubAskDepthKey`), so the session refuses start_agent and ask_project
+  as one asked on its own machine would. A machine or hub from before this change neither sends nor reads it: there,
+  a linked ask still counts the asked session as one the person started.
 - **Trust** (owner decision 2026-10-11, #382). A session in a project the person has not trusted cannot
   ask at all, the rule `attach_app` follows: text in that repository could be the one asking, and the
   card would then be the only thing between a planted instruction and another project. An untrusted

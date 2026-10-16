@@ -43,10 +43,25 @@ export const agentDepthKey = (sessionId: string) => `agent_depth:${sessionId}`
 
 type DepthStore = { appSetting(key: string): string | null; setAppSetting(key: string, value: string): void }
 
-/** The depth a session was started at, or 0 when none was recorded (one the person started, or made before #867) */
+/**
+ * Where a hub's ask_project task marks the session of this machine working on it (#838 item 12): the depth the hub
+ * counts it at, kept until that turn ends (`SessionManager.sendFromHub`). The hub's caller is on another machine, so no
+ * link here leads to it; without the mark, a session asked from a linked machine could start agents and ask projects
+ * as if the person had started it, past the depth on both machines. An app setting, as `agentDepthKey`: an older
+ * build leaves it alone.
+ */
+export const hubAskDepthKey = (sessionId: string) => `hub_ask_depth:${sessionId}`
+
+/**
+ * The depth a session was started at, or 0 when none was recorded (one the person started, or made before #867); at
+ * least the depth a hub's task gives it while that task's turn runs (#838)
+ */
 export function recordedAgentDepth(store: Pick<DepthStore, 'appSetting'>, sessionId: string): number {
-  const n = Number(store.appSetting(agentDepthKey(sessionId)))
-  return Number.isSafeInteger(n) && n > 0 ? n : 0
+  const at = (key: string) => {
+    const n = Number(store.appSetting(key))
+    return Number.isSafeInteger(n) && n > 0 ? n : 0
+  }
+  return Math.max(at(agentDepthKey(sessionId)), at(hubAskDepthKey(sessionId)))
 }
 
 /** Records a session another one started, one deeper than that session is now (#897 review) */
@@ -58,7 +73,8 @@ export function recordAgentDepth(
   host.store.setAppSetting(agentDepthKey(childId), String(depthOf(host, starterId) + 1))
 }
 
-function depthOf(host: Parameters<typeof agentDepthRefusal>[0], sessionId: string): number {
+/** A session's depth now: what a hub sends with an ask_project task to another machine, one deeper (#838) */
+export function depthOf(host: Parameters<typeof agentDepthRefusal>[0], sessionId: string): number {
   return sessionDepth(sessionId, host.meta, host.children.delegations.values(), (id) => recordedAgentDepth(host.store, id))
 }
 
