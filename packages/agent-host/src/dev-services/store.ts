@@ -853,6 +853,10 @@ export class Store {
     return this.permissions.addApprovalRule(r)
   }
 
+  dropWildcardApprovalRules(): number {
+    return this.permissions.dropWildcardApprovalRules()
+  }
+
   listApprovalRules(): {
     id: number
     scope: string

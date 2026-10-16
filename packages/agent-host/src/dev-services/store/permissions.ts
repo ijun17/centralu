@@ -51,6 +51,16 @@ export class PermissionRecords {
       .all() as never
   }
 
+  /**
+   * Deletes every "always allow" rule whose matcher ends in `*` (#838): a build before #838 read such a rule as a prefix,
+   * and this build gives a command ending in `*` no key, so none of them allows anything here; left in the store, they
+   * would widen again under a build that reads them as before. Deleting only narrows: an older build serving the same
+   * store asks for those commands again. Returns how many went.
+   */
+  dropWildcardApprovalRules(): number {
+    return this.db.prepare(`DELETE FROM approval_rules WHERE substr(matcher, -1) = '*'`).run().changes
+  }
+
   /** A rule has to be deletable — saving without being able to delete would make "show the outcome" only half true */
   deleteApprovalRule(id: number): void {
     this.db.prepare(`DELETE FROM approval_rules WHERE id = ?`).run(id)

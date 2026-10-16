@@ -74,8 +74,8 @@ import {
   textSizeFromLegacyStep,
   sessionLiveDefaults,
   withoutToolRecord,
-  NO_PATH,
   appKeyOf,
+  alwaysAllowKey,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, BusyAnswer, BusyChoice, ChildRunResult, RoutedCard, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { LaunchSettings } from '../adapters/contract.js'
@@ -574,6 +574,9 @@ export class SessionManager {
     // Not awaited here; a purge or restore waits for it, so neither reads the folder while it is still aside
     this.recoveryRepair = repairWorktreeRecoveryRemovals((id) => store.isTrashed(id)).catch((e) => console.error(`[trash] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
     this.nameUnnamedWorktrees()
+    // "Always allow" rules ending in `*` (#838): none allows anything in this build, and an older one read them as prefixes
+    const wildcards = store.dropWildcardApprovalRules()
+    if (wildcards > 0) console.error(`[permissions] removed ${wildcards} "always allow" rule(s) ending in * (#838): their commands are asked again`)
     /*
      * Merge detection also runs once at startup (#69) — a merge could have happened in a terminal
      * while the app was off. A failure here is no reason to block session restore, so it is not
@@ -3160,7 +3163,15 @@ export class SessionManager {
      * remembering a command that was never even run as 'always allow' would let it pass silently the next
      * time.
      */
-    const landed = this.requireHandle(sessionId).respondApproval(requestId, decision, scope, matcher)
+    /*
+     * What "always" remembers is the host's own key for the card it answers (#838 review), not what the window sent: a
+     * window from before #838 (during a swap) sends a command ending in `*`, or a flagged one, as its matcher, and the
+     * adapter and the store would keep it. A matcher that is not the card's key remembers nothing; the call is allowed once.
+     */
+    const pending = m?.pendingApproval
+    const key = pending?.requestId === requestId ? alwaysAllowKey(pending.detail) : ''
+    const remembered = decision === 'always' && matcher !== undefined && key !== '' && matcher === key ? matcher : undefined
+    const landed = this.requireHandle(sessionId).respondApproval(requestId, decision, scope, remembered)
 
     // This is a second response to a request that has already been answered — since the first response
     // already landed, this never broadcasts a denial or reports a failure (#158)
@@ -3186,13 +3197,13 @@ export class SessionManager {
 
     // Persisting the rule — the adapter only keeps it in memory, so this is needed for it to survive a
     // restart (C-2)
-    // An edit with no path has no key to match (protocol's `alwaysAllowKey`, #428): "(no path)" is never a rule
-    if (decision === 'always' && m && matcher && matcher !== NO_PATH) {
+    // Only the card's own key (`remembered` above): an edit with no path has none (#428), so "(no path)" is never a rule
+    if (decision === 'always' && m && remembered) {
       this.store.addApprovalRule({
         scope: scope ?? 'session',
         sessionId: scope === 'project' ? undefined : sessionId,
         projectId: scope === 'project' ? (m.projectId ?? undefined) : undefined,
-        matcher,
+        matcher: remembered,
         decision: 'allow',
       })
     }
