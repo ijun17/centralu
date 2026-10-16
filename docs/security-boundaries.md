@@ -1559,6 +1559,11 @@ tests. What differs from macOS and Linux, and what holds it:
   for a short one, the case on disk, a link resolved, through the nearest folder that exists; #428). The
   copies had drifted: ask_project's read grants compared with case and the JS `realpath`, so a short
   name or another case was refused, and a touched file under a project kept through a link was dropped.
+- **Names that are not file names.** A file dragged into the tree (`importFile`) is refused on
+  Windows when Windows would not make a file of that name, by the rules a new project folder's
+  name follows (`folderNameError`): a device name (`nul`, `aux.c`, `CONOUT$`) opens the device, a
+  trailing dot or space is dropped, and `notes.txt:payload` writes a hidden stream on `notes.txt`
+  past the no-overwrite flag (#849).
 - **File identity.** A read's opened-file check is the only guard against a swap there, since
   Windows has no `O_NOFOLLOW`. An NTFS file id is 64 bits with the record's reuse count on top, so
   it is above 2^53, and as a Number two files can compare equal: on windows-2022, 1754 of 2000

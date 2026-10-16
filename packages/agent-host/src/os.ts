@@ -175,3 +175,11 @@ export function cpKeepsLinks(platform: Platform = HOST_PLATFORM): boolean {
 export function measuresWithDu(platform: Platform = HOST_PLATFORM): boolean {
   return platform !== 'win32'
 }
+
+/**
+ * A file name has to pass Windows' rules to be one (#849): there `nul` or `aux.c` opens a device, a trailing dot or space
+ * is dropped, and `notes.txt:payload` writes a hidden stream on `notes.txt` instead of a file of that name.
+ */
+export function hasWindowsFileNames(platform: Platform = HOST_PLATFORM): boolean {
+  return platform === 'win32'
+}

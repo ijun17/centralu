@@ -3,6 +3,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -433,6 +434,23 @@ describe('importFile — a file dragged in from outside', () => {
 
   it('rejects when the destination is outside the project', async () => {
     await expect(importFile(root, '..', 'evil.txt', Buffer.from('x'))).rejects.toThrow(/outside the project/)
+  })
+
+  /*
+   * #849: on Windows `nul` and `aux.c` open a device, a trailing dot or space is dropped (`notes.` lands as `notes`),
+   * and `notes.txt:payload` writes a hidden stream on notes.txt past `wx`. Checked here with this host's rules on
+   * Windows, and with Windows' rules given on any machine.
+   */
+  it('refuses on Windows a name Windows does not take as a file\'s, and writes nothing', async () => {
+    const windows = process.platform === 'win32' ? [undefined, 'win32' as const] : ['win32' as const]
+    for (const platform of windows) {
+      for (const bad of ['nul', 'aux.c', 'CONOUT$', 'notes.', 'notes ', 'notes.txt:payload']) {
+        await expect(importFile(root, '', bad, Buffer.from('x'), platform), bad).rejects.toThrow(/Windows/)
+      }
+    }
+    expect(readdirSync(root)).toEqual([])
+    // Elsewhere those are names like any other
+    if (process.platform !== 'win32') expect(await importFile(root, '', 'notes.', Buffer.from('x'), 'linux')).toEqual({ path: 'notes.' })
   })
 })
 

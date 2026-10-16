@@ -2,10 +2,10 @@ import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
 import { copyFile, lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { IMAGE_PREVIEW_MAX_BYTES, wireBaseName, wireJoin, type FsEntry, type FsFile } from '@cc/protocol'
+import { folderNameError, IMAGE_PREVIEW_MAX_BYTES, wireBaseName, wireJoin, type FsEntry, type FsFile } from '@cc/protocol'
 import { assertCreatePath, assertExistingPath, canonicalPath, isInside, UnsafePathError } from './path-guard.js'
 import { runGit, type GitTrust } from './git-exec.js'
-import { clonesFiles, cpKeepsLinks } from '../os.js'
+import { clonesFiles, cpKeepsLinks, hasWindowsFileNames, HOST_PLATFORM, type Platform } from '../os.js'
 
 /**
  * The file tree and viewer service (C-1).
@@ -133,9 +133,24 @@ export async function moveEntry(root: string, from: string, toDir: string): Prom
  *
  * `wx` makes the no-overwrite rule atomic here, unlike the move above: the create fails if
  * anything is at that path already.
+ *
+ * On Windows the name must also be one Windows takes as a file's name (#849), checked as a new folder's is: `nul` or
+ * `aux.c` would open a device, a trailing dot or space would be dropped, and `notes.txt:payload` would write a hidden
+ * stream on `notes.txt` past `wx`, since the file the name seems to say is not the thing created.
  */
-export async function importFile(root: string, toDir: string, name: string, data: Buffer): Promise<{ path: string }> {
-  const rel = wireJoin(toDir, baseName(name))
+export async function importFile(
+  root: string,
+  toDir: string,
+  name: string,
+  data: Buffer,
+  platform: Platform = HOST_PLATFORM,
+): Promise<{ path: string }> {
+  const base = baseName(name)
+  if (hasWindowsFileNames(platform)) {
+    const why = folderNameError(base, true)
+    if (why) fail(why)
+  }
+  const rel = wireJoin(toDir, base)
   const dst = safeJoin(root, rel)
   const dirInfo = await assertExistingPath(root, toDir)
   await assertCreatePath(root, rel)
