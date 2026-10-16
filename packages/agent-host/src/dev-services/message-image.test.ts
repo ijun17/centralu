@@ -1,11 +1,11 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, posix, win32 } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { IMAGE_PREVIEW_MAX_BYTES } from '@cc/protocol'
-import { mentions, readMessageImage, resolveWrittenPath, sniffImage } from './message-image.js'
+import { localLinkTarget, mentions, readMessageImage, resolveWrittenPath, sniffImage } from './message-image.js'
 
 /** The smallest bytes each format's signature accepts, padded so the file is not empty past the signature */
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])
@@ -59,6 +59,36 @@ describe('mentions', () => {
   it('takes the decoded form the window sends for a destination the reply percent-encoded', () => {
     expect(mentions('![x](/tmp/a%20b.png)', '/tmp/a b.png')).toBe(true)
     expect(mentions('![x](/tmp/한글.png)', '/tmp/한글.png')).toBe(true)
+  })
+})
+
+/*
+ * #849 review: which link targets the Windows walk follows by hand. Only a target on a drive letter, or one relative to
+ * the link's folder, says where it leads in a way the walk can check; anything else may be a path into the NT
+ * namespace (a share through `\Device\Mup`, a device), which `win32.resolve` would have read as a harmless folder on C:.
+ * A symlink with such a target needs a privilege Developer Mode does not give, so this is checked on the strings.
+ */
+describe('localLinkTarget', () => {
+  it('takes a drive path and a path relative to the link, and nothing else', () => {
+    for (const ok of ['C:\\shots\\a.png', 'd:/shots/a.png', 'a.png', '..\\shots\\a.png', 'sub/a.png', '.\\a.png']) {
+      expect(localLinkTarget(ok), ok).toBe(true)
+    }
+    for (const bad of [
+      '\\\\server\\share\\a.png',
+      '//server/share/a.png',
+      '\\\\?\\UNC\\server\\share\\a.png',
+      '\\\\.\\pipe\\a',
+      '\\??\\UNC\\server\\share\\a.png',
+      '\\Device\\Mup\\server\\share\\a.png',
+      '\\GLOBAL??\\UNC\\server\\share\\a.png',
+      '\\DosDevices\\UNC\\server\\share\\a.png',
+      '/shots/a.png',
+      'C:a.png',
+      'a.png:stream',
+      '',
+    ]) {
+      expect(localLinkTarget(bad), bad).toBe(false)
+    }
   })
 })
 
@@ -202,6 +232,31 @@ describe('readMessageImage', () => {
     // A local link is still followed
     symlinkSync(join(dir, 'real.png'), join(dir, 'local', 'near.png'), 'file')
     expect(await readMessageImage(join(dir, 'local', 'near.png'))).toMatchObject({ ok: true, file: join(dir, 'real.png') })
+  })
+
+  /*
+   * Fail closed (#849 review): a link the walk cannot read, and a chain too long to finish, used to end the walk with
+   * "nothing found", and realpath then followed what the walk had not judged. A junction to a volume path is a link
+   * readlink cannot read (lstat follows it and calls it a folder); the image behind it is real and local, which is
+   * why only the refusal shows that it was not followed unjudged.
+   */
+  it.skipIf(process.platform !== 'win32')('refuses a path through a link it cannot read, and one through too many links', async () => {
+    mkdirSync(join(dir, 'kept'))
+    writeFileSync(join(dir, 'kept', 'real.png'), PNG)
+    const mountvol = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'mountvol.exe')
+    const volume = execFileSync(mountvol, [dir.slice(0, 2), '/L'], { encoding: 'utf8' }).trim()
+    const shots = join(dir, 'shots')
+    symlinkSync(`${volume}${dir.slice(3)}\\kept`, shots, 'junction')
+    try {
+      const got = await readMessageImage(join(shots, 'real.png'))
+      expect(got).toMatchObject({ ok: false, reason: 'unreadable' })
+      expect(got).not.toHaveProperty('file')
+    } finally {
+      rmdirSync(shots) // as a link: a recursive rm would go through it
+    }
+    symlinkSync(join(dir, 'b.png'), join(dir, 'a.png'), 'file')
+    symlinkSync(join(dir, 'a.png'), join(dir, 'b.png'), 'file')
+    expect(await readMessageImage(join(dir, 'a.png'))).toMatchObject({ ok: false, reason: 'unreadable' })
   })
 
   it('refuses a PNG past the real 10 MB cap without reading it', async () => {

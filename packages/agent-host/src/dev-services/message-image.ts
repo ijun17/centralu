@@ -1,5 +1,5 @@
 import { constants } from 'node:fs'
-import { lstat, open, readlink, realpath } from 'node:fs/promises'
+import { open, readdir, readlink, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { posix, sep, win32, type PlatformPath } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -116,47 +116,76 @@ export function resolveWrittenPath(
   return abs
 }
 
-/** A Windows path that names another machine or a device: `\\server\share`, `//server/share`, `\\?\…`, `\\.\…`, `\??\…` */
-const ELSEWHERE = /^(?:[\\/]{2}|\\\?\?\\)/
+/** A Windows path on a drive letter: the only kind the walk below, and the read after it, take */
+const DRIVE_PATH = /^[A-Za-z]:[\\/]/
 
-/** Links followed before the path is taken for a loop, which realpath then refuses on its own */
+/** Links followed before the walk gives up, and the path is refused rather than left to realpath */
 const MAX_LINK_HOPS = 64
 
 /**
- * The first link along `abs` whose target names another machine or a device, or null (Windows, #849).
+ * Whether the walk may follow a link with this target (as `readlink` gives it) by hand: a path on a drive letter, or
+ * one relative to the link's folder. Everything else is refused, not resolved: `\\server\share`, `\\?\…`, `\??\…`, and
+ * the NT spellings of a share (`\Device\Mup\…`, `\GLOBAL??\UNC\…`, `\DosDevices\UNC\…`), which `win32.resolve` reads
+ * as a folder on the current drive that does not exist, while the system follows them to the network. A target
+ * starting with one separator, one relative to a drive's current folder (`C:a.png`) and one with a stream in it are
+ * refused with them: none says plainly where it leads.
+ */
+export function localLinkTarget(target: string): boolean {
+  if (DRIVE_PATH.test(target)) return !target.slice(2).includes(':')
+  return target !== '' && !/^[\\/]/.test(target) && !target.includes(':')
+}
+
+type LinkWalk = { ok: true } | { ok: false; reason: 'elsewhere' | 'unchecked'; why: string }
+
+/**
+ * Where the links along `abs` lead, judged before anything follows them (Windows, #849).
  *
  * `resolveWrittenPath` refuses a path written as `\\…`, but a local link can lead there: `shot.png -> \\host\share\x.png`,
  * or a folder link earlier in the path. `realpath` follows it, and following it is already the connection: Windows
- * opens the share over SMB and offers that machine the person's sign-in. So each link along the path is read with
- * `lstat` and `readlink`, which do not follow it, and its target is judged before anything goes there. A link with a
- * local target is followed by hand, and the walk goes on through what it leads to.
+ * opens the share over SMB and offers that machine the person's sign-in. So the path is walked from its drive, one
+ * name at a time, and what each name is comes from its folder's listing: libuv lists every reparse point as a link,
+ * while `lstat` follows one whose target it cannot read (it would itself be the connection). A link's target is read
+ * with `readlink` and followed by hand only if `localLinkTarget` takes it.
+ *
+ * This fails closed: a link whose target cannot be read, a folder that cannot be listed, a name its folder's listing
+ * does not hold (a short name such as `SHOTS~1`), and more than MAX_LINK_HOPS links are all refused. A name that is
+ * simply not there is not: realpath then stops at it, reaching nothing.
  */
-export async function linkToElsewhere(abs: string): Promise<string | null> {
+export async function walkLinks(abs: string): Promise<LinkWalk> {
   let path = abs
-  for (let hops = 0; hops < MAX_LINK_HOPS; hops++) {
+  for (let hops = 0; hops <= MAX_LINK_HOPS; hops++) {
     const { root } = win32.parse(path)
-    if (ELSEWHERE.test(root)) return path
+    if (!DRIVE_PATH.test(root)) return { ok: false, reason: 'elsewhere', why: path }
     const parts = path.slice(root.length).split(/[\\/]+/).filter(Boolean)
     let current = root
     let next: string | null = null
     for (const [i, part] of parts.entries()) {
-      const candidate = win32.join(current, part)
-      const info = await lstat(candidate).catch(() => null)
-      // Not there or not readable: realpath says which, and it has nothing to follow from here
-      if (!info) return null
-      if (info.isSymbolicLink()) {
+      const listed = await readdir(current, { withFileTypes: true }).catch((e: NodeJS.ErrnoException) => e)
+      if (listed instanceof Error) {
+        if (listed.code === 'ENOENT' || listed.code === 'ENOTDIR') return { ok: true }
+        return { ok: false, reason: 'unchecked', why: `${current} cannot be listed (${listed.code})` }
+      }
+      // The name on disk: Windows names ignore case, and a folder that does not may hold both spellings
+      const entry = listed.find((e) => e.name === part) ?? listed.find((e) => e.name.toLowerCase() === part.toLowerCase())
+      if (!entry) {
+        // A short name, or a name Windows trims (a trailing dot or space), names something the listing spells otherwise
+        if (/[~:]|[. ]$/.test(part)) return { ok: false, reason: 'unchecked', why: `${win32.join(current, part)} is not a name in its folder` }
+        return { ok: true }
+      }
+      const candidate = win32.join(current, entry.name)
+      if (entry.isSymbolicLink()) {
         const target = await readlink(candidate).catch(() => null)
-        if (target === null) return null
-        if (ELSEWHERE.test(target)) return target
+        if (target === null) return { ok: false, reason: 'unchecked', why: `the target of ${candidate} cannot be read` }
+        if (!localLinkTarget(target)) return { ok: false, reason: 'elsewhere', why: target }
         next = win32.resolve(current, target, ...parts.slice(i + 1))
         break
       }
       current = candidate
     }
-    if (next === null) return null
+    if (next === null) return { ok: true }
     path = next
   }
-  return null
+  return { ok: false, reason: 'unchecked', why: `more than ${MAX_LINK_HOPS} links lead from ${abs}` }
 }
 
 const refuse = (reason: MessageImageRefusal, message: string, file?: string): MessageImage =>
@@ -168,8 +197,9 @@ const mb = (n: number) => `${(n / 1_000_000).toFixed(1)} MB`
 export async function readMessageImage(abs: string, max: number = IMAGE_PREVIEW_MAX_BYTES): Promise<MessageImage> {
   const windows = sep === '\\'
   if (windows) {
-    const elsewhere = await linkToElsewhere(abs)
-    if (elsewhere !== null) return refuse('not_found', `${abs} leads to ${elsewhere}, which is not on this machine`)
+    const walk = await walkLinks(abs)
+    if (!walk.ok && walk.reason === 'elsewhere') return refuse('not_found', `${abs} leads to ${walk.why}, which is not on this machine`)
+    if (!walk.ok) return refuse('unreadable', `Centralu cannot check where ${abs} leads: ${walk.why}`)
   }
   let file: string
   try {
@@ -180,7 +210,7 @@ export async function readMessageImage(abs: string, max: number = IMAGE_PREVIEW_
     return refuse('not_found', `There is no file at ${abs}`)
   }
   // Again on what realpath answered: a link swapped in since the walk is caught before the open, not after it
-  if (windows && ELSEWHERE.test(file)) return refuse('not_found', `${abs} leads to ${file}, which is not on this machine`)
+  if (windows && !DRIVE_PATH.test(file)) return refuse('not_found', `${abs} leads to ${file}, which is not on this machine`)
   let handle
   try {
     // The resolved path, and no other: a link put there since realpath fails here (ELOOP) rather than being followed

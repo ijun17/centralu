@@ -1505,10 +1505,13 @@ Since the file can be anywhere, the project root is not the boundary here. Three
   reach out to whichever machine a reply named, and Windows offers that machine the person's sign-in. This is decided
   on the resolved path, so a relative path in a session whose folder is a share is refused too. A local link that leads
   there (`shot.png -> \\host\share\x.png`, or a folder link earlier in the path) is refused as well, before `realpath`
-  follows it, since following it is already the connection: on Windows every link along the path is read with `lstat`
-  and `readlink`, a local target is followed by hand, and a `\\…` one ends the walk (`linkToElsewhere`, #849). What
-  `realpath` answers is checked again. A drive letter mapped to a share is read like any other drive: the person mapped
-  it. A junction to a volume with no drive letter (`\\?\Volume{…}\`) is refused with the rest.
+  follows it, since following it is already the connection. On Windows the path is walked from its drive (`walkLinks`,
+  #849): what each name is comes from its folder's listing (`lstat` follows a link whose target libuv cannot read),
+  and a link is followed by hand only when its target is a drive path or relative to the link's folder
+  (`localLinkTarget`). Any other target is refused, the NT spellings of a share (`\Device\Mup\…`, `\GLOBAL??\UNC\…`)
+  included, and so is a link whose target cannot be read (a junction to a volume with no drive letter), a name its
+  folder does not list (a short name), and more than 64 links. What `realpath` answers must be a drive path too. A
+  drive letter mapped to a share is read like any other drive: the person mapped it.
 
 The path is resolved once (`~`, a path relative to the session's folder, a `file://` URL, then `realpath`), and that
 resolved string is the one opened, with `O_NOFOLLOW`, once; the type, the size and the signature are all read through
@@ -1581,7 +1584,9 @@ Limits:
   which has no mode bits; they are as private as the folder they are in. The default data folder
   is in the user's profile, which only that user (and administrators) can read. A `CC_DATA_DIR`
   elsewhere gets that folder's ACL.
-- Junctions are reported as links by `lstat` and so are treated like symlinks. Only the worktree
+- Junctions are reported as links by `lstat` and so are treated like symlinks, except one whose target
+  libuv cannot read (a volume path): `lstat` follows that one and calls it a folder, so the worktree copy and the
+  reply-image walk ask the folder's listing instead. Only the worktree
   copy has a test that makes them (`worktree-dependencies.test.ts`); no containment test does yet
   (creating a symlink on Windows needs Developer Mode or administrator rights; a junction does not).
 - The keeper does not run on Windows (no named-pipe control socket), so the direct path is used.
