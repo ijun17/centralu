@@ -238,32 +238,46 @@ const REAL_STRAY_STOP: StrayStopDeps = { find: findStrays, kill: (pid, signal) =
  * else's process while trying to clean up an orphan. So only what is still "a process with no
  * terminal running right now in our own folder" receives the signal.
  *
- * SIGTERM first, and SIGKILL after the grace to whatever of those is still a leftover, measured once more: the same
- * two shots as every other stop (`stopGroup`). A dev server that traps TERM used to be left running after Stop.
+ * SIGTERM first, and SIGKILL after the grace to whatever of those is still a leftover, measured once more and still
+ * running the same command: the same two shots as every other stop (`stopGroup`). A dev server that traps TERM used to
+ * be left running after Stop.
+ *
+ * **`held` unknown (null) stops nothing.** The keeper's children are told apart from leftovers only by its list (rule
+ * 3): after a keeper handoff, kept agents are init's children, and with the list missing they would be stopped as
+ * leftovers. Even a TERM ends an agent, so this refuses rather than guess.
  */
 export async function stopStrays(
   pids: readonly number[],
   roots: readonly string[],
   selfPid = process.pid,
-  held: readonly number[] = [],
+  held: readonly number[] | null = [],
   deps: StrayStopDeps = REAL_STRAY_STOP,
 ): Promise<{ stopped: number }> {
-  const shoot = async (targets: readonly number[], signal: NodeJS.Signals): Promise<number[]> => {
-    const live = await deps.find(roots, selfPid, held)
-    const allowed = new Set(live.map((s) => s.pid))
-    const hit: number[] = []
-    for (const pid of targets) {
-      if (!allowed.has(pid)) continue
+  if (held === null) {
+    throw Object.assign(new Error('The keeper could not say which processes it holds for this host, so nothing was stopped; try again'), {
+      code: 'internal',
+    })
+  }
+  const shoot = async (targets: readonly StrayProcess[], signal: NodeJS.Signals): Promise<StrayProcess[]> => {
+    const live = new Map((await deps.find(roots, selfPid, held)).map((s) => [s.pid, s]))
+    const hit: StrayProcess[] = []
+    for (const target of targets) {
+      const now = live.get(target.pid)
+      // Still a leftover, and the same one: a number given to another program meanwhile is not fired at
+      if (!now || (target.command && now.command !== target.command)) continue
       try {
-        deps.kill(pid, signal)
-        hit.push(pid)
+        deps.kill(target.pid, signal)
+        hit.push(now)
       } catch {
         // it just died — the goal is already met
       }
     }
     return hit
   }
-  const termed = await shoot(pids, 'SIGTERM')
+  const termed = await shoot(
+    pids.map((pid) => ({ pid, command: '', cwd: '' })),
+    'SIGTERM',
+  )
   if (termed.length > 0) {
     const t = setTimeout(() => void shoot(termed, 'SIGKILL').catch(() => {}), deps.graceMs)
     t.unref?.()

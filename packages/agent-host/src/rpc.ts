@@ -117,6 +117,8 @@ export function createRpcHandler(
     return themes
   }
   const held = async (): Promise<number[]> => (heldPids ? heldPids().catch(() => []) : [])
+  /** The same list, or null when the keeper could not answer: a stop must not guess (`stopStrays`) */
+  const heldOrUnknown = async (): Promise<number[] | null> => (heldPids ? heldPids().catch(() => null) : [])
   const requireTerminals = (): TerminalService => {
     if (!terminals) throw Object.assign(new Error('Terminals are unavailable'), { code: 'internal' })
     return terminals
@@ -602,7 +604,7 @@ export function createRpcHandler(
     },
     'processes.strays': async () => findStrays(mgr.folderRoots(), process.pid, await held()),
     'processes.stop': async (p) =>
-      stopStrays(RpcMethods['processes.stop'].params.parse(p).pids, mgr.folderRoots(), process.pid, await held()),
+      stopStrays(RpcMethods['processes.stop'].params.parse(p).pids, mgr.folderRoots(), process.pid, await heldOrUnknown()),
     'projects.list': async () => mgr.listProjects(),
     'projects.reorder': async (p) =>
       mgr.reorderProjects(RpcMethods['projects.reorder'].params.parse(p).orderedIds),

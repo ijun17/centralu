@@ -167,6 +167,22 @@ describe('stopStrays', () => {
     await vi.waitFor(() => expect(sent).toEqual([[10, 'SIGTERM'], [11, 'SIGTERM'], [10, 'SIGKILL']]))
   })
 
+  /** After a keeper handoff its agents are init's children: with its list missing they read as leftovers (#428 review) */
+  it('stops nothing when the keeper could not say what it holds', async () => {
+    const sent: number[] = []
+    const r = stopStrays([10], ['/p'], 1, null, { find: async () => [stray(10)], kill: (pid) => void sent.push(pid), graceMs: 5 })
+    await expect(r).rejects.toThrow(/nothing was stopped/)
+    expect(sent).toEqual([])
+  })
+
+  it('does not KILL a number that runs another program by the second measurement', async () => {
+    const sent: [number, string][] = []
+    const scans = [[stray(10)], [{ pid: 10, command: 'vim notes.md', cwd: '/p' }]]
+    await stopStrays([10], ['/p'], 1, [], { find: async () => scans.shift() ?? [], kill: (pid, signal) => void sent.push([pid, signal]), graceMs: 5 })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(sent).toEqual([[10, 'SIGTERM']])
+  })
+
   /*
    * A real leftover: started by a shell that exits at once, so it is init's child, in a session of its own (no
    * terminal), working in the project folder, and it ignores TERM. Not on Windows, which has no ps (`hasPs`).
