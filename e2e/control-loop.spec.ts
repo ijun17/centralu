@@ -4185,7 +4185,7 @@ test('A tool that provides daily tokens shows them alongside', async ({ page }) 
     }
   })
   await page.getByTestId('usage-donut-claude').click()
-  await expect(page.getByTestId('usage-daily')).toContainText('Today 9.0M')
+  await expect(page.getByTestId('usage-daily')).toContainText('Today 9M')
 })
 
 test('When usage cannot be read, the reason is stated (never left as a blank screen)', async ({ page }) => {
@@ -8771,7 +8771,7 @@ test('Worktree setup: gitignored candidates are pointed out, and clicking adds o
   await page.getByTestId('worktree-toggle').locator('input').check()
 
   // The size shows alongside — the judgment a person makes from this list is "this is too big"
-  await expect(page.getByTestId('ignored-node_modules/')).toContainText('637MB')
+  await expect(page.getByTestId('ignored-node_modules/')).toContainText('637 MB')
   // Something whose size could not be measured still appears in the list (the size is only a hint)
   await expect(page.getByTestId('ignored-weird/')).toBeVisible()
 

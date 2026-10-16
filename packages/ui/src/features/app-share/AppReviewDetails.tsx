@@ -1,4 +1,5 @@
 import type { AppReview, AppUses } from '@cc/protocol'
+import { formatBytes } from '../../app/format.js'
 
 /**
  * What the person sees before enabling something (M4 E-3) — what the app being imported (or the
@@ -80,14 +81,14 @@ export function AppReviewDetails({ review }: { review: AppReview }) {
         </p>
       </Section>
 
-      <Section title={`Files · ${review.files.length} · ${size(review.totalBytes)}`} testId="review-files">
+      <Section title={`Files · ${review.files.length} · ${formatBytes(review.totalBytes)}`} testId="review-files">
         <ul className="max-h-40 overflow-y-auto rounded-md border border-line bg-surface-floor px-2 py-1 font-mono text-xs" data-testid="review-file-list">
           {review.files.map((f) => (
             <li key={f.path} className="flex gap-2">
               <span className="min-w-0 flex-1 truncate text-ink-muted" title={f.path}>
                 {f.path}
               </span>
-              <span className="shrink-0 text-ink-faint">{size(f.bytes)}</span>
+              <span className="shrink-0 text-ink-faint">{formatBytes(f.bytes)}</span>
             </li>
           ))}
         </ul>
@@ -151,8 +152,3 @@ export function usesLines(uses: AppUses): string[] {
   return out
 }
 
-function size(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}

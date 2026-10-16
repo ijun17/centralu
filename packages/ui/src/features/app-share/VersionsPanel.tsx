@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AppSnapshot, AppVersions } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { formatBytes } from '../../app/format.js'
 import { useStore } from '../../store/store.js'
 import { userAppMachine, type ExternalCatalogApp } from '../../store/app-catalog.js'
 
@@ -140,7 +141,7 @@ export function VersionsPanel({ app }: { app: ExternalCatalogApp }) {
                     )}
                   </div>
                   <p className="mt-0.5 text-ink-faint">
-                    {s.files} files · {size(s.bytes)}
+                    {s.files} files · {formatBytes(s.bytes)}
                   </p>
                 </li>
               ))}
@@ -191,8 +192,3 @@ function when(at: number): string {
   return new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-function size(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}

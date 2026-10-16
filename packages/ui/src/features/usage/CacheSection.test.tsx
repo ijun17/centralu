@@ -46,7 +46,7 @@ describe('CacheSection', () => {
     expect(text).toContain('94.1% cache hit · last 5 h')
     expect(text).toContain('Read from cache 31.2M')
     expect(text).toContain('Written to cache 1.9M')
-    expect(text).toContain('Uncached input 18k')
+    expect(text).toContain('Uncached input 18.4k')
     expect(text).toContain('Rebuilds 6 of 412 requests')
     expect(text).toContain('6 rebuilds: 3 cache expired (idle 64 min) · 1 model change · 1 compaction · 1 unknown')
     // Each session that rebuilt says why, under its name

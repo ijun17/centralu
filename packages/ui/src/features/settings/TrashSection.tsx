@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { TrashedSession } from '@cc/protocol'
 import { messagesToChat, useStore, type ChatItem } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { formatBytes } from '../../app/format.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { useToolMeta } from '../../store/selectors.js'
 import { Markdown } from '../session/Markdown.jsx'
@@ -93,7 +94,7 @@ export function TrashSection() {
         <span className="readout text-sm text-ink-muted" data-testid="trash-total">
           {trash === null
             ? 'Loading…'
-            : `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'} · ${size(trash.bytes)}`}
+            : `${sessions.length} ${sessions.length === 1 ? 'session' : 'sessions'} · ${formatBytes(trash.bytes)}`}
         </span>
         <button
           type="button"
@@ -139,7 +140,7 @@ export function TrashSection() {
                 </span>
               </div>
               <div className="mt-0.5 text-2xs text-ink-faint" data-testid={`trash-holds-${s.id}`}>
-                {s.messages} {s.messages === 1 ? 'message' : 'messages'} · {size(s.bytes)}
+                {s.messages} {s.messages === 1 ? 'message' : 'messages'} · {formatBytes(s.bytes)}
                 <GoesWith session={s} />
               </div>
               <div className="mt-1.5 flex gap-3 text-xs">
@@ -329,8 +330,3 @@ function ReaderItem({ item }: { item: ChatItem }) {
   }
 }
 
-function size(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}

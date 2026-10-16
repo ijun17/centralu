@@ -1,3 +1,4 @@
+import { formatCount } from '../app/format.js'
 import type { Attachment, NormalizedEvent, StoredMessage, SubagentStep } from '@cc/protocol'
 import { agentStartQuestion, centraluUpdateQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
 
@@ -374,12 +375,10 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
 export function compactionText(e: Extract<NormalizedEvent, { type: 'compaction' }>): string {
   if (e.failed) return `Compaction failed — ${e.reason ?? 'unknown reason'}`
   if (e.before != null && e.after != null) {
-    return `Context compacted here · ${fmtTokens(e.before)} → ${fmtTokens(e.after)}`
+    return `Context compacted here · ${formatCount(e.before)} → ${formatCount(e.after)}`
   }
   return 'Earlier messages were compacted here'
 }
-
-const fmtTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 
 /**
  * What to write on the handoff marker (#102).

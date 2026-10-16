@@ -3,6 +3,7 @@ import { RelativeAge } from '../../components/RelativeAge.jsx'
 import type { ExternalSession, GitBranch } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { formatBytes } from '../../app/format.js'
 import { isPlainEscape, isTextEntry } from '../../app/keys.js'
 import { useSessionsOf, useTools } from '../../store/selectors.js'
 import { Modal } from '../../components/Modal.jsx'
@@ -35,15 +36,6 @@ const splitList = (s: string): string[] =>
     .split(',')
     .map((f) => f.trim())
     .filter(Boolean)
-
-/** 630MB · 8.5GB — only the order of magnitude has to be right. This number states scale, not precision */
-function fmtBytes(n: number): string {
-  if (n < 1024) return `${n}B`
-  const kb = n / 1024
-  if (kb < 1024) return `${Math.round(kb)}KB`
-  const mb = kb / 1024
-  return mb < 1024 ? `${Math.round(mb)}MB` : `${(mb / 1024).toFixed(1)}GB`
-}
 
 /**
  * Session creation (FR-7).
@@ -539,7 +531,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                                 >
                                   {e.path}
                                   {e.bytes !== null && (
-                                    <span className="ml-1 text-ink-faint">{fmtBytes(e.bytes)}</span>
+                                    <span className="ml-1 text-ink-faint">{formatBytes(e.bytes)}</span>
                                   )}
                                 </button>
                               </li>
@@ -554,7 +546,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
                       */}
                         {picks.length > 0 && (
                           <p className="mt-1.5 text-2xs text-ink-faint" data-testid="copy-total">
-                            {picks.length} to copy{pickedBytes > 0 ? ` · ~${fmtBytes(pickedBytes)}` : ''}
+                            {picks.length} to copy{pickedBytes > 0 ? ` · ~${formatBytes(pickedBytes)}` : ''}
                             {pickedBytes > 1024 ** 3 && (
                               <span className="text-ink-muted"> — every worktree pays this again</span>
                             )}

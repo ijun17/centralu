@@ -136,7 +136,7 @@ test('the gauge says the cache hit rate on hover, and its dropdown breaks it dow
     await expect(page.getByTestId('usage-cache-rate')).toHaveText('94.1%')
     await expect(page.getByTestId('usage-cache-read')).toContainText('31.2M')
     await expect(page.getByTestId('usage-cache-written')).toContainText('1.9M')
-    await expect(page.getByTestId('usage-cache-uncached')).toContainText('18k')
+    await expect(page.getByTestId('usage-cache-uncached')).toContainText('18.4k')
     await expect(page.getByTestId('usage-cache-rebuilds')).toContainText('6 of 412 requests')
     await expect(page.getByTestId('usage-cache-causes')).toHaveText(
       '6 rebuilds: 3 cache expired (idle 64 min) · 1 model change · 1 compaction · 1 launch settings changed',

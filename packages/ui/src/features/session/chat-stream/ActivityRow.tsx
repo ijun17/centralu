@@ -1,5 +1,6 @@
 import { useRef } from 'react'
 import { interruptNotice, type SessionSummary } from '@cc/core'
+import { formatCount } from '../../../app/format.js'
 import { useStore } from '../../../store/store.js'
 import { formatElapsed, useElapsedNow } from '../elapsed.js'
 
@@ -102,7 +103,7 @@ export function ActivityRow({ sessionId, activity }: { sessionId: string; activi
                 activity === 'retrying'
                 ? 'Reconnecting'
                 : thinkingTokens
-                ? `Thinking · ~${thinkingTokens >= 1000 ? `${(thinkingTokens / 1000).toFixed(1)}k` : thinkingTokens} tokens`
+                ? `Thinking · ~${formatCount(thinkingTokens)} tokens`
                 : 'Waiting for response'}
         </span>
         {/*

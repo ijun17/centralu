@@ -7,7 +7,7 @@ import { Tooltip } from '../../components/primitives.jsx'
 import { useStore } from '../../store/store.js'
 import { useToolMeta } from '../../store/selectors.js'
 import { CacheSection } from './CacheSection.jsx'
-import { formatTokens } from './format.js'
+import { formatCount } from '../../app/format.js'
 import { SAME_ACCOUNT_LABEL } from './sameAccount.js'
 
 /**
@@ -200,7 +200,7 @@ function DailyTokens({ daily }: { daily: { date: string; tokens: number }[] }) {
       <div className="flex items-baseline gap-2">
         <span className="text-xs uppercase text-ink-faint">Daily tokens</span>
         {today && (
-          <span className="readout ml-auto text-xs text-ink">Today {formatTokens(today.tokens)}</span>
+          <span className="readout ml-auto text-xs text-ink">Today {formatCount(today.tokens)}</span>
         )}
       </div>
       <ul className="mt-2 space-y-1">
@@ -214,7 +214,7 @@ function DailyTokens({ daily }: { daily: { date: string; tokens: number }[] }) {
               />
             </span>
             <span className="readout w-14 shrink-0 text-right text-2xs text-ink-faint">
-              {formatTokens(d.tokens)}
+              {formatCount(d.tokens)}
             </span>
           </li>
         ))}

@@ -1,4 +1,5 @@
 import { memo } from 'react'
+import { formatCount } from '../../app/format.js'
 import { useStore } from '../../store/store.js'
 import { SessionSettings } from './SessionSettings.jsx'
 
@@ -23,7 +24,8 @@ export const ComposerFooter = memo(function ComposerFooter({
 }) {
   const session = useStore((s) => s.sessions[sessionId])
   if (!session) return null
-  const ctxPct = session.context ? Math.round((session.context.used / session.context.window) * 100) : null
+  // A window of 0 (a model the host could not size) has no percentage to give
+  const ctxPct = session.context && session.context.window > 0 ? Math.round((session.context.used / session.context.window) * 100) : null
   return (
     <div className="mt-1.5 flex items-center gap-2">
       <SessionSettings
@@ -72,7 +74,7 @@ export const ComposerFooter = memo(function ComposerFooter({
         data-testid="context-gauge"
         title={
           session.context
-            ? `Context ${session.context.used.toLocaleString()} / ${session.context.window.toLocaleString()} tokens`
+            ? `Context ${formatCount(session.context.used)} / ${formatCount(session.context.window)} tokens`
             : 'Context unknown — this session has never reported one'
         }
       >

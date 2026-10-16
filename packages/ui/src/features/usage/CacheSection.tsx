@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react'
 import type { CacheSessionStats, CacheStats, CacheWindowStats } from '@cc/protocol'
 import { cacheHitRate, cacheWindowName, percentOf, rebuildBreakdown } from '@cc/core'
 import { Tooltip } from '../../components/primitives.jsx'
-import { formatTokens } from './format.js'
+import { formatCount } from '../../app/format.js'
 
 /**
  * The prompt cache, in the usage dropdown (docs/agent-host.md §6.1).
@@ -74,15 +74,15 @@ export function CacheSection({
           </p>
           <InputBar w={w} writes={cache.writes} />
           <dl className="mt-2 space-y-0.5 text-xs" data-testid="usage-cache-figures">
-            <Figure swatch="bg-ink-muted" label="Read from cache" value={formatTokens(w.cacheReadTokens)} testId="read" />
+            <Figure swatch="bg-ink-muted" label="Read from cache" value={formatCount(w.cacheReadTokens)} testId="read" />
             <Figure
               // No mark for a figure that is not there: the bar has no such part either
               swatch={cache.writes ? 'bg-ink' : undefined}
               label="Written to cache"
-              value={cache.writes ? formatTokens(w.cacheCreationTokens) : 'not reported'}
+              value={cache.writes ? formatCount(w.cacheCreationTokens) : 'not reported'}
               testId="written"
             />
-            <Figure swatch="bg-ink-faint" label="Uncached input" value={formatTokens(w.inputTokens)} testId="uncached" />
+            <Figure swatch="bg-ink-faint" label="Uncached input" value={formatCount(w.inputTokens)} testId="uncached" />
             <Figure
               label={
                 <Tooltip
@@ -152,7 +152,7 @@ function InputBar({ w, writes }: { w: CacheWindowStats; writes: boolean }) {
           key={p.what}
           className={`block h-full min-w-0.5 ${p.tone}`}
           style={{ flexGrow: p.n / total, flexBasis: 0 }}
-          title={`${formatTokens(p.n)} ${p.what}`}
+          title={`${formatCount(p.n)} ${p.what}`}
         />
       ))}
     </span>
@@ -200,7 +200,7 @@ function TopSessions({
       <ul className="mt-1 space-y-px">
         {sessions.map((s) => {
           const title = s.name || 'Deleted session'
-          const figure = `${formatTokens(writes ? s.cacheCreationTokens : s.inputTokens)}${
+          const figure = `${formatCount(writes ? s.cacheCreationTokens : s.inputTokens)}${
             s.rebuilds ? ` · ${s.rebuilds} rebuild${s.rebuilds === 1 ? '' : 's'}` : ''
           }`
           // Why this session rebuilt, under its name: the question the row answers is "what made it write"

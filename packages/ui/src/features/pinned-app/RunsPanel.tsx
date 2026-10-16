@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AgentUse, AppPermission, AppRun, AppUsage } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { formatCount } from '../../app/format.js'
 import { externalAppKey, useStore } from '../../store/store.js'
 
 /**
@@ -196,7 +197,7 @@ function AgentUseSection({ appId, projectId, machine, runs }: { appId: string; p
 
 function UseLine({ label, use, testId }: { label: string; use: AgentUse; testId: string }) {
   const parts = [`${use.runs} ${use.runs === 1 ? 'run' : 'runs'}`, longDuration(use.durationMs)]
-  if (use.tokens) parts.push(`${tokenCount(use.tokens.input + use.tokens.output)} tokens`)
+  if (use.tokens) parts.push(`${formatCount(use.tokens.input + use.tokens.output)} tokens`)
   return (
     <div className="flex items-baseline gap-2">
       <dt className="readout w-12 shrink-0 text-ink-faint">{label}</dt>
@@ -213,13 +214,6 @@ function longDuration(ms: number): string {
   if (s < 60) return `${s} s`
   if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
-}
-
-/** A token count — "850", "12.4k", "3.1M" */
-function tokenCount(n: number): string {
-  if (n < 1000) return String(n)
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
-  return `${(n / 1_000_000).toFixed(1)}M`
 }
 
 /**
@@ -328,7 +322,7 @@ function RunRow({
         </span>
         {run.tokens && (
           <span className="readout shrink-0" data-testid="run-tokens" title={`in ${run.tokens.input} · out ${run.tokens.output}`}>
-            {tokenCount(run.tokens.input + run.tokens.output)} tokens
+            {formatCount(run.tokens.input + run.tokens.output)} tokens
           </span>
         )}
         {onOpenSession && (

@@ -1,4 +1,5 @@
 import type { SessionSummary } from '@cc/core'
+import { formatBytes } from '../../app/format.js'
 import type { AppState, Draft, StoreGet, StoreSet } from '../state.js'
 import { EMPTY_DRAFT } from '../state.js'
 import { ifSessionStill, omitKey } from '../patch.js'
@@ -161,7 +162,7 @@ export const sendActions = (set: StoreSet, get: StoreGet): SendActions => ({
     const platform = get().platform
     if (!platform) return null
     if (file.size > MAX_ATTACHMENT_BYTES) {
-      set({ toast: `${file.name} is too large (max ${MAX_ATTACHMENT_BYTES / 1024 / 1024}MB)` })
+      set({ toast: `${file.name} is too large (max ${formatBytes(MAX_ATTACHMENT_BYTES)})` })
       return null
     }
     const count = (d: number) =>

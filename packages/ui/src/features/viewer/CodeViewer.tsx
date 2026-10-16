@@ -6,6 +6,7 @@ import { useStore } from '../../store/store.js'
 import { useProjectMachine } from '../../store/selectors.js'
 import { useRemoteIde } from '../machines/remoteIde.js'
 import { useShortcut } from '../../app/shortcut.js'
+import { formatBytes } from '../../app/format.js'
 import { isPlainEnter } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { TRUNCATED_NOTICE, caretAt, selectedText, wholeFileText, type Caret } from './copy.js'
@@ -433,11 +434,11 @@ export function CodeViewer({ projectId }: { projectId: string }) {
             className="max-h-full max-w-full object-contain"
             data-testid="viewer-image-content"
           />
-          <p className="readout shrink-0 text-2xs text-ink-faint">{(file.bytes / 1024).toFixed(0)}KB</p>
+          <p className="readout shrink-0 text-2xs text-ink-faint">{formatBytes(file.bytes)}</p>
         </div>
       ) : file.binary ? (
         <p className="p-3 text-sm text-ink-faint" data-testid="viewer-binary">
-          {file.previewError ?? `Binary file (${(file.bytes / 1024).toFixed(0)}KB)`}
+          {file.previewError ?? `Binary file (${formatBytes(file.bytes)})`}
         </p>
       ) : (
         /*
