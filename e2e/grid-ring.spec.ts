@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { channels, tokenColor } from './fixtures/tokens.js'
 
 /**
  * The border of a panel that is answering shows **on all four sides**, no matter the window width
@@ -26,14 +27,15 @@ test.use({ browserName: 'webkit', deviceScaleFactor: 1 })
  */
 const WIDTHS = [1280, 1281, 1333, 1366, 1401, 1404, 1437, 1500]
 
-/** --color-ink-muted in the dark preset (#a8a8a8), the light grey of the answering look's border */
-const MUTED = 168
 /**
- * The threshold for a lit side. A side where the border vanished reads as only the floor
- * (surface-floor 15) or the grey of a resting panel (line-strong 77); a side dimmed to a half pixel sits
- * in between (about 91). A lit side reads as MUTED itself.
+ * The threshold for a lit side: the answering look's border is --color-ink-muted (168, #a8a8a8, in the dark preset
+ * when this was measured), read from the page so a palette change does not move the line (#845). A side where the
+ * border vanished reads as only the floor (surface-floor 15) or the grey of a resting panel (line-strong 77); a side
+ * dimmed to a half pixel sits in between (about 91). A lit side reads as the muted grey itself.
  */
-const LIT = MUTED - 8
+async function litThreshold(page: Page): Promise<number> {
+  return channels(await tokenColor(page, '--color-ink-muted'))[0] - 8
+}
 
 const EDGES = ['top', 'right', 'bottom', 'left'] as const
 type Dim = { width: number; panel: number; edge: (typeof EDGES)[number]; peak: number }
@@ -175,6 +177,7 @@ async function settle(page: Page) {
 async function dimEdges(page: Page, ids: string[], before?: () => Promise<void>) {
   const dim: Dim[] = []
   const boxes: { width: number; left: number; top: number; right: number; bottom: number }[] = []
+  const lit = await litThreshold(page)
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: 800 })
     await settle(page)
@@ -184,7 +187,7 @@ async function dimEdges(page: Page, ids: string[], before?: () => Promise<void>)
     }
     const m = await edgePeaks(page, ids)
     m.peaks.forEach((p, panel) => {
-      for (const edge of EDGES) if (p[edge] < LIT) dim.push({ width, panel, edge, peak: p[edge] })
+      for (const edge of EDGES) if (p[edge] < lit) dim.push({ width, panel, edge, peak: p[edge] })
     })
     for (const b of m.boxes) boxes.push({ width, ...b })
   }

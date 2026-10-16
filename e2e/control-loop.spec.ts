@@ -1,6 +1,9 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { copied, pressCopy, watchCopies } from './fixtures/clipboard.js'
 import { APP_VERSION } from '@cc/protocol'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { tokenColor } from './fixtures/tokens.js'
 
 /**
  * Meets the M1 Phase 5 completion criteria. Drives the UI with the mock platform (?mock).
@@ -2527,7 +2530,7 @@ test("Sidebar: a marker appears on the name row when a folded project's session 
   const mark = page.getByTestId('fold-summary-alpha').locator('[data-state="waiting_approval"]')
   await expect(mark).toHaveText('1')
   await expect(mark).toHaveAttribute('data-look', 'waiting')
-  await expect(mark).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  await expect(mark).toHaveCSS('background-color', await tokenColor(page, '--color-ink-signal'))
   await page.getByTestId('fold-summary-alpha').hover()
   await expect(page.getByTestId('fold-summary-tip-alpha')).toContainText('1 awaiting approval')
   // An expanded project has no summary — each row's own marker already says it
@@ -3725,7 +3728,8 @@ test('The sidebar uses only one row per project (vertical space)', async ({ page
 
   // The project header must not grow taller than one session row, or the list would be pushed down
   const header = (await page.getByTestId('project-header-alpha').boundingBox())!
-  expect(header.height).toBeLessThan(28)
+  const row = (await page.locator('[data-testid^="session-row-"]').first().boundingBox())!
+  expect(header.height).toBeLessThanOrEqual(row.height)
 
   // Background info does not take up space under normal conditions
   await expect(page.getByTestId('project-tip-alpha')).toBeHidden()
@@ -4855,8 +4859,14 @@ test('The search field sits vertically centered inside the top bar', async ({ pa
   await setup(page, { projects: ['/tmp/alpha'] })
   const bar = page.getByTestId('app-header')
   const box = (await bar.boundingBox())!
-  // Up to the 1px bottom border
-  expect(box.height).toBeLessThanOrEqual(37)
+  /*
+   * The bar's height, up to its 1px bottom border, is the one the desktop shell keeps the traffic lights centred on
+   * (traffic_lights.rs HEADER_H; tooling/styles.test.ts checks it against App.tsx and tauri.conf.json). Read from
+   * there rather than written here a fourth time.
+   */
+  const rust = readFileSync(fileURLToPath(new URL('../apps/desktop/src-tauri/src/traffic_lights.rs', import.meta.url)), 'utf8')
+  const headerH = Number(/const HEADER_H: f64 = ([\d.]+);/.exec(rust)![1])
+  expect(box.height).toBeLessThanOrEqual(headerH + 1)
   expect(box.y).toBe(0)
 
   // The field must also be centered within it (top/bottom margin difference within 1px)
@@ -9007,8 +9017,8 @@ test('Deleting a project: unlocks only by typing the name, and the file checkbox
   await expect(confirm).toHaveText('Delete and trash folder')
   // The warning uses the danger palette (dogfooding: dangerous spots are red) — today the same
   // values as a diff's deletion
-  await expect(page.getByTestId('delete-project-warning')).toHaveCSS('background-color', 'rgb(56, 23, 26)')
-  await expect(confirm).toHaveCSS('color', 'rgb(255, 155, 145)')
+  await expect(page.getByTestId('delete-project-warning')).toHaveCSS('background-color', await tokenColor(page, '--color-danger-bg'))
+  await expect(confirm).toHaveCSS('color', await tokenColor(page, '--color-danger'))
 
   // 4. Delete it — both the project and its sessions disappear, and the folder went to the trash
   await confirm.click()

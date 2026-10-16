@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { newSession, setup } from './project-screen.js'
+import { tokenColor } from './tokens.js'
 
 /**
  * What the agent tools tell the person, on screen (#304), driven through the mock platform, which records the new
@@ -45,18 +46,6 @@ const HYDRATION = {
   audience: 'centralu',
   summary: 'Codex says Centralu loads thread history in an outdated way',
   hint: 'Nothing to do on your side; Centralu will switch to the paginated API (#342).',
-}
-
-/** The computed colour of a token, to compare a line's colour with in either theme */
-async function tokenColor(page: Page, name: string): Promise<string> {
-  return page.evaluate((n) => {
-    const probe = document.createElement('span')
-    probe.style.color = `var(${n})`
-    document.body.appendChild(probe)
-    const c = getComputedStyle(probe).color
-    probe.remove()
-    return c
-  }, name)
 }
 
 async function emit(page: Page, sessionId: string, event: Record<string, unknown>) {
