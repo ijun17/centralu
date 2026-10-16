@@ -9,6 +9,7 @@ import type { QueuedRequest } from '../dev-services/store.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
+import { hubAskDepthKey } from './agent-depth.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS, type Delegation } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost, type ReportWork } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -1183,13 +1184,24 @@ export class SessionManager {
    * It stays an instruction, not someone else's words (#120): the hub holds this host's token, so it could send the
    * same text as the person; marking it as a relay would only hide the words from a manager it was meant for.
    */
-  async sendFromHub(sessionId: string, text: string, fromName: string): Promise<void> {
+  async sendFromHub(sessionId: string, text: string, fromName: string, ask?: { depth: number }): Promise<void> {
     const target = this.meta.get(sessionId)
     if (!target || target.kind === 'orchestrator' || target.kind === 'coordinator') {
       throw Object.assign(new Error(`Not a session this machine shares: ${sessionId}`), { code: 'session_not_found' })
     }
     const name = oneLineText(fromName, 120) || 'Orchestrator on a linked computer'
-    await this.send(sessionId, text, undefined, { sessionId: HUB_SENDER, name })
+    /*
+     * An ask_project task from the hub (#838 item 12): the session works on it at the depth the hub counts, until the
+     * turn ends (`hubAskDepthKey`), so its start_agent and ask_project read the same depth as a session asked here.
+     * Marked before the send, as the turn may end before it returns; taken back if the send fails.
+     */
+    if (ask) this.store.setAppSetting(hubAskDepthKey(sessionId), String(ask.depth))
+    try {
+      await this.send(sessionId, text, undefined, { sessionId: HUB_SENDER, name })
+    } catch (e) {
+      if (ask) this.store.deleteAppSetting(hubAskDepthKey(sessionId))
+      throw e
+    }
   }
 
   hostReader(): {
@@ -2594,6 +2606,8 @@ export class SessionManager {
     // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
     if (endedTurn && e.sessionId && this.children.turnOwners.get(e.sessionId)?.untilTurnEnd) this.children.releaseTurn(e.sessionId)
+    // A hub's ask_project task ends with its turn, and the depth it gave the session with it (#838)
+    if (endedTurn && e.sessionId && this.store.appSetting(hubAskDepthKey(e.sessionId)) !== null) this.store.deleteAppSetting(hubAskDepthKey(e.sessionId))
     // The card slot is now empty — if a capability question was waiting, it is raised (D-4). Either the
     // adapter's card just closed, or a card that had been hiding ours just closed
     if (e.type === 'approval_resolved' && e.sessionId) this.hostCards.raiseHostAsks(e.sessionId)

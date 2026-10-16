@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { agentDepthRefusal, sessionDepth } from './agent-depth.js'
+import { agentDepthKey, agentDepthRefusal, hubAskDepthKey, recordedAgentDepth, sessionDepth } from './agent-depth.js'
 
 type Link = { askedBy?: string; forkedFrom?: string }
 const metaOf = (links: Record<string, Link>) => new Map(Object.entries(links))
@@ -67,5 +67,20 @@ describe('the refusal (#867)', () => {
     expect(agentDepthRefusal(host(2, chain), 'g', 'start agents')).toBe(
       'This session is 2 levels below a session the person started, and "How deep agents may start agents" in Settings → Orchestrator is 2, so it cannot start agents. Say in your answer what is needed instead; the person can raise that setting.',
     )
+  })
+})
+
+// A hub's ask_project task gives the session its depth while the task's turn runs (#838 item 12)
+describe('the depth a hub’s task gives a session', () => {
+  it('is read with the depth it was started at, the larger of the two', () => {
+    const rows = new Map<string, string>()
+    const store = { appSetting: (k: string) => rows.get(k) ?? null }
+    expect(recordedAgentDepth(store, 's')).toBe(0)
+    rows.set(hubAskDepthKey('s'), '2')
+    expect(recordedAgentDepth(store, 's')).toBe(2)
+    rows.set(agentDepthKey('s'), '3')
+    expect(recordedAgentDepth(store, 's')).toBe(3)
+    rows.set(hubAskDepthKey('s'), 'x')
+    expect(recordedAgentDepth(store, 's')).toBe(3)
   })
 })
