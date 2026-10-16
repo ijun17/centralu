@@ -5,10 +5,14 @@
  * (60eb2fbd, 759b802a, 58cc91d4):
  *
  *   git worktree add --detach /tmp/old <commit>
- *   ln -s "$PWD/node_modules" /tmp/old/node_modules
- *   ln -s "$PWD/packages/agent-host/node_modules" /tmp/old/packages/agent-host/node_modules
+ *   (cd /tmp/old && pnpm install --frozen-lockfile)
  *   cp packages/agent-host/scripts/write-store-fixture.mts /tmp/old/packages/agent-host/
- *   (cd /tmp/old/packages/agent-host && npx tsx write-store-fixture.mts /tmp/old) > packages/agent-host/src/dev-services/store-fixtures/v<N>.sql
+ *   (cd /tmp/old/packages/agent-host && pnpm exec tsx write-store-fixture.mts /tmp/old) > packages/agent-host/src/dev-services/store-fixtures/v<N>.sql
+ *   git worktree remove --force /tmp/old
+ *
+ * Give the old checkout its own install. node_modules linked in from this checkout is not ignored as a link
+ * (`node_modules/` matches folders only), so it gets committed, and checking that commit out replaces this
+ * checkout's real node_modules with a link to itself.
  *
  * The tables and their rows come first and the indexes and triggers after, so loading the file does not index a
  * row twice. A virtual table's own shadow tables are left to its CREATE.
