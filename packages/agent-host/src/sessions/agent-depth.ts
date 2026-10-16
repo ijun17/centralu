@@ -8,11 +8,16 @@ import type { Delegation } from './child-ownership.js'
  *
  * Counted along every link, the deepest one wins: a link that does not count would be the way around the setting, and
  * `auto` used to be that way (#862: twelve sessions at once, a load average of 216).
+ *
+ * **Never less than the depth it was started at** (`recorded`, #897 review): a link ends when the session it points to
+ * is deleted, and counted from the links alone, deleting the middle of a chain would let a grandchild start agents at a
+ * setting of 2. A session another session starts records its depth when it is made (`recordAgentDepth`).
  */
 export function sessionDepth(
   sessionId: string,
   meta: ReadonlyMap<string, Pick<SessionInfo, 'askedBy' | 'forkedFrom'>>,
   delegations: Iterable<Pick<Delegation, 'callerId' | 'sessionId' | 'settled'>>,
+  recorded: (sessionId: string) => number = () => 0,
 ): number {
   const live = [...delegations].filter((d) => !d.settled)
   const walk = (id: string, path: ReadonlySet<string>): number => {
@@ -20,13 +25,41 @@ export function sessionDepth(
     const parents = new Set<string>()
     if (info?.askedBy) parents.add(info.askedBy)
     for (const d of live) if (d.sessionId === id && d.callerId !== id) parents.add(d.callerId)
-    if (!parents.size) return info?.forkedFrom ? 1 : 0
-    let deepest = 0
+    let deepest = -1
     // A loop (two sessions asking each other) counts once; it cannot make a chain endless
     for (const p of parents) if (!path.has(p)) deepest = Math.max(deepest, walk(p, new Set(path).add(p)))
-    return deepest + 1
+    const linked = parents.size ? Math.max(deepest, 0) + 1 : info?.forkedFrom ? 1 : 0
+    return Math.max(linked, recorded(id))
   }
   return walk(sessionId, new Set([sessionId]))
+}
+
+/**
+ * Where a session's depth at its start is kept (#897 review): an app setting per session, the way `report_paused:<id>`
+ * is, so an older build that does not know it leaves it alone and nothing needs a migration. The trash's purge deletes
+ * it with the session (`TrashStore.purgeSession`).
+ */
+export const agentDepthKey = (sessionId: string) => `agent_depth:${sessionId}`
+
+type DepthStore = { appSetting(key: string): string | null; setAppSetting(key: string, value: string): void }
+
+/** The depth a session was started at, or 0 when none was recorded (one the person started, or made before #867) */
+export function recordedAgentDepth(store: Pick<DepthStore, 'appSetting'>, sessionId: string): number {
+  const n = Number(store.appSetting(agentDepthKey(sessionId)))
+  return Number.isSafeInteger(n) && n > 0 ? n : 0
+}
+
+/** Records a session another one started, one deeper than that session is now (#897 review) */
+export function recordAgentDepth(
+  host: Parameters<typeof agentDepthRefusal>[0],
+  childId: string,
+  starterId: string,
+): void {
+  host.store.setAppSetting(agentDepthKey(childId), String(depthOf(host, starterId) + 1))
+}
+
+function depthOf(host: Parameters<typeof agentDepthRefusal>[0], sessionId: string): number {
+  return sessionDepth(sessionId, host.meta, host.children.delegations.values(), (id) => recordedAgentDepth(host.store, id))
 }
 
 /** Where the person changes the setting, as every refusal names it */
@@ -53,11 +86,12 @@ export function agentDepthRefusal(
     meta: ReadonlyMap<string, Pick<SessionInfo, 'askedBy' | 'forkedFrom'>>
     children: { delegations: ReadonlyMap<string, Pick<Delegation, 'callerId' | 'sessionId' | 'settled'>> }
     uiPreferences: () => Pick<UiPreferences, 'agentDepth'>
+    store: DepthStore
   },
   callerId: string,
   what: string,
 ): string | null {
   const limit = agentDepthOf(host.uiPreferences())
-  const depth = sessionDepth(callerId, host.meta, host.children.delegations.values())
+  const depth = depthOf(host, callerId)
   return depth < limit ? null : agentDepthError(depth, limit, what)
 }
