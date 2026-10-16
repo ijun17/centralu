@@ -152,7 +152,8 @@ export class MockPlatform implements Platform {
     // The event families are recorded by the modules that own what they touch; this only runs them in the host's order
     if (event.type === 'subagent_event') {
       const stepSeq = this.store.recordSubagentStep(event)
-      this.bus.broadcast({ ...event, stepSeq })
+      // A step the host keeps no row for is not sent on either (a chunk with no text)
+      if (stepSeq !== null) this.bus.broadcast({ ...event, stepSeq })
       return
     }
     this.backgroundMock.track(event)

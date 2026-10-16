@@ -1,9 +1,16 @@
 import type { CacheLedger } from './cache-ledger.js'
-import type {
-  NormalizedEvent,
-  PermissionPreset,
-  SessionInfo,
-  StoredMessage,
+import {
+  appViewRecord,
+  continuesStreamRow,
+  endsStreamRow,
+  keepsSubagentStep,
+  recordedRowKind,
+  streamRowKind,
+  subagentStepRow,
+  type NormalizedEvent,
+  type PermissionPreset,
+  type SessionInfo,
+  type StoredMessage,
 } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
 import { saveAttachment, sweepAttachments } from '../dev-services/attachments.js'
@@ -79,23 +86,12 @@ export class SessionRecord {
    * indexed exactly once, when the stream closes.
    */
   persistMessage(e: NormalizedEvent, m: SessionInfo): number | null {
-    // A reasoning summary (#58) only counts as recorded once text is actually attached. A chunk with
-    // nothing but estTokens (claude) lives only as a progress indicator and then disappears: stacking
-    // up content-free rows would turn the record into noise.
-    if (e.type === 'message_delta' || (e.type === 'reasoning_delta' && e.text)) {
-      const streamKind = e.type === 'message_delta' ? ('text' as const) : ('reasoning' as const)
-      const text = e.text ?? ''
+    // Which chunks grow a row and where a message ends are shared with the mock (protocol transcript-rows.ts)
+    const streamKind = streamRowKind(e)
+    if (streamKind) {
+      const text = (e as { text?: string }).text ?? ''
       const run = this.streams.get(m.id)
-      /*
-       * A chunk that names a different message than the open row is a new message (#212). Codex can say two
-       * things in a row with nothing recorded between them (a poll of a running command is not an item), and
-       * with no boundary here the two became one row: "…polling it now.It is still running…". A chunk that
-       * names no message continues the open row, as before.
-       */
-      const messageId = e.type === 'message_delta' ? e.messageId : undefined
-      const openId = run?.payload.messageId
-      const newMessage = !!messageId && typeof openId === 'string' && openId !== messageId
-      if (run && run.kind === streamKind && !newMessage) {
+      if (run && continuesStreamRow(run, e)) {
         run.text += text
         if (run.text.length - run.written >= STREAM_FLUSH_CHARS || Date.now() - run.lastWrite >= STREAM_FLUSH_MS) {
           this.flushStream(m.id, run)
@@ -116,58 +112,13 @@ export class SessionRecord {
       return seq
     }
 
-    /*
-     * Any **recorded** event that is not a stream is a message boundary — if a tool call arrives in
-     * the middle of an answer, everything before it is one chunk. Meanwhile, an event that is never
-     * recorded, like activity or usage_update, blends naturally with streaming and is not a boundary.
-     * The end of a turn (turn_complete, error, or a state_change that is not working) is a boundary
-     * too — nothing gets recorded for it, but the message has ended.
-     */
-    const kind =
-      e.type === 'tool_call' ? 'tool_call'
-      : e.type === 'tool_result' ? 'tool_result'
-      : e.type === 'approval_request' || e.type === 'approval_resolved' ? 'approval'
-      // Records the compaction point. In the model's own context, old conversation is folded away, but
-      // it still exists as-is in our record — showing where it was folded is what makes reading back through
-      // it possible.
-      : e.type === 'compaction' ? 'marker'
-      // The same reason for a fresh conversation inside the session (#304): the model forgot, our record did not
-      : e.type === 'conversation_reset' ? 'marker'
-      // What the tool wanted the person to read (#304) — a line in the transcript, like an error
-      : e.type === 'notice' ? 'marker'
-      /*
-       * A failure is part of the record too (#107). An error used to just change state and move on —
-       * all that remained on screen was a single `lastError` line, and even that was cleared the
-       * moment the next turn began. So the spot where a turn died with a 400 was left with **an empty
-       * answer**, and nowhere recorded why it was empty. Stamping it as a marker keeps that moment in
-       * the transcript (and in a handoff record).
-       */
-      : e.type === 'error' ? 'marker'
-      /*
-       * Inline app view (M4 B-1): all that is recorded is which app's view was raised under this card
-       * (or that it was rejected). A result, cancellation or closing are events that happen while that
-       * view is alive, so none of them are recorded.
-       */
-      : e.type === 'app_view' && (e.phase === 'open' || e.phase === 'rejected') ? 'app_view'
-      : null
-    const boundary =
-      kind !== null ||
-      e.type === 'turn_complete' ||
-      e.type === 'error' ||
-      (e.type === 'state_change' && e.state !== 'working')
-    if (boundary) this.closeStream(m.id)
+    // Any recorded event that is not a stream, and the end of a turn, is a message boundary (`endsStreamRow`)
+    const kind = recordedRowKind(e)
+    if (endsStreamRow(e)) this.closeStream(m.id)
     if (!kind) return null
     const seq = this.host.store.nextSeq(m.id)
-    /*
-     * The record of an app view **never carries the body** — the tool's input is passed through to
-     * the app exactly as given, so it is unknown what it contains. Same reason an app run record
-     * (A-6) only ever keeps a summary of its arguments. The instance id also has no meaning once this
-     * host process ends.
-     */
-    const payload =
-      e.type === 'app_view'
-        ? { type: e.type, sessionId: e.sessionId, callId: e.callId, appId: e.appId, projectId: e.projectId, tool: e.tool, phase: e.phase, ...(e.reason ? { reason: e.reason } : {}) }
-        : e
+    // The record of an app view never carries the body (`appViewRecord`)
+    const payload = e.type === 'app_view' ? appViewRecord(e) : e
     const msg: StoredMessage = { sessionId: m.id, seq, role: 'system', kind, payload, ts: Date.now() }
     this.host.store.appendMessages([msg])
     m.lastSeq = seq
@@ -227,14 +178,8 @@ export class SessionRecord {
     const m = this.host.meta.get(e.sessionId)
     if (!m) return
     const step = e.step
-    if (step.type === 'reasoning_delta' && !step.text) return
-    if (step.type === 'message_delta' && !step.text) return
-    const kind =
-      step.type === 'message_delta' ? ('text' as const)
-      : step.type === 'reasoning_delta' ? ('reasoning' as const)
-      : step.type
-    const role = kind === 'text' || kind === 'reasoning' ? ('assistant' as const) : ('system' as const)
-    const stepSeq = this.host.store.appendSubagentMessage(m.id, e.parentCallId, { role, kind, payload: step, ts: Date.now() })
+    if (!keepsSubagentStep(step)) return
+    const stepSeq = this.host.store.appendSubagentMessage(m.id, e.parentCallId, { ...subagentStepRow(step), payload: step, ts: Date.now() })
     if (step.type === 'tool_call' || step.type === 'tool_result') this.host.observeCommit(step, m)
     this.host.emit({ ...e, stepSeq })
   }

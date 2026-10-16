@@ -1,4 +1,16 @@
-import { applySessionState, type NormalizedEvent, type SessionInfo, type StoredMessage } from '@cc/protocol'
+import {
+  appViewRecord,
+  applySessionState,
+  continuesStreamRow,
+  endsStreamRow,
+  keepsSubagentStep,
+  recordedRowKind,
+  streamRowKind,
+  subagentStepRow,
+  type NormalizedEvent,
+  type SessionInfo,
+  type StoredMessage,
+} from '@cc/protocol'
 import type { MockClock } from './clock.js'
 
 /**
@@ -24,20 +36,21 @@ export class SessionStore {
   }
 
   /**
-   * A native subagent's step (#222) — see `MockPlatform.emit`. Returns the step number, to carry in the broadcast.
+   * A native subagent's step (#222) — see `MockPlatform.emit`. Returns the step number, to carry in the broadcast, or
+   * null for a step the host neither keeps nor sends on (a chunk with no text).
    */
-  recordSubagentStep(event: Extract<NormalizedEvent, { type: 'subagent_event' }>): number {
+  recordSubagentStep(event: Extract<NormalizedEvent, { type: 'subagent_event' }>): number | null {
     /*
      * A native subagent's step (#222) — like the host: kept under its launch card, apart from the conversation, numbered
      * within that launch (`stepSeq`), and sent on without a conversation seq. It never touches the session's state or
      * its open text row.
      */
+    const step = event.step
+    if (!keepsSubagentStep(step)) return null
     const key = `${event.sessionId} ${event.parentCallId}`
     const rows = this.subagentMessages.get(key) ?? []
-    const step = event.step
-    const kind = step.type === 'message_delta' ? 'text' : step.type === 'reasoning_delta' ? 'reasoning' : step.type
     const stepSeq = rows.length + 1
-    rows.push({ sessionId: event.sessionId, seq: stepSeq, role: kind === 'text' || kind === 'reasoning' ? 'assistant' : 'system', kind, payload: step, ts: this.clock.now() })
+    rows.push({ sessionId: event.sessionId, seq: stepSeq, ...subagentStepRow(step), payload: step, ts: this.clock.now() })
     this.subagentMessages.set(key, rows)
     return stepSeq
   }
@@ -104,102 +117,58 @@ export class SessionStore {
     }
   }
 
-  /** Records the event as a stored row where the host would, and returns the event as it is broadcast (with its seq) */
+  /**
+   * Records the event as a stored row where the host would, and returns the event as it is broadcast (with its seq).
+   *
+   * The same rules as the real thing (host `SessionRecord.persistMessage`), read from one place (protocol
+   * transcript-rows.ts): which events are recorded, that a streaming message is gathered into one row (#66) and one row
+   * is one message (#77, a chunk naming another `messageId` starts a new row, #212), and where a message ends. An event
+   * that stays in the record gets a seq within the session and carries it in the broadcast: the UI's unread tracking
+   * (lastSeq) trusts only this seq, and a screen that splits messages by number draws whatever rows this keeps.
+   */
   record(s: SessionInfo, event: NormalizedEvent, incoming: NormalizedEvent): NormalizedEvent {
-    let out: NormalizedEvent = incoming
-    /*
-     * The same rule as the real thing (the host): an event that stays in the record gets a
-     * seq within the session and carries it in the broadcast. The UI's unread tracking
-     * (lastSeq) trusts only this seq — if the mock does not carry it, a bug that the real
-     * thing would catch slips by quietly in tests only.
-     */
-    const kind =
-      event.type === 'tool_call'
-        ? ('tool_call' as const)
-        : event.type === 'tool_result'
-          ? ('tool_result' as const)
-          : event.type === 'approval_request' || event.type === 'approval_resolved'
-            ? ('approval' as const)
-            : event.type === 'message_delta'
-              ? ('text' as const)
-              : // A reasoning summary (#58) — the same rule as the real thing: recorded only when text is carried
-                event.type === 'reasoning_delta' && event.text
-                ? ('reasoning' as const)
-                : // A message that came in from outside (FR-11). The real payload is {text, from}, and the event
-                  // holds both of them as-is, so restoring it (messagesToChat) brings back the same screen
-                  event.type === 'user_message'
-                  ? ('text' as const)
-                  : event.type === 'compaction' || event.type === 'conversation_reset' || event.type === 'notice'
-                    ? ('marker' as const)
-                    : // Images persist too (#40, second pass). The real thing has a file plus a path, but the
-                      // mock's disk is memory — leaving the bytes as-is in the payload lets loadMessages restore
-                      // the same screen as the real thing
-                      event.type === 'message_image'
-                      ? ('image' as const)
-                      : null
-    /*
-     * An in-conversation app screen (M4 B-1) — like the real thing, records only open and rejected, with no
-     * body (manager.persistMessage). A reopened screen sets up its placeholder from this.
-     */
-    if (event.type === 'app_view' && (event.phase === 'open' || event.phase === 'rejected')) {
-      const seq = (this.messages.get(s.id)?.length ?? 0) + 1
-      const { type, sessionId, callId, appId, projectId, tool, phase, reason } = event
-      this.pushMessage({
-        sessionId: s.id,
-        seq,
-        role: 'system',
-        kind: 'app_view',
-        payload: { type, sessionId, callId, appId, projectId, tool, phase, ...(reason ? { reason } : {}) },
-        ts: this.clock.now(),
-      })
-      s.lastSeq = seq
-      out = { ...event, seq } as NormalizedEvent
-    }
-    /*
-     * A streaming message is gathered into one row — the same rule as the real thing (host
-     * persistMessage, #66). A chunk of the same kind grows the open row and carries that
-     * row's number. A different row (a tool, a human message — pushMessage) or the end of
-     * a turn closes it. Making a new row per chunk would give each chunk a different
-     * number, and a screen that splits messages by number (#77) would draw one message as
-     * broken up chunk by chunk.
-     */
-    const streamKind =
-      event.type === 'message_delta' ? 'text' : event.type === 'reasoning_delta' && event.text ? 'reasoning' : null
-    const piece = streamKind ? ((event as { text?: string }).text ?? '') : ''
-    const run = this.streams.get(s.id)
-    if (streamKind && run?.kind === streamKind) {
-      run.payload = { ...(run.payload as object), text: String((run.payload as { text?: string }).text ?? '') + piece }
-      s.lastSeq = run.seq
-      out = { ...event, seq: run.seq } as NormalizedEvent
-    } else {
-      const closes =
-        streamKind !== null ||
-        event.type === 'turn_complete' ||
-        event.type === 'error' ||
-        (event.type === 'state_change' && event.state !== 'working')
-      if (closes) this.streams.delete(s.id)
-      // Does not start a row with an empty chunk — like the real thing, does not carry a number either
-      if (kind && !(streamKind && !piece)) {
-        const row: StoredMessage = {
-          sessionId: s.id,
-          seq: (this.messages.get(s.id)?.length ?? 0) + 1,
-          role:
-            event.type === 'message_delta' || event.type === 'reasoning_delta'
-              ? 'assistant'
-              : event.type === 'user_message'
-                ? 'user'
-                : 'system',
-          kind,
-          payload: event,
-          ts: this.clock.now(),
-        }
-        this.pushMessage(row)
-        if (streamKind) this.streams.set(s.id, row)
-        s.lastSeq = row.seq
-        out = { ...event, seq: row.seq } as NormalizedEvent
+    const streamKind = streamRowKind(event)
+    if (streamKind) {
+      const piece = (event as { text?: string }).text ?? ''
+      const run = this.streams.get(s.id)
+      if (run && continuesStreamRow(run, event)) {
+        run.payload = { ...(run.payload as object), text: String((run.payload as { text?: string }).text ?? '') + piece }
+        s.lastSeq = run.seq
+        return { ...incoming, seq: run.seq } as NormalizedEvent
       }
+      this.streams.delete(s.id)
+      // Does not start a row with an empty chunk — like the real thing, does not carry a number either
+      if (!piece) return incoming
+      const row = this.append(s, 'assistant', streamKind, event)
+      this.streams.set(s.id, row)
+      return { ...incoming, seq: row.seq } as NormalizedEvent
     }
-    return out
+    if (endsStreamRow(event)) this.streams.delete(s.id)
+    const recorded = recordedRowKind(event)
+    if (recorded) {
+      const row = this.append(s, 'system', recorded, event.type === 'app_view' ? appViewRecord(event) : event)
+      return { ...incoming, seq: row.seq } as NormalizedEvent
+    }
+    /*
+     * Two rows the host writes on their own paths (`sendMessage`, `persistImage`). A message that came in from outside
+     * (FR-11): the real payload is {text, from}, and the event holds both of them as-is, so restoring it
+     * (messagesToChat) brings back the same screen. Images persist too (#40, second pass): the real thing has a file
+     * plus a path, but the mock's disk is memory, so the bytes stay in the payload and loadMessages restores the same
+     * screen.
+     */
+    if (event.type === 'user_message' || event.type === 'message_image') {
+      const row = event.type === 'user_message' ? this.append(s, 'user', 'text', event) : this.append(s, 'system', 'image', event)
+      return { ...incoming, seq: row.seq } as NormalizedEvent
+    }
+    return incoming
+  }
+
+  /** Appends a row with the session's next seq (which closes whatever was streaming) and moves the session's lastSeq */
+  private append(s: SessionInfo, role: StoredMessage['role'], kind: StoredMessage['kind'], payload: unknown): StoredMessage {
+    const row: StoredMessage = { sessionId: s.id, seq: (this.messages.get(s.id)?.length ?? 0) + 1, role, kind, payload, ts: this.clock.now() }
+    this.pushMessage(row)
+    s.lastSeq = row.seq
+    return row
   }
 
   constructor(

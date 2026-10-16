@@ -1,5 +1,5 @@
 import { formatCount } from '../app/format.js'
-import type { Attachment, NormalizedEvent, StoredMessage, SubagentStep } from '@cc/protocol'
+import { subagentStepRow, type Attachment, type NormalizedEvent, type StoredMessage, type SubagentStep } from '@cc/protocol'
 import { agentStartQuestion, centraluUpdateQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
 
 /**
@@ -481,8 +481,7 @@ export function errorText(e: Extract<NormalizedEvent, { type: 'error' }>): strin
 
 /** A live subagent step as the stored row the host would read back (#222) — the same shape `messagesToChat` draws */
 export function subagentRow(sessionId: string, seq: number, step: SubagentStep): StoredMessage {
-  const kind = step.type === 'message_delta' ? 'text' : step.type === 'reasoning_delta' ? 'reasoning' : step.type
-  return { sessionId, seq, role: kind === 'text' || kind === 'reasoning' ? 'assistant' : 'system', kind, payload: step, ts: Date.now() }
+  return { sessionId, seq, ...subagentStepRow(step), payload: step, ts: Date.now() }
 }
 
 /** Message restoration (on restart, or switching sessions) */

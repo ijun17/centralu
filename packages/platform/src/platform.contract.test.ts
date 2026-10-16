@@ -48,11 +48,16 @@ class EchoHandle implements SessionHandle {
   async dispose() {}
 }
 class EchoAdapter implements AgentAdapter {
+  /** Each session's event sink, so a test can speak as the agent tool (`Harness.agentSays`) */
+  readonly sinks = new Map<string, EventSink>()
   readonly tool: ToolName = 'claude'
   readonly descriptor = { name: 'claude', label: 'Claude Code', mark: 'C', install: 'npm i -g x', login: 'x login' }
   readonly capabilities = { approvals: true, contextUsage: 'exact' as const, resume: true, autoTitle: true, attachments: ['image' as const], verbosities: [], exclusiveWriter: false, backgroundTasks: false }
   async detect() { return { tool: this.tool, installed: true, loggedIn: true, detail: 'echo' } }
-  async createSession(opts: CreateSessionOpts, emit: EventSink) { return new EchoHandle(opts.sessionId, emit) }
+  async createSession(opts: CreateSessionOpts, emit: EventSink) {
+    this.sinks.set(opts.sessionId, emit)
+    return new EchoHandle(opts.sessionId, emit)
+  }
 }
 
 /**
@@ -71,11 +76,14 @@ type Harness = {
   makeDir: (root: string, rel: string) => void
   /** Puts a theme file somewhere outside the themes folder and answers its path (what Import is given) */
   outsideThemeFile: (name: string, text: string) => string
+  /** Events as the session's agent tool would send them: the host hears them from its adapter, the mock from `emit` */
+  agentSays: (events: NormalizedEvent[]) => void
 }
 
 async function makeWeb(): Promise<Harness> {
   const store = new Store()
-  const adapters = new Map<ToolName, AgentAdapter>([['claude', new EchoAdapter()]])
+  const echo = new EchoAdapter()
+  const adapters = new Map<ToolName, AgentAdapter>([['claude', echo]])
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   /*
    * Both the registry and `npm i -g` are **injected.**
@@ -120,6 +128,9 @@ async function makeWeb(): Promise<Harness> {
       registryVersion = version
     },
     makeDir: (root, rel) => mkdirSync(join(root, rel), { recursive: true }),
+    agentSays: (events) => {
+      for (const e of events) echo.sinks.get(e.sessionId!)!(e)
+    },
     outsideThemeFile: (name, text) => {
       const path = join(themesRoot, name)
       writeFileSync(path, text)
@@ -157,6 +168,9 @@ async function makeMock(): Promise<Harness> {
       const path = `/elsewhere/${name}`
       platform.themeImportSources.set(path, text)
       return path
+    },
+    agentSays: (events) => {
+      for (const e of events) platform.emit(e)
     },
     cleanup: async () => platform.dispose(),
   }
@@ -274,6 +288,38 @@ describe.each([
     await waitFor(async () => (await h.platform.agents.loadMessages(s.id)).length > 0)
     const msgs = await h.platform.agents.loadMessages(s.id)
     expect(msgs[0]!.role).toBe('user')
+  })
+
+  /*
+   * Transcript rows (#850 item 13): the mock records a conversation by the same rules as the host (protocol
+   * transcript-rows.ts). One row is one message (#77): two messages with no recorded event between them stay two rows
+   * when their chunks name different messages (#212), and a failed turn leaves its marker row (#107). The e2e scenarios
+   * and the demo draw the mock's rows, so a mock that merged them showed a conversation the real host never stores.
+   */
+  it('keeps one row per message and the marker row of an error, as the host stores them', async () => {
+    const p = await h.platform.projects.add(tmpdir())
+    const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
+    events.length = 0
+    h.agentSays([
+      { type: 'state_change', sessionId: s.id, state: 'working' },
+      { type: 'message_delta', sessionId: s.id, role: 'assistant', messageId: 'm1', text: 'Polling it ' },
+      { type: 'message_delta', sessionId: s.id, role: 'assistant', messageId: 'm1', text: 'now.' },
+      { type: 'message_delta', sessionId: s.id, role: 'assistant', messageId: 'm2', text: 'It is still running.' },
+      { type: 'message_delta', sessionId: s.id, role: 'assistant', text: ' Waiting.' },
+      { type: 'error', sessionId: s.id, error: { code: 'internal', message: 'boom', retryable: false } },
+    ])
+    await waitFor(() => events.some((e) => e.type === 'error' && e.sessionId === s.id))
+    const rows = (await h.platform.agents.loadMessages(s.id)).map((m) => {
+      const payload = m.payload as { text?: string; type?: string }
+      return [m.seq, m.role, m.kind, payload.text ?? payload.type]
+    })
+    expect(rows).toEqual([
+      [1, 'assistant', 'text', 'Polling it now.'],
+      [2, 'assistant', 'text', 'It is still running. Waiting.'],
+      [3, 'system', 'marker', 'error'],
+    ])
+    // The broadcast error carries its row's number: live drawing matches rows by number (#161)
+    expect((events.find((e) => e.type === 'error' && e.sessionId === s.id) as { seq?: number } | undefined)?.seq).toBe(3)
   })
 
   /*
