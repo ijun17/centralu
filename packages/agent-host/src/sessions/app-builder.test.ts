@@ -320,3 +320,17 @@ describe('an error is not automatically sent to the building session (C-6)', () 
     expect(claude.handles.get(builder!.id)!.sent).toEqual([])
   })
 })
+
+describe('a builder asked for twice at once (#839)', () => {
+  it('is stood up once, and both callers get it', async () => {
+    // The app is made with no builder: the tool could not start then
+    claude.fail = true
+    const { builder } = await create({ projectId, id: 'notes', name: 'Notes' })
+    expect(builder).toBeNull()
+    claude.fail = false
+    const [a, b] = await Promise.all([mgr.createAppBuilder({ projectId, appId: 'notes' }), mgr.createAppBuilder({ projectId, appId: 'notes' })])
+    expect(a.id).toBe(b.id)
+    expect(mgr.listSessions().filter((s) => s.appId === 'notes')).toHaveLength(1)
+    expect(claude.seen).toHaveLength(1)
+  })
+})

@@ -138,6 +138,21 @@ export class AppSessions {
   async createAppBuilder(ref: AppRef, tool?: ToolName): Promise<SessionInfo> {
     const existing = this.builderOf(ref)
     if (existing) return existing
+    // One being stood up already (#839): a second ask waits on it, never makes another
+    const key = builderKey(ref)
+    const standing = this.buildersStanding.get(key)
+    if (standing) return standing
+    const p = this.standUpBuilder(ref, tool).finally(() => {
+      if (this.buildersStanding.get(key) === p) this.buildersStanding.delete(key)
+    })
+    this.buildersStanding.set(key, p)
+    return p
+  }
+
+  /** Builders being stood up now, by app (#839) */
+  private readonly buildersStanding = new Map<string, Promise<SessionInfo>>()
+
+  private async standUpBuilder(ref: AppRef, tool?: ToolName): Promise<SessionInfo> {
     const rt = this.host.appsHub?.rt
     if (!rt) throw Object.assign(new Error('External apps are unavailable'), { code: 'internal' })
     const app = rt.list().find((a) => a.appId === ref.appId && a.projectId === ref.projectId)
