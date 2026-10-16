@@ -59,7 +59,12 @@ async function isRepo(cwd: string): Promise<boolean> {
 
 export async function gitSummary(cwd: string, trust: GitTrust = {}): Promise<GitSummary> {
   try {
-    const stdout = await git(cwd, ['status', '--porcelain=v2', '--branch'], trust)
+    /*
+     * Untracked files one by one, as the panel lists them (`gitStatusFiles`): by default git names a new folder once,
+     * and the sidebar said 1 where the panel listed its files (#850 item 10). One line per path, so a partly staged
+     * file counts once here too (`changedFileCount`).
+     */
+    const stdout = await git(cwd, ['status', '--porcelain=v2', '--branch', '--untracked-files=all'], trust)
     let branch = '(detached)'
     let changed = 0
     for (const line of stdout.split('\n')) {

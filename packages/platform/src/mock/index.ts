@@ -1,5 +1,5 @@
 import { frameDragEndInPage } from '../engine.js'
-import type { NormalizedEvent } from '@cc/protocol'
+import { changedFileCount, type NormalizedEvent } from '@cc/protocol'
 import type { AgentPort, Platform } from '../ports/index.js'
 import { AgentVersionsMock } from './agent-versions.js'
 import { AppBuilderMock } from './app-builder.js'
@@ -56,7 +56,7 @@ export class MockPlatform implements Platform {
   private readonly toolsMock = new ToolsMock()
   private readonly backgroundMock = new BackgroundTasksMock(this.forward)
   private readonly gitMock = new GitMock()
-  private readonly projectStore = new ProjectStore(() => this.gitMock.gitState.files.length)
+  private readonly projectStore = new ProjectStore(() => changedFileCount(this.gitMock.gitState.files))
   private readonly externalSessionsMock = new ExternalSessionsMock(this.store)
   private readonly gridMock = new GridMock(this.store, this.projectStore)
   private readonly trashMock = new TrashMock(this.clock, this.forward, this.store, this.projectStore, this.toolsMock, this.gridMock)

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { RelativeAge } from '../../components/RelativeAge.jsx'
 import { useDismiss } from '../../components/useDismiss.js'
-import type { GitCommit, GitFileStatus } from '@cc/protocol'
+import { changedFileCount, type GitCommit, type GitFileStatus } from '@cc/protocol'
 import { laneCount, layoutCommits } from '@cc/core'
 import { CommitGraph, ROW_H } from '../../components/CommitGraph.jsx'
 import { ChevronIcon } from '../../components/icons.jsx'
@@ -682,7 +682,7 @@ function CollapsedRail({ projectId, isRepo }: { projectId: string; isRepo: boole
     let alive = true
     platform.git
       .status(projectId)
-      .then((f) => alive && setCount(f.length))
+      .then((f) => alive && setCount(changedFileCount(f)))
       .catch(() => alive && setCount(null))
     return () => {
       alive = false
@@ -796,7 +796,7 @@ function GitChanges({ projectId, denied }: { projectId: string; denied?: boolean
       {files && files.length > 0 && (
         <TabActions>
           <span className="readout text-2xs text-ink-muted" data-testid="evidence-change-count">
-            {files.length}
+            {changedFileCount(files)}
           </span>
           <button
             className="rounded-md px-1.5 py-0.5 text-2xs text-ink-faint transition-colors hover:bg-surface-hover/50 hover:text-ink"

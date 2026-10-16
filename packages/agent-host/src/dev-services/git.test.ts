@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { changedFileCount } from '@cc/protocol'
 import { join } from 'node:path'
 import { GIT_DIFF_MAX_CHARS, gitBranches, gitCheckout, gitCommit, gitCommitDetail, gitDiff, gitStage, gitStatusFiles, gitSummary } from './git.js'
 
@@ -117,6 +118,28 @@ describe('gitStatusFiles — porcelain v2', () => {
 
     const files = await gitStatusFiles(d)
     expect(files).toEqual([{ path: 'a.txt', staged: false, status: 'M' }])
+  })
+})
+
+describe('the changed-file count (#850 item 10)', () => {
+  it('is the panel list counted by path: a partly staged file once, each file of a new folder', async () => {
+    const { d, git } = repo()
+    writeFileSync(join(d, 'a.ts'), 'one\n')
+    git('add', '.')
+    git('commit', '-qm', 'init')
+    // Staged, then changed again: under Staged and under Changes
+    writeFileSync(join(d, 'a.ts'), 'two\n')
+    git('add', 'a.ts')
+    writeFileSync(join(d, 'a.ts'), 'three\n')
+    // A new folder: git's default lists the folder, the panel lists its files
+    mkdirSync(join(d, 'new'))
+    writeFileSync(join(d, 'new', 'x.ts'), 'x\n')
+    writeFileSync(join(d, 'new', 'y.ts'), 'y\n')
+
+    const files = await gitStatusFiles(d)
+    expect(files).toHaveLength(4)
+    expect(changedFileCount(files)).toBe(3)
+    expect((await gitSummary(d)).changedFiles).toBe(3)
   })
 })
 
