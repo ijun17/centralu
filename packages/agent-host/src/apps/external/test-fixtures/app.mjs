@@ -8,7 +8,7 @@
  * --log   writes what this process saw, one JSON object per line. Tests count "how many times it
  *         started", "which methods arrived", and "what environment it received" from this file —
  *         judging by what the app actually experienced, not by anything the host says.
- * --mode  normal | crash-on-start | ignore-eof | grandchild | stubborn-grandchild | detached-grandchild | hold-fd3 | flood-stderr
+ * --mode  normal | crash-on-start | ignore-eof | grandchild | stubborn-grandchild | detached-grandchild | ignore-eof-detached | hold-fd3 | flood-stderr
  *         | secret-to-stderr | bad-tool-name | mediation | view | attach
  *
  * `attach` is the bundle for A-5 (attaching to a session): tools with different annotations (the
@@ -64,7 +64,7 @@ if (MODE === 'flood-stderr') {
 if (MODE === 'secret-to-stderr') {
   process.stderr.write(`about to use token=${process.env.FIXTURE_SECRET}\n`)
 }
-if (MODE === 'ignore-eof') {
+if (MODE === 'ignore-eof' || MODE === 'ignore-eof-detached') {
   // This timer keeps the process alive even after stdin closes — this tests the shutdown rule's "end the tree after the grace period"
   setInterval(() => {}, 1000)
 }
@@ -91,11 +91,12 @@ if (MODE === 'stubborn-grandchild') {
     kid.unref()
   })
 }
-if (MODE === 'detached-grandchild') {
+if (MODE === 'detached-grandchild' || MODE === 'ignore-eof-detached') {
   /*
    * A grandchild started outside the app's own job, the way any non-Node app (Python, a shell) starts its children on
    * Windows. Node puts a child spawned without `detached` into a job that ends it together with this process; this one
-   * is not in it, so on Windows it outlives the app unless the host collects it (#14).
+   * is not in it, so on Windows it outlives the app unless the host collects it (#14). `ignore-eof-detached` is the same
+   * child under an app that also keeps running once its input closes, so the host has to end the tree itself (#849).
    */
   const kid = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', detached: true, windowsHide: true })
   kid.unref()

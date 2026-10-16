@@ -301,6 +301,27 @@ describe('the shutdown rule (S-5)', () => {
     }
   }, 15_000)
 
+  /*
+   * Windows (#849): the app does not end once its input closes, so the host ends its tree after the grace period, and
+   * the grandchild is outside the app's job, so ending the app alone would not end it. The `ignore-eof` test earlier in
+   * this block has its grandchild inside the job, where it dies with the app however the app is ended.
+   */
+  it.runIf(process.platform === 'win32')('on Windows, an app that does not end with its input closed is ended with a descendant started outside its job — no orphan is left behind', async () => {
+    plant('stubborn', 'ignore-eof-detached')
+    make({ graceMs: 300 })
+    await rt.tools(ref('stubborn'))
+    const pid = starts('stubborn')[0]!.pid
+    const grandchild = records('stubborn').find((r) => r.t === 'grandchild')!.grandchild!
+    try {
+      expect(alive(grandchild)).toBe(true)
+      await rt.restart(ref('stubborn'))
+      await until(() => [alive(pid), alive(grandchild)], ([a, b]) => !a && !b, 8_000)
+      expect(hostLog('stubborn')).toContain('did not exit within 300ms')
+    } finally {
+      if (alive(grandchild)) process.kill(grandchild)
+    }
+  }, 15_000)
+
   it('when the host exits (dispose), an old process still waiting to finish a call after its entry was replaced also stops', async () => {
     plant('keeper', 'attach')
     make()
