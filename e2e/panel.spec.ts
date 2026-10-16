@@ -314,7 +314,16 @@ test('the collapsed composer does not cover the answering border of a panel', as
   const panel = page.getByTestId(`grid-panel-${a}`)
   await expect(panel).toHaveAttribute('data-look', 'answering')
   await expect(panel).toHaveCSS('border-bottom-width', '1px')
-  await expect(panel).toHaveCSS('border-bottom-color', 'rgb(255, 255, 255)')
+  // The answering look's light grey (ink-muted), as the browser computes the token
+  const muted = await page.evaluate(() => {
+    const probe = document.createElement('i')
+    probe.style.color = 'var(--color-ink-muted)'
+    document.body.append(probe)
+    const c = getComputedStyle(probe).color
+    probe.remove()
+    return c
+  })
+  await expect(panel).toHaveCSS('border-bottom-color', muted)
 
   // The middle of the bottom edge, where the folded composer sits: half a pixel in is inside the 1px border
   const hit = await panel.evaluate((el) => {

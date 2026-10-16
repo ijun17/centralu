@@ -26,14 +26,14 @@ test.use({ browserName: 'webkit', deviceScaleFactor: 1 })
  */
 const WIDTHS = [1280, 1281, 1333, 1366, 1401, 1404, 1437, 1500]
 
-/** --color-ink-signal, the white of the answering look's border */
-const WHITE = 255
+/** --color-ink-muted in the dark preset (#a8a8a8), the light grey of the answering look's border */
+const MUTED = 168
 /**
  * The threshold for a lit side. A side where the border vanished reads as only the floor
  * (surface-floor 15) or the grey of a resting panel (line-strong 77); a side dimmed to a half pixel sits
- * in between. A lit side reads as WHITE itself.
+ * in between (about 91). A lit side reads as MUTED itself.
  */
-const LIT = WHITE - 8
+const LIT = MUTED - 8
 
 const EDGES = ['top', 'right', 'bottom', 'left'] as const
 type Dim = { width: number; panel: number; edge: (typeof EDGES)[number]; peak: number }

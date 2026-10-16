@@ -7,7 +7,7 @@ import { addSessionPanels, newSession, setup } from './project-screen.js'
  * token changed to the wrong one, a border that lost its dashes or a fill that went missing fails here.
  *
  *   idle       a thin grey line
- *   answering  a thick white solid line
+ *   answering  a light grey (ink-muted) solid line
  *   stopped    a thick white dashed line on grey (error, limited, an interruption)
  *   waiting    a thick white solid line on grey (an approval, an open question)
  */
@@ -30,9 +30,9 @@ const CASES: { name: string; look: Look; patch: Record<string, unknown> }[] = [
  * What a look draws, as tokens. The mark's ring is the 1.5px background behind the chip (`fill`), or for the
  * stopped look a dashed border of the same width (`dashed`); a panel only colours and dashes its own 1px border.
  */
-const LOOKS: Record<Look, { ring: 'none' | 'fill' | 'dashed'; panelStyle: string; line: 'signal' | 'faint-line'; chip: 'floor' | 'selected' }> = {
+const LOOKS: Record<Look, { ring: 'none' | 'fill' | 'dashed'; panelStyle: string; line: 'signal' | 'muted' | 'faint-line'; chip: 'floor' | 'selected' }> = {
   idle: { ring: 'none', panelStyle: 'solid', line: 'faint-line', chip: 'floor' },
-  answering: { ring: 'fill', panelStyle: 'solid', line: 'signal', chip: 'floor' },
+  answering: { ring: 'fill', panelStyle: 'solid', line: 'muted', chip: 'floor' },
   stopped: { ring: 'dashed', panelStyle: 'dashed', line: 'signal', chip: 'selected' },
   waiting: { ring: 'fill', panelStyle: 'solid', line: 'signal', chip: 'selected' },
 }
@@ -52,6 +52,7 @@ function token(page: Page, name: string): Promise<string> {
 async function colours(page: Page) {
   return {
     signal: await token(page, '--color-ink-signal'),
+    muted: await token(page, '--color-ink-muted'),
     'faint-line': await token(page, '--color-line-strong'),
     clear: 'rgba(0, 0, 0, 0)',
     floor: await token(page, '--color-surface-floor'),
@@ -107,7 +108,7 @@ export function sessionLookTests() {
           const want = LOOKS[look]
           await expect(mark, name).toHaveAttribute('data-look', look)
           // The ring: the background behind the chip, or a dashed border of the same width for the stopped look
-          await expect(mark, name).toHaveCSS('background-color', want.ring === 'fill' ? c.signal : c.clear)
+          await expect(mark, name).toHaveCSS('background-color', want.ring === 'fill' ? c[want.line as 'signal' | 'muted'] : c.clear)
           if (want.ring !== 'dashed') await expect(mark, name).toHaveCSS('border-top-width', '0px')
           else await expect(mark, name).toHaveCSS('border-top-style', 'dashed')
           if (want.ring === 'dashed') await expect(mark, name).toHaveCSS('border-top-color', c.signal)

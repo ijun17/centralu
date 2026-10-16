@@ -1077,7 +1077,8 @@
  * as `data-look`.
  *
  *   idle       nothing around the chip (the chip's own thin grey border)
- *   answering  a white ring
+ *   answering  a light grey ring (`ink-muted`, the ring the orbit left with the spin turned off): it is
+ *              working, nothing to do; white stays for what calls the person
  *   stopped    a white dashed ring on a grey chip: the turn broke off (error, interruption, limit)
  *   waiting    a white ring on a grey chip: the person has to act (approval, a question)
  *
@@ -1098,7 +1099,9 @@
   min-width: 17px;
   padding: 1.5px;
 }
-.cc-mark[data-look='answering'],
+.cc-mark[data-look='answering'] {
+  background: var(--color-ink-muted);
+}
 .cc-mark[data-look='waiting'] {
   background: var(--color-ink-signal);
 }
@@ -1120,7 +1123,9 @@
  * own 1px border, drawn by the browser on the same pixel as the panel (#208), so all four sides show at
  * any width and the content box does not move. No fill: a panel is a screen to read.
  */
-.cc-panel[data-look='answering'],
+.cc-panel[data-look='answering'] {
+  border-color: var(--color-ink-muted);
+}
 .cc-panel[data-look='stopped'],
 .cc-panel[data-look='waiting'] {
   border-color: var(--color-ink-signal);

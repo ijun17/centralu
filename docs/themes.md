@@ -119,10 +119,10 @@ and warns next to it when the order breaks. It is a warning, not a refusal: a th
 person's, but a theme that breaks the order quietly hides what is waiting for them.
 
 A session's state is drawn with the same inks and no hue or motion (#736). The sidebar mark has four
-looks: idle (the chip's own `line-strong` border), answering (a 1.5px `ink-signal` ring), stopped
+looks: idle (the chip's own `line-strong` border), answering (a 1.5px `ink-muted` ring, light grey: working, nothing to do), stopped
 (the same ring dashed, the chip on `surface-selected`: an error, an interruption or a limit) and
 waiting (the solid ring, the chip on `surface-selected`: an approval or a question). A grid or project
-panel follows with its own 1px border: `ink-signal` while answering or waiting, dashed when stopped.
+panel follows with its own 1px border: `ink-muted` while answering, `ink-signal` while waiting, dashed `ink-signal` when stopped.
 
 ## How it is applied
 
