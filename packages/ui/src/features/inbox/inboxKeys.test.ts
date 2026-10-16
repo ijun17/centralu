@@ -46,7 +46,8 @@ describe('inboxKeyAction (#683 review: the list hears the window, so it keeps th
 })
 
 describe('inboxCovered', () => {
-  const base = { openLayers: 0, paletteOpen: false, settingsOpen: false, usageOpen: false, overlay: null }
+  // The list itself is open: it does not cover itself
+  const base = { openLayers: 0, paletteOpen: false, settingsOpen: false, usageOpen: false, inboxOpen: true, overlay: null }
   it('is any layer over the list', () => {
     expect(inboxCovered(base)).toBe(false)
     expect(inboxCovered({ ...base, paletteOpen: true })).toBe(true)

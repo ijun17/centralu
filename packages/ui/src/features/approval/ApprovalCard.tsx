@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { alwaysAllowKey, isCentraluApply, SESSION_HANDOFF, sessionOnlyAlways, type ApprovalDetail } from '@cc/protocol'
 import { agentStartQuestion, approvalNotes, centraluUpdateQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
 import { inFlightKey, useStore } from '../../store/store.js'
+import { isCovered, type CoveringLayers } from '../../store/layers.js'
 import { useShortcut } from '../../app/shortcut.js'
 import { composingKey, letterOf } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
@@ -452,27 +453,10 @@ export type ApprovalKeyAction = { decision: 'allow' | 'deny' | 'always'; scope?:
  * always goes to exactly one thing: "the session currently focused."
  */
 export function approvalCardCovered(
-  st: {
-    inboxOpen: boolean
-    usageOpen: boolean
-    settingsOpen: boolean
-    paletteOpen: boolean
-    overlay: unknown
-    focusedSessionId: string | null
-    /** The count of windows opened via local state (delete confirmation, new session, image zoom, command palette…) — `Modal` counts itself (#158) */
-    openLayers: number
-  },
+  st: CoveringLayers & { focusedSessionId: string | null },
   sessionId: string,
 ): boolean {
-  return (
-    st.openLayers > 0 ||
-    st.inboxOpen ||
-    st.usageOpen ||
-    st.settingsOpen ||
-    st.paletteOpen ||
-    st.overlay !== null ||
-    st.focusedSessionId !== sessionId
-  )
+  return isCovered(st) || st.focusedSessionId !== sessionId
 }
 
 /**

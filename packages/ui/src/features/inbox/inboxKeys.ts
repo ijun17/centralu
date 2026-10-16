@@ -1,4 +1,5 @@
 import { composingKey, letterOf } from '../../app/keys.js'
+import { isCovered, type CoveringLayers } from '../../store/layers.js'
 
 export type InboxKeyAction = 'down' | 'up' | 'open' | 'done' | 'allow' | 'deny' | 'close'
 
@@ -37,14 +38,8 @@ export function inboxKeyAction(
 }
 
 /** Whether another layer stands over the waiting list: a modal, the palette, settings, usage, an overlay */
-export function inboxCovered(st: {
-  openLayers: number
-  paletteOpen: boolean
-  settingsOpen: boolean
-  usageOpen: boolean
-  overlay: unknown
-}): boolean {
-  return st.openLayers > 0 || st.paletteOpen || st.settingsOpen || st.usageOpen || st.overlay !== null
+export function inboxCovered(st: CoveringLayers): boolean {
+  return isCovered(st, 'inbox')
 }
 
 /** Whether a key press lands in a field that takes text */

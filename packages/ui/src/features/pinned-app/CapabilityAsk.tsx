@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import type { AppQuestion } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
+import { isCovered, type CoveringLayers } from '../../store/layers.js'
 import { PermissionCard, approvalKeyAction } from '../approval/ApprovalCard.jsx'
 
 /**
@@ -28,7 +29,7 @@ export function CapabilityAsk({ question, visible }: { question: AppQuestion; vi
       const st = useStore.getState()
       const action = approvalKeyAction(e, {
         typing: t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.isContentEditable,
-        covered: st.inboxOpen || st.usageOpen || st.settingsOpen || st.paletteOpen || st.overlay !== null || st.view !== 'app',
+        covered: capabilityAskCovered(st),
       })
       // There is no "always allow" — the answer is remembered either way
       if (!action || action.decision === 'always') return
@@ -49,4 +50,9 @@ export function CapabilityAsk({ question, visible }: { question: AppQuestion; vi
       <PermissionCard appName={question.app.name} text={question.text} onAnswer={(d) => void answer(question.id, d)} />
     </div>
   )
+}
+
+/** Whether the question's y/n keys belong to something else: a layer over the view, or another screen (a pure function — tests attach here) */
+export function capabilityAskCovered(st: CoveringLayers & { view: string }): boolean {
+  return isCovered(st) || st.view !== 'app'
 }

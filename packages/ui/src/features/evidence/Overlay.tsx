@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { isPlainEscape } from '../../app/keys.js'
 import { useStore } from '../../store/store.js'
+import { isCovered, type CoveringLayers } from '../../store/layers.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import { lazyComponent } from '../../components/lazy.jsx'
@@ -109,10 +110,10 @@ export function Overlay() {
  * terminal).
  */
 export function overlayTakesEscape(
-  st: { openLayers: number; settingsOpen: boolean; paletteOpen: boolean; inboxOpen: boolean; usageOpen: boolean },
+  st: CoveringLayers,
   target: EventTarget | null,
 ): boolean {
-  if (st.openLayers > 0 || st.settingsOpen || st.paletteOpen || st.inboxOpen || st.usageOpen) return false
+  if (isCovered(st, 'overlay')) return false
   const el = target as Element | null
   return !(el && typeof el.closest === 'function' && el.closest('[data-testid="evidence-panel"]'))
 }

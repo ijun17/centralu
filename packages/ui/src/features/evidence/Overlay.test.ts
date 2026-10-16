@@ -8,7 +8,8 @@ import { overlayTakesEscape } from './Overlay.jsx'
  * open above it.
  */
 describe('overlayTakesEscape — the overlay only claims Esc when it is on top and the key came from its own side (#181)', () => {
-  const none = { openLayers: 0, settingsOpen: false, paletteOpen: false, inboxOpen: false, usageOpen: false }
+  // The overlay itself is open: it does not cover itself
+  const none = { openLayers: 0, settingsOpen: false, paletteOpen: false, inboxOpen: false, usageOpen: false, overlay: { kind: 'viewer' } }
   const at = (inPanel: boolean) => ({ closest: (sel: string) => (inPanel && sel.includes('evidence-panel') ? {} : null) }) as unknown as EventTarget
 
   it('dismisses when pressed in an input field (a hidden conversation) or empty space — must not get trapped behind the cover', () => {
@@ -24,5 +25,7 @@ describe('overlayTakesEscape — the overlay only claims Esc when it is on top a
     expect(overlayTakesEscape({ ...none, openLayers: 1 }, at(false))).toBe(false)
     expect(overlayTakesEscape({ ...none, settingsOpen: true }, at(false))).toBe(false)
     expect(overlayTakesEscape({ ...none, paletteOpen: true }, at(false))).toBe(false)
+    expect(overlayTakesEscape({ ...none, inboxOpen: true }, at(false))).toBe(false)
+    expect(overlayTakesEscape({ ...none, usageOpen: true }, at(false))).toBe(false)
   })
 })
