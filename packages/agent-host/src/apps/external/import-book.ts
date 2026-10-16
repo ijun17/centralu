@@ -57,14 +57,19 @@ export class ImportBook {
     this.doc = this.read()
   }
 
-  /** The mark on this folder — an uncertain legacy identity loses its confirmation, not its import mark. */
+  /**
+   * The mark on this folder. A folder that is not the one marked (recreated under the same id outside Centralu, or one
+   * that cannot be read) keeps the import mark and loses its confirmation (#838): no mark at all would make the gate
+   * trust it as the person's own app, so replacing an enabled import's folder ran whatever the new one holds. Removing
+   * an app through Centralu drops its mark (`drop`), so an app the person makes under that id afterwards is unmarked.
+   */
   get(appId: string, dir: string): ImportMark | null {
     const m = this.doc[appId]
     if (!m) return null
     try {
-      return this.matchingMark(m, statSync(dir, { bigint: true }).ino.toString())
+      return this.matchingMark(m, statSync(dir, { bigint: true }).ino.toString()) ?? { ...m, confirmed: null }
     } catch {
-      return null
+      return { ...m, confirmed: null }
     }
   }
 
@@ -82,9 +87,11 @@ export class ImportBook {
     const m = this.doc[appId]
     if (!m) return
     const ino = statSync(dir, { bigint: true }).ino
-    if (!this.matchingMark(m, ino.toString())) throw new Error('This app folder changed since it was imported')
-    // Confirmation is an explicit write path: upgrade a legacy record only after a fresh
-    // review, without binding an uncertain identity or changing stored state during get().
+    /*
+     * Confirmation is an explicit write path: it binds the mark to this folder only after a fresh review of what the
+     * folder holds now (`enable` checks the key against the current manifest), a legacy record or a folder recreated
+     * under the import's id alike (#838). Nothing changes stored state during get().
+     */
     this.doc[appId] = {
       ...m,
       ino: Number(ino),

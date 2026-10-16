@@ -119,8 +119,18 @@ export function secretValueProblem(value: string): string | null {
  * whole record into confetti, and a value that short is not meaningful as a secret anyway.
  */
 export function redactor(secrets: Record<string, string>): (text: string) => string {
+  /*
+   * Each value also in its JSON-escaped form (#838): a run record keeps the arguments as JSON (`describeArgs`), where
+   * a value with a line break, a quote, a backslash or a control character is spelled differently (`\n`, `\"`), so a
+   * multi-line key (a PEM, a service account's JSON) passed as an argument was kept unmasked. Both forms are sorted
+   * together, longest first, by the same rule as the values.
+   */
   const pairs = Object.entries(secrets)
     .filter(([, v]) => v.length >= 4)
+    .flatMap(([name, v]): [string, string][] => {
+      const escaped = JSON.stringify(v).slice(1, -1)
+      return escaped === v ? [[name, v]] : [[name, v], [name, escaped]]
+    })
     .sort((a, b) => b[1].length - a[1].length)
   if (pairs.length === 0) return (t) => t
   return (text) => {

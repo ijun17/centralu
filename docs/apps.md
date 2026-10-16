@@ -90,7 +90,8 @@ app wrote there while running would reach the whole team.
 - **Secrets**: the manifest holds names only. Values live on this machine, in
   `<data folder>/app-secrets.json` (mode 0600, written through a temporary file created 0600). An
   app receives only the names it declares, as environment variables. Values of 4 characters or more
-  are replaced by `[redacted:NAME]` in the app's log, run records and error bundles.
+  are replaced by `[redacted:NAME]` in the app's log, run records and error bundles, also where JSON
+  escapes them (a multi-line key in an argument, #838).
   A person enters them in the **Secrets** panel beside the pinned view (its button says how many
   are missing) or in the app's row in Settings > Apps: Set, Replace, Clear. Both call
   `apps.setSecret`, which takes only a name the manifest declares, refuses an empty value, and
@@ -959,7 +960,7 @@ says where it came from and offers "Review and enable…".
 **The confirmation is the host's.** It is kept in `<data folder>/app-imports.json` (0600), outside
 the app folder, so the app's own code cannot write "confirmed" and an archive cannot arrive with
 it. It is bound to the folder's inode, so a different folder later created with the same id is not
-covered, and removing the app forgets it. Bigint stat supplies the exact file id, persisted as the
+covered: it is still an import, unconfirmed until reviewed (#838), and removing the app forgets it. Bigint stat supplies the exact file id, persisted as the
 decimal string `inoExact`. The numeric `ino` remains `Number(fileId)` so older hosts retain their
 existing comparison during swaps and rollbacks; it can be removed only in a later release under
 the "add first, remove later" rule. The new host compares `inoExact` when present. Without it,

@@ -164,8 +164,18 @@ export class AppHandover {
     if (reviewKey(manifest) !== s.review.reviewKey) throw new ImportRefused('The app changed while it was waiting. Review it again')
     this.refuseTaken(id)
     const dir = join(ensureDirInside(this.host.dataRoot, ['apps']), id)
-    renameSync(s.appDir, dir)
-    this.book.mark(id, dir, s.review.source)
+    /*
+     * The mark is written before the folder appears (#838). A rename first left a window, and on a failed mark a
+     * folder for good, in which the app sat in the user folder with no mark: the person's own app, run without the
+     * review. Staging is in the data folder, so the rename keeps the folder's inode the mark is tied to.
+     */
+    this.book.mark(id, s.appDir, s.review.source)
+    try {
+      renameSync(s.appDir, dir)
+    } catch (e) {
+      this.book.drop(id)
+      throw e
+    }
     if (opts.enable) this.book.confirm(id, dir, manifest)
     // Captures the state it arrived in as the first version (E-1) — so even if a building session breaks it while editing, it can be restored to the imported version
     this.snapshot(id, dir, 'imported')

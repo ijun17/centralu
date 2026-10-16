@@ -1043,7 +1043,9 @@ then who may call it:
 - Secret values live in `app-secrets.json` (0600) and are replaced by their names in the app's log,
   run records (arguments, errors, kept failures) and error bundles (`secrets.ts` `redactor`,
   `app-process.ts` `AppLog`; test "stderr goes to the app's own log, with secret values masked by
-  name"). Arguments are hashed only after redaction. The person enters values through
+  name"). Each value is also replaced in its JSON-escaped form (#838), since run records keep
+  arguments as JSON, where a multi-line key or one with quotes is spelled differently. Arguments are
+  hashed only after redaction. The person enters values through
   `apps.setSecret`, which accepts only names the manifest declares and never returns a value: the
   app list carries only whether each declared name is set, and refusals never quote the value. A
   test looks for the value, as a string, in the app log, run records, kept failures, error bundles,
@@ -1148,7 +1150,12 @@ else's code that will run as the user. It gets its own confirmation, separate fr
   the decimal string `inoExact`). Numeric `ino` is kept for older hosts during swaps and rollbacks
   until a later release can remove it ("add first, remove later"). The new host compares `inoExact`
   when present. Legacy numeric ids below 2^53 still match exactly; unsafe numeric ids keep their
-  import mark but require fresh review. Lookups are read-only; importing or confirming explicitly
+  import mark but require fresh review. A folder that is not the one marked (recreated under the id
+  outside Centralu, or unreadable) also keeps the import mark and is unconfirmed until reviewed (#838):
+  it used to read as no mark, which the gate takes for the person's own app, so replacing an enabled
+  import's folder ran whatever the new one held. Removing the app through Centralu still forgets the
+  mark. The mark is written before the folder is moved in, so a failed write brings nothing in.
+  Lookups are read-only; importing or confirming explicitly
   writes both fields. The mark records a hash of the manifest's `server` and `uses`. Enabling sends
   back the key of the review the person saw, and the host
   compares it with the manifest at that moment, so what was reviewed is what is enabled. A later

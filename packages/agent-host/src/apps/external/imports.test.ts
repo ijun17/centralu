@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -143,8 +143,12 @@ describe('the import book keeps exact folder identities', () => {
 
     const reloaded = new ImportBook(dataRoot)
     expect(reloaded.get('notes', dir)?.confirmed?.key).toBe(reviewKey(declaration))
-    expect(reloaded.get('notes', replacement)).toBeNull()
-    expect(() => reloaded.confirm('notes', replacement, declaration)).toThrow('folder changed')
+    // The replacement is still an import, unconfirmed (#838): no mark would make it the person's own app
+    expect(reloaded.get('notes', replacement)).toMatchObject({ source: dir, confirmed: null })
+    // A fresh review binds the mark to the folder reviewed
+    reloaded.confirm('notes', replacement, declaration)
+    expect(reloaded.get('notes', replacement)?.confirmed?.key).toBe(reviewKey(declaration))
+    expect(reloaded.get('notes', dir)?.confirmed).toBeNull()
   })
 
   it('legacy numeric file ids keep confirmation only below 2^53 and can be reviewed again otherwise', () => {
@@ -161,9 +165,7 @@ describe('the import book keeps exact folder identities', () => {
       expect(book.get('notes', dir)?.confirmed, `legacy id ${id}`).toEqual(id < boundary ? confirmed : null)
       expect(book.get('notes', dir)?.confirmed, `second lookup of ${id}`).toEqual(id < boundary ? confirmed : null)
       fileIds.set(dir, id + 1n)
-      expect(book.get('notes', dir), `different folder before upgrade of ${id}`).toEqual(
-        id < boundary ? null : { ...legacy, confirmed: null },
-      )
+      expect(book.get('notes', dir), `different folder before upgrade of ${id}`).toEqual({ ...legacy, confirmed: null })
       fileIds.set(dir, id)
       // An unrelated write exposes any mutation of the stored mark during get().
       book.mark('other', other, other)
@@ -175,7 +177,7 @@ describe('the import book keeps exact folder identities', () => {
       expect(new ImportBook(dataRoot).get('notes', dir)?.confirmed?.at).toBe(30)
       if (id < boundary) {
         fileIds.set(dir, id + 1n)
-        expect(book.get('notes', dir), `different folder for legacy id ${id}`).toBeNull()
+        expect(book.get('notes', dir), `different folder for legacy id ${id}`).toMatchObject({ confirmed: null })
       }
     }
   })
@@ -327,6 +329,43 @@ describe('an imported app arrives disabled and never starts before the person en
     rt.refresh()
     expect(info('notes')?.status).toBe('stopped')
     expect(info('notes')?.imported).toBeUndefined()
+  })
+})
+
+/*
+ * An enabled import whose folder is replaced outside Centralu (#838): the new folder has another inode, and the mark
+ * read as absent, so the gate treated the app as the person's own and ran whatever the new folder holds.
+ */
+describe('a replaced folder does not inherit the import, nor escape it', () => {
+  it('a folder recreated under an enabled import’s id is unconfirmed until the person reviews it', async () => {
+    make()
+    await importApp(plantSource('notes-src', 'notes'), true)
+    expect(info('notes')?.status).toBe('stopped')
+    await rt.dispose()
+    const dir = join(dataRoot, 'apps', 'notes')
+    // Made while the old one still exists, so it cannot get the old folder's inode back
+    const next = join(root, 'next')
+    mkdirSync(next)
+    writeFileSync(join(next, MANIFEST_FILE), JSON.stringify(manifest('notes', { server: { command: process.execPath, args: [APP, '--env', 'OTHER'] } })))
+    rmSync(dir, { recursive: true })
+    renameSync(next, dir)
+
+    make()
+    expect(info('notes')).toMatchObject({ status: 'unconfirmed', imported: { confirmedAt: null } })
+    expect((await rt.call(userRef('notes'), 'env', {}, { kind: 'view' })).status).toBe('rejected')
+    const review = rt.reviewApp(userRef('notes'))
+    expect(rt.enableApp(userRef('notes'), review.reviewKey).status).toBe('stopped')
+  })
+
+  it('a mark that cannot be written brings nothing in: no unmarked app is left in the user folder', async () => {
+    make()
+    const { token, review } = await rt.prepareImport(plantSource('notes-src', 'notes'))
+    // The book's file is a folder now, so its write fails
+    mkdirSync(join(dataRoot, IMPORTS_FILE, 'x'), { recursive: true })
+    expect(() => rt.commitImport(token, { enable: false, reviewKey: review.reviewKey })).toThrow()
+    rt.refresh()
+    expect(userApps()).toEqual([])
+    expect(info('notes')).toBeUndefined()
   })
 })
 
