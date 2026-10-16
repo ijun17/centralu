@@ -27,22 +27,21 @@ import { NO_PATH, alwaysAllowKey, matchesAllowRule, type ApprovalDetail, type Ap
  */
 
 /**
- * An "always allow" rule (FR-3). Patterns are allowed, but registering one shows a preview of what it
- * matches — instead of limiting what can be expressed, the result is made visible.
+ * An "always allow" rule (FR-3): one command, matched whole (protocol's `matchesAllowRule`, #838). Registering one
+ * shows a preview of what it matches, so the result is visible.
  */
 export type ApprovalRule = {
   scope: ApprovalScope
   projectId?: string
   sessionId?: string
-  /** The command, or a prefix of it ending in `*` (protocol's `matchesAllowRule`) */
+  /** The command, matched exactly: a `*` in it is a literal character (protocol's `matchesAllowRule`, #838) */
   matcher: string
 }
 
 /*
  * The host's own rule (protocol's `alwaysAllowKey` and `matchesAllowRule`, #428), so a preview shows exactly what the
- * host lets through: the command trimmed, as the suggested matcher is, and `*` a wildcard only at the end, a prefix
- * test that spans line breaks (a heredoc commit matches `git commit*`). Reading `*` anywhere as a wildcard used to
- * widen the preview past what the host allows.
+ * host lets through: the command trimmed, as the suggested matcher is, and matched whole. A `*` is no wildcard
+ * anywhere (#838): a trailing one made "always" on `cat logs/*` a prefix rule for any command starting `cat logs/`.
  */
 export function matchesRule(command: string, matcher: string): boolean {
   return matchesAllowRule(alwaysAllowKey({ kind: 'command', command, cwd: '' }), matcher)
@@ -73,9 +72,9 @@ export function previewMatches(matcher: string, history: readonly string[]): str
  *
  * Back when it widened to the first two words + '*', approving `rm -rf node_modules` suggested `rm -rf*`,
  * and `rm -rf /` very nearly got approved automatically along with it. Appending '*' to the whole command is
- * not safe either — `cmd*` is broken open by chaining such as `cmd; rm -rf /`. So the default suggestion is
- * an exact match, and widening it is left to the user, who edits it and checks the result in the preview
- * (previewMatches) first.
+ * not safe either — `cmd*` is broken open by chaining such as `cmd; rm -rf /`. So the suggestion is an exact
+ * match, and the host matches it exactly too (#838). A command that ends in `*` gets no suggestion (`''`): an older
+ * host would read the rule as a prefix.
  */
 export function suggestMatcher(command: string): string {
   return alwaysAllowKey({ kind: 'command', command, cwd: '' })

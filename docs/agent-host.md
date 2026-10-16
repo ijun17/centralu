@@ -1233,8 +1233,9 @@ Implementation rules:
   screen agree. Claude used to fall back to the command text: a rule nobody saved or named, gone at the next restart.
   The key and the match are written once, in protocol (`alwaysAllowKey`, `matchesAllowRule`), and core's suggestion
   and preview, the UI's matcher and both adapters read them: a command trimmed, a file edit's path, nothing for an
-  edit with no path (the card offers no "always" for it and the manager saves no "(no path)" rule), and `*` a
-  wildcard only at the end. The copies had drifted: a command with surrounding whitespace never matched its own rule,
+  edit with no path (the card offers no "always" for it and the manager saves no "(no path)" rule), none for a command
+  flagged outside the sandbox, for the network or as terminal input or ending in `*`, and an exact match with `*` a
+  literal character (#838; it was a wildcard at the end, which made "always" on `cat logs/*` a prefix rule). The copies had drifted: a command with surrounding whitespace never matched its own rule,
   and core's preview read a `*` in the middle as a wildcard the host did not honour.
 - Process management (spawning the CLI, crash detection) is the adapter's own responsibility. A crash is emitted as an `error` event and the host does not die.
 - A capability is not necessarily a static declaration; it can be **decided at detect() time** (e.g. if whether approvals work depends on the Codex version, decide after detecting the version — the C4 response).

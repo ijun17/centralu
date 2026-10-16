@@ -189,10 +189,20 @@ describe('approvalCardCovered — which card accepts a key press', () => {
 
 // An edit whose file is unknown has nothing to remember (#428): no "always allow" button, and `a` does nothing
 describe('offersAlways', () => {
-  it('is off only for a file edit with no path', () => {
+  it('is off for a file edit with no path', () => {
     expect(offersAlways({ kind: 'file_edit', path: NO_PATH, diffPreview: '', multi: false })).toBe(false)
     expect(offersAlways({ kind: 'file_edit', path: '/x/a.ts', diffPreview: '', multi: false })).toBe(true)
     expect(offersAlways({ kind: 'command', command: 'npm test', cwd: '/x' })).toBe(true)
     expect(offersAlways({ kind: 'other', raw: '{}' })).toBe(true)
+  })
+
+  // A rule of the command's text would also let the plain command through, so a flagged command offers none (#838)
+  it('offers no "always" for a command outside the sandbox, a network request, terminal input, empty or ending in *', () => {
+    const c = { kind: 'command' as const, command: 'npm test', cwd: '/x' }
+    expect(offersAlways({ ...c, unsandboxed: true })).toBe(false)
+    expect(offersAlways({ ...c, network: { host: 'example.com', protocol: 'https' } })).toBe(false)
+    expect(offersAlways({ ...c, stdin: true })).toBe(false)
+    expect(offersAlways({ ...c, command: '  ' })).toBe(false)
+    expect(offersAlways({ ...c, command: 'cat logs/*' })).toBe(false)
   })
 })

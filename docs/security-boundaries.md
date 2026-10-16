@@ -445,6 +445,16 @@ a planted `.codex/config.toml` cannot turn its app tools into `approve`. The thr
 `approvalPolicy` is compared afterwards and a difference logged. The refusal itself is still from
 Codex source, and no logged-in app call was run.
 
+**"Always allow" on a command** (#838) remembers the command's text, trimmed, and lets through that text only
+(`alwaysAllowKey`, `matchesAllowRule` in `protocol/src/always-allow.ts`; both adapters check it before asking). A `*`
+is a literal character: a trailing one used to be a wildcard, so "always" on `cat logs/*` allowed every command that
+starts `cat logs/`, chained ones included, saved for the project. A command that ends in `*` has no key at all: no "always"
+on its card, and a rule an older build saved for one allows nothing now, so it asks again rather than allowing more.
+A host from an earlier build, serving the same store during a swap or after a downgrade, would read such a rule as a
+prefix, so this build never writes one. A command the card flags (outside the sandbox, network access, input to a running terminal) has no key
+either: the card offers no "always", and a rule for the same text does not let it through, since the rule cannot tell
+it from the plain command.
+
 ### Turning things off
 
 The table describes `safe`/`normal`. Under `auto`, project trust and revoked remembered

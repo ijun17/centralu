@@ -21,7 +21,7 @@ export class AlwaysAllowRules {
     for (const m of matchers) this.matchers.add(m)
   }
 
-  /** The protocol's rule (`matchesAllowRule`): exact, or a prefix when the matcher ends in `*` — the same rule core previews */
+  /** The protocol's rule (`matchesAllowRule`): the same text, `*` included (#838) — the same rule core previews */
   allows(key: string): boolean {
     for (const m of this.matchers) if (matchesAllowRule(key, m)) return true
     return false
