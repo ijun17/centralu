@@ -145,17 +145,22 @@ export class AppSessions {
     if (existing) return existing
     // One being stood up already (#839): a second ask waits on it, never makes another
     const key = builderKey(ref)
+    const on = tool ?? this.host.defaultToolFor(ref.projectId)
     const standing = this.buildersStanding.get(key)
-    if (standing) return standing
+    if (standing) {
+      // One app has one builder: a second ask on another tool is told which one it is getting, not given it silently
+      if (standing.tool !== on) throw Object.assign(new Error(`This app's builder is already being started on ${standing.tool ?? 'the default tool'}`), { code: 'internal' })
+      return standing.p
+    }
     const p = this.standUpBuilder(ref, tool).finally(() => {
-      if (this.buildersStanding.get(key) === p) this.buildersStanding.delete(key)
+      if (this.buildersStanding.get(key)?.p === p) this.buildersStanding.delete(key)
     })
-    this.buildersStanding.set(key, p)
+    this.buildersStanding.set(key, { p, tool: on })
     return p
   }
 
-  /** Builders being stood up now, by app (#839) */
-  private readonly buildersStanding = new Map<string, Promise<SessionInfo>>()
+  /** Builders being stood up now, by app, with the tool each is on (#839) */
+  private readonly buildersStanding = new Map<string, { p: Promise<SessionInfo>; tool: ToolName | null }>()
 
   private async standUpBuilder(ref: AppRef, tool?: ToolName): Promise<SessionInfo> {
     const rt = this.host.appsHub?.rt

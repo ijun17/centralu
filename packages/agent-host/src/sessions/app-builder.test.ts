@@ -334,3 +334,15 @@ describe('a builder asked for twice at once (#839)', () => {
     expect(claude.seen).toHaveLength(1)
   })
 })
+
+describe('a builder asked for on another tool while one is stood up (#839 review)', () => {
+  it('is refused, and says which tool the one being stood up is on', async () => {
+    claude.fail = true
+    await create({ projectId, id: 'notes', name: 'Notes' })
+    claude.fail = false
+    const first = mgr.createAppBuilder({ projectId, appId: 'notes' }, 'claude')
+    await expect(mgr.createAppBuilder({ projectId, appId: 'notes' }, 'codex')).rejects.toThrow(/already being started on claude/)
+    expect((await first).tool).toBe('claude')
+    expect(codex.seen).toEqual([])
+  })
+})
