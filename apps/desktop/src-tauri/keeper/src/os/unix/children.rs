@@ -43,6 +43,8 @@ impl ExitStatus {
 fn command(cmd: &str, args: &[String], cwd: &str, env: &HashMap<String, String>) -> Command {
     let mut c = Command::new(cmd);
     c.args(args).current_dir(cwd).env_clear().envs(env);
+    // The descriptor limit the keeper had before it raised its own (`os::raise_descriptor_limit`).
+    crate::os::original_descriptor_limit(&mut c);
     c
 }
 

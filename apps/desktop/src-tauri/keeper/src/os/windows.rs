@@ -21,6 +21,9 @@ pub fn group_signal_after_exit_is_safe(_pid: u32) -> bool {
 /// each opening one (`hide_console`, which `spawn_host` calls on every OS).
 pub fn own_group(_cmd: &mut Command) {}
 
+/// No descriptor limit to give back: Windows has none of its own (`raise_descriptor_limit` is unix).
+pub fn original_descriptor_limit(_cmd: &mut Command) {}
+
 /// `.bin/tsx` is a sh script, and its siblings `tsx.CMD` / `tsx.ps1` cannot be started without a
 /// shell either (Rust would hand the sh script to CreateProcessW and fail). So Node runs tsx's own
 /// entry directly, the file `.bin/tsx` points at anyway (`host_proc::source_launch`).

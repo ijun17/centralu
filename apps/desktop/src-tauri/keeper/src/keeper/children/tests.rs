@@ -368,6 +368,20 @@ fn bare_reactor(d: &Dir) -> Reactor {
 }
 
 /// A long control line, once answered, does not leave its size behind in the read buffer (#392).
+/// #840 item 3 (review): a pause that has run out is over even when no connection comes to end it,
+/// so the reactor goes back to waking once a second.
+#[test]
+fn an_accept_pause_that_ran_out_lets_the_reactor_sleep_again() {
+    let d = temp_dir("pauseover");
+    let mut r = bare_reactor(&d);
+    assert_eq!(r.poll_timeout(), 1000);
+    r.accept_paused_until = Some(Instant::now() + Duration::from_secs(60));
+    assert_eq!(r.poll_timeout(), 100, "paused: look again soon");
+    r.accept_paused_until = Some(Instant::now() - Duration::from_millis(1));
+    assert_eq!(r.poll_timeout(), 1000, "the pause is over");
+    assert!(r.accept_paused_until.is_none());
+}
+
 #[test]
 fn a_long_control_line_gives_its_read_memory_back_once_it_is_answered() {
     let d = temp_dir("rbuf");
@@ -545,3 +559,30 @@ fn a_child_table_without_its_sweeps_is_refused() {
     full["sweeps"] = serde_json::json!([]);
     assert!(serde_json::from_value::<ReactorState>(full).is_ok());
 }
+
+/**
+ * #840 item 3: a keeper out of descriptors (a soft limit of 256 from Finder, a few dozen relays and
+ * attaches) failed every `accept` while a connection waited, and the readable listener brought the
+ * reactor straight back to it: one core spinning, thousands of log lines a second. The listener is
+ * now left alone for a moment after such a failure, and the connection is accepted once a
+ * descriptor is free.
+ */
+#[test]
+fn a_keeper_out_of_descriptors_pauses_accepting_instead_of_spinning() {
+    let Some(stderr) = super::super::accept::few_descriptors::rerun("keeper::children::tests::a_keeper_out_of_descriptors_pauses_accepting_instead_of_spinning")
+    else {
+        let d = temp_dir("emfile");
+        let _keeper = Children::start(&d.0).unwrap();
+        let mut held = super::super::accept::few_descriptors::exhaust(64);
+        // One descriptor for the client's end; the keeper has none left for its own.
+        drop(held.pop());
+        // Linux leaves it in the listen queue; macOS drops it with the failed accept.
+        let _waiting = UnixStream::connect(socket_path(&d.0)).unwrap();
+        thread::sleep(Duration::from_secs(1));
+        drop(held);
+        let _host = Control::open(&d.0);
+        return;
+    };
+    super::super::accept::few_descriptors::assert_accepts_paused(&stderr, "the reactor");
+}
+

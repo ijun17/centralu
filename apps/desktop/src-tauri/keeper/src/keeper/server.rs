@@ -41,6 +41,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
+use super::accept::{self, AcceptErrors};
 use super::children::{self, Children};
 use super::{content, handoff, keys};
 use super::client::{self, read_line};
@@ -173,6 +174,8 @@ pub(super) struct Keeper {
 
 /// The keeper's entry point. Returns the process exit code.
 pub fn run(args: &[String]) -> i32 {
+    // Before anything opens a descriptor; a keeper that takes over from another raises its own.
+    let raised = os::raise_descriptor_limit();
     let opts = parse_args(args);
     let data = opts.data_dir.clone().unwrap_or_else(super::data_dir);
     // From content nothing runs from an AppImage's mount any more: let it go before anything else
@@ -180,6 +183,9 @@ pub fn run(args: &[String]) -> i32 {
     let shed = content::own_origin(&data).dir().is_some().then(|| super::appimage::shed(opts.take_over_fd));
     if let Some(what) = &shed {
         log(what);
+    }
+    if let Some((from, to)) = raised {
+        log(&format!("descriptor limit raised from {from} to {to}"));
     }
     // Started by another keeper to take its place (step 4): everything comes from that keeper.
     if let Some(fd) = opts.take_over_fd {
@@ -347,6 +353,7 @@ pub(super) fn serve(k: Arc<Keeper>) -> i32 {
 fn accept_loop(k: &Arc<Keeper>) {
     use std::os::fd::AsRawFd;
     let _ = k.listener.set_nonblocking(true);
+    let mut errors = AcceptErrors::new(log);
     loop {
         if k.handed_over.load(Ordering::SeqCst) {
             // The next keeper owns the socket now; this process is about to exit.
@@ -366,16 +373,19 @@ fn accept_loop(k: &Arc<Keeper>) {
         }
         match k.listener.accept() {
             Ok((stream, _)) => {
+                errors.accepted();
                 let _ = stream.set_nonblocking(false);
                 k.requests.fetch_add(1, Ordering::SeqCst);
-                let k = k.clone();
-                thread::spawn(move || {
-                    let guard = Request(Some(k.clone()));
-                    handle(k, stream, guard);
-                });
+                let guard = Request(Some(k.clone()));
+                let k2 = k.clone();
+                // Refused: the request (dropped with the closure) is not counted any more, and the
+                // window retries on the closed connection.
+                if let Err(e) = accept::spawn("keeper-request", move || handle(k2, stream, guard)) {
+                    log(&format!("could not start a thread for a request: {e}"));
+                }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-            Err(e) => log(&format!("accept failed: {e}")),
+            Err(e) => thread::sleep(errors.failed(&e)),
         }
     }
 }

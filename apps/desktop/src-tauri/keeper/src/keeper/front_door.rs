@@ -44,6 +44,8 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use super::accept::{self, AcceptErrors};
+
 /// How long a connection waits for a host while none is ready. A swap's gap is the drain bound
 /// (10 s) plus the new host's activation; past this a client is better off reconnecting.
 pub const PARK_LIMIT: Duration = Duration::from_secs(45);
@@ -129,9 +131,7 @@ impl PendingDoor {
     /// Starts accepting and pumping. Called once the handoff is committed.
     pub fn start(self) -> FrontDoor {
         for (client, upstream) in self.relays {
-            let me = self.door.clone();
-            let id = me.register(&client, upstream.as_ref());
-            thread::spawn(move || me.relay(id, client, upstream));
+            self.door.start_relay(client, upstream);
         }
         self.door.start_accepting();
         self.door
@@ -173,6 +173,7 @@ impl FrontDoor {
     }
 
     fn accept_loop(&self) {
+        let mut errors = AcceptErrors::new(log);
         loop {
             if self.shared.frozen.load(Ordering::SeqCst) {
                 self.park_accept();
@@ -184,15 +185,26 @@ impl FrontDoor {
             }
             match self.listener.accept() {
                 Ok((stream, _)) => {
+                    errors.accepted();
                     // The listener is non-blocking for the poll; the relay wants blocking writes.
                     let _ = stream.set_nonblocking(false);
-                    let id = self.register(&stream, None);
-                    let me = self.clone();
-                    thread::spawn(move || me.relay(id, stream, None));
+                    self.start_relay(stream, None);
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
-                Err(e) => eprintln!("[keeper] front door accept failed: {e}"),
+                Err(e) => thread::sleep(errors.failed(&e)),
             }
+        }
+    }
+
+    /// Starts the thread that relays one connection. One the OS refuses is closed and forgotten,
+    /// never a panic (`accept::spawn`).
+    fn start_relay(&self, client: TcpStream, upstream: Option<TcpStream>) {
+        let id = self.register(&client, upstream.as_ref());
+        let me = self.clone();
+        // Refused: the sockets go with the closure, and their copies with `forget`.
+        if let Err(e) = accept::spawn("keeper-relay", move || me.relay(id, client, upstream)) {
+            log(&format!("could not start a relay: {e}"));
+            self.forget(id);
         }
     }
 
@@ -445,6 +457,10 @@ impl FrontDoor {
     }
 }
 
+fn log(msg: &str) {
+    eprintln!("[keeper] front door {msg}");
+}
+
 /// A token for the door: 16 random bytes from the OS, as hex.
 pub fn new_token() -> io::Result<String> {
     let mut bytes = [0u8; 16];
@@ -614,5 +630,29 @@ mod tests {
         assert!(door.url().starts_with("ws://127.0.0.1:"));
         assert_eq!(new_token().unwrap().len(), 32);
         assert_ne!(new_token().unwrap(), new_token().unwrap());
+    }
+
+    /// #840 item 3, the door's half: out of descriptors, the accept loop came straight back to the
+    /// connection waiting in the queue, a core spinning and a log line each time. It pauses now, and
+    /// relays again once a descriptor is free.
+    #[test]
+    fn a_door_out_of_descriptors_pauses_accepting_instead_of_spinning() {
+        let Some(stderr) =
+            super::super::accept::few_descriptors::rerun("keeper::front_door::tests::a_door_out_of_descriptors_pauses_accepting_instead_of_spinning")
+        else {
+            let (a, _ka) = fake_host("A");
+            let door = FrontDoor::open(0, "t".into()).unwrap();
+            door.point_at(Some(a));
+            let mut held = super::super::accept::few_descriptors::exhaust(64);
+            drop(held.pop());
+            // Linux leaves it in the listen queue; macOS drops it with the failed accept.
+            let _waiting = TcpStream::connect(("127.0.0.1", door.port())).unwrap();
+            thread::sleep(Duration::from_secs(1));
+            drop(held);
+            let mut c = connect(&door);
+            assert_eq!(ask(&mut c, "hello").unwrap(), "A:hello", "relayed once a descriptor was free");
+            return;
+        };
+        super::super::accept::few_descriptors::assert_accepts_paused(&stderr, "the door");
     }
 }

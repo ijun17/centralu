@@ -64,6 +64,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 
 use self::buffer::{BufState, OutBuf, Policy, LINES_CAP, RING_CAP, TAIL_CAP};
+use super::accept::AcceptErrors;
 use super::handoff::pack::{Pack, Shifted};
 use crate::os;
 use crate::os::children as proc;
@@ -449,6 +450,9 @@ struct Reactor {
     sweeps: Vec<Sweep>,
     /// Frozen for a handoff: no I/O at all until thawed (step 4).
     frozen: bool,
+    /// Failed accepts, and until when the listener is left out of the poll after one (#840 item 3).
+    accept_errors: AcceptErrors,
+    accept_paused_until: Option<Instant>,
     #[cfg(test)]
     hold_next_poll: bool,
 }
@@ -534,6 +538,8 @@ impl Reactor {
             stopping: None,
             sweeps: Vec::new(),
             frozen: false,
+            accept_errors: AcceptErrors::new(log),
+            accept_paused_until: None,
             #[cfg(test)]
             hold_next_poll: false,
         })
@@ -691,12 +697,8 @@ impl Reactor {
             if std::mem::take(&mut self.hold_next_poll) {
                 self.until_command_and_output();
             }
+            let timeout = self.poll_timeout();
             let (mut fds, toks) = self.poll_set();
-            let quick = self.stopping.is_some()
-                || !self.host_stop_waiters.is_empty()
-                || self.watch.polling()
-                || !self.sweeps.is_empty();
-            let timeout = if quick { 100 } else { 1000 };
             // SAFETY: fds is a valid array of fds.len() pollfd entries.
             let rc = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout) };
             if rc < 0 {
@@ -767,6 +769,26 @@ impl Reactor {
         }
     }
 
+    /// How long the next `poll` may wait: briefly while something is due soon, else a second. A
+    /// pause after a failed accept that has run out is over here, whether or not a connection came
+    /// meanwhile (macOS drops the one that failed, so none may come), so it does not keep the
+    /// reactor waking ten times a second.
+    fn poll_timeout(&mut self) -> i32 {
+        if self.accept_paused_until.is_some_and(|t| Instant::now() >= t) {
+            self.accept_paused_until = None;
+        }
+        let quick = self.stopping.is_some()
+            || !self.host_stop_waiters.is_empty()
+            || self.watch.polling()
+            || !self.sweeps.is_empty()
+            || self.accept_paused_until.is_some();
+        if quick {
+            100
+        } else {
+            1000
+        }
+    }
+
     fn poll_set(&self) -> (Vec<libc::pollfd>, Vec<Tok>) {
         let mut fds = Vec::new();
         let mut toks = Vec::new();
@@ -774,7 +796,11 @@ impl Reactor {
             fds.push(libc::pollfd { fd, events, revents: 0 });
             toks.push(t);
         };
-        add(self.listener.as_raw_fd(), libc::POLLIN, Tok::Listener);
+        // Left out for a moment after a failed accept, which a waiting connection would otherwise
+        // bring straight back (#840 item 3).
+        if self.accept_paused_until.is_none_or(|t| Instant::now() >= t) {
+            add(self.listener.as_raw_fd(), libc::POLLIN, Tok::Listener);
+        }
         add(self.wake.as_raw_fd(), libc::POLLIN, Tok::Wake);
         for fd in self.watch.fds() {
             add(fd, libc::POLLIN, Tok::Exit);
@@ -894,9 +920,11 @@ impl Reactor {
     }
 
     fn accept(&mut self) {
+        self.accept_paused_until = None;
         loop {
             match self.listener.accept() {
                 Ok((stream, _)) => {
+                    self.accept_errors.accepted();
                     if let Err(who) = os::peer_is_this_user(&stream) {
                         log(&format!("refused a connection from another user ({who})"));
                         continue;
@@ -910,7 +938,10 @@ impl Reactor {
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => return,
                 Err(e) => {
-                    log(&format!("accept failed: {e}"));
+                    let pause = self.accept_errors.failed(&e);
+                    if !pause.is_zero() {
+                        self.accept_paused_until = Some(Instant::now() + pause);
+                    }
                     return;
                 }
             }

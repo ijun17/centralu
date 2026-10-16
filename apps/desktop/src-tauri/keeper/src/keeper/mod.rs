@@ -38,6 +38,7 @@
 //! verifies and copies the new build's signed content first and hands over to the keeper in that
 //! copy, and its hosts run from the copy as well.
 
+mod accept;
 pub mod children;
 pub mod appimage;
 pub mod carried;

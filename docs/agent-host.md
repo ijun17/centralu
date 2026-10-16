@@ -1493,6 +1493,15 @@ the new one exists, so creating `~/.centralu` first (for `keeper.log` or the soc
 A second keeper whose predecessor answers on the socket exits with code 3 and starts no host; one whose
 predecessor holds the lock but does not answer (on its way out) waits up to 15 s for it.
 
+**Descriptors.** A keeper started from Finder or launchd gets a soft descriptor limit of 256, which a few dozen
+relays and attached streams used up. It raises its soft limit to 10,240 (or the hard limit) as it starts; what it
+starts (hosts, agents, terminals, commands) gets the limit from before back, so a `select`-based program is never
+handed a descriptor past 1,024. When an `accept` still fails for want of one, each of its three listeners (`keeper.sock`,
+`children.sock`, the front door) is left alone for 100 ms and the failure is logged once every 10 s with a count,
+instead of the loop coming straight back to the waiting connection (one core and thousands of log lines a second on
+Linux; macOS drops the connection instead), and a thread the OS refuses for a connection closes that connection
+rather than aborting the keeper (`keeper/accept.rs`, #840 item 3).
+
 **When it ends.** `idle_decision` in `keeper/mod.rs`: with a window attached, never. During an announced
 relaunch's grace (§4.5), not yet, in either mode. With background mode off, when the last window detaches. With it on, after 30 minutes with no window and no activity reported by the
 host (a working or waiting session, a terminal, a command run). A keeper no window attached to within 60 s of

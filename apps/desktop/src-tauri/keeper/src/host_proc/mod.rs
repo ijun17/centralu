@@ -579,6 +579,7 @@ pub fn spawn_host(launch: &HostLaunch) -> Result<Child, String> {
     // can be stopped: the node launcher (tsx) spawns children of its own. Windows has no groups;
     // what it needs is no console window (`hide_console`).
     os::own_group(&mut cmd);
+    os::original_descriptor_limit(&mut cmd);
     hide_console(&mut cmd);
 
     cmd.spawn().map_err(|e| format!("failed to run {}: {e}", launch.program))

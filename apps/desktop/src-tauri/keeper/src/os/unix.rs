@@ -75,6 +75,69 @@ pub fn new_session(cmd: &mut Command) {
     }
 }
 
+/// The soft descriptor limit the keeper asks for: macOS's `OPEN_MAX`, which `setrlimit` there
+/// refuses to go past even when the hard limit is unlimited.
+pub const DESCRIPTOR_LIMIT: u64 = 10_240;
+
+/**
+ * Raises this process's soft descriptor limit to `DESCRIPTOR_LIMIT`, or to the hard limit when that
+ * is lower; never lowers it. Returns the limit before and after when it changed.
+ *
+ * A keeper started from Finder or launchd gets a soft limit of 256, and every relay through the
+ * front door holds four descriptors, every attached child stream more: a few dozen clients were
+ * enough to run out, and with it every accept and spawn failed (#840 item 3). What the keeper
+ * starts gets the limit it had before back (`original_descriptor_limit`): a program that still uses
+ * `select` cannot take a descriptor at or past `FD_SETSIZE` (1,024), which a limit of 10,240 would
+ * let it be given.
+ */
+pub fn raise_descriptor_limit() -> Option<(u64, u64)> {
+    let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    // SAFETY: a valid out-pointer.
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) } != 0 {
+        return None;
+    }
+    let before = lim.rlim_cur;
+    let want = DESCRIPTOR_LIMIT.min(lim.rlim_max);
+    if want <= before {
+        return None;
+    }
+    let raised = libc::rlimit { rlim_cur: want as libc::rlim_t, rlim_max: lim.rlim_max };
+    // SAFETY: a valid pointer to an rlimit.
+    if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &raised) } != 0 {
+        return None;
+    }
+    ORIGINAL_DESCRIPTOR_LIMIT.store(before, std::sync::atomic::Ordering::SeqCst);
+    Some((before, want))
+}
+
+/// The soft descriptor limit this process had before `raise_descriptor_limit`; 0 while it has not
+/// raised it.
+static ORIGINAL_DESCRIPTOR_LIMIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/**
+ * Has `cmd` start with the soft descriptor limit this process had before it raised its own: the
+ * keeper's children (hosts, agents, terminals and commands) see the limit they would have had
+ * without it. Nothing changes when the limit was never raised. The hard limit is left as it is.
+ */
+pub fn original_descriptor_limit(cmd: &mut Command) {
+    let original = ORIGINAL_DESCRIPTOR_LIMIT.load(std::sync::atomic::Ordering::SeqCst);
+    if original == 0 {
+        return;
+    }
+    // SAFETY: getrlimit and setrlimit are plain syscalls, async-signal-safe, which is all
+    // pre_exec requires; the closure allocates nothing.
+    unsafe {
+        cmd.pre_exec(move || {
+            let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+            if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) == 0 && lim.rlim_cur > original {
+                lim.rlim_cur = original;
+                libc::setrlimit(libc::RLIMIT_NOFILE, &lim);
+            }
+            Ok(())
+        });
+    }
+}
+
 /// Runs `f` with the creation mask set to `mask`, so a socket is born with its final permissions
 /// instead of passing through a window where another user could connect before a chmod.
 /// Only called while the keeper is still single-threaded.
