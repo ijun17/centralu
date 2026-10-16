@@ -31,14 +31,19 @@ pub fn read_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
     Ok(Some(buf))
 }
 
+/// One newline-delimited JSON line, as both sides of both sockets write them.
+pub fn json_line(v: &impl serde::Serialize) -> Vec<u8> {
+    let mut line = serde_json::to_vec(v).unwrap_or_default();
+    line.push(b'\n');
+    line
+}
+
 /// One request, one answer, then the connection closes.
 pub fn request(sock: &Path, req: &Value, timeout: Duration) -> Result<Value, String> {
     let mut stream = UnixStream::connect(sock).map_err(|e| format!("cannot reach the keeper at {}: {e}", sock.display()))?;
     stream.set_read_timeout(Some(timeout)).map_err(|e| e.to_string())?;
     stream.set_write_timeout(Some(timeout)).map_err(|e| e.to_string())?;
-    let mut line = serde_json::to_vec(req).map_err(|e| e.to_string())?;
-    line.push(b'\n');
-    stream.write_all(&line).map_err(|e| format!("the keeper did not take the request: {e}"))?;
+    stream.write_all(&json_line(req)).map_err(|e| format!("the keeper did not take the request: {e}"))?;
     let mut reader = BufReader::new(stream);
     let answer = read_line(&mut reader)
         .map_err(|e| format!("the keeper did not answer: {e}"))?
@@ -82,13 +87,11 @@ pub fn attach(
     let mut stream = UnixStream::connect(sock).map_err(|e| format!("cannot reach the keeper at {}: {e}", sock.display()))?;
     stream.set_read_timeout(Some(Duration::from_secs(10))).map_err(|e| e.to_string())?;
     stream.set_write_timeout(Some(Duration::from_secs(5))).map_err(|e| e.to_string())?;
-    let mut line = serde_json::to_vec(&json!({
+    let line = json_line(&json!({
         "op": "attach",
         "protocol": super::KEEPER_PROTOCOL,
         "build": build,
-    }))
-    .map_err(|e| e.to_string())?;
-    line.push(b'\n');
+    }));
     stream.write_all(&line).map_err(|e| format!("the keeper did not take the attach: {e}"))?;
     let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
     let first = read_line(&mut reader)

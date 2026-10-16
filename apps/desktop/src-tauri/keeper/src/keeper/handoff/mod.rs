@@ -66,7 +66,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -80,7 +80,7 @@ use super::front_door::{DoorFreeze, FrontDoor};
 use super::server::{self, Keeper, Options, State};
 use super::source::{self, BuildSource};
 use super::swap::{Phase, SwapView};
-use super::{KeeperInfo, KEEPER_PROTOCOL};
+use super::KeeperInfo;
 use crate::os;
 use crate::host_proc::{ForeignAdopt, HostInfo, HostStatus, Supervisor};
 
@@ -643,14 +643,7 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
     let copies = source::Copies::new(&data, origin.dir().map(Path::to_path_buf));
     let keeper = Arc::new(Keeper {
         origin,
-        info: KeeperInfo {
-            pid: std::process::id(),
-            protocol: KEEPER_PROTOCOL,
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            started_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
-            data_dir: data.to_string_lossy().to_string(),
-            build: Some(build),
-        },
+        info: KeeperInfo::of_this_process(&data, build),
         sock: super::socket_path(&data),
         data,
         sup: Supervisor::new(),

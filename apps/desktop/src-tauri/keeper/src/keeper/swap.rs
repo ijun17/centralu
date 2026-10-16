@@ -120,6 +120,24 @@ pub struct SwapView {
     pub started_at: u64,
 }
 
+impl SwapView {
+    /// A switch to `target` from `from` that starts now: no message, nothing cut, nothing refused.
+    /// Every view of one switch is this with its phase and outcome filled in.
+    pub fn begun(phase: Phase, target: BuildSource, from: Option<BuildSource>) -> SwapView {
+        SwapView {
+            phase,
+            target,
+            from,
+            message: None,
+            rolled_back: false,
+            cut: Vec::new(),
+            keeper_message: None,
+            refused: None,
+            started_at: super::now_secs(),
+        }
+    }
+}
+
 /// How a swap ended.
 #[derive(Debug, PartialEq)]
 pub enum Outcome {

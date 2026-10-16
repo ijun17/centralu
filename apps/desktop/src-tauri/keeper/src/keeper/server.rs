@@ -37,14 +37,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
 use super::accept::{self, AcceptErrors};
 use super::children::{self, Children};
 use super::{content, handoff, keys};
-use super::client::{self, read_line};
+use super::client::{self, json_line, read_line};
 use super::front_door::{self, FrontDoor};
 use super::source::{self, BuildSource, Settings};
 use super::swap::{self, Phase, SwapView};
@@ -52,6 +52,9 @@ use super::{
     idle_decision, idle_limit, relaunch_grace, relaunch_state, socket_path, stop_on_detach, IdleInput, KeeperInfo, KeeperView, EXIT_ALREADY_RUNNING,
     KEEPER_PROTOCOL, REATTACH_GRACE,
 };
+
+/// The answer to a second switch (or a restart, an upgrade) while one runs.
+const SWITCH_IN_PROGRESS: &str = "a build switch is already in progress";
 use crate::host_proc::{self, HostInfo, HostLaunch, HostStatus, LaunchError, Launcher, StatusSink, Supervisor};
 use crate::os;
 
@@ -138,6 +141,50 @@ pub(super) struct State {
 }
 
 impl State {
+    /// A fresh keeper's state: no host yet, the next launch runs `desired`.
+    pub(super) fn new(desired: BuildSource, settings: Settings) -> State {
+        let now = Instant::now();
+        State {
+            status: HostStatus::Starting,
+            source: None,
+            desired,
+            subscribers: Vec::new(),
+            next_id: 1,
+            attached: 0,
+            ever_attached: false,
+            last_detach: now,
+            busy: false,
+            last_busy: now,
+            settings,
+            stopping: false,
+            swap: None,
+            swapping: false,
+            drained: None,
+            keeps_agents: None,
+            relaunch_until: None,
+            reattach_until: None,
+        }
+    }
+
+    /// Counts a window as attached and returns its id. Shared by `attach`, which adds the window to
+    /// the push list once it has answered, and `add_window`.
+    fn count_window(&mut self) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.attached += 1;
+        self.ever_attached = true;
+        id
+    }
+
+    /// Counts a window another keeper handed over as attached and adds its connection to the push
+    /// list; returns its id. A window back spends the wait for one the keeper closed.
+    fn add_window(&mut self, push: UnixStream) -> u64 {
+        let id = self.count_window();
+        self.reattach_until = None;
+        self.subscribers.push((id, push));
+        id
+    }
+
     /// An announced relaunch whose grace is still running.
     pub(super) fn relaunching(&self, now: Instant) -> bool {
         relaunch_state(self.relaunch_until, now).0
@@ -274,47 +321,20 @@ pub fn run(args: &[String]) -> i32 {
             return 6;
         }
     };
-    let now = Instant::now();
     let origin = content::own_origin(&data);
     let copies = source::Copies::new(&data, origin.dir().map(Path::to_path_buf));
     let keeper = Arc::new(Keeper {
         origin,
-        info: KeeperInfo {
-            pid: std::process::id(),
-            protocol: KEEPER_PROTOCOL,
-            version: env!("CARGO_PKG_VERSION").to_string(),
-            started_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
-            data_dir: data.to_string_lossy().to_string(),
-            build: Some(desired.clone()),
-        },
+        info: KeeperInfo::of_this_process(&data, desired.clone()),
         data,
         sock,
         sup: Supervisor::new(),
         door,
         children,
         copies,
-        state: Mutex::new(State {
-            status: HostStatus::Starting,
-            source: None,
-            desired,
-            subscribers: Vec::new(),
-            next_id: 1,
-            attached: 0,
-            ever_attached: false,
-            last_detach: now,
-            busy: false,
-            last_busy: now,
-            settings,
-            stopping: false,
-            swap: None,
-            swapping: false,
-            drained: None,
-            keeps_agents: None,
-            relaunch_until: None,
-            reattach_until: None,
-        }),
+        state: Mutex::new(State::new(desired, settings)),
         idle: idle_limit(),
-        started: now,
+        started: Instant::now(),
         lock,
         listener,
         frozen: AtomicBool::new(false),
@@ -616,13 +636,7 @@ impl Keeper {
         if self.frozen.load(Ordering::SeqCst) || self.handed_over.load(Ordering::SeqCst) {
             return;
         }
-        let line = match serde_json::to_vec(&json!({ "event": "status", "view": self.view(st) })) {
-            Ok(mut v) => {
-                v.push(b'\n');
-                v
-            }
-            Err(_) => return,
-        };
+        let line = json_line(&json!({ "event": "status", "view": self.view(st) }));
         let mut closed = false;
         st.subscribers.retain_mut(|(id, s)| {
             let Err(e) = s.write_all(&line) else { return true };
@@ -735,9 +749,7 @@ pub(super) fn spawn_idle_watch(k: Arc<Keeper>) {
 }
 
 fn reply(stream: &mut UnixStream, v: &Value) {
-    let mut line = serde_json::to_vec(v).unwrap_or_default();
-    line.push(b'\n');
-    let _ = stream.write_all(&line);
+    let _ = stream.write_all(&json_line(v));
 }
 
 fn handle(k: Arc<Keeper>, mut stream: UnixStream, guard: Request) {
@@ -822,10 +834,7 @@ fn attach(k: Arc<Keeper>, mut stream: UnixStream, reader: BufReader<UnixStream>,
             drop(st);
             return reply(&mut stream, &json!({ "ok": false, "error": "the keeper is stopping" }));
         }
-        let id = st.next_id;
-        st.next_id += 1;
-        st.attached += 1;
-        st.ever_attached = true;
+        let id = st.count_window();
         // The window an announced relaunch started (#352): it is told so, and the grace is spent
         let relaunched = st.relaunching(Instant::now());
         if st.reattach_until.take().is_some() {
@@ -925,13 +934,7 @@ pub(super) fn adopt_window(k: &Arc<Keeper>, stream: UnixStream) {
     let _ = stream.set_write_timeout(Some(WINDOW_WRITE_TIMEOUT));
     let id = {
         let Ok(mut st) = k.state.lock() else { return };
-        let id = st.next_id;
-        st.next_id += 1;
-        st.attached += 1;
-        st.ever_attached = true;
-        st.reattach_until = None;
-        st.subscribers.push((id, stream));
-        id
+        st.add_window(stream)
     };
     let k = k.clone();
     thread::spawn(move || watch_window(k, id, BufReader::new(read_half)));
@@ -961,24 +964,17 @@ fn switch(k: Arc<Keeper>, stream: &mut UnixStream, req: &Value) {
         thread::spawn(move || move_to_content(k, src, asked, true));
         return;
     }
-    let next = match asked.host_dir.as_deref() {
-        Some(dir) if Path::new(dir).join("main.mjs").is_file() => {
-            BuildSource::from_host_dir(Path::new(dir), asked.bundle_path.clone(), asked.version.clone())
-        }
-        Some(dir) => return reply(stream, &json!({ "ok": false, "error": format!("no host in {dir}") })),
-        None if asked.commit == "dev" => BuildSource::dev(),
-        None => return reply(stream, &json!({ "ok": false, "error": "switch needs a host folder" })),
+    let next = match (host_build(&asked), asked.host_dir.as_deref()) {
+        (Some(next), _) => next,
+        (None, Some(dir)) => return reply(stream, &json!({ "ok": false, "error": format!("no host in {dir}") })),
+        (None, None) if asked.commit == "dev" => BuildSource::dev(),
+        (None, None) => return reply(stream, &json!({ "ok": false, "error": "switch needs a host folder" })),
     };
     // The new build's keeper executable, from the window asking (step 4): hand the keeper over first
     if let Some(exe) = keeper_exe {
         if k.info.build.as_ref().map(|b| !b.same_build(&next)).unwrap_or(true) {
-            {
-                let Ok(mut st) = k.state.lock() else { return };
-                if st.swapping {
-                    drop(st);
-                    return reply(stream, &json!({ "ok": false, "error": "a build switch is already in progress" }));
-                }
-                st.swapping = true;
+            if !start_switching(&k, stream) {
+                return;
             }
             reply(stream, &json!({ "ok": true }));
             log(&format!("switching to {}: the keeper first, from {}", next.key(), exe.display()));
@@ -999,7 +995,7 @@ pub(super) fn begin_switch(k: Arc<Keeper>, next: BuildSource, keeper_message: Op
         if st.swapping && stream.is_some() {
             drop(st);
             if let Some(s) = stream.as_mut() {
-                reply(s, &json!({ "ok": false, "error": "a build switch is already in progress" }));
+                reply(s, &json!({ "ok": false, "error": SWITCH_IN_PROGRESS }));
             }
             return;
         }
@@ -1013,17 +1009,7 @@ pub(super) fn begin_switch(k: Arc<Keeper>, next: BuildSource, keeper_message: Op
             st.desired = next.clone();
             if let Some(m) = &keeper_message {
                 // Nothing to swap, but the window should still hear why the keeper stayed behind
-                st.swap = Some(SwapView {
-                    phase: Phase::Done,
-                    target: next.clone(),
-                    from: st.source.clone(),
-                    message: None,
-                    rolled_back: false,
-                    cut: Vec::new(),
-                    keeper_message: Some(m.clone()),
-                    refused: None,
-                    started_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
-                });
+                st.swap = Some(SwapView { keeper_message: Some(m.clone()), ..SwapView::begun(Phase::Done, next.clone(), st.source.clone()) });
                 k.broadcast(&mut st);
             }
         }
@@ -1059,20 +1045,11 @@ fn upgrade(k: Arc<Keeper>, stream: &mut UnixStream, req: &Value) {
         thread::spawn(move || move_to_content(k, src, asked.unwrap_or_default(), false));
         return;
     }
-    let target = match asked.as_ref().and_then(|a| a.host_dir.clone()) {
-        Some(dir) if Path::new(&dir).join("main.mjs").is_file() => {
-            let a = asked.unwrap_or_default();
-            BuildSource::from_host_dir(Path::new(&dir), a.bundle_path, a.version)
-        }
-        _ => return reply(stream, &json!({ "ok": false, "error": "upgrade needs a source with a host folder" })),
+    let Some(target) = asked.as_ref().and_then(host_build) else {
+        return reply(stream, &json!({ "ok": false, "error": "upgrade needs a source with a host folder" }));
     };
-    {
-        let Ok(mut st) = k.state.lock() else { return };
-        if st.swapping {
-            drop(st);
-            return reply(stream, &json!({ "ok": false, "error": "a build switch is already in progress" }));
-        }
-        st.swapping = true;
+    if !start_switching(&k, stream) {
+        return;
     }
     reply(stream, &json!({ "ok": true }));
     thread::spawn(move || move_keeper(k, exe, target, false));
@@ -1093,17 +1070,12 @@ fn move_keeper(k: Arc<Keeper>, exe: PathBuf, target: BuildSource, switch_host: b
         Err(_) => return,
     };
     let then_switch = (switch_host && host_differs).then(|| target.clone());
-    let started_at = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let begun = SwapView::begun(Phase::HandingOver, target.clone(), from);
     let view = |phase: Phase, message: Option<String>, keeper_message: Option<String>| SwapView {
         phase,
-        target: target.clone(),
-        from: from.clone(),
         message,
-        rolled_back: false,
-        cut: Vec::new(),
         keeper_message,
-        refused: None,
-        started_at,
+        ..begun.clone()
     };
     if let Ok(mut st) = k.state.lock() {
         st.swap = Some(view(Phase::HandingOver, None, None));
@@ -1143,11 +1115,18 @@ fn start_switching(k: &Keeper, stream: &mut UnixStream) -> bool {
     let Ok(mut st) = k.state.lock() else { return false };
     if st.swapping {
         drop(st);
-        reply(stream, &json!({ "ok": false, "error": "a build switch is already in progress" }));
+        reply(stream, &json!({ "ok": false, "error": SWITCH_IN_PROGRESS }));
         return false;
     }
     st.swapping = true;
     true
+}
+
+/// The build in the host folder a `switch` or `upgrade` names, its stamp read from the folder; None
+/// when it names none or there is no host in it.
+fn host_build(asked: &BuildSource) -> Option<BuildSource> {
+    let dir = Path::new(asked.host_dir.as_deref()?);
+    dir.join("main.mjs").is_file().then(|| BuildSource::from_host_dir(dir, asked.bundle_path.clone(), asked.version.clone()))
 }
 
 /**
@@ -1233,18 +1212,11 @@ fn move_to_content(k: Arc<Keeper>, src: Option<PathBuf>, asked: BuildSource, swi
 fn refuse(k: &Arc<Keeper>, asked: &BuildSource, r: content::Refusal) {
     log(&format!("the keeper stays on its build: the new build's content was refused ({}): {}", r.reason, r.message));
     let Ok(mut st) = k.state.lock() else { return };
-    let from = st.source.clone();
     st.swapping = false;
     st.swap = Some(SwapView {
-        phase: Phase::Failed,
-        target: asked.clone(),
-        from,
         message: Some(r.message),
-        rolled_back: false,
-        cut: Vec::new(),
-        keeper_message: None,
         refused: Some(r.reason.to_string()),
-        started_at: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0),
+        ..SwapView::begun(Phase::Failed, asked.clone(), st.source.clone())
     });
     k.broadcast(&mut st);
 }
@@ -1258,18 +1230,8 @@ pub(super) fn swap_to(k: Arc<Keeper>, next: BuildSource, keeper_message: Option<
         }
         Err(_) => return,
     };
-    let started_at = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    let view = |phase: Phase| SwapView {
-        phase,
-        target: next.clone(),
-        from: from.clone(),
-        message: None,
-        rolled_back: false,
-        cut: Vec::new(),
-        keeper_message: keeper_message.clone(),
-        refused: None,
-        started_at,
-    };
+    let begun = SwapView { keeper_message, ..SwapView::begun(Phase::Starting, next.clone(), from.clone()) };
+    let view = |phase: Phase| SwapView { phase, ..begun.clone() };
     let show = |v: SwapView| {
         log(&format!(
             "swap to {}: {:?}{}",
@@ -1398,36 +1360,11 @@ mod tests {
     #[test]
     fn the_folders_in_use_are_the_running_the_next_and_a_running_switchs_target() {
         let b = |dir: &str| BuildSource { commit: dir.into(), host_dir: Some(format!("/d/content/{dir}/host")), ..Default::default() };
-        let now = Instant::now();
         let mut st = State {
-            status: HostStatus::Starting,
             source: Some(BuildSource { copy_dir: Some("/d/hosts/abc".into()), ..b("0.2.0") }),
-            desired: b("0.2.0"),
-            subscribers: Vec::new(),
-            next_id: 1,
-            attached: 0,
-            ever_attached: false,
-            last_detach: now,
-            busy: false,
-            last_busy: now,
-            settings: Settings::default(),
-            stopping: false,
-            swap: Some(SwapView {
-                phase: Phase::HandingOver,
-                target: b("0.2.1"),
-                from: None,
-                message: None,
-                rolled_back: false,
-                cut: Vec::new(),
-                keeper_message: None,
-                refused: None,
-                started_at: 0,
-            }),
+            swap: Some(SwapView::begun(Phase::HandingOver, b("0.2.1"), None)),
             swapping: true,
-            drained: None,
-            keeps_agents: None,
-            relaunch_until: None,
-            reattach_until: None,
+            ..State::new(b("0.2.0"), Settings::default())
         };
         let dirs = |st: &State| host_dirs_in_use(st).into_iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>();
         assert_eq!(dirs(&st), ["/d/hosts/abc", "/d/content/0.2.0/host", "/d/content/0.2.0/host", "/d/content/0.2.1/host"]);
@@ -1437,19 +1374,11 @@ mod tests {
 
     /// A keeper with nothing running, for tests of what it does with its windows.
     fn test_keeper(data: &Path) -> Arc<Keeper> {
-        let now = Instant::now();
         let sock = data.join("keeper.sock");
         let _ = fs::remove_file(&sock);
         Arc::new(Keeper {
             origin: content::Origin::Direct,
-            info: KeeperInfo {
-                pid: std::process::id(),
-                protocol: KEEPER_PROTOCOL,
-                version: "test".into(),
-                started_at: 0,
-                data_dir: data.to_string_lossy().to_string(),
-                build: None,
-            },
+            info: KeeperInfo::of_this_process(data, BuildSource::dev()),
             listener: UnixListener::bind(&sock).unwrap(),
             sock,
             data: data.to_path_buf(),
@@ -1457,29 +1386,10 @@ mod tests {
             door: FrontDoor::open(0, "t".into()).unwrap(),
             children: Children::disabled(),
             copies: source::Copies::new(data, None),
-            state: Mutex::new(State {
-                status: HostStatus::Starting,
-                source: None,
-                desired: BuildSource::dev(),
-                subscribers: Vec::new(),
-                next_id: 1,
-                attached: 0,
-                ever_attached: false,
-                last_detach: now,
-                busy: false,
-                last_busy: now,
-                // Background on: a window leaving does not stop the test's process.
-                settings: Settings { background: true },
-                stopping: false,
-                swap: None,
-                swapping: false,
-                drained: None,
-                keeps_agents: None,
-                relaunch_until: None,
-            reattach_until: None,
-            }),
+            // Background on: a window leaving does not stop the test's process.
+            state: Mutex::new(State::new(BuildSource::dev(), Settings { background: true })),
             idle: Duration::from_secs(3600),
-            started: now,
+            started: Instant::now(),
             lock: File::create(data.join("keeper.lock")).unwrap(),
             frozen: AtomicBool::new(false),
             handed_over: AtomicBool::new(false),

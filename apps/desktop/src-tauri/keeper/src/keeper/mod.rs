@@ -182,6 +182,11 @@ pub struct KeeperView {
     pub keeps_agents: Option<bool>,
 }
 
+/// Seconds since the epoch, as every record the keeper keeps writes its times.
+pub(super) fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeeperInfo {
@@ -196,6 +201,21 @@ pub struct KeeperInfo {
     /// predate step 4, which cannot hand themselves over.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build: Option<BuildSource>,
+}
+
+impl KeeperInfo {
+    /// This process, started now, serving `data`, from the build `build`. A fresh keeper and one
+    /// that took over from another describe themselves the same way.
+    pub(super) fn of_this_process(data: &Path, build: BuildSource) -> KeeperInfo {
+        KeeperInfo {
+            pid: std::process::id(),
+            protocol: KEEPER_PROTOCOL,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            started_at: now_secs(),
+            data_dir: data.to_string_lossy().to_string(),
+            build: Some(build),
+        }
+    }
 }
 
 /// Everything the idle rule looks at, so the rule can be tested without a clock.
