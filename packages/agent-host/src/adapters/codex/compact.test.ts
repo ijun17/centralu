@@ -1,4 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { sessionLiveDefaults, type NormalizedEvent, type SessionInfo } from '@cc/protocol'
+import type { SessionRecordHost } from '../../sessions/session-record.js'
 
 /**
  * compact is a function, not a message (a dogfooding observation).
@@ -52,6 +54,8 @@ vi.mock('./client.js', () => ({
 }))
 
 const { CodexAdapter } = await import('./index.js')
+const { Store } = await import('../../dev-services/store.js')
+const { SessionRecord } = await import('../../sessions/session-record.js')
 
 const methods = () => state.requests.map((r) => r.method)
 const tick = () => new Promise((r) => setTimeout(r, 0))
@@ -400,6 +404,39 @@ describe('codex /goal — runs as a function', () => {
     expect(set?.params).toMatchObject({ threadId: 't1', objective: 'all tests green' })
     expect(methods()).not.toContain('turn/start')
     expect(events.some((e) => e.type === 'message_delta' && /Goal set/.test(e.text ?? ''))).toBe(true)
+  })
+
+  /*
+   * The confirmation is Centralu's line, not the model's: sent mid-turn, it named no message, and the record joined
+   * it onto the model's open reply as one row ("…looking at the tests.Goal set: …"). Run through the real record.
+   */
+  it("the confirmation is a row of its own, never glued onto the model's open reply", async () => {
+    const store = new Store()
+    store.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    store.upsertSession({
+      id: 's1', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: 's1', autoNamed: false, state: 'idle',
+      lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
+      verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
+      parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
+    })
+    const m = { id: 's1', lastSeq: 0 } as SessionInfo
+    const rec = new SessionRecord({ store, meta: new Map([['s1', m]]) } as unknown as SessionRecordHost)
+    try {
+      const h = await session((e) => void rec.persistMessage(e as NormalizedEvent, m))
+      const say = (itemId: string, delta: string) =>
+        state.handlers!.onNotification({ method: 'item/agentMessage/delta', params: { threadId: 't1', itemId, delta } })
+      say('msg-1', 'Looking at the tests.')
+      h.send('/goal all tests green')
+      await tick()
+      say('msg-1', ' Still looking.')
+      h.send('/goal')
+      await tick()
+      rec.closeStream('s1')
+      const rows = store.loadMessages('s1', 50).filter((r) => r.kind === 'text').map((r) => (r.payload as { text: string }).text)
+      expect(rows).toEqual(['Looking at the tests.', 'Goal set: all tests green', ' Still looking.', 'No goal set.'])
+    } finally {
+      store.close()
+    }
   })
 
   /*

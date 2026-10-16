@@ -1191,6 +1191,10 @@ Implementation rules:
   `refusal`). The explanation is the host's because recognizing a notice means knowing the tool's wording; the screen
   only draws what it is given, and Codex's own words stay one click away.
 - Adapters hold no state — tracking session state is done by `sessions/` watching events. The adapter is a converter.
+- **What both adapters do the same way is written once, in `adapters/session-kit.ts`** (#428), since copies of it
+  drifted into bugs. A line Centralu itself says in a chat (a `/goal` confirmation or refusal) is `adapterNotice`: an
+  assistant message with its own `messageId` (`centralu-notice-<n>`, counted across the host), so the record never
+  joins it onto the model's open reply. Codex's `/goal` replies named no message and were glued onto it mid-turn.
 - Process management (spawning the CLI, crash detection) is the adapter's own responsibility. A crash is emitted as an `error` event and the host does not die.
 - A capability is not necessarily a static declaration; it can be **decided at detect() time** (e.g. if whether approvals work depends on the Codex version, decide after detecting the version — the C4 response).
 

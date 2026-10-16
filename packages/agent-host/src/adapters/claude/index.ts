@@ -62,6 +62,7 @@ import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, Det
 import { LocalAgentProcess, spawnLocalAgent, type LocalSpawnSpec } from '../local-process.js'
 import { approvalDetail, ClaudeStreamNormalizer } from './normalize.js'
 import { noCodeIntelligenceSettings } from './lsp-plugins.js'
+import { adapterNotice } from '../session-kit.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { withoutCrossSessionMessaging } from './cross-session.js'
 
@@ -390,7 +391,6 @@ class ClaudeSession implements SessionHandle {
   private settleGoalKnown: () => void = () => {}
   /** Messages held behind a `/goal` that is waiting for `goalKnown` — so nothing sent after it overtakes it. */
   private sendGate: Promise<void> | null = null
-  private notices = 0
   /** The CLI's process when it came from a `ProcessSource` (the keeper, #280 step 2) */
   private proc: AgentProcess | null = null
   private adopted = false
@@ -1073,13 +1073,10 @@ class ClaudeSession implements SessionHandle {
          * turn's result closes it. The line carries its own message id, so it never runs into the
          * model's text as one row.
          */
-        this.emit({
-          type: 'message_delta',
-          sessionId: this.sessionId,
-          role: 'assistant',
-          messageId: `centralu-notice-${++this.notices}`,
-          text: "This Claude Code does not offer /goal to Centralu (it is not in the CLI's command list) — update Claude Code to use goals here. Sent as a message, the model would only pretend to keep one.",
-        })
+        this.emit(adapterNotice(
+          this.sessionId,
+          "This Claude Code does not offer /goal to Centralu (it is not in the CLI's command list) — update Claude Code to use goals here. Sent as a message, the model would only pretend to keep one.",
+        ))
         if (!this.turnOpen) this.emit({ type: 'turn_complete', sessionId: this.sessionId })
         return
       }

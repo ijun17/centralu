@@ -47,6 +47,7 @@ import {
   type CodexThreadSettings,
 } from './normalize.js'
 import { UnmappedTypes } from '../unmapped.js'
+import { adapterNotice } from '../session-kit.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { sandboxConfig } from './sandbox.js'
 
@@ -1245,8 +1246,8 @@ class CodexSession implements SessionHandle {
          */
         if (text.trim() === '/goal' || text.trim().startsWith('/goal ')) {
           const arg = text.trim().slice('/goal'.length).trim()
-          const say = (line: string) =>
-            this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text: line })
+          // Its own message, not a continuation of the model's open reply (`adapterNotice`)
+          const say = (line: string) => this.emit(adapterNotice(this.sessionId, line))
           if (!arg) {
             return this.client
               .request<{ goal: { objective?: string; status?: string } | null }>('thread/goal/get', {
