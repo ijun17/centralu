@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { registerInlineFrame, useStore, type InlineView as InlineViewState } from '../../store/store.js'
 import { useExternalApp } from '../../store/app-catalog.js'
-import { AppFrame, type AppFrameHandle, type AppFrameMessage } from '../app-frame/AppFrame.jsx'
-import { messageText } from '../pinned-app/MessageAsk.jsx'
+import { AppFrame, type AppFrameHandle } from '../app-frame/AppFrame.jsx'
+import { useMessageAsk } from '../pinned-app/useMessageAsk.js'
 import { UpdatedCue } from '../pinned-app/UpdatedCue.jsx'
 import { AppIcon } from '../../components/icons.jsx'
 
@@ -46,8 +46,6 @@ export function InlineViewSlot({ sessionId, callId, leaving = false }: { session
   // a key keeps view states from bleeding into each other
   return <InlineViewBody key={`${sessionId}:${callId}`} sessionId={sessionId} view={view} leaving={leaving} />
 }
-
-type Ask = { text: string; dropped: number; resolve: (sent: boolean) => void }
 
 function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view: InlineViewState; leaving: boolean }) {
   /*
@@ -96,36 +94,11 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
     [close, sessionId, callId],
   )
 
-  /*
-   * The view's `ui/message`. If an earlier question is still pending, that one is closed as
-   * declined (the same rule as pinned views and link confirmation). If there is no text at all,
-   * this declines without asking — there is nothing to send.
-   */
-  const [ask, setAsk] = useState<Ask | null>(null)
-  const askRef = useRef<Ask | null>(null)
-  const settleAsk = useCallback((sent: boolean) => {
-    const a = askRef.current
-    askRef.current = null
-    setAsk(null)
-    a?.resolve(sent)
-  }, [])
-  const onMessage = useCallback(
-    (m: AppFrameMessage) =>
-      new Promise<boolean>((resolve) => {
-        const { text, dropped } = messageText(m.content)
-        if (!text) return resolve(false)
-        askRef.current?.resolve(false)
-        const next = { text, dropped, resolve }
-        askRef.current = next
-        setAsk(next)
-      }),
-    [],
-  )
+  // The view's `ui/message` always goes to this conversation, but only once the person has read it and pressed Send
+  const { ask, onMessage, take, settle: settleAsk } = useMessageAsk()
   const answer = async (send: boolean) => {
-    const a = askRef.current
+    const a = take()
     if (!a) return
-    askRef.current = null
-    setAsk(null)
     if (!send || !view.instanceId) return a.resolve(false)
     a.resolve(await sendViewMessage(sessionId, view.instanceId, a.text))
   }
@@ -134,7 +107,6 @@ function InlineViewBody({ sessionId, view, leaving }: { sessionId: string; view:
   useEffect(() => {
     if (view.state !== 'live') settleAsk(false)
   }, [view.state, settleAsk])
-  useEffect(() => () => settleAsk(false), [settleAsk])
 
   return (
     <div

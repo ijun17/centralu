@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { externalAppKey, gridScreenAppKeys, projectScreenAppKeys, registerPinnedFrame, returnsToPanel, useStore, type PinnedView } from '../../store/store.js'
 import { useExternalApp, type ExternalCatalogApp } from '../../store/app-catalog.js'
 import { AppFrame, type AppFrameHandle, type AppFrameMessage } from '../app-frame/AppFrame.jsx'
 import { AppIcon, CloseIcon } from '../../components/icons.jsx'
 import { RunsPanel } from './RunsPanel.jsx'
-import { MessageAsk, messageText, type MessageAskState } from './MessageAsk.jsx'
+import { MessageAsk } from './MessageAsk.jsx'
+import { useMessageAsk } from './useMessageAsk.js'
 import { BuilderPane } from './BuilderPane.jsx'
 import { ErrorTail } from './ErrorTail.jsx'
 import { FixBar } from './FixBar.jsx'
@@ -190,33 +191,11 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
    * message with not a single piece of text is declined without asking — there is nothing to send.
    */
   const sendViewMessage = useStore((s) => s.sendViewMessage)
-  const [ask, setAsk] = useState<MessageAskState | null>(null)
-  const askRef = useRef<MessageAskState | null>(null)
-  const settleAsk = useCallback((sent: boolean) => {
-    const a = askRef.current
-    askRef.current = null
-    setAsk(null)
-    a?.resolve(sent)
-    return a
-  }, [])
-  const onMessage = useCallback(
-    (m: AppFrameMessage) =>
-      new Promise<boolean>((resolve) => {
-        const { text, dropped } = messageText(m.content)
-        if (!text) return resolve(false)
-        askRef.current?.resolve(false)
-        const next = { text, dropped, resolve }
-        askRef.current = next
-        setAsk(next)
-      }),
-    [],
-  )
+  const { ask, onMessage, take, settle: settleAsk } = useMessageAsk()
   const answer = async (sessionId: string | null) => {
     if (!sessionId) return void settleAsk(false)
-    const a = askRef.current
+    const a = take()
     if (!a) return
-    askRef.current = null
-    setAsk(null)
     /*
      * Sent through **the same path** as an in-conversation view (`apps.viewMessage`) — it lands in
      * the chosen conversation as a message from the app, and the agent receives it wrapped by the
@@ -231,7 +210,6 @@ function PinnedAppView({ pv, mode }: { pv: PinnedView; mode: Mode }) {
   useEffect(() => {
     if (pv.phase !== 'open') settleAsk(false)
   }, [pv.phase, settleAsk])
-  useEffect(() => () => void settleAsk(false), [settleAsk])
 
   /*
    * Registers the rendered frame with the store (C-4) — when the app comes back up with new code,
