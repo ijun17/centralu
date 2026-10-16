@@ -75,6 +75,8 @@ export type OrchestratedSession = {
   away?: string
   /** Why its last turn did not run to its end (#698), until it works again */
   interruption?: Interruption
+  /** Its card is a question, not an approval: `state` says waiting_approval for both (#428) */
+  waitingOn?: 'question'
 }
 
 /** One `recall` hit: where it was said, and the seq that opens it with read_session */

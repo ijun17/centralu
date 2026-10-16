@@ -1,4 +1,4 @@
-import type { Attachment, ExternalAppInfo, GitSource, NormalizedEvent, PermissionPreset, SessionInfo, SettingsApplied, ToolName, UpdateStatus } from '@cc/protocol'
+import { blockedOnQuestion, type Attachment, type ExternalAppInfo, type GitSource, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus } from '@cc/protocol'
 import type { BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard } from '../adapters/contract.js'
 import type { AppCheckReport, AppRef } from '../apps/external/runtime.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
@@ -144,6 +144,7 @@ export function orchestratorToolsFor(
           name: labelOf(host.store, s),
           project: s.projectId ? (byId.get(s.projectId) ?? '(project no longer exists)') : '(none)',
           state: s.state,
+          ...(blockedOnQuestion(s) ? { waitingOn: 'question' as const } : {}),
           ...(s.worktreeMerged ? { merged: true } : {}),
           // PR status (#76, stage 3) — what lets a manager tell "waiting on review" apart from "just still
           // in progress"

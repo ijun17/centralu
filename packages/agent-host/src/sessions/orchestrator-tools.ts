@@ -576,7 +576,7 @@ async function listSessionsText(tools: OrchestratorTools, caller: ToolCaller): P
       .map(
         (s) =>
           // A linked machine's session says where it runs (#82 phase 4), and why the row is only what was last known
-          `- ${s.name} [${s.sessionId}] · project ${s.project}${s.machine ? ` on ${s.machine}` : ''} · ${s.tool} · ${s.state}` +
+          `- ${s.name} [${s.sessionId}] · project ${s.project}${s.machine ? ` on ${s.machine}` : ''} · ${s.tool} · ${s.waitingOn === 'question' ? 'waiting on a question' : s.state}` +
           (s.away ? ` · ${s.away}` : '') +
           // A turn cut short by the network or a quit looks like any session at rest (#698)
           (s.interruption ? ` · ${interruptionWords(s.interruption)}` : '') +

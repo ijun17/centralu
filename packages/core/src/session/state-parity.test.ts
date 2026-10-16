@@ -66,8 +66,12 @@ describe('the host keeps the state the window shows', () => {
     expect(run([E.done])).toMatchObject({ state: 'idle', waitingSince: null })
   })
 
-  it('a tool result is work', () => {
-    expect(run([E.delta, E.done, E.result]).state).toBe('working')
+  it('a tool result starts nothing: a late one after the turn leaves the session at rest', () => {
+    // A background agent's card released as its process closes (claude releaseAgents), or a set-aside handle's result
+    expect(run([E.delta, E.done, E.result])).toMatchObject({ state: 'waiting_input', waitingSince: 1_001 })
+    expect(run([E.result]).state).toBe('idle')
+    // Nor does one finishing beside a call that waits on the person release the session from that card
+    expect(run([E.delta, E.approval('a1'), E.result])).toMatchObject({ state: 'waiting_approval', approval: 'a1' })
   })
 
   it('a limit stays until the session leaves limited', () => {
@@ -82,6 +86,28 @@ describe('the host keeps the state the window shows', () => {
 
   it('the same question arriving again replaces its card', () => {
     expect(run([E.delta, E.question('q1'), E.question('q1')]).questions).toEqual(['q1'])
+  })
+
+  it('a limit report does not take a session off the card it waits on', () => {
+    // Codex reports its rate limits at any time (account/rateLimits/updated)
+    expect(run([E.delta, E.question('q1'), E.limit])).toMatchObject({ state: 'waiting_approval', waitingSince: 1_001, questions: ['q1'], limit: { usedPercent: 100 } })
+  })
+
+  /*
+   * What the host states itself goes out as a state_change, and the host now applies that same statement to its copy
+   * (manager `settleState`) rather than writing the state by hand.
+   */
+  it('the host\'s own statements read the same: resume, tool change, failed re-attach, a card\'s answer and rest', () => {
+    // A resume or a tool change after a limit, an error or a finished turn: idle, and the banners come down
+    expect(run([E.delta, E.limit, E.state('idle')])).toMatchObject({ state: 'idle', waitingSince: null, limit: null })
+    expect(run([E.delta, E.error, E.state('idle')])).toMatchObject({ state: 'idle', waitingSince: null })
+    expect(run([E.delta, E.activity, E.done, E.state('idle')])).toMatchObject({ state: 'idle', activity: null })
+    // A failed re-attach of a session mid-turn, with its card still standing: idle, the dead card gone
+    expect(run([E.delta, E.approval('a1'), E.state('idle')])).toMatchObject({ state: 'idle', approval: null })
+    // respondApproval for a host card raised in a turn: its resolve, then "working" when nothing else is open
+    expect(run([E.delta, E.approval('h1'), E.approved('h1'), E.state('working')])).toMatchObject({ state: 'working', approval: null })
+    // restAfterCard for one raised between turns: the rest first, then the resolve, which changes nothing
+    expect(run([E.delta, E.done, E.approval('h1'), E.state('waiting_input'), E.approved('h1')])).toMatchObject({ state: 'waiting_input', approval: null })
   })
 
   it('a host card raised in limited closes back into limited (#673)', () => {

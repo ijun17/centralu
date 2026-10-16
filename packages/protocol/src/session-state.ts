@@ -39,6 +39,7 @@ const ALLOWED: Record<SessionState, readonly SessionState[]> = {
    * waiting_approval → limited: a card the host raised between turns (#673) closes back into the rest the
    * session had before it (`restAfterCard`, host-cards.ts), and limited is one of those rests. Refused, the
    * card's own resolve then read as "back to work" and the session sat in working with nothing to end it.
+   * Only that statement takes this edge: a `limit_reached` does not (`transition` below).
    */
   waiting_approval: ['working', 'waiting_input', 'limited', 'error', 'idle'],
   waiting_input: ['working', 'error', 'idle'],
@@ -60,8 +61,14 @@ export function nextStateFor(event: NormalizedEvent): SessionState | null {
       return event.state
     case 'message_delta':
     case 'tool_call':
-    case 'tool_result':
       return 'working'
+    /*
+     * Not tool_result: a result closes a call, it starts nothing. Results arrive after the turn ended too — a
+     * background agent's card released when its process closes (claude `releaseAgents`), or one a set-aside handle
+     * still sends (manager `onEvent`) — and read as work they moved a session at rest into working with nothing left
+     * to end it: never idle again for the keeper, an update or sleep, and "stopped by quit" at the next start (#428).
+     * In a turn the session is already working; a new turn announces itself (its first output or a state_change).
+     */
     case 'approval_request':
       return 'waiting_approval'
     case 'approval_resolved':
@@ -109,6 +116,12 @@ export function transition(from: SessionState, event: NormalizedEvent): Transiti
   if ((event.type === 'approval_resolved' || event.type === 'question_resolved') && from !== 'waiting_approval') {
     return { state: from, illegal: false }
   }
+  /*
+   * A limit report does not take a session off a card it is blocked on. Codex reports its rate limits at any time
+   * (account/rateLimits/updated); taken as a transition, it moved an open-card session to limited, out of the inbox
+   * while it still waited on the person. The limit itself is still recorded (the reducer's switch).
+   */
+  if (event.type === 'limit_reached' && from === 'waiting_approval') return { state: from, illegal: false }
   if (!canTransition(from, to)) return { state: from, illegal: true }
   return { state: to, illegal: false }
 }
@@ -195,7 +208,7 @@ export function stepSessionState(s: SessionStateFacts, event: NormalizedEvent, n
  * a dead card back to life. The event's own facts (a new card, an activity, a limit) are set after that, as the
  * reducer's switch sets them on top of its clearing.
  */
-export function applySessionState(m: SessionInfo, e: NormalizedEvent, now: number): void {
+export function applySessionState(m: SessionInfo, e: NormalizedEvent, now: number): SessionStateStep {
   const step = stepSessionState(m, e, now)
   if (!step.illegal) {
     m.state = step.state
@@ -231,6 +244,15 @@ export function applySessionState(m: SessionInfo, e: NormalizedEvent, now: numbe
       m.limit = { resumeAt: e.resumeAt, usedPercent: e.usedPercent, windowMins: e.windowMins }
       break
   }
+  return step
+}
+
+/**
+ * Blocked on a question and nothing else. The state says waiting_approval for both kinds of card, as the window shows
+ * them; a text read by an agent names the card (list_sessions, a busy session, a handover).
+ */
+export function blockedOnQuestion(s: Pick<SessionInfo, 'state' | 'pendingApproval' | 'pendingQuestions'>): boolean {
+  return s.state === 'waiting_approval' && !s.pendingApproval && s.pendingQuestions.length > 0
 }
 
 /** Whether a resolve leaves some other approval or question card of a waiting session still open */

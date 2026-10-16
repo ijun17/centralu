@@ -416,7 +416,14 @@ stateDiagram-v2
 - `waiting_approval`은 승인과 질문을 둘 다 덮는다. 둘 다 에이전트를 사람 앞에서 멈춰 세운다. 턴 안에 있다는 것
   (`isInTurn`)은 `working`이거나 `waiting_approval`이라는 뜻이다.
 - `waiting_approval → limited`: 호스트가 턴 사이에 띄운 카드는 닫히면 띄울 때의 쉬는 상태로 돌아가고(`restAfterCard`,
-  #673), `limited`도 그런 상태다.
+  #673), `limited`도 그런 상태다. 이 이동은 그 진술만 할 수 있다. `limit_reached`(Codex는 한도를 아무 때나 알린다)는
+  한도를 기록하지만 카드 앞에 멈춘 세션을 그대로 둔다.
+- 턴이 돌지 않을 때 어댑터가 띄운 카드도 닫히면 띄울 때의 쉬는 상태로 돌아간다(`CardRests`,
+  `agent-host/src/sessions/card-rest.ts`). 턴 안에서는 마지막 카드에 답하면 다시 `working`이 된다.
+- `tool_result`는 상태를 옮기지 않는다. 호출 하나를 닫을 뿐 턴을 시작하지 않는다. 결과는 턴이 끝난 뒤에도 온다(프로세스가
+  닫히며 풀리는 백그라운드 에이전트). 이것을 일로 읽으면 세션이 끝낼 것 없는 `working`에 남았다(#428).
+- 호스트가 스스로 하는 진술(재개, 도구 변경, 다시 붙이기 실패, 카드의 쉬는 상태)은 `state_change`로 나가고, 호스트의
+  사본에도 손으로 쓰지 않고 같은 규칙으로 적용한다(`settleState`).
 - `waiting_input`은 턴이 끝났다는 뜻이다. 기다림으로 치므로(`isWaiting`) 인박스에 서지만, 급한 정도는 `error`보다
   낮다(`URGENCY`). 승인은 에이전트를 막고, 끝난 턴은 막지 않는다.
 - `approval_request`나 `question_request`는 **어느** 상태에서든 적용한다. 짐작이 아니라 호스트가 받은 사실이고,

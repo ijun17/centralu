@@ -63,6 +63,8 @@ describe('consent from one project to another', () => {
 
   it('a denial is refused in words the model can act on, and is not remembered', async () => {
     const s = await w.callerSession()
+    // Asked from inside a turn, as a tool call asks (a card raised between turns closes back into its rest, #428)
+    await w.mgr.send(s, 'reach the toolkit')
     const p = w.mgr.ensureProjectAccess(s, w.target.id, 'delegate', what)
     await w.until(() => !!w.card(s))
     w.mgr.respondApproval(s, w.card(s)!.requestId, 'deny')
