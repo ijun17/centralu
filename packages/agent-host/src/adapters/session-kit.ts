@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { NormalizedEvent } from '@cc/protocol'
 
 /**
@@ -79,4 +80,20 @@ export class PendingCards<T> {
  */
 export function couldNotStop(sessionId: string, err: Error): NormalizedEvent {
   return { type: 'error', sessionId, error: { code: 'internal', message: `Could not stop: ${err.message}`, retryable: true } }
+}
+
+/**
+ * The ids of the approval and question cards a handle raises, `<prefix>-<tag>-<n>`. Part of every id is this
+ * handle's own tag (#683 review). The counter starts at 0 in each process, so after a swap a window that missed the
+ * events between could still hold `req-1` of the old process while the new one raises its own `req-1`, and an answer
+ * meant for the first would land on the second. With the tag the ids of two handles never meet, and the old id is
+ * refused as gone. Both adapters kept this counter and tag apart.
+ */
+export class CardIds {
+  private counter = 0
+  private readonly tag = randomUUID().slice(0, 8)
+
+  next(prefix: string): string {
+    return `${prefix}-${this.tag}-${++this.counter}`
+  }
 }

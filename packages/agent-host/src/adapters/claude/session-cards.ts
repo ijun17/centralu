@@ -1,10 +1,9 @@
 import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk'
-import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import type { ApprovalDecision, ApprovalScope, PermissionPreset, QuestionAnswer } from '@cc/protocol'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import type { CreateSessionOpts, EventSink } from '../contract.js'
-import { PendingCards } from '../session-kit.js'
+import { CardIds, PendingCards } from '../session-kit.js'
 import { newFile } from './new-file.js'
 import { approvalDetail } from './normalize.js'
 import { appToolOf, isOrchestratorTool, parseQuestions, READ_TOOLS, readTarget } from './permissions.js'
@@ -30,14 +29,8 @@ export class ClaudeCards {
   readonly pending = new PendingCards<PendingApproval>()
   /** Auto-approval matchers. Seeded with the saved rules at session start, and grows with each 'always' response. */
   private alwaysAllow = new AlwaysAllowRules()
-  private reqCounter = 0
-  /**
-   * Part of every request id this handle raises (#683 review). The counter starts at 0 in each process, so after a
-   * swap a window that missed the events between could still hold `req-1` of the old process while the new one
-   * raises its own `req-1`, and an answer meant for the first would land on the second. With this the ids of two
-   * handles never meet, and the old id is refused as gone.
-   */
-  private readonly reqTag = randomUUID().slice(0, 8)
+  /** The ids of the cards this handle raises (see `CardIds`) */
+  private readonly ids = new CardIds()
 
   constructor(private readonly host: CardsHost) {}
 
@@ -130,7 +123,7 @@ export class ClaudeCards {
       const questions = parseQuestions(toolInput)
       // If the shape is not a question, we cannot render it — never swallow it, let it flow through as usual.
       if (questions.length === 0) return { behavior: 'allow' as const, updatedInput: toolInput }
-      const requestId = `q-${this.reqTag}-${++this.reqCounter}`
+      const requestId = this.ids.next('q')
       this.host.emit({ type: 'question_request', sessionId: this.host.sessionId, requestId, questions })
       return new Promise((resolve) => {
         this.questions.set(requestId, { resolve: resolve as (r: unknown) => void, input: toolInput })
@@ -152,7 +145,7 @@ export class ClaudeCards {
     const key = alwaysAllowKey(detail)
     if (key && this.alwaysAllow.allows(key)) return { behavior: 'allow' as const, updatedInput: toolInput }
 
-    const requestId = `req-${this.reqTag}-${++this.reqCounter}`
+    const requestId = this.ids.next('req')
     this.host.emit({ type: 'approval_request', sessionId: this.host.sessionId, requestId, detail })
     return new Promise((resolve) => {
       this.pending.set(requestId, { resolve: resolve as PendingApproval['resolve'], input: toolInput })

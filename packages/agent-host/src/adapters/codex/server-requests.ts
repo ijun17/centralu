@@ -1,11 +1,11 @@
-import { randomUUID } from 'node:crypto'
+
 /** Name of our MCP server attached via the bridge — elicitation acceptance judges by this name (defined in one place, #93) */
 import { ORCHESTRATOR_MCP_NAME } from '../../sessions/orchestrator-tools.js'
 import type { ApprovalDecision, ApprovalDetail, ApprovalScope } from '@cc/protocol'
 import type { EventSink } from '../contract.js'
 import type { ServerRequest } from './client.js'
 import { approvalDetailFrom, fileChangesOf, toCodexDecision } from './normalize.js'
-import { PendingCards } from '../session-kit.js'
+import { CardIds, PendingCards } from '../session-kit.js'
 import { AlwaysAllowRules, alwaysAllowKey } from '../always-allow.js'
 import { turnIdOf } from './turn-reads.js'
 
@@ -31,12 +31,8 @@ export class CodexRequests {
    * with it, or an answer goes to a request id nobody is waiting on.
    */
   readonly approvals = new PendingCards<OpenRequest>()
-  private reqCounter = 0
-  /**
-   * Part of every request id this handle raises (#683 review): the counter restarts in each process, and after a
-   * swap a window that missed the events between could answer the new process's `codex-req-1` with the old one's.
-   */
-  private readonly reqTag = randomUUID().slice(0, 8)
+  /** The ids of the cards this handle raises (see `CardIds`) */
+  private readonly ids = new CardIds()
   private alwaysAllow = new AlwaysAllowRules()
   /**
    * The changes of each file-change item still open, by item id (#169). The approval request for that item
@@ -134,7 +130,7 @@ export class CodexRequests {
        * is `codex_approval_kind`, while current codex source uses `codex/approval_kind` — we read both.
        */
       if (typeof p.serverName === 'string' && this.host.appServers().has(p.serverName) && approvalKindOf(p._meta) === 'mcp_tool_call') {
-        const requestId = `codex-req-${this.reqTag}-${++this.reqCounter}`
+        const requestId = this.ids.next('codex-req')
         this.approvals.set(requestId, { ...requestOrigin(r), elicitation: true })
         this.host.emit({ type: 'approval_request', sessionId: this.host.sessionId, requestId, detail: appApprovalDetail(p.serverName, p.message, p._meta) })
         return
@@ -188,7 +184,7 @@ export class CodexRequests {
       return
     }
 
-    const requestId = `codex-req-${this.reqTag}-${++this.reqCounter}`
+    const requestId = this.ids.next('codex-req')
     this.approvals.set(requestId, requestOrigin(r))
     this.host.emit({ type: 'approval_request', sessionId: this.host.sessionId, requestId, detail })
   }
