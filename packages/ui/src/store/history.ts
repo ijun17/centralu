@@ -1,6 +1,6 @@
 import { SUBAGENT_STEPS_PAGE, type StoredMessage } from '@cc/protocol'
 import type { AppState, StoreGet, StoreSet } from './state.js'
-import { HISTORY_PAGE, SUBAGENT_STEPS_UNREAD, mergePage, prependPage, putSubagentSteps, readBack } from './historyPages.js'
+import { HISTORY_PAGE, SUBAGENT_STEPS_UNREAD, mergeBySeq, mergePage, prependPage, putSubagentSteps, readBack } from './historyPages.js'
 import { RECOVERY_RETRY_MS } from './connection.js'
 import { inlineViewsFromHistory, mergeInlineHistory, syncInlineViews } from './apps.js'
 import { omitKey } from './patch.js'
@@ -99,7 +99,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
         platform.agents.loadMessages(sessionId, HISTORY_PAGE, seq + 1),
         platform.agents.loadMessages(sessionId, HISTORY_PAGE, seq + HISTORY_PAGE + 1),
       ])
-      const msgs = [...new Map([...before, ...after].map((m) => [m.seq, m])).values()].sort((a, b) => a.seq - b.seq)
+      const msgs = mergeBySeq(before, after)
       if (get().searchTargets[sessionId]?.seq !== seq) return
       const items = messagesToChat(msgs)
       bumpChatKeysAbove(items)
@@ -181,7 +181,7 @@ export const historyActions = (set: StoreSet, get: StoreGet): HistoryActions => 
       set((s) => {
         const now = s.subagentSteps[sessionId]?.[callId] ?? cur
         // A live step may have joined while the page was on its way: one row per number, in order
-        const rows = [...new Map([...now.rows, ...page].map((r) => [r.seq, r])).values()].sort((a, b) => a.seq - b.seq)
+        const rows = mergeBySeq(now.rows, page)
         return putSubagentSteps(s.subagentSteps, sessionId, callId, { ...now, rows, more: page.length >= SUBAGENT_STEPS_PAGE, loading: false })
       })
     } catch (e) {

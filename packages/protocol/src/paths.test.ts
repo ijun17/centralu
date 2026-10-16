@@ -1,6 +1,6 @@
 import { posix, win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { folderNameError, gitSourceError, osPathBaseName, repoNameOf, wireBaseName, wireJoin, wireSegments } from './paths.js'
+import { folderNameError, gitSourceError, osPathBaseName, repoNameOf, wireBaseName, wireJoin, wireParent, wireSegments } from './paths.js'
 
 /** A repository a new project is cloned from (#515): https, ssh and scp-like only */
 describe('a clone source', () => {
@@ -101,6 +101,15 @@ describe('wire paths are POSIX', () => {
     expect(wireJoin('', 'a.ts')).toBe('a.ts')
     expect(wireJoin('sub', 'a.ts')).toBe('sub/a.ts')
     expect(wireJoin('sub', 'deep', 'a.ts')).toBe('sub/deep/a.ts')
+  })
+
+  it('the parent is everything before the last separator, and the root for a path with none', () => {
+    expect(wireParent('src/app/a.ts')).toBe('src/app')
+    expect(wireParent('src/a.ts')).toBe('src')
+    expect(wireParent('a.ts')).toBe('')
+    expect(wireParent('')).toBe('')
+    // A folder is told apart from a file by the entry, not by a trailing separator
+    expect(wireParent('src/app')).toBe('src')
   })
 
   it('the base name is the last segment, trailing separator or not', () => {

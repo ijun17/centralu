@@ -1,4 +1,4 @@
-import { wireBaseName, wireJoin, wireSegments } from '@cc/protocol'
+import { wireBaseName, wireJoin, wireParent, wireSegments } from '@cc/protocol'
 import type { FsEntry, FsFile } from '../ports/index.js'
 
 /** The mock's file tree: the listing grouped by parent path, and the file contents by path */
@@ -42,12 +42,6 @@ export class MemoryFs {
     }
   }
 
-  /** `a/b/c.ts` → `a/b` (the root is `''`) — since the mock's entries are grouped by parent path */
-  private parentOf(path: string): string {
-    const cut = path.lastIndexOf('/')
-    return cut < 0 ? '' : path.slice(0, cut)
-  }
-
   /**
    * Detaches one entry from the mock. If it is a folder, everything under it — the listing and
    * the files — comes along. In the real thing, moving a folder takes what is inside it along
@@ -55,7 +49,7 @@ export class MemoryFs {
    * a kind of difference that happens **only in the mock**.
    */
   private detach(path: string): FsEntry | null {
-    const parent = this.parentOf(path)
+    const parent = wireParent(path)
     const siblings = this.state.entries[parent] ?? []
     const entry = siblings.find((e) => e.path === path)
     if (!entry) return null

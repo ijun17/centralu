@@ -10,6 +10,14 @@ import { nextChatKey, type ChatItem } from './transcript.js'
  */
 
 /**
+ * Rows from several reads of one conversation as one list: one row per `seq` (the later list wins, since it is the
+ * fresher read), in order. A page, the page around a search hit and a live row can all hold the same message.
+ */
+export function mergeBySeq<T extends { seq: number }>(...lists: readonly (readonly T[])[]): T[] {
+  return [...new Map(lists.flat().map((r) => [r.seq, r] as const)).values()].sort((a, b) => a.seq - b.seq)
+}
+
+/**
  * How much history is read back at a time — **a count of messages, not rows** (#66).
  * The host's `loadMessages` merges delta chunks into messages before counting them, so what arrives
  * is 100 real messages, not the "200 rows = 200 tokens = a couple of sentences" that 200 meant in
