@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join, win32 } from 'node:path'
@@ -64,6 +64,11 @@ export const PROBE_TIMEOUT_MS = 3000
  * Asks the login shell for PATH. It has to be interactive (-i) for .zshrc's nvm/mise init to take
  * effect. Bounded (PA2): some shells ignore SIGTERM, and a shell config that waits on a prompt, or
  * a shell stopped by its terminal, would otherwise keep the host from ever reaching ready.
+ *
+ * **In a session of its own** (`detached`), as the keeper's probe runs it (`os/unix.rs` `probe_shell`, #428): an
+ * interactive shell in a background group of a terminal's session is stopped (SIGTTOU) when it sets up job control, so
+ * a host started from a terminal waited out the bound. And its own session is its own group, which a timeout ends as a
+ * whole: killing the shell alone left what its config had started (a `sleep`, an agent, a prompt helper) running.
  */
 export function probeLoginShell(
   platform: NodeJS.Platform = process.platform,
@@ -74,23 +79,35 @@ export function probeLoginShell(
   if (platform === 'win32') return []
   const shell = env.SHELL
   if (!shell || !existsSync(shell)) return []
-  try {
-    const out = execFileSync(shell, ['-ilc', 'command -p echo "__CC_PATH__:$PATH"'], {
-      encoding: 'utf8',
-      timeout: timeoutMs,
-      // Some shells ignore SIGTERM, so SIGKILL is used to guarantee it is cut off —
-      // if this hangs, the host never reaches ready and the whole app fails to start
-      killSignal: 'SIGKILL',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      // So that a shell init script does not pop up an interactive prompt
-      env: { ...env, TERM: 'dumb', CI: '1' },
-    })
-    // The shell config might print something else, so only the marked line is picked out
-    const line = out.split('\n').find((l) => l.startsWith('__CC_PATH__:'))
-    return line ? line.slice('__CC_PATH__:'.length).split(delimiter).filter(Boolean) : []
-  } catch {
+  const r = spawnSync(shell, ['-ilc', 'command -p echo "__CC_PATH__:$PATH"'], {
+    encoding: 'utf8',
+    timeout: timeoutMs,
+    // Some shells ignore SIGTERM, so SIGKILL is used to guarantee it is cut off —
+    // if this hangs, the host never reaches ready and the whole app fails to start
+    killSignal: 'SIGKILL',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    // So that a shell init script does not pop up an interactive prompt
+    env: { ...env, TERM: 'dumb', CI: '1' },
+    // Honoured by spawnSync as by spawn (setsid; measured, Node 26), though its options type leaves it out
+    ...({ detached: true } as object),
+  })
+  if (r.error) {
+    // Cut off, or never started. Its session's group is its pid: whatever it started goes with it
+    if (r.pid > 1) {
+      try {
+        process.kill(-r.pid, 'SIGKILL')
+      } catch {
+        // the group is already empty
+      }
+    }
     return []
   }
+  // The shell config might print something else, so only the marked line is picked out, whatever spaces or a CR around it
+  const line = (r.stdout ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l.startsWith('__CC_PATH__:'))
+  return line ? line.slice('__CC_PATH__:'.length).split(delimiter).filter(Boolean) : []
 }
 
 /**

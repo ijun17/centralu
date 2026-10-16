@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { __resetToolPathCache, ensureToolPath, fallbackDirs, probeLoginShell, whichTool } from './env-path.js'
@@ -154,6 +154,32 @@ describe.skipIf(process.platform === 'win32')('the login-shell probe', () => {
     const began = Date.now()
     expect(probeLoginShell('linux', { SHELL: stops }, 300)).toEqual([])
     expect(Date.now() - began).toBeLessThan(3000)
+  })
+
+  /** Killing the shell alone left what its config started running, under init (#428) */
+  it('a shell cut off at the bound takes what it started with it', async () => {
+    const pidFile = join(dir, 'helper-pid')
+    const starts = shell('starts-a-helper', `sleep 30 &\necho $! > "${pidFile}"\nexec sleep 30`)
+    // A bound a loaded machine's shell still writes its helper's pid within
+    expect(probeLoginShell('darwin', { SHELL: starts }, 2000)).toEqual([])
+    const helper = Number(readFileSync(pidFile, 'utf8'))
+    const alive = () => {
+      try {
+        process.kill(helper, 0)
+        return true
+      } catch {
+        return false
+      }
+    }
+    for (let i = 0; i < 40 && alive(); i++) await new Promise((r) => setTimeout(r, 50))
+    const left = alive()
+    if (left) process.kill(helper, 'SIGKILL')
+    expect(left).toBe(false)
+  })
+
+  it('reads the marked line with the spaces or carriage return a config leaves around it', () => {
+    const crlf = shell('crlf', `printf '  __CC_PATH__:/a:/b\\r\\n'`)
+    expect(probeLoginShell('linux', { SHELL: crlf })).toEqual(['/a', '/b'])
   })
 
   it('Windows runs no probe at all, even with a SHELL that could run (PA6)', () => {

@@ -228,14 +228,16 @@ Platforms: macOS, Linux.
 Happened: some shells ignore SIGTERM, and a hung probe meant the host never became ready (cfe32262). Under a
 controlling terminal (the npm launcher runs the AppImage attached to one) an interactive bash in its own process group
 is stopped by SIGTTOU, so the keeper's probe waited out 5 s every time (measured, #458).
-Rule: the host's probe: 3 s, `SIGKILL`, stdin ignored, `TERM=dumb`, `CI=1`, any failure falls back. The keeper's
-probe: a session of its own, 5 s, then the group is killed.
+Rule: both probes run the shell in a session of its own and kill its whole group at the bound: the host's 3 s, the
+keeper's 5 s. The host's: `SIGKILL`, stdin ignored, `TERM=dumb`, `CI=1`, the marked line trimmed, any failure falls
+back. Killing the host's shell alone left what its config had started running (#428).
 Guard: `host/env-path.test.ts` "a shell that never answers is cut off at the bound and the fallback is used (PA2)",
 "a shell that ignores SIGTERM is still cut off at the bound: the probe is killed, not asked (PA2)" and "a shell stopped
 by its terminal (SIGTTOU, SIGSTOP) is cut off too (PA2)"; `keeper/os/unix.rs`
 `a_shell_that_never_answers_is_cut_off_at_the_bound` and `a_shell_that_job_control_would_stop_still_answers` (fails
-when the probe runs in a group of its own instead of a session). *Changed by step 3.*
-Platforms: macOS, Linux. *Changed by #458.*
+when the probe runs in a group of its own instead of a session); `host/env-path.test.ts` "a shell cut off at the bound
+takes what it started with it". *Changed by step 3.*
+Platforms: macOS, Linux. *Changed by #458, #428.*
 
 **PA3. The probe runs once per process.**
 Happened: every terminal created ran a login shell first, 1 to 4 s each (7a3149e4).
