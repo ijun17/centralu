@@ -24,6 +24,7 @@ import {
   moveTarget,
   prepareCopyTarget,
   readTextFile,
+  resolveEntry,
   resolveExisting,
   safeJoin,
 } from './fs.js'
@@ -470,6 +471,52 @@ describe('resolveExisting — the absolute path handed to the shell', () => {
 
   it('rejects outside the project (so the trash never swallows someone else\'s file)', async () => {
     await expect(resolveExisting(root, '../..')).rejects.toThrow(/outside the project/)
+  })
+})
+
+/*
+ * Trash, Reveal and Open in IDE act on the entry the person pointed at, never on where a link leads (#838). Following a
+ * link at the end of the path, an untrusted repository's `old-build -> .` sent the project folder itself to the trash.
+ */
+describe('resolveEntry — the entry itself, for the trash, the file manager and the IDE', () => {
+  it('refuses a link to the project folder or above it, never handing out the project folder', async () => {
+    symlinkSync('.', join(root, 'old-build'), 'dir')
+    await expect(resolveEntry(root, 'old-build')).rejects.toThrow(/is a link/)
+    symlinkSync('..', join(root, 'up'), 'dir')
+    await expect(resolveEntry(root, 'up')).rejects.toThrow(/outside the project/)
+  })
+
+  it('refuses a link to a file or folder inside, rather than acting on its target', async () => {
+    writeFileSync(join(root, 'a.ts'), 'x')
+    mkdirSync(join(root, 'src'))
+    mkdirSync(join(root, 'sub'))
+    symlinkSync(join(root, 'a.ts'), join(root, 'sub', 'alias.ts'))
+    symlinkSync(join(root, 'src'), join(root, 'sub', 'src-link'), 'dir')
+    await expect(resolveEntry(root, 'sub/alias.ts')).rejects.toThrow(/is a link/)
+    await expect(resolveEntry(root, 'sub/src-link')).rejects.toThrow(/is a link/)
+  })
+
+  it('refuses the project folder itself, however the path spells it', async () => {
+    mkdirSync(join(root, 'a'))
+    for (const rel of ['', '.', 'a/..', './a/../.']) {
+      await expect(resolveEntry(root, rel)).rejects.toThrow(/project folder itself/)
+    }
+  })
+
+  it('still refuses a path outside the project, a folder link that leaves it, and a missing entry', async () => {
+    await expect(resolveEntry(root, '../x')).rejects.toThrow(/outside the project/)
+    symlinkSync(outsideDir(), join(root, 'out'), 'dir')
+    await expect(resolveEntry(root, 'out/anything')).rejects.toThrow(/outside the project/)
+    await expect(resolveEntry(root, 'gone.ts')).rejects.toThrow(/no longer there/)
+  })
+
+  it('gives a file or folder through a folder link inside the project, as resolveExisting does', async () => {
+    mkdirSync(join(root, 'sub'))
+    writeFileSync(join(root, 'sub', 'a.ts'), 'x')
+    symlinkSync(join(root, 'sub'), join(root, 'via'), 'dir')
+    expect(await resolveEntry(root, 'sub/a.ts')).toBe(await resolveExisting(root, 'sub/a.ts'))
+    expect(await resolveEntry(root, 'via/a.ts')).toBe(await resolveExisting(root, 'sub/a.ts'))
+    expect(await resolveEntry(root, 'sub')).toBe(await resolveExisting(root, 'sub'))
   })
 })
 

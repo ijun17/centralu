@@ -1486,7 +1486,12 @@ Existing filesystem targets are checked against the canonical project root. Syml
 resolving inside that root are supported; outside targets and dangling links are rejected.
 Text/image reads require a regular-file descriptor, bound allocation/read size, and compare
 opened-file identity. Native reveal/trash checks are additional absolute/no-symlink checks;
-they are **not** independent proof of project containment. Opening in an IDE does not fall
+they are **not** independent proof of project containment. The path the host hands them is the entry itself
+(`resolveEntry`, #838): its folder is resolved, its last segment is not followed, and the project folder itself is
+refused. Following a link at the end, an untrusted repository's `old-build -> .` sent the project folder to the
+trash. A link at the end is now refused (one leading outside is refused as outside, as before): the shell's own check
+refuses a link, and an IDE handed one would open where it leads, so a link is neither trashed, revealed nor opened
+from the tree, and its target never is. Opening in an IDE does not fall
 back to a generic OS opener that could execute repository-authored content. A linked machine's project is opened
 with a VS Code Remote-SSH link instead (#82): VS Code connects over the person's ssh and, by default, asks before opening a remote file
 or folder from a link (`security.promptForRemoteFileProtocolHandling`); the hub hands it a path and never reads or runs the file itself.

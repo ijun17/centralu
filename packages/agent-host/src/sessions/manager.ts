@@ -129,7 +129,7 @@ import {
   listDir,
   moveEntry,
   readTextFile,
-  resolveExisting,
+  resolveEntry,
 } from '../dev-services/fs.js'
 import { DirWatchers } from '../dev-services/watch.js'
 import { invalidateFileIndex } from '../dev-services/file-search.js'
@@ -3583,9 +3583,9 @@ export class SessionManager {
     return importFile(this.cwdOf(projectId), toDir, name, Buffer.from(dataBase64, 'base64'))
   }
   /** The absolute path handed to the OS by the desktop shell (trash, file manager). Built by the side that
-   * knows the project */
+   * knows the project: the entry itself, a link not followed to its target (#838) */
   resolveFile(projectId: string, path: string) {
-    return resolveExisting(this.cwdOf(projectId), path)
+    return resolveEntry(this.cwdOf(projectId), path)
   }
 
   saveWorkspace(layout: Record<string, unknown>): void {
