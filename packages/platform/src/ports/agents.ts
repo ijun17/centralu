@@ -22,7 +22,7 @@ import type {
   AgentVersions,
   SleepPolicy,
 } from '@cc/protocol'
-import type { Unsubscribe, ConnectionState, MachineRef } from './common'
+import type { Unsubscribe, ConnectionState, MachineRef } from './common.js'
 
 export interface AgentPort {
   createSession(params: CreateSessionParams): Promise<SessionInfo>

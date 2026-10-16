@@ -5,7 +5,7 @@ import type {
   SavedCommand,
   GitSource,
 } from '@cc/protocol'
-import type { MachineRef } from './common'
+import type { MachineRef } from './common.js'
 
 export interface ProjectPort {
   reorder(orderedIds: string[]): Promise<ProjectInfo[]>

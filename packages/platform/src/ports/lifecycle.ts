@@ -1,7 +1,7 @@
 import type {
   UpdateStatus,
 } from '@cc/protocol'
-import type { Unsubscribe } from './common'
+import type { Unsubscribe } from './common.js'
 
 /**
  * Updates for the app itself (issue #43).

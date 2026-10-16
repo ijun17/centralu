@@ -13,7 +13,7 @@ import type {
   SessionInfo,
   ToolName,
 } from '@cc/protocol'
-import type { MachineRef } from './common'
+import type { MachineRef } from './common.js'
 
 /**
  * Where to mount one app screen (M4 B-3). Created by the host. `url` contains a secret slot

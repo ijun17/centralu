@@ -2,7 +2,7 @@ import type {
   TerminalInfo,
   CommandRunInfo,
 } from '@cc/protocol'
-import type { Unsubscribe } from './common'
+import type { Unsubscribe } from './common.js'
 
 /**
  * Project terminal.
