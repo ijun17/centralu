@@ -220,7 +220,7 @@ export default tseslint.config(
    */
   {
     files: ['packages/*/src/**/*.{ts,tsx,mts,mjs}', 'apps/*/src/**/*.{ts,tsx}', 'packaging/**/*.mjs'],
-    ignores: ['**/*.test.{ts,tsx}', ...PLATFORM_MODULES],
+    ignores: ['**/*.test.{ts,tsx}', '**/*test-helpers.ts', ...PLATFORM_MODULES],
     plugins: { local: platformChecks },
     rules: { 'local/platform-checks': 'error' },
   },
