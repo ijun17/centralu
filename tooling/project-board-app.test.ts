@@ -58,7 +58,8 @@ if (query.includes('updateProjectV2ItemFieldValue')) {
   // lag: GitHub lists a newly added item only after a few reads, as it did live on 2026-10-04
   st.items.push({ id, content: c, values: {}, hiddenReads: st.lag ?? 0 })
   save()
-  out({ addProjectV2ItemById: { item: { id } } })
+  // addNoItem: GitHub answers the add without the item it made
+  out({ addProjectV2ItemById: { item: st.addNoItem ? null : { id } } })
 } else if (query.includes('issueOrPullRequest')) {
   const c = st.repo.find((x) => x.number === v.number)
   if (!c) fail('gh: Could not resolve to an issue or pull request with the number of ' + v.number + '.\n', 1, JSON.stringify({ data: { repository: { issueOrPullRequest: null } }, errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to an issue or pull request with the number of ' + v.number + '.' }] }))
@@ -462,6 +463,19 @@ describe.skipIf(process.platform === 'win32')('the project board app', { timeout
     )
     expect(mutations().filter((q) => q.includes('addProjectV2ItemById'))).toHaveLength(2)
     expect(writtenItems()).toEqual(['item-43', 'item-42', 'item-42', 'item-8', 'item-42'])
+  })
+
+  // set_item_fields always refused an add answered without its item; add_item went on with no id,
+  // waited on reading back an item it could never find, and called it added
+  it('says so when GitHub answers an add without the item it made, in add_item as in set_item_fields', async () => {
+    runtime()
+    patchState({ addNoItem: true })
+    // Each its own issue: the fake adds it all the same, so a second call would find it on the board
+    for (const [tool, n] of [['add_item', 42], ['set_item_fields', 43]] as const) {
+      const r = await call(tool, { item: `#${n}`, status: 'Ready' })
+      expect(r.isError).toBe(true)
+      expect(r.data!.failed).toEqual([`#${n}: GitHub did not return the project item it added for #${n}.`])
+    }
   })
 
   it('finds an item GitHub lists only a moment after adding it, and still sets its fields', async () => {
