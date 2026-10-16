@@ -4295,6 +4295,7 @@ export class SessionManager {
       get store() {
         return self.store
       },
+      uiPreferences: () => self.uiPreferences(),
       untilCard: (...a) => self.untilCard(...a),
       untilHandedOver: (...a) => self.delegationFlow.untilHandedOver(...a),
     }

@@ -3,6 +3,7 @@ import type { AgentStartRecord, AgentStartRequest, Delegation, LowMemory } from 
 import { ASK_WAIT_MS, taskLine } from './ask-project.js'
 import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentName, presetWithin } from './start-agent.js'
 import { labelOf } from './transcript-view.js'
+import { agentDepthRefusal } from './agent-depth.js'
 import type {
   ApprovalDetail,
   ModelOption,
@@ -56,10 +57,6 @@ type StartProgress = {
   /** Said when the model or effort asked for could not be checked */
   unchecked?: string
 }
-
-/** The refusal for a session that may not start agents because it was itself started or asked (#561) */
-const AGENT_DEPTH_ERROR =
-  'This session was itself started or asked by another session, so it cannot start agents — say in your answer what is needed instead.'
 
 /** The person's answer on a start_agent card, read as consent; a refusal says whether they refused or nobody answered */
 type AgentConsent = { ok: true } | { ok: false; error: string; why: 'denied' | 'withdrawn' }
@@ -170,7 +167,8 @@ export class AgentStartFlow {
    * start_agent (#561): an ordinary session starts another agent (Claude or Codex) in its own project on a task.
    *
    *   1. Who may: an ordinary session of a trusted project (the rule ask_project and attach_app follow, #382), and
-   *      not one that was itself started or asked by another session (`askedBy`): depth one.
+   *      not one as deep below a session the person started as the agent depth allows (#867, `agentDepthRefusal`;
+   *      1 by default, so only the person's own sessions start agents). No preset opens it, `auto` included.
    *   2. How many: at most `AGENT_CEILING` children run at once in a project, over all its sessions.
    *   3. The person's consent (`ensureAgentConsent`): the project's trust for a `normal` caller (#673); otherwise a
    *      card, answered once, always for this session, or always for this project.
@@ -253,7 +251,9 @@ export class AgentStartFlow {
     const done = (r: ChildRunResult) => ({ done: r })
     const caller = this.host.meta.get(callerId)
     if (!caller?.projectId) return done({ ok: false, error: 'This session belongs to no project, so it cannot start agents.' })
-    if (this.agentDepthBlocked(caller) && !this.host.autoBoundaryOpen(callerId, 'delegation depth')) return done({ ok: false, error: AGENT_DEPTH_ERROR })
+    // How deep agents may start agents (#867): a setting, read now, that no preset opens
+    const deep = agentDepthRefusal(this.host, callerId, 'start agents')
+    if (deep) return done({ ok: false, error: deep })
     const project = this.host.store.listProjects().find((p) => p.id === caller.projectId)
     if (!project) return done({ ok: false, error: 'This session\'s project is no longer registered.' })
     if (project.trusted !== true && !this.host.autoBoundaryOpen(callerId, 'start in an untrusted project')) {
@@ -376,8 +376,8 @@ export class AgentStartFlow {
   /**
    * The child itself, once the person (or the project's trust) allowed it (#561, #673): counted again, made in the
    * caller's folder or a new worktree, named, and given the task. A card may have stood for hours, so what the start
-   * rests on is read again first (#673 review): the caller is still here, its project still trusted, it still may start
-   * agents (depth one), and its preset is no higher than the one the person read on the card (`approvedPreset`).
+   * rests on is read again first (#673 review): the caller is still here, its project still trusted, it is still above
+   * the agent depth (#867), and its preset is no higher than the one the person read on the card (`approvedPreset`).
    *
    * **The place is taken before the first wait** (#673 review): the ceiling is checked and a place reserved in one
    * synchronous step (`agentStartReserved`), held until the child's delegation counts it or the start fails. Checked
@@ -426,7 +426,7 @@ export class AgentStartFlow {
   /**
    * What a child's start rests on in its caller, read once the person allowed it and again once its session exists,
    * right before its delegation is registered: the caller is still here, its project still registered and trusted
-   * (or the caller is `auto`), and it still may start agents (depth one).
+   * (or the caller is `auto`), and it is still above the agent depth (#867), which `auto` does not open.
    */
   private agentStartGateError(callerId: string, projectId: string): string | null {
     const caller = this.host.meta.get(callerId)
@@ -435,8 +435,7 @@ export class AgentStartFlow {
     if (!now) return 'This session\'s project is no longer registered.'
     const auto = caller.permissionPreset === 'auto'
     if (now.trusted !== true && !auto) return `This session's project is no longer trusted, so it cannot start agents. ${ASK_THE_PERSON}`
-    if (this.agentDepthBlocked(caller) && !auto) return AGENT_DEPTH_ERROR
-    return null
+    return agentDepthRefusal(this.host, callerId, 'start agents')
   }
 
   /**
@@ -654,11 +653,6 @@ export class AgentStartFlow {
     const requestId = `ag-${randomUUID()}`
     if (this.host.meta.get(callerId)?.permissionPreset !== 'auto') onCard?.(requestId)
     return this.agentConsentFrom(callerId, detail.project.id, await this.host.askHost(callerId, detail, signal, { requestId }))
-  }
-
-  /** Depth one (#561): a session started by another, or handling an ask_project task now, starts no agents */
-  agentDepthBlocked(caller: SessionInfo): boolean {
-    return !!caller.askedBy || [...this.host.children.delegations.values()].some((d) => d.sessionId === caller.id && !d.agent && !d.settled)
   }
 
   /** A `normal` caller in a trusted project needs no card to start agents (#673): the project's trust, read now */

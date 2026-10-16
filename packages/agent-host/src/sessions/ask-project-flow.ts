@@ -8,6 +8,7 @@ import { inTurn } from '../idle.js'
 import { linkedTurnEnd, type LinkedTurnEvent } from './linked-turn-end.js'
 import { raceBound } from './with-timeout.js'
 import type { DelegationFlow, DelegationHost } from './delegation-flow.js'
+import { agentDepthRefusal } from './agent-depth.js'
 
 /** How much of a linked machine's last message is read for an answer; `clipAnswer` then cuts it to the usual size */
 const ANSWER_READ_MAX_CHARS = 100_000
@@ -42,7 +43,7 @@ type LinkedAsk = {
  * and the delegation flow's members both flows share. The manager builds it with getters for its fields, so each is
  * read when used, never kept.
  */
-export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'applyDeferredRestart' | 'askHost' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'routedCards' | 'store' | 'untilCard'> &
+export type AskProjectHost = Pick<DelegationHost, 'agentRuns' | 'applyDeferredRestart' | 'askHost' | 'autoBoundaryOpen' | 'builderRefOf' | 'busyAnswer' | 'busyChoices' | 'busyForCaller' | 'children' | 'deliver' | 'enqueue' | 'ensureProjectAccess' | 'linkedReader' | 'meta' | 'queuedOf' | 'readGrants' | 'routedCards' | 'store' | 'uiPreferences' | 'untilCard'> &
   Pick<DelegationFlow, 'awaitTurn' | 'grantReads' | 'handedOverReply' | 'startDelegation' | 'untilHandedOver'>
 
 /**
@@ -95,10 +96,12 @@ export class AskProjectFlow {
   askGateError(callerId: string): string | null {
     const caller = this.host.meta.get(callerId)
     if (!caller?.projectId) return 'This session belongs to no project, so it cannot ask another one'
-    if ((caller.askedBy || [...this.host.children.delegations.values()].some((d) => d.sessionId === callerId && !d.agent && !d.settled)) && !this.host.autoBoundaryOpen(callerId, 'delegation depth')) {
-      // `askedBy` marks a child of start_agent too (#561): depth one for both reaches
-      return 'This session was itself started or asked by another session, so it cannot ask a project — say in your answer what is needed instead.'
-    }
+    /*
+     * The agent depth (#867): the task makes a session in the other project work one level below this one, so it is
+     * start_agent's limit too, and no preset opens it
+     */
+    const deep = agentDepthRefusal(this.host, callerId, 'ask a project')
+    if (deep) return deep
     /*
      * Not from an untrusted project (owner decision 2026-10-11, #382), the rule attach_app already follows
      * (`AppAccess.gate`): text in a repository the person has not trusted could be what is asking, and the consent card
@@ -120,8 +123,9 @@ export class AskProjectFlow {
    * ask_project (#371 part B): a session in one project asks another project to do a task, and gets its answer back.
    *
    *   1. The target is another registered project, named by name or id. Its own project is refused (do it here),
-   *      and a session that was itself asked by another project cannot ask a third: depth one, so two projects
-   *      that consented to each other cannot bounce a task between them without a person.
+   *      and a session at the agent depth cannot ask (#867): at the default of 1, one itself asked by another project
+   *      cannot ask a third, so two projects that consented to each other cannot bounce a task between them without a
+   *      person.
    *   2. The person's consent for the pair (`ensureProjectAccess`, kind 'delegate').
    *   3. An existing ordinary session in the target, named by name or id; no creation or ownership change.
    *      Without a name exactly one is selected, otherwise its sessions are listed for the caller to choose.

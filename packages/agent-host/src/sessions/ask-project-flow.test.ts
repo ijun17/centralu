@@ -41,19 +41,24 @@ describe('the gates read before anything is asked', () => {
     expect(await flow.askProject('loose', { project: 'p2', task: 'x' })).toEqual({ ok: false, error: 'This session belongs to no project, so it cannot ask another one' })
   })
 
-  it('a session that was itself asked cannot ask again, unless auto opens that boundary', () => {
-    meta.set('asked', session('asked', { askedBy: 'caller' }))
+  it('a session as deep as the agent depth cannot ask a project, auto included; the depth read at each call lets it (#867)', () => {
+    meta.set('asked', session('asked', { askedBy: 'caller', permissionPreset: 'auto' }))
     const opened: string[] = []
-    let open = false
+    let agentDepth: number | undefined
     const flow = new AskProjectFlow(hostWith({
       meta, children, store,
-      autoBoundaryOpen: (id, boundary) => (opened.push(`${id}:${boundary ?? ''}`), open),
+      uiPreferences: () => ({ agentDepth }) as never,
+      autoBoundaryOpen: (id, boundary) => (opened.push(`${id}:${boundary ?? ''}`), true),
     }))
-    expect(flow.askGateError('asked')).toMatch(/^This session was itself started or asked by another session/)
-    open = true
-    // Past the depth boundary, the project's trust is the next gate (the store has no such project: not trusted)
+    // No depth saved reads as 1; auto is never asked about the depth
+    expect(flow.askGateError('asked')).toMatch(/^This session is 1 level below a session the person started, and "How deep agents may start agents" in Settings → Orchestrator is 1, so it cannot ask a project\./)
+    agentDepth = 1
+    expect(flow.askGateError('asked')).toMatch(/so it cannot ask a project/)
+    expect(opened).toEqual([])
+    agentDepth = 2
+    // Past the depth, the project's trust is the next gate (the store has no such project: not trusted, auto opens it)
     expect(flow.askGateError('asked')).toBeNull()
-    expect(opened).toEqual(['asked:delegation depth', 'asked:delegation depth', 'asked:delegate from an untrusted project'])
+    expect(opened).toEqual(['asked:delegate from an untrusted project'])
   })
 
 })

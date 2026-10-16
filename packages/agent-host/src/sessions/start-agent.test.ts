@@ -485,7 +485,7 @@ describe('starting another agent in the same project', () => {
       expect(childrenOf(s)).toEqual([])
     })
 
-    it('a session that began handling another project\'s task while the card stood starts nothing (depth one)', async () => {
+    it('a session that began handling another project\'s task while the card stood starts nothing (agent depth 1)', async () => {
       const s = await session('safe')
       const p = w.mgr.startAgent(s, { task: 'wait for the person', wait: false })
       await w.until(() => !!agentCard(s))
@@ -498,7 +498,7 @@ describe('starting another agent in the same project', () => {
       void w.mgr.askProject(asker, { project: w.caller.id, session: s, task: 'check something', ifBusy: 'note' })
       await w.until(() => !!handleOf(s)?.sent.some((t) => t.includes('check something')))
       w.mgr.respondApproval(s, requestId, 'allow')
-      expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('itself started or asked') })
+      expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('How deep agents may start agents') })
       expect(childrenOf(s)).toEqual([])
     })
   })

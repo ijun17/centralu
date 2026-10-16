@@ -1484,6 +1484,12 @@ export const UiPreferences = z.object({
   /** Running children per project: null uses preset defaults (auto unlimited, otherwise 4); 0 is unlimited. */
   agentCeiling: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
   /**
+   * How many levels of sessions may start agents (#867): at 1 only a session the person started starts agents (start_agent,
+   * a fork, ask_project); at 2 its children do too, at 3 its grandchildren. Every preset keeps to it, `auto` included.
+   * Optional, like agentCeiling: a record from before it has none and reads as `DEFAULT_AGENT_DEPTH` (`agentDepthOf`).
+   */
+  agentDepth: z.number().int().min(1).max(3).optional(),
+  /**
    * The model and effort start_agent uses per tool and difficulty (#729), when the caller names a difficulty and no
    * model. A difficulty with nothing chosen falls back to the project's remembered choice, as a call without one does.
    * Optional, like agentCeiling: a record from before it has none. The patch carries the whole map.
@@ -1510,6 +1516,20 @@ export type UiPreferences = z.infer<typeof UiPreferences>
  */
 export const UiPreferencesPatch = UiPreferences.partial()
 export type UiPreferencesPatch = z.infer<typeof UiPreferencesPatch>
+
+/**
+ * The agent depth when none is saved (#867, owner decision 2026-10-16): only the sessions the person started may start
+ * agents. Twelve sessions at once, started by `auto` children each starting their own, took a Mac's load average to 216
+ * (#862).
+ */
+export const DEFAULT_AGENT_DEPTH = 1
+/** The deepest the setting goes (#867): three levels of agents below the person's session */
+export const MAX_AGENT_DEPTH = 3
+
+/** The agent depth in force: the saved one, else the default */
+export function agentDepthOf(prefs: Pick<UiPreferences, 'agentDepth'>): number {
+  return prefs.agentDepth ?? DEFAULT_AGENT_DEPTH
+}
 
 /** What someone who has never opened Settings gets. Each field's reason is on the field. */
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {

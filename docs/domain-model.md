@@ -601,7 +601,7 @@ sequenceDiagram
   end
 ```
 
-Depth is one: a delegated session cannot ask a third project. A second task to the same project while one runs is
+At the default agent depth of 1 (a setting, up to 3, that no preset crosses, #867), a delegated session cannot ask a third project. A second task to the same project while one runs is
 refused. Read grants live in the host's memory and end with it. Stopping the caller stops the delegated turn.
 Detail: [agent-host.md](agent-host.md) §1.2.
 

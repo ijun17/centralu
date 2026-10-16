@@ -194,9 +194,10 @@ What one call does (`SessionManager.askProject`, which runs `AskProjectFlow` in 
 
 1. **The project.** Name or id of another registered project, on this computer or on a linked machine
    (§1.2.4). Its own project is refused; an unknown name lists the other projects, each with the machine
-   it is on once a machine is linked. Under `safe`/`normal`, an untrusted caller cannot ask, and a child
-   started by another session or a session currently handling a cross-project task cannot delegate
-   again (depth one). Under `auto` (#603), the caller's own preset opens and logs those boundaries.
+   it is on once a machine is linked. Under `safe`/`normal`, an untrusted caller cannot ask; under `auto`
+   (#603), the caller's own preset opens and logs that boundary. Under every preset, a session at the agent depth
+   cannot delegate (#867, `agentDepthRefusal`): at the default of 1, a child started by another session or a
+   session currently handling a cross-project task.
 2. **The session.** `session` names an ordinary session by name or id. Orchestrators, builders and
    app agents are excluded. Without it, exactly one ordinary session is selected; otherwise the call
    lists the candidates with id, name, state and last activity and asks the caller to name one.
@@ -326,8 +327,9 @@ The optional `tool` is a registry name, accepted as a string by the schema and c
 current registry at call time. An unknown name returns an error listing the installed tools; adding
 an adapter does not require changing this schema.
 
-Under `auto` (#603), the host's shared `autoBoundaryOpen` decision opens consent, depth,
-project trust and same-project ownership gates, with allowances logged. Worktree cleanup keeps local work
+Under `auto` (#603), the host's shared `autoBoundaryOpen` decision opens consent,
+project trust and same-project ownership gates, with allowances logged. It does not open the agent depth (#867):
+`auto` children each starting their own once ran twelve sessions at once (#862). Worktree cleanup keeps local work
 in the trash under every preset (#608).
 `agent_session` can status, wait, send or stop any session in the same project, and delete
 any worktree session there,
@@ -355,8 +357,15 @@ prevent an idle caller from sleeping, or stop the target when the caller is inte
 What one `start_agent` call does (`SessionManager.startAgent`, also `AgentStartFlow` in start-agent-flow.ts), with the refusal/card rules
 below retained for `safe` and `normal`:
 
-1. **Who may.** An ordinary session (`reader` profile) of a trusted project (#382's rule), not one marked `askedBy`:
-   depth one, so a child cannot start agents, and neither can a session handling an active ask_project task.
+1. **Who may.** An ordinary session (`reader` profile) of a trusted project (#382's rule), above the agent depth
+   (#867, `sessions/agent-depth.ts`). Settings → Orchestrator → How deep agents may start agents, a slider from 1 to 3,
+   persists `prefs.agentDepth`; a record without it reads as 1 (`agentDepthOf`), so it needs no store migration. A
+   session the person started is depth 0; one marked `askedBy`, or working on a task another session gave it (an
+   unsettled delegation: ask_project, a fork, agent_session), is one deeper than that session, the deepest link
+   counting, and a fork whose requester is gone is at least 1. A caller at the setting's depth or deeper is refused
+   under every preset, `auto` included, with an error that names the setting and where it is; at 1, a child cannot
+   start agents, and neither can a session handling an active ask_project task. The setting is read at each call
+   (and again after the card, below), so lowering it applies to the next start. Forks and ask_project read the same.
 2. **How many.** Settings → Orchestrator → Running agents per project persists `prefs.agentCeiling`,
    read at call time. Empty/null means no ceiling under `auto`, `AGENT_CEILING` (4) otherwise;
    zero is unlimited, and a positive integer sets a ceiling per project over all its sessions.
@@ -411,7 +420,7 @@ below retained for `safe` and `normal`:
    the request is in the store's `agent_start_requests` (v50): a host swap or restart leaves the row (the leaving
    host's call answers `pending`), and the next host raises the card again (`resumeAgentStart`) and starts the child
    when it is approved. An approval (here or there) first reads again what the start rests on (#673 review): the
-   caller is still here, its project still trusted, it is still allowed by depth one (it may have begun handling an
+   caller is still here, its project still trusted, it is still above the agent depth (it may have begun handling an
    ask_project task meanwhile), and its preset is no higher than the one on the card; otherwise no child starts and the
    caller is told why. Turning trust off withdraws the project's standing cards at once and tells their callers. The
    same caller asking the same task (and tool, when named) while its card stands gets the existing handle back, not a
@@ -824,7 +833,7 @@ the person sends are unchanged. The answer says which choice ran and its handle.
 |---|---|
 | `note` | Today's mid-turn note (#594/#606/#653): only when B's own preset is `auto`, and only on a CLI that takes input mid-turn (`send_to_session` sends as before). The turn's answer stays its owner's; B reads the reply to its note on its own reader. Not into another caller's `ask_project` task. |
 | `queue` | Held (`queued`, `enqueue`) and delivered as a new turn B owns when A's running turn ends (`drainQueue`, from the turn's end and the boundaries that free a session): B's delegation for `agent_session` and `ask_project`, its turn for `send_to_session`, each framed as that tool frames its work, with the report when it ends and its cards (§1.2.2). One at a time, oldest first. The answer is a handle (`qr-…`) and the place in the queue; `agent_session` status (or `ask_project` with no task) says where it stands, `stop` withdraws it. Written to `queued_requests` (store v52): `detachAll` delivers nothing (`handingOver`), and the next host delivers a request when the kept session's turn ends there, or soon after start for a session at rest (a kept one after its adoption, so its input never starts a second process). A request whose session or requester is gone is dropped, as are those of a trashed session. Before it goes in, the request tool's gates are read again with the requester's preset as it is then (`queuedGateError`): for ask_project its trust and depth, the target project, and the pair's remembered consent when only `auto` let the request pass without one (`openedByAuto`, stored as `queued_requests.opened_by_auto`, store v54, so a swap keeps it; a row an older build wrote is read as marked when the pair has no remembered consent); for agent_session the ownership a requester that is not `auto` needs and the preset rule. A request that fails them is dropped with its requester told. A requester moved off `auto`, or handing off to a successor that is not `auto` (`moveLiveChildren`, the original is told), drops at once what only `auto` let through (`dropOpenedByAuto`: a marked ask whose pair still has no remembered consent, a send to a session it did not start); one being delivered at that moment is left to the delivery gate, which reads the stored mark if a swap delivers it again. Its caller's project losing trust or being removed, and the person revoking the pair, withdraw queued `ask_project` requests the same way (`withdrawReaches`); trust and a revoked pair leave an `auto` requester's requests, which the delivery gate reads again. **Delivery** (#684 review): one drain per session at a time (`delivering`), which reserves the session before its first await, so waking a sleeping session counts as busy and lets no second request in; the request stays first in the queue and its row stays, marked `delivering_at`, until the session's turn actually starts, and only then is it taken off. A swap or crash in between leaves the row, and the next host delivers it again: at least once, with one duplicate possible when the old process took the input without a word before the swap. A deferred restart is not waited out by the drain (`deliver` waits for it), and its end schedules the drain again. A retry of the same request (requester, tool and words) returns the handle already held instead of a second entry. |
-| `fork`, `fork_read` | A sub-session from a copy of A's conversation now (`forkFor`): the adapter's `forkConversation` (Claude: the SDK's `forkSession`, which writes the copy beside the original's transcript; Codex: `thread/fork`), resumed with its history on screen (`importHistory`). An adapter without it, a session with no conversation yet, and `ask_project` (which never creates a session in another project) are not offered a fork. start_agent's gates apply: depth one, the project's trust (#382; #673's consent rule as `ensureAgentConsent` has it) and the per-project ceiling; once the card is answered the gates are read again and a place is taken before the copy is made (`reservePlace`), and the project losing trust withdraws a card still standing. Once the fork's session exists the gates and the lower of the two presets as they are now are read again with no wait before its delegation; a fork that fails them gets no task and goes to the trash. The preset is the lowest of B's and A's. `fork` gets a worktree of its own (`agentWorktreeBranch`, branched from A's branch when A is a worktree session; a project with no git repository is refused and pointed at `fork_read`); `fork_read` is read-only work in A's folder under at most `safe`, so two agents never write one folder. Linked to B: `askedBy` B for a same-project ordinary session (the orchestrator through the delegation alone), its turn B's delegation (the report, its cards), and `forkedFrom` A (`sessions.forked_from_session_id`, store v52), which the sidebar uses to hang it under A, ahead of `parentSessionId` and `askedBy` (`orderAsTree`, `foldGroupsHiding`). |
+| `fork`, `fork_read` | A sub-session from a copy of A's conversation now (`forkFor`): the adapter's `forkConversation` (Claude: the SDK's `forkSession`, which writes the copy beside the original's transcript; Codex: `thread/fork`), resumed with its history on screen (`importHistory`). An adapter without it, a session with no conversation yet, and `ask_project` (which never creates a session in another project) are not offered a fork. start_agent's gates apply: the agent depth (#867), the project's trust (#382; #673's consent rule as `ensureAgentConsent` has it) and the per-project ceiling; once the card is answered the gates are read again and a place is taken before the copy is made (`reservePlace`), and the project losing trust withdraws a card still standing. Once the fork's session exists the gates and the lower of the two presets as they are now are read again with no wait before its delegation; a fork that fails them gets no task and goes to the trash. The preset is the lowest of B's and A's. `fork` gets a worktree of its own (`agentWorktreeBranch`, branched from A's branch when A is a worktree session; a project with no git repository is refused and pointed at `fork_read`); `fork_read` is read-only work in A's folder under at most `safe`, so two agents never write one folder. Linked to B: `askedBy` B for a same-project ordinary session (the orchestrator through the delegation alone), its turn B's delegation (the report, its cards), and `forkedFrom` A (`sessions.forked_from_session_id`, store v52), which the sidebar uses to hang it under A, ahead of `parentSessionId` and `askedBy` (`orderAsTree`, `foldGroupsHiding`). |
 
 **Sizes.** `ifBusy` carries no words in any schema: the `busy` answer names it and its values. `ask_project`'s is a
 bare string (the enum would put the reader's Claude request over its 2,300), and the runner refuses other values;
