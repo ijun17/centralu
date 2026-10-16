@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { RelativeAge } from '../../components/RelativeAge.jsx'
-import type { ExternalSession, GitBranch, ToolName, ToolStatus } from '@cc/protocol'
+import type { ExternalSession, GitBranch } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { isPlainEscape, isTextEntry } from '../../app/keys.js'
-import { useSessionsOf, useToolMeta, useTools } from '../../store/selectors.js'
+import { useSessionsOf, useTools } from '../../store/selectors.js'
 import { Modal } from '../../components/Modal.jsx'
 import { MachineTag } from '../machines/MachineTag.jsx'
+import { useToolChoice } from './useToolChoice.js'
 
 /** What one field looks like. All three must share a shape to read as "the same kind of answer" */
 const inputClass =
@@ -80,9 +81,11 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
    * but whether a tool is installed or logged in may have just changed.
    */
   const allTools = useTools()
-  const [tools, setTools] = useState<ToolStatus[] | null>(null)
-  const [tool, setTool] = useState<ToolName>(project?.defaultTool ?? allTools[0]?.name ?? '')
-  const toolMeta = useToolMeta(tool)
+  const machine = project?.machine ?? null
+  const { tool, setTool, toolMeta, tools, info, usable, blocked } = useToolChoice(
+    project?.defaultTool ?? allTools[0]?.name ?? '',
+    machine,
+  )
   const [busy, setBusy] = useState(false)
   /**
    * Run only this session in a worktree (an FR-2 option).
@@ -190,25 +193,6 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
     listRef.current?.querySelector<HTMLElement>('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest' })
   }, [resume?.externalId])
 
-  /*
-   * Detected every time the dialog opens — the person may have just installed or logged in.
-   *
-   * **On the project's machine** (#82): a session in a project on a linked machine runs that machine's CLIs, so whether
-   * one is installed and logged in is that machine's answer, not this computer's (probe 1 of the plan found this
-   * dialog answering for the wrong machine).
-   */
-  const machine = project?.machine ?? null
-  const detect = useCallback(async () => {
-    try {
-      setTools(await platform.agents.detect(machine))
-    } catch {
-      setTools([])
-    }
-  }, [platform, machine])
-  useEffect(() => {
-    void detect()
-  }, [detect])
-
   // Changing the tool changes the list too — the previous selection belonged to a different tool, so it is discarded
   useEffect(() => {
     let alive = true
@@ -229,36 +213,6 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
       alive = false
     }
   }, [platform, projectId, tool])
-
-  /**
-   * The app has to work normally even when only **one** of the two tools is usable (a product
-   * rule).
-   *
-   * If the default tool is unusable but the other one works fine, this **silently switches to it.**
-   * Otherwise, a person who only uses Codex would hit a "log in to Claude" wall every time they
-   * opened the dialog, needing to log into a tool they never use just to open it — a direct
-   * violation of this app's principle ("do not force a workflow on the person").
-   *
-   * The switch happens **exactly once**, the moment detection results first arrive. Anything the
-   * person picks after that is left untouched.
-   */
-  const autoPicked = useRef(false)
-  useEffect(() => {
-    if (!tools || autoPicked.current) return
-    autoPicked.current = true
-    const ok = (t: ToolName) => {
-      const d = tools.find((x) => x.name === t)
-      return d?.installed === true && d.loggedIn
-    }
-    setTool((cur) => (ok(cur) ? cur : (tools.find((x) => x.installed && x.loggedIn)?.name ?? cur)))
-  }, [tools])
-
-  const info = (t: ToolName) => tools?.find((x) => x.name === t)
-  const usable = (t: ToolName) => {
-    const d = info(t)
-    return !tools || (d?.installed === true && d.loggedIn)
-  }
-  const blocked = tools ? !usable(tool) : false
 
   // The weight that copying would drag along — the judgment a person makes from this list is "this is too big," so a total is shown
   const picks = splitList(copyFiles)

@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { newAppIdProblem, type ToolName, type ToolStatus } from '@cc/protocol'
-import { usePlatform } from '../../app/PlatformProvider.jsx'
+import { useState } from 'react'
+import { newAppIdProblem } from '@cc/protocol'
 import { isPlainEscape } from '../../app/keys.js'
 import { Modal } from '../../components/Modal.jsx'
-import { useToolMeta, useTools } from '../../store/selectors.js'
+import { useTools } from '../../store/selectors.js'
 import { useStore } from '../../store/store.js'
 import { appIdHint, deriveAppId } from './newAppId.js'
+import { useToolChoice } from './useToolChoice.js'
 
 /** What one field looks like — it has to match the new session dialog's shape to read as "the same kind of dialog" */
 const inputClass =
@@ -33,7 +33,6 @@ const inputClass =
  * machine). That fact is stated before the rejection arrives, with a way to trust it right there.
  */
 export function NewAppDialog({ projectId, onClose }: { projectId: string | null; onClose: () => void }) {
-  const platform = usePlatform()
   const project = useStore((s) => (projectId ? s.projects[projectId] : undefined))
   const orchestratorTool = useStore((s) => (s.orchestratorId ? s.sessions[s.orchestratorId]?.tool : undefined))
   const createApp = useStore((s) => s.createApp)
@@ -45,11 +44,9 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
    * wrong, the dialog **always sends the tool actually selected**: a session never starts with a
    * different tool than the one shown selected.
    */
-  const [tool, setTool] = useState<ToolName>(
+  const { tool, setTool, toolMeta, tools, info, usable, blocked } = useToolChoice(
     (projectId ? project?.defaultTool : orchestratorTool) ?? allTools[0]?.name ?? '',
   )
-  const toolMeta = useToolMeta(tool)
-  const [tools, setTools] = useState<ToolStatus[] | null>(null)
   const [name, setName] = useState('')
   /** The value the person entered if they touched the id, otherwise null — the derived id keeps following as the name is edited */
   const [idEdit, setIdEdit] = useState<string | null>(null)
@@ -60,36 +57,6 @@ export function NewAppDialog({ projectId, onClose }: { projectId: string | null;
   const problem = newAppIdProblem(id)
   const untrusted = !!project && !project.trusted
 
-  // Detected every time it opens — the person may have just installed or logged in
-  const detect = useCallback(async () => {
-    try {
-      setTools(await platform.agents.detect())
-    } catch {
-      setTools([])
-    }
-  }, [platform])
-  useEffect(() => {
-    void detect()
-  }, [detect])
-
-  // Switches **exactly once** if the default tool is unusable but the other one is fine (the same rule as the new session dialog) — anything picked after that is left alone
-  const autoPicked = useRef(false)
-  useEffect(() => {
-    if (!tools || autoPicked.current) return
-    autoPicked.current = true
-    const ok = (t: ToolName) => {
-      const d = tools.find((x) => x.name === t)
-      return d?.installed === true && d.loggedIn
-    }
-    setTool((cur) => (ok(cur) ? cur : (tools.find((x) => x.installed && x.loggedIn)?.name ?? cur)))
-  }, [tools])
-
-  const info = (t: ToolName) => tools?.find((x) => x.name === t)
-  const usable = (t: ToolName) => {
-    const d = info(t)
-    return !tools || (d?.installed === true && d.loggedIn)
-  }
-  const blocked = tools ? !usable(tool) : false
   const canCreate = !busy && name.trim() !== '' && problem === null && !blocked && !untrusted && tool !== ''
 
   return (
