@@ -3,6 +3,7 @@ import { type ApprovalDetail, type BackgroundTask, type NormalizedEvent, type Re
 import { fileEditDetail, type FileChange } from '../file-changes.js'
 import { mcpImageEvents } from '../images.js'
 import { planUpdate } from '../plan.js'
+import { firstLine, isCentraluTool } from '../tool-titles.js'
 import { toolResultEvent } from '../tool-result.js'
 import { noticeWords } from './notices.js'
 
@@ -121,7 +122,7 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
      * the claude side, when its arguments are on the item. A call made from inside `exec` carries none and
      * stays centralu_run; the screen re-reads both proposal lists for such a call.
      */
-    if (tool === 'centralu_run' && (!server || server === 'centralu')) {
+    if (isCentraluTool({ server, tool }, 'centralu_run')) {
       const args = jsonObject(item.arguments ?? asObj(item.invocation).arguments)
       const command = str(args.command).trim()
       if (/^[a-z]+(?:_[a-z]+)*$/.test(command)) {
@@ -130,7 +131,7 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
       }
     }
     // ask_project (#371) — the project asked is the title, the same rule as toolSummary on the claude side
-    if (tool === 'ask_project' && (!server || server === 'centralu')) {
+    if (isCentraluTool({ server, tool }, 'ask_project')) {
       const rawArgs = item.arguments ?? asObj(item.invocation).arguments
       let project = ''
       try {
@@ -140,18 +141,6 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
         /* If the arguments are not JSON, the card names no project — it still finds the session it asked */
       }
       return { tool, title: project || tool, paths: [] }
-    }
-    // Worktree proposal (#69) — the branch name is the title, and that title is the only channel for the UI's prefill
-    if (tool.endsWith('propose_worktree_session')) {
-      const rawArgs = asObj(item.invocation).arguments
-      let branch = ''
-      try {
-        const parsed = typeof rawArgs === 'string' ? (JSON.parse(rawArgs) as unknown) : rawArgs
-        branch = str(asObj(parsed).branch)
-      } catch {
-        /* If the arguments are not JSON, the card just shows up with no name — the window opens with a blank name */
-      }
-      return { tool, title: branch || tool, paths: [] }
     }
     /*
      * **The arguments go on the title too** (dogfooding 2026-09-08).
@@ -182,8 +171,7 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
    */
   if (type === 'collabAgentToolCall') {
     const tool = str(item.tool) || type
-    const line = str(item.prompt).split('\n')[0] ?? ''
-    return { tool, title: line.length > 200 ? `${line.slice(0, 200)} …` : line || tool, paths: [] }
+    return { tool, title: firstLine(str(item.prompt)) || tool, paths: [] }
   }
   return { tool: type || 'tool', title: str(item.title) || type, paths: [] }
 }
@@ -986,8 +974,7 @@ export class CodexChildTracker {
   /** A `spawnAgent` call named this thread. */
   link(thread: string, callId: string, prompt: string): NormalizedEvent[] {
     if (this.linked.has(thread)) return []
-    const line = prompt.split('\n')[0]?.trim() ?? ''
-    this.linked.set(thread, { callId, description: line.length > 200 ? `${line.slice(0, 200)} …` : line || 'Child agent' })
+    this.linked.set(thread, { callId, description: firstLine(prompt.trim()) || 'Child agent' })
     return this.changed()
   }
 

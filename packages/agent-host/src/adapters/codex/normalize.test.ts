@@ -182,9 +182,9 @@ describe('streaming and tool calls', () => {
         summary: { tool: string; title: string }
       }).summary
     expect(summary({ command: 'propose_skill', args: { name: 'weekly-report', content: 'x' } }).tool).toBe('propose_skill')
-    expect(summary(JSON.stringify({ command: 'propose_worktree_session', args: { branch: 'feat/login-fix' } }))).toMatchObject({
-      tool: 'propose_worktree_session',
-      title: 'feat/login-fix',
+    expect(summary(JSON.stringify({ command: 'ask_project', args: { project: 'Docs' } }))).toMatchObject({
+      tool: 'ask_project',
+      title: 'Docs',
     })
     // Called from inside exec, the item carries no arguments: it stays the call, which the screen answers by re-reading both lists
     expect(summary({}).tool).toBe('centralu_run')

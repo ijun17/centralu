@@ -194,16 +194,19 @@ describe('tool calls (the actual shape from the spike)', () => {
   it('a centralu_run call is summarized as the command it runs', () => {
     const out = n({
       type: 'assistant',
-      message: { content: [{ type: 'tool_use', id: 'tu9', name: 'mcp__centralu__centralu_run', input: { command: 'propose_worktree_session', args: { branch: 'feat/login-fix' } } }] },
+      message: { content: [{ type: 'tool_use', id: 'tu9', name: 'mcp__centralu__centralu_run', input: { command: 'ask_project', args: { project: 'Docs' } } }] },
     })
     expect(out[0]).toMatchObject({
       type: 'tool_call',
-      summary: { tool: 'mcp__centralu__propose_worktree_session', title: 'feat/login-fix' },
-      input: { command: 'propose_worktree_session', args: { branch: 'feat/login-fix' } },
+      summary: { tool: 'mcp__centralu__ask_project', title: 'Docs' },
+      input: { command: 'ask_project', args: { project: 'Docs' } },
     })
     expect(toolSummary('mcp__centralu__centralu_run', { command: 'propose_skill', args: '{"name":"a","content":"b"}' }).tool).toBe('mcp__centralu__propose_skill')
     expect(toolSummary('mcp__centralu__centralu_run', { command: 'x__y' }).tool).toBe('mcp__centralu__centralu_run')
     expect(toolSummary('mcp__centralu__centralu_run', {}).tool).toBe('mcp__centralu__centralu_run')
+    // Another server's tools of the same names are not Centralu's (#843: Codex already read the server)
+    expect(toolSummary('mcp__other__centralu_run', { command: 'ask_project' }).tool).toBe('mcp__other__centralu_run')
+    expect(toolSummary('mcp__other__ask_project', { project: 'Docs' }).title).toBe('mcp__other__ask_project')
   })
 
   // Nothing reads it and every card folds; the two adapters' guesses had drifted (#428)

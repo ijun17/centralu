@@ -4,11 +4,12 @@ import { inlineImageEvent, undrawnImageEvent } from '../images.js'
 import { todoWritePlan } from '../plan.js'
 import { addTokens, NO_TOKENS, tokenCount } from '../token-usage.js'
 import { toolResultEvent } from '../tool-result.js'
+import { stepLine } from '../tool-titles.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { ClaudeBackgroundTracker } from './background-tracker.js'
 import { ClaudeGoalTracker } from './goal-tracker.js'
 import { str, type Json } from './json.js'
-import { agentReport, agentStats, approvalDetail, editedPaths, resultOutput, stepLine, toolSummary } from './tool-summary.js'
+import { agentReport, agentStats, approvalDetail, editedPaths, resultOutput, toolSummary } from './tool-summary.js'
 
 export { ClaudeBackgroundTracker, ClaudeGoalTracker, approvalDetail, toolSummary }
 

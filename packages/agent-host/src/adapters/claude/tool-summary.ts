@@ -1,5 +1,6 @@
-import type { ApprovalDetail, ToolSummary } from '@cc/protocol'
+import { launchesSubagent, type ApprovalDetail, type ToolSummary } from '@cc/protocol'
 import { diffLines, fileEditDetail, type FileChange } from '../file-changes.js'
+import { isCentraluTool } from '../tool-titles.js'
 import { str, type Json } from './json.js'
 
 const FILE_EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
@@ -9,7 +10,7 @@ const FILE_EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
  * command's full name and its arguments. Null when it names no command, which leaves the card as the call.
  */
 function commandRunOf(name: string, input: Json): { name: string; input: Json } | null {
-  if (!name.endsWith('__centralu_run')) return null
+  if (!isCentraluTool({ name }, 'centralu_run')) return null
   const command = str(input.command).trim()
   if (!/^[a-z]+(?:_[a-z]+)*$/.test(command)) return null
   let args: unknown = input.args ?? {}
@@ -39,16 +40,14 @@ export function toolSummary(name: string, input: Json): ToolSummary {
     if (p) paths.push(p)
     title = `${name}: ${p || '?'}`
   } else if (name === 'Grep' || name === 'Glob') title = `${name}: ${str(input.pattern)}`
-  // The only channel through which a proposal card can pre-fill a branch name (#69) — carried in the title.
-  else if (name.endsWith('propose_worktree_session')) title = str(input.branch, name)
   // The project asked (#371) — the caller's card names it, and finds the delegated session by it before the answer
-  else if (name.endsWith('__ask_project')) title = str(input.project, name)
+  else if (isCentraluTool({ name }, 'ask_project')) title = str(input.project, name)
   /*
    * An agent card's title is the work handed to it (#98). While it was just the name, every card
    * said "Agent Agent", and launching three agents side by side left no way to tell which card was
    * which (a dogfooding session: all three showed the same line).
    */
-  else if (name === 'Agent' || name === 'Task') title = str(input.description, name)
+  else if (launchesSubagent(name)) title = str(input.description, name)
   return { tool: name, title, paths }
 }
 
@@ -61,21 +60,6 @@ export function toolSummary(name: string, input: Json): ToolSummary {
  */
 export function editedPaths(s: ToolSummary): string[] {
   return FILE_EDIT_TOOLS.has(s.tool) ? s.paths : []
-}
-
-/**
- * One line of a subagent's step — appended to that agent card's live output (#98).
- *
- * Uses the same title rule as the parent's own card (`toolSummary`), but with the tool name
- * prepended: Bash's title is the full command text, so without the name what remains is what was
- * typed, not what it actually did. A multi-line command (a heredoc) only keeps its first line —
- * the card's tail is three lines, so a single command would otherwise take up the whole thing.
- */
-export function stepLine(s: ToolSummary): string {
-  const lines = s.title.split('\n')
-  const first = lines[0] ?? ''
-  const head = first.slice(0, 200) + (lines.length > 1 || first.length > 200 ? ' …' : '')
-  return head === s.tool || head.startsWith(`${s.tool}:`) ? head : `${s.tool}: ${head}`
 }
 
 /** "34 tool uses · 2m 13s" — the opening of an agent card's result (#98). */
