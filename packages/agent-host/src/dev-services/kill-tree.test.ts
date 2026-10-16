@@ -1,6 +1,10 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { collectOrphansWindows, killTargets, killTree, orphansOf, parsePs, parseWinProcs, stopTree, survivorTargets, type KillOs } from './kill-tree.js'
+import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from './process-tree.test-helpers.js'
 
 /**
  * Choosing targets for a tree kill (the conclusion of what was measured on 2026-09-07).
@@ -133,6 +137,7 @@ describe('parsePs', () => {
  * app process are launched) — if it stayed in our own group, kill-tree would see it as "itself"
  * and skip it.
  */
+// Signals, process groups and ps: not on Windows, whose real tree is the block after this one
 describe.skipIf(process.platform === 'win32')('stopTree — a real tree (#149)', () => {
   const GRACE_MS = 500
   const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
@@ -225,6 +230,49 @@ describe.skipIf(process.platform === 'win32')('stopTree — a real tree (#149)',
   it('even when the grandchild is in its own group from job control — with a caller that saw root end', async () => {
     await expectTreeGone(true, 'until-it-exits')
   }, 15_000)
+})
+
+/**
+ * The Windows tree kill against a real tree (#849): no OS passed in, so the real `taskkill /T /F` runs. The tree is a
+ * root started like an app or a pty's shell, a child the root started outside its job and a grandchild the child did
+ * the same with (`plantTreeScript`). Ending the root alone, which the handle's own `kill()` does, leaves both of them
+ * running: only the parent links reach them.
+ */
+describe.runIf(process.platform === 'win32')('stopTree and killTree — a real tree on Windows (#849)', () => {
+  let dir = ''
+  let pids: number[] = []
+  afterEach(async () => {
+    await cleanUp(pids)
+    pids = []
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
+  })
+
+  async function plant(): Promise<{ root: ChildProcess; exited: () => boolean; handle: { pid?: number; kill: (s?: string) => void } }> {
+    dir = mkdtempSync(join(tmpdir(), 'cc-kill-tree-'))
+    const pidFile = join(dir, 'pids')
+    const root = spawn(process.execPath, [plantTreeScript(dir), pidFile, '2'], { stdio: 'ignore', windowsHide: true })
+    let exited = false
+    root.once('exit', () => (exited = true))
+    // Starting three Node processes takes seconds on a loaded runner
+    pids = await settleOn(() => treePids(pidFile), (p) => p.length === 3, 20_000)
+    expect(pids).toHaveLength(3)
+    expect(pids[0]).toBe(root.pid)
+    expect(pids.every(isAlive)).toBe(true)
+    return { root, exited: () => exited, handle: { pid: root.pid, kill: (s) => void root.kill(s as NodeJS.Signals | undefined) } }
+  }
+
+  it('Stop (stopTree) ends the root and every process under it', async () => {
+    const t = await plant()
+    stopTree(t.handle, 500, () => !t.exited())
+    expect(await settleOn(t.exited, (x) => x, 10_000)).toBe(true)
+    expect(await settleOn(() => pids.filter(isAlive), (left) => left.length === 0, 10_000)).toEqual([])
+  }, 40_000)
+
+  it('a shutdown (killTree) ends the root and every process under it', async () => {
+    const t = await plant()
+    killTree(t.handle, 'SIGKILL')
+    expect(await settleOn(() => pids.filter(isAlive), (left) => left.length === 0, 10_000)).toEqual([])
+  }, 40_000)
 })
 
 /**
