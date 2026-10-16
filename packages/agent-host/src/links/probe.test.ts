@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseProbe, probeCommand, probeTarget } from './probe.js'
 import { WINDOWS_INLINE_MAX } from './tunnel.js'
+import { fakeExe, rmFakeDir } from '../fake-exe.test-helpers.js'
 
 /**
  * The probe the Add machine dialog runs when the person picks a host (#514), against a fake `ssh`
@@ -38,20 +39,15 @@ process.stdout.write(out.join('\r\n') + '\r\n')
 process.stderr.write('#< CLIXML\r\n<Objs Version="1.1.0.1"><Obj S="progress"></Obj></Objs>')
 `
 
-/** Runs through the fake ssh, a `#!` script that Windows does not start (tunnel.test.ts skips the same way) */
-const viaFake = it.skipIf(process.platform === 'win32')
-
 let dir: string
 let log: string
 let ssh: string
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'cc-probe-'))
   log = join(dir, 'ssh.log')
-  ssh = join(dir, 'ssh')
-  writeFileSync(ssh, FAKE_SSH)
-  chmodSync(ssh, 0o755)
+  ssh = fakeExe(dir, 'ssh', FAKE_SSH)
 })
-afterEach(() => rmSync(dir, { recursive: true, force: true }))
+afterEach(() => rmFakeDir(dir))
 
 const probe = (as: string, registry: unknown = {}, timeoutMs?: number) =>
   probeTarget('ijun1', { ssh, env: { ...process.env, FAKE_SSH_LOG: log, FAKE_AS: as, FAKE_REGISTRY: JSON.stringify(registry) }, ...(timeoutMs ? { timeoutMs } : {}) })
@@ -72,7 +68,7 @@ describe('the probe command', () => {
     expect(script).not.toMatch(/wsl\.exe|Set-|New-|Remove-|Start-|Invoke-|>/i)
   })
 
-  viaFake('goes over BatchMode ssh with the target after --', async () => {
+  it('goes over BatchMode ssh with the target after --', async () => {
     await probe('posix')
     const args = logged()[0] as string[]
     expect(args.slice(0, 6)).toEqual(['-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', '--'])
@@ -88,20 +84,20 @@ describe('the probe command', () => {
 })
 
 describe('what it tells apart', () => {
-  viaFake('a POSIX shell: no powershell there, exit 127', async () => {
+  it('a POSIX shell: no powershell there, exit 127', async () => {
     expect(await probe('posix')).toEqual({ sshTarget: 'ijun1', reachable: true, os: 'posix', windowsShell: null, wslDistros: [], error: null })
   })
 
-  viaFake("csh's own words for a missing command are a POSIX shell too", async () => {
+  it("csh's own words for a missing command are a POSIX shell too", async () => {
     expect((await probe('csh')).os).toBe('posix')
   })
 
-  viaFake('Windows with no DefaultShell: cmd.exe, which is what OpenSSH runs then', async () => {
+  it('Windows with no DefaultShell: cmd.exe, which is what OpenSSH runs then', async () => {
     const r = await probe('windows', { platform: 'Win32NT', defaultShell: '' })
     expect(r).toEqual({ sshTarget: 'ijun1', reachable: true, os: 'windows', windowsShell: 'cmd', wslDistros: [], error: null })
   })
 
-  viaFake.each([
+  it.each([
     ['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', 'powershell'],
     ['"C:\\Program Files\\PowerShell\\7\\pwsh.exe"', 'pwsh'],
     ['C:\\Windows\\System32\\cmd.exe', 'cmd'],
@@ -110,7 +106,7 @@ describe('what it tells apart', () => {
     expect((await probe('windows', { platform: 'Win32NT', defaultShell })).windowsShell).toBe(shell)
   })
 
-  viaFake('the WSL distros, the default first, without docker-desktop and without a name WSL would not take', async () => {
+  it('the WSL distros, the default first, without docker-desktop and without a name WSL would not take', async () => {
     const r = await probe('windows', {
       platform: 'Win32NT',
       defaultGuid: '{b}',
@@ -127,11 +123,11 @@ describe('what it tells apart', () => {
     ])
   })
 
-  viaFake('PowerShell on a Unix machine, installed as `powershell`, is a POSIX machine', async () => {
+  it('PowerShell on a Unix machine, installed as `powershell`, is a POSIX machine', async () => {
     expect((await probe('windows', { platform: 'Unix' })).os).toBe('posix')
   })
 
-  viaFake("not reached, or a key refused: ssh's own reason, and nothing told", async () => {
+  it("not reached, or a key refused: ssh's own reason, and nothing told", async () => {
     expect(await probe('unreachable')).toEqual({
       sshTarget: 'ijun1',
       reachable: false,
@@ -142,12 +138,13 @@ describe('what it tells apart', () => {
     })
   })
 
-  viaFake('an answer it does not recognise: reached, nothing told, what came back said', async () => {
+  it('an answer it does not recognise: reached, nothing told, what came back said', async () => {
     expect(await probe('odd')).toMatchObject({ reachable: true, os: null, error: 'This account is restricted' })
   })
 
   /** The probe sent TERM alone: an ssh that ignored it ran on with nobody waiting for it (#428) */
-  viaFake('an ssh that ignores TERM past its deadline is KILLed', async () => {
+  // A shell script that traps TERM: there is no TERM to ignore on Windows, where the bound ends ssh with TerminateProcess
+  it.skipIf(process.platform === 'win32')('an ssh that ignores TERM past its deadline is KILLed', async () => {
     const pidFile = join(dir, 'pid')
     /*
      * An ssh that ignores TERM, as one stuck in a ProxyCommand can. A shell, so TERM is ignored from its first
@@ -174,11 +171,11 @@ describe('what it tells apart', () => {
     expect(left).toBe(false)
   }, 20_000)
 
-  viaFake('reads a reason whose character arrives in two pieces as one character (#428)', async () => {
+  it('reads a reason whose character arrives in two pieces as one character (#428)', async () => {
     expect(await probe('split')).toMatchObject({ reachable: true, os: null, error: '접속 거부: 계정이 잠겼습니다' })
   })
 
-  viaFake('an ssh that never answers is ended and reported as not reached', async () => {
+  it('an ssh that never answers is ended and reported as not reached', async () => {
     const r = await probe('hang', {}, 500)
     expect(r).toMatchObject({ reachable: false, os: null, error: 'ssh to ijun1 did not answer in time' })
   })
