@@ -16,6 +16,13 @@ privileged conversation memory. Read-session, preview and recall text is framed 
 untrusted data, not human authorization — that now includes what one ordinary session reads of
 another in the same project; the reader set reads no other project and cannot send.
 
+Who wrote each line travels with it (#838). `read_session` gives a line another session sent `from` and one an app
+sent `fromApp` (`authorOf` in `sessions/transcript-view.ts`); `recall`'s context marks every message
+(`[person]`, `[agent]`, `[session "<name>"]`, `[app "<name>"]`) and indents a message's own later lines, so neither a
+child's report nor an app's text reads as the person's, and no text can start a line with a mark of its own. The
+orchestrator's memory of its past conversation (appended to its prompt when it restarts) leaves out app messages as it
+already left out other sessions', and indents a message's later lines, so text cannot start a `Person:` line.
+
 ### Starting other agents in the same project (#561)
 
 `start_agent` and `agent_session` let an ordinary session start a Claude or Codex session in its own project and

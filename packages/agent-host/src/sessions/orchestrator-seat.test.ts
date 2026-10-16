@@ -1,6 +1,6 @@
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AdapterCapabilities, SessionInfo, ToolName } from '@cc/protocol'
+import { sessionLiveDefaults, type AdapterCapabilities, type SessionInfo, type ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, LinkedSessions, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
@@ -256,5 +256,30 @@ describe('a session the orchestrator creates', () => {
     expect(await orchestratorToolsFor(host, 'orch').createSession({ project: 'far', firstMessage: 'go' })).toMatchObject({ ok: true })
     expect(createSession).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ preset: 'safe' }))
     expect(send).toHaveBeenCalledWith('m1/s', 'go', 'Orchestrator')
+  })
+})
+
+// read_session said only role "user" for every message in, so a child's report or an app's text read as the person's (#838)
+describe('what read_session says of who wrote a line', () => {
+  it('a line another session or an app sent carries its name; the person’s carries none', async () => {
+    store.addProject({ id: 'p1', path: tmpdir(), name: 'site' })
+    store.upsertSession({
+      id: 'a', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'a', autoNamed: false, state: 'idle',
+      lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
+      serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null,
+      scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
+    })
+    store.appendMessages([
+      { sessionId: 'a', seq: 1, role: 'user', kind: 'text', payload: { text: 'mine' }, ts: 1 },
+      { sessionId: 'a', seq: 2, role: 'user', kind: 'text', payload: { text: 'report', from: { sessionId: 'w', name: 'Worker' } }, ts: 2 },
+      { sessionId: 'a', seq: 3, role: 'user', kind: 'text', payload: { text: 'view', fromApp: { appId: 's', projectId: null, name: 'Slider' } }, ts: 3 },
+    ])
+    const r = await orchestratorToolsFor(host, 'orch').readSession('a')
+    const lines = (r as { lines: string[] }).lines.map((l) => JSON.parse(l) as Record<string, unknown>)
+    expect(lines.map(({ text, from, fromApp }) => ({ text, from, fromApp }))).toEqual([
+      { text: 'mine', from: undefined, fromApp: undefined },
+      { text: 'report', from: 'Worker', fromApp: undefined },
+      { text: 'view', from: undefined, fromApp: 'Slider' },
+    ])
   })
 })

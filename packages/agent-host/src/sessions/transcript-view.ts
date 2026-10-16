@@ -1,4 +1,4 @@
-import { oneLineText, type SessionInfo, type StoredMessage } from '@cc/protocol'
+import { frameField, oneLineText, type SessionInfo, type StoredMessage } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
 import { clipPreview, lastResponse } from './turn-answer.js'
 
@@ -34,6 +34,27 @@ const CONTEXT_CHARS = 4000
 
 function payloadHasFrom(payload: unknown): boolean {
   return payload !== null && typeof payload === 'object' && 'from' in payload
+}
+
+/**
+ * Who wrote a stored message that is not the session's own answer (#838): another session (`from`, a send_to_session
+ * or a report), an app (`fromApp`, a view's message or work it asked for), or else the person. Read from the row, so
+ * a reader can say who wrote each line instead of making all of it the person's.
+ */
+export type MessageAuthor = { kind: 'person' } | { kind: 'session'; name: string } | { kind: 'app'; name: string }
+
+export function authorOf(payload: unknown): MessageAuthor {
+  if (payload === null || typeof payload !== 'object') return { kind: 'person' }
+  const p = payload as { from?: { name?: unknown }; fromApp?: { name?: unknown } }
+  if (p.fromApp && typeof p.fromApp === 'object') return { kind: 'app', name: frameField(String(p.fromApp.name ?? '')) }
+  if (p.from && typeof p.from === 'object') return { kind: 'session', name: frameField(String(p.from.name ?? '')) }
+  return { kind: 'person' }
+}
+
+/** Every line after a message's first, indented: a line break inside one message never starts a line of its own (#838) */
+const LINE_BREAKS = /\r\n|[\n\r\u0085\u2028\u2029]/g
+function indentedLines(text: string): string {
+  return text.replace(LINE_BREAKS, '\n  ')
 }
 
 function payloadText(payload: unknown): string {
@@ -100,13 +121,20 @@ export function contextAt(reader: MessageReader, sessionId: string, seq: number)
     chosen.push(r)
   }
   chosen.sort((x, y) => x.seq - y.seq)
+  /*
+   * Every message is marked with who wrote it, and its own line breaks are indented (#838). Only the person's used to
+   * be marked, and every user row was "[person]": a child's report or an app's text read as the person's words, and a
+   * line in any message could start a "[person]" line of its own.
+   */
   const parts: string[] = []
   for (const r of chosen) {
     const t = ((r.payload as { text?: string }).text ?? '').slice(0, CONTEXT_MSG_CHARS)
-    // A person's message marks the boundary — mixing up who said what would only cause confusion
-    parts.push(r.role === 'user' ? `\n[person] ${t}\n` : t)
+    const author = authorOf(r.payload)
+    const mark =
+      r.role !== 'user' ? '[agent]' : author.kind === 'person' ? '[person]' : author.kind === 'session' ? `[session ${JSON.stringify(author.name)}]` : `[app ${JSON.stringify(author.name)}]`
+    parts.push(`${mark} ${indentedLines(t)}`)
   }
-  return parts.join('')
+  return parts.join('\n')
 }
 
 /** When it last moved — used to tell which session's conversation is happening right now */
@@ -151,7 +179,8 @@ export function previewOf(reader: MessageReader, sessionId: string, maxChars = 1
  * process's system prompt. This is not a resume — it is a **handoff**: it cannot restore it word for
  * word, but it hands over what was being talked about.
  *
- * **Only the person's own words and its own answers go in.** Tool results (the body of another
+ * **Only the person's own words and its own answers go in.** Not a message another session or an app sent (#838), and
+ * each message's own line breaks are indented, so its text cannot start a line that reads as the person's. Tool results (the body of another
  * session pulled in through read_session or recall) are excluded: opening a path where text a worker
  * wrote gets promoted into a system prompt would recreate exactly the channel from lower privilege
  * to higher privilege (the same reason orchestrator-home.ts turns off folder documents).
@@ -162,10 +191,13 @@ export function orchestratorMemory(reader: MessageReader, sessionId: string): st
   for (const m of rows) {
     if (m.kind !== 'text') continue
     if (m.role !== 'user' && m.role !== 'assistant') continue
+    // Another session's words and an app's text are not the person's (#838): neither goes into the prompt
+    if (m.role === 'user' && authorOf(m.payload).kind !== 'person') continue
     if (payloadHasFrom(m.payload)) continue
     const text = payloadText(m.payload).trim()
     if (!text) continue
-    lines.push(`${m.role === 'user' ? 'Person' : 'Me'}: ${text.slice(0, MEMORY_LINE_CHARS)}`)
+    // A line break inside a message is indented, so no text can start a "Person:" line of its own (#838)
+    lines.push(`${m.role === 'user' ? 'Person' : 'Me'}: ${indentedLines(text.slice(0, MEMORY_LINE_CHARS))}`)
   }
   if (lines.length === 0) return ''
   return [

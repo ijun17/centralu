@@ -7,7 +7,7 @@ import { presetWithin } from './start-agent.js'
 import type { ChildOwnership } from './child-ownership.js'
 import type { OrchestratorProposals } from './orchestrator-proposals.js'
 import { dedupeNearbyHits, takeInTurns, windowAround } from './snippet.js'
-import { contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
+import { authorOf, contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
 
 /**
  * What the orchestrator tools reach of the session manager (#428): its sessions and store, who owns whose work, and
@@ -338,7 +338,10 @@ export function orchestratorToolsFor(
             lines.push(JSON.stringify({ ts: stamp(r.ts), role: 'assistant', text }))
           }
         } else if (r.kind === 'text') {
-          lines.push(JSON.stringify({ ts: stamp(r.ts), role: 'user', text: p.text ?? '' }))
+          // Who wrote it (#838): a child's report or an app's text is not the person's, and says so on its line
+          const author = authorOf(r.payload)
+          const by = author.kind === 'session' ? { from: author.name } : author.kind === 'app' ? { fromApp: author.name } : {}
+          lines.push(JSON.stringify({ ts: stamp(r.ts), role: 'user', ...by, text: p.text ?? '' }))
         } else if (r.kind === 'tool_call' && p.summary?.title) {
           /*
            * **A tool call is folded up.** Expanded, a full python script or a full commit message
