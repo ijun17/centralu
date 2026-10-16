@@ -1265,6 +1265,17 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     expect(hub.mgr.listSessions().find((s) => s.id === 'h1')!.state).not.toBe('error')
   })
 
+  // The machine counts its session one level below the hub's caller while it works on the task (#838 item 12)
+  it('tells the machine the depth its session works at, which ends with the turn', async () => {
+    const { remote, name, ask, answer } = await rig()
+    const sent = vi.spyOn(remote.mgr, 'sendFromHub')
+    const call = ask({ project: name, task: 'say hello' })
+    await answer('allow')
+    expect(await call).toMatchObject({ ok: true, state: 'done' })
+    expect(sent).toHaveBeenCalledWith('w1', expect.stringContaining('say hello'), expect.any(String), { depth: 1 })
+    await until(() => remote.store.appSetting('hub_ask_depth:w1') === null)
+  })
+
   it('finds the project by machine/name, by the machine’s name, and by qualified id; "always" is read as once', async () => {
     const { name, ask, answer, hub } = await rig()
     for (const project of [`m1/${name}`, `Remote box/${name}`, `remote BOX/${name.toUpperCase()}`, 'm1.p-remote']) {

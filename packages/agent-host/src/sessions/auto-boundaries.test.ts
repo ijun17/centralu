@@ -207,6 +207,26 @@ describe('auto Centralu boundaries (#603)', () => {
       expect(log.mock.calls.flat().join('\n')).not.toContain('agent_start')
     })
 
+    /*
+     * A task a linked machine's session asked through ask_project (#838 item 12): the hub's caller is on another machine,
+     * so no link here leads to it, and the session counted as one the person started.
+     */
+    it('a session working on a task a linked machine asked counts at the depth the hub sent, until that turn ends', async () => {
+      const s = await session('auto')
+      await w.mgr.sendFromHub(s, 'a task from the hub', 'Orchestrator on Hub mac', { depth: 1 })
+      expect(await start(s)).toMatchObject({ ok: false, error: expect.stringContaining(levelsBelow(1)) })
+      expect(await w.mgr.askProject(s, { project: w.target.id, task: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining(levelsBelow(1)) })
+      handle(s).answer('done')
+      await w.until(() => w.store.appSetting(`hub_ask_depth:${s}`) === null)
+      expect(await start(s)).toMatchObject({ ok: true, state: 'working' })
+    })
+
+    it('an instruction a linked machine’s orchestrator sends is not an ask: the session keeps its own depth', async () => {
+      const s = await session('auto')
+      await w.mgr.sendFromHub(s, 'an instruction', 'Orchestrator on Hub mac')
+      expect(await start(s)).toMatchObject({ ok: true, state: 'working' })
+    })
+
     it('deleting the middle of a chain does not let the grandchild start agents; its depth outlives the parent (#897 review)', async () => {
       w.mgr.setUiPreferences({ agentDepth: 2 })
       const top = await session('auto')
