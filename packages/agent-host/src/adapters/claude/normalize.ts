@@ -2,6 +2,7 @@ import type { NormalizedEvent, RequestInput, SessionActivity, TokenUsage } from 
 import { TouchedFiles } from '../file-changes.js'
 import { inlineImageEvent, undrawnImageEvent } from '../images.js'
 import { todoWritePlan } from '../plan.js'
+import { addTokens, NO_TOKENS, tokenCount } from '../token-usage.js'
 import { toolResultEvent } from '../tool-result.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { ClaudeBackgroundTracker } from './background-tracker.js'
@@ -344,17 +345,17 @@ export function normalizeMessage(
         out.push(...todoWritePlan(sessionId, name, block.input))
       }
     }
-    // Usage also comes carried on an assistant message.
+    // Usage also comes carried on an assistant message: this one request's, which `ClaudeStreamNormalizer` adds to the running reading
     const usage = (m.message as Json | undefined)?.usage as Json | undefined
     if (usage) {
       out.push({
         type: 'usage_update',
         sessionId,
         tokens: {
-          inputTokens: Number(usage.input_tokens ?? 0),
-          outputTokens: Number(usage.output_tokens ?? 0),
-          cacheReadTokens: Number(usage.cache_read_input_tokens ?? 0),
-          cacheCreationTokens: Number(usage.cache_creation_input_tokens ?? 0),
+          inputTokens: tokenCount(usage.input_tokens),
+          outputTokens: tokenCount(usage.output_tokens),
+          cacheReadTokens: tokenCount(usage.cache_read_input_tokens),
+          cacheCreationTokens: tokenCount(usage.cache_creation_input_tokens),
         },
       })
     }
@@ -479,7 +480,7 @@ export function normalizeMessage(
        * the CLI log (Opus) used only 200/363 output tokens against 24k-80k cache input tokens.
        * What got recorded was the small model's share.
        */
-      const sum = (field: string) => models.reduce((n, u) => n + Number(u[field] ?? 0), 0)
+      const sum = (field: string) => models.reduce((n, u) => n + tokenCount(u[field]), 0)
       out.push({
         type: 'usage_update',
         sessionId,
@@ -626,6 +627,9 @@ export class ClaudeStreamNormalizer {
   private readonly requestsSeen: string[] = []
   /** The parent's last `usage_update` reading, which a subagent's request repeats (see `withRequest`) */
   private lastTokens: TokenUsage | null = null
+  /** The last turn result's reading, the process's total then, and the parent's requests since (see `withRequest`) */
+  private resultTokens: TokenUsage | null = null
+  private sinceResult: TokenUsage = NO_TOKENS
   /** Edits whose result has not come yet (see `touch`) */
   private readonly touched: TouchedFiles
   /** The session's /goal, read off the stream (see `ClaudeGoalTracker`). */
@@ -714,19 +718,32 @@ export class ClaudeStreamNormalizer {
    * by then, since it launched the subagent from a message of its own.
    */
   private withRequest(m: Json, events: NormalizedEvent[], subagent: boolean): NormalizedEvent[] {
-    if (!subagent) {
-      this.lastTokens = readingOf(events) ?? this.lastTokens
-    }
     const message = (m.message ?? {}) as Json
     const id = str(message.id)
     const usage = message.usage as Json | undefined
-    if (!id || !usage || this.requestsSeen.includes(id)) return events
+    const fresh = !!usage && !(id && this.requestsSeen.includes(id))
+    if (!subagent) {
+      /*
+       * `TokenUsage` is a running reading (#843): the turn's result carries the process's total, and an assistant
+       * message only its own request. Sent as it came, that request replaced the session's figures mid-turn (a reading
+       * of 2M dropped to one request's 80k), and the result put them back. The running reading is the last result's
+       * plus each request since, each counted once however many messages repeat it.
+       */
+      const request = readingOf(events)
+      if (request && fresh) this.sinceResult = addTokens(this.sinceResult, request)
+      if (request) {
+        const running = addTokens(this.resultTokens ?? NO_TOKENS, this.sinceResult)
+        events = events.map((e) => (e.type === 'usage_update' ? { ...e, tokens: running } : e))
+        this.lastTokens = running
+      }
+    }
+    if (!id || !usage || !fresh) return events
     this.requestsSeen.push(id)
     if (this.requestsSeen.length > 32) this.requestsSeen.shift()
     const request: RequestInput = {
-      inputTokens: Number(usage.input_tokens ?? 0),
-      cacheReadTokens: Number(usage.cache_read_input_tokens ?? 0),
-      cacheCreationTokens: Number(usage.cache_creation_input_tokens ?? 0),
+      inputTokens: tokenCount(usage.input_tokens),
+      cacheReadTokens: tokenCount(usage.cache_read_input_tokens),
+      cacheCreationTokens: tokenCount(usage.cache_creation_input_tokens),
       ...(subagent ? { agent: str(m.parent_tool_use_id) } : {}),
       ...ttlOf(usage.cache_creation),
     }
@@ -825,7 +842,14 @@ export class ClaudeStreamNormalizer {
     ]
     if (type === 'assistant') events = this.withRequest(m, events, subagent)
     // The turn's result is a running reading too: a subagent's request repeats whichever came last
-    else if (type === 'result' && !subagent) this.lastTokens = readingOf(events) ?? this.lastTokens
+    else if (type === 'result' && !subagent) {
+      const total = readingOf(events)
+      if (total) {
+        this.lastTokens = total
+        this.resultTokens = total
+        this.sinceResult = NO_TOKENS
+      }
+    }
     events = this.touch(events)
     if (subagent) return events
     events = this.followRetry(type, events)

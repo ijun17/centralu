@@ -829,6 +829,34 @@ describe('a model request, for prompt cache accounting', () => {
     expect(ttl('none', { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 })).toBeUndefined()
   })
 
+  it("keeps the session's reading running mid-turn: the last result's total plus each request since (#843)", () => {
+    const stream = new ClaudeStreamNormalizer(SID)
+    const tokensOf = (events: NormalizedEvent[]) => events.find((e) => e.type === 'usage_update')
+    stream.push({
+      type: 'result',
+      subtype: 'success',
+      total_cost_usd: 0.5,
+      modelUsage: { m: { inputTokens: 100, outputTokens: 1_000, cacheReadInputTokens: 2_000_000, cacheCreationInputTokens: 50_000 } },
+    })
+    const first = [...stream.push(block('msg_1', [{ type: 'text', text: 'a' }])), ...stream.push(block('msg_1', [{ type: 'text', text: 'b' }]))]
+    expect(first.filter((e) => e.type === 'usage_update').map((e) => (e as { tokens: unknown }).tokens)).toEqual([
+      { inputTokens: 109, outputTokens: 1_040, cacheReadTokens: 2_080_412, cacheCreationTokens: 54_213, costUsd: 0.5 },
+      // The same request repeated by a second message of one response is not counted again
+      { inputTokens: 109, outputTokens: 1_040, cacheReadTokens: 2_080_412, cacheCreationTokens: 54_213, costUsd: 0.5 },
+    ])
+    expect(tokensOf(stream.push(block('msg_2', [])))).toMatchObject({ tokens: { cacheReadTokens: 2_160_824 } })
+    // The next result is the process's total again, and the requests since start over from it
+    stream.push({ type: 'result', subtype: 'success', modelUsage: { m: { inputTokens: 200, outputTokens: 2_000, cacheReadInputTokens: 3_000_000, cacheCreationInputTokens: 60_000 } } })
+    expect(tokensOf(stream.push(block('msg_3', [])))).toMatchObject({ tokens: { inputTokens: 209, cacheReadTokens: 3_080_412 } })
+  })
+
+  it('reads a count that is not a number as 0, not NaN (#843)', () => {
+    const out = n({ type: 'assistant', message: { id: 'm', content: [], usage: { input_tokens: 'many', output_tokens: { n: 1 }, cache_read_input_tokens: 5 } } })
+    expect(out.find((e) => e.type === 'usage_update')).toMatchObject({
+      tokens: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 5, cacheCreationTokens: 0 },
+    })
+  })
+
   it("is not carried by the turn's result, which is a running total", () => {
     const stream = new ClaudeStreamNormalizer(SID)
     const out = stream.push({
