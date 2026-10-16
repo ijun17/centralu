@@ -933,10 +933,14 @@ export class ExternalApps {
       seen.add(found.folder)
       const prev = held.apps.get(found.folder)
       if (prev && prev.found.hash === found.hash && prev.found.error === found.error) {
+        const lostTrust = prev.scope.trusted && !scope.trusted
         if (prev.scope.trusted !== scope.trusted) changed = true
         prev.scope = scope
-        // An app in a project that lost trust is stopped immediately — it stays in the list
-        if (!scope.trusted) void this.lifecycle.halt(prev, 'project is no longer trusted')
+        /*
+         * An app in a project that lost trust is stopped immediately — it stays in the list. Only trust lost: an app an
+         * `auto` session started in a project never trusted (`sessionBoundaryOpen`) was stopped by every rescan (#839)
+         */
+        if (lostTrust) void this.lifecycle.halt(prev, 'project is no longer trusted')
         // Did something outside the manifest change (server.mjs, a screen…) (C-4)? Measured only for an app that has started at least once
         else if (prev.life.stamp !== null && folderFingerprint(prev.dir) !== prev.life.stamp) this.reflector.folderChanged(prev)
         continue
