@@ -153,6 +153,7 @@ import { appMessageFrame, type AppMessageSource, type AppMessageVia, type AppVie
 import { SessionTrash, type SessionTrashHost } from './session-trash.js'
 import { parseJson, readJsonObjects } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
+import { foldsPathCase } from '../os.js'
 export { appMessageFrame } from './app-messages.js'
 export type { AppMessageSource, AppMessageVia, AppViewPlace } from './app-messages.js'
 export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './delegation-flow.js'
@@ -628,10 +629,23 @@ export class SessionManager {
     if (!existsSync(path) || !statSync(path).isDirectory()) {
       throw Object.assign(new Error(`Directory not found: ${path}`), { code: 'internal' })
     }
-    const existing = this.store.findProjectByPath(path)
+    // One folder is one project (#849): `C:\proj\`, `c:\proj` and `C:\Proj` were three. A new one is kept without a
+    // trailing separator and with a capital drive letter; one already kept in another spelling is found and kept as is
+    const spelled = resolve(path).replace(/^[a-z]:/, (drive) => drive.toUpperCase())
+    const existing = this.projectAt(spelled)
+    const at = existing?.path ?? spelled
     const id = existing?.id ?? randomUUID()
-    this.store.addProject({ id, path, name: basename(path), ...(opts.trusted ? { trusted: true } : {}) })
-    return this.projectInfo(id, path)
+    this.store.addProject({ id, path: at, name: basename(at), ...(opts.trusted ? { trusted: true } : {}) })
+    return this.projectInfo(id, at)
+  }
+
+  /** The project kept for this folder, in whatever spelling it was kept: by case and real long name where paths fold case */
+  private projectAt(path: string): { id: string; path: string } | undefined {
+    const exact = this.store.findProjectByPath(path)
+    if (exact) return { id: exact.id, path }
+    const key = (p: string) => (foldsPathCase() ? canonicalPath(p).toLowerCase() : resolve(p))
+    const want = key(path)
+    return this.store.listProjects().find((p) => key(p.path) === want)
   }
 
   /**

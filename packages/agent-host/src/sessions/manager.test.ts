@@ -1,6 +1,6 @@
 /** T3-3 completion criteria: verify RPC integration with an in-memory adapter mock */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import {
   chmodSync,
   closeSync,
@@ -20,7 +20,7 @@ import {
   renameSync,
 } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AdapterCapabilities, ApprovalDecision, GridPanel, NormalizedEvent, SessionInfo, StoredMessage, ToolName, TrashedSession, Attachment } from '@cc/protocol'
 import { CENTRALU_APPLY, CENTRALU_APPLY_QUESTION, NormalizedEvent as NormalizedEventSchema, sessionLiveDefaults } from '@cc/protocol'
@@ -557,6 +557,33 @@ describe('projects', () => {
     await addProject()
     await addProject()
     expect((await rpc('projects.list', {}) as unknown[]).length).toBe(1)
+  })
+
+  /*
+   * #849: `C:\proj\`, `c:\proj` and `C:\Proj` were registered as three projects of one folder. A trailing separator does
+   * that anywhere; case, the drive letter's included, and a short name (`RUNNER~1`) only where paths fold case.
+   */
+  it('registers one folder as one project, whatever the spelling', async () => {
+    const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-one-project-long-name-')))
+    try {
+      const first = (await rpc('projects.add', { path: `${dir.slice(0, 1).toLowerCase()}${dir.slice(1)}${sep}` })) as { id: string; path: string }
+      // Kept without the separator, and the drive letter (Windows) in capitals
+      expect(first.path).toBe(dir)
+      const spellings = [dir]
+      if (process.platform === 'win32') {
+        const short = spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `"for %I in ("${dir}") do @echo %~sI"`], {
+          windowsVerbatimArguments: true,
+        }).stdout.toString().trim()
+        expect(short, 'this volume makes short names').not.toBe(dir)
+        spellings.push(dir.toUpperCase(), dir.toLowerCase(), short)
+      }
+      for (const path of spellings) {
+        expect(((await rpc('projects.add', { path })) as { id: string }).id, path).toBe(first.id)
+      }
+      expect((await rpc('projects.list', {})) as { path: string }[]).toEqual([expect.objectContaining({ id: first.id, path: dir })])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   /*
