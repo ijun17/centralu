@@ -24,7 +24,7 @@ import { cloneInto } from '../dev-services/project-clone.js'
 import { labelOf, orchestratorMemory, previewOf } from './transcript-view.js'
 import { RECONNECTING_FLAG_MS, interruptionAfter } from './interruptions.js'
 import { homedir } from 'node:os'
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, join, relative, resolve, sep } from 'node:path'
 import { existsSync, rmSync, statSync } from 'node:fs'
 import type {
   RebuildCause,
@@ -136,7 +136,8 @@ import { AskProjectFlow, type AskProjectHost } from './ask-project-flow.js'
 import { HandoffFlow, type HandoffFlowHost, type HandoffTimings } from './handoff-flow.js'
 import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, HUB_SENDER, agentStartPersonText, taskList } from './delegation-flow.js'
 import { RestartPolicy, type RestartHost } from './restart-policy.js'
-import { WorktreeSessions, type WorktreeHost, canonicalPath, insideFolder } from './worktree-sessions.js'
+import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
+import { canonicalPath, isInside } from '../dev-services/path-guard.js'
 import { HostCards, type HostAsk, type HostCardsHost } from './host-cards.js'
 import { ExternalConversations, type ExternalConversationsHost, truncate } from './external-conversations.js'
 import { SessionRecord, type SessionRecordHost } from './session-record.js'
@@ -3385,10 +3386,14 @@ export class SessionManager {
       return { ...e, paths: [] }
     }
     const base = this.cwdFor(m)
+    // Both sides canonical (#428): a tool names its files under the real path of a root kept through a link (macOS's
+    // `/tmp` is `/private/tmp`), and compared as written they fell outside and were dropped
+    const rootReal = canonicalPath(root)
     const paths = new Set<string>()
     for (const p of e.paths) {
-      const rel = relative(root, resolve(base, p))
-      if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) continue
+      const target = canonicalPath(resolve(base, p))
+      const rel = relative(rootReal, target)
+      if (!rel || !isInside(rootReal, target)) continue
       // git and the screen both speak in POSIX separators (#47) — so does a tree entry's path
       paths.add(rel.replaceAll(sep, '/'))
     }
@@ -4643,7 +4648,7 @@ export class SessionManager {
     return [...this.meta.values()].filter((s) => {
       if (s.id === target.id) return false
       const cwd = this.store.sessionCwd(s.id) ?? s.worktree?.path
-      return !!cwd && insideFolder(canonicalPath(cwd), folder)
+      return !!cwd && isInside(folder, canonicalPath(cwd))
     })
   }
 

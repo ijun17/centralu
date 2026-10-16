@@ -3033,6 +3033,17 @@ describe('the path of a touched file (#185)', () => {
     ])
     expect(events.find((e) => e.type === 'files_touched')).toMatchObject({ paths: ['src/a.ts', 'src/b.ts'] })
   })
+
+  it('reads a path through a link to the project the same as the project (#428)', async () => {
+    const p = await addProject()
+    const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
+    // The other spelling of the project's folder: macOS's temp folder is a link (/var is /private/var)
+    const real = realpathSync.native(p.path)
+    const other = real === p.path ? tmpdir() : real
+    events.length = 0
+    adapter.handleOf(s.id)!.emitTouched([join(other, 'src', 'c.ts'), join(other, '..', 'elsewhere.ts')])
+    expect(events.find((e) => e.type === 'files_touched')).toMatchObject({ paths: ['src/c.ts'] })
+  })
 })
 
 describe('worktree sessions', () => {

@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { SessionInfo } from '@cc/protocol'
 import { Store } from '../dev-services/store.js'
-import { canonicalPath, WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
+import { canonicalPath } from '../dev-services/path-guard.js'
+import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
 
 /*
  * The worktree code over a host it reaches only through `WorktreeHost` (#428): the refusals before anything is checked

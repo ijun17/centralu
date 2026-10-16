@@ -177,7 +177,8 @@ and `normal` it has these controls ([agent-host.md](agent-host.md) §1.2):
   running. A bounded call that already returned does not confer a right to stop the target.
 - **The answer is someone else's words**, JSON-quoted for the caller like a worker's preview.
 - **Files come back by name, and only from inside the target project.** A named path is granted
-  to the caller only if it exists inside the target project's folder after resolving symlinks, and
+  to the caller only if it exists inside the target project's folder after resolving symlinks
+  (`canonicalPath`, so the grant and a later read compare in one spelling), and
   never the project root itself; a file opens that file, a folder what is under it. A path outside
   is listed and not opened (Claude then asks the person before reading it; Codex does not restrict
   reads at all, so for a Codex caller the grant changes nothing and the residual is the same as any
@@ -1460,7 +1461,12 @@ tests. What differs from macOS and Linux, and what holds it:
   because the command is the person's own text.
 - **Paths.** `path-guard.ts` refuses a path whose `relative()` from the root is absolute (another
   drive, a UNC share), instead of walking its segments inside the root (`path-guard.test.ts`, with
-  `path.win32`). Windows paths ignore case; containment uses `relative()`, which does too.
+  `path.win32`). Windows paths ignore case; containment uses `relative()`, which does too. Every
+  "inside" test in the host is `isInside` in `path-guard.ts`, and every comparison that must see one
+  place in two spellings canonicalizes with `canonicalPath` there (`realpathSync.native`: the long name
+  for a short one, the case on disk, a link resolved, through the nearest folder that exists; #428). The
+  copies had drifted: ask_project's read grants compared with case and the JS `realpath`, so a short
+  name or another case was refused, and a touched file under a project kept through a link was dropped.
 - **File identity.** A read's opened-file check is the only guard against a swap there, since
   Windows has no `O_NOFOLLOW`. An NTFS file id is 64 bits with the record's reuse count on top, so
   it is above 2^53, and as a Number two files can compare equal: on windows-2022, 1754 of 2000

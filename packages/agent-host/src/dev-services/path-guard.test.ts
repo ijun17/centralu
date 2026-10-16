@@ -1,6 +1,6 @@
 import { posix, win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { pathParts, UnsafePathError } from './path-guard.js'
+import { isInside, pathParts, UnsafePathError } from './path-guard.js'
 
 /**
  * The segments the guard walks, under Windows path rules (#14), checked with `path.win32` so it
@@ -35,5 +35,26 @@ describe('path segments under Windows rules', () => {
 describe('path segments under POSIX rules', () => {
   it('splits only on / (a backslash is part of a file name there)', () => {
     expect(pathParts('/home/me/proj', 'src/a\\b.ts', posix)).toEqual(['src', 'a\\b.ts'])
+  })
+})
+
+describe('isInside (#428)', () => {
+  it('judges by segment, under POSIX rules', () => {
+    expect(isInside('/a/wt', '/a/wt')).toBe(true)
+    expect(isInside('/a/wt', '/a/wt/x')).toBe(true)
+    expect(isInside('/a/wt', '/a/wt-old')).toBe(false)
+    expect(isInside('/a/wt', '/a')).toBe(false)
+    expect(isInside('/a/wt', '/a/wt/../b')).toBe(false)
+    // A name that only starts with two dots is a name, not a step up
+    expect(isInside('/a/wt', '/a/wt/..cache/x')).toBe(true)
+    // The file system's root holds everything
+    expect(isInside('/', '/etc/hosts')).toBe(true)
+  })
+
+  it('judges by segment under Windows rules: case aside, another drive and a share outside', () => {
+    expect(isInside('C:\\Work\\Proj', 'c:\\work\\proj\\src\\a.ts', win32)).toBe(true)
+    expect(isInside('C:\\Work\\Proj', 'C:\\Work\\Proj-old', win32)).toBe(false)
+    expect(isInside('C:\\Work\\Proj', 'D:\\Work\\Proj\\a', win32)).toBe(false)
+    expect(isInside('C:\\Work\\Proj', '\\\\evil\\share\\Proj\\a', win32)).toBe(false)
   })
 })

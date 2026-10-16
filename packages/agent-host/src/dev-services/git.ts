@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { isAbsolute, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { assertExistingPath, isMissingPathError } from './path-guard.js'
+import { assertExistingPath, isInside, isMissingPathError } from './path-guard.js'
 import type { GitBranch, GitCommit, GitFileStatus } from '@cc/protocol'
 import { runGit, type GitTrust } from './git-exec.js'
 import { killTree } from './kill-tree.js'
@@ -134,7 +134,7 @@ function assertLexicalGitPath(cwd: string, path: string): string {
    * "outside the project" too, and readers went looking for the cause in the wrong place.
    */
   if (rel === '') throw Object.assign(new Error('Path is the project root, not a file in it'), { code: 'internal' })
-  if (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) return rel
+  if (isInside(root, target)) return rel
   throw Object.assign(new Error('Path is outside the project'), { code: 'internal' })
 }
 

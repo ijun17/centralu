@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process'
 import { constants } from 'node:fs'
 import { lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
 import { IMAGE_PREVIEW_MAX_BYTES, wireBaseName, wireJoin, type FsEntry, type FsFile } from '@cc/protocol'
-import { assertCreatePath, assertExistingPath, UnsafePathError } from './path-guard.js'
+import { assertCreatePath, assertExistingPath, isInside, UnsafePathError } from './path-guard.js'
 import { runGit, type GitTrust } from './git-exec.js'
 import { clonesFiles } from '../os.js'
 
@@ -48,8 +48,7 @@ function imageMime(path: string): string | undefined {
 /** Blocks a path from leaving the project root */
 export function safeJoin(root: string, rel: string): string {
   const target = resolve(root, rel || '.')
-  const rootResolved = resolve(root)
-  if (target !== rootResolved && !target.startsWith(rootResolved + sep)) {
+  if (!isInside(resolve(root), target)) {
     throw Object.assign(new Error('Path is outside the project'), { code: 'internal' })
   }
   return target
@@ -420,7 +419,7 @@ export async function prepareCopyTarget(root: string, rel: string): Promise<stri
 export async function dropEscapingLinks(root: string, start: string): Promise<string[]> {
   const rootReal = await realpath(root)
   const startReal = await realpath(start)
-  if (!staysInside(rootReal, startReal)) throw new UnsafePathError('Path is outside the project')
+  if (!isInside(rootReal, startReal)) throw new UnsafePathError('Path is outside the project')
 
   const removed: string[] = []
   const stack = [startReal]
@@ -453,10 +452,6 @@ async function linkStaysInside(rootReal: string, link: string): Promise<boolean>
    * pointing at `~/.ssh/id_rsa` becomes a window the moment that file comes into existence.
    */
   const target = await realpath(link).catch(async () => resolve(dirname(link), await readlink(link)))
-  return staysInside(rootReal, target)
+  return isInside(rootReal, target)
 }
 
-function staysInside(rootReal: string, candidate: string): boolean {
-  const rel = relative(rootReal, candidate)
-  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
-}

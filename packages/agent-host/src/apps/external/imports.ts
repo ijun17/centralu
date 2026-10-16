@@ -1,9 +1,9 @@
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, type Dirent } from 'node:fs'
 import { isIP } from 'node:net'
-import { isAbsolute, join, relative, sep } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { wireJoin, wireSegments, type AppReview } from '@cc/protocol'
-import { assertExistingPathSync } from '../../dev-services/path-guard.js'
+import { assertExistingPathSync, isInside } from '../../dev-services/path-guard.js'
 import { proposedMcpServerNameError } from '../contract.js'
 import { reviewKey } from './import-book.js'
 import { MANIFEST_FILE, MAX_MANIFEST_BYTES, parseManifest, type AppManifest } from './manifest.js'
@@ -267,7 +267,7 @@ function copyFolder(root: string, dest: string, limits: ImportLimits): StagedFil
           t.skip(r, 'link to nothing')
           continue
         }
-        if (!inside(root, target)) throw new ImportRefused(`${r} is a link to ${target}, outside the folder. Links are not followed; remove it and import again`)
+        if (!isInside(root, target)) throw new ImportRefused(`${r} is a link to ${target}, outside the folder. Links are not followed; remove it and import again`)
         t.skip(r, 'link')
         continue
       }
@@ -314,10 +314,6 @@ function execBits(mode: number): number {
   return mode & 0o111 ? 0o755 : 0o644
 }
 
-function inside(root: string, target: string): boolean {
-  const rel = relative(root, target)
-  return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel))
-}
 
 /**
  * Unpacks a zip. First, every entry's name, kind, and declared size are validated (if even one is
@@ -404,7 +400,7 @@ export function stageZip(buf: Buffer, dest: string, limits: ImportLimits): Stage
   mkdirSync(dest)
   for (const { parts, e } of plan) {
     const out = join(dest, ...parts)
-    if (!inside(dest, out)) throw new ImportRefused(`${wireJoin(...parts)} would be written outside the app folder`)
+    if (!isInside(dest, out)) throw new ImportRefused(`${wireJoin(...parts)} would be written outside the app folder`)
     if (e.kind === 'dir') {
       mkdirSync(out, { recursive: true })
       continue

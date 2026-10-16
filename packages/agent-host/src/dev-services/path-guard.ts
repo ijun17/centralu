@@ -1,6 +1,6 @@
 import { lstatSync, realpathSync, statSync, type BigIntStats, type Stats } from 'node:fs'
 import { lstat, realpath, stat } from 'node:fs/promises'
-import { dirname, isAbsolute, join, posix, relative, sep, win32, type PlatformPath } from 'node:path'
+import { basename, dirname, join, posix, resolve, sep, win32, type PlatformPath } from 'node:path'
 
 /** This OS's path rules */
 const nativePath: PlatformPath = sep === '\\' ? win32 : posix
@@ -173,6 +173,33 @@ export function pathParts(root: string, rel: string, p: PlatformPath = nativePat
   return path.split(separator).filter((part) => part.length > 0 && part !== '.')
 }
 
+/**
+ * Whether `candidate` is `root` or lies inside it, judged by segment (#428): `/a/wt-old` is not inside `/a/wt`, and a
+ * name that only starts with two dots (`..cache`) is. On Windows `relative()` compares without regard to case, and
+ * answers an absolute path for another drive or a UNC share, which is outside. Both are taken as given: canonicalize
+ * them first (`canonicalPath`) wherever a link, a short name or a symlinked root could make one path look like two.
+ * The one test of "inside" for the host; it used to be written nine times, with three ways to canonicalize.
+ */
+export function isInside(root: string, candidate: string, p: PlatformPath = nativePath): boolean {
+  const rel = p.relative(root, candidate)
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${p.sep}`) && !p.isAbsolute(rel))
+}
+
+/**
+ * A path resolved through the nearest folder that exists, so a folder not made yet still compares with its parent's
+ * real path. `realpathSync.native` gives the real spelling: the long name for a Windows short one (`RUNNER~1`) and the
+ * case on disk on a case-insensitive volume, where the JS `realpathSync` keeps the spelling it was given.
+ */
+export function canonicalPath(path: string): string {
+  const full = resolve(path)
+  try {
+    return realpathSync.native(full)
+  } catch {
+    const parent = dirname(full)
+    return parent === full ? full : join(canonicalPath(parent), basename(full))
+  }
+}
+
 function checkedParent(rootReal: string, current: string): string {
   const parent = dirname(current)
   assertInside(rootReal, parent)
@@ -180,10 +207,7 @@ function checkedParent(rootReal: string, current: string): string {
 }
 
 function assertInside(rootReal: string, candidate: string): void {
-  const rel = relative(rootReal, candidate)
-  if (rel === '') return
-  if (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) return
-  throw new UnsafePathError('Path is outside the project')
+  if (!isInside(rootReal, candidate)) throw new UnsafePathError('Path is outside the project')
 }
 
 function isMissingFsPath(error: unknown): error is NodeJS.ErrnoException {

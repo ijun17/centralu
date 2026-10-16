@@ -199,6 +199,8 @@ orchestrator, which belongs to no project, retains its own create-session tool.
 5. **The answer.** Final text is JSON-quoted as another session's words and clipped after 6,000
    characters. Named files and folders inside the target project, resolved through symlinks, become
    readable to the caller for this host's lifetime (`readGrants`); the project root is never granted.
+   A grant and each read are compared in one spelling (`canonicalPath`, `isInside` in `dev-services/path-guard.ts`,
+   #428), so a short name, another case or a link to the root reads as the place it names.
    Outside paths are listed without grants. Claude checks grants on each read through `mayRead`;
    Codex's reads are already unrestricted.
 

@@ -1,8 +1,8 @@
 import { saveWorktreeRecovery, clearRecoveredBranchMark, worktreeRecoveryDir, type WorktreeRecovery } from '../dev-services/worktree-recovery.js'
 import { AgentRunWait } from './app-agents.js'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { dirname, join } from 'node:path'
 import { foldsPathCase } from '../os.js'
-import { lstatSync, realpathSync, statSync } from 'node:fs'
+import { lstatSync, statSync } from 'node:fs'
 import { exec } from 'node:child_process'
 import type {
   BackgroundTask,
@@ -40,20 +40,9 @@ import {
   prepareCopyTarget,
   resolveExisting,
 } from '../dev-services/fs.js'
-import { isMissingPathError } from '../dev-services/path-guard.js'
+import { canonicalPath, isInside, isMissingPathError } from '../dev-services/path-guard.js'
 import { prepareWorktreeDependencies } from '../dev-services/worktree-dependencies.js'
 import { RestartPolicy } from './restart-policy.js'
-
-/** A path resolved through the nearest folder that exists, so a folder not made yet still compares with its parent's real path */
-export function canonicalPath(path: string): string {
-  const full = resolve(path)
-  try {
-    return realpathSync.native(full)
-  } catch {
-    const parent = dirname(full)
-    return parent === full ? full : join(canonicalPath(parent), basename(full))
-  }
-}
 
 /** A path as a comparison key: real long name, forward slashes, no trailing slash, case-folded on Windows (git prints its own spelling) */
 function pathKey(path: string): string {
@@ -83,11 +72,6 @@ function worktreeFolderState(path: string): 'present' | 'gone' | { unreachable: 
   }
 }
 
-/** Whether `path` is `folder` or lies inside it, judged by segment: `/a/wt-old` is not inside `/a/wt` */
-export function insideFolder(path: string, folder: string): boolean {
-  const rel = relative(folder, path)
-  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
-}
 
 /**
  * What the worktree code reaches of the session manager (#428), typed as the manager declares each member. The
@@ -351,7 +335,7 @@ export class WorktreeSessions {
     const cwd = this.host.store.sessionCwd(sessionId) ?? this.host.meta.get(sessionId)?.worktree?.path
     if (!cwd) return false
     const path = canonicalPath(cwd)
-    for (const folder of this.worktreeCleanup.values()) if (insideFolder(path, folder)) return true
+    for (const folder of this.worktreeCleanup.values()) if (isInside(folder, path)) return true
     return false
   }
 

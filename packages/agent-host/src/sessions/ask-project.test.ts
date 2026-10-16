@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, readableGrants, underGrant, type AskableProject } from './ask-project.js'
 import { SessionManager } from './manager.js'
@@ -98,6 +98,18 @@ describe('what the caller may read', () => {
     // A link inside a granted folder still resolves to where it points
     symlinkSync(join(root, 'secret.txt'), join(project, 'out', 'link.txt'))
     expect(underGrant(join(project, 'out', 'link.txt'), grants, '/')).toBe(false)
+  })
+
+  it('reads a path in another spelling of the same place as the grant: a link to the root, another case (#428)', () => {
+    const grants = readableGrants([join(project, 'out')], project).granted
+    // The temp folder as the system names it can be a link (macOS: /var is /private/var); a file not made yet included
+    const viaLink = join(tmpdir(), basename(root), 'toolkit', 'out', 'new.png')
+    expect(underGrant(viaLink, grants, '/')).toBe(true)
+    // A volume that folds case names the same folder in either case; the grant is read in its case on disk
+    if (existsSync(join(root, 'TOOLKIT'))) expect(underGrant(join(root, 'TOOLKIT', 'out', 'a.png'), grants, '/')).toBe(true)
+    // Still closed outside the grant, in any spelling
+    expect(underGrant(join(tmpdir(), basename(root), 'toolkit', 'README.md'), grants, '/')).toBe(false)
+    expect(underGrant(join(root, 'secret.txt'), grants, '/')).toBe(false)
   })
 
   it('cuts a long answer in the middle and says where the whole of it is', () => {

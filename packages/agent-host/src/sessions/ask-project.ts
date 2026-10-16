@@ -1,5 +1,6 @@
 import { realpathSync, statSync } from 'node:fs'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { resolve } from 'node:path'
+import { canonicalPath, isInside } from '../dev-services/path-guard.js'
 
 /**
  * ask_project (#371 part B) — what a session in one project gets back when it asks another project to do something.
@@ -119,17 +120,13 @@ export function pathsIn(answer: string): string[] {
   return found
 }
 
+/** The real path of what exists, in its real spelling (`realpathSync.native`, as `canonicalPath`), or null */
 function real(p: string): string | null {
   try {
-    return realpathSync(p)
+    return realpathSync.native(p)
   } catch {
     return null
   }
-}
-
-function within(root: string, p: string): boolean {
-  const rel = relative(root, p)
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
 }
 
 /**
@@ -150,7 +147,7 @@ export function readableGrants(paths: readonly string[], projectRoot: string): {
   const outside: string[] = []
   for (const p of paths) {
     const r = real(p)
-    if (!root || !r || !within(root, r)) {
+    if (!root || !r || !isInside(root, r)) {
       outside.push(p)
       continue
     }
@@ -175,10 +172,8 @@ export function readableGrants(paths: readonly string[], projectRoot: string): {
  * path is resolved through symlinks first (when it exists), the same as the grants were.
  */
 export function underGrant(path: string, grants: Iterable<string>, cwd: string): boolean {
-  const abs = resolve(cwd, path)
-  const r = real(abs) ?? abs
-  for (const g of grants) {
-    if (r === g || r.startsWith(g.endsWith(sep) ? g : g + sep)) return true
-  }
+  // Canonical as the grants are, so a short name, another case or a link to the root reads the same path (#428)
+  const r = canonicalPath(resolve(cwd, path))
+  for (const g of grants) if (isInside(g, r)) return true
   return false
 }
