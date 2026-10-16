@@ -60,6 +60,26 @@ describe('the hub router (docs/plans/remote-hub.md §5)', () => {
     expect(Object.keys(ROUTES).sort()).toEqual(Object.keys(RpcMethods).sort())
   })
 
+  it('rewrites every answer the way the qualifier does: a field it cannot read passes as it is (#850)', () => {
+    const q = new Qualifier('m1', 1)
+    const fields = ['terminals', 'runs', 'run', 'restarted', 'busy', 'cache', 'sessions', 'session', 'project', 'app', 'builder', 'sessionId', 'file']
+    for (const [method, route] of Object.entries(ROUTES)) {
+      const fix = 'result' in route ? route.result : undefined
+      if (!fix) continue
+      // What another build may send: nothing, a scalar, a list where an object was meant, fields of the wrong kind
+      for (const odd of [undefined, null, 1, 'x', [], {}, { cache: { windows: {} } }, Object.fromEntries(fields.map((f) => [f, {}])), Object.fromEntries(fields.map((f) => [f, 1]))]) {
+        expect(() => fix(odd, q), `${method} on ${JSON.stringify(odd)}`).not.toThrow()
+      }
+    }
+    // A list read as an object was spread into one (`{ 0: … }`); a missing list was invented as an empty one
+    expect(ROUTES['apps.create'].kind === 'project' && ROUTES['apps.create'].result?.([1], q)).toStrictEqual([1])
+    expect(ROUTES['trash.restore'].kind === 'session' && ROUTES['trash.restore'].result?.(['x'], q)).toStrictEqual(['x'])
+    expect(ROUTES['terminal.list'].kind === 'project' && ROUTES['terminal.list'].result?.({}, q)).toStrictEqual({})
+    expect(ROUTES['agents.applyVersions'].kind === 'machine' && ROUTES['agents.applyVersions'].result?.({ restarted: ['s1'] }, q)).toStrictEqual({ restarted: ['m1.s1'] })
+    // And what it can read is rewritten as before
+    expect(ROUTES['commands.state'].kind === 'project' && ROUTES['commands.state'].result?.({ runs: [{ runId: 'r1' }, 3] }, q)).toStrictEqual({ runs: [{ runId: 'm1.r1' }, 3] })
+  })
+
   it('leaves every call with an unprefixed id, or no id, to the hub exactly as sent', async () => {
     const { router, local, m1 } = rig()
     await router.handle('agents.send', { sessionId: 'abc', text: 'hi' })

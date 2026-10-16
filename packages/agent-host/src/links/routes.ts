@@ -1,4 +1,5 @@
 import type { RpcMethodName } from '@cc/protocol'
+import { isObj, type Obj } from './obj.js'
 import type { Qualifier } from './qualifier.js'
 
 /**
@@ -25,7 +26,7 @@ import type { Qualifier } from './qualifier.js'
  *              for this computer's OS (reveal in Finder)
  *
  * `params` turns the hub's parameters into the remote's (the routing key is always stripped);
- * `result` turns the remote's answer into the hub's terms.
+ * `result` turns the remote's answer into the hub's terms, field by field through `fields` and `each`.
  */
 
 type ParamsFix = (p: Record<string, unknown>, q: Qualifier) => Record<string, unknown>
@@ -53,26 +54,37 @@ const HUB: Route = { kind: 'hub' }
 const INTERNAL: Route = { kind: 'internal' }
 const MERGE: Route = { kind: 'merge' }
 
+/**
+ * An answer object with the named fields rewritten, by the rule the qualifier's own rewrites follow (qualifier.ts): what
+ * is not an object, and a field it does not have, passes as it is, for the window to parse through the method's schema.
+ * The hand-written copies drifted (#850): some spread a list as an object, threw on a field that was not a list, or
+ * invented an empty list for a missing one
+ */
+const fields =
+  (fix: Readonly<Record<string, ResultFix>>): ResultFix =>
+  (r, q) => {
+    if (!isObj(r)) return r
+    const out: Obj = { ...r }
+    for (const [k, f] of Object.entries(fix)) if (k in r) out[k] = f(r[k], q)
+    return out
+  }
+/** Each item of a list rewritten the same way; anything else passes as it is */
+const each =
+  (fix: ResultFix): ResultFix =>
+  (r, q) =>
+    Array.isArray(r) ? r.map((x) => fix(x, q)) : r
+
+const id: ResultFix = (r, q) => q.maybeId(r)
 const sessionInfo: ResultFix = (r, q) => q.session(r)
 const sessionResult: ResultFix = (r, q) => q.sessionResult(r)
 const messages: ResultFix = (r, q) => q.messages(r)
-const builderSession: ResultFix = (r, q) => (r && typeof r === 'object' ? { ...(r as object), sessionId: q.maybeId((r as { sessionId?: unknown }).sessionId) } : r)
-
-const usageResult: ResultFix = (r, q) => {
-  const cache = r && typeof r === 'object' ? (r as { cache?: { windows?: unknown } }).cache : undefined
-  if (!cache || !Array.isArray(cache.windows)) return r
-  const windows = cache.windows.map((w: unknown) => {
-    const sessions = w && typeof w === 'object' ? (w as { sessions?: unknown }).sessions : undefined
-    if (!Array.isArray(sessions)) return w
-    return {
-      ...(w as object),
-      sessions: sessions.map((s: unknown) =>
-        s && typeof s === 'object' ? { ...(s as object), sessionId: q.maybeId((s as { sessionId?: unknown }).sessionId) } : s,
-      ),
-    }
-  })
-  return { ...(r as object), cache: { ...cache, windows } }
-}
+const projectInfo: ResultFix = (r, q) => q.project(r)
+const terminal: ResultFix = (r, q) => q.terminal(r)
+const run: ResultFix = (r, q) => q.run(r)
+const appInfo: ResultFix = (r, q) => q.app(r)
+const builderSession = fields({ sessionId: id })
+// The sessions the cache figures name are the remote's, so the hub's screen can open them (docs/agent-host.md §6.1)
+const usageResult = fields({ cache: fields({ windows: each(fields({ sessions: each(fields({ sessionId: id })) })) }) })
 
 export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   // ── Sessions ───────────────────────────────────────────────────────────────────────────
@@ -106,16 +118,12 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'messages.subagent': session(messages),
   // Read on the machine the session runs on; the path it resolved is that machine's, so there is nothing to reveal here
   'messages.image': session((r) => {
-    if (!r || typeof r !== 'object' || !('file' in r)) return r
-    const { file: _file, ...rest } = r as Record<string, unknown>
+    if (!isObj(r) || !('file' in r)) return r
+    const { file: _file, ...rest } = r
     return rest
   }),
   'trash.read': session(messages),
-  'trash.restore': session((r, q) =>
-    r && typeof r === 'object'
-      ? { ...(r as object), session: q.session((r as { session?: unknown }).session), project: q.project((r as { project?: unknown }).project) }
-      : r,
-  ),
+  'trash.restore': session(fields({ session: sessionInfo, project: projectInfo })),
   'trash.purge': session(),
   'sessions.reorder': project(
     (r, q) => q.sessions(r),
@@ -128,7 +136,7 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'projects.setTrusted': project(),
   'projects.setCommands': project(),
   'projects.setWorktreeSetup': project(),
-  'projects.gitStatus': project((r, q) => q.project(r)),
+  'projects.gitStatus': project(projectInfo),
   'worktrees.createManager': project(sessionInfo),
   'worktrees.setTrunk': project(),
   'git.status': project(),
@@ -148,22 +156,16 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'fs.importFile': project(),
   'fs.resolve': { kind: 'noRemote', key: 'projectId' },
   'files.search': project(),
-  'terminal.list': project((r, q) =>
-    r && typeof r === 'object'
-      ? { ...(r as object), terminals: ((r as { terminals?: unknown[] }).terminals ?? []).map((t) => q.terminal(t)) }
-      : r,
-  ),
-  'terminal.create': project((r, q) => q.terminal(r)),
+  'terminal.list': project(fields({ terminals: each(terminal) })),
+  'terminal.create': project(terminal),
   'terminal.close': { kind: 'terminal' },
   'terminal.input': { kind: 'terminal' },
   'terminal.resize': { kind: 'terminal' },
-  'terminal.restart': { kind: 'terminal', result: (r, q) => q.terminal(r) },
-  'commands.run': project((r, q) => q.run(r)),
+  'terminal.restart': { kind: 'terminal', result: terminal },
+  'commands.run': project(run),
   'commands.stop': project(),
-  'commands.state': project((r, q) =>
-    r && typeof r === 'object' ? { ...(r as object), runs: ((r as { runs?: unknown[] }).runs ?? []).map((x) => q.run(x)) } : r,
-  ),
-  'commands.log': project((r, q) => (r && typeof r === 'object' ? { ...(r as object), run: q.run((r as { run?: unknown }).run) } : r)),
+  'commands.state': project(fields({ runs: each(run) })),
+  'commands.log': project(fields({ run })),
   'commands.resize': project(),
   'projectConsents.revoke': {
     kind: 'project',
@@ -178,21 +180,13 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'agents.setAutoApplyVersions': { kind: 'machine' },
   'agents.sleepPolicy': { kind: 'machine' },
   'agents.setSleepPolicy': { kind: 'machine' },
-  'agents.applyVersions': {
-    kind: 'machine',
-    result: (r, q) => {
-      if (!r || typeof r !== 'object') return r
-      const { restarted, busy } = r as { restarted?: unknown[]; busy?: unknown[] }
-      return { ...(r as object), restarted: (restarted ?? []).map((x) => q.maybeId(x)), busy: (busy ?? []).map((x) => q.maybeId(x)) }
-    },
-  },
+  'agents.applyVersions': { kind: 'machine', result: fields({ restarted: each(id), busy: each(id) }) },
   'agents.models': { kind: 'machine' },
-  // The sessions the cache figures name are the remote's, so the hub's screen can open them (docs/agent-host.md §6.1)
-  'agents.usage': { kind: 'machine', result: (r, q) => usageResult(r, q), sharesAccount: true },
+  'agents.usage': { kind: 'machine', result: usageResult, sharesAccount: true },
   'agents.account': { kind: 'machine' },
-  'projects.add': { kind: 'machine', result: (r, q) => q.project(r) },
+  'projects.add': { kind: 'machine', result: projectInfo },
   // Made by the host of the machine the project lives on, in its own home and path terms (#515)
-  'projects.create': { kind: 'machine', result: (r, q) => q.project(r) },
+  'projects.create': { kind: 'machine', result: projectInfo },
   'projects.createPreview': { kind: 'machine' },
   'processes.strays': { kind: 'machine' },
   'processes.stop': { kind: 'machine' },
@@ -210,14 +204,10 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'trash.empty': MERGE,
 
   // ── Apps: a project app routes with its project; a user-folder app by `machine` where the call takes it ──
-  'apps.runs': app((r, q) => (Array.isArray(r) ? r.map((x) => q.appRun(x)) : r)),
+  'apps.runs': app(each((r, q) => q.appRun(r))),
   'apps.restart': app(),
   'apps.remove': app(),
-  'apps.create': project((r, q) =>
-    r && typeof r === 'object'
-      ? { ...(r as object), app: q.app((r as { app?: unknown }).app), builder: q.session((r as { builder?: unknown }).builder) }
-      : r,
-  ),
+  'apps.create': project(fields({ app: appInfo, builder: sessionInfo })),
   'apps.builder': app(sessionInfo),
   'apps.createBuilder': app(sessionInfo),
   'apps.errors': app((r, q) => q.errorBundles(r)),
@@ -231,11 +221,11 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'apps.setShared': project(),
   'apps.setSecret': app(),
   'apps.review': project(),
-  'apps.enable': project((r, q) => q.app(r)),
+  'apps.enable': project(appInfo),
   'apps.versions': app(),
-  'apps.restoreVersion': app((r, q) => q.app(r)),
+  'apps.restoreVersion': app(appInfo),
   'apps.reach': session(undefined, (p, q) => ({ ...p, projectId: q.stripMaybe(p.projectId, 'The app') })),
-  'apps.inlineViews': session((r, q) => (Array.isArray(r) ? r.map((v) => q.inlineView(v)) : r)),
+  'apps.inlineViews': session(each((r, q) => q.inlineView(r))),
   /*
    * App views of another machine (plan §11): the instance stays open there and holds its app, and its id reaches the
    * window qualified. The hub serves every view's address itself (`apps.viewFrame`, views/view-host.ts), asking the
