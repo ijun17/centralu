@@ -9,7 +9,7 @@ import { expect, test, type Page } from '@playwright/test'
  * recovered, and did the drag that already existed (dropping a path into the composer) get
  * pushed aside by the new drag.
  *
- * That is also why this is its own file. control-loop watches one lap of the control loop, and
+ * That is also why this is its own file. The control-*.spec.ts files watch the control loop, and
  * panel watches what the screen picks when several are open. This one watches only **whether
  * files move**.
  */

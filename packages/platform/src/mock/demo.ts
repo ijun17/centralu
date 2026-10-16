@@ -158,7 +158,7 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
       '',
       '  ✓  1 e2e/panel.spec.ts:196:1 › the collapsed composer does not cover the ring during a response (612ms)',
       '  ✓  2 e2e/panel.spec.ts:231:1 › the raised composer does not cover the ring either (588ms)',
-      '  ✓  3 e2e/control-loop.spec.ts:1204:1 › the ring turns off once the response ends (497ms)',
+      '  ✓  3 e2e/control-grid.spec.ts:204:1 › the ring turns off once the response ends (497ms)',
       '',
       '  3 passed (1.4s)',
     ].join('\n'),
