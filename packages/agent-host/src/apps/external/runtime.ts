@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import type { CallToolResult, ListResourcesResult, PriorDiscovery, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
+import type { CallToolResult, ListResourcesResult, ReadResourceResult, Tool } from '@modelcontextprotocol/client'
 import { APP_ID_MAX_LENGTH, APP_SERVER_PREFIX, RESERVED_NAME_PREFIX, USER_APP_SCOPE, appKeyOf, appLabel, newAppIdProblem, type AppReview, type ExternalAppInfo, type NewAppIdProblem } from '@cc/protocol'
 import { DirWatchers } from '../../dev-services/watch.js'
 import { AppProcess, AppStartError, type SpawnSpec } from './app-process.js'
@@ -11,8 +11,8 @@ import { memoryCapabilityBook } from './capabilities.js'
 import { checkScreen, checkTools, formatReport, type AppCheckReport, type CheckFinding, type CheckedTool } from './check.js'
 import { ERRORS_KEPT, errorBundle, type HeldErrorBundle, type SentErrorBundle } from './errors.js'
 import { folderFingerprint } from './fingerprint.js'
-import { PROJECT_APPS_PARTS, PROJECT_APPS_REL, USER_APPS_PARTS, USER_APPS_REL, scanApps, type ScannedApp } from './discovery.js'
-import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError, type AppManifest } from './manifest.js'
+import { PROJECT_APPS_PARTS, PROJECT_APPS_REL, USER_APPS_PARTS, USER_APPS_REL, scanApps } from './discovery.js'
+import { MANIFEST_FILE, MANIFEST_VERSION, parseManifest, toolNameError } from './manifest.js'
 import { RUN_RETENTION_MS, RunRow, announcingLedger, type AgentUse, type AppRunListed } from './runs.js'
 import { appTemplateDir, oneLine, scaffoldApp } from './scaffold.js'
 import { placeAppFolder } from './placement.js'
@@ -66,112 +66,8 @@ export { resourceUriOf } from './visibility.js'
 
 /** What the runtime is given and the shape of what a call returns (`runtime-types.ts`) — they leave through this door too */
 export { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type AppRunStatus, type ExternalAppsDeps, type RuntimeTiming } from './runtime-types.js'
+import { invalidReason, newEntry, resetLife, type AppEntry, type AppTool, type Blocker, type OpenRun, type Scope } from './app-entry.js'
 import { DEFAULT_TIMING, type AppCaller, type AppCallOutcome, type AppRunStatus, type ExternalAppsDeps, type RuntimeTiming } from './runtime-types.js'
-
-type Scope = { key: string; projectId: string | null; root: string; trusted: boolean }
-
-/** One app's lifecycle — a process comes and goes, but this stays alive as long as the app is in the list */
-type Life = {
-  proc: AppProcess | null
-  starting: Promise<AppProcess> | null
-  /** Consecutive failure count — counts both a failed start and an unannounced exit */
-  failures: number
-  /** The next startup never happens before this time (exponential backoff) */
-  retryAt: number
-  /** The reason for the last failure (including the tail of stderr) */
-  lastError: string | null
-  /** Stopped — failed maxFailures times in a row. Does not start again until a person restarts it */
-  gaveUp: boolean
-  /** The spec generation discovered — the next startup connects without probing */
-  verdict: PriorDiscovery | undefined
-  /**
-   * A generation number. Raised every time it stops or changes — if a startup in progress finishes
-   * with a different number than when it began, that process is already stale and is discarded (so an
-   * app that should start with a changed manifest never starts with the old command instead).
-   */
-  epoch: number
-  inflight: number
-  /** Waiters for inflight to reach 0 — a check (C-3) never cuts off a call in progress, it waits and then restarts */
-  idleWaiters: (() => void)[]
-  /**
-   * The fingerprint of the app folder the last-started process saw (C-4) — null if it has never
-   * started. Reflecting a change compares the current folder against this, and restarts if they
-   * differ. Survives the process going down: an edit made while it was idle and stopped still counts
-   * as "changed".
-   */
-  stamp: string | null
-  /**
-   * The fingerprint the last process that **actually started** read (C-4) — the list's `codeStamp`.
-   * Unlike `stamp`, a failed startup never changes this: an open screen compares it against the code
-   * currently running to tell whether it is showing stale HTML. Reopening a screen against new code
-   * that failed to start would show nothing but the failure.
-   */
-  loaded: string | null
-  idle: NodeJS.Timeout | null
-  /** The current process's tool list (names and audience passed validation), and the reasons for anything filtered out */
-  tools: AppTool[] | null
-  toolWarnings: string[]
-  /**
-   * The last tool list read — unlike `tools`, **this survives the process going down** (A-5).
-   *
-   * Attaching an app to a session needs its tool list, but knowing the tool list requires starting
-   * the app. Starting every attached app every time a session starts would break "zero app processes
-   * while idle" (the performance budget) for a single session. The list read once is remembered, and
-   * re-read and announced if changed the next time the app starts. If the manifest changes, entries
-   * are rebuilt fresh, so the old list disappears along with it.
-   */
-  known: AppTool[] | null
-  /**
-   * The current process's pipe number. An open run carries the pipe number it was born under, and the
-   * broker only accepts a run under that same number — so even if the app restarts, a dead process's
-   * run id never works on the new pipe.
-   */
-  pipeId: number
-}
-
-type AppTool = { tool: Tool; visibility: Audience[] }
-
-/**
- * Why an app may not run right now (`ExternalApps.blocker`) — the one answer every door asks: a call, a start, a
- * check, a reload, and the list's status. `reason` is worded for the person or agent who reads it verbatim.
- */
-type Blocker = { kind: 'invalid' | 'untrusted' | 'unconfirmed' | 'removing' | 'failed'; reason: string }
-
-/**
- * Clears what a run of failures left behind — the count, the backoff, the reason, the stop — and the remembered spec
- * generation. Every door that gives an app a fresh start passes through here: Restart, a check, a reload on changed
- * files, a restored version, a changed secret. The generation goes too: it describes the code that last connected,
- * and the SDK warns that a stale one fails (a modern verdict against a server that went back to the 2025 SDK) or,
- * worse, succeeds silently forever (a legacy verdict against an upgraded server keeps speaking `initialize`). Only
- * Restart used to clear it, so a check or a reload after switching SDKs kept connecting the old way.
- */
-function resetLife(L: Life): void {
-  Object.assign(L, { failures: 0, retryAt: 0, lastError: null, gaveUp: false, verdict: undefined })
-}
-
-/** A currently open host → app call */
-type OpenRun = {
-  entry: AppEntry
-  pipeId: number
-  tool: string
-  /** Whoever called it — the basis for finding who started it by walking up the chain (where D-4's question is attributed) */
-  caller: AppCaller
-  /** Set when the call ends or is cancelled — broker work beneath this run stops together with it */
-  abort: AbortController
-}
-
-type AppEntry = {
-  ref: AppRef
-  scope: Scope
-  /** Exactly what discovery saw — the baseline the next scan is compared against */
-  found: ScannedApp
-  dir: string
-  /** The result of layering the runtime's own validation (a reserved id) on top of discovery's */
-  manifest: AppManifest | null
-  error: string | null
-  warnings: string[]
-  life: Life
-}
 
 /**
  * How long it waits to capture stderr once more after a tool failure (C-6). The stack a thrown app
@@ -204,9 +100,6 @@ const CHECK_WHERE: Record<Blocker['kind'], CheckFinding['where']> = {
   removing: 'app',
   failed: 'start',
 }
-
-/** The reason an app with an invalid manifest does not run — the same words for every door */
-const invalidReason = (e: AppEntry): string => `This app's manifest is invalid: ${e.error ?? 'unknown error'}`
 
 /** An app that cannot be called — the reason is exactly the message */
 export class AppUnavailableError extends Error {
@@ -1910,7 +1803,7 @@ export class ExternalApps {
         }
         void this.haltWhenDrained(prev, 'manifest changed')
       }
-      held.apps.set(found.folder, this.entry(scope, found))
+      held.apps.set(found.folder, newEntry(scope, found, this.deps.reservedIds))
       changed = true
     }
     for (const [id, e] of [...held.apps]) {
@@ -1922,43 +1815,6 @@ export class ExternalApps {
     }
     this.watchers.setWatched(key, scope.root, result.watch)
     if (changed) this.appsChanged()
-  }
-
-  private entry(scope: Scope, found: ScannedApp): AppEntry {
-    let { manifest, error } = found
-    if (manifest && this.deps.reservedIds.includes(manifest.id)) {
-      // A reserved id would inherit the retired control app's rows and sessions (#97, RESERVED_APP_IDS)
-      error = `"${manifest.id}" is a reserved app id — use another id`
-      manifest = null
-    }
-    return {
-      ref: { projectId: scope.projectId, appId: found.folder },
-      scope,
-      found,
-      dir: found.dir,
-      manifest,
-      error,
-      warnings: found.warnings,
-      life: {
-        proc: null,
-        starting: null,
-        failures: 0,
-        retryAt: 0,
-        lastError: null,
-        gaveUp: false,
-        verdict: undefined,
-        epoch: 0,
-        inflight: 0,
-        idleWaiters: [],
-        stamp: null,
-        loaded: null,
-        idle: null,
-        tools: null,
-        toolWarnings: [],
-        known: null,
-        pipeId: 0,
-      },
-    }
   }
 
   private dropScope(key: string): void {
