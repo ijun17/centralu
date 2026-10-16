@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { ASK_WAIT_MS, askFrame, clipAnswer, matchProjects, pathsIn, projectChoice, readableGrants, underGrant, type AskableProject } from './ask-project.js'
 import { SessionManager } from './manager.js'
 import { crossWorld, type CrossWorld } from './cross-project.test-helpers.js'
@@ -581,7 +581,9 @@ describe('asking another project', () => {
     await vi.advanceTimersByTimeAsync(ASK_WAIT_MS)
     expect(await first).toMatchObject({ ok: true, state: 'working', sessionId: d })
     vi.useRealTimers()
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Put back after this test, or every later test in the file writes its errors nowhere (#845)
+    onTestFinished(() => quiet.mockRestore())
     handleOf(d)!.event({ type: 'error', sessionId: d, error: { code: 'internal', message: "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)", retryable: true } })
     const told = () => w.store.loadMessages(s, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(d))
     await w.until(() => told().length === 1)

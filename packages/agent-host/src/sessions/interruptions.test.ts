@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { AdapterCapabilities, NormalizedEvent, ToolName } from '@cc/protocol'
 import { INTERRUPTED_BY_TOOL, type AgentAdapter, type AgentProcess, type CreateSessionOpts, type EventSink, type SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
@@ -232,6 +232,8 @@ describe('a turn the network stopped (#698)', () => {
     kid.answer('done')
     await until(() => reportsTo(parent, child).length === 1)
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Put back after this test, or every later test in the file writes its errors nowhere (#845)
+    onTestFinished(() => log.mockRestore())
     kid.ownTurnFails('unexpected status 401 Unauthorized')
     expect(info(a, child)).toMatchObject({ state: 'error', interruption: null })
     // The decision to tell is taken with the event: nothing was decided now, so nothing is on its way
@@ -258,6 +260,8 @@ describe('a caller waiting on the turn (#698)', () => {
     const a = host()
     const { parent, child, call } = await waitingParent(a)
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Put back after this test, or every later test in the file writes its errors nowhere (#845)
+    onTestFinished(() => log.mockRestore())
     a.claude.handles.get(child)!.emit({ type: 'error', sessionId: child, error: { code: 'internal', message: ECONNREFUSED, retryable: true } })
     expect(toldLines(log)).toEqual([])
     const r = await call
@@ -367,6 +371,8 @@ describe('a turn a quit stopped (#698)', () => {
 
     // The child is at rest now: the start after that tells nobody again, once its notices have had their moment
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Put back after this test, or every later test in the file writes its errors nowhere (#845)
+    onTestFinished(() => log.mockRestore())
     host()
     await startNoticesRan()
     expect(toldLines(log)).toEqual([])
@@ -379,6 +385,8 @@ describe('a turn a quit stopped (#698)', () => {
     // The orchestrator was mid-turn too, waiting on its child, when the app quit
     await a.mgr.send(parent, 'keep going while the child works')
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Put back after this test, or every later test in the file writes its errors nowhere (#845)
+    onTestFinished(() => log.mockRestore())
     const b = host()
     await startNoticesRan()
     expect(toldLines(log)).toEqual([])
@@ -442,7 +450,9 @@ describe('a tool reconnecting for too long (#698)', () => {
     const a = host()
     const { id, h } = await working(a)
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Put back after this test, or every later test in the file writes its errors nowhere (#845)
+    onTestFinished(() => quiet.mockRestore())
     h.emit({ type: 'activity', sessionId: id, activity: 'retrying' })
     vi.advanceTimersByTime(RECONNECTING_FLAG_MS - 1000)
     expect(interruptions(id)).toEqual([])
