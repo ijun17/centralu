@@ -1,3 +1,4 @@
+import { oneLineText } from '@cc/protocol'
 import { remember } from './folder-cache.js'
 import type {
   ExternalSession,
@@ -56,8 +57,7 @@ function isCompactionMarker(row: StoredMessage): boolean {
 const EXTERNAL_LIST_LIMIT = 200
 
 export function truncate(s: string, max = 40): string {
-  const oneLine = s.replace(/\s+/g, ' ').trim()
-  return oneLine.length > max ? oneLine.slice(0, max) + '…' : oneLine
+  return oneLineText(s, max)
 }
 
 /**

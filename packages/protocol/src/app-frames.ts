@@ -24,8 +24,19 @@
  * space, and long values are truncated — the frame's shape is kept by whoever uses it.
  */
 export function frameField(value: string): string {
-  const flat = value.replace(/[\p{Cc}\p{Cf}]+/gu, ' ').trim()
-  return flat.length > 120 ? flat.slice(0, 120) + '…' : flat
+  return oneLineText(value, 120)
+}
+
+/**
+ * Any text on one line (#428): every run of white space, control characters (U+0085 included) and format characters
+ * (bidi overrides and isolates, zero-width marks) becomes one space, which also takes the line and paragraph
+ * separators (U+2028, U+2029) a reader may break on; past `max` characters it is cut, with an ellipsis. The one
+ * reduction for a name, a task line or a label: the host had ten, with different character sets, and the narrower
+ * ones let a bidi override or a NEL through.
+ */
+export function oneLineText(value: unknown, max = Infinity): string {
+  const flat = String(value ?? '').replace(/[\s\p{Cc}\p{Cf}]+/gu, ' ').trim()
+  return flat.length > max ? flat.slice(0, max) + '…' : flat
 }
 
 /** How one run of the app ended — the header only states the outcome, not that it succeeded */

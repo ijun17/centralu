@@ -188,7 +188,8 @@ orchestrator, which belongs to no project, retains its own create-session tool.
    project are checked again after consent (`askGateError`). The caller's project losing trust or being removed, or
    the target project being removed, withdraws a card still standing (`withdrawReaches`).
 4. **Delivery.** The task travels in `askFrame`, explaining the caller and how the answer comes
-   back, and appears in the target conversation with `from` identifying the asking session. An idle
+   back (the caller's project name a one-line field, `frameField`, as the parent's name in `agentFrame` and
+   `agentNoteFrame` is, #428), and appears in the target conversation with `from` identifying the asking session. An idle
    session resumes as needed. A session busy with a turn that is not the caller's (the person's,
    another delegation, or requests queued ahead) returns the choices instead (§1.2.3, #677): the
    caller passes `ifBusy` `note` (an `auto` caller only, through the adapter's tracked mid-turn input

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { oneLineText } from '@cc/protocol'
 import { assertExistingPathSync, isMissingPathError } from '../../dev-services/path-guard.js'
 import { MANIFEST_FILE, parseManifest, type AppManifest } from './manifest.js'
 
@@ -108,7 +109,7 @@ function escapeHtml(s: string): string {
 
 /** Reduces a person-supplied name or description to one line — so a line break cannot cut off a code comment */
 export function oneLine(s: string): string {
-  return s.replace(/\s+/g, ' ').trim()
+  return oneLineText(s)
 }
 
 /**

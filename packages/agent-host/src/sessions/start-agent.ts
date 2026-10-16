@@ -1,4 +1,4 @@
-import { APP_SLUG, type AgentDifficulty, type AgentModels, type PermissionPreset, type ToolDefaults } from '@cc/protocol'
+import { APP_SLUG, frameField, oneLineText, type AgentDifficulty, type AgentModels, type PermissionPreset, type ToolDefaults } from '@cc/protocol'
 
 /**
  * start_agent and agent_session (#561) — an ordinary session starts another agent (Claude or Codex) in its own
@@ -33,7 +33,7 @@ export function presetWithin(child: PermissionPreset, parent: PermissionPreset):
  */
 export function agentFrame(parentName: string, task: string): string {
   return [
-    `[Another session in this project, "${parentName}", gives you this task through Centralu's start_agent. ` +
+    `[Another session in this project, "${frameField(parentName)}", gives you this task through Centralu's start_agent. ` +
       'Your final message goes back to it as the answer: keep it short, and name the files it should read by their absolute paths. ' +
       // #729: children that backgrounded their verify and ended the turn "waiting for it" left the parent unanswered (#721)
       'Wait for your own background work that ends (a test run, a build) inside your turn before you answer.]',
@@ -71,7 +71,7 @@ export function agentChoice(
 
 /** A follow-up carries the parent's words without replacing the task or promising an independent answer. */
 export function agentNoteFrame(parentName: string, text: string): string {
-  return `[A note from the parent session "${parentName}" through Centralu's agent_session. These are the parent's words about your ongoing work.]\n\n${text}`
+  return `[A note from the parent session "${frameField(parentName)}" through Centralu's agent_session. These are the parent's words about your ongoing work.]\n\n${text}`
 }
 
 /**
@@ -92,6 +92,5 @@ export function agentBranch(task: string, id: string, max = 40): string {
 
 /** The name a child starts with: its task's first words, like a session the person starts with a message */
 export function agentName(task: string, max = 48): string {
-  const one = task.replace(/\s+/g, ' ').trim()
-  return one.length > max ? `${one.slice(0, max - 1)}…` : one || 'Agent'
+  return oneLineText(task, max) || 'Agent'
 }

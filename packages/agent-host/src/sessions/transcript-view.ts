@@ -1,4 +1,4 @@
-import type { SessionInfo, StoredMessage } from '@cc/protocol'
+import { oneLineText, type SessionInfo, type StoredMessage } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
 
 /**
@@ -64,8 +64,7 @@ export function labelOf(reader: MessageReader, s: SessionInfo): string {
     const t = ((r.payload as { text?: string }).text ?? '').trim()
     // Skips the compaction summary itself — that is exactly what ruined the name in the first place
     if (!t || /^This session is being continued|^Caveat:/i.test(t)) continue
-    const one = t.replace(/\s+/g, ' ').slice(0, 60)
-    return `${one}${t.length > 60 ? '…' : ''} (resumed session)`
+    return `${oneLineText(t, 60)} (resumed session)`
   }
   return `${s.name.slice(0, 40)}…`
 }

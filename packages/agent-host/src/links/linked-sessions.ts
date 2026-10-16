@@ -1,4 +1,4 @@
-import { BackgroundTask, HostReadSessionResult, HostRecallHit, HostSessionRow, SessionId, ToolName } from '@cc/protocol'
+import { BackgroundTask, HostReadSessionResult, HostRecallHit, HostSessionRow, oneLineText, SessionId, ToolName } from '@cc/protocol'
 import type { SessionInfo } from '@cc/protocol'
 import { NOT_REACHABLE, type LinkedProject, type LinkedSessions, type OrchestratedSession, type RecallHit } from '../adapters/contract.js'
 import { trustedJsonText } from '../sessions/orchestrator-tools.js'
@@ -28,19 +28,17 @@ const notRouted: RpcHandler = async (method) => {
 /** Long enough for any name a person or the auto-namer gives (60 characters plus a suffix), short enough to stay a label */
 const LABEL_MAX = 200
 
-/** What breaks a line, or is not text: the control characters, and the two separators a reader may take for a break */
-// eslint-disable-next-line no-control-regex
-const NOT_ONE_LINE = /[\u0000-\u001f\u007f\u2028\u2029]+/g
+/** What breaks a line, or is not text, as `oneLineText` reads it: control and format characters, and the line separators */
+const NOT_ONE_LINE = /[\p{Cc}\p{Cf}\u2028\u2029]/u
 
-/** One line of a machine's text: no line breaks or control characters, cut to a label's length */
+/** One line of a machine's text (`oneLineText`, #428), cut to a label's length */
 function oneLine(value: unknown, max = LABEL_MAX): string {
-  const text = String(value ?? '').replace(NOT_ONE_LINE, ' ').trim()
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text
+  return oneLineText(value, max)
 }
 
 /** A machine's line of a conversation: kept when it is one line, as the machine's code makes it; quoted as one otherwise */
 function fencedLine(line: string): string {
-  return line.replace(NOT_ONE_LINE, '') === line ? line : trustedJsonText(line)
+  return NOT_ONE_LINE.test(line) ? trustedJsonText(line) : line
 }
 
 /**

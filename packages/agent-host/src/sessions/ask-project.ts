@@ -1,3 +1,4 @@
+import { frameField, oneLineText } from '@cc/protocol'
 import { realpathSync, statSync } from 'node:fs'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 
@@ -26,8 +27,7 @@ const ANSWER_TAIL_CHARS = 1200
 
 /** The task as one line on the consent card: the card asks "Let A ask B to <this>?" */
 export function taskLine(task: string, max = 160): string {
-  const one = task.replace(/\s+/g, ' ').trim()
-  return one.length > max ? `${one.slice(0, max - 1)}…` : one
+  return oneLineText(task, max)
 }
 
 /**
@@ -37,7 +37,7 @@ export function taskLine(task: string, max = 160): string {
  */
 export function askFrame(callerProject: string, task: string): string {
   return [
-    `[A session in the project "${callerProject}" asks this project, through Centralu's ask_project. ` +
+    `[A session in the project "${frameField(callerProject)}" asks this project, through Centralu's ask_project. ` +
       'Your final message goes back to it as the answer: keep it short, and name every file it should read by its absolute path.]',
     '',
     task,

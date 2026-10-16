@@ -67,6 +67,7 @@ import {
   // also needs to put words into a session built with the same frame.
   frameField,
   gitSourceError,
+  oneLineText,
   repoNameOf,
   parseUiPreferences,
   textSizeFromLegacyStep,
@@ -179,7 +180,7 @@ function movedChildrenNote(moved: readonly MovedChild[]): string {
 
 function movedLabel(c: Pick<MovedChild, 'name' | 'project' | 'request'>): string {
   if (c.request) return 'start_agent request'
-  return `"${c.name.replace(/\s+/g, ' ').slice(0, 120)}"${c.project ? ` (project ${c.project})` : ''}`
+  return `"${oneLineText(c.name, 120)}"${c.project ? ` (project ${c.project})` : ''}`
 }
 
 /**
@@ -1148,7 +1149,7 @@ export class SessionManager {
     if (!target || target.kind === 'orchestrator' || target.kind === 'coordinator') {
       throw Object.assign(new Error(`Not a session this machine shares: ${sessionId}`), { code: 'session_not_found' })
     }
-    const name = fromName.replace(/\s+/g, ' ').trim().slice(0, 120) || 'Orchestrator on a linked computer'
+    const name = oneLineText(fromName, 120) || 'Orchestrator on a linked computer'
     await this.send(sessionId, text, undefined, { sessionId: HUB_SENDER, name })
   }
 
