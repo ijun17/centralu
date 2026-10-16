@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+/** Name of our MCP server attached via the bridge — elicitation acceptance judges by this name (defined in one place, #93) */
 import { ORCHESTRATOR_MCP_NAME } from '../../sessions/orchestrator-tools.js'
 import type { ApprovalDecision, ApprovalDetail, ApprovalScope } from '@cc/protocol'
 import type { EventSink } from '../contract.js'

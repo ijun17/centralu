@@ -2,10 +2,7 @@
 import { execFile } from 'node:child_process'
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
-import { bridgePath } from './bridge-path.js'
-
-/** Name of our MCP server attached via the bridge — elicitation acceptance judges by this name (defined in one place, #93) */
-import { ORCHESTRATOR_MCP_NAME, codexToolInstructionsFor } from '../../sessions/orchestrator-tools.js'
+import { codexToolInstructionsFor } from '../../sessions/orchestrator-tools.js'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -50,8 +47,9 @@ import { sandboxConfig } from './sandbox.js'
 import { withStderrTail } from '../../stream-text.js'
 import { raceTimeout } from '../../timing.js'
 import { CodexRequests } from './server-requests.js'
+import { CodexServers } from './thread-servers.js'
 import { runningTurnOf, threadIdOf, turnIdOf } from './turn-reads.js'
-import { APP_CALL_WAIT_MS, APP_STARTUP_TIMEOUT_SEC, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, permissionOptionsFor, repoFilesConfig, spawnInKeeper, type AppApprovalMode } from './launch-config.js'
+import { APP_CALL_WAIT_MS, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, permissionOptionsFor, repoFilesConfig, spawnInKeeper } from './launch-config.js'
 
 export { APP_CALL_WAIT_MS, appApprovalModeFor, CODEX_TOOL_TIMEOUT_SEC, repoFilesConfig }
 
@@ -113,12 +111,6 @@ class CodexSession implements SessionHandle {
    * A `turn/completed` with `interrupted` for any other turn was not asked for here, and says so (`INTERRUPTED_BY_TOOL`).
    */
   private interruptsSent: string[] = []
-  /** App servers loaded onto this thread through the bridge — only elicitations under those names go to our cards */
-  private appServers = new Set<string>()
-  /** Whether this thread was given Centralu's own server — only then is an elicitation under that name ours to accept (#382) */
-  private ownServer = false
-  /** The approval mode the app bridges on this thread were given, or null when it has none (#382, `checkAppMode`) */
-  private appModeLoaded: AppApprovalMode | null = null
   /**
    * Messages that arrived while a compact/review turn was running (measured while dogfooding,
    * 2026-09-02, MGH session).
@@ -186,11 +178,8 @@ class CodexSession implements SessionHandle {
   private readonly requests = new CodexRequestInputs()
   /** What the thread said it runs with — a `thread/settings/updated` is measured against this (#304, `threadSettingsChanged`) */
   private threadSettings: CodexThreadSettings | null = null
-  /**
-   * MCP servers whose failed start was already said (#304). Codex tries a failing server twice on one thread start
-   * (measured, codex-cli 0.160.0), and one line per server is enough; a server that starts again may fail again later.
-   */
-  private mcpFailed = new Set<string>()
+  /** Centralu's bridge and the app bridges this thread loads (see `CodexServers`) */
+  private readonly threadServers: CodexServers
   /** The server's requests behind our approval cards (see `CodexRequests`) */
   private readonly serverRequests: CodexRequests
   /** Thread ready — awaited at construction time to obtain externalId */
@@ -203,13 +192,19 @@ class CodexSession implements SessionHandle {
     this.sessionId = opts.sessionId
     this.unmapped = new UnmappedTypes('codex', opts.sessionId, CODEX_KNOWN_NOTIFICATIONS)
     this.children = new CodexChildTracker(opts.sessionId)
+    this.threadServers = new CodexServers({
+      sessionId: opts.sessionId,
+      opts,
+      request: (method, params) => this.client.request(method, params),
+      threadId: () => this.threadId,
+    })
     this.serverRequests = new CodexRequests({
       sessionId: opts.sessionId,
       emit: (e) => this.emit(e),
       respond: (id, result) => this.client.respond(id, result),
       threadId: () => this.threadId,
-      appServers: () => this.appServers,
-      ownServer: () => this.ownServer,
+      appServers: () => this.threadServers.appServers,
+      ownServer: () => this.threadServers.ownServer,
     })
     this.client = new CodexClient(
       {
@@ -289,7 +284,7 @@ class CodexSession implements SessionHandle {
       if (!adopted || !/already initialized/i.test((err as Error).message)) throw err
     }
 
-    const workspaceConfig = await sandboxConfig(this.opts.cwd, this.opts.permissionPreset, () => this.personsConfig())
+    const workspaceConfig = await sandboxConfig(this.opts.cwd, this.opts.permissionPreset, () => this.threadServers.personsConfig())
     if (this.opts.resumeExternalId) {
       // Resume (FR-10). If it fails, the session manager guides the person through the fallback
       let res: Record<string, unknown>
@@ -333,7 +328,7 @@ class CodexSession implements SessionHandle {
              * For apps, resume is effectively "starting the next thread" — an app attached while
              * the thread was running gets attached here.
              */
-            ...(await this.mcpConfig()),
+            ...(await this.threadServers.mcpConfig()),
             // Files in the repository only reach this thread in a trusted project — resume follows the same rule (#92)
             ...repoFilesConfig(this.opts),
             ...workspaceConfig,
@@ -369,7 +364,7 @@ class CodexSession implements SessionHandle {
       }
       this.threadId = threadIdOf(res) ?? this.opts.resumeExternalId
       this.threadSettings = threadSettingsOf(res)
-      this.checkAppMode(res)
+      this.threadServers.checkAppMode(res)
       this.readNetworkAccess(res)
       // An adopted thread may be mid-turn: Stop needs that turn's id (#313)
       if (adopted) this.takeStartedTurn(runningTurnOf(res) ?? (await this.latestRunningTurn(res)))
@@ -419,7 +414,7 @@ class CodexSession implements SessionHandle {
           // Response speed (measured: priority = "Fast, 1.5x speed, increased usage")
           ...(this.opts.serviceTier ? { service_tier: this.opts.serviceTier } : {}),
           // MCP servers — the orchestrator's bridge and any attached external app's bridge (including approved MCP servers) (see mcpConfig)
-          ...(await this.mcpConfig()),
+          ...(await this.threadServers.mcpConfig()),
           // Files in the repository (.codex/ settings, hooks, rules, AGENTS.md) only in a trusted project (#92, repoFilesConfig)
           ...repoFilesConfig(this.opts),
           ...workspaceConfig,
@@ -427,7 +422,7 @@ class CodexSession implements SessionHandle {
       })
       this.threadId = threadIdOf(res)
       this.threadSettings = threadSettingsOf(res)
-      this.checkAppMode(res)
+      this.threadServers.checkAppMode(res)
       this.readNetworkAccess(res)
       // No rollout yet: the thread is named at its first turn (see externalId)
       return
@@ -469,149 +464,6 @@ class CodexSession implements SessionHandle {
   /** A turn started on this thread, so Codex has written its rollout and the thread can be resumed (see externalId) */
   private threadWritten(): void {
     if (this.externalId === null && this.threadId !== null) this.externalId = this.threadId
-  }
-
-  /**
-   * The MCP settings loaded onto the thread — start and resume use **the exact same assembly**
-   * (so nothing is missing on resume).
-   *
-   * There are two:
-   *   1. The bridge for Centralu's own tools (FR-11). Since #320 every ordinary session gets it
-   *      too (the reader set), so a Codex session starts one small node process for it (about
-   *      40 MB resident, measured idle) unless the person turned the set off in Settings.
-   *   2. The bridge for an external app (M4 A-5) — one per app. This is only produced **for a
-   *      session that has an app attached**: a session with neither starts no bridge. An MCP
-   *      server the person approved (propose_mcp_server) also becomes a user-folder app and
-   *      arrives here (A-7). It used to be loaded raw, but Codex's elicitation asking whether to
-   *      use that server's tools was likely being rejected by us (we only accept `ours`), so it
-   *      probably never ran even once (plan "to confirm separately" 2). Tool approval for an app
-   *      bridge goes to our own approval cards.
-   *
-   * The app bridge is an stdio process that Codex starts (one of the three in plan S-3). HTTP
-   * (`url`) never received a single request in 0.147.0, and we could not re-check in 0.153.4.
-   * The bridge is the same file as the orchestrator's (they are split by `CC_APP_SERVER`).
-   */
-  /**
-   * The approval policy the person's own Codex settings resolve to, for an app bridge under normal (#382, decision
-   * 1). Asked of Codex itself (`config/read`), so profiles, managed layers and the person's own file are merged the
-   * way Codex merges them.
-   *
-   * Which layers count follows what this thread will load. Measured (codex-cli 0.160.0, a scratch `CODEX_HOME`, the
-   * person's `approval_policy` and a repository's `.codex/config.toml` set to opposite values, 2026-10-11):
-   *
-   *   Codex's trust for the folder   config/read {}   config/read {cwd}   thread/start (no per-thread trust)
-   *   trusted                        person's         repository's        repository's
-   *   untrusted                      person's         person's            person's
-   *   unset                          person's         person's            person's
-   *
-   * and with `repoFilesConfig`'s per-thread `untrusted` the thread reports the person's in every row. So a session
-   * whose repository files are kept out (an untrusted project, the orchestrator and coordinators) reads without a
-   * folder, and a trusted project's session reads from its folder, as Claude's normal reads the project's settings
-   * there. Should the two still differ (a layer this read does not see), the thread's own report is compared
-   * afterwards (`checkAppMode`) and the difference logged. A Codex without `config/read`, or one that fails, keeps
-   * `writes`.
-   */
-  private async personsApprovalPolicy(): Promise<unknown> {
-    return (await this.personsConfig()).approval_policy ?? null
-  }
-
-  private async personsConfig(): Promise<Record<string, unknown>> {
-    const projectFiles = Object.keys(repoFilesConfig(this.opts)).length === 0
-    try {
-      const res = await this.client.request<{ config?: Record<string, unknown> }>('config/read', projectFiles ? { cwd: this.opts.cwd } : {})
-      return res?.config ?? {}
-    } catch {
-      return {}
-    }
-  }
-
-  /**
-   * The thread says which policy it runs under (`approvalPolicy` in the start and resume responses). If that is not
-   * the one the app bridges were set for, the apps on this thread ask or refuse differently from the person's policy
-   * until the next start; said in the log so it can be found (#382).
-   */
-  private checkAppMode(res: Record<string, unknown> | undefined): void {
-    if (this.appModeLoaded === null || this.opts.permissionPreset !== 'normal') return
-    const policy = res?.approvalPolicy
-    if (policy === undefined) return
-    const expected = appApprovalModeFor('normal', policy)
-    if (expected !== this.appModeLoaded) {
-      console.error(
-        `[codex] ${this.sessionId.slice(0, 8)} app tools were set to ${this.appModeLoaded}, but the thread runs approval policy ${JSON.stringify(policy)}`,
-      )
-    }
-  }
-
-  private async mcpConfig(): Promise<Record<string, unknown>> {
-    const bridge = this.opts.orchestratorBridge
-    const servers: Record<string, unknown> = {}
-    const orchestrator = !!(this.opts.orchestratorTools && bridge)
-    this.ownServer = orchestrator
-    if (orchestrator) {
-      servers[ORCHESTRATOR_MCP_NAME] = {
-        command: process.execPath,
-        args: [bridgePath()],
-        env: { CC_HOST_URL: bridge!.url, CC_BRIDGE_TOKEN: bridge!.token, CC_SESSION_ID: this.opts.sessionId },
-        /*
-         * Our own tools are never asked about, under any preset — the same as Claude, where they
-         * skip canUseTool (isOrchestratorTool). Without this, auto (`approvalPolicy: never`) made
-         * Codex refuse every one of them on its own: "MCP tool call requires approval, but approval
-         * policy is never" (measured, codex-cli 0.160.0, #320). Under safe and normal the
-         * elicitation it raised was answered `accept` by us anyway (onServerRequest, `ours`).
-         */
-        default_tools_approval_mode: 'approve',
-        // Said, not assumed (the app bridges' reason above): ask_project's "still working" at 240 s must beat it (#371)
-        tool_timeout_sec: CODEX_TOOL_TIMEOUT_SEC,
-      }
-    }
-    const apps = this.opts.apps
-    const attached = apps?.current() ?? []
-    this.appServers = new Set()
-    this.appModeLoaded = null
-    if (apps && bridge && attached.length > 0) {
-      /*
-       * Read the tool list first — a read-only tool has to be written per tool for even safe to
-       * not ask about it. An app we do not already know is started here to read it (bounded).
-       * A session with no attached app never reaches this line.
-       */
-      const lists = await Promise.all(attached.map((a) => (a.tools ? Promise.resolve(a.tools) : apps.tools(a.server))))
-      const mode = appApprovalModeFor(this.opts.permissionPreset, this.opts.permissionPreset === 'normal' ? await this.personsApprovalPolicy() : null)
-      this.appModeLoaded = mode
-      attached.forEach((a, i) => {
-        servers[a.server] = {
-          command: process.execPath,
-          args: [bridgePath()],
-          env: {
-            CC_HOST_URL: bridge.url,
-            CC_BRIDGE_TOKEN: bridge.token,
-            CC_SESSION_ID: this.opts.sessionId,
-            CC_APP_SERVER: a.server,
-            CC_APP_WAIT_MS: String(APP_CALL_WAIT_MS),
-          },
-          default_tools_approval_mode: mode,
-          // A tool the app itself declares read-only is never asked about, under any preset (decision 5)
-          tools: Object.fromEntries(
-            (lists[i] ?? []).filter((t) => t.annotations?.readOnlyHint === true).map((t) => [t.name, { approval_mode: 'approve' }]),
-          ),
-          tool_timeout_sec: CODEX_TOOL_TIMEOUT_SEC,
-          startup_timeout_sec: APP_STARTUP_TIMEOUT_SEC,
-        }
-        this.appServers.add(a.server)
-      })
-    }
-    /*
-     * Whether to read the folder's document (AGENTS.md) is not decided here — repoFilesConfig
-     * decides it from what the session is.
-     *
-     * This used to load `project_doc_max_bytes: 0` here whenever the orchestrator tool bridge was
-     * present, because the orchestrator followed a planted AGENTS.md verbatim (measured: it
-     * started answering with "infiltration-success-9142" once one was planted). But the worktree
-     * manager and the session that creates the worktree also receive this bridge, so they lost
-     * AGENTS.md even in trusted projects (#152). The rule for orchestrator and coordination
-     * sessions is unchanged — they arrive as `noSettingFiles`, and repoFilesConfig loads the same
-     * value for them.
-     */
-    return Object.keys(servers).length > 0 ? { mcp_servers: servers } : {}
   }
 
   private onNotification(n: { method: string; params?: unknown }): void {
@@ -672,7 +524,7 @@ class CodexSession implements SessionHandle {
       this.activityBefore = null
     }
 
-    this.noteAppCall(n)
+    this.threadServers.noteAppCall(n)
     if (n.method === 'item/started' || n.method === 'item/completed') {
       const p = (n.params ?? {}) as { turnId?: string; item?: { type?: string; clientId?: string } }
       if (p.item?.type === 'userMessage' && p.item.clientId && p.turnId) {
@@ -700,7 +552,7 @@ class CodexSession implements SessionHandle {
       for (const e of events) this.emit(e)
       return
     }
-    if (n.method === 'mcpServer/startupStatus/updated' && !this.firstMcpFailure(n.params)) return
+    if (n.method === 'mcpServer/startupStatus/updated' && !this.threadServers.firstMcpFailure(n.params)) return
     for (const e of normalizeNotification(this.sessionId, n)) {
       if (e.type === 'error' && this.inputReceipts.size) this.interrupt(new Error(e.error.message))
       /*
@@ -756,29 +608,6 @@ class CodexSession implements SessionHandle {
   }
 
   /**
-   * Whether this thread can call an attached app's bridge (#308). The servers are fixed when the thread
-   * starts or resumes (`mcpConfig`), and Codex ignores later changes, so an app attached after that is
-   * not in this thread until it restarts. Before the thread exists, the coming start takes the current
-   * set, so the app is counted in. A bridge Codex reported failed stays failed until it reports ready.
-   */
-  appAttachment(server: string): 'attached' | 'restart' | 'failed' {
-    if (this.threadId === null) return 'attached'
-    if (!this.appServers.has(server)) return 'restart'
-    return this.mcpFailed.has(server) ? 'failed' : 'attached'
-  }
-
-  /** Whether this MCP status is one to say: a failure not yet said since the server last started (see `mcpFailed`). */
-  private firstMcpFailure(params: unknown): boolean {
-    const p = (params ?? {}) as { name?: unknown; status?: unknown }
-    const name = typeof p.name === 'string' ? p.name : ''
-    if (p.status === 'ready') this.mcpFailed.delete(name)
-    if (p.status !== 'failed') return false
-    if (this.mcpFailed.has(name)) return false
-    this.mcpFailed.add(name)
-    return true
-  }
-
-  /**
    * A child thread's notification (#222): its items become steps under the `spawnAgent` card that launched it, or wait
    * for that card to name the thread (`unlinked`). Only items are kept — the child's turn, status and deltas carry
    * nothing `childSteps` reads.
@@ -813,29 +642,6 @@ class CodexSession implements SessionHandle {
       this.unlinkedCount -= held.length
       for (const early of held) this.onChildNotification(thread, early)
     }
-  }
-
-  /**
-   * Tells the attachment layer when an attached app's tool call starts and ends (M4 B-1 —
-   * matching cards to calls on the in-conversation screen).
-   *
-   * A call coming in through the bridge does not know the card id (`item.id`) — we found no
-   * evidence that Codex carries that id on the MCP request. So we record here what we observed
-   * ("card X calls server S's tool T with argument A"), and the attachment layer matches it
-   * against the call that follows. A card that has ended (including a rejection) is removed from
-   * matching. A notification from another thread (a child agent) was already filtered out above —
-   * a child's call is not the parent's card.
-   */
-  private noteAppCall(n: { method: string; params?: unknown }): void {
-    const apps = this.opts.apps
-    if (!apps || (n.method !== 'item/started' && n.method !== 'item/completed')) return
-    const item = (n.params as { item?: Record<string, unknown> } | undefined)?.item
-    if (!item || item.type !== 'mcpToolCall' || typeof item.id !== 'string') return
-    if (n.method === 'item/completed') return apps.callEnded(item.id)
-    const server = typeof item.server === 'string' ? item.server : ''
-    const tool = typeof item.tool === 'string' ? item.tool : ''
-    if (!this.appServers.has(server) || !tool) return
-    apps.noteCall(item.id, server, tool, item.arguments ?? (item.invocation as { arguments?: unknown } | undefined)?.arguments ?? {})
   }
 
   sendTracked(text: string, observer?: InputObserver): Promise<void> {
@@ -1086,6 +892,10 @@ class CodexSession implements SessionHandle {
 
   applyRules(matchers: readonly string[]): void {
     this.serverRequests.applyRules(matchers)
+  }
+
+  appAttachment(server: string): 'attached' | 'restart' | 'failed' {
+    return this.threadServers.appAttachment(server)
   }
 
   /** Slash commands (skills) — the app-server's official RPC */
