@@ -656,7 +656,7 @@ export function seedHeavyStore(dataDir: string, profile: StoreProfile = 'owner',
     })
 
     const gridSessionIds = sessions.slice(0, spec.gridPanels).map((s) => s.id)
-    store.setGridView(gridSessionIds.map((sessionId): GridPanel => ({ kind: 'session', sessionId })))
+    store.grid.setGridView(gridSessionIds.map((sessionId): GridPanel => ({ kind: 'session', sessionId })))
 
     for (let i = 0; i < spec.appRuns; i++) {
       const id = `run-${i + 1}`

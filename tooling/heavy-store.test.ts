@@ -89,7 +89,7 @@ describe('heavy-store fixture', () => {
           .map((s) => s.id)
           .sort(),
       ).toEqual(a.sessions.map((s) => s.id).sort())
-      expect(store.listGridView()).toHaveLength(4)
+      expect(store.grid.listGridView()).toHaveLength(4)
       const rows = store.loadMessagesFrom(a.longSessionId, 0, 1_000_000)
       expect(rows).toHaveLength(a.sessions[0]!.rows)
       for (const r of rows) {

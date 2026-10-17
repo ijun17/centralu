@@ -548,33 +548,33 @@ describe('migration v9 — the grid layout', () => {
         ...sessionLiveDefaults(),
       })
     }
-    s.setGridView([sp('s3'), sp('s1')])
-    expect(s.listGridView()).toEqual([sp('s3'), sp('s1')])
+    s.grid.setGridView([sp('s3'), sp('s1')])
+    expect(s.grid.listGridView()).toEqual([sp('s3'), sp('s1')])
     s.close()
   })
 
   it('rewrites the whole thing — adding, removing and reordering all come through the same call', () => {
     const s = seeded()
-    s.setGridView([sp('s1')])
-    s.setGridView([])
-    expect(s.listGridView()).toEqual([])
+    s.grid.setGridView([sp('s1')])
+    s.grid.setGridView([])
+    expect(s.grid.listGridView()).toEqual([])
     s.close()
   })
 
   it('the layout stays put even after resaving a session', () => {
     const s = seeded()
-    s.setGridView([sp('s1')])
+    s.grid.setGridView([sp('s1')])
     const before = s.listSessions()[0]!
     s.upsertSession({ ...before, name: 'renamed' })
-    expect(s.listGridView()).toEqual([sp('s1')])
+    expect(s.grid.listGridView()).toEqual([sp('s1')])
     s.close()
   })
 
   it('deleting a session drops it from the layout too — it must not try to draw something that no longer exists', async () => {
     const s = seeded()
-    s.setGridView([sp('s1')])
+    s.grid.setGridView([sp('s1')])
     await s.trashSession('s1', KEEP_ALL)
-    expect(s.listGridView()).toEqual([])
+    expect(s.grid.listGridView()).toEqual([])
     s.close()
   })
 })
@@ -610,10 +610,10 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
       const s = new Store(file)
       expect(s.schemaVersion).toBe(LATEST_SCHEMA)
       expect(s.migrationsRun).toBe(LATEST_SCHEMA - 41)
-      expect(s.listGridView()).toEqual([sp('s3'), sp('s1'), sp('s2')])
+      expect(s.grid.listGridView()).toEqual([sp('s3'), sp('s1'), sp('s2')])
       // Now an app can stand between them
-      s.setGridView([sp('s3'), ap('p1', 'slider'), sp('s1')])
-      expect(s.listGridView()).toEqual([sp('s3'), ap('p1', 'slider'), sp('s1')])
+      s.grid.setGridView([sp('s3'), ap('p1', 'slider'), sp('s1')])
+      expect(s.grid.listGridView()).toEqual([sp('s3'), ap('p1', 'slider'), sp('s1')])
       s.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -631,7 +631,7 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
       const s = newestStore(file)
       s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       for (const id of ['s1', 's2']) gridSession(s, id, 'p1')
-      s.setGridView([ap('p1', 'slider'), sp('s1')])
+      s.grid.setGridView([ap('p1', 'slider'), sp('s1')])
       s.close()
 
       const older = new Database(file)
@@ -655,7 +655,7 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
       older.close()
 
       const again = new Store(file)
-      expect(again.listGridView()).toEqual([ap('p1', 'slider'), sp('s1')])
+      expect(again.grid.listGridView()).toEqual([ap('p1', 'slider'), sp('s1')])
       again.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -664,25 +664,25 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
 
   it('sessions, a project’s app and a user-folder app keep one order, and a panel named twice keeps its first place', () => {
     const s = seeded()
-    s.setGridView([ap(null, 'notes'), sp('s1'), ap('p1', 'slider'), ap('p1', 'slider'), ap(null, 'notes')])
-    expect(s.listGridView()).toEqual([ap(null, 'notes'), sp('s1'), ap('p1', 'slider')])
+    s.grid.setGridView([ap(null, 'notes'), sp('s1'), ap('p1', 'slider'), ap('p1', 'slider'), ap(null, 'notes')])
+    expect(s.grid.listGridView()).toEqual([ap(null, 'notes'), sp('s1'), ap('p1', 'slider')])
     s.close()
   })
 
   it('two projects’ apps with the same id are two panels', () => {
     const s = seeded()
     s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
-    s.setGridView([ap('p1', 'slider'), ap('p2', 'slider')])
-    expect(s.listGridView()).toEqual([ap('p1', 'slider'), ap('p2', 'slider')])
+    s.grid.setGridView([ap('p1', 'slider'), ap('p2', 'slider')])
+    expect(s.grid.listGridView()).toEqual([ap('p1', 'slider'), ap('p2', 'slider')])
     s.close()
   })
 
   it('deleting a project takes its apps off the grid and leaves the rest where they were', () => {
     const s = seeded()
     s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
-    s.setGridView([ap('p2', 'slider'), sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
+    s.grid.setGridView([ap('p2', 'slider'), sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
     s.deleteProject('p2')
-    expect(s.listGridView()).toEqual([sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
+    expect(s.grid.listGridView()).toEqual([sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
     s.close()
   })
 })
@@ -701,11 +701,11 @@ describe('migration v43 — an app panel keeps its span', () => {
 
   it('a span round-trips with its placement, and a panel without one reads without one', () => {
     const s = seeded()
-    s.setGridView([ap('p1', 'board', { cols: 2, rows: 1 }), sp('s1'), ap(null, 'notes')])
-    expect(s.listGridView()).toEqual([ap('p1', 'board', { cols: 2, rows: 1 }), sp('s1'), ap(null, 'notes')])
+    s.grid.setGridView([ap('p1', 'board', { cols: 2, rows: 1 }), sp('s1'), ap(null, 'notes')])
+    expect(s.grid.listGridView()).toEqual([ap('p1', 'board', { cols: 2, rows: 1 }), sp('s1'), ap(null, 'notes')])
     // Rewritten without it: the choice is gone, not kept from the last write
-    s.setGridView([sp('s1'), ap('p1', 'board')])
-    expect(s.listGridView()).toEqual([sp('s1'), ap('p1', 'board')])
+    s.grid.setGridView([sp('s1'), ap('p1', 'board')])
+    expect(s.grid.listGridView()).toEqual([sp('s1'), ap('p1', 'board')])
     s.close()
   })
 
@@ -737,9 +737,9 @@ describe('migration v43 — an app panel keeps its span', () => {
 
       const s = new Store(file)
       expect(s.schemaVersion).toBe(LATEST_SCHEMA)
-      expect(s.listGridView()).toEqual([ap('p1', 'board'), sp('s1')])
-      s.setGridView([ap('p1', 'board', { cols: 3, rows: 2 }), sp('s1')])
-      expect(s.listGridView()).toEqual([ap('p1', 'board', { cols: 3, rows: 2 }), sp('s1')])
+      expect(s.grid.listGridView()).toEqual([ap('p1', 'board'), sp('s1')])
+      s.grid.setGridView([ap('p1', 'board', { cols: 3, rows: 2 }), sp('s1')])
+      expect(s.grid.listGridView()).toEqual([ap('p1', 'board', { cols: 3, rows: 2 }), sp('s1')])
       s.close()
 
       // A v42 host's setGridView, copied from that build: it names neither column, and must still succeed
@@ -754,7 +754,7 @@ describe('migration v43 — an app panel keeps its span', () => {
       })()
       older.close()
       const again = new Store(file)
-      expect(again.listGridView()).toEqual([ap('p1', 'board')])
+      expect(again.grid.listGridView()).toEqual([ap('p1', 'board')])
       again.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -763,12 +763,12 @@ describe('migration v43 — an app panel keeps its span', () => {
 
   it('half a span, or one outside the bounds, reads as none chosen', () => {
     const s = seeded()
-    s.setGridView([ap('p1', 'a'), ap('p1', 'b'), ap('p1', 'c')])
+    s.grid.setGridView([ap('p1', 'a'), ap('p1', 'b'), ap('p1', 'c')])
     const db = (s as unknown as { db: Database.Database }).db
     db.exec(`UPDATE grid_layout SET span_cols = 2 WHERE app_id = 'a'`)
     db.exec(`UPDATE grid_layout SET span_cols = 9, span_rows = 1 WHERE app_id = 'b'`)
     db.exec(`UPDATE grid_layout SET span_cols = 2, span_rows = 2 WHERE app_id = 'c'`)
-    expect(s.listGridView()).toEqual([ap('p1', 'a'), ap('p1', 'b'), ap('p1', 'c', { cols: 2, rows: 2 })])
+    expect(s.grid.listGridView()).toEqual([ap('p1', 'a'), ap('p1', 'b'), ap('p1', 'c', { cols: 2, rows: 2 })])
     s.close()
   })
 })
@@ -897,7 +897,7 @@ describe('v13 migration — the old-named table becomes grid_panels', () => { //
     const store = new Store(file)
 
     expect(store.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(store.listGridView()).toEqual([sp('s1')])
+    expect(store.grid.listGridView()).toEqual([sp('s1')])
     store.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1832,7 +1832,7 @@ describe('the trash (#204)', () => {
     const s = seeded()
     s.appendMessages(galaxy('s1', 5))
     s.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
-    s.setGridView([sp('s1')])
+    s.grid.setGridView([sp('s1')])
     session(s, 'orch', null, { kind: 'orchestrator' })
     expect(s.orchestratorId()).toBe('orch')
 
@@ -1841,7 +1841,7 @@ describe('the trash (#204)', () => {
 
     expect(s.listSessions()).toEqual([])
     expect(s.orchestratorId()).toBeNull()
-    expect(s.listGridView()).toEqual([])
+    expect(s.grid.listGridView()).toEqual([])
     expect(s.searchMessages('galaxy')).toEqual([])
     expect(s.searchMessages('ga')).toEqual([]) // the short-query path (LIKE) is a second way into the index
     expect(s.listApprovalRules()).toEqual([])

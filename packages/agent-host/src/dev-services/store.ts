@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import type { AgentUse, GridPanel, ProjectInfo, SavedCommand, SessionInfo, StoredMessage, ToolDefaults } from '@cc/protocol'
+import type { AgentUse, ProjectInfo, SavedCommand, SessionInfo, StoredMessage, ToolDefaults } from '@cc/protocol'
 import { AppRunRecords, type AppRunRecord } from './store/app-runs.js'
 import { ChildOwnershipRecords, type QueuedRequest } from './store/child-ownership.js'
 import { GridRecords } from './store/grid.js'
@@ -67,7 +67,7 @@ export class Store extends MigrationRunner {
   protected db: Database.Database
   private readonly projects: ProjectRecords
   private readonly sessions: SessionRecords
-  private readonly grid: GridRecords
+  readonly grid: GridRecords
   private readonly messages: MessageRecords
   private readonly handoffs: HandoffMarkers
   private readonly trash: TrashRecords
@@ -301,16 +301,6 @@ export class Store extends MigrationRunner {
 
   markRead(sessionId: string, seq: number): void {
     return this.sessions.markRead(sessionId, seq)
-  }
-
-  // ── GridRecords (store/grid.ts) ──
-
-  listGridView(): GridPanel[] {
-    return this.grid.listGridView()
-  }
-
-  setGridView(panels: readonly GridPanel[], remote?: (sessionId: string) => boolean, appMachine?: (panel: Extract<GridPanel, { kind: 'app' }>) => string | null): void {
-    return this.grid.setGridView(panels, remote, appMachine)
   }
 
   // ── MessageRecords (store/messages.ts) ──

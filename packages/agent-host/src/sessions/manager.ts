@@ -787,7 +787,7 @@ export class SessionManager {
 
   /** Grid layout — sessions and apps, in order (#288) */
   grid(): GridPanel[] {
-    return this.store.listGridView()
+    return this.store.grid.listGridView()
   }
 
   /**
@@ -832,7 +832,7 @@ export class SessionManager {
       seen.add(key)
       clean.push(panel)
     }
-    this.store.setGridView(clean, remote, (p) => (projects.has(p.projectId ?? '') ? null : appMachine(p)))
+    this.store.grid.setGridView(clean, remote, (p) => (projects.has(p.projectId ?? '') ? null : appMachine(p)))
     return clean
   }
 
