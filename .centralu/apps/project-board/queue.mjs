@@ -30,7 +30,8 @@ export const ERROR_LIMIT = 3
 export const MAX_EVENTS = 200
 export const MAX_DONE = 40
 const OK_CONCLUSIONS = new Set(['success', 'neutral', 'skipped'])
-// An unattended queue is strict: CLEAN only. UNSTABLE (a check outside the required set failed) and
+// An unattended queue is strict: CLEAN, and UNSTABLE only where the queue can prove why (runs a
+// successful one made moot, #1015; runs a batch cancelled, batch.mjs). Any other UNSTABLE and
 // HAS_HOOKS wait, and say so after UNCLEAN_MS.
 const MERGEABLE_STATES = new Set(['CLEAN'])
 
@@ -292,7 +293,7 @@ export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBran
     if (now - Date.parse(since) > UNCLEAN_MS)
       return attention(
         'not-clean',
-        `${n} is green, but GitHub has said ${pr.mergeStateStatus ?? 'nothing'} (not CLEAN) for ${Math.round(UNCLEAN_MS / 60_000)} minutes, and the queue merges only CLEAN. UNSTABLE: a check outside the required set failed; rerun or fix it.`,
+        `${n} is green, but GitHub has said ${pr.mergeStateStatus ?? 'nothing'} (not CLEAN) for ${Math.round(UNCLEAN_MS / 60_000)} minutes, and the queue merges only CLEAN (or UNSTABLE from a cancelled duplicate or an older run of CI on this head, which this is not). UNSTABLE: a check that did not pass, outside the required set or from another run; rerun or fix it.`,
       )
     return { state: 'waiting', patch: { uncleanSince: since } }
   }
@@ -344,6 +345,24 @@ export function errorReason(n, count, message) {
 
 /** The key that makes "one message per change": the same reason on the same head is not news. */
 export const noticeKey = (reason, head) => `${reason.kind}:${head ?? ''}:${reason.job?.id ?? reason.job?.name ?? ''}`
+
+/**
+ * What the watch command (bin/merge-queue.mjs) sees for `owner` (null: every owner) after `after`:
+ * the messages, the items still queued, and whether a batch with one of the owner's pull requests
+ * has its end still to do (the last member landed: its branch, and the check that main is the tree
+ * CI tested, whose notice goes to that member's owner). Answers `{ news, left, batchPending, done }`;
+ * `done` is when the command may exit: news while something is left, or nothing left at all, but
+ * not while such a batch is still finishing, which would say "Nothing left queued" before its notice.
+ */
+export function watchState(q, { owner = null, after }) {
+  const mine = (x) => !owner || x.owner === owner
+  const news = q.events.filter((e) => e.seq > after && e.notify && mine(e))
+  const left = q.items.filter((i) => ACTIVE.has(i.state) && mine(i))
+  const owned = new Set(q.items.filter(mine).map((i) => i.pr))
+  const batchPending = (q.batches ?? []).some((b) => BATCH_ACTIVE.has(b.state) && b.members.some((m) => !owner || owned.has(m.pr)))
+  const done = left.length ? news.length > 0 : !batchPending
+  return { news, left, batchPending, done }
+}
 
 /** The text the queuing session gets for an item that needs it. */
 export function attentionText(item, reason, ref = refIn(item.repo)) {

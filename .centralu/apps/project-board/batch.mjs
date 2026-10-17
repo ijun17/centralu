@@ -36,8 +36,8 @@ export const batchName = (b) => b.branch
 const refList = (b, prs, ref) => prs.map((p) => ref(b.repo, p)).join(', ')
 
 /**
- * The items one batch would take now: active, in CI, not in a batch, their own CI read on the head
- * they have and not finished (pending or nothing yet), with every run of it not started, and not
+ * The items one batch would take now: active, in CI, not in a batch, not a fork's or a release
+ * bump (`ci.batchable`, from the item's poll), their own CI read on the head they have and not finished (pending or nothing yet), with every run of it not started, and not
  * sent back from a batch on this head. The oldest first, at most `max`, in one repository (the
  * oldest item's).
  */
@@ -49,6 +49,7 @@ export function batchCandidates(q, { max }) {
       i.head &&
       i.batchless !== i.head &&
       i.ci?.head === i.head &&
+      i.ci.batchable !== false &&
       (i.ci.verdict === 'pending' || i.ci.verdict === 'none') &&
       i.ci.runs?.length > 0 &&
       i.ci.runs.every((r) => NOT_STARTED.has(r.status)),
@@ -58,8 +59,12 @@ export function batchCandidates(q, { max }) {
   return ok.filter((i) => String(i.repo).toLowerCase() === String(repo).toLowerCase()).slice(0, max)
 }
 
-/** Starts a batch of `items` (in that order): written down before anything on GitHub, built on the next tick. */
-export function formBatch(q, items, { at, ref }) {
+/**
+ * Starts a batch of `items` (in that order): written down before anything on GitHub, built on the
+ * next tick. `cancelled`: the runs a batch it comes from cancelled (a split, tested again), kept for
+ * these members, so landing them still knows why GitHub calls them UNSTABLE.
+ */
+export function formBatch(q, items, { at, ref, cancelled = [] }) {
   q.batchSeq = (Number.isInteger(q.batchSeq) ? q.batchSeq : 0) + 1
   const id = q.batchSeq
   const b = {
@@ -69,7 +74,7 @@ export function formBatch(q, items, { at, ref }) {
     state: 'building',
     members: items.map((i) => ({ pr: i.pr, head: i.head })),
     steps: [],
-    cancelled: [],
+    cancelled: (cancelled ?? []).filter((c) => items.some((i) => i.pr === c.pr)),
     landed: 0,
     head: null,
     reruns: {},
@@ -142,7 +147,7 @@ export function splitBatch(q, b, { at, ref, min = 2 }) {
     if (items.length >= min) {
       // Out of the batch it failed in, a member is not batchless: it is batched again, with fewer
       for (const i of items) delete i.batchless
-      made.push(formBatch(q, items, { at, ref }))
+      made.push(formBatch(q, items, { at, ref, cancelled: b.cancelled }))
     }
   }
   return made

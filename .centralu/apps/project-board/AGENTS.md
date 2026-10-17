@@ -190,7 +190,9 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   moot, cancelled or older, and every commit status succeeded, as a cancelled duplicate pull_request
   run left #971 UNSTABLE for good; `onlySupersededFailures`. Landed as usual, nothing rerun: a rerun
   of the duplicate would spend a whole CI run to change nothing) → every open lower must be inside the top's head
-  (compare), then squash with `--match-head-commit` on the head read, subject `Title (#N)` without
+  (compare: the green run, read on that head, ran on all of them) and no lower's own latest CI run on
+  its head may have failed (cancelled or none is fine; a red one means the top's run may not cover it,
+  → attention `lower-failed`), then squash with `--match-head-commit` on the head read, subject `Title (#N)` without
   attribution lines (`squashMessage`, as `merge_when_green`). Only GitHub's word that it merged counts:
   `gh pr merge` can exit 0 under GitHub's own merge queue without merging (→ attention, not asked again
   on that head). A stack lands only when the top merged into the default branch, here or found merged
@@ -236,15 +238,19 @@ has `queue.batch` (`min` items to start one, at least 2; `max`, default 6).
 
 - **Which**: active items in CI whose own CI was read on their head and has not started (every run
   `queued`, `waiting`, `requested` or `pending`: cancelling it throws no work away), not sent back
-  from a batch on that head (`batchless`), the oldest first, in one repository. One batch runs at a
+  from a batch on that head (`batchless`), not a fork's (its head would run CI in this repository's
+  branch) and not a release bump (its CI is the release's evidence), the oldest first, in one
+  repository. Sent back, an item is batchable again only after its own next poll. One batch runs at a
   time; an item in a batch is not polled on its own (`dueItem`).
 - **Building**: each member is read again (still open, not a draft, not DIRTY, the same head). A
   branch `queue/batch-<n>` is made at the default branch (never moved: one that exists ends the
   batch), and each head is merged into it in order on GitHub (`POST /merges`); one that conflicts
-  goes on with its own CI and is not batched again on that head. With two or more merged, the CI
+  goes on with its own CI and is not batched again on that head; so does one GitHub will not merge
+  into it for another reason (a 404 or 422, a head gone, already in main). With two or more merged, the CI
   workflows are started on the branch (`workflow_dispatch`); GitHub refusing that (no trigger, no
   permission) ends the batch and makes none for an hour (`batchOff`), before anything is cancelled.
-  Then the members' own runs that have not started are cancelled.
+  Then the members' own runs that have not started are cancelled, each written down before it is
+  cancelled (`cancelled`, which a batch split or re-formed from this one keeps for its members).
 - **CI on the batch** is read as an item's head is (`decideRun`, shared with `decideCi`): the
   required set from the default branch plus jobs the batch adds, a cancelled run rerun once, failed
   jobs once. A member that changes meanwhile (pushed, closed, a draft, taken out, queued again) ends
@@ -270,9 +276,12 @@ has `queue.batch` (`min` items to start one, at least 2; `max`, default 6).
   something else, a head moved, a draft, DIRTY, BEHIND, BLOCKED, a long subject: that member and the
   rest go back to their own CI (where the usual attention says what is wrong). Found merged with the
   batch's tree after it (a driver stopped before writing it down), it counts as landed. The batch
-  branch is deleted when the batch ends, whatever the end.
+  branch is deleted when the batch ends, whatever the end, but only once the queue has written down
+  that it made it (`branchMade`), and only while it is still the driver.
 - A member sent back has its own run cancelled: the item's poll reruns it (a cancelled run once per
   head), which is what tells the session what is wrong with it, if anything.
+- The watch command does not say "Nothing left queued" while a batch with the owner's pull requests
+  still has its end to do (`watchState`); it waits for it, and its notice.
 - `merge_queue` lists running batches first, `batch` on each member, and `batches`; the screen tags a
   member "batch N". Batch events are for the screen, not a session; a member's merge is its owner's
   news as ever ("Tested in batch …"). `PROJECT_BOARD_QUEUE_BATCH_MIN` changes `min` only for tests.

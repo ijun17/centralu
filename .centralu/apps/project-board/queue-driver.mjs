@@ -192,20 +192,50 @@ async function failingLine(repo, job) {
 }
 
 /**
- * Lands an item that is green and mergeable: checks every open lower is inside the top's head, then
- * squash-merges the top on the head that was read. Answers the outcome; `afterMerge` does the rest.
+ * Whether a pull request may share a batch (#962): not a fork's (the queue merges its head into a
+ * branch of this repository and starts CI there, with this repository's secrets), not a release bump
+ * (its CI is the release's evidence, docs/releasing.md, and it lands alone).
+ */
+export function batchable(pr) {
+  if (pr.isCrossRepository) return false
+  const prefix = config.release?.branchPrefix
+  if (prefix && String(pr.headRefName ?? '').startsWith(prefix)) return false
+  return !/^chore\(release\)!?:/.test(String(pr.title ?? ''))
+}
+
+/** A finished run whose conclusion is a failure (cancelled, skipped or still going is not). */
+const FAILED_RUN = new Set(['failure', 'timed_out', 'startup_failure', 'action_required'])
+
+/**
+ * Lands an item that is green and mergeable: checks every open lower is inside the top's head (so
+ * the green CI, read on that head, ran on all of them) and that no lower's own latest CI run on its
+ * head failed, then squash-merges the top on the head that was read. The top's run is what proves
+ * the stack; a lower's red run is a sign it does not (a CI that tests only the top's own diff, a
+ * lower pushed again). Answers the outcome; `afterMerge` does the rest.
  */
 export async function land(item, pr, ref, renew, defaultBranch) {
   const repo = item.repo
   const n = ref(repo, item.pr)
   for (const l of item.lowers ?? []) {
     const lp = await readPr(repo, l)
-    if (lp.state === 'OPEN' && !(await containsCommit(repo, lp.headRefOid, pr.headRefOid)))
+    if (lp.state !== 'OPEN') continue
+    if (!(await containsCommit(repo, lp.headRefOid, pr.headRefOid)))
       return {
         state: 'attention',
         reason: {
           kind: 'stack',
           text: `${n} does not contain the head ${short(lp.headRefOid)} of ${ref(repo, l)}, which would be closed as landed. Restack ${n} onto it and push, or queue ${n} again without ${ref(repo, l)}.`,
+        },
+      }
+    // Cheap: the runs' conclusions only. Cancelled or no run at all is fine (the top's run covers it)
+    const own = latestRuns((await readWorkflowChecks(repo, lp.headRefOid, { workflows: CI.workflows })).runs, lp)
+    const red = own.find((r) => r.status === 'completed' && FAILED_RUN.has(r.conclusion))
+    if (red)
+      return {
+        state: 'attention',
+        reason: {
+          kind: 'lower-failed',
+          text: `${ref(repo, l)}, under ${n}, has a failed CI run ${red.id} on its head ${short(lp.headRefOid)}, so the stack is not landed on the top's green run alone. Fix ${ref(repo, l)} (or rerun it if it was a flake) and restack ${n}, or queue ${n} again without it.`,
         },
       }
   }
@@ -305,7 +335,7 @@ async function pollItem(item, { now, ref, renew, save }) {
     const checks = evaluateChecks({ required: required.names, reported: scoped.reported, alsoReported: required.unresolved.length > 0 })
     const runs = latestRuns(scoped.runs, pr)
     // What a batch looks at (batch.mjs batchCandidates): its own CI on this head, and whether it has started
-    base.ci = { head: pr.headRefOid, verdict: checks.verdict, runs: runs.map((r) => ({ id: r.id, status: r.status })) }
+    base.ci = { head: pr.headRefOid, verdict: checks.verdict, runs: runs.map((r) => ({ id: r.id, status: r.status })), batchable: batchable(pr) }
     let lowerBranches = []
     if (checks.verdict === 'green' && pr.baseRefName !== defaultBranch && item.lowers?.length)
       lowerBranches = (await Promise.all(item.lowers.map((l) => readPr(repo, l).catch(() => null)))).filter(Boolean).map((l) => l.headRefName)

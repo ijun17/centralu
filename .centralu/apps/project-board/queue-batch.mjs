@@ -39,7 +39,7 @@ import {
   setPrBase,
 } from './github.mjs'
 import { ACTIVE, attentionText, BATCH_ACTIVE, decideRun, ERROR_LIMIT, findItem, pushEvent, SUBJECT_MAX } from './queue.mjs'
-import { afterMerge, land, latestRuns, permissionsOf, pollMs, takeLease, updateQueue } from './queue-driver.mjs'
+import { afterMerge, batchable, land, latestRuns, permissionsOf, pollMs, takeLease, updateQueue } from './queue-driver.mjs'
 import { short } from './util.mjs'
 
 /** A dispatch GitHub refused (no workflow_dispatch trigger, a permission): no new batch for this long. */
@@ -88,6 +88,7 @@ export async function batchTick(dir, b, { q, holder, now, ref }) {
     const message = e instanceof GitHubError ? e.message : `Unexpected error: ${e?.message ?? e}`
     if (!(e instanceof GitHubError)) console.error('[project-board] merge queue batch:', e)
     let ended = false
+    let made = false
     updateQueue(dir, (fresh) => {
       if (fatal) {
         const ms = Math.min(15 * 60_000, Math.max(60_000, (fresh.pause?.ms ?? 0) * 2))
@@ -100,11 +101,14 @@ export async function batchTick(dir, b, { q, holder, now, ref }) {
       fb.errors = (fb.errors ?? 0) + 1
       if (fb.errors < ERROR_LIMIT) return
       batchEvent(fresh, fb, `Batch ${fb.branch} could not be read or acted on ${fb.errors} times in a row (${message}); its pull requests go back to their own CI.`, at)
-      // Built, its members' own runs may be cancelled: rerun on their own, not batched again on this head
-      endBatch(fresh, fb, 'error', { at, batchless: fb.state !== 'building' })
+      // Not batched again on this head: their own runs may be cancelled (rerun on their own), and a
+      // batch that failed three times would most likely fail again, batch after batch
+      made = fb.branchMade === true
+      endBatch(fresh, fb, 'error', { at })
       ended = true
     })
-    if (ended) await deleteBranch(b.repo, b.branch).catch(() => null)
+    // Only a branch the queue made (written down when it was), and only while still the driver
+    if (ended && made && renew()) await deleteBranch(b.repo, b.branch).catch(() => null)
     return { did: 'error', batch: b.id, error: message, fatal }
   }
   if (r?.yielded) return { did: 'busy' }
@@ -112,7 +116,9 @@ export async function batchTick(dir, b, { q, holder, now, ref }) {
 }
 
 /** Ends the batch on GitHub's side (its branch, once made) and in the queue, with an event. */
-async function drop(b, { save, at }, text, { batchless = true, state = 'dropped', then, made = true } = {}) {
+async function drop(b, { save, at, renew }, text, { batchless = true, state = 'dropped', then, made = true } = {}) {
+  // Not the driver any more: the one that is ends it
+  if (!renew()) return { yielded: true }
   if (made) await deleteBranch(b.repo, b.branch)
   save((q, fb) => {
     batchEvent(q, fb, `Batch ${fb.branch}: ${text}`, at)
@@ -144,7 +150,7 @@ async function build(b, ctx) {
       continue
     }
     const pr = await readPr(repo, m.pr, QUEUE_PR_FIELDS)
-    if (pr.state === 'OPEN' && !pr.isDraft && pr.headRefOid === m.head && pr.mergeStateStatus !== 'DIRTY' && pr.mergeable !== 'CONFLICTING') kept.push({ ...m, title: pr.title })
+    if (pr.state === 'OPEN' && !pr.isDraft && pr.headRefOid === m.head && pr.mergeStateStatus !== 'DIRTY' && pr.mergeable !== 'CONFLICTING' && batchable(pr)) kept.push({ ...m, title: pr.title })
     else gone.push(m.pr)
   }
   if (kept.length < KEEP_MIN) {
@@ -168,20 +174,31 @@ async function build(b, ctx) {
   save((fq, fb) => (fb.branchMade = true))
   const steps = []
   const conflicts = []
+  const refused = []
   for (const m of kept) {
     if (!renew()) return { yielded: true } // the next driver finds the branch made by the queue, and makes it again
-    const r = await mergeInto(repo, b.branch, m.head, `Merge queue batch ${b.id}: #${m.pr} ${m.title}`)
+    let r
+    try {
+      r = await mergeInto(repo, b.branch, m.head, `Merge queue batch ${b.id}: #${m.pr} ${m.title}`)
+    } catch (e) {
+      if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
+      // Not a conflict, but GitHub would not merge it (a head gone, a 404 or 422): as a conflict, it is left out
+      refused.push(m.pr)
+      continue
+    }
     if (r.conflict) conflicts.push(m.pr)
-    else if (r.nothing) gone.push(m.pr)
+    else if (r.nothing) refused.push(m.pr) // in main already: no batch of its own to give
     else steps.push({ pr: m.pr, head: m.head, sha: r.sha, tree: r.tree })
   }
-  // Out of the batch: one that conflicts is not batched again on its head (or it would conflict again)
+  // Out of the batch: one that conflicts or that GitHub would not merge is not batched again on its
+  // head (or it would fail the same way, batch after batch)
+  const left = [...conflicts, ...refused]
   const back = (fq, fb) => {
-    releaseMembers(fq, fb, [...conflicts, ...gone], { at, batchless: false })
-    markBatchless(fq, fb.repo, conflicts)
+    releaseMembers(fq, fb, [...left, ...gone], { at, batchless: false })
+    markBatchless(fq, fb.repo, left)
   }
   if (steps.length < KEEP_MIN)
-    return drop(b, ctx, `${conflicts.length ? `${list(b, conflicts, ref)} conflict${conflicts.length === 1 ? 's' : ''} with the others, and ` : ''}fewer than ${KEEP_MIN} merged cleanly; no batch.`, {
+    return drop(b, ctx, `${conflicts.length ? `${list(b, conflicts, ref)} conflict${conflicts.length === 1 ? 's' : ''} with the others, and ` : ''}${refused.length ? `GitHub would not merge ${list(b, refused, ref)} into it, and ` : ''}fewer than ${KEEP_MIN} merged cleanly; no batch.`, {
       batchless: false,
       then: back,
     })
@@ -196,19 +213,25 @@ async function build(b, ctx) {
       then: (fq) => (fq.batchOff = { until: new Date(now + BATCH_OFF_MS).toISOString(), reason: e.message }),
     })
   }
-  // Their own runs that have not started are not needed now: the batch's run tests them
-  const cancelled = []
+  // Their own runs that have not started are not needed now: the batch's run tests them. Each is
+  // written down before it is cancelled, so a driver stopped in between leaves no cancelled run
+  // the batch does not know (landing accepts UNSTABLE only from runs on that list). A batch made
+  // from another (split, tested again) starts with that one's list.
+  const cancelled = [...(b.cancelled ?? [])]
   for (const s of steps) {
     const own = await readWorkflowChecks(repo, s.head, { workflows: CI.workflows })
     for (const run of own.runs.filter((x) => NOT_STARTED.has(x.status))) {
       // Not the driver any more: the next one builds this batch again from the start
       if (!renew()) return { yielded: true }
+      const entry = { pr: s.pr, run: run.id, suite: run.check_suite_id ?? null }
+      cancelled.push(entry)
+      save((fq, fb) => (fb.cancelled = [...(fb.cancelled ?? []), entry]))
       try {
         await cancelWorkflowRun(repo, run.id)
-        cancelled.push({ pr: s.pr, run: run.id, suite: run.check_suite_id ?? null })
       } catch (e) {
         if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
-        // Started or finished meanwhile: it runs on, and the batch does not count on it
+        // Started or finished meanwhile: it runs on. Its checks are not cancelled ones, so the
+        // entry lets nothing through (onlyCancelledByBatch wants conclusion cancelled)
       }
     }
   }
@@ -227,8 +250,11 @@ async function build(b, ctx) {
       updatedAt: at,
       nextAt: new Date(now + pollMs('ci')).toISOString(),
     })
-    const runs = cancelled.length ? ` Cancelled their own runs not started yet (${cancelled.map((c) => c.run).join(', ')}).` : ''
-    const off = conflicts.length ? ` ${list(fb, conflicts, ref)} conflicted with the ones before, and go${conflicts.length === 1 ? 'es on with its' : ' on with their'} own CI.` : ''
+    const fresh = cancelled.slice((b.cancelled ?? []).length)
+    const runs = fresh.length ? ` Cancelled their own runs not started yet (${fresh.map((c) => c.run).join(', ')}).` : ''
+    const off =
+      (conflicts.length ? ` ${list(fb, conflicts, ref)} conflicted with the ones before, and go${conflicts.length === 1 ? 'es on with its' : ' on with their'} own CI.` : '') +
+      (refused.length ? ` GitHub would not merge ${list(fb, refused, ref)} into it; ${refused.length === 1 ? 'it goes on with its' : 'they go on with their'} own CI.` : '')
     batchEvent(fq, fb, `Batch ${fb.branch}: ${list(fb, steps.map((s) => s.pr), ref)} merged onto ${defaultBranch} at ${short(main.sha)}; CI started on ${short(last.sha)}.${runs}${off}`, at)
   })
   return { state: 'ci' }
@@ -259,7 +285,7 @@ async function runCi(b, ctx) {
         const again = rest.map((p) => findItem(fq, fb.repo, p)).filter((i) => i && !i.batch && ACTIVE.has(i.state))
         if (again.length >= KEEP_MIN) {
           for (const i of again) delete i.batchless
-          formBatch(fq, again, { at, ref })
+          formBatch(fq, again, { at, ref, cancelled: fb.cancelled })
         }
       },
     })
@@ -300,6 +326,7 @@ async function runCi(b, ctx) {
   }
   // Attention for a batch is not a session's: red is split and tried again, anything else goes back
   if (RED.has(d.reason.kind) && b.steps.length >= 2) {
+    if (!renew()) return { yielded: true }
     await deleteBranch(repo, b.branch)
     let made = []
     save((fq, fb) => {
@@ -335,6 +362,7 @@ async function landNext(b, ctx) {
   if (b.landed >= b.steps.length) {
     const main = await readCommit(repo, defaultBranch)
     const same = main.tree === b.tree
+    if (!renew()) return { yielded: true }
     await deleteBranch(repo, b.branch)
     save((fq, fb) => {
       batchEvent(fq, fb, `Batch ${fb.branch}: landed ${list(fb, prs, ref)}; ${defaultBranch} at ${short(main.sha)} ${same ? 'is the tree CI tested' : 'is not the tree CI tested'}.`, at)

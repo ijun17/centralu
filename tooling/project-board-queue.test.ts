@@ -8,7 +8,7 @@ import { fakeExe, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agen
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { decideBefore, decideCi, emptyQueue, enqueue, noticeKey, dequeue, normalize, onlySupersededFailures } from '../.centralu/apps/project-board/queue.mjs'
+import { decideBefore, decideCi, emptyQueue, enqueue, noticeKey, dequeue, normalize, onlySupersededFailures, watchState } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -310,6 +310,36 @@ describe('what the merge queue decides for a batch (#962)', () => {
     ])
   })
 
+  it('keeps the runs a batch cancelled for the members of the batches split or re-formed from it', () => {
+    const q = queueOf(waitingItem(1, A), waitingItem(2, B), waitingItem(3, C), waitingItem(4, '4'.repeat(40)))
+    const b = formBatch(q, q.items, { at: 'x', ref })
+    b.state = 'ci'
+    b.steps = q.items.map((i: any) => ({ pr: i.pr, head: i.head, sha: `s${i.pr}`, tree: `T${i.pr}` }))
+    b.cancelled = q.items.map((i: any) => ({ pr: i.pr, run: 900 + i.pr, suite: 50 + i.pr }))
+    const made = splitBatch(q, b, { at: 'y', ref })
+    // Without them, a half's members were UNSTABLE from runs it did not know, and waited 30 minutes
+    expect(made.map((x: any) => x.cancelled.map((c: any) => c.run))).toEqual([
+      [901, 902],
+      [903, 904],
+    ])
+  })
+
+  it('lets the watch command say "Nothing left queued" only once a batch with its pull requests has finished', () => {
+    const q = queueOf(waitingItem(1, A, 'queued', { owner: 'me', state: 'merged' }), waitingItem(2, B, 'queued', { owner: 'other' }))
+    q.events = [{ seq: 5, notify: true, owner: 'me', kind: 'merged', text: 'merged #1' }]
+    q.seq = 5
+    const b = formBatch(q, [q.items[0]], { at: 'x', ref })
+    b.state = 'landing'
+    // Its last member landed; the batch's end (the branch, the tree check and its notice) is still to come
+    expect(watchState(q, { owner: 'me', after: 0 })).toMatchObject({ batchPending: true, done: false })
+    b.state = 'done'
+    expect(watchState(q, { owner: 'me', after: 0 })).toMatchObject({ batchPending: false, done: true, news: [{ text: 'merged #1' }] })
+    // Something still queued: news ends it at once, as before
+    b.state = 'landing'
+    expect(watchState(q, { owner: null, after: 0 })).toMatchObject({ done: true })
+    expect(watchState(q, { owner: 'other', after: 0 })).toMatchObject({ news: [], done: false })
+  })
+
   it('lands a member only while main has the tree the batch had before it, in order, and on its own head', () => {
     expect(landing()).toEqual({ do: 'merge' })
     // Something else landed on main: the batch's tree is not what this member would land on
@@ -390,6 +420,7 @@ if (args[0] === 'pr' && args[1] === 'view') {
 } else if (args[0] === 'pr' && args[1] === 'list') {
   out((st.basedOn ?? {})[args[args.indexOf('--base') + 1]] ?? [])
 } else if (path === R + '/commits/main') {
+  if (st.mainError) fail('Not Found (HTTP 404)')
   const m = st.main ?? { sha: 'main0', tree: 'tree-main0' }
   out({ sha: m.sha, commit: { tree: { sha: m.tree } } })
 } else if (path === R + '/git/refs' && args.includes('POST')) {
@@ -401,12 +432,14 @@ if (args[0] === 'pr' && args[1] === 'view') {
   const body = JSON.parse(fs.readFileSync(0, 'utf8'))
   write(['merge-into', body.head, body.base])
   if ((st.conflicts ?? []).includes(body.head)) fail('Merge conflict (HTTP 409)')
+  if ((st.mergeErrors ?? []).includes(body.head)) fail('Not Found (HTTP 404)')
   out({ sha: 'batch-' + body.head, commit: { tree: { sha: 'tree-' + body.head } } })
 } else if (path && path.endsWith('/actions/workflows/build.yml/dispatches')) {
   const body = JSON.parse(fs.readFileSync(0, 'utf8'))
   if (st.dispatchError) fail(st.dispatchError)
   write(['dispatch', body.ref])
 } else if (path && /\/actions\/runs\/\d+\/cancel$/.test(path)) {
+  if (st.cancelError) fail(st.cancelError)
   write(['cancel', path.split('/')[5]])
 } else if (path && path.includes('/statuses/')) {
   const body = JSON.parse(fs.readFileSync(0, 'utf8'))
@@ -638,6 +671,33 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     expect(order).toEqual(['base 77', 'merge 77', 'delete feat/b77', 'close 76', 'delete feat/low'])
     expect(writes().find((w) => w[0] === 'close')).toEqual(['close', '76', 'Landed in #77, which merged this stack as one commit.'])
     expect(notices().at(-1)!.text).toContain('Closed #76 as landed in it.')
+  })
+
+  it("lands no stack whose lower's own latest CI run on its head failed, and lands it once that run is no failure", async () => {
+    runtime(
+      ghState({
+        prs: { '76': ghPr(76, { headRefName: 'feat/low', headRefOid: SHA2 }), '77': ghPr(77, { baseRefName: 'main' }) },
+        runs: { [SHA]: [ghRun('success')], [SHA2]: [ghRun('failure', 1, SHA2, { id: 990, head_branch: 'feat/low' })] },
+        compare: { [`${SHA2}...${SHA}`]: 'ahead' },
+      }),
+    )
+    await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
+    const q = await until((x) => stateOf(x) === 'attention', 'attention')
+    expect(q.queue[0].reason.kind).toBe('lower-failed')
+    expect(notices().at(-1)!.text).toContain('#76, under #77, has a failed CI run 990 on its head beef000')
+    expect(writes()).toEqual([])
+    // Rerun and cancelled (a newer push superseded it): no failure, so the top's green run lands the stack
+    patchGh((s) => (s.runs[SHA2] = [ghRun('cancelled', 2, SHA2, { id: 990, head_branch: 'feat/low' })]))
+    await until((x) => stateOf(x) === 'merged', 'the stack to land')
+    expect(writes().map((w) => w.slice(0, 2).join(' '))).toEqual(['merge 77', 'delete feat/b77', 'close 76', 'delete feat/low'])
+  })
+
+  it('lands no stack whose top does not contain a lower\'s head', async () => {
+    runtime(ghState({ prs: { '76': ghPr(76, { headRefName: 'feat/low', headRefOid: SHA2 }), '77': ghPr(77) }, compare: { [`${SHA2}...${SHA}`]: 'diverged' } }))
+    await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
+    const q = await until((x) => stateOf(x) === 'attention', 'attention')
+    expect(q.queue[0].reason.kind).toBe('stack')
+    expect(writes()).toEqual([])
   })
 
   it('reruns a cancelled run once, then asks the queuing session for attention once, and never merges it', async () => {
@@ -1033,6 +1093,58 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
     expect(writes().map(short2).slice(0, 4)).toEqual(['branch queue/batch-2', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-2'])
     expect(writes().map(short2)).not.toContain('delete queue/batch-1')
     expect(batchEvents().filter((t) => t.includes('queue/batch-1 could not be made'))).toHaveLength(1)
+  })
+
+  it('never deletes the batch branch when it ends after three errors before the queue made it', async () => {
+    runtime(batchState({ mainError: true }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until(() => batchesOnDisk()[0]?.state === 'error', 'the batch to end in errors', BATCH_WAIT_MS)
+    await morePolls(4)
+    expect(writes().map(short2)).toEqual([])
+    // Not batched again on those heads, batch after batch
+    expect(batchesOnDisk()).toHaveLength(1)
+  })
+
+  it('writes down each run it cancels before cancelling it', async () => {
+    runtime(batchState({ cancelError: 'API rate limit exceeded for user ID 1. (HTTP 403)' }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    // The cancel call fails (a rate limit pauses the queue): the run is on the batch's list all the same
+    await until(() => queueOnDisk().pause?.kind === 'rate', 'the pause', BATCH_WAIT_MS)
+    expect(batchesOnDisk()[0].cancelled.map((c: any) => [c.pr, c.run, c.suite])).toEqual([[77, 901, 5001]])
+  })
+
+  it('leaves out one GitHub will not merge into the batch (not a conflict), and never batches it again on that head', async () => {
+    runtime(batchState({ mergeErrors: [B] }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped', BATCH_WAIT_MS)
+    await morePolls(6)
+    expect(batchesOnDisk()).toHaveLength(1)
+    expect(queueOnDisk().items.find((i: any) => i.pr === 78).batchless).toBe(B)
+    expect(batchEvents().find((t) => t.includes('would not merge'))).toContain('GitHub would not merge #78 into it')
+  })
+
+  it("batches neither a fork's pull request nor a release bump", async () => {
+    const base = batchState()
+    runtime(
+      batchState({
+        prs: {
+          ...base.prs,
+          '78': ghPr(78, { headRefOid: B, mergeStateStatus: 'UNSTABLE', isCrossRepository: true }),
+          '79': ghPr(79, { headRefOid: C, mergeStateStatus: 'UNSTABLE', headRefName: 'chore/release-0.1.0-beta.27', title: 'chore(release): 0.1.0-beta.27' }),
+        },
+        runs: { ...base.runs, [C]: [ownRun(79, C, 903, 5003)] },
+        checks: { ...base.checks, [C]: ownChecks(5003, null) },
+      }),
+    )
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await call('queue_merge', { pr: 79, owner: 'tester' })
+    await morePolls(9)
+    expect(batchesOnDisk()).toEqual([])
+    expect(writes()).toEqual([])
   })
 
   it('leaves out one that conflicts with the ones before it, and batches the rest', async () => {
