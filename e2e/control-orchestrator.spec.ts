@@ -66,63 +66,17 @@ test('The orchestrator sits above the grid and opens on click', async ({ page })
 })
 
 /**
- * The orchestrator is still experimental (issue #1).
- *
- * The marker must be visible **before it is clicked** — the harm being prevented is "clicking
- * without knowing", so putting it inside the screen would already be too late. It also must not
- * break the palette rule: making it bright would falsely claim more urgency than the grid, and
- * color is off-limits from the start.
+ * Neither sidebar door carries a badge any more. The grid graduated on 2026-08-27; the
+ * orchestrator's "Evolving" went on 2026-10-17 (the owner's call), with the dot that marked a
+ * waiting proposal: the proposal card itself waits in the orchestrator's screen.
  */
-test('The orchestrator button states it is experimental before it is clicked — without using brightness', async ({
-  page,
-}) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
-
-  const mark = page.getByTestId('orchestrator-experimental')
-  await expect(mark).toBeVisible()
-  // 'Experimental' (a warning) -> 'Evolving' (an identity) (dogfooding, 2026-09-05): since it is
-  // a feature that picks up skills, MCP servers and apps on its own, "still growing" is closer to
-  // the truth than "might break"
-  await expect(mark).toHaveText('Evolving')
-
-  const rgb = (c: string) => c.match(/\d+/g)!.slice(0, 3).map(Number)
-  const style = (testId: string, prop: string) =>
-    page.getByTestId(testId).evaluate((el, p) => getComputedStyle(el).getPropertyValue(p), prop)
-
-  // It is achromatic (R=G=B) — in this app, color is reserved for diff content
-  const markColor = rgb(await style('orchestrator-experimental', 'color'))
-  expect(new Set(markColor).size).toBe(1)
-
-  // **Darker** than the label. Making it brighter would steal the spot reserved for "something is
-  // waiting on me right now"
-  const labelColor = rgb(await style('orchestrator-button', 'color'))
-  expect(markColor[0]!).toBeLessThan(labelColor[0]!)
-
-  /*
-   * There used to be a "dashed border" check here. The reasoning was that narrowing the sidebar
-   * would clip and hide the text, so a shape needed to remain — but measured, the text never
-   * clips: the badge is `shrink-0`, so it stays intact even at the narrowest width. So the dashed
-   * border check was dropped, and this instead holds onto **what actually needs guarding**:
-   * whether this text stays on screen even when narrowed.
-   */
-  await page.evaluate(() => (window as never as { __store: any }).__store.getState().setSidebarWidth(180))
-  await expect(mark).toBeVisible()
-  await expect(mark).toHaveText('Evolving')
-})
-
-/**
- * The grid graduated (2026-08-27, the user's call). The Experimental badge went up when the
- * view shipped ahead of its spec (issue #25); weeks of dogfooding later it is simply how
- * sessions get watched side by side, and a warning that no longer warns anyone is clutter
- * on the one lane that is always on screen. This pins the removal — and that the
- * orchestrator's badge, whose surface still earns its mark, did not vanish with it.
- */
-test('the grid no longer calls itself experimental — the orchestrator still does', async ({ page }) => {
+test('neither the grid nor the orchestrator button carries a badge', async ({ page }) => {
   await setup(page, { projects: ['/tmp/alpha'] })
 
   await expect(page.getByTestId('grid-button')).toBeVisible()
+  await expect(page.getByTestId('orchestrator-button')).toHaveText('Orchestrator')
   await expect(page.getByTestId('grid-experimental')).toHaveCount(0)
-  await expect(page.getByTestId('orchestrator-experimental')).toBeVisible()
+  await expect(page.getByTestId('orchestrator-experimental')).toHaveCount(0)
 })
 
 test('While viewing the orchestrator, no session appears selected in the sidebar', async ({ page }) => {
