@@ -145,13 +145,26 @@ describe('a gh that is a batch file', () => {
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
   })
 
-  it('is no gh to run: the answer is that gh is unavailable, never a throw', async () => {
+  /*
+   * And never the bare name instead: given one, Windows looks in the working directory, the project, before PATH, so a
+   * gh.exe committed to the repository would run (a review of #964). Here that gh.exe is Node, which runs the script
+   * `pr` it finds there and leaves a mark.
+   */
+  it('is no gh to run: the answer is that gh is unavailable, never a throw, and never a gh.exe in the project', async () => {
     root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-gh-cmd-')))
     const bin = join(root, 'bin')
+    const project = join(root, 'project')
     mkdirSync(bin)
+    mkdirSync(project)
     writeFileSync(join(bin, 'gh.cmd'), '@echo {}\r\n')
+    fakeGh(project)
+    writeFileSync(join(project, 'package.json'), '{"type":"commonjs"}')
+    writeFileSync(join(project, 'pr'), "require('node:fs').writeFileSync('planted-ran', 'yes')\n")
     vi.stubEnv('PATH', bin)
+    // Windows' default, which some shells (agent CLIs among them) turn off: the working directory is looked in first
+    vi.stubEnv('NoDefaultCurrentDirectoryInExePath', undefined)
     __forgetPrograms()
-    await expect(gitBranchPr(root, 'feat/x')).resolves.toBe('unavailable')
+    const answer = await gitBranchPr(project, 'feat/x')
+    expect({ answer, plantedRan: existsSync(join(project, 'planted-ran')) }).toEqual({ answer: 'unavailable', plantedRan: false })
   })
 })

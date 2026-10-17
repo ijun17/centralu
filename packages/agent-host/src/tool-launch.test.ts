@@ -212,7 +212,7 @@ describe('a program the host runs in a project folder', () => {
    * #849: Node refuses to spawn a .cmd (EINVAL), so a gh.cmd or git.cmd first on PATH made every call throw, gitBranchPr
    * too, which is documented not to.
    */
-  it('never a .cmd: the .exe its shim starts, else the first .exe on PATH, else the name', () => {
+  it('never a .cmd: the .exe its shim starts, else the first .exe on PATH, else a path that is not there', () => {
     const shim = 'C:\\Users\\me\\scoop\\shims\\gh.cmd'
     const exe = 'C:\\Users\\me\\scoop\\apps\\gh\\current\\bin\\gh.exe'
     const later = 'C:\\Program Files\\GitHub CLI\\gh.exe'
@@ -221,7 +221,13 @@ describe('a program the host runs in a project folder', () => {
     __forgetPrograms()
     expect(programPath('gh', 'win32', find(true), () => ({ command: NODE, args: ['C:\\x\\gh.js'] }))).toBe(later)
     __forgetPrograms()
-    expect(programPath('gh', 'win32', find(false), (p) => ({ command: p, args: [] }))).toBe('gh')
+    __forgetPrograms()
+    // Never the bare name, which Windows would look up in the project first (a planted gh.exe), and not remembered
+    let asked = 0
+    const none = (_n: string, exts?: string) => (++asked, exts === undefined ? shim : null)
+    expect(programPath('gh', 'win32', none, (p) => ({ command: p, args: [] }))).toBe('C:\\Users\\me\\scoop\\shims\\gh.exe')
+    expect(programPath('gh', 'win32', none, (p) => ({ command: p, args: [] }))).toBe('C:\\Users\\me\\scoop\\shims\\gh.exe')
+    expect(asked).toBe(4)
   })
 })
 

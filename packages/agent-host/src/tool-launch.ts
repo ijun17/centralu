@@ -179,8 +179,13 @@ function withPathExt(path: string, env: Record<string, string | undefined>, deps
  *
  * **Never a `.cmd` or `.bat`** (#849): Node refuses to spawn one (EINVAL), so a `gh.cmd` or `git.cmd`
  * first on PATH made every call throw, `gitBranchPr` too, which is documented not to. Such a file is
- * taken as the `.exe` it starts (a package manager's shim), or else the first `.exe` on PATH; with
- * neither, the name, which the spawn reports as missing.
+ * taken as the `.exe` it starts (a package manager's shim), or else the first `.exe` on PATH.
+ *
+ * With neither, **never the bare name**: given one, Windows would look in the project first and run a
+ * `git.exe` planted there, which is what the absolute path is for. The answer is then the `.exe`
+ * beside that `.cmd`, which the lookup has just found is not there: the spawn reports it missing
+ * (ENOENT, `gitBranchPr`'s 'unavailable'), and nothing is looked for anywhere else. It is not
+ * remembered, so a git installed later is found.
  */
 export function programPath(
   name: string,
@@ -193,8 +198,10 @@ export function programPath(
   if (known) return known
   let found = find(name)
   if (found && /\.(cmd|bat)$/i.test(found)) {
-    const started = launch(found)
+    const batch = found
+    const started = launch(batch)
     found = started.args.length === 0 && /\.(exe|com)$/i.test(started.command) ? started.command : find(name, '.COM;.EXE')
+    if (!found) return win32.join(win32.dirname(batch), `${name}.exe`)
   }
   if (found) programs.set(name, found)
   return found ?? name
