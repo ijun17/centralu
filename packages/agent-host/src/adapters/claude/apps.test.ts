@@ -74,16 +74,20 @@ const servers = () => (captured.options?.mcpServers ?? {}) as Record<string, { t
 let cards = 0
 /** Notices the last session raised */
 let notices: string[] = []
+/** The tool calls the last session put in its conversation, by id */
+let toolCalls: string[] = []
 
 async function start(key: AppSessionKey, over: Partial<CreateSessionOpts> = {}) {
   cards = 0
   notices = []
+  toolCalls = []
   handle = await new ClaudeAdapter().createSession(
     // A project's apps attach only in a trusted project (decision 4) — this session belongs to a trusted project, matching what the manager passes.
     { sessionId: key.id, cwd: '/tmp', permissionPreset: 'normal', projectTrusted: key.projectId !== null, apps: hub.attach(key), ...over },
     (e) => {
       if (e.type === 'approval_request') cards++
       if (e.type === 'notice') notices.push(e.text)
+      if (e.type === 'tool_call') toolCalls.push(e.callId)
     },
   )
   return handle
@@ -219,8 +223,12 @@ describe('the conversation-view card id — Claude', () => {
     })
     captured.feed.push(toolUse('toolu_ok', 2))
     captured.wake?.()
-    await kit.until(() => captured.feed.length, (n) => n === 0)
-    await new Promise((r) => setTimeout(r, 20))
+    /*
+     * Waits until the session has shown the last tool use (#845): it notes a tool use for matching before it shows it,
+     * so by then both are noted. A 20 ms sleep used to stand in for this, and on a loaded machine the call could come
+     * first and rest on the short join wait instead.
+     */
+    await kit.until(() => toolCalls, (ids) => ids.includes('toolu_ok'))
     await request('tools/call', { name: 'poke', arguments: { to: 2 } })
     expect(await ids[0]).toBe('toolu_ok')
   })
