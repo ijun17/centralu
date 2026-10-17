@@ -13,11 +13,19 @@ import { eventually, SLOW } from './test-timing.js'
  * `lazy-resume`, `start-agent`, `versions`, `git-pr` and others set 10–30 s and ran out there while
  * the rest of the suite had three times the room. This reads each test file's syntax tree and lists
  * every limit passed to `it`/`test`/`describe` or a hook (`it(name, fn, 30_000)`,
- * `{ timeout: 10_000 }`) that does not multiply by `SLOW`.
+ * `{ timeout: 10_000 }`), or set for a whole file (`vi.setConfig({ testTimeout: 30_000 })`), that
+ * does not multiply by `SLOW`.
  */
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const RUNNERS = new Set(['it', 'test', 'describe', 'beforeAll', 'afterAll', 'beforeEach', 'afterEach'])
+/** What `vi.setConfig` takes that is a time limit */
+const CONFIG_LIMITS = new Set(['testTimeout', 'hookTimeout'])
+
+/** `vi.setConfig(...)` (or `vitest.setConfig`), which sets the limits of every test in the file after it */
+function isSetConfig(e: ts.Expression): boolean {
+  return ts.isPropertyAccessExpression(e) && e.name.text === 'setConfig' && ts.isIdentifier(e.expression) && ['vi', 'vitest'].includes(e.expression.text)
+}
 
 /** The runner a call goes back to: `it`, `it.skip`, `it.each([...])`, `test.skipIf(x)` */
 function runnerOf(e: ts.Expression): string | null {
@@ -33,6 +41,12 @@ export function limitsIn(file: string, source: string): string[] {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
   const found: ts.Expression[] = []
   const visit = (n: ts.Node) => {
+    if (ts.isCallExpression(n) && isSetConfig(n.expression)) {
+      for (const a of n.arguments) {
+        if (!ts.isObjectLiteralExpression(a)) continue
+        for (const p of a.properties) if (ts.isPropertyAssignment(p) && CONFIG_LIMITS.has(p.name.getText(sf))) found.push(p.initializer)
+      }
+    }
     if (ts.isCallExpression(n) && RUNNERS.has(runnerOf(n.expression) ?? '')) {
       const args = n.arguments
       const fn = args.findIndex((a) => ts.isArrowFunction(a) || ts.isFunctionExpression(a))
