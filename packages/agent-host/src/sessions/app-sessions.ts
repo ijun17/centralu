@@ -150,7 +150,7 @@ export class AppSessions {
     const standing = this.buildersStanding.get(key)
     if (standing) {
       // One app has one builder: a second ask on another tool is told which one it is getting, not given it silently
-      if (standing.tool !== on) throw Object.assign(new Error(`This app's builder is already being started on ${standing.tool ?? 'the default tool'}`), { code: 'internal' })
+      if (standing.tool !== on) throw rpcError(`This app's builder is already being started on ${standing.tool ?? 'the default tool'}`)
       return standing.p
     }
     const p = this.standUpBuilder(ref, tool).finally(() => {

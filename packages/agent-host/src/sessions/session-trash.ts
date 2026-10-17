@@ -102,7 +102,7 @@ export class SessionTrash {
      * A restore or a purge still running (#839): a restore makes the session live only at its end, so a delete now found
      * no session, told the windows it was gone, and the restore then brought it back behind that word
      */
-    if (this.trashBusy.has(sessionId)) throw Object.assign(new Error('That session is already being restored or deleted'), { code: 'internal' })
+    if (this.trashBusy.has(sessionId)) throw rpcError('That session is already being restored or deleted')
     const pending = this.trashing.get(sessionId)
     if (pending) {
       /*
