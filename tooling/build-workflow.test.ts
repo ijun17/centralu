@@ -83,14 +83,25 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
   })
 
   // #1035: a flaky shard cost a rerun of its whole job, 5 to 7 minutes with the queue
-  it('runs a failed e2e shard once more inside its job, saying so', () => {
+  it('runs a failed e2e shard once more inside its job, saying so, with time for both and the first report kept', () => {
     for (const id of ['e2e', 'e2e-chromium']) {
       const body = job(id).body
-      const run = /^ {8}run: \|\n((?: {10}.*\n)+)/m.exec(body.slice(body.indexOf('- name: pnpm e2e')))?.[1] ?? ''
+      const step = body.slice(body.indexOf('- name: pnpm e2e'))
+      expect(step, id).toMatch(/^ {8}id: e2e$/m)
+      const run = /^ {8}run: \|\n((?: {10}.*\n)+)/m.exec(step)?.[1] ?? ''
       const lines = run.split('\n').map((l) => l.trim()).filter(Boolean)
       expect(lines[0], id).toMatch(/^e2e\(\) \{ pnpm e2e --shard=\$\{\{ matrix\.shard \}\}\/\$\{\{ matrix\.shards \}\} .*; \}$/)
-      expect(lines.slice(1), id).toEqual(['if e2e; then exit 0; fi', expect.stringMatching(/^echo "::warning title=e2e \(/), 'e2e'])
+      expect(lines[1], id).toBe('if e2e; then exit 0; fi')
+      expect(lines.at(-1), id).toBe('e2e')
+      const rest = lines.slice(2, -1)
+      expect(rest.some((l) => l.startsWith('echo "::warning title=e2e (')), id).toBe(true)
+      expect(rest.some((l) => l.includes('mv "$d" "e2e-first-attempt/')), id).toBe(true)
+      expect(rest, id).toContain('echo "retried=true" >> "$GITHUB_OUTPUT"')
+      // The first run's report, uploaded apart from the blobs `e2e report` merges
+      expect(body, id).toMatch(/if: \$\{\{ !cancelled\(\) && steps\.e2e\.outputs\.retried == 'true' \}\}\n {8}with:\n {10}name: e2e-first-attempt-/)
+      expect(Number(/^ {4}timeout-minutes: (\d+)$/m.exec(body)?.[1]), id).toBeGreaterThanOrEqual(30)
     }
+    expect(workflow).toContain('pattern: e2e-blob-*')
   })
 
   it('gives each gated matrix job a stand-in with the same checks, run on the other answer only', () => {

@@ -413,7 +413,8 @@ jobs:
   e2e:
     name: e2e (webkit ${{ matrix.shard }}/${{ matrix.shards }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # A first run that fails and the retry below must both fit (#1035): a shard takes 4 to 6 minutes
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -441,6 +442,7 @@ jobs:
         run: pnpm exec playwright install --with-deps webkit
 
       - name: pnpm e2e (shard ${{ matrix.shard }}/${{ matrix.shards }})
+        id: e2e
         env:
           E2E_BROWSER: webkit
           PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
@@ -452,8 +454,21 @@ jobs:
         run: |
           e2e() { pnpm e2e --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,blob --trace=retain-on-failure; }
           if e2e; then exit 0; fi
+          # The first attempt's report and traces, kept apart: the second run starts both afresh
+          mkdir -p e2e-first-attempt
+          for d in blob-report e2e/test-results; do if [ -d "$d" ]; then mv "$d" "e2e-first-attempt/${d//\//-}"; fi; done
+          echo "retried=true" >> "$GITHUB_OUTPUT"
           echo "::warning title=e2e (webkit ${{ matrix.shard }}/${{ matrix.shards }}) ran twice::The shard failed and runs once more. Whatever passes now still failed once: read the first run above and fix the test."
           e2e
+
+      # Only after a retry, and not under e2e-blob-*: `e2e report` merges the attempts that count
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && steps.e2e.outputs.retried == 'true' }}
+        with:
+          name: e2e-first-attempt-webkit-${{ matrix.shard }}
+          path: e2e-first-attempt
+          retention-days: 7
+          if-no-files-found: warn
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
@@ -472,7 +487,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # A first run that fails and the retry below must both fit (#1035): a shard takes 4 to 6 minutes
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -500,6 +516,7 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: pnpm e2e (shard ${{ matrix.shard }}/${{ matrix.shards }})
+        id: e2e
         env:
           E2E_BROWSER: chromium
           PLAYWRIGHT_BLOB_OUTPUT_DIR: blob-report
@@ -510,8 +527,21 @@ jobs:
         run: |
           e2e() { pnpm e2e --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=list,blob --trace=retain-on-failure; }
           if e2e; then exit 0; fi
+          # The first attempt's report and traces, kept apart: the second run starts both afresh
+          mkdir -p e2e-first-attempt
+          for d in blob-report e2e/test-results; do if [ -d "$d" ]; then mv "$d" "e2e-first-attempt/${d//\//-}"; fi; done
+          echo "retried=true" >> "$GITHUB_OUTPUT"
           echo "::warning title=e2e (chromium ${{ matrix.shard }}/${{ matrix.shards }}) ran twice::The shard failed and runs once more. Whatever passes now still failed once: read the first run above and fix the test."
           e2e
+
+      # Only after a retry, and not under e2e-blob-*: `e2e report` merges the attempts that count
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && steps.e2e.outputs.retried == 'true' }}
+        with:
+          name: e2e-first-attempt-chromium-${{ matrix.shard }}
+          path: e2e-first-attempt
+          retention-days: 7
+          if-no-files-found: warn
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
