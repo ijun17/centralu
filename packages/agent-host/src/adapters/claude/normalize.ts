@@ -4,7 +4,7 @@ import { inlineImageEvent, undrawnImageEvent } from '../images.js'
 import { todoWritePlan } from '../plan.js'
 import { addTokens, NO_TOKENS, tokenCount } from '../token-usage.js'
 import { toolResultEvent } from '../tool-result.js'
-import { stepLine } from '../tool-titles.js'
+import { subagentSteps } from '../subagent-steps.js'
 import { UnmappedTypes } from '../unmapped.js'
 import { RetryActivity } from '../retry-activity.js'
 import { ClaudeBackgroundTracker } from './background-tracker.js'
@@ -114,17 +114,7 @@ export function normalizeMessage(
   const parent = str(m.parent_tool_use_id)
   if (parent && (type === 'assistant' || type === 'user' || type === 'stream_event')) {
     if (type === 'stream_event') return out
-    for (const e of normalizeMessage({ ...m, parent_tool_use_id: null }, sessionId)) {
-      if (e.type === 'message_delta' || (e.type === 'reasoning_delta' && e.text)) {
-        out.push({ type: 'subagent_event', sessionId, parentCallId: parent, step: e })
-      } else if (e.type === 'tool_call') {
-        out.push({ type: 'tool_output_delta', sessionId, callId: parent, text: `${stepLine(e.summary)}\n` })
-        out.push({ type: 'subagent_event', sessionId, parentCallId: parent, step: e })
-      } else if (e.type === 'tool_result') {
-        out.push({ type: 'subagent_event', sessionId, parentCallId: parent, step: e })
-      }
-    }
-    return out
+    return subagentSteps(sessionId, parent, normalizeMessage({ ...m, parent_tool_use_id: null }, sessionId))
   }
 
   /*

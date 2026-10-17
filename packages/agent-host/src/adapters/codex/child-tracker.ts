@@ -1,6 +1,7 @@
 import { asObj, str } from '../../json-value.js'
-import { type BackgroundTask, type NormalizedEvent, type SubagentStep } from '@cc/protocol'
-import { firstLine, stepLine } from '../tool-titles.js'
+import { type BackgroundTask, type NormalizedEvent } from '@cc/protocol'
+import { subagentSteps } from '../subagent-steps.js'
+import { firstLine } from '../tool-titles.js'
 import { codexItemOk } from './items.js'
 import { messageIdOf, normalizeNotification, type Notification } from './normalize.js'
 
@@ -25,24 +26,16 @@ export function childSteps(sessionId: string, parentCallId: string, n: Notificat
   if (n.method !== 'item/started' && n.method !== 'item/completed') return []
   const item = asObj(asObj(n.params).item)
   const type = str(item.type)
-  const step = (s: SubagentStep): NormalizedEvent => ({ type: 'subagent_event', sessionId, parentCallId, step: s })
   if (type === 'agentMessage') {
     const text = n.method === 'item/completed' ? str(item.text) : ''
-    return text ? [step({ type: 'message_delta', sessionId, role: 'assistant', text, ...messageIdOf(item.id) })] : []
+    return text ? subagentSteps(sessionId, parentCallId, [{ type: 'message_delta', sessionId, role: 'assistant', text, ...messageIdOf(item.id) }]) : []
   }
   if (type === 'reasoning') {
     const parts = n.method === 'item/completed' && Array.isArray(item.summary) ? item.summary.map((x) => str(x)).filter(Boolean) : []
-    return parts.length ? [step({ type: 'reasoning_delta', sessionId, text: parts.join('\n\n') })] : []
+    return parts.length ? subagentSteps(sessionId, parentCallId, [{ type: 'reasoning_delta', sessionId, text: parts.join('\n\n') }]) : []
   }
-  const out: NormalizedEvent[] = []
-  for (const e of normalizeNotification(sessionId, n)) {
-    // Each call is a line of the launch card's live output too, as a Claude subagent's are (#98, #843): the card said
-    // nothing while the child worked
-    if (e.type === 'tool_call') out.push({ type: 'tool_output_delta', sessionId, callId: parentCallId, text: `${stepLine(e.summary)}\n` })
-    if (e.type === 'tool_call' || e.type === 'tool_result') out.push(step(e))
-    else if (e.type === 'files_touched') out.push(e)
-  }
-  return out
+  // The rest as the parent's own items are read: calls and results, and the files they changed (adapters/subagent-steps.ts)
+  return subagentSteps(sessionId, parentCallId, normalizeNotification(sessionId, n))
 }
 
 /** The child threads a completed `spawnAgent` call started (`receiverThreadIds`), none for any other item (#222, #843) */
