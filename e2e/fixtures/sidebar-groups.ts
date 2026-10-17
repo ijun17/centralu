@@ -560,7 +560,18 @@ export function sidebarGroupTests(): void {
       await expect(page.getByTestId(`session-row-${KIDS[1]}`)).toHaveCount(0)
 
       await page.getByTestId('search-button').click()
+      /*
+       * The palette's field takes the keyboard a task after the palette opens (a setTimeout in CommandPalette), and
+       * Enter picks whichever row is highlighted at that moment, the first. Typed at once, the letters could land on
+       * the search button instead and the Enter pick the first session of an empty query (#1076, about 1 run in 3 of
+       * this file on a loaded Windows machine). So: the field holds the keyboard, it holds the words, and the one
+       * row the Enter will take is kid 2.
+       */
+      const field = page.getByTestId('palette-input')
+      await expect(field).toBeFocused()
       await page.keyboard.type('kid 2')
+      await expect(field).toHaveValue('kid 2')
+      await expect(page.locator('[data-testid^="palette-item-"]').first()).toContainText('kid 2')
       await page.keyboard.press('Enter')
       await expect(page.getByTestId(`session-row-${KIDS[1]}`)).toHaveAttribute('aria-current', 'page')
     })
