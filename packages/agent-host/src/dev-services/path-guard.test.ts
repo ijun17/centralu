@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { lstatSync, mkdirSync, mkdtempSync, realpathSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, posix, win32 } from 'node:path'
+import { basename, join, posix, win32 } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { assertExistingPath, assertExistingPathSync, isInside, pathParts, UnsafePathError } from './path-guard.js'
+import { assertCreatePath, assertExistingPath, assertExistingPathSync, isInside, pathParts, UnsafePathError } from './path-guard.js'
 
 /**
  * The segments the guard walks, under Windows path rules (#14), checked with `path.win32` so it
@@ -58,6 +58,71 @@ describe.skipIf(process.platform !== 'win32')('a project root spelled with a sho
     expect(short, 'this volume makes short names').not.toBe(long)
     expect((await assertExistingPath(short, 'link/a.txt')).isFile()).toBe(true)
     expect(assertExistingPathSync(short, 'link/a.txt').isFile()).toBe(true)
+  })
+})
+
+/*
+ * A junction to a volume path (`\\?\Volume{…}\…`) needs no privilege to make, and libuv cannot read its target, so
+ * `lstat` follows it and calls it a plain folder. The walk went on inside it as if it were in the project: the file
+ * tree listed the folder it led to and a dropped file was written there (measured on Windows 11).
+ */
+describe.skipIf(process.platform !== 'win32')('a junction to a volume path', () => {
+  const dirs: string[] = []
+  const links: string[] = []
+  afterEach(() => {
+    // Removed as links first: a recursive rm would go through one into what it leads to
+    for (const l of links.splice(0)) rmdirSync(l)
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  })
+  const viaVolume = (path: string) => {
+    const mountvol = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'mountvol.exe')
+    const volume = spawnSync(mountvol, [path.slice(0, 2), '/L'], { encoding: 'utf8' }).stdout.trim()
+    expect(volume).toMatch(/^\\\\\?\\Volume\{[0-9a-f-]+\}\\$/i)
+    return volume + path.slice(3)
+  }
+  const shortName = (path: string) =>
+    spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `"for %I in ("${path}") do @echo %~sI"`], {
+      windowsVerbatimArguments: true,
+    }).stdout.toString().trim()
+  const setup = () => {
+    const top = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-guard-volume-')))
+    dirs.push(top)
+    const root = join(top, 'project')
+    const outside = join(top, 'outside')
+    mkdirSync(join(root, 'inside'), { recursive: true })
+    mkdirSync(outside)
+    writeFileSync(join(outside, 'secret.txt'), 'outside')
+    writeFileSync(join(root, 'inside', 'a.txt'), 'inside')
+    const junction = (target: string, name: string) => {
+      const at = join(root, name)
+      symlinkSync(viaVolume(target), at, 'junction')
+      links.push(at)
+      // What the walk has to go by
+      expect(lstatSync(at).isSymbolicLink()).toBe(false)
+      return at
+    }
+    return { root, outside, junction }
+  }
+
+  it('refuses one leading outside the project, on the async walk and on the sync one, however it is spelled', async () => {
+    const { root, outside, junction } = setup()
+    const at = junction(outside, 'volume-link')
+    const short = basename(shortName(at))
+    expect(short, 'this volume makes short names').not.toBe('volume-link')
+    for (const name of ['volume-link', 'VOLUME-LINK', short]) {
+      await expect(assertExistingPath(root, `${name}/secret.txt`), name).rejects.toThrow(UnsafePathError)
+      await expect(assertExistingPath(root, name), name).rejects.toThrow(UnsafePathError)
+      expect(() => assertExistingPathSync(root, `${name}/secret.txt`), name).toThrow(UnsafePathError)
+      // A file dropped into it would have been written outside
+      await expect(assertCreatePath(root, `${name}/dropped.txt`), name).rejects.toThrow(UnsafePathError)
+    }
+  })
+
+  it('still follows one leading inside the project', async () => {
+    const { root, junction } = setup()
+    junction(join(root, 'inside'), 'volume-link')
+    expect((await assertExistingPath(root, 'volume-link/a.txt')).isFile()).toBe(true)
+    expect(assertExistingPathSync(root, 'volume-link/a.txt').isFile()).toBe(true)
   })
 })
 

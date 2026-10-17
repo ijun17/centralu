@@ -1653,8 +1653,10 @@ Limits:
   is in the user's profile, which only that user (and administrators) can read. A `CC_DATA_DIR`
   elsewhere gets that folder's ACL.
 - Junctions are reported as links by `lstat` and so are treated like symlinks, except one whose target
-  libuv cannot read (a volume path): `lstat` follows that one and calls it a folder, so the worktree copy and the
-  reply-image walk ask the folder's listing instead. Only the worktree
-  copy has a test that makes them (`worktree-dependencies.test.ts`); no containment test does yet
-  (creating a symlink on Windows needs Developer Mode or administrator rights; a junction does not).
+  libuv cannot read (a volume path, `\\?\Volume{…}\…`, which anyone can make): `lstat` follows that one and calls it a
+  folder, so the worktree copy and the reply-image walk ask the folder's listing instead, and the path guard checks
+  where every entry `lstat` does not call a link really is (`realpath`), which has to be inside the project too. It
+  had walked on inside such a junction as if it were the project: the file tree listed the folder it led to and a
+  dropped file was written there (`path-guard.test.ts`, also by a short name and another case). Creating a symlink on
+  Windows needs Developer Mode or administrator rights; a junction does not.
 - The keeper does not run on Windows (no named-pipe control socket), so the direct path is used.

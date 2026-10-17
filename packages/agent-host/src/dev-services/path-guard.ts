@@ -4,6 +4,7 @@ import { basename, dirname, join, posix, resolve, sep, win32, type PlatformPath 
 
 /** This OS's path rules */
 const nativePath: PlatformPath = sep === '\\' ? win32 : posix
+const windows = sep === '\\'
 
 export class UnsafePathError extends Error {
   override readonly name = 'UnsafePathError'
@@ -82,7 +83,7 @@ async function walkPath(root: string, rel: string, mode: WalkMode): Promise<Walk
         current = target
       } else {
         stats = linkStats
-        current = candidate
+        current = windows ? realInside(rootReal, await realpath(candidate)) : candidate
       }
     } catch (error) {
       if (isMissingFsPath(error) && mode === 'create-leaf' && index === parts.length - 1) return { exists: false }
@@ -122,7 +123,7 @@ function walkPathSync(root: string, rel: string, mode: WalkMode): WalkResult {
         current = target
       } else {
         stats = linkStats
-        current = candidate
+        current = windows ? realInside(rootReal, realpathSync.native(candidate)) : candidate
       }
     } catch (error) {
       if (isMissingFsPath(error) && mode === 'create-leaf' && index === parts.length - 1) return { exists: false }
@@ -210,6 +211,19 @@ function checkedParent(rootReal: string, current: string): string {
 
 function assertInside(rootReal: string, candidate: string): void {
   if (!isInside(rootReal, candidate)) throw new UnsafePathError('Path is outside the project')
+}
+
+/**
+ * Windows: where an entry `lstat` did not call a link really is, which has to be inside the project as well. libuv
+ * calls a reparse point a link only when it can read the target, and `lstat` follows any other: a junction to a volume
+ * path (`\\?\Volume{…}\outside`), which anyone can make without a privilege, came back as a plain folder, and the walk
+ * went on inside it as if it were in the project while every call after the guard went where it leads. Measured on
+ * Windows 11 (#849 follow-up): the file tree listed the outside folder and a dropped file was written there. A junction
+ * never leads off the machine (Windows does not follow a mount point to a share), so this realpath connects nowhere.
+ */
+function realInside(rootReal: string, real: string): string {
+  assertInside(rootReal, real)
+  return real
 }
 
 function isMissingFsPath(error: unknown): error is NodeJS.ErrnoException {
