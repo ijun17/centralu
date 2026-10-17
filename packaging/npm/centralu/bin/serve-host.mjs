@@ -156,7 +156,8 @@ function proofOf(token, nonce) {
  * Opens a socket to the host and says hello with the token, the way `probeHost` and `askHostToStop` do. With `prove`
  * (the installed host can, `hostProvesOf`), the host first proves it holds the token (#838), and the token goes out only
  * then: whatever else listens on the port (another account's program, while the host is down) never sees it.
- * `on.hello(ws)` runs after the hello is sent; `on.unproven()` when the proof did not come.
+ * `on.message(m, ws)` gets every frame after the hello; `on.unproven()` runs when the proof did not come, `on.gone()`
+ * when the socket failed or closed.
  */
 function helloSocket({ port, token, protocolVersion, prove, WebSocketImpl, on }) {
   const ws = new WebSocketImpl(`ws://127.0.0.1:${port}`)
@@ -181,7 +182,7 @@ function helloSocket({ port, token, protocolVersion, prove, WebSocketImpl, on })
       if (m?.kind === 'proof' && m.nonce === nonce && m.mac === proofOf(token, nonce)) return hello()
       return on.unproven()
     }
-    if (m) on.message(m)
+    if (m) on.message(m, ws)
   }
   ws.onerror = () => (proving ? on.unproven() : on.gone())
   ws.onclose = () => (proving ? on.unproven() : on.gone())
@@ -201,6 +202,34 @@ function helloSocket({ port, token, protocolVersion, prove, WebSocketImpl, on })
  */
 export function probeHost({ port, token, protocolVersion, prove = false, timeoutMs = 2000, WebSocketImpl = globalThis.WebSocket }) {
   if (typeof WebSocketImpl !== 'function') return tcpProbe(port, timeoutMs)
+  return helloExchange({
+    port, token, protocolVersion, prove, WebSocketImpl, timeoutMs,
+    timedOut: { running: false },
+    failed: () => ({ running: false }),
+    on: (done) => ({
+      unproven: () => done({ running: false, unproven: true }),
+      gone: () => done({ running: false }),
+      message: (m) => {
+        if (m.kind === 'hello_ok') {
+          done({
+            running: true,
+            protocolVersion: Number.isInteger(m.protocolVersion) ? m.protocolVersion : undefined,
+            version: typeof m.build?.version === 'string' ? m.build.version : undefined,
+          })
+        } else if (m.kind === 'res' && m.ok === false && m.error?.code === 'version_mismatch') {
+          // The token was right (it is checked first), so this is our host, on another protocol
+          done({ running: true, protocolVersion: mismatchProtocolOf(m.error) ?? undefined })
+        }
+      },
+    }),
+  })
+}
+
+/**
+ * One `helloSocket` exchange that ends once: with the first `done(result)` an `on` handler calls, with `timedOut`
+ * after `timeoutMs`, or with `failed(error)` when the socket cannot even be made. The socket is closed in every case.
+ */
+function helloExchange({ timeoutMs, timedOut, failed, on, ...hello }) {
   return new Promise((resolve) => {
     let ws = null
     let settled = false
@@ -215,29 +244,11 @@ export function probeHost({ port, token, protocolVersion, prove = false, timeout
       }
       resolve(result)
     }
-    const timer = setTimeout(() => done({ running: false }), timeoutMs)
+    const timer = setTimeout(() => done(timedOut), timeoutMs)
     try {
-      ws = helloSocket({
-        port, token, protocolVersion, prove, WebSocketImpl,
-        on: {
-          unproven: () => done({ running: false, unproven: true }),
-          gone: () => done({ running: false }),
-          message: (m) => {
-            if (m.kind === 'hello_ok') {
-              done({
-                running: true,
-                protocolVersion: Number.isInteger(m.protocolVersion) ? m.protocolVersion : undefined,
-                version: typeof m.build?.version === 'string' ? m.build.version : undefined,
-              })
-            } else if (m.kind === 'res' && m.ok === false && m.error?.code === 'version_mismatch') {
-              // The token was right (it is checked first), so this is our host, on another protocol
-              done({ running: true, protocolVersion: mismatchProtocolOf(m.error) ?? undefined })
-            }
-          },
-        },
-      })
-    } catch {
-      done({ running: false })
+      ws = helloSocket({ ...hello, on: on(done) })
+    } catch (e) {
+      done(failed(e))
     }
   })
 }
@@ -262,40 +273,22 @@ function tcpProbe(port, timeoutMs) {
  */
 export function askHostToStop({ port, token, protocolVersion, prove = false, timeoutMs = 5000, WebSocketImpl = globalThis.WebSocket }) {
   if (typeof WebSocketImpl !== 'function') return Promise.resolve({ ok: false, message: `Node ${process.version} has no WebSocket to ask with` })
-  return new Promise((resolve) => {
-    let ws = null
-    let settled = false
-    const done = (result) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      try {
-        ws?.close()
-      } catch {
-        // already closed
-      }
-      resolve(result)
-    }
-    const timer = setTimeout(() => done({ ok: false, message: 'no answer in time' }), timeoutMs)
-    try {
-      // With `prove`, the token goes out only to a host that proved it holds it (#838)
-      ws = helloSocket({
-        port, token, protocolVersion, prove, WebSocketImpl,
-        on: {
-          unproven: () => done({ ok: false, message: 'what answers on the port did not prove it holds the token' }),
-          gone: () => done({ ok: false, message: 'the connection closed' }),
-          message: (m) => {
-            if (m.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'stop', method: 'host.stop', params: {} }))
-            else if (m.kind === 'res' && m.id === 'stop') done(m.ok ? { ok: true } : { ok: false, message: m.error?.message ?? 'refused' })
-            else if (m.kind === 'res' && m.ok === false) {
-              const pv = m.error?.code === 'version_mismatch' ? mismatchProtocolOf(m.error) : null
-              done({ ok: false, message: m.error?.message ?? 'refused', ...(pv !== null ? { protocolVersion: pv } : {}) })
-            }
-          },
-        },
-      })
-    } catch (e) {
-      done({ ok: false, message: e.message })
-    }
+  // With `prove`, the token goes out only to a host that proved it holds it (#838)
+  return helloExchange({
+    port, token, protocolVersion, prove, WebSocketImpl, timeoutMs,
+    timedOut: { ok: false, message: 'no answer in time' },
+    failed: (e) => ({ ok: false, message: e.message }),
+    on: (done) => ({
+      unproven: () => done({ ok: false, message: 'what answers on the port did not prove it holds the token' }),
+      gone: () => done({ ok: false, message: 'the connection closed' }),
+      message: (m, ws) => {
+        if (m.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'stop', method: 'host.stop', params: {} }))
+        else if (m.kind === 'res' && m.id === 'stop') done(m.ok ? { ok: true } : { ok: false, message: m.error?.message ?? 'refused' })
+        else if (m.kind === 'res' && m.ok === false) {
+          const pv = m.error?.code === 'version_mismatch' ? mismatchProtocolOf(m.error) : null
+          done({ ok: false, message: m.error?.message ?? 'refused', ...(pv !== null ? { protocolVersion: pv } : {}) })
+        }
+      },
+    }),
   })
 }
