@@ -1,7 +1,5 @@
 import { InputReceipts, type InputReceipt } from '../input-receipts.js'
 import type { InputObserver } from '../contract.js'
-import { codexToolInstructionsFor } from '../../sessions/orchestrator-tools.js'
-import { CLIENT_INFO, parseCliVersion } from '@cc/protocol'
 import type { ApprovalDecision, ApprovalScope } from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
 import { INTERRUPTED_BY_TOOL, type CreateSessionOpts, type EventSink, type SessionHandle } from '../contract.js'
@@ -22,14 +20,13 @@ import { CodexServers } from './thread-servers.js'
 import { CodexChildThreads } from './child-threads.js'
 import { CodexSlashCommands } from './slash-commands.js'
 import { runningTurnOf, threadIdOf, turnIdOf } from './turn-reads.js'
-import { permissionOptionsFor, repoFilesConfig, spawnInKeeper } from './launch-config.js'
-import { rpcError } from '../../rpc-error.js'
+import { spawnInKeeper } from './launch-config.js'
+import { initializeAppServer, latestRunningTurn, networkAccessOf, resumeFailure, resumeThreadParams, startThreadParams } from './thread-open.js'
+import { CodexTurns } from './turns.js'
+import { WakingSends, watchBackgroundResume } from './background-resume.js'
 
 /** How long we let a resume wait in front of the person — a lock error ("active writer") arrives within this window (measured ~0.3s) */
 export const LAZY_RESUME_WAIT_MS = 3_000
-/** The ceiling for a background resume — the same value as the manager's step limit (150s). Past this, it is considered stuck */
-const BACKGROUND_RESUME_CAP_MS = 150_000
-
 export class CodexSession implements SessionHandle {
   readonly sessionId: string
   /**
@@ -45,29 +42,8 @@ export class CodexSession implements SessionHandle {
 
   private client: CodexClient
   private threadId: string | null = null
-  /**
-   * The id of the turn currently running — **needed in order to stop it** (dogfooding
-   * 2026-09-07: stop did not work).
-   *
-   * `turn/interrupt` does not work with only a threadId. Measured behavior: the server rejects
-   * it with `Invalid request: missing field \`turnId\``(-32600), and we were only piping that
-   * rejection into an error event — the screen looked stopped but the turn ran to completion.
-   * So we capture this **from both** the turn/started notification and the turn/start response:
-   * if stop is pressed very quickly, the response can arrive before the notification.
-   */
-  private turnId: string | null = null
-  /**
-   * Turns already reported ended (`turn/completed`/`turn/failed`), the latest few. The `turn/start` response can
-   * arrive after its own turn's `turn/completed`; taking the id from that late response would bring a finished
-   * turn back as the target of Stop, and the next Stop would send `turn/interrupt` for a dead turn and say
-   * "Could not stop". Bounded: only a response still in flight can name one of these.
-   */
-  private endedTurns: string[] = []
-  /**
-   * Turns we asked Codex to interrupt (#698), the latest few: a Stop, a delegation withdrawn, a parent's note cancelled.
-   * A `turn/completed` with `interrupted` for any other turn was not asked for here, and says so (`INTERRUPTED_BY_TOOL`).
-   */
-  private interruptsSent: string[] = []
+  /** Which turn is running, which ended, and which we interrupted: what Stop targets (see `CodexTurns`) */
+  private readonly turns = new CodexTurns()
   /**
    * Messages that arrived while a compact/review turn was running (measured while dogfooding,
    * 2026-09-02, MGH session).
@@ -85,17 +61,8 @@ export class CodexSession implements SessionHandle {
   private inputGroups = new Map<string, InputReceipt[]>()
   /** An unsteerable turn (compact/review) is running — we know because we are the ones who started it */
   private blockingTurn = false
-  /**
-   * The count of messages sent, and the count reclaimed by a Stop pressed before the thread was
-   * up (#168).
-   *
-   * Before resume finishes there is no turn to stop (there is no threadId or turnId yet). The old
-   * Stop did nothing in that window, and a message queued up behind ready went out as turn/start
-   * once resume finished — the turn started after the person had already stopped it. Now that
-   * Stop reclaims whatever was sent up to that point. Anything sent after that still goes through.
-   */
-  private sendsIssued = 0
-  private sendsStopped = 0
+  /** Messages sent while the thread was still coming up, and those a Stop reclaimed (see `WakingSends`, #168) */
+  private readonly sends = new WakingSends()
   /** Codex is reconnecting on its own (#168): the `retrying` activity and what it puts back (see `RetryActivity`) */
   private readonly retry: RetryActivity
   /**
@@ -209,110 +176,23 @@ export class CodexSession implements SessionHandle {
 
   private async start(): Promise<void> {
     const adopted = !!this.opts.processSource?.adopt
-    try {
-      const init = await this.client.request<{ userAgent?: unknown }>('initialize', {
-        clientInfo: CLIENT_INFO,
-        capabilities: null,
-      })
-      this.client.notify('initialized')
-      /*
-       * The app-server's version, for moving the session to a newer install (#297). Codex reports it only here, in
-       * `userAgent`: `<our client name>/<server version> (<os>) …` (measured, codex-cli 0.160.0, 2026-10-05:
-       * "centralu/0.160.0 (Mac OS 27.0.1; arm64) unknown (centralu; 0.1.0-beta.10)"). An adopted app-server is not
-       * initialized again; its version comes from the keeper's tag instead (manager.adoptKept).
-       */
-      const ua = typeof init?.userAgent === 'string' ? init.userAgent : ''
-      const version = parseCliVersion(ua.slice(ua.indexOf('/') + 1))
-      if (version) this.emit({ type: 'agent_version', sessionId: this.sessionId, version })
-    } catch (err) {
-      /*
-       * An app-server adopted from a previous host (#280 step 2) is the same stdio connection, already
-       * initialized. Measured (codex-cli 0.160.0, gpt-5.6-luna, 2026-10-04): the second `initialize`
-       * is rejected with -32600 "Already initialized" and nothing else changes; `thread/resume` then
-       * answers with the running turn and re-sends a pending approval under the same request id.
-       */
-      if (!adopted || !/already initialized/i.test((err as Error).message)) throw err
-    }
+    await initializeAppServer(this.client, this.sessionId, adopted, (e) => this.emit(e))
 
     const workspaceConfig = await sandboxConfig(this.opts.cwd, this.opts.permissionPreset, () => this.threadServers.personsConfig())
     if (this.opts.resumeExternalId) {
       // Resume (FR-10). If it fails, the session manager guides the person through the fallback
       let res: Record<string, unknown>
       try {
-        res = await this.client.request<Record<string, unknown>>('thread/resume', {
-          threadId: this.opts.resumeExternalId,
-          ...permissionOptionsFor(this.opts.permissionPreset),
-          /*
-           * Metadata only, not the whole history (#342). Nothing here reads the history the resume used to return
-           * except the running turn's id, and that has its own one-turn query below. Measured (codex-cli 0.160.0,
-           * gpt-5.6-luna, a five-turn scratch thread, 2026-10-05): 1,206 KB / 761 ms and a `deprecationNotice`
-           * ("Full-history hydration is deprecated for paginated threads; use `excludeTurns: true`…") that #304 put
-           * in the conversation, against 1.9 KB / 351 ms and no notice. One long thread's answer was 23 MB
-           * (client.ts). A Codex that predates the flag ignores it and answers with the turns, as before.
-           */
-          excludeTurns: true,
-          /*
-           * Verbosity has to be carried through on resume too (#54). turn/start has no place for
-           * it (unlike effort), so these two spots where the thread is started are the only
-           * place — leaving it out here becomes the quiet kind of loss where settings reset every
-           * time the session wakes back up.
-           *
-           * Reasoning summary is the same case (measured for #58): unless this switch is turned
-           * on, the item/reasoning/* stream **never arrives, not once** — the kind of feature
-           * where wiring it up without flipping the switch does nothing at all.
-           */
-          config: {
-            model_reasoning_summary: 'auto',
-            ...(this.opts.verbosity ? { model_verbosity: this.opts.verbosity } : {}),
-            ...(this.opts.serviceTier ? { service_tier: this.opts.serviceTier } : {}),
-            /*
-             * MCP servers are loaded **on resume too** (M4 A-5, plan "to confirm separately" 1).
-             *
-             * The old resume sent no servers at all — if the initial settings do not survive on
-             * the thread, a Codex orchestrator that wakes back up loses the centralu tools.
-             * Whether they actually survive can only be known by running it (S-7), and we could
-             * not re-check because Codex was logged out. So we load them again without waiting
-             * for that confirmation: resume's `config` is a settings override (generated type
-             * ThreadResumeParams — "Configuration overrides for the resumed thread"), so the same
-             * name lands in the same slot, and overwriting it loses nothing if it had survived.
-             * For apps, resume is effectively "starting the next thread" — an app attached while
-             * the thread was running gets attached here.
-             */
-            ...(await this.threadServers.mcpConfig()),
-            // Files in the repository only reach this thread in a trusted project — resume follows the same rule (#92)
-            ...repoFilesConfig(this.opts),
-            ...workspaceConfig,
-          },
-        })
+        res = await this.client.request<Record<string, unknown>>('thread/resume', resumeThreadParams(this.opts, await this.threadServers.mcpConfig(), workspaceConfig))
       } catch (err) {
-        /*
-         * The raw message ("already has an active writer") explains nothing to the user.
-         *
-         * And **a sentence meant for a human is not enough on its own** — if the layer above has
-         * to re-parse that sentence with a regular expression, that is not a contract. We surface
-         * a machine-readable code alongside it: the UI needs this code to be able to offer
-         * "split off and continue" (codex's thread/fork works fine even on a locked thread —
-         * confirmed by measurement).
-         */
-        const msg = (err as Error).message
-        if (/active writer/i.test(msg)) {
-          /*
-           * Measurement (#57) narrowed down what this error actually means: the lock is a flock,
-           * not a file's mere existence, so a file left behind by a dead process **cannot**
-           * produce this error. Landing here means a live process is holding the flock at this
-           * exact moment — codex running in a terminal, another app, or an orphan that survived
-           * without being cleaned up, having inherited only the fd.
-           */
-          throw rpcError('This conversation is already open elsewhere (codex in a terminal, another app, or a process left behind by an unclean shutdown)', 'conversation_locked')
-        }
-        throw err
+        throw resumeFailure(err)
       }
       this.threadId = threadIdOf(res) ?? this.opts.resumeExternalId
       this.threadSettings = threadSettingsOf(res)
       this.threadServers.checkAppMode(res)
-      this.readNetworkAccess(res)
+      this.networkAccess = networkAccessOf(res)
       // An adopted thread may be mid-turn: Stop needs that turn's id (#313)
-      if (adopted) this.takeStartedTurn(runningTurnOf(res) ?? (await this.latestRunningTurn(res)))
+      if (adopted) this.takeStartedTurn(runningTurnOf(res) ?? (await latestRunningTurn(this.client, this.sessionId, this.threadId, res)))
       /*
        * The goal is a live field (2026-09-07) — for the badge to stay accurate after a restart,
        * we ask again on resume. Older codex has no such method: a failure lies down quietly as
@@ -327,48 +207,11 @@ export class CodexSession implements SessionHandle {
         })
         .catch(() => {})
     } else {
-      const res = await this.client.request<Record<string, unknown>>('thread/start', {
-        cwd: this.opts.cwd,
-        ...permissionOptionsFor(this.opts.permissionPreset),
-        model: this.opts.model,
-        /*
-         * The following two are attached only for the orchestrator.
-         *
-         * The role is given directly through developerInstructions — the same slot as Claude's
-         * systemPrompt append. The reason we avoid a file (AGENTS.md) is the same: if a
-         * lower-privilege session could edit that file, it would become able to instruct every
-         * session. The instructions of the Centralu tools ride there too (#525, developerInstructions()).
-         *
-         * Tools are attached through the stdio bridge. What we confirmed by measurement:
-         *   per-thread config.mcp_servers  works (our command actually runs)
-         *   the url (HTTP) approach        does not — not a single request ever arrives
-         * So one extra process ends up running — a cost that does not exist on the Claude path.
-         */
-        ...this.developerInstructions(),
-        /*
-         * config is **assembled in this one place only.** There used to be a trap where the
-         * verbosity spread and the orchestrator spread each built their own config keys, and one
-         * would silently overwrite the other entirely — once there were three contributors
-         * (summary, verbosity, orchestrator), it became cheaper to remove the trap than to keep
-         * remembering it.
-         */
-        config: {
-          // The reasoning-summary switch (measured for #58): without it, the item/reasoning/* stream never arrives
-          model_reasoning_summary: 'auto',
-          ...(this.opts.verbosity ? { model_verbosity: this.opts.verbosity } : {}),
-          // Response speed (measured: priority = "Fast, 1.5x speed, increased usage")
-          ...(this.opts.serviceTier ? { service_tier: this.opts.serviceTier } : {}),
-          // MCP servers — the orchestrator's bridge and any attached external app's bridge (including approved MCP servers) (see mcpConfig)
-          ...(await this.threadServers.mcpConfig()),
-          // Files in the repository (.codex/ settings, hooks, rules, AGENTS.md) only in a trusted project (#92, repoFilesConfig)
-          ...repoFilesConfig(this.opts),
-          ...workspaceConfig,
-        },
-      })
+      const res = await this.client.request<Record<string, unknown>>('thread/start', startThreadParams(this.opts, await this.threadServers.mcpConfig(), workspaceConfig))
       this.threadId = threadIdOf(res)
       this.threadSettings = threadSettingsOf(res)
       this.threadServers.checkAppMode(res)
-      this.readNetworkAccess(res)
+      this.networkAccess = networkAccessOf(res)
       // No rollout yet: the thread is named at its first turn (see externalId)
       return
     }
@@ -377,33 +220,10 @@ export class CodexSession implements SessionHandle {
 
   private networkAccess: boolean | undefined
 
-  private readNetworkAccess(res: Record<string, unknown>): void {
-    const sandbox = res.sandbox as { type?: string; networkAccess?: boolean | string } | undefined
-    this.networkAccess = sandbox?.type === 'dangerFullAccess' || sandbox?.networkAccess === 'enabled'
-      ? true
-      : typeof sandbox?.networkAccess === 'boolean' ? sandbox.networkAccess : undefined
-  }
-
   delegationNotice(): string | undefined {
     return this.networkAccess === false
       ? `this child cannot reach the network under ${this.opts.permissionPreset}`
       : undefined
-  }
-
-  /**
-   * The thread's developer instructions: the session's role, then the instructions of the Centralu tools it gets
-   * (#525), which Claude receives from the in-process server and Codex would never show from the bridge's
-   * `initialize` (measured: sessions/orchestrator-tools.ts, codexToolInstructionsFor). Sent at thread/start only.
-   * `thread/resume` takes the same field and ignores it: resumed with other developer instructions, the model still
-   * named the phrase from the first ones and the rollout gained no developer message (codex-cli 0.160.0,
-   * `scripts/probe-codex-mcp-instructions.mts`, 2026-10-12). So a thread keeps what it was started with; a session
-   * that changes profile while its thread lives on (a session the person turns the reader set off for, or back on)
-   * keeps its tools' new rules from the tool descriptions alone until it starts a new thread.
-   */
-  private developerInstructions(): { developerInstructions?: string } {
-    const tools = this.opts.orchestratorTools && this.opts.orchestratorBridge ? codexToolInstructionsFor(this.opts.toolProfile ?? 'orchestrator') : undefined
-    const text = [this.opts.systemPromptAppend, tools].filter(Boolean).join('\n\n')
-    return text ? { developerInstructions: text } : {}
   }
 
   /** A turn started on this thread, so Codex has written its rollout and the thread can be resumed (see externalId) */
@@ -448,15 +268,11 @@ export class CodexSession implements SessionHandle {
     // Which turn is running (Turn.id — generated/v2/Turn.ts). Cleared once it ends: trying to
     // stop a turn that has already ended gets rejected by the server, and that rejection becomes a false "did not stop" signal
     if (n.method === 'turn/started') {
-      this.turnId = turnIdOf(n.params)
+      this.turns.turnId = turnIdOf(n.params)
       // Before the event below goes out: the manager records a handle's external id as its events arrive
       this.threadWritten()
     }
-    if (n.method === 'turn/completed' || n.method === 'turn/failed') {
-      this.turnId = null
-      const ended = turnIdOf(n.params)
-      if (ended) this.endedTurns = [...this.endedTurns.slice(-(ENDED_TURNS_KEPT - 1)), ended]
-    }
+    if (n.method === 'turn/completed' || n.method === 'turn/failed') this.turns.ended(turnIdOf(n.params))
 
     // Output flows again after a reconnect — the retrying activity gives way to what was showing before it
     const resumed = n.method.startsWith('item/') ? this.retry.resumed() : null
@@ -493,6 +309,13 @@ export class CodexSession implements SessionHandle {
       return
     }
     if (n.method === 'mcpServer/startupStatus/updated' && !this.threadServers.firstMcpFailure(n.params)) return
+    this.emitNotification(n)
+    this.childThreads.noteSpawn(n)
+    this.childThreads.noteTurnEnd(n)
+  }
+
+  /** A notification of this thread's own, as the events it maps to (`normalizeNotification`), each the way it goes out */
+  private emitNotification(n: { method: string; params?: unknown }): void {
     for (const e of normalizeNotification(this.sessionId, n)) {
       if (e.type === 'error' && this.inputReceipts.size) this.interrupt(new Error(e.error.message))
       /*
@@ -524,7 +347,7 @@ export class CodexSession implements SessionHandle {
       const interrupted = e.type === 'state_change' && e.reason === 'interrupted' && n.method === 'turn/completed'
       if (interrupted) {
         const turn = turnIdOf(n.params)
-        const ours = !!turn && this.interruptsSent.includes(turn)
+        const ours = !!turn && this.turns.interruptSent(turn)
         console.error(`[codex] ${this.sessionId.slice(0, 8)} turn ${turn ?? '?'} interrupted ${ours ? 'by a stop from Centralu' : 'by Codex, not by a stop from Centralu'}`)
         this.emit(ours ? e : { ...e, reason: INTERRUPTED_BY_TOOL })
       } else {
@@ -535,8 +358,6 @@ export class CodexSession implements SessionHandle {
         if (ended) this.inputReceipts.endTurn(ended)
       }
     }
-    this.childThreads.noteSpawn(n)
-    this.childThreads.noteTurnEnd(n)
   }
 
   sendTracked(text: string, observer?: InputObserver): Promise<void> {
@@ -548,11 +369,11 @@ export class CodexSession implements SessionHandle {
   send(text: string): void { this.sendInput(text) }
 
   private sendInput(text: string, receipt?: InputReceipt): void {
-    const nth = ++this.sendsIssued
+    const nth = this.sends.issue()
     void this.ready
       .then(() => {
-        // A Stop pressed before the thread was up already reclaimed this message (sendsStopped) — do not send it
-        if (nth <= this.sendsStopped || receipt?.cancelled) return
+        // A Stop pressed before the thread was up already reclaimed this message (`sends`) — do not send it
+        if (this.sends.reclaimed(nth) || receipt?.cancelled) return
         if (!this.threadId) throw new Error('Thread is not ready')
         /*
          * While compact/review is running, we do not send but queue instead — the measurement in
@@ -638,9 +459,9 @@ export class CodexSession implements SessionHandle {
       return
     }
     // Stop can arrive while turn/start is in flight, before the next turn is named.
-    if (receipts.some((r) => r.cancelled) && !this.endedTurns.includes(id)) {
+    if (receipts.some((r) => r.cancelled) && !this.turns.hasEnded(id)) {
       // Ours: the person's Stop, so its ending is not Codex's own interrupt (#698)
-      this.noteInterruptSent(id)
+      this.turns.noteInterruptSent(id)
       void this.client.request('turn/interrupt', { threadId: this.threadId, turnId: id }).catch(() => {})
     }
     if (receipts.some((r) => r.cancelled)) return
@@ -655,7 +476,7 @@ export class CodexSession implements SessionHandle {
    */
   private takeStartedTurn(id: string | null): void {
     this.threadWritten()
-    if (id && !this.endedTurns.includes(id)) this.turnId ??= id
+    this.turns.take(id)
   }
 
   /**
@@ -683,46 +504,17 @@ export class CodexSession implements SessionHandle {
     return this.threadServers.appAttachment(server)
   }
 
-  /** Slash commands (skills) — the app-server's official RPC */
-  async listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
-    const res = await this.client.request<{ data?: unknown }>('skills/list', {})
-    const groups = Array.isArray(res?.data) ? res.data : []
-    /*
-     * compact is a built-in command, not a skill, so it does not appear in skills/list — but
-     * autocomplete is drawn from this list, so leaving it out makes it a command that **exists but
-     * is invisible** (hiding something that exists is also a lie the list tells). If codex ever
-     * starts including it in the list, the dedupe below removes our own entry.
-     */
-    const out: { name: string; description?: string; argumentHint?: string }[] = [
-      { name: 'compact', description: 'Summarizes the conversation to shrink context (built into codex)' },
-      {
-        name: 'review',
-        description: 'Reviews the changed code (built into codex). If given an argument, reviews following that instruction instead',
-        argumentHint: '[instruction]',
-      },
-    ]
-    for (const g of groups) {
-      const skills = (g as { skills?: unknown }).skills
-      if (!Array.isArray(skills)) continue
-      for (const s of skills) {
-        const skill = (s ?? {}) as { name?: unknown; description?: unknown; enabled?: unknown }
-        if (typeof skill.name !== 'string' || skill.enabled === false) continue
-        if (out.some((c) => c.name === skill.name)) continue
-        out.push({
-          name: skill.name,
-          description: typeof skill.description === 'string' ? skill.description : '',
-        })
-      }
-    }
-    return out
+  /** Slash commands (skills) — the app-server's official RPC (see `CodexSlashCommands.list`) */
+  listCommands(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
+    return this.slashCommands.list()
   }
 
   interrupt(reason = new Error('The parent note was stopped before it finished')): void {
     const turns = this.inputReceipts.failAll(reason)
     this.pendingInputs = this.pendingInputs.filter((p) => !p.receipt)
     for (const turnId of turns) {
-      if (!this.threadId || turnId === this.turnId || this.endedTurns.includes(turnId)) continue
-      this.noteInterruptSent(turnId)
+      if (!this.threadId || turnId === this.turns.turnId || this.turns.hasEnded(turnId)) continue
+      this.turns.noteInterruptSent(turnId)
       void this.client.request('turn/interrupt', { threadId: this.threadId, turnId }).catch(() => {})
     }
     /*
@@ -735,11 +527,11 @@ export class CodexSession implements SessionHandle {
     this.opts.apps?.cancelAll()
     /*
      * The thread has not come up yet (a lazy resume is in progress) — reclaim the queued message
-     * and go back to waiting for input (#168, sendsStopped). No turn/completed(interrupted) will
+     * and go back to waiting for input (#168, `sends`). No turn/completed(interrupted) will
      * arrive either, since no turn was ever started — the state is flipped here instead.
      */
-    if (!this.threadId && this.sendsIssued > this.sendsStopped) {
-      this.sendsStopped = this.sendsIssued
+    if (!this.threadId && this.sends.unsent > 0) {
+      this.sends.reclaim()
       this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
       return
     }
@@ -753,16 +545,12 @@ export class CodexSession implements SessionHandle {
       this.respondApproval(requestId, 'deny')
     }
     // Nothing to stop if no turn is running (this is the case of a stop pressed right after a turn just ended)
-    if (!this.threadId || !this.turnId) return
-    this.noteInterruptSent(this.turnId)
+    if (!this.threadId || !this.turns.turnId) return
+    this.turns.noteInterruptSent(this.turns.turnId)
     // Swallowing a failure here would leave us assuming it stopped and waiting — if it did not stop, say so
     void this.client
-      .request('turn/interrupt', { threadId: this.threadId, turnId: this.turnId })
+      .request('turn/interrupt', { threadId: this.threadId, turnId: this.turns.turnId })
       .catch((err: Error) => this.emit(couldNotStop(this.sessionId, err)))
-  }
-
-  private noteInterruptSent(turnId: string): void {
-    if (!this.interruptsSent.includes(turnId)) this.interruptsSent = [...this.interruptsSent.slice(-(ENDED_TURNS_KEPT - 1)), turnId]
   }
 
   /**
@@ -784,51 +572,16 @@ export class CodexSession implements SessionHandle {
     for (const e of this.childThreads.children.release('Ended with the session process')) this.emit(e)
   }
 
-  /**
-   * The watchdog for a background resume (lazy resume only). If resume fails or exceeds the
-   * ceiling after the handle has already been handed out, we cannot just go quietly to sleep — we
-   * raise adapter_crashed so the manager retires the handle and the "resend if missing" automatic
-   * recovery path can kick in.
-   */
+  /** The watchdog for a background resume (lazy resume only, see `watchBackgroundResume`) */
   watchBackgroundStart(): void {
-    const timer = setTimeout(() => {
-      if (this.closed) return
-      this.emit({
-        type: 'error',
-        sessionId: this.sessionId,
-        error: {
-          code: 'adapter_crashed',
-          message: `Resuming codex did not finish within ${BACKGROUND_RESUME_CAP_MS / 1000}s${this.unsentNote()}`,
-          retryable: true,
-        },
-      })
-      void this.dispose().catch(() => {})
-    }, BACKGROUND_RESUME_CAP_MS)
-    this.ready.then(
-      () => clearTimeout(timer),
-      (e: Error & { code?: string }) => {
-        clearTimeout(timer)
-        if (this.closed) return
-        /*
-         * A lock error keeps its code (#168, item 5). Arriving here instead of inside the 3-second
-         * window used to turn it into adapter_crashed, so the screen could not offer "continue in
-         * a fork". Measured on 0.153.4: a second app-server resuming a held thread is refused with
-         * -32600 "thread <id> already has an active writer" in 35 ms to 1.3 s, so this is rare,
-         * but a slow start can push it past the window.
-         *
-         * Messages sent meanwhile were never delivered (send stays quiet about them, so the
-         * failure is said once): the person is told, since the screen shows them as sent.
-         */
-        const note = this.unsentNote()
-        const locked = e.code === 'conversation_locked'
-        this.emit({
-          type: 'error',
-          sessionId: this.sessionId,
-          error: { code: locked ? 'conversation_locked' : 'adapter_crashed', message: e.message + note, retryable: true },
-        })
-        void this.dispose().catch(() => {})
-      },
-    )
+    watchBackgroundResume({
+      sessionId: this.sessionId,
+      emit: (e) => this.emit(e),
+      closed: () => this.closed,
+      ready: this.ready,
+      unsentNote: () => this.unsentNote(),
+      dispose: () => this.dispose(),
+    })
   }
 
   /**
@@ -837,8 +590,7 @@ export class CodexSession implements SessionHandle {
    * one error rather than after it: once the manager retires the handle, a later event from it may not be heard.
    */
   private unsentNote(): string {
-    const unsent = this.sendsIssued - this.sendsStopped
-    this.sendsStopped = this.sendsIssued
+    const unsent = this.sends.reclaim()
     return unsent > 0 ? ` — ${undeliveredText(unsent, 'were sent while it was opening')}` : ''
   }
 
@@ -850,8 +602,7 @@ export class CodexSession implements SessionHandle {
    */
   private reportUnsentWhileWaking(when: string): void {
     if (this.started) return
-    const unsent = this.sendsIssued - this.sendsStopped
-    this.sendsStopped = this.sendsIssued
+    const unsent = this.sends.reclaim()
     if (unsent > 0) this.emit(undeliveredError(this.sessionId, unsent, when))
   }
 
@@ -879,30 +630,6 @@ export class CodexSession implements SessionHandle {
   }
 
   /**
-   * The turn an adopted thread is still running, asked for on its own (#342): a resume with `excludeTurns` answers
-   * with no turns. Measured (codex-cli 0.160.0, 2026-10-05), a second `thread/resume` on the same connection while a
-   * turn ran said `status: {type: 'active'}` and `turns: []`; `thread/turns/list` with `limit: 1`, newest first and
-   * `itemsView: 'notLoaded'` named that turn as `inProgress` in 0.5 KB. Asked only for an active thread. A Codex
-   * without the method answers with the turns in the resume itself, which `runningTurnOf` read first.
-   */
-  private async latestRunningTurn(res: Record<string, unknown>): Promise<string | null> {
-    const status = (res.thread as { status?: { type?: unknown } } | undefined)?.status
-    if (status?.type !== 'active' || !this.threadId) return null
-    try {
-      const page = await this.client.request<{ data?: unknown }>('thread/turns/list', {
-        threadId: this.threadId,
-        limit: 1,
-        sortDirection: 'desc',
-        itemsView: 'notLoaded',
-      })
-      return runningTurnOf({ thread: { turns: page?.data } })
-    } catch (err) {
-      console.error(`[codex] ${this.sessionId.slice(0, 8)} could not ask for the running turn: ${(err as Error).message}`)
-      return null
-    }
-  }
-
-  /**
    * Lets go of the app-server without closing it (#280 step 2). No deny for a waiting approval —
    * the next host's `thread/resume` gets it re-sent under the same id — and no EOF, which would make
    * codex exit. The bridge processes codex started for this thread stay with codex.
@@ -916,5 +643,3 @@ export class CodexSession implements SessionHandle {
   }
 }
 
-/** How many ended turns `endedTurns` keeps: more than can have a `turn/start` response still in flight */
-const ENDED_TURNS_KEPT = 8

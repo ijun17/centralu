@@ -121,7 +121,8 @@ centralu/
 │        │                      #   도구마다 index.ts가 어댑터, session.ts가 세션이고, 세션에서 떼어 낸 부분이 옆에 있다
 │        │                      #   (#850): claude/ session-cards, session-servers, permissions, sdk-query, refresh-race,
 │        │                      #   tracked-input, schedule-look; codex/ server-requests,
-│        │                      #   thread-servers, child-threads, slash-commands, launch-config. codex/normalize.ts는 알림을
+│        │                      #   thread-servers, child-threads, slash-commands, launch-config, thread-open, turns,
+│        │                      #   background-resume. codex/normalize.ts는 알림을
 │        │                      #   옮기고, 그것이 읽는 부분이 옆에 있다: items, approvals, thread-settings, token-readings,
 │        │                      #   child-tracker, known-notifications. claude/normalize.ts는 메시지를 옮기고, 종류마다 파일이
 │        │                      #   하나다: cli-messages, model-messages, turn-ending. contract.ts는 contract/의 orchestrator, session-apps,
