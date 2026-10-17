@@ -664,8 +664,9 @@ fn parse_reaped(v: Option<&Value>) -> Vec<(i32, ExitStatus)> {
 /// Step 7: after the commit, everything starts.
 fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitStatus)]) -> i32 {
     let snap = p.snap;
+    let handed_host = p.host.as_ref().map(|h| h.pid);
     let children = match p.children {
-        Some(c) => c.start(reaped).unwrap_or_else(|e| {
+        Some(c) => c.start(reaped, handed_host).unwrap_or_else(|e| {
             log(&format!("could not start the child service ({e})"));
             Children::disabled()
         }),
@@ -729,6 +730,7 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
         if let Err(e) = keeper.sup.adopt_foreign(h, server::sink(&keeper), server::launcher(&keeper)) {
             log(&format!("could not adopt the host (pid {pid}): {e}"));
         }
+        keeper.children.adopted();
     } else if !matches!(snap.status, HostStatus::Failed { .. }) {
         // No host was running and none had given up: start one, as a fresh keeper would
         keeper.sup.start(server::sink(&keeper), server::launcher(&keeper));

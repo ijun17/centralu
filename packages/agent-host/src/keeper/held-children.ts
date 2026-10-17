@@ -80,7 +80,8 @@ export async function connectHeldChildren(dataDir: string): Promise<HeldChildren
     children = await KeeperChildren.connect(join(dataDir, 'children.sock'))
     list = await children.list()
   } catch (err) {
-    console.error(`[keeper] no child service (${(err as Error).message}); this host keeps its own children`)
+    // A keeper refuses a process that is not its host (#538), and says why in keeper.log
+    console.error(`[keeper] no child service (${(err as Error).message}); this host keeps its own children (keeper.log says why if the keeper refused it)`)
     return null
   }
   const { kept, release } = sortKept(list, {
