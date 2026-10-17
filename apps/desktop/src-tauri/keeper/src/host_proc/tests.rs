@@ -81,7 +81,9 @@ fn signals_go_only_to_a_real_pid_or_group() {
 
 /// PA13: the dev host is started directly, never through a package manager. Killing the pnpm
 /// wrapper left the real host orphaned holding its port (M1.5 defect 1); on Windows `.bin/tsx` is
-/// an sh script `CreateProcessW` cannot start, so Node runs tsx's own entry.
+/// an sh script `CreateProcessW` cannot start, so Node runs tsx's own entry. On unix Node runs the
+/// host itself with tsx's loader, so the host is the process the keeper started (#538: the child
+/// socket answers the host's exact pid).
 #[test]
 fn the_dev_host_is_started_directly_never_through_a_package_manager() {
     let launch = source_launch(&[]);
@@ -91,8 +93,8 @@ fn the_dev_host_is_started_directly_never_through_a_package_manager() {
         assert!(!program.ends_with(&format!("/{wrapper}")) && program != wrapper, "{program}");
     }
     if os::RUNS_SH_SCRIPTS {
-        assert_eq!(launch.program, format!("{root}/node_modules/.bin/tsx"));
-        assert_eq!(launch.args[0], format!("{root}/packages/agent-host/src/main.ts"));
+        assert!(launch.program.ends_with("node"), "{}", launch.program);
+        assert_eq!(launch.args[..3], ["--import".to_string(), format!("{root}/node_modules/tsx/dist/loader.mjs"), format!("{root}/packages/agent-host/src/main.ts")]);
     } else {
         assert_eq!(launch.args[0], format!("{root}/node_modules/tsx/dist/cli.mjs"));
         assert_eq!(launch.args[1], format!("{root}/packages/agent-host/src/main.ts"));
@@ -101,8 +103,8 @@ fn the_dev_host_is_started_directly_never_through_a_package_manager() {
     assert!(launch.env.iter().any(|(k, v)| k == "CC_DEV" && v == "1"));
 }
 
-/// PA13: a host leads a process group of its own, so the whole tree it starts (tsx starts Node
-/// under it) can be stopped as one. The "host" here reports its pid and its group.
+/// PA13: a host leads a process group of its own, so the whole tree it starts (what it runs
+/// without a session of its own) can be stopped as one. The "host" here reports its pid and its group.
 #[cfg(unix)]
 #[test]
 fn a_host_leads_a_process_group_of_its_own() {

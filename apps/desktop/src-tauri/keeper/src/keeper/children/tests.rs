@@ -646,14 +646,57 @@ fn the_child_socket_answers_only_the_hosts_this_keeper_holds() {
     let _ = other.wait();
 }
 
-/// A host run from source is tsx's child, in the group `spawn_host` makes tsx the leader of.
 #[test]
-fn a_host_is_its_pid_or_a_process_in_its_group() {
-    assert!(is_a_host(40, None, &[40]));
-    assert!(is_a_host(41, Some(40), &[40]), "node under tsx, in the host's group");
-    assert!(!is_a_host(41, Some(41), &[40]), "a process of its own group: a terminal, an agent");
-    assert!(!is_a_host(41, None, &[40]), "a group that cannot be read is not the host's");
-    assert!(!is_a_host(40, Some(40), &[]), "no host held");
+fn a_host_is_its_exact_pid() {
+    assert!(is_a_host(40, &[40]));
+    assert!(is_a_host(41, &[40, 41]), "the standby");
+    assert!(!is_a_host(41, &[40]));
+    assert!(!is_a_host(40, &[]), "no host held");
+}
+
+/// Review of #1100: `spawn_host` makes the host lead a process group, and what it runs without a session of its own (a
+/// worktree's setup command, `npm install -g`, a version probe) is in that group. A setup script an agent changed
+/// must not get in by being there. The host here is a group leader as `spawn_host` makes one, and its child connects
+/// first, then the host itself.
+#[test]
+fn a_child_of_the_host_in_its_group_is_refused() {
+    use std::os::unix::process::CommandExt;
+    if std::process::Command::new("python3").arg("--version").output().is_err() {
+        eprintln!("skipped: no python3 to play the host with");
+        return;
+    }
+    let d = temp_dir("group");
+    let keeper = Children::start(&d.0).unwrap();
+    const ASK: &str = r#"
+import socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.settimeout(3)
+s.connect(sys.argv[1])
+s.sendall(b'{"op":"hello","protocol":1}\n')
+try:
+    got = s.recv(4096)
+except OSError:
+    got = b''
+print('answered' if got else 'closed')
+"#;
+    // Waits for its stdin to end first, so the keeper names it before anything connects
+    let host = format!(
+        "import subprocess, sys\nsys.stdin.read()\nASK = {ASK:?}\nchild = subprocess.run([sys.executable, '-c', ASK, sys.argv[1]], capture_output=True, text=True).stdout.strip()\nprint('child', child, flush=True)\nexec(ASK)\n"
+    );
+    let mut child = std::process::Command::new("python3")
+        .args(["-c", &host, &socket_path(&d.0).to_string_lossy()])
+        .process_group(0)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let host_pid = child.id();
+    keeper.answer_hosts(std::sync::Arc::new(move || Some(host_pid)));
+    drop(child.stdin.take());
+    let out = child.wait_with_output().unwrap();
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(said.contains("child closed"), "a process in the host's group is not the host: {said}");
+    assert!(said.trim_end().ends_with("answered"), "the host itself: {said}");
 }
 
 /// `keeper.sock`'s `children` (#538): what the child socket's `list` says, for a process that is not a host.

@@ -134,20 +134,22 @@ struct Shared {
 
 /**
  * The processes the child socket answers (#538, issue's option B): the current host, which the
- * keeper's supervisor names (`current`), and a swap's standby while it is one. Through this socket a
- * process can start any program and read every agent's stream; the uid check alone let every process
- * of this user in. Nothing is answered until the keeper says who its host is.
+ * keeper's supervisor names (`current`), and a swap's standby while it is one, by their exact pid.
+ * Through this socket a process can start any program and read every agent's stream; the uid check
+ * alone let every process of this user in. Nothing is answered until the keeper says who its host is.
  */
 #[derive(Default)]
 struct Hosts {
     current: Option<Arc<dyn Fn() -> Option<u32> + Send + Sync>>,
     standby: Option<u32>,
+    /// At a handoff (#280 step 4), the host the previous keeper passed on, from the first accept until
+    /// this keeper's supervisor has adopted it and names it itself (`Children::adopted`).
+    handed: Option<u32>,
 }
 
 impl Shared {
-    /// Whether the process at the other end of `stream` is a host this keeper holds: its pid is one,
-    /// or its process group is one's (a host run from source is tsx's child, in tsx's group, and
-    /// `spawn_host` makes the host the leader of its own group). Said in the log when it is not.
+    /// Whether the process at the other end of `stream` is a host this keeper holds, by its exact pid.
+    /// Said in the log when it is not.
     fn answers(&self, stream: &std::os::unix::net::UnixStream) -> bool {
         let pid = match os::peer_pid(stream) {
             Ok(pid) => pid,
@@ -157,21 +159,29 @@ impl Shared {
             }
         };
         let held: Vec<u32> = match self.hosts.lock() {
-            Ok(h) => h.current.as_ref().and_then(|f| f()).into_iter().chain(h.standby).collect(),
+            Ok(h) => h.current.as_ref().and_then(|f| f()).into_iter().chain(h.standby).chain(h.handed).collect(),
             Err(_) => Vec::new(),
         };
-        if is_a_host(pid, os::process_group(pid), &held) {
+        if is_a_host(pid, &held) {
             return true;
         }
-        log(&format!("refused a connection from pid {pid}: not a host this keeper holds"));
+        log(&format!(
+            "refused a connection from pid {pid}: not a host this keeper holds ({})",
+            if held.is_empty() { "it names none yet".to_string() } else { format!("it holds {held:?}") }
+        ));
         false
     }
 }
 
-/// `Shared::answers`'s rule, apart from the kernel: the peer `pid` (in the group `group`, when it
-/// could be read) is a host of `held`, or in one's group.
-pub(super) fn is_a_host(pid: u32, group: Option<u32>, held: &[u32]) -> bool {
-    held.contains(&pid) || group.is_some_and(|g| held.contains(&g))
+/**
+ * `Shared::answers`'s rule, apart from the kernel: the peer `pid` is one of the hosts in `held`.
+ * Exactly the host, not its process group: `spawn_host` makes the host lead a group, and what it runs
+ * without a session of its own (a worktree's setup command, `npm install -g`, a version probe) is in
+ * that group too. A setup script an agent changed could then have connected here and started anything
+ * (review of #1100). A host run from source is one process for this reason (`source_launch`).
+ */
+pub(super) fn is_a_host(pid: u32, held: &[u32]) -> bool {
+    held.contains(&pid)
 }
 
 enum Cmd {
@@ -219,6 +229,13 @@ impl Children {
     pub fn answer_hosts(&self, current: Arc<dyn Fn() -> Option<u32> + Send + Sync>) {
         if let Some(Ok(mut h)) = self.shared.as_ref().map(|s| s.hosts.lock()) {
             h.current = Some(current);
+        }
+    }
+
+    /// The host handed over with this keeper has been adopted: the supervisor names it from now on.
+    pub fn adopted(&self) {
+        if let Some(Ok(mut h)) = self.shared.as_ref().map(|s| s.hosts.lock()) {
+            h.handed = None;
         }
     }
 
@@ -337,9 +354,14 @@ pub struct Pending {
 impl Pending {
     /// Starts the reactor. `reaped` are the exit statuses the outgoing keeper collected at the
     /// commit, for children this keeper (not their parent) could not learn them for otherwise.
-    pub fn start(mut self, reaped: &[(i32, ExitStatus)]) -> io::Result<Children> {
+    /// `host`: the host handed over with them, answered from the first accept (#538): the keeper
+    /// names its host only once it is built, and a host's attach in between would have been refused.
+    pub fn start(mut self, reaped: &[(i32, ExitStatus)], host: Option<u32>) -> io::Result<Children> {
         for &(pid, st) in reaped {
             self.reactor.watch.know(pid, st);
+        }
+        if let Ok(mut h) = self.shared.hosts.lock() {
+            h.handed = host;
         }
         self.reactor.start()?;
         log(&format!("took over {} from the previous keeper", self.shared.sock.display()));

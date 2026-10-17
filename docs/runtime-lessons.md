@@ -342,8 +342,9 @@ Platforms: all.
 **PA13. The dev host is started directly, never through a wrapper.**
 Happened: killing the pnpm wrapper left the host orphaned holding its port (M1.5 defect 1, three hosts); on Windows
 `.bin/tsx` is an sh script `CreateProcessW` cannot start.
-Rule: start `node_modules/.bin/tsx` (unix) or Node with tsx's `cli.mjs` (Windows) directly, in a process group of its
-own.
+Rule: start Node with tsx's loader (`--import …/tsx/dist/loader.mjs`, unix: the host is then the one process started,
+which the keeper's child socket checks by pid, #538) or Node with tsx's `cli.mjs` (Windows) directly, in a process
+group of its own.
 Guard: `keeper/host_proc.rs` `the_dev_host_is_started_directly_never_through_a_package_manager`;
 `keeper/host_proc.rs` `a_host_leads_a_process_group_of_its_own`; `scripts/keeper-integration.mjs` check "stop ends the
 host and the keeper even with background mode on". *Changed by step 3.*

@@ -817,6 +817,10 @@ pub fn bundled_launch(main_mjs: &Path, extra: &[String]) -> Result<HostLaunch, L
 ///
 /// **Never goes through a package manager** — launching through the pnpm wrapper only kills
 /// the wrapper, leaving the actual host (a grandchild) orphaned (confirmed by measurement).
+///
+/// On unix the host is **one process**: Node with tsx's loader (`--import`), not tsx's CLI, which
+/// runs the script in a child of its own. The keeper's child socket answers a host by its exact pid
+/// (#538), and that pid must be the host's.
 pub fn source_launch(extra: &[String]) -> HostLaunch {
     let root = workspace_root();
     let mut args = vec![
@@ -827,8 +831,9 @@ pub fn source_launch(extra: &[String]) -> HostLaunch {
     ];
     args.extend(extra.iter().cloned());
     let program = if os::RUNS_SH_SCRIPTS {
-        // `.bin/tsx`, a sh script, runs as it is.
-        format!("{root}/node_modules/.bin/tsx")
+        // An absolute path is a valid ESM specifier for `--import` on unix
+        args.splice(0..0, ["--import".to_string(), format!("{root}/node_modules/tsx/dist/loader.mjs")]);
+        resolve_node().unwrap_or_else(|_| "node".into())
     } else {
         // Node runs tsx's own entry, the file `.bin/tsx` points at anyway.
         args.insert(0, format!("{root}/node_modules/tsx/dist/cli.mjs"));
