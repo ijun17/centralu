@@ -113,39 +113,52 @@ fn host_build(sup: State<'_, Supervisor>) -> HostBuild {
     sup.build()
 }
 
+/**
+ * Runs `work`, which waits on the keeper's socket (up to 10 s), on Tauri's pool for blocking work
+ * (#840 item 6). A plain command runs on the main thread, so while the keeper was slow to answer
+ * the whole window hung with the spinning cursor; `#[tauri::command(async)]` would only move the
+ * wait onto one of the async runtime's few workers.
+ */
+async fn off_main_thread<T: Send + 'static>(app: AppHandle, work: impl FnOnce(AppHandle) -> T + Send + 'static) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(move || work(app)).await.map_err(|e| format!("the request to the keeper did not finish: {e}"))
+}
+
 /// Switches the host to this window's build with the keeper's blue-green swap (#280 step 3). The
 /// swap's progress reaches the UI in `host-build`.
 #[tauri::command]
-fn switch_host_build(sup: State<'_, Supervisor>) -> Result<(), String> {
-    sup.switch_build()
+async fn switch_host_build(app: AppHandle) -> Result<(), String> {
+    off_main_thread(app, |app| app.state::<Supervisor>().switch_build()).await?
 }
 
 /// Background mode (#280): whether quitting leaves the agents running. Off by default.
 #[tauri::command]
-fn background_mode(sup: State<'_, Supervisor>) -> Result<bool, String> {
-    sup.background()
+async fn background_mode(app: AppHandle) -> Result<bool, String> {
+    off_main_thread(app, |app| app.state::<Supervisor>().background()).await?
 }
 
 #[tauri::command]
-fn set_background_mode(sup: State<'_, Supervisor>, on: bool) -> Result<bool, String> {
-    sup.set_background(on)
+async fn set_background_mode(app: AppHandle, on: bool) -> Result<bool, String> {
+    off_main_thread(app, move |app| app.state::<Supervisor>().set_background(on)).await?
 }
 
 /// "Quit completely" (#280): stops the keeper, the host and everything they hold (agents,
 /// terminals, running commands) whatever background mode says, then quits.
 #[tauri::command]
-fn quit_and_stop_agents(app: AppHandle, sup: State<'_, Supervisor>, approved: State<QuitApproved>) -> Result<(), String> {
-    sup.stop_agents()?;
-    approved.0.store(true, std::sync::atomic::Ordering::SeqCst);
-    app.exit(0);
-    Ok(())
+async fn quit_and_stop_agents(app: AppHandle) -> Result<(), String> {
+    off_main_thread(app, |app| {
+        app.state::<Supervisor>().stop_agents()?;
+        app.state::<QuitApproved>().0.store(true, std::sync::atomic::Ordering::SeqCst);
+        app.exit(0);
+        Ok(())
+    })
+    .await?
 }
 
 /// "Restart completely" (#387): stops the keeper and everything it holds, and this window starts a
 /// keeper of its own build. For a keeper that could not hand itself over to this build.
 #[tauri::command]
-fn restart_keeper(sup: State<'_, Supervisor>) -> Result<(), String> {
-    sup.restart_keeper()
+async fn restart_keeper(app: AppHandle) -> Result<(), String> {
+    off_main_thread(app, |app| app.state::<Supervisor>().restart_keeper()).await?
 }
 
 /// Whether "Apply now" can relaunch this window into the update just installed (#352).
@@ -164,35 +177,40 @@ fn relaunch_info(sup: State<'_, Supervisor>) -> RelaunchInfo {
  * A keeper too old to hold on is acceptable only with background mode on, where a window closing
  * never stopped anything; with it off this refuses, rather than cutting every turn.
  *
- * `request_restart`, not `restart`: a command runs on the main thread, where `restart` skips the
- * exit events and so the detach below. Through `ExitRequested` with a code (our quit gate lets a
- * programmatic exit through) and `Exit`, Tauri then runs this executable's path again, reading the
- * executable's name from the bundle's new `Info.plist` (`tauri::process::restart`, 2.11.5).
+ * `request_restart`, not `restart`: `restart` skips the exit events and so the detach below (it
+ * showed when this ran on the main thread; it runs off it now, #840 item 6). Through
+ * `ExitRequested` with a code (our quit gate lets a programmatic exit through) and `Exit`, Tauri
+ * then runs this executable's path again, reading the executable's name from the bundle's new
+ * `Info.plist` (`tauri::process::restart`, 2.11.5).
  */
 #[tauri::command]
-fn apply_update_relaunch(app: AppHandle, sup: State<'_, Supervisor>, approved: State<QuitApproved>) -> Result<(), String> {
-    let info = sup.relaunch_info();
-    if !info.ready {
-        return Err(info.reason.unwrap_or_else(|| "relaunching would not start the new version".into()));
-    }
-    if let Err(e) = sup.announce_relaunch() {
-        if sup.background() != Ok(true) {
-            return Err(format!(
-                "Not relaunched: {e}. With background mode off the running agents would stop; quit and open Centralu again when they are done."
-            ));
+async fn apply_update_relaunch(app: AppHandle) -> Result<(), String> {
+    off_main_thread(app, |app| {
+        let sup = app.state::<Supervisor>();
+        let info = sup.relaunch_info();
+        if !info.ready {
+            return Err(info.reason.unwrap_or_else(|| "relaunching would not start the new version".into()));
         }
-    }
-    approved.0.store(true, std::sync::atomic::Ordering::SeqCst);
-    app.request_restart();
-    Ok(())
+        if let Err(e) = sup.announce_relaunch() {
+            if sup.background() != Ok(true) {
+                return Err(format!(
+                    "Not relaunched: {e}. With background mode off the running agents would stop; quit and open Centralu again when they are done."
+                ));
+            }
+        }
+        app.state::<QuitApproved>().0.store(true, std::sync::atomic::Ordering::SeqCst);
+        app.request_restart();
+        Ok(())
+    })
+    .await?
 }
 
 /// Retry from the failure screen (#184). Restarts a supervisor that has given up — merely
 /// reloading the webview does not bring the host back up. Does nothing if it is still running
 /// (an answer is coming soon anyway).
 #[tauri::command]
-fn restart_host(app: AppHandle, sup: State<'_, Supervisor>) -> bool {
-    sup.restart(app)
+async fn restart_host(app: AppHandle) -> bool {
+    off_main_thread(app, |app| app.state::<Supervisor>().restart(app.clone())).await.unwrap_or(false)
 }
 
 /// The dock icon badge (FR-12, display layer ④).
@@ -672,6 +690,35 @@ fn leave_app_folder() {
         if let Err(e) = std::env::set_current_dir(&to) {
             eprintln!("[startup] could not leave the app folder for {}: {e}", to.display());
         }
+    }
+}
+
+/**
+ * #840 item 6: a command that waits on the keeper's socket runs that wait off the main thread, on
+ * the blocking pool (`off_main_thread`). A plain command runs on the main thread, so while the
+ * keeper was slow to answer (up to 10 s for a switch) the whole window hung.
+ */
+#[cfg(test)]
+mod keeper_command_tests {
+    /// The `Supervisor` calls that send a request to the keeper and wait for its answer.
+    const WAITS_ON_KEEPER: [&str; 7] =
+        [".switch_build(", ".background(", ".set_background(", ".stop_agents(", ".restart_keeper(", ".announce_relaunch(", ".restart("];
+
+    #[test]
+    fn a_command_that_waits_on_the_keeper_runs_off_the_main_thread() {
+        let src = include_str!("lib.rs");
+        // The commands, not this test
+        let commands = src.split("#[cfg(test)]").next().unwrap();
+        let mut checked = 0;
+        for chunk in commands.split("#[tauri::command").skip(1) {
+            let body = &chunk[..chunk.find("\n}\n").unwrap_or(chunk.len())];
+            let name = body.split_once("fn ").and_then(|(_, r)| r.split_once('(')).map(|(n, _)| n).unwrap_or("?");
+            if WAITS_ON_KEEPER.iter().any(|c| body.contains(c)) {
+                checked += 1;
+                assert!(body.contains("async fn ") && body.contains("off_main_thread("), "the command `{name}` waits on the keeper on the main thread");
+            }
+        }
+        assert!(checked >= 7, "only {checked} commands that wait on the keeper were found");
     }
 }
 
