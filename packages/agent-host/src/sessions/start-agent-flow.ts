@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
 import type { AgentStartRecord, AgentStartRequest, Delegation, LowMemory } from './child-ownership.js'
 import { ASK_WAIT_MS, taskLine } from './ask-project.js'
-import { AGENT_CEILING, agentBranch, agentChoice, agentFrame, agentName, distinguishingText, givenAgentName, presetWithin } from './start-agent.js'
+import { agentBranch, agentChoice, agentFrame, agentName, distinguishingText, givenAgentName, presetWithin } from './start-agent.js'
 import { labelOf } from './transcript-view.js'
 import { agentDepthRefusal, recordAgentDepth } from './agent-depth.js'
 import type {
@@ -23,6 +23,7 @@ import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import type { HostAskAnswer } from './host-cards.js'
 import type { DelegationHost } from './delegation-host.js'
 import { newOrchestratorAgentFolder } from './orchestrator-home.js'
+import { AgentStartGates } from './agent-start-gates.js'
 import {
   ASK_THE_PERSON,
   ORCHESTRATOR_PLACE,
@@ -108,22 +109,21 @@ export type StartAgentDelegations = {
  * what it reaches of the rest of the flow is `StartAgentDelegations`, of the manager `DelegationHost`.
  */
 export class AgentStartFlow {
+  /** Whether a session may start an agent now: its caller's standing and the ceiling (agent-start-gates.ts) */
+  private readonly gates: AgentStartGates
+
   constructor(
     private readonly host: DelegationHost,
     private readonly flow: StartAgentDelegations,
-  ) {}
+  ) {
+    this.gates = new AgentStartGates(host)
+  }
 
   /**
    * Sessions the person allowed to start agents "always for this session" (#561, `ensureAgentConsent`). Live only, like
    * `readGrants`: a restart asks again. The project-wide always is a stored consent instead.
    */
   readonly agentConsents = new Set<string>()
-
-  /**
-   * Places taken by starts between their ceiling check and the child's delegation (#673 review) — project id -> how
-   * many. Counted by `agentCeilingError` with the running children, so starts at once cannot pass the ceiling together.
-   */
-  private readonly agentStartReserved = new Map<string, number>()
 
   /**
    * start_agent (#561): an ordinary session starts another agent (Claude or Codex) in its own project on a task.
@@ -404,21 +404,14 @@ export class AgentStartFlow {
     }
   }
 
-  /**
-   * What a child's start rests on in its caller, read once the person allowed it and again once its session exists,
-   * right before its delegation is registered: the caller is still here, its project still registered and trusted
-   * (or the caller is `auto`), and it is still above the agent depth (#867), which `auto` does not open.
-   */
-  private agentStartGateError(callerId: string, projectId: string): string | null {
-    const caller = this.host.meta.get(callerId)
-    if (!caller) return 'The session that asked is no longer here.'
-    // The orchestrator's place is no project (#853): nothing to be registered or trusted
-    if (projectId === ORCHESTRATOR_PLACE && caller.kind === 'orchestrator') return agentDepthRefusal(this.host, callerId, 'start agents')
-    const now = this.host.store.projects.listProjects().find((p) => p.id === projectId)
-    if (!now) return 'This session\'s project is no longer registered.'
-    const auto = caller.permissionPreset === 'auto'
-    if (now.trusted !== true && !auto) return `This session's project is no longer trusted, so it cannot start agents. ${ASK_THE_PERSON}`
-    return agentDepthRefusal(this.host, callerId, 'start agents')
+  /** `AgentStartGates.agentStartGateError` (agent-start-gates.ts), kept on the flow for its callers */
+  private agentStartGateError(...a: Parameters<AgentStartGates['agentStartGateError']>): ReturnType<AgentStartGates['agentStartGateError']> {
+    return this.gates.agentStartGateError(...a)
+  }
+
+  /** `AgentStartGates.reservePlace` (agent-start-gates.ts), kept on the flow for its callers */
+  reservePlace(...a: Parameters<AgentStartGates['reservePlace']>): ReturnType<AgentStartGates['reservePlace']> {
+    return this.gates.reservePlace(...a)
   }
 
   /**
@@ -448,27 +441,6 @@ export class AgentStartFlow {
         ok: false,
         error: `${why} The session "${called}" [${child.id}] made for it got no task, but could not be moved to the trash (${(e as Error).message}); ${left}. Tell the person.`,
       }
-    }
-  }
-
-  /**
-   * A place under the per-project ceiling, checked and taken in one synchronous step (`agentStartReserved`), for a start
-   * (`createAgentChild`) or a fork (`forkFor`) that waits on something before its delegation counts the child.
-   * `release` once the delegation counts it, or when the start fails; a second call does nothing.
-   */
-  reservePlace(callerId: string, projectId: string): { release: () => void } | { error: string } {
-    const full = this.agentCeilingError(callerId, projectId)
-    if (full) return { error: full }
-    this.agentStartReserved.set(projectId, (this.agentStartReserved.get(projectId) ?? 0) + 1)
-    let reserved = true
-    return {
-      release: () => {
-        if (!reserved) return
-        reserved = false
-        const left = (this.agentStartReserved.get(projectId) ?? 1) - 1
-        if (left > 0) this.agentStartReserved.set(projectId, left)
-        else this.agentStartReserved.delete(projectId)
-      },
     }
   }
 
@@ -566,22 +538,9 @@ export class AgentStartFlow {
     return { branch: agentBranch(basis, randomUUID()) }
   }
 
-  /** A saved ceiling overrides the caller's preset default: auto unlimited, otherwise AGENT_CEILING. */
-  agentCeilingError(callerId: string, projectId: string): string | null {
-    const configured = this.host.uiPreferences().agentCeiling
-    const ceiling = configured ?? (this.host.autoBoundaryOpen(callerId) ? 0 : AGENT_CEILING)
-    if (ceiling === 0) return null
-    // A start under way holds its place from its check (#673 review); a request still waiting on the person holds none
-    const running =
-      [...this.host.children.delegations.values()].filter((d) => {
-        const child = this.host.meta.get(d.sessionId)
-        // A session gone is no one's (#994 review); one with no project is the orchestrator's place (#853)
-        return d.agent && !d.settled && !!child && (child.projectId ?? ORCHESTRATOR_PLACE) === projectId
-      }).length +
-      (this.agentStartReserved.get(projectId) ?? 0)
-    if (running < ceiling) return null
-    const whose = projectId === ORCHESTRATOR_PLACE ? 'you started' : "started by this project's sessions"
-    return `${running} agents ${whose} are already working, the most at once. Wait for one (agent_session, action "wait") or stop one, then try again.`
+  /** `AgentStartGates.agentCeilingError` (agent-start-gates.ts), kept on the flow for its callers */
+  agentCeilingError(...a: Parameters<AgentStartGates['agentCeilingError']>): ReturnType<AgentStartGates['agentCeilingError']> {
+    return this.gates.agentCeilingError(...a)
   }
 
   /**
