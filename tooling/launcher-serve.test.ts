@@ -27,6 +27,7 @@ import {
   ensureServeState,
   hostCommand,
   hostEnv,
+  takesTokenOnStdin,
   tokenLine,
   launcherScript,
   ensureLauncher,
@@ -300,6 +301,25 @@ describe('how the host is started', () => {
     const plan = hostCommand('/usr/bin/node', '/h/main.mjs', { port: 17175, dataDir: '/d', platform: 'linux' })
     expect(plan.args.join(' ')).not.toContain('secret-token')
     expect(plan.args).not.toContain('--token')
+  })
+
+  // Review of #1100: CENTRALU_HOST_ENTRY can point at a bundle from before #538, which reads only CC_HOST_TOKEN
+  it('gives a host bundle from before the stdin token its token in the environment, as before', () => {
+    const d = mkdtempSync(join(tmpdir(), 'cc-token-entry-'))
+    try {
+      writeFileSync(join(d, 'main.mjs'), '')
+      writeFileSync(join(d, 'bundle-info.json'), JSON.stringify({ protocolVersion: 1, hostProof: 1 }))
+      expect(takesTokenOnStdin(join(d, 'main.mjs'))).toBe(false)
+      const e = hostEnv(env, { dataDir: '/d', version: '1.0.0', hostDir: d, legacyToken: 'secret-token' })
+      expect(e.CC_HOST_TOKEN).toBe('secret-token')
+      expect(e.CC_HOST_TOKEN_ON_STDIN).toBeUndefined()
+      writeFileSync(join(d, 'bundle-info.json'), JSON.stringify({ protocolVersion: 1, hostProof: 1, tokenOnStdin: 1 }))
+      expect(takesTokenOnStdin(join(d, 'main.mjs'))).toBe(true)
+      // The source, which has no bundle-info.json, reads it from stdin
+      expect(takesTokenOnStdin(join(ROOT, 'packages/agent-host/src/main.ts'))).toBe(true)
+    } finally {
+      rmSync(d, { recursive: true, force: true })
+    }
   })
 
   it('starts the host with no display and none of the keeper’s or dev mode’s variables', () => {
