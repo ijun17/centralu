@@ -216,6 +216,58 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   Tests: `tooling/project-board-queue.test.ts` (the decisions, the app against a fake `gh` that
   records every write, a restart, the watch command), and the screen in `e2e/fixtures/board-reader.ts`.
 
+### Batches (#962)
+
+The free plan runs about one CI build at a time, so pull requests queued together each waited for
+their own run in one line. `batch.mjs` holds the rules (pure), `queue-batch.mjs` does them on GitHub,
+and the tick drives the running batch before any item, under the same lease. On while `project.json`
+has `queue.batch` (`min` items to start one, at least 2; `max`, default 6).
+
+- **Which**: active items in CI whose own CI was read on their head and has not started (every run
+  `queued`, `waiting`, `requested` or `pending`: cancelling it throws no work away), not sent back
+  from a batch on that head (`batchless`), the oldest first, in one repository. One batch runs at a
+  time; an item in a batch is not polled on its own (`dueItem`).
+- **Building**: each member is read again (still open, not a draft, not DIRTY, the same head). A
+  branch `queue/batch-<n>` is made at the default branch (never moved: one that exists ends the
+  batch), and each head is merged into it in order on GitHub (`POST /merges`); one that conflicts
+  goes on with its own CI and is not batched again on that head. With two or more merged, the CI
+  workflows are started on the branch (`workflow_dispatch`); GitHub refusing that (no trigger, no
+  permission) ends the batch and makes none for an hour (`batchOff`), before anything is cancelled.
+  Then the members' own runs that have not started are cancelled.
+- **CI on the batch** is read as an item's head is (`decideRun`, shared with `decideCi`): the
+  required set from the default branch plus jobs the batch adds, a cancelled run rerun once, failed
+  jobs once. A member that changes meanwhile (pushed, closed, a draft, taken out, queued again) ends
+  the run; the rest are tried again without it. **Red** (failed twice): split in halves, a half of
+  two or more tried again, one alone goes back to its own CI. Anything else (no run in 15 minutes, a
+  refused rerun) sends them all back.
+- **The required-checks rule** (#962's open question, decided here): the queue's own rule, with no
+  branch protection change. A member's required checks count as passed when the batch run passed
+  every required check (the same workflow file and job names, read the same way) on a commit whose
+  tree is what the default branch becomes when it lands. GitHub is not asked to take a status in
+  place of a check: the repository has no protection rule, and if one is added that requires checks
+  on the head, GitHub answers BLOCKED and the member goes back to its own CI. Requiring only a batch
+  status in branch protection was the other option; it was not taken: it changes the repository's
+  settings, and every merge would then need a batch's status, which `merge_when_green` and a pull
+  request queued alone never get.
+- **Landing**: one member per tick, in order, as its own squash (`land`, `afterMerge`: the same
+  checks, subject, lowers and branches as alone), each only while the default branch's tree is the
+  tree the batch had before it; the last one leaves exactly the tree CI tested, and the batch's end
+  says whether it did. A member's own runs were cancelled, so GitHub may call it UNSTABLE: that alone
+  does not stop it when every check that did not pass is a run the batch cancelled
+  (`onlyCancelledByBatch`); anything else waits 30 minutes, then the rest go back. Before each merge
+  a `merge-queue` success status on its head names the batch run. The default branch moved by
+  something else, a head moved, a draft, DIRTY, BEHIND, BLOCKED, a long subject: that member and the
+  rest go back to their own CI (where the usual attention says what is wrong). Found merged with the
+  batch's tree after it (a driver stopped before writing it down), it counts as landed. The batch
+  branch is deleted when the batch ends, whatever the end.
+- A member sent back has its own run cancelled: the item's poll reruns it (a cancelled run once per
+  head), which is what tells the session what is wrong with it, if anything.
+- `merge_queue` lists running batches first, `batch` on each member, and `batches`; the screen tags a
+  member "batch N". Batch events are for the screen, not a session; a member's merge is its owner's
+  news as ever ("Tested in batch …"). `PROJECT_BOARD_QUEUE_BATCH_MIN` changes `min` only for tests.
+  Tests: `tooling/project-board-queue.test.ts` (the rules, and the app against the fake `gh`: green,
+  red and split, the default branch moved, dispatch refused, a conflict).
+
 ## Which tool for which task (#957)
 
 `help` (model only, read-only) answers a fixed table: which of this app's tools to use for a
@@ -361,7 +413,8 @@ step shows on the screen.
 - `github.mjs` — every call to GitHub, through `gh`. `project.json` — which project, and the CI settings.
 - `ci.mjs` — the CI and merge decisions as pure functions (no gh, no IO).
 - `queue.mjs`, `queue-driver.mjs`, `bin/merge-queue.mjs` — the merge queue's decisions (pure), its file,
-  lease and polls, and the watch command.
+  lease and polls, and the watch command. `batch.mjs`, `queue-batch.mjs` — its batches: the rules
+  (pure) and their steps on GitHub.
 - `markdown.mjs` — GitHub Markdown to safe HTML for the reader, and the decision summary parser (pure).
 - `rules.mjs` — the rules for public text, commit messages and the pull request template (pure).
 - `answers.mjs` — the owner's saved answers: save, delete, mark recorded (pure; decision-tools.mjs keeps them in the data folder).

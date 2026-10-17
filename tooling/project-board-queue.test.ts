@@ -13,6 +13,8 @@ import { decideBefore, decideCi, emptyQueue, enqueue, noticeKey, dequeue, normal
 import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { latestRuns, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
+// @ts-expect-error — plain .mjs of a Centralu app
+import { batchCandidates, decideLanding, endBatch, formBatch, onlyCancelledByBatch, splitBatch } from '../.centralu/apps/project-board/batch.mjs'
 
 /**
  * The project board app's merge queue (#956): queue_merge, merge_queue, unqueue, the driver that runs
@@ -198,6 +200,130 @@ describe('what the merge queue decides for one poll', () => {
   })
 })
 
+// --- Batches (#962): the decisions ----------------------------------------------------------------------
+
+const A = 'a'.repeat(40)
+const B = 'b'.repeat(40)
+const C = 'c'.repeat(40)
+/** A queued item whose own CI was read on its head: its runs in `status`. */
+const waitingItem = (pr: number, head: string, status = 'queued', extra: Record<string, unknown> = {}) => ({
+  repo: R,
+  pr,
+  lowers: [],
+  owner: 'me',
+  state: 'ci',
+  head,
+  reruns: {},
+  queuedAt: `2026-10-17T09:0${pr % 10}:00Z`,
+  ci: { head, verdict: 'pending', runs: [{ id: 900 + pr, status }] },
+  ...extra,
+})
+const queueOf = (...items: any[]) => ({ ...emptyQueue(), items })
+const greenBatch = () => {
+  const q = queueOf(waitingItem(1, A), waitingItem(2, B))
+  const b = formBatch(q, q.items, { at: 'x', ref })
+  Object.assign(b, {
+    state: 'landing',
+    base: { sha: 'm0', tree: 'T0' },
+    steps: [
+      { pr: 1, head: A, sha: 's1', tree: 'T1' },
+      { pr: 2, head: B, sha: 's2', tree: 'T2' },
+    ],
+    cancelled: [{ pr: 1, run: 901, suite: 51 }],
+  })
+  return { q, b }
+}
+const landing = (extra: Record<string, unknown> = {}) => {
+  const { q, b } = greenBatch()
+  return decideLanding({ b, step: b.steps[0], pr: openPr({ number: 1, headRefOid: A }), item: q.items[0], mainTree: 'T0', prevTree: 'T0', defaultBranch: 'main', subject: 'fix: x (#1)', subjectMax: 72, now: NOW, ref, ...extra })
+}
+
+describe('what the merge queue decides for a batch (#962)', () => {
+  it('batches only items whose own CI has not started, never one sent back from a batch on the same head, the oldest first', () => {
+    const q = queueOf(
+      waitingItem(3, C),
+      waitingItem(1, A),
+      waitingItem(2, B, 'in_progress'), // its own run is going: cancelling it would throw work away
+      waitingItem(4, 'd'.repeat(40), 'queued', { batchless: 'd'.repeat(40) }),
+      waitingItem(5, 'e'.repeat(40), 'queued', { ci: { head: 'f'.repeat(40), verdict: 'pending', runs: [{ id: 1, status: 'queued' }] } }), // read on an older head
+      waitingItem(6, '6'.repeat(40), 'queued', { state: 'attention' }),
+      waitingItem(7, '7'.repeat(40), 'queued', { ci: { head: '7'.repeat(40), verdict: 'green', runs: [{ id: 2, status: 'completed' }] } }),
+    )
+    expect(batchCandidates(q, { max: 6 }).map((i: any) => i.pr)).toEqual([1, 3])
+    expect(batchCandidates(q, { max: 1 }).map((i: any) => i.pr)).toEqual([1])
+    // A new head is not the one sent back
+    q.items[3].head = '9'.repeat(40)
+    q.items[3].ci.head = q.items[3].head
+    expect(batchCandidates(q, { max: 6 }).map((i: any) => i.pr)).toEqual([1, 3, 4])
+  })
+
+  it('takes batch members out of the items the queue polls on their own, and gives them back when it ends', () => {
+    const q = queueOf(waitingItem(1, A, 'queued', { nextAt: '2026-10-17T09:00:00Z' }), waitingItem(2, B, 'queued', { nextAt: '2026-10-17T09:00:00Z' }))
+    const b = formBatch(q, q.items, { at: 'x', ref })
+    expect(b).toMatchObject({ branch: 'queue/batch-1', state: 'building', members: [{ pr: 1, head: A }, { pr: 2, head: B }] })
+    expect(q.items.map((i: any) => i.batch)).toEqual([1, 1])
+    // A file whose batch is gone (by hand, an older build) gives its items back
+    const reread = normalize({ ...q, batches: [] })
+    expect(reread.items.map((i: any) => i.batch)).toEqual([undefined, undefined])
+    // Given back, they are batchable again only once their own poll has read them: a batch that keeps
+    // failing to build would otherwise be formed again at once, every tick, and no item polled
+    endBatch(q, b, 'dropped', { at: 'y', batchless: false })
+    expect(q.items.map((i: any) => [i.batch, i.nextAt])).toEqual([
+      [undefined, 'y'],
+      [undefined, 'y'],
+    ])
+    expect(batchCandidates(q, { max: 6 })).toEqual([])
+  })
+
+  it('splits a red batch in halves: a half of two or more is tried again, one left alone goes back to its own CI', () => {
+    const q = queueOf(waitingItem(1, A), waitingItem(2, B), waitingItem(3, C))
+    const b = formBatch(q, q.items, { at: 'x', ref })
+    b.state = 'ci'
+    b.steps = q.items.map((i: any) => ({ pr: i.pr, head: i.head, sha: `s${i.pr}`, tree: `T${i.pr}` }))
+    const made = splitBatch(q, b, { at: 'y', ref })
+    expect(b.state).toBe('failed')
+    expect(made.map((x: any) => x.members.map((m: any) => m.pr))).toEqual([[1, 2]])
+    expect(q.items.map((i: any) => [i.pr, i.batch ?? null, i.batchless ?? null])).toEqual([
+      [1, 2, null],
+      [2, 2, null],
+      [3, null, C],
+    ])
+  })
+
+  it('lands a member only while main has the tree the batch had before it, in order, and on its own head', () => {
+    expect(landing()).toEqual({ do: 'merge' })
+    // Something else landed on main: the batch's tree is not what this member would land on
+    expect(landing({ mainTree: 'Tx' })).toMatchObject({ do: 'stop' })
+    expect(landing({ pr: openPr({ number: 1, headRefOid: C }) })).toMatchObject({ do: 'stop', text: expect.stringContaining('head moved') })
+    expect(landing({ item: null })).toMatchObject({ do: 'stop', text: '#1 left the queue before it landed' })
+    expect(landing({ pr: openPr({ number: 1, headRefOid: A, isDraft: true }) })).toMatchObject({ do: 'stop' })
+    expect(landing({ pr: openPr({ number: 1, headRefOid: A, mergeStateStatus: 'BLOCKED' }) })).toMatchObject({ do: 'stop', text: expect.stringContaining('BLOCKED') })
+    expect(landing({ subject: 'x'.repeat(73) })).toMatchObject({ do: 'stop' })
+    // Found merged with the batch's tree after it: a driver stopped before writing it down
+    expect(landing({ pr: openPr({ number: 1, headRefOid: A, state: 'MERGED' }), mainTree: 'T1' })).toEqual({ do: 'landed' })
+    expect(landing({ pr: openPr({ number: 1, headRefOid: A, state: 'MERGED' }), mainTree: 'Tx' })).toMatchObject({ do: 'stop' })
+    // A stack's top moves onto main first
+    expect(landing({ pr: openPr({ number: 1, headRefOid: A, baseRefName: 'feat/low' }), lowerBranches: ['feat/low'] })).toEqual({ do: 'retarget', base: 'main' })
+  })
+
+  it('lands an UNSTABLE member only when every check that did not pass is a run the batch cancelled', () => {
+    const run = (conclusion: string | null, suiteId: number) => ({ kind: 'run', name: 'verify', status: conclusion ? 'completed' : 'queued', conclusion, suiteId })
+    expect(onlyCancelledByBatch([run('cancelled', 51), run('success', 52)], [51])).toBe(true)
+    expect(onlyCancelledByBatch([run('cancelled', 53)], [51])).toBe(false) // cancelled by someone else
+    expect(onlyCancelledByBatch([run('failure', 52)], [51])).toBe(false)
+    expect(onlyCancelledByBatch([run(null, 52)], [51])).toBe(false) // still to run
+    expect(onlyCancelledByBatch([{ kind: 'status', name: 'x', state: 'failure' }], [51])).toBe(false)
+    const unstable = openPr({ number: 1, headRefOid: A, mergeStateStatus: 'UNSTABLE' })
+    expect(landing({ pr: unstable, checks: [run('cancelled', 51)] })).toEqual({ do: 'merge' })
+    const waits = landing({ pr: unstable, checks: [run('failure', 52)] })
+    expect(waits).toMatchObject({ do: 'wait' })
+    // …and says so in time, instead of waiting for ever
+    const { q, b } = greenBatch()
+    b.uncleanSince = waits.patch.uncleanSince
+    expect(decideLanding({ b, step: b.steps[0], pr: unstable, item: q.items[0], mainTree: 'T0', prevTree: 'T0', defaultBranch: 'main', checks: [run('failure', 52)], subject: 's', subjectMax: 72, now: NOW + 31 * 60_000, ref })).toMatchObject({ do: 'stop' })
+  })
+})
+
 /** The pid of a process that has ended. */
 function deadPid(): number {
   const r = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' })
@@ -234,6 +360,8 @@ if (args[0] === 'pr' && args[1] === 'view') {
   if (st.mergeNoop) process.exit(0)
   const pr = st.prs[args[2]]
   pr.state = 'MERGED'; pr.mergeCommit = { oid: 'abcdef1234567890abcdef1234567890abcdef12' }
+  // main moves to the squash: its tree is the head merged onto main (the batch's tree for it), unless drifted
+  st.main = { sha: 'main-' + args[2], tree: st.mainDrift ? 'tree-drift' : 'tree-' + pr.headRefOid }
   save()
 } else if (args[0] === 'pr' && args[1] === 'close') {
   write(['close', args[2], args[args.indexOf('--comment') + 1]])
@@ -241,6 +369,29 @@ if (args[0] === 'pr' && args[1] === 'view') {
   save()
 } else if (args[0] === 'pr' && args[1] === 'list') {
   out((st.basedOn ?? {})[args[args.indexOf('--base') + 1]] ?? [])
+} else if (path === R + '/commits/main') {
+  const m = st.main ?? { sha: 'main0', tree: 'tree-main0' }
+  out({ sha: m.sha, commit: { tree: { sha: m.tree } } })
+} else if (path === R + '/git/refs' && args.includes('POST')) {
+  const body = JSON.parse(fs.readFileSync(0, 'utf8'))
+  if ((st.refs ?? []).includes(body.ref)) fail('Reference already exists (HTTP 422)')
+  write(['branch', body.ref.replace('refs/heads/', ''), body.sha])
+  out({ ref: body.ref })
+} else if (path === R + '/merges') {
+  const body = JSON.parse(fs.readFileSync(0, 'utf8'))
+  write(['merge-into', body.head, body.base])
+  if ((st.conflicts ?? []).includes(body.head)) fail('Merge conflict (HTTP 409)')
+  out({ sha: 'batch-' + body.head, commit: { tree: { sha: 'tree-' + body.head } } })
+} else if (path && path.endsWith('/actions/workflows/build.yml/dispatches')) {
+  const body = JSON.parse(fs.readFileSync(0, 'utf8'))
+  if (st.dispatchError) fail(st.dispatchError)
+  write(['dispatch', body.ref])
+} else if (path && /\/actions\/runs\/\d+\/cancel$/.test(path)) {
+  write(['cancel', path.split('/')[5]])
+} else if (path && path.includes('/statuses/')) {
+  const body = JSON.parse(fs.readFileSync(0, 'utf8'))
+  write(['status', path.split('/statuses/')[1], body.state, body.context, body.description])
+  out({ id: 1, state: body.state })
 } else if (path === R) {
   out({ permissions: st.permissions, default_branch: 'main' })
 } else if (path && path.includes('/protection/required_status_checks')) {
@@ -370,14 +521,37 @@ async function call(name: string, args: Record<string, unknown> = {}) {
   if (!out.result) throw new Error(`${name} did not answer: ${out.status} ${out.error}`)
   return { text: resultText(out.result), isError: out.result.isError === true, data: out.result.structuredContent as any }
 }
-const gh = (): Gh => JSON.parse(readFileSync(statePath, 'utf8'))
+/**
+ * The fake gh's state. A fake gh process may be rewriting the file as it is read (writeFileSync is not
+ * atomic, and Windows writes slower), so a read that finds it half written tries again.
+ */
+function gh(): Gh {
+  for (let i = 0; ; i++) {
+    try {
+      return JSON.parse(readFileSync(statePath, 'utf8'))
+    } catch (e) {
+      if (i >= 50) throw e
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20)
+    }
+  }
+}
 const patchGh = (fn: (s: Gh) => void) => {
   const s = gh()
   fn(s)
   writeFileSync(statePath, JSON.stringify(s))
 }
 const writes = (): any[][] => gh().writes ?? []
-const ghCalls = () => readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as string[])
+// A line a fake gh is still appending is not a call yet
+const ghCalls = () =>
+  readFileSync(logPath, 'utf8')
+    .split('\n')
+    .flatMap((l) => {
+      try {
+        return l.trim() ? [JSON.parse(l) as string[]] : []
+      } catch {
+        return []
+      }
+    })
 function filesNamed(dir: string, name: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? filesNamed(join(dir, e.name), name) : e.name === name ? [join(dir, e.name)] : []))
 }
@@ -385,9 +559,9 @@ const queueFile = () => filesNamed(join(root, 'data'), 'merge-queue.json')[0]!
 const queueOnDisk = () => JSON.parse(readFileSync(queueFile(), 'utf8'))
 const notices = () => (queueOnDisk().events as { kind: string; notify: boolean; text: string }[]).filter((e) => e.notify)
 
-/** Polls until `ok` holds, through merge_queue (which also keeps the app awake), for at most 20 s. */
-async function until(ok: (q: any) => boolean, what: string) {
-  const end = Date.now() + 20_000 * SLOW
+/** Polls until `ok` holds, through merge_queue (which also keeps the app awake), for at most `ms` (20 s). */
+async function until(ok: (q: any) => boolean, what: string, ms = 20_000) {
+  const end = Date.now() + ms * SLOW
   for (;;) {
     const q = (await call('merge_queue', { all: true })).data
     if (ok(q)) return q
@@ -651,6 +825,190 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     runtime()
     await until((x) => stateOf(x) === 'merged', 'the merge after the restart')
     expect(writes().filter((w) => w[0] === 'merge')).toHaveLength(1)
+  })
+})
+
+// --- Batches (#962), against the fake gh -----------------------------------------------------------------
+
+/** A check of one run (its check suite), for a batch's run or a PR's own. */
+const suiteCheck = (name: string, conclusion: string | null, id: number, suite: number, status?: string) => ({ ...ghCheck(name, conclusion, id), check_suite: { id: suite }, ...(status ? { status } : {}) })
+const ownRun = (pr: number, head: string, id: number, suite: number, conclusion: string | null = null, attempt = 1) =>
+  ghRun(conclusion, attempt, head, { id, head_branch: `feat/b${pr}`, check_suite_id: suite, ...(conclusion === null ? { status: 'queued' } : {}) })
+const ownChecks = (suite: number, conclusion: string | null) => [
+  suiteCheck('verify', conclusion, suite * 10 + 1, suite, conclusion === null ? 'queued' : undefined),
+  suiteCheck('windows tests', conclusion, suite * 10 + 2, suite, conclusion === null ? 'queued' : undefined),
+]
+/** The batch branch's head after A then B are merged into it (the fake's merges answer `batch-<head>`). */
+const BATCH_HEAD = `batch-${B}`
+const batchRun = (conclusion: string | null, attempt = 1) => ghRun(conclusion, attempt, BATCH_HEAD, { id: 950, head_branch: 'queue/batch-1', event: 'workflow_dispatch', check_suite_id: 6000, html_url: `https://github.com/${R}/actions/runs/950` })
+const batchChecks = (conclusion: string) => [suiteCheck('verify', 'success', 61, 6000), suiteCheck('windows tests', conclusion, 62, 6000)]
+/** #77 at A and #78 at B, their own runs queued behind others; CI on the batch passes. */
+const batchState = (patch: Gh = {}) =>
+  ghState({
+    prs: { '77': ghPr(77, { headRefOid: A, mergeStateStatus: 'UNSTABLE' }), '78': ghPr(78, { headRefOid: B, mergeStateStatus: 'UNSTABLE' }) },
+    runs: { [A]: [ownRun(77, A, 901, 5001)], [B]: [ownRun(78, B, 902, 5002)] },
+    checks: { [A]: ownChecks(5001, null), [B]: ownChecks(5002, null) },
+    on: {
+      'cancel:901': { runs: { [A]: [ownRun(77, A, 901, 5001, 'cancelled')] }, checks: { [A]: ownChecks(5001, 'cancelled') } },
+      'cancel:902': { runs: { [B]: [ownRun(78, B, 902, 5002, 'cancelled')] }, checks: { [B]: ownChecks(5002, 'cancelled') } },
+      'dispatch:queue/batch-1': { runs: { [BATCH_HEAD]: [batchRun('success')] }, checks: { [BATCH_HEAD]: batchChecks('success') } },
+    },
+    ...patch,
+  })
+const batchesOnDisk = () => (queueOnDisk().batches ?? []) as any[]
+const batchEvents = () => (queueOnDisk().events as { kind: string; text: string }[]).filter((e) => e.kind === 'batch').map((e) => e.text)
+const short2 = (w: any[]) => w.slice(0, 2).join(' ')
+/** A batch is many gh calls, each a process of its own: wait on events, with bounds generous for a loaded machine. */
+const BATCH_WAIT_MS = 90_000
+
+describe('the merge queue batches pull requests waiting for CI into one run (#962)', { timeout: 240_000 * SLOW }, () => {
+  it('builds queue/batch-1 from main, runs CI on it once, cancels their own waiting runs, and lands each in order on the tested tree', async () => {
+    runtime(batchState())
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'merged', 'both to land', BATCH_WAIT_MS)
+    await until(() => batchesOnDisk()[0]?.state === 'done', 'the batch to end', BATCH_WAIT_MS)
+    expect(writes().map(short2)).toEqual([
+      'branch queue/batch-1',
+      `merge-into ${A}`,
+      `merge-into ${B}`,
+      'dispatch queue/batch-1',
+      'cancel 901',
+      'cancel 902',
+      `status ${A}`,
+      'merge 77',
+      'delete feat/b77',
+      `status ${B}`,
+      'merge 78',
+      'delete feat/b78',
+      'delete queue/batch-1',
+    ])
+    // The branch starts at main, each head is merged into it, and CI runs on the branch
+    expect(writes()[0]).toEqual(['branch', 'queue/batch-1', 'main0'])
+    expect(writes()[1]).toEqual(['merge-into', A, 'queue/batch-1'])
+    // Each lands as its own squash on the head the batch tested, and says where it was tested
+    const merges = writes().filter((w) => w[0] === 'merge')
+    expect(merges[0]![2]).toEqual(expect.arrayContaining(['--squash', '--match-head-commit', A, '--subject', 'feat(apps): change 77 (#77)']))
+    expect(merges[1]![2]).toEqual(expect.arrayContaining(['--match-head-commit', B]))
+    expect(writes().find((w) => w[0] === 'status')).toEqual(['status', A, 'success', 'merge-queue', 'Passed CI in queue/batch-1 with #78'])
+    expect(notices().map((e) => e.text)).toEqual([
+      'Merge queue: merged #77 (feat(apps): change 77) as abcdef1, "feat(apps): change 77 (#77)". Tested in batch queue/batch-1 with #78.',
+      'Merge queue: merged #78 (feat(apps): change 78) as abcdef1, "feat(apps): change 78 (#78)". Tested in batch queue/batch-1 with #77.',
+    ])
+    expect(batchEvents().at(-1)).toBe('Batch queue/batch-1: landed #77, #78; main at main-78 is the tree CI tested.')
+    // One CI run for the two: no rerun of their own cancelled runs
+    expect(writes().filter((w) => w[0].startsWith('rerun'))).toEqual([])
+  })
+
+  it('splits a red batch: two go back to their own CI, whose cancelled runs are rerun, and land from there', async () => {
+    const landsAlone = (pr: number, head: string, id: number, suite: number) => ({
+      runs: { [head]: [ownRun(pr, head, id, suite, 'success', 2)] },
+      checks: { [head]: ownChecks(suite, 'success') },
+      prs: { [String(pr)]: ghPr(pr, { headRefOid: head, mergeStateStatus: 'CLEAN' }) },
+    })
+    const base = batchState()
+    runtime(
+      batchState({
+        on: {
+          ...base.on,
+          'dispatch:queue/batch-1': { runs: { [BATCH_HEAD]: [batchRun('failure')] }, checks: { [BATCH_HEAD]: batchChecks('failure') } },
+          'rerun-failed:950': { runs: { [BATCH_HEAD]: [batchRun('failure', 2)] } },
+          'rerun:901': landsAlone(77, A, 901, 5001),
+          'rerun:902': landsAlone(78, B, 902, 5002),
+        },
+      }),
+    )
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until((x) => stateOf(x, 77) === 'merged' && stateOf(x, 78) === 'merged', 'both to land on their own', BATCH_WAIT_MS)
+    const order = writes().map(short2)
+    expect(order.slice(0, 7)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-1', 'cancel 901', 'cancel 902', 'rerun-failed 950'])
+    expect(order).toContain('delete queue/batch-1')
+    expect(order.filter((w) => w.startsWith('rerun ')).sort()).toEqual(['rerun 901', 'rerun 902'])
+    // Never landed from the red batch: no batch status on either head
+    expect(order.filter((w) => w.startsWith('status'))).toEqual([])
+    expect(batchesOnDisk().map((b) => b.state)).toEqual(['failed'])
+    expect(batchEvents().some((t) => t.includes('failed twice') && t.includes('Split'))).toBe(true)
+    // Not batched again on the same heads
+    expect(batchesOnDisk()).toHaveLength(1)
+  })
+
+  it('stops landing when main is not the tree the batch had before the next one, and sends that one back to its own CI', async () => {
+    runtime(batchState({ mainDrift: true }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until(() => batchesOnDisk()[0]?.state === 'stopped', 'the batch to stop', BATCH_WAIT_MS)
+    await until(() => writes().some((w) => short2(w) === 'rerun 902'), "#78's own run to be rerun", BATCH_WAIT_MS)
+    const order = writes().map(short2)
+    expect(order).toContain('merge 77')
+    expect(order).not.toContain('merge 78')
+    expect(order).not.toContain(`status ${B}`)
+    expect(batchEvents().at(-1)).toMatch(/^Batch queue\/batch-1: stopped before #78: main is not the tree the batch had before #78 \(something else landed\)\. #78 goes back to its own CI \(#77 landed\)\.$/)
+    const q = await call('merge_queue', { all: true })
+    expect(q.data.queue.find((i: any) => i.pr === 78)).toMatchObject({ state: 'ci', batch: null })
+  })
+
+  it('makes no batch for an hour when CI cannot be started on it, and cancels none of their own runs', async () => {
+    runtime(batchState({ dispatchError: "Workflow does not have 'workflow_dispatch' trigger (HTTP 422)" }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped', BATCH_WAIT_MS)
+    await morePolls(4)
+    expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'delete queue/batch-1'])
+    expect(queueOnDisk().batchOff.reason).toContain("does not have 'workflow_dispatch' trigger")
+    expect(batchesOnDisk()).toHaveLength(1)
+    const q = await call('merge_queue')
+    expect(q.data.queue.map((i: any) => [i.pr, i.state, i.batch])).toEqual([
+      [77, 'ci', null],
+      [78, 'ci', null],
+    ])
+  })
+
+  it('makes no batch again with one that conflicts, when too few are left to batch', async () => {
+    runtime(batchState({ conflicts: [B] }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until(() => batchesOnDisk()[0]?.state === 'dropped', 'the batch to be dropped', BATCH_WAIT_MS)
+    await morePolls(6)
+    // Without marking it, the same two were batched again after their next poll, and conflicted again
+    expect(batchesOnDisk()).toHaveLength(1)
+    expect(writes().map(short2)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${B}`, 'delete queue/batch-1'])
+    expect(queueOnDisk().items.find((i: any) => i.pr === 78).batchless).toBe(B)
+  })
+
+  it('never deletes a batch branch it did not make, and carries on with the next name', async () => {
+    runtime(batchState({ refs: ['refs/heads/queue/batch-1'] }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until(() => writes().some((w) => short2(w) === 'dispatch queue/batch-2'), 'the next batch to start', BATCH_WAIT_MS)
+    expect(writes().map(short2).slice(0, 4)).toEqual(['branch queue/batch-2', `merge-into ${A}`, `merge-into ${B}`, 'dispatch queue/batch-2'])
+    expect(writes().map(short2)).not.toContain('delete queue/batch-1')
+    expect(batchEvents().filter((t) => t.includes('queue/batch-1 could not be made'))).toHaveLength(1)
+  })
+
+  it('leaves out one that conflicts with the ones before it, and batches the rest', async () => {
+    const base = batchState()
+    runtime(
+      batchState({
+        prs: { ...base.prs, '79': ghPr(79, { headRefOid: C, mergeStateStatus: 'UNSTABLE' }) },
+        runs: { ...base.runs, [C]: [ownRun(79, C, 903, 5003)] },
+        checks: { ...base.checks, [C]: ownChecks(5003, null) },
+        conflicts: [C],
+      }),
+      { PROJECT_BOARD_QUEUE_BATCH_MIN: '3' },
+    )
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await call('queue_merge', { pr: 79, owner: 'tester' })
+    await call('queue_merge', { pr: 78, owner: 'tester' })
+    await until(() => batchesOnDisk()[0]?.state === 'landing' || batchesOnDisk()[0]?.state === 'done', 'the batch to pass', BATCH_WAIT_MS)
+    const order = writes().map(short2)
+    expect(order.slice(0, 7)).toEqual(['branch queue/batch-1', `merge-into ${A}`, `merge-into ${C}`, `merge-into ${B}`, 'dispatch queue/batch-1', 'cancel 901', 'cancel 902'])
+    // Its own run is left to run, and it is not batched again on that head
+    expect(order).not.toContain('cancel 903')
+    const item = queueOnDisk().items.find((i: any) => i.pr === 79)
+    expect(item).toMatchObject({ state: 'ci', batchless: C })
+    expect(item.batch).toBeUndefined()
+    expect(batchEvents().find((t) => t.includes('conflicted'))).toContain('#79 conflicted with the ones before, and goes on with its own CI.')
   })
 })
 

@@ -5,6 +5,7 @@
 // short in-memory cache and nothing on disk.
 import { execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
+import { short } from './util.mjs'
 
 const GH_TIMEOUT_MS = 30_000
 const MAX_PAGES = 20
@@ -562,6 +563,51 @@ export async function openPrsOnBase(repo, branch) {
   if (!REF.test(String(branch))) return []
   const list = parseJson(await runGh(['pr', 'list', '-R', repo, '--base', branch, '--state', 'open', '--limit', '50', '--json', 'number']))
   return Array.isArray(list) ? list.map((p) => p.number) : []
+}
+
+// --- Batches of the merge queue (queue-batch.mjs, #962) -------------------------------------------------
+
+/** A commit by branch or sha: its sha and its tree's. */
+export async function readCommit(repo, ref) {
+  checkRepo(repo)
+  if (!REF.test(String(ref))) throw new GitHubError('input', `"${ref}" is not a branch or commit.`)
+  const c = await restJson(`repos/${repo}/commits/${encodeURIComponent(ref)}`, { missing: [404, 422] })
+  if (!c?.sha || !c.commit?.tree?.sha) throw new GitHubError('not-found', `${repo} has no branch or commit "${ref}".`)
+  return { sha: c.sha, tree: c.commit.tree.sha }
+}
+
+/** Creates a branch at `sha` on GitHub. Never moves one that exists: GitHub refuses that, and so does this. */
+export async function createBranch(repo, branch, sha) {
+  checkRepo(repo)
+  if (!REF.test(String(branch))) throw new GitHubError('input', `"${branch}" is not a branch name.`)
+  await restWrite('POST', `repos/${repo}/git/refs`, { ref: `refs/heads/${branch}`, sha }, `the branch ${branch}`)
+}
+
+/**
+ * Merges `head` (a commit) into the branch `base` on GitHub, as a merge commit there. Answers
+ * `{ sha, tree }` of the merge, `{ conflict: true }` (HTTP 409) or `{ nothing: true }` (204: `base`
+ * contains it already).
+ */
+export async function mergeInto(repo, base, head, message) {
+  checkRepo(repo)
+  let out
+  try {
+    out = await runGh(['api', '-X', 'POST', `repos/${repo}/merges`, '--input', '-'], { input: JSON.stringify({ base, head, commit_message: message }) })
+  } catch (e) {
+    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+    if (httpStatus(e) === 409) return { conflict: true }
+    throw new GitHubError('github', `GitHub refused to merge ${short(head)} into ${base}: ${firstLine(e)}`)
+  }
+  if (!String(out ?? '').trim()) return { nothing: true }
+  const c = parseJson(out)
+  if (!c?.sha || !c.commit?.tree?.sha) throw new GitHubError('github', `GitHub answered the merge into ${base} with something that is not a commit.`)
+  return { sha: c.sha, tree: c.commit.tree.sha }
+}
+
+/** Sets a commit status on `sha` (`state` success, failure, error or pending). */
+export async function postStatus(repo, sha, { state, context, description, targetUrl }) {
+  checkRepo(repo)
+  await restWrite('POST', `repos/${repo}/statuses/${sha}`, { state, context, description: String(description).slice(0, 140), ...(targetUrl ? { target_url: targetUrl } : {}) }, `the ${context} status`)
 }
 
 // --- Reading an item and answering it (the reader in the view) --------------------------------------

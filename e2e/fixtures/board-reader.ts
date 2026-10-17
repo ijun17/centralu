@@ -112,11 +112,12 @@ let fx: FixtureHost
 const QUEUE = {
   content: [{ type: 'text', text: 'queue' }],
   structuredContent: {
-    summary: 'Merge queue: 1 need attention, 1 in CI, 1 waiting, 1 merged. Driven by the board app.',
+    summary: 'Merge queue: 1 need attention, 2 in CI, 1 waiting, 1 merged. Driven by the board app.',
     items: [],
     queue: [
       { repo: REPO, pr: 120, ref: '#120', title: 'fix(ui): keep focus', state: 'attention', lowers: [], reason: { kind: 'dirty', text: '#120 conflicts with main (GitHub: DIRTY) at c0ffee0. Rebase it onto main and push.' }, head: 'c0ffee0000', commit: null },
       { repo: REPO, pr: 121, ref: '#121', title: 'feat(apps): a stack top', state: 'ci', lowers: [119], reason: null, head: 'beef000000', commit: null },
+      { repo: REPO, pr: 123, ref: '#123', title: 'fix(apps): tested in a batch', state: 'ci', lowers: [], reason: null, head: 'feed000000', commit: null, batch: { id: 3, branch: 'queue/batch-3', state: 'ci' } },
       { repo: REPO, pr: 122, ref: '#122', title: 'docs: a note', state: 'waiting', lowers: [], reason: null, head: null, commit: null },
       { repo: REPO, pr: 118, ref: '#118', title: 'fix(host): a merged one', state: 'merged', lowers: [], reason: null, head: 'abc', commit: 'abcdef1234' },
     ],
@@ -409,11 +410,14 @@ export function boardReaderTests(): void {
       const v = await showBoard(page, { queue: QUEUE })
       const queue = v.locator('#queue')
       await expect(queue).toBeVisible()
-      await expect(queue.locator('.q-group .q-label')).toHaveText(['Needs attention1', 'CI1', 'Waiting1', 'Merged1'])
+      await expect(queue.locator('.q-group .q-label')).toHaveText(['Needs attention1', 'CI2', 'Waiting1', 'Merged1'])
       const attention = queue.locator('.q-row[data-state="attention"]')
       await expect(attention).toContainText('fix(ui): keep focus')
       await expect(attention.locator('.why')).toHaveText('#120 conflicts with main (GitHub: DIRTY) at c0ffee0. Rebase it onto main and push.')
-      await expect(queue.locator('.q-row[data-state="ci"] .tag')).toHaveText('stack over #119')
+      await expect(queue.locator(`.q-row[data-ref="${REPO}#121"] .tag`)).toHaveText('stack over #119')
+      // In a batch (#962): which one, so a pull request whose own run was cancelled says why
+      await expect(queue.locator(`.q-row[data-ref="${REPO}#123"] .tag`)).toHaveText('batch 3')
+      await expect(queue.locator(`.q-row[data-ref="${REPO}#123"] .tag`)).toHaveAttribute('title', 'Tested together with others on queue/batch-3')
       await expect(queue.locator('.q-row[data-state="merged"]')).toContainText('merged as abcdef1')
       await expect(queue.locator('.q-row[data-state="merged"] button')).toHaveCount(0)
       // A title reads the pull request in place, like a card's
