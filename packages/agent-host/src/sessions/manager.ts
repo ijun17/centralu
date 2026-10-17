@@ -93,7 +93,6 @@ import {
   gitDiff,
   gitHeadSha,
   gitBranchPr,
-  gitBranchDelete,
   type BranchPr,
   gitLog,
   gitCommitDetail,
@@ -106,7 +105,6 @@ import {
   gitValidBranchName,
   type Worktree,
   gitWorktreeDirty,
-  gitWorktreeRemove,
 } from '../dev-services/git.js'
 import {
   importFile,
@@ -126,7 +124,7 @@ import { HandoffFlow, type HandoffFlowHost, type HandoffTimings } from './handof
 import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, HUB_SENDER, agentStartPersonText } from './delegation-flow.js'
 import type { AgentStartFlow } from './start-agent-flow.js'
 import { RestartPolicy, type RestartHost } from './restart-policy.js'
-import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
+import { WorktreeSessions, worktreeSetupNotice, type WorktreeHost } from './worktree-sessions.js'
 import { canonicalPath, isInside, pathParts } from '../dev-services/path-guard.js'
 import { HostCards, type HostCardsHost } from './host-cards.js'
 import { ExternalConversations, type ExternalConversationsHost, truncate } from './external-conversations.js'
@@ -1038,6 +1036,8 @@ export class SessionManager {
       forkedFrom?: string
       /** start_agent's choice of code intelligence for its child (#686); absent: a child starts without it */
       lsp?: boolean
+      /** What the new worktree's setup could not do (#841 item 3), for a caller that tells the agent; the person gets a notice */
+      onSetupProblems?: (problems: string[]) => void
     },
   ): Promise<SessionInfo> {
     if (params.askedBy && this.meta.get(params.askedBy)?.projectId !== params.projectId) {
@@ -1067,8 +1067,9 @@ export class SessionManager {
      * files — the exact thing this feature exists to prevent.
      */
     let worktree: Worktree | null = null
+    let setupProblems: string[] = []
     if (params.worktree && params.projectId) {
-      worktree = await this.worktrees.createWorktree({ ...params, projectId: params.projectId }, id)
+      ;({ worktree, setupProblems } = await this.worktrees.createWorktree({ ...params, projectId: params.projectId }, id))
     }
 
     /*
@@ -1122,25 +1123,29 @@ export class SessionManager {
     // DB when the adapter fails — visible in the list but impossible to address (confirmed with a
     // measurement).
     let handle: SessionHandle
-    if (params.builderOf) this.appSessions.setBuilder(params.builderOf, id)
-    // External apps (M4 A-5) — a worker gets these too. If the handle never comes up, the catch below closes
-    // it
-    const apps = this.apps.appsFor(info)
-    // The same rule runs again on every wake (toolProfileOf). The builder slot was just written (setBuilder), so the
-    // flag says what the row's slot already says
-    const { profile, tools } = this.tools.toolChoice(info, !!params.builderOf)
-    // Code intelligence (#686): decided once, here, from what the session is, and recorded below for every wake
-    const noCodeIntelligence = codeIntelligenceOff({
-      kind: info.kind,
-      appId: info.appId ?? null,
-      builder: !!params.builderOf,
-      askedBy: info.askedBy ?? null,
-      forkedFrom: info.forkedFrom ?? null,
-      ...(params.lsp !== undefined ? { lsp: params.lsp } : {}),
-    })
-    const from = this.handleSink()
+    let apps: SessionApps | undefined
+    let noCodeIntelligence = false
     this.record.unborn.set(id, [])
+    // Everything from here until the session is saved is inside the cleanup below: a throw before the adapter starts
+    // left the new worktree with no session pointing at it (#774)
     try {
+      if (params.builderOf) this.appSessions.setBuilder(params.builderOf, id)
+      // External apps (M4 A-5) — a worker gets these too. If the handle never comes up, the catch below closes
+      // it
+      apps = this.apps.appsFor(info)
+      // The same rule runs again on every wake (toolProfileOf). The builder slot was just written (setBuilder), so the
+      // flag says what the row's slot already says
+      const { profile, tools } = this.tools.toolChoice(info, !!params.builderOf)
+      // Code intelligence (#686): decided once, here, from what the session is, and recorded below for every wake
+      noCodeIntelligence = codeIntelligenceOff({
+        kind: info.kind,
+        appId: info.appId ?? null,
+        builder: !!params.builderOf,
+        askedBy: info.askedBy ?? null,
+        forkedFrom: info.forkedFrom ?? null,
+        ...(params.lsp !== undefined ? { lsp: params.lsp } : {}),
+      })
+      const from = this.handleSink()
       handle = await adapter.createSession(
         this.launchOptions(info, {
           tool: params.tool, cwd, model: params.model, effort: params.effort,
@@ -1172,19 +1177,17 @@ export class SessionManager {
       // If the adapter fails, nobody will ever use the worktree just created — do not leave an
       // orphaned directory behind. (A session that fails here is never even saved, so there is no
       // way to recover it later if it is not cleaned up now.)
-      if (worktree) {
-        await gitWorktreeRemove(params.cwd, worktree.path, true).catch(() => {})
-        /*
-         * The branch is deleted along with it (#167). It was created together with the worktree via
-         * `-b`, so deleting only the directory would block re-creating one under the same name with
-         * "already exists", and if no name was ever set, a fresh `centralu/…` piled up on every
-         * failure. Since `-b` fails if the name already exists, any branch that got this far was just
-         * created by this call, and has not a single commit on it.
-         */
-        await gitBranchDelete(params.cwd, worktree.branch, this.gitTrust(params.projectId)).catch(() => {})
-      }
+      /*
+       * The branch is deleted along with it (#167). It was created together with the worktree via
+       * `-b`, so deleting only the directory would block re-creating one under the same name with
+       * "already exists", and if no name was ever set, a fresh `centralu/…` piled up on every
+       * failure. Since `-b` fails if the name already exists, any branch that got this far was just
+       * created by this call, and has not a single commit on it. What could not be removed is said
+       * (#841): swallowed, the next start under the same name failed with "already exists" and no cause.
+       */
+      const left = worktree && params.projectId ? await this.worktrees.discardNewWorktree(params.cwd, worktree, params.projectId) : null
       const msg = (err as Error).message
-      throw rpcError(`Could not start ${params.tool} session: ${msg}`)
+      throw rpcError(`Could not start ${params.tool} session: ${msg}${left ? ` (${left})` : ''}`)
     }
 
     this.meta.set(id, info)
@@ -1239,6 +1242,22 @@ export class SessionManager {
     const early = this.record.unborn.get(id) ?? []
     this.record.unborn.delete(id)
     for (const e of early) this.onEvent(e)
+    /*
+     * What the worktree's setup could not do (#841 item 3), at the top of the new session: logged only, a `.env` that
+     * never arrived was found by the agent's first failing command, and the person never learned why. A start_agent
+     * caller also puts it in its child's task (`onSetupProblems`), as the agent does not read notices.
+     */
+    if (worktree && setupProblems.length) {
+      this.onEvent({
+        type: 'notice',
+        sessionId: id,
+        level: 'warning',
+        from: 'Centralu',
+        label: 'worktree setup',
+        text: worktreeSetupNotice(setupProblems),
+      })
+      params.onSetupProblems?.(setupProblems)
+    }
 
     // Restores past conversation. Done **after the adapter comes up** — a session with history but
     // no way to address it is just as bad as a ghost session.

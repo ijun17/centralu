@@ -564,6 +564,10 @@ to the project's dependencies would let it change the original checkout. Interna
 links escaping the new worktree are removed after all package copies finish. No install or lifecycle script
 runs automatically. If dependencies are absent in the project, differ from the child's lockfile/manifests,
 or cannot be copied, the configured setup command or the child must install them; creation still continues.
+What provisioning could not do (a copy skipped or refused, a link dropped, dependencies or the setup command
+failing) is a warning notice at the top of the new session, and a `start_agent` child also gets it in its task,
+since an agent does not read notices (#841). A step after `git worktree add` that throws before a session owns
+the worktree removes the folder and its branch again (#774); what could not be removed is named in the error.
 
 **Codex sandbox** (#582). Every Codex session whose cwd is a linked git worktree (including a cwd below its
 root) adds the canonical `git rev-parse --git-common-dir` to the workspace-write roots, retaining configured

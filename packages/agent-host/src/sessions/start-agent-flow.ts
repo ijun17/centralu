@@ -510,9 +510,11 @@ export class AgentStartFlow {
     // worktree of the project's repository (part 2), which createSession makes in the worktree root
     const cwd = worktree ? project.path : (this.host.store.sessionCwd(callerId) ?? caller.worktree?.path ?? project.path)
     let child: SessionInfo
+    let setupProblems: string[] = []
     progress.stage = 'creating'
     try {
       child = await this.host.createSession({
+        onSetupProblems: (problems) => (setupProblems = problems),
         projectId: project.id,
         cwd,
         tool,
@@ -553,7 +555,7 @@ export class AgentStartFlow {
     release()
     progress.d = d
     try {
-      await this.host.deliver(child.id, agentFrame(labelOf(this.host.store, caller), choice.task), undefined, { sessionId: callerId, name: labelOf(this.host.store, caller) }, false)
+      await this.host.deliver(child.id, agentFrame(labelOf(this.host.store, caller), choice.task, setupProblems), undefined, { sessionId: callerId, name: labelOf(this.host.store, caller) }, false)
     } catch (e) {
       this.host.children.dropDelegation(key, d)
       if (this.host.agentRuns.get(child.id) === d.wait) this.host.agentRuns.delete(child.id)

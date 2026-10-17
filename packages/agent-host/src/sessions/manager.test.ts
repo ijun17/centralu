@@ -3412,7 +3412,64 @@ describe('worktree sessions', () => {
     expect(s.worktree?.branch).toBe('feat-login')
   })
 
-  it('the session still comes up even if the tree being copied has an unreadable file — a copy failure is only logged (#167)', async () => {
+  /*
+   * #774: a step after `git worktree add` that throws, before any session owns the worktree. It used to leave the folder
+   * and its branch with nothing pointing at them, since the cleanup below only began around the adapter's start.
+   */
+  it('leaves no worktree or branch behind when its setup throws after the checkout (#774)', async () => {
+    const branches = () =>
+      execFileSync('git', ['branch', '--format=%(refname:short)'], { cwd: repo }).toString().split('\n').filter(Boolean)
+    const setup = vi.spyOn(store, 'worktreeSetup').mockImplementation(() => {
+      throw new Error('the settings could not be read')
+    })
+    try {
+      await expect(
+        wtRpc('agents.createSession', { projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat-setup' }),
+      ).rejects.toThrow(/Could not set up the worktree: the settings could not be read/)
+    } finally {
+      setup.mockRestore()
+    }
+    const left = existsSync(join(wtRoot, project.id)) ? readdirSync(join(wtRoot, project.id)) : []
+    expect(left).toEqual([])
+    expect(branches()).toEqual(['main'])
+    expect(wtMgr.listSessions()).toEqual([])
+  })
+
+  it('leaves no worktree or branch behind when a step before the tool starts throws (#774)', async () => {
+    const branches = () =>
+      execFileSync('git', ['branch', '--format=%(refname:short)'], { cwd: repo }).toString().split('\n').filter(Boolean)
+    const sink = vi.spyOn(wtMgr as unknown as { handleSink: () => unknown }, 'handleSink').mockImplementation(() => {
+      throw new Error('no sink')
+    })
+    try {
+      await expect(create(true)).rejects.toThrow(/no sink/)
+    } finally {
+      sink.mockRestore()
+    }
+    const left = existsSync(join(wtRoot, project.id)) ? readdirSync(join(wtRoot, project.id)) : []
+    expect(left).toEqual([])
+    expect(branches()).toEqual(['main'])
+  })
+
+  // #841 item 3: setup failures were in host.log only, so the person and the agent met them as a failing command later
+  it('what the setup could not do is said at the top of the new session', async () => {
+    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['.env'] })
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    let s: SessionInfo
+    try {
+      s = await create(true)
+    } finally {
+      logged.mockRestore()
+    }
+    const notice = events.find((e) => e.type === 'notice' && e.sessionId === s.id && e.label === 'worktree setup')
+    expect(notice && 'text' in notice ? notice.text : '').toContain('copy skipped (missing): .env')
+    // A setup that did everything says nothing
+    store.setWorktreeSetup(project.id, { command: '', copyFiles: [] })
+    const clean = await create(true)
+    expect(events.some((e) => e.type === 'notice' && e.sessionId === clean.id && e.label === 'worktree setup')).toBe(false)
+  })
+
+  it('the session still comes up even if the tree being copied has an unreadable file — the copy failure is logged and said in the session (#167, #841)', async () => {
     const nm = join(repo, 'node_modules')
     mkdirSync(join(nm, 'pkg'), { recursive: true })
     writeFileSync(join(nm, 'pkg', 'index.js'), 'module.exports = 1\n')
@@ -3439,6 +3496,7 @@ describe('worktree sessions', () => {
       // This checks a case where the copy actually failed — a quietly successful copy would make this test
       // say nothing.
       expect(logged.mock.calls.some(([line]) => String(line).startsWith('[worktree] copy failed: node_modules'))).toBe(true)
+      expect(events.some((e) => e.type === 'notice' && e.sessionId === s.id && e.text.includes('copy failed: node_modules'))).toBe(true)
     } finally {
       logged.mockRestore()
       if (locked !== null) closeSync(locked)

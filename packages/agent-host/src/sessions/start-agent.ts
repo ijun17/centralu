@@ -1,4 +1,5 @@
 import { APP_SLUG, frameField, oneLineText, type AgentDifficulty, type AgentModels, type PermissionPreset, type ToolDefaults } from '@cc/protocol'
+import { worktreeSetupFrame } from './worktree-sessions.js'
 
 /**
  * start_agent and agent_session (#561) — an ordinary session starts another agent (Claude or Codex) in its own
@@ -31,12 +32,14 @@ export function presetWithin(child: PermissionPreset, parent: PermissionPreset):
  * background work rather than ending the turn on "waiting for it" (#729). It directs nothing else (product-spec.md
  * §1.2): the task is the parent's words, and the child works under its own approvals.
  */
-export function agentFrame(parentName: string, task: string): string {
+export function agentFrame(parentName: string, task: string, setupProblems: readonly string[] = []): string {
   return [
     `[Another session in this project, "${frameField(parentName)}", gives you this task through Centralu's start_agent. ` +
       'Your final message goes back to it as the answer: keep it short, and name the files it should read by their absolute paths. ' +
       // #729: children that backgrounded their verify and ended the turn "waiting for it" left the parent unanswered (#721)
       'Wait for your own background work that ends (a test run, a build) inside your turn before you answer.]',
+    // #841 item 3: the agent does not read the session's notices, and met a missing `.env` as a failing command
+    ...(setupProblems.length ? ['', worktreeSetupFrame(setupProblems)] : []),
     '',
     task,
   ].join('\n')
