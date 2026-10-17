@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
-import { __resetWarningsForTest, approvalDetailFrom, CodexChildTracker, CodexRequestInputs, fileChangesOf, CompactionMarks, normalizeNotification, toCodexDecision } from './normalize.js'
+import { approvalDetailFrom, toCodexDecision } from './approvals.js'
+import { CodexChildTracker } from './child-tracker.js'
+import { fileChangesOf } from './items.js'
+import { CompactionMarks, normalizeNotification } from './normalize.js'
+import { __resetWarningsForTest, CodexRequestInputs } from './token-readings.js'
 
 /**
  * A-2 contract tests. The fixtures are trimmed-down versions of protocol output **actually
@@ -509,11 +513,15 @@ describe('state and gauges', () => {
    */
   it('an MCP tool call shows the server and tool name', () => {
     const out = n('item/started', {
-      item: { type: 'mcpToolCall', id: 'm1', server: 'centralu', tool: 'list_sessions', status: 'inProgress' },
+      item: { type: 'mcpToolCall', id: 'm1', server: 'browser', tool: 'list_tabs', status: 'inProgress' },
     })
     expect(out[0]).toMatchObject({
       type: 'tool_call',
-      summary: { tool: 'list_sessions', title: 'centralu: list_sessions' },
+      summary: { tool: 'list_tabs', title: 'browser: list_tabs' },
+    })
+    // Centralu's own say what they did instead, with the mark the card draws them by (#730)
+    expect(n('item/started', { item: { type: 'mcpToolCall', id: 'm2', server: 'centralu', tool: 'list_sessions', status: 'inProgress' } })[0]).toMatchObject({
+      summary: { tool: 'list_sessions', title: 'Listed sessions', centralu: { tool: 'list_sessions', label: 'Listed sessions' } },
     })
   })
 

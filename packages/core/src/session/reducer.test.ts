@@ -419,3 +419,11 @@ describe('why a turn stopped (#698)', () => {
     expect(applyEvent(s, ev({ type: 'activity', activity: 'retrying' }), NOW).interruption).toMatchObject({ reason: 'reconnecting' })
   })
 })
+
+describe("a session's preview of a tool call (#730)", () => {
+  it('says what a Centralu call did, with its title; an ordinary call keeps its title', () => {
+    const centralu = ev({ type: 'tool_call', callId: 'c2', summary: { tool: 'mcp__centralu__start_agent', title: 'write the parser', paths: [], centralu: { tool: 'start_agent', label: 'Started an agent' } } })
+    expect(applyEvent(s0(), centralu, NOW).preview).toBe('Started an agent: write the parser')
+    expect(applyEvent(s0(), TURN[1]!, NOW).preview).toBe('npm run build')
+  })
+})

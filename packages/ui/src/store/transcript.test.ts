@@ -151,3 +151,14 @@ describe('messagesToChat — restoration', () => {
     ])
   })
 })
+
+describe("a Centralu call's mark (#730)", () => {
+  it('rides on the card live and when the conversation is read back', () => {
+    const mark = { tool: 'start_agent', label: 'Started an agent', sessionId: 'c1' }
+    const summary = { tool: 'start_agent', title: 'write the parser', paths: [], centralu: mark }
+    expect(feed([{ type: 'tool_call', callId: 'c1', summary }])[0]).toMatchObject({ kind: 'tool', centralu: mark })
+    expect(messagesToChat([row(3, 'tool_call', { callId: 'c1', summary })])[0]).toMatchObject({ kind: 'tool', centralu: mark })
+    // An ordinary call carries none
+    expect(feed([{ type: 'tool_call', callId: 'c2', summary: { tool: 'Bash', title: 'ls', paths: [] } }])[0]).not.toHaveProperty('centralu')
+  })
+})

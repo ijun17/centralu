@@ -1,5 +1,5 @@
 import { formatCount } from '../app/format.js'
-import { subagentStepRow, type Attachment, type NormalizedEvent, type StoredMessage, type SubagentStep } from '@cc/protocol'
+import { subagentStepRow, type Attachment, type NormalizedEvent, type StoredMessage, type SubagentStep, type ToolSummary } from '@cc/protocol'
 import { agentStartQuestion, centraluUpdateQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
 
 /**
@@ -61,6 +61,8 @@ export type ChatItem = (
       title: string
       /** The files the call names (the host's `ToolSummary.paths`), so the card can link them; absent when none */
       paths?: string[]
+      /** A call to one of Centralu's own servers (#730, the host's `ToolSummary.centralu`), drawn apart from the rest */
+      centralu?: ToolSummary['centralu']
       callId?: string
       result?: string
       ok?: boolean
@@ -216,6 +218,7 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
           tool: e.summary.tool,
           title: e.summary.title,
           ...(e.summary.paths?.length ? { paths: e.summary.paths } : {}),
+          ...(e.summary.centralu ? { centralu: e.summary.centralu } : {}),
           ...(e.callId ? { callId: e.callId } : {}),
         },
       ]
@@ -520,7 +523,7 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
       if (typeof e.type === 'string' && !KNOWN_MARKERS.has(e.type)) continue
       items.push({ kind: 'mark', seq: m.seq, storedSeq: m.seq, ...markerParts(e) })
     } else if (m.kind === 'tool_call') {
-      const e = m.payload as { callId?: string; summary?: { tool: string; title: string; paths?: string[] } }
+      const e = m.payload as { callId?: string; summary?: { tool: string; title: string; paths?: string[]; centralu?: ToolSummary['centralu'] } }
       if (e.summary)
         items.push({
           kind: 'tool',
@@ -529,6 +532,7 @@ export function messagesToChat(msgs: StoredMessage[]): ChatItem[] {
           tool: e.summary.tool,
           title: e.summary.title,
           ...(e.summary.paths?.length ? { paths: e.summary.paths } : {}),
+          ...(e.summary.centralu ? { centralu: e.summary.centralu } : {}),
           ...(e.callId ? { callId: e.callId } : {}),
         })
     } else if (m.kind === 'tool_result') {

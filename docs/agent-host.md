@@ -20,6 +20,7 @@ agent-host/src/
 │  └─ json-lines.ts     # newline-delimited JSON: split at \n only (never readline, which also splits at U+2028), pending requests (#428)
 ├─ adapters/
 │  ├─ contract.ts       # AgentAdapter interface + capability types
+│  ├─ contract/         # the contract's larger parts: orchestrator tools, session apps, the tool's process
 │  ├─ registry.ts       # the tool → adapter map
 │  ├─ claude/           # based on the Claude Agent SDK (incl. orchestrator-mcp.ts)
 │  └─ codex/            # app-server JSON-RPC client (written here, incl. the stdio bridge)
@@ -332,7 +333,22 @@ is cut by `clipPreview` (its head and an ellipsis), on this host and for a linke
 | Tool | Arguments → what comes back |
 |---|---|
 | `start_agent` | `{ task, tool?: string, model?, effort?, difficulty?: light\|standard\|heavy, wait?, worktree?, branch?, lsp? }` → the child's id and name, and its answer (`done`) or `working`; or `pending` with a request handle while the person's card stands (#673), or, with `lowMemory`, while an allowed start waits for memory (§1.2.4, #686). `lsp: true` keeps the child's code intelligence (§1.2.4) |
-| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete\|answer, text?, card?, ifBusy? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, §1.2.2, #676), `busy` and `queued` (a send to a session busy with a turn that is not the caller's, §1.2.3, #677), `stopped` and `deleted` (a child moved to the trash; worktree cleanup also preserves local work, #608/#637) |
+| `agent_session` | `{ sessionId?, action: status\|send\|wait\|stop\|delete\|answer\|list, text?, card?, ifBusy? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, §1.2.2, #676), `busy` and `queued` (a send to a session busy with a turn that is not the caller's, §1.2.3, #677), `stopped` and `deleted` (a child moved to the trash; worktree cleanup also preserves local work, #608/#637). `list` needs no `sessionId`: the caller's own children (`askedBy`) still here, each as working, waiting, finished or stopped, asleep or not, its last activity, and a worktree branch not merged yet (#690) |
+
+**Cleaning up after a child (#690).** On 2026-10-14 a parent integrated fourteen children's answers and deleted none of
+them until the person said it could; asked why, it said it had forgotten the last step, and nothing it read named it.
+Every answer that hands a child's result to the session that started it now ends with one line naming the delete:
+`done` and `at_rest` (`cleanUpLine`, `sessions/tool-answers.ts`), and the report of a finished turn
+(`ChildReports.cleanUpWords`), which also says how many of its other children are finished and that `list` shows them.
+The line is said only of the caller's own child (`askedBy`; under `auto` agent_session also reads the person's sessions
+and siblings) whose work is over: not a turn cut short (`interruption`), failed or limited, nor one owing a report over
+its own background work (`cleanUpDue`, `sessions/own-agents.ts`). The report counts with the same rule `list` uses
+(`ownAgents`, `agentState`: a delegation still running is working, a cut-short turn is stopped, one being trashed is
+gone). `list` takes `askedBy` only, as status, send, wait and stop do: a `parentSessionId`-only link is the former
+worktree manager's, which store step v48 copied into `askedBy`. With the session tools turned off it says so.
+The line rides in the answer, not in `start_agent`'s description: it costs nothing until the result is read, which
+is the moment it applies. Nothing deletes a child on its own: a delete can drop a branch, and even with the trash it
+stays the parent's or the person's call. Sleep (#568) already frees a finished child's memory.
 
 The optional `tool` is a registry name, accepted as a string by the schema and checked against the
 current registry at call time. An unknown name returns an error listing the installed tools; adding
@@ -1673,7 +1689,7 @@ burst has been sent, each of these buffers hands back the capacity it left behin
 tool, sessionId, version?}` (the CLI version it was started from, #297, §4.6), `{kind:"terminal", id, cwd}`, `{kind:"command", cwd, command, runId, startedAt}`. A newer host
 must keep reading an older host's tags: the children outlive the build that spawned them.
 
-- **Agents.** The manager passes the adapter a `ProcessSource` (`adapters/contract.ts`): `spawn` in the keeper,
+- **Agents.** The manager passes the adapter a `ProcessSource` (`adapters/contract/process.ts`): `spawn` in the keeper,
   or `adopt` a kept process. Claude gets it as `spawnClaudeCodeProcess`; `CodexClient` takes the process instead
   of spawning. `KeeperAgentProcess` has the `ChildProcess` surface both use, but `kill()` is a keeper request for
   the CLI's whole process group (below) that is never sent once the process is detached or the host is exiting
@@ -2866,18 +2882,29 @@ and the first conversation as `<ide_opened_file>…`.
 `adapters/history-text.ts` strips only these blocks — it does not throw the whole thing away,
 because real user speech often follows an injected block.
 Only when nothing is left after stripping is the line dropped.
-Tool calls and results are dropped, keeping only the name: the point of importing is to get the conversation back,
-not to resurrect the execution log.
+**Tool calls come back as they were shown live** ([#843](https://github.com/ijun17/centralu/issues/843)). Everything in
+a record but the words is read by the adapter's live normalizer (`normalizeMessage` for a Claude message,
+`normalizeNotification` for a Codex item as if it had started and completed), and the reader keeps its tool calls,
+their results and its compactions (`adapters/history-events.ts`); its thinking, usage, plan, images and activity are
+not part of a conversation read back. Before, only the words came back, with a Claude call kept as its name, so an
+imported conversation showed `Bash` where a watched one showed the command and its output. The limit counts the words
+and compactions of the newest end (`lastLines`): a turn's tool rows ride along, so a turn full of calls does not push
+older turns out. The Claude reader reads the transcript whole and keeps that end too: the SDK's own `limit` slices
+from the start, so it gave the oldest rows and counted tool rows (#1006). One import keeps the newest calls up to 400
+tool rows and each result's record up to 20,000 characters, since it writes them in one go. Not the same as live: a
+Claude agent's card says its report is not in the record, since `getSessionMessages` keeps no `tool_use_result` and its
+result is text meant for the model, and an image in a result is not brought back.
 
 **Where the tool compacted is kept** ([#303](https://github.com/ijun17/centralu/issues/303)). Codex's history (now
 `thread/turns/list` with full items, before #342 `thread/read`) returns each compaction as a `{ type: 'contextCompaction', id }` item in the turn where it ran — a turn of its own for
 `/compact`, ahead of the user's message for an automatic one (measured on codex-cli 0.147.0, 0.153.4 and 0.160.0,
-`scripts/probe-codex-compaction.mts`). The reader turns it into a compaction line (`HistoryMessage` with
-`role: 'system', marker: 'compaction'`), and the host stores that as exactly the row a live `compaction` event leaves
-(kind `marker`, the event as its payload), so the screen and the handoff pivot cannot tell a read-back compaction from
-one watched live. Stored once: catching up skips as many compaction lines right after our last message as our record
-already holds there (a compaction this host saw live is in both), and attaches the rest. The Claude reader
-keeps only user and assistant messages from `getSessionMessages`, so an imported Claude conversation still shows none.
+`scripts/probe-codex-compaction.mts`). The reader turns it into an event line (`HistoryMessage` with
+`role: 'system', event`), and the host stores that as exactly the row the live event leaves (its recorded kind,
+`marker` for a compaction, the event as its payload), so the screen and the handoff pivot cannot tell a read-back
+compaction or tool call from one watched live. Stored once: catching up skips the event lines right after our last
+message that our record already holds there (a compaction by count, a tool call or result by its id; one this host saw
+live is in both), and attaches the rest. A Claude record keeps no compaction row (`getSessionMessages` drops system
+rows), so the reader marks one where the CLI's summary stands as a user turn.
 
 ### 8.4 The identity of an imported session
 

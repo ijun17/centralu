@@ -16,7 +16,8 @@ export type SlashCommandsHost = {
 
 /**
  * The slash commands Codex runs as functions rather than messages (#58): `/compact`, `/review` and `/goal` go to their
- * own requests, since sent through turn/start the model would read the literal characters.
+ * own requests, since sent through turn/start the model would read the literal characters. It also lists the commands
+ * the composer offers (`list`).
  */
 export class CodexSlashCommands {
   constructor(private readonly host: SlashCommandsHost) {}
@@ -136,5 +137,39 @@ export class CodexSlashCommands {
       })
     }
     return null
+  }
+
+  /** Slash commands (skills) — the app-server's official RPC */
+  async list(): Promise<{ name: string; description?: string; argumentHint?: string }[]> {
+    const res = await this.host.request<{ data?: unknown }>('skills/list', {})
+    const groups = Array.isArray(res?.data) ? res.data : []
+    /*
+     * compact is a built-in command, not a skill, so it does not appear in skills/list — but
+     * autocomplete is drawn from this list, so leaving it out makes it a command that **exists but
+     * is invisible** (hiding something that exists is also a lie the list tells). If codex ever
+     * starts including it in the list, the dedupe below removes our own entry.
+     */
+    const out: { name: string; description?: string; argumentHint?: string }[] = [
+      { name: 'compact', description: 'Summarizes the conversation to shrink context (built into codex)' },
+      {
+        name: 'review',
+        description: 'Reviews the changed code (built into codex). If given an argument, reviews following that instruction instead',
+        argumentHint: '[instruction]',
+      },
+    ]
+    for (const g of groups) {
+      const skills = (g as { skills?: unknown }).skills
+      if (!Array.isArray(skills)) continue
+      for (const s of skills) {
+        const skill = (s ?? {}) as { name?: unknown; description?: unknown; enabled?: unknown }
+        if (typeof skill.name !== 'string' || skill.enabled === false) continue
+        if (out.some((c) => c.name === skill.name)) continue
+        out.push({
+          name: skill.name,
+          description: typeof skill.description === 'string' ? skill.description : '',
+        })
+      }
+    }
+    return out
   }
 }
