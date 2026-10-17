@@ -905,6 +905,26 @@ describe('asking the host on the port without handing the token to anyone else (
     }
   })
 
+  /*
+   * A refusal for another protocol names the host's in `data` for a program to read (server.ts), and in the sentence
+   * for a person. `--stop` read `data` first; the probe behind `--connection` read only the sentence, so a rewording
+   * there would have reported no protocol. Both read it the same way now.
+   */
+  it('reads the host protocol a version_mismatch names in its data, in the probe as in --stop', async () => {
+    const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+    await new Promise<void>((r) => wss.once('listening', () => r()))
+    wss.on('connection', (ws) => ws.on('message', () => {
+      ws.send(JSON.stringify({ kind: 'res', id: null, ok: false, error: { code: 'version_mismatch', message: 'Update Centralu.', retryable: false, data: { protocolVersion: 7 } } }))
+    }))
+    const port = (wss.address() as { port: number }).port
+    try {
+      expect(await probeHost({ port, token: TOKEN, protocolVersion: PROTOCOL_VERSION })).toEqual({ running: true, protocolVersion: 7 })
+      expect(await askHostToStop({ port, token: TOKEN, protocolVersion: PROTOCOL_VERSION })).toMatchObject({ ok: false, protocolVersion: 7 })
+    } finally {
+      await new Promise<void>((r) => wss.close(() => r()))
+    }
+  })
+
   it('takes proof from the installed build: a bundle that says hostProof, or the source', () => {
     const d = tempDir()
     expect(hostProvesOf(join(d, 'main.mjs'))).toBe(false)

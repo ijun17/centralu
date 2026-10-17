@@ -125,6 +125,15 @@ export function mismatchServerVersion(message) {
 }
 
 /**
+ * The protocol a `version_mismatch` refusal says the host speaks: `data.protocolVersion`, which the host sends for a
+ * program to read (server.ts), else the sentence (`mismatchServerVersion`). null when neither names one.
+ */
+function mismatchProtocolOf(error) {
+  if (Number.isInteger(error?.data?.protocolVersion)) return error.data.protocolVersion
+  return mismatchServerVersion(error?.message)
+}
+
+/**
  * Whether the installed host answers a `prove` (#838): a bundle says so in `bundle-info.json` (`hostProof`), a host run
  * from source has `transport/host-proof.ts`. The connection line's `proof` is this, not a live answer: a program another
  * account put on the port could otherwise answer the probe so as to make the line say no, and the hub send the token.
@@ -222,7 +231,7 @@ export function probeHost({ port, token, protocolVersion, prove = false, timeout
               })
             } else if (m.kind === 'res' && m.ok === false && m.error?.code === 'version_mismatch') {
               // The token was right (it is checked first), so this is our host, on another protocol
-              done({ running: true, protocolVersion: mismatchServerVersion(m.error.message) ?? undefined })
+              done({ running: true, protocolVersion: mismatchProtocolOf(m.error) ?? undefined })
             }
           },
         },
@@ -279,8 +288,8 @@ export function askHostToStop({ port, token, protocolVersion, prove = false, tim
             if (m.kind === 'hello_ok') ws.send(JSON.stringify({ kind: 'rpc', id: 'stop', method: 'host.stop', params: {} }))
             else if (m.kind === 'res' && m.id === 'stop') done(m.ok ? { ok: true } : { ok: false, message: m.error?.message ?? 'refused' })
             else if (m.kind === 'res' && m.ok === false) {
-              const pv = m.error?.code === 'version_mismatch' ? (m.error?.data?.protocolVersion ?? mismatchServerVersion(m.error.message)) : null
-              done({ ok: false, message: m.error?.message ?? 'refused', ...(Number.isInteger(pv) ? { protocolVersion: pv } : {}) })
+              const pv = m.error?.code === 'version_mismatch' ? mismatchProtocolOf(m.error) : null
+              done({ ok: false, message: m.error?.message ?? 'refused', ...(pv !== null ? { protocolVersion: pv } : {}) })
             }
           },
         },
