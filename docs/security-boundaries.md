@@ -1163,8 +1163,10 @@ then who may call it:
   `app-process.ts` `AppLog`; test "stderr goes to the app's own log, with secret values masked by
   name"). Each value is also replaced in its JSON-escaped form (#838), since run records keep
   arguments as JSON, where a multi-line key or one with quotes is spelled differently, and each line of a
-  multi-line value of 16 characters or more on its own, since the app's log is masked a line at a time. Arguments are
-  hashed only after redaction. The person enters values through
+  multi-line value of 16 characters or more on its own, since the app's log is masked a line at a time. A run record's
+  arguments and kept result are masked string by string before they become JSON, then as JSON (`runs.ts`
+  `maskedJson`): a value holding the secret already JSON-escaped (JSON passed as text) was escaped a second time,
+  a spelling neither form matched (`redactor.test.ts`). Arguments are hashed only after redaction. The person enters values through
   `apps.setSecret`, which accepts only names the manifest declares and never returns a value: the
   app list carries only whether each declared name is set, and refusals never quote the value. A
   test looks for the value, as a string, in the app log, run records, kept failures, error bundles,
@@ -1233,7 +1235,10 @@ Limits:
 - The data folder is outside the repository so that runtime files are never committed. It is not
   an isolation boundary between apps: they all run as the same user.
 - Redaction is literal string replacement. Values shorter than 4 characters, and values the app
-  transforms (encodes, splits), are not caught.
+  transforms (encodes, splits), are not caught. Neither are JSON spellings other than the raw value, its
+  `JSON.stringify` form and one more level of escaping: a value escaped with `\uXXXX` where JSON.stringify writes
+  the character itself (.NET writes `+` as `+`), or JSON nested two levels deep in text, keeps the secret in a
+  run record.
 - Visibility decides who may call a tool, not what the tool does.
 - Sharing an app and allowing a pair of projects are about which sessions may call it, not what it
   does with what they send: an attached app receives whatever the calling session's agent passes it,
