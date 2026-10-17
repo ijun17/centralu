@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { dataRoot } from '../data-dir.js'
 import { commandsFor } from './orchestrator-tools.js'
 
@@ -53,6 +54,30 @@ export function orchestratorHome(): string {
   const dir = join(dataRoot(), 'orchestrator')
   mkdirSync(dir, { recursive: true })
   return dir
+}
+
+/**
+ * Where the sessions the orchestrator starts work (#853): each in a folder of its own under `<data>/orchestrator-agents`,
+ * never in the orchestrator's (#994 review). A child writes files; written into the orchestrator's folder they would
+ * reach the session that directs every other one (Codex loads `.agents/skills` from its folder whatever the trust,
+ * `codex/launch-config.ts`), and children sharing one folder would write over each other. Removed when its session is
+ * deleted for good (`purgeSession`).
+ */
+export function orchestratorAgentsRoot(): string {
+  return join(dataRoot(), 'orchestrator-agents')
+}
+
+/** A new, empty folder for one child of the orchestrator */
+export function newOrchestratorAgentFolder(): string {
+  const dir = join(orchestratorAgentsRoot(), randomUUID())
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+/** Whether `path` is one child's folder (directly under the root, never the root itself) */
+export function isOrchestratorAgentFolder(path: string): boolean {
+  const p = resolve(path)
+  return dirname(p) === resolve(orchestratorAgentsRoot()) && /^[0-9a-f-]{36}$/.test(basename(p))
 }
 
 export const ORCHESTRATOR_ROLE = `You are the central orchestrator of the Centralu app.

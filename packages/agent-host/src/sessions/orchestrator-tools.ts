@@ -3,8 +3,8 @@ import type { OrchestratorTools } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput } from '../apps/contract.js'
 import { appGuide } from './app-guide.js'
 import { ANSWER_FORM, agentListText, agentRunText, askProjectText, busyText, cardsText, listSessionsText, queuedText, trustedJsonText } from './tool-answers.js'
-import { ORCHESTRATOR_TOOLS, TOOL_ARGS, type CommandToolName, type OrchestratorToolName } from './tool-definitions.js'
-import { FILL, callForm, commandsFor, guideSeats } from './tool-seats.js'
+import { AGENT_TOOLS, ORCHESTRATOR_TOOLS, TOOL_ARGS, type AgentToolName, type CommandToolName, type OrchestratorToolName } from './tool-definitions.js'
+import { FILL, callForm, commandsFor, guideSeats, notAToolText, profileAllows } from './tool-seats.js'
 
 /*
  * The orchestrator tools, in four modules (#850): the definitions (tool-definitions.ts), which seat is shown and
@@ -41,8 +41,12 @@ function issuesText(error: z.ZodError): string {
   return error.issues.map((i) => `${i.path.join('.') || '(args)'}: ${i.message}`).join('; ')
 }
 
-/** Tools only a reader has (profileAllows), checked here too since this runner is shared by every seat */
-const READER_ONLY: ReadonlySet<string> = new Set(['ask_project', 'start_agent', 'agent_session'])
+/**
+ * Tools only some seats have (profileAllows), checked here too since this runner is shared by every seat: ask_project a
+ * reader's, start_agent's pair a reader's and the orchestrator's (#853), which reaches them as commands in the
+ * `commands` tier (a direct call then is refused, naming centralu_run)
+ */
+const SEATED: ReadonlySet<string> = new Set(['ask_project', 'start_agent', 'agent_session'])
 
 /**
  * Runs one tool and turns the result into **text for the model to read**.
@@ -63,7 +67,9 @@ export async function runOrchestratorTool(
   /** The tool call's own signal, where the path has one (Claude's in-process MCP) — ask_project stops the delegated turn on it */
   signal?: AbortSignal,
 ): Promise<ToolOutput> {
-  if (READER_ONLY.has(name) && caller.profile !== 'reader') return { text: `Not a tool of this session: ${name}`, isError: true }
+  if (SEATED.has(name) && (caller.profile === 'human' || !profileAllows(caller.profile, name))) {
+    return { text: caller.profile === 'human' ? `Not a tool of this session: ${name}` : notAToolText(caller.profile, name), isError: true }
+  }
   if (!isToolName(name)) return { text: `Unknown tool: ${name}`, isError: true }
   const parsed = TOOL_ARGS[name].safeParse(leftOut(TOOL_ARGS[name], args))
   if (!parsed.success) {
@@ -141,7 +147,7 @@ const HANDLERS: ToolHandlers = {
     return askProjectText(await tools.askProject({ project, ...(session ? { session } : {}), ...(task ? { task } : {}), ...(ifBusy ? { ifBusy } : {}) }, signal))
   },
 
-  async start_agent(args, { tools, signal }) {
+  async start_agent(args, { tools, signal, caller }) {
     const task = args.task.trim() ? args.task : undefined
     if (!task) return { text: 'Give a task: what the new session should do.', isError: true }
     const tool = filled(args.tool)
@@ -150,7 +156,7 @@ const HANDLERS: ToolHandlers = {
     const { difficulty } = args
     const branch = filled(args.branch)
     const name = filled(args.name)
-    return agentRunText(
+    return agentCallsFor(caller, agentRunText(
       await tools.startAgent(
         {
           task,
@@ -166,19 +172,19 @@ const HANDLERS: ToolHandlers = {
         },
         signal,
       ),
-    )
+    ))
   },
 
-  async agent_session(args, { tools, signal }) {
+  async agent_session(args, { tools, signal, caller }) {
     const sessionId = filled(args.sessionId)
     const { action, ifBusy } = args
-    if (action === 'list') return agentListText(await tools.listAgents())
+    if (action === 'list') return agentCallsFor(caller, agentListText(await tools.listAgents()))
     if (!sessionId) return { text: 'Give the sessionId start_agent returned.', isError: true }
     const text = args.text?.trim() ? args.text : undefined
     if (action === 'send' && !text) return { text: 'Give text: what to send it.', isError: true }
     if (action === 'answer' && !text) return { text: 'Give text: the answer.', isError: true }
     const card = filled(args.card)
-    return agentRunText(await tools.agentSession({ sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}), ...(ifBusy ? { ifBusy } : {}) }, signal))
+    return agentCallsFor(caller, agentRunText(await tools.agentSession({ sessionId, action, ...(text ? { text } : {}), ...(card ? { card } : {}), ...(ifBusy ? { ifBusy } : {}) }, signal)))
   },
 
   async recall({ query, limit }, { tools }) {
@@ -471,6 +477,16 @@ const HANDLERS: ToolHandlers = {
   },
 }
 
+/**
+ * start_agent's answers name agent_session as a reader calls it (`agentRunText`); the orchestrator reaches it through
+ * centralu_run in the `commands` tier (#853), where the bare call is refused, so its answers name that form instead
+ */
+function agentCallsFor(caller: ToolCaller, out: ToolOutput): ToolOutput {
+  if (!(commandsFor(caller.profile) as string[]).includes('agent_session')) return out
+  const text = out.text.replace(/\bagent_session\(([^)]*)\)/g, (_, inner: string) => `centralu_run(command="agent_session", args={${inner.replace(/\b(\w+)=/g, '$1: ')}})`)
+  return { ...out, text }
+}
+
 /** A command's one line in centralu_commands: its description's first sentence, without emphasis or issue numbers */
 function commandLine(description: string): string {
   const plain = description.replace(/\*\*/g, '').replace(/ \((?:#\d+|M4)\)/g, '')
@@ -479,10 +495,10 @@ function commandLine(description: string): string {
 }
 
 function commandDef(name: string) {
-  return ORCHESTRATOR_TOOLS.find((t) => t.name === name)
+  return [...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS].find((t) => t.name === name)
 }
 
-function commandSchemaText(name: OrchestratorToolName): string {
+function commandSchemaText(name: OrchestratorToolName | AgentToolName): string {
   return JSON.stringify(z.toJSONSchema(TOOL_ARGS[name].strict()))
 }
 

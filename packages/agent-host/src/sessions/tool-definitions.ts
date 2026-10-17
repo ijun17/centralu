@@ -444,6 +444,9 @@ export const APP_ACCESS_TOOLS = [
 
 export type AppAccessToolName = (typeof APP_ACCESS_TOOLS)[number]['name']
 
+/** start_agent and agent_session (#561), which the orchestrator reaches as commands too (#853) */
+export type AgentToolName = (typeof AGENT_TOOLS)[number]['name']
+
 /**
  * The ceiling for the app-access set, counted like READER_BUDGET_CHARS (full name, description and
  * schema; the deferred ones included, since Codex loads them). The set is 874 today, of which about
@@ -555,6 +558,8 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   'If the person is waiting for the result, turn on reportBack — it notifies you here when that session finishes.',
   'If a report is not enough, read that session\'s conversation directly with read_session.',
   'If there is no suitable session to assign work to, make one with create_session — deleting it is the person\'s job.',
+  // #853: the orchestrator's light work outside any project went to its CLI's own subagent, which Centralu never shows
+  'For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command, not your Agent tool.',
   'Make a new project with create_project; to add an existing folder, point the person to Add project in the sidebar.',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
   'If a new capability like browser automation is needed, **propose** it with propose_mcp_server — if the person approves, the app installs it and restarts you. The conversation continues after the restart.',

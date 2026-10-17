@@ -844,3 +844,7 @@ such a session's instructions (`residentCost` counts a session with no app, so t
 4,422 on Codex, and `READER_BUDGET_CHARS` stays 1,750). Not measured live: whether agents then call an app's `help`
 before `gh`.
 
+**#853: the orchestrator's children (2026-10-17).** `start_agent` and `agent_session` joined the orchestrator's rare
+commands (`RARE_COMMANDS`), so their 1,357 characters ride in none of its requests in the default tier; one line of
+its instructions names `start_agent` for light work outside any project. Orchestrator (`residentCost`): 8,744 →
+8,893 on Claude, 8,796 → 8,945 on Codex. Not measured live.

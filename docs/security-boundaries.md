@@ -78,6 +78,15 @@ boundaries (#603), with a log line instead of a card or refusal. The agent depth
   start_agent's gates (depth, trust, ceiling, the consent card, with the gates read again once the card is answered
   and a place under the ceiling taken before the fork is made), runs at the lower of the two presets, and gets a worktree of its own unless it is read-only work,
   which shares the folder under at most `safe`, so two agents never write one folder.
+- **The orchestrator's children** (#853): the orchestrator reaches `start_agent` and `agent_session` too (as commands
+  in the `commands` tier), for light work outside any project. Its child has no project and works in a folder of its
+  own under `<data>/orchestrator-agents`, never the orchestrator's, so nothing it writes lands where the orchestrator
+  reads (Codex loads `.agents/skills` from a session's folder whatever the trust) and no two children share one; the
+  folder goes when the child is deleted for good. It runs under the orchestrator's preset with no Centralu tools and
+  only the person's own settings (no project to trust). The consent is a card under `safe` and `normal` (no
+  project's trust stands in for it), with "always for this project" kept as always for the orchestrator while the host
+  serves it, since there is no project to remember it for; `auto` opens it. `agent_session` acts only on a child whose
+  `askedBy` is the orchestrator, in every preset. The depth binds as for any caller: the orchestrator is at 0.
 - **A ceiling**: Settings → Orchestrator → Running agents per project (`prefs.agentCeiling`).
   Empty uses the preset default: no ceiling under `auto`, 4 otherwise (`AGENT_CEILING`); zero
   explicitly removes the ceiling, and a positive integer limits all running children in each project.
@@ -313,8 +322,8 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `check` | — | — | yes | — | — |
 | `create_app` | yes | — | — | — | — |
 | `ask_project` | — | — | — | yes | — |
-| `start_agent` | — | — | — | yes | — |
-| `agent_session` | — | — | — | yes | — |
+| `start_agent` | yes | — | — | yes | — |
+| `agent_session` | yes | — | — | yes | — |
 | `find_apps` | — | — | — | yes | — |
 | `attach_app` | — | — | — | yes | — |
 | `detach_app` | — | — | — | yes | — |

@@ -22,6 +22,8 @@ describe('the start-agent question (#561)', () => {
     expect(agentStartQuestion({ ...d, model: 'gpt-6.1-sol', difficulty: 'heavy' })).toBe(
       'Start Codex (gpt-6.1-sol, your choice for heavy work) in "website", with safe permissions, to write the parser?',
     )
+    // The orchestrator's child (#853), outside any project
+    expect(agentStartQuestion({ ...d, project: { id: '', name: 'a folder of its own, outside any project' } })).toBe('Start Codex in a folder of its own, outside any project, with safe permissions, to write the parser?')
     // A name the caller gave it (#861)
     expect(agentStartQuestion({ ...d, name: 'Parser' })).toBe('Start Codex as "Parser" in "website", with safe permissions, to write the parser?')
     // In a new worktree (#561 part 2): the branch is part of what is agreed to

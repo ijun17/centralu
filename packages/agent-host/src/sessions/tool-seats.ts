@@ -16,6 +16,7 @@ import {
   READER_TOOLS,
   SCOPED_INSTRUCTIONS,
   SCOPED_TOOL_NAMES,
+  type AgentToolName,
   type OrchestratorToolName,
 } from './tool-definitions.js'
 
@@ -75,17 +76,20 @@ export function currentRareTier(): RareTier {
  * and say when, which is what a model that cannot see them goes looking with.
  * Out: propose_worktree_session, before it went with the worktree manager (#561 part 3): asked for a branch, the
  * orchestrator reached it 3 of 3 times as a tool and 0 of 3 deferred or behind centralu_run (tool-cost.md §9).
+ * In since #853: start_agent and agent_session. The orchestrator hands light work outside any project (a web search, a
+ * lookup) to a child the person can watch rather than its CLI's own subagent; their 1,357 characters would put its
+ * every request over its ceiling, and the instructions name start_agent.
  * Out: app_guide. It answers the person's own questions about the app, which come often and
  * without warning; deferred, a reader found it 4 of 5 times and never for a question about a setting (§8). Out
  * too: everything the instructions tell the orchestrator to reach for first (list, read, recall, send, create
  * a session or a project).
  */
-export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly OrchestratorToolName[]>> = {
-  orchestrator: ['create_app', 'propose_skill', 'propose_mcp_server', 'update_centralu', 'answer_question', 'handoff_session'],
+export const RARE_COMMANDS: Partial<Record<ToolProfile, readonly (OrchestratorToolName | AgentToolName)[]>> = {
+  orchestrator: ['create_app', 'propose_skill', 'propose_mcp_server', 'update_centralu', 'answer_question', 'handoff_session', 'start_agent', 'agent_session'],
 }
 
 /** The commands this seat reaches through centralu_run in this tier: never one its profile does not allow */
-export function commandsFor(profile: ToolProfile | 'human', tier: RareTier = rareTier): OrchestratorToolName[] {
+export function commandsFor(profile: ToolProfile | 'human', tier: RareTier = rareTier): (OrchestratorToolName | AgentToolName)[] {
   if (tier !== 'commands' || profile === 'human') return []
   return (RARE_COMMANDS[profile] ?? []).filter((n) => baseAllows(profile, n))
 }
@@ -153,9 +157,10 @@ function baseAllows(profile: ToolProfile, name: string): boolean {
       APP_ACCESS_TOOLS.some((t) => t.name === name)
     )
   }
-  // ask_project, start_agent and the app-access tools (#371, #561) are a reader's alone: every directing seat already
-  // works inside its own view
-  if (DELEGATE_TOOLS.some((t) => t.name === name) || AGENT_TOOLS.some((t) => t.name === name) || APP_ACCESS_TOOLS.some((t) => t.name === name)) return false
+  // ask_project and the app-access tools (#371) are a reader's alone: every directing seat already works inside its own
+  // view. start_agent's pair (#561) is the orchestrator's too (#853), for children outside any project
+  if (AGENT_TOOLS.some((t) => t.name === name)) return profile === 'orchestrator'
+  if (DELEGATE_TOOLS.some((t) => t.name === name) || APP_ACCESS_TOOLS.some((t) => t.name === name)) return false
   if (profile === 'orchestrator') return !(BUILDER_TOOL_NAMES as readonly string[]).includes(name)
   if (profile === 'scoped') return (SCOPED_TOOL_NAMES as readonly string[]).includes(name)
   return (BUILDER_TOOL_NAMES as readonly string[]).includes(name)
@@ -173,7 +178,7 @@ export function toolDefsFor(
   if (profile === 'reader') return [...READER_TOOLS, ...DELEGATE_TOOLS, ...AGENT_TOOLS, ...APP_ACCESS_TOOLS]
   const deferred = deferredFor(profile, tier)
   return [
-    ...ORCHESTRATOR_TOOLS.filter((t) => profileAllows(profile, t.name, tier)).map((t) => (deferred.includes(t.name) ? { ...t, deferred: true } : t)),
+    ...[...ORCHESTRATOR_TOOLS, ...AGENT_TOOLS].filter((t) => profileAllows(profile, t.name, tier)).map((t) => (deferred.includes(t.name) ? { ...t, deferred: true } : t)),
     ...(commandsFor(profile, tier).length ? COMMAND_TOOLS : []),
   ]
 }

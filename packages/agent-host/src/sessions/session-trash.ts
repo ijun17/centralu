@@ -3,6 +3,8 @@ import type { ChildOwnership } from './child-ownership.js'
 import type { SessionAppsHub } from './session-apps.js'
 import type { AgentRunWait } from './app-agents.js'
 import { basename } from 'node:path'
+import { rm } from 'node:fs/promises'
+import { isOrchestratorAgentFolder } from './orchestrator-home.js'
 import { existsSync, statSync } from 'node:fs'
 import {
   isInTurn,
@@ -438,6 +440,10 @@ export class SessionTrash {
       }
       await recoveryRemoval.commit().catch(() => {})
       await clearAttachments(sessionId).catch(() => {})
+      // An orchestrator's child worked in a folder of its own (#853, #994 review), which goes with it
+      if (cwd && isOrchestratorAgentFolder(cwd)) {
+        await rm(cwd, { recursive: true, force: true }).catch((e: Error) => console.error(`[trash] the folder of ${sessionId.slice(0, 8)} could not be removed: ${e.message}`))
+      }
       /*
        * Sweeps up the handoff note that lost its purpose along with this session (#106). It matters
        * that this runs **after** the row is gone — the session that was just deleted must not still

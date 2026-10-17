@@ -1063,6 +1063,40 @@ the session to write it (`mode: "agent"`) stays an option in both.
   The card waits like `create_project`'s, so on Codex a card left standing past the bridge's bound ends the call there
   while the card stays.
 
+### 1.2.7 The orchestrator starts sessions outside any project (#853)
+
+Handing off light work unrelated to any project (a web search, a lookup), the orchestrator reached for its CLI's own
+subagent, which never appears in Centralu: the person could neither watch it nor step in. It now has `start_agent` and
+`agent_session` too, as commands of the `commands` tier (`RARE_COMMANDS`, reached through `centralu_run`; a direct
+tool in the other tiers), and one line of its instructions says to use them rather than its Agent tool. The flow is
+§1.2.1's (`AgentStartFlow`) with the orchestrator as the caller and no project as the place
+(`ORCHESTRATOR_PLACE`, an empty id):
+
+- **The child** has no project (`projectId: null`), is marked `askedBy` the orchestrator, and works in a folder of its
+  own, `<data>/orchestrator-agents/<uuid>` (`newOrchestratorAgentFolder`), never the orchestrator's: a file a child
+  left in the orchestrator's folder (Codex loads `.agents/skills` from it whatever the trust) would reach the session
+  that directs every other one, and children sharing one folder wrote over each other (#994 review). The folder goes
+  when the child is deleted for good (`purgeSession`), and with a start that fails. It runs under the orchestrator's
+  preset and gets no Centralu tools and only the person's own settings (no project to trust). There is no worktree,
+  and a busy child is not forked: there is no repository to fork from. In the sidebar it hangs under the
+  orchestrator's row (`orchestratorChildren`), with a ⋯ menu to stop or delete it; a child whose orchestrator was
+  replaced stays there under "Started by an earlier orchestrator".
+- **The consent**: a card under `safe` and `normal` (no project's trust stands in for it), naming no project
+  ("Start Codex in a folder of its own, outside any project, …") and offering no "Always for this project"; ⌥a, or that
+  answer from an older window, is kept as always for the orchestrator while this host serves it, which the card says
+  ("lasts until Centralu restarts"). `auto` opens it. The depth binds as for any caller; the orchestrator is at 0, so
+  its child starts none.
+- **The rest is the same**: the per-place ceiling (`agentCeilingError`, counted over the orchestrator's children that
+  are still here, and worded as "agents you started"), the
+  finish notice through the report path, a request kept across a swap (its `projectId` is the empty place id), and
+  `agent_session` status, send, wait, stop and delete, on a child whose `askedBy` is the orchestrator and no other
+  session in any preset. Its answers name `centralu_run(command="agent_session", …)` for the orchestrator.
+
+Characters: the orchestrator's instructions grow by the one line (Claude 8,744 → 8,893 resident, Codex 8,796 →
+8,945, under its 9,500); the two tools' definitions ride in no request in the default tier. Not measured live:
+whether the orchestrator then reaches for `start_agent` rather than its Agent tool. Not done: a read-only research
+preset for such a child (the issue's suggestion); it runs under the orchestrator's preset as any child does.
+
 ### 1.3 Making a new project (`projects.create`, `create_project`, #515)
 
 A project used to need a folder that already existed (`projects.add` refuses one that does not). Now
