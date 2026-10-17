@@ -706,6 +706,47 @@ Steps 1 to 4 are phase 3 as §4 needs it, about 6–9 days; each lands behind ph
   one from here. Not covered: an entry written by a newer version, then a rollback past `--autostart`, then an uninstall
   leaves the entry (it then runs a launcher that is gone, which fails at boot and does nothing else).
 
+### 10.11 A dev build of the host on a linked machine (#1036)
+
+A linked machine runs released hosts only: `machines.install` and `update` install from npm, and a hub on a local
+build hands remotes its base release. Trying an unreleased host change on Windows took a whole beta. Design 1 of the
+issue, the smallest, puts a dev build on the machine from one git commit, with nothing new crossing the link:
+
+    pnpm remote-dev <machine> --ref <commit> --repo <working copy there> [--allow-dirty]
+
+- **A maintainer's command on the hub, not an RPC** (`packages/agent-host/scripts/remote-dev.mts`, `links/remote-dev.ts`).
+  It finds the machine in the hub's store (read only: id, name or ssh target), resolves `--ref` in the hub's working
+  copy to all 40 digits, and reaches the machine over the link's own ssh. Agents and linked machines gain nothing.
+- **Checked before anything stops** (`devBuild` in `remote-install.mjs`, run there on the Node `current` runs on):
+  the hub installed a release there (a dev build needs one to go back to); the working copy's HEAD is exactly that
+  commit (it is checked, never checked out: the person's working copy is not changed); it has no uncommitted changes
+  unless `--allow-dirty`; its `PROTOCOL_VERSION` is the protocol the running host speaks now, which is the hub's while
+  the link is connected; the Node there is not below its `engines.node` floor; its dependencies are installed. Each
+  refusal is one sentence (`failure` in install.ts).
+- **Built there by the working copy's own bundler**, on that Node: `bundle.mjs` with `CC_BUNDLE_OUT` writes the host
+  straight into `<data>/remote/versions/<base>.local.N/node_modules/@centralu/host-<platform>/host/`, beside the
+  launcher package copied from the working copy with `<base>.local.N` stamped into its `package.json` (the version the
+  host reports, through `CC_HOST_SOURCE`, so neither `brand.ts` nor anything else in the working copy is touched;
+  `stampLocalVersion` is not needed). `N` is the next free number for that base. The build's output goes to
+  `<data>/remote/dev-build.log`; a failed build leaves nothing.
+- **Marked as dev**: `install.json` gains `source: { kind: 'dev', commit, dirty }`; the connection line's `install`
+  carries it (`installInfo` in serve-install.mjs), `InstalledVersion.source` (additive) brings it to `machine_status`,
+  and the row says "a dev build of <commit>".
+- **Swapped by the update's own steps** (`switchRemote` in update.ts): stop, switch, start, a hello from
+  `<base>.local.N` within 30 s, or the old pointers back and the old version started again with the end of its log.
+- **The way back is the release**: `previous` is the release it replaced, and a dev build over a dev build keeps that
+  release (the earlier dev build is pruned). `machines.rollback` returns to it, and `machines.update` now takes
+  `<base>.local.N` to `<base>` (it refused it as a downgrade); a remote on `<base>.local.N` is ranked as `<base>`, so
+  the hub on `<base>` is not offered an update (§4).
+- **Not held**: the command cannot hold the hub's own link (only an RPC could). While the host is down the link may
+  start one itself: after the switch that is the new version and the check passes; before it, the old one answers and
+  the old version is put back, with a sentence. A machine where WMI is blocked (link-bound hosts, decision 3) cannot
+  be checked from the command and is refused at the start step.
+- **Limits**: the machine needs the repository and its build tools (pnpm install done there); a stable base
+  (`x.y.z` with no prerelease) is refused, since `<base>.local.N` is SemVer only on a prerelease. The Mac stays on
+  `pnpm local-update` (its keeper runs signed content only). Design 2 (a CI artifact per commit, streamed and hashed by
+  the hub) is later.
+
 ## 11. Phase 2: app views through the hub (design and build, 2026-10-11)
 
 > **Status: built, the owner decided §11.7 on 2026-10-11.** Before this, every app-view call naming another machine's

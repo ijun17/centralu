@@ -64,8 +64,19 @@ export const MachineVersions = z.object({
 })
 export type MachineVersions = z.infer<typeof MachineVersions>
 
-/** One side of a managed install: a Centralu version and the Node it runs on (`current` / `previous` there) */
-export const InstalledVersion = z.object({ version: z.string(), node: z.string() })
+/**
+ * Where a managed version came from, when it is not a release: a dev build of the host made on that machine from a git
+ * commit (`pnpm remote-dev`, #1036), `dirty` when the working copy had changes the commit does not hold. Its version
+ * is `<base>.local.N`
+ */
+export const InstallSource = z.object({ kind: z.literal('dev'), commit: z.string(), dirty: z.boolean().catch(false).default(false) })
+export type InstallSource = z.infer<typeof InstallSource>
+
+/**
+ * One side of a managed install: a Centralu version and the Node it runs on (`current` / `previous` there). `source`
+ * (additive, #1036) is set for a dev build only; a release has none
+ */
+export const InstalledVersion = z.object({ version: z.string(), node: z.string(), source: InstallSource.optional().catch(undefined) })
 export type InstalledVersion = z.infer<typeof InstalledVersion>
 
 /**
