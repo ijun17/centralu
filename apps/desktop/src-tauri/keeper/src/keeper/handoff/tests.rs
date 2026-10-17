@@ -283,3 +283,37 @@ fn an_incoming_keeper_that_does_not_answer_is_reported_as_silent() {
     let _ = alive.wait();
     assert!(why.starts_with("the new keeper did not finish taking over:"), "{why}");
 }
+
+/**
+ * #840 item 4: an incoming keeper whose channel closed after `ready` with no `commit` takes over
+ * only once the outgoing keeper is gone. That keeper's channel closes as it exits, so it may still
+ * be finishing its exit, and once ended it is a zombie until its parent reaps it: one `kill(pid, 0)`
+ * read both as alive, and both keepers exited.
+ */
+#[test]
+fn an_outgoing_keeper_that_is_a_zombie_or_still_exiting_counts_as_gone() {
+    // A zombie: ended, not reaped by its parent (this test).
+    let mut zombie = Command::new("/bin/sh").args(["-c", "exit 0"]).spawn().unwrap();
+    let pid = zombie.id();
+    // SAFETY: info is a valid out-pointer; WNOWAIT leaves the child to be reaped below.
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    assert_eq!(unsafe { libc::waitid(libc::P_PID, pid, &mut info, libc::WEXITED | libc::WNOWAIT) }, 0);
+    let zombie_gone = previous_keeper_gone(pid, Duration::from_millis(500));
+    zombie.wait().unwrap();
+    assert!(zombie_gone, "a zombie outgoing keeper counted as running");
+
+    // Still exiting when the channel closed: gone a moment later.
+    let mut exiting = Command::new("/bin/sh").args(["-c", "sleep 0.3"]).spawn().unwrap();
+    let pid = exiting.id();
+    let reaper = std::thread::spawn(move || exiting.wait());
+    let exiting_gone = previous_keeper_gone(pid, Duration::from_secs(10));
+    reaper.join().unwrap().unwrap();
+    assert!(exiting_gone, "an outgoing keeper still exiting counted as running");
+
+    // One that really runs on is still running at the bound.
+    let mut running = Command::new("/bin/sh").args(["-c", "sleep 30"]).spawn().unwrap();
+    let still = !previous_keeper_gone(running.id(), Duration::from_millis(200));
+    let _ = running.kill();
+    let _ = running.wait();
+    assert!(still, "a running outgoing keeper counted as gone");
+}

@@ -42,8 +42,9 @@
 //! reverse order. A never closed or moved anything (the snapshot holds duplicates), and while frozen
 //! it read nothing, so it carries on exactly where it stopped. B, on `abort`, exits without acting.
 //! If B instead sees the channel close after `ready` with no `commit`, A died at the worst moment:
-//! B takes over if A is gone (it has the whole state, and nobody else does) and exits if A is
-//! still alive (A must then be resuming).
+//! B takes over once A is gone (it has the whole state, and nobody else does; A's zombie counts as
+//! gone, and B waits up to 5 s for A to finish exiting) and exits if A is still alive after that
+//! (A must then be resuming).
 //!
 //! **The lock** never has a gap: B holds a duplicate of the same open file description, so the
 //! `flock` is held by both until A exits, and by B after. A third keeper starting at any point is
@@ -523,10 +524,28 @@ fn prepare(data: &Path, msg: wire::Message) -> Result<Prepared, String> {
     Ok(Prepared { snap, lock, listener, door, children, host, windows })
 }
 
-/// Whether a process is still there (the outgoing keeper, when the channel closed unexpectedly).
-fn alive(pid: u32) -> bool {
-    // SAFETY: signal 0 only checks.
-    unsafe { libc::kill(pid as i32, 0) == 0 }
+/// How long an incoming keeper whose channel closed after `ready` with no `commit` waits for the
+/// outgoing keeper to be gone before it concludes that keeper is resuming instead.
+const PREVIOUS_GONE_LIMIT: Duration = Duration::from_secs(5);
+
+/**
+ * Whether the outgoing keeper `pid` has ended within `limit` (#840 item 4). Its channel closes as
+ * its process exits, so at that moment it may still be running out its exit, and once it has
+ * ended it is a zombie until its parent reaps it. A single `kill(pid, 0)` counted both as alive:
+ * the incoming keeper then exited too, and every agent and terminal both held lost its keeper.
+ * `os::pid_alive` reads a zombie as ended, and the question is asked until `limit`.
+ */
+fn previous_keeper_gone(pid: u32, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    loop {
+        if !os::pid_alive(pid) {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// A test hook, read only by an incoming keeper: wait this long before saying ready, so a test
@@ -598,7 +617,7 @@ pub(super) fn take(opts: Options, fd: RawFd) -> i32 {
         Err(e) => {
             // After ready the outgoing keeper only commits; the channel closing without a word
             // means it died. With it gone, this keeper holds the only copy of everything.
-            if alive(from) {
+            if !previous_keeper_gone(from, PREVIOUS_GONE_LIMIT) {
                 log(&format!("no commit ({e}) and the previous keeper is still running; exiting"));
                 return EXIT_ABORTED;
             }
