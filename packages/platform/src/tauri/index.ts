@@ -179,7 +179,7 @@ export type BuildSource = Omit<HostBuild, 'protocolVersion'> & {
  * Which builds are involved (#280): this window's and the running host's. `mode` says whether the
  * host is held by the keeper (release builds) or is the app's own child (`pnpm app:dev`).
  * `sameBuild` is false when a window of one build is attached to a host of another — the case the
- * window offers to switch. The shell's `HostBuild` (sidecar.rs), named apart from the protocol's `HostBuild`, which is
+ * window offers to switch. The shell's `HostBuild` (sidecar/mod.rs), named apart from the protocol's `HostBuild`, which is
  * one host's record (#428).
  */
 export type ShellHostBuild = {
@@ -198,6 +198,11 @@ export type ShellHostBuild = {
   background?: boolean
   /** The current or last blue-green swap (#280 step 3) */
   swap?: SwapView
+  /**
+   * Whether that swap went to this window's build, by the keeper's rule (`SwapView::is_to`: a clean commit is one
+   * build whatever its build time). Absent without a swap, and from a window older than the field.
+   */
+  swapToThisBuild?: boolean
   /** Whether the running host hands agents over in a swap (step 2) or stops them */
   keepsAgents?: boolean
   /** A session working or waiting, a terminal or a command running: what a switch could cost */

@@ -31,6 +31,8 @@ import { basename, dirname, join } from 'node:path'
 export class PrivateJsonFile<T> {
   /** True while the last read returned the empty document in place of a file it could not use */
   private standIn = false
+  /** The last time this file could not be used, for the screen (#944): where it went, or null when it is still in place */
+  private lastTrouble: { movedTo: string | null; at: number } | null = null
 
   constructor(
     readonly path: string,
@@ -53,6 +55,14 @@ export class PrivateJsonFile<T> {
   /** True while the last read stood in for a file that is still there and could not be used. A write is refused then */
   get unreadable(): boolean {
     return this.standIn
+  }
+
+  /**
+   * The last time this file could not be used, while it matters (#944): moved aside (`movedTo`, a file name in the same
+   * folder) until a write succeeds, or still in place and refusing writes (`movedTo` null) until it reads again
+   */
+  get trouble(): { movedTo: string | null; at: number } | null {
+    return this.lastTrouble
   }
 
   read(): T {
@@ -93,11 +103,15 @@ export class PrivateJsonFile<T> {
       rmSync(tmp, { force: true })
       throw e
     }
+    // What the person re-entered is the file now: the line about the one moved aside has done its job
+    this.lastTrouble = null
     chmodSync(this.path, 0o600)
   }
 
   private settled(doc: T): T {
     this.standIn = false
+    // A file that was stuck reads again; one moved aside stays said until a write (`write`)
+    if (this.lastTrouble?.movedTo === null) this.lastTrouble = null
     return doc
   }
 
@@ -112,12 +126,15 @@ export class PrivateJsonFile<T> {
       return this.stuck(`is unreadable and could not be moved aside (${(e as Error).message})`)
     }
     console.error(`[apps] ${this.opts.label} is unreadable; moved to ${basename(aside)}. ${this.opts.lost}`)
-    return this.settled(this.opts.empty())
+    this.standIn = false
+    this.lastTrouble = { movedTo: basename(aside), at: Date.now() }
+    return this.opts.empty()
   }
 
   private stuck(why: string): T {
     // Said once, not on every read: the secrets file is read for every list broadcast
     if (!this.standIn) console.error(`[apps] ${this.opts.label} ${why}; it is left as it is and not written until it can be read. ${this.opts.lost}`)
+    if (!this.standIn) this.lastTrouble = { movedTo: null, at: Date.now() }
     this.standIn = true
     return this.opts.empty()
   }

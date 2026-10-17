@@ -80,7 +80,11 @@ function seconds(ms: number): string {
 export function runSsh(opts: SshRunOptions): Promise<SshRunResult> {
   const stdoutLimit = opts.stdoutLimit ?? SSH_STDOUT_LIMIT
   return new Promise((resolve, reject) => {
-    const child = spawn(opts.ssh ?? 'ssh', [...opts.args], { env: opts.env ?? process.env, stdio: [opts.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] })
+    const child = spawn(opts.ssh ?? 'ssh', [...opts.args], {
+      env: opts.env ?? process.env,
+      stdio: [opts.stdin === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    })
     if (opts.stdin !== undefined) {
       // A remote that exits before reading it all closes the pipe: that is its answer, not ours to throw
       child.stdin!.on('error', () => {})

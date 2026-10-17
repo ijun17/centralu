@@ -34,7 +34,7 @@ import {
   treeOf,
 } from './git.mjs'
 import { bumpText, compareVersions, declaredVersion, filesNamed, nextVersion, parseVersion, releaseNotes, versionLines } from './versions.mjs'
-import { listSome, plural, short, sleep } from './util.mjs'
+import { listSome, plural, short, sleep, span } from './util.mjs'
 
 /** A refusal: nothing was pushed, tagged, started or approved. */
 export class ReleaseRefusal extends Error {
@@ -61,6 +61,12 @@ export function releaseConfig(c = {}) {
     workflow: c.workflow ?? '.github/workflows/release.yml',
     environment: c.environment ?? 'npm-publish',
     rehearsalInputs: c.rehearsalInputs ?? { dry_run: 'true' },
+    // The packages that must be on the registry before the shim's approval: every package.json these
+    // name at the tagged commit, but the shim's own
+    registry: { packages: c.registry?.packages ?? ['packaging/npm/*/package.json'], shim: c.registry?.shim ?? 'packaging/npm/centralu/package.json' },
+    // How many jobs the repository's runners take at once (GitHub's 20 for a free account), for the
+    // bump's warning when other builds hold most of them
+    runners: Number(c.runners) > 0 ? Number(c.runners) : 20,
   }
 }
 
@@ -169,18 +175,70 @@ async function releaseCi(s, cfg, gh, ci) {
   return { problems: [], lines: [`CI: PR #${pr.number}'s run on the same tree (${short(prHead)}); ${s.main} at ${short(s.tip)} is ${main.verdict}.`] }
 }
 
-/** Every publication approval judges the bytes under the immutable tag, not a later merge. */
+/**
+ * Every publication approval judges the bytes under the immutable tag, not a later merge. `later` says
+ * the CI may still turn green by itself (pending, or not reported yet), which a waiting approve waits out.
+ */
 async function approvalCi(s, tagSha, ci) {
-  const r = await ci(tagSha)
+  // The required set of the tagged commit's own workflows: main's may name jobs it never had (#1035)
+  const r = await ci(tagSha, { own: true })
   const lines = [`The tagged commit's own CI at ${short(tagSha)}: ${r.verdict}.`]
   const cancelled = (r.cancelledRuns ?? []).map((run) => `The build for ${tagSha} was cancelled${tagSha !== s.tip ? ' by a newer push' : ''}; re-run it: gh run rerun ${run.id} --repo ${s.repo}`)
-  const problems = cancelled.length ? cancelled : r.verdict === 'green' ? [] : [`The tagged commit's own CI at ${short(tagSha)} must be green before npm-publish approval: ${r.summary}. PR evidence cannot authorize publication.`]
-  return { problems, lines: [...lines, ...cancelled] }
+  // Every build run on the commit completed and a required check is still missing: it never will report
+  const stuck = !cancelled.length && r.verdict === 'pending' && r.settled && !r.running && r.missing?.length > 0
+  const problems = cancelled.length
+    ? cancelled
+    : r.verdict === 'green'
+      ? []
+      : [
+          `The tagged commit's own CI at ${short(tagSha)} must be green before npm-publish approval: ${r.summary}. PR evidence cannot authorize publication.`,
+          ...(stuck ? [`Its build runs have all completed without reporting ${list(r.missing)}, so waiting will not bring them; look at the run, or re-run it.`] : []),
+        ]
+  return { problems, later: !cancelled.length && !stuck && (r.verdict === 'pending' || r.verdict === 'none'), lines: [...lines, ...cancelled] }
 }
 
-/** The version files main carries, the bumped text of each, and every problem with them. */
-async function versionFiles(s, cfg, from, to) {
-  const all = await filesAt(s.root, s.tip)
+/**
+ * Before the shim's approval: every other job of the run succeeded, and every package
+ * `release.registry.packages` names (but the shim) is on the registry at this version, published from
+ * the tagged commit. The workflow's `needs` and release-npm.mts check the same; this says it before the
+ * approval rather than after it. `later`: what may still come by itself (a package not visible yet,
+ * a registry that did not answer).
+ */
+async function shimGate(s, cfg, all, jobs, tagSha, version, registry) {
+  // `final`: what does not mend itself (a failed job, a package from other code), so nothing to wait for
+  const final = []
+  const pending = []
+  const others = all.filter((j) => !jobs.includes(j.name))
+  const failed = others.filter((j) => j.status === 'completed' && j.conclusion !== 'success')
+  const unfinished = others.filter((j) => j.status !== 'completed')
+  if (failed.length) final.push(`Not every platform job succeeded (${list(failed.map((j) => `${j.name}: ${j.conclusion}`))}); the shim may not go out before all of them have.`)
+  if (unfinished.length) pending.push(`Platform jobs still running: ${list(unfinished.map((j) => j.name))}.`)
+  const names = []
+  for (const path of filesNamed(cfg.registry.packages, await filesAt(s.root, tagSha)).filter((p) => p !== cfg.registry.shim)) {
+    const name = JSON.parse((await showFile(s.root, tagSha, path)) ?? '{}').name
+    if (name) names.push(name)
+  }
+  if (!names.length) final.push(`No package.json at ${short(tagSha)} matches project.json release.registry.packages, so the registry cannot be checked.`)
+  const missing = []
+  for (const name of names) {
+    let p
+    try {
+      p = await registry(name, version)
+    } catch (e) {
+      pending.push(`The registry did not answer for ${name}@${version}: ${e.message}`)
+      continue
+    }
+    if (p.state === 'absent') missing.push(name)
+    else if (p.gitHead !== tagSha) final.push(`${name}@${version} is on the registry from ${p.gitHead ? short(p.gitHead) : 'an unknown commit'}, not from ${short(tagSha)}; the shim would pin other code. Bump to the next prerelease.`)
+  }
+  if (missing.length) pending.push(`Not on the registry at ${version} yet: ${list(missing)}.`)
+  const problems = [...final, ...pending]
+  return { problems, later: !final.length, lines: problems.length ? [] : [`Before the shim: every other job of the run succeeded, and the ${plural(names.length, 'package')} it needs are on the registry at ${version} from ${short(tagSha)}.`] }
+}
+
+/** The version files main (or `at`) carries, the bumped text of each, and every problem with them. */
+async function versionFiles(s, cfg, from, to, at = s.tip) {
+  const all = await filesAt(s.root, at)
   const named = filesNamed(cfg.versionFiles, all)
   const problems = []
   if (!named.length) problems.push('project.json release.versionFiles names no file of the repository.')
@@ -188,25 +246,64 @@ async function versionFiles(s, cfg, from, to) {
   const files = {}
   const counts = {}
   for (const path of named) {
-    const text = await showFile(s.root, s.tip, path)
+    const text = await showFile(s.root, at, path)
     const r = bumpText(text ?? '', from, to ?? from)
     if (!r.count) problems.push(`${path} is in release.versionFiles but does not carry "${from}"; it fell behind, or the list is wrong.`)
     files[path] = r.text
     counts[path] = r.count
   }
   // A file that carries the version and is not listed would keep the old one after the bump
-  const holding = await filesHolding(s.root, s.tip, [from])
+  const holding = await filesHolding(s.root, at, [from])
   for (const p of holding.filter((p) => !named.includes(p) && !filesNamed(cfg.ignore, [p]).length)) {
-    for (const line of versionLines(await showFile(s.root, s.tip, p), from, p))
+    for (const line of versionLines(await showFile(s.root, at, p), from, p))
       problems.push(`${p}:${line} carries "${from}" but is not in project.json release.versionFiles; derive it from the version source, or add it to release.ignore if it intentionally pins a version.`)
   }
   return { named, files, counts, problems }
 }
 
-/** What GitHub says about the release workflow's runs on main's commit and for the tag. */
+/** A commit's tree, fetched by its id; null when the remote does not give it. */
+async function remoteTree(s, sha) {
+  if (!/^[0-9a-f]{40}$/.test(sha ?? '')) return null
+  try {
+    const [c] = await fetchRefs(s.root, s.remote, [sha], `refs/centralu-release/${process.pid}-${++calls}`)
+    return await treeOf(s.root, c)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The rehearsals that count for main's commit, newest first: those on it, and those on its bump branch
+ * (`branchPrefix` + main's version) at a commit with the same tree (#1035). A rehearsal of the open
+ * bump PR runs beside its CI; after the squash main's commit is another, but what was built is the
+ * same files, the rule #629 reuses the PR's CI by. The workflow file is part of that tree too.
+ */
+async function rehearsalsFor(s, cfg, gh) {
+  const file = workflowFile(cfg)
+  const branch = `${cfg.branchPrefix}${s.version}`
+  const onTip = await gh.workflowRuns(s.repo, file, { event: 'workflow_dispatch', headSha: s.tip })
+  const onBranch = (await gh.workflowRuns(s.repo, file, { event: 'workflow_dispatch', branch })).filter((r) => r.headBranch === branch && r.headSha !== s.tip)
+  const same = []
+  if (onBranch.length) {
+    const tree = await treeOf(s.root, s.tip)
+    const trees = new Map()
+    for (const r of onBranch) {
+      if (!trees.has(r.headSha)) trees.set(r.headSha, await remoteTree(s, r.headSha))
+      if (trees.get(r.headSha) === tree) same.push(r)
+    }
+  }
+  const at = (r) => Date.parse(r.createdAt ?? '') || 0
+  return [...onTip, ...same].sort((a, b) => at(b) - at(a) || Number(b.id) - Number(a.id))
+}
+
+/** Where a rehearsal ran, said against main's commit. */
+const rehearsedOn = (s, r) => (r.headSha === s.tip ? short(s.tip) : `${short(r.headSha)} on ${r.headBranch}, the same tree as ${s.main} at ${short(s.tip)}`)
+
+/** What GitHub says about the release workflow's runs on main's commit (or its tree) and for the tag. */
 async function runsFor(s, cfg, gh) {
   const file = workflowFile(cfg)
-  const rehearsals = await gh.workflowRuns(s.repo, file, { event: 'workflow_dispatch', headSha: s.tip })
+  // Only an untagged version is still rehearsed
+  const rehearsals = s.tagged ? [] : await rehearsalsFor(s, cfg, gh)
   const candidates = s.tagged ? (await gh.workflowRuns(s.repo, file, { event: 'push', headSha: s.tagged.sha })).filter((r) => r.headBranch === s.tag) : []
   const active = candidates.filter((r) => r.status !== 'completed')
   // A run GitHub says is waiting on the release environment is the one a maintainer can act on;
@@ -281,7 +378,7 @@ export async function releaseStatus({ repo, dir, cfg, gh, ci }) {
   } else {
     phase = 'ready-to-tag'
     const rh = runs.rehearsal
-    lines.push(rh ? `Rehearsal on ${short(s.tip)}: ${runState(rh)}${rh.url ? `, ${rh.url}` : ''}.` : `No rehearsal on ${short(s.tip)} yet.`)
+    lines.push(rh ? `Rehearsal on ${rehearsedOn(s, rh)}: ${runState(rh)}${rh.url ? `, ${rh.url}` : ''}.` : `No rehearsal on ${short(s.tip)} yet.`)
     next =
       rh?.conclusion === 'success'
         ? `Tag ${s.tag} with release step tag (confirm: true).`
@@ -303,6 +400,25 @@ export async function releaseStatus({ repo, dir, cfg, gh, ci }) {
 }
 
 // --- bump ---------------------------------------------------------------------------------------------
+
+// Busy: other builds' jobs on a runner or waiting for one, at least this share of `runners` (#1035)
+const BUSY_SHARE = 0.75
+
+/**
+ * A warning when other builds hold most runners: the bump PR's CI then queues behind them (5-7 min on
+ * 0.1.0-beta.26, #1035). Never a refusal; a failed read says so and the bump goes on.
+ */
+async function runnerWarning(repo, cfg, gh) {
+  let load
+  try {
+    load = await gh.activeJobs(repo)
+  } catch (e) {
+    return `How busy the runners are could not be read (${e.message}); the bump goes on.`
+  }
+  const used = load.running + load.queued
+  if (used < cfg.runners * BUSY_SHARE) return null
+  return `Runners are busy: ${plural(load.running, 'job')} of other builds running and ${load.queued} queued, against ${cfg.runners} runners (${plural(load.runs, 'active run')}). The bump PR's CI will wait for them; push it once they drain, or cancel builds that no longer matter.`
+}
 
 const wrap = (text, width = 72) => {
   const out = []
@@ -368,13 +484,16 @@ export async function bumpRelease({ repo, dir, cfg, gh, ci, openPr, permissions 
 
   const message = `${title}\n\n${wrap(`The version ${s.version} → ${next} in ${vf.named.join(', ')}.`)}\n`
   const changed = Object.entries(vf.counts).map(([p, n]) => `${p}: ${plural(n, 'place')}`)
-  const lines = [`${s.version} → ${next} in ${plural(vf.named.length, 'file')}:`, ...changed.map((c) => `- ${c}`)]
+  const warning = await runnerWarning(repo, cfg, gh)
+  const lines = [`${s.version} → ${next} in ${plural(vf.named.length, 'file')}:`, ...changed.map((c) => `- ${c}`), ...(warning ? [warning] : [])]
+  const note = warning ? ` ${warning}` : ''
   if (!confirm)
     return {
-      summary: `Ready to bump ${s.version} → ${next} on ${s.main} at ${short(s.tip)}, as ${branch}; nothing pushed yet. Call again with confirm: true to push the branch and open the pull request.`,
+      summary: `Ready to bump ${s.version} → ${next} on ${s.main} at ${short(s.tip)}, as ${branch}; nothing pushed yet. Call again with confirm: true to push the branch and open the pull request.${note}`,
       lines: [...lines, ...notesLines(s)],
       next,
       pushed: false,
+      warning,
     }
   const commit = await commitFiles(s.root, s.tip, vf.files, message)
   try {
@@ -387,10 +506,11 @@ export async function bumpRelease({ repo, dir, cfg, gh, ci, openPr, permissions 
   if (!opened.ok) return { summary: `Pushed ${branch}, but the pull request was not opened: ${opened.text}`, lines, next, pushed: true, partial: true }
   lines.push(opened.text)
   return {
-    summary: `Opened the bump to ${next}: ${opened.url ?? `#${opened.number}`}. Merge it once CI is green (merge_when_green), then rehearse and tag.`,
+    summary: `Opened the bump to ${next}: ${opened.url ?? `#${opened.number}`}. Rehearse it now (release step rehearse) while its CI runs, merge it once CI is green (merge_when_green), then tag.${note}`,
     lines,
     next,
     pushed: true,
+    warning,
     number: opened.number,
     url: opened.url,
   }
@@ -410,20 +530,25 @@ async function findRun(gh, repo, file, filter, match, after) {
   return null
 }
 
-/** The rehearsal: the release workflow by hand on main, with its dry-run input. Builds and packs, publishes nothing. */
-export async function rehearseRelease({ repo, dir, cfg, gh, ci, permissions }, { confirm = false }) {
+/**
+ * The rehearsal: the release workflow by hand, with its dry-run input. Builds and packs, publishes
+ * nothing. On main once main carries an untagged version; while main's version is released, on the
+ * open bump PR's head (#1035), beside its CI, which the tag accepts once the squash gives main the
+ * same tree.
+ */
+export async function rehearseRelease({ repo, dir, cfg, gh, ci, permissions }, { version, confirm = false }) {
   if (!canMerge(permissions)) throw new ReleaseRefusal([NOT_MAINTAINER])
   const s = { repo, ...(await readState({ repo, dir, cfg, gh })) }
+  if (s.tagged) return rehearseBumpPr(s, cfg, gh, { version, confirm })
   const evidence = await releaseCi(s, cfg, gh, ci)
   const problems = [...evidence.problems]
-  if (s.tagged) problems.push(`${s.version} is released already (${s.tag}); bump first.`)
   const vf = await versionFiles(s, cfg, s.version)
   problems.push(...vf.problems)
   if (problems.length) throw new ReleaseRefusal(problems)
   const file = workflowFile(cfg)
   const { rehearsal } = await runsFor(s, cfg, gh)
   if (rehearsal && (rehearsal.status !== 'completed' || rehearsal.conclusion === 'success'))
-    return { summary: `A rehearsal on ${short(s.tip)} ${runState(rehearsal)}${rehearsal.url ? `: ${rehearsal.url}` : ''}; not starting another.`, lines: evidence.lines, started: false, run: rehearsal.url }
+    return { summary: `A rehearsal on ${rehearsedOn(s, rehearsal)} ${runState(rehearsal)}${rehearsal.url ? `: ${rehearsal.url}` : ''}; not starting another.`, lines: evidence.lines, started: false, run: rehearsal.url }
   const inputs = Object.entries(cfg.rehearsalInputs).map(([k, v]) => `${k}=${v}`).join(', ')
   if (!confirm)
     return {
@@ -437,6 +562,63 @@ export async function rehearseRelease({ repo, dir, cfg, gh, ci, permissions }, {
   return {
     summary: `Started the rehearsal of ${s.version} on ${short(s.tip)}${run?.url ? `: ${run.url}` : `; GitHub does not list the run yet, look at ${file}'s runs`}. Tag once it succeeds.`,
     lines: evidence.lines,
+    started: true,
+    run: run?.url ?? null,
+  }
+}
+
+/** The open bump PR's head, rehearsed on its branch: the version it carries, untagged, its files consistent, on main's head. */
+async function rehearseBumpPr(s, cfg, gh, { version, confirm }) {
+  const file = workflowFile(cfg)
+  const want = version !== undefined ? String(version).replace(/^v/, '') : null
+  const branches = (await remoteRefs(s.root, s.remote, `refs/heads/${cfg.branchPrefix}`))
+    .map((b) => ({ ...b, version: b.name, name: `${cfg.branchPrefix}${b.name}` }))
+    .filter((b) => parseVersion(b.version) && compareVersions(b.version, s.version) > 0 && (want === null || b.version === want))
+  const open = []
+  for (const b of branches) {
+    const pr = (await gh.prsWithHead(s.repo, b.name)).find((p) => p.state === 'OPEN' && p.baseRefName === s.main)
+    if (pr) open.push({ ...b, pr })
+  }
+  if (!open.length) throw new ReleaseRefusal([`${s.version} is released already (${s.tag}) and no bump pull request${want ? ` for ${want}` : ''} is open into ${s.main} (${cfg.branchPrefix}<version>): bump first (release step bump), then rehearse its pull request.`])
+  if (open.length > 1) throw new ReleaseRefusal([`Several bump pull requests are open (${list(open.map((b) => `#${b.pr.number} for ${b.version}`))}); say which with version.`])
+  const [b] = open
+  const pr = b.pr
+  const problems = []
+  if (pr.headRefOid !== b.sha) problems.push(`PR #${pr.number}'s head is ${short(pr.headRefOid)} but ${b.name} is at ${short(b.sha)} on ${s.remote}; it moved, call again.`)
+  const [head] = await fetchRefs(s.root, s.remote, [`refs/heads/${b.name}`], `refs/centralu-release/${process.pid}-${++calls}`)
+  // The squash gives main this tree only when main's head is under the PR's head
+  if (!(await isAncestor(s.root, s.tip, head)))
+    problems.push(`PR #${pr.number} (${short(head)}) is not on ${s.main}'s head ${short(s.tip)}: after its squash ${s.main}'s tree would differ from what was rehearsed, so the tag would not count the rehearsal. Bring the branch up to date with ${s.main} first.`)
+  const source = await showFile(s.root, head, cfg.source.path)
+  const declared = source === null ? null : declaredVersion(source, cfg.source.pattern)
+  if (declared !== b.version) problems.push(`${b.name} at ${short(head)} declares ${declared ?? 'no version'} in ${cfg.source.path}, not ${b.version}.`)
+  else {
+    if (s.tags.some((t) => t.name === `${cfg.tagPrefix}${b.version}`)) problems.push(`${cfg.tagPrefix}${b.version} is tagged already.`)
+    if (s.last && compareVersions(b.version, s.last.version) <= 0) problems.push(`${b.version} is not after ${s.last.name}, the latest release tag.`)
+    problems.push(...(await versionFiles(s, cfg, b.version, undefined, head)).problems)
+  }
+  if (problems.length) throw new ReleaseRefusal(problems)
+  const lines = [
+    `Bump PR #${pr.number} for ${b.version}: its head ${short(head)} on ${b.name}, on ${s.main}'s head ${short(s.tip)}.`,
+    `No CI is required to rehearse it; the tag still needs green CI, and counts this rehearsal only if ${s.main}'s tree after the squash is the tree rehearsed.`,
+  ]
+  const runs = (await gh.workflowRuns(s.repo, file, { event: 'workflow_dispatch', headSha: head })).filter((r) => r.headBranch === b.name)
+  const rehearsal = runs[0]
+  if (rehearsal && (rehearsal.status !== 'completed' || rehearsal.conclusion === 'success'))
+    return { summary: `A rehearsal of PR #${pr.number} at ${short(head)} ${runState(rehearsal)}${rehearsal.url ? `: ${rehearsal.url}` : ''}; not starting another.`, lines, started: false, run: rehearsal.url }
+  const inputs = Object.entries(cfg.rehearsalInputs).map(([k, v]) => `${k}=${v}`).join(', ')
+  if (!confirm)
+    return {
+      summary: `Ready to rehearse ${b.version} on bump PR #${pr.number}'s head ${short(head)} (${file} on ${b.name} with ${inputs}; builds and packs, publishes nothing, asks no approval). Call again with confirm: true to start it.`,
+      lines,
+      started: false,
+    }
+  const at = Date.now()
+  await gh.dispatchWorkflow(s.repo, file, b.name, cfg.rehearsalInputs)
+  const run = await findRun(gh, s.repo, file, { event: 'workflow_dispatch', headSha: head }, (r) => r.headBranch === b.name, at)
+  return {
+    summary: `Started the rehearsal of ${b.version} on bump PR #${pr.number}'s head ${short(head)}${run?.url ? `: ${run.url}` : `; GitHub does not list the run yet, look at ${file}'s runs`}. Merge the PR once its CI is green; the tag counts this rehearsal when ${s.main} gets the same tree.`,
+    lines,
     started: true,
     run: run?.url ?? null,
   }
@@ -457,16 +639,16 @@ export async function tagRelease({ repo, dir, cfg, gh, ci, permissions }, { vers
   problems.push(...vf.problems)
   const { rehearsal } = await runsFor(s, cfg, gh)
   if (!skipRehearsal && !s.tagged) {
-    if (!rehearsal) problems.push(`No rehearsal ran on ${short(s.tip)}: rehearse first (release step rehearse), or pass skipRehearsal: true to tag without one.`)
-    else if (rehearsal.status !== 'completed') problems.push(`The rehearsal on ${short(s.tip)} is still running${rehearsal.url ? ` (${rehearsal.url})` : ''}; tag once it succeeds.`)
-    else if (rehearsal.conclusion !== 'success') problems.push(`The rehearsal on ${short(s.tip)} ${runState(rehearsal)}${rehearsal.url ? ` (${rehearsal.url})` : ''}; fix that first, or pass skipRehearsal: true.`)
+    if (!rehearsal) problems.push(`No rehearsal ran on ${short(s.tip)} or on its bump branch at the same tree: rehearse first (release step rehearse), or pass skipRehearsal: true to tag without one.`)
+    else if (rehearsal.status !== 'completed') problems.push(`The rehearsal on ${rehearsedOn(s, rehearsal)} is still running${rehearsal.url ? ` (${rehearsal.url})` : ''}; tag once it succeeds.`)
+    else if (rehearsal.conclusion !== 'success') problems.push(`The rehearsal on ${rehearsedOn(s, rehearsal)} ${runState(rehearsal)}${rehearsal.url ? ` (${rehearsal.url})` : ''}; fix that first, or pass skipRehearsal: true.`)
   }
   if (problems.length) throw new ReleaseRefusal(problems)
 
   const lines = [
     ...evidence.lines,
     `${s.main} at ${short(s.tip)}: CI green, every version file carries ${s.version}.`,
-    skipRehearsal ? 'Rehearsal: skipped (skipRehearsal: true).' : `Rehearsal: succeeded${rehearsal?.url ? `, ${rehearsal.url}` : ''}.`,
+    skipRehearsal ? 'Rehearsal: skipped (skipRehearsal: true).' : `Rehearsal: succeeded on ${rehearsedOn(s, rehearsal)}${rehearsal?.url ? `, ${rehearsal.url}` : ''}.`,
     ...notesLines(s),
   ]
   if (!confirm)
@@ -492,37 +674,101 @@ export async function tagRelease({ repo, dir, cfg, gh, ci, permissions }, { vers
 
 // --- approve ------------------------------------------------------------------------------------------
 
+// approve with wait (#1035): how long it may wait for the gate by default and at most, and how often it
+// reads it again. Centralu keeps the call alive while it reports progress (docs/apps.md §5).
+const APPROVE_WAIT_MINUTES = 45
+const APPROVE_WAIT_MAX_MINUTES = 60
+// PROJECT_BOARD_CI_POLL_MS: for the tests only, as for merge_when_green
+const APPROVE_POLL_MS = Number(process.env.PROJECT_BOARD_CI_POLL_MS) || 30_000
+
 /**
  * The environment approval of the tag's release run (owner decision, 2026-10-06: the maintainer's
  * agent drives the release end to end, approvals included, every step shown). Only that run, only the
  * configured environment, only what GitHub says this login may approve.
  */
-export async function approveRelease({ repo, dir, cfg, gh, ci, permissions }, { version, comment, confirm = false }) {
-  if (!canMerge(permissions)) throw new ReleaseRefusal([NOT_MAINTAINER])
+export async function approveRelease(ctx, { version, comment, confirm = false, wait = false, waitMinutes }, { signal, progress = () => {} } = {}) {
+  if (!canMerge(ctx.permissions)) throw new ReleaseRefusal([NOT_MAINTAINER])
+  const waiting = wait && confirm
+  const limitMs = Math.min(APPROVE_WAIT_MAX_MINUTES, Math.max(0, Number(waitMinutes ?? APPROVE_WAIT_MINUTES) || 0)) * 60_000
+  const started = Date.now()
+  const cancelled = { summary: 'Not approved: cancelled while waiting for the gate.', lines: [], approved: false, cancelled: true }
+  // What the first read found (version, tagged commit, run): a wait approves only that, never what replaced it
+  let pin = null
+  for (let beat = 1; ; beat++) {
+    const g = await approvalGate(ctx, version, pin)
+    if (g.answer) return g.answer
+    if (g.refuse) throw new ReleaseRefusal(g.refuse)
+    pin = g.pin ?? pin
+    if (g.ready) {
+      const { run, pending, tag, what, last, lines } = g.ready
+      if (!confirm) return { summary: `${tag}'s release run waits for approval on ${ctx.cfg.environment} (${what}); nothing approved yet. Call again with confirm: true to approve, or approve on GitHub: ${run.url}`, lines, approved: false, run: run.url }
+      // A call cancelled while the gate was read last approves nothing
+      if (signal?.aborted) return cancelled
+      await ctx.gh.approveDeployments(ctx.repo, run.id, [...new Set(pending.map((p) => p.environmentId))], String(comment ?? '').trim() || `Approved through the project board's release tool for ${tag}.`)
+      const after = waiting && beat > 1 ? ` after ${span(Date.now() - started)} of waiting for the gate` : ''
+      return { summary: `Approved ${ctx.cfg.environment} for ${tag} (${what})${after}${run.url ? `: ${run.url}` : ''}.${last ? '' : ' The shim asks again once every platform job succeeds: approve with wait: true to approve it the moment it may go.'}`, lines, approved: true, run: run.url }
+    }
+    // Not yet: without waiting, answered as the step always has; waiting, read everything again later
+    const { problems, answer, why } = g.later
+    if (!waiting) {
+      if (problems) throw new ReleaseRefusal(problems)
+      return answer
+    }
+    if (Date.now() - started + APPROVE_POLL_MS > limitMs)
+      return { summary: `Not approved: the gate did not pass within ${span(limitMs)} of waiting, so nothing was approved. Still: ${why} Call again with wait: true to wait longer, or look at the run.`, lines: problems ?? [], approved: false, timedOut: true, run: answer?.run ?? null }
+    progress(beat, `Waiting to approve (${span(Date.now() - started)} so far): ${why}`)
+    if (!(await sleep(APPROVE_POLL_MS, signal))) return cancelled
+  }
+}
+
+/**
+ * The approval's gate, read fresh: `answer` (nothing to approve, for good), `refuse` (problems that do
+ * not mend themselves), `later` (not yet: what a plain call answers or refuses with, and what a
+ * waiting one waits on) or `ready` (approve now). `pin`: the version, tagged commit and run an earlier
+ * read of the same wait found; anything else now refuses. Each answer but `refuse` carries the pin.
+ */
+async function approvalGate({ repo, dir, cfg, gh, ci, registry }, version, pin) {
   const s = { repo, ...(await readState({ repo, dir, cfg, gh })) }
-  const want = version !== undefined ? String(version).replace(/^v/, '') : s.version
+  // A bump merged meanwhile changes main's version, not the one this wait is for
+  const want = pin ? pin.want : version !== undefined ? String(version).replace(/^v/, '') : s.version
   const tag = `${cfg.tagPrefix}${want}`
   const t = s.tags.find((x) => x.name === tag)
-  if (!t) throw new ReleaseRefusal([`${tag} is not tagged; there is no release run to approve.`])
+  if (!t) return { refuse: [`${tag} is not tagged; there is no release run to approve.`] }
+  if (pin && t.sha !== pin.sha) return { refuse: [`${tag} moved from ${short(pin.sha)} to ${short(t.sha)} while waiting; nothing was approved. A release tag is never moved: look at what happened before approving anything.`] }
   const candidates = (await gh.workflowRuns(repo, workflowFile(cfg), { event: 'push', headSha: t.sha })).filter((r) => r.headBranch === tag)
   let run = candidates.find((r) => r.status !== 'completed') ?? candidates[0]
   for (const r of candidates.filter((x) => x.status !== 'completed')) if ((await gh.pendingDeployments(repo, r.id)).some((p) => p.environment === cfg.environment)) { run = r; break }
-  if (!run) throw new ReleaseRefusal([`GitHub lists no ${workflowFile(cfg)} run for ${tag} (${short(t.sha)}).`])
-  if (run.headSha !== t.sha) throw new ReleaseRefusal([`The run for ${tag} is on ${short(run.headSha)}, but ${tag} is ${short(t.sha)}.`])
-  if (run.status === 'completed') return { summary: `The release run for ${tag} ${runState(run)}${run.url ? `: ${run.url}` : ''}; nothing waits for approval.`, lines: [], approved: false, run: run.url }
+  if (!run) {
+    const why = `GitHub lists no ${workflowFile(cfg)} run for ${tag} (${short(t.sha)}).`
+    return { later: { problems: [why], why }, pin: { want, sha: t.sha, runId: null } }
+  }
+  if (pin?.runId && Number(run.id) !== Number(pin.runId)) return { refuse: [`The release run for ${tag} is now ${run.id}, not run ${pin.runId} this wait started on; nothing was approved. Look at both runs before approving.`] }
+  const pinned = { want, sha: t.sha, runId: run.id }
+  if (run.headSha !== t.sha) return { refuse: [`The run for ${tag} is on ${short(run.headSha)}, but ${tag} is ${short(t.sha)}.`] }
+  if (run.status === 'completed') return { answer: { summary: `The release run for ${tag} ${runState(run)}${run.url ? `: ${run.url}` : ''}; nothing waits for approval.`, lines: [], approved: false, run: run.url } }
   const pending = (await gh.pendingDeployments(repo, run.id)).filter((p) => p.environment === cfg.environment)
-  if (!pending.length) return { summary: `The release run for ${tag} is ${runState(run)}; nothing waits for approval on ${cfg.environment} now${run.url ? `: ${run.url}` : ''}.`, lines: [], approved: false, run: run.url }
+  if (!pending.length) {
+    const summary = `The release run for ${tag} is ${runState(run)}; nothing waits for approval on ${cfg.environment} now${run.url ? `: ${run.url}` : ''}.`
+    return { later: { answer: { summary, lines: [], approved: false, run: run.url }, why: summary }, pin: pinned }
+  }
   const cannot = pending.filter((p) => !p.canApprove)
-  if (cannot.length) throw new ReleaseRefusal([`GitHub says this login may not approve ${cfg.environment} for this run${cannot[0].reviewers.length ? ` (reviewers: ${cannot[0].reviewers.join(', ')})` : ''}. Approve on GitHub: ${run.url}`])
-  const jobs = (await gh.runJobs(repo, run.id)).filter((j) => j.status === 'waiting').map((j) => j.name)
-  const what = jobs.length ? list(jobs) : 'the waiting jobs'
-  const last = jobs.length > 0 && jobs.every((j) => /shim/i.test(j))
+  if (cannot.length) return { refuse: [`GitHub says this login may not approve ${cfg.environment} for this run${cannot[0].reviewers.length ? ` (reviewers: ${cannot[0].reviewers.join(', ')})` : ''}. Approve on GitHub: ${run.url}`] }
+  // One read of the jobs decides which approval this is; GitHub may show the environment waiting
+  // before it lists the job that waits on it
+  const all = await gh.runJobs(repo, run.id)
+  const jobs = all.filter((j) => j.status === 'waiting').map((j) => j.name)
+  if (!jobs.length) {
+    const why = `GitHub says the release run for ${tag} waits on ${cfg.environment} but lists no waiting job yet, so which approval it is cannot be told.`
+    return { later: { problems: [why], why }, pin: pinned }
+  }
+  const what = list(jobs)
+  const last = jobs.every((j) => /shim/i.test(j))
   const evidence = await approvalCi(s, t.sha, ci)
-  if (evidence.problems.length) throw new ReleaseRefusal(evidence.problems)
-  const lines = [...evidence.lines, `Waiting on ${cfg.environment}: ${what}.`, ...(last ? ['This is the shim: the last moment anything is reversible (docs/releasing.md).'] : [])]
-  if (!confirm) return { summary: `${tag}'s release run waits for approval on ${cfg.environment} (${what}); nothing approved yet. Call again with confirm: true to approve, or approve on GitHub: ${run.url}`, lines, approved: false, run: run.url }
-  await gh.approveDeployments(repo, run.id, [...new Set(pending.map((p) => p.environmentId))], String(comment ?? '').trim() || `Approved through the project board's release tool for ${tag}.`)
-  return { summary: `Approved ${cfg.environment} for ${tag} (${what})${run.url ? `: ${run.url}` : ''}.${last ? '' : ' The shim asks again once every platform job succeeds.'}`, lines, approved: true, run: run.url }
+  const shim = last ? await shimGate(s, cfg, all, jobs, t.sha, want, registry) : { problems: [], later: true, lines: [] }
+  const problems = [...evidence.problems, ...shim.problems]
+  if (problems.length) return (evidence.problems.length && !evidence.later) || !shim.later ? { refuse: problems } : { later: { problems, why: problems.join(' ') }, pin: pinned }
+  const lines = [...evidence.lines, ...shim.lines, `Waiting on ${cfg.environment}: ${what}.`, ...(last ? ['This is the shim: the last moment anything is reversible (docs/releasing.md).'] : [])]
+  return { ready: { run, pending, tag, what, last, lines }, pin: pinned }
 }
 
 /** Cancel only an extra tag run whose publish job has not succeeded. */

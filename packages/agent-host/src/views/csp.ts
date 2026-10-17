@@ -1,4 +1,5 @@
 import { isIP } from 'node:net'
+import { isThisMachineHost } from '../this-machine.js'
 
 /**
  * The CSP for an app view (M4 B-3).
@@ -38,19 +39,13 @@ export type ViewPermissions = {
  *   a keyword like `'unsafe-eval'`       a way to change the policy through a domain declaration
  *   a value with whitespace, `;`, `,`    a way to smuggle in an extra directive
  *
- * Loopback (`localhost`, `127.0.0.0/8`, `[::1]`, `0.0.0.0`) is also rejected. Those addresses hold
- * the routes behind the host's secret path, and other apps' per-app origin ports. A view has no
- * reason to reach any of that. An app that needs to talk to a local service does so through the app
- * server instead (this design's principle of keeping state and outbound calls on the server).
+ * This machine (`isThisMachineHost`: `localhost`, `127.0.0.0/8`, `0.0.0.0/8`, and link-local `169.254.0.0/16`, the same
+ * list an https import is refused for) is also rejected. Those addresses hold the routes behind the host's secret
+ * path, and other apps' per-app origin ports. A view has no reason to reach any of that. An IPv6 literal cannot get
+ * this far at all: the pattern above has no brackets, so `[::1]` is dropped by it, not by that check. An app that needs
+ * to talk to a local service does so through the app server instead (this design's principle of keeping state and outbound calls on the server).
  */
 const SOURCE = /^(https?|wss?):\/\/(\*\.)?((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?::(\d{1,5}|\*))?(\/[a-z0-9._~%/-]*)?$/i
-
-function isLoopback(host: string): boolean {
-  if (host === 'localhost' || host.endsWith('.localhost')) return true
-  if (isIP(host) !== 4) return false
-  const first = Number(host.split('.')[0])
-  return first === 0 || first === 127
-}
 
 /**
  * CSP and the browser consume a WHATWG URL, so the security decision must use that same canonical
@@ -73,7 +68,7 @@ function canonicalSource(source: string): string | null {
   }
 
   const host = parsed.hostname.toLowerCase()
-  if (isLoopback(host) || (wildcard && isIP(host) !== 0)) return null
+  if (isThisMachineHost(host) || (wildcard && isIP(host) !== 0)) return null
 
   const port = rawPort ? `:${rawPort === '*' ? '*' : Number(rawPort)}` : ''
   const path = rawPath ? parsed.pathname : ''

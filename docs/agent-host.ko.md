@@ -1608,7 +1608,8 @@ cmd.exe는 그때 이미 줄 전체를 읽었고, Ctrl+C로 배치 작업이 끝
 |---|---|---|
 | 레지스트리 | `stored.ts`, store v46 `linked_machines` | 사람이 링크한 기기: id, 이름, ssh 대상, 원격 셸, 숫자를 접는 `slot`, 받아들인 버전 쌍 |
 | 전송 | `tunnel.ts` (`SshTunnel`) | ssh로 원격에 연결 줄을 묻고, ssh 로컬 포워드를 잡고 있는다 |
-| 링크 | `links.ts` (`LinkedMachine`) | 기기마다 하나: 전송, 버전 확인, 클라이언트, 재시도 간격, 상태, 숨기는 세션 집합, 미러 갱신 |
+| 링크 | `linked-machine-connection.ts`, `linked-machine-ops.ts` (`LinkedMachine`) | 기기마다 하나: 전송, 버전 확인, 클라이언트, 재시도 간격, 상태, 숨기는 세션 집합, 미러 갱신. 그리고 사람이 그 기기에 시키는 일(설치, 업데이트, 되돌리기, 제거, 자동 시작, 활동) |
+| 링크 목록 | `links-registry.ts` (`Links`), `link-deps.ts`. `links.ts`가 다시 내보낸다 | 이 허브의 모든 링크. 레지스트리와 함께 더하고 빼며, ssh 호스트 목록과 probe도 여기 있다 |
 | 클라이언트 | `remote-client.ts` | 허브가 원격 호스트에 거는 WebSocket: hello, 커서와 에포크, 호출, 이벤트, 터미널 프레임 |
 | 라우터 | `router.ts`, `routes.ts` | `HostServer.onRpc` 앞에서: id가 가리키는 기기로 호출을 보내고, 목록을 합치고, 나머지는 로컬로 답한다 |
 | 한정자 | `qualifier.ts`, `machine-ids.ts` | 들어올 때 `<machine>.<id>`를 붙이고 나갈 때 뗀다. 숫자는 slot마다 접는다 |
@@ -1713,7 +1714,9 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 - **git**: `git` CLI spawn + `--porcelain=v2/-z` 파싱. status·diff·log·branches·checkout·stage·commit·push.
   git2(Rust)로의 이전은 **측정으로 병목이 확인되기 전까지는 하지 않는다** (m2-plan 결정 3).
   포트 인터페이스가 같으므로 나중에 옮겨도 UI는 변경되지 않는다.
-- **store**: better-sqlite3 + `user_version` 마이그레이션 러너. `Store`(`store.ts`)는 파일을 열고 마이그레이션을 돌린다. 나머지 메서드는 `dev-services/store/`의
+- **store**: better-sqlite3 + `user_version` 마이그레이션 러너. `Store`(`store.ts`)는 파일을 열고, 자신이 상속하는 두 클래스로 마이그레이션을 돌린다:
+  러너(`store/migrate-runner.ts`, `Store.inspect`도 여기서 답한다)와 그 아래의 최소 읽기 버전 관문(`store/reader-gate.ts`). 밀린 `VACUUM`은
+  `store/vacuum.ts`에 있다. 나머지 메서드는 `dev-services/store/`의
   개념별 모듈(프로젝트, 세션, 메시지, 휴지통, 앱 실행 기록 등)로 호출을 넘기고, 단계 목록은 `store/migrations/`에 있다. 스키마 DDL은 정확히 한 곳,
   `protocol/src/schema/schema.sql`에만 있다. 번들에서는 빌드 산출물 옆에 복사되어 함께 배포된다 (F-0).
   마이그레이션 단계의 규칙은 아래(§5.1)에 있다.
@@ -1794,7 +1797,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 | 화면 설정 (`UiPreferences`) | `app_settings.ui_preferences` | `parseUiPreferences` (protocol), `SessionManager.uiPreferences` / `setUiPreferences` | 빠진 필드마다 기본값 | 못 읽는 값은 기본값으로 보이고, 이 빌드가 변경을 쓸 때 모르는 필드와 못 읽는 값은 남는다 | 기본값, 행 이름을 댄 stderr 한 줄. 다음 변경이 덮어쓴다 | `theme.test.ts`, `ui-preferences.test.ts` |
 | 작업 공간 스냅샷 | `workspace` 행 | UI 스토어의 복원(`attach`), `readNotifyPolicy` (core), `sanitizeLayout` | 필드마다 따로 확인. 스냅샷에 없는 알림 스위치는 꺼짐이 아니라 기본값(켜짐) | 무시. 창이 스냅샷을 통째로 다시 쓰므로 옛 창은 새 창의 배치 필드를 떨군다. 의도된 것: 스냅샷은 설정이 아니라 배치다 | 호스트가 `null`을 답하고 화면은 기본값에서 시작 | `store.test.ts` (ui), `notify.test.ts` |
 | 테마·글꼴 캐시 | 페이지의 `localStorage` | `applyCachedTheme`, `applyCachedTypography` | 값마다 확인 | 무시 | 캐시 없음과 같다. 첫 프레임만이고 호스트의 답이 뒤따른다 | (캐시뿐) |
-| 키퍼 설정 | `keeper-settings.json` | `source::load_settings` (키퍼, 기본값 있는 serde) | `background` 기본값은 꺼짐 | 읽을 때 무시, **다음 저장에서 떨어진다** | **말 없이** 꺼짐으로 읽힌다 | `background_mode_is_off_unless_saved_on` (새 모양 테스트는 아직 없음) |
+| 키퍼 설정 | `keeper-settings.json` | `source::load_settings` / `save_background` (키퍼) | `background` 기본값은 꺼짐 | 모르는 필드는 그대로 두었다가 다시 쓴다. `background`가 참·거짓이 아니면 그 값만 꺼짐으로 읽고 stderr에 한 줄 남긴다 | 꺼짐으로 읽고 파일 이름을 밝힌 stderr 한 줄을 남긴다. 다음 저장이 덮어쓴다 | `background_mode_is_off_unless_saved_on`, `a_newer_settings_file_keeps_what_this_build_does_not_know` |
 | 그리드 배치 | `grid_layout` | `Store.listGridView` / `setGridView` | 스팬 없는 행은 고른 것 없음으로 읽힌다 (v43) | `kind`에 CHECK가 있어 새 패널 종류는 테이블 재구성, 곧 §5.1의 깨는 단계다. 범위 밖 스팬은 없음으로 읽힌다 | (행) | `store.test.ts` (v42, v43) |
 | 프로젝트 사이의 동의 (#371) | `project_consents` | `Store.listProjectConsents` / `getProjectConsent` | (행) | 이 빌드가 모르는 종류는 저장소에 남고 목록에는 안 나온다 (#384) | (행) | `store.test.ts` |
 | 세션의 앱 동의 | `app_settings.session_apps:<id>` | `sessions/app-access.ts`의 `parse` | (목록) | 모르는 동의의 원소는 버린다 | 빈 목록 | |
@@ -1813,8 +1816,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 | 원격 연결 줄 | `centralu serve --connection` stdout | `parseConnectionLine` (`links/tunnel.ts`) | `version`과 `dataDir`는 기본값 | 다른 `v`는 어느 쪽을 업데이트할지 말하는 오류, 포트나 토큰이 없으면 오류 | JSON이 아닌 줄은 건너뛴다 | `tunnel.test.ts` |
 | 호스트 ↔ UI 페이로드 | RPC 결과, 이벤트, `hello_ok` | `parseRpcResult`, `parseServerFrame`, `parseTolerant` (protocol, #339) | 기본값 적용 | 선언 안 된 필드는 버리고, 못 읽는 값은 그 값만 온 그대로 둔다 | | `tolerant.test.ts`, `rpc-client.test.ts`, `e2e/older-host.spec.ts` |
 
-아직 덮지 못한 것: `keeper-settings.json`은 저장할 때 모르는 필드를 떨구고, 못 읽는 파일은 말 없이 꺼짐으로 읽힌다(키퍼의
-Rust, 따로 바꾼다). 이전 릴리스의 호스트로 새 저장소를 여는 e2e도 아직이다. `older-host.spec.ts`는 페이로드 쪽 절반을 덮는다.
+아직 덮지 못한 것: 이전 릴리스의 호스트로 새 저장소를 여는 e2e. `older-host.spec.ts`는 페이로드 쪽 절반을 덮는다.
 
 ## 6. 사용량과 한도 (FR-9)
 

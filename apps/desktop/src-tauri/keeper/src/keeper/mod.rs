@@ -156,6 +156,16 @@ pub fn socket_path(data: &Path) -> PathBuf {
     data.join("keeper.sock")
 }
 
+/// `<data>/keeper.log`: the keeper's stdout and stderr, the host's stderr, and the lines the shell
+/// and the window add to them.
+pub fn log_path(data: &Path) -> PathBuf {
+    data.join("keeper.log")
+}
+
+/// For the window, which links this crate and not the verifier: the one way to write hex and a
+/// file's hash.
+pub use content_verify::{hex, sha256_file};
+
 /// What the keeper says about itself and its host: the answer to `status` and `attach`, and the
 /// body of every pushed event.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

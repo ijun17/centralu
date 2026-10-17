@@ -40,6 +40,11 @@ export type SwapView = {
   cut?: string[]
   /** The keeper could not move to the new build (#280 step 4); the host switch went ahead anyway */
   keeperMessage?: string
+  /**
+   * A keeper running from verified content refused the new build's content (thin-shell plan §10 step 5):
+   * `content`, `downgrade`, `copy`, `in-use` or `no-content`, with the words in `message`. Nothing moved.
+   */
+  refused?: string
   startedAt: number
 }
 
@@ -162,6 +167,7 @@ export type AutoSwitchInput = {
     /** Started by "Apply now" (#352): the keeper held on through the relaunch and said so */
     relaunched?: boolean
     swap?: SwapView
+    swapToThisBuild?: boolean
   }
   /** "Apply updates automatically when idle" is on (#352) */
   autoApply: boolean
@@ -255,13 +261,15 @@ export function keeperStaysBehind(b: {
   keeper?: SwapBuild
   keeperSameBuild?: boolean
   swap?: SwapView
+  swapToThisBuild?: boolean
 }): boolean {
   const s = b.swap
   if (b.sameBuild !== true || b.keeperSameBuild !== false) return false
   if (!b.keeper) return true
   if (!s?.keeperMessage) return false
   if (s.phase !== 'done' && s.phase !== 'failed') return false
-  return !b.app || sameBuildKey(s.target, b.app)
+  // The window says it by the keeper's rule; a window from before `swapToThisBuild` leaves it to this one
+  return b.swapToThisBuild ?? (!b.app || sameBuildKey(s.target, b.app))
 }
 
 /** What the window's build bar shows: one of these, or nothing */
@@ -309,6 +317,7 @@ export type BuildBarInput = {
     sameBuild?: boolean
     keeperSameBuild?: boolean
     swap?: SwapView
+    swapToThisBuild?: boolean
     shell?: ShellStart
   }
   /** "Not now" or "Dismiss" was pressed, for as long as the window stays behind */
@@ -403,7 +412,10 @@ export function olderBuildText(app: SwapBuild | undefined, running: SwapBuild | 
   return `This window is an older build (${shortBuild(app)}) than the one running (${shortBuild(running)}).`
 }
 
-/** The keeper's notion of one build (`BuildSource::same_build`): the same commit and build time, whatever the path */
+/**
+ * One build for a window that does not say `swapToThisBuild`: the same commit and build time, whatever the path.
+ * Stricter than the keeper's rule (`BuildSource::same_build`), which ignores the build time of a clean commit.
+ */
 function sameBuildKey(a: SwapBuild, b: SwapBuild): boolean {
   return a.commit.trim() === b.commit.trim() && (a.builtAt ?? '') === (b.builtAt ?? '')
 }

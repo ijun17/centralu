@@ -64,7 +64,7 @@ const DEFAULT_MAX_QUEUED_BYTES = 64 * 1024 * 1024
 /** Every error a call rejects with, the host's and the client's own, is built here: an Error with the protocol's `code` and `retryable` (#972 item 7) */
 const rpcError = (message: string, code: string, retryable: boolean) => Object.assign(new Error(message), { code, retryable })
 
-/** The default RPC response timeout. Session creation and git operations also finish within this (measured at a few seconds) */
+/** The default RPC response timeout. Session creation and git reads also finish within this (measured at a few seconds) */
 const DEFAULT_CALL_TIMEOUT_MS = 30_000
 
 /**
@@ -102,6 +102,16 @@ const LONG_CALLS = new Set<string>([
 ])
 
 /**
+ * **A git write the person asked for** (#982 review): stage, commit, switch and push run the repository's hooks (a
+ * pre-commit type check, a pre-push test run) and the credential helper, which may wait on a sign-in. The host gives
+ * each 10 minutes (`WRITE_TIMEOUT_MS`, dev-services/git.ts). Under the 30-second default the screen said "RPC timed
+ * out" while git still held `index.lock`, unlocked its buttons, and a second click started a second commit. This
+ * budget is past the host's, so the screen hears the host's own answer, a timeout included.
+ */
+const GIT_WRITE_CALL_TIMEOUT_MS = 11 * 60_000
+const GIT_WRITE_CALLS = new Set<string>(['git.stage', 'git.commit', 'git.checkout', 'git.push'])
+
+/**
  * The budget for an app tool a screen calls (`apps.invoke`) (M4 D-4). That call can wait on a
  * person — the first time an app tries to use a capability, the host asks that app's pinned
  * screen and waits up to 5 minutes for an answer (the runtime's capabilityQuestionMs). After
@@ -115,6 +125,13 @@ const APP_CALL_TIMEOUT_MS = 15 * 60_000
 
 /** An endpoint in the one spelling `URL` gives it, so two spellings of one address compare equal */
 const endpointUrl = (url: string): string => new URL(url).toString()
+
+/** How long a call waits for the host before it is cut */
+function callBudget(method: string): number {
+  if (method === 'apps.invoke') return APP_CALL_TIMEOUT_MS
+  if (GIT_WRITE_CALLS.has(method)) return GIT_WRITE_CALL_TIMEOUT_MS
+  return LONG_CALLS.has(method) ? LONG_CALL_TIMEOUT_MS : DEFAULT_CALL_TIMEOUT_MS
+}
 
 export class RpcClient {
   private ws: WebSocket | null = null
@@ -504,7 +521,7 @@ export class RpcClient {
       const timer = setTimeout(() => {
         if (!this.take(id)) return
         reject(rpcError(`RPC timed out: ${method}`, 'timeout', true))
-      }, this.opts.callTimeoutMs ?? (method === 'apps.invoke' ? APP_CALL_TIMEOUT_MS : LONG_CALLS.has(method) ? LONG_CALL_TIMEOUT_MS : DEFAULT_CALL_TIMEOUT_MS))
+      }, this.opts.callTimeoutMs ?? callBudget(method))
       // Sent now if the host is ready, otherwise after the next hello_ok
       const ws = this.ready ? this.ws : null
       const viewRead = ['apps.viewFrame', 'apps.recoverView', 'apps.inlineReopen', 'apps.inlineViews', 'apps.holdViews'].includes(method) ||

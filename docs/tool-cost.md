@@ -661,6 +661,13 @@ pick a worktree as described; Codex (it reaches MCP tools through `exec`, §6).
 defers `agent_session`, so its resident cost does not move there. The line naming the delete once a child's answer is
 used rides in the answers (`done`, `at_rest`, a finished turn's report), at no resident cost. Not measured live.
 
+**#861: `name` (2026-10-17).** `start_agent` gained `name`, a bare optional string with no description: a short name
+for the child, shown in the sidebar, that its new worktree's branch is made from. Characters (`residentCost`): the
+agent set 1,333 → 1,358 (`AGENT_BUDGET_CHARS` 1,350 → 1,375); every ordinary Claude request carries the 25, as
+`start_agent` is loaded there. Not measured live: about 7 tokens at the ratio §10 measured. Without a name, the child's
+name and branch skip the leading words its task shares with a sibling's name (`distinguishingText`), which costs no
+schema.
+
 ## 11. Centralu's features first: instructions for ordinary sessions, and the orchestrator's preamble (#564, 2026-10-12)
 
 The owner replaced the principle that Centralu does not shape the person's workflow with a rule: unless the person
@@ -825,3 +832,19 @@ thread keeps what it was started with, agent-host.md §1.1); prompts deep in a l
 are far from the question; the consent cards allowed, so what `ask_project` or `attach_app` would then have answered;
 the orchestrator's new preamble on its own prompts; the `start_agent` line on Codex and in Korean, and with the consent
 card allowed (whether the child then does the long job); Windows and the packaged app.
+
+**#957: repository work through an app's guide (2026-10-17).** Owner decision: no task-to-tool table in these
+instructions, which sit in the prompt's cached prefix and would change whenever an app does; an app such as the
+project board serves its own table on demand from its `help` tool. One line, the same whichever apps they are, sends
+an agent there first (`REPO_WORK_FIRST`): "an attached app's help tool before repository work by hand (PRs, CI,
+merges, releases)". Only in an ordinary session that has an app attached when it starts
+(`READER_INSTRUCTIONS_WITH_APPS`): without one there is no help to read. Decided at the start, so a session's prefix
+never changes under it. Not in the orchestrator's instructions: it does no repository work itself. Characters: +88 in
+such a session's instructions (`residentCost` counts a session with no app, so the reader stays 2,585 on Claude and
+4,422 on Codex, and `READER_BUDGET_CHARS` stays 1,750). Not measured live: whether agents then call an app's `help`
+before `gh`.
+
+**#853: the orchestrator's children (2026-10-17).** `start_agent` and `agent_session` joined the orchestrator's rare
+commands (`RARE_COMMANDS`), so their 1,357 characters ride in none of its requests in the default tier; one line of
+its instructions names `start_agent` for light work outside any project. Orchestrator (`residentCost`): 8,744 →
+8,893 on Claude, 8,796 → 8,945 on Codex. Not measured live.

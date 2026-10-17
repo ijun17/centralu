@@ -674,7 +674,7 @@ fn start(data: PathBuf, build: BuildSource, p: Prepared, reaped: &[(i32, ExitSta
     let door = p.door.start();
     let now = Instant::now();
     let ago = |ms: u64| now.checked_sub(Duration::from_millis(ms)).unwrap_or(now);
-    let settings = source::Settings { background: snap.background };
+    let settings = source::Settings { background: snap.background, ..Default::default() };
     let origin = content::own_origin(&data);
     let copies = source::Copies::new(&data, origin.dir().map(Path::to_path_buf));
     let keeper = Arc::new(Keeper {

@@ -88,7 +88,7 @@ function resetWorkspaceSave(): void {
 }
 
 /** Sends the pending snapshot unless one is already on its way (that one sends the newer when it settles) */
-function flushWorkspace(get: () => AppState): void {
+function flushWorkspace(get: () => AppState, set: StoreSet): void {
   if (restoringWorkspace || workspaceSave.inFlight) return
   const platform = get().platform
   const snap = workspaceSave.pending
@@ -103,21 +103,25 @@ function flushWorkspace(get: () => AppState): void {
       if (workspaceSave.pending === snap) {
         workspaceSave.pending = null
         workspaceSave.attempt = 0
-      } else flushWorkspace(get) // A newer save came in meanwhile
+      } else flushWorkspace(get, set) // A newer save came in meanwhile
     },
     () => {
       if (workspaceSave.epoch !== epoch) return
       workspaceSave.inFlight = false
       // A newer save came in meanwhile: it supersedes this one and goes now
-      if (workspaceSave.pending !== snap) return flushWorkspace(get)
+      if (workspaceSave.pending !== snap) return flushWorkspace(get, set)
       // Disconnected: the reconnect sends it. Out of steps: the next reconnect or save does
       if (get().connection !== 'connected') return
       const wait = WORKSPACE_RETRY_MS[workspaceSave.attempt]
-      if (wait === undefined) return
+      if (wait === undefined) {
+        // Said once the retries run out (#841 item 9): a layout that silently did not stick was found after a restart
+        set({ toast: 'Could not save the window layout; it is tried again on the next change or reconnect' })
+        return
+      }
       workspaceSave.attempt++
       workspaceSave.retryTimer = setTimeout(() => {
         workspaceSave.retryTimer = null
-        flushWorkspace(get)
+        flushWorkspace(get, set)
       }, wait)
     },
   )
@@ -194,7 +198,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
         if ((connection === 'connected' || resync) && was !== 'connected') {
           // A save that failed while the host was away goes out now, with a fresh set of retries
           workspaceSave.attempt = 0
-          flushWorkspace(get)
+          flushWorkspace(get, set)
           // A new host (a restart, a switched build) read the installed CLIs before this window was back (#297)
           void get().checkAgentVersions(false)
           // Revive sessions that were running; a resync's own recovery below does that and more
@@ -228,14 +232,25 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
 
     const asked = get().sessions
     const watch = watchLiveEvents()
+    /*
+     * What could not be read and came up empty, said in one toast once the screen is up (#841 item 10): an empty grid
+     * or app list with no word read as "there is none", and the person rebuilt what was only unread
+     */
+    const unread: string[] = []
+    const orEmpty =
+      <T,>(what: string, empty: T) =>
+      (): T => {
+        unread.push(what)
+        return empty
+      }
     const [projects, sessions, gridPanels, tools, prefs, externalApps, themeFiles, machines] = await Promise.all([
       platform.projects.list(),
       platform.agents.listSessions(),
       // The app must come up even if the layout cannot be read — the grid just looks empty
       // Sanitized: a host from before apps could stand on the grid answers bare session ids, which still read as sessions
-      platform.agents.grid().then(sanitizeGridPanels).catch(() => [] as GridPanel[]),
+      platform.agents.grid().then(sanitizeGridPanels).catch(orEmpty('the grid layout', [] as GridPanel[])),
       // Same reason: the tool list must not block the app either — if it cannot be read, only names show, with no label
-      platform.agents.detect().catch(() => [] as ToolStatus[]),
+      platform.agents.detect().catch(orEmpty('the installed agent CLIs', [] as ToolStatus[])),
       /*
         The screen settings must **never arrive later than the first screen.**
 
@@ -247,14 +262,14 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
         come up because of one setting is far worse than whatever that setting does.
       */
       // Read through the schema, field by field: an older host answers without the fields it does not know
-      platform.prefs.load().then(parseUiPreferences, () => DEFAULT_UI_PREFERENCES),
+      platform.prefs.load().then(parseUiPreferences, orEmpty('the screen settings', DEFAULT_UI_PREFERENCES)),
       // The external app list (A-8) also arrives with the first screen — so the sidebar's app rows
       // do not pop in late. The app still comes up if it cannot be read: the app rows just look
       // empty, and the next broadcast re-reads them
-      platform.apps.list().catch(() => [] as ExternalAppInfo[]),
+      platform.apps.list().catch(orEmpty('the app list', [] as ExternalAppInfo[])),
       // The theme files arrive with the preferences that choose among them, so the first screen
       // already has its theme — and a folder that cannot be read just means the presets
-      platform.themes.list().catch(() => [] as ThemeFileEntry[]),
+      platform.themes.list().catch(orEmpty('the theme files', [] as ThemeFileEntry[])),
       // The linked machines (#82) name the sidebar's groups, so they come with the lists they group. A host from before them has none
       platform.machines.list().catch(() => [] as MachineInfo[]),
     ]).finally(watch.stop)
@@ -277,6 +292,8 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
         connection: 'connected',
       }
     })
+
+    if (unread.length) set({ toast: `Could not read ${unread.join(', ')}; shown empty or as defaults until read again` })
 
     // Replay events that arrived before the list was registered — the first output of a session that
     // was already running before the app was even opened is held here
@@ -496,7 +513,7 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
       foldComposer: s.foldComposer,
       introSeen: s.introSeen,
     } as never
-    flushWorkspace(get)
+    flushWorkspace(get, set)
   },
 
   /**
@@ -551,7 +568,13 @@ export const connectionActions = (set: StoreSet, get: StoreGet): ConnectionActio
         fresh = await platform.agents.listSessions().catch(() => null)
         if (fresh) break
         const wait = RECOVERY_RETRY_MS[attempt]
-        if (wait === undefined) return
+        if (wait === undefined) {
+          // Said, not dropped (#841 item 9): the sidebar may miss what changed while the host was away
+          if (generation === recoveryGeneration && get().platform === platform) {
+            set({ toast: 'Could not catch up after reconnecting: the session list may be out of date until the next reconnect' })
+          }
+          return
+        }
         await new Promise((r) => setTimeout(r, wait))
         if (generation !== recoveryGeneration || get().platform !== platform || get().connection !== 'connected') return
       }

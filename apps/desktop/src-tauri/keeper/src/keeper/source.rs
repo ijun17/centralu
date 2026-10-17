@@ -461,27 +461,85 @@ impl Drop for Claim<'_> {
 
 /// Background mode (#280, decision 1): whether closing the last window leaves the keeper and
 /// the host running. Off by default.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+///
+/// The file is shared by every build that serves this data folder, an older keeper after a person
+/// goes back a release included (#384): each reads what it knows and keeps the rest. A field this
+/// build does not know stays in `rest` and is written back with it; a value it cannot read takes its
+/// default alone, and is said.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Settings {
-    #[serde(default)]
     pub background: bool,
+    /// The fields this build does not know (a newer build's), as they were read.
+    pub rest: serde_json::Map<String, serde_json::Value>,
+}
+
+impl Settings {
+    /// Reads the fields this build knows from the file's JSON, and keeps the others. Errs on a file
+    /// that is not a JSON object at all.
+    pub fn from_json(text: &str) -> Result<(Settings, Vec<String>), String> {
+        let value: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("not JSON ({e})"))?;
+        let serde_json::Value::Object(mut rest) = value else { return Err("not a JSON object".into()) };
+        let mut problems = Vec::new();
+        let background = match rest.remove("background") {
+            None => false,
+            Some(serde_json::Value::Bool(on)) => on,
+            Some(other) => {
+                problems.push(format!("background is {other}, not true or false"));
+                false
+            }
+        };
+        Ok((Settings { background, rest }, problems))
+    }
+
+    pub fn to_json(&self) -> serde_json::Value {
+        let mut all = self.rest.clone();
+        all.insert("background".into(), serde_json::Value::Bool(self.background));
+        serde_json::Value::Object(all)
+    }
 }
 
 pub fn settings_path(data: &Path) -> PathBuf {
     data.join("keeper-settings.json")
 }
 
-/// A missing or unreadable file reads as the default (off): failing to read a preference must
-/// never be the reason agents keep running unwatched.
+/// A missing file reads as the default (off), and so does one this build cannot read: failing to
+/// read a preference must never be the reason agents keep running unwatched. What could not be read
+/// is said on stderr (`keeper.log`), naming the file.
 pub fn load_settings(data: &Path) -> Settings {
-    fs::read_to_string(settings_path(data))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    let path = settings_path(data);
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Settings::default(),
+        Err(e) => {
+            eprintln!("[keeper] cannot read {} ({e}); background mode reads as off", path.display());
+            return Settings::default();
+        }
+    };
+    match Settings::from_json(&text) {
+        Ok((settings, problems)) => {
+            for p in problems {
+                eprintln!("[keeper] {}: {p}; it reads as off", path.display());
+            }
+            settings
+        }
+        Err(why) => {
+            eprintln!("[keeper] {} is {why}; background mode reads as off until it is set again", path.display());
+            Settings::default()
+        }
+    }
 }
 
 pub fn save_settings(data: &Path, settings: &Settings) -> io::Result<()> {
-    write_private(&settings_path(data), &serde_json::to_vec_pretty(settings)?)
+    write_private(&settings_path(data), &serde_json::to_vec_pretty(&settings.to_json())?)
+}
+
+/// Sets background mode in the file, keeping every other field there as it is (a newer build's).
+/// A file that cannot be read is replaced.
+pub fn save_background(data: &Path, on: bool) -> io::Result<Settings> {
+    let mut settings = load_settings(data);
+    settings.background = on;
+    save_settings(data, &settings)?;
+    Ok(settings)
 }
 
 /**
@@ -873,10 +931,45 @@ mod tests {
         assert!(!load_settings(&data).background, "off by default");
         fs::write(settings_path(&data), "not json").unwrap();
         assert!(!load_settings(&data).background, "an unreadable file reads as off");
-        save_settings(&data, &Settings { background: true }).unwrap();
+        save_background(&data, true).unwrap();
         assert!(load_settings(&data).background);
         let mode = fs::metadata(settings_path(&data)).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    /// #384: the file is shared with every other build that serves this data folder. A newer build's
+    /// fields survive this one saving, and a newer shape of a known field, or a file that is no object
+    /// at all, reads as off without a crash.
+    #[test]
+    fn a_newer_settings_file_keeps_what_this_build_does_not_know() {
+        let data = temp("settings-newer");
+        let newer = r#"{ "background": true, "idleQuitMinutes": 30, "windows": { "reopen": ["main"] } }"#;
+        fs::write(settings_path(&data), newer).unwrap();
+        let read = load_settings(&data);
+        assert!(read.background);
+        assert_eq!(read.rest.get("idleQuitMinutes"), Some(&serde_json::json!(30)));
+
+        save_background(&data, false).unwrap();
+        let written: serde_json::Value = serde_json::from_str(&fs::read_to_string(settings_path(&data)).unwrap()).unwrap();
+        assert_eq!(written, serde_json::json!({ "background": false, "idleQuitMinutes": 30, "windows": { "reopen": ["main"] } }));
+
+        // A newer shape of `background` is off, alone: the rest still reads
+        fs::write(settings_path(&data), r#"{ "background": { "on": true }, "idleQuitMinutes": 30 }"#).unwrap();
+        let (settings, problems) = Settings::from_json(&fs::read_to_string(settings_path(&data)).unwrap()).unwrap();
+        assert!(!settings.background);
+        assert_eq!(settings.rest.get("idleQuitMinutes"), Some(&serde_json::json!(30)));
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(!load_settings(&data).background);
+
+        for broken in ["[true]", "true", "null", "{", ""] {
+            fs::write(settings_path(&data), broken).unwrap();
+            assert!(!load_settings(&data).background, "{broken:?}");
+            assert!(Settings::from_json(broken).is_err(), "{broken:?}");
+        }
+        // A broken file is replaced by the next save
+        save_background(&data, true).unwrap();
+        assert!(load_settings(&data).background);
         let _ = fs::remove_dir_all(&data);
     }
 }

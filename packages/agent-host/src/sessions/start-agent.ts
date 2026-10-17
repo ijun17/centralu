@@ -1,4 +1,5 @@
 import { APP_SLUG, frameField, oneLineText, type AgentDifficulty, type AgentModels, type PermissionPreset, type ToolDefaults } from '@cc/protocol'
+import { worktreeSetupFrame } from './worktree-sessions.js'
 
 /**
  * start_agent and agent_session (#561) — an ordinary session starts another agent (Claude or Codex) in its own
@@ -31,12 +32,14 @@ export function presetWithin(child: PermissionPreset, parent: PermissionPreset):
  * background work rather than ending the turn on "waiting for it" (#729). It directs nothing else (product-spec.md
  * §1.2): the task is the parent's words, and the child works under its own approvals.
  */
-export function agentFrame(parentName: string, task: string): string {
+export function agentFrame(parentName: string, task: string, setupProblems: readonly string[] = []): string {
   return [
     `[Another session in this project, "${frameField(parentName)}", gives you this task through Centralu's start_agent. ` +
       'Your final message goes back to it as the answer: keep it short, and name the files it should read by their absolute paths. ' +
       // #729: children that backgrounded their verify and ended the turn "waiting for it" left the parent unanswered (#721)
       'Wait for your own background work that ends (a test run, a build) inside your turn before you answer.]',
+    // #841 item 3: the agent does not read the session's notices, and met a missing `.env` as a failing command
+    ...(setupProblems.length ? ['', worktreeSetupFrame(setupProblems)] : []),
     '',
     task,
   ].join('\n')
@@ -75,22 +78,65 @@ export function agentNoteFrame(parentName: string, text: string): string {
 }
 
 /**
- * The branch of a child's new worktree when the caller names none (#561 part 2): the job's first words as a slug under
- * Centralu's prefix, so the branch says what it is for, with a few characters of the session's id so two children
- * on the same job never collide. `centralu/write-the-parser-1a2b`.
+ * The branch of a child's new worktree when the caller names none (#561 part 2): the job's first words (or the name the
+ * caller gave, #861) as a slug under Centralu's prefix, so the branch says what it is for, with a few characters of
+ * the session's id so two children on the same job never collide. `centralu/write-the-parser-1a2b`.
+ *
+ * At most 40 characters after the prefix, the id included, cut at a word (#861): six branches cut at 40 characters of
+ * slug read the same in the sidebar, stopping inside the word that told them apart.
  */
-export function agentBranch(task: string, id: string, max = 40): string {
-  const slug = task
+export function agentBranch(task: string, id: string, max = 35): string {
+  const full = task
     .toLowerCase()
     .normalize('NFKD')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, max)
-    .replace(/-+$/, '')
+  let slug = full.slice(0, max)
+  // Not inside a word, unless the first word is longer than the whole
+  if (full.length > max && full[max] !== '-' && slug.includes('-')) slug = slug.slice(0, slug.lastIndexOf('-'))
+  slug = slug.replace(/-+$/, '')
   return `${APP_SLUG}/${slug || 'agent'}-${id.replace(/[^a-z0-9]/gi, '').slice(0, 4).toLowerCase()}`
 }
 
 /** The name a child starts with: its task's first words, like a session the person starts with a message */
 export function agentName(task: string, max = 48): string {
   return oneLineText(task, max) || 'Agent'
+}
+
+/** The words two names are compared by (#861): letters and digits, case and width folded */
+function nameWords(text: string): { word: string; at: number }[] {
+  return [...text.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({ word: m[0].normalize('NFKC').toLowerCase(), at: m.index }))
+}
+
+/** A sibling's words as its name carries them: one named by its branch loses Centralu's prefix and its id */
+function siblingWords(name: string): string[] {
+  const words = nameWords(name).map((w) => w.word)
+  return name.startsWith(`${APP_SLUG}/`) ? words.slice(1, -1) : words
+}
+
+/**
+ * A child's task from the first word that tells it apart from its siblings (#861), for its name and branch. A caller
+ * starting several children tends to open every task the same way ("Round 4 refactor of Centralu, area C …"), and
+ * names made from the first words then all read alike. The leading words a task shares with a sibling's name (the
+ * caller's other children, by the name they carry now) are left out when there are at least two of them and
+ * something is left. The task stays whole for the child; only its name and branch skip them.
+ */
+export function distinguishingText(task: string, siblings: readonly string[]): string {
+  const text = oneLineText(task)
+  const words = nameWords(text)
+  let shared = 0
+  for (const name of siblings) {
+    const theirs = siblingWords(name)
+    let n = 0
+    while (n < words.length && n < theirs.length && words[n]!.word === theirs[n]) n++
+    shared = Math.max(shared, n)
+  }
+  if (shared < 2 || shared >= words.length) return text
+  return text.slice(words[shared]!.at)
+}
+
+/** The short name a caller gave (#861), on one line and at most 40 characters; absent when it gave none */
+export function givenAgentName(name: string | undefined): string | undefined {
+  const flat = oneLineText(name ?? '')
+  return flat ? oneLineText(flat, 40) : undefined
 }

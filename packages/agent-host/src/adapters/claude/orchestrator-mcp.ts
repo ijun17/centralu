@@ -32,7 +32,13 @@ import { DrainCut, drainToolResult, hostDrain } from '../../drain.js'
  */
 export { ORCHESTRATOR_MCP_NAME }
 
-export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile = 'orchestrator', sessionId?: string) {
+export function orchestratorMcp(
+  tools: OrchestratorTools,
+  profile: ToolProfile = 'orchestrator',
+  sessionId?: string,
+  /** An app is attached as the session starts (#957, #992 review): the instructions then name an app's help */
+  appsAttached = false,
+) {
   const defs = toolDefsFor(profile)
   // A set with a deferred tool is loaded tool by tool: the reader's always, the orchestrator's in the `deferred` tier (#512)
   const someDeferred = defs.some((t) => 'deferred' in t && t.deferred === true)
@@ -56,7 +62,7 @@ export function orchestratorMcp(tools: OrchestratorTools, profile: ToolProfile =
      */
     alwaysLoad: !someDeferred,
     // None for the reader set (#320): server instructions are where a role would creep in
-    instructions: instructionsFor(profile),
+    instructions: instructionsFor(profile, undefined, appsAttached),
     // Only expose what the profile allows (#69) — the execution side re-checks the same rule.
     tools: defs.map((t) =>
       tool(t.name, t.description, t.schema.shape, async (args: Record<string, unknown>, extra: unknown) =>

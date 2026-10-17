@@ -1,5 +1,5 @@
 import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type ExternalAppInfo, type GitSource, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus } from '@cc/protocol'
-import type { BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard } from '../adapters/contract.js'
+import type { AgentListRow, AgentSessionOpts, BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard, StartAgentOpts } from '../adapters/contract.js'
 import type { AppCheckReport, AppRef } from '../apps/external/runtime.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
 import { inTurn } from '../idle.js'
@@ -66,6 +66,10 @@ export type OrchestratorSeatHost = {
     spec: { name: string; parent?: string; source?: GitSource },
     signal?: AbortSignal,
   ): Promise<{ ok: true; projectId: string; name: string; path: string; machine: string } | { ok: false; error: string }>
+  /** start_agent and agent_session for the central orchestrator (#853): the start flow, with the orchestrator as the caller */
+  startAgent(callerId: string, opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult>
+  agentSession(callerId: string, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
+  listAgents(callerId: string): AgentListRow[]
   /** handoff_session (#694): `HandoffFlow.handoff`, after this seat's own scope checks */
   handoff(
     callerId: string,
@@ -475,10 +479,23 @@ export function orchestratorToolsFor(
     // Only an ordinary session asks another project (#371): the orchestrator, managers and coordinators already
     // direct sessions with send_to_session, inside their own view
     askProject: async () => ({ ok: false, error: 'Only an ordinary project session can ask another project' }),
-    // The same for starting agents (#561): these seats create and direct sessions with their own tools
-    startAgent: async () => ({ ok: false, error: 'Only an ordinary project session can start agents this way' }),
-    agentSession: async () => ({ ok: false, error: 'Only an ordinary project session can start agents this way' }),
-    listAgents: async () => ({ ok: false, error: 'Only an ordinary project session can start agents this way' }),
+    /*
+     * Starting agents (#561): an ordinary session's, and the central orchestrator's (#853), which hands light work
+     * outside any project (a web search, a lookup) to a child the person can watch, where it used to reach for its
+     * CLI's own subagent, which Centralu never shows. A coordinator and a hub's view direct sessions with their own tools
+     */
+    startAgent: async (opts, signal) =>
+      central && host.meta.get(orchestratorId)?.kind === 'orchestrator'
+        ? host.startAgent(orchestratorId, opts, signal)
+        : { ok: false, error: 'Only an ordinary project session or the orchestrator can start agents this way' },
+    agentSession: async (opts, signal) =>
+      central && host.meta.get(orchestratorId)?.kind === 'orchestrator'
+        ? host.agentSession(orchestratorId, opts, signal)
+        : { ok: false, error: 'Only an ordinary project session or the orchestrator can start agents this way' },
+    listAgents: async () =>
+      central && host.meta.get(orchestratorId)?.kind === 'orchestrator'
+        ? { ok: true, agents: host.listAgents(orchestratorId) }
+        : { ok: false, error: 'Only an ordinary project session or the orchestrator can start agents this way' },
 
     sendToSession: async (sessionId, text, reportBack, ifBusy) => {
       /*

@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs'
 import { belowFloor, floorOf, isHostCrash, switchedSentence, updateNodeSentence } from './node-floor.js'
 import { nodeFloor } from './install.js'
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
-import { floorOf as launcherFloorOf } from '../../../../packaging/npm/centralu/bin/node-floor.mjs'
+import { belowFloor as launcherBelowFloor, floorOf as launcherFloorOf } from '../../../../packaging/npm/centralu/bin/node-floor.mjs'
+
+type FloorFixture = { floor: string; cases: { found: string; below: boolean }[] }
 
 describe('the Node floor the hub checks machines against (#699)', () => {
   it('is the one the launcher checks: engines.node of the npm package', () => {
@@ -21,6 +23,21 @@ describe('the Node floor the hub checks machines against (#699)', () => {
     expect(belowFloor('24.21.0', '22.14.0')).toBe(false)
     expect(belowFloor(null, '22.14.0')).toBe(false)
     expect(belowFloor('unknown', '22.14.0')).toBe(false)
+  })
+
+  /*
+   * The keeper checks the same floor in Rust (`host_proc/node.rs` `below_floor`) and disagreed on `v22.14.0-rc.1`,
+   * `v22` and `v22.x.1`. One fixture pins the three checks; the keeper's test reads it too.
+   */
+  it('agrees with the launcher and the keeper on every version in the shared fixture', () => {
+    const fixture = JSON.parse(readFileSync(new URL('../../../../tooling/fixtures/node-floor.json', import.meta.url), 'utf8')) as FloorFixture
+    expect(fixture.cases.length).toBeGreaterThan(10)
+    for (const { found, below } of fixture.cases) {
+      expect({ found, hub: belowFloor(found, fixture.floor) }).toEqual({ found, hub: below })
+      expect({ found, launcher: launcherBelowFloor(found, fixture.floor) as boolean }).toEqual({ found, launcher: below })
+    }
+    const keeperTest = readFileSync(new URL('../../../../apps/desktop/src-tauri/keeper/src/host_proc/tests.rs', import.meta.url), 'utf8')
+    expect(keeperTest).toContain('include_str!("../../../../../../tooling/fixtures/node-floor.json")')
   })
 
   it('knows the ways a host dies on a Node below it', () => {

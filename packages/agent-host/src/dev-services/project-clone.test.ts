@@ -52,7 +52,7 @@ describe('why a clone failed, in one sentence', () => {
     expect(cloneFailure({ stderr: 'fatal: unable to access: Could not resolve host: host' }, url)).toMatch(/could not reach/)
     expect(cloneFailure({ stderr: 'remote: Repository not found.\nfatal: repository not found' }, url)).toMatch(/no repository at/)
     expect(cloneFailure({ code: 'ENOENT' }, url)).toMatch(/git is not installed/)
-    expect(cloneFailure({ killed: true, signal: 'SIGTERM' }, url)).toMatch(/longer than 10 minutes/)
+    expect(cloneFailure({ timedOut: true, killed: true, signal: 'SIGKILL' }, url)).toMatch(/longer than 10 minutes/)
     expect(cloneFailure({ stderr: 'fatal: something else\n' }, url)).toBe('git clone failed: something else')
   })
 })

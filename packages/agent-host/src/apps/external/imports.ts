@@ -1,9 +1,10 @@
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { isIP } from 'node:net'
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { wireJoin, wireSegments, type AppReview } from '@cc/protocol'
-import { assertExistingPathSync, isInside } from '../../dev-services/path-guard.js'
+import { removeDataQuietly } from '../../dev-services/data-folder.js'
+import { assertExistingPathSync, canonicalPath, isInside } from '../../dev-services/path-guard.js'
+import { isThisMachineHost } from '../../this-machine.js'
 import { proposedMcpServerNameError } from '../contract.js'
 import { APP_FOLDER_DEPTH, STOP, hiddenName, walkAppFolder } from './folder-walk.js'
 import { reviewKey } from './import-book.js'
@@ -115,14 +116,9 @@ export function classifySource(raw: string, isAbs: (path: string) => boolean = i
 function httpsProblem(url: URL): string | null {
   if (url.protocol !== 'https:') return `Only https links can be downloaded: ${url.href}`
   if (url.username || url.password) return 'Links with a user name or password in them are not accepted'
-  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
-  if (host === 'localhost' || host.endsWith('.localhost')) return `A link to this machine cannot be downloaded: ${url.href}`
-  if (isIP(host) === 4) {
-    const [a, b] = host.split('.').map(Number) as [number, number]
-    if (a === 127 || a === 0 || (a === 169 && b === 254)) return `A link to this machine or a link-local address cannot be downloaded: ${url.href}`
-  }
-  if (isIP(host) === 6 && (host === '::1' || host === '::' || /^fe[89ab]/.test(host) || host.startsWith('::ffff:'))) {
-    return `A link to this machine or a link-local address cannot be downloaded: ${url.href}`
+  if (isThisMachineHost(url.hostname)) {
+    const named = url.hostname === 'localhost' || url.hostname.endsWith('.localhost')
+    return named ? `A link to this machine cannot be downloaded: ${url.href}` : `A link to this machine or a link-local address cannot be downloaded: ${url.href}`
   }
   return null
 }
@@ -185,14 +181,15 @@ export type StagedFiles = {
 
 /**
  * Stages a source on this machine (a folder or a `.zip`) into `dest` (a folder that does not exist
- * yet). The root is resolved to its **real path** — if the person chose a path that is itself a
+ * yet). The root is resolved to its **real path** (`canonicalPath`, so a Windows short name is the long one a link's target comes back with) — if the person chose a path that is itself a
  * link, that link was the person's choice (`/tmp` is `/private/tmp` on macOS), but a link **inside**
  * it is never followed.
  */
 export function stageLocal(path: string, dest: string, limits: ImportLimits): StagedFiles {
   let root: string
   try {
-    root = realpathSync(path)
+    statSync(path)
+    root = canonicalPath(path)
   } catch {
     throw new ImportRefused(`Nothing to import at ${path}`)
   }
@@ -252,7 +249,9 @@ function copyFolder(root: string, dest: string, limits: ImportLimits): StagedFil
       link: (r) => {
         let target: string
         try {
-          target = realpathSync(join(root, r))
+          // A link to nothing has no real path (`canonicalPath` would make one up from the parent)
+          statSync(join(root, r))
+          target = canonicalPath(join(root, r))
         } catch {
           t.skip(r, 'link to nothing')
           return
@@ -521,7 +520,11 @@ export function listAppFiles(dir: string, limits: ImportLimits): StagedFiles {
   return out
 }
 
-/** Cleans up one staging entry — silently, even on failure (the next startup cleans the whole staging area) */
-export function discard(dir: string): void {
-  rmSync(dir, { recursive: true, force: true })
+/**
+ * Cleans up one staging entry, retrying a busy file and, if it still will not go, only logging it: a failed cleanup
+ * must not replace the result or the reason beside it, nor throw from a timer (the next startup cleans the whole
+ * staging area)
+ */
+export function discard(dir: string, remove?: (path: string) => void): void {
+  removeDataQuietly(dir, '[apps]', remove)
 }

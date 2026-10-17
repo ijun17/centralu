@@ -11,6 +11,8 @@ export type ServersHost = {
   closed(): boolean
   /** The live query, once there is one: the set is replaced through it */
   query(): { setMcpServers(servers: Record<string, McpServerConfig>): Promise<{ errors: Record<string, string> }> } | null
+  /** Says something to the person in the session, as a warning notice (#841 item 8) */
+  warn(text: string): void
 }
 
 /**
@@ -43,7 +45,7 @@ export class ClaudeServers {
     this.appProxies.set(a.server, { proxy: appProxy(this.host.opts.apps!, a.server), tools: JSON.stringify(a.tools) })
   }
   if (this.host.opts.orchestratorTools) {
-    this.orchestratorServer = orchestratorMcp(this.host.opts.orchestratorTools, this.host.opts.toolProfile, this.host.opts.sessionId)
+    this.orchestratorServer = orchestratorMcp(this.host.opts.orchestratorTools, this.host.opts.toolProfile, this.host.opts.sessionId, this.appProxies.size > 0)
   }
   }
 
@@ -105,11 +107,20 @@ export class ClaudeServers {
     const servers = this.mcpServers()
     this.serversSync = this.serversSync
       .then(() => q.setMcpServers(servers))
+      /*
+       * Said in the session as well as logged (#841 item 8): logged only, an app that never attached looked like an app
+       * with no tools, and neither the person nor the agent learned why
+       */
       .then((r) => {
         const errors = Object.entries(r?.errors ?? {})
-        if (errors.length) console.error(`[claude] ${this.host.sessionId.slice(0, 8)} app servers failed to attach:`, errors)
+        if (!errors.length) return
+        console.error(`[claude] ${this.host.sessionId.slice(0, 8)} app servers failed to attach:`, errors)
+        if (!this.host.closed()) this.host.warn(`Claude Code could not attach ${errors.map(([name, why]) => `${name} (${String(why).split('\n')[0]})`).join(', ')}; its tools are missing from this session until it restarts.`)
       })
-      .catch((err: Error) => console.error(`[claude] ${this.host.sessionId.slice(0, 8)} could not update app servers: ${err.message}`))
+      .catch((err: Error) => {
+        console.error(`[claude] ${this.host.sessionId.slice(0, 8)} could not update app servers: ${err.message}`)
+        if (!this.host.closed()) this.host.warn(`Claude Code could not update this session's apps (${err.message.split('\n')[0]}); apps attached or removed since it started may not be in effect until it restarts.`)
+      })
   }
 
   /**

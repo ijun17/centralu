@@ -141,7 +141,7 @@ pub fn read_highest_seen(path: &Path) -> Result<Option<String>> {
             Ok(Some(v))
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(Error::io(format!("read {}", path.display()), e)),
+        Err(e) => Err(Error::read_io(format!("read {}", path.display()), e)),
     }
 }
 

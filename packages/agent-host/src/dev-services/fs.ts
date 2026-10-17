@@ -538,7 +538,7 @@ async function cloneTree(src: string, dst: string): Promise<boolean> {
   if (!clonesFiles()) return false
   return new Promise<boolean>((done) => {
     // -c demands clonefile (used if it can be, failed otherwise — it never quietly falls back to a copy on its own)
-    const p = spawn('/bin/cp', ['-Rc', src, dst], { stdio: 'ignore' })
+    const p = spawn('/bin/cp', ['-Rc', src, dst], { stdio: 'ignore', windowsHide: true })
     p.on('error', () => done(false))
     p.on('close', (code) => done(code === 0))
   })

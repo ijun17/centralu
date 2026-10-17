@@ -131,6 +131,8 @@ const ApprovalDetailKinds = z.discriminatedUnion('kind', [
     worktree: z.object({ branch: z.string() }).optional(),
     /** One line for a person to read: the task, cut short */
     text: z.string(),
+    /** The short name the caller gave the new session (#861), shown in the sidebar; absent: named from its task */
+    name: z.string().optional(),
   }),
   /**
    * An ordinary session asks to check or install Centralu itself (#581). Applying the installed build (#665) is not an

@@ -78,6 +78,15 @@ boundaries (#603), with a log line instead of a card or refusal. The agent depth
   start_agent's gates (depth, trust, ceiling, the consent card, with the gates read again once the card is answered
   and a place under the ceiling taken before the fork is made), runs at the lower of the two presets, and gets a worktree of its own unless it is read-only work,
   which shares the folder under at most `safe`, so two agents never write one folder.
+- **The orchestrator's children** (#853): the orchestrator reaches `start_agent` and `agent_session` too (as commands
+  in the `commands` tier), for light work outside any project. Its child has no project and works in a folder of its
+  own under `<data>/orchestrator-agents`, never the orchestrator's, so nothing it writes lands where the orchestrator
+  reads (Codex loads `.agents/skills` from a session's folder whatever the trust) and no two children share one; the
+  folder goes when the child is deleted for good. It runs under the orchestrator's preset with no Centralu tools and
+  only the person's own settings (no project to trust). The consent is a card under `safe` and `normal` (no
+  project's trust stands in for it), with "always for this project" kept as always for the orchestrator while the host
+  serves it, since there is no project to remember it for; `auto` opens it. `agent_session` acts only on a child whose
+  `askedBy` is the orchestrator, in every preset. The depth binds as for any caller: the orchestrator is at 0.
 - **A ceiling**: Settings → Orchestrator → Running agents per project (`prefs.agentCeiling`).
   Empty uses the preset default: no ceiling under `auto`, 4 otherwise (`AGENT_CEILING`); zero
   explicitly removes the ceiling, and a positive integer limits all running children in each project.
@@ -313,8 +322,8 @@ is not listed for it and a call by name is refused (`Not a tool of this session`
 | `check` | — | — | yes | — | — |
 | `create_app` | yes | — | — | — | — |
 | `ask_project` | — | — | — | yes | — |
-| `start_agent` | — | — | — | yes | — |
-| `agent_session` | — | — | — | yes | — |
+| `start_agent` | yes | — | — | yes | — |
+| `agent_session` | yes | — | — | yes | — |
 | `find_apps` | — | — | — | yes | — |
 | `attach_app` | — | — | — | yes | — |
 | `detach_app` | — | — | — | yes | — |
@@ -1144,7 +1153,7 @@ then who may call it:
   into the user folder from elsewhere is not: see "Imported apps and app links" below.
 - The host withholds its own environment: every `CC_*` and `CENTRALU_*` variable is removed (the
   WebSocket token is one; with it an app could call every RPC). The app receives its declared
-  secrets, `CENTRALU_APP_ID` and `CENTRALU_APP_DATA` (`runtime.ts` `spawnSpec`; test "receives its
+  secrets, `CENTRALU_APP_ID` and `CENTRALU_APP_DATA` (`app-start-env.ts` `spawnSpec`; test "receives its
   data folder (created for it) and only its declared secrets, never the host's own variables").
 - Secret values live in `app-secrets.json` (0600) and are replaced by their names in the app's log,
   run records (arguments, errors, kept failures) and error bundles (`secrets.ts` `redactor`,
@@ -1393,8 +1402,9 @@ its own `<meta>`, never widen it. By default: `default-src 'none'`; inline scrip
 unless declared; `form-action 'none'`; `object-src 'none'`. `'self'` is not a source: under the
 opaque origin it would mean the host port. A declared entry must be `scheme://host[:port][/path]`
 with http(s) or ws(s) (a `*.` subdomain or a `:*` port is allowed). A bare `*`, bare schemes,
-keywords, anything containing a space, `;` or `,`, and loopback hosts (where the host's routes and
-other apps' ports live) are dropped, and the drop is logged. A declared host is parsed the way a
+keywords, anything containing a space, `;` or `,`, and hosts of this machine (loopback, unspecified and
+link-local, also with a trailing dot or inside a `::`-compatible or NAT64 IPv6 address: where the host's routes and other apps' ports live, and cloud metadata; the same check an
+import's download address goes through) are dropped, and the drop is logged. A declared host is parsed the way a
 browser parses a URL (WHATWG) before it is checked, and the policy carries that canonical form, so
 `127.1`, `2130706433` and `0x7f000001` are read as `127.0.0.1` and dropped (#407). This is
 hardening, not a closed hole: CSP host matching is literal, and Chromium and WebKit (Playwright)

@@ -61,6 +61,48 @@ pub fn alive(sock: &Path) -> bool {
     request(sock, &json!({ "op": "status" }), Duration::from_secs(2)).is_ok()
 }
 
+// The window's requests, one function per op it sends (`server::handle` answers them), each with the
+// bound the window has always given it.
+
+/// `relaunching` (#352): the keeper holds on through the window's relaunch. Its grace, in seconds.
+pub fn relaunching(sock: &Path) -> Result<u64, String> {
+    let v = request(sock, &json!({ "op": "relaunching" }), Duration::from_secs(5))?;
+    Ok(v.get("graceSecs").and_then(Value::as_u64).unwrap_or(0))
+}
+
+/// `restart`: starts the host again (the failure screen's Retry). Whether the keeper started one.
+pub fn restart_host(sock: &Path) -> Result<bool, String> {
+    let v = request(sock, &json!({ "op": "restart" }), Duration::from_secs(5))?;
+    Ok(v.get("started").and_then(Value::as_bool).unwrap_or(false))
+}
+
+/// `switch` (#280 step 3): swaps the host to `source`, and the keeper to the executable `keeper`
+/// first when named (step 4).
+pub fn switch(sock: &Path, source: &super::source::BuildSource, keeper: Option<&Path>) -> Result<(), String> {
+    let mut req = json!({ "op": "switch", "source": source });
+    if let Some(exe) = keeper {
+        req["keeper"] = json!({ "exe": exe });
+    }
+    request(sock, &req, Duration::from_secs(10)).map(|_| ())
+}
+
+/// `settings`: whether background mode is on.
+pub fn background(sock: &Path) -> Result<bool, String> {
+    let v = request(sock, &json!({ "op": "settings" }), Duration::from_secs(5))?;
+    Ok(v.get("background").and_then(Value::as_bool).unwrap_or(false))
+}
+
+/// `set_background`: turns background mode on or off. What it is now.
+pub fn set_background(sock: &Path, on: bool) -> Result<bool, String> {
+    let v = request(sock, &json!({ "op": "set_background", "on": on }), Duration::from_secs(5))?;
+    Ok(v.get("background").and_then(Value::as_bool).unwrap_or(on))
+}
+
+/// `stop`: the keeper stops the host, everything it holds and itself, whatever background mode says.
+pub fn stop(sock: &Path) -> Result<(), String> {
+    request(sock, &json!({ "op": "stop" }), Duration::from_secs(5)).map(|_| ())
+}
+
 /// A live attach connection. Its being open is what tells the keeper a window is attached;
 /// closing it (or this process ending, however it ends) is the detach.
 pub struct Attached {
@@ -174,6 +216,55 @@ mod tests {
             PathBuf::from("/Applications/Centralu.app")
         );
         assert_eq!(bundle_of(Path::new("/usr/bin/centralu")), PathBuf::from("/usr/bin/centralu"));
+    }
+
+    /// A keeper that takes one request, answers `answer`, and hands back what it was asked.
+    fn one_answer(name: &str, answer: &'static str) -> (PathBuf, thread::JoinHandle<Value>) {
+        use std::os::unix::net::UnixListener;
+        let sock = std::env::temp_dir().join(format!("cc-client-{}-{name}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&sock);
+        let listener = UnixListener::bind(&sock).unwrap();
+        let asked = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let line = read_line(&mut BufReader::new(stream.try_clone().unwrap())).unwrap().unwrap();
+            stream.write_all(format!("{answer}\n").as_bytes()).unwrap();
+            serde_json::from_str(&line).unwrap()
+        });
+        (sock, asked)
+    }
+
+    /// The window's requests used to be written inline at each call; the keeper matches the op by name
+    /// (`server::handle`), so each function must send exactly the request the window always sent.
+    #[test]
+    fn each_request_sends_its_op_and_reads_its_answer() {
+        use super::super::source::BuildSource;
+        let check = |name: &str, answer: &'static str, call: &dyn Fn(&Path) -> String, sent: Value, got: &str| {
+            let (sock, asked) = one_answer(name, answer);
+            assert_eq!(call(&sock), got, "{name}");
+            assert_eq!(asked.join().unwrap(), sent, "{name}");
+            let _ = std::fs::remove_file(&sock);
+        };
+        check("relaunching", r#"{"ok":true,"graceSecs":30}"#, &|s| format!("{:?}", relaunching(s)), json!({ "op": "relaunching" }), "Ok(30)");
+        check("restart", r#"{"ok":true,"started":true}"#, &|s| format!("{:?}", restart_host(s)), json!({ "op": "restart" }), "Ok(true)");
+        check("settings", r#"{"ok":true}"#, &|s| format!("{:?}", background(s)), json!({ "op": "settings" }), "Ok(false)");
+        check(
+            "set-background",
+            r#"{"ok":true,"background":true}"#,
+            &|s| format!("{:?}", set_background(s, true)),
+            json!({ "op": "set_background", "on": true }),
+            "Ok(true)",
+        );
+        check("stop", r#"{"ok":true}"#, &|s| format!("{:?}", stop(s)), json!({ "op": "stop" }), "Ok(())");
+        let source = BuildSource { commit: "abc".into(), ..Default::default() };
+        check(
+            "switch",
+            r#"{"ok":true}"#,
+            &|s| format!("{:?}", switch(s, &source, Some(Path::new("/A.app/Contents/MacOS/centralu-keeper")))),
+            json!({ "op": "switch", "source": { "commit": "abc" }, "keeper": { "exe": "/A.app/Contents/MacOS/centralu-keeper" } }),
+            "Ok(())",
+        );
+        check("switch-bare", r#"{"ok":true}"#, &|s| format!("{:?}", switch(s, &source, None)), json!({ "op": "switch", "source": { "commit": "abc" } }), "Ok(())");
+        check("refused", r#"{"ok":false,"error":"no"}"#, &|s| format!("{:?}", stop(s)), json!({ "op": "stop" }), r#"Err("no")"#);
     }
 
     #[test]

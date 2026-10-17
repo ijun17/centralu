@@ -276,7 +276,7 @@ function makeBundle(root: string, name: string, version: string, keeper: string,
   return { name, version, app, exe, content, commit }
 }
 
-/** What a window of this bundle sends (sidecar.rs `switch_build`); a keeper from content never reads `hostDir` */
+/** What a window of this bundle sends (sidecar/link.rs `switch_build`); a keeper from content never reads `hostDir` */
 const switchFrom = (b: Bundle) => ({
   op: 'switch',
   source: { commit: b.commit, hostDir: join(b.app, 'Contents/Resources/resources/host'), bundlePath: b.app, version: b.version },

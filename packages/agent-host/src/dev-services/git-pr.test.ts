@@ -49,8 +49,8 @@ function fakeGh(bin: string): void {
  * children (it runs git) must end with it. The gh here (`fakeGh`) runs the
  * script named `pr` in its working directory, which starts a child of its own and waits. The child is detached: a
  * child Node starts otherwise is in Node's job and ends with it on Windows, which gh's (a Go program's) are not.
- * Its end is checked on Windows only: elsewhere gh is in the host's process group, which `killTree` leaves alone,
- * and a folder a process works in can be removed.
+ * Its end is checked on Windows only: elsewhere a detached child leaves gh's process group, which is what `killTree`
+ * ends, and a folder a process works in can be removed. A child that stays in the group is checked everywhere (below).
  */
 describe('gh stopped by an abort (#368)', () => {
   let root: string
@@ -138,6 +138,67 @@ describe('gh stopped by an abort (#368)', () => {
     expect(alive(ghPid)).toBe(false)
     if (process.platform === 'win32') await until(() => !alive(child), 5_000)
   })
+
+  // #982: the bound was execFile's own, which ends gh alone; a child holding gh's output then held the answer as well
+  it('ends gh and what it started when gh does not answer in time', { timeout: 30_000 * SLOW }, async () => {
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-gh-timeout-')))
+    const bin = join(root, 'bin')
+    const project = join(root, 'project')
+    mkdirSync(bin)
+    mkdirSync(project)
+    fakeGh(bin)
+    writeFileSync(join(project, 'package.json'), '{"type":"commonjs"}')
+    writeFileSync(join(project, 'pr'), [
+      "const { spawn } = require('node:child_process')",
+      "const { writeFileSync } = require('node:fs')",
+      `const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { cwd: ${JSON.stringify(bin)}, stdio: ['ignore', 'inherit', 'inherit'], detached: true })`,
+      "writeFileSync('pids', JSON.stringify([process.pid, child.pid]))",
+      'setInterval(() => {}, 1000)',
+    ].join('\n'))
+    vi.stubEnv('PATH', `${bin}${delimiter}${process.env.PATH ?? ''}`)
+    __forgetPrograms()
+
+    const bound = 3_000 * SLOW
+    const started = Date.now()
+    const answer = gitBranchPr(project, 'feat/x', undefined, bound)
+    await until(() => existsSync(join(project, 'pids')), 20_000)
+    const [ghPid, child] = JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number]
+    childPid = child
+    expect(await answer).toBeNull()
+    expect(Date.now() - started).toBeLessThan(bound + 5_000 * SLOW)
+    expect(alive(ghPid)).toBe(false)
+    if (process.platform === 'win32') await until(() => !alive(child), 5_000)
+  })
+
+  // #982 review: in the host's process group the tree kill spared what gh started (git, reading the remotes); gh now
+  // leads a group of its own, and a child that stays in it ends with it on every system
+  it('ends a child gh started in its own group when gh does not answer in time', { timeout: 30_000 * SLOW }, async () => {
+    root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-gh-timeout-')))
+    const bin = join(root, 'bin')
+    const project = join(root, 'project')
+    mkdirSync(bin)
+    mkdirSync(project)
+    fakeGh(bin)
+    writeFileSync(join(project, 'package.json'), '{"type":"commonjs"}')
+    writeFileSync(join(project, 'pr'), [
+      "const { spawn } = require('node:child_process')",
+      "const { writeFileSync } = require('node:fs')",
+      // Not detached: what gh's own git looks like
+      `const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60_000)'], { cwd: ${JSON.stringify(bin)}, stdio: 'ignore' })`,
+      "writeFileSync('pids', JSON.stringify([process.pid, child.pid]))",
+      'setInterval(() => {}, 1000)',
+    ].join('\n'))
+    vi.stubEnv('PATH', `${bin}${delimiter}${process.env.PATH ?? ''}`)
+    __forgetPrograms()
+
+    const answer = gitBranchPr(project, 'feat/x', undefined, 3_000 * SLOW)
+    await until(() => existsSync(join(project, 'pids')), 20_000)
+    const [ghPid, child] = JSON.parse(readFileSync(join(project, 'pids'), 'utf8')) as [number, number]
+    childPid = child
+    expect(await answer).toBeNull()
+    expect(alive(ghPid)).toBe(false)
+    await until(() => !alive(child), 5_000 * SLOW)
+  })
 })
 
 /*
@@ -174,4 +235,5 @@ describe('a gh that is a batch file', () => {
     const answer = await gitBranchPr(project, 'feat/x')
     expect({ answer, plantedRan: existsSync(join(project, 'planted-ran')) }).toEqual({ answer: 'unavailable', plantedRan: false })
   })
+
 })

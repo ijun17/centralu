@@ -1,12 +1,12 @@
 import type { ChildProcess } from 'node:child_process'
-import { closeSync, existsSync, mkdirSync, openSync, renameSync, statSync, writeSync } from 'node:fs'
+import { mkdirSync } from 'node:fs'
 import type { Socket } from 'node:net'
 import { dirname } from 'node:path'
 import { Client, type PriorDiscovery, type Tool } from '@modelcontextprotocol/client'
 import { CLIENT_INFO } from '@cc/protocol'
 import { KILL_GRACE_MS, hasProcessGroups, stopTree } from '../../dev-services/kill-tree.js'
 import { killHandle, spawnGrouped, sweepExited } from '../../dev-services/grouped-child.js'
-import { rotateIfLarge } from '../../log-file.js'
+import { RollingFile } from '../../log-file.js'
 import { LineTail, lineSplitter } from '../../stream-text.js'
 import { ExitAfterDrain } from '../../exit-after-drain.js'
 import { resolveCommand, type ToolLaunch } from '../../tool-launch.js'
@@ -355,25 +355,22 @@ const TAIL_LINE_CHARS = 500
  * plan "data and secrets").
  */
 class AppLog {
-  private fd: number | null = null
-  private written = 0
+  private readonly file: RollingFile
   // So a line that never ends does not consume memory — if it gets long, it is written even if that means cutting it off
   private readonly lines = lineSplitter((line) => this.appLine(line), { maxLine: 8192 })
   private readonly recent = new LineTail(TAIL_LINES, TAIL_LINE_CHARS)
 
   constructor(
-    private path: string,
-    private maxBytes: number,
+    path: string,
+    maxBytes: number,
     private redact: (text: string) => string,
   ) {
     try {
       mkdirSync(dirname(path), { recursive: true })
-      rotateIfLarge(path, maxBytes)
-      this.written = existsSync(path) ? statSync(path).size : 0
-      this.fd = openSync(path, 'a')
     } catch {
-      this.fd = null
+      /* the file below goes quiet if its folder is not there */
     }
+    this.file = new RollingFile(path, maxBytes)
   }
 
   note(text: string): void {
@@ -399,12 +396,7 @@ class AppLog {
 
   close(): void {
     this.flush()
-    try {
-      if (this.fd !== null) closeSync(this.fd)
-    } catch {
-      /* already closed */
-    }
-    this.fd = null
+    this.file.close()
   }
 
   private appLine(line: string): void {
@@ -414,34 +406,6 @@ class AppLog {
   }
 
   private write(text: string): void {
-    if (this.fd === null) return
-    try {
-      writeSync(this.fd, text)
-      this.written += Buffer.byteLength(text)
-      if (this.written >= this.maxBytes) this.roll()
-    } catch {
-      /* even if the write fails, the app keeps running */
-    }
-  }
-
-  /** For the same reason as roll in log-file.ts, never hold onto a closed fd number */
-  private roll(): void {
-    try {
-      if (this.fd !== null) closeSync(this.fd)
-    } catch {
-      /* already closed */
-    }
-    this.fd = null
-    try {
-      renameSync(this.path, `${this.path}.1`)
-    } catch {
-      /* if it cannot be rolled, keep writing to the same file */
-    }
-    try {
-      this.fd = openSync(this.path, 'a')
-    } catch {
-      /* if it cannot be opened, only the file side goes quiet */
-    }
-    this.written = 0
+    this.file.write(text)
   }
 }

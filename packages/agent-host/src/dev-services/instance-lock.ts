@@ -60,6 +60,7 @@ export function processStartTime(pid: number): string | null {
   try {
     const out = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
       encoding: 'utf8',
+      windowsHide: true,
       timeout: 2000,
       stdio: ['ignore', 'pipe', 'ignore'],
       env: { ...process.env, LC_ALL: 'C' },

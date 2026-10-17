@@ -254,7 +254,10 @@ export class DelegationFlow {
     }
     const deletingWithoutWorktree = opts.action === 'delete' && !child?.worktree
     const startedHere = child?.askedBy === callerId || (deletingWithoutWorktree && child?.parentSessionId === callerId)
-    if (!caller?.projectId || !child || (!startedHere && (deletingWithoutWorktree || !this.host.autoBoundaryOpen(callerId, 'session ownership'))) || child.projectId !== caller.projectId) {
+    // The orchestrator works on the children it started outside any project (#853), and on no other session
+    const seat = caller?.projectId ? 'project' : caller?.kind === 'orchestrator' ? 'orchestrator' : null
+    const owns = seat === 'orchestrator' ? child?.askedBy === callerId : startedHere || (!deletingWithoutWorktree && this.host.autoBoundaryOpen(callerId, 'session ownership'))
+    if (!caller || !seat || !child || !owns || child.projectId !== caller.projectId) {
       return { ok: false, error: `${opts.sessionId} is not a session this session started. agent_session works only on sessions start_agent started here.` }
     }
     if (opts.sessionId === callerId) return this.agentAtRest(child)
@@ -555,6 +558,8 @@ export class DelegationFlow {
     const deep = agentDepthRefusal(this.host, callerId, 'start a sub-session')
     // Worded for "No fork of …: <why>."
     if (deep) return deep.replace(/^This/, 'this').replace(/\.$/, '')
+    // A session with no project (the orchestrator's child, #853) has no repository to fork from (#994 review)
+    if (!target.projectId) return 'it works outside any project, so there is nothing to fork it from; send to it once its turn ends, or start a new session'
     const project = this.host.store.listProjects().find((p) => p.id === target.projectId)
     if (!project) return 'its project is no longer registered'
     if (project.trusted !== true && !this.host.autoBoundaryOpen(callerId)) return "its project is not trusted (the person can trust it from the project menu)"

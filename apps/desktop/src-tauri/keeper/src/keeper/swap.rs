@@ -136,6 +136,13 @@ impl SwapView {
             started_at: super::now_secs(),
         }
     }
+
+    /// Whether this swap went to `build`, by the keeper's rule of one build (`BuildSource::same_build`:
+    /// a clean commit names its code whatever its build time). The window says it for its own build
+    /// (`swapToThisBuild`), so the UI does not compare builds by a rule of its own.
+    pub fn is_to(&self, build: &BuildSource) -> bool {
+        self.target.same_build(build)
+    }
 }
 
 /// How a swap ended.
@@ -587,5 +594,19 @@ pub(crate) mod tests {
         let text = serde_json::to_string(&v).unwrap();
         assert!(text.contains(r#""phase":"failed""#) && text.contains(r#""rolledBack":true"#), "{text}");
         assert_eq!(serde_json::from_str::<SwapView>(&text).unwrap(), v);
+    }
+
+    /// A clean commit is one build whatever its build time; a dirty one is told apart by it. The UI
+    /// used to require both to be equal, and read a swap to this window's build as another's.
+    #[test]
+    fn a_swap_is_to_a_build_by_the_keepers_rule() {
+        let build = |commit: &str, at: &str| BuildSource { commit: commit.into(), built_at: Some(at.into()), ..Default::default() };
+        let swap = SwapView::begun(Phase::Done, build("9e77999e", "1000"), None);
+        assert!(swap.is_to(&build("9e77999e", "2000")), "a second local build of one clean commit");
+        assert!(swap.is_to(&build(" 9e77999e ", "1000")));
+        assert!(!swap.is_to(&build("daf4ecf5", "1000")));
+        let dirty = SwapView::begun(Phase::Done, build("9e77999e-dirty", "1000"), None);
+        assert!(dirty.is_to(&build("9e77999e-dirty", "1000")));
+        assert!(!dirty.is_to(&build("9e77999e-dirty", "2000")), "two builds of a dirty tree can hold different code");
     }
 }

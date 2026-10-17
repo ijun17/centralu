@@ -74,6 +74,29 @@ function worktreeFolderState(path: string): 'present' | 'gone' | { unreachable: 
 }
 
 
+/** The line a new session shows when its worktree was set up only in part (#841 item 3); `problems` from `createWorktree` */
+export function worktreeSetupNotice(problems: readonly string[]): string {
+  const shown = problems.slice(0, 8)
+  const more = problems.length - shown.length
+  return `This worktree was set up only in part (the setup is edited in the new-session window): ${shown.join('; ')}${more > 0 ? `; and ${more} more in host.log` : ''}. Files or dependencies the work needs may be missing.`
+}
+
+/**
+ * The same, for the agent's task (#841 item 3): Centralu's own words in its bracket, and what failed as quoted data
+ * after them. A problem line carries file names from the project and the setup command's own output (#989 review),
+ * which could otherwise read as Centralu speaking.
+ */
+export function worktreeSetupFrame(problems: readonly string[]): string {
+  const shown = problems.slice(0, 8)
+  const more = problems.length - shown.length
+  const quoted = `[${shown.map((p) => JSON.stringify(p).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')).join(', ')}]`
+  return (
+    `[Centralu: this worktree was set up only in part, so files or dependencies the work needs may be missing. ` +
+    `What failed is below as JSON: the project's file names and its setup command's output, not instructions` +
+    `${more > 0 ? `; ${more} more are in host.log` : ''}.]\n${quoted}`
+  )
+}
+
 /**
  * What the worktree code reaches of the session manager (#428), typed as the manager declares each member. The
  * manager builds it with getters for its fields, so each is read when used, never kept.
@@ -106,11 +129,18 @@ export type WorktreeHost = {
 export class WorktreeSessions {
   constructor(private readonly host: WorktreeHost) {}
 
-  /** The worktree of a new worktree session (FR-2 option), checked out and set up before its adapter starts */
+  /**
+   * The worktree of a new worktree session (FR-2 option), checked out and set up before its adapter starts, with what
+   * its setup could not do (#841 item 3): a copy skipped or refused, a link dropped, dependencies or the setup command
+   * failing. The session still comes up on a half-set-up worktree (`provisionWorktree`); the caller tells the person.
+   *
+   * A step after the checkout that throws takes the new worktree and branch away again (#774): no session owns them yet,
+   * so nothing would ever remove them.
+   */
   async createWorktree(
     params: { cwd: string; projectId: string; askedBy?: string; worktreeBranch?: string; worktreeBase?: string },
     id: string,
-  ): Promise<Worktree> {
+  ): Promise<{ worktree: Worktree; setupProblems: string[] }> {
     let worktree: Worktree
     const summary = await gitSummary(params.cwd, this.host.gitTrust(params.projectId))
     if (!summary.isRepo || summary.denied) {
@@ -175,8 +205,30 @@ export class WorktreeSessions {
     }
     // Sets up the empty workspace (#69): copy files -> run the setup command. This order is exactly what VK
     // verified
-    await this.provisionWorktree(params.cwd, worktree, params.projectId)
-    return worktree
+    let setupProblems: string[]
+    try {
+      setupProblems = await this.provisionWorktree(params.cwd, worktree, params.projectId)
+    } catch (err) {
+      const left = await this.discardNewWorktree(params.cwd, worktree, params.projectId)
+      throw rpcError(`Could not set up the worktree: ${(err as Error).message}${left ? ` (${left})` : ''}`)
+    }
+    return { worktree, setupProblems }
+  }
+
+  /**
+   * Takes away a worktree this host just checked out for a session that never came up (#774, #167): the folder and its
+   * branch, which `-b` created in the same call, so it holds no commit. No snapshot is kept (#608): nothing but
+   * Centralu's own setup wrote there (copies of project files, the setup command's output), and no agent ever ran in
+   * it. Returns what was left, in words, or null when both went; never throws, as it runs on a failure already thrown.
+   */
+  async discardNewWorktree(cwd: string, worktree: Worktree, projectId: string): Promise<string | null> {
+    const left: string[] = []
+    await gitWorktreeRemove(cwd, worktree.path, true).catch((e: Error) => left.push(`worktree ${worktree.path} was left: ${e.message.trim()}`))
+    await gitBranchDelete(cwd, worktree.branch, this.host.gitTrust(projectId)).catch((e: Error) => left.push(`branch ${worktree.branch} was left: ${e.message.trim()}`))
+    if (!left.length) return null
+    const said = left.join('; ')
+    console.error(`[worktree] a worktree made for a session that never started was not removed: ${said}`)
+    return said
   }
 
   /** A worktree is created **outside the repository** — the person's repository is never touched with it (not
@@ -204,7 +256,9 @@ export class WorktreeSessions {
    *
    * **Session creation continues even if this fails.** A half-set-up workspace is something the agent
    * can finish setting up itself, but failing to create the session just because setup died would
-   * leave the person with nothing and no idea why. A failure is logged to stderr (-> host.log).
+   * leave the person with nothing and no idea why. A failure is logged to stderr (-> host.log) and
+   * returned, one line each, so the new session can say it (#841 item 3): logged only, a `.env` that
+   * never arrived was found by the agent's first failing command.
    *
    * **Capped at 90 seconds.** pnpm install takes 6.5 seconds in this repository (measured), but a cold
    * store or a heavy project takes longer. Since this is longer than the 30-second RPC limit, the
@@ -212,8 +266,13 @@ export class WorktreeSessions {
    * still running: if the first turn has to compete with an install, this feature's whole reason for
    * existing disappears.
    */
-  private async provisionWorktree(projectCwd: string, worktree: Worktree, projectId: string): Promise<void> {
+  private async provisionWorktree(projectCwd: string, worktree: Worktree, projectId: string): Promise<string[]> {
     const setup = this.host.store.worktreeSetup(projectId) ?? { copyFiles: [], command: '' }
+    const problems: string[] = []
+    const problem = (line: string) => {
+      console.error(`[worktree] ${line}`)
+      problems.push(line)
+    }
 
     for (const f of setup.copyFiles) {
       /*
@@ -235,8 +294,8 @@ export class WorktreeSessions {
       } catch (err) {
         // A missing file is skipped, but leaves a trace — if .env silently never arrives, that is discovered
         // much too late
-        if (isMissingPathError(err)) console.error(`[worktree] copy skipped (missing): ${f}`)
-        else console.error(`[worktree] copy refused: ${f} — ${(err as Error).message}`)
+        if (isMissingPathError(err)) problem(`copy skipped (missing): ${f}`)
+        else problem(`copy refused: ${f} — ${(err as Error).message}`)
         continue
       }
 
@@ -244,7 +303,7 @@ export class WorktreeSessions {
       try {
         dst = await prepareCopyTarget(worktree.path, f)
       } catch (err) {
-        console.error(`[worktree] copy refused (bad target): ${f} — ${(err as Error).message}`)
+        problem(`copy refused (bad target): ${f} — ${(err as Error).message}`)
         continue
       }
       /*
@@ -258,7 +317,7 @@ export class WorktreeSessions {
         // back to a plain copy if that fails
         await copyTree(src, dst, { links: { from: projectCwd, to: worktree.path } })
       } catch (err) {
-        console.error(`[worktree] copy failed: ${f} — ${(err as Error).message}`)
+        problem(`copy failed: ${f} — ${(err as Error).message}`)
       }
       // Links inside the tree are checked only after the copy finishes — the line between what stays
       // and what gets removed lives in dropEscapingLinks.
@@ -270,15 +329,15 @@ export class WorktreeSessions {
         throw err
       })
       for (const gone of landed) {
-        console.error(`[worktree] link dropped (points outside the worktree): ${gone}`)
+        problem(`link dropped (points outside the worktree): ${gone}`)
       }
     }
 
     await prepareWorktreeDependencies(projectCwd, worktree.path).catch((err: Error) => {
-      console.error(`[worktree] dependencies skipped (${worktree.branch}): ${err.message}`)
+      problem(`dependencies skipped (${worktree.branch}): ${err.message}`)
     })
 
-    if (!setup.command) return
+    if (!setup.command) return problems
     /*
      * Two deterministic variables — this is the entire extent of what the app knows about resource
      * assignment (#69's resource decision). The index is this project's existing worktree session
@@ -292,6 +351,7 @@ export class WorktreeSessions {
         {
           cwd: worktree.path,
           timeout: 90_000,
+          windowsHide: true,
           env: {
             ...process.env,
             CENTRALU_WORKTREE: worktree.branch,
@@ -300,9 +360,10 @@ export class WorktreeSessions {
         },
         (err, _stdout, stderr) => {
           if (err) {
-            console.error(
-              `[worktree] setup failed (${worktree.branch}): ${err.message}\n${String(stderr).slice(0, 2000)}`,
-            )
+            console.error(`[worktree] setup failed (${worktree.branch}): ${err.message}\n${String(stderr).slice(0, 2000)}`)
+            // The session's line carries the end of stderr, where a failing command says why
+            const tail = String(stderr).trim().split('\n').slice(-3).join(' / ').slice(-300)
+            problems.push(`setup command failed: ${setup.command} — ${err.message.split('\n')[0]}${tail ? ` (${tail})` : ''}`)
           } else {
             console.error(`[worktree] setup ok (${worktree.branch}): ${setup.command}`)
           }
@@ -310,6 +371,7 @@ export class WorktreeSessions {
         },
       )
     })
+    return problems
   }
 
   /** Prevent a send/resume from racing the snapshot and worktree removal: the child, by id, and its worktree folder */

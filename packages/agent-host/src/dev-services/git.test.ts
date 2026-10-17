@@ -183,9 +183,9 @@ describe('the change summary on a large or slow tree (#850 review of item 10)', 
   it.skipIf(!posix)('reads git in English: a translated "not a git repository" is still no repository', async () => {
     const d = mkdtempSync(join(tmpdir(), 'cc-not-git-'))
     dirs.push(d)
-    // What git prints under a Korean locale, and the English it prints under C
+    // What git prints under a Korean locale, and the English it prints under C or C.UTF-8
     const restore = fakeStatus(
-      `if [ "$LC_ALL" = C ]; then echo 'fatal: not a git repository (or any of the parent directories): .git' >&2; else echo 'fatal: 깃 저장소가 아닙니다' >&2; fi; exit 128`,
+      `if [ "\${LC_ALL%%.*}" = C ]; then echo 'fatal: not a git repository (or any of the parent directories): .git' >&2; else echo 'fatal: 깃 저장소가 아닙니다' >&2; fi; exit 128`,
     )
     const previous = process.env.LC_ALL
     process.env.LC_ALL = 'ko_KR.UTF-8'

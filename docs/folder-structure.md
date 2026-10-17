@@ -129,16 +129,17 @@ centralu/
 │        │                      #   token-usage, tool-titles, retry-activity, session-kit, subagent-steps,
 │        │                      #   history-events (#843)
 │        ├─ sessions/           # SessionManager (manager.ts) and the parts moved out of it (#428): child-ownership, delegation-flow (start_agent in start-agent-flow, what it reaches of the manager in delegation-host), ask-project-flow, handoff-flow, handoff-record, external-conversations, session-record, tool-queries, app-sessions, app-messages, session-trash, host-cards, card-rest, delegated-cards, interruptions, sleep, turn-answer, linked-reports, orchestrator-seat, restart-policy, worktree-sessions, transcript-view, orchestrator-proposals, queued-requests, routed-cards, handoff-children, child-reports, interruption-watch, launch-records, merge-checks, project-creation, updates-asked, project-consents, ui-preferences, session-app-wiring, session-tools, handoff-notes; the session apps (session-apps, app-access, app-agents, app-builder, app-guide); the orchestrator tools' runner (orchestrator-tools) and the parts moved out of it (#850): tool-definitions, tool-seats, tool-answers, tool-profiles
-│        ├─ apps/external/      # external apps (apps.md): runtime.ts is the one door (ExternalApps); the parts moved out of it (#850): runtime-types, app-entry, app-lifecycle, app-calls, change-reflector, app-check, app-folders, error-log; and placement, folder-walk, discovery, manifest, desk/broker, capabilities, runs, handover/imports/versions
+│        ├─ apps/external/      # external apps (apps.md): runtime.ts is the one door (ExternalApps); the parts moved out of it (#850): runtime-types, app-entry, app-lifecycle, app-calls, change-reflector, app-check, app-folders, error-log, app-start-env (an app's start environment and secrets), app-resources (its resources and home view); and placement, folder-walk, discovery, manifest, desk/broker, capabilities, runs, handover/imports/versions
 │        ├─ views/              # app views: the view host, its CSP, the proxy page
-│        ├─ links/              # linked machines (#82): links, the remote client, install and update over ssh
+│        ├─ links/              # linked machines (#82): links.ts is the door (re-exports); one machine's connection and its operations, the registry of links, the remote client, install and update over ssh
 │        ├─ dev-services/       # despite the name, the prod path (agent-host.md §5): git, fs, store (sqlite),
 │        │                      #   the watcher, terminals and commands
 │        │  └─ store/           # what `Store` (store.ts) is made of; it opens the file, runs migrations and passes each call on
 │        │     ├─ migrations/   # the step list, in files by version range; index.ts holds the rule a new step follows
+│        │     ├─ migrate-runner.ts  reader-gate.ts   # what `Store` extends: the runner (and `Store.inspect`), the min-reader gate
 │        │     ├─ projects.ts  sessions.ts  grid.ts  messages.ts  handoff-markers.ts  trash.ts
 │        │     ├─ settings.ts  permissions.ts  app-runs.ts  child-ownership.ts  linked-machines.ts
-│        │     └─ search-index.ts  vacuum.ts   # shared by the steps and the tables above
+│        │     └─ search-index.ts  vacuum.ts   # shared by the steps and the tables above; vacuum.ts also runs an owed VACUUM
 │        └─ keeper/             # the keeper's child service: agents and ptys spawned there, re-attach (#280)
 │
 ├─ e2e/                         # Playwright (apps/web + platform/mock combination); perf-memory.mts and seed-store.mts

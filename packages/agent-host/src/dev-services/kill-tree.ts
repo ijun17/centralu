@@ -119,7 +119,7 @@ export function survivorTargets(rows: ProcRow[], first: readonly ProcRow[], self
 /** One ps snapshot. Returns an empty array on failure — which falls back to the old behavior of only firing at the root's group */
 function snapshot(): ProcRow[] {
   try {
-    return parsePs(execFileSync('ps', ['-A', '-o', 'pid=,ppid=,pgid='], { encoding: 'utf8', timeout: 2000 }))
+    return parsePs(execFileSync('ps', ['-A', '-o', 'pid=,ppid=,pgid='], { encoding: 'utf8', timeout: 2000, windowsHide: true }))
   } catch {
     return []
   }
