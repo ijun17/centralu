@@ -185,6 +185,9 @@ fn thaw(k: &Keeper, f: &Frozen) {
     if f.keeper {
         k.frozen.store(false, Ordering::SeqCst);
         if let Ok(mut st) = k.state.lock() {
+            for w in &st.subscribers {
+                w.push.thaw();
+            }
             k.broadcast(&mut st);
         }
     }
@@ -345,6 +348,15 @@ fn freeze(k: &Arc<Keeper>, f: &mut Frozen, then_switch: Option<BuildSource>) -> 
         }
         std::thread::sleep(Duration::from_millis(10));
     }
+    // The windows' writers: what they queued goes out first, then they stop, so no line is half
+    // written when the sockets change hands. A write in progress ends within the window write
+    // timeout, with the window closed if it failed. The writers are read from the state but waited
+    // for without its lock, which a writer's failure takes.
+    let pushers: Vec<_> = k.state.lock().map_err(|_| "keeper state poisoned")?.subscribers.iter().map(|w| w.push.clone()).collect();
+    let windows_deadline = Instant::now() + server::WINDOW_WRITE_TIMEOUT + Duration::from_secs(1);
+    if !pushers.iter().all(|p| p.freeze(windows_deadline)) {
+        return Err("a window did not take its status in time".into());
+    }
     let door = k.door.freeze(FREEZE_LIMIT)?;
     f.door = true;
     let host = k.sup.freeze(FREEZE_LIMIT)?;
@@ -380,8 +392,8 @@ fn freeze(k: &Arc<Keeper>, f: &mut Frozen, then_switch: Option<BuildSource>) -> 
     });
     let st = k.state.lock().map_err(|_| "keeper state poisoned")?;
     let mut windows = Vec::new();
-    for (_, s) in &st.subscribers {
-        windows.push(pack.fd(s).map_err(e)?);
+    for w in &st.subscribers {
+        windows.push(pack.fd(&w.stream).map_err(e)?);
     }
     let now = Instant::now();
     let snap = KeeperSnap {

@@ -6,9 +6,9 @@ use super::*;
 /// How long a write to a window (an answer, a status push) may wait for it to read. A window that
 /// does not take its status within this is closed (`Keeper::broadcast`).
 #[cfg(not(test))]
-pub(super) const WINDOW_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+pub(in crate::keeper) const WINDOW_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(test)]
-pub(super) const WINDOW_WRITE_TIMEOUT: Duration = Duration::from_millis(200);
+pub(in crate::keeper) const WINDOW_WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 
 pub(super) fn attach(k: Arc<Keeper>, mut stream: UnixStream, reader: BufReader<UnixStream>, req: &Value, mut guard: Request) {
     let protocol = req.get("protocol").and_then(Value::as_u64).unwrap_or(0);
@@ -19,7 +19,6 @@ pub(super) fn attach(k: Arc<Keeper>, mut stream: UnixStream, reader: BufReader<U
         );
     }
     let client: Option<BuildSource> = req.get("build").cloned().and_then(|b| serde_json::from_value(b).ok());
-    let Ok(push) = stream.try_clone() else { return };
     let id = {
         let Ok(mut st) = k.state.lock() else { return };
         if st.stopping {
@@ -49,19 +48,22 @@ pub(super) fn attach(k: Arc<Keeper>, mut stream: UnixStream, reader: BufReader<U
             (Some(c), Some(b)) => Some(c.same_build(b)),
             _ => None,
         };
-        // The answer goes out before this window is added to the push list, under the same lock,
-        // so no event can overtake it.
-        reply(
-            &mut stream,
-            &json!({ "ok": true, "view": k.view(&st), "sameBuild": same, "keeperSameBuild": keeper_same, "relaunched": relaunched }),
-        );
-        st.subscribers.push((id, push));
+        // The answer is the first line the window's writer sends, queued under the same lock as
+        // the window joins the push list, so no event can overtake it.
+        let answer = json!({ "ok": true, "view": k.view(&st), "sameBuild": same, "keeperSameBuild": keeper_same, "relaunched": relaunched });
+        // The request has been read: the reader waits for the window's end with no bound
+        let _ = stream.set_read_timeout(None);
+        let Some(w) = Window::start(&k, id, stream) else {
+            st.attached = st.attached.saturating_sub(1);
+            return;
+        };
+        w.push.answer(json_line(&answer));
+        st.subscribers.push(w);
         k.broadcast(&mut st);
         id
     };
     // From here the window is a subscriber, not a request a freeze has to wait for.
     guard.done();
-    let _ = stream.set_read_timeout(None);
     watch_window(k, id, reader);
 }
 
@@ -76,7 +78,7 @@ pub(in crate::keeper) fn watch_window(k: Arc<Keeper>, id: u64, mut reader: BufRe
     }
     let stop = {
         let Ok(mut st) = k.state.lock() else { return };
-        st.subscribers.retain(|(i, _)| *i != id);
+        st.remove_window(id);
         st.attached = st.attached.saturating_sub(1);
         let now = Instant::now();
         st.last_detach = now;
@@ -126,7 +128,7 @@ pub(in crate::keeper) fn adopt_window(k: &Arc<Keeper>, stream: UnixStream) {
     let _ = stream.set_write_timeout(Some(WINDOW_WRITE_TIMEOUT));
     let id = {
         let Ok(mut st) = k.state.lock() else { return };
-        st.add_window(stream)
+        st.add_window(k, stream)
     };
     let k = k.clone();
     thread::spawn(move || watch_window(k, id, BufReader::new(read_half)));

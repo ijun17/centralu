@@ -99,6 +99,21 @@ fn test_keeper(data: &Path) -> Arc<Keeper> {
     })
 }
 
+/// Pushes status until the window's writer gives up on it (it never reads), at most 10 s.
+fn push_until_closed(k: &Arc<Keeper>) {
+    let end = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < end {
+        {
+            let Ok(mut st) = k.state.lock() else { break };
+            if st.subscribers.is_empty() {
+                break;
+            }
+            k.broadcast(&mut st);
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+
 /**
  * #840 item 5: a window the keeper can no longer push its status to (it stopped reading) was
  * taken off the push list and nothing else: its connection stayed open, so it still counted as
@@ -117,13 +132,7 @@ fn a_window_whose_status_push_fails_is_closed_and_detached() {
     assert_eq!(k.state.lock().unwrap().attached, 1);
     // The window stops reading and never closes its own end: pushes fill its socket until one
     // times out.
-    for _ in 0..1000 {
-        let Ok(mut st) = k.state.lock() else { break };
-        if st.subscribers.is_empty() {
-            break;
-        }
-        k.broadcast(&mut st);
-    }
+    push_until_closed(&k);
     let end = Instant::now() + Duration::from_secs(3);
     while k.state.lock().unwrap().attached > 0 && Instant::now() < end {
         thread::sleep(Duration::from_millis(20));
@@ -154,13 +163,7 @@ fn a_closed_window_is_waited_for_with_background_mode_off() {
     k.state.lock().unwrap().settings.background = false;
     let (window, keeper_end) = UnixStream::pair().unwrap();
     adopt_window(&k, keeper_end);
-    for _ in 0..1000 {
-        let Ok(mut st) = k.state.lock() else { break };
-        if st.subscribers.is_empty() {
-            break;
-        }
-        k.broadcast(&mut st);
-    }
+    push_until_closed(&k);
     let end = Instant::now() + Duration::from_secs(3);
     while k.state.lock().unwrap().attached > 0 && Instant::now() < end {
         thread::sleep(Duration::from_millis(20));
@@ -201,4 +204,50 @@ fn a_rollback_refused_while_the_old_host_runs_is_shown_as_failed() {
     let _ = fs::remove_dir_all(&data);
     let HostStatus::Failed { message } = status else { panic!("the windows still see {status:?}") };
     assert!(message.contains("Restart completely"), "the way out is not named: {message}");
+}
+
+/**
+ * #840 item 5: a window that stops reading holds up no push. Pushes were blocking writes under the
+ * state lock, so once its socket was full every change (and every request and the host's status,
+ * which wait for that lock) waited out the write timeout. Another window still gets its status
+ * meanwhile.
+ */
+#[test]
+fn a_window_that_stops_reading_holds_up_no_push() {
+    use std::io::{BufRead, BufReader};
+    let data = PathBuf::from(format!("/tmp/cck-nonblock-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&data);
+    fs::create_dir_all(&data).unwrap();
+    let k = test_keeper(&data);
+    let (stuck, keeper_end) = UnixStream::pair().unwrap();
+    adopt_window(&k, keeper_end);
+    let (reading, keeper_end) = UnixStream::pair().unwrap();
+    adopt_window(&k, keeper_end);
+    let got = Arc::new(AtomicUsize::new(0));
+    {
+        let got = got.clone();
+        thread::spawn(move || {
+            for line in BufReader::new(reading).lines() {
+                if line.is_err() {
+                    break;
+                }
+                got.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+    }
+    let mut slowest = Duration::ZERO;
+    for _ in 0..300 {
+        let began = Instant::now();
+        {
+            let mut st = k.state.lock().unwrap();
+            k.broadcast(&mut st);
+        }
+        slowest = slowest.max(began.elapsed());
+        thread::sleep(Duration::from_millis(1));
+    }
+    let reached = got.load(Ordering::SeqCst);
+    drop(stuck);
+    let _ = fs::remove_dir_all(&data);
+    assert!(slowest < WINDOW_WRITE_TIMEOUT / 2, "a push held the state lock for {slowest:?}");
+    assert!(reached > 0, "the window that reads got no status");
 }

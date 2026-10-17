@@ -31,10 +31,11 @@
 //!
 //! **Files.** This one: the keeper's state, the accept loop and the requests. `start.rs`: the
 //! options and a fresh keeper's start. `host.rs`: the status sink and the launcher. `windows.rs`:
-//! attach, detach, relaunch. `switch.rs`: build switches, keeper handoffs and moves to verified
+//! attach, detach, relaunch; `push.rs`, each window's writer. `switch.rs`: build switches, keeper handoffs and moves to verified
 //! content.
 
 mod host;
+mod push;
 mod start;
 mod switch;
 mod windows;
@@ -70,7 +71,7 @@ pub use self::start::{parse_args, run, Options};
 pub(super) use self::host::{launcher, sink};
 pub(super) use self::start::{log_origin, own_build, record_lock_holder};
 pub(super) use self::switch::{begin_switch, host_dirs_in_use};
-pub(super) use self::windows::adopt_window;
+pub(super) use self::windows::{adopt_window, WINDOW_WRITE_TIMEOUT};
 // What the moved parts name as `super::…` (the keeper module itself).
 use super::{appimage, data_dir, exe, prepare_default_dir};
 use self::host::*;
@@ -83,7 +84,8 @@ pub(super) struct State {
     pub(super) source: Option<BuildSource>,
     /// The build the next launch runs. Changed by `switch`.
     pub(super) desired: BuildSource,
-    pub(super) subscribers: Vec<(u64, UnixStream)>,
+    /// The attached windows status is pushed to.
+    pub(super) subscribers: Vec<Window>,
     pub(super) next_id: u64,
     pub(super) attached: usize,
     pub(super) ever_attached: bool,
@@ -146,13 +148,25 @@ impl State {
         id
     }
 
-    /// Counts a window another keeper handed over as attached and adds its connection to the push
-    /// list; returns its id. A window back spends the wait for one the keeper closed.
-    fn add_window(&mut self, push: UnixStream) -> u64 {
+    /// Counts a window another keeper handed over as attached and adds it to the push list; returns
+    /// its id. A window back spends the wait for one the keeper closed.
+    fn add_window(&mut self, k: &Arc<Keeper>, stream: UnixStream) -> u64 {
         let id = self.count_window();
         self.reattach_until = None;
-        self.subscribers.push((id, push));
+        if let Some(w) = Window::start(k, id, stream) {
+            self.subscribers.push(w);
+        }
         id
+    }
+
+    /// Takes the window `id` off the push list and ends its writer.
+    fn remove_window(&mut self, id: u64) {
+        self.subscribers.retain(|w| {
+            if w.id == id {
+                w.push.close();
+            }
+            w.id != id
+        });
     }
 
     /// An announced relaunch whose grace is still running.
@@ -163,6 +177,46 @@ impl State {
     /// A window the keeper closed itself may still come back (`reattach_until`).
     pub(super) fn reattaching(&self, now: Instant) -> bool {
         self.reattach_until.is_some_and(|u| now < u)
+    }
+}
+
+/// An attached window: its connection (passed on in a handoff) and the writer that pushes to it
+/// (`push.rs`).
+pub(super) struct Window {
+    pub(super) id: u64,
+    /// Shared with the writer, not duplicated: one descriptor for both.
+    pub(super) stream: Arc<UnixStream>,
+    pub(super) push: Arc<push::Pusher>,
+}
+
+impl Window {
+    /**
+     * Starts the writer for the window `id` on `stream`. A write that fails closes the window, as
+     * before (#840 item 5): it is taken off the push list and given `REATTACH_GRACE` to come back,
+     * since it may only be stalled, before its connection is shut down, so its detach (which
+     * `watch_window` sees as the connection ends) finds the grace already set. None, and the
+     * connection shut down, when no thread could be started for it: the window attaches again.
+     */
+    fn start(k: &Arc<Keeper>, id: u64, stream: UnixStream) -> Option<Window> {
+        let k2 = k.clone();
+        let on_fail = move |e: &std::io::Error| {
+            log(&format!("window {id} stopped taking its status ({e}); closing its connection"));
+            if let Ok(mut st) = k2.state.lock() {
+                if st.subscribers.iter().any(|w| w.id == id) {
+                    st.subscribers.retain(|w| w.id != id);
+                    st.reattach_until = Some(Instant::now() + REATTACH_GRACE);
+                }
+            }
+        };
+        let stream = Arc::new(stream);
+        match push::Pusher::start(stream.clone(), on_fail) {
+            Ok(push) => Some(Window { id, stream, push }),
+            Err(e) => {
+                log(&format!("could not start a writer for window {id} ({e}); closing its connection"));
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+                None
+            }
+        }
     }
 }
 
@@ -284,30 +338,21 @@ impl Keeper {
         }
     }
 
-    /// Pushes the current view to every attached window, dropping any that stopped reading. Not
-    /// while frozen for a handoff: the windows' sockets may be in two keepers' hands then, and two
-    /// writers could interleave half lines.
+    /// Pushes the current view to every attached window. Not while frozen for a handoff: the
+    /// windows' sockets may be in two keepers' hands then, and two writers could interleave half
+    /// lines.
     ///
-    /// A window dropped here has its connection closed too (#840 item 5): that is its detach, which
-    /// `watch_window` counts, and the window attaches again. Left open, it counted as attached for
-    /// good and, if it came back, waited for status that never came.
+    /// Only queued here: each window's writer sends it (`push.rs`), so a window that stopped
+    /// reading holds up neither this lock nor the other windows (#840 item 5). One whose write fails
+    /// has its connection closed (`Window::start`): that is its detach, which `watch_window` counts,
+    /// and the window attaches again.
     pub(super) fn broadcast(&self, st: &mut State) {
         if self.frozen.load(Ordering::SeqCst) || self.handed_over.load(Ordering::SeqCst) {
             return;
         }
         let line = json_line(&json!({ "event": "status", "view": self.view(st) }));
-        let mut closed = false;
-        st.subscribers.retain_mut(|(id, s)| {
-            let Err(e) = s.write_all(&line) else { return true };
-            log(&format!("window {id} stopped taking its status ({e}); closing its connection"));
-            let _ = s.shutdown(std::net::Shutdown::Both);
-            closed = true;
-            false
-        });
-        // The window may only be stalled: its detach must not stop the keeper with everything it
-        // holds. It is given `REATTACH_GRACE` to come back, as an announced relaunch is.
-        if closed {
-            st.reattach_until = Some(Instant::now() + REATTACH_GRACE);
+        for w in &st.subscribers {
+            w.push.status(line.clone());
         }
     }
 

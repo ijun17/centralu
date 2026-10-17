@@ -1521,7 +1521,11 @@ detach; the window then attaches again. Before #840 item 5 it was only taken off
 attached, and got no status again. A window the keeper closed itself may only be stalled (suspended, in a debugger,
 its reader blocked), so its detach does not stop the keeper even when it was the last one and background mode is
 off: for 5 minutes (`REATTACH_GRACE`) the keeper waits for a window as it does for an announced relaunch, the next
-attach spends that, and if none comes the idle rule applies as usual.
+attach spends that, and if none comes the idle rule applies as usual. Each window has a writer thread of its own
+(`server/push.rs`): a change only queues the new view, a view still waiting is replaced by a newer one, and the
+attach answer is queued first and never replaced. Before, pushes were blocking writes under the keeper's state lock,
+so a window that stopped reading held every push, request and host status for up to 5 s at each change. A keeper
+handoff lets every writer send what it queued, then stops them before the windows' sockets change hands.
 
 **The legacy folder.** Before anything creates the default data folder, the app and the keeper move the
 pre-rename folder to the new name by the same rule as `data-dir.ts`: the host leaves a legacy folder alone once
