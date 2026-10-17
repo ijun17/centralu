@@ -315,3 +315,52 @@ describe('AttachmentStrip', () => {
     expect(html).toContain('src="data:image/png;base64,AAAA"')
   })
 })
+
+describe("ChatRow: Centralu's own tool calls (#730)", () => {
+  it('draws a start_agent call with the Centralu mark, what it did and its job, and opens the child it names', () => {
+    state = { sessions: { c1: session('c1', { name: 'Parser' }) } }
+    const { html, text } = row(
+      tool({
+        tool: 'mcp__centralu__start_agent',
+        title: 'write the parser (codex, heavy)',
+        centralu: { tool: 'start_agent', label: 'Started an agent' },
+        result: 'the codex session "Parser" [c1] answered, as JSON: "done"',
+        ok: true,
+      }),
+    )
+    expect(html).toContain('data-centralu-call="centralu"')
+    expect(html).toContain('data-mark="centralu"')
+    expect(html).toContain('border-l-line-strong')
+    expect(testIds(html)).toEqual(['tool-card', 'tool-card-toggle', 'centralu-call-mark', 'centralu-call-label', 'tool-card-title', 'centralu-call-open', 'tool-card-output'])
+    expect(text).toMatch(/^Started an agent write the parser \(codex, heavy\) Open session →/)
+    expect(text).not.toContain('mcp__centralu__start_agent')
+    expect(html).toContain('title="Parser"')
+  })
+
+  it('reads a Claude name an older host stored without the mark, and gives no link to the session it is in', () => {
+    const { html, text } = row(tool({ tool: 'mcp__centralu__read_session', title: 'mcp__centralu__read_session', centralu: undefined }))
+    expect(html).toContain('data-centralu-call="centralu"')
+    expect(text).toBe('Read session')
+    state = { sessions: { s1: session('s1') } }
+    const self = row(tool({ tool: 'mcp__centralu__agent_session', title: 'Checked on an agent', centralu: { tool: 'agent_session', label: 'Checked on an agent', sessionId: 's1' } }))
+    expect(self.text).toBe('Checked on an agent')
+    expect(testIds(self.html)).not.toContain('centralu-call-open')
+  })
+
+  it("draws an app's tool with the app's window icon and name, and Codex's title without the server and tool", () => {
+    state = { externalApps: [{ appId: 'board', name: 'Project board' }] as AppState['externalApps'] }
+    const { html, text } = row(tool({ tool: 'list_items', title: 'app-board: list_items {"status":"Ready"}', centralu: { tool: 'list_items', app: 'board' } }))
+    expect(html).toContain('data-centralu-call="app"')
+    expect(html).toContain('data-mark="app"')
+    expect(text).toBe('Project board: list items {"status":"Ready"}')
+  })
+
+  it('leaves an ordinary MCP call and a built-in tool as they were', () => {
+    for (const item of [tool({ tool: 'mcp__playwright__browser_click', title: 'mcp__playwright__browser_click' }), tool({ tool: 'Bash', title: 'ls' })]) {
+      const { html } = row(item)
+      expect(html).not.toContain('data-centralu-call')
+      expect(testIds(html)).not.toContain('centralu-call-mark')
+      expect(html).not.toContain('border-l-line-strong')
+    }
+  })
+})

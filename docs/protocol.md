@@ -115,6 +115,17 @@ hint to collapse a read-only tool's card, but every card folds now, nothing on t
 guesses had drifted apart (Codex called every `git` command read-only, `git push` included). The field stays in the
 schema, optional, so events and stored records from older builds still parse; a reader must not rely on it.
 
+`ToolSummary.centralu` marks a call to one of Centralu's own servers ([#730](https://github.com/ijun17/centralu/issues/730)):
+`centralu` or an app's `app-<id>` (`app`), with the bare tool name, what the call did in words (`label`, "Started an
+agent") and the session it names (`sessionId`). The adapter sets it because only it knows the server: Claude names the
+server inside the tool name, but Codex names it apart, so the screen could not have told Codex's `start_agent` from
+another server's tool of that name. For these calls the adapter titles the card by the argument a person follows the
+call by (the job, the project asked, the text sent; else the words). A record an older host wrote has no mark; the
+screen then reads Claude's `mcp__centralu__…` and `mcp__app-<id>__…` names (`centraluCallOf`), and Codex's stay
+ordinary cards. The card draws a marked call with Centralu's mark (an app's window icon and name for an app's tool),
+the words, the title and a link to the session it names, on a stronger left edge; a session's preview reads
+"<words>: <title>" (`toolCallLine`).
+
 **A native subagent's steps are one wrapper kind, not the parent's events with a flag**
 ([#222](https://github.com/ijun17/centralu/issues/222)). Claude Code's `Agent` tool and Codex's `spawn_agent` run a
 subagent whose text, reasoning, tool calls and results reach the host on the parent's stream. Each becomes a

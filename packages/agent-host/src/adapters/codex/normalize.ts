@@ -1,9 +1,9 @@
 import { asObj, finite, str } from '../../json-value.js'
-import { type ApprovalDetail, type BackgroundTask, type NormalizedEvent, type RequestInput, type SessionGoal, type SubagentStep } from '@cc/protocol'
+import { type ApprovalDetail, type BackgroundTask, type NormalizedEvent, type RequestInput, type SessionGoal, type SubagentStep, type ToolSummary } from '@cc/protocol'
 import { fileEditDetail, type FileChange } from '../file-changes.js'
 import { mcpImageEvents } from '../images.js'
 import { planUpdate } from '../plan.js'
-import { firstLine, isCentraluTool, stepLine } from '../tool-titles.js'
+import { centraluMark, firstLine, isCentraluTool, stepLine } from '../tool-titles.js'
 import { toolResultEvent } from '../tool-result.js'
 import { noticeWords } from './notices.js'
 
@@ -99,7 +99,7 @@ function itemInput(item: Record<string, unknown>): Record<string, unknown> {
 }
 
 /** A tool-call item, into a human-readable line (the conversation card's title) */
-function itemSummary(item: Record<string, unknown>): { tool: string; title: string; paths: string[] } {
+function itemSummary(item: Record<string, unknown>): ToolSummary {
   const type = str(item.type)
   if (type === 'commandExecution') {
     const cmd = str(item.command)
@@ -140,7 +140,8 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
       } catch {
         /* If the arguments are not JSON, the card names no project — it still finds the session it asked */
       }
-      return { tool, title: project || tool, paths: [] }
+      const mark = centraluMark(server, tool, {})
+      return { tool, title: project || tool, paths: [], ...(mark ? { centralu: mark.centralu } : {}) }
     }
     /*
      * **The arguments go on the title too** (dogfooding 2026-09-08).
@@ -154,10 +155,14 @@ function itemSummary(item: Record<string, unknown>): { tool: string; title: stri
      */
     const args = argsPreview(item.arguments ?? asObj(item.invocation).arguments)
     const name = [server, tool].filter(Boolean).join(': ') || str(item.title) || 'MCP tool'
+    // Centralu's own servers (#730): marked, and titled by what the call does. Codex names the server apart, so the
+    // screen cannot tell from `tool` alone; a call made from inside `exec` names none and stays unmarked
+    const mark = tool ? centraluMark(server, tool, jsonObject(item.arguments ?? asObj(item.invocation).arguments)) : null
     return {
       tool: tool || 'MCP',
-      title: args ? `${name} ${args}` : name,
+      title: mark?.title ?? (args ? `${name} ${args}` : name),
       paths: [],
+      ...(mark ? { centralu: mark.centralu } : {}),
     }
   }
   if (type === 'webSearch') {
