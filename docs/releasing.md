@@ -73,7 +73,7 @@ script rehearses by default and why nothing publishes automatically.
 - Its first job, `changes` (`.github/scripts/ci-changes.mjs`), leaves out of a pull request
   what it cannot affect, by the files it adds to main (compared with its merge-base with main,
   whatever its base branch, so a stacked pull request is judged by the whole stack; renames count
-  as both paths): documents alone run `verify`, `windows tests` and the WebKit UI scenarios only
+  as both paths): documents alone run `verify`, the `windows tests` jobs and the WebKit UI scenarios only
   (WebKit runs on every pull request, owner decision 2026-10-11); tests alone skip the bundles,
   the keeper end to end and the content verifier; the window alone (`packages/ui`, `core`,
   `platform`, `apps/web`) skips the keeper, the content verifier and the host's tests on the
@@ -96,8 +96,12 @@ script rehearses by default and why nothing publishes automatically.
   AppImage ships for Linux: npm can unpack a folder and start an exe, but cannot run an
   installer. The installer's one advantage is that it installs the WebView2 runtime on a
   machine without it. Neither is signed, so SmartScreen asks before the first start. The
-  Windows job also runs the Rust unit tests, and a separate `windows tests` job runs the
-  four parts of `pnpm verify`, each blocking as on the other platforms. (The unit-test step
+  Windows job also runs the Rust unit tests, and separate jobs run the four parts of
+  `pnpm verify`, each blocking as on the other platforms: `windows tests` the lint, the
+  dependency rules and the types, and `windows tests (vitest 1/2)` and `(vitest 2/2)` the
+  unit tests in two `vitest --shard` halves side by side (#1035: as one job it took 16.5
+  minutes, the longest of every run). The name `windows tests` stayed with the first, so a
+  required set read from main's workflow before the split still finds it. (The unit-test step
   did not block until the W2 failures listed in #307 were fixed.) The host's own tests also
   run on the Node remotes are pinned to ([below](#the-node-remotes-run-82)). The npm
   package `@centralu/win32-x64` ships the same folder, built again by `release.yml`'s own
@@ -162,7 +166,7 @@ Workflow event audit (2026-10-13):
 
 | Workflow and jobs | Event-dependent behavior | Required for this CI gate? |
 | --- | --- | --- |
-| `build.yml`: `changes`, `bundle`, `verify`, `content-verify`, `windows-tests`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux`, and the `…-skipped` stand-ins | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps without changing test behavior. `changes` (2026-10-17, `.github/scripts/ci-changes.mjs`, reviewed by hand: it reads no event) runs everything for a commit already on main and leaves out of a pull request the jobs its files cannot affect. A bump PR changes the product's version files, which run everything, so its run is the same set of jobs as main's (`tooling/build-workflow.test.ts` checks the version's source file). | Yes: the configured CI workflow, unless branch protection specifies the set. |
+| `build.yml`: `changes`, `bundle`, `verify`, `content-verify`, `windows-tests`, `windows-tests-unit`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux`, and the `…-skipped` stand-ins | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps without changing test behavior. `changes` (2026-10-17, `.github/scripts/ci-changes.mjs`, reviewed by hand: it reads no event) runs everything for a commit already on main and leaves out of a pull request the jobs its files cannot affect. A bump PR changes the product's version files, which run everything, so its run is the same set of jobs as main's (`tooling/build-workflow.test.ts` checks the version's source file). | Yes: the configured CI workflow, unless branch protection specifies the set. |
 | `release.yml`: `guard`, `platform`, `shim` | Tag push or manual dispatch; `guard` validates the tag on push and dry-run controls publishing. Neither main push nor PR runs it. | No; rehearsal remains a separate tag prerequisite. |
 | `shell-release.yml`: `guard`, `build`, `publish` | Manual dispatch only. | No. |
 | `local-content-sign.yml`: `validate`, `sign` | Manual dispatch only; real signing requires main. | No. |

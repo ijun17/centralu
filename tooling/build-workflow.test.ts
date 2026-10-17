@@ -61,9 +61,25 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
       'keeper-linux': 'host',
     })
     // WebKit e2e on every pull request, documents only included: the owner's decision of 2026-10-11
-    for (const id of ['verify', 'windows-tests', 'e2e']) expect(job(id).body).not.toMatch(/^ {4}(needs|if):/m)
+    for (const id of ['verify', 'windows-tests', 'windows-tests-unit', 'e2e']) expect(job(id).body).not.toMatch(/^ {4}(needs|if):/m)
     expect(jobs.some((j) => j.id === 'e2e-skipped')).toBe(false)
     for (const id of Object.keys(gated)) expect(job(id).body).toMatch(/^ {4}needs: changes$/m)
+  })
+
+  // #1035: the one Windows job was the longest of every run, 15 of its 16.5 minutes the unit tests
+  it('runs the Windows unit tests in shards beside lint and types, under the check name required sets know', () => {
+    const checks = job('windows-tests').body
+    expect(names(checks)).toEqual(['windows tests'])
+    for (const run of ['pnpm lint', 'pnpm depcruise', 'pnpm typecheck']) expect(checks).toContain(`run: ${run}\n`)
+    expect(checks).not.toContain('pnpm test')
+    const unit = job('windows-tests-unit').body
+    const shards = Number(/^ {8}shards: \[(\d+)\]$/m.exec(unit)?.[1])
+    expect(shards).toBeGreaterThan(1)
+    expect(/^ {8}shard: \[([\d, ]+)\]$/m.exec(unit)?.[1]).toBe(Array.from({ length: shards }, (_, i) => i + 1).join(', '))
+    expect(names(unit)).toEqual(Array.from({ length: shards }, (_, i) => `windows tests (vitest ${i + 1}/${shards})`))
+    expect(unit).toContain('run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }}\n')
+    expect(unit).toMatch(/^ {4}runs-on: windows-2022$/m)
+    expect(unit).toContain('CC_DATA_DIR: ${{ runner.temp }}')
   })
 
   it('gives each gated matrix job a stand-in with the same checks, run on the other answer only', () => {
