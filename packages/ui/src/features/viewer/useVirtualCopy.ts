@@ -1,5 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent, type RefObject } from 'react'
 import { caretAt, selectedText, type Caret, type CopyLine } from './copy.js'
+import { letterOf } from '../../app/keys.js'
 
 /**
  * Copy and ⌘A for a pane whose rows are virtualized: the code viewer and the diff (#428).
@@ -16,8 +17,10 @@ import { caretAt, selectedText, type Caret, type CopyLine } from './copy.js'
  *   mounted; the anchor end is where the drag began, and the browser walks it out of the rows once the list scrolls far
  *   enough. It is forgotten when `resetKey` or `contentKey` changes, so one file's anchor never leaks into the next.
  * - **⌘A claims the whole of `wholeText`** and paints the rows that exist, nothing else: the highlight keeps a live
- *   selection alive (without one the browser fires no `copy`), and repainting on scroll keeps it under the eye. Any
- *   press of the mouse starts a new selection and ends the claim.
+ *   selection alive (without one the browser fires no `copy`), and repainting on scroll keeps it under the eye. The
+ *   claim lasts only while that selection does (#842 item 9): any press of the mouse ends it, and so does a selection
+ *   that collapses or moves out of the rows. It used to end on a mouse press only, so after ⌘A here, text selected by
+ *   keyboard anywhere else (the composer, a field) copied as the whole file.
  * - **The pane takes focus once per `resetKey`** once it has rows (`ready`), so ⌘A has somewhere to land: it is not a
  *   text field, and with focus left on the sidebar button that opened it ⌘A went to the document and ⌘C then copied
  *   only the mounted rows (#118). Once per key, so it never steals focus back from a search box mid-typing.
@@ -83,6 +86,7 @@ export function useVirtualCopy({
     const onSelectionChange = () => {
       const sel = document.getSelection()
       const root = scrollRef.current
+      if (whole.current && !claimHolds(sel, rowsRef.current)) whole.current = false
       if (!sel || !root || !sel.anchorNode) return
       if (!root.contains(sel.anchorNode)) {
         // A selection that begins outside the pane (the caret is collapsed there) is a new one: what was remembered
@@ -95,7 +99,7 @@ export function useVirtualCopy({
     }
     document.addEventListener('selectionchange', onSelectionChange)
     return () => document.removeEventListener('selectionchange', onSelectionChange)
-  }, [ready, scrollRef])
+  }, [ready, scrollRef, rowsRef])
 
   /*
    * ⌘C. Scoped by *what is selected*, not by where the event lands: once the browser has walked the selection out into
@@ -110,7 +114,7 @@ export function useVirtualCopy({
       if (!root) return
       const { lines: current, wholeText: all } = latest.current
       const payload =
-        whole.current && all !== null
+        whole.current && all !== null && claimHolds(document.getSelection(), rowsRef.current)
           ? all
           : selectedText({ selection: document.getSelection(), root, lines: current, lastAnchor: anchor.current })
       if (payload === null) return
@@ -127,7 +131,7 @@ export function useVirtualCopy({
       document.removeEventListener('copy', onCopy)
       document.removeEventListener('mousedown', onMouseDown)
     }
-  }, [ready, scrollRef])
+  }, [ready, scrollRef, rowsRef])
 
   /** Paints the selection over every row that exists right now: with ⌘A the rest is not there to light up */
   const paintMountedRows = () => {
@@ -143,7 +147,8 @@ export function useVirtualCopy({
   return {
     onKeyDown: (e) => {
       // Both modifiers, like every other shortcut here. ⌘⇧A is the global "next waiting session" and must fall through
-      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.key.toLowerCase() !== 'a') return
+      // Read by meaning, as every letter shortcut here: on a Korean layout the A key types ㅁ (app/keys.ts)
+      if (!(e.metaKey || e.ctrlKey) || e.shiftKey || letterOf(e) !== 'a') return
       e.preventDefault()
       whole.current = true
       paintMountedRows()
@@ -152,4 +157,10 @@ export function useVirtualCopy({
       if (whole.current) paintMountedRows()
     },
   }
+}
+
+/** Whether ⌘A's painted selection still stands: not collapsed, and both its ends inside the rows */
+function claimHolds(sel: Selection | null, rows: HTMLElement | null): boolean {
+  if (!sel || !rows || sel.isCollapsed || !sel.anchorNode || !sel.focusNode) return false
+  return rows.contains(sel.anchorNode) && rows.contains(sel.focusNode)
 }

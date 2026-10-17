@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { MAX_AGENT_DEPTH, agentDepthOf, type SessionInfo, type ToolName, type ToolStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
@@ -6,6 +6,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useMachineName, useTools } from '../../store/selectors.js'
 import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { isPlainEscape } from '../../app/keys.js'
+import { useDialogFocus } from '../../components/dialogFocus.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
@@ -201,6 +202,10 @@ export function Settings() {
     return () => window.removeEventListener('keydown', onKey)
   }, [open, toggle])
 
+  // A dialog to the keyboard and to a screen reader: focus starts inside and Tab stays there (#842 item 7)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const dialog = useDialogFocus(panelRef, open)
+
   if (!open) return null
 
   return (
@@ -210,8 +215,11 @@ export function Settings() {
       data-testid="settings"
     >
       <div
-        className="flex max-h-[calc(80vh/var(--text-zoom))] w-[640px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal)"
+        ref={panelRef}
+        {...dialog}
+        className="flex max-h-[calc(80vh/var(--text-zoom))] w-[640px] max-w-[calc(92vw/var(--text-zoom))] flex-col overflow-hidden rounded-lg border border-line bg-surface-side shadow-(--shadow-modal) outline-none"
         onClick={(e) => e.stopPropagation()}
+        data-testid="settings-panel"
       >
         <header className="flex items-baseline gap-2 border-b border-line px-4 py-2.5">
           <h2 className="text-md font-medium text-ink">Settings</h2>

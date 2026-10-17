@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
 import type { Ref } from 'react'
 import {
   EMPTY_DRAFT,
@@ -12,7 +12,7 @@ import { approvalCardCovered } from '../approval/ApprovalCard.jsx'
 import { CloseIcon, PlusIcon, SendIcon } from '../../components/icons.jsx'
 import { IconButton } from '../../components/IconButton.jsx'
 import { AttachmentStrip } from './chat-rows/attachments.jsx'
-import { AutocompleteMenu, useAutocomplete, type Suggestion } from './Autocomplete.jsx'
+import { AutocompleteMenu, suggestionId, useAutocomplete, type Suggestion } from './Autocomplete.jsx'
 import { guiCommandFor } from './guiCommands.js'
 import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js'
 import { onFirstVisualLine, onLastVisualLine } from './caret.js'
@@ -317,6 +317,7 @@ export const Composer = memo(function Composer({
   }, [sessionId])
 
   // Autocomplete: `/` for skills, `@` for files
+  const suggestionsId = useId()
   const ac = useAutocomplete({
     sessionId,
     projectId,
@@ -605,6 +606,7 @@ export const Composer = memo(function Composer({
       >
         {ac.open && (
           <AutocompleteMenu
+            listId={suggestionsId}
             items={ac.items}
             index={ac.index}
             loading={ac.loading}
@@ -663,6 +665,8 @@ export const Composer = memo(function Composer({
               if (action === 'up') return (e.preventDefault(), ac.move(-1))
               if (action === 'close') return (e.preventDefault(), setCaret(-1))
               if (action === 'pick') {
+                // The list on screen answers the previous keystroke: wait for this one's answer, never send meanwhile
+                if (ac.stale) return void e.preventDefault()
                 const item = ac.items[ac.index]
                 if (item) {
                   e.preventDefault()
@@ -730,6 +734,12 @@ export const Composer = memo(function Composer({
                 : 'Type a message'
           }
           data-testid="prompt-input"
+          // The box drives the suggestion list while it is open, and names the option under the cursor (#842 item 7)
+          role="combobox"
+          aria-expanded={ac.open}
+          aria-controls={ac.open ? suggestionsId : undefined}
+          aria-autocomplete="list"
+          aria-activedescendant={ac.open && ac.items[ac.index] ? suggestionId(suggestionsId, ac.index) : undefined}
           // Whose composer this is: that session's approval card takes mod+⇧Y/D/L from here, where y/n/a are letters
           data-composer-session={sessionId}
         />

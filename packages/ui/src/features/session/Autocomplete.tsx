@@ -75,6 +75,11 @@ export function detectTrigger(
   return null
 }
 
+/** Which search a file result answers: the project and the query */
+function searchKey(projectId: string, query: string): string {
+  return `${projectId}\n${query}`
+}
+
 export function useAutocomplete({
   sessionId,
   projectId,
@@ -102,7 +107,16 @@ export function useAutocomplete({
     ready: false,
     commands: [],
   })
-  const [files, setFiles] = useState<{ path: string; name: string }[]>([])
+  /*
+   * The file results with the search they answer (#842 item 13). They used to be kept bare, so after a keystroke the
+   * list still held the previous query's results until the new answer came, and Enter or Tab in that moment inserted
+   * one of them (after a switch of session, even a path from the previous project).
+   */
+  const [files, setFiles] = useState<{ key: string; projectId: string; list: { path: string; name: string }[] }>({
+    key: '',
+    projectId: '',
+    list: [],
+  })
   const [index, setIndex] = useState(0)
 
   const trigger = useMemo(() => (enabled ? detectTrigger(text, caret) : null), [enabled, text, caret])
@@ -163,17 +177,20 @@ export function useAutocomplete({
   }, [sessionId])
 
   // Files are searched on every keystroke (fast, since the host holds the index)
+  const fileKey = trigger?.kind === 'file' && atSource === 'files' ? searchKey(projectId, trigger.query) : null
   useEffect(() => {
-    if (trigger?.kind !== 'file' || atSource !== 'files') return
+    if (fileKey === null || trigger?.kind !== 'file') return
     let alive = true
     void platform.fs
       .search(projectId, trigger.query, 20)
-      .then((r) => alive && setFiles(r))
-      .catch(() => alive && setFiles([]))
+      .then((r) => alive && setFiles({ key: fileKey, projectId, list: r }))
+      .catch(() => alive && setFiles({ key: fileKey, projectId, list: [] }))
     return () => {
       alive = false
     }
-  }, [trigger?.kind, trigger?.query, platform, projectId, atSource])
+  }, [fileKey, trigger?.kind, trigger?.query, platform, projectId])
+  /** The results on screen answer an earlier search: shown until the answer comes, never picked by a key */
+  const filesStale = fileKey !== null && files.key !== fileKey
 
   const items = useMemo<Suggestion[]>(() => {
     if (!trigger) return []
@@ -234,8 +251,10 @@ export function useAutocomplete({
         .slice(0, 20)
         .map((x) => ({ value: `@${x.name} `, label: x.name, hint: projectNames[x.projectId!] ?? '' }))
     }
-    return files.map((f) => ({ value: `@${f.path} `, label: f.name, hint: f.path }))
-  }, [trigger, commands, files, atSource, sessions, projectNames])
+    // Another project's results are never shown, not even while this project's are on their way
+    const list = files.projectId === projectId ? files.list : []
+    return list.map((f) => ({ value: `@${f.path} `, label: f.name, hint: f.path }))
+  }, [trigger, commands, files, atSource, sessions, projectNames, projectId])
 
   // Reset to the first item whenever the list changes — a stale cursor position picks the
   // wrong one
@@ -252,7 +271,7 @@ export function useAutocomplete({
     [trigger, text, caret],
   )
 
-  const loading = trigger?.kind === 'command' && !commands.ready
+  const loading = (trigger?.kind === 'command' && !commands.ready) || filesStale
 
   return {
     open: !!trigger && (items.length > 0 || loading),
@@ -260,19 +279,29 @@ export function useAutocomplete({
     items,
     index,
     loading,
+    /** The list answers an earlier search: Enter and Tab wait for the answer instead of picking (#842 item 13) */
+    stale: filesStale,
     move: (delta: number) =>
       setIndex((i) => (items.length === 0 ? 0 : (i + delta + items.length) % items.length)),
     apply,
   }
 }
 
+/** The id of an option in the list `listId` names, which the composer points at as the active one (#842 item 7) */
+export function suggestionId(listId: string, index: number): string {
+  return `${listId}-${index}`
+}
+
 export function AutocompleteMenu({
+  listId,
   items,
   index,
   loading,
   kind,
   onPick,
 }: {
+  /** The list's id: the composer names it as what it controls */
+  listId: string
   items: Suggestion[]
   index: number
   loading: boolean
@@ -298,11 +327,14 @@ export function AutocompleteMenu({
           {kind === 'command' ? 'Loading skills…' : 'Searching…'}
         </p>
       ) : (
-        <ul ref={listRef} className="max-h-56 overflow-y-auto">
+        <ul ref={listRef} id={listId} role="listbox" aria-label={kind === 'command' ? 'Commands' : 'Suggestions'} className="max-h-56 overflow-y-auto">
           {items.map((item, i) => (
-            <li key={item.value}>
+            <li key={item.value} role="presentation">
               <button
                 type="button"
+                id={suggestionId(listId, i)}
+                role="option"
+                tabIndex={-1}
                 data-idx={i}
                 data-testid={`autocomplete-item-${i}`}
                 aria-selected={i === index}
@@ -322,8 +354,8 @@ export function AutocompleteMenu({
           ))}
           {/* GUI commands can already be listed while skills are still not yet — "not yet"
           speaks up below the list too */}
-          {loading && (
-            <li>
+          {loading && kind === 'command' && (
+            <li role="presentation">
               <p
                 className="border-t border-line px-2.5 py-1.5 text-xs text-ink-faint"
                 data-testid="autocomplete-loading"

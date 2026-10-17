@@ -34,7 +34,7 @@ import { Notices } from '../features/notices/Notices.jsx'
 import { UsageDonuts } from '../features/usage/UsageDonuts.jsx'
 import { DragRegion } from '../components/DragRegion.jsx'
 import { IconButton } from '../components/IconButton.jsx'
-import { StepIcon } from '../components/icons.jsx'
+import { CloseIcon, StepIcon } from '../components/icons.jsx'
 import { isOsFileDrag, markInternalDrags } from '../features/files/dragPath.js'
 import { lazyComponent } from '../components/lazy.jsx'
 
@@ -750,12 +750,14 @@ function GlobalKeys() {
 
 function Toast() {
   const toast = useStore((s) => s.toast)
+  // Every toast said, the same words again included: the timer restarts on each (#842 item 14)
+  const toastAt = useStore((s) => s.toastAt)
   const setToast = useStore((s) => s.setToast)
   useEffect(() => {
     if (!toast) return
     const t = setTimeout(() => setToast(null), 2500)
     return () => clearTimeout(t)
-  }, [toast, setToast])
+  }, [toast, toastAt, setToast])
   if (!toast) return null
   return (
     /*
@@ -767,11 +769,15 @@ function Toast() {
       what it covers up is the app's whole answer to "that didn't work".
     */
     <div
-      className="absolute bottom-5 left-1/2 z-30 -translate-x-1/2 rounded-md border border-line bg-surface-raised px-3 py-2 text-sm text-ink shadow-(--shadow-popover)"
+      className="absolute bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-md border border-line bg-surface-raised py-2 pl-3 pr-1.5 text-sm text-ink shadow-(--shadow-popover)"
       data-testid="toast"
       role="status"
     >
-      {toast}
+      <span>{toast}</span>
+      {/* Gone before it was read is the toast's whole risk; one that is in the way can be put away (#842 item 14) */}
+      <IconButton label="Dismiss" onClick={() => setToast(null)} testId="toast-dismiss" placement="top" align="right">
+        <CloseIcon size={11} />
+      </IconButton>
     </div>
   )
 }
