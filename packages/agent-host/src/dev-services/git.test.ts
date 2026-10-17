@@ -4,7 +4,8 @@ import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, 
 import { tmpdir } from 'node:os'
 import { changedFileCount } from '@cc/protocol'
 import { join } from 'node:path'
-import { GIT_DIFF_MAX_CHARS, gitWorktreeDirty, gitBranches, gitCheckout, gitCommit, gitCommitDetail, gitDiff, gitIgnoredEntries, gitStage, gitStatusFiles, gitSummary, treeBytes } from './git.js'
+import { GIT_DIFF_MAX_CHARS, gitWorktreeDirty, gitBranches, gitCheckout, gitCommit, gitCommitDetail, gitDiff, gitIgnoredEntries, gitStage, gitStatusFiles, gitSummary } from './git.js'
+import { treeBytes } from './entry-sizes.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**

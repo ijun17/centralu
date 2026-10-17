@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { __forgetPrograms } from '../tool-launch.js'
-import { gitBranchPr } from './git.js'
+import { gitBranchPr } from './git-pr.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 const alive = (pid: number) => {

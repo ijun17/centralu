@@ -92,8 +92,6 @@ import {
   gitStatusFiles,
   gitDiff,
   gitHeadSha,
-  gitBranchPr,
-  type BranchPr,
   gitLog,
   gitCommitDetail,
   gitBranches,
@@ -106,6 +104,7 @@ import {
   type Worktree,
   gitWorktreeDirty,
 } from '../dev-services/git.js'
+import { gitBranchPr, type BranchPr } from '../dev-services/git-pr.js'
 import {
   importFile,
   listDir,
