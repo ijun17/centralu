@@ -134,13 +134,38 @@ pub(super) fn floor_text(floor: [u32; 3]) -> String {
     floor.map(|n| n.to_string()).join(".")
 }
 
-/// Whether a version (`v22.12.0`, as `node --version` prints it) is older than `floor`
-pub(super) fn below_floor(parts: &[u32], floor: [u32; 3]) -> bool {
-    let mut padded = [0u32; 3];
-    for (slot, n) in padded.iter_mut().zip(parts) {
-        *slot = *n;
+/**
+ * Whether a version (`v22.12.0`, as `node --version` prints it) is older than `floor`, by the rule of the
+ * hub's and the launcher's `belowFloor` (`agent-host/src/links/node-floor.ts`, `packaging/npm/centralu/bin/
+ * node-floor.mjs`), which `tooling/fixtures/node-floor.json` pins for all three: a version that does not
+ * start with three numbers gives no basis to refuse and is let through (`v22`, `v22.x.1`), build metadata
+ * is ignored, and a prerelease of the floor is below it (`v22.14.0-rc.1`), as SemVer orders them.
+ */
+pub(super) fn below_floor(found: &str, floor: [u32; 3]) -> bool {
+    let v = found.trim();
+    let v = v.strip_prefix(['v', 'V']).unwrap_or(v);
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let mut lead = v.splitn(3, '.');
+    let (Some(a), Some(b), Some(c)) = (lead.next(), lead.next(), lead.next()) else { return false };
+    if !digits(a) || !digits(b) || !c.starts_with(|ch: char| ch.is_ascii_digit()) {
+        return false;
     }
-    padded < floor
+    let v = v.split('+').next().unwrap_or(v);
+    let (core, pre) = match v.split_once('-') {
+        Some((core, pre)) => (core, Some(pre)),
+        None => (v, None),
+    };
+    let mut parts = core.split('.');
+    for x in floor {
+        // A part that is not a number (`0abc`) ends the comparison as "not older", as the hub's does
+        let Some(y) = parts.next().map(|p| if digits(p) { p.parse::<u64>().ok() } else { None }).unwrap_or(Some(0)) else {
+            return false;
+        };
+        if u64::from(x) != y {
+            return u64::from(x) > y;
+        }
+    }
+    pre.is_some()
 }
 
 /// Finding Node takes around one second because it launches the whole login shell. Since the
@@ -324,12 +349,8 @@ pub(super) fn check_node_version(path: &str) -> Result<String, String> {
         return Ok(path.to_string());
     };
     let raw = String::from_utf8_lossy(&out.stdout);
-    let parts = version_parts(raw.trim());
-    if parts.is_empty() {
-        return Ok(path.to_string());
-    }
     let floor = min_node()?;
-    if below_floor(&parts, floor) {
+    if below_floor(&raw, floor) {
         let floor = floor_text(floor);
         return Err(format!(
             "Node {floor} or newer is required, but {path} is {}: older than that, the bundled database \

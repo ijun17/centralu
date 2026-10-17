@@ -1,0 +1,31 @@
+{
+  "_comment": "Node versions as `node --version` or a machine reports them, and whether each is below the floor. Read by the three Node-floor checks' tests: the keeper's (apps/desktop/src-tauri/keeper/src/host_proc/tests.rs), the hub's (packages/agent-host/src/links/node-floor.test.ts) and the launcher's (the same test). A version that does not start with three numbers is let through: there is no basis to refuse it. A prerelease of the floor is below it, as SemVer orders them.",
+  "floor": "22.14.0",
+  "cases": [
+    { "found": "v22.14.0", "below": false },
+    { "found": "22.14.0", "below": false },
+    { "found": "v22.14.1", "below": false },
+    { "found": "v22.23.3", "below": false },
+    { "found": "v24.21.0", "below": false },
+    { "found": "v100.0.0", "below": false },
+    { "found": "v22.13.99", "below": true },
+    { "found": "v22.12.0", "below": true },
+    { "found": "22.12.0", "below": true },
+    { "found": "V22.13.1", "below": true },
+    { "found": "  v22.12.0\n", "below": true },
+    { "found": "v20.19.0", "below": true },
+    { "found": "v9.11.2", "below": true },
+    { "found": "v22.14.0-rc.1", "below": true },
+    { "found": "v22.13.1-rc.1", "below": true },
+    { "found": "v22.15.0-rc.1", "below": false },
+    { "found": "v22.14.0+build5", "below": false },
+    { "found": "v22.12.0+build5", "below": true },
+    { "found": "v22", "below": false },
+    { "found": "v22.14", "below": false },
+    { "found": "v22.x.1", "below": false },
+    { "found": "", "below": false },
+    { "found": "banana", "below": false },
+    { "found": "lts/*", "below": false },
+    { "found": "Segmentation fault", "below": false }
+  ]
+}
