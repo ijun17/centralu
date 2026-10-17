@@ -749,3 +749,27 @@ test('A long error sentence does not push the conversation sideways', async ({ p
   }))
   expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1)
 })
+
+/*
+ * A link in a reply goes out through the platform (system.openUrl), like terminal and app links. It used to be a bare
+ * target="_blank" anchor: Chromium opened a page for it, the desktop's WebView opened nothing. So what is checked is
+ * that the port was reached, and that no page opened and this one did not navigate.
+ */
+test('a link in a reply opens through the platform, not as a new page', async ({ page, context }) => {
+  const popups: string[] = []
+  context.on('page', (p) => popups.push(p.url()))
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'Where are the docs?')
+  await emitEvent(page, 0, { type: 'message_delta', role: 'assistant', text: 'See [the docs](https://example.test/docs?from=chat).' })
+  const link = page.getByTestId('msg-assistant').getByRole('link', { name: 'the docs' })
+  // The address stays on the link, for hover, copy and the context menu
+  await expect(link).toHaveAttribute('href', 'https://example.test/docs?from=chat')
+  const here = page.url()
+
+  await link.click()
+  await expect.poll(() => page.evaluate(() => (window as any).__mock.openedUrls as string[])).toEqual([
+    'https://example.test/docs?from=chat',
+  ])
+  expect(popups).toEqual([])
+  expect(page.url()).toBe(here)
+})

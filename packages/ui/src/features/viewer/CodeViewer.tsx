@@ -9,6 +9,7 @@ import { useShortcut } from '../../app/shortcut.js'
 import { formatBytes } from '../../app/format.js'
 import { isPlainEnter } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
+import { SkeletonLines } from '../../components/Skeleton.jsx'
 import { TRUNCATED_NOTICE, wholeFileText } from './copy.js'
 import { useVirtualCopy } from './useVirtualCopy.js'
 import { clearViewerJump, currentViewerJump, requestViewerJump, useViewerJump } from './jump.js'
@@ -333,7 +334,7 @@ export function CodeViewer({ projectId }: { projectId: string }) {
           )}
         </div>
       ) : file === null ? (
-        <p className="p-3 text-sm text-ink-faint">Loading…</p>
+        <SkeletonLines lines={8} className="p-3" label="Loading the file" />
       ) : showingImage && image ? (
         <div
           className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 overflow-auto bg-surface-floor p-4"

@@ -233,6 +233,9 @@ export class MockPlatform implements Platform {
   set externalSessions(value: ExternalSessionsMock['externalSessions']) { this.externalSessionsMock.externalSessions = value }
   get externalHistory() { return this.externalSessionsMock.externalHistory }
   set externalHistory(value: ExternalSessionsMock['externalHistory']) { this.externalSessionsMock.externalHistory = value }
+  get holdExternalSessions() { return this.externalSessionsMock.holdExternalSessions }
+  set holdExternalSessions(value: boolean) { this.externalSessionsMock.holdExternalSessions = value }
+  releaseExternalSessions(): void { this.externalSessionsMock.releaseExternalSessions() }
 
   // trash.ts
   get externallyDeleted() { return this.trashMock.externallyDeleted }

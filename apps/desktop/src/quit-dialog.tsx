@@ -1,4 +1,5 @@
 import type { Ref } from 'react'
+import { useOpenLayer } from '@cc/ui'
 // By path, like build-bar.tsx: the browser harness that drives this dialog in e2e has no Tauri
 import { COMPLETELY_STOPS } from '../../../packages/platform/src/tauri/switch-plan.js'
 
@@ -19,7 +20,8 @@ export type Stray = { pid: number; command: string; cwd: string }
  * keeper's `stop`.
  *
  * Presentational: the state, the focus trap and Enter/Esc live in main.tsx, so the browser
- * harness can draw exactly this (e2e/quit-dialog.spec.ts).
+ * harness can draw exactly this (e2e/quit-dialog.spec.ts). It counts itself as an open layer, so
+ * y/n/a and the app's other shortcuts do not act behind it (e2e/desktop-dialog-layers.spec.ts).
  */
 export function QuitDialog({
   background,
@@ -48,6 +50,7 @@ export function QuitDialog({
   /** `completely`: the keeper is told to stop everything, whatever background mode says */
   onQuit: (completely: boolean) => void
 }) {
+  useOpenLayer()
   const keepsRunning = background === true
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim-thin" data-testid="confirm-quit" onClick={onCancel}>

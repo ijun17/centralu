@@ -4,6 +4,7 @@ import { nextResetTick } from '../../app/labelClock.js'
 import type { CacheStats, ToolName, UsageSnapshot, UsageWindow } from '@cc/protocol'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { Tooltip } from '../../components/primitives.jsx'
+import { SkeletonLines } from '../../components/Skeleton.jsx'
 import { useStore } from '../../store/store.js'
 import { useToolMeta } from '../../store/selectors.js'
 import { CacheSection } from './CacheSection.jsx'
@@ -42,9 +43,7 @@ export function UsagePanel({ tool, machine = null }: { tool: ToolName; /** A lin
 
   if (r === undefined && read.error === null) {
     return (
-      <p className="px-4 py-6 text-center text-sm text-ink-faint" data-testid="usage-loading">
-        Loading usage…
-      </p>
+      <SkeletonLines lines={4} className="px-4 py-6" label="Loading usage" testId="usage-loading" />
     )
   }
 

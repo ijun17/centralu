@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import type { Load } from '../../app/useLoad.js'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
+import { SkeletonLines } from '../../components/Skeleton.jsx'
 import { formatDay } from '../../app/format.js'
 
 /**
@@ -71,7 +72,7 @@ export function GrantList<T>({
         <LoadFailed what={what} error={load.error} onRetry={() => void load.reload()} className="mt-2" testId={testIds.failed} />
       )}
       {list === undefined ? (
-        load.error === null && <p className="mt-2 text-sm text-ink-faint">Loading…</p>
+        load.error === null && <SkeletonLines lines={2} className="mt-2" />
       ) : list.length === 0 ? (
         <p className="mt-2 text-sm text-ink-faint" data-testid={testIds.empty}>
           {empty}

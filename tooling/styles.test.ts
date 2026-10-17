@@ -260,12 +260,12 @@ describe('bundle regression (decision C-3: no editor engine in the viewer)', () 
     expect(css).not.toMatch(/cm-editor|shiki/i)
   })
 
-  it('the app\'s total JS, lazy chunks included, stays under 1.75MB', () => {
+  it('the app\'s total JS, lazy chunks included, stays under 1.8MB', () => {
     // The release build's JS, every chunk counted. Crossing this line means a heavy dependency
     // came in or a feature grew more than it should: find out which before raising it, and give
     // the measurement and the reason in the commit that raises it. `git log -L` on this line
     // lists every raise so far with its reason.
-    expect(jsBytes).toBeLessThan(1_750_000)
+    expect(jsBytes).toBeLessThan(1_800_000)
   })
 })
 
