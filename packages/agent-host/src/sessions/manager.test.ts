@@ -3642,7 +3642,7 @@ describe('worktree sessions', () => {
   })
 
   it('forgets when it last asked about a branch once the session is deleted or merged (#392)', async () => {
-    const checked = () => [...(wtMgr as unknown as { prCheckedAt: Map<string, number> }).prCheckedAt.keys()]
+    const checked = () => [...(wtMgr as unknown as { merges: { prCheckedAt: Map<string, number> } }).merges.prCheckedAt.keys()]
     const gone = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/pr-gone',
     })) as SessionInfo
