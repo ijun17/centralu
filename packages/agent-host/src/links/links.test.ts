@@ -15,6 +15,7 @@ import { fakeRegistry } from './fake-registry.test-helpers.js'
 import { Router } from './router.js'
 import { DirectTunnel, type ConnectionLine, type HostStart, type Tunnel } from './tunnel.js'
 import { NodeTooOld } from './node-floor.js'
+import { readHoldCommand } from './swap-hold.js'
 import { storeMirror, storeRegistry } from './stored.js'
 import { scriptedAdapters } from './scripted-agent.test-helpers.js'
 import { eventually } from '../../../../tooling/test-timing.js'
@@ -525,17 +526,18 @@ describe('a hub linked to another host (#82)', () => {
 
   describe('a remote host the link finds not running (remote-hub.md §10.9, decision 7)', () => {
     /** Links over a tunnel whose remote host runs once `startHost` has run, with every status and log line kept */
-    async function linkTo(start: () => Promise<HostStart>) {
+    async function linkTo(start: () => Promise<HostStart>, exec?: (command: unknown) => Promise<{ code: number; stdout: string; stderr: string }>, over: Partial<ConnectionLine> = {}) {
       const remote = await remoteHost()
       let running = false
       let starts = 0
-      const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { hostRunning: running })), {
+      const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { hostRunning: running, ...over })), {
         startHost: async () => {
           starts++
           const r = await start()
           running = true
           return r
         },
+        ...(exec ? { exec } : {}),
       })
       const store = new Store()
       const registry = storeRegistry(store)
@@ -559,6 +561,27 @@ describe('a hub linked to another host (#82)', () => {
       links.start()
       return { links, statuses, logs, starts: () => starts }
     }
+
+    it('starts none while `pnpm remote-dev` holds the machine for a swap, says it is updating, and starts one once the hold is lifted (#1036)', async () => {
+      // The machine's shell, answering the hold a swap wrote there (swap-hold.ts) until it is lifted
+      let hold: string | null = JSON.stringify({ until: Date.now() + 60_000, by: 'pnpm remote-dev' })
+      const asked: string[] = []
+      const l = await linkTo(
+        async () => ({ how: 'detached', note: null }),
+        async (cmd) => {
+          asked.push(String(cmd))
+          return { code: 0, stdout: hold ? `CENTRALU-HOLD ${hold}\n` : '', stderr: '' }
+        },
+        // A swap needs an install the hub manages there
+        { install: { managed: true, current: { version: APP_VERSION, node: '24.21.0' }, previous: null, node: '24.21.0' } },
+      )
+      await eventually(() => asked.length >= 2 && l.links.list()[0]!.status === 'updating')
+      expect(l.starts()).toBe(0)
+      expect(l.logs.filter((x) => x.includes('pnpm remote-dev is swapping its host'))).toHaveLength(1)
+      hold = null
+      await eventually(() => l.links.list()[0]!.status === 'connected')
+      expect(l.starts()).toBe(1)
+    })
 
     it('starts it without asking, says so in the row and the log, and connects', async () => {
       const l = await linkTo(async () => ({ how: 'detached', note: null }))
@@ -655,6 +678,8 @@ describe('a machine whose Node is below the floor (#699)', () => {
     ]
     const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { hostRunning: running, install: installed ? MANAGED : OLD, ...o.line })), {
       exec: async (cmd: string) => {
+        // A swap's hold (#1036), asked before a host is started where the hub manages an install: there is none here
+        if (cmd === readHoldCommand(o.remote ?? { shell: 'posix' })) return { code: 0, stderr: '', stdout: '' }
         runs.push(cmd)
         if (o.failInstall) return { code: 1, stderr: 'curl: (6) Could not resolve host', stdout: '' }
         const i = runs.length - 1

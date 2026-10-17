@@ -1,3 +1,4 @@
+import { isLocalBuildVersion } from '@cc/protocol'
 import { removeAutostart } from './autostart.js'
 import { DATA_PS, DATA_SH, STEP, installCommand, installRemote, readStep, type InstallOptions, type InstallResult, type InstalledVersion } from './install.js'
 import { lastLine, NOT_FOUND, remoteScript, shimNames, stopCommand, type RemoteCommand, type RemoteRun, type RemoteSpec } from './tunnel.js'
@@ -28,7 +29,22 @@ import { lastLine, NOT_FOUND, remoteScript, shimNames, stopCommand, type RemoteC
 /** How long the new version has to answer after it was started (plan §10.5 step 4) */
 export const CHECK_MS = 30_000
 
-export type UpdateStep = 'preflight' | 'registry' | 'node' | 'centralu' | 'stop' | 'switch' | 'start' | 'check' | 'prune' | 'roll_back' | 'autostart' | 'remove'
+export type UpdateStep =
+  | 'preflight'
+  | 'registry'
+  | 'node'
+  | 'centralu'
+  | 'build'
+  | 'stop'
+  | 'backup'
+  | 'switch'
+  | 'start'
+  | 'check'
+  | 'restore_store'
+  | 'prune'
+  | 'roll_back'
+  | 'autostart'
+  | 'remove'
 
 export type HostControl = {
   /** One command on the remote, in its shell's terms (`Tunnel.exec`) */
@@ -122,11 +138,57 @@ async function startAndCheck(c: HostControl, version: string): Promise<string | 
   return (await c.answers(version, CHECK_MS)) ? null : `it did not answer within ${CHECK_MS / 1000} s`
 }
 
+/** Copies the store there, no host running, before `before` first opens it (remote-install.mjs `storeBackup`, #1036) */
+async function backupStore(c: HostControl, owner: InstalledVersion, before: string): Promise<void> {
+  readStep(await c.exec(installCommand(c.spec, c.script, { action: 'store-backup', version: owner.version, node: owner.node, owner: owner.version, before })), 'done', c.target)
+}
+
+/** Puts back the copy of the store taken for `owner`, no host running; false when there is none */
+async function restoreStore(c: HostControl, owner: InstalledVersion): Promise<boolean> {
+  const out = JSON.parse(readStep(await c.exec(installCommand(c.spec, c.script, { action: 'store-restore', version: owner.version, node: owner.node, owner: owner.version })), 'done', c.target)) as {
+    restored?: boolean
+  }
+  return out.restored === true
+}
+
+/** What the person is told when the store was put back as it was before a dev build */
+const restoredNote = (version: string, target: string) =>
+  `The store on ${target} was put back as it was before the dev build first opened it, since Centralu ${version} could not read it as the dev build left it; what was done on the dev build since is not in it`
+
+/**
+ * `to` started and checked; when it does not answer and the version left was a dev build, the store as it was before
+ * that dev build first opened it is put back and `to` started once more (#1036): a dev build may have migrated the
+ * store past what `to` reads, and `to` then refuses to start. Only after a dev build: the copy is the store of then,
+ * and putting it back drops what was done since
+ */
+async function startOrRestore(c: HostControl, to: InstalledVersion, from: InstalledVersion | null): Promise<{ why: string | null; note?: string }> {
+  const why = await startAndCheck(c, to.version)
+  if (!why || !isLocalBuildVersion(from?.version) || isLocalBuildVersion(to.version)) return { why }
+  await stopRemoteHost(c).catch(() => undefined)
+  let restored = false
+  try {
+    restored = await restoreStore(c, to)
+  } catch (err) {
+    return { why: `${why}; ${(err as Error).message}` }
+  }
+  if (!restored) return { why }
+  c.step('restore_store')
+  const again = await startAndCheck(c, to.version)
+  return again ? { why: again } : { why: null, note: restoredNote(to.version, c.target) }
+}
+
 /**
  * After a failed switch to `to`: the end of its log, the pointers as they were, the old host started
- * again. Always rejects, with what happened and where the machine is now
+ * again. Always rejects, with what happened and where the machine is now. `restore`: the store is put back as it was
+ * before `to` (a dev build) first opened it, which it may have migrated past what the old version reads (#1036)
  */
-async function putBack(c: HostControl, to: InstalledVersion, why: string, was: { current: InstalledVersion | null; previous: InstalledVersion | null; running: boolean }): Promise<never> {
+async function putBack(
+  c: HostControl,
+  to: InstalledVersion,
+  why: string,
+  was: { current: InstalledVersion | null; previous: InstalledVersion | null; running: boolean },
+  restore = false,
+): Promise<never> {
   c.step('roll_back')
   const tail = await hostLogTail(c).catch(() => '')
   const log = tail ? ` The end of its host.log: ${tail}` : ''
@@ -135,11 +197,13 @@ async function putBack(c: HostControl, to: InstalledVersion, why: string, was: {
     // A new host that came up late, or half, goes before the old one starts on the same port
     await stopRemoteHost(c).catch(() => undefined)
     await setPointers(c, to, was.current, was.previous)
+    if (restore && was.current) await restoreStore(c, was.current)
     if (was.running) await c.start()
   } catch (err) {
     throw new Error(`Centralu ${to.version} did not start on ${c.target} (${why}), and putting back ${back} failed too: ${(err as Error).message}.${log}`)
   }
-  throw new Error(`Centralu ${to.version} did not start on ${c.target} (${why}); ${was.running ? `it runs ${back} again` : `${back} is back in place`}.${log}`)
+  const store = restore ? ' Its store is as it was before the dev build first opened it.' : ''
+  throw new Error(`Centralu ${to.version} did not start on ${c.target} (${why}); ${was.running ? `it runs ${back} again` : `${back} is back in place`}.${store}${log}`)
 }
 
 export type UpdateOptions = Omit<InstallOptions, 'exec' | 'spec' | 'target' | 'script' | 'onStep' | 'activate'>
@@ -150,18 +214,47 @@ export async function updateRemote(c: HostControl, o: UpdateOptions): Promise<In
   const next = placed.installed
   if (!next) throw new Error(`Installing on ${c.target} answered without saying what it placed; the Centralu there may predate updates from the app`)
   const was = { current: placed.current ?? null, previous: placed.previous ?? null }
+  // The old `current` becomes `previous`; with none (an npm install ran there), there is nothing to go back to
+  return switchRemote(c, next, was, was.current && was.current.version !== next.version ? was.current : was.previous)
+}
+
+/**
+ * The update's steps after a version was placed beside (plan §10.5 steps 2 to 6): stop the running host, point
+ * `current` at `next` and `previous` at `keep`, start, check, then prune; or put the pointers back and start the old
+ * version again. Shared by `updateRemote` and a dev build (dev-build.ts).
+ *
+ * `saveStore` (a dev build, #1036): the store is copied while no host runs, before `next` first opens it, and put back
+ * when `next` does not answer, so the old version finds the store it can read. Leaving a dev build the other way
+ * (`next` a release), a `next` that does not answer gets the copy taken for it and one more start (`startOrRestore`)
+ */
+export async function switchRemote(
+  c: HostControl,
+  next: InstalledVersion,
+  was: { current: InstalledVersion | null; previous: InstalledVersion | null },
+  keep: InstalledVersion | null,
+  o: { saveStore?: boolean } = {},
+): Promise<InstallResult> {
   await c.hold()
   c.step('stop')
   const { wasRunning } = await stopRemoteHost(c)
+  const saveStore = o.saveStore === true && was.current !== null
+  if (saveStore && was.current) {
+    c.step('backup')
+    try {
+      await backupStore(c, was.current, next.version)
+    } catch (err) {
+      // Nothing was switched: the old version starts again as it was
+      if (wasRunning) await c.start().catch(() => undefined)
+      throw err
+    }
+  }
   c.step('switch')
-  // The old `current` becomes `previous`; with none (an npm install ran there), there is nothing to go back to
-  const keep = was.current && was.current.version !== next.version ? was.current : was.previous
   await setPointers(c, next, next, keep)
-  const why = await startAndCheck(c, next.version)
-  if (why) return putBack(c, next, why, { ...was, running: wasRunning })
+  const { why, note } = saveStore ? { why: await startAndCheck(c, next.version), note: undefined } : await startOrRestore(c, next, was.current)
+  if (why) return putBack(c, next, why, { ...was, running: wasRunning }, saveStore)
   c.step('prune')
   const pruned = await pruneThere(c, next).catch(() => ({ removed: [], left: [] }))
-  return { current: next, previous: keep, ...pruned }
+  return { current: next, previous: keep, ...pruned, ...(note ? { note } : {}) }
 }
 
 /** `machines.rollback`: back to `previous`, one step only (`previous` is cleared) */
@@ -171,9 +264,10 @@ export async function rollbackRemote(c: HostControl, there: { current: Installed
   const { wasRunning } = await stopRemoteHost(c)
   c.step('switch')
   await setPointers(c, there.previous, there.previous, null)
-  const why = await startAndCheck(c, there.previous.version)
+  // Back from a dev build, the release may not read the store as the dev build left it (#1036)
+  const { why, note } = await startOrRestore(c, there.previous, there.current)
   if (why) return putBack(c, there.previous, why, { current: there.current, previous: there.previous, running: wasRunning })
-  return { current: there.previous, previous: null, removed: [], left: [] }
+  return { current: there.previous, previous: null, removed: [], left: [], ...(note ? { note } : {}) }
 }
 
 const UNINSTALL_SH = `${DATA_SH}

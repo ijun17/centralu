@@ -68,7 +68,8 @@ export class LinkedMachine extends LinkedMachineConnection {
         nodeDist: installer.nodeDist,
       })
       this.deps.log?.(`[links] ${this.name}: updated to Centralu ${r.current.version}${r.previous ? `; ${r.previous.version} kept to roll back to` : ''}`)
-      return { ...this.installedNow(r), ...(pick.note ? { note: pick.note } : {}) }
+      const note = [pick.note, r.note].filter(Boolean).join(' ')
+      return { ...this.installedNow(r), ...(note ? { note } : {}) }
     })
   }
 
@@ -174,7 +175,7 @@ export class LinkedMachine extends LinkedMachineConnection {
 
   private installedNow(r: InstallResult): MachineInstallResult {
     this.installed = { managed: true, current: r.current, previous: r.previous }
-    return { machine: this.info(), current: r.current, previous: r.previous, removed: r.removed, left: r.left }
+    return { machine: this.info(), current: r.current, previous: r.previous, removed: r.removed, left: r.left, ...(r.note ? { note: r.note } : {}) }
   }
 
   /**

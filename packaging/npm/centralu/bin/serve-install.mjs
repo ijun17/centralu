@@ -115,6 +115,21 @@ export function parsePointer(text) {
 }
 
 /**
+ * Where a managed version came from, from its `install.json`: `{ kind: 'dev', commit, dirty }` for a dev build put
+ * there from a git commit (`pnpm remote-dev`, #1036), null for a release (or anything unreadable). The hub shows it
+ * on the machine's row, so a build no release produced is never mistaken for one.
+ */
+export function installSource(versionDir) {
+  try {
+    const s = JSON.parse(readFileSync(join(versionDir, 'install.json'), 'utf8')).source
+    if (s?.kind === 'dev' && typeof s.commit === 'string' && /^[0-9a-f]{7,64}$/.test(s.commit)) return { kind: 'dev', commit: s.commit, dirty: s.dirty === true }
+  } catch {
+    // no install.json, or not one this reads
+  }
+  return null
+}
+
+/**
  * The connection line's `install` field (docs/plans/remote-hub.md §10.5): whether this command was
  * started by the managed launcher, the managed install's `current` and `previous`, and the Node
  * running this command. Read from the machine at every ask, never kept by the hub (S12).
@@ -122,11 +137,14 @@ export function parsePointer(text) {
 export function installInfo(dataDir, env, nodeVersion = process.versions.node) {
   const l = remoteLayout(dataDir)
   const read = (file) => {
+    let p
     try {
-      return parsePointer(readFileSync(file, 'utf8'))
+      p = parsePointer(readFileSync(file, 'utf8'))
     } catch {
       return null
     }
+    const source = p && installSource(join(l.versions, p.version))
+    return p && source ? { ...p, source } : p
   }
   return { managed: env.CENTRALU_MANAGED === '1', current: read(l.current), previous: read(l.previous), node: nodeVersion }
 }

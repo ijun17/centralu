@@ -216,6 +216,17 @@ export type InstallParams = {
  */
 export type PointerParams = { action: 'pointers'; version: string; node: string; current: InstalledVersion | null; previous: InstalledVersion | null }
 export type PruneParams = { action: 'prune'; version: string; node: string }
+/**
+ * A dev build there from a git commit (`devBuild` in remote-install.mjs, #1036): run on the Node `current` runs on,
+ * `version` being `current`'s, only checked as a word. `protocol` is the one the hub links on
+ */
+export type DevParams = { action: 'dev'; version: string; node: string; repo: string; commit: string; allowDirty: boolean; protocol: number; hub: string }
+/**
+ * The store copied before a dev build first opens it, and put back (`storeBackup` / `storeRestore` in
+ * remote-install.mjs, #1036); run on the Node of `version`, which is only checked as a word
+ */
+export type StoreBackupParams = { action: 'store-backup'; version: string; node: string; owner: string; before: string }
+export type StoreRestoreParams = { action: 'store-restore'; version: string; node: string; owner: string }
 
 export type { InstalledVersion }
 
@@ -224,7 +235,7 @@ export type { InstalledVersion }
  * PowerShell command line) beside the install and runs it on the pinned Node with `params` as one
  * base64 word.
  */
-export function installCommand(spec: RemoteSpec, script: string, params: InstallParams | PointerParams | PruneParams): RemoteCommand {
+export function installCommand(spec: RemoteSpec, script: string, params: InstallParams | PointerParams | PruneParams | DevParams | StoreBackupParams | StoreRestoreParams): RemoteCommand {
   if (!PLAIN.test(params.version) || !PLAIN.test(params.node)) throw new Error('Not a version to install')
   const gz = gzipSync(Buffer.from(script, 'utf8'), { level: 9 }).toString('base64')
   const arg = Buffer.from(JSON.stringify(params), 'utf8').toString('base64')
@@ -246,13 +257,15 @@ Remove-Item -Force $f -ErrorAction SilentlyContinue
 
 /** What an install did: the version now `current`, the one kept as `previous`, and what was removed */
 export type InstallResult = {
-  current: { version: string; node: string }
-  previous: { version: string; node: string } | null
+  current: InstalledVersion
+  previous: InstalledVersion | null
   /** With `activate: false`: what was placed beside (`current` and `previous` are then unchanged, and may be null) */
   installed?: InstalledVersion
   removed: string[]
   /** Folders that could not be removed (a Windows program still running from them) */
   left: string[]
+  /** Something the person should know about how it went (a store put back as it was before a dev build, #1036) */
+  note?: string
 }
 
 /** The sentence for a step's failure code, for the person */
@@ -276,6 +289,36 @@ function failure(target: string, code: string, detail: string): string {
       return `Centralu ${detail} is no longer installed on ${target}`
     case 'remove':
       return `What this computer installed on ${target} could not be removed: ${detail || 'no reason given'}`
+    case 'dev_unmanaged':
+      return `${target} runs no Centralu this computer installed; install the release there from the app first, so a dev build has a release to go back to`
+    case 'dev_repo':
+      return `There is no Centralu working copy at ${detail || 'the folder given'} on ${target}`
+    case 'dev_git':
+      return `git could not read the working copy on ${target}: ${detail || 'no reason given'}`
+    case 'dev_commit': {
+      const [head = '', want = ''] = detail.split(' ')
+      return `The working copy on ${target} is at ${head.slice(0, 12)}, not ${want.slice(0, 12)}; check out that commit there (git fetch, then git checkout ${want.slice(0, 12)}) and try again. Nothing was built`
+    }
+    case 'dev_dirty':
+      return `The working copy on ${target} has ${detail} uncommitted change${detail === '1' ? '' : 's'}; commit or stash them, or pass --allow-dirty to build them too. Nothing was built`
+    case 'dev_base':
+      return `The working copy on ${target} is version ${detail || '(none)'}; a dev build is cut from a prerelease (x.y.z-beta.N)`
+    case 'dev_protocol': {
+      const [have = '?', want = '?'] = detail.split(' ')
+      return `That commit speaks protocol ${have}, and the Centralu this command runs from speaks protocol ${want}; this computer could not link to it, so nothing was built`
+    }
+    case 'dev_node': {
+      const [have = '?', floor = '?'] = detail.split(' ')
+      return `That commit needs Node ${floor} or later, and the Node Centralu runs on there is ${have}; update the release there first. Nothing was built`
+    }
+    case 'dev_deps':
+      return `The working copy on ${target} has no dependencies installed; run pnpm install there and try again`
+    case 'store_backup':
+      return `The store on ${target} could not be copied before the dev build first opened it (${detail || 'no reason given'}); the release was started again and nothing was switched`
+    case 'store_restore':
+      return `The store on ${target} could not be put back as it was before the dev build: ${detail || 'no reason given'}`
+    case 'dev_build':
+      return `Building the host on ${target} failed: ${detail || 'no reason given'} (the whole output is in <data>/remote/dev-build.log there). Nothing was switched`
     default:
       return `Installing on ${target} failed (${[code, detail].filter(Boolean).join(': ')})`
   }
