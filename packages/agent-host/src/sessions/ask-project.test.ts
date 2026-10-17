@@ -702,7 +702,7 @@ describe('asking another project', () => {
       const p = w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
       await w.until(() => !!w.card(s))
       // Removed at the store, so the card is still up when the person answers it
-      w.store.deleteProject(w.target.id)
+      w.store.trash.deleteProject(w.target.id)
       w.mgr.respondApproval(s, w.card(s)!.requestId, 'always')
       expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('removed') })
       expect(w.store.permissions.listProjectConsents()).toEqual([])

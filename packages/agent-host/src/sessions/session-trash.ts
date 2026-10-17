@@ -232,7 +232,7 @@ export class SessionTrash {
     this.host.stopWatchingReconnect(sessionId)
     this.host.quitNotices = this.host.quitNotices.filter((n) => n.sessionId !== sessionId && n.requester !== sessionId)
     this.host.meta.delete(sessionId)
-    await this.host.store.trashSession(sessionId, {
+    await this.host.store.trash.trashSession(sessionId, {
       projectId: m.projectId,
       projectName: project?.name ?? null,
       projectPath: project?.path ?? null,
@@ -266,7 +266,7 @@ export class SessionTrash {
   async listTrash(): Promise<{ sessions: TrashedSession[]; bytes: number }> {
     const projects = new Map(this.host.store.projects.listProjects().map((p) => [p.id, p]))
     const sessions = await Promise.all(
-      this.host.store.listTrash().map(async (r): Promise<TrashedSession> => {
+      this.host.store.trash.listTrash().map(async (r): Promise<TrashedSession> => {
         const { record } = r
         const live = record.projectId ? projects.get(record.projectId) : undefined
         const files =
@@ -299,7 +299,7 @@ export class SessionTrash {
 
   /** A trashed conversation, read-only (#204). Live sessions are read through `loadMessages`, not here */
   async readTrashed(sessionId: string, limit: number, beforeSeq?: number): Promise<StoredMessage[]> {
-    if (!this.host.store.isTrashed(sessionId)) {
+    if (!this.host.store.trash.isTrashed(sessionId)) {
       throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
     }
     return this.host.loadMessages(sessionId, limit, beforeSeq)
@@ -321,7 +321,7 @@ export class SessionTrash {
   async restoreSession(sessionId: string): Promise<{ session: SessionInfo; project: ProjectInfo | null }> {
     return this.trashOp(sessionId, async () => {
       await this.host.recoveryRepair
-      const t = this.host.store.trashedSession(sessionId)
+      const t = this.host.store.trash.trashedSession(sessionId)
       if (!t) throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
       const { record } = t
       let projectId: string | null = null
@@ -353,7 +353,7 @@ export class SessionTrash {
         const repo = this.host.store.projects.listProjects().find((p) => p.id === projectId)!.path
         recovered = await restoreWorktreeRecovery(sessionId, repo, t.session.worktree.path, t.session.worktree.branch, record.recovery, this.host.gitTrust(projectId))
       }
-      const back = await this.host.store.restoreSession(sessionId, projectId)
+      const back = await this.host.store.trash.restoreSession(sessionId, projectId)
       if (!back) throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
       const fixed = isInTurn(back.state) ? { ...back, state: 'idle' as const, waitingSince: null } : back
       if (recovered && fixed.worktree) fixed.worktree = { ...fixed.worktree, branch: recovered.branch }
@@ -381,7 +381,7 @@ export class SessionTrash {
   async purgeSession(sessionId: string): Promise<void> {
     return this.trashOp(sessionId, async () => {
       await this.host.recoveryRepair
-      const t = this.host.store.trashedSession(sessionId)
+      const t = this.host.store.trash.trashedSession(sessionId)
       if (!t) throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
       const { session: s, record } = t
       const cwd = this.host.store.sessions.sessionCwd(sessionId) ?? s.worktree?.path ?? record.projectPath
@@ -428,7 +428,7 @@ export class SessionTrash {
        */
       const recoveryRemoval = await stageWorktreeRecoveryRemoval(sessionId)
       try {
-        await this.host.store.purgeSession(sessionId)
+        await this.host.store.trash.purgeSession(sessionId)
         this.host.restartPolicy.forgetBackground(sessionId)
         this.host.store.settings.deleteAppSetting(codeIntelligenceKey(sessionId))
       } catch (e) {
@@ -456,7 +456,7 @@ export class SessionTrash {
   async emptyTrash(): Promise<{ purged: number; failed: { sessionId: string; name: string; error: string }[] }> {
     let purged = 0
     const failed: { sessionId: string; name: string; error: string }[] = []
-    for (const r of this.host.store.listTrash()) {
+    for (const r of this.host.store.trash.listTrash()) {
       try {
         await this.purgeSession(r.id)
         purged++

@@ -1169,7 +1169,7 @@ describe('starting another agent in the same project', () => {
         expect(await w.mgr.agentSession(s, { sessionId: c, action: 'delete' })).toMatchObject({ ok: false, error: expect.stringContaining('the person may be using it') })
         expect(dispose).not.toHaveBeenCalled()
         expect(w.mgr.listSessions().find((row) => row.id === c)).toEqual(before)
-        expect(w.store.trashedSession(c)).toBeNull()
+        expect(w.store.trash.trashedSession(c)).toBeNull()
         child.answer('The person\'s task is complete.')
         expect(await w.mgr.agentSession(s, { sessionId: c, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted' })
       })
@@ -1199,7 +1199,7 @@ describe('starting another agent in the same project', () => {
       let release!: () => void
       const gate = new Promise<void>((resolve) => { release = resolve })
       const dispose = vi.spyOn(handleOf(c)!, 'dispose').mockImplementation(() => gate)
-      const trash = vi.spyOn(w.store, 'trashSession')
+      const trash = vi.spyOn(w.store.trash, 'trashSession')
       const rpc = createRpcHandler(w.mgr, w.adapters)
       const parent = () => w.mgr.agentSession(s, { sessionId: c, action: 'delete' })
       const sidebar = () => rpc('agents.deleteSession', { sessionId: c })
@@ -1213,7 +1213,7 @@ describe('starting another agent in the same project', () => {
       expect(dispose).toHaveBeenCalledTimes(1)
       expect(trash).toHaveBeenCalledTimes(1)
       expect(w.events.filter((e) => e.type === 'session_deleted' && e.sessionId === c)).toHaveLength(1)
-      expect(w.store.trashedSession(c)?.record.projectId).toBe(w.caller.id)
+      expect(w.store.trash.trashedSession(c)?.record.projectId).toBe(w.caller.id)
     })
 
     it.each(['safe', 'normal', 'auto'] as const)('%s moves its completed child to the sidebar trash, preserving its history and creator link', async (preset) => {
@@ -1228,7 +1228,7 @@ describe('starting another agent in the same project', () => {
       expect(result).toEqual({ text: expect.stringContaining('to the trash. Tell the person in one line.') })
       expect(result.text).not.toMatch(/worktree|branch|undefined/)
       expect(w.mgr.listSessions().some((child) => child.id === c)).toBe(false)
-      expect(w.store.trashedSession(c)?.session).toMatchObject({ askedBy: s, parentSessionId: null })
+      expect(w.store.trash.trashedSession(c)?.session).toMatchObject({ askedBy: s, parentSessionId: null })
       expect(w.store.loadMessages(c, 50).some((m) => JSON.stringify(m.payload).includes('Research complete.'))).toBe(true)
       expect(w.events).toContainEqual({ type: 'session_deleted', sessionId: c })
       await w.mgr.restoreSession(c)
@@ -1246,7 +1246,7 @@ describe('starting another agent in the same project', () => {
           ok: false, error: expect.stringContaining('not a session this session started'),
         })
         expect(dispose).not.toHaveBeenCalled()
-        expect(w.store.trashedSession(target)).toBeNull()
+        expect(w.store.trash.trashedSession(target)).toBeNull()
       }
     })
 
@@ -1265,7 +1265,7 @@ describe('starting another agent in the same project', () => {
       const deleting = w.mgr.agentSession(s, { sessionId: c, action: 'delete' })
       try {
         await w.until(() => dispose.mock.calls.length === 1)
-        expect(w.store.trashedSession(c)).toBeNull()
+        expect(w.store.trash.trashedSession(c)).toBeNull()
         expect(w.events.some((e) => e.type === 'session_deleted' && e.sessionId === c)).toBe(false)
         // Output already in flight is flushed with the conversation before it goes to the trash.
         child.event({ type: 'message_delta', sessionId: c, role: 'assistant', text: ' before stop' })
@@ -1274,7 +1274,7 @@ describe('starting another agent in the same project', () => {
       }
       expect(await deleting).toMatchObject({ ok: true, state: 'deleted', sessionId: c })
       expect(await waiting).toMatchObject({ ok: false, error: expect.stringContaining('deleted') })
-      expect(w.store.trashedSession(c)).not.toBeNull()
+      expect(w.store.trash.trashedSession(c)).not.toBeNull()
       expect(w.store.loadMessages(c, 50).some((m) => JSON.stringify(m.payload).includes('Partial research before stop'))).toBe(true)
       expect(w.mgr.isLive(c)).toBe(false)
       expect(parentDispose).not.toHaveBeenCalled()
@@ -1294,7 +1294,7 @@ describe('starting another agent in the same project', () => {
       const next = new SessionManager(w.store, w.adapters, (e) => w.events.push(e))
       try {
         expect(await next.agentSession(s, { sessionId: c, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted', sessionId: c })
-        expect(w.store.trashedSession(c)?.session).toMatchObject({ [link]: s })
+        expect(w.store.trash.trashedSession(c)?.session).toMatchObject({ [link]: s })
       } finally {
         await next.detachAll()
       }
@@ -1503,7 +1503,7 @@ describe('starting another agent in the same project', () => {
         expect(next.listSessions().find((row) => row.id === c.id)?.worktree).toEqual(worktree)
         // The folder is gone, so there is nothing to lose: the session goes to the trash (#715)
         expect(await next.agentSession(s, { sessionId: c.id, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted', note: expect.stringContaining('already gone') })
-        expect(w.store.trashedSession(c.id)).not.toBeNull()
+        expect(w.store.trash.trashedSession(c.id)).not.toBeNull()
         expect(next.listSessions().some((row) => row.id === c.id)).toBe(false)
       } finally {
         await next.disposeAll()
@@ -1553,7 +1553,7 @@ describe('starting another agent in the same project', () => {
       // Right after the stop, though the tool reported its end only after the stop returned
       const deleted = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
       expect(deleted).toMatchObject({ ok: true, state: 'deleted', note: 'Its timers ended with its process: Wakes itself at 12:00 (/loop).' })
-      expect(w.store.trashedSession(c.id)).not.toBeNull()
+      expect(w.store.trash.trashedSession(c.id)).not.toBeNull()
     })
 
     it('work that cannot be stopped on its own: delete does not point to stop, and stop says nothing was stopped (#718)', async () => {
@@ -1638,7 +1638,7 @@ describe('starting another agent in the same project', () => {
         expect(listed()).toContain(real)
         const r = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
         expect(r).toMatchObject({ ok: true, state: 'deleted', branch: 'feat/gone-ahead', note: expect.stringMatching(/already gone.*kept/) })
-        expect(w.store.trashedSession(c.id)).not.toBeNull()
+        expect(w.store.trash.trashedSession(c.id)).not.toBeNull()
         expect(listed()).not.toContain(real)
         expect(branches()).toContain('feat/gone-ahead')
       })
@@ -1670,7 +1670,7 @@ describe('starting another agent in the same project', () => {
         rmSync(dirname(c.worktree!.path), { recursive: true, force: true })
         const r = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
         expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Cannot reach the worktree folder') })
-        expect(w.store.trashedSession(c.id)).toBeNull()
+        expect(w.store.trash.trashedSession(c.id)).toBeNull()
         expect(branches()).toContain('feat/gone-unmounted')
       })
 
@@ -1685,7 +1685,7 @@ describe('starting another agent in the same project', () => {
         } finally {
           chmodSync(parent, 0o755)
         }
-        expect(w.store.trashedSession(c.id)).toBeNull()
+        expect(w.store.trash.trashedSession(c.id)).toBeNull()
         expect(branches()).toContain('feat/gone-eacces')
       })
 
@@ -1694,7 +1694,7 @@ describe('starting another agent in the same project', () => {
         expect(listed()).toContain(real)
         const r = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
         expect(r).toMatchObject({ ok: true, state: 'deleted', note: expect.stringContaining('already gone') })
-        expect(w.store.trashedSession(c.id)).not.toBeNull()
+        expect(w.store.trash.trashedSession(c.id)).not.toBeNull()
         expect(listed()).not.toContain(real)
         expect(branches()).not.toContain('feat/gone-merged')
       })

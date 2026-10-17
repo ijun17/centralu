@@ -359,7 +359,7 @@ describe('migrations (E-0)', () => {
       })),
     )
     const fts = indexRowsOf(s, 's1')
-    await s.trashSession('s1', KEEP_ALL)
+    await s.trash.trashSession('s1', KEEP_ALL)
     s.appendMessages(s.loadMessages('s1', n)) // the index rows a cut-short trash step would have left
     expect(fts()).toBe(n)
     const seen: { messages: number; hits: number }[] = []
@@ -370,14 +370,14 @@ describe('migrations (E-0)', () => {
       setImmediate(look)
     }
     setImmediate(look)
-    await s.purgeSession('s1', 100)
+    await s.trash.purgeSession('s1', 100)
     deleting = false
     // If this finished in one shot, look would never have run even once
     expect(seen.length).toBeGreaterThanOrEqual(5)
     for (const at of seen) expect(at.hits).toBe(at.messages)
     expect(seen.some((at) => at.messages > 0 && at.messages < n)).toBe(true)
     expect(s.sessions.listSessions().map((x) => x.id)).not.toContain('s1')
-    expect(s.listTrash()).toEqual([])
+    expect(s.trash.listTrash()).toEqual([])
     expect(s.loadMessages('s1')).toEqual([])
     expect(fts()).toBe(0)
     s.close()
@@ -573,7 +573,7 @@ describe('migration v9 — the grid layout', () => {
   it('deleting a session drops it from the layout too — it must not try to draw something that no longer exists', async () => {
     const s = seeded()
     s.grid.setGridView([sp('s1')])
-    await s.trashSession('s1', KEEP_ALL)
+    await s.trash.trashSession('s1', KEEP_ALL)
     expect(s.grid.listGridView()).toEqual([])
     s.close()
   })
@@ -681,7 +681,7 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
     const s = seeded()
     s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
     s.grid.setGridView([ap('p2', 'slider'), sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
-    s.deleteProject('p2')
+    s.trash.deleteProject('p2')
     expect(s.grid.listGridView()).toEqual([sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
     s.close()
   })
@@ -1690,7 +1690,7 @@ describe('the person\'s answers to an app\'s capability requests (M4 D-4)', () =
     s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     s.permissions.putAppPermission('p1/notes', 'p1', allow('agent:claude', 1))
     s.permissions.putAppPermission('_user/timer', null, allow('agent:claude', 2))
-    s.deleteProject('p1')
+    s.trash.deleteProject('p1')
     expect(s.permissions.listAppPermissions('p1/notes')).toEqual([])
     expect(s.permissions.listAppPermissions('_user/timer')).toHaveLength(1)
   })
@@ -1836,8 +1836,8 @@ describe('the trash (#204)', () => {
     session(s, 'orch', null, { kind: 'orchestrator' })
     expect(s.sessions.orchestratorId()).toBe('orch')
 
-    expect(await s.trashSession('s1', KEEP_ALL)).toBe(true)
-    await s.trashSession('orch', { ...KEEP_ALL, projectId: null })
+    expect(await s.trash.trashSession('s1', KEEP_ALL)).toBe(true)
+    await s.trash.trashSession('orch', { ...KEEP_ALL, projectId: null })
 
     expect(s.sessions.listSessions()).toEqual([])
     expect(s.sessions.orchestratorId()).toBeNull()
@@ -1848,11 +1848,11 @@ describe('the trash (#204)', () => {
     expect(indexRowsOf(s, 's1')()).toBe(0)
     // Out of reach is not gone: the conversation is all there, and the trash lists it with where it came from
     expect(s.loadMessages('s1', 10)).toHaveLength(5)
-    expect(s.listTrash().map((r) => [r.id, r.messages, r.record.projectId]).sort()).toEqual([
+    expect(s.trash.listTrash().map((r) => [r.id, r.messages, r.record.projectId]).sort()).toEqual([
       ['orch', 0, null],
       ['s1', 5, 'p1'],
     ])
-    expect(await s.trashSession('s1', KEEP_ALL)).toBe(false) // twice is once
+    expect(await s.trash.trashSession('s1', KEEP_ALL)).toBe(false) // twice is once
     s.close()
   })
 
@@ -1891,16 +1891,16 @@ describe('the trash (#204)', () => {
     s.appendMessages([{ sessionId: 's1', seq: 6, role: 'assistant', kind: 'tool_call', payload: { id: 'x' }, ts: 6 }])
     s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
     const before = s.sessions.listSessions()[0]!
-    await s.trashSession('s1', KEEP_ALL)
+    await s.trash.trashSession('s1', KEEP_ALL)
 
-    const back = await s.restoreSession('s1', 'p1')
+    const back = await s.trash.restoreSession('s1', 'p1')
     expect(back).toEqual(before)
     expect(s.sessions.listSessions()).toEqual([before])
-    expect(s.listTrash()).toEqual([])
+    expect(s.trash.listTrash()).toEqual([])
     expect(s.searchMessages('galaxy')).toHaveLength(5)
     expect(indexRowsOf(s, 's1')()).toBe(5) // a message with no text gets no index row, as when it was written
     expect(s.permissions.listApprovalRules().map((r) => r.sessionId)).toEqual(['s1'])
-    expect(await s.restoreSession('s1', 'p1')).toBeNull() // only what is in the trash comes back
+    expect(await s.trash.restoreSession('s1', 'p1')).toBeNull() // only what is in the trash comes back
     s.close()
   })
 
@@ -1920,7 +1920,7 @@ describe('the trash (#204)', () => {
       setImmediate(look)
     }
     setImmediate(look)
-    await s.trashSession('s1', KEEP_ALL, 100)
+    await s.trash.trashSession('s1', KEEP_ALL, 100)
     busy = false
     expect(seen.length).toBeGreaterThanOrEqual(5)
     // Out of reach from the first chunk, with every message still there
@@ -1930,7 +1930,7 @@ describe('the trash (#204)', () => {
     seen.length = 0
     busy = true
     setImmediate(look)
-    await s.restoreSession('s1', 'p1', 100)
+    await s.trash.restoreSession('s1', 'p1', 100)
     busy = false
     expect(seen.length).toBeGreaterThanOrEqual(5)
     expect(seen.every((at) => at.hits === 0 && at.listed === 0)).toBe(true)
@@ -1951,11 +1951,11 @@ describe('the trash (#204)', () => {
       s.appRuns.beginAppRun({ ...run, id: `called-${id}`, callerSessionId: id, sessionId: null })
       s.appRuns.keepAppRunFailure({ runId: `called-${id}`, projectId: 'p1', appId: 'notes', args: '{}', result: null, createdAt: 1 }, 10)
     }
-    expect(await s.purgeSession('s1')).toBe(false) // a live session has to go through the trash first
+    expect(await s.trash.purgeSession('s1')).toBe(false) // a live session has to go through the trash first
     expect(s.loadMessages('s1', 10)).toHaveLength(3)
 
-    await s.trashSession('s1', KEEP_ALL)
-    expect(await s.purgeSession('s1')).toBe(true)
+    await s.trash.trashSession('s1', KEEP_ALL)
+    expect(await s.trash.purgeSession('s1')).toBe(true)
 
     const db = (s as unknown as { db: Database.Database }).db
     const count = (sql: string, id: string) => (db.prepare(sql).get(id) as { n: number }).n
@@ -1972,7 +1972,7 @@ describe('the trash (#204)', () => {
       // the other session's rows are all still there
       expect([sql, count(sql, 's2')]).not.toEqual([sql, 0])
     }
-    expect(s.listTrash()).toEqual([])
+    expect(s.trash.listTrash()).toEqual([])
     s.close()
   })
 
@@ -1981,7 +1981,7 @@ describe('the trash (#204)', () => {
     session(s, 's2', 'p1')
     s.appendMessages(galaxy('s1', 3))
     s.appendMessages(galaxy('s2', 2))
-    await s.trashSession('s2', KEEP_ALL) // already in the trash when the project goes
+    await s.trash.trashSession('s2', KEEP_ALL) // already in the trash when the project goes
     s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
     s.permissions.addApprovalRule({ scope: 'project', projectId: 'p1', matcher: 'Bash(pwd)', decision: 'allow' })
     s.sessions.recordCommit('p1', 'sha-s1', 's1')
@@ -1991,11 +1991,11 @@ describe('the trash (#204)', () => {
     s.appRuns.beginAppRun({ ...run, id: 'of-s1', callerSessionId: 's1', sessionId: null })
     s.appRuns.beginAppRun({ ...run, id: 'of-view', callerSessionId: null, sessionId: null })
 
-    s.deleteProject('p1')
+    s.trash.deleteProject('p1')
 
     expect(s.projects.listProjects()).toEqual([])
     expect(s.sessions.listSessions()).toEqual([])
-    const trash = s.listTrash()
+    const trash = s.trash.listTrash()
     expect(trash.map((r) => [r.id, r.messages])).toEqual(expect.arrayContaining([['s1', 3], ['s2', 2]]))
     // Nobody was asked about the tool's files or a worktree, so emptying the trash leaves them
     expect(trash.find((r) => r.id === 's1')?.record).toEqual(KEEP_ALL)
@@ -2028,7 +2028,7 @@ describe('the trash (#204)', () => {
       expect(s.schemaVersion).toBe(LATEST_SCHEMA)
       expect(s.migrationsRun).toBe(LATEST_SCHEMA - 38)
       expect(s.sessions.listSessions().map((x) => x.id)).toEqual(['old'])
-      expect(s.listTrash()).toEqual([])
+      expect(s.trash.listTrash()).toEqual([])
       s.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -2065,7 +2065,7 @@ describe('migration v44 — consent from one project to another', () => {
     s.permissions.setProjectConsent('p1', 'p2', 'delegate')
     s.permissions.setProjectConsent('p2', 'p3', 'apps')
     s.permissions.setProjectConsent('p1', 'p3', 'delegate')
-    s.deleteProject('p2')
+    s.trash.deleteProject('p2')
     expect(s.permissions.listProjectConsents().map((c) => `${c.fromProjectId}>${c.toProjectId}`)).toEqual(['p1>p3'])
     s.close()
   })
@@ -2125,7 +2125,7 @@ describe('usage_facts is no longer touched', () => {
   it('deleting a project works on a store without the table', () => {
     const s = seeded()
     ;(s as unknown as { db: Database.Database }).db.exec(`DROP TABLE usage_facts`)
-    s.deleteProject('p1')
+    s.trash.deleteProject('p1')
     expect(s.projects.listProjects()).toEqual([])
     s.close()
   })

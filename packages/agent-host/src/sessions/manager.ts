@@ -447,7 +447,7 @@ export class SessionManager {
     void this.handoffNotes.sweepOrphanHandoffNotes().catch(() => {})
     // Recovery folders a purge moved aside and never finished with (#647): back for an entry still in the trash, gone otherwise
     // Not awaited here; a purge or restore waits for it, so neither reads the folder while it is still aside
-    this.recoveryRepair = repairWorktreeRecoveryRemovals((id) => store.isTrashed(id)).catch((e) => console.error(`[trash] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
+    this.recoveryRepair = repairWorktreeRecoveryRemovals((id) => store.trash.isTrashed(id)).catch((e) => console.error(`[trash] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
     this.nameUnnamedWorktrees()
     // "Always allow" rules ending in `*` (#838): since #908 none allows anything, and an older build read them as prefixes
     const wildcards = store.permissions.dropWildcardApprovalRules()
@@ -560,7 +560,7 @@ export class SessionManager {
     )
     for (const s of leavesFirst) await this.trashSession(s.id).catch(() => {})
     const root = this.projectRow(projectId)?.path
-    this.store.deleteProject(projectId)
+    this.store.trash.deleteProject(projectId)
     // What was held for the project's folder goes with it (#392): its watchers and its `@` file index
     this.watchers.drop(projectId)
     if (root) invalidateFileIndex(root)
@@ -2894,7 +2894,7 @@ export class SessionManager {
     const commits = await gitLog(this.cwdOf(projectId), limit)
     // Tags which session created each commit (#50) — passes through untouched wherever there is no record
     // A commit link of a session in the trash is kept (#96, #204) — and says where the session is rather than "deleted"
-    const trashed = this.store.trashedIds()
+    const trashed = this.store.trash.trashedIds()
     return attachCommitSessions(commits, this.store.sessions.commitSessions(projectId), (sid) =>
       this.meta.get(sid)?.name ?? (trashed.has(sid) ? '(in the trash)' : undefined),
     )

@@ -81,10 +81,10 @@ describe('a stored row that is not JSON fails only itself (#850)', () => {
     const s = seeded()
     s.sessions.upsertSession(session('s2'))
     const keep = { projectId: 'p1', projectName: 'p1', projectPath: '/tmp/p1', removeExternal: false, removeWorktree: false }
-    await s.trashSession('s1', keep)
-    await s.trashSession('s2', keep)
+    await s.trash.trashSession('s1', keep)
+    await s.trash.trashSession('s2', keep)
     dbOf(s).prepare(`UPDATE sessions SET trash = 'null' WHERE id = 's1'`).run()
-    const listed = s.listTrash()
+    const listed = s.trash.listTrash()
     expect(listed.map((t) => t.id).sort()).toEqual(['s1', 's2'])
     // Unreadable reads as "keep everything": deleting for good must be asked for
     expect(listed.find((t) => t.id === 's1')?.record).toMatchObject({ removeExternal: false, removeWorktree: false })

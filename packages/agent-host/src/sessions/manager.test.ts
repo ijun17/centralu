@@ -3868,7 +3868,7 @@ describe('worktree sessions', () => {
     }
     const remove = (s: SessionInfo, parent: string) => wtMgr.runOrchestratorTool(parent, 'agent_session', { sessionId: s.id, action: 'delete' })
     const saved = (s: SessionInfo) => {
-      const recovery = store.trashedSession(s.id)!.record.recovery!
+      const recovery = store.trash.trashedSession(s.id)!.record.recovery!
       return { recovery, dir: join(worktreeRecoveryDir(s.id), recovery.snapshot) }
     }
 
@@ -4001,7 +4001,7 @@ describe('worktree sessions', () => {
       vi.spyOn(adapter.handleOf(s.id)!, 'dispose').mockRejectedValueOnce(new Error('process did not stop'))
       expect((await remove(s, managerId)).text).toContain('process did not stop')
       expect(existsSync(s.worktree!.path)).toBe(true)
-      expect(store.isTrashed(s.id)).toBe(false)
+      expect(store.trash.isTrashed(s.id)).toBe(false)
     })
 
     it('blocks concurrent input until disposal and cleanup finish', async () => {
@@ -4037,7 +4037,7 @@ describe('worktree sessions', () => {
       expect((await remove(s, managerId)).isError).not.toBe(true)
       g(repo, ['branch', 'feat/occupied', 'HEAD'])
       const before = g(repo, ['rev-parse', 'feat/occupied']).trim()
-      const restore = vi.spyOn(store, 'restoreSession').mockRejectedValueOnce(new Error('restore interrupted'))
+      const restore = vi.spyOn(store.trash, 'restoreSession').mockRejectedValueOnce(new Error('restore interrupted'))
       await expect(wtMgr.restoreSession(s.id)).rejects.toThrow('restore interrupted')
       const back = await wtMgr.restoreSession(s.id)
       restore.mockRestore()
@@ -4057,7 +4057,7 @@ describe('worktree sessions', () => {
       const result = await wtMgr.emptyTrash()
       expect(result.purged).toBe(0)
       expect(result.failed[0]!.error).toContain('cannot remove recovery files')
-      expect(store.isTrashed(s.id)).toBe(true)
+      expect(store.trash.isTrashed(s.id)).toBe(true)
       expect(existsSync(saved(s).dir)).toBe(true)
       cleanup.mockRestore()
       expect(await wtMgr.emptyTrash()).toEqual({ purged: 1, failed: [] })
@@ -4068,10 +4068,10 @@ describe('worktree sessions', () => {
       writeFileSync(join(s.worktree!.path, 'wip'), 'local\n')
       expect((await remove(s, managerId)).isError).not.toBe(true)
       const { dir } = saved(s)
-      const purge = vi.spyOn(store, 'purgeSession').mockRejectedValueOnce(new Error('database locked'))
+      const purge = vi.spyOn(store.trash, 'purgeSession').mockRejectedValueOnce(new Error('database locked'))
       await expect(wtMgr.purgeSession(s.id)).rejects.toThrow('database locked')
       purge.mockRestore()
-      expect(store.isTrashed(s.id)).toBe(true)
+      expect(store.trash.isTrashed(s.id)).toBe(true)
       expect(existsSync(dir)).toBe(true)
       expect((await wtMgr.listTrash()).sessions.find((t) => t.id === s.id)!.bytes).toBeGreaterThan(100)
       const back = await wtMgr.restoreSession(s.id)
@@ -4095,7 +4095,7 @@ describe('worktree sessions', () => {
       expect(r.text).toContain(`"helper" is still in the worktree of "${s.name}"`)
       expect(r.text).not.toContain('sibling')
       expect(existsSync(s.worktree!.path)).toBe(true)
-      expect(store.isTrashed(s.id)).toBe(false)
+      expect(store.trash.isTrashed(s.id)).toBe(false)
       expect(wtMgr.listSessions().find((x) => x.id === s.id)!.live).toBe(true)
       await wtMgr.trashSession(helper.id)
       expect((await remove(s, managerId)).isError).not.toBe(true)
@@ -4114,7 +4114,7 @@ describe('worktree sessions', () => {
         expect(r.isError).toBe(true)
         expect(r.text).toContain('"helper" is still in the worktree')
         expect(existsSync(s.worktree!.path)).toBe(true)
-        expect(store.isTrashed(s.id)).toBe(false)
+        expect(store.trash.isTrashed(s.id)).toBe(false)
         await next.trashSession(helper.id)
         expect((await next.runOrchestratorTool(managerId, 'agent_session', { sessionId: s.id, action: 'delete' })).isError).not.toBe(true)
         expect(existsSync(s.worktree!.path)).toBe(false)
@@ -4148,7 +4148,7 @@ describe('worktree sessions', () => {
       expect(r.isError).toBe(true)
       expect(r.text).toContain('"helper" is still in the worktree')
       expect(existsSync(s.worktree!.path)).toBe(true)
-      expect(store.isTrashed(s.id)).toBe(false)
+      expect(store.trash.isTrashed(s.id)).toBe(false)
       expect(readFileSync(join(s.worktree!.path, 'wip'), 'utf8')).toBe('local\n')
     })
 
@@ -4177,7 +4177,7 @@ describe('worktree sessions', () => {
       const r = await remove(s, managerId)
       expect(r.isError).not.toBe(true)
       expect(r.text).toContain('"helper" is still in the worktree')
-      expect(store.isTrashed(s.id)).toBe(true)
+      expect(store.trash.isTrashed(s.id)).toBe(true)
       expect(existsSync(s.worktree!.path)).toBe(true)
       expect(g(repo, ['rev-parse', '--verify', 'refs/heads/feat/occupant-after-trash']).trim()).toBeTruthy()
     })
@@ -4219,7 +4219,7 @@ describe('worktree sessions', () => {
       // A crash between the move aside and the database step, and one after it
       renameSync(worktreeRecoveryDir(kept.s.id), `${worktreeRecoveryDir(kept.s.id)}.purging-1`)
       renameSync(worktreeRecoveryDir(gone.s.id), `${worktreeRecoveryDir(gone.s.id)}.purging-2`)
-      await store.purgeSession(gone.s.id)
+      await store.trash.purgeSession(gone.s.id)
       await wtMgr.detachAll()
       const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
       try {
@@ -4243,7 +4243,7 @@ describe('worktree sessions', () => {
         const removal = await stage(id)
         return { ...removal, abort: async () => { throw new Error('folder locked') } }
       })
-      vi.spyOn(store, 'purgeSession').mockRejectedValueOnce(new Error('database locked'))
+      vi.spyOn(store.trash, 'purgeSession').mockRejectedValueOnce(new Error('database locked'))
       const log = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
         await expect(wtMgr.purgeSession(s.id)).rejects.toThrow('database locked')
@@ -4251,7 +4251,7 @@ describe('worktree sessions', () => {
       } finally {
         log.mockRestore()
       }
-      expect(store.isTrashed(s.id)).toBe(true)
+      expect(store.trash.isTrashed(s.id)).toBe(true)
       expect(existsSync(worktreeRecoveryDir(s.id))).toBe(false)
       await wtMgr.detachAll()
       const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
@@ -4277,8 +4277,8 @@ describe('worktree sessions', () => {
       const [r] = await Promise.all([agent, sidebar])
       expect(r.isError).toBe(true)
       expect(r.text).toContain('already being deleted')
-      expect(store.isTrashed(s.id)).toBe(true)
-      expect(store.trashedSession(s.id)!.record.recovery).toBeUndefined()
+      expect(store.trash.isTrashed(s.id)).toBe(true)
+      expect(store.trash.trashedSession(s.id)!.record.recovery).toBeUndefined()
       expect(existsSync(s.worktree!.path)).toBe(true)
       expect(readFileSync(join(s.worktree!.path, 'wip'), 'utf8')).toBe('local\n')
       expect(g(repo, ['rev-parse', '--verify', 'refs/heads/feat/sidebar-race']).trim()).toBeTruthy()
@@ -4293,7 +4293,7 @@ describe('worktree sessions', () => {
       expect((await remove(s, managerId)).text).toContain('disk full')
       expect(readFileSync(join(s.worktree!.path, 'wip'), 'utf8')).toBe('local\n')
       expect(g(repo, ['rev-parse', '--verify', 'feat/capture-error']).trim()).toBeTruthy()
-      expect(store.isTrashed(s.id)).toBe(false)
+      expect(store.trash.isTrashed(s.id)).toBe(false)
       expect(wtMgr.listSessions().find((x) => x.id === s.id)!.live).toBe(false)
       snapshot.mockRestore()
     })
@@ -4346,7 +4346,7 @@ describe('worktree sessions', () => {
           expect(git.mock.calls.some(([, args]) => args[0] === 'add')).toBe(false)
           expect(existsSync(path)).toBe(true)
           expect(g(s.worktree!.path, ['ls-files', '--stage'])).toBe(index)
-          expect(store.isTrashed(s.id)).toBe(false)
+          expect(store.trash.isTrashed(s.id)).toBe(false)
         } else {
           expect(r.isError).not.toBe(true)
           expect(git.mock.calls.some(([, args]) => args[0] === 'add')).toBe(true)
@@ -4425,7 +4425,7 @@ describe('worktree sessions', () => {
         expect(r.text).toContain('Warning:')
         expect(r.text).toContain(failure === 'worktree' ? s.worktree!.path : s.worktree!.branch)
         expect(r.text).not.toContain('its worktree and branch')
-        expect(store.isTrashed(s.id)).toBe(true)
+        expect(store.trash.isTrashed(s.id)).toBe(true)
         expect(existsSync(s.worktree!.path)).toBe(failure === 'worktree')
         expect(g(repo, ['branch', '--list', '--format=%(refname:short)', s.worktree!.branch]).trim()).toBe(s.worktree!.branch)
         expect(readFileSync(join(saved(s).dir, '0.patch'), 'utf8')).toContain('saved')
@@ -6033,7 +6033,7 @@ describe("a handoff note does not race its reader (#106)", () => {
       spy.mockRestore()
     }
 
-    expect(store.trashedIds().has(handing.id)).toBe(true)
+    expect(store.trash.trashedIds().has(handing.id)).toBe(true)
     expect(existsSync(note(handing.id))).toBe(true)
   })
 

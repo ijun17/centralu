@@ -252,7 +252,7 @@ describe('auto Centralu boundaries (#603)', () => {
       expect(w.mgr.listSessions().find((s) => s.id === bottom.sessionId)?.askedBy).toBe(middle.sessionId)
       expect(await start(bottom.sessionId)).toMatchObject({ ok: false, error: expect.stringContaining('2 levels below') })
       // The record goes with the session when the trash is emptied of it, and only its own
-      expect(await w.store.purgeSession(middle.sessionId)).toBe(true)
+      expect(await w.store.trash.purgeSession(middle.sessionId)).toBe(true)
       expect(w.store.settings.appSetting(`agent_depth:${middle.sessionId}`)).toBeNull()
       expect(w.store.settings.appSetting(`agent_depth:${bottom.sessionId}`)).toBe('2')
     })
@@ -396,7 +396,7 @@ describe('auto Centralu boundaries (#603)', () => {
       changedFiles: state === 'dirty' ? 1 : 0,
       commits: state === 'unmerged' ? 1 : 0,
     } })
-    expect(w.store.trashedSession(child.id)?.record.recovery).toBeDefined()
+    expect(w.store.trash.trashedSession(child.id)?.record.recovery).toBeDefined()
     expect(existsSync(child.worktree!.path)).toBe(false)
     expect(git(w.caller.path, 'branch', '--list', child.worktree!.branch)).toBe('')
     expect(w.mgr.listSessions().some((s) => s.id === child.id)).toBe(false)

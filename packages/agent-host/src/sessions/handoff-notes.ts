@@ -91,7 +91,7 @@ export class HandoffNotes {
       (owner) =>
         this.host.meta.has(owner) ||
         // A session in the trash still owns its note (#204) — restoring it must find it; only purging lets it go
-        this.host.store.trashedIds().has(owner) ||
+        this.host.store.trash.trashedIds().has(owner) ||
         this.host.store.handoffs.handoffPredecessors().has(owner),
       projectId,
     )

@@ -70,7 +70,7 @@ export class Store extends MigrationRunner {
   readonly grid: GridRecords
   private readonly messages: MessageRecords
   readonly handoffs: HandoffMarkers
-  private readonly trash: TrashRecords
+  readonly trash: TrashRecords
   readonly settings: SettingsRecords
   readonly permissions: PermissionRecords
   readonly appRuns: AppRunRecords
@@ -259,36 +259,8 @@ export class Store extends MigrationRunner {
 
   // ── TrashRecords (store/trash.ts) ──
 
-  trashSession(sessionId: string, record: TrashRecord, chunk?: number): Promise<boolean> {
-    return this.trash.trashSession(sessionId, record, chunk)
-  }
-
-  restoreSession(sessionId: string, projectId: string | null, chunk?: number): Promise<SessionInfo | null> {
-    return this.trash.restoreSession(sessionId, projectId, chunk)
-  }
-
-  purgeSession(sessionId: string, chunk?: number): Promise<boolean> {
-    return this.trash.purgeSession(sessionId, chunk)
-  }
-
-  isTrashed(sessionId: string): boolean {
-    return this.trash.isTrashed(sessionId)
-  }
-
-  trashedIds(): Set<string> {
-    return this.trash.trashedIds()
-  }
-
   trashedSession(sessionId: string): { session: SessionInfo; record: TrashRecord; deletedAt: number } | null {
     return this.trash.trashedSession(sessionId)
-  }
-
-  listTrash(): TrashedRow[] {
-    return this.trash.listTrash()
-  }
-
-  deleteProject(projectId: string): void {
-    return this.trash.deleteProject(projectId)
   }
 
   // ── SettingsRecords (store/settings.ts) ──

@@ -73,9 +73,9 @@ describe('the search index holds what was said, not the tool calls (#221)', () =
   it('a session restored from the trash gets its index back without its tool calls', async () => {
     const s = seeded()
     s.appendMessages(conversation('s1'))
-    await s.trashSession('s1', KEEP_ALL)
+    await s.trash.trashSession('s1', KEEP_ALL)
     expect(indexRows(s)).toBe(0)
-    await s.restoreSession('s1', 'p1')
+    await s.trash.restoreSession('s1', 'p1')
     expect(s.searchMessages('zebracorn')).toEqual([])
     expect(s.searchMessages('build the package').map((h) => h.seq)).toEqual([1])
     expect(indexRows(s)).toBe(3)
@@ -133,7 +133,7 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
     const s = seeded(template)
     session(s, 'gone')
     s.appendMessages([...conversation('s1'), ...conversation('gone')])
-    await s.trashSession('gone', KEEP_ALL)
+    await s.trash.trashSession('gone', KEEP_ALL)
     const calls: StoredMessage[] = Array.from({ length: 400 }, (_, i) => ({
       sessionId: 's1', seq: 100 + i, role: 'system', kind: 'tool_call',
       payload: { type: 'tool_call', sessionId: 's1', callId: `c${i}`, summary: { tool: 'Bash', title: COMMAND, paths: [] } },
