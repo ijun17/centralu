@@ -20,6 +20,7 @@ agent-host/src/
 │  └─ json-lines.ts     # newline-delimited JSON: split at \n only (never readline, which also splits at U+2028), pending requests (#428)
 ├─ adapters/
 │  ├─ contract.ts       # AgentAdapter interface + capability types
+│  ├─ contract/         # the contract's larger parts: orchestrator tools, session apps, the tool's process
 │  ├─ registry.ts       # the tool → adapter map
 │  ├─ claude/           # based on the Claude Agent SDK (incl. orchestrator-mcp.ts)
 │  └─ codex/            # app-server JSON-RPC client (written here, incl. the stdio bridge)
@@ -1673,7 +1674,7 @@ burst has been sent, each of these buffers hands back the capacity it left behin
 tool, sessionId, version?}` (the CLI version it was started from, #297, §4.6), `{kind:"terminal", id, cwd}`, `{kind:"command", cwd, command, runId, startedAt}`. A newer host
 must keep reading an older host's tags: the children outlive the build that spawned them.
 
-- **Agents.** The manager passes the adapter a `ProcessSource` (`adapters/contract.ts`): `spawn` in the keeper,
+- **Agents.** The manager passes the adapter a `ProcessSource` (`adapters/contract/process.ts`): `spawn` in the keeper,
   or `adopt` a kept process. Claude gets it as `spawnClaudeCodeProcess`; `CodexClient` takes the process instead
   of spawning. `KeeperAgentProcess` has the `ChildProcess` surface both use, but `kill()` is a keeper request for
   the CLI's whole process group (below) that is never sent once the process is detached or the host is exiting

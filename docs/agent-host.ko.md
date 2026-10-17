@@ -21,6 +21,7 @@ agent-host/src/
 │  └─ json-lines.ts     # 줄 단위 JSON: \n에서만 나눈다(U+2028에서도 끊는 readline은 쓰지 않는다), 대기 중인 요청 (#428)
 ├─ adapters/
 │  ├─ contract.ts       # AgentAdapter 인터페이스 + 능력 타입
+│  ├─ contract/         # 계약의 큰 부분: 오케스트레이터 도구, 세션 앱, 도구의 프로세스
 │  ├─ registry.ts       # 도구 → 어댑터 지도
 │  ├─ claude/           # Claude Agent SDK 기반 (orchestrator-mcp.ts 포함)
 │  └─ codex/            # app-server JSON-RPC 클라이언트 (직접 작성. stdio 다리 포함)
@@ -1187,7 +1188,7 @@ id로 다시 연다: 각 인스턴스는 `open()`처럼 자기 앱을 다시 붙
 sessionId, version?}`(띄운 CLI 버전, #297, §4.6), `{kind:"terminal", id, cwd}`, `{kind:"command", cwd, command, runId, startedAt}`. 새 호스트는 옛 호스트의
 태그를 계속 읽을 수 있어야 한다: 자식은 자기를 띄운 빌드보다 오래 산다.
 
-- **에이전트.** 매니저는 어댑터에 `ProcessSource`(`adapters/contract.ts`)를 넘긴다: 키퍼에서 `spawn`하거나, 쥐어 둔
+- **에이전트.** 매니저는 어댑터에 `ProcessSource`(`adapters/contract/process.ts`)를 넘긴다: 키퍼에서 `spawn`하거나, 쥐어 둔
   프로세스를 `adopt`한다. claude는 이것을 `spawnClaudeCodeProcess`로 받고, `CodexClient`는 띄우는 대신 그 프로세스를
   받는다. `KeeperAgentProcess`는 둘이 쓰는 `ChildProcess`의 표면을 갖지만, `kill()`은 CLI의 프로세스 그룹 전체(아래)에
   대해 키퍼에 보내는 요청이고 프로세스를 놓았거나 호스트가 끝나는 중이면 결코 보내지 않는다(SDK는 주인이 끝날 때 자기
