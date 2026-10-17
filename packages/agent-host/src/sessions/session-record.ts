@@ -7,12 +7,15 @@ import {
   recordedRowKind,
   streamRowKind,
   subagentStepRow,
+  type Attachment,
+  type MessageImage,
   type NormalizedEvent,
   type PermissionPreset,
   type SessionInfo,
   type StoredMessage,
 } from '@cc/protocol'
 import type { Store } from '../dev-services/store.js'
+import { mentions, readMessageImage, resolveWrittenPath, writtenForms } from '../dev-services/message-image.js'
 import { saveAttachment, sweepAttachments } from '../dev-services/attachments.js'
 
 /**
@@ -38,6 +41,10 @@ export type SessionRecordHost = {
   observeCommit: (e: Extract<NormalizedEvent, { type: "tool_call" | "tool_result"; }>, m: SessionInfo) => void
   readonly running: Map<string, { model: string | null; effort: string | null; verbosity: string | null; serviceTier: string | null; permissionPreset: PermissionPreset; }>
   readonly store: Store
+  /** Where the session actually runs: the stored path, derived once for an old row (#28) */
+  cwdFor: (m: SessionInfo) => string
+  /** A session's row, or `session_not_found` */
+  sessionOf: (sessionId: string) => SessionInfo
 }
 
 /**
@@ -238,5 +245,81 @@ export class SessionRecord {
     this.host.store.appendMessages([{ sessionId: m.id, seq, role: 'system', kind: 'image', payload, ts: Date.now() }])
     m.lastSeq = seq
     this.host.store.upsertSession(m)
+  }
+
+  /**
+   * A local image one of this session's replies names (`messages.image`; dev-services/message-image.ts).
+   *
+   * The reply is asked first, before the path is resolved or anything on disk is touched: a path no reply of this
+   * session wrote is refused without saying whether it exists. A reply still streaming is asked too, from memory: its
+   * row is written every two seconds (`STREAM_FLUSH_MS`), and the window draws the image as soon as the `)` arrives.
+   * A relative path is read against the folder the session runs in, as the agent that wrote it meant it.
+   */
+  async messageImage(sessionId: string, written: string): Promise<MessageImage> {
+    const m = this.host.sessionOf(sessionId)
+    if (!this.repliesName(sessionId, written)) {
+      return { ok: false, reason: 'not_mentioned', message: 'No reply in this session names this path, so it is not read' }
+    }
+    const abs = resolveWrittenPath(written, this.host.cwdFor(m))
+    if (abs === null) return { ok: false, reason: 'not_found', message: `${written} is not a path on this machine` }
+    return readMessageImage(abs)
+  }
+
+  repliesName(sessionId: string, written: string): boolean {
+    const open = this.streams.get(sessionId)
+    if (open?.kind === 'text' && mentions(open.text, written)) return true
+    return writtenForms(written).some((form) => this.host.store.replyTextsContaining(sessionId, form).some((text) => mentions(text, written)))
+  }
+
+  /**
+   * The steps of the subagent one card launched (#222) — the only read of them, asked when the person opens that
+   * card's steps. As cards: a tool's `input` and `output` stay in the store, as for a history page (#221).
+   * A trashed session's cards can be opened in its read-only view, so this does not refuse the trash.
+   */
+  loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq: number | undefined, limit: number): StoredMessage[] {
+    return this.host.store.loadSubagentMessages(sessionId, parentCallId, { afterSeq, limit })
+  }
+
+  async loadMessages(sessionId: string, limit: number, beforeSeq?: number): Promise<StoredMessage[]> {
+    const rows = this.host.store.loadMessages(sessionId, limit, beforeSeq)
+    /*
+     * An image row stores only a path (#40) — the bytes are loaded back in when handing it to the
+     * screen. If the file is gone (cleaned up by the 500MB cap, or deleted outside), the reason is
+     * loaded instead of a silent blank.
+     */
+    const { readFile } = await import('node:fs/promises')
+    return Promise.all(
+      rows.map(async (r) => {
+        if (r.kind === 'image') {
+          const p = r.payload as Extract<NormalizedEvent, { type: 'message_image' }>
+          if (!p.path || p.note) return r
+          try {
+            const data = (await readFile(p.path)).toString('base64')
+            return { ...r, payload: { ...p, data } }
+          } catch {
+            return { ...r, payload: { ...p, note: 'The image was cleared and no longer exists (total-size cap)' } }
+          }
+        }
+        // A user attachment's own image follows the same rule — bytes are loaded if the file is still
+        // there, and if it was cleaned up the path alone is left quietly (the screen falls back to a name
+        // chip)
+        if (r.kind === 'text' && r.role === 'user') {
+          const p = r.payload as { attachments?: Attachment[] }
+          if (!p?.attachments?.some((a) => a.kind === 'image')) return r
+          const attachments = await Promise.all(
+            p.attachments.map(async (a) => {
+              if (a.kind !== 'image') return a
+              try {
+                return { ...a, data: (await readFile(a.path)).toString('base64') }
+              } catch {
+                return a
+              }
+            }),
+          )
+          return { ...r, payload: { ...p, attachments } }
+        }
+        return r
+      }),
+    )
   }
 }

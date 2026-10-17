@@ -38,7 +38,6 @@ import type {
   ApprovalScope,
   CreateSessionParams,
   GridPanel,
-  MessageImage,
   NormalizedEvent,
   PermissionPreset,
   QuestionAnswer,
@@ -47,7 +46,6 @@ import type {
   SessionInfo,
   SessionState,
   Interruption,
-  StoredMessage,
   ToolName,
   SettingsApplied,
   FsResolvePurpose,
@@ -121,7 +119,6 @@ import {
 } from '../dev-services/fs.js'
 import { DirWatchers } from '../dev-services/watch.js'
 import { invalidateFileIndex } from '../dev-services/file-search.js'
-import { mentions, readMessageImage, resolveWrittenPath, writtenForms } from '../dev-services/message-image.js'
 import { writeHandoffNoteSync } from '../dev-services/handoff-notes.js'
 import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
 import { AskProjectFlow, type AskProjectHost } from './ask-project-flow.js'
@@ -3898,81 +3895,21 @@ export class SessionManager {
     this.store.markRead(sessionId, seq)
   }
 
-  /**
-   * A local image one of this session's replies names (`messages.image`; dev-services/message-image.ts).
-   *
-   * The reply is asked first, before the path is resolved or anything on disk is touched: a path no reply of this
-   * session wrote is refused without saying whether it exists. A reply still streaming is asked too, from memory: its
-   * row is written every two seconds (`STREAM_FLUSH_MS`), and the window draws the image as soon as the `)` arrives.
-   * A relative path is read against the folder the session runs in, as the agent that wrote it meant it.
-   */
-  async messageImage(sessionId: string, written: string): Promise<MessageImage> {
-    const m = this.sessionOf(sessionId)
-    if (!this.repliesName(sessionId, written)) {
-      return { ok: false, reason: 'not_mentioned', message: 'No reply in this session names this path, so it is not read' }
-    }
-    const abs = resolveWrittenPath(written, this.cwdFor(m))
-    if (abs === null) return { ok: false, reason: 'not_found', message: `${written} is not a path on this machine` }
-    return readMessageImage(abs)
+  /** `SessionRecord.messageImage` (session-record.ts), kept on the manager for its callers */
+  messageImage(...a: Parameters<SessionRecord['messageImage']>): ReturnType<SessionRecord['messageImage']> {
+    return this.record.messageImage(...a)
   }
 
-  private repliesName(sessionId: string, written: string): boolean {
-    const open = this.record.streams.get(sessionId)
-    if (open?.kind === 'text' && mentions(open.text, written)) return true
-    return writtenForms(written).some((form) => this.store.replyTextsContaining(sessionId, form).some((text) => mentions(text, written)))
+  /** `SessionRecord.loadSubagentMessages` (session-record.ts), kept on the manager for its callers */
+  loadSubagentMessages(...a: Parameters<SessionRecord['loadSubagentMessages']>): ReturnType<SessionRecord['loadSubagentMessages']> {
+    return this.record.loadSubagentMessages(...a)
   }
 
-  /**
-   * The steps of the subagent one card launched (#222) — the only read of them, asked when the person opens that
-   * card's steps. As cards: a tool's `input` and `output` stay in the store, as for a history page (#221).
-   * A trashed session's cards can be opened in its read-only view, so this does not refuse the trash.
-   */
-  loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq: number | undefined, limit: number): StoredMessage[] {
-    return this.store.loadSubagentMessages(sessionId, parentCallId, { afterSeq, limit })
+  /** `SessionRecord.loadMessages` (session-record.ts), kept on the manager for its callers */
+  loadMessages(...a: Parameters<SessionRecord['loadMessages']>): ReturnType<SessionRecord['loadMessages']> {
+    return this.record.loadMessages(...a)
   }
 
-  async loadMessages(sessionId: string, limit: number, beforeSeq?: number): Promise<StoredMessage[]> {
-    const rows = this.store.loadMessages(sessionId, limit, beforeSeq)
-    /*
-     * An image row stores only a path (#40) — the bytes are loaded back in when handing it to the
-     * screen. If the file is gone (cleaned up by the 500MB cap, or deleted outside), the reason is
-     * loaded instead of a silent blank.
-     */
-    const { readFile } = await import('node:fs/promises')
-    return Promise.all(
-      rows.map(async (r) => {
-        if (r.kind === 'image') {
-          const p = r.payload as Extract<NormalizedEvent, { type: 'message_image' }>
-          if (!p.path || p.note) return r
-          try {
-            const data = (await readFile(p.path)).toString('base64')
-            return { ...r, payload: { ...p, data } }
-          } catch {
-            return { ...r, payload: { ...p, note: 'The image was cleared and no longer exists (total-size cap)' } }
-          }
-        }
-        // A user attachment's own image follows the same rule — bytes are loaded if the file is still
-        // there, and if it was cleaned up the path alone is left quietly (the screen falls back to a name
-        // chip)
-        if (r.kind === 'text' && r.role === 'user') {
-          const p = r.payload as { attachments?: Attachment[] }
-          if (!p?.attachments?.some((a) => a.kind === 'image')) return r
-          const attachments = await Promise.all(
-            p.attachments.map(async (a) => {
-              if (a.kind !== 'image') return a
-              try {
-                return { ...a, data: (await readFile(a.path)).toString('base64') }
-              } catch {
-                return a
-              }
-            }),
-          )
-          return { ...r, payload: { ...p, attachments } }
-        }
-        return r
-      }),
-    )
-  }
 
   /**
    * The handles are being let go of (#839): a quit sweeping them (`disposeAll`), or a handover (`detachAll`). A process
