@@ -27,7 +27,16 @@ test('Enter on a focused option of a single-choice question answers it (#543)', 
   await newSession(page, 'alpha', 'q')
   await emitEvent(page, 0, { type: 'question_request', requestId: 'q1', questions: [QUESTIONS[0]] })
 
-  await page.getByTestId('question-option').filter({ hasText: 'Kimbap' }).focus()
+  /*
+   * Visible first (#790). The conversation is hidden (visibility: hidden) for the few frames it takes to settle at the
+   * bottom after its first message, and a hidden button cannot take focus: `focus()` then did nothing, and Enter went
+   * to the page (2 of 20 WebKit runs). A person cannot focus what is not drawn either, so the test waits for what they
+   * would see, and checks the option holds focus before pressing Enter.
+   */
+  const option = page.getByTestId('question-option').filter({ hasText: 'Kimbap' })
+  await expect(option).toBeVisible()
+  await option.focus()
+  await expect(option).toBeFocused()
   await page.keyboard.press('Enter')
 
   await expect(page.getByTestId('chat-stream')).toContainText('Answer received: Kimbap')
