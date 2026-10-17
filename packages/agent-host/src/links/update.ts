@@ -28,7 +28,7 @@ import { lastLine, NOT_FOUND, remoteScript, shimNames, stopCommand, type RemoteC
 /** How long the new version has to answer after it was started (plan §10.5 step 4) */
 export const CHECK_MS = 30_000
 
-export type UpdateStep = 'preflight' | 'registry' | 'node' | 'centralu' | 'stop' | 'switch' | 'start' | 'check' | 'prune' | 'roll_back' | 'autostart' | 'remove'
+export type UpdateStep = 'preflight' | 'registry' | 'node' | 'centralu' | 'build' | 'stop' | 'switch' | 'start' | 'check' | 'prune' | 'roll_back' | 'autostart' | 'remove'
 
 export type HostControl = {
   /** One command on the remote, in its shell's terms (`Tunnel.exec`) */
@@ -150,12 +150,25 @@ export async function updateRemote(c: HostControl, o: UpdateOptions): Promise<In
   const next = placed.installed
   if (!next) throw new Error(`Installing on ${c.target} answered without saying what it placed; the Centralu there may predate updates from the app`)
   const was = { current: placed.current ?? null, previous: placed.previous ?? null }
+  // The old `current` becomes `previous`; with none (an npm install ran there), there is nothing to go back to
+  return switchRemote(c, next, was, was.current && was.current.version !== next.version ? was.current : was.previous)
+}
+
+/**
+ * The update's steps after a version was placed beside (plan §10.5 steps 2 to 6): stop the running host, point
+ * `current` at `next` and `previous` at `keep`, start, check, then prune; or put the pointers back and start the old
+ * version again. Shared by `updateRemote` and a dev build (dev-build.ts)
+ */
+export async function switchRemote(
+  c: HostControl,
+  next: InstalledVersion,
+  was: { current: InstalledVersion | null; previous: InstalledVersion | null },
+  keep: InstalledVersion | null,
+): Promise<InstallResult> {
   await c.hold()
   c.step('stop')
   const { wasRunning } = await stopRemoteHost(c)
   c.step('switch')
-  // The old `current` becomes `previous`; with none (an npm install ran there), there is nothing to go back to
-  const keep = was.current && was.current.version !== next.version ? was.current : was.previous
   await setPointers(c, next, next, keep)
   const why = await startAndCheck(c, next.version)
   if (why) return putBack(c, next, why, { ...was, running: wasRunning })

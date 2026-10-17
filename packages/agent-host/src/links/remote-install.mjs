@@ -2,16 +2,17 @@
 // ssh and runs it on the pinned Node that step 1 placed; it never runs on the hub. It imports Node's
 // own modules only, and reads one argument: the base64 of a JSON object the hub wrote
 // ({ version, node, platform, hub, packages: [{ name, tarball, integrity }], activate? }), or for the
-// update's later steps ({ action: 'pointers', current, previous } and { action: 'prune' }; plan §10.5).
+// update's later steps ({ action: 'pointers', current, previous } and { action: 'prune' }; plan §10.5), or a dev
+// build of the host from a git commit in a working copy there ({ action: 'dev', repo, commit, … }; `pnpm remote-dev`, #1036).
 //
 // It prints one line for the hub to read, `CENTRALU-INSTALL done <json>` or
 // `CENTRALU-INSTALL fail <code> <detail>`, and nothing that matters on its exit code (exit codes do
 // not survive the way back from Windows; tunnel.ts). The sentences for the person are the hub's.
 import { spawnSync } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join, win32 } from 'node:path'
+import { basename, isAbsolute, join, win32 } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const WORD = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/
@@ -365,10 +366,122 @@ export function pruneNow({ dataDir = process.env.CC_DATA_DIR || join(homedir(), 
   }
 }
 
+/** `a` at least `b`, both plain `x.y.z` (a prerelease or build suffix is ignored) */
+function atLeast(a, b) {
+  const n = (v) => String(v).replace(/^v/, '').split(/[-+]/)[0].split('.').map((x) => Number(x) || 0)
+  const [x, y] = [n(a), n(b)]
+  for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0)
+  return true
+}
+
+/** A release a dev build can be cut from: a prerelease, since `<base>.local.N` is SemVer only on one (`isLocalBuildVersion`) */
+const DEV_BASE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*$/
+
+/** git in the working copy, by name on PATH as the person runs it there; what it printed, or a refusal */
+function git(repo, args) {
+  const r = spawnSync('git', ['-C', repo, ...args], { cwd: repo, encoding: 'utf8', windowsHide: true, maxBuffer: 16 * 1024 * 1024 })
+  if (r.error) throw new Refusal('dev_git', r.error.message)
+  if (r.status !== 0) throw new Refusal('dev_git', (r.stderr || '').trim().split('\n').at(-1) || `exit ${r.status}`)
+  return r.stdout
+}
+
+/** The last line of what a run printed that says anything */
+function lastSaid(...texts) {
+  for (const t of texts) {
+    const line = String(t ?? '').trim().split(/\r?\n/).filter((l) => l.trim()).at(-1)
+    if (line) return line.trim()
+  }
+  return ''
+}
+
+/**
+ * A dev build of the host from a git commit (`pnpm remote-dev`, #1036; docs/plans/remote-hub.md §10.11), placed beside
+ * what is there as `<base>.local.N` with nothing switched: the hub's update steps stop, switch, start and check it
+ * (update.ts `switchRemote`).
+ *
+ * Checked before anything is built: the working copy's HEAD is exactly `p.commit`, it has no changes unless
+ * `p.allowDirty`, it speaks `p.protocol` (the protocol the hub links on), and this Node (the pinned one `current` runs
+ * on) is not below its floor. Then the working copy's own `bundle.mjs` runs on this Node into the new version's folder
+ * (`CC_BUNDLE_OUT`), its launcher package is copied beside with the version stamped into its `package.json` (what the
+ * host says it is, through `CC_HOST_SOURCE`), and `install.json` says where it came from:
+ * `source: { kind: 'dev', commit, dirty }`. What the build printed goes to `<data>/remote/dev-build.log`.
+ */
+export function devBuild(p, { dataDir = process.env.CC_DATA_DIR || join(homedir(), '.centralu'), platform = process.platform, arch = process.arch } = {}) {
+  if (typeof p.repo !== 'string' || !isAbsolute(p.repo)) throw new Refusal('dev_repo', String(p.repo ?? ''))
+  if (typeof p.commit !== 'string' || !/^[0-9a-f]{40}$/.test(p.commit)) throw new Refusal('params', 'commit')
+  const l = remoteLayout(dataDir)
+  mkdirSync(l.root, { recursive: true })
+  const unlock = lock(l)
+  try {
+    const current = readPointer(l.current)
+    if (!current) throw new Refusal('dev_unmanaged')
+    const repo = p.repo
+    const bundler = join(repo, 'packages', 'agent-host', 'scripts', 'bundle.mjs')
+    if (!existsSync(bundler)) throw new Refusal('dev_repo', repo)
+    const head = git(repo, ['rev-parse', 'HEAD']).trim()
+    if (head !== p.commit) throw new Refusal('dev_commit', `${head} ${p.commit}`)
+    const changes = git(repo, ['status', '--porcelain']).split('\n').filter((line) => line.trim()).length
+    if (changes > 0 && !p.allowDirty) throw new Refusal('dev_dirty', String(changes))
+    const shim = JSON.parse(readFileSync(join(repo, 'packaging', 'npm', 'centralu', 'package.json'), 'utf8'))
+    const base = String(shim.version ?? '')
+    if (!DEV_BASE.test(base) || base.includes('.local.')) throw new Refusal('dev_base', base)
+    const protocol = Number(/export const PROTOCOL_VERSION = (\d+)/.exec(readFileSync(join(repo, 'packages', 'protocol', 'src', 'envelope.ts'), 'utf8'))?.[1])
+    if (protocol !== p.protocol) throw new Refusal('dev_protocol', `${protocol} ${p.protocol}`)
+    const floor = /(\d+\.\d+\.\d+)/.exec(String(shim.engines?.node ?? ''))?.[1]
+    if (floor && !atLeast(process.versions.node, floor)) throw new Refusal('dev_node', `${process.versions.node} ${floor}`)
+    if (!existsSync(join(repo, 'node_modules', 'esbuild'))) throw new Refusal('dev_deps', repo)
+    // The next number after every dev build of this release still there, and any a pointer names
+    const local = new RegExp(`^${base.replace(/[.+-]/g, '\\$&')}\\.local\\.([1-9]\\d*)$`)
+    let names = []
+    try {
+      names = readdirSync(l.versions)
+    } catch {
+      // no versions folder: the first one
+    }
+    const taken = [...names, current.version, readPointer(l.previous)?.version ?? ''].map((n) => Number(local.exec(n)?.[1] ?? 0))
+    const version = `${base}.local.${Math.max(0, ...taken) + 1}`
+    if (!WORD.test(version)) throw new Refusal('dev_base', version)
+    const target = `${platform}-${arch}`
+    const partial = join(l.root, `.partial-${version}-${process.pid}`)
+    rmSync(partial, { recursive: true, force: true })
+    try {
+      const hostPkg = join(partial, 'node_modules', '@centralu', `host-${target}`)
+      const r = spawnSync(process.execPath, [bundler], {
+        cwd: repo,
+        env: { ...process.env, CC_BUNDLE_OUT: join(hostPkg, 'host') },
+        encoding: 'utf8',
+        windowsHide: true,
+        maxBuffer: 64 * 1024 * 1024,
+        timeout: 20 * 60_000,
+      })
+      writeFileSync(join(l.root, 'dev-build.log'), `${r.stdout ?? ''}${r.stderr ?? ''}${r.error ? `\n${r.error.message}\n` : ''}`)
+      if (r.status !== 0 || !existsSync(join(hostPkg, 'host', 'main.mjs'))) throw new Refusal('dev_build', lastSaid(r.stderr, r.error?.message, r.stdout) || `exit ${r.status}`)
+      writeFileSync(join(hostPkg, 'package.json'), JSON.stringify({ name: `@centralu/host-${target}`, version, files: ['host'] }, null, 2) + '\n')
+      const shimDir = join(partial, 'node_modules', 'centralu')
+      cpSync(join(repo, 'packaging', 'npm', 'centralu', 'bin'), join(shimDir, 'bin'), { recursive: true })
+      // The platform packages it names are npm's to fetch; here the host sits beside it, as a hub's install puts it
+      const { optionalDependencies: _platforms, ...stamped } = shim
+      writeFileSync(join(shimDir, 'package.json'), JSON.stringify({ ...stamped, version }, null, 2) + '\n')
+      const source = { kind: 'dev', commit: p.commit, dirty: changes > 0 }
+      writeFileSync(
+        join(partial, 'install.json'),
+        JSON.stringify({ version, node: current.node, platform: target, packages: [], installedAt: new Date().toISOString(), by: p.hub ?? null, source }, null, 2) + '\n',
+      )
+      mkdirSync(l.versions, { recursive: true })
+      placeVersion(l, partial, join(l.versions, version))
+      return { installed: { version, node: current.node, source }, current, previous: readPointer(l.previous), removed: [], left: [] }
+    } finally {
+      rmSync(partial, { recursive: true, force: true })
+    }
+  } finally {
+    unlock()
+  }
+}
+
 async function main() {
   try {
     const p = JSON.parse(Buffer.from(process.argv[2] ?? '', 'base64').toString('utf8'))
-    const r = p.action === 'pointers' ? await setPointers(p) : p.action === 'prune' ? pruneNow() : await install(p)
+    const r = p.action === 'pointers' ? await setPointers(p) : p.action === 'prune' ? pruneNow() : p.action === 'dev' ? devBuild(p) : await install(p)
     process.stdout.write(`CENTRALU-INSTALL done ${JSON.stringify(r)}\n`)
   } catch (err) {
     const code = err instanceof Refusal ? err.code : 'error'

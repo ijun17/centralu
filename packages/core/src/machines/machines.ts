@@ -257,7 +257,9 @@ function shims(m: Partial<Pick<MachineInfo, 'shell'>>): { npm: string; centralu:
 export function installNote(m: Pick<MachineInfo, 'install'>): string | null {
   const i = m.install
   if (!i?.current) return null
-  return `Installed from this computer: Centralu ${i.current.version}${i.previous ? ` (${i.previous.version} kept to roll back to)` : ''}`
+  // A dev build made there from a commit (`pnpm remote-dev`, #1036) is never mistaken for a release
+  const dev = i.current.source?.kind === 'dev' ? `, a dev build of ${i.current.source.commit.slice(0, 10)}${i.current.source.dirty ? ' with uncommitted changes' : ''}` : ''
+  return `Installed from this computer: Centralu ${i.current.version}${dev}${i.previous ? ` (${i.previous.version} kept to roll back to)` : ''}`
 }
 
 /** The row's start-at-boot switch: what it says, whether it is on, and what it does not do there yet */

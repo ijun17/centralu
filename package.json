@@ -51,7 +51,8 @@
     "smoke:goal": "tsx packages/agent-host/scripts/smoke-goal.mts",
     "smoke:interrupt": "tsx packages/agent-host/scripts/smoke-interrupt.mts",
     "measure:tools": "tsx packages/agent-host/scripts/measure-tools.mts",
-    "local-update": "tsx scripts/local-update.mts"
+    "local-update": "tsx scripts/local-update.mts",
+    "remote-dev": "tsx packages/agent-host/scripts/remote-dev.mts"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",

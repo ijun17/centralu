@@ -11,7 +11,7 @@ not wired into CI, and are run by hand when the related area changes.
 | Script | When it runs |
 |---|---|
 | `fix-pty-permissions.mjs` | `postinstall` — sets the execute permission on node-pty's spawn-helper |
-| `bundle.mjs` | `pnpm bundle:host` — builds the host bundle for distribution (esbuild, target node22) |
+| `bundle.mjs` | `pnpm bundle:host` — builds the host bundle for distribution (esbuild, target node22); `CC_BUNDLE_OUT` names another (absolute) output folder |
 | `codex-bindings.mjs` | `pnpm codex:bindings` — generates codex protocol types and refreshes the dependent contract |
 
 ## Verification wired through npm scripts
@@ -31,7 +31,11 @@ pnpm smoke:terminal      # exercises the terminal with a real PTY
 pnpm smoke:orphan        # behavior when the session disappears on the tool's side
 pnpm perf:idle           # idle performance (host process only, against the §7.1 target)
 pnpm measure:tools       # what Centralu's MCP tools cost (#513): dry by default, --live for real models
+pnpm remote-dev <machine> --ref <commit> --repo <path there>  # a dev build of the host on a linked machine (#1036)
 ```
+
+`remote-dev.mts` builds the host on a linked machine from one commit of a working copy there and swaps to it
+(docs/plans/remote-hub.md §10.11); Settings → Machines' "Roll back" returns to the release. It spends nothing.
 
 `measure-tools.mts` is the one to run before and after a change to how tools are exposed: dry it
 spends nothing (the real Claude CLI talks to a fake API), `--live` measures tokens, cache rebuilds,

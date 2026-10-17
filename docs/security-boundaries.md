@@ -851,6 +851,13 @@ A host started with `centralu serve` on another machine is reached by the app th
   (`hello_ok.elevated`, from the token's integrity level) and the machine's row in Settings → Machines says it in one
   sentence with the way out: link the machine through a standard account with its own ssh key. A host running as root
   on Linux or macOS is reported the same way.
+- **A dev build on a linked machine** (`pnpm remote-dev`, #1036; [plans/remote-hub.md](plans/remote-hub.md) §10.11)
+  adds no new trust in what crosses the link: no file travels but the installer every update sends, and what is built
+  is the working copy already on that machine, by its own bundler, at a commit the hub named in full and checked there
+  first (HEAD must equal it, no uncommitted changes unless the maintainer allows them, the hub's protocol). It is a
+  command on the hub over the link's own ssh, never an RPC, so an agent or a linked machine cannot start one. The
+  build is marked (`install.json` `source: { kind: 'dev' }`, shown on the machine's row), so it is never taken for a
+  release, and the release it replaced stays as `previous` for `machines.rollback`.
 - **Headless.** The host starts without `DISPLAY` / `WAYLAND_DISPLAY`, so nothing it starts can raise a window or a
   keyring prompt on that machine.
 - **What the client must not do:** forward with a wildcard bind address (`-L 0.0.0.0:…`) or `GatewayPorts`, which

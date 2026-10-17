@@ -105,9 +105,13 @@ export async function fakeRegistry(packages: FakePackage[]): Promise<FakeRegistr
  * happened to `<data>/events` and which version runs to `<data>/running`; `FAKE_BROKEN=<version>` makes that
  * version fail to start and leave a line in `host.log`. `--autostart off` removes `<data>/autostart`, the
  * stand-in for a boot entry; `FAKE_AUTOSTART_FAILS` makes it refuse, `FAKE_NO_AUTOSTART` plays a version that
- * predates it. `FAKE_STOP_FAILS` makes `--stop` refuse.
+ * predates it. `FAKE_STOP_FAILS` makes `--stop` refuse. `--connection` prints a connection line with the running
+ * version, and with `installInfo` (the URL of the real `serve-install.mjs`) the `install` field it reads.
+ * `fromPackage`: the version is the one in `../package.json` beside it, as a dev build stamps it (#1036).
  */
-export const fakeServe = (version: string) => `import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+export const fakeServe = (version: string, o: { fromPackage?: boolean; installInfo?: string } = {}) => `import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+${o.installInfo ? `import { installInfo } from ${JSON.stringify(o.installInfo)}` : ''}
+const V = ${o.fromPackage ? "JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version" : JSON.stringify(version)}
 const d = process.env.CC_DATA_DIR || process.env.HOME + '/.centralu'
 const a = process.argv.slice(2).join(' ')
 const log = (s) => appendFileSync(d + '/events', s + '\\n')
@@ -117,14 +121,18 @@ if (a === 'serve --stop') {
   rmSync(d + '/running', { force: true })
   console.log(JSON.stringify({ v: 1, stop: process.env.FAKE_STOP_FAILS ? { ok: false, wasRunning: true, message: 'the host on 127.0.0.1:4141 is still running' } : { ok: true, wasRunning: was } }))
 } else if (a === 'serve --detach') {
-  log('start ${version}')
-  if (process.env.FAKE_BROKEN === '${version}') {
-    appendFileSync(d + '/host.log', 'host ${version}: the store was written by a newer Centralu\\n')
+  log('start ' + V)
+  if (process.env.FAKE_BROKEN === V) {
+    appendFileSync(d + '/host.log', 'host ' + V + ': the store was written by a newer Centralu\\n')
     console.log(JSON.stringify({ v: 1, detach: { ok: false, reason: 'exited', message: 'the host exited before it answered' } }))
   } else {
-    writeFileSync(d + '/running', '${version}')
-    console.log(JSON.stringify({ v: 1, port: 4141, token: 't', version: '${version}', protocolVersion: 1, dataDir: d, hostRunning: true, detach: { ok: true, how: 'setsid' } }))
+    writeFileSync(d + '/running', V)
+    console.log(JSON.stringify({ v: 1, port: 4141, token: 't', version: V, protocolVersion: 1, dataDir: d, hostRunning: true, detach: { ok: true, how: 'setsid' } }))
   }
+} else if (a === 'serve --connection') {
+  const running = existsSync(d + '/running') ? readFileSync(d + '/running', 'utf8') : null
+  ${o.installInfo ? 'const install = installInfo(d, process.env)' : 'const install = undefined'}
+  console.log(JSON.stringify({ v: 1, port: 4141, token: 't', version: running ?? V, protocolVersion: 1, dataDir: d, hostRunning: running !== null, ...(install ? { install } : {}) }))
 } else if (a === 'serve --autostart off') {
   log('autostart off')
   if (process.env.FAKE_NO_AUTOSTART) {

@@ -207,6 +207,16 @@ describe('the update prompt and the install rows (plan §10.5)', () => {
     )
     expect(installNote(machine({ install: { managed: false, current: null, previous: null } }))).toBeNull()
   })
+
+  it('names a dev build made there from a commit as one, never as a release (#1036)', () => {
+    const dev = { version: '0.3.0-beta.7.local.2', node: '24', source: { kind: 'dev' as const, commit: '0123456789abcdef0123456789abcdef01234567', dirty: false } }
+    expect(installNote(machine({ install: { managed: true, current: dev, previous: { version: '0.3.0-beta.7', node: '24' } } }))).toBe(
+      'Installed from this computer: Centralu 0.3.0-beta.7.local.2, a dev build of 0123456789 (0.3.0-beta.7 kept to roll back to)',
+    )
+    expect(installNote(machine({ install: { managed: true, current: { ...dev, source: { ...dev.source, dirty: true } }, previous: null } }))).toBe(
+      'Installed from this computer: Centralu 0.3.0-beta.7.local.2, a dev build of 0123456789 with uncommitted changes',
+    )
+  })
 })
 
 describe('the start-at-boot switch (plan §10.4, owner decision 4)', () => {

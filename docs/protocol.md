@@ -470,7 +470,9 @@ own. The UI still talks to one host; everything here is additive, and `PROTOCOL_
   null, or `{ how, at, note }` when the hub started that host: `detached` outlives the link,
   `link_bound` runs in the link's own ssh session because the machine blocks starting a process
   through WMI, and `note` says so. Additive. `elevated` (#702, additive) is what the machine's host said in its last
-  hello (`hello_ok.elevated`): true when its agents run with administrator rights, null when it has not said. `versions` is
+  hello (`hello_ok.elevated`): true when its agents run with administrator rights, null when it has not said.
+  `install` is `{ managed, current, previous }`, each version `{ version, node, source? }`; `source` (#1036, additive)
+  is `{ kind: 'dev', commit, dirty }` for a dev build made there from a commit (`pnpm remote-dev`), absent for a release. `versions` is
   `{ hub, remote, older, compatible, sameChannel, accepted }`, each side
   `{ version, protocolVersion, dev }`: the link does not connect while the two run different
   versions, until they are aligned or the person declines (`machines.acceptVersions`, refused

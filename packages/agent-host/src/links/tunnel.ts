@@ -1,7 +1,7 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { createConnection, createServer } from 'node:net'
 import { win32 } from 'node:path'
-import type { RemoteShell } from '@cc/protocol'
+import type { InstallSource, RemoteShell } from '@cc/protocol'
 import { Tail } from '../stream-text.js'
 import { endChild, runSsh, type SshRunResult } from './ssh-run.js'
 import { isHostCrash, NodeTooOld } from './node-floor.js'
@@ -52,8 +52,9 @@ export type RemoteAutostart = { on: boolean; how: 'systemd' | 'task' | null; lin
 export type RemoteInstall = {
   /** Started by the managed launcher in `<data>/remote/bin/` (not an npm install) */
   managed: boolean
-  current: { version: string; node: string } | null
-  previous: { version: string; node: string } | null
+  /** `source`: a dev build made there from a commit (`pnpm remote-dev`, #1036), from its `install.json` */
+  current: { version: string; node: string; source?: InstallSource } | null
+  previous: { version: string; node: string; source?: InstallSource } | null
   /** The Node that ran `--connection` */
   node: string | null
 }
@@ -143,8 +144,12 @@ function parseInstall(raw: unknown): RemoteInstall | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
   const pointer = (v: unknown) => {
-    const p = v as { version?: unknown; node?: unknown } | null
-    return p && typeof p.version === 'string' && typeof p.node === 'string' ? { version: p.version, node: p.node } : null
+    const p = v as { version?: unknown; node?: unknown; source?: unknown } | null
+    if (!p || typeof p.version !== 'string' || typeof p.node !== 'string') return null
+    // A dev build made there from a commit (#1036): only a well-formed one is said
+    const s = p.source as { kind?: unknown; commit?: unknown; dirty?: unknown } | null | undefined
+    const source = s && s.kind === 'dev' && typeof s.commit === 'string' && /^[0-9a-f]{7,64}$/.test(s.commit) ? { kind: 'dev' as const, commit: s.commit, dirty: s.dirty === true } : null
+    return { version: p.version, node: p.node, ...(source ? { source } : {}) }
   }
   return { managed: o.managed === true, current: pointer(o.current), previous: pointer(o.previous), node: typeof o.node === 'string' ? o.node : null }
 }
