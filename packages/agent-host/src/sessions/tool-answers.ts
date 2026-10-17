@@ -1,5 +1,5 @@
 import { frameField } from '@cc/protocol'
-import type { BusyChoice, ChildRunResult, AskProjectResult, OrchestratorTools, RoutedCard } from '../adapters/contract.js'
+import type { AgentListRow, BusyChoice, ChildRunResult, AskProjectResult, OrchestratorTools, RoutedCard } from '../adapters/contract.js'
 import type { ToolCaller, ToolOutput } from '../apps/contract.js'
 import { interruptionWords } from './interruptions.js'
 
@@ -128,6 +128,36 @@ const NEW_ROLE_NEW_AGENT =
   "For another kind of work (say, editing files after read-only research), start a new agent instead, with the task written in full: it starts without this one's context, and this one's name and role came from its first task."
 
 /**
+ * Said wherever a child's answer reaches its parent (#690). On 2026-10-14 a parent used fourteen children's answers and
+ * left every one of them in the person's list until told it could delete them: asked why, it said it forgot the last
+ * step, and nothing it read named it. Here rather than in start_agent's description, which rides in every request; the
+ * answer is read exactly when the result is used. Never a delete of its own: deleting can drop a branch, so it stays
+ * the parent's or the person's call.
+ */
+export function cleanUpLine(sessionId: string): string {
+  return `Once you have used its answer and need nothing more from it, delete it: agent_session(sessionId="${sessionId}", action="delete"). Work not on the trunk is kept in the trash.`
+}
+
+/** agent_session list (#690): the caller's own children, each with what deleting it would cost */
+export function agentListText(r: { ok: true; agents: readonly AgentListRow[] } | { ok: false; error: string }): ToolOutput {
+  if (!r.ok) return { text: r.error, isError: true }
+  const rows = r.agents
+  if (rows.length === 0) return { text: 'No session start_agent started from here is left.' }
+  const finished = rows.filter((r) => r.state === 'finished').length
+  const lines = rows.map(
+    (r) =>
+      `- ${frameField(r.name)} [${r.sessionId}] · ${r.tool} · ${r.state}${r.asleep ? ' (asleep)' : ''}` +
+      (r.worktree ? ` · worktree branch ${frameField(r.worktree.branch)}${r.worktree.unmerged ? ', not merged: a delete keeps its work in the trash' : ', merged'}` : '') +
+      (r.lastActive ? ` · last ${r.lastActive}` : ''),
+  )
+  return {
+    text:
+      `Sessions you started (${rows.length}, ${finished} finished):\n${lines.join('\n')}\n` +
+      (finished ? 'Delete each finished one whose answer you have used: agent_session(sessionId=…, action="delete").' : 'None is finished yet.'),
+  }
+}
+
+/**
  * What the model reads back from start_agent and agent_session (#561). The child's answer is fenced like ask_project's
  * (JSON-quoted, one line): it is another session's words. Each state names the next call, which is how a model that
  * has only start_agent loaded finds agent_session.
@@ -203,7 +233,8 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
         text:
           `${who} is not working on anything you gave it (${r.sessionState}${r.interruption ? `, ${interruptionWords(r.interruption)}` : ''}). Its last answer, as JSON:\n${trustedJsonText(r.answer || '(no final text)')}\n` +
           (r.notice ? `${r.notice}\n` : '') +
-          `agent_session(sessionId="${r.sessionId}", action="send", text=…) gives it more. ${NEW_ROLE_NEW_AGENT}`,
+          `agent_session(sessionId="${r.sessionId}", action="send", text=…) gives it more. ${NEW_ROLE_NEW_AGENT}` +
+          (r.cleanUp ? `\n${cleanUpLine(r.sessionId)}` : ''),
       }
     case 'done': {
       const lines = [`${who} answered, as JSON:`, trustedJsonText(r.answer || '(no final text)')]
@@ -211,6 +242,7 @@ function agentStateText(r: Exclude<Extract<ChildRunResult, { ok: true }>, { stat
       if (r.readable.length) lines.push(`You can read these now: ${r.readable.join(', ')}`)
       if (r.outside.length) lines.push(`Named outside its folder (not opened for you): ${r.outside.join(', ')}`)
       lines.push(`agent_session(sessionId="${r.sessionId}", action="send", text=…) continues with it. ${NEW_ROLE_NEW_AGENT}`)
+      if (r.cleanUp) lines.push(cleanUpLine(r.sessionId))
       return { text: lines.join('\n') }
     }
   }

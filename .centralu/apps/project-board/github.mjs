@@ -5,7 +5,7 @@
 // short in-memory cache and nothing on disk.
 import { execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { short } from './util.mjs'
+import { mapLimit, short } from './util.mjs'
 
 const GH_TIMEOUT_MS = 30_000
 const MAX_PAGES = 20
@@ -371,8 +371,12 @@ export async function resolveRef(repo, ref) {
  * With `head` (a pull request's head commit), the jobs its own workflows add count too: they can
  * only add to the set, never remove from it. Without this a job a pull request introduces was "not
  * required" for that very pull request, and #445 merged with its new job red.
+ *
+ * With `at` (a commit), the workflows are read at that commit instead of on `base`, and `head` is
+ * ignored: the checks that commit's own run reports (a release's tagged commit, after main's
+ * workflow changed, #1035). Branch protection still comes first.
  */
-export async function readRequired(repo, base, workflows, workflowCheckNames, head) {
+export async function readRequired(repo, base, workflows, workflowCheckNames, head, { at } = {}) {
   checkRepo(repo)
   const names = new Set()
   // 404: not protected; 403: this login may not read protection (that needs admin). Rulesets are
@@ -389,7 +393,8 @@ export async function readRequired(repo, base, workflows, workflowCheckNames, he
   const unresolved = []
   const read = []
   let added = 0
-  for (const ref of head ? [base, head] : [base]) {
+  const own = at ?? base
+  for (const ref of at ? [at] : head ? [base, head] : [base]) {
     for (const path of workflows ?? []) {
       let text
       try {
@@ -400,7 +405,7 @@ export async function readRequired(repo, base, workflows, workflowCheckNames, he
       }
       const w = workflowCheckNames(text)
       const file = path.split('/').pop()
-      if (ref === base) {
+      if (ref === own) {
         found.push(...w.names)
         unresolved.push(...w.unresolved.map((j) => `${file} job ${j}`))
         read.push(file)
@@ -413,7 +418,7 @@ export async function readRequired(repo, base, workflows, workflowCheckNames, he
   }
   if (!found.length && !unresolved.length) return { names: null, unresolved: [], source: 'no required set found, so every reported check counts' }
   const plus = added ? `, plus ${added} job${added === 1 ? '' : 's'} the pull request adds` : ''
-  return { names: [...new Set(found)], unresolved, added, source: `${read.join(', ')} on ${base}${plus}` }
+  return { names: [...new Set(found)], unresolved, added, source: `${read.join(', ')} on ${at ? short(at) : base}${plus}` }
 }
 
 /** CI runs carry workflow identity; job names alone can collide with release jobs. */
@@ -812,11 +817,12 @@ const runOf = (w) => ({
   createdAt: w.created_at ?? null,
 })
 
-/** The workflow's latest runs, newest first, for one event and commit when given. */
-export async function workflowRuns(repo, workflow, { event, headSha } = {}) {
+/** The workflow's latest runs, newest first, for one event, commit and branch when given. */
+export async function workflowRuns(repo, workflow, { event, headSha, branch } = {}) {
   checkRepo(repo)
   if (!WORKFLOW.test(String(workflow))) throw new GitHubError('input', `"${workflow}" is not a workflow file name.`)
-  const q = new URLSearchParams({ per_page: '30', ...(event ? { event } : {}), ...(headSha ? { head_sha: headSha } : {}) })
+  if (branch !== undefined && !REF.test(String(branch))) return []
+  const q = new URLSearchParams({ per_page: '30', ...(event ? { event } : {}), ...(headSha ? { head_sha: headSha } : {}), ...(branch ? { branch } : {}) })
   const r = await restJson(`repos/${repo}/actions/workflows/${workflow}/runs?${q}`, { missing: [404] })
   return (r?.workflow_runs ?? []).map(runOf)
 }
@@ -866,5 +872,25 @@ export async function dispatchWorkflow(repo, workflow, ref, inputs) {
   } catch (e) {
     if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
     throw new GitHubError('github', `GitHub refused to start ${workflow}: ${firstLine(e)}`)
+  }
+}
+
+/**
+ * How busy the repository's runners are: the jobs of every queued or running workflow run, those on a
+ * runner now (`running`) and those waiting for one (`queued`). A job held by an environment approval
+ * holds no runner and is not counted.
+ */
+export async function activeJobs(repo) {
+  checkRepo(repo)
+  const runs = new Map()
+  for (const status of ['in_progress', 'queued']) {
+    const r = await restJson(`repos/${repo}/actions/runs?status=${status}&per_page=100`)
+    for (const run of r?.workflow_runs ?? []) runs.set(run.id, run)
+  }
+  const jobs = (await mapLimit([...runs.keys()], 4, (id) => runJobs(repo, id))).flat()
+  return {
+    runs: runs.size,
+    running: jobs.filter((j) => j.status === 'in_progress').length,
+    queued: jobs.filter((j) => ['queued', 'pending', 'requested'].includes(j.status)).length,
   }
 }

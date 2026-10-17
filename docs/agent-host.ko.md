@@ -1608,7 +1608,8 @@ cmd.exe는 그때 이미 줄 전체를 읽었고, Ctrl+C로 배치 작업이 끝
 |---|---|---|
 | 레지스트리 | `stored.ts`, store v46 `linked_machines` | 사람이 링크한 기기: id, 이름, ssh 대상, 원격 셸, 숫자를 접는 `slot`, 받아들인 버전 쌍 |
 | 전송 | `tunnel.ts` (`SshTunnel`) | ssh로 원격에 연결 줄을 묻고, ssh 로컬 포워드를 잡고 있는다 |
-| 링크 | `links.ts` (`LinkedMachine`) | 기기마다 하나: 전송, 버전 확인, 클라이언트, 재시도 간격, 상태, 숨기는 세션 집합, 미러 갱신 |
+| 링크 | `linked-machine-connection.ts`, `linked-machine-ops.ts` (`LinkedMachine`) | 기기마다 하나: 전송, 버전 확인, 클라이언트, 재시도 간격, 상태, 숨기는 세션 집합, 미러 갱신. 그리고 사람이 그 기기에 시키는 일(설치, 업데이트, 되돌리기, 제거, 자동 시작, 활동) |
+| 링크 목록 | `links-registry.ts` (`Links`), `link-deps.ts`. `links.ts`가 다시 내보낸다 | 이 허브의 모든 링크. 레지스트리와 함께 더하고 빼며, ssh 호스트 목록과 probe도 여기 있다 |
 | 클라이언트 | `remote-client.ts` | 허브가 원격 호스트에 거는 WebSocket: hello, 커서와 에포크, 호출, 이벤트, 터미널 프레임 |
 | 라우터 | `router.ts`, `routes.ts` | `HostServer.onRpc` 앞에서: id가 가리키는 기기로 호출을 보내고, 목록을 합치고, 나머지는 로컬로 답한다 |
 | 한정자 | `qualifier.ts`, `machine-ids.ts` | 들어올 때 `<machine>.<id>`를 붙이고 나갈 때 뗀다. 숫자는 slot마다 접는다 |
@@ -1713,7 +1714,9 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 - **git**: `git` CLI spawn + `--porcelain=v2/-z` 파싱. status·diff·log·branches·checkout·stage·commit·push.
   git2(Rust)로의 이전은 **측정으로 병목이 확인되기 전까지는 하지 않는다** (m2-plan 결정 3).
   포트 인터페이스가 같으므로 나중에 옮겨도 UI는 변경되지 않는다.
-- **store**: better-sqlite3 + `user_version` 마이그레이션 러너. `Store`(`store.ts`)는 파일을 열고 마이그레이션을 돌린다. 나머지 메서드는 `dev-services/store/`의
+- **store**: better-sqlite3 + `user_version` 마이그레이션 러너. `Store`(`store.ts`)는 파일을 열고, 자신이 상속하는 두 클래스로 마이그레이션을 돌린다:
+  러너(`store/migrate-runner.ts`, `Store.inspect`도 여기서 답한다)와 그 아래의 최소 읽기 버전 관문(`store/reader-gate.ts`). 밀린 `VACUUM`은
+  `store/vacuum.ts`에 있다. 나머지 메서드는 `dev-services/store/`의
   개념별 모듈(프로젝트, 세션, 메시지, 휴지통, 앱 실행 기록 등)로 호출을 넘기고, 단계 목록은 `store/migrations/`에 있다. 스키마 DDL은 정확히 한 곳,
   `protocol/src/schema/schema.sql`에만 있다. 번들에서는 빌드 산출물 옆에 복사되어 함께 배포된다 (F-0).
   마이그레이션 단계의 규칙은 아래(§5.1)에 있다.

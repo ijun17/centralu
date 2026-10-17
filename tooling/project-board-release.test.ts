@@ -8,6 +8,8 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -185,6 +187,15 @@ const save = () => fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(st
 const fail = (stderr, code = 1, stdout = '') => { process.stdout.write(stdout); process.stderr.write(stderr); process.exit(code) }
 const json = (v) => { process.stdout.write(JSON.stringify(v)); process.exit(0) }
 const R = 'repos/ijun17/centralu'
+// A queue of answers per key (seq['ci:<sha>'], 'jobs:<run>', 'pending:<run>'): each request takes the
+// next, the last one stays. What a waiting approve sees change between its reads.
+const next = (key, fallback) => {
+  const q = st.seq?.[key]
+  if (!q || !q.length) return fallback
+  const v = q.length > 1 ? q.shift() : q[0]
+  save()
+  return v
+}
 const association = (p) => ({ number: p.number, head: { sha: p.headRefOid, ref: p.headRefName }, base: { ref: p.baseRefName } })
 if (args[0] === 'pr' && args[1] === 'list') {
   const head = args[args.indexOf('--head') + 1]
@@ -220,7 +231,7 @@ if (args[0] === 'api' && args[1] === '-X') {
 }
 if (args[0] === 'api' && args[1] === '-H') {
   const m = /^repos\/[^/]+\/[^/]+\/contents\/([^?]+)(?:\?ref=(.*))?$/.exec(args[3])
-  const text = m && st.files[decodeURIComponent(m[1])]
+  const text = m && (st.filesAt?.[decodeURIComponent(m[2] || '')]?.[decodeURIComponent(m[1])] ?? st.files[decodeURIComponent(m[1])])
   if (text === undefined || text === null) fail('gh: Not Found (HTTP 404)\n', 1, '{"message":"Not Found"}')
   process.stdout.write(text)
   process.exit(0)
@@ -231,11 +242,14 @@ if (args[0] === 'api') {
   if (path === R + '/commits/main') json({ sha: st.dispatchSha })
   if (/\/commits\/[0-9a-f]+\/pulls$/.test(path)) json(st.commitPrOverrides || st.prs.map(association))
   if (path === R) json({ default_branch: 'main', permissions: st.permissions })
-  if (path === R + '/branches/main/protection/required_status_checks') json({ contexts: ['build'], checks: [] })
+  if (path === R + '/branches/main/protection/required_status_checks') {
+    if (st.noProtection) fail('gh: Branch not protected (HTTP 404)\n', 1, '{"message":"Branch not protected"}')
+    json({ contexts: ['build'], checks: [] })
+  }
   if (path === R + '/rules/branches/main') json([])
   if (/\/commits\/[0-9a-f]+\/check-runs$/.test(path)) {
     const sha = path.split('/').at(-2)
-    const verdict = st.ciBySha?.[sha] || (st.prs.some((p) => p.headRefOid === sha) ? st.prCi : st.ci)
+    const verdict = next('ci:' + sha, st.ciBySha?.[sha] || (st.prs.some((p) => p.headRefOid === sha) ? st.prCi : st.ci))
     const collision = st.collidingReleaseChecks === true || st.collidingReleaseChecks === (st.prs.some((p) => p.headRefOid === sha) ? 'PR' : 'main')
     const releaseChecks = collision ? [{ id: 99, name: 'build', status: 'completed', conclusion: 'success', started_at: '2026-10-13T12:00:00Z', check_suite: { id: 99 }, app: { slug: 'github-actions' } }] : []
     if (verdict === 'none') json({ check_runs: releaseChecks })
@@ -243,12 +257,14 @@ if (args[0] === 'api') {
     json({ check_runs: [{ id: 1, name: 'build', status: c[0], conclusion: c[1], html_url: 'https://github.com/ijun17/centralu/actions/runs/1/job/1', started_at: '2026-10-13T10:00:00Z', check_suite: { id: 11 }, app: { slug: st.ciApp || 'github-actions' } }, ...releaseChecks] })
   }
   if (/\/commits\/[0-9a-f]+\/status$/.test(path)) json({ statuses: [] })
+  if (path === R + '/actions/runs') json({ workflow_runs: (st.activeRuns || []).filter((r) => r.status === q.get('status')) })
+  if (path === R + '/actions/workflows/release.yml/runs' && q.get('event') === 'push' && st.seq?.tagRuns) json({ workflow_runs: next('tagRuns', []) })
   if (path === R + '/actions/workflows/release.yml/runs')
-    json({ workflow_runs: st.runs.filter((r) => (!q.get('event') || r.event === q.get('event')) && (!q.get('head_sha') || r.head_sha === q.get('head_sha'))).reverse() })
+    json({ workflow_runs: st.runs.filter((r) => (!q.get('event') || r.event === q.get('event')) && (!q.get('head_sha') || r.head_sha === q.get('head_sha')) && (!q.get('branch') || r.head_branch === q.get('branch'))).reverse() })
   const jobs = /\/actions\/runs\/(\d+)\/jobs$/.exec(path)
-  if (jobs) json({ jobs: st.jobs[jobs[1]] || [] })
+  if (jobs) json({ jobs: next('jobs:' + jobs[1], st.jobs[jobs[1]] || []) })
   const pending = /\/actions\/runs\/(\d+)\/pending_deployments$/.exec(path)
-  if (pending) json(st.pending[pending[1]] || [])
+  if (pending) json(next('pending:' + pending[1], st.pending[pending[1]] || []))
 }
 fail('fake gh: unexpected call ' + JSON.stringify(args) + '\n')
 `
@@ -271,7 +287,46 @@ type State = {
   pending: Record<string, unknown[]>
   dispatchSha?: string
   cancelled?: string[]
+  seq?: Record<string, unknown[]>
+  /** No branch protection: the required set comes from the workflow files */
+  noProtection?: boolean
+  /** A file's text at one ref (the contents API's ?ref=), before `files` */
+  filesAt?: Record<string, Record<string, string>>
+  /** Every workflow's runs not completed, for how busy the runners are */
+  activeRuns?: { id: number; status: string }[]
+  /** The npm registry: package name → the commit it was published from; a name not here is absent */
+  registry?: Record<string, string | null>
+  /** How many more times the registry answers 404 for a name before it shows what `registry` holds */
+  registryHidden?: Record<string, number>
 }
+
+/** What the shim needs on the registry: every package of packaging/npm but the shim */
+const REGISTRY_NAMES = CARRIERS.filter((p) => /^packaging\/npm\/[^/]+\/package\.json$/.test(p) && p !== 'packaging/npm/centralu/package.json').map(
+  (p) => JSON.parse(readFileSync(join(REPO_ROOT, p), 'utf8')).name as string,
+)
+/** A local npm registry for the shim's gate, answering from the fake gh's state */
+function registryServer() {
+  const server = createServer(async (req, res) => {
+    if (registryHold) {
+      registryAsked?.()
+      await registryHold
+    }
+    const st = JSON.parse(readFileSync(statePath, 'utf8')) as State
+    const m = /^\/(.+)\/([^/]+)$/.exec(req.url ?? '')
+    const name = m ? decodeURIComponent(m[1]!) : ''
+    const hidden = st.registryHidden?.[name] ?? 0
+    if (hidden > 0) {
+      st.registryHidden![name] = hidden - 1
+      writeFileSync(statePath, JSON.stringify(st))
+    }
+    if (!m || hidden > 0 || !st.registry || !(name in st.registry)) return void res.writeHead(404).end('{}')
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ name, version: m[2], ...(st.registry[name] ? { gitHead: st.registry[name] } : {}) }))
+  })
+  return new Promise<{ url: string; close: () => Promise<void> }>((resolve) =>
+    server.listen(0, '127.0.0.1', () => resolve({ url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, close: () => new Promise((r) => server.close(() => r())) })),
+  )
+}
+const published = (sha: string, names = REGISTRY_NAMES) => patchState((st) => (st.registry = Object.fromEntries(names.map((n) => [n, sha]))))
 
 const ref: AppRef = { projectId: 'p1', appId: 'project-board' }
 const agent: AppCaller = { kind: 'session', sessionId: 's1' }
@@ -281,8 +336,12 @@ let gitDirs: string[] = []
 let rt: ExternalApps | null = null
 let statePath = ''
 let logPath = ''
+let registry: { url: string; close: () => Promise<void> } | null = null
+/** While set, the registry answers only once it settles; `registryAsked` is called on each request */
+let registryHold: Promise<void> | null = null
+let registryAsked: (() => void) | null = null
 
-beforeEach(() => {
+beforeEach(async () => {
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-project-board-release-')))
   for (const d of ['bin', 'data', 'node']) mkdirSync(join(root, d))
   linkNode(join(root, 'node'))
@@ -301,11 +360,16 @@ beforeEach(() => {
   }
   writeFileSync(statePath, JSON.stringify(state))
   writeFileSync(logPath, '')
+  registry = await registryServer()
 })
 
 afterEach(async () => {
   await rt?.dispose()
   rt = null
+  registryHold = null
+  registryAsked = null
+  await registry?.close()
+  registry = null
   rmFakeDir(root)
 })
 
@@ -323,15 +387,16 @@ function runtime(ignore?: string[]) {
     projects: () => [{ id: 'p1', path: projectPath, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: { PATH: [join(root, 'bin'), join(root, 'node'), ...gitDirs].join(delimiter), HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, GIT_CONFIG_NOSYSTEM: '1', PROJECT_BOARD_RUN_LOOK_MS: '10' },
+    env: { PATH: [join(root, 'bin'), join(root, 'node'), ...gitDirs].join(delimiter), HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath, GIT_CONFIG_NOSYSTEM: '1', PROJECT_BOARD_RUN_LOOK_MS: '10', PROJECT_BOARD_CI_POLL_MS: '10', PROJECT_BOARD_NPM_REGISTRY: registry!.url },
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 5_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
   return rt
 }
 
-async function call(name: string, args: Record<string, unknown> = {}, caller: AppCaller = agent) {
-  const out = await rt!.call(ref, name, args, caller)
+async function call(name: string, args: Record<string, unknown> = {}, caller: AppCaller = agent, signal?: AbortSignal) {
+  const out = await rt!.call(ref, name, args, caller, signal ? { signal } : {})
+  if (signal?.aborted) return { text: out.status, isError: true, data: { status: out.status } as any }
   if (!out.result) throw new Error(`${name} did not answer: ${out.status} ${out.error}`)
   return { text: resultText(out.result), isError: out.result.isError === true, data: out.result.structuredContent as any }
 }
@@ -597,6 +662,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(status.data.lines.join(' ')).toContain(`The tagged commit's own CI at ${s.tip.slice(0, 7)}: ${ci}.`)
     expect(ghWrites()).toEqual([])
     patchState((st) => { st.ci = 'green' })
+    published(s.tip)
     const approved = await call('release', { step: 'approve', path: s.work, confirm: true })
     expect(approved.isError, approved.text).toBe(false)
     expect(approved.data.approved).toBe(true)
@@ -618,6 +684,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
       st.ci = 'green'
       st.ciBySha = { [tagged]: 'failing' }
       st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: tagged, status: 'waiting', conclusion: null }))
+      st.jobs['61'] = [{ name: 'linux-x64', status: 'waiting', conclusion: null }]
       st.pending['61'] = [{ environment: { id: 7, name: 'npm-publish' }, current_user_can_approve: true, reviewers: [] }]
     })
     runtime()
@@ -690,6 +757,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
       st.ciBySha = { [tagged]: 'green' }
       st.jobs['61'] = [{ name: 'centralu (shim)', status: 'waiting', conclusion: null }]
     })
+    published(tagged)
     const shim = await call('release', { step: 'approve', path: s.work, confirm: true })
     expect(shim.data.approved, shim.text).toBe(true)
     expect(ghWrites()).toHaveLength(2)
@@ -708,6 +776,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
       st.ciBySha = { [tagged]: 'cancelled' }
       st.ciRunOverrides = { [tagged]: { id: 42, status: 'completed', conclusion: 'cancelled', run_attempt: 1 } }
       st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: tagged, status: 'waiting', conclusion: null }))
+      st.jobs['61'] = [{ name: 'linux-x64', status: 'waiting', conclusion: null }]
       st.pending['61'] = [{ environment: { id: 7, name: 'npm-publish' }, current_user_can_approve: true, reviewers: [] }]
     })
     runtime()
@@ -774,7 +843,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
 
     const r = await call('release', { step: 'bump', path: s.work, confirm: true, notes: 'Ship the two changes.', closes: 'Refs #386' })
     expect(r.isError).toBe(false)
-    expect(r.data.summary).toBe(`Opened the bump to ${NEXT}: https://github.com/ijun17/centralu/pull/900. Merge it once CI is green (merge_when_green), then rehearse and tag.`)
+    expect(r.data.summary).toBe(`Opened the bump to ${NEXT}: https://github.com/ijun17/centralu/pull/900. Rehearse it now (release step rehearse) while its CI runs, merge it once CI is green (merge_when_green), then tag.`)
     expect(r.data.lines).not.toContain(`Merged since v${APP_VERSION} (2):`)
     const pushed = remoteHas(s.origin, `refs/heads/chore/release-${NEXT}`)!
     expect(g(s.origin, 'rev-parse', `${pushed}^`)).toBe(s.tip)
@@ -990,6 +1059,30 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     ])
   })
 
+  it('warns at the bump, without refusing it, when other builds hold most runners', async () => {
+    const s = repo()
+    const jobs = (n: number, status: string) => Array.from({ length: n }, (_, i) => ({ name: `job ${i}`, status, conclusion: null }))
+    patchState((st) => {
+      st.activeRuns = [{ id: 81, status: 'in_progress' }, { id: 82, status: 'queued' }]
+      st.jobs['81'] = [...jobs(8, 'in_progress'), ...jobs(3, 'completed'), ...jobs(2, 'waiting')]
+      st.jobs['82'] = jobs(4, 'queued')
+    })
+    runtime()
+    const quiet = await call('release', { step: 'bump', path: s.work })
+    expect(quiet.isError, quiet.text).toBe(false)
+    expect(quiet.data.warning).toBeNull()
+    patchState((st) => (st.jobs['81'] = jobs(12, 'in_progress')))
+    const busy = await call('release', { step: 'bump', path: s.work })
+    expect(busy.isError, busy.text).toBe(false)
+    const warning = "Runners are busy: 12 jobs of other builds running and 4 queued, against 20 runners (2 active runs). The bump PR's CI will wait for them; push it once they drain, or cancel builds that no longer matter."
+    expect(busy.data.warning).toBe(warning)
+    expect(busy.data.summary).toContain(warning)
+    expect(busy.data.lines).toContain(warning)
+    const r = await call('release', { step: 'bump', path: s.work, confirm: true })
+    expect(r.data.pushed, r.text).toBe(true)
+    expect(r.data.summary).toContain(warning)
+  })
+
   it('refuses a bump whose branch or pull request exists already', async () => {
     const s = repo()
     g(s.work, 'push', '-q', 'origin', `HEAD:refs/heads/chore/release-${NEXT}`)
@@ -1022,7 +1115,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     const s = repo({ bumped: true })
     runtime()
     const none = await call('release', { step: 'tag', path: s.work, confirm: true })
-    expect(none.data.problems).toEqual([`No rehearsal ran on ${s.tip.slice(0, 7)}: rehearse first (release step rehearse), or pass skipRehearsal: true to tag without one.`])
+    expect(none.data.problems).toEqual([`No rehearsal ran on ${s.tip.slice(0, 7)} or on its bump branch at the same tree: rehearse first (release step rehearse), or pass skipRehearsal: true to tag without one.`])
     patchState((st) => st.runs.push(run({ head_sha: s.tip, conclusion: 'failure' })))
     const failed = await call('release', { step: 'tag', path: s.work, confirm: true })
     expect(failed.data.problems).toEqual([`The rehearsal on ${s.tip.slice(0, 7)} ended failure (https://github.com/ijun17/centralu/actions/runs/50); fix that first, or pass skipRehearsal: true.`])
@@ -1054,6 +1147,100 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(ghWrites()).toEqual([])
     const twice = await call('release', { step: 'tag', path: s.work, confirm: true, skipRehearsal: true })
     expect(twice.data.problems).toEqual([`v${NEXT} is tagged already; a release tag is never moved. Bump to the next version instead.`])
+  })
+
+  /** main released at APP_VERSION, and the bump to NEXT open as PR #900 on its branch: answers its head */
+  function openBump(s: Repo) {
+    const branch = `chore/release-${NEXT}`
+    g(s.work, 'checkout', '-q', '-b', branch)
+    for (const f of CARRIERS) write(s.work, f, bumpText(readFileSync(join(s.work, f), 'utf8'), APP_VERSION, NEXT).text)
+    const head = commitAll(s.work, `chore(release): ${NEXT}`)
+    g(s.work, 'push', '-q', 'origin', branch)
+    g(s.work, 'checkout', '-q', 'main')
+    patchState((st) => {
+      st.prs.push({ number: 900, state: 'OPEN', headRefName: branch, baseRefName: 'main', headRefOid: head })
+      st.dispatchSha = head
+    })
+    return { branch, head }
+  }
+  /** The bump PR squashed onto main: a new commit with `tree` (default the PR head's) on main's head */
+  function squash(s: Repo, head: string, tree = g(s.work, 'rev-parse', `${head}^{tree}`)) {
+    const tip = g(s.work, 'commit-tree', tree, '-p', s.tip, '-m', `chore(release): ${NEXT} (#900)`)
+    g(s.work, 'reset', '-q', '--hard', tip)
+    g(s.work, 'push', '-q', 'origin', 'main')
+    patchState((st) => {
+      st.prs[0]!.state = 'MERGED'
+      st.prs[0]!.mergeCommit = { oid: tip }
+      for (const r of st.runs) if (r.id === 77) Object.assign(r, { status: 'completed', conclusion: 'success' })
+    })
+    s.tip = tip
+    return tip
+  }
+
+  it('rehearses the open bump PR on its branch, and tags main after the squash on that rehearsal (same tree)', async () => {
+    const s = repo()
+    const { branch, head } = openBump(s)
+    runtime()
+    const plan = await call('release', { step: 'rehearse', path: s.work })
+    expect(plan.isError, plan.text).toBe(false)
+    expect(plan.data.summary).toBe(
+      `Ready to rehearse ${NEXT} on bump PR #900's head ${head.slice(0, 7)} (release.yml on ${branch} with dry_run=true; builds and packs, publishes nothing, asks no approval). Call again with confirm: true to start it.`,
+    )
+    const r = await call('release', { step: 'rehearse', path: s.work, confirm: true })
+    expect(r.data.started, r.text).toBe(true)
+    expect(ghWrites()).toEqual([{ args: ['api', '-X', 'POST', 'repos/ijun17/centralu/actions/workflows/release.yml/dispatches', '--input', '-'], stdin: JSON.stringify({ ref: branch, inputs: { dry_run: 'true' } }) }])
+    const again = await call('release', { step: 'rehearse', path: s.work, confirm: true })
+    expect(again.data.summary).toBe(`A rehearsal of PR #900 at ${head.slice(0, 7)} queued: https://github.com/ijun17/centralu/actions/runs/77; not starting another.`)
+
+    const tip = squash(s, head)
+    expect(tip).not.toBe(head)
+    const status = await call('release_status', { path: s.work })
+    expect(status.data.lines).toContain(`Rehearsal on ${head.slice(0, 7)} on ${branch}, the same tree as main at ${tip.slice(0, 7)}: succeeded, https://github.com/ijun17/centralu/actions/runs/77.`)
+    const tag = await call('release', { step: 'tag', path: s.work, confirm: true })
+    expect(tag.isError, tag.text).toBe(false)
+    expect(tag.data.lines).toContain(`Rehearsal: succeeded on ${head.slice(0, 7)} on ${branch}, the same tree as main at ${tip.slice(0, 7)}, https://github.com/ijun17/centralu/actions/runs/77.`)
+    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(tip)
+    // Main still needs no second rehearsal
+    expect(ghWrites()).toHaveLength(1)
+  })
+
+  it('does not count a bump branch rehearsal once main after the squash has another tree', async () => {
+    const s = repo()
+    const { head } = openBump(s)
+    runtime()
+    expect((await call('release', { step: 'rehearse', path: s.work, confirm: true })).data.started).toBe(true)
+    // Squashed onto a main that got one more change meanwhile: the files differ from what was rehearsed
+    write(s.work, 'c.txt', 'three\n')
+    s.tip = commitAll(s.work, 'fix: three (#12)')
+    g(s.work, 'push', '-q', 'origin', 'main')
+    g(s.work, 'checkout', '-q', head)
+    write(s.work, 'c.txt', 'three\n')
+    g(s.work, 'add', 'c.txt')
+    const merged = g(s.work, 'write-tree')
+    g(s.work, 'checkout', '-q', '-f', 'main')
+    squash(s, head, merged)
+    const tag = await call('release', { step: 'tag', path: s.work, confirm: true })
+    expect(tag.isError).toBe(true)
+    expect(tag.data.problems).toEqual([`No rehearsal ran on ${s.tip.slice(0, 7)} or on its bump branch at the same tree: rehearse first (release step rehearse), or pass skipRehearsal: true to tag without one.`])
+    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
+  })
+
+  it('refuses to rehearse a bump PR that is not on main head, or when none is open', async () => {
+    const s = repo()
+    runtime()
+    const none = await call('release', { step: 'rehearse', path: s.work, confirm: true })
+    expect(none.isError).toBe(true)
+    expect(none.data.problems[0]).toContain(`${APP_VERSION} is released already (v${APP_VERSION}) and no bump pull request is open into main`)
+    const { head } = openBump(s)
+    write(s.work, 'c.txt', 'three\n')
+    const tip = commitAll(s.work, 'fix: three (#12)')
+    g(s.work, 'push', '-q', 'origin', 'main')
+    const behind = await call('release', { step: 'rehearse', path: s.work, confirm: true })
+    expect(behind.isError).toBe(true)
+    expect(behind.data.problems).toEqual([
+      `PR #900 (${head.slice(0, 7)}) is not on main's head ${tip.slice(0, 7)}: after its squash main's tree would differ from what was rehearsed, so the tag would not count the rehearsal. Bring the branch up to date with main first.`,
+    ])
+    expect(ghWrites()).toEqual([])
   })
 
   it('refuses to tag another version than main carries, or while CI on main is red', async () => {
@@ -1098,7 +1285,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     )
     expect(ghWrites()).toEqual([])
     const r = await call('release', { step: 'approve', path: s.work, confirm: true })
-    expect(r.data.summary).toBe(`Approved npm-publish for v${NEXT} (linux-x64, darwin-arm64): https://github.com/ijun17/centralu/actions/runs/61. The shim asks again once every platform job succeeds.`)
+    expect(r.data.summary).toBe(`Approved npm-publish for v${NEXT} (linux-x64, darwin-arm64): https://github.com/ijun17/centralu/actions/runs/61. The shim asks again once every platform job succeeds: approve with wait: true to approve it the moment it may go.`)
     expect(ghWrites()).toEqual([
       {
         args: ['api', '-X', 'POST', 'repos/ijun17/centralu/actions/runs/61/pending_deployments', '--input', '-'],
@@ -1125,6 +1312,186 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     const cancelled = await call('release', { step: 'cancel_duplicate', run: 62, path: s.work, confirm: true })
     expect(cancelled.data.summary).toContain('Cancelled duplicate run 62')
     expect((JSON.parse(readFileSync(statePath, 'utf8')) as State).cancelled).toEqual(['repos/ijun17/centralu/actions/runs/62/cancel'])
+  })
+
+  /** A tagged NEXT whose release run 61 waits on npm-publish with `jobs` */
+  function waitingRelease(jobs: { name: string; status: string; conclusion: string | null }[]) {
+    const s = repo({ bumped: true })
+    g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
+    patchState((st) => {
+      st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'waiting', conclusion: null }))
+      st.pending['61'] = [{ environment: { id: 7, name: 'npm-publish' }, current_user_can_approve: true, reviewers: [] }]
+      st.jobs['61'] = jobs
+    })
+    runtime()
+    return s
+  }
+  const PLATFORMS_WAITING = [
+    { name: 'check the tag against the repo', status: 'completed', conclusion: 'success' },
+    { name: 'linux-x64', status: 'waiting', conclusion: null },
+  ]
+  const SHIM_WAITING = [
+    { name: 'check the tag against the repo', status: 'completed', conclusion: 'success' },
+    { name: 'linux-x64', status: 'completed', conclusion: 'success' },
+    { name: 'centralu (shim)', status: 'waiting', conclusion: null },
+  ]
+  const approvals = () => ghWrites().filter((w) => w.args[3]?.endsWith('/pending_deployments'))
+
+  it('with wait, approves the platforms the moment the tagged commit turns green, and not before', async () => {
+    const s = waitingRelease(PLATFORMS_WAITING)
+    patchState((st) => (st.seq = { [`ci:${s.tip}`]: ['pending', 'pending', 'pending', 'green'] }))
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true, wait: true })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.data.approved).toBe(true)
+    expect(r.data.summary).toContain(`Approved npm-publish for v${NEXT} (linux-x64) after`)
+    expect(r.data.lines).toContain(`The tagged commit's own CI at ${s.tip.slice(0, 7)}: green.`)
+    expect(approvals()).toHaveLength(1)
+    // Every pending answer was read before the one approval
+    expect((JSON.parse(readFileSync(statePath, 'utf8')) as State).seq![`ci:${s.tip}`]).toEqual(['green'])
+  })
+
+  it('without wait, the same pending CI still refuses at once', async () => {
+    const s = waitingRelease(PLATFORMS_WAITING)
+    patchState((st) => (st.seq = { [`ci:${s.tip}`]: ['pending', 'green'] }))
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(r.isError).toBe(true)
+    expect(r.data.problems.join(' ')).toContain('must be green before npm-publish approval')
+    expect(approvals()).toEqual([])
+  })
+
+  it('with wait, refuses without approving when the tagged CI fails while it waits', async () => {
+    const s = waitingRelease(PLATFORMS_WAITING)
+    patchState((st) => (st.seq = { [`ci:${s.tip}`]: ['pending', 'failing'] }))
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true, wait: true })
+    expect(r.isError).toBe(true)
+    expect(r.data.problems.join(' ')).toContain('must be green before npm-publish approval')
+    expect(approvals()).toEqual([])
+  })
+
+  it('with wait, gives up after waitMinutes with what it still waits for, approving nothing', async () => {
+    const s = waitingRelease(PLATFORMS_WAITING)
+    patchState((st) => (st.ci = 'pending'))
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true, wait: true, waitMinutes: 0.005 })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.data.approved).toBe(false)
+    expect(r.data.timedOut).toBe(true)
+    expect(r.data.summary).toMatch(/^Not approved: the gate did not pass within \d+ s of waiting, so nothing was approved\. Still: The tagged commit's own CI/)
+    expect(approvals()).toEqual([])
+  })
+
+  it('with wait, waits for the shim to be asked for, then approves it once its packages show on the registry', async () => {
+    const s = waitingRelease(SHIM_WAITING)
+    published(s.tip)
+    patchState((st) => {
+      // The platforms still building: nothing waits on the environment for the first reads
+      st.seq = { 'pending:61': [[], [], [], [], st.pending['61']] }
+      st.registryHidden = { [REGISTRY_NAMES[0]!]: 2 }
+    })
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true, wait: true })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.data.approved).toBe(true)
+    expect(r.data.lines).toContain('This is the shim: the last moment anything is reversible (docs/releasing.md).')
+    expect(r.data.lines.join(' ')).toContain(`the ${REGISTRY_NAMES.length} packages it needs are on the registry at ${NEXT} from ${s.tip.slice(0, 7)}`)
+    expect(approvals()).toHaveLength(1)
+    expect((JSON.parse(readFileSync(statePath, 'utf8')) as State).registryHidden).toEqual({ [REGISTRY_NAMES[0]!]: 0 })
+  })
+
+  it('refuses the shim while a package is not on the registry, from another commit, or a platform job failed', async () => {
+    const s = waitingRelease(SHIM_WAITING)
+    published(s.tip, REGISTRY_NAMES.slice(1))
+    const missing = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(missing.isError).toBe(true)
+    expect(missing.data.problems).toEqual([`Not on the registry at ${NEXT} yet: ${REGISTRY_NAMES[0]}.`])
+
+    published('f'.repeat(40))
+    const other = await call('release', { step: 'approve', path: s.work, confirm: true, wait: true })
+    expect(other.isError).toBe(true)
+    expect(other.data.problems[0]).toBe(`${REGISTRY_NAMES[0]}@${NEXT} is on the registry from fffffff, not from ${s.tip.slice(0, 7)}; the shim would pin other code. Bump to the next prerelease.`)
+
+    published(s.tip)
+    patchState((st) => (st.jobs['61'] = [SHIM_WAITING[0]!, { name: 'linux-x64', status: 'completed', conclusion: 'failure' }, SHIM_WAITING[2]!]))
+    const failed = await call('release', { step: 'approve', path: s.work, confirm: true, wait: true })
+    expect(failed.isError).toBe(true)
+    expect(failed.data.problems).toEqual(['Not every platform job succeeded (linux-x64: failure); the shim may not go out before all of them have.'])
+    expect(approvals()).toEqual([])
+
+    patchState((st) => (st.jobs['61'] = SHIM_WAITING))
+    const ok = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(ok.data.approved, ok.text).toBe(true)
+  })
+
+  /** build.yml with these jobs, by name */
+  const buildYml = (...names: string[]) => `on:\n  push:\n  pull_request:\njobs:\n${names.map((n, i) => `  job${i}:\n    name: ${n}\n    runs-on: ubuntu-24.04\n`).join('')}`
+
+  it("judges the tagged commit by its own workflow's checks, not main's newer ones", async () => {
+    const s = waitingRelease(PLATFORMS_WAITING)
+    patchState((st) => {
+      st.noProtection = true
+      // main's workflow gained a job after the tag; the tagged commit's run never had it
+      st.files['.github/workflows/build.yml'] = buildYml('build', 'windows tests (vitest 1/2)')
+      st.filesAt = { [s.tip]: { '.github/workflows/build.yml': buildYml('build') } }
+    })
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.data.approved).toBe(true)
+  })
+
+  it('with wait, refuses at once when the build runs completed without a required check', async () => {
+    const s = waitingRelease(PLATFORMS_WAITING)
+    patchState((st) => {
+      st.noProtection = true
+      st.filesAt = { [s.tip]: { '.github/workflows/build.yml': buildYml('build', 'never reported') } }
+    })
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true, wait: true, waitMinutes: 0.05 })
+    expect(r.isError, r.text).toBe(true)
+    expect(r.data.problems.join(' ')).toContain('Its build runs have all completed without reporting never reported, so waiting will not bring them')
+    expect(approvals()).toEqual([])
+  })
+
+  it('does not approve the shim past its gate while GitHub lists no waiting job yet', async () => {
+    const s = waitingRelease(SHIM_WAITING)
+    // Nothing on the registry: only the shim gate stands in the way
+    patchState((st) => (st.seq = { 'jobs:61': [[SHIM_WAITING[0], SHIM_WAITING[1], { ...SHIM_WAITING[2], status: 'queued' }], SHIM_WAITING] }))
+    const first = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(first.isError).toBe(true)
+    expect(first.data.problems).toEqual([`GitHub says the release run for v${NEXT} waits on npm-publish but lists no waiting job yet, so which approval it is cannot be told.`])
+    const second = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(second.isError).toBe(true)
+    expect(second.data.problems[0]).toContain(`Not on the registry at ${NEXT} yet`)
+    expect(approvals()).toEqual([])
+  })
+
+  it('with wait, approves nothing once the call is cancelled, even when the gate then passes', async () => {
+    const s = waitingRelease(SHIM_WAITING)
+    published(s.tip)
+    let release!: () => void
+    registryHold = new Promise((r) => (release = r))
+    const asked = new Promise<void>((r) => (registryAsked = r))
+    const abort = new AbortController()
+    const answer = call('release', { step: 'approve', path: s.work, confirm: true, wait: true }, agent, abort.signal)
+    await asked
+    abort.abort()
+    expect((await answer).data.status).toBe('cancelled')
+    // Let the cancellation reach the app before the registry answers and the gate passes
+    await new Promise((r) => setTimeout(r, 1_000 * SLOW))
+    registryHold = null
+    release()
+    await new Promise((r) => setTimeout(r, 2_000 * SLOW))
+    expect(approvals()).toEqual([])
+  })
+
+  it('with wait, refuses when the release run changes under it', async () => {
+    const s = waitingRelease(PLATFORMS_WAITING)
+    const at = (id: number, status: string) => run({ id, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status, conclusion: null })
+    patchState((st) => {
+      st.seq = { tagRuns: [[at(61, 'in_progress')], [at(62, 'waiting'), at(61, 'in_progress')]], 'pending:61': [[]] }
+      st.pending['62'] = st.pending['61']!
+      st.jobs['62'] = PLATFORMS_WAITING
+    })
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true, wait: true })
+    expect(r.isError, r.text).toBe(true)
+    expect(r.data.problems).toEqual([`The release run for v${NEXT} is now 62, not run 61 this wait started on; nothing was approved. Look at both runs before approving.`])
+    expect(approvals()).toEqual([])
   })
 
   it('refuses to approve a version with no tag, and says so when nothing waits', async () => {

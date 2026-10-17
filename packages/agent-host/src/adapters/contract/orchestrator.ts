@@ -228,9 +228,13 @@ export type ChildRunResult =
       /** For a fork: the session it was copied from */
       forkedFrom?: string
     } & (
-      | { state: 'done'; answer: string; readable: string[]; outside: string[] }
+      /**
+       * `cleanUp` (#690): the caller's own child, its work over, so the answer names its delete. Not for a session it
+       * only observes or reads under `auto`, a turn cut short, or a report still owed over its background work
+       */
+      | { state: 'done'; answer: string; readable: string[]; outside: string[]; cleanUp?: boolean }
       | { state: 'working'; reported: boolean }
-      | { state: 'at_rest'; answer: string; sessionState: string; interruption?: Interruption }
+      | { state: 'at_rest'; answer: string; sessionState: string; interruption?: Interruption; cleanUp?: boolean }
       | { state: 'asking'; cards: RoutedCard[] }
       | { state: 'answered'; card: string }
       | { state: 'busy'; sessionState: string; choices: BusyChoice[] }
@@ -261,6 +265,22 @@ export type StartAgentOpts = {
   worktree?: boolean
   branch?: string
   lsp?: boolean
+}
+
+/**
+ * One session the caller started, as agent_session list shows it (#690): a parent that forgot to clean up after using
+ * its children's answers sweeps them in one call. `finished` is a child at rest with nothing standing on it, the one a
+ * parent deletes; `asleep` says its process stopped (#568), which costs no memory but still leaves its row and
+ * worktree. `unmerged` is a worktree branch git and the PR do not show as landed: a delete keeps that work in the trash.
+ */
+export type AgentListRow = {
+  sessionId: string
+  name: string
+  tool: string
+  state: 'working' | 'waiting' | 'finished' | 'stopped'
+  asleep: boolean
+  lastActive?: string
+  worktree?: { branch: string; unmerged: boolean }
 }
 
 /** agent_session's arguments (#561) */
@@ -405,6 +425,8 @@ export type OrchestratorTools = {
   startAgent(opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult>
   /** Works with a session the caller started (#561, agent_session): status, send more, wait, stop */
   agentSession(opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
+  /** The sessions the caller started with start_agent that are still here (#690, agent_session list) */
+  listAgents(): Promise<{ ok: true; agents: AgentListRow[] } | { ok: false; error: string }>
   /**
    * Answers a card standing in a session whose turn this seat gave it (#676, answer_question): the directing seats'
    * way, as agent_session's `answer` is an ordinary session's. Same rules (`RoutedCards.answerRoutedCard`,

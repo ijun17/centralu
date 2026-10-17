@@ -61,9 +61,47 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
       'keeper-linux': 'host',
     })
     // WebKit e2e on every pull request, documents only included: the owner's decision of 2026-10-11
-    for (const id of ['verify', 'windows-tests', 'e2e']) expect(job(id).body).not.toMatch(/^ {4}(needs|if):/m)
+    for (const id of ['verify', 'windows-tests', 'windows-tests-unit', 'e2e']) expect(job(id).body).not.toMatch(/^ {4}(needs|if):/m)
     expect(jobs.some((j) => j.id === 'e2e-skipped')).toBe(false)
     for (const id of Object.keys(gated)) expect(job(id).body).toMatch(/^ {4}needs: changes$/m)
+  })
+
+  // #1035: the one Windows job was the longest of every run, 15 of its 16.5 minutes the unit tests
+  it('runs the Windows unit tests in shards beside lint and types, under the check name required sets know', () => {
+    const checks = job('windows-tests').body
+    expect(names(checks)).toEqual(['windows tests'])
+    for (const run of ['pnpm lint', 'pnpm depcruise', 'pnpm typecheck']) expect(checks).toContain(`run: ${run}\n`)
+    expect(checks).not.toContain('pnpm test')
+    const unit = job('windows-tests-unit').body
+    const shards = Number(/^ {8}shards: \[(\d+)\]$/m.exec(unit)?.[1])
+    expect(shards).toBeGreaterThan(1)
+    expect(/^ {8}shard: \[([\d, ]+)\]$/m.exec(unit)?.[1]).toBe(Array.from({ length: shards }, (_, i) => i + 1).join(', '))
+    expect(names(unit)).toEqual(Array.from({ length: shards }, (_, i) => `windows tests (vitest ${i + 1}/${shards})`))
+    expect(unit).toContain('run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }}\n')
+    expect(unit).toMatch(/^ {4}runs-on: windows-2022$/m)
+    expect(unit).toContain('CC_DATA_DIR: ${{ runner.temp }}')
+  })
+
+  // #1035: a flaky shard cost a rerun of its whole job, 5 to 7 minutes with the queue
+  it('runs a failed e2e shard once more inside its job, saying so, with time for both and the first report kept', () => {
+    for (const id of ['e2e', 'e2e-chromium']) {
+      const body = job(id).body
+      const step = body.slice(body.indexOf('- name: pnpm e2e'))
+      expect(step, id).toMatch(/^ {8}id: e2e$/m)
+      const run = /^ {8}run: \|\n((?: {10}.*\n)+)/m.exec(step)?.[1] ?? ''
+      const lines = run.split('\n').map((l) => l.trim()).filter(Boolean)
+      expect(lines[0], id).toMatch(/^e2e\(\) \{ pnpm e2e --shard=\$\{\{ matrix\.shard \}\}\/\$\{\{ matrix\.shards \}\} .*; \}$/)
+      expect(lines[1], id).toBe('if e2e; then exit 0; fi')
+      expect(lines.at(-1), id).toBe('e2e')
+      const rest = lines.slice(2, -1)
+      expect(rest.some((l) => l.startsWith('echo "::warning title=e2e (')), id).toBe(true)
+      expect(rest.some((l) => l.includes('mv "$d" "e2e-first-attempt/')), id).toBe(true)
+      expect(rest, id).toContain('echo "retried=true" >> "$GITHUB_OUTPUT"')
+      // The first run's report, uploaded apart from the blobs `e2e report` merges
+      expect(body, id).toMatch(/if: \$\{\{ !cancelled\(\) && steps\.e2e\.outputs\.retried == 'true' \}\}\n {8}with:\n {10}name: e2e-first-attempt-/)
+      expect(Number(/^ {4}timeout-minutes: (\d+)$/m.exec(body)?.[1]), id).toBeGreaterThanOrEqual(30)
+    }
+    expect(workflow).toContain('pattern: e2e-blob-*')
   })
 
   it('gives each gated matrix job a stand-in with the same checks, run on the other answer only', () => {

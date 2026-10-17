@@ -12,7 +12,7 @@
 //               remotes run (packages/agent-host, packages/protocol, tooling/launcher-)
 //   code        anything but documents: the UI scenarios in Chromium and the UX tasks
 //
-// `verify`, `windows tests` and the WebKit UI scenarios do not ask: they run on every commit (their
+// `verify`, the `windows tests` jobs and the WebKit UI scenarios do not ask: they run on every commit (their
 // tests read documents too; WebKit on every pull request is the owner's decision of 2026-10-11).
 //
 // Which files: everything a commit adds to main. A commit already on main (a push to main, every

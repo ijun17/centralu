@@ -333,7 +333,22 @@ is cut by `clipPreview` (its head and an ellipsis), on this host and for a linke
 | Tool | Arguments → what comes back |
 |---|---|
 | `start_agent` | `{ task, tool?: string, model?, effort?, difficulty?: light\|standard\|heavy, wait?, worktree?, branch?, lsp? }` → the child's id and name, and its answer (`done`) or `working`; or `pending` with a request handle while the person's card stands (#673), or, with `lowMemory`, while an allowed start waits for memory (§1.2.4, #686). `lsp: true` keeps the child's code intelligence (§1.2.4) |
-| `agent_session` | `{ sessionId, action: status\|send\|wait\|stop\|delete\|answer, text?, card?, ifBusy? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, §1.2.2, #676), `busy` and `queued` (a send to a session busy with a turn that is not the caller's, §1.2.3, #677), `stopped` and `deleted` (a child moved to the trash; worktree cleanup also preserves local work, #608/#637) |
+| `agent_session` | `{ sessionId?, action: status\|send\|wait\|stop\|delete\|answer\|list, text?, card?, ifBusy? }` → the same states, plus `at_rest` (nothing the caller gave it runs; its last answer), `asking` and `answered` (a card in the turn the caller gave it, §1.2.2, #676), `busy` and `queued` (a send to a session busy with a turn that is not the caller's, §1.2.3, #677), `stopped` and `deleted` (a child moved to the trash; worktree cleanup also preserves local work, #608/#637). `list` needs no `sessionId`: the caller's own children (`askedBy`) still here, each as working, waiting, finished or stopped, asleep or not, its last activity, and a worktree branch not merged yet (#690) |
+
+**Cleaning up after a child (#690).** On 2026-10-14 a parent integrated fourteen children's answers and deleted none of
+them until the person said it could; asked why, it said it had forgotten the last step, and nothing it read named it.
+Every answer that hands a child's result to the session that started it now ends with one line naming the delete:
+`done` and `at_rest` (`cleanUpLine`, `sessions/tool-answers.ts`), and the report of a finished turn
+(`ChildReports.cleanUpWords`), which also says how many of its other children are finished and that `list` shows them.
+The line is said only of the caller's own child (`askedBy`; under `auto` agent_session also reads the person's sessions
+and siblings) whose work is over: not a turn cut short (`interruption`), failed or limited, nor one owing a report over
+its own background work (`cleanUpDue`, `sessions/own-agents.ts`). The report counts with the same rule `list` uses
+(`ownAgents`, `agentState`: a delegation still running is working, a cut-short turn is stopped, one being trashed is
+gone). `list` takes `askedBy` only, as status, send, wait and stop do: a `parentSessionId`-only link is the former
+worktree manager's, which store step v48 copied into `askedBy`. With the session tools turned off it says so.
+The line rides in the answer, not in `start_agent`'s description: it costs nothing until the result is read, which
+is the moment it applies. Nothing deletes a child on its own: a delete can drop a branch, and even with the trash it
+stays the parent's or the person's call. Sleep (#568) already frees a finished child's memory.
 
 The optional `tool` is a registry name, accepted as a string by the schema and checked against the
 current registry at call time. An unknown name returns an error listing the installed tools; adding
@@ -2313,7 +2328,8 @@ stays the one writer of its own store. The code is `packages/agent-host/src/link
 |---|---|---|
 | Registry | `stored.ts`, store v46 `linked_machines` | The machines the person linked: id, name, ssh target, remote shell, the `slot` for folding numbers, the version pair accepted |
 | Transport | `tunnel.ts` (`SshTunnel`) | Asks the remote for its connection line over ssh, then holds an ssh local forward |
-| Link | `links.ts` (`LinkedMachine`) | One per machine: transport, version check, client, backoff, status, the hidden-session set, the mirror's updates |
+| Link | `linked-machine-connection.ts`, `linked-machine-ops.ts` (`LinkedMachine`) | One per machine: transport, version check, client, backoff, status, the hidden-session set, the mirror's updates; and what the person asks of it (install, update, rollback, uninstall, autostart, activity) |
+| Links | `links-registry.ts` (`Links`), `link-deps.ts`; `links.ts` re-exports them | Every link of this hub, added and removed with the registry, and the ssh hosts and probe |
 | Client | `remote-client.ts` | The hub's WebSocket to the remote host: hello, cursor and epoch, calls, events, terminal frames |
 | Router | `router.ts`, `routes.ts` | In front of `HostServer.onRpc`: sends a call to the machine its ids name, merges lists, answers the rest locally |
 | Qualifier | `qualifier.ts`, `machine-ids.ts` | `<machine>.<id>` on the way in, stripped on the way out; numbers folded per slot |
@@ -2568,8 +2584,10 @@ was **put on hold**. This directory is used as is in prod today. The name is a h
   Moving to git2 (Rust) **is not done until measurement confirms a bottleneck** (m2-plan decision 3).
   The port interface is the same, so moving it later leaves the UI unchanged.
 - **store**: better-sqlite3 + a `user_version` migration runner. `Store` (`store.ts`) opens the file and runs the
-  migrations; its other methods pass the call on to one module per concept in `dev-services/store/` (projects, sessions,
-  messages, the trash, app runs, …), and the step list is in `store/migrations/`. The schema DDL lives in exactly one place,
+  migrations through the two classes it extends: the runner (`store/migrate-runner.ts`, which also answers
+  `Store.inspect`) and, below it, the min-reader version gate (`store/reader-gate.ts`); an owed `VACUUM` is
+  `store/vacuum.ts`. Its other methods pass the call on to one module per concept in `dev-services/store/` (projects,
+  sessions, messages, the trash, app runs, …), and the step list is in `store/migrations/`. The schema DDL lives in exactly one place,
   `protocol/src/schema/schema.sql`. In the bundle it is copied next to the build output and ships with it (F-0).
   The rule for migration steps is below (§5.1).
 - **fs**: lazy readdir listing + `git check-ignore` (once per directory) + path escape blocking.

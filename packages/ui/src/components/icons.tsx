@@ -72,6 +72,21 @@ export function AppIcon({ size = 13 }: { size?: number }) {
   )
 }
 
+/**
+ * Centralu's mark (#730): the app icon's orbit (a ring, the arc the app draws for "working", the centre), in one ink.
+ * It marks a call to Centralu's own tools in a conversation, the points where an agent reaches other sessions,
+ * projects, machines or apps. Kind by shape: it is emphasis, never the signal's brightness.
+ */
+export function CentraluMarkIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      <circle cx="8" cy="8" r="5.6" stroke="currentColor" strokeOpacity="0.35" strokeWidth="1.4" />
+      <path d="M8 2.4 A5.6 5.6 0 1 1 3.7 11.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="8" cy="8" r="1.7" fill="currentColor" />
+    </svg>
+  )
+}
+
 export function CloseIcon({ size = 13 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>

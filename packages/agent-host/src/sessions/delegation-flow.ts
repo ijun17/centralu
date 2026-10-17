@@ -4,8 +4,9 @@ import { AgentRunWait } from './app-agents.js'
 import { turnAnswer } from './turn-answer.js'
 import { ASK_WAIT_MS, clipAnswer, pathsIn, readableGrants, taskLine } from './ask-project.js'
 import { agentFrame, agentNoteFrame, presetWithin } from './start-agent.js'
-import { labelOf } from './transcript-view.js'
+import { labelOf, lastActiveOf } from './transcript-view.js'
 import { agentDepthRefusal, recordAgentDepth } from './agent-depth.js'
+import { agentState, cleanUpDue, ownAgents } from './own-agents.js'
 import type {
   BackgroundTask,
   PermissionPreset,
@@ -18,7 +19,7 @@ import {
   liveBackgroundTasks,
 } from '@cc/protocol'
 import { inTurn } from '../idle.js'
-import type { BusyAnswer, ChildRunResult, AgentSessionOpts, RoutedCard } from '../adapters/contract.js'
+import type { AgentListRow, BusyAnswer, ChildRunResult, AgentSessionOpts, RoutedCard } from '../adapters/contract.js'
 import { raceBound } from './with-timeout.js'
 import type { DelegationHost } from './delegation-host.js'
 import { AgentStartFlow, agentStartPending, agentStartPersonText } from './start-agent-flow.js'
@@ -185,6 +186,27 @@ export class DelegationFlow {
         if (readers?.size === 0) this.host.turnObservers.delete(child.id)
       },
     }
+  }
+
+  /**
+   * agent_session list (#690): the sessions this caller started that are still here, oldest first. On 2026-10-14 a
+   * parent used fourteen children's answers and deleted none of them until the person said it could: deleting was a
+   * call away, but nothing showed it what was left. Only its own children (`askedBy`), in its own project, as the
+   * other actions take them; a session another started is not its to delete.
+   */
+  listAgents(callerId: string): AgentListRow[] {
+    return ownAgents(this.host, callerId).map((s) => {
+      const lastActive = lastActiveOf(this.host.store, s.id)
+      return {
+        sessionId: s.id,
+        name: labelOf(this.host.store, s),
+        tool: s.tool,
+        state: agentState(this.host, s),
+        asleep: !s.live,
+        ...(lastActive ? { lastActive } : {}),
+        ...(s.worktree ? { worktree: { branch: s.worktree.branch, unmerged: !s.worktreeMerged } } : {}),
+      }
+    })
   }
 
   /**
@@ -665,6 +687,7 @@ export class DelegationFlow {
       sessionState: child.state,
       ...(child.interruption ? { interruption: child.interruption } : {}),
       ...(notice ? { notice } : {}),
+      ...(callerId && cleanUpDue(child, callerId, notice) ? { cleanUp: true } : {}),
     }
   }
 
@@ -848,6 +871,7 @@ export class DelegationFlow {
       this.host.pauseReport(d.sessionId, left)
     }
     const notice = this.pausedNotice(d.sessionId, d.callerId)
+    const child = this.host.meta.get(d.sessionId)
     return {
       ok: true,
       state: 'done',
@@ -858,6 +882,7 @@ export class DelegationFlow {
       readable: granted,
       outside,
       ...(notice ? { notice } : {}),
+      ...(child && cleanUpDue(child, d.callerId, notice) ? { cleanUp: true } : {}),
     }
   }
 

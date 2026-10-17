@@ -655,6 +655,12 @@ The guidance is in the schema because a caller needs it before its first call; #
 into the answers at no resident cost. Not measured: whether models then pass `difficulty` rather than `model`, and
 pick a worktree as described; Codex (it reaches MCP tools through `exec`, §6).
 
+**#690: `agent_session` `list`, and the clean-up line (2026-10-17).** `list` lists the caller's own children, so
+`sessionId` became optional; the description names it. `agent_session` 534 → 535 characters (`residentCost`: the
+`required` entry that went away nearly pays for the enum value and the words), the agent set 1,332 → 1,333. Claude
+defers `agent_session`, so its resident cost does not move there. The line naming the delete once a child's answer is
+used rides in the answers (`done`, `at_rest`, a finished turn's report), at no resident cost. Not measured live.
+
 ## 11. Centralu's features first: instructions for ordinary sessions, and the orchestrator's preamble (#564, 2026-10-12)
 
 The owner replaced the principle that Centralu does not shape the person's workflow with a rule: unless the person

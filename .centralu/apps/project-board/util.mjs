@@ -27,6 +27,8 @@ export async function mapLimit(list, n, fn) {
 
 /** A commit's first 7 characters, or `?` when there is none. */
 export const short = (sha) => (sha ? String(sha).slice(0, 7) : '?')
+/** A duration in words: seconds under two minutes, else minutes. */
+export const span = (ms) => (ms < 120_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`)
 /** `1 file`, `2 files`. */
 export const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 /** The first `max` of a list, then how many more. */

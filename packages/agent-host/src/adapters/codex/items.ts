@@ -1,6 +1,7 @@
 import { asObj, jsonObject, str } from '../../json-value.js'
 import { type FileChange } from '../file-changes.js'
-import { centraluRunCommand, firstLine, isCentraluTool } from '../tool-titles.js'
+import type { ToolSummary } from '@cc/protocol'
+import { centraluMark, centraluRunCommand, firstLine, isCentraluTool } from '../tool-titles.js'
 
 /**
  * Codex's tool items (generated/v2/ThreadItem.ts), read: what a call was asked to do, how it is titled, what it
@@ -82,7 +83,7 @@ export function itemInput(item: Record<string, unknown>): Record<string, unknown
 }
 
 /** A tool-call item, into a human-readable line (the conversation card's title) */
-export function itemSummary(item: Record<string, unknown>): { tool: string; title: string; paths: string[] } {
+export function itemSummary(item: Record<string, unknown>): ToolSummary {
   const type = str(item.type)
   if (type === 'commandExecution') {
     const cmd = str(item.command)
@@ -115,7 +116,8 @@ export function itemSummary(item: Record<string, unknown>): { tool: string; titl
     if (isCentraluTool({ server, tool }, 'ask_project')) {
       // Arguments that are not JSON name no project: the card still finds the session it asked
       const project = str(jsonObject(item.arguments ?? asObj(item.invocation).arguments).project)
-      return { tool, title: project || tool, paths: [] }
+      const mark = centraluMark(server, tool, {})
+      return { tool, title: project || tool, paths: [], ...(mark ? { centralu: mark.centralu } : {}) }
     }
     /*
      * **The arguments go on the title too** (dogfooding 2026-09-08).
@@ -129,10 +131,14 @@ export function itemSummary(item: Record<string, unknown>): { tool: string; titl
      */
     const args = argsPreview(item.arguments ?? asObj(item.invocation).arguments)
     const name = [server, tool].filter(Boolean).join(': ') || str(item.title) || 'MCP tool'
+    // Centralu's own servers (#730): marked, and titled by what the call does. Codex names the server apart, so the
+    // screen cannot tell from `tool` alone; a call made from inside `exec` names none and stays unmarked
+    const mark = tool ? centraluMark(server, tool, jsonObject(item.arguments ?? asObj(item.invocation).arguments)) : null
     return {
       tool: tool || 'MCP',
-      title: args ? `${name} ${args}` : name,
+      title: mark?.title ?? (args ? `${name} ${args}` : name),
       paths: [],
+      ...(mark ? { centralu: mark.centralu } : {}),
     }
   }
   if (type === 'webSearch') {
