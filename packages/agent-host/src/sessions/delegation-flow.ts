@@ -5,13 +5,7 @@ import { ASK_WAIT_MS } from './ask-project.js'
 import { agentFrame, agentNoteFrame, presetWithin } from './start-agent.js'
 import { labelOf, lastActiveOf } from './transcript-view.js'
 import { agentState, ownAgents } from './own-agents.js'
-import type {
-  SessionInfo,
-} from '@cc/protocol'
 import {
-  // The frame's single-line field (#120) — lives in protocol (app-frames.ts) because the mock
-  // also needs to put words into a session built with the same frame.
-  frameField,
   liveBackgroundTasks,
 } from '@cc/protocol'
 import { inTurn } from '../idle.js'
@@ -22,6 +16,7 @@ import { AgentStartFlow, agentStartPending, agentStartPersonText } from './start
 import { BackgroundStops, taskList } from './background-stops.js'
 import { DelegationWaits } from './delegation-waits.js'
 import { DelegationForks } from './delegation-forks.js'
+import { ObservedTurns } from './observed-turns.js'
 
 // Moved with start_agent (#850); still importable from here
 export type { DelegationHost } from './delegation-host.js'
@@ -51,12 +46,15 @@ export class DelegationFlow {
   private readonly waits: DelegationWaits
   /** A fork of a busy session for a requester (delegation-forks.ts) */
   private readonly forks: DelegationForks
+  /** Turns read by a session that does not own them, and an observer's note (observed-turns.ts) */
+  private readonly observed: ObservedTurns
 
   constructor(private readonly host: DelegationHost) {
     this.starts = new AgentStartFlow(host, this)
     this.stops = new BackgroundStops(host)
     this.waits = new DelegationWaits(host)
     this.forks = new DelegationForks(host, this)
+    this.observed = new ObservedTurns(host, this)
   }
 
   /**
@@ -64,7 +62,7 @@ export class DelegationFlow {
    * have no new stored user row (their input was recorded before the previous answer), so each read starts after the
    * last one
    */
-  private answerReader(sessionId: string): () => string {
+  answerReader(sessionId: string): () => string {
     let after = this.host.meta.get(sessionId)?.lastSeq ?? 0
     return () => {
       const answer = turnAnswer(this.host.store.messages.loadMessages(sessionId, 50), { afterSeq: after })
@@ -132,50 +130,9 @@ export class DelegationFlow {
     return d
   }
 
-  /**
-   * Read an existing turn without claiming it in delegations, agentRuns or the caller's sleep graph. With `own`, a
-   * fresh reader even while another caller's wait is active: a note's receipt is held on it, never on that wait (#646).
-   */
-  private observeTurn(child: SessionInfo, subscribe: boolean, own = false): { run: Delegation; release(): void } {
-    const active = own ? undefined : this.host.agentRuns.get(child.id)
-    const shared = active && !active.finished ? active : undefined
-    /*
-     * A note's reader reads each turn's answer on its own, as a delegation does: it is made before its note goes in. An
-     * observer is made in the middle of a turn whose start it never saw, so the rows already written may be this turn's
-     * answer: it reads the turn's answer as the record ends
-     */
-    const wait = shared ?? new AgentRunWait(() => {}, () => child.name, undefined, own
-      ? this.answerReader(child.id)
-      : () => turnAnswer(this.host.store.messages.loadMessages(child.id, 50)))
-    const project = this.host.store.projects.listProjects().find((p) => p.id === child.projectId)
-    const target = { id: child.projectId ?? '', name: project?.name ?? '', path: this.host.store.sessions.sessionCwd(child.id) ?? project?.path ?? '' }
-    if (!shared && subscribe) {
-      const readers = this.host.turnObservers.get(child.id) ?? new Set<AgentRunWait>()
-      readers.add(wait)
-      this.host.turnObservers.set(child.id, readers)
-    }
-    return {
-      run: {
-        // This is the target's own turn, never work owned by its observer.
-        callerId: child.id, sessionId: child.id,
-        target,
-        wait, get settled() { return wait.finished }, notice: () => undefined,
-        outcome: wait.done.then((r) => ({ ok: true as const, answer: r.answer }),
-          (e: Error) => ({ ok: false as const, error: e.message })),
-        stop: (why) => {
-          // Only an explicit stop of the target may interrupt it or fail an app's watcher.
-          if (wait.finished) return
-          wait.fail(new Error(`${why}, so the turn was stopped`))
-          this.host.handles.get(child.id)?.interrupt()
-        },
-      },
-      release: () => {
-        if (shared) return
-        const readers = this.host.turnObservers.get(child.id)
-        readers?.delete(wait)
-        if (readers?.size === 0) this.host.turnObservers.delete(child.id)
-      },
-    }
+  /** `ObservedTurns.observeTurn` (observed-turns.ts), kept on the flow for its callers */
+  observeTurn(...a: Parameters<ObservedTurns['observeTurn']>): ReturnType<ObservedTurns['observeTurn']> {
+    return this.observed.observeTurn(...a)
   }
 
   /**
@@ -478,36 +435,14 @@ export class DelegationFlow {
     return this.waits.agentWorking(...a)
   }
 
-  /** An observer's `status` / `wait` on the note it sent (#646): its own reader's outcome, taken once it has settled */
-  private async readObserverNote(key: string, note: { run: Delegation; waiters: number; told: boolean }, wait: boolean, signal?: AbortSignal): Promise<ChildRunResult> {
-    if (!wait && !note.run.settled) return this.agentWorking(note.run, false, true)
-    note.waiters++
-    let r: ChildRunResult
-    try {
-      r = await this.awaitAgent(key, note.run, signal, true)
-    } finally {
-      note.waiters--
-    }
-    if (note.run.settled) {
-      note.told = true
-      this.host.children.dropObserverNote(key, note)
-    }
-    return r
+  /** `ObservedTurns.readObserverNote` (observed-turns.ts), kept on the flow for its callers */
+  readObserverNote(...a: Parameters<ObservedTurns['readObserverNote']>): ReturnType<ObservedTurns['readObserverNote']> {
+    return this.observed.readObserverNote(...a)
   }
 
-  /** The observer's note was refused after its send returned (#646): said in the observer's session, as a report is */
-  private async tellNoteRefused(observerId: string, sessionId: string, why: string): Promise<void> {
-    const name = this.host.nameOf(sessionId)
-    await this.host.tellSession(
-      observerId,
-      `[Centralu] Your note to another session was not delivered.\n` +
-        `Session: ${frameField(name)}\n` +
-        `id: ${sessionId}\n\n` +
-        `Reason: ${why.slice(0, 600)}\n\n` +
-        `Send it again with agent_session, or read that session's recent conversation with read_session.`,
-      { sessionId, name },
-      true,
-    )
+  /** `ObservedTurns.tellNoteRefused` (observed-turns.ts), kept on the flow for its callers */
+  tellNoteRefused(...a: Parameters<ObservedTurns['tellNoteRefused']>): ReturnType<ObservedTurns['tellNoteRefused']> {
+    return this.observed.tellNoteRefused(...a)
   }
 
   /** `DelegationWaits.agentAsking` (delegation-waits.ts), kept on the flow for its callers */
