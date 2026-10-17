@@ -6,7 +6,7 @@ import { inTurn } from '../idle.js'
 import { presetWithin } from './start-agent.js'
 import type { ChildOwnership, LinkedReport } from './child-ownership.js'
 import type { OrchestratorProposals } from './orchestrator-proposals.js'
-import { dedupeNearbyHits, takeInTurns, windowAround } from './snippet.js'
+import { dedupeNearbyHits, takeInTurns, windowAround, windowAroundLines } from './snippet.js'
 import { authorOf, contextAt, labelOf, lastActiveOf, previewOf, timeOf } from './transcript-view.js'
 
 /**
@@ -336,13 +336,15 @@ export function orchestratorToolsFor(
       const remote = readLinks()?.recall(query, limit)
       for (const h of dedupeNearbyHits(mine)) {
         const s = host.meta.get(h.sessionId)!
+        const context = contextAt(host.store, s.id, h.seq, s.id === orchestratorId && cut !== null ? cut : undefined)
         out.push({
           sessionId: s.id,
           session: s.id === orchestratorId ? `${labelOf(host.store, s)} (this session, before compaction)` : labelOf(host.store, s),
           project: projectLabel(s.projectId, byId, untrusted),
           // Cut from **the surrounding conversation**, not a single delta chunk (a chunk alone says
-          // nothing); its own hit stops at its compaction (#974)
-          snippet: windowAround(contextAt(host.store, s.id, h.seq, s.id === orchestratorId && cut !== null ? cut : undefined) || h.body, query, 160),
+          // nothing); its own hit stops at its compaction (#974). Its lines are kept, so the mark of who wrote a message is
+          // never one that a message's text wrote (#838)
+          snippet: context ? windowAroundLines(context, query, 160) : windowAround(h.body, query, 160),
           seq: h.seq, // Passed as `around` to read_session, it jumps straight to that spot
           at: timeOf(host.store, h.sessionId, h.seq),
         })

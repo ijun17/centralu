@@ -22,6 +22,9 @@ Who wrote each line travels with it (#838). `read_session` gives a line another 
 sent `fromApp` (`authorOf` in `sessions/transcript-view.ts`); `recall`'s context marks every message
 (`[person]`, `[agent]`, `[session "<name>"]`, `[app "<name>"]`) and indents a message's own later lines, so neither a
 child's report nor an app's text reads as the person's, and no text can start a line with a mark of its own. The
+hit's snippet keeps those lines (`windowAroundLines` in `sessions/snippet.ts`): it used to fold every line break into a
+space, which put a mark an app's text wrote on the same footing as a real one, and a snippet cut inside a message starts
+with that message's mark (`orchestrator-seat.test.ts`). The
 orchestrator's memory of its past conversation (appended to its prompt when it restarts) leaves out app messages as it
 already left out other sessions', and indents a message's later lines, so text cannot start a `Person:` line.
 
