@@ -187,6 +187,51 @@ describe('DirWatchers — watches only expanded directories (#34)', () => {
  * That means a live watcher ends up attached to a directory outside the project — which means we
  * are listening in on what happens in someone else's folder.
  */
+describe('each window keeps its own watch set (#842 item 6)', () => {
+  it('two holders on one project watch the union, and one folding does not unwatch the other', () => {
+    const root = tmp()
+    mkdirSync(join(root, 'a'))
+    mkdirSync(join(root, 'b'))
+    const w = makeWatcher(() => {})
+    w.setWatched('p1', root, ['', 'a'], 1)
+    w.setWatched('p1', root, ['', 'b'], 2)
+    expect(w.watchedCount('p1')).toBe(3)
+    // Window 1 folds a: window 2's b stays watched, and so does the root both have open
+    w.setWatched('p1', root, [''], 1)
+    expect(w.watchedCount('p1')).toBe(2)
+    // Window 1 leaves the project
+    w.setWatched('p1', root, [], 1)
+    expect(w.watchedCount('p1')).toBe(2)
+  })
+
+  it('a holder that is gone stops counting, and what nobody else holds is unwatched', () => {
+    const root = tmp()
+    mkdirSync(join(root, 'a'))
+    mkdirSync(join(root, 'b'))
+    const w = makeWatcher(() => {})
+    w.setWatched('p1', root, ['', 'a'], 1)
+    w.setWatched('p1', root, ['b'], 2)
+    w.forgetHolder(2)
+    expect(w.watchedCount('p1')).toBe(2)
+    w.forgetHolder(1)
+    expect(w.watchedCount('p1')).toBe(0)
+  })
+
+  it('a change in a folder only one window has open is still reported', async () => {
+    const root = tmp()
+    mkdirSync(join(root, 'b'))
+    const got: string[][] = []
+    const w = makeWatcher((_p, d) => got.push(d))
+    w.setWatched('p1', root, ['b'], 2)
+    w.setWatched('p1', root, [''], 1)
+    for (let i = 0; i < 30 && !got.flat().includes('b'); i++) {
+      writeFileSync(join(root, 'b', `n${i}.txt`), 'x')
+      await new Promise((r) => setTimeout(r, 100))
+    }
+    expect(got.flat()).toContain('b')
+  })
+})
+
 describe('a .. past a symlink cannot watch outside (#119)', () => {
   it('no watch was set up', () => {
     const root = tmp()

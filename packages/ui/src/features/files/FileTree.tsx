@@ -79,15 +79,18 @@ export function FileTree({ projectId }: { projectId: string }) {
   const platform = usePlatform()
   const expanded = useStore((s) => s.expandedDirs[projectId])
   /*
-   * Watches live in the host's memory. A host the window reconnects to after a crash restart or a build switch holds
-   * none, and the window hears that as a resync (#972 item 3): the watched set is sent again then, and what is open is
-   * re-read, since whatever changed while no host was watching was never reported.
+   * Watches live in the host's memory, kept under the window's connection (#842 item 6), so they are sent again on
+   * every reconnect and every resync: a new connection starts with none, and a host the window reconnects to after a
+   * crash restart or a build switch holds none at all (#972 item 3). On a resync what is open is re-read too, since
+   * whatever changed while no host was watching was never reported.
    */
+  const connected = useStore((s) => s.connection === 'connected')
   const hostResyncs = useStore((s) => s.hostResyncs)
   useEffect(() => {
+    if (!connected) return
     // A failed watch registration must not break the tree — watching is a side glance, not the main job
     void platform.fs.watch(projectId, ['', ...(expanded ?? [])]).catch(() => {})
-  }, [platform, projectId, expanded, hostResyncs])
+  }, [platform, projectId, expanded, connected, hostResyncs])
   const resyncsSeen = useRef(hostResyncs)
   useEffect(() => {
     if (resyncsSeen.current === hostResyncs) return

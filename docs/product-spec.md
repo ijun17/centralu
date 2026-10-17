@@ -201,6 +201,8 @@ Lives in the right-hand **evidence panel**, whose tabs are **Git / History / Fil
 - Highlight files an agent recently modified (tracking "files the agent just touched").
 - **Notices external changes** (issue #34, shipped 2026-08-25): non-recursive watches on the expanded directories only,
   flushed on a 300ms interval — the tree follows what agents and editors do to the disk without polling the whole repo.
+  Each window's set is kept under its connection and the watchers are the union, so two windows on one project do not
+  unwatch each other's folders; a window sends its set again after a reconnect or a host swap (#842).
 
 #### FR-6. Code viewer (read-only)
 
