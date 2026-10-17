@@ -418,7 +418,7 @@ async function duSizes(cwd: string, paths: string[]): Promise<Map<string, number
   const sizes = new Map<string, number>()
   try {
     const out = await new Promise<string>((resolve, reject) => {
-      execFile('du', ['-sk', ...paths], { cwd, timeout: SIZE_BUDGET_MS, maxBuffer: 1 << 20 }, (err, stdout) =>
+      execFile('du', ['-sk', ...paths], { cwd, timeout: SIZE_BUDGET_MS, maxBuffer: 1 << 20, windowsHide: true }, (err, stdout) =>
         // du exits non-zero if even one entry cannot be read — whatever it did print is used anyway
         stdout ? resolve(stdout) : reject(err),
       )

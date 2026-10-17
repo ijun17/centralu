@@ -152,6 +152,7 @@ async function filterOverrides(cwd: string): Promise<string[]> {
     ;({ stdout } = await exec(programPath('git'), [...BASE, ...LOCKED, 'config', '-z', '--name-only', '--get-regexp', '^filter\\.'], {
       cwd,
       ...DEFAULTS,
+      windowsHide: true,
     }))
   } catch (e) {
     // 1 = no key matched. Anything else (a broken config, a denied folder) fails the read itself

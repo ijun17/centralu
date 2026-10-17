@@ -109,7 +109,7 @@ export class CodexAdapter implements AgentAdapter {
     const path = whichTool('codex')
     try {
       const launch = launchFor(path ?? 'codex')
-      const { stdout } = await exec(launch.command, [...launch.args, '--version'], { timeout: 5000 })
+      const { stdout } = await exec(launch.command, [...launch.args, '--version'], { timeout: 5000, windowsHide: true })
       const version = `${stdout.trim()} · ${path ?? 'PATH'}`
       // Login status is judged by whether the auth file exists (cheap — no need to start the CLI)
       const loggedIn = existsSync(join(codexHome(), 'auth.json'))

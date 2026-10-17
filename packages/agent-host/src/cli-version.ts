@@ -42,7 +42,7 @@ const realDeps = (): CliVersionDeps => ({
   launch: (path) => launchFor(path),
   realpath: (path) => realpathSync(path),
   read: (path) => readFileSync(path, 'utf8'),
-  run: async (command, args) => (await exec(command, args, { timeout: 5000 })).stdout,
+  run: async (command, args) => (await exec(command, args, { timeout: 5000, windowsHide: true })).stdout,
 })
 
 /** How many folders up from the file to look for its `package.json`: `bin/claude.exe` is one, a nested `dist/bin/x.js` two */

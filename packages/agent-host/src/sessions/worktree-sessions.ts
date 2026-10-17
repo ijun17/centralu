@@ -292,6 +292,7 @@ export class WorktreeSessions {
         {
           cwd: worktree.path,
           timeout: 90_000,
+          windowsHide: true,
           env: {
             ...process.env,
             CENTRALU_WORKTREE: worktree.branch,
