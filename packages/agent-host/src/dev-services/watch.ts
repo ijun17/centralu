@@ -36,8 +36,23 @@ export const MAX_WATCHED_DIRS = 256
  */
 type ProjectWatch = { dirs: Map<string, FSWatcher | null>; tree: { root: string; watcher: FSWatcher } | null }
 
+/**
+ * Who asked for a watch set: a window's connection (`RpcContext.client`), or a part of the host that keeps its own
+ * (`LOCAL_HOLDER`, an app runtime's key).
+ */
+export type WatchHolder = string | number
+
+/** The holder of a set the host asks for itself */
+export const LOCAL_HOLDER = 'local'
+
 export class DirWatchers {
   private byProject = new Map<string, ProjectWatch>()
+  /**
+   * What each holder wants watched, per project (#842 item 6). The watchers are the union. A window's set used to be the
+   * project's whole set, so two windows on one project took turns overwriting each other's: a folder one had open went
+   * unwatched the moment the other folded or opened anything.
+   */
+  private wants = new Map<string, { root: string; by: Map<WatchHolder, readonly string[]> }>()
   private pending = new Map<string, Set<string>>()
   private timers = new Map<string, ReturnType<typeof setTimeout>>()
   private closed = false
@@ -61,8 +76,31 @@ export class DirWatchers {
    * drift apart with no error ever raised — stating the whole set makes that drift impossible to
    * even express.
    */
-  setWatched(projectId: string, root: string, rels: readonly string[]): number {
+  setWatched(projectId: string, root: string, rels: readonly string[], holder: WatchHolder = LOCAL_HOLDER): number {
     if (this.closed) return 0
+    const entry = this.wants.get(projectId) ?? { root, by: new Map<WatchHolder, readonly string[]>() }
+    entry.root = root
+    if (rels.length > 0) entry.by.set(holder, [...rels])
+    else entry.by.delete(holder)
+    if (entry.by.size > 0) this.wants.set(projectId, entry)
+    else this.wants.delete(projectId)
+    return this.apply(projectId, root, [...entry.by.values()].flat())
+  }
+
+  /**
+   * A holder is gone (a window's connection closed): its sets stop counting, and what no one else holds is unwatched.
+   * Without this a closed window's folders stayed watched for the life of the host.
+   */
+  forgetHolder(holder: WatchHolder): void {
+    for (const [projectId, entry] of [...this.wants]) {
+      if (!entry.by.delete(holder)) continue
+      if (entry.by.size === 0) this.wants.delete(projectId)
+      this.apply(projectId, entry.root, [...entry.by.values()].flat())
+    }
+  }
+
+  /** Makes the project's watchers exactly `rels` (the union of what its holders want) */
+  private apply(projectId: string, root: string, rels: readonly string[]): number {
     const want = new Set([...new Set(rels)].slice(0, MAX_WATCHED_DIRS))
     const cur = this.byProject.get(projectId) ?? { dirs: new Map<string, FSWatcher | null>(), tree: null }
     this.byProject.set(projectId, cur)
@@ -185,6 +223,7 @@ export class DirWatchers {
     const cur = this.byProject.get(projectId)
     if (cur) closeAll(cur)
     this.byProject.delete(projectId)
+    this.wants.delete(projectId)
     const t = this.timers.get(projectId)
     if (t) clearTimeout(t)
     this.timers.delete(projectId)
@@ -200,6 +239,7 @@ export class DirWatchers {
     this.closed = true
     for (const cur of this.byProject.values()) closeAll(cur)
     this.byProject.clear()
+    this.wants.clear()
     for (const t of this.timers.values()) clearTimeout(t)
     this.timers.clear()
     this.pending.clear()

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { setup, newSession, emitEvent } from './fixtures/control.js'
 
 /**
@@ -181,6 +181,89 @@ test('Closing one terminal does not recreate the remaining ones', async ({ page 
     return el?.__kept === true
   }, ids[0])
   expect(kept).toBe(true)
+})
+
+/** The first terminal of alpha, on screen in the evidence panel */
+async function openTerminal(page: Page): Promise<string> {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'task')
+  await page.getByTestId('evidence-tab-terminal').click()
+  await expect(page.getByTestId('terminal-stack').locator('[data-testid^="terminal-surface-"]')).toHaveCount(1)
+  return page.evaluate(() => [...(window as any).__mock.terminalState.byCwd.values()][0][0].id)
+}
+
+/*
+ * A resync (a reconnect that lost events, or a host swap) reads the terminals again (#842 item 4). The views stayed
+ * attached to the old connection: what the shell printed meanwhile never showed, and a shell that died meanwhile never
+ * offered Restart.
+ */
+test('a resync redraws a terminal from the host: output from the gap, and Restart for a shell that died meanwhile', async ({ page }) => {
+  const id = await openTerminal(page)
+  // While the connection was gone: the shell printed and then died, and no event of it reached the window
+  await page.evaluate((tid) => {
+    const t = [...(window as any).__mock.terminalState.byCwd.values()][0][0]
+    if (t.id !== tid) throw new Error('another terminal')
+    t.history += 'printed while away\r\n'
+    t.alive = false
+  }, id)
+  await expect(page.getByTestId(`terminal-restart-${id}`)).toHaveCount(0)
+
+  await page.evaluate(() => (window as any).__mock.setConnectionState('resync_required'))
+
+  await expect(page.getByTestId(`terminal-surface-${id}`)).toContainText('printed while away')
+  await expect(page.getByTestId(`terminal-restart-${id}`)).toBeVisible()
+})
+
+/*
+ * Output between the list's answer and the view subscribing (#842 item 5). The chunk here is sent after the answer was
+ * handled and before React draws the view (a few microtasks later, never a task), which is the gap a busy dev server
+ * printed into. The tab is switched through the store, not by a click: an update made while a click is being dispatched
+ * renders at once in a microtask, which hides the gap; a list that answers outside an event (a slow host, a resync)
+ * renders a task later.
+ */
+test('output that arrives between the terminal list and the view mounting is not lost', async ({ page }) => {
+  const id = await openTerminal(page)
+  // Off the terminal tab, so coming back lists the terminals again
+  await page.getByTestId('evidence-tab-files').click()
+  await expect(page.getByTestId('evidence-terminal')).toHaveCount(0)
+  await page.evaluate((tid) => {
+    const m = (window as any).__mock
+    const real = m.terminal.list
+    m.terminal.list = (projectId: string) => {
+      const answer = real(projectId)
+      void answer
+        .then(() => Promise.resolve())
+        .then(() => Promise.resolve())
+        .then(() => m.emitTerminal(tid, 'printed in the gap\r\n'))
+      return answer
+    }
+  }, id)
+
+  await page.evaluate(() => (window as any).__store.getState().setPanelTab('terminal'))
+
+  await expect(page.getByTestId(`terminal-surface-${id}`)).toContainText('printed in the gap')
+})
+
+/* One restart at a time (#842 item 10): a second click while the first is on its way restarts nothing more */
+test('a double click on Restart restarts the shell once', async ({ page }) => {
+  const id = await openTerminal(page)
+  await page.evaluate((tid) => {
+    const m = (window as any).__mock
+    ;(window as any).__restarts = 0
+    const real = m.terminal.restart
+    m.terminal.restart = async (...args: unknown[]) => {
+      ;(window as any).__restarts++
+      await new Promise((r) => setTimeout(r, 300))
+      return real(...args)
+    }
+    m.emitTerminalExit(tid, 1)
+  }, id)
+  await expect(page.getByTestId(`terminal-restart-${id}`)).toBeVisible()
+
+  await page.getByTestId(`terminal-restart-${id}`).dblclick()
+
+  await expect(page.getByTestId(`terminal-restart-${id}`)).toHaveCount(0)
+  expect(await page.evaluate(() => (window as any).__restarts)).toBe(1)
 })
 
 /** Usage (FR-9) — covers subscription limits only */
