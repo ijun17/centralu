@@ -301,6 +301,61 @@ fn a_supervisor_that_gave_up_can_be_claimed_again() {
     assert_eq!(sup.last_error(), None, "a fresh attempt must not look like it failed instantly for the old reason");
 }
 
+/// #840 item 10: a quit that comes while a host is being launched (the launcher copying a build,
+/// say) found no child to stop, and the host started a moment later ran on, unsupervised. It is
+/// stopped as soon as it has started.
+#[cfg(unix)]
+#[test]
+fn a_host_launched_while_quitting_is_stopped_at_once() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    struct Quiet;
+    impl StatusSink for Quiet {
+        fn status(&self, _: &HostStatus) {}
+    }
+    let file = std::env::temp_dir().join(format!("cc-host-launch-race-{}", std::process::id()));
+    let _ = std::fs::remove_file(&file);
+    let (release, wait) = mpsc::channel::<()>();
+    let wait = Mutex::new(wait);
+    let entered = Arc::new(AtomicBool::new(false));
+    let launcher: Launcher = {
+        let entered = entered.clone();
+        let file = file.to_string_lossy().to_string();
+        Arc::new(move || {
+            entered.store(true, Ordering::SeqCst);
+            let _ = wait.lock().unwrap().recv_timeout(Duration::from_secs(10));
+            Ok(HostLaunch {
+                program: "/bin/sh".into(),
+                args: vec!["-c".into(), "echo $$ > \"$F\"; while :; do sleep 0.05; done".into()],
+                env: vec![("F".into(), file.clone())],
+            })
+        })
+    };
+    let sup = Supervisor::new();
+    assert!(sup.start(Arc::new(Quiet), launcher));
+    let end = Instant::now() + Duration::from_secs(10);
+    while !entered.load(Ordering::SeqCst) && Instant::now() < end {
+        thread::sleep(Duration::from_millis(10));
+    }
+    sup.shutdown();
+    release.send(()).unwrap();
+    // The watcher ends once the host it started is stopped; the host may be stopped before it
+    // got as far as writing its pid.
+    let end = Instant::now() + Duration::from_secs(10);
+    while sup.is_running() && Instant::now() < end {
+        thread::sleep(Duration::from_millis(10));
+    }
+    let watching = sup.is_running();
+    let pid = std::fs::read_to_string(&file).ok().and_then(|s| s.trim().parse::<u32>().ok());
+    let running = pid.is_some_and(pid_alive);
+    if let Some(pid) = pid.filter(|_| running) {
+        // SAFETY: a plain syscall to the test's own host's group.
+        unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
+    }
+    let _ = std::fs::remove_file(&file);
+    assert!(!watching && !running, "a host started while quitting runs on (pid {pid:?}, watched: {watching})");
+}
+
 #[test]
 fn no_restart_while_the_app_is_quitting() {
     let sup = Supervisor::new();

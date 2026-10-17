@@ -464,7 +464,18 @@ impl Supervisor {
 
         // unix: a reader that can be paused for a keeper handoff (#280 step 4)
         let (lines, gate) = hand::host_lines(stdout);
-        if let Ok(mut inner) = self.inner.lock() {
+        {
+            let Ok(mut inner) = self.inner.lock() else {
+                stop_child(&mut child);
+                return Ok(None);
+            };
+            // A shutdown that came while this host was being launched found no child to stop
+            // (#840 item 10): the host would have run on after it, unsupervised.
+            if inner.shutting_down {
+                drop(inner);
+                stop_child(&mut child);
+                return Ok(None);
+            }
             inner.child = Some(HostProc::Own(child));
             inner.gate = gate;
         }
