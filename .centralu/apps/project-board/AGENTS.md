@@ -166,22 +166,33 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   on GitHub).
 - **Each poll** reads one item (`decideBefore`, `decideCi`): no maintain or admin, a draft, DIRTY,
   BEHIND, BLOCKED, a squash subject over 72 characters, or a base that is not the default branch or a
-  lower's branch → attention. A cancelled run is rerun once per head and failed jobs once per head
-  (`gh api …/rerun`, `…/rerun-failed-jobs`), counting a rerun as done only once its attempt number
-  moves; failing again, or cancelled again → attention, naming the job and its first failing line. No
-  run on a head for 15 minutes → attention. A head that moved starts over (reruns, required set,
-  attention). Green and mergeable (CLEAN, HAS_HOOKS, UNSTABLE) → every open lower must be inside the
-  top's head (compare), then squash with `--match-head-commit` on the head read, subject `Title (#N)`
-  without attribution lines (`squashMessage`, as `merge_when_green`). After a merge, found here or
-  found already merged (a driver stopped between the merge and writing it down): the top's branch is
-  deleted, the lowers closed and their branches deleted unless another open pull request is based on
-  one. Never `--auto`, never `--delete-branch`, never a force push.
+  lower's branch → attention. Only the CI workflows' own checks count (`readWorkflowChecks`, their
+  check suites: a release job of the same name is not CI, #624), and the run to rerun is the PR's own
+  pull_request run when a push run shares the commit (`latestRuns`). A cancelled run is rerun once per
+  head and failed jobs once per head (`gh api …/rerun`, `…/rerun-failed-jobs`), written down before
+  asking and counted as done only once its attempt number moves; GitHub refusing the rerun, failing
+  again or cancelled again → attention, naming the job and its first failing line. No run on a head
+  for 15 minutes, or a required check never reported for 20 minutes while nothing else runs (a renamed
+  job, a path-filtered workflow) → attention. A head that moved starts over (reruns, required set,
+  clocks, attention). Green and **CLEAN only** (an unattended queue is strict: UNSTABLE, HAS_HOOKS and
+  UNKNOWN wait, and after 30 minutes → attention) → every open lower must be inside the top's head
+  (compare), then squash with `--match-head-commit` on the head read, subject `Title (#N)` without
+  attribution lines (`squashMessage`, as `merge_when_green`). Only GitHub's word that it merged counts:
+  `gh pr merge` can exit 0 under GitHub's own merge queue without merging (→ attention, not asked again
+  on that head). A stack lands only when the top merged into the default branch, here or found merged
+  (a driver stopped between the merge and writing it down, or by hand): then each head branch is
+  deleted and the lowers closed, a branch kept when another open pull request is based on it (deleting
+  it would close that one). Found merged into another branch, nothing is closed or deleted. Never
+  `--auto`, never `--delete-branch`, never a force push.
+- **Failures on one item** that are not an outage (a pull request gone, a write GitHub refuses) are
+  counted; three in a row → attention, once.
 - **Gentle on GitHub**: one item per tick (5 s), each item again after its own wait (90 s while CI
   runs, 2 min while it needs attention), the required set read once per head, the permission once per
   10 minutes. A rate limit (`rate`, now in `FATAL`), no network or no login pauses the whole queue,
   from 1 minute doubling to 15, shown in `merge_queue`.
 - **Where it lives**: `merge-queue.json` in the app's data folder, read and written whole and
-  synchronously for each change, so it survives the server restarting. Centralu stops an app with no
+  synchronously for each change, so it survives the server restarting. A file that does not read
+  stops the driver, said once in the app's log, then tried again with a growing wait. Centralu stops an app with no
   open screen and no call after 5 minutes (docs/apps.md §4), and an app cannot message a session on
   its own (§13), so the queue has two drivers: this server while it runs, and the **watch command** a
   session runs in the background. One drives at a time through `merge-queue.lease.json` (renewed
@@ -191,8 +202,9 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   one per poll; a merge or a close is one too. `node .centralu/apps/project-board/bin/merge-queue.mjs
   watch --data <folder> --owner <name> --after <seq>` (queue_merge answers it whole) drives the queue
   while it waits and exits with that owner's messages: 3 when one needs attention, 0 for a merge or
-  when nothing is left, 6 at its deadline (`--minutes`, default 100), 2 for a wrong argument. It names
-  the command to run again. A Claude session is woken when a background command ends.
+  when nothing is left, 6 at its deadline (`--minutes`, default 100), 2 for a wrong argument or an
+  unreadable queue, 130 or 143 when stopped by SIGINT or SIGTERM (the tick in flight finishes and is
+  written down first). It names the command to run again, quoted like queue_merge's (`shellQuote`). A Claude session is woken when a background command ends.
 - **The screen** shows a "Merge queue" section above the board while it has items: needs attention
   (with why), CI, waiting, merged in the last day, each with Unqueue while active. Nothing tells a
   screen when the driver moves an item, so it reads `merge_queue` again every 15 s while one is active.

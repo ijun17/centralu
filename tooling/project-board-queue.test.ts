@@ -7,11 +7,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { fakeExe, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { decideBefore, decideCi, emptyQueue, enqueue, noticeKey, dequeue } from '../.centralu/apps/project-board/queue.mjs'
+import { decideBefore, decideCi, emptyQueue, enqueue, noticeKey, dequeue, normalize } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
-import { takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
+import { latestRuns, takeLease, releaseLease } from '../.centralu/apps/project-board/queue-driver.mjs'
 
 /**
  * The project board app's merge queue (#956): queue_merge, merge_queue, unqueue, the driver that runs
@@ -66,7 +66,7 @@ describe('what the merge queue decides for one poll', () => {
     expect(decideCi({ item: fresh(), pr: openPr(), checks: checksOf([check('verify', null), check('windows tests', 'success')]), defaultBranch: 'main', now: NOW, ref }).action).toBeUndefined()
     expect(decideCi({ item: fresh(), pr: openPr(), checks: checksOf([]), defaultBranch: 'main', now: NOW, ref }).action).toBeUndefined()
     // GitHub still working out mergeability, or BEHIND / BLOCKED
-    expect(decideCi({ item: fresh(), pr: openPr({ mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' }), checks: GREEN(), defaultBranch: 'main', now: NOW, ref })).toEqual({ state: 'waiting' })
+    expect(decideCi({ item: fresh(), pr: openPr({ mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN' }), checks: GREEN(), defaultBranch: 'main', now: NOW, ref })).toMatchObject({ state: 'waiting' })
     expect(decideCi({ item: fresh(), pr: openPr({ mergeStateStatus: 'BEHIND' }), checks: GREEN(), defaultBranch: 'main', now: NOW, ref }).reason.kind).toBe('behind')
     expect(decideCi({ item: fresh(), pr: openPr({ mergeStateStatus: 'BLOCKED' }), checks: GREEN(), defaultBranch: 'main', now: NOW, ref }).reason.kind).toBe('blocked')
   })
@@ -105,6 +105,33 @@ describe('what the merge queue decides for one poll', () => {
     expect(decideCi({ item: fresh(), pr: long, checks: GREEN(), defaultBranch: 'main', now: NOW, ref }).reason.kind).toBe('subject')
   })
 
+  it('merges only on CLEAN: UNSTABLE, HAS_HOOKS and UNKNOWN wait, and say so after a while', () => {
+    for (const mergeStateStatus of ['UNSTABLE', 'HAS_HOOKS', 'UNKNOWN']) {
+      const first = decideCi({ item: fresh(), pr: openPr({ mergeStateStatus }), checks: GREEN(), defaultBranch: 'main', now: NOW, ref })
+      expect(first, mergeStateStatus).toMatchObject({ state: 'waiting', patch: { uncleanSince: new Date(NOW).toISOString() } })
+      expect(first.action, mergeStateStatus).toBeUndefined()
+      const later = decideCi({ item: fresh(first.patch), pr: openPr({ mergeStateStatus }), checks: GREEN(), defaultBranch: 'main', now: NOW + 31 * 60_000, ref })
+      expect(later, mergeStateStatus).toMatchObject({ state: 'attention', reason: { kind: 'not-clean' } })
+    }
+  })
+
+  it('says when a required check never reports, once nothing else is running (a renamed job, a path-filtered workflow)', () => {
+    const missing = checksOf([check('verify', 'success')])
+    const first = decideCi({ item: fresh(), pr: openPr(), checks: missing, runs: [run('success')], defaultBranch: 'main', now: NOW, ref })
+    expect(first).toMatchObject({ state: 'ci', patch: { missingSince: new Date(NOW).toISOString() } })
+    const later = decideCi({ item: fresh(first.patch), pr: openPr(), checks: missing, runs: [run('success')], defaultBranch: 'main', now: NOW + 21 * 60_000, ref })
+    expect(later).toMatchObject({ state: 'attention', reason: { kind: 'missing-check' } })
+    expect(later.reason.text).toContain('"windows tests"')
+    // While a check still runs, the missing one may simply not have started: no clock
+    const running = checksOf([check('verify', null)])
+    expect(decideCi({ item: fresh(first.patch), pr: openPr(), checks: running, runs: [run(null)], defaultBranch: 'main', now: NOW + 21 * 60_000, ref })).toMatchObject({ state: 'ci', patch: { missingSince: null } })
+  })
+
+  it('counts a pull request found merged as landed only when it merged into the default branch', () => {
+    expect(decideBefore({ item: fresh(), permissions: maintainer, pr: openPr({ state: 'MERGED' }), defaultBranch: 'main', ref })).toEqual({ state: 'merged', landed: true })
+    expect(decideBefore({ item: fresh(), permissions: maintainer, pr: openPr({ state: 'MERGED', baseRefName: 'feat/low' }), defaultBranch: 'main', ref })).toEqual({ state: 'merged', landed: false })
+  })
+
   it('says a head with no CI run at all needs attention only after 15 minutes', () => {
     const none = checksOf([])
     const first = decideCi({ item: fresh(), pr: openPr(), checks: none, runs: [], defaultBranch: 'main', now: NOW, ref })
@@ -128,6 +155,15 @@ describe('what the merge queue decides for one poll', () => {
     expect(noticeKey({ kind: 'failed', job: { id: '12' } }, SHA)).toBe(k)
     expect(noticeKey({ kind: 'failed', job: { id: '13' } }, SHA)).not.toBe(k)
     expect(noticeKey({ kind: 'failed', job: { id: '12' } }, SHA2)).not.toBe(k)
+  })
+
+  it("reruns the PR's own pull_request run when a push run shares its commit, and reads an old file without lowers", () => {
+    const pr = { headRefName: 'feat/queue' }
+    const push = { id: 1, run_attempt: 1, event: 'push', head_branch: 'feat/queue', status: 'completed', conclusion: 'failure', created_at: '2026-10-17T09:00:00Z', workflow_id: 7 }
+    const pull = { id: 2, run_attempt: 1, event: 'pull_request', head_branch: 'feat/queue', status: 'completed', conclusion: 'failure', created_at: '2026-10-17T08:00:00Z', workflow_id: 7 }
+    expect(latestRuns([push, pull], pr).map((r: { id: number }) => r.id)).toEqual([2])
+    expect(latestRuns([push], pr).map((r: { id: number }) => r.id)).toEqual([1])
+    expect(normalize({ items: [{ repo: R, pr: 1, state: 'ci' }] }).items[0]).toMatchObject({ lowers: [], reruns: {} })
   })
 
   it('lets one driver hold the queue at a time, until it lets go or goes quiet', () => {
@@ -174,6 +210,8 @@ if (args[0] === 'pr' && args[1] === 'view') {
 } else if (args[0] === 'pr' && args[1] === 'merge') {
   if (st.mergeError) fail(st.mergeError)
   write(['merge', args[2], args])
+  // GitHub's own merge queue: gh exits 0 and nothing is merged yet
+  if (st.mergeNoop) process.exit(0)
   const pr = st.prs[args[2]]
   pr.state = 'MERGED'; pr.mergeCommit = { oid: 'abcdef1234567890abcdef1234567890abcdef12' }
   save()
@@ -196,7 +234,10 @@ if (args[0] === 'pr' && args[1] === 'view') {
 } else if (path && /\/commits\/[^/]+\/status$/.test(path)) {
   out({ state: 'pending', statuses: [] })
 } else if (path && path.includes('/actions/workflows/build.yml/runs?')) {
-  out({ workflow_runs: (st.runs ?? {})[new URLSearchParams(path.split('?')[1]).get('head_sha')] ?? [] })
+  const runs = (st.runs ?? {})[new URLSearchParams(path.split('?')[1]).get('head_sha')] ?? []
+  out(args.includes('--slurp') ? [{ workflow_runs: runs }] : { workflow_runs: runs })
+} else if (path && /\/actions\/runs\/\d+\/rerun(-failed-jobs)?$/.test(path) && st.rerunError) {
+  fail(st.rerunError)
 } else if (path && /\/actions\/runs\/\d+\/rerun(-failed-jobs)?$/.test(path)) {
   write([path.endsWith('failed-jobs') ? 'rerun-failed' : 'rerun', path.split('/')[5]])
 } else if (path && /\/actions\/jobs\/\d+\/logs$/.test(path)) {
@@ -223,9 +264,21 @@ const ghCheck = (name: string, conclusion: string | null, id: number, at = '2026
   html_url: `https://github.com/${R}/actions/runs/900/job/${id}`,
   started_at: at,
   app: { slug: 'github-actions' },
+  check_suite: { id: 5000 },
 })
 const green = (at?: string) => [ghCheck('verify', 'success', 11, at), ghCheck('windows tests', 'success', 12, at)]
-const ghRun = (conclusion: string | null, attempt = 1, sha = SHA) => ({ id: 900, run_attempt: attempt, head_sha: sha, status: conclusion === null ? 'in_progress' : 'completed', conclusion, created_at: '2026-10-17T08:00:00Z' })
+const ghRun = (conclusion: string | null, attempt = 1, sha = SHA, extra: Record<string, unknown> = {}) => ({
+  id: 900,
+  run_attempt: attempt,
+  head_sha: sha,
+  head_branch: 'feat/b77',
+  event: 'pull_request',
+  check_suite_id: 5000,
+  status: conclusion === null ? 'in_progress' : 'completed',
+  conclusion,
+  created_at: '2026-10-17T08:00:00Z',
+  ...extra,
+})
 const ghPr = (number: number, extra: Record<string, unknown> = {}) => ({
   number,
   title: `feat(apps): change ${number}`,
@@ -414,6 +467,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 }, () => {
     patchGh((s) => {
       s.prs['77'].headRefOid = SHA2
       s.checks[SHA2] = green('2026-10-17T09:00:00Z')
+      s.runs[SHA2] = [ghRun('success', 1, SHA2)]
     })
     await until((x) => stateOf(x) === 'merged', 'the new head to land')
     expect(writes().find((w) => w[0] === 'merge')![2]).toEqual(expect.arrayContaining(['--match-head-commit', SHA2]))
@@ -474,6 +528,83 @@ describe('the project board app: the merge queue', { timeout: 60_000 }, () => {
     expect(r.text).toBe('Took #77 out of the merge queue; nothing on GitHub changed.')
     expect((await call('unqueue', { pr: 77 })).isError).toBe(true)
     expect(writes()).toEqual([])
+  })
+
+  it('asks GitHub once for a rerun it refuses, and tells the session, instead of asking every minute', async () => {
+    runtime(
+      ghState({
+        checks: { [SHA]: [ghCheck('verify', 'success', 11), ghCheck('windows tests', 'failure', 12)] },
+        runs: { [SHA]: [ghRun('failure')] },
+        rerunError: 'Unable to retry this workflow run because it was created over a month ago (HTTP 403)',
+      }),
+    )
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    const q = await until((x) => stateOf(x) === 'attention', 'attention')
+    expect(q.queue[0].reason.kind).toBe('rerun-refused')
+    await morePolls()
+    expect(ghCalls().filter((a) => a.some((x) => /\/rerun(-failed-jobs)?$/.test(x)))).toHaveLength(1)
+    expect(notices()).toHaveLength(1)
+    expect(notices()[0]!.text).toContain('created over a month ago')
+  })
+
+  it('tells the session once when it can no longer read a queued pull request, after three tries', async () => {
+    runtime(ghState({ checks: { [SHA]: [ghCheck('verify', null, 11)] } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    patchGh((s) => delete s.prs['77'])
+    const q = await until((x) => stateOf(x) === 'attention', 'attention')
+    expect(q.queue[0].reason.kind).toBe('error')
+    await morePolls()
+    expect(notices()).toHaveLength(1)
+    expect(notices()[0]!.text).toContain('#77 is not a pull request this GitHub login can see')
+    expect(writes()).toEqual([])
+  })
+
+  it('closes no lower when the top is found merged into another branch than main', async () => {
+    runtime(
+      ghState({
+        prs: { '76': ghPr(76, { headRefName: 'feat/low', headRefOid: SHA2 }), '77': ghPr(77, { baseRefName: 'feat/low' }) },
+        checks: { [SHA]: [ghCheck('verify', null, 11)] },
+      }),
+    )
+    await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
+    // Someone merged the top into the lower's branch by hand
+    patchGh((s) => Object.assign(s.prs['77'], { state: 'MERGED', mergeCommit: { oid: 'abcdef1234567890abcdef1234567890abcdef12' } }))
+    await until((x) => stateOf(x) === 'merged', 'the item to end')
+    expect(writes()).toEqual([])
+    expect(notices().at(-1)!.text).toContain('into feat/low, not main')
+    expect(notices().at(-1)!.text).toContain('left #76 open')
+  })
+
+  it('lands nothing when gh pr merge exits without merging (a GitHub merge queue), and cleans up once GitHub merges it', async () => {
+    runtime(
+      ghState({
+        prs: { '76': ghPr(76, { headRefName: 'feat/low', headRefOid: SHA2 }), '77': ghPr(77) },
+        mergeNoop: true,
+      }),
+    )
+    await call('queue_merge', { pr: 77, lowers: [76], owner: 'tester' })
+    const q = await until((x) => stateOf(x) === 'attention', 'attention')
+    expect(q.queue[0].reason.kind).toBe('not-merged')
+    await morePolls()
+    expect(writes().map((w) => w[0])).toEqual(['merge'])
+    patchGh((s) => Object.assign(s.prs['77'], { state: 'MERGED', mergeCommit: { oid: 'abcdef1234567890abcdef1234567890abcdef12' } }))
+    await until((x) => stateOf(x) === 'merged', 'the merge GitHub made')
+    expect(writes().map((w) => w.slice(0, 2).join(' '))).toEqual(['merge 77', 'delete feat/b77', 'close 76', 'delete feat/low'])
+  })
+
+  it("keeps the top's branch when another open pull request is based on it", async () => {
+    runtime(ghState({ basedOn: { 'feat/b77': [{ number: 90 }] } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge')
+    expect(writes().map((w) => w[0])).toEqual(['merge'])
+    expect(notices().at(-1)!.text).toContain('kept feat/b77: #90 is based on it')
+  })
+
+  it('counts only the CI workflow\'s checks, not a same-named check from another workflow', async () => {
+    const release = { ...ghCheck('verify', 'failure', 31, '2026-10-17T09:30:00Z'), check_suite: { id: 7000 } }
+    runtime(ghState({ checks: { [SHA]: [...green(), release] } }))
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge')
   })
 
   it('keeps the queue in the data folder across a restart of the app, and carries on', async () => {
@@ -558,7 +689,8 @@ describe('the watch command: the queuing session hears about its items', { timeo
     expect(lines[0]).toMatch(/^Merge queue: #77 \(feat\(apps\): change 77\) needs attention: dirty\./)
     expect(r.out).not.toContain('#78')
     expect(lines[1]).toBe('1 still queued for tester. To hear about them, run again in the background:')
-    expect(lines[2]).toMatch(/merge-queue\.mjs" watch --data ".+" --owner "tester" --after \d+$/)
+    // Quoted only where the shell needs it, as queue_merge's own command is
+    expect(lines[2]).toMatch(/merge-queue\.mjs"? watch --data "?.+"? --owner tester --after \d+$/)
     // Its lease is let go: the next driver need not wait for it
     expect(filesNamed(dir, 'merge-queue.lease.json')).toEqual([])
   })

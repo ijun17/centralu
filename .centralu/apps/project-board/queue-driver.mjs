@@ -24,17 +24,16 @@ import {
   mergePr,
   openPrsOnBase,
   QUEUE_PR_FIELDS,
-  readChecks,
   readJobLog,
   readPr,
   readRepo,
   readRequired,
+  readWorkflowChecks,
   rerunRun,
-  runsForHead,
   sameRepo,
   setPrBase,
 } from './github.mjs'
-import { ACTIVE, attentionText, decideBefore, decideCi, dueItem, itemKey, normalize, emptyQueue, noticeKey, POLL_MS, pushEvent, resetFor } from './queue.mjs'
+import { ACTIVE, attentionText, decideBefore, decideCi, dueItem, emptyQueue, ERROR_LIMIT, errorReason, itemKey, normalize, noticeKey, POLL_MS, pushEvent, rerunRefused, resetFor } from './queue.mjs'
 import { short } from './util.mjs'
 
 export const QUEUE_FILE = 'merge-queue.json'
@@ -44,6 +43,7 @@ export const LEASE_MS = 3 * 60_000
 const PAUSE_MIN_MS = 60_000
 const PAUSE_MAX_MS = 15 * 60_000
 const PERMISSIONS_MS = 10 * 60_000
+const BACKOFF_MAX_MS = 5 * 60_000
 
 // PROJECT_BOARD_QUEUE_POLL_MS: for the tests only, which cannot wait 90 s between polls
 const pollOverride = Number(process.env.PROJECT_BOARD_QUEUE_POLL_MS) || 0
@@ -142,6 +142,25 @@ async function permissionsOf(repo, now) {
   return v
 }
 
+/**
+ * The latest run of each CI workflow on the head, from readWorkflowChecks' runs: the pull_request run
+ * of the PR's own branch first when a push run shares the commit, then the newest.
+ */
+export function latestRuns(runs, pr) {
+  const by = new Map()
+  const rank = (r) => [r.event === 'pull_request' && r.head_branch === pr.headRefName ? 1 : 0, String(r.created_at ?? ''), r.run_attempt ?? 1]
+  const better = (a, b) => {
+    const [x, y] = [rank(a), rank(b)]
+    return x[0] !== y[0] ? x[0] > y[0] : x[1] !== y[1] ? x[1] > y[1] : x[2] > y[2]
+  }
+  for (const r of runs ?? []) {
+    const key = r.workflow_id ?? r.path ?? r.name ?? 'ci'
+    const cur = by.get(key)
+    if (!cur || better(r, cur)) by.set(key, r)
+  }
+  return [...by.values()].map((r) => ({ id: r.id, attempt: r.run_attempt ?? 1, status: r.status, conclusion: r.conclusion ?? null, event: r.event ?? null }))
+}
+
 /** The first failing test line of a failed job, for the attention message; best effort. */
 async function failingLine(repo, job) {
   if (!job?.id) return ''
@@ -159,7 +178,7 @@ async function failingLine(repo, job) {
  * Lands an item that is green and mergeable: checks every open lower is inside the top's head, then
  * squash-merges the top on the head that was read. Answers the outcome; `afterMerge` does the rest.
  */
-async function land(item, pr, ref, renew) {
+async function land(item, pr, ref, renew, defaultBranch) {
   const repo = item.repo
   const n = ref(repo, item.pr)
   for (const l of item.lowers ?? []) {
@@ -177,13 +196,22 @@ async function land(item, pr, ref, renew) {
   const msg = squashMessage({ number: pr.number, title: pr.title, description: pr.body })
   const why = await mergePr(repo, pr.number, pr.headRefOid, msg.subject, msg.body)
   if (why) return { state: 'attention', reason: { kind: 'refused', text: `GitHub refused to merge ${n} at ${short(pr.headRefOid)}: ${why}. Look at the PR; the queue tries again on a new head.` } }
-  let merged = pr
+  // gh can exit 0 without a merge (GitHub's own merge queue, auto-merge): only GitHub's word counts
+  let merged = null
   try {
     merged = await readPr(repo, pr.number)
-  } catch {
-    // merged either way; the commit id is a nicety
+  } catch (e) {
+    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
   }
-  return { state: 'merged', merged: { ...pr, mergeCommit: merged.mergeCommit ?? null }, subject: msg.subject }
+  if (merged?.state !== 'MERGED')
+    return {
+      state: 'attention',
+      reason: {
+        kind: 'not-merged',
+        text: `gh pr merge answered for ${n} at ${short(pr.headRefOid)}, but GitHub does not show it merged (a merge queue or auto-merge on GitHub may hold it). The queue does not ask again on this head, and lands the stack once GitHub shows it merged.`,
+      },
+    }
+  return { state: 'merged', merged, subject: msg.subject, landed: merged.baseRefName === defaultBranch }
 }
 
 /**
@@ -192,20 +220,28 @@ async function land(item, pr, ref, renew) {
  * with "Landed in #N" and deletes their branches, unless another open pull request is based on one.
  * A lower the top does not contain stays open and is named. Answers the message for the session.
  */
-async function afterMerge(item, pr, ref, subject) {
+async function afterMerge(item, pr, ref, subject, { landed, defaultBranch }) {
   const repo = item.repo
   const n = ref(repo, item.pr)
   const commit = pr.mergeCommit?.oid ?? null
+  const title = item.title ? ` (${item.title})` : ''
+  if (!landed) {
+    // Merged into another branch (a lower's, by hand): the stack has not landed, so nothing is closed
+    const open = (item.lowers ?? []).map((l) => ref(repo, l))
+    return `Merge queue: ${n}${title} was merged into ${pr.baseRefName}, not ${defaultBranch}, so the stack has not landed: the queue ${open.length ? `left ${open.join(', ')} open and ` : ''}deleted no branch. It is off the queue.`
+  }
   const notes = []
   const stack = new Set([item.pr, ...(item.lowers ?? [])])
   const gone = (e) => !e || /Reference does not exist|HTTP 422|Not Found/i.test(e)
-  if (item.deleteBranch !== false) {
-    if (pr.isCrossRepository) notes.push(`kept ${pr.headRefName} (a fork's)`)
-    else {
-      const e = await deleteBranch(repo, pr.headRefName)
-      if (!gone(e)) notes.push(`could not delete ${pr.headRefName}: ${e}`)
-    }
+  /** Deletes a head branch unless it is a fork's or another open pull request is based on it (deleting it would close that one). */
+  const dropBranch = async (p) => {
+    if (p.isCrossRepository) return notes.push(`kept ${p.headRefName} (a fork's)`)
+    const on = (await openPrsOnBase(repo, p.headRefName)).filter((k) => !stack.has(k))
+    if (on.length) return notes.push(`kept ${p.headRefName}: ${on.map((k) => ref(repo, k)).join(', ')} ${on.length === 1 ? 'is' : 'are'} based on it`)
+    const e = await deleteBranch(repo, p.headRefName)
+    if (!gone(e)) notes.push(`could not delete ${p.headRefName}: ${e}`)
   }
+  if (item.deleteBranch !== false) await dropBranch(pr)
   const closed = []
   const lowers = []
   for (const l of item.lowers ?? []) {
@@ -219,19 +255,9 @@ async function afterMerge(item, pr, ref, subject) {
     if (e) notes.push(`could not close ${ref(repo, l)}: ${e}`)
     else (closed.push(ref(repo, l)), lowers.push(lp))
   }
-  if (item.deleteBranch !== false) {
-    for (const lp of lowers.filter((x) => !x.isCrossRepository)) {
-      const on = (await openPrsOnBase(repo, lp.headRefName)).filter((k) => !stack.has(k))
-      if (on.length) {
-        notes.push(`kept ${lp.headRefName}: ${on.map((k) => ref(repo, k)).join(', ')} ${on.length === 1 ? 'is' : 'are'} based on it`)
-        continue
-      }
-      const e = await deleteBranch(repo, lp.headRefName)
-      if (!gone(e)) notes.push(`could not delete ${lp.headRefName}: ${e}`)
-    }
-  }
+  if (item.deleteBranch !== false) for (const lp of lowers) await dropBranch(lp)
   const how = subject ? ` as ${short(commit)}, "${subject}"` : ` as ${short(commit)} (merged before this poll, by the queue or by hand)`
-  return `Merge queue: merged ${n}${item.title ? ` (${item.title})` : ''}${how}.${closed.length ? ` Closed ${closed.join(', ')} as landed in it.` : ''}${notes.length ? ` Note: ${notes.join('; ')}.` : ''}`
+  return `Merge queue: merged ${n}${title}${how}.${closed.length ? ` Closed ${closed.join(', ')} as landed in it.` : ''}${notes.length ? ` Note: ${notes.join('; ')}.` : ''}`
 }
 
 /**
@@ -239,7 +265,7 @@ async function afterMerge(item, pr, ref, subject) {
  * and fields, the events, and when to read it again. Throws only what stops every item (rate limit,
  * no network, no login).
  */
-async function pollItem(item, { now, ref, renew }) {
+async function pollItem(item, { now, ref, renew, save }) {
   const repo = item.repo
   const at = new Date(now).toISOString()
   const { permissions, defaultBranch } = await permissionsOf(repo, now)
@@ -249,7 +275,7 @@ async function pollItem(item, { now, ref, renew }) {
   const events = []
   if (item.head && item.head !== pr.headRefOid) events.push({ kind: 'head', text: `${ref(repo, item.pr)}: head moved from ${short(item.head)} to ${short(pr.headRefOid)}; starting again on it.` })
 
-  let d = decideBefore({ item: view, permissions, pr, ref })
+  let d = decideBefore({ item: view, permissions, pr, defaultBranch, ref })
   if (!d) {
     let required = view.required
     if (!required || required.base !== pr.baseRefName || required.head !== pr.headRefOid) {
@@ -257,8 +283,10 @@ async function pollItem(item, { now, ref, renew }) {
       required = { base: pr.baseRefName, head: pr.headRefOid, names: r.names, unresolved: r.unresolved }
       base.required = required
     }
-    const checks = evaluateChecks({ required: required.names, reported: await readChecks(repo, pr.headRefOid), alsoReported: required.unresolved.length > 0 })
-    const runs = checks.verdict === 'failing' || checks.verdict === 'none' ? await runsForHead(repo, pr.headRefOid, CI.workflows) : []
+    // Only the CI workflows' own checks count: a release job of the same name is not CI (#624)
+    const scoped = await readWorkflowChecks(repo, pr.headRefOid, { workflows: CI.workflows })
+    const checks = evaluateChecks({ required: required.names, reported: scoped.reported, alsoReported: required.unresolved.length > 0 })
+    const runs = latestRuns(scoped.runs, pr)
     let lowerBranches = []
     if (checks.verdict === 'green' && pr.baseRefName !== defaultBranch && item.lowers?.length)
       lowerBranches = (await Promise.all(item.lowers.map((l) => readPr(repo, l).catch(() => null)))).filter(Boolean).map((l) => l.headRefName)
@@ -270,30 +298,40 @@ async function pollItem(item, { now, ref, renew }) {
   if (d.event) events.push({ kind: 'action', text: d.event })
   if (d.action?.type === 'rerun') {
     if (!renew()) return { yielded: true }
-    await rerunRun(repo, d.action.runId, { failedOnly: d.action.failedOnly })
-    wait = pollMs('acted')
+    // Written down before asking, so a refusal or a driver stopped mid-call is never asked again
+    save({ ...base, reruns: patch.reruns })
+    try {
+      await rerunRun(repo, d.action.runId, { failedOnly: d.action.failedOnly })
+      wait = pollMs('acted')
+    } catch (e) {
+      if (!(e instanceof GitHubError) || FATAL.has(e.kind)) throw e
+      patch.reruns = { ...patch.reruns, [d.action.kind]: { ...patch.reruns[d.action.kind], error: e.message } }
+      d = rerunRefused(ref(repo, item.pr), d.action.runId, e.message)
+      wait = pollMs('attention')
+    }
   } else if (d.action?.type === 'retarget') {
     if (!renew()) return { yielded: true }
     await setPrBase(repo, item.pr, d.action.base)
     wait = pollMs('waiting')
-  } else if (d.action?.type === 'merge' && item.reason?.kind === 'refused' && item.head === pr.headRefOid) {
-    // GitHub refused this head once: asking again changes nothing until the head or the PR does
+  } else if (d.action?.type === 'merge' && ['refused', 'not-merged'].includes(item.reason?.kind) && item.head === pr.headRefOid) {
+    // GitHub refused this head once, or holds it: asking again changes nothing until the head or the PR does
     d = { state: 'attention', reason: item.reason }
   } else if (d.action?.type === 'merge') {
-    const landed = await land(view, pr, ref, renew)
+    const landed = await land(view, pr, ref, renew, defaultBranch)
     if (landed.yielded) return { yielded: true }
     d = landed
   }
 
   if (d.state === 'merged') {
     const merged = d.merged ?? pr
-    const text = await afterMerge(view, merged, ref, d.subject)
+    const text = await afterMerge(view, merged, ref, d.subject, { landed: d.landed, defaultBranch })
     Object.assign(patch, { mergedAt: at, commit: merged.mergeCommit?.oid ?? null })
     events.push({ kind: 'merged', text, notify: true })
   } else if (d.state === 'closed') {
     events.push({ kind: 'closed', text: `Merge queue: ${ref(repo, item.pr)}${pr.title ? ` (${pr.title})` : ''} was closed without merging; it is off the queue.`, notify: true })
   }
 
+  patch.errors = 0
   if (d.state === 'attention') {
     const key = noticeKey(d.reason, pr.headRefOid)
     if (key !== item.noticeKey) {
@@ -328,9 +366,14 @@ export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
   const at = new Date(now).toISOString()
   // Before every write to GitHub: still the driver? (A driver asleep past its lease must not act.)
   const renew = () => takeLease(dir, holder, Date.now())
+  const save = (p) =>
+    updateQueue(dir, (fresh) => {
+      const it = fresh.items.find((i) => itemKey(i) === key && ACTIVE.has(i.state))
+      if (it) Object.assign(it, p)
+    })
   let r
   try {
-    r = await pollItem(item, { now, ref, renew })
+    r = await pollItem(item, { now, ref, renew, save })
   } catch (e) {
     const fatal = e instanceof GitHubError && FATAL.has(e.kind)
     const message = e instanceof GitHubError ? e.message : `Unexpected error: ${e?.message ?? e}`
@@ -341,7 +384,19 @@ export async function tick(dir, { holder, now = Date.now(), ref = queueRef }) {
         fresh.pause = { since: fresh.pause?.since ?? at, until: new Date(now + ms).toISOString(), ms, kind: e.kind, reason: message }
       }
       const it = fresh.items.find((i) => itemKey(i) === key && ACTIVE.has(i.state))
-      if (it) Object.assign(it, { lastError: message, nextAt: new Date(now + pollMs('error')).toISOString() })
+      if (!it) return
+      Object.assign(it, { lastError: message, nextAt: new Date(now + pollMs('error')).toISOString() })
+      if (fatal) return
+      // The same failure on one item, poll after poll (a pull request gone, a refused write): the
+      // session hears about it once it is not a blip, and once per change
+      it.errors = (it.errors ?? 0) + 1
+      if (it.errors < ERROR_LIMIT) return
+      const reason = errorReason(ref(it.repo, it.pr), it.errors, message)
+      const nk = noticeKey(reason, it.head)
+      Object.assign(it, { state: 'attention', reason, nextAt: new Date(now + pollMs('attention')).toISOString() })
+      if (nk === it.noticeKey) return
+      it.noticeKey = nk
+      pushEvent(fresh, it, { kind: 'attention', text: attentionText(it, reason, ref), notify: true, at })
     })
     return { did: 'error', key, error: message, fatal }
   }
@@ -366,20 +421,28 @@ export function startDriver(dir, { holder, ref = queueRef, tickMs = TICK_MS, onT
   let timer = null
   let stopped = false
   let running = Promise.resolve()
+  // A tick that throws (the queue file does not read) says so once, then waits longer each time
+  let failures = 0
+  let said = null
   const loop = async () => {
     if (stopped) return
     let done
     running = new Promise((resolve) => (done = resolve))
     try {
       const r = await tick(dir, { holder, ref })
+      failures = 0
+      said = null
       onTick?.(r)
     } catch (e) {
-      console.error(`[project-board] merge queue: ${e?.message ?? e}`)
+      failures += 1
+      const message = String(e?.message ?? e)
+      if (message !== said) console.error(`[project-board] merge queue: ${message}`)
+      said = message
     } finally {
       done()
     }
     if (!stopped) {
-      timer = setTimeout(loop, tickMs)
+      timer = setTimeout(loop, failures ? Math.min(BACKOFF_MAX_MS, tickMs * 2 ** failures) : tickMs)
       timer.unref?.()
     }
   }

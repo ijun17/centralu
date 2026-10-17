@@ -12,12 +12,11 @@ import { answering, serially } from './handlers.mjs'
 import { ACTIVE, dequeue, enqueue, itemLine } from './queue.mjs'
 import { queueRef, readLease, readQueue, startDriver, updateQueue } from './queue-driver.mjs'
 import { answer, asError, linesAnswer } from './reply.mjs'
-import { plural } from './util.mjs'
+import { plural, shellQuote } from './util.mjs'
 
 const dataDir = () => centralu.dataDir
 const WATCH = join(APP_DIR, 'bin', 'merge-queue.mjs')
-// Quoted for the shell the session runs it in: a POSIX shell, or on Windows PowerShell or cmd
-const quote = (s) => (/^[\w./:@-]+$/.test(s) ? s : process.platform === 'win32' ? `"${s}"` : `"${String(s).replace(/(["\\$`])/g, '\\$1')}"`)
+const quote = shellQuote
 
 /** The command a session runs in the background to hear about its items (bin/merge-queue.mjs). */
 export function watchCommand({ owner, after }) {
@@ -141,7 +140,7 @@ async function unqueue({ pr }) {
 }
 
 const QUEUE_DESCRIPTION =
-  'Queue pull requests to merge on their own, instead of a gh loop of gh pr merge and gh run rerun: one PR, or a stack as pr (the top) plus lowers (the PRs under it), which lands as one squash through the top after moving its base to main and closes the lowers with "Landed in #N". The queue runs in this app (it survives sessions and restarts): green and mergeable → squash with --match-head-commit and delete the branch; a cancelled run is rerun once per head, failed jobs once per head; failing again, DIRTY, a draft, or anything it cannot fix → it tells the session that queued it. Maintainer only; never merges anything not green or a draft. The answer gives a watch command to run in the background: it exits with the message when an item needs you or lands.'
+  'Queue pull requests to merge on their own, instead of a gh loop of gh pr merge and gh run rerun: one PR, or a stack as pr (the top) plus lowers (the PRs under it), which lands as one squash through the top after moving its base to main and closes the lowers with "Landed in #N". The queue runs in this app (it survives sessions and restarts): green and mergeable → squash with --match-head-commit and delete the branch; a cancelled run is rerun once per head, failed jobs once per head; failing again, DIRTY, a draft, or anything it cannot fix → it tells the session that queued it. Maintainer only; merges only when every required check of the CI workflow passed and GitHub says CLEAN (UNSTABLE waits), never a draft. The answer gives a watch command to run in the background: it exits with the message when an item needs you or lands.'
 
 export const tools = {
   queue_merge: {

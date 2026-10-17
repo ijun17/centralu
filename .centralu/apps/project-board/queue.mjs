@@ -21,10 +21,18 @@ export const POLL_MS = { waiting: 15_000, ci: 90_000, acted: 60_000, attention: 
 export const NO_CI_MS = 15 * 60_000
 /** A rerun asked for that GitHub has not started after this long. */
 export const RERUN_STUCK_MS = 10 * 60_000
+/** A required check not reported while nothing else runs (a renamed job, a path-filtered workflow). */
+export const MISSING_MS = 20 * 60_000
+/** Green, but GitHub has not said CLEAN for this long (UNSTABLE, HAS_HOOKS, UNKNOWN). */
+export const UNCLEAN_MS = 30 * 60_000
+/** Failures in a row on one item, other than an outage, before the session hears about it. */
+export const ERROR_LIMIT = 3
 export const MAX_EVENTS = 200
 export const MAX_DONE = 40
 const OK_CONCLUSIONS = new Set(['success', 'neutral', 'skipped'])
-const MERGEABLE_STATES = new Set(['CLEAN', 'HAS_HOOKS', 'UNSTABLE'])
+// An unattended queue is strict: CLEAN only. UNSTABLE (a check outside the required set failed) and
+// HAS_HOOKS wait, and say so after UNCLEAN_MS.
+const MERGEABLE_STATES = new Set(['CLEAN'])
 
 export const emptyQueue = () => ({ version: 1, seq: 0, pause: null, items: [], events: [] })
 
@@ -36,7 +44,11 @@ export function normalize(q) {
     ...base,
     ...q,
     seq: Number.isFinite(q.seq) ? q.seq : 0,
-    items: Array.isArray(q.items) ? q.items.filter((i) => i && Number.isInteger(i.pr) && typeof i.repo === 'string') : [],
+    items: Array.isArray(q.items)
+      ? q.items
+          .filter((i) => i && Number.isInteger(i.pr) && typeof i.repo === 'string')
+          .map((i) => ({ ...i, lowers: Array.isArray(i.lowers) ? i.lowers.filter(Number.isInteger) : [], reruns: i.reruns && typeof i.reruns === 'object' ? i.reruns : {} }))
+      : [],
     events: Array.isArray(q.events) ? q.events : [],
   }
 }
@@ -126,10 +138,11 @@ const attention = (kind, text, extra = {}) => ({ state: 'attention', reason: { k
  * Answers a decision, or null to go on to the checks. `head` is the pull request's head now; a head
  * other than the one the item knew resets what was done for the old one (`reset`).
  */
-export function decideBefore({ item, permissions, pr, ref }) {
+export function decideBefore({ item, permissions, pr, defaultBranch, ref }) {
   const n = ref(item.repo, item.pr)
   if (!canMerge(permissions)) return attention('permission', `${NO_PERMISSION.reason} The queue merges nothing for this account; unqueue ${n}.`)
-  if (pr.state === 'MERGED') return { state: 'merged' }
+  // Landed only into the default branch: merged into a lower's branch, its lowers are not landed
+  if (pr.state === 'MERGED') return { state: 'merged', landed: pr.baseRefName === defaultBranch }
   if (pr.state !== 'OPEN') return { state: 'closed' }
   if (pr.isDraft) return attention('draft', `${n} is a draft, and the queue never merges a draft. Mark it ready for review; the queue carries on by itself.`)
   if (pr.mergeStateStatus === 'DIRTY' || pr.mergeable === 'CONFLICTING')
@@ -143,7 +156,7 @@ export function decideBefore({ item, permissions, pr, ref }) {
 /** The fields that start again when the head moved: reruns, the no-CI clock, the required set. */
 export function resetFor(item, head) {
   if (item.head === head) return {}
-  return { head, reruns: {}, noCiSince: null, required: null }
+  return { head, reruns: {}, noCiSince: null, missingSince: null, uncleanSince: null, required: null }
 }
 
 /**
@@ -170,6 +183,8 @@ export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBran
       return attention('failing', `${n}: required check ${jobText(job)} failed at ${short(head)}, outside a run the queue can rerun. Look with ci_status; fix and push, and the queue takes the new head.`, { job })
     const kind = bad.conclusion === 'cancelled' ? 'cancelled' : 'failed'
     const done = reruns[kind]
+    // GitHub refused the rerun (a run too old, a permission): asking again would only fail again
+    if (done?.error && done.run === bad.id && bad.attempt <= done.attempt) return rerunRefused(n, bad.id, done.error)
     if (done && done.run === bad.id && bad.attempt <= done.attempt) {
       // Asked for already, and GitHub has not started it yet
       if (now - Date.parse(done.at) > RERUN_STUCK_MS) return attention('rerun-stuck', `${n}: the rerun of run ${bad.id} asked for at ${done.at.slice(11, 16)} UTC has not started. Look at the run on GitHub, or push again.`)
@@ -179,7 +194,7 @@ export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBran
       const failedOnly = kind === 'failed'
       return {
         state: 'ci',
-        action: { type: 'rerun', runId: bad.id, failedOnly },
+        action: { type: 'rerun', runId: bad.id, failedOnly, kind },
         patch: { reruns: { ...reruns, [kind]: { run: bad.id, attempt: bad.attempt, at } } },
         event: `${n}: run ${bad.id} ${kind === 'cancelled' ? 'was cancelled; rerunning it' : `failed (${jobText(job)}); rerunning its failed jobs`} once for ${short(head)}.`,
       }
@@ -200,7 +215,17 @@ export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBran
         return attention('no-ci', `${n}: no CI run has started on ${short(head)} in ${Math.round(NO_CI_MS / 60_000)} minutes. Push again, or start the build on GitHub; the queue carries on once checks report.`)
       return { state: 'ci', patch: { noCiSince: since } }
     }
-    return { state: 'ci', patch: { noCiSince: null } }
+    // A required check not reported while nothing runs will not report by itself
+    const missing = checks.rows.filter((r) => r.state === 'missing')
+    const running = checks.rows.some((r) => r.state === 'pending') || runs.some((r) => r.status !== 'completed')
+    if (!missing.length || running) return { state: 'ci', patch: { noCiSince: null, missingSince: null } }
+    const since = item.head === head && item.missingSince ? item.missingSince : at
+    if (now - Date.parse(since) > MISSING_MS)
+      return attention(
+        'missing-check',
+        `${n}: required check${missing.length === 1 ? '' : 's'} ${missing.map((r) => `"${r.name}"`).join(', ')} never reported on ${short(head)}, and nothing else is running (a renamed job, or a workflow its paths filter skipped). Fix the workflow or the required set, then push.`,
+      )
+    return { state: 'ci', patch: { noCiSince: null, missingSince: since } }
   }
 
   if (verdict !== 'green') return attention('internal', `${n}: unknown CI verdict ${verdict}.`)
@@ -217,8 +242,27 @@ export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBran
     return attention('subject', `${n}: the squash subject "${subject}" is ${[...subject].length} characters, over ${SUBJECT_MAX}. Shorten the PR title; the queue carries on by itself.`)
   if (pr.mergeStateStatus === 'BEHIND') return attention('behind', `${n} is behind ${defaultBranch}, and GitHub requires it up to date. Rebase it onto ${defaultBranch} and push.`)
   if (pr.mergeStateStatus === 'BLOCKED') return attention('blocked', `${n} is green, but GitHub blocks merging it (a required review or rule). Look at the PR on GitHub.`)
-  if (pr.mergeable !== 'MERGEABLE' || !MERGEABLE_STATES.has(pr.mergeStateStatus)) return { state: 'waiting' } // GitHub still working it out
-  return { state: 'ci', action: { type: 'merge' } }
+  if (pr.mergeable !== 'MERGEABLE' || !MERGEABLE_STATES.has(pr.mergeStateStatus)) {
+    // GitHub still working it out (UNKNOWN), or not CLEAN (UNSTABLE, HAS_HOOKS): wait, and say so in time
+    const since = item.head === head && item.uncleanSince ? item.uncleanSince : at
+    if (now - Date.parse(since) > UNCLEAN_MS)
+      return attention(
+        'not-clean',
+        `${n} is green, but GitHub has said ${pr.mergeStateStatus ?? 'nothing'} (not CLEAN) for ${Math.round(UNCLEAN_MS / 60_000)} minutes, and the queue merges only CLEAN. UNSTABLE: a check outside the required set failed; rerun or fix it.`,
+      )
+    return { state: 'waiting', patch: { uncleanSince: since } }
+  }
+  return { state: 'ci', action: { type: 'merge' }, patch: { uncleanSince: null, missingSince: null } }
+}
+
+/** A rerun GitHub refused, as attention: the run, and what GitHub said. */
+export function rerunRefused(n, runId, error) {
+  return attention('rerun-refused', `${n}: GitHub refused to rerun run ${runId}: ${error}. Rerun it yourself, or push again; the queue takes the new head.`)
+}
+
+/** A poll that failed ERROR_LIMIT times in a row on one item (not an outage), as attention. */
+export function errorReason(n, count, message) {
+  return { kind: 'error', text: `${n} could not be read or acted on ${count} times in a row: ${message} Look at it on GitHub; unqueue it if it is gone.` }
 }
 
 /** The key that makes "one message per change": the same reason on the same head is not news. */

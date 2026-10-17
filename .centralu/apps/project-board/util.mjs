@@ -31,3 +31,10 @@ export const short = (sha) => (sha ? String(sha).slice(0, 7) : '?')
 export const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 /** The first `max` of a list, then how many more. */
 export const listSome = (xs, max) => `${xs.slice(0, max).join(', ')}${xs.length > max ? ` and ${xs.length - max} more` : ''}`
+
+/**
+ * A word for the shell a session runs a command in: as is when it is plain, else in double quotes (a
+ * POSIX shell's escapes; on Windows PowerShell or cmd, as is inside the quotes).
+ */
+export const shellQuote = (s) =>
+  /^[\w./:@-]+$/.test(String(s)) ? String(s) : process.platform === 'win32' ? `"${s}"` : `"${String(s).replace(/(["\\$`])/g, '\\$1')}"`

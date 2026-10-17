@@ -9,9 +9,11 @@
 //
 // queue_merge answers the whole command. Exit codes: 0 news without attention (merged, closed) or
 // nothing left queued, 3 an item needs attention, 6 no news before the deadline (run it again),
-// 2 a wrong argument or an unreadable queue.
+// 2 a wrong argument or an unreadable queue, 130 or 143 stopped by SIGINT or SIGTERM (the tick in
+// flight finishes and is written down first).
 import { releaseLease, readQueue, startDriver, TICK_MS } from '../queue-driver.mjs'
 import { ACTIVE } from '../queue.mjs'
+import { shellQuote } from '../util.mjs'
 
 const USAGE = 'Usage: node .centralu/apps/project-board/bin/merge-queue.mjs watch --data <folder> [--owner <name>] [--after <seq>] [--minutes <n>]'
 const args = process.argv.slice(2)
@@ -39,7 +41,7 @@ try {
   console.error(e.message)
   process.exit(2)
 }
-const again = (seq) => `node "${process.argv[1]}" watch --data "${opts.data}"${opts.owner ? ` --owner "${opts.owner}"` : ''} --after ${seq}`
+const again = (seq) => ['node', shellQuote(process.argv[1]), 'watch', '--data', shellQuote(opts.data), ...(opts.owner ? ['--owner', shellQuote(opts.owner)] : []), '--after', String(seq)].join(' ')
 const holder = `watch:${process.pid}`
 const driver = startDriver(opts.data, { holder })
 const deadline = Date.now() + opts.minutes * 60_000

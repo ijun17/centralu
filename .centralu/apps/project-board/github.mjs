@@ -526,20 +526,6 @@ export async function deleteBranch(repo, branch) {
 
 // --- The merge queue (queue-driver.mjs) ---------------------------------------------------------------
 
-/** The latest run of each CI workflow on a commit: id, attempt, status and conclusion, newest first. */
-export async function runsForHead(repo, sha, workflows) {
-  checkRepo(repo)
-  const out = []
-  for (const path of workflows ?? []) {
-    const file = String(path).split('/').pop()
-    if (!WORKFLOW.test(file)) throw new GitHubError('input', `"${path}" is not a workflow file name.`)
-    const r = await restJson(`repos/${repo}/actions/workflows/${file}/runs?${new URLSearchParams({ head_sha: sha, per_page: '5' })}`, { missing: [404] })
-    const run = (r?.workflow_runs ?? []).filter((w) => w.head_sha === sha).sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))[0]
-    if (run) out.push({ id: run.id, workflow: file, attempt: run.run_attempt ?? 1, status: run.status, conclusion: run.conclusion ?? null, url: run.html_url ?? null })
-  }
-  return out
-}
-
 /** Starts a completed run again: all of its jobs, or only the failed ones. GitHub answers nothing. */
 export async function rerunRun(repo, runId, { failedOnly = false } = {}) {
   checkRepo(repo)
