@@ -176,6 +176,28 @@ test('Viewer copy: ⌘A gives the whole file (#36)', async ({ page }) => {
   expect(copied.endsWith('const line2999 = 2999')).toBe(true)
 })
 
+/*
+ * ⌘A's claim outlives the rows it painted (#842 review of item 9). Scrolling to the end recycles every painted row, and
+ * the live range collapses with them; the claim used to end there, and ⌘C copied the rows that happened to be mounted.
+ */
+test('Viewer copy: ⌘A, then scrolling to the end, still copies the whole file (#36, #842)', async ({ page }) => {
+  await openBigFile(page, 3000)
+  await page.keyboard.press('ControlOrMeta+a')
+  const scroller = page.getByTestId('code-viewer').getByRole('region', { name: 'Code' })
+  for (let i = 0; i < 6; i++) {
+    await scroller.evaluate((el, step) => (el.scrollTop = ((step + 1) / 6) * el.scrollHeight), i)
+    await page.waitForTimeout(50)
+  }
+  await expect(page.locator('[data-testid="code-viewer"] [data-line="2999"]')).toBeVisible()
+  await expect(page.locator('[data-testid="code-viewer"] [data-line="0"]')).toHaveCount(0)
+  await pressCopy(page)
+
+  const copied = await clipboard(page)
+  expect(copied.split('\n')).toHaveLength(3000)
+  expect(copied.startsWith('const line0 = 0\n')).toBe(true)
+  expect(copied.endsWith('const line2999 = 2999')).toBe(true)
+})
+
 test('Viewer copy: copying continues through lines that were never rendered (#36)', async ({ page }) => {
   await openBigFile(page, 3000)
 
