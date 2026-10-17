@@ -851,7 +851,9 @@ A host started with `centralu serve` on another machine is reached by the app th
   by the launcher and passed on to nothing. It reaches the host as the first line on the host's stdin, a pipe to the
   launcher (`CC_HOST_TOKEN_ON_STDIN=1`, #538): not on the command line, which every user on the machine can read with
   `ps`, and not in the environment, which every process of the user can read for as long as the host runs (measured
-  below, "The front door"). It does not change across restarts until `--rotate-token`.
+  below, "The front door"). A host bundle from before #538 (`CENTRALU_HOST_ENTRY` pointing at one), whose
+  `bundle-info.json` does not say `tokenOnStdin`, still gets it in `CC_HOST_TOKEN` (`takesTokenOnStdin`). It does not
+  change across restarts until `--rotate-token`.
 - **Other users on the remote machine** can connect to 127.0.0.1 like anyone local, and are stopped by the token, as on
   a desktop. A machine where another user can read your files (root, or a wrong home-folder mode) can read the token;
   the remote mode is for a machine the person trusts, and the spec says so (product-spec.md §1.5).
@@ -980,10 +982,12 @@ get in**, not every process of this user.
   connection is dropped unless it is the keeper's own uid.
 - Then its peer pid, also from the kernel (`SO_PEERCRED` on Linux, `LOCAL_PEERPID` on macOS), recorded when the
   peer connected: the connection is dropped, with a line in `keeper.log`, unless that pid is the current host's
-  (the supervisor's, its own or one handed over by the previous keeper) or a swap's standby while it is one, or the
-  pid's process group is one of theirs (a host run from source is tsx's child, in the group `spawn_host` makes the
-  host lead). Agents, terminals and commands start in sessions of their own, so they are not in a host's group.
-  Nothing is answered before the keeper names its host (`Children::answer_hosts`).
+  (the supervisor's, its own or one handed over by the previous keeper) or a swap's standby while it is one: that
+  exact pid, not its process group. `spawn_host` makes the host lead a group, and what the host runs without a
+  session of its own (a worktree's setup command, `npm install -g`, a version probe) is in that group, so a setup
+  script an agent changed would otherwise get in. A host run from source is one process for this (Node with tsx's
+  loader, `source_launch`). Nothing is answered before the keeper names its host (`Children::answer_hosts`); after a
+  keeper handoff, the host handed over is answered from the first accept until the new keeper has adopted it.
 - What the keeper holds can still be listed, read-only, through `keeper.sock` (`{"op":"children"}`), for this user's
   tools and the integration scripts.
 - A control line is capped at 16 MiB (a spawn carries a whole environment); a host's input to a child is queued up
@@ -999,9 +1003,7 @@ get in**, not every process of this user.
 Limits: the check names processes, not code. A process that can act as the host (attach a debugger to it, or
 replace its files before it starts) gets in, and this user can do both. It closes the path where any process of this
 user, a command an agent ran included, simply connects. A pid is the kernel's record of who connected; it is not
-reused while the keeper holds that host. A host run from source and handed over by the previous keeper is in that
-keeper's session, where macOS does not tell another session the group of a process: there only the host's own pid
-is let in (a debug build's path). It is local only. Windows has no keeper; when it gets one, its child channel would
+reused while the keeper holds that host. It is local only. Windows has no keeper; when it gets one, its child channel would
 be a named pipe whose DACL names this user, with `GetNamedPipeClientProcessId` for the same check by pid.
 
 ### The keeper handoff channel
