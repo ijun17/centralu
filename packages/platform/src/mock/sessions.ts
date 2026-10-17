@@ -1,12 +1,28 @@
 import type { Attachment, PermissionPreset, CreateSessionParams, SessionInfo, MessageImage, ToolName } from '@cc/protocol'
-import { sessionLiveDefaults, SUBAGENT_STEPS_PAGE } from '@cc/protocol'
+import { oneLineText, sessionLiveDefaults, SUBAGENT_STEPS_PAGE, wireSegments } from '@cc/protocol'
 import type { AgentPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { SessionStore } from './session-store.js'
 import type { ProjectStore } from './project-store.js'
 import type { ExternalSessionsMock } from './external-sessions.js'
 import type { TrashMock } from './trash.js'
+import { putInOrder } from './projects.js'
 import type { Emit } from './event-bus.js'
+
+/** A name coined from a person's words, as the host cuts it (`truncate`, external-conversations.ts): one line, 40 characters (#999) */
+const autoName = (text: string) => oneLineText(text, 40)
+
+/**
+ * Whether git would take `name` as a branch (`git check-ref-format --branch`), which the host asks git itself
+ * (`gitValidBranchName`). The rules git applies to a branch name, written out for the mock that has no git.
+ */
+export function validBranchName(name: string): boolean {
+  if (!name || name === '@' || name.startsWith('-')) return false
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x20\x7f~^:?*[\\]/.test(name) || name.includes('..') || name.includes('@{') || name.includes('//')) return false
+  if (name.startsWith('/') || name.endsWith('/') || name.endsWith('.')) return false
+  return wireSegments(name).every((part) => !part.startsWith('.') && !part.endsWith('.lock'))
+}
 
 /** The session port's everyday operations: creating, sending, settings, resuming, listing and reading */
 export class SessionsMock {
@@ -47,6 +63,7 @@ export class SessionsMock {
     createSession: async (params: CreateSessionParams) => {
       this.lastCreateParams = params
       this.createParamsLog.push(params)
+      if (params.worktree) this.checkWorktree(params)
       const id = `mock-session-${this.clock.next()}`
       const worktree = params.worktree
         ? {
@@ -81,7 +98,7 @@ export class SessionsMock {
          */
         name:
           (params.worktreeBranch?.trim() || undefined) ??
-          params.initialPrompt?.slice(0, 40) ??
+          (params.initialPrompt ? autoName(params.initialPrompt) : undefined) ??
           worktree?.branch ??
           'New session',
         autoNamed: !params.worktreeBranch?.trim(),
@@ -128,7 +145,7 @@ export class SessionsMock {
         const firstUser = history.find((h) => h.role === 'user')
         const listed = this.externalSessionsMock.externalSessions.sessions.find((s) => s.externalId === params.resumeExternalId)
         if (listed) info.name = listed.title
-        else if (firstUser) info.name = firstUser.text.slice(0, 40)
+        else if (firstUser) info.name = autoName(firstUser.text)
       }
       /*
        * The same rule as the real thing (#102): an inherited note is not kept as the first
@@ -159,7 +176,7 @@ export class SessionsMock {
         this.emit({ type: 'user_message', sessionId: id, seq: (this.store.messages.get(id)?.length ?? 0) + 1, text: params.initialPrompt })
         info.lastReadSeq = info.lastSeq
         if (info.autoNamed && info.name === 'New session') {
-          info.name = params.initialPrompt.slice(0, 40)
+          info.name = autoName(params.initialPrompt)
           this.emit({ type: 'session_title', sessionId: id, title: info.name, auto: true })
         }
         this.emit({ type: 'state_change', sessionId: id, state: 'working' })
@@ -195,35 +212,36 @@ export class SessionsMock {
         await this.wakeUp(sessionId)
       }
       const seq = (this.store.messages.get(sessionId)?.length ?? 0) + 1
-      // The same rule as the real thing: attachments also stay in the payload, and image bytes are re-loaded from "disk" (a map, here)
-      const stored = attachments?.map((a) =>
-        a.kind === 'image' && this.attachmentData.has(a.path)
-          ? { ...a, data: this.attachmentData.get(a.path) }
-          : a,
-      )
-      this.store.pushMessage({
-        sessionId,
-        seq,
-        role: 'user',
-        kind: 'text',
-        payload: { text, ...(stored?.length ? { attachments: stored } : {}) },
-        ts: this.clock.now(),
-      })
-      s.lastSeq = seq
-      s.lastReadSeq = seq
       if (s.autoNamed && s.name === 'New session') {
-        s.name = text.slice(0, 40)
+        s.name = autoName(text)
         this.emit({ type: 'session_title', sessionId, title: s.name, auto: true })
       }
+      /*
+       * The same rule as the real thing (manager.send, #999): the message is recorded and announced as `user_message`,
+       * attachments riding along, so every window (and the store's handling of the event) sees it. `emit` records it.
+       */
+      this.emit({ type: 'user_message', sessionId, seq, text, ...(attachments?.length ? { attachments } : {}) })
+      // Attachments also stay in the payload, and image bytes are re-loaded from "disk" (a map, here), as loadMessages does
+      const row = this.store.messages.get(sessionId)?.at(-1)
+      if (row && attachments?.length) {
+        const stored = attachments.map((a) => (a.kind === 'image' && this.attachmentData.has(a.path) ? { ...a, data: this.attachmentData.get(a.path) } : a))
+        row.payload = { ...(row.payload as object), attachments: stored }
+      }
+      s.lastReadSeq = s.lastSeq
       this.emit({ type: 'state_change', sessionId, state: 'working' })
     },
+    /*
+     * The same rule as the real thing (manager.reorderSessions, #999): the order is one across projects, so only the
+     * slots this project's sessions hold take the new order, and every other session stays where it was. A session
+     * missing from the list stays at the end of this project's, as it was.
+     */
     reorderSessions: async (projectId: string, orderedIds: string[]) => {
-      const mine = [...this.store.sessions.values()].filter((s) => s.projectId === projectId)
-      const rank = new Map(orderedIds.map((id, i) => [id, i]))
-      mine.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
-      const others = [...this.store.sessions.entries()].filter(([, s]) => s.projectId !== projectId)
-      this.store.sessions = new Map([...others, ...mine.map((s) => [s.id, s] as const)])
-      return [...this.store.sessions.values()]
+      const all = [...this.store.sessions.values()]
+      const mine = putInOrder(all.filter((s) => s.projectId === projectId), orderedIds)
+      let k = 0
+      const next = all.map((s) => (s.projectId === projectId ? mine[k++]! : s))
+      this.store.sessions = new Map(next.map((s) => [s.id, s] as const))
+      return next.map((s) => ({ ...s }))
     },
     switchTool: async (sessionId: string, tool: ToolName) => {
       const s = this.store.sessions.get(sessionId)
@@ -258,6 +276,8 @@ export class SessionsMock {
     },
     // Moves it to the trash (#204) — the tool's file and the worktree wait there until it is deleted for good
     deleteSession: async (sessionId: string, deleteWorktree = false, deleteExternal = false) => {
+      // Already in the trash, or never here: the host says it is gone anyway, so a screen holding a stale row lets go (#999)
+      if (!this.store.sessions.has(sessionId)) return this.emit({ type: 'session_deleted', sessionId })
       this.trashMock.moveToTrash(sessionId, deleteWorktree, deleteExternal)
     },
     updateSettings: async (
@@ -277,6 +297,16 @@ export class SessionsMock {
       if (s.verbosity !== undefined) sess.verbosity = s.verbosity
       if (s.serviceTier !== undefined) sess.serviceTier = s.serviceTier
       if (s.permissionPreset) sess.permissionPreset = s.permissionPreset
+      /*
+       * The same rule as the real thing (manager.updateSettings, #69, #107, #719, #999): the model and effort chosen last
+       * become the project's default under this session's tool, and another window hears of it when they changed.
+       */
+      const owner = sess.projectId ? this.projectStore.list.find((p) => p.id === sess.projectId) : undefined
+      if ((s.model !== undefined || s.effort !== undefined) && owner) {
+        const before = owner.defaultModels[sess.tool]
+        owner.defaultModels = { ...owner.defaultModels, [sess.tool]: { model: sess.model, effort: sess.effort } }
+        if ((before?.model ?? null) !== (sess.model || null) || (before?.effort ?? null) !== (sess.effort || null)) this.emit({ type: 'projects_changed' })
+      }
       // The same rule as the real thing (#659): every client hears about a saved change, the caller included
       this.emit({
         type: 'settings_changed',
@@ -328,7 +358,8 @@ export class SessionsMock {
     rename: async (sessionId: string, name: string) => {
       const s = this.store.sessions.get(sessionId)
       if (!s) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'session_not_found' })
-      const next = name.trim()
+      // One line, as the host keeps a name (manager.rename, #838)
+      const next = oneLineText(name)
       if (!next) throw Object.assign(new Error('Session name cannot be empty'), { code: 'internal' })
       s.name = next
       s.autoNamed = false
@@ -353,6 +384,24 @@ export class SessionsMock {
       const all = this.store.subagentMessages.get(`${sessionId} ${parentCallId}`) ?? []
       return all.filter((m) => m.seq > afterSeq).slice(0, limit)
     },
+  }
+
+  /**
+   * The host's refusals for a worktree session, in its order and words (worktree-sessions.ts createWorktree, #999):
+   * the project has to be a repository git can read, trusted (checking out runs the repository's hooks and filters,
+   * #407), and the branch asked for has to be one git takes.
+   */
+  private checkWorktree(params: CreateSessionParams): void {
+    const p = this.projectStore.list.find((x) => x.id === params.projectId)
+    const refuse = (message: string) => Object.assign(new Error(message), { code: 'internal' })
+    if (!p?.git?.isRepo || p.git.denied) {
+      throw refuse(p?.git?.denied ? 'Cannot read this git repository — grant folder access and try again' : 'Worktrees need a git repository. This directory is not one.')
+    }
+    if (!p.trusted) {
+      throw refuse("Worktree sessions need a trusted project: checking out runs the repository's hooks and filters. Trust the project first.")
+    }
+    const requested = params.worktreeBranch?.trim()
+    if (requested && !validBranchName(requested)) throw refuse(`Not a valid branch name: ${requested}`)
   }
 
   constructor(

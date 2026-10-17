@@ -1293,8 +1293,8 @@ describe('the cursor for a session where an event arrives before history (#79)',
     await useStore.getState().attach(mock)
     useStore.getState().focusSession('e79-other')
 
-    // Before this session is opened: a command that went through approval, a human message (a mock
-    // never sends the confirmation — so it has no number), an agent's image (its event carries no
+    // Before this session is opened: a command that went through approval, a human message (numbered by
+    // its user_message, as the host announces it, #999), an agent's image (its event carries no
     // number), a failed turn (the schema strips the number, #161)
     mock.emit({ type: 'approval_request', sessionId: 'e79', requestId: 'q1', detail: { kind: 'command', command: 'rm -rf build' } } as never)
     mock.emit({ type: 'approval_resolved', sessionId: 'e79', requestId: 'q1', decision: 'allow' } as never)
@@ -1303,7 +1303,7 @@ describe('the cursor for a session where an event arrives before history (#79)',
     const error = { type: 'error', sessionId: 'e79', error: { code: 'internal', message: 'boom', retryable: false } }
     mock.messages.get('e79')!.push({ sessionId: 'e79', seq: 10, role: 'system', kind: 'marker', payload: error, ts: 10 })
     useStore.getState().dispatchEvent(error as NormalizedEvent)
-    expect(useStore.getState().chat['e79']!.map((i) => i.storedSeq)).toEqual([6, undefined, undefined, undefined])
+    expect(useStore.getState().chat['e79']!.map((i) => i.storedSeq)).toEqual([6, 8, undefined, undefined])
 
     useStore.getState().focusSession('e79')
 
@@ -3733,14 +3733,18 @@ describe('new projects', () => {
     expect(useStore.getState().projects[p.id]?.trusted).toBe(true)
   })
 
-  it('createProject registers what the host made and asks about trust once, as adding a folder does', async () => {
+  it('createProject registers what the host made, and asks about trust only for a clone (#655, #999)', async () => {
     const mock = new MockPlatform()
     await useStore.getState().attach(mock)
+    // An empty folder the host made itself starts trusted: nothing to ask
     const p = await useStore.getState().createProject('site')
     expect(p.path).toBe('/Users/you/Centralu/site')
     expect(useStore.getState().projects[p.id]).toEqual(p)
-    expect(useStore.getState().trustAsk).toBe(p.id)
+    expect(useStore.getState().trustAsk).toBeNull()
     await expect(useStore.getState().createProject('site')).rejects.toThrow(/already in/)
+    // A clone holds a stranger's code: the person decides, once
+    const clone = await useStore.getState().createProject('', undefined, null, { git: 'https://github.com/me/app.git' })
+    expect(useStore.getState().trustAsk).toBe(clone.id)
   })
 })
 

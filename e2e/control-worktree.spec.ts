@@ -14,7 +14,7 @@ import { setup, newSession } from './fixtures/control.js'
  * off, and once it is on, that fact must be visible.
  */
 test('The worktree defaults to off, and turning it on shows the branch on the session', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
   await page.getByTestId('project-menu-alpha').click()
 
@@ -36,7 +36,7 @@ test('The worktree defaults to off, and turning it on shows the branch on the se
 })
 
 test('A session with the worktree off has no badge', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
   await newSession(page, 'alpha', 'just do it here')
 
   await expect(page.getByTestId('worktree-badge')).toHaveCount(0)
@@ -48,7 +48,7 @@ test('A session with the worktree off has no badge', async ({ page }) => {
  * lost and turn that on themselves.
  */
 test('Deleting a worktree session asks first, and deletion requires opting in', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
   await page.getByTestId('project-menu-alpha').click()
 
@@ -78,7 +78,7 @@ test('Deleting a worktree session asks first, and deletion requires opting in', 
 })
 
 test('Deleting a non-worktree session never mentions worktrees', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
   await newSession(page, 'alpha', 'regular session')
 
   await page
@@ -100,7 +100,7 @@ test('Deleting a non-worktree session never mentions worktrees', async ({ page }
  * ordinary sessions (#561 part 3), so making a worktree session adds no manager row.
  */
 test('A worktree session the person makes stands on its own; one a session started sits under that session', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
@@ -151,7 +151,7 @@ test('A worktree session the person makes stands on its own; one a session start
  * menu sets it any more (#733): it is detected, and the store keeps `setWorktreeTrunk` for whatever sets it next.
  */
 test('A new worktree session forks from the project trunk, and the project menu no longer sets it (#733)', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
   await page.evaluate(() => {
     const st = (window as any).__store.getState()
     return st.setWorktreeTrunk(Object.keys(st.projects)[0], 'develop')
@@ -167,7 +167,7 @@ test('A new worktree session forks from the project trunk, and the project menu 
 })
 
 test('Naming the worktree branch becomes the session name', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
   await page.getByTestId('project-menu-alpha').click()
 
@@ -194,7 +194,7 @@ test('Naming the worktree branch becomes the session name', async ({ page }) => 
 test('Turning on the worktree shows where it branches from, and it can be changed before sending', async ({
   page,
 }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
   await page.evaluate(() => {
     const m = (window as never as { __mock: any }).__mock
     m.gitState.branches = [
@@ -233,7 +233,7 @@ test('Turning on the worktree shows where it branches from, and it can be change
 test('Worktree proposal: a line stays in the conversation, + lights up, and the dialog comes pre-filled with the name', async ({
   page,
 }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
   // A session whose conversation holds a proposal (the worktree manager made them before #561 part 3)
   await page.getByTestId('project-menu-alpha').click()
@@ -285,7 +285,7 @@ test('Worktree proposal: a line stays in the conversation, + lights up, and the 
  * creation).
  */
 test('Worktree setup: input fields at first, collapsing into a summary once saved', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
   await page.getByTestId('project-menu-alpha').click()
 
@@ -325,7 +325,7 @@ test('Worktree setup: input fields at first, collapsing into a summary once save
 test('Worktree setup: gitignored candidates are pointed out, and clicking adds or removes them', async ({
   page,
 }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
   await page.evaluate(() => {
     ;(window as any).__mock.gitState.ignored = [
       { path: 'node_modules/', bytes: 668213248 },
@@ -361,7 +361,7 @@ test('Worktree setup: gitignored candidates are pointed out, and clicking adds o
 
 /** The merged badge (#69) — reporting the fact becomes a badge, and cleanup is left to the person via the delete dialog */
 test('Merging a branch shows a merged badge on the sidebar row', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
   await page.getByTestId('project-menu-alpha').click()
 
@@ -385,7 +385,7 @@ test('Merging a branch shows a merged badge on the sidebar row', async ({ page }
 
 /** The PR chip (#76 stage 3) — the PR state measured by gh becomes a chip, and it yields its spot to the merged badge once merged */
 test('Opening a PR shows a PR chip, and merging replaces it with the merged badge', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
 
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
@@ -421,7 +421,7 @@ test('Opening a PR shows a PR chip, and merging replaces it with the merged badg
 
 /** #69 dogfooding finding 3: proposals are a queue — receiving two, opening + twice consumes both */
 test('Two worktree proposals fill in order across two dialog openings', async ({ page }) => {
-  await setup(page, { projects: ['/tmp/alpha'] })
+  await setup(page, { projects: ['/tmp/alpha'], trusted: true })
   await page.getByTestId('project-menu-alpha').click()
   await page.getByTestId('new-session-alpha').click()
   await page.getByTestId('worktree-toggle').locator('input').check()

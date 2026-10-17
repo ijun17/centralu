@@ -112,8 +112,9 @@ export class MemoryFs {
       .map((e) => ({ path: e.path, name: e.name }))
   }
 
+  /** Folders first, then by name — the host's order (dev-services/fs.ts listDir, #999), whatever order a test seeded */
   listDir(path: string): FsEntry[] {
-    return this.state.entries[path] ?? []
+    return [...(this.state.entries[path] ?? [])].sort((a, b) => (a.isDir === b.isDir ? a.name.localeCompare(b.name) : a.isDir ? -1 : 1))
   }
 
   readFile(path: string): FsFile {

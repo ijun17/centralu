@@ -4,9 +4,10 @@
  * added, it goes in as a third entry.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, posix, win32 } from 'node:path'
+import { basename, join, posix, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocket } from 'ws'
 import { HostServer } from '../../agent-host/src/transport/server.js'
@@ -39,9 +40,13 @@ class EchoHandle implements SessionHandle {
     this.emit({ type: 'message_delta', sessionId: this.sessionId, role: 'assistant', text: `echo:${text}` })
     this.emit({ type: 'turn_complete', sessionId: this.sessionId })
   }
+  /** Answered requests: a second answer finds nothing to resolve, as a real adapter's (claude session-cards.ts) */
+  private readonly answered = new Set<string>()
   respondApproval(requestId: string, decision: ApprovalDecision): boolean {
+    if (this.answered.has(requestId)) return false
+    this.answered.add(requestId)
+    // The agent goes on with the call it asked about; the turn ends when it does, not with the answer
     this.emit({ type: 'approval_resolved', sessionId: this.sessionId, requestId, decision })
-    this.emit({ type: 'turn_complete', sessionId: this.sessionId })
     return true
   }
   interrupt() {}
@@ -356,6 +361,134 @@ describe.each([
     await expect(h.platform.trash.restore(s.id)).rejects.toThrow(/Not in the trash/)
   })
 
+  /*
+   * Where the mock had drifted from the host (#999): each of these answered differently in the mock, so e2e and the
+   * demo showed what the app does not.
+   */
+  describe('what the mock used to answer differently (#999)', () => {
+    let parent = ''
+    let repo = ''
+    beforeAll(() => {
+      parent = mkdtempSync(join(tmpdir(), 'cc-contract-new-'))
+      // A real repository for the host; the mock reads any registered folder as one
+      repo = mkdtempSync(join(tmpdir(), 'cc-contract-repo-'))
+      execFileSync('git', ['init', '-q', repo])
+    })
+    afterAll(() => {
+      rmSync(parent, { recursive: true, force: true })
+      rmSync(repo, { recursive: true, force: true })
+    })
+    const session = async (projectId?: string) => {
+      const p = projectId ?? (await h.platform.projects.list())[0]!.id
+      return h.platform.agents.createSession({ projectId: p, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })
+    }
+    const sessionNamed = async (id: string) => (await h.platform.agents.listSessions()).find((x) => x.id === id)
+
+    it('a send is announced as user_message, with the text and its row', async () => {
+      const s = await session()
+      events.length = 0
+      await h.platform.agents.send(s.id, 'announced')
+      await waitFor(() => events.some((e) => e.type === 'user_message' && e.sessionId === s.id))
+      const said = events.find((e) => e.type === 'user_message' && e.sessionId === s.id) as { text: string; seq: number }
+      expect(said.text).toBe('announced')
+      const row = (await h.platform.agents.loadMessages(s.id)).find((m) => m.role === 'user')!
+      expect([said.seq, (row.payload as { text: string }).text]).toEqual([row.seq, 'announced'])
+    })
+
+    it('a name coined from a message is one line, cut with an ellipsis, and a name the person gives is one line', async () => {
+      const s = await session()
+      await h.platform.agents.send(s.id, `first line\nsecond ${'x'.repeat(60)}`)
+      await waitFor(async () => (await sessionNamed(s.id))?.name !== 'New session')
+      expect((await sessionNamed(s.id))!.name).toBe(`first line second ${'x'.repeat(22)}…`)
+      await h.platform.agents.rename(s.id, 'two\nlines')
+      expect((await sessionNamed(s.id))!.name).toBe('two lines')
+    })
+
+    it('a new empty project starts trusted, with no repository, and every window hears of it', async () => {
+      events.length = 0
+      const made = await h.platform.projects.create('fresh', parent)
+      expect(made).toMatchObject({ trusted: true, git: null })
+      expect(events.some((e) => e.type === 'projects_changed')).toBe(true)
+    })
+
+    it('a worktree session needs a repository, a trusted project and a branch name git takes', async () => {
+      const worktree = async (p: { id: string; path: string }, worktreeBranch?: string) =>
+        h.platform.agents.createSession({
+          projectId: p.id,
+          cwd: p.path,
+          tool: 'claude',
+          permissionPreset: 'normal',
+          worktree: true,
+          ...(worktreeBranch ? { worktreeBranch } : {}),
+        })
+      const empty = (await h.platform.projects.list()).find((p) => p.name === 'fresh')!
+      await expect(worktree(empty)).rejects.toThrow(/need a git repository/)
+      const r = await h.platform.projects.add(repo)
+      await expect(worktree(r)).rejects.toThrow(/need a trusted project/)
+      await h.platform.projects.setTrusted(r.id, true)
+      await expect(worktree(r, 'bad..name')).rejects.toThrow('Not a valid branch name: bad..name')
+    })
+
+    it("an approval answer lets the agent go on, a second answer is ignored, and always keeps only the card's own key", async () => {
+      const s = await session()
+      const ask = async (requestId: string, command: string) => {
+        h.agentSays([{ type: 'approval_request', sessionId: s.id, requestId, detail: { kind: 'command', command, cwd: tmpdir() } }])
+        await waitFor(async () => (await sessionNamed(s.id))?.pendingApproval?.requestId === requestId)
+      }
+      const rules = async () => (await h.platform.rules.list()).filter((r) => r.sessionId === s.id).map((r) => [r.matcher, r.decision])
+      await ask('req-a', 'npm test')
+      events.length = 0
+      await h.platform.agents.respondApproval(s.id, 'req-a', 'always', 'session', 'npm test')
+      await waitFor(() => events.some((e) => e.type === 'approval_resolved' && e.sessionId === s.id))
+      expect(events.some((e) => e.type === 'turn_complete' && e.sessionId === s.id)).toBe(false)
+      expect(await rules()).toEqual([['npm test', 'allow']])
+      // A second click on the same card: no failure, no denial
+      events.length = 0
+      await h.platform.agents.respondApproval(s.id, 'req-a', 'deny')
+      expect(events.filter((e) => e.sessionId === s.id)).toEqual([])
+
+      // A matcher that is not the card's key remembers nothing
+      await ask('req-b', 'npm run build')
+      await h.platform.agents.respondApproval(s.id, 'req-b', 'always', 'session', 'npm run *')
+      expect(await rules()).toEqual([['npm test', 'allow']])
+    })
+
+    it("a model chosen for a session becomes the project's default for that tool, and windows hear of it", async () => {
+      const [p] = await h.platform.projects.list()
+      const s = await session(p!.id)
+      events.length = 0
+      await h.platform.agents.updateSettings(s.id, { model: 'opus', effort: 'high' })
+      expect((await h.platform.projects.list()).find((x) => x.id === p!.id)!.defaultModels.claude).toEqual({ model: 'opus', effort: 'high' })
+      expect(events.some((e) => e.type === 'projects_changed')).toBe(true)
+    })
+
+    it('a reorder that leaves ids out keeps them at the end, in the order they had', async () => {
+      const ids = (await h.platform.projects.list()).map((p) => p.id)
+      const last = ids.at(-1)!
+      expect((await h.platform.projects.reorder([last])).map((p) => p.id)).toEqual([last, ...ids.slice(0, -1)])
+
+      const all = await h.platform.agents.listSessions()
+      const projectId = all[0]!.projectId!
+      const mine = all.filter((x) => x.projectId === projectId).map((x) => x.id)
+      expect(mine.length).toBeGreaterThan(2)
+      const after = await h.platform.agents.reorderSessions(projectId, [mine.at(-1)!])
+      expect(after.filter((x) => x.projectId === projectId).map((x) => x.id)).toEqual([mine.at(-1)!, ...mine.slice(0, -1)])
+    })
+
+    it('deleting a session that is not there still says it is gone', async () => {
+      events.length = 0
+      await h.platform.agents.deleteSession('never-here')
+      await waitFor(() => events.some((e) => e.type === 'session_deleted' && e.sessionId === 'never-here'))
+    })
+
+    it('a commit with nothing staged fails and says why', async () => {
+      const r = (await h.platform.projects.list()).find((p) => p.name === basename(repo))!
+      const res = await h.platform.git.commit(r.id, 'nothing here')
+      expect(res.ok).toBe(false)
+      expect(res.message).toMatch(/nothing to commit/)
+    })
+  })
+
   /**
    * The keyboard's labels are also a capability (issue #32).
    *
@@ -406,6 +539,14 @@ describe.each([
     })
 
     /** There is no overwrite — it names what it collided with and does nothing */
+    it('lists folders first, then by name, whatever order they were made in (#999)', async () => {
+      await h.platform.fs.importFile(projectId, '', 'zz-order.txt', btoa('z'))
+      await h.platform.fs.importFile(projectId, '', 'aa-order.txt', btoa('a'))
+      h.makeDir(dir, 'mm-order')
+      const names = (await h.platform.fs.listDir(projectId, '')).map((e) => e.name).filter((n) => n.includes('-order'))
+      expect(names).toEqual(['mm-order', 'aa-order.txt', 'zz-order.txt'])
+    })
+
     it('does not import if the same name already exists', async () => {
       await expect(h.platform.fs.importFile(projectId, '', 'dropped.txt', btoa('other'))).rejects.toThrow(
         /already exists/,
