@@ -180,6 +180,7 @@ export const useStore = create<AppState>((set, get) => ({
   scrollAnchor: {},
   searchTargets: {},
   workingSince: {},
+  stopping: {},
   expandedDirs: {},
   showIgnored: true,
   // Defaults to folded — the reason this feature exists at all is that a two-row grid leaves little room to read

@@ -47,6 +47,17 @@ export function ActivityRow({ sessionId, activity }: { sessionId: string; activi
    * shell, Codex keeps a child agent), so the line comes from what each task says about itself.
    */
   const notice = useStore((s) => interruptNotice(s.sessions[sessionId]?.backgroundTasks ?? []))
+  /*
+   * A Stop pressed in this turn (#1060). Stopped is said once the tool confirms it, which can take a moment (Codex's
+   * `turn/completed`, Claude's answer to the interrupt), so the button says so until the session leaves working. When
+   * the tool says the Stop has not taken effect, the button is Stop again and the line says why, in place of the
+   * background notice.
+   */
+  const stop = useStore((s) => s.stopping[sessionId])
+  const pressed = stop !== undefined && stop.turn === startedAt
+  const unconfirmed = pressed ? stop.failed : undefined
+  const stopping = pressed && unconfirmed === undefined
+  const line = unconfirmed ?? notice
   const rowRef = useRef<HTMLDivElement>(null)
   // Re-read only when the shown count changes and someone can see it (elapsed.ts, #364)
   const now = useElapsedNow(startedAt ?? null, rowRef)
@@ -115,23 +126,27 @@ export function ActivityRow({ sessionId, activity }: { sessionId: string; activi
             {formatElapsed(seconds)}
           </span>
         )}
-        {notice && (
+        {line && (
           <span
             className="min-w-0 flex-1 truncate text-right text-xs text-ink-muted"
-            title={notice}
-            data-testid="interrupt-background-note"
+            title={line}
+            data-testid={unconfirmed !== undefined ? 'interrupt-unconfirmed' : 'interrupt-background-note'}
+            role={unconfirmed !== undefined ? 'status' : undefined}
           >
-            {notice}
+            {line}
           </span>
         )}
         <button
           type="button"
-          className={`${notice ? '' : 'ml-auto '}shrink-0 rounded-md border border-line px-2 py-0.5 text-xs text-ink-faint transition-colors hover:border-line-strong hover:text-ink`}
+          className={`${line ? '' : 'ml-auto '}shrink-0 rounded-md border border-line px-2 py-0.5 text-xs text-ink-faint transition-colors hover:border-line-strong hover:text-ink disabled:cursor-default disabled:hover:border-line disabled:hover:text-ink-faint`}
           onClick={() => void interrupt(sessionId)}
-          title={notice ? `Stop the turn — ${notice.charAt(0).toLowerCase()}${notice.slice(1)}` : 'Stop the turn'}
+          disabled={stopping}
+          aria-busy={stopping || undefined}
+          title={stopping ? 'Waiting for the tool to confirm the stop' : notice ? `Stop the turn — ${notice.charAt(0).toLowerCase()}${notice.slice(1)}` : 'Stop the turn'}
           data-testid="activity-interrupt"
+          data-stopping={stopping || undefined}
         >
-          Stop
+          {stopping ? 'Stopping…' : 'Stop'}
         </button>
       </div>
     </div>

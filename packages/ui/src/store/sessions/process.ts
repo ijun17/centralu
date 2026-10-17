@@ -164,11 +164,13 @@ export const processActions = (set: StoreSet, get: StoreGet): ProcessActions => 
   },
 
   async interrupt(sessionId) {
+    // "Stopping…" until the session leaves working, or the tool says the Stop has not taken effect (`stopping`)
+    set((s) => ({ stopping: { ...s.stopping, [sessionId]: { turn: s.workingSince[sessionId] } } }))
     try {
       await get().platform!.agents.interrupt(sessionId)
     } catch (err) {
       // Silence after failing to stop would leave someone believing it stopped and waiting — the exact kind of failure this project forbids
-      set({ toast: `Could not stop: ${(err as Error).message}` })
+      set((s) => ({ toast: `Could not stop: ${(err as Error).message}`, stopping: omitKey(s.stopping, sessionId) }))
     }
   },
 
