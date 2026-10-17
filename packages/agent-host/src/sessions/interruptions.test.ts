@@ -495,6 +495,17 @@ describe('a tool reconnecting for too long (#698)', () => {
     expect(info(a, id).interruption ?? null).toBeNull()
   })
 
+  it('a reconnect that starts while the host lets its processes go starts no clock on the leaving host', async () => {
+    const a = host()
+    const { id, h } = await working(a)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    // The process still speaks while it is let go: its tool begins retrying then
+    h.dispose = async () => h.emit({ type: 'activity', sessionId: id, activity: 'retrying' })
+    await a.mgr.detachAll()
+    vi.advanceTimersByTime(RECONNECTING_FLAG_MS * 2)
+    expect(interruptions(id)).toEqual([])
+  })
+
   it('silence alone is not flagged: a long build or a sleep looks the same', async () => {
     const a = host()
     const { id } = await working(a)

@@ -2749,6 +2749,8 @@ export class SessionManager {
   }
 
   private watchReconnecting(sessionId: string): void {
+    // A leaving host starts no clock: its processes still speak while they are let go, and the next host watches them (#698)
+    if (this.handingOver || this.disposing) return
     const since = Date.now()
     // The entry stays after it fires, so a later event of the same episode does not start the clock again
     const timer = setTimeout(() => {
