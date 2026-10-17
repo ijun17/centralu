@@ -122,7 +122,8 @@ centralu/
 │        │                      #   codex/ server-requests, thread-servers, child-threads, slash-commands,
 │        │                      #   launch-config. codex/normalize.ts maps notifications, with what it reads beside
 │        │                      #   it: items, approvals, thread-settings, token-readings, child-tracker,
-│        │                      #   known-notifications. contract.ts re-exports contract/: orchestrator,
+│        │                      #   known-notifications. claude/normalize.ts maps messages, one family per file:
+│        │                      #   cli-messages, model-messages, turn-ending. contract.ts re-exports contract/: orchestrator,
 │        │                      #   session-apps, process. Shared by both: tool-result, file-changes, images, plan,
 │        │                      #   token-usage, tool-titles, retry-activity, session-kit, subagent-steps,
 │        │                      #   history-events (#843)
