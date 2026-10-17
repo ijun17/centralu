@@ -6,14 +6,13 @@ import { spawn } from 'node:child_process'
 import { existsSync, openSync, renameSync, writeSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
-import { isAlive, say, sayTo, runCaptured, tail, sleep, waitUntil } from './serve-util.mjs'
+import { answerLine, isAlive, say, sayTo, runCaptured, tail, sleep, waitUntil } from './serve-util.mjs'
 import { SERVE_LOG_FILE, serveDataDir, readServeState, ensureServeState, heldHere, lockHolderPid, readServePid } from './serve-files.mjs'
 import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslDistro, wslUser } from './serve-windows.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
 import { CHILD_FLAG } from './serve-args.mjs'
-import { keepLauncher } from './serve-install.mjs'
 import { protocolVersionOf, connectionLine, hostProvesOf, probeHost, askHostToStop } from './serve-host.mjs'
-import { describe, runServe } from './serve-run.mjs'
+import { describe, runServe, serveFolder } from './serve-run.mjs'
 
 /**
  * What a detached launcher needs from the `--detach` that started it. A process created through WMI
@@ -121,15 +120,9 @@ export async function runDetach({
   noStartMs = 10_000,
   write = (line) => process.stdout.write(line),
 }) {
-  const dataDir = serveDataDir(env, home)
   // Created here, so the token exists before the launcher reads it and `answered` reads it again
-  ensureServeState(dataDir, platform)
-  keepLauncher(dataDir, cliPath, env)
-  const fail = (reason, message) => {
-    say(message)
-    write(`${JSON.stringify({ v: 1, detach: { ok: false, how, reason, message } })}\n`)
-    return 1
-  }
+  const { dataDir } = serveFolder({ env, home, cliPath, platform })
+  const fail = (reason, message) => answerLine(write, 'detach', { ok: false, how, reason, message })
   const answered = async (already) => {
     const d = await describe({ env, dataDir, state: ensureServeState(dataDir, platform), entry, version })
     if (!d?.hostRunning) return false
@@ -229,11 +222,7 @@ export async function runStop({
   write = (line) => process.stdout.write(line),
 }) {
   const dataDir = serveDataDir(env, home)
-  const report = (stop) => {
-    if (stop.message) say(stop.message)
-    write(`${JSON.stringify({ v: 1, stop })}\n`)
-    return stop.ok ? 0 : 1
-  }
+  const report = (stop) => answerLine(write, 'stop', stop)
   const state = readServeState(dataDir)
   if (!state) return report({ ok: true, wasRunning: false, message: `no centralu serve has run for ${dataDir}` })
   const port = state.port ?? DEFAULT_SERVE_PORT

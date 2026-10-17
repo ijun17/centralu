@@ -16,6 +16,16 @@ export function say(line) {
   sink(`[centralu serve] ${line}\n`)
 }
 
+/**
+ * The one line `--detach`, `--stop` and `--autostart` answer with on stdout, `{ v: 1, [key]: value }`, its `message` said
+ * on stderr as well. Returns the exit code: 0 when `value.ok`, else 1.
+ */
+export function answerLine(write, key, value) {
+  if (value.message) say(value.message)
+  write(`${JSON.stringify({ v: 1, [key]: value })}\n`)
+  return value.ok ? 0 : 1
+}
+
 /** Points `say` at `write` from here on (a detached launcher's serve.log) */
 export function sayTo(write) {
   sink = write

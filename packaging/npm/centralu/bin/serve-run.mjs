@@ -10,6 +10,17 @@ import { keepLauncher, installInfo } from './serve-install.mjs'
 import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, hostProvesOf, probeHost } from './serve-host.mjs'
 import { autostartInfo } from './serve-autostart.mjs'
 
+/**
+ * The data folder a command that may start or describe a host works in: its state, created on first use, and the
+ * launcher serve keeps there brought up to date (`keepLauncher`).
+ */
+export function serveFolder({ env, home, cliPath, platform = process.platform }) {
+  const dataDir = serveDataDir(env, home)
+  const state = ensureServeState(dataDir, platform)
+  keepLauncher(dataDir, cliPath, env)
+  return { dataDir, state }
+}
+
 /** What `--connection` answers, as fields: the running host's versions when one answers, else the installed ones */
 export async function describe({ env, dataDir, state, entry, version }) {
   const port = state.port ?? DEFAULT_SERVE_PORT
@@ -37,9 +48,7 @@ export async function describe({ env, dataDir, state, entry, version }) {
  * stderr. Exit 1 when there is no host to describe.
  */
 export async function printConnection({ env, home, entry, version, cliPath }) {
-  const dataDir = serveDataDir(env, home)
-  const state = ensureServeState(dataDir)
-  keepLauncher(dataDir, cliPath, env)
+  const { dataDir, state } = serveFolder({ env, home, cliPath })
   const d = await describe({ env, dataDir, state, entry, version })
   if (!d) {
     say(`cannot read the protocol version of the host at ${entry}`)
@@ -62,9 +71,7 @@ export async function printConnection({ env, home, entry, version, cliPath }) {
  * and serve.log stops growing.
  */
 export async function runServe({ env, home, entry, version, cliPath, port: askedPort, platform = process.platform, execPath = process.execPath, logFd = null }) {
-  const dataDir = serveDataDir(env, home)
-  const state = ensureServeState(dataDir, platform)
-  keepLauncher(dataDir, cliPath, env)
+  const { dataDir, state } = serveFolder({ env, home, cliPath, platform })
   const protocolVersion = protocolVersionOf(entry)
 
   // A serve that is already up answers on the port it recorded; say so before starting a host that

@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join, posix } from 'node:path'
-import { replaceFile, say, runCaptured } from './serve-util.mjs'
+import { answerLine, replaceFile, runCaptured } from './serve-util.mjs'
 import { serveDataDir } from './serve-files.mjs'
 import { askPowershell, detachHow, encodedCommand, wslInterop, PS_MODULE_PATH, windowsArg, windowsPowershell, psText, wslDistro, wslUser } from './serve-windows.mjs'
 import { keepLauncher, remoteLayout } from './serve-install.mjs'
@@ -343,11 +343,7 @@ export async function runAutostart({
   const dataDir = serveDataDir(env, home)
   // The entry of an npm install runs the launcher serve keeps; make sure it is there and current
   keepLauncher(dataDir, cliPath, env)
-  const report = (a) => {
-    if (a.message) say(a.message)
-    write(`${JSON.stringify({ v: 1, autostart: a })}\n`)
-    return a.ok ? 0 : 1
-  }
+  const report = (a) => answerLine(write, 'autostart', a)
   if (how === null) {
     clearAutostartMark(dataDir)
     return report({ ok: action !== 'on', on: false, how: null, linger: null, ...(action === 'off' ? {} : { message: autostartUnsupported(platform, env) }) })
