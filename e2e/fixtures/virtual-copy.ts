@@ -154,6 +154,31 @@ export function virtualCopyTests(): void {
       expect(copied.length).toBeGreaterThan(20)
     })
 
+    /*
+     * ⌘A's claim on the clipboard lasts only while its selection does (#842 item 9). It ended on a mouse press only, so a
+     * selection made afterwards without the mouse, anywhere, copied as the whole file.
+     */
+    test('viewer: after ⌘A, a selection made elsewhere without the mouse is not copied as the whole file (#842 item 9)', async ({ page }) => {
+      await openFile(page, ['a.ts'])
+      await page.getByTestId('code-viewer').getByRole('region', { name: 'Code' }).focus()
+      await page.keyboard.press('ControlOrMeta+a')
+      expect(await copyOf(page)).toMatch(/^a\.ts line 0\n[\s\S]*a\.ts line 199$/)
+      await selectOutside(page)
+      await page.waitForTimeout(100)
+      await pressCopy(page)
+      await expect(copied(page)).rejects.toThrow('left this copy to the browser')
+    })
+
+    test('viewer: ⌘A is read by the key, so the A key on a Korean layout selects the whole file (#842 item 14)', async ({ page }) => {
+      await openFile(page, ['a.ts'])
+      await page.getByTestId('code-viewer').getByRole('region', { name: 'Code' }).focus()
+      // The A key on a Korean (2-set) layout reports ㅁ as its key
+      await page.evaluate(() => {
+        document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ㅁ', code: 'KeyA', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true }))
+      })
+      expect(await copyOf(page)).toMatch(/^a\.ts line 0\n[\s\S]*a\.ts line 199$/)
+    })
+
     test('diff: ⌘A highlights the rows only, and copies the whole diff', async ({ page }) => {
       await openDiff(page)
       await page.locator('[data-testid="diff-view"] [data-line="3"] [data-code]').click()
