@@ -97,6 +97,13 @@ export type ConversationSlice = {
    */
   workingSince: Record<string, number>
   /**
+   * A Stop the person pressed, per session (#1060): the turn it was pressed in (that turn's `workingSince`), and the
+   * notice text once the tool says it has not taken effect. Stop is said once the tool confirms it, as Claude now
+   * waits too, so the button says "Stopping…" from the click until the session leaves `working`. Keyed to its turn,
+   * so a later turn never reads an old Stop, and nothing has to clear it.
+   */
+  stopping: Record<string, { turn: number | undefined; failed?: string }>
+  /**
    * The oldest history point currently on screen, per session.
    * Conversation the model has forgotten to compaction still survives in our store, so this is
    * where reading further back starts from.

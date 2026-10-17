@@ -1,4 +1,4 @@
-import type { NormalizedEvent } from '@cc/protocol'
+import { STOP_NOT_CONFIRMED_LABEL, type NormalizedEvent } from '@cc/protocol'
 import { applyEvent, bumpSeq, gridSessionIds, markRead as markReadPure, nextStateFor, type SessionSummary } from '@cc/core'
 import { isOnScreen } from '../../app/onscreen.js'
 import type { StoreGet, StoreSet } from '../state.js'
@@ -177,6 +177,11 @@ export function conversationEvent(e: NormalizedEvent, sessionId: string, announc
       workingSince: trackWorkingSince(st.workingSince, sessions, Date.now()),
     }
   })
+
+  // The tool says the Stop has not taken effect: the button stops saying "Stopping…" and says why (`stopping`)
+  if (e.type === 'notice' && e.label === STOP_NOT_CONFIRMED_LABEL && get().stopping[sessionId]) {
+    set((st) => ({ stopping: { ...st.stopping, [sessionId]: { ...st.stopping[sessionId]!, failed: e.text } } }))
+  }
 
   notifyStateChange(e, sessionId, cur, withSeq, announced, set, get)
 }
