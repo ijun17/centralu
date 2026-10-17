@@ -120,9 +120,12 @@ schema, optional, so events and stored records from older builds still parse; a 
 agent") and the session it names (`sessionId`). The adapter sets it because only it knows the server: Claude names the
 server inside the tool name, but Codex names it apart, so the screen could not have told Codex's `start_agent` from
 another server's tool of that name. For these calls the adapter titles the card by the argument a person follows the
-call by (the job, the project asked, the text sent; else the words). A record an older host wrote has no mark; the
-screen then reads Claude's `mcp__centralu__…` and `mcp__app-<id>__…` names (`centraluCallOf`), and Codex's stay
-ordinary cards. The card draws a marked call with Centralu's mark (an app's window icon and name for an app's tool),
+call by (the job, the project asked, the text sent; else the words). `app-<x>` is only a name's shape (a repository's
+`.mcp.json` may hold such a server), so each session keeps an app's mark only for an app attached to it
+(`keepAttachedAppMarks`). A record an older host wrote has no mark; the screen then reads Claude's `mcp__centralu__…`
+names, and `mcp__app-<id>__…` only for an app it knows (`centraluCallOf`); Codex's stay ordinary cards. The card links
+the session the call's arguments name, or, for start_agent, ask_project and create_session only, the first `[id]` of
+its answer (a list's first id is no one's). The card draws a marked call with Centralu's mark (an app's window icon and name for an app's tool),
 the words, the title and a link to the session it names, on a stronger left edge; a session's preview reads
 "<words>: <title>" (`toolCallLine`).
 

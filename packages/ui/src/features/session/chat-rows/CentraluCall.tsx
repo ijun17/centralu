@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { centraluCallLabel, centraluCallTitle, type ToolSummary } from '@cc/protocol'
 import { useStore, type ChatItem } from '../../../store/store.js'
 import { AppIcon, CentraluMarkIcon, ChevronIcon } from '../../../components/icons.jsx'
@@ -5,14 +6,24 @@ import { AppIcon, CentraluMarkIcon, ChevronIcon } from '../../../components/icon
 type ToolItem = Extract<ChatItem, { kind: 'tool' }>
 
 /**
- * The session a Centralu call names (#730): the one in its arguments (`sessionId`), else the first `[id]` its answer
- * names that this window knows (start_agent's "the codex session "…" [id]"). Only a session the window has, so the
- * link never opens nothing.
+ * The calls whose answer names the one session they made or reached as its first `[id]` (start_agent's "the codex
+ * session "…" [id]"). Any other answer may name many (list_sessions, agent_session list, recall's hits): its first id
+ * is an arbitrary session, so only the one its arguments name is linked (#730 review).
+ */
+const ANSWER_NAMES_ITS_SESSION: ReadonlySet<string> = new Set(['start_agent', 'ask_project', 'create_session'])
+
+/**
+ * The session a Centralu call names (#730): the one in its arguments (`sessionId`), else, for the calls above, the
+ * first `[id]` its answer names. Only a session the window has (a deleted one gets no link), never the one it is in.
+ * The answer is read once per answer, not on every store update.
  */
 function useNamedSession(item: ToolItem, call: NonNullable<ToolSummary['centralu']>, selfId: string) {
+  const fromAnswer = useMemo(
+    () => (ANSWER_NAMES_ITS_SESSION.has(call.tool) ? (item.result?.match(/\[([^\]\s]+)\]/)?.[1] ?? null) : null),
+    [call.tool, item.result],
+  )
   return useStore((s) => {
-    const ids = [call.sessionId, ...[...(item.result?.matchAll(/\[([^\]\s]+)\]/g) ?? [])].map((m) => m[1])]
-    const id = ids.find((x) => x && x !== selfId && s.sessions[x])
+    const id = [call.sessionId, fromAnswer].find((x) => x && x !== selfId && s.sessions[x])
     return id ? s.sessions[id] : undefined
   })
 }

@@ -1,4 +1,4 @@
-import { centraluServer, type ToolSummary } from '@cc/protocol'
+import { APP_SERVER_PREFIX, centraluServer, type NormalizedEvent, type ToolSummary } from '@cc/protocol'
 import { trimmed } from '../json-value.js'
 import { ORCHESTRATOR_MCP_NAME } from '../apps/contract.js'
 import { jsonObject, str, type Obj } from '../json-value.js'
@@ -136,6 +136,32 @@ export function centraluMark(server: string, tool: string, args: Record<string, 
    * With no argument to show, the title is the words: a raw `mcp__centralu__agent_session` said nothing, and a title
    * is never empty, since read_session lists a call by it
    */
-  title ??= label
+  // Not ask_project's: its own row reads the title as the project, and a blank one as "another project"
+  if (tool !== 'ask_project') title ??= label
   return { centralu: { ...base, ...(label ? { label } : {}) }, ...(title ? { title } : {}) }
+}
+
+/**
+ * An app's mark stays only on a call to a server this session has an app attached under (#730 review): `app-<x>` is
+ * only a name's shape, and a repository's `.mcp.json` or the person's CLI config may hold a server of that name. The
+ * title is left as it is (an app's call is never retitled). Applied where each session emits, on its own calls and its
+ * subagents' steps; `attached` is read only for a marked app call.
+ */
+export function keepAttachedAppMarks(e: NormalizedEvent, attached: () => Iterable<string>): NormalizedEvent {
+  const stray = (s: ToolSummary): ToolSummary | null => {
+    if (!s.centralu?.app) return null
+    const server = `${APP_SERVER_PREFIX}${s.centralu.app}`
+    for (const a of attached()) if (a === server) return null
+    const { centralu: _gone, ...rest } = s
+    return rest as ToolSummary
+  }
+  if (e.type === 'tool_call') {
+    const s = stray(e.summary)
+    return s ? { ...e, summary: s } : e
+  }
+  if (e.type === 'subagent_event' && e.step.type === 'tool_call') {
+    const s = stray(e.step.summary)
+    return s ? { ...e, step: { ...e.step, summary: s } } : e
+  }
+  return e
 }

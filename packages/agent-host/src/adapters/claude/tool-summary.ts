@@ -32,7 +32,8 @@ export function toolSummary(name: string, input: Json): ToolSummary {
     title = `${name}: ${p || '?'}`
   } else if (name === 'Grep' || name === 'Glob') title = `${name}: ${str(input.pattern)}`
   // The project asked (#371) — the caller's card names it, and finds the delegated session by it before the answer
-  else if (isCentraluTool({ name }, 'ask_project')) title = str(input.project, name)
+  // A blank project is the name, as no project is (#730 review): the card then says "another project"
+  else if (isCentraluTool({ name }, 'ask_project')) title = str(input.project).trim() || name
   /*
    * An agent card's title is the work handed to it (#98). While it was just the name, every card
    * said "Agent Agent", and launching three agents side by side left no way to tell which card was
