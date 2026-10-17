@@ -255,7 +255,7 @@ describe('bundle regression (decision C-3: no editor engine in the viewer)', () 
     expect(css).not.toMatch(/cm-editor|shiki/i)
   })
 
-  it('the app\'s total JS does not exceed 1.7MB', () => {
+  it('the app\'s total JS does not exceed 1.8MB', () => {
     // 1.31MB in the release build (measured at M4 B-3c, including lazy-loaded chunks). It was
     // 1.16MB at 988713e, and the app screen's bridge (ext-apps app-bridge, 138KB loaded the
     // first time a screen opens) has been added since. Crossing this line means a heavy
@@ -274,7 +274,11 @@ describe('bundle regression (decision C-3: no editor engine in the viewer)', () 
     // Raised from 1.7MB for answering approvals from the waiting list and sidebar rows (#683, with
     // its review's guards: the row's line, its fit check, the list's key rules): 1,696,097B on
     // main at 29ffab50, 1,704,574B with it (+8KB, no dependency).
-    expect(jsBytes).toBeLessThan(1_750_000)
+    //
+    // Raised from 1.75MB for the UI audit (#842: dialogs with focus and Tab of their own, keyboard resizing, the terminal
+    // and file-tree reconnects, stale-search guards): 1,747,083B on main at 5a6f0cc7, 1,753,981B with it (+7KB, no
+    // dependency). Main was 3KB under the old line.
+    expect(jsBytes).toBeLessThan(1_800_000)
   })
 })
 
