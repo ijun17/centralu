@@ -4,7 +4,7 @@ import { nextWaitingTick } from '../../app/labelClock.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '../../store/store.js'
 import { projectLabelOf, useInbox } from '../../store/selectors.js'
-import { inboxCovered, inboxKeyAction, typingTarget } from './inboxKeys.js'
+import { buttonTarget, inboxCovered, inboxKeyAction, typingTarget } from './inboxKeys.js'
 import { useFocusReturn } from '../../components/focusReturn.js'
 import { CONTINUE_TEXT, Kbd, StateDot, canContinue, formatWaiting, interruptionLabel, waitingTone } from '../../components/primitives.jsx'
 import { SessionMachineTag } from '../machines/MachineTag.jsx'
@@ -50,7 +50,11 @@ export function Inbox() {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       // The list's keys only when nothing covers it and no field has the keyboard (#683 review, inboxKeys.ts)
-      const action = inboxKeyAction(e, { typing: typingTarget(e.target), covered: inboxCovered(useStore.getState()) })
+      const action = inboxKeyAction(e, {
+        typing: typingTarget(e.target),
+        covered: inboxCovered(useStore.getState()),
+        onButton: buttonTarget(e.target),
+      })
       if (!action) return
       const item = items[cursor]
       if (action === 'down') setCursor((c) => Math.min(c + 1, items.length - 1))
