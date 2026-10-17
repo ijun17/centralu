@@ -17,7 +17,7 @@ import { guiCommandFor } from './guiCommands.js'
 import { onFirstLine, onLastLine, sentMessages, stepHistory } from './history.js'
 import { onFirstVisualLine, onLastVisualLine } from './caret.js'
 import { fitHeight } from './composerFit.js'
-import { isComposerSendKey } from './composerKeys.js'
+import { autocompleteKeyAction, isComposerSendKey } from './composerKeys.js'
 import { composerFocusAnswer } from './composerFocus.js'
 import { composingKey } from '../../app/keys.js'
 import { appendPath, isFileDrag, isOsFileDrag, readDragPath } from '../files/dragPath.js'
@@ -658,10 +658,11 @@ export const Composer = memo(function Composer({
             // While autocomplete is open, the arrow keys, Enter and Tab belong to the list — unless
             // the input method is using them (#181): an `@파일` still being composed
             if (ac.open && !composing) {
-              if (e.key === 'ArrowDown') return (e.preventDefault(), ac.move(1))
-              if (e.key === 'ArrowUp') return (e.preventDefault(), ac.move(-1))
-              if (e.key === 'Escape') return (e.preventDefault(), setCaret(-1))
-              if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+              const action = autocompleteKeyAction(e)
+              if (action === 'down') return (e.preventDefault(), ac.move(1))
+              if (action === 'up') return (e.preventDefault(), ac.move(-1))
+              if (action === 'close') return (e.preventDefault(), setCaret(-1))
+              if (action === 'pick') {
                 const item = ac.items[ac.index]
                 if (item) {
                   e.preventDefault()

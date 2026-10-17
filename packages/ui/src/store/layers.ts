@@ -33,3 +33,13 @@ export function isCovered(st: CoveringLayers, own?: OwnLayer): boolean {
     (own !== 'overlay' && st.overlay !== null)
   )
 }
+
+/**
+ * Whether a dialog stands over the whole window: a modal (anything counted in `openLayers`), settings or usage (#842
+ * item 1). The window's global shortcuts are not answered while one is up: ⌘K over a dialog opened the palette under
+ * it and took the keyboard, so what the person typed went to the hidden palette and its Enter ran a command nobody
+ * could see; ⌘1-9 and ⌘[ moved the screen behind it. The palette is not one of these: ⌘K closes it.
+ */
+export function dialogOpen(st: Pick<CoveringLayers, 'openLayers' | 'settingsOpen' | 'usageOpen'>): boolean {
+  return st.openLayers > 0 || st.settingsOpen || st.usageOpen
+}

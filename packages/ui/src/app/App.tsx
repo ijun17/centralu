@@ -12,6 +12,7 @@ import { applyTheme, cacheChoice, pickTheme, resolveChoice, systemPrefersDark } 
 import { applyTypography, cacheTypography, typographyOf } from './typography.js'
 import { projectScreenOf, screenExists, usableThemeFiles, useStore } from '../store/store.js'
 import { canStep } from '../store/navHistory.js'
+import { dialogOpen } from '../store/layers.js'
 import { useCounts, computeInbox, currentWaitingId } from '../store/selectors.js'
 import { Sidebar } from '../features/sidebar/Sidebar.jsx'
 import { EvidencePanel } from '../features/evidence/EvidencePanel.jsx'
@@ -650,6 +651,15 @@ function GlobalKeys() {
         position otherwise.
       */
       const letter = letterOf(e)
+      const mod = e.metaKey || e.ctrlKey
+      /*
+        A dialog keeps the keyboard (#842 item 1): its own keys (Esc, Enter, Tab) are its, and none of the window's
+        shortcuts reach the screen under it. The open palette lets only ⌘K through, the key that closes it; the rest
+        would act behind it while it stays up.
+      */
+      const layers = useStore.getState()
+      if (dialogOpen(layers)) return
+      if (layers.paletteOpen && !(mod && letter === 'k')) return
       // Back and forward between screens ⌘[ ⌘] / Alt+← Alt+→ (#374); never while typing (keys.ts says why)
       const dir = e.defaultPrevented ? null : navKeyOf(e)
       if (dir) {
@@ -659,19 +669,19 @@ function GlobalKeys() {
         return
       }
       // Command palette ⌘K (FR-17)
-      if ((e.metaKey || e.ctrlKey) && letter === 'k') {
+      if (mod && letter === 'k') {
         e.preventDefault()
         useStore.getState().togglePalette()
         return
       }
-      if ((e.metaKey || e.ctrlKey) && letter === 'i') {
+      if (mod && letter === 'i') {
         e.preventDefault()
         toggleInbox()
         return
       }
       // Jump to the next waiting item: approval → error → waiting-for-input, in that order
       // (sorting lives in core)
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && letter === 'a') {
+      if (mod && e.shiftKey && letter === 'a') {
         e.preventDefault()
         const st = useStore.getState()
         const next = nextWaitingSession(computeInbox(st), currentWaitingId(st))
@@ -680,7 +690,7 @@ function GlobalKeys() {
       }
       // Toggle the evidence panel ⌘B — replaces tab switching (⌘⇧1-4).
       // Git and files are not a screen that replaces the conversation, they sit alongside it.
-      if ((e.metaKey || e.ctrlKey) && letter === 'b') {
+      if (mod && letter === 'b') {
         e.preventDefault()
         useStore.getState().togglePanel()
         return
@@ -689,7 +699,7 @@ function GlobalKeys() {
       // held (caught by e2e)
       const digit = /^Digit([1-9])$/.exec(e.code)?.[1]
       // Jump to project ⌘1-9 (FR-17)
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && digit) {
+      if (mod && !e.shiftKey && digit) {
         const st = useStore.getState()
         const project = Object.values(st.projects)[Number(digit) - 1]
         if (project) {
