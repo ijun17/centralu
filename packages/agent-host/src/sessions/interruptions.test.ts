@@ -477,7 +477,7 @@ describe('a tool reconnecting for too long (#698)', () => {
     const a = host()
     const { id, h } = await working(a)
     h.emit({ type: 'activity', sessionId: id, activity: 'retrying' })
-    const clocks = () => (a.mgr as unknown as { reconnecting: Map<string, unknown> }).reconnecting
+    const clocks = () => (a.mgr as unknown as { interruptions: { reconnecting: Map<string, unknown> } }).interruptions.reconnecting
     expect(clocks().has(id)).toBe(true)
     await a.mgr.trashSession(id)
     expect(clocks().has(id)).toBe(false)

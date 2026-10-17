@@ -12,6 +12,7 @@ import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { HandoffChildren, movedChildrenNote, type HandoffChildrenHost } from './handoff-children.js'
 import { ChildReports, type ChildReportsHost } from './child-reports.js'
+import { InterruptionWatch, type InterruptionWatchHost } from './interruption-watch.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -24,7 +25,6 @@ import { underGrant } from './ask-project.js'
 import { makeProjectFolder, projectFolderTarget, type ProjectFolderTarget } from '../dev-services/project-folder.js'
 import { cloneInto } from '../dev-services/project-clone.js'
 import { orchestratorMemory } from './transcript-view.js'
-import { RECONNECTING_FLAG_MS, interruptionAfter } from './interruptions.js'
 import { homedir } from 'node:os'
 import { basename, join, relative, resolve, sep } from 'node:path'
 import { existsSync, realpathSync, rmSync, statSync } from 'node:fs'
@@ -160,7 +160,7 @@ export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS }
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost
 
 /**
  * Where the marker "conversation up to here belongs to the old tool" is stored.
@@ -253,6 +253,8 @@ export class SessionManager {
   private readonly handoffChildren: HandoffChildren
   /** What a session is told of work it gave: reports, paused reports, stops nobody was owed (child-reports.ts) */
   private readonly reports: ChildReports
+  /** A session's `interruption` kept with its events, the reconnect clocks, and a quit's stop (interruption-watch.ts) */
+  private readonly interruptions: InterruptionWatch
   /** ask_project, here or on a linked machine (ask-project-flow.ts) */
   private readonly askProjectFlow: AskProjectFlow
   /** The conversations a tool keeps on its own side: listing, holders, import and catch-up (external-conversations.ts) */
@@ -327,8 +329,6 @@ export class SessionManager {
   private turnObservers = new Map<string, Set<AgentRunWait>>()
   /** Turns a quit cut, and who to tell, waiting for the start to finish (#698, `tellQuitNotices`) */
   private quitNotices: { sessionId: string; requester: string }[] = []
-  /** Sessions whose tool is `retrying`, and since when (#698): flagged `reconnecting` once it lasts `RECONNECTING_FLAG_MS` */
-  private reconnecting = new Map<string, { since: number; timer: ReturnType<typeof setTimeout> }>()
   /** `disposeAll` has begun (#673): a card it withdraws is not the person's answer, and its request stays stored */
   private disposing = false
   /**
@@ -365,6 +365,7 @@ export class SessionManager {
     } = {},
   ) {
     this.children = new ChildOwnership(store)
+    this.interruptions = new InterruptionWatch(this.parts())
     this.reports = new ChildReports(this.parts())
     this.handoffChildren = new HandoffChildren(this.parts())
     this.cards = new RoutedCards(this.parts())
@@ -427,7 +428,7 @@ export class SessionManager {
       if (stale) {
         console.error(`[agent-host] stale state reset: ${s.id.slice(0, 8)} ${s.state} -> idle`)
         // No window is attached yet: the marker and the interruption are read with the conversation and the list
-        this.markStoppedByQuit(fixed, false)
+        this.interruptions.markStoppedByQuit(fixed, false)
         store.upsertSession(fixed)
         stoppedByQuit.push(fixed)
       }
@@ -1726,7 +1727,7 @@ export class SessionManager {
             // The same statement the window gets, through the same rules (#428)
             const change = { type: 'state_change' as const, sessionId: m.id, state: 'idle' as const, reason: 'reattach_failed' }
             this.applyStateHint(change, m)
-            this.markStoppedByQuit(m, true)
+            this.interruptions.markStoppedByQuit(m, true)
             this.store.upsertSession(m)
             this.emit(change)
             // Its turn is over: the report it owed says so now, rather than naming a later turn (#698)
@@ -2409,7 +2410,7 @@ export class SessionManager {
         this.applyStateHint(e, m)
         this.cardRests.note(e, m.id, before)
         interruptionBefore = m.interruption ?? null
-        this.trackInterruption(e, m, wasBusy && !inTurn(m.state))
+        this.interruptions.trackInterruption(e, m, wasBusy && !inTurn(m.state))
         // Heard from: an unknown background state is bounded by quiet, not by age (#648, `backgroundKnown`)
         if (this.restartPolicy.backgroundUnknown.has(m.id)) this.restartPolicy.backgroundUnknown.set(m.id, Date.now())
         /*
@@ -2529,69 +2530,6 @@ export class SessionManager {
     return false
   }
 
-  /**
-   * Keeps `interruption` with the event (#698): `interruptionAfter` for the turn's ending, and the `reconnecting` flag
-   * for a tool that has been `retrying` past `RECONNECTING_FLAG_MS`. Only `retrying` starts the clock: a quiet session
-   * is not a stuck one.
-   */
-  private trackInterruption(e: NormalizedEvent, m: SessionInfo, endedTurn: boolean): void {
-    const next = interruptionAfter(e, Date.now(), endedTurn)
-    // The reconnecting flag stands while the tool still retries, whatever else the turn says meanwhile
-    const stillReconnecting = m.interruption?.reason === 'reconnecting' && m.state === 'working' && m.activity === 'retrying'
-    if (next !== undefined && !stillReconnecting) m.interruption = next
-    const retrying = m.state === 'working' && m.activity === 'retrying'
-    if (retrying) {
-      if (!this.reconnecting.has(m.id)) this.watchReconnecting(m.id)
-      return
-    }
-    this.stopWatchingReconnect(m.id)
-    if (m.interruption?.reason === 'reconnecting') m.interruption = null
-  }
-
-  /** Ends a reconnect episode's clock: the tool stopped retrying, the turn ended, or the session is gone */
-  private stopWatchingReconnect(sessionId: string): void {
-    const watch = this.reconnecting.get(sessionId)
-    if (watch) clearTimeout(watch.timer)
-    this.reconnecting.delete(sessionId)
-  }
-
-  private watchReconnecting(sessionId: string): void {
-    // A leaving host starts no clock: its processes still speak while they are let go, and the next host watches them (#698)
-    if (this.handingOver || this.disposing) return
-    const since = Date.now()
-    // The entry stays after it fires, so a later event of the same episode does not start the clock again
-    const timer = setTimeout(() => {
-      const m = this.meta.get(sessionId)
-      if (!m || m.state !== 'working' || m.activity !== 'retrying') return
-      console.error(`[sessions] ${sessionId.slice(0, 8)} has been reconnecting to its API for ${Math.round(RECONNECTING_FLAG_MS / 60_000)} min`)
-      m.interruption = { reason: 'reconnecting', at: since }
-      this.emit({ type: 'interruption', sessionId, interruption: m.interruption })
-    }, RECONNECTING_FLAG_MS)
-    timer.unref?.()
-    this.reconnecting.set(sessionId, { since, timer })
-  }
-
-  /**
-   * The turn went with its process (#698): a start found the session mid-turn with no process left (a full quit, a
-   * reboot, a crash the keeper did not survive), or a kept process could not be re-attached. The session is reset to
-   * `idle`, which used to leave no mark at all: the conversation simply stopped. A line now says so, and the
-   * interruption puts the session in the inbox with a way to continue.
-   */
-  private markStoppedByQuit(m: SessionInfo, announce: boolean): void {
-    m.interruption = { reason: 'quit', at: Date.now() }
-    const notice: NormalizedEvent = {
-      type: 'notice',
-      sessionId: m.id,
-      level: 'warning',
-      from: 'Centralu',
-      label: 'stopped',
-      text: 'Centralu quit or restarted while this turn was running, so the turn stopped before it finished. Send a message to continue.',
-    }
-    const seq = this.record.persistMessage(notice, m)
-    if (!announce) return
-    this.emit(seq != null ? ({ ...notice, seq } as NormalizedEvent) : notice)
-    this.emit({ type: 'interruption', sessionId: m.id, interruption: m.interruption })
-  }
 
   /** A state hint, for storage: the core reducer's rules on the host's copy (`applySessionState`, protocol session-state.ts) */
   private applyStateHint(e: NormalizedEvent, m: SessionInfo): void {
@@ -3954,7 +3892,7 @@ export class SessionManager {
       sleepSession: (...a) => self.sleepSession(...a),
       startDelegation: (...a) => self.delegationFlow.startDelegation(...a),
       stopBackgroundTask: (...a) => self.stopBackgroundTask(...a),
-      stopWatchingReconnect: (...a) => self.stopWatchingReconnect(...a),
+      stopWatchingReconnect: (...a) => self.interruptions.stopWatchingReconnect(...a),
       get store() {
         return self.store
       },
@@ -5049,7 +4987,7 @@ export class SessionManager {
    */
   private leaveHost(why: string): void {
     // Reconnect clocks die with the host (#698); the next one starts its own from the session's next event
-    for (const id of [...this.reconnecting.keys()]) this.stopWatchingReconnect(id)
+    this.interruptions.stopAll()
     // So do the waits of paused reports (#721): quitting, the work ends with its process and the next start drops the
     // mark; handing over, the wait is the next host's, which starts it again on adoption
     this.reports.stopSettlingPausedReports()
