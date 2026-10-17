@@ -301,10 +301,12 @@ export class SessionsMock {
        * The same rule as the real thing (manager.updateSettings, #69, #107, #719, #999): the model and effort chosen last
        * become the project's default under this session's tool, and another window hears of it when they changed.
        */
-      const owner = sess.projectId ? this.projectStore.list.find((p) => p.id === sess.projectId) : undefined
+      const at = sess.projectId ? this.projectStore.list.findIndex((p) => p.id === sess.projectId) : -1
+      const owner = at === -1 ? undefined : this.projectStore.list[at]!
       if ((s.model !== undefined || s.effort !== undefined) && owner) {
         const before = owner.defaultModels[sess.tool]
-        owner.defaultModels = { ...owner.defaultModels, [sess.tool]: { model: sess.model, effort: sess.effort } }
+        // A new object, as setTrusted swaps one in: the screen may hold the one `add` returned, and must learn of this only from the event
+        this.projectStore.list[at] = { ...owner, defaultModels: { ...owner.defaultModels, [sess.tool]: { model: sess.model, effort: sess.effort } } }
         if ((before?.model ?? null) !== (sess.model || null) || (before?.effort ?? null) !== (sess.effort || null)) this.emit({ type: 'projects_changed' })
       }
       // The same rule as the real thing (#659): every client hears about a saved change, the caller included
