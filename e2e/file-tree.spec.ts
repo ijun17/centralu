@@ -261,3 +261,36 @@ test('with text zoomed in, the right-click menu still appears where clicked and 
   expect(menu.x + menu.width).toBeLessThanOrEqual(viewport.width)
   expect(Math.abs(menu.y - at.y)).toBeLessThanOrEqual(4)
 })
+
+/*
+ * The host keeps each window's watch set under its connection (#842 item 6), so a reconnect starts with none and a new
+ * host knows none. The tree sends its set again on both, or the folders on screen go unwatched until one is opened or
+ * folded by hand.
+ */
+test('the watch set is sent again after a reconnect and after a resync (#842 item 6)', async ({ page }) => {
+  await setup(page)
+  await seedTree(page, { '': [{ name: 'src', isDir: true }], src: [{ name: 'a.ts' }] })
+  await openTree(page)
+  await page.getByTestId('dir-src').click()
+  await expect(page.getByTestId('file-src/a.ts')).toBeVisible()
+  const watched = () => page.evaluate(() => (window as any).__mock.watchedDirs.get(Object.keys((window as any).__store.getState().projects)[0]) ?? null)
+  await expect.poll(watched).toEqual(['', 'src'])
+
+  // A dropped connection: the set the old one held is gone with it
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.watchedDirs.clear()
+    m.setConnectionState('disconnected')
+  })
+  await expect(page.getByTestId('connection')).toContainText('Disconnected')
+  await page.evaluate(() => (window as any).__mock.setConnectionState('connected'))
+  await expect.poll(watched).toEqual(['', 'src'])
+
+  // A swap to a new host that kept nothing
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.watchedDirs.clear()
+    m.setConnectionState('resync_required')
+  })
+  await expect.poll(watched).toEqual(['', 'src'])
+})

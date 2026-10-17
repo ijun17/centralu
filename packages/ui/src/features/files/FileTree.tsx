@@ -78,10 +78,18 @@ export function FileTree({ projectId }: { projectId: string }) {
    */
   const platform = usePlatform()
   const expanded = useStore((s) => s.expandedDirs[projectId])
+  /*
+   * Sent again on every reconnect and every resync (#842 item 6). The host keeps a window's set under its connection, so
+   * a new connection starts with none, and a new host (a swap) knows no sets at all: the folders on screen went unwatched
+   * until the person happened to open or fold one.
+   */
+  const connected = useStore((s) => s.connection === 'connected')
+  const hostResyncs = useStore((s) => s.hostResyncs)
   useEffect(() => {
+    if (!connected) return
     // A failed watch registration must not break the tree — watching is a side glance, not the main job
     void platform.fs.watch(projectId, ['', ...(expanded ?? [])]).catch(() => {})
-  }, [platform, projectId, expanded])
+  }, [platform, projectId, expanded, connected, hostResyncs])
   useEffect(() => {
     // The watch is only torn down when leaving the project. Tearing it down and re-setting it
     // every time the expanded set changes would miss whatever changed in between — the effect

@@ -117,7 +117,7 @@ import {
   resolveProjectFolder,
   resolveTarget,
 } from '../dev-services/fs.js'
-import { DirWatchers } from '../dev-services/watch.js'
+import { DirWatchers, type WatchHolder } from '../dev-services/watch.js'
 import { invalidateFileIndex } from '../dev-services/file-search.js'
 import { writeHandoffNoteSync } from '../dev-services/handoff-notes.js'
 import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
@@ -2918,8 +2918,13 @@ export class SessionManager {
    * is round-trip: the request arrives via RPC, but the answer (a change) goes out through the same
    * broadcast path as a session event.
    */
-  watchDirs(projectId: string, paths: readonly string[]): number {
-    return this.watchers.setWatched(projectId, this.cwdOf(projectId), paths)
+  watchDirs(projectId: string, paths: readonly string[], holder?: WatchHolder): number {
+    return this.watchers.setWatched(projectId, this.cwdOf(projectId), paths, holder)
+  }
+
+  /** A window's connection closed: the folders only it had open stop being watched (#842 item 6) */
+  forgetWatchHolder(holder: WatchHolder): void {
+    this.watchers.forgetHolder(holder)
   }
   readTextFile(projectId: string, path: string) {
     return readTextFile(this.cwdOf(projectId), path)

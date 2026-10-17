@@ -114,3 +114,20 @@ describe('project deletion — what was held for the folder (#392)', () => {
     expect(heldFileIndexes()).toBe(0)
   })
 })
+
+describe('watch sets per window, through the RPC door (#842 item 6)', () => {
+  it("one window folding a folder does not unwatch another window's, and a closed window's folders are let go", async () => {
+    const a = (await rpc('projects.add', { path: join(fixture, 'a') })) as { id: string }
+    mkdirSync(join(fixture, 'a', 'src'))
+    mkdirSync(join(fixture, 'a', 'docs'))
+    await rpc('fs.watch', { projectId: a.id, paths: ['', 'src'] }, { client: 1 })
+    await rpc('fs.watch', { projectId: a.id, paths: ['', 'docs'] }, { client: 2 })
+    expect(mgr.watchedDirCount(a.id)).toBe(3)
+
+    await rpc('fs.watch', { projectId: a.id, paths: [''] }, { client: 1 })
+    expect(mgr.watchedDirCount(a.id)).toBe(2)
+
+    mgr.forgetWatchHolder(2)
+    expect(mgr.watchedDirCount(a.id)).toBe(1)
+  })
+})

@@ -304,9 +304,10 @@ export function createRpcHandler(
       const { projectId, path } = RpcMethods['fs.listDir'].params.parse(p)
       return mgr.listDir(projectId, path)
     },
-    'fs.watch': async (p) => {
+    'fs.watch': async (p, ctx) => {
       const { projectId, paths } = RpcMethods['fs.watch'].params.parse(p)
-      return { watched: mgr.watchDirs(projectId, paths) }
+      // Each window's set is its own, and the watchers are the union (#842 item 6)
+      return { watched: mgr.watchDirs(projectId, paths, ctx?.client) }
     },
     'fs.readFile': async (p) => {
       const { projectId, path } = RpcMethods['fs.readFile'].params.parse(p)
