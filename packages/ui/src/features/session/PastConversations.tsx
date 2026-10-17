@@ -3,6 +3,7 @@ import type { ExternalSession } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { useLoad } from '../../app/useLoad.js'
 import { RelativeAge } from '../../components/RelativeAge.jsx'
+import { SkeletonLines } from '../../components/Skeleton.jsx'
 
 /**
  * A new session's empty screen offers the project's past conversations of this tool.
@@ -28,6 +29,8 @@ export function PastConversations({ sessionId, projectId, tool }: { sessionId: s
     [platform, projectId, tool],
   )
   const sessions = listed.data?.supported ? listed.data.sessions : []
+  // Read again for each tool the empty screen switches to: the list's shape stands there meanwhile
+  if (listed.loading && !listed.data) return <PastSkeleton />
   if (sessions.length === 0) return null
 
   const pick = async (s: ExternalSession) => {
@@ -52,7 +55,7 @@ export function PastConversations({ sessionId, projectId, tool }: { sessionId: s
   }
 
   return (
-    <div className="mx-auto w-full max-w-[560px] px-4 pt-6" data-testid="past-conversations">
+    <div className="mt-5" data-testid="past-conversations">
       <p className="mb-1.5 text-xs text-ink-faint">Or continue a past conversation</p>
       <div className="max-h-72 overflow-y-auto rounded-md border border-line bg-surface-raised">
         {sessions.map((s) => (
@@ -71,6 +74,20 @@ export function PastConversations({ sessionId, projectId, tool }: { sessionId: s
               {s.importedAs && ' · Already open · click to jump'}
             </span>
           </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** The list while it is read: the heading as it will stand, and three rows of a title over a dim line */
+function PastSkeleton() {
+  return (
+    <div className="mt-5" data-testid="past-conversations-loading">
+      <p className="mb-1.5 text-xs text-ink-faint">Or continue a past conversation</p>
+      <div className="rounded-md border border-line bg-surface-raised">
+        {[0, 1, 2].map((i) => (
+          <SkeletonLines key={i} lines={2} className="px-2.5 py-2" label="Looking for past conversations" />
         ))}
       </div>
     </div>
