@@ -1,18 +1,14 @@
-import { execFile } from 'node:child_process'
-import { lstat, readdir } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { isAbsolute, relative, resolve } from 'node:path'
 import { assertExistingPath, isInside, isMissingPathError } from './path-guard.js'
 import type { GitBranch, GitCommit, GitFileStatus } from '@cc/protocol'
 import { runGit, streamGit, type GitTrust } from './git-exec.js'
-import { killTree } from './kill-tree.js'
-import { killHandle, spawnGrouped } from './grouped-child.js'
-import { programPath } from '../tool-launch.js'
-import { raceTimeout } from '../timing.js'
+import { duSizes, walkedSizes } from './entry-sizes.js'
 import { measuresWithDu } from '../os.js'
 import { rpcError } from '../rpc-error.js'
 
 /**
- * Reads and operates on git (B-1).
+ * Reads and operates on git (B-1). This file holds the reads; the writes the person asks for are in git-write.ts,
+ * worktrees and their branches in git-worktree.ts, a branch's pull request in git-pr.ts.
  *
  * Document correction (G): an earlier comment called this "throwaway code, to be replaced by
  * Rust git2 at Tauri stage 4," but that plan was **put on hold** once the Node sidecar became
@@ -40,31 +36,13 @@ export type GitSummary = {
 // The git panel's shapes are the protocol's (FR-4); a hand copy here had already lost `sessionName` (#428)
 export type { GitBranch, GitCommit, GitFileStatus, GitTrust }
 
-const OK = { timeout: 10_000, maxBuffer: 32 * 1024 * 1024 }
-
 /** A read: the repository's programs run only for a trusted project */
-function git(cwd: string, args: string[], trust: GitTrust = {}): Promise<string> {
+export function git(cwd: string, args: string[], trust: GitTrust = {}): Promise<string> {
   return runGit(cwd, args, { allowRepoPrograms: trust.trusted === true })
 }
 
-/**
- * A write the person asked for (stage, commit, switch, push): it runs as plain git does, hooks and
- * filters included, trusted or not. Turning a clean filter off here would change what gets
- * committed (an LFS pointer, a git-crypt file), which is worse than not committing at all.
- * docs/security-boundaries.md lists this as a limit.
- *
- * It gets a bound of its own (`WRITE_TIMEOUT_MS`), not a read's 10 s (#980): a write runs the repository's hooks (a
- * pre-commit type check, a pre-push test run) and the person's credential helper, which can wait on a sign-in.
- */
-function gitWrite(cwd: string, args: string[]): Promise<string> {
-  return runGit(cwd, args, { allowRepoPrograms: true, timeout: WRITE_TIMEOUT_MS })
-}
-
-/** How long a write the person asked for may take before git is stopped: the clone's bound (`CLONE_TIMEOUT_MS`) */
-export const WRITE_TIMEOUT_MS = 10 * 60_000
-
 /** Every read function returns an empty result when this is not a git repository — so callers do not have to guard every time */
-async function isRepo(cwd: string): Promise<boolean> {
+export async function isRepo(cwd: string): Promise<boolean> {
   try {
     await git(cwd, ['rev-parse', '--git-dir'])
     return true
@@ -201,7 +179,7 @@ function assertLexicalGitPath(cwd: string, path: string): string {
   throw rpcError('Path is outside the project')
 }
 
-async function assertCanonicalGitPath(cwd: string, path: string): Promise<string> {
+export async function assertCanonicalGitPath(cwd: string, path: string): Promise<string> {
   const rel = assertLexicalGitPath(cwd, path)
   try {
     await assertExistingPath(cwd, path)
@@ -212,7 +190,7 @@ async function assertCanonicalGitPath(cwd: string, path: string): Promise<string
   return rel
 }
 
-function literalPathspec(path: string): string {
+export function literalPathspec(path: string): string {
   return `:(literal)${path}`
 }
 
@@ -410,84 +388,6 @@ export async function gitIgnoredEntries(
     .sort((a, b) => (b.bytes ?? 0) - (a.bytes ?? 0))
 }
 
-/** How long measuring the ignored entries may take before the list goes without sizes */
-const SIZE_BUDGET_MS = 5000
-
-/** One call to du asks for all of them; keyed by the path without its trailing slash */
-async function duSizes(cwd: string, paths: string[]): Promise<Map<string, number>> {
-  const sizes = new Map<string, number>()
-  try {
-    const out = await new Promise<string>((resolve, reject) => {
-      execFile('du', ['-sk', ...paths], { cwd, timeout: SIZE_BUDGET_MS, maxBuffer: 1 << 20, windowsHide: true }, (err, stdout) =>
-        // du exits non-zero if even one entry cannot be read — whatever it did print is used anyway
-        stdout ? resolve(stdout) : reject(err),
-      )
-    })
-    for (const line of out.split('\n')) {
-      const [kb, ...rest] = line.split('\t')
-      const p = rest.join('\t').trim()
-      if (p && kb) sizes.set(p.replace(/\/$/, ''), Number(kb) * 1024)
-    }
-  } catch {
-    // proceed without sizes
-  }
-  return sizes
-}
-
-/**
- * The same sizes read from the file system, where du is not run (`measuresWithDu`, Windows, #849): bytes in files, not
- * blocks on disk, and a link counts for nothing and is never followed. An entry not finished within the budget has
- * no size, as one du did not reach.
- */
-async function walkedSizes(cwd: string, paths: string[]): Promise<Map<string, number>> {
-  const deadline = Date.now() + SIZE_BUDGET_MS
-  const sizes = new Map<string, number>()
-  for (const path of paths) {
-    const key = path.replace(/\/$/, '')
-    const bytes = await treeBytes(resolve(cwd, key), deadline)
-    if (bytes !== null) sizes.set(key, bytes)
-  }
-  return sizes
-}
-
-/** How many lstat calls the size walk has in flight at once, and how many entries it reads before giving up */
-const SIZE_BATCH = 256
-const MAX_SIZED_ENTRIES = 1_000_000
-
-/**
- * The bytes under `path`, or null past `deadline` or past `maxEntries` entries. The files of one folder are measured
- * SIZE_BATCH at a time, with the deadline checked between batches: one folder of a million files used to queue a
- * million lstat calls at once (#849 review). A link counts as nothing and is not asked about: `lstat` follows one
- * whose target libuv cannot read, and following it could reach anywhere.
- */
-export async function treeBytes(path: string, deadline: number, maxEntries: number = MAX_SIZED_ENTRIES): Promise<number | null> {
-  const top = await lstat(path).catch(() => null)
-  if (!top) return null
-  if (!top.isDirectory()) return top.size
-  let total = 0
-  let seen = 0
-  const folders = [path]
-  while (folders.length > 0) {
-    if (Date.now() > deadline) return null
-    const folder = folders.pop()!
-    const entries = await readdir(folder, { withFileTypes: true }).catch(() => [])
-    seen += entries.length
-    if (seen > maxEntries) return null
-    const files: string[] = []
-    for (const entry of entries) {
-      // A junction or symlink is neither: it is not walked into
-      if (entry.isDirectory()) folders.push(join(folder, entry.name))
-      else if (!entry.isSymbolicLink()) files.push(join(folder, entry.name))
-    }
-    for (let i = 0; i < files.length; i += SIZE_BATCH) {
-      if (Date.now() > deadline) return null
-      const each = await Promise.all(files.slice(i, i + SIZE_BATCH).map((file) => lstat(file).then((s) => s.size, () => 0)))
-      for (const bytes of each) total += bytes
-    }
-  }
-  return total
-}
-
 /**
  * The branch list. Whether a branch is remote is decided by the prefix of its **full ref name**
  * (#175).
@@ -514,386 +414,4 @@ export async function gitBranches(cwd: string): Promise<GitBranch[]> {
     out.push({ name, current: head.trim() === '*', remote, upstream: upstream || undefined })
   }
   return out
-}
-
-/**
- * Checks out a branch. A dirty state does **not block** this — the result is shown first
- * (product philosophy: show, do not block). With dryRun, this only reports what would conflict.
- *
- * `switch` is used rather than `checkout` (#175). `checkout origin/release` detaches HEAD with
- * no error, so a "switched" toast was followed by commits piling up on no branch at all, and
- * `checkout <name>` turns into a command that discards a file's changes if no branch of that
- * name exists but a file of the same name does. `switch` only accepts a branch, and never
- * detaches HEAD without `--detach`. Choosing a remote branch creates a local branch tracking it
- * and switches to that (`--track`) — if a local branch of the same name already exists, git
- * refuses, and that raw message is passed straight through to the person. The
- * `--end-of-options` before the name keeps something like `-f` from being read as an option and
- * discarding changes.
- */
-export async function gitCheckout(
-  cwd: string,
-  branch: string,
-  opts: { dryRun?: boolean } & GitTrust = {},
-): Promise<{ ok: boolean; conflicts: string[]; message?: string }> {
-  if (!(await isRepo(cwd))) return { ok: false, conflicts: [], message: 'Not a git repository' }
-  if (opts.dryRun) {
-    const dirty = (await gitStatusFiles(cwd, opts)).filter((f) => f.status !== '?').map((f) => f.path)
-    return { ok: dirty.length === 0, conflicts: [...new Set(dirty)] }
-  }
-  try {
-    const local = await gitRevParse(cwd, `refs/heads/${branch}`)
-    const remote = !local && (await gitRevParse(cwd, `refs/remotes/${branch}`))
-    await gitWrite(cwd, ['switch', ...(remote ? ['--track'] : []), '--end-of-options', branch])
-    return { ok: true, conflicts: [] }
-  } catch (e) {
-    return { ok: false, conflicts: [], message: cleanGitError(e) }
-  }
-}
-
-export async function gitStage(cwd: string, paths: string[], unstage = false): Promise<void> {
-  if (paths.length === 0) return
-  const safePaths = await Promise.all(paths.map((path) => assertCanonicalGitPath(cwd, path)))
-  const pathspecs = safePaths.map(literalPathspec)
-  await gitWrite(cwd, unstage ? ['restore', '--staged', '--', ...pathspecs] : ['add', '--', ...pathspecs])
-}
-
-export async function gitCommit(cwd: string, message: string): Promise<{ ok: boolean; message?: string }> {
-  try {
-    await gitWrite(cwd, ['commit', '-m', message])
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, message: cleanGitError(e) }
-  }
-}
-
-/** Push (part of v1.5, finalized in product-spec §8 M2). Creates an upstream if there is none */
-export async function gitPush(cwd: string): Promise<{ ok: boolean; message?: string }> {
-  try {
-    const branches = await gitBranches(cwd)
-    const current = branches.find((b) => b.current)
-    if (!current) return { ok: false, message: 'Current branch is unknown (detached HEAD)' }
-    const args = current.upstream ? ['push'] : ['push', '--set-upstream', 'origin', current.name]
-    await gitWrite(cwd, args)
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, message: cleanGitError(e) }
-  }
-}
-
-/**
- * Shows git's raw error message as-is — summarizing it leaves the user unable to decide what to do next.
- *
- * Falls back to stdout when stderr is empty (#160). `git commit` writes its reason
- * ("nothing to commit") to stdout when there is nothing to commit — so the toast used to show
- * only `Command failed: git commit -m …`. This happens exactly when an agent has already
- * committed with Bash and the person then clicks Commit in the panel.
- */
-function cleanGitError(e: unknown): string {
-  const err = e as { stderr?: string; stdout?: string; message?: string }
-  const text = err.stderr?.trim() || err.stdout?.trim() || err.message || 'Unknown error'
-  return text.trim().split('\n').slice(0, 6).join('\n')
-}
-
-/*
- * ── Worktrees (FR-2's lower-priority option) ─────────────────────────────────────
- *
- * **Working directly in the original directory is the default.** A worktree is an isolation
- * mechanism only someone who wants it turns on, and every function here exists for that one
- * checkbox.
- *
- * The location is **outside the repository** (`~/.centralu/worktrees/…`). Putting it inside
- * would require adding a line to `.gitignore` — us editing the user's own file — and leaving it
- * out would make `git status` messy.
- */
-
-export type Worktree = { path: string; branch: string; base?: string }
-
-/**
- * Creates a new worktree and branch. The branch forks **from the current HEAD.**
- *
- * A failure here is never swallowed: if the worktree could not be created but the session went
- * on to run quietly in the original directory, the user believes it is isolated — the worst
- * possible outcome for this feature.
- */
-/**
- * Creates one worktree.
- *
- * Given `from`, it forks **from that trunk** (#76). Without it, it falls back to forking from
- * the root's HEAD as before, which is a baseline whose meaning silently changes the moment a
- * person switches branches in the root — with the manager holding the trunk, the answer to
- * "where does this fork from" is pinned to one value.
- *
- * Given a trunk that does not exist, git rejects it. Why this is not checked in advance and
- * quietly falls back to HEAD: a worktree that forked from somewhere other than its named trunk
- * comes back later as "why isn't this being detected as merged."
- */
-export async function gitWorktreeAdd(
-  repoCwd: string,
-  path: string,
-  branch: string,
-  from?: string,
-  trust: GitTrust = {},
-): Promise<Worktree> {
-  /*
-   * **Only in a trusted project (#407).** A checkout writes every tracked file through the
-   * repository's smudge filters and then fires `post-checkout` (and `reference-transaction` for
-   * the new branch). Turning those off is not a safe middle: the worktree would hold files the
-   * filters never converted (an LFS pointer, a git-crypt blob), which the session then edits and
-   * commits back. `--no-checkout` avoids the filters but leaves an empty folder the agent would
-   * have to fill by running git itself. Refusing leaves nothing half-made; the manager says why
-   * before it gets here.
-   */
-  if (trust.trusted !== true) {
-    throw rpcError('A worktree can only be created in a trusted project')
-  }
-  await gitWrite(repoCwd, ['worktree', 'add', '-b', branch, path, ...(from ? [from] : [])])
-  return { path, branch }
-}
-
-/**
- * Has this branch's work **entirely landed in the trunk** (#69)?
- *
- * The sum of two checks:
- *   1. Has the branch tip moved from its creation point (base)? If not, that is "no work done
- *      yet," not "merged." A freshly created branch is an ancestor of the trunk, so is-ancestor
- *      alone would read it as merged the instant it is created (base is recorded to avoid
- *      exactly this trap).
- *   2. Is the branch an ancestor of the trunk (`merge-base --is-ancestor`)? This catches an
- *      ordinary merge and a fast-forward merge.
- *
- * **The caller says what the trunk is** (#76). This used to always be the root's HEAD, which
- * was a baseline whose meaning silently changed the instant a person switched branches in the
- * root: a merge into main would go undetected if the root happened to be on a different branch,
- * and conversely, if the root's HEAD happened to contain the branch, a branch that was never
- * merged would read as merged. With the manager holding the trunk (worktreeManager.baseBranch),
- * the answer to this question is pinned to one value. With no trunk recorded, this falls back to
- * HEAD — the case for worktrees that existed before a manager did.
- *
- * **What this cannot catch (measured, 2026-08-29):** a squash merge cannot be detected locally —
- * is-ancestor says no, `branch --merged` says no, even `git cherry` reported it as unmerged.
- * A rebase merge is missed too, once the sha changes. Such a branch is left with no automatic
- * marker, and a person can always delete it by hand (the delete conversation) — the cost of
- * missing it is one badge, not data.
- */
-export async function gitBranchMerged(
-  projectCwd: string,
-  branch: string,
-  baseSha: string,
-  trunk = 'HEAD',
-): Promise<boolean> {
-  try {
-    const tip = (await git(projectCwd, ['rev-parse', '--verify', `refs/heads/${branch}`])).trim()
-    if (!tip || tip === baseSha) return false
-    await git(projectCwd, ['merge-base', '--is-ancestor', tip, trunk])
-    return true
-  } catch {
-    return false // the branch does not exist, or is not an ancestor — either way this is not "merged"
-  }
-}
-
-export type BranchPr = {
-  number: number
-  state: 'open' | 'merged' | 'closed'
-  url: string
-  /**
-   * The commit sha at the PR's head. This is what the hard gate (#76) bases its "up to date"
-   * check on: the local tip has to match this before "all of the branch's work has landed in
-   * that PR" is proven — a new commit stacked on after a squash merge is the one way to lose
-   * work that neither is-ancestor nor the PR status can see.
-   */
-  headOid?: string
-}
-
-/**
- * This branch's pull request status — **asked of gh** (#76 stage 3).
- *
- * What PR status knows precisely is exactly what gitBranchMerged cannot see (squash and rebase
- * merges — the dominant outcome for a GitHub PR): MERGED is not an inference, it is a fact the
- * server recorded.
- *
- * This function fails quietly. Two branches of failure are returned as distinct:
- *   - `'unavailable'` — gh itself is missing (ENOENT). The answer will not change on asking
- *     again, so the caller is right to stop asking for the rest of this process.
- *   - `null` — unknown for now (no PR, offline, not a GitHub repository, not authenticated).
- *     Asking again later may get an answer.
- * Neither branch throws — this signal is the basis for one badge, not a precondition for the
- * session list.
- */
-export async function gitBranchPr(
-  projectCwd: string,
-  branch: string,
-  signal?: AbortSignal,
-  timeoutMs = OK.timeout,
-): Promise<BranchPr | 'unavailable' | null> {
-  /*
-   * Started as the root of a tree this host can end (`spawnGrouped`), as git is: off Windows in a process group of its
-   * own, so the tree kill below reaches what gh started (it runs git to read the remotes); in the host's group it
-   * spared them (#982 review). No `timeout` of execFile's own either: it ended gh alone. Running past `timeoutMs`
-   * takes the abort's path.
-   */
-  const { child } = spawnGrouped(programPath('gh'), ['pr', 'view', branch, '--json', 'number,state,url,headRefOid'], {
-    cwd: projectCwd,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-  const out: Buffer[] = []
-  let outBytes = 0
-  child.stdout!.on('data', (chunk: Buffer) => {
-    outBytes += chunk.length
-    if (outBytes <= OK.maxBuffer) out.push(chunk)
-  })
-  child.stderr!.resume()
-  const run = new Promise<string>((resolve, reject) => {
-    child.once('error', reject)
-    child.once('close', (code) => (code === 0 ? resolve(Buffer.concat(out).toString('utf8')) : reject(Object.assign(new Error(`gh exited with ${code}`), { code }))))
-  })
-  const closed = new Promise<void>((done) => child.once('close', () => done()))
-  const exited = new Promise<void>((done) => child.once('exit', () => done()))
-  /*
-   * **An abort, or running past `timeoutMs`, ends gh with the processes it started, and returns once gh is gone** (the
-   * host stopping, #368; a gh that does not answer, #982).
-   * They work in the project's folder, and Windows refuses to remove a folder a running process works in (EBUSY).
-   * `killTree` ends the tree (gh's group; `taskkill /T /F` on Windows). The wait is for gh's `exit`, then for `close`
-   * (every process holding gh's output has ended) for at most a second: on macOS and Linux the tree kill does not
-   * reach a child that left gh's process group, and that child can hold the output open for as long as it runs,
-   * which must not hold the host's shutdown (nor does it hold the folder there: those systems remove a folder a
-   * process works in).
-   */
-  const stop = () => {
-    killTree(killHandle(child), 'SIGKILL')
-    // gh itself as well, should the tree kill have found no group to fire at
-    child.kill('SIGKILL')
-  }
-  let onAbort: (() => void) | undefined
-  const aborted = new Promise<never>((_, reject) => {
-    onAbort = () => {
-      stop()
-      void exited
-        .then(() => raceTimeout(closed, 1000, undefined))
-        .then(() => reject(Object.assign(new Error('gh was stopped'), { code: 'ABORT_ERR' })))
-    }
-  })
-  aborted.catch(() => {})
-  if (signal?.aborted) onAbort!()
-  else signal?.addEventListener('abort', onAbort!, { once: true })
-  const timer = setTimeout(onAbort!, timeoutMs)
-  try {
-    const stdout = await Promise.race([run, aborted])
-    const j = JSON.parse(stdout) as { number?: unknown; state?: unknown; url?: unknown; headRefOid?: unknown }
-    if (typeof j.number !== 'number' || typeof j.state !== 'string' || typeof j.url !== 'string') return null
-    return {
-      number: j.number,
-      state: j.state === 'MERGED' ? 'merged' : j.state === 'CLOSED' ? 'closed' : 'open',
-      url: j.url,
-      ...(typeof j.headRefOid === 'string' && j.headRefOid ? { headOid: j.headRefOid } : {}),
-    }
-  } catch (e) {
-    // Not started at all (ENOENT) has nothing to wait for
-    return (e as NodeJS.ErrnoException).code === 'ENOENT' ? 'unavailable' : null
-  } finally {
-    clearTimeout(timer)
-    if (onAbort) signal?.removeEventListener('abort', onAbort)
-  }
-}
-
-/**
- * Whether a name can be a branch (#69) — the judgment is left to git itself.
- *
- * If ref name rules (the lock suffix, consecutive dots, control characters, `@{`…) were
- * reimplemented here, they would go stale the moment git changed its own rules.
- * `check-ref-format --branch` is the source of truth for that judgment, and its exit code is
- * the answer. This command needs no repository, so cwd can be anywhere.
- */
-export async function gitValidBranchName(name: string): Promise<boolean> {
-  try {
-    await git(process.cwd(), ['check-ref-format', '--branch', name])
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
- * Removes a worktree. `force` discards even uncommitted changes.
- *
- * The caller must preserve local work or obtain the person's discard decision before forcing
- * removal. `withSubmodules` also removes initialized submodules (git requires a second force).
- */
-export async function gitWorktreeRemove(repoCwd: string, path: string, force = false, withSubmodules = false): Promise<void> {
-  await git(repoCwd, ['worktree', 'remove', ...(force ? ['--force', ...(withSubmodules ? ['--force'] : [])] : []), path])
-}
-
-/**
- * How many commits `branch` holds that `trunk` does not (#715): what deleting the branch would lose. null when it
- * cannot be told (the branch or the trunk is not there), which a caller must read as "keep the branch".
- */
-export async function gitBranchAhead(repoCwd: string, branch: string, trunk: string): Promise<number | null> {
-  try {
-    const n = Number((await git(repoCwd, ['rev-list', '--count', `${trunk}..refs/heads/${branch}`])).trim())
-    return Number.isFinite(n) ? n : null
-  } catch {
-    return null
-  }
-}
-
-/** Deletes a branch ref after the caller has preserved local work or obtained the person's discard decision. */
-export async function gitBranchDelete(repoCwd: string, branch: string, trust: GitTrust = {}): Promise<void> {
-  await git(repoCwd, ['branch', '-D', branch], trust)
-}
-
-/**
- * Whether uncommitted changes remain — used to ask whether removal is safe.
- *
- * This guards a forced removal, so work inside a submodule has to count. A trusted project's
- * status descends into submodules as plain git does. Before trust, status does not
- * (`--ignore-submodules=all`, `git-exec.ts`: a submodule's own config could name a filter that
- * was not turned off), so any submodule at all counts as a change: removal then asks first
- * rather than guessing. A worktree is only created in a trusted project, so this is the case of
- * trust taken away afterwards.
- */
-export async function gitWorktreeDirty(
-  path: string,
-  trust: GitTrust = {},
-  limits: SummaryLimits = {},
-): Promise<{ dirty: boolean; changedFiles: number; more?: true; unknown?: true }> {
-  const summary = await gitSummary(path, trust, limits)
-  // Not known to be clean is not clean: removal asks first (#850 review). A folder the system denied is not known either
-  if (summary.unknown || summary.denied) return { dirty: true, changedFiles: 0, unknown: true }
-  let changedFiles = summary.changedFiles
-  if (trust.trusted !== true && summary.isRepo) {
-    // `ls-files --stage` reads the index only; mode 160000 is a submodule (a gitlink)
-    const staged = await git(path, ['ls-files', '--stage', '-z']).catch(() => '')
-    changedFiles += staged.split('\0').filter((line) => line.startsWith('160000 ')).length
-  }
-  return { dirty: changedFiles > 0, changedFiles, ...(summary.more ? { more: true as const } : {}) }
-}
-
-/**
- * The list of registered worktrees. Used to filter out one a person deleted from Finder
- * (git still lists it too — that state is what `prune` is for).
- */
-export async function gitWorktreeList(repoCwd: string): Promise<Worktree[]> {
-  if (!(await isRepo(repoCwd))) return []
-  const out = await git(repoCwd, ['worktree', 'list', '--porcelain'])
-  const list: Worktree[] = []
-  let path = ''
-  for (const line of out.split('\n')) {
-    if (line.startsWith('worktree ')) path = line.slice('worktree '.length).trim()
-    else if (line.startsWith('branch ') && path) {
-      list.push({ path, branch: line.slice('branch refs/heads/'.length).trim() })
-      path = ''
-    }
-  }
-  return list
-}
-
-/** Every path git lists as a worktree of this repository, detached ones too (#715). */
-export async function gitWorktreePaths(repoCwd: string): Promise<string[]> {
-  if (!(await isRepo(repoCwd))) return []
-  const out = await git(repoCwd, ['worktree', 'list', '--porcelain'])
-  return out.split('\n').filter((line) => line.startsWith('worktree ')).map((line) => line.slice('worktree '.length).trim())
-}
-
-/** Cleans up only the registration of a worktree that is gone (does not delete the directory) */
-export async function gitWorktreePrune(repoCwd: string): Promise<void> {
-  await git(repoCwd, ['worktree', 'prune'])
 }

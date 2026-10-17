@@ -1,6 +1,6 @@
 import { rmSync } from 'node:fs'
-import { lstat, readdir, rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { rm } from 'node:fs/promises'
+import { treeBytes } from './entry-sizes.js'
 
 /**
  * The folders the host keeps per session in its data folder (attachments, worktree recovery
@@ -12,16 +12,11 @@ import { join } from 'node:path'
  * tree) as the session's, and a link to nothing made the recovery size throw, which the trash then
  * showed as 0 for every byte of the snapshot beside it. An entry that vanishes while it is being read
  * (a purge or a sweep running at the same time) or cannot be read is skipped, not allowed to cost the
- * sum: the number is an estimate shown to a person, never a reason to delete.
+ * sum: the number is an estimate shown to a person, never a reason to delete. The walk is the one that sizes what git
+ * ignores (`treeBytes`), without its deadline or its cap.
  */
 export async function dataBytes(path: string): Promise<number> {
-  const s = await lstat(path).catch(() => null)
-  if (!s) return 0
-  if (s.isFile()) return s.size
-  if (!s.isDirectory()) return 0
-  const names = await readdir(path).catch(() => [] as string[])
-  const sizes = await Promise.all(names.map((name) => dataBytes(join(path, name))))
-  return sizes.reduce((a, b) => a + b, 0)
+  return (await treeBytes(path, Infinity, Infinity)) ?? 0
 }
 
 /**

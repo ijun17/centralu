@@ -92,20 +92,14 @@ import {
   gitStatusFiles,
   gitDiff,
   gitHeadSha,
-  gitBranchPr,
-  type BranchPr,
   gitLog,
   gitCommitDetail,
   gitBranches,
   gitIgnoredEntries,
-  gitCheckout,
-  gitStage,
-  gitCommit,
-  gitPush,
-  gitValidBranchName,
-  type Worktree,
-  gitWorktreeDirty,
 } from '../dev-services/git.js'
+import { gitCheckout, gitStage, gitCommit, gitPush, GitWriteRuns } from '../dev-services/git-write.js'
+import { gitValidBranchName, type Worktree, gitWorktreeDirty } from '../dev-services/git-worktree.js'
+import { gitBranchPr, type BranchPr } from '../dev-services/git-pr.js'
 import {
   importFile,
   listDir,
@@ -205,6 +199,8 @@ export class SessionManager {
   private watchers = new DirWatchers((projectId, dirs) => this.emit({ type: 'fs_changed', projectId, dirs }))
   /** Every model request's cache figures over the last day, per tool (docs/agent-host.md §6.1); read by `usageFor` */
   private readonly cacheLedger = new CacheLedger()
+  /** The git panel's writes still running, so the person can cancel one (`git.cancel`, #1007) */
+  private readonly gitWrites = new GitWriteRuns()
   /**
    * `detachAll` is handing the sessions to the next host (#280): the waits it fails are not the end of their turns,
    * so no report goes out and the marks stay in the store for the host that sees those turns end (#646).
@@ -2914,16 +2910,24 @@ export class SessionManager {
     return gitIgnoredEntries(this.cwdOf(projectId), undefined, this.gitTrust(projectId))
   }
   gitCheckout(projectId: string, branch: string, dryRun?: boolean) {
-    return gitCheckout(this.cwdOf(projectId), branch, { dryRun, ...this.gitTrust(projectId) })
+    const cwd = this.cwdOf(projectId)
+    return this.gitWrites.run(projectId, (signal) => gitCheckout(cwd, branch, { dryRun, signal, ...this.gitTrust(projectId) }))
   }
   gitStage(projectId: string, paths: string[], unstage?: boolean) {
-    return gitStage(this.cwdOf(projectId), paths, unstage)
+    const cwd = this.cwdOf(projectId)
+    return this.gitWrites.run(projectId, (signal) => gitStage(cwd, paths, unstage, signal))
   }
   gitCommit(projectId: string, message: string) {
-    return gitCommit(this.cwdOf(projectId), message)
+    const cwd = this.cwdOf(projectId)
+    return this.gitWrites.run(projectId, (signal) => gitCommit(cwd, message, signal))
   }
   gitPush(projectId: string) {
-    return gitPush(this.cwdOf(projectId))
+    const cwd = this.cwdOf(projectId)
+    return this.gitWrites.run(projectId, (signal) => gitPush(cwd, signal))
+  }
+  /** Ends the git panel's write still running for this project (#1007); whether there was one */
+  gitCancel(projectId: string): { cancelled: boolean } {
+    return { cancelled: this.gitWrites.cancel(projectId) }
   }
 
   // ── File tree/viewer (C-1) ──

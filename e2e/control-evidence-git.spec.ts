@@ -38,6 +38,38 @@ test('Git: the diff gets the wide area; the list, staging and commit live in the
   expect(await page.evaluate(() => (window as any).__mock.gitState.lastCommitMessage)).toBe('test commit')
 })
 
+/*
+ * #1007: a commit or push waits up to ten minutes on a hook or a credential helper waiting on a sign-in (#980), and
+ * the panel's buttons wait with it. Cancel ends it; the toast says it was cancelled, not that it failed.
+ */
+test('Git panel: a commit or push still running can be cancelled (#1007)', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.gitState.files = [{ path: 'src/a.ts', staged: true, status: 'M' }]
+    m.gitState.holdWrites = true
+  })
+  await newSession(page, 'alpha', 'task')
+
+  // Nothing to cancel while nothing runs
+  await expect(page.getByTestId('evidence-git-cancel')).toHaveCount(0)
+  await page.getByTestId('evidence-commit-message').fill('held commit')
+  await page.getByTestId('evidence-commit').click()
+  await expect(page.getByTestId('evidence-push')).toBeDisabled()
+  await page.getByTestId('evidence-git-cancel').click()
+  await expect(page.getByTestId('toast')).toContainText('Commit cancelled')
+  await expect(page.getByTestId('evidence-git-cancel')).toHaveCount(0)
+  expect(await page.evaluate(() => (window as any).__mock.gitState.lastCommitMessage)).toBeUndefined()
+  // The message stays for the next try
+  await expect(page.getByTestId('evidence-commit-message')).toHaveValue('held commit')
+
+  await page.getByTestId('evidence-push').click()
+  await page.getByTestId('evidence-git-cancel').click()
+  await expect(page.getByTestId('toast')).toContainText('Push cancelled')
+  await expect(page.getByTestId('evidence-push')).toBeEnabled()
+  expect(await page.evaluate(() => (window as any).__mock.gitState.pushed)).toBe(false)
+})
+
 test('Git panel: a copied diff comes out exactly as that diff (#36)', async ({ page }) => {
   const diff =
     '--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n-const old = 1\n+const next = 1\n   indented\n unchanged'

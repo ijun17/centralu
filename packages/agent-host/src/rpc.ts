@@ -295,6 +295,7 @@ export function createRpcHandler(
       return mgr.gitCommit(projectId, message)
     },
     'git.push': async (p) => mgr.gitPush(RpcMethods['git.push'].params.parse(p).projectId),
+    'git.cancel': async (p) => mgr.gitCancel(RpcMethods['git.cancel'].params.parse(p).projectId),
     'attachments.save': async (p) => {
       const { sessionId, name, mime, dataBase64 } = RpcMethods['attachments.save'].params.parse(p)
       return mgr.saveAttachment(sessionId, name, mime, dataBase64)

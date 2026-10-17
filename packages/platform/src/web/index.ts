@@ -571,6 +571,7 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       },
       commit: (projectId, message) => rpc.call('git.commit', { projectId, message }),
       push: (projectId) => rpc.call('git.push', { projectId }),
+      cancel: (projectId) => rpc.call('git.cancel', { projectId }),
     },
     terminal: {
       list: async (projectId) =>
