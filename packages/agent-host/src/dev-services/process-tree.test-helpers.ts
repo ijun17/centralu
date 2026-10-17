@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { alive } from '../process.test-helpers.js'
 
 /**
  * A real process tree for the Windows tree-kill tests (#849): a Node script that starts a copy of itself, which starts
@@ -63,14 +64,7 @@ export function treePids(pidFile: string): number[] {
   return readFileSync(pidFile, 'utf8').split(/\r?\n/).filter(Boolean).map(Number)
 }
 
-export function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
+export { alive }
 
 /** Waits until the condition holds and returns the last value read; never throws, so the assertion after it names what was left */
 export async function settle<T>(read: () => T, ok: (v: T) => boolean, ms: number): Promise<T> {

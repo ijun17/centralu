@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
+import { eventually, SLOW } from './test-timing.js'
 
 /**
  * Every time limit a test sets for itself is scaled for Windows (#845).
@@ -12,11 +13,19 @@ import { describe, expect, it } from 'vitest'
  * `lazy-resume`, `start-agent`, `versions`, `git-pr` and others set 10–30 s and ran out there while
  * the rest of the suite had three times the room. This reads each test file's syntax tree and lists
  * every limit passed to `it`/`test`/`describe` or a hook (`it(name, fn, 30_000)`,
- * `{ timeout: 10_000 }`) that does not multiply by `SLOW`.
+ * `{ timeout: 10_000 }`), or set for a whole file (`vi.setConfig({ testTimeout: 30_000 })`), that
+ * does not multiply by `SLOW`.
  */
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const RUNNERS = new Set(['it', 'test', 'describe', 'beforeAll', 'afterAll', 'beforeEach', 'afterEach'])
+/** What `vi.setConfig` takes that is a time limit */
+const CONFIG_LIMITS = new Set(['testTimeout', 'hookTimeout'])
+
+/** `vi.setConfig(...)` (or `vitest.setConfig`), which sets the limits of every test in the file after it */
+function isSetConfig(e: ts.Expression): boolean {
+  return ts.isPropertyAccessExpression(e) && e.name.text === 'setConfig' && ts.isIdentifier(e.expression) && ['vi', 'vitest'].includes(e.expression.text)
+}
 
 /** The runner a call goes back to: `it`, `it.skip`, `it.each([...])`, `test.skipIf(x)` */
 function runnerOf(e: ts.Expression): string | null {
@@ -32,6 +41,12 @@ export function limitsIn(file: string, source: string): string[] {
   const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, file.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
   const found: ts.Expression[] = []
   const visit = (n: ts.Node) => {
+    if (ts.isCallExpression(n) && isSetConfig(n.expression)) {
+      for (const a of n.arguments) {
+        if (!ts.isObjectLiteralExpression(a)) continue
+        for (const p of a.properties) if (ts.isPropertyAssignment(p) && CONFIG_LIMITS.has(p.name.getText(sf))) found.push(p.initializer)
+      }
+    }
     if (ts.isCallExpression(n) && RUNNERS.has(runnerOf(n.expression) ?? '')) {
       const args = n.arguments
       const fn = args.findIndex((a) => ts.isArrowFunction(a) || ts.isFunctionExpression(a))
@@ -75,5 +90,31 @@ describe('time limits a test sets for itself', () => {
         .map((l) => `${f}:${l}`),
     )
     expect(unscaled).toEqual([])
+  })
+})
+
+describe('eventually', () => {
+  it('returns the first truthy value the check gives', async () => {
+    let n = 0
+    expect(await eventually(() => (++n >= 3 ? { n } : null))).toEqual({ n: 3 })
+  })
+
+  it('tries a check that throws again, as one that returns false', async () => {
+    let n = 0
+    const value = await eventually(() => {
+      if (++n < 3) throw new Error('not yet')
+      return 'ready'
+    })
+    expect(value).toBe('ready')
+  })
+
+  it('gives up after its limit times SLOW, naming the last value it saw', async () => {
+    const t0 = Date.now()
+    await expect(eventually(() => '', 50)).rejects.toThrow(`not true within ${50 * SLOW} ms; the last value was ''`)
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(50 * SLOW)
+  })
+
+  it('gives up naming the last error the check threw', async () => {
+    await expect(eventually(() => { throw new Error('ENOENT: pids') }, 20)).rejects.toThrow(`still failing after ${20 * SLOW} ms: ENOENT: pids`)
   })
 })

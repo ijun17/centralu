@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { collectOrphansWindows, killTargets, killTree, orphansOf, parsePs, parseWinProcs, stopTree, survivorTargets, type KillOs } from './kill-tree.js'
 import { alive as isAlive, cleanUp, plantTreeScript, settle as settleOn, treePids } from './process-tree.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { alive } from '../process.test-helpers.js'
 
 /**
  * Choosing targets for a tree kill (the conclusion of what was measured on 2026-09-07).
@@ -143,14 +144,6 @@ describe.skipIf(process.platform === 'win32')('stopTree — a real tree (#149)',
   const GRACE_MS = 500
   const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
   const table = () => parsePs(execFileSync('ps', ['-A', '-o', 'pid=,ppid=,pgid='], { encoding: 'utf8' }))
-  const alive = (pid: number) => {
-    try {
-      process.kill(pid, 0)
-      return true
-    } catch {
-      return false
-    }
-  }
   /** Waits until the condition holds and returns the last value read. Does not throw if it never holds in time — the assertion is expect's job */
   const settle = async <T,>(read: () => T, ok: (v: T) => boolean, ms: number): Promise<T> => {
     const deadline = Date.now() + ms

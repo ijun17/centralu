@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
 import type { AgentProcess } from '../contract.js'
 import { fakeAgentCli, goneWithin, helperPid, killLeftovers } from '../fake-agent-cli.test-helpers.js'
+import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /**
  * Claude without a keeper (Windows, dev, e2e, a debug app). The SDK's own spawn signals only the
@@ -35,7 +36,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 const { ClaudeAdapter } = await import('./index.js')
 
 // Real processes: a node start costs seconds on a loaded machine
-vi.setConfig({ testTimeout: 30_000 })
+vi.setConfig({ testTimeout: 30_000 * SLOW })
 const started: number[] = []
 afterEach(() => killLeftovers(started))
 

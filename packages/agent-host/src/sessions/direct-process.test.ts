@@ -8,6 +8,7 @@ import { AgentVersionService } from '../agent-versions.js'
 import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
+import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
  * Putting a session to sleep (#568) and moving it to a newly installed CLI (#297) without a keeper, with real
@@ -21,9 +22,9 @@ import { SessionManager } from './manager.js'
  */
 
 // Real processes: a node start costs seconds on a loaded machine, and every wait below is bounded on its own
-vi.setConfig({ testTimeout: 30_000 })
+vi.setConfig({ testTimeout: 30_000 * SLOW })
 /** The sweep after an exit lists processes through PowerShell on Windows, which alone takes most of a second */
-const GONE_MS = process.platform === 'win32' ? 15_000 : 5000
+const GONE_MS = 5_000 * SLOW
 
 class Handle implements SessionHandle {
   externalId: string | null

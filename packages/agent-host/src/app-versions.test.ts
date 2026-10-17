@@ -1,6 +1,4 @@
-import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { RpcMethods, type AppVersions, type ToolName } from '@cc/protocol'
@@ -10,6 +8,7 @@ import { PROJECT_APPS, plantApp } from './apps/external/test-helpers.js'
 import { Store } from './dev-services/store.js'
 import { createRpcHandler } from './rpc.js'
 import { SessionManager } from './sessions/manager.js'
+import { fixtureGit, removeTree, tempRoot } from './temp-dir.test-helpers.js'
 
 /**
  * App versions — from the RPC door (M4 E-1). For a project app, git is the version history, so
@@ -26,13 +25,13 @@ let mgr: SessionManager
 let rpc: ReturnType<typeof createRpcHandler>
 let projectId = ''
 
-const git = (...args: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=Tester', ...args], { cwd: repo })
+const git = (...args: string[]) => fixtureGit(repo, ['-c', 'user.name=Tester', ...args])
 
 beforeEach(async () => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-app-versions-')))
+  root = tempRoot('cc-app-versions-')
   repo = join(root, 'repo')
   mkdirSync(join(root, 'data'))
-  execFileSync('git', ['init', '-q', '-b', 'main', repo])
+  fixtureGit(root, ['init', '-q', '-b', 'main', repo])
   store = new Store()
   const adapters = new Map<ToolName, AgentAdapter>()
   mgr = new SessionManager(store, adapters, () => {})
@@ -46,7 +45,7 @@ afterEach(async () => {
   await mgr.disposeAll()
   await rt.dispose()
   store.close()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 describe('apps.versions', () => {
