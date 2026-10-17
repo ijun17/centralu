@@ -141,6 +141,8 @@ export type ClaudeAdapterOptions = {
   retryDelay?: () => number
   /** How long `settle` waits on Windows. Default: 1.5 s, inside the app's 3 s stop grace */
   exitGraceMs?: number
+  /** How long a Stop waits for the CLI to confirm it before saying it could not stop. Default: 10 s */
+  stopConfirmMs?: number
   /** How long a usage probe is asked, and the wait between two asks. Default: 20 s and 0.5 s (#726) */
   probeAskMs?: number
   probeRetryMs?: number
@@ -154,6 +156,13 @@ export type ClaudeAdapterOptions = {
  * so nothing waits there.
  */
 const WINDOWS_START_GAP_MS = 1500
+
+/**
+ * How long a Stop waits for the CLI's answer to the interrupt (`ClaudeSession.interrupt`). The CLI answers a control
+ * request as it reads it, mid-turn or not, so a wait this long means the request is lost; past it the person is told
+ * the turn could not be stopped, rather than left looking at a turn that never ends.
+ */
+const STOP_CONFIRM_MS = 10_000
 
 export class ClaudeAdapter implements AgentAdapter {
   readonly tool = 'claude' as const
@@ -173,6 +182,7 @@ export class ClaudeAdapter implements AgentAdapter {
       retryDelay: options.retryDelay ?? (() => 3000 + Math.floor(Math.random() * 3000)),
       closing: new Set(),
       exitGraceMs: options.exitGraceMs ?? 1500,
+      stopConfirmMs: options.stopConfirmMs ?? STOP_CONFIRM_MS,
     }
     this.probeAskMs = options.probeAskMs ?? PROBE_USAGE_MS
     this.probeRetryMs = options.probeRetryMs ?? PROBE_USAGE_RETRY_MS

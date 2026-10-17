@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
-import type { NormalizedEvent } from '@cc/protocol'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { STOP_NOT_CONFIRMED_LABEL, transition, type NormalizedEvent, type SessionState } from '@cc/protocol'
+import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /**
  * What Stop leaves behind (#168). The CLI closes an interrupted turn with an
@@ -16,6 +17,8 @@ const cli = vi.hoisted(() => {
   const inbox: unknown[] = []
   let wake: (() => void) | null = null
   return {
+    /** What the SDK's interrupt answers; a test replaces it, `afterEach` puts back the one that confirms at once */
+    interrupt: async (): Promise<unknown> => undefined,
     push(m: unknown) {
       inbox.push(m)
       wake?.()
@@ -33,7 +36,7 @@ const cli = vi.hoisted(() => {
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: () => ({
     [Symbol.asyncIterator]: () => cli.stream(),
-    interrupt: async () => {},
+    interrupt: () => cli.interrupt(),
     close: () => {},
     supportedCommands: async () => [],
     getContextUsage: async () => undefined,
@@ -50,9 +53,9 @@ const delta = (text: string) => ({
 })
 const interrupted = { type: 'result', subtype: 'error_during_execution', is_error: true, modelUsage: {} }
 
-async function session() {
+async function session(options: ConstructorParameters<typeof ClaudeAdapter>[0] = {}) {
   const events: NormalizedEvent[] = []
-  const handle = await new ClaudeAdapter().createSession(
+  const handle = await new ClaudeAdapter(options).createSession(
     { sessionId: 's1', cwd: '/tmp', permissionPreset: 'auto' },
     (e) => events.push(e),
   )
@@ -104,6 +107,155 @@ describe('stopping a turn in Claude (#168)', () => {
     cli.push({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'text', text: 'Usage 42%' }] } })
     await tick()
     expect(events.some((e) => e.type === 'message_delta' && e.text === 'Usage 42%')).toBe(true)
+    await handle.dispose()
+  })
+})
+
+/**
+ * Stopped is said only once the CLI says so (#1060). `interrupt()` used to emit waiting_input/interrupted before the
+ * SDK's interrupt had answered, so a rejected interrupt showed the turn as stopped while the CLI kept working. A Stop
+ * that has not taken effect is a notice, not an error: an error moves the session to `error`, which ends the turn for
+ * the host, and the confirmation that may still come (`waiting_input`) is not a move `error` allows. So the states are
+ * read through the state machine itself (`transition`), as the host and the window apply them.
+ */
+describe('a Stop Claude has not confirmed (interrupt)', () => {
+  afterEach(() => {
+    cli.interrupt = async () => undefined
+  })
+  const stoppedStates = (events: NormalizedEvent[]) =>
+    events.filter((e) => e.type === 'state_change' && e.state === 'waiting_input' && e.reason === 'interrupted')
+  /** The session's state after these events, from idle, through the shared state machine; an illegal move is a failure */
+  const stateOf = (events: NormalizedEvent[]): SessionState => {
+    let state: SessionState = 'idle'
+    for (const e of events) {
+      const step = transition(state, e)
+      expect(step.illegal, `${e.type} from ${state}`).toBe(false)
+      state = step.state
+    }
+    return state
+  }
+  const stopNotices = (events: NormalizedEvent[]) =>
+    events.flatMap((e) => (e.type === 'notice' && e.label === STOP_NOT_CONFIRMED_LABEL ? [e.text] : []))
+  /** A turn running: sent, and the model's first words arrived */
+  async function running(options: ConstructorParameters<typeof ClaudeAdapter>[0] = {}) {
+    const s = await session(options)
+    s.handle.send('do a long task')
+    cli.push(delta('working on it'))
+    await tick()
+    expect(stateOf(s.events)).toBe('working')
+    return s
+  }
+
+  it('says the turn stopped only after the interrupt answers', async () => {
+    let confirm: () => void = () => {}
+    cli.interrupt = () => new Promise((resolve) => (confirm = () => resolve(undefined)))
+    const { handle, events } = await running()
+    handle.interrupt()
+    await tick()
+    expect(stateOf(events)).toBe('working')
+
+    confirm()
+    await tick()
+    expect(stateOf(events)).toBe('waiting_input')
+    expect(stoppedStates(events)).toHaveLength(1)
+    await handle.dispose()
+  })
+
+  it('a rejected interrupt keeps the turn working, says why in a notice, and its own ending is its own', async () => {
+    cli.interrupt = async () => {
+      throw new Error('the control request was lost')
+    }
+    const { handle, events, errors } = await running()
+    handle.interrupt()
+    await tick()
+
+    expect(stateOf(events)).toBe('working')
+    expect(errors()).toEqual([])
+    expect(stopNotices(events)).toEqual(['Could not stop: the control request was lost. The turn is still running.'])
+    // The CLI went on, and the turn's ending is not taken for our stop: an error_during_execution is a failure again
+    cli.push(delta(' and more'))
+    cli.push(interrupted)
+    await tick()
+    expect(errors()).toHaveLength(1)
+    expect(stateOf(events)).toBe('error')
+    await handle.dispose()
+  })
+
+  it("the stopped turn's result confirms the stop when the interrupt's answer never comes", async () => {
+    cli.interrupt = () => new Promise(() => {})
+    const { handle, events } = await running({ stopConfirmMs: 20 })
+    handle.interrupt()
+    cli.push(interrupted)
+    await vi.waitFor(() => expect(stoppedStates(events)).toHaveLength(1), { timeout: 5_000 * SLOW })
+    // The bound has passed by now, and the turn it waited on is over: nothing says it could not stop
+    await new Promise((r) => setTimeout(r, 60))
+    expect(stopNotices(events)).toEqual([])
+    expect(stateOf(events)).toBe('waiting_input')
+    await handle.dispose()
+  })
+
+  it('a Stop pressed with no turn running is said at once, as before', async () => {
+    cli.interrupt = () => new Promise(() => {})
+    const { handle, events } = await session()
+    handle.interrupt()
+    expect(stoppedStates(events)).toHaveLength(1)
+    await handle.dispose()
+  })
+
+  it('an interrupt that never answers is said in a notice once its bound passes; the turn stays working, and a late answer still stops it', async () => {
+    let confirm: () => void = () => {}
+    cli.interrupt = () => new Promise((resolve) => (confirm = () => resolve(undefined)))
+    const { handle, events, errors } = await running({ stopConfirmMs: 20 })
+    handle.interrupt()
+
+    await vi.waitFor(() => expect(stopNotices(events)).toHaveLength(1), { timeout: 5_000 * SLOW })
+    expect(stopNotices(events)[0]).toMatch(/^Claude Code has not confirmed the stop after \d+ s\. The turn is still running\.$/)
+    expect(errors()).toEqual([])
+    expect(stateOf(events)).toBe('working')
+
+    confirm()
+    await tick()
+    expect(stateOf(events)).toBe('waiting_input')
+    expect(stoppedStates(events)).toHaveLength(1)
+    await handle.dispose()
+  })
+
+  it('a second Stop joins the first: one bound, and two answers say stopped once', async () => {
+    const answers: (() => void)[] = []
+    cli.interrupt = () => new Promise((resolve) => answers.push(() => resolve(undefined)))
+    const { handle, events } = await running({ stopConfirmMs: 10_000 })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      handle.interrupt()
+      vi.advanceTimersByTime(6_000)
+      handle.interrupt()
+      expect(answers).toHaveLength(2)
+      // 10 s after the first Stop: had the second started the bound again, nothing would be said for 6 s more
+      vi.advanceTimersByTime(4_001)
+      expect(stopNotices(events)).toHaveLength(1)
+      expect(stateOf(events)).toBe('working')
+    } finally {
+      vi.useRealTimers()
+    }
+    for (const answer of answers) answer()
+    await tick()
+    expect(stoppedStates(events)).toHaveLength(1)
+    expect(stopNotices(events)).toHaveLength(1)
+    await handle.dispose()
+  })
+
+  it("a refusal of one Stop is not the verdict while another Stop's interrupt may still land", async () => {
+    const pending: { resolve: () => void; reject: (e: Error) => void }[] = []
+    cli.interrupt = () => new Promise((resolve, reject) => pending.push({ resolve: () => resolve(undefined), reject }))
+    const { handle, events } = await running()
+    handle.interrupt()
+    handle.interrupt()
+    pending[0]!.reject(new Error('busy'))
+    await tick()
+    expect(stopNotices(events)).toEqual([])
+    pending[1]!.resolve()
+    await tick()
+    expect(stateOf(events)).toBe('waiting_input')
     await handle.dispose()
   })
 })

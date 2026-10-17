@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { NormalizedEvent } from '@cc/protocol'
+import { STOP_NOT_CONFIRMED_LABEL, type NormalizedEvent } from '@cc/protocol'
 
 /**
  * Bookkeeping both adapters do the same way. Each helper here replaces copies that had drifted apart, so a rule
@@ -80,6 +80,15 @@ export class PendingCards<T> {
  */
 export function couldNotStop(sessionId: string, err: Error): NormalizedEvent {
   return { type: 'error', sessionId, error: { code: 'internal', message: `Could not stop: ${err.message}`, retryable: true } }
+}
+
+/**
+ * A Stop of a running turn that has not taken effect, while the turn goes on (#1060). A notice, not an error: an
+ * error moves the session to `error`, which ends the turn for the host (delegation waits settle, queued requests go
+ * in) and on screen, and the confirmation that may still come (`waiting_input`) is not a move `error` allows.
+ */
+export function stopNotConfirmed(sessionId: string, text: string): NormalizedEvent {
+  return { type: 'notice', sessionId, level: 'warning', text, from: 'Centralu', label: STOP_NOT_CONFIRMED_LABEL }
 }
 
 /**
