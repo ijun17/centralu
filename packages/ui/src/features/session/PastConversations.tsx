@@ -19,7 +19,6 @@ import { SkeletonLines } from '../../components/Skeleton.jsx'
 export function PastConversations({ sessionId, projectId, tool }: { sessionId: string; projectId: string; tool: string }) {
   const platform = useStore((s) => s.platform)
   const createSession = useStore((s) => s.createSession)
-  const deleteSession = useStore((s) => s.deleteSession)
   const focusSession = useStore((s) => s.focusSession)
   const askComposerFocus = useStore((s) => s.askComposerFocus)
   const setToast = useStore((s) => s.setToast)
@@ -33,20 +32,27 @@ export function PastConversations({ sessionId, projectId, tool }: { sessionId: s
   if (listed.loading && !listed.data) return <PastSkeleton />
   if (sessions.length === 0) return null
 
+  /*
+   * The empty session held nothing (no message, no turn), so it goes without a word: through the port, not the store's
+   * deleteSession, whose "Moved to the trash" toast answers a deletion the person asked for. The host's
+   * session_deleted takes it off the screen either way.
+   */
+  const discardEmpty = () => void platform?.agents.deleteSession(sessionId).catch(() => {})
+
   const pick = async (s: ExternalSession) => {
     if (busy) return
     if (s.importedAs) {
       focusSession(s.importedAs)
       askComposerFocus(s.importedAs)
-      void deleteSession(sessionId).catch(() => {})
+      discardEmpty()
       return
     }
     setBusy(s.externalId)
     try {
       const created = await createSession(projectId, { tool, resumeExternalId: s.externalId, importHistory: true })
       askComposerFocus(created.id)
-      // The empty session held nothing: no message, no turn. Removing it keeps the sidebar to the one the person chose
-      void deleteSession(sessionId).catch(() => {})
+      // Removing the empty one keeps the sidebar to the session the person chose
+      discardEmpty()
     } catch (e) {
       setToast(`Could not load that conversation: ${(e as Error).message}`)
     } finally {
