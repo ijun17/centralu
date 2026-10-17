@@ -261,3 +261,28 @@ test('with text zoomed in, the right-click menu still appears where clicked and 
   expect(menu.x + menu.width).toBeLessThanOrEqual(viewport.width)
   expect(Math.abs(menu.y - at.y)).toBeLessThanOrEqual(4)
 })
+
+/*
+ * Watches live in the host's memory (#972 item 3). A host the window reconnects to after a crash restart or a build
+ * switch holds none, so the tree has to send its watched set again, and re-read what is open: a change made while no
+ * host was watching was never reported.
+ */
+test('after a host resync the tree registers its watches again and re-reads what is open', async ({ page }) => {
+  await setup(page)
+  await seedTree(page, { '': [{ name: 'a.ts' }] })
+  await openTree(page)
+  await expect(page.getByTestId('file-a.ts')).toBeVisible()
+  const projectId = await page.evaluate(() => [...(window as any).__mock.watchedDirs.keys()][0] as string)
+  expect(projectId).toBeTruthy()
+
+  // The new host knows no watches, and a file appeared while nobody was watching
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.watchedDirs.clear()
+    m.fsState.entries[''].push({ name: 'b.ts', path: 'b.ts', isDir: false, ignored: false })
+    m.setConnectionState('disconnected')
+    m.setConnectionState('resync_required')
+  })
+  await expect.poll(() => page.evaluate((id) => (window as any).__mock.watchedDirs.get(id) as string[] | undefined, projectId)).toEqual([''])
+  await expect(page.getByTestId('file-b.ts')).toBeVisible()
+})
