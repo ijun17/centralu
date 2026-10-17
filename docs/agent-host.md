@@ -774,7 +774,18 @@ in five ways, each in one place:
 | Watching the file tree | one watcher per expanded folder | one recursive watcher on the project's root: a watched folder, and every folder above it, cannot be renamed or moved (#849) | `dev-services/watch.ts`, `os.ts` `locksWatchedFolders` |
 
 Quitting closes the host's stdin (it runs with `--watch-parent`, so EOF runs the same shutdown as
-TERM) and ends its tree with `taskkill` only if it is still running after the grace period. A
+TERM) and ends its tree with `taskkill` only if it is still running after the grace period.
+
+**Its work ends with it (#1067).** Windows does not end a process's children when it ends, and a host that crashed,
+was ended or swapped left behind whatever its work had started through a program that is not Node: codex's MCP
+servers, a dev server a terminal's PowerShell started, what a git hook started (libuv's own job lets a child's
+children leave it, and ConPTY's are in no job). At start the host joins a job object with
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and holds its only handle, so everything it starts from then on, and everything
+that starts, ends when the host does (`lifecycle/work-job.ts`, the `work job` start step; one PowerShell, run while
+the store opens). The job allows no breakaway: Git for Windows' sh leaves a job that allows it, so a hook's children
+outlived the host. The host opens nothing for the person ("Open in IDE" and `system.openUrl` are the window's); a
+program the person starts from a terminal that was not already running ends with the host. A host that cannot join
+(PowerShell refused, an outer job that forbids it) says so in its log and runs as before. A
 worktree setup command runs under `cmd.exe`, so it reads `%CENTRALU_WORKTREE%`, not
 `$CENTRALU_WORKTREE`.
 

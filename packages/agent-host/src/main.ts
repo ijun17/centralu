@@ -57,6 +57,7 @@ import { projectsHome } from './dev-services/project-folder.js'
 import { parseJson } from './dev-services/store/json.js'
 import { asObj } from './json-value.js'
 import { flagSetting } from './dev-services/store/settings.js'
+import { joinWorkJob, workJobLine } from './lifecycle/work-job.js'
 
 /**
  * Agent Host entry point.
@@ -75,6 +76,11 @@ const start = new StartSequence()
  */
 start.at('launch variables')
 const launch = takeLaunchEnv()
+/*
+ * Windows (#1067): this host joins a job that ends what it starts when it ends. Asked now, so the PowerShell it takes
+ * runs while the store opens; awaited at `work job`, before anything is started.
+ */
+const workJob = joinWorkJob()
 
 /**
  * The build identifier. The bundler swaps `__CC_BUILD__` for the actual commit
@@ -255,6 +261,10 @@ const adapters = createAdapters()
  * host left there is taken over below. Without a keeper (`pnpm dev`, e2e, a debug app, Windows)
  * this is null and everything is spawned here.
  */
+start.at('work job')
+const workJobSaid = workJobLine(await workJob)
+if (workJobSaid) console.error(workJobSaid)
+
 start.at('keeper children')
 const held = launch.underKeeper ? await connectHeldChildren(dirname(dbPath)) : null
 
