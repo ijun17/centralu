@@ -20,10 +20,10 @@ import type { ChildRunResult, StartAgentOpts } from '../adapters/contract.js'
 import { gigabytes, type MemoryShortfall } from './memory-gate.js'
 import { gitSummary } from '../dev-services/git.js'
 import { gitValidBranchName } from '../dev-services/git-worktree.js'
-import type { HostAskAnswer } from './host-cards.js'
 import type { DelegationHost } from './delegation-host.js'
 import { newOrchestratorAgentFolder } from './orchestrator-home.js'
 import { AgentStartGates } from './agent-start-gates.js'
+import { AgentConsents } from './agent-consents.js'
 import {
   ASK_THE_PERSON,
   ORCHESTRATOR_PLACE,
@@ -49,9 +49,6 @@ type StartProgress = {
   /** Said when the model or effort asked for could not be checked */
   unchecked?: string
 }
-
-/** The person's answer on a start_agent card, read as consent; a refusal says whether they refused or nobody answered */
-type AgentConsent = { ok: true } | { ok: false; error: string; why: 'denied' | 'withdrawn' }
 
 /** The answer when start_agent's setup outlasts its bound: it states whether a session exists, and what to do next */
 function startAgentLate(progress: StartProgress): ChildRunResult {
@@ -111,19 +108,21 @@ export type StartAgentDelegations = {
 export class AgentStartFlow {
   /** Whether a session may start an agent now: its caller's standing and the ceiling (agent-start-gates.ts) */
   private readonly gates: AgentStartGates
+  /** The person's consent for a session to start agents (agent-consents.ts) */
+  private readonly consents: AgentConsents
 
   constructor(
     private readonly host: DelegationHost,
     private readonly flow: StartAgentDelegations,
   ) {
     this.gates = new AgentStartGates(host)
+    this.consents = new AgentConsents(host)
   }
 
-  /**
-   * Sessions the person allowed to start agents "always for this session" (#561, `ensureAgentConsent`). Live only, like
-   * `readGrants`: a restart asks again. The project-wide always is a stored consent instead.
-   */
-  readonly agentConsents = new Set<string>()
+  /** `AgentConsents.agentConsents` (agent-consents.ts), kept on the flow for its callers */
+  get agentConsents(): Set<string> {
+    return this.consents.agentConsents
+  }
 
   /**
    * start_agent (#561): an ordinary session starts another agent (Claude or Codex) in its own project on a task.
@@ -592,57 +591,14 @@ export class AgentStartFlow {
     return wrong ?? { error: null }
   }
 
-  /**
-   * The person's consent for a session to start agents (#561), the first time it does: a card in the caller's approval
-   * slot. "Always" is kept for this session while this host serves it; with ⌥ (scope `project`) it is remembered as the
-   * project's 'agents' consent, listed in Settings → Permissions with ask_project's pairs and revoked there.
-   *
-   * **Trust is the consent (#673).** A `normal` caller in a trusted project starts agents without a card: the person
-   * already decided about that project when they trusted it (#655), and a card in a session they were not looking at
-   * only made the session work alone. `safe` keeps the card, as it keeps every boundary closed (#606); `auto` opens it.
-   * `onCard` hears the request id before a card is raised, so the request can be kept until the person answers.
-   */
-  async ensureAgentConsent(
-    callerId: string,
-    detail: Extract<ApprovalDetail, { kind: 'agent_start' }>,
-    signal?: AbortSignal,
-    onCard?: (requestId: string) => void,
-  ): Promise<AgentConsent> {
-    if (this.agentConsents.has(callerId)) return { ok: true }
-    if (detail.project.id && this.host.store.permissions.getProjectConsent(detail.project.id, detail.project.id, 'agents')) return { ok: true }
-    if (this.trustIsAgentConsent(callerId, detail.project.id)) return { ok: true }
-    const requestId = `ag-${randomUUID()}`
-    if (this.host.meta.get(callerId)?.permissionPreset !== 'auto') onCard?.(requestId)
-    return this.agentConsentFrom(callerId, detail.project.id, await this.host.askHost(callerId, detail, signal, { requestId }))
+  /** `AgentConsents.ensureAgentConsent` (agent-consents.ts), kept on the flow for its callers */
+  ensureAgentConsent(...a: Parameters<AgentConsents['ensureAgentConsent']>): ReturnType<AgentConsents['ensureAgentConsent']> {
+    return this.consents.ensureAgentConsent(...a)
   }
 
-  /** A `normal` caller in a trusted project needs no card to start agents (#673): the project's trust, read now */
-  private trustIsAgentConsent(callerId: string, projectId: string): boolean {
-    if (this.host.meta.get(callerId)?.permissionPreset !== 'normal') return false
-    return this.host.store.projects.listProjects().find((p) => p.id === projectId)?.trusted === true
-  }
-
-  /** The person's answer on a start_agent card, as consent (remembered where they chose "always") or a refusal */
-  private agentConsentFrom(callerId: string, projectId: string, decision: HostAskAnswer): AgentConsent {
-    // The orchestrator's place is no project to remember it for (#853): always for the project is always for this session
-    if (decision === 'always_project' && projectId === ORCHESTRATOR_PLACE) {
-      this.agentConsents.add(callerId)
-      return { ok: true }
-    }
-    if (decision === 'always_project') {
-      this.host.store.permissions.setProjectConsent(projectId, projectId, 'agents')
-      this.host.emit({ type: 'project_consents_changed' })
-      return { ok: true }
-    }
-    if (decision === 'always') {
-      this.agentConsents.add(callerId)
-      return { ok: true }
-    }
-    if (decision === 'allow') return { ok: true }
-    if (decision === 'deny') {
-      return { ok: false, why: 'denied', error: `The person did not allow this session to start another agent. Do not start one again unless they tell you to. ${ASK_THE_PERSON}` }
-    }
-    return { ok: false, why: 'withdrawn', error: `The question to the person was withdrawn before they answered, so no agent was started. ${ASK_THE_PERSON}` }
+  /** `AgentConsents.agentConsentFrom` (agent-consents.ts), kept on the flow for its callers */
+  agentConsentFrom(...a: Parameters<AgentConsents['agentConsentFrom']>): ReturnType<AgentConsents['agentConsentFrom']> {
+    return this.consents.agentConsentFrom(...a)
   }
 
   /** A start_agent request whose card now stands (#673): kept, in memory and in the store, until it is answered */
