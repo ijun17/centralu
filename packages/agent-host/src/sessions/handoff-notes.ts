@@ -31,7 +31,7 @@ export class HandoffNotes {
     let generation = [sessionId]
     try {
       while (generation.length) {
-        const heirs = generation.flatMap((at) => this.host.store.handoffHeirs(at)).filter((h) => !seen.has(h.sessionId))
+        const heirs = generation.flatMap((at) => this.host.store.handoffs.handoffHeirs(at)).filter((h) => !seen.has(h.sessionId))
         for (const h of heirs) seen.add(h.sessionId)
         const live = heirs.find((h) => !h.trashed && this.host.meta.has(h.sessionId) && !this.host.trashing.has(h.sessionId))
         if (live) return live.sessionId
@@ -92,7 +92,7 @@ export class HandoffNotes {
         this.host.meta.has(owner) ||
         // A session in the trash still owns its note (#204) — restoring it must find it; only purging lets it go
         this.host.store.trashedIds().has(owner) ||
-        this.host.store.handoffPredecessors().has(owner),
+        this.host.store.handoffs.handoffPredecessors().has(owner),
       projectId,
     )
   }

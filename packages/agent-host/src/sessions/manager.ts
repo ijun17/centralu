@@ -1715,7 +1715,7 @@ export class SessionManager {
           // The goal survives in the tool's conversation, not in a new one (see CreateSessionOpts.knownGoal)
           ...(resumeId && m.goal ? { knownGoal: m.goal } : {}),
           noCodeIntelligence: this.launches.codeIntelligenceOffFor(sessionId),
-          inheritsHandoff: this.store.inheritsHandoff(sessionId),
+          inheritsHandoff: this.store.handoffs.inheritsHandoff(sessionId),
           choice: { profile, tools },
           apps,
           memory: !resumeId,
@@ -2130,7 +2130,7 @@ export class SessionManager {
       return
     }
     // Text the tool repeats on every start (#304): one stored line per session is enough
-    if (e.type === 'notice' && e.oncePerSession && e.sessionId && this.store.hasNotice(e.sessionId, e.text)) return
+    if (e.type === 'notice' && e.oncePerSession && e.sessionId && this.store.handoffs.hasNotice(e.sessionId, e.text)) return
     let seq: number | null = null
     /** This event ended the turn — how it ended (completed, error, canceled, limit) is stated by this event
      * itself */

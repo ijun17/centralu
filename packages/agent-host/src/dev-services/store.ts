@@ -69,7 +69,7 @@ export class Store extends MigrationRunner {
   private readonly sessions: SessionRecords
   readonly grid: GridRecords
   private readonly messages: MessageRecords
-  private readonly handoffs: HandoffMarkers
+  readonly handoffs: HandoffMarkers
   private readonly trash: TrashRecords
   private readonly settings: SettingsRecords
   private readonly permissions: PermissionRecords
@@ -343,24 +343,6 @@ export class Store extends MigrationRunner {
 
   nextSeq(sessionId: string): number {
     return this.messages.nextSeq(sessionId)
-  }
-
-  // ── HandoffMarkers (store/handoff-markers.ts) ──
-
-  handoffPredecessors(): Set<string> {
-    return this.handoffs.handoffPredecessors()
-  }
-
-  handoffHeirs(fromSessionId: string): { sessionId: string; trashed: boolean }[] {
-    return this.handoffs.handoffHeirs(fromSessionId)
-  }
-
-  hasNotice(sessionId: string, text: string): boolean {
-    return this.handoffs.hasNotice(sessionId, text)
-  }
-
-  inheritsHandoff(sessionId: string): boolean {
-    return this.handoffs.inheritsHandoff(sessionId)
   }
 
   // ── TrashRecords (store/trash.ts) ──

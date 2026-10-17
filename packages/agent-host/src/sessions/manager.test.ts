@@ -6018,9 +6018,9 @@ describe("a handoff note does not race its reader (#106)", () => {
 
     // Purging another session sweeps the project's notes. While that sweep reads the folder, the person
     // moves the note's session to the trash, which keeps its note (#204).
-    const claimed = store.handoffPredecessors.bind(store)
+    const claimed = store.handoffs.handoffPredecessors.bind(store.handoffs)
     let trashing: Promise<void> | undefined
-    const spy = vi.spyOn(store, 'handoffPredecessors').mockImplementation(() => {
+    const spy = vi.spyOn(store.handoffs, 'handoffPredecessors').mockImplementation(() => {
       trashing ??= mgr.trashSession(handing.id)
       return claimed()
     })
