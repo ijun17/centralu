@@ -17,6 +17,8 @@ export type Scope = { key: string; projectId: string | null; root: string; trust
 export type Life = {
   proc: AppProcess | null
   starting: Promise<AppProcess> | null
+  /** The process of the start under way, from its spawn until it is ready or fails (#839): a halt stops it too */
+  spawning: AppProcess | null
   /** Consecutive failure count — counts both a failed start and an unannounced exit */
   failures: number
   /** The next startup never happens before this time (exponential backoff) */
@@ -138,6 +140,7 @@ export function newEntry(scope: Scope, found: ScannedApp, reservedIds: readonly 
     life: {
       proc: null,
       starting: null,
+      spawning: null,
       failures: 0,
       retryAt: 0,
       lastError: null,

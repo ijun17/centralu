@@ -121,8 +121,18 @@ export class AppLifecycle {
       if (e.ref.projectId === null) this.host.snapshot(e.ref.appId, e.dir, L.stamp)
       let proc: AppProcess
       try {
-        proc = await AppProcess.start(this.host.spawnSpec(e, pipeId))
+        proc = await AppProcess.start({
+          ...this.host.spawnSpec(e, pipeId),
+          // Known from its spawn (#839): a quit stops one still starting, a halt stops the start it abandons, and one
+          // spawned once the quit began is stopped at once
+          onSpawn: (spawned) => {
+            this.remember(spawned)
+            L.spawning = spawned
+            if (this.host.disposed()) void spawned.stop(0, { awaitKill: false })
+          },
+        })
       } catch (err) {
+        L.spawning = null
         if (L.epoch === epoch) {
           // If connecting failed with the remembered generation, that memory could be wrong — the next attempt probes again
           if (usedPrior) L.verdict = undefined
@@ -138,8 +148,10 @@ export class AppLifecycle {
             runId: null,
           })
         }
-        throw new AppUnavailableError((err as Error).message)
+        // A halt stopped it while it started: said as the abandoned start it is, not as the app failing
+        throw new AppUnavailableError(L.epoch === epoch ? (err as Error).message : 'The app changed or was stopped, so this start was abandoned')
       }
+      if (L.spawning === proc) L.spawning = null
       if (L.epoch !== epoch || this.host.disposed()) {
         this.remember(proc)
         void proc.stop(this.host.timing.graceMs)
@@ -250,15 +262,22 @@ export class AppLifecycle {
   async halt(e: AppEntry, why: string, opts: { graceMs?: number; awaitKill?: boolean; awaitTree?: boolean } = {}): Promise<void> {
     const L = e.life
     L.epoch += 1
+    // A start under way is abandoned by the new epoch (#839): the next need starts afresh instead of joining it
+    L.starting = null
     this.clearIdle(e)
     const proc = L.proc
     L.proc = null
     L.tools = null
-    if (!proc) return
+    // The abandoned start's process goes with it (#839): left to finish starting, it ran beside the next start's copy
+    const spawning = L.spawning
+    L.spawning = null
+    const graceMs = opts.graceMs ?? this.host.timing.graceMs
+    const stopping = spawning ? (spawning.log.note(`stopping while starting: ${why}`), spawning.stop(graceMs, { awaitKill: opts.awaitKill, awaitTree: opts.awaitTree })) : undefined
+    if (!proc) return stopping
     // A running app is stopping — it is not running in the list from this moment (A-8)
     this.host.appsChanged()
     proc.log.note(`stopping: ${why}`)
-    await proc.stop(opts.graceMs ?? this.host.timing.graceMs, { awaitKill: opts.awaitKill, awaitTree: opts.awaitTree })
+    await Promise.all([proc.stop(graceMs, { awaitKill: opts.awaitKill, awaitTree: opts.awaitTree }), stopping])
   }
 
   armIdle(e: AppEntry): void {

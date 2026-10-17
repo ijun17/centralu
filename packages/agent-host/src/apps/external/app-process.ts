@@ -45,6 +45,11 @@ export type SpawnSpec = {
    * returns (together with the shutdown rule).
    */
   serveFd3?: (fd3: Socket, note: (line: string) => void) => () => void
+  /**
+   * The process is spawned, before it is ready (#839): whoever must be able to stop it while it starts (the host
+   * quitting) learns of it here, not only once it answers
+   */
+  onSpawn?: (proc: AppProcess) => void
 }
 
 /**
@@ -173,6 +178,7 @@ export class AppProcess {
     })
     const proc = new AppProcess(child, (child.stdio[3] as Socket | undefined) ?? null, log, spec.probeTimeoutMs, spawnedAt)
     if (proc.fd3 && spec.serveFd3) proc.closeFd3Server = spec.serveFd3(proc.fd3, (line) => log.note(line))
+    spec.onSpawn?.(proc)
     try {
       await proc.connect(spec)
       log.note(`ready: pid ${child.pid} era ${proc.client.getProtocolEra()} (${proc.client.getNegotiatedProtocolVersion()})${spec.prior ? ' via cached verdict' : ''}`)
