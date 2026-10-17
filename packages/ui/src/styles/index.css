@@ -283,14 +283,13 @@
  * The sidebar's lines, a step toward the ink so they stand apart from its background (dividers between
  * projects, "Add project", row borders). Mixed from the theme's own tokens rather than set per preset, so
  * every preset and a custom theme get it: lighter on a dark sidebar, darker on a light one. The sidebar
- * swaps these in for --color-line and --color-line-strong (SIDEBAR_VARS).
+ * swaps this in for --color-line (SIDEBAR_VARS).
  *
  * Outside @theme on purpose: what @theme declares is a token a theme sets (THEME_TOKENS, which a test
- * holds to it), and these are derived from two of them, never set themselves.
+ * holds to it), and this is derived from two of them, never set themselves.
  */
 :root {
   --color-line-side: color-mix(in oklab, var(--color-line) 80%, var(--color-ink-faint));
-  --color-line-strong-side: color-mix(in oklab, var(--color-line-strong) 80%, var(--color-ink-faint));
 }
 
 /*

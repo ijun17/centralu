@@ -27,9 +27,12 @@ export const GUIDE = 'before:absolute before:inset-y-0 before:-left-px before:w-
 const GUTTER = 28
 export const SIDEBAR_VARS = {
   '--sidebar-gutter': `${GUTTER}px`,
-  // The sidebar's lines stand a step further from its background than elsewhere (styles/index.css, --color-line-side)
+  /*
+   * The sidebar's lines (dividers, the outlined buttons) stand a step further from its background than elsewhere
+   * (styles/index.css, --color-line-side). Only --color-line: line-strong is what a session's tool mark is drawn with,
+   * and a mark must look the same in the sidebar as in the header and the grid.
+   */
   '--color-line': 'var(--color-line-side)',
-  '--color-line-strong': 'var(--color-line-strong-side)',
 } as CSSProperties
 export const GUTTER_WIDTH = 'w-(--sidebar-gutter)'
 /** The project name's own column, which "Your apps" title shares: the 2px bar, 2px of padding, then the gutter */
