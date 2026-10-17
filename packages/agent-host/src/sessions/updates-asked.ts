@@ -1,0 +1,80 @@
+import { CENTRALU_APPLY, CENTRALU_APPLY_QUESTION } from '@cc/protocol'
+import type { UpdateApplyBroker } from '../update-apply.js'
+import type { UpdateService } from '../updates.js'
+import type { DelegationHost } from './delegation-flow.js'
+import type { RoutedCardsHost } from './routed-cards.js'
+
+/**
+ * What an agent's update_centralu reaches of the session manager (#428), typed as the manager declares each member.
+ * The manager builds it with getters for its fields (`SessionManager.parts`), so each is read when used, never kept.
+ */
+export type UpdatesAskedHost = Pick<DelegationHost, 'askHost' | 'meta'> & Pick<RoutedCardsHost, 'isAppAgentSession' | 'toolProfileOf'>
+
+/**
+ * An agent's update_centralu (#665): check and install through the same service the window calls, and apply through a
+ * window's "Apply now", each behind the calling session's preset and the person's card. What a session was allowed
+ * lasts for that session on this host. Moved out of the session manager as it was (#428); what it reaches of the
+ * manager is `UpdatesAskedHost`.
+ */
+export class UpdatesAsked {
+  constructor(private readonly host: UpdatesAskedHost) {}
+
+  updates: UpdateService | null = null
+  /** Sessions allowed to update once per host; an "always" answer adds this session only. */
+  readonly updateConsents = new Set<string>()
+  /** Asking a window to apply the installed update (#665); null on a host with no windows to ask (tests) */
+  updateApply: UpdateApplyBroker | null = null
+  /** Sessions whose "always" covers applying (#665), kept apart from check and install: a relaunch is the person's window */
+  readonly updateApplyConsents = new Set<string>()
+
+  /** Update grants last only for the calling session on this host; they never change automatic application. */
+  async updateCentraluAsked(
+    sessionId: string,
+    action: 'check' | 'install' | 'apply',
+    signal?: AbortSignal,
+  ): Promise<{ ok: boolean; error?: string; status?: import('@cc/protocol').UpdateStatus; relaunched?: { version?: string } }> {
+    if (action === 'apply') return this.applyUpdateAsked(sessionId, signal)
+    const updates = this.updates
+    if (!updates) return { ok: false, error: 'Update checks are unavailable' }
+    if (this.host.toolProfileOf(sessionId) === 'reader' && !this.updateConsents.has(sessionId)) {
+      const decision = await this.host.askHost(sessionId, { kind: 'centralu_update', action })
+      if (decision === 'always') this.updateConsents.add(sessionId)
+      else if (decision !== 'allow') return { ok: false, error: 'The person did not allow this Centralu update. Do not ask again unless they tell you to.' }
+    }
+    return { ok: true, status: action === 'check' ? await updates.check(true) : await updates.apply() }
+  }
+
+  /**
+   * `update_centralu` action "apply" (#665): a window relaunches into the installed build, as its "Apply now" does.
+   *
+   * By the caller's own preset, read now (as every boundary of #606): `auto` applies at once, `normal` raises a card in
+   * the caller (after a window said it is ready, so "nothing installed" never asks), `safe` is refused, as is an agent an
+   * app started. "Always" on the card covers applying for this session only, apart from check and install. The window
+   * still makes every check its button makes (update-apply.ts), so an agent can only ask for what the person could click.
+   */
+  private async applyUpdateAsked(sessionId: string, signal?: AbortSignal): Promise<{ ok: boolean; error?: string; relaunched?: { version?: string } }> {
+    const broker = this.updateApply
+    if (!broker) return { ok: false, error: 'Applying updates is unavailable on this host' }
+    const m = this.host.meta.get(sessionId)
+    if (!m) return { ok: false, error: 'The calling session is gone' }
+    if (this.host.isAppAgentSession(m)) return { ok: false, error: 'An agent an app started cannot apply Centralu updates.' }
+    if (m.permissionPreset === 'safe') {
+      return {
+        ok: false,
+        error: "This session's preset is safe, which cannot relaunch Centralu. Tell the person the update is ready to apply from the update line; do not ask again unless they tell you to.",
+      }
+    }
+    const outcome = await broker.apply(async () => {
+      if (this.updateApplyConsents.has(sessionId)) return null
+      // As `other` with its whole question as the text: a released window drops a detail it cannot parse (#665 review)
+      const decision = await this.host.askHost(sessionId, { kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }, signal)
+      if (decision === 'always') this.updateApplyConsents.add(sessionId)
+      else if (decision === null) return 'The question to the person was withdrawn before they answered, so nothing was relaunched.'
+      else if (decision !== 'allow') return 'The person did not allow this session to apply the Centralu update. Do not ask again unless they tell you to.'
+      return null
+    })
+    if (!outcome.ok) return { ok: false, error: outcome.error }
+    console.error(`[updates] session ${sessionId} applied the installed update: a window is relaunching${outcome.version ? ` into ${outcome.version}` : ''}`)
+    return { ok: true, relaunched: outcome.version ? { version: outcome.version } : {} }
+  }
+}

@@ -15,6 +15,7 @@ import { InterruptionWatch, type InterruptionWatchHost } from './interruption-wa
 import { LaunchRecords, type LaunchRecordsHost } from './launch-records.js'
 import { MergeChecks, type MergeChecksHost } from './merge-checks.js'
 import { ProjectCreation, type ProjectCreationHost } from './project-creation.js'
+import { UpdatesAsked, type UpdatesAskedHost } from './updates-asked.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -58,8 +59,6 @@ import {
   applyBackgroundTasks,
   applySessionState,
   nextStateFor,
-  CENTRALU_APPLY,
-  CENTRALU_APPLY_QUESTION,
   sessionOnlyAlways,
   DATA_DIR,
   oneLineText,
@@ -153,7 +152,7 @@ export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS }
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost
 
 /**
  * Where the marker "conversation up to here belongs to the old tool" is stored.
@@ -254,6 +253,8 @@ export class SessionManager {
   private readonly merges: MergeChecks
   /** A project added or made here, and the orchestrator's create_project (project-creation.ts) */
   private readonly projectCreation: ProjectCreation
+  /** An agent's update_centralu: check, install and apply, behind its preset and the person's card (updates-asked.ts) */
+  private readonly updatesAsked: UpdatesAsked
   /** ask_project, here or on a linked machine (ask-project-flow.ts) */
   private readonly askProjectFlow: AskProjectFlow
   /** The conversations a tool keeps on its own side: listing, holders, import and catch-up (external-conversations.ts) */
@@ -294,13 +295,6 @@ export class SessionManager {
    * that had joined the wake and was waiting is also not sent.
    */
   private leaving = new Map<string, string>()
-  private updates: UpdateService | null = null
-  /** Sessions allowed to update once per host; an "always" answer adds this session only. */
-  private updateConsents = new Set<string>()
-  /** Asking a window to apply the installed update (#665); null on a host with no windows to ask (tests) */
-  private updateApply: UpdateApplyBroker | null = null
-  /** Sessions whose "always" covers applying (#665), kept apart from check and install: a relaunch is the person's window */
-  private updateApplyConsents = new Set<string>()
   /**
    * Where external apps are attached to a session (M4 A-5). It is null on a host with no runtime
    * (most tests), and in that case the session accepts no apps — it is optional, like any other
@@ -364,6 +358,7 @@ export class SessionManager {
     } = {},
   ) {
     this.children = new ChildOwnership(store)
+    this.updatesAsked = new UpdatesAsked(this.parts())
     this.projectCreation = new ProjectCreation(this.parts())
     this.merges = new MergeChecks(this.parts())
     this.launches = new LaunchRecords(this.parts())
@@ -3426,7 +3421,7 @@ export class SessionManager {
     const off = () => !this.uiPreferences().sessionTools
     const offError = 'Turned off in Settings'
     return {
-      updateCentralu: async (action, signal) => (off() ? { ok: false, error: offError } : this.updateCentraluAsked(sessionId, action, signal)),
+      updateCentralu: async (action, signal) => (off() ? { ok: false, error: offError } : this.updatesAsked.updateCentraluAsked(sessionId, action, signal)),
       listSessions: async () => (off() ? [] : view.listSessions()),
       readSession: async (...a) => (off() ? { ok: false, error: offError } : view.readSession(...a)),
       recall: async (...a) => (off() ? { hits: [] } : view.recall(...a)),
@@ -3635,10 +3630,10 @@ export class SessionManager {
       untilHandedOver: (...a) => self.delegationFlow.untilHandedOver(...a),
       untilWakeWithdrawn: (...a) => self.untilWakeWithdrawn(...a),
       get updateApplyConsents() {
-        return self.updateApplyConsents
+        return self.updatesAsked.updateApplyConsents
       },
       get updateConsents() {
-        return self.updateConsents
+        return self.updatesAsked.updateConsents
       },
       withdrawHostAsk: (...a) => self.hostCards.withdrawHostAsk(...a),
       get worktreeRoot() {
@@ -3674,7 +3669,7 @@ export class SessionManager {
       linkedReader: () => this.linkedReader,
       linkedReportRestored: (sessionId) => this.linkedReports.restored(sessionId),
       emit: (e) => this.emit(e),
-      updateCentraluAsked: (sessionId, action, signal) => this.updateCentraluAsked(sessionId, action, signal),
+      updateCentraluAsked: (sessionId, action, signal) => this.updatesAsked.updateCentraluAsked(sessionId, action, signal),
       updateSettings: (sessionId, settings, by) => this.updateSettings(sessionId, settings, by),
       createSession: (params) => this.createSession(params),
       firstTool: (preferred) => this.firstTool(preferred),
@@ -3901,56 +3896,6 @@ export class SessionManager {
     })
   }
 
-  /** Update grants last only for the calling session on this host; they never change automatic application. */
-  private async updateCentraluAsked(
-    sessionId: string,
-    action: 'check' | 'install' | 'apply',
-    signal?: AbortSignal,
-  ): Promise<{ ok: boolean; error?: string; status?: import('@cc/protocol').UpdateStatus; relaunched?: { version?: string } }> {
-    if (action === 'apply') return this.applyUpdateAsked(sessionId, signal)
-    const updates = this.updates
-    if (!updates) return { ok: false, error: 'Update checks are unavailable' }
-    if (this.toolProfileOf(sessionId) === 'reader' && !this.updateConsents.has(sessionId)) {
-      const decision = await this.hostCards.askHost(sessionId, { kind: 'centralu_update', action })
-      if (decision === 'always') this.updateConsents.add(sessionId)
-      else if (decision !== 'allow') return { ok: false, error: 'The person did not allow this Centralu update. Do not ask again unless they tell you to.' }
-    }
-    return { ok: true, status: action === 'check' ? await updates.check(true) : await updates.apply() }
-  }
-
-  /**
-   * `update_centralu` action "apply" (#665): a window relaunches into the installed build, as its "Apply now" does.
-   *
-   * By the caller's own preset, read now (as every boundary of #606): `auto` applies at once, `normal` raises a card in
-   * the caller (after a window said it is ready, so "nothing installed" never asks), `safe` is refused, as is an agent an
-   * app started. "Always" on the card covers applying for this session only, apart from check and install. The window
-   * still makes every check its button makes (update-apply.ts), so an agent can only ask for what the person could click.
-   */
-  private async applyUpdateAsked(sessionId: string, signal?: AbortSignal): Promise<{ ok: boolean; error?: string; relaunched?: { version?: string } }> {
-    const broker = this.updateApply
-    if (!broker) return { ok: false, error: 'Applying updates is unavailable on this host' }
-    const m = this.meta.get(sessionId)
-    if (!m) return { ok: false, error: 'The calling session is gone' }
-    if (this.isAppAgentSession(m)) return { ok: false, error: 'An agent an app started cannot apply Centralu updates.' }
-    if (m.permissionPreset === 'safe') {
-      return {
-        ok: false,
-        error: "This session's preset is safe, which cannot relaunch Centralu. Tell the person the update is ready to apply from the update line; do not ask again unless they tell you to.",
-      }
-    }
-    const outcome = await broker.apply(async () => {
-      if (this.updateApplyConsents.has(sessionId)) return null
-      // As `other` with its whole question as the text: a released window drops a detail it cannot parse (#665 review)
-      const decision = await this.hostCards.askHost(sessionId, { kind: 'other', raw: CENTRALU_APPLY_QUESTION, about: CENTRALU_APPLY }, signal)
-      if (decision === 'always') this.updateApplyConsents.add(sessionId)
-      else if (decision === null) return 'The question to the person was withdrawn before they answered, so nothing was relaunched.'
-      else if (decision !== 'allow') return 'The person did not allow this session to apply the Centralu update. Do not ask again unless they tell you to.'
-      return null
-    })
-    if (!outcome.ok) return { ok: false, error: outcome.error }
-    console.error(`[updates] session ${sessionId} applied the installed update: a window is relaunching${outcome.version ? ` into ${outcome.version}` : ''}`)
-    return { ok: true, relaunched: outcome.version ? { version: outcome.version } : {} }
-  }
 
 
 
@@ -4059,12 +4004,12 @@ export class SessionManager {
 
   /** The same service the window calls; this tool never writes the automatic-apply preference. */
   useUpdates(updates: UpdateService): void {
-    this.updates = updates
+    this.updatesAsked.updates = updates
   }
 
   /** The windows' "Apply now" for an agent (#665, update-apply.ts) — wired by the host, which owns the event stream */
   useUpdateApply(broker: UpdateApplyBroker): void {
-    this.updateApply = broker
+    this.updatesAsked.updateApply = broker
   }
 
   /**
