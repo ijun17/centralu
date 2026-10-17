@@ -3,6 +3,11 @@
 use super::*;
 use std::io::{BufRead, BufReader};
 
+/// The test process as the host the child socket answers (#538): the tests connect from it.
+fn this_process() -> std::sync::Arc<dyn Fn() -> Option<u32> + Send + Sync> {
+    std::sync::Arc::new(|| Some(std::process::id()))
+}
+
 struct Dir(PathBuf);
 impl Drop for Dir {
     fn drop(&mut self) {
@@ -129,6 +134,7 @@ fn gone(pid: i32) -> bool {
 fn the_socket_is_private_to_this_user() {
     let d = temp_dir("mode");
     let _c = Children::start(&d.0).unwrap();
+    _c.answer_hosts(this_process());
     let mode = fs::metadata(socket_path(&d.0)).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
 }
@@ -138,6 +144,7 @@ fn the_socket_is_private_to_this_user() {
 fn a_departing_host_does_not_end_the_child_and_the_next_host_gets_what_it_missed() {
     let d = temp_dir("leave");
     let keeper = Children::start(&d.0).unwrap();
+    keeper.answer_hosts(this_process());
     let mut host1 = Control::open(&d.0);
     let (id, pid) = host1.spawn("pipes", "echo first; read x; echo \"got $x\"; sleep 0.3; echo after; read y; echo \"bye $y\"");
     let (mut out1, _) = attach(&d.0, &id, "out");
@@ -169,6 +176,7 @@ fn a_departing_host_does_not_end_the_child_and_the_next_host_gets_what_it_missed
 fn an_unwatched_pty_is_drained_so_its_child_can_exit() {
     let d = temp_dir("drain");
     let _keeper = Children::start(&d.0).unwrap();
+    _keeper.answer_hosts(this_process());
     let mut host = Control::open(&d.0);
     // Far more than a pty's kernel buffer, with nobody reading.
     let (id, _) = host.spawn("pty", "i=0; while [ $i -lt 4000 ]; do echo line-$i-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; i=$((i+1)); done; exit 3");
@@ -183,6 +191,7 @@ fn an_unwatched_pty_is_drained_so_its_child_can_exit() {
 fn a_pty_is_resized_through_the_keeper_and_a_new_reader_gets_the_screen_replayed() {
     let d = temp_dir("resize");
     let _keeper = Children::start(&d.0).unwrap();
+    _keeper.answer_hosts(this_process());
     let mut host = Control::open(&d.0);
     let (id, _) = host.spawn("pty", "stty size; read x; stty size; read y");
     let (mut a, _) = attach(&d.0, &id, "out");
@@ -202,6 +211,7 @@ fn a_pty_is_resized_through_the_keeper_and_a_new_reader_gets_the_screen_replayed
 fn a_signal_request_ends_the_child_and_its_exit_is_reported() {
     let d = temp_dir("signal");
     let _keeper = Children::start(&d.0).unwrap();
+    _keeper.answer_hosts(this_process());
     let mut host = Control::open(&d.0);
     let (id, pid) = host.spawn("pipes", "exec sleep 30");
     let r = host.req(json!({ "op": "signal", "id": id, "signal": "SIGTERM" }));
@@ -223,6 +233,7 @@ fn a_signal_request_ends_the_child_and_its_exit_is_reported() {
 fn close_stdin_gives_the_child_eof_after_what_was_written() {
     let d = temp_dir("eof");
     let _keeper = Children::start(&d.0).unwrap();
+    _keeper.answer_hosts(this_process());
     let mut host = Control::open(&d.0);
     let (id, _) = host.spawn("pipes", "cat; echo eof-seen");
     let (mut out, _) = attach(&d.0, &id, "out");
@@ -238,6 +249,7 @@ fn close_stdin_gives_the_child_eof_after_what_was_written() {
 fn half_a_line_from_a_host_that_died_never_reaches_the_child() {
     let d = temp_dir("torn");
     let _keeper = Children::start(&d.0).unwrap();
+    _keeper.answer_hosts(this_process());
     let mut host = Control::open(&d.0);
     let (id, _) = host.spawn("pipes", "while read l; do echo \"[$l]\"; done");
     let (mut a, _) = attach(&d.0, &id, "out");
@@ -255,6 +267,7 @@ fn half_a_line_from_a_host_that_died_never_reaches_the_child() {
 fn stop_all_ends_pipes_and_ptys_the_host_left_running() {
     let d = temp_dir("stopall");
     let keeper = Children::start(&d.0).unwrap();
+    keeper.answer_hosts(this_process());
     let mut host = Control::open(&d.0);
     // EOF ends the first; the pty ignores HUP and TERM, so only the KILL step ends it.
     let (_, p1) = host.spawn("pipes", "read x");
@@ -277,6 +290,7 @@ fn stop_all_ends_pipes_and_ptys_the_host_left_running() {
 fn stop_all_ends_every_group_in_a_terminals_session() {
     let d = temp_dir("ptyjobs");
     let keeper = Children::start(&d.0).unwrap();
+    keeper.answer_hosts(this_process());
     let mut host = Control::open(&d.0);
     let (id, pid) = host.spawn("pty", "set -m; trap '' HUP; sleep 300 & echo $!; wait");
     let job = helper_of(&d.0, &id);
@@ -294,6 +308,7 @@ fn stop_all_ends_every_group_in_a_terminals_session() {
 fn asking_the_host_to_stop_waits_for_it_to_hang_up() {
     let d = temp_dir("askstop");
     let keeper = Children::start(&d.0).unwrap();
+    keeper.answer_hosts(this_process());
     let mut host = Control::open(&d.0);
     let k = keeper.clone();
     let waiter = thread::spawn(move || k.ask_host_to_stop(Duration::from_secs(5)));
@@ -311,6 +326,7 @@ fn asking_the_host_to_stop_waits_for_it_to_hang_up() {
 fn a_new_attach_replaces_the_old_reader() {
     let d = temp_dir("replace");
     let _keeper = Children::start(&d.0).unwrap();
+    _keeper.answer_hosts(this_process());
     let mut host = Control::open(&d.0);
     let (id, _) = host.spawn("pipes", "read x; echo \"$x\"; read y");
     let (mut old, _) = attach(&d.0, &id, "out");
@@ -332,7 +348,7 @@ fn a_control_queue_past_the_cap_is_dropped_while_the_socket_is_full() {
     let sock = d.0.join("s");
     let listener = UnixListener::bind(&sock).unwrap();
     let (wake_r, wake_w) = UnixStream::pair().unwrap();
-    let shared = Arc::new(Shared { cmds: Mutex::new(Vec::new()), wake: OwnedFd::from(wake_w), sock });
+    let shared = Arc::new(Shared { cmds: Mutex::new(Vec::new()), wake: OwnedFd::from(wake_w), sock, hosts: Mutex::default() });
     let mut r = Reactor::new(listener, OwnedFd::from(wake_r), shared).unwrap();
 
     let (mine, peer) = UnixStream::pair().unwrap();
@@ -363,7 +379,7 @@ fn bare_reactor(d: &Dir) -> Reactor {
     let sock = d.0.join("s");
     let listener = UnixListener::bind(&sock).unwrap();
     let (wake_r, wake_w) = UnixStream::pair().unwrap();
-    let shared = Arc::new(Shared { cmds: Mutex::new(Vec::new()), wake: OwnedFd::from(wake_w), sock });
+    let shared = Arc::new(Shared { cmds: Mutex::new(Vec::new()), wake: OwnedFd::from(wake_w), sock, hosts: Mutex::default() });
     Reactor::new(listener, OwnedFd::from(wake_r), shared).unwrap()
 }
 
@@ -490,6 +506,7 @@ fn gone_within(pid: i32, limit: Duration) -> bool {
 fn an_agents_helpers_do_not_outlive_it() {
     let d = temp_dir("helpers");
     let _keeper = Children::start(&d.0).unwrap();
+    _keeper.answer_hosts(this_process());
     let mut host = Control::open(&d.0);
     let (id, pid) = host.spawn("pipes", "sleep 300 & echo $!; read x");
     let helper = helper_of(&d.0, &id);
@@ -512,6 +529,7 @@ fn an_agents_helpers_do_not_outlive_it() {
 fn a_helper_that_ignores_term_is_killed_and_nothing_outside_the_group_is_touched() {
     let d = temp_dir("stubborn");
     let _keeper = Children::start(&d.0).unwrap();
+    _keeper.answer_hosts(this_process());
     let mut host = Control::open(&d.0);
     let (id, pid) = host.spawn("pipes", "trap '' TERM; sleep 300 & echo $!; read x");
     let helper = helper_of(&d.0, &id);
@@ -538,6 +556,7 @@ fn a_helper_that_ignores_term_is_killed_and_nothing_outside_the_group_is_touched
 fn stop_all_ends_the_helpers_of_agents_that_exited_during_the_stop() {
     let d = temp_dir("stophelp");
     let keeper = Children::start(&d.0).unwrap();
+    keeper.answer_hosts(this_process());
     let mut host = Control::open(&d.0);
     // EOF ends the CLI at once; its helper ignores TERM.
     let (id, pid) = host.spawn("pipes", "trap '' TERM; sleep 300 & echo $!; read x");
@@ -573,6 +592,7 @@ fn a_keeper_out_of_descriptors_pauses_accepting_instead_of_spinning() {
     else {
         let d = temp_dir("emfile");
         let _keeper = Children::start(&d.0).unwrap();
+        _keeper.answer_hosts(this_process());
         let mut held = super::super::accept::few_descriptors::exhaust(64);
         // One descriptor for the client's end; the keeper has none left for its own.
         drop(held.pop());
@@ -586,3 +606,109 @@ fn a_keeper_out_of_descriptors_pauses_accepting_instead_of_spinning() {
     super::super::accept::few_descriptors::assert_accepts_paused(&stderr, "the reactor");
 }
 
+/// What a hello on the child socket gets: the answer line, or None when the keeper closed it unanswered.
+fn hello_answer(data: &Path) -> Option<Value> {
+    let s = UnixStream::connect(socket_path(data)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let mut w = s.try_clone().unwrap();
+    let _ = w.write_all(&json_line(&json!({ "op": "hello", "protocol": CHILDREN_PROTOCOL })));
+    let mut l = String::new();
+    match BufReader::new(s).read_line(&mut l) {
+        Ok(n) if n > 0 => Some(serde_json::from_str(&l).unwrap()),
+        _ => None,
+    }
+}
+
+/// #538: through this socket a process can start any program and read every agent's stream. The uid
+/// check let every process of this user in; now only the hosts this keeper holds get an answer, and
+/// nothing does before the keeper says who its host is.
+#[test]
+fn the_child_socket_answers_only_the_hosts_this_keeper_holds() {
+    let d = temp_dir("peer");
+    let keeper = Children::start(&d.0).unwrap();
+    assert_eq!(hello_answer(&d.0), None, "no host named yet: nobody is answered");
+
+    // A host that is another process: this one, the test, is not it
+    let mut other = std::process::Command::new("/bin/sh").args(["-c", "sleep 30"]).spawn().unwrap();
+    let other_pid = other.id();
+    keeper.answer_hosts(std::sync::Arc::new(move || Some(other_pid)));
+    assert_eq!(hello_answer(&d.0), None, "a process of this user that is not the host");
+
+    // A swap's standby is answered while it is one
+    keeper.set_standby(Some(std::process::id()));
+    assert_eq!(hello_answer(&d.0).map(|v| v["ok"].clone()), Some(json!(true)), "the standby");
+    keeper.set_standby(None);
+    assert_eq!(hello_answer(&d.0), None, "the standby once the swap is over");
+
+    keeper.answer_hosts(this_process());
+    assert_eq!(hello_answer(&d.0).map(|v| v["ok"].clone()), Some(json!(true)), "the host");
+    let _ = other.kill();
+    let _ = other.wait();
+}
+
+#[test]
+fn a_host_is_its_exact_pid() {
+    assert!(is_a_host(40, &[40]));
+    assert!(is_a_host(41, &[40, 41]), "the standby");
+    assert!(!is_a_host(41, &[40]));
+    assert!(!is_a_host(40, &[]), "no host held");
+}
+
+/// Review of #1100: `spawn_host` makes the host lead a process group, and what it runs without a session of its own (a
+/// worktree's setup command, `npm install -g`, a version probe) is in that group. A setup script an agent changed
+/// must not get in by being there. The host here is a group leader as `spawn_host` makes one, and its child connects
+/// first, then the host itself.
+#[test]
+fn a_child_of_the_host_in_its_group_is_refused() {
+    use std::os::unix::process::CommandExt;
+    if std::process::Command::new("python3").arg("--version").output().is_err() {
+        eprintln!("skipped: no python3 to play the host with");
+        return;
+    }
+    let d = temp_dir("group");
+    let keeper = Children::start(&d.0).unwrap();
+    const ASK: &str = r#"
+import socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.settimeout(3)
+s.connect(sys.argv[1])
+s.sendall(b'{"op":"hello","protocol":1}\n')
+try:
+    got = s.recv(4096)
+except OSError:
+    got = b''
+print('answered' if got else 'closed')
+"#;
+    // Waits for its stdin to end first, so the keeper names it before anything connects
+    let host = format!(
+        "import subprocess, sys\nsys.stdin.read()\nASK = {ASK:?}\nchild = subprocess.run([sys.executable, '-c', ASK, sys.argv[1]], capture_output=True, text=True).stdout.strip()\nprint('child', child, flush=True)\nexec(ASK)\n"
+    );
+    let mut child = std::process::Command::new("python3")
+        .args(["-c", &host, &socket_path(&d.0).to_string_lossy()])
+        .process_group(0)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let host_pid = child.id();
+    keeper.answer_hosts(std::sync::Arc::new(move || Some(host_pid)));
+    drop(child.stdin.take());
+    let out = child.wait_with_output().unwrap();
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(said.contains("child closed"), "a process in the host's group is not the host: {said}");
+    assert!(said.trim_end().ends_with("answered"), "the host itself: {said}");
+}
+
+/// `keeper.sock`'s `children` (#538): what the child socket's `list` says, for a process that is not a host.
+#[test]
+fn the_list_is_what_the_child_socket_lists() {
+    let d = temp_dir("list");
+    let keeper = Children::start(&d.0).unwrap();
+    keeper.answer_hosts(this_process());
+    let mut host = Control::open(&d.0);
+    let (id, _) = host.spawn("pipes", "sleep 5");
+    let listed = keeper.list(Duration::from_secs(5)).unwrap();
+    assert_eq!(listed, host.req(json!({ "op": "list" }))["children"].as_array().unwrap().clone());
+    assert_eq!(listed[0]["id"], json!(id));
+    assert_eq!(Children::disabled().list(Duration::from_millis(10)), None);
+}

@@ -1,7 +1,8 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { homedir, tmpdir } from 'node:os'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * The codex CLI itself honors `CODEX_HOME`, but our own detect() was hard-coding the home path —
@@ -22,8 +23,18 @@ const { CodexAdapter } = await import('./index.js')
 
 
 describe('the settings folder codex detect() looks at', () => {
+  const dirs: string[] = []
+  const temp = (prefix: string) => {
+    const d = tempRoot(prefix)
+    dirs.push(d)
+    return d
+  }
+  afterEach(async () => {
+    for (const d of dirs.splice(0)) await removeTree(d)
+  })
+
   it('treats an auth.json inside CODEX_HOME as being logged in', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'codex-home-'))
+    const home = temp('codex-home-')
     writeFileSync(join(home, 'auth.json'), '{}')
     vi.stubEnv('CODEX_HOME', home)
 
@@ -31,7 +42,7 @@ describe('the settings folder codex detect() looks at', () => {
   })
 
   it('when CODEX_HOME is empty, not logged in even if the real home has an auth.json (must look at the same place as the CLI)', async () => {
-    vi.stubEnv('CODEX_HOME', mkdtempSync(join(tmpdir(), 'codex-home-empty-')))
+    vi.stubEnv('CODEX_HOME', temp('codex-home-empty-'))
 
     const d = await new CodexAdapter().detect()
 
@@ -44,7 +55,7 @@ describe('the settings folder codex detect() looks at', () => {
    * check that detect() answered, whatever this machine's login state was.
    */
   it('treats an empty string as unset — falls back to the home folder', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'codex-user-home-'))
+    const home = temp('codex-user-home-')
     mkdirSync(join(home, '.codex'))
     writeFileSync(join(home, '.codex', 'auth.json'), '{}')
     // os.homedir() reads HOME on macOS and Linux, USERPROFILE on Windows

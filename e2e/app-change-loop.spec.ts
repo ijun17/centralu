@@ -37,7 +37,15 @@ import { ViewHost } from '../packages/agent-host/src/views/view-host.js'
  */
 
 const APP = 'counter'
-/** How long a view is left open and watched — the same as when it was measured */
+/**
+ * How long a view is left open and watched — the same as when it was measured.
+ *
+ * These windows are the one place this file waits on the clock, because what they bound is a
+ * rate: the host lets one app's "changed" out at most once per APP_CHANGE_WINDOW_MS of wall
+ * time, so a ceiling for a loop is a count per span of time. A slow machine cannot hide a loop
+ * in them either: a loop feeds itself, and the one measured ran about 700 times a second, so
+ * however slowly it turns it is far past these ceilings within a window.
+ */
 const WATCH_MS = 3000
 
 type Harness = {
@@ -49,6 +57,8 @@ type Harness = {
   agentShows(sessionId: string, callId: string): Promise<void>
   /** As if a session's agent called the read-only `summarize` — the app asks for an agent, and that agent runs until `releaseAgent` */
   agentSummarizes(sessionId: string): Promise<unknown>
+  /** As if a session's agent called `increment` — a change that every open view hears */
+  agentIncrements(sessionId: string): Promise<unknown>
   releaseAgent(): void
   close(): Promise<void>
 }
@@ -165,6 +175,7 @@ async function startHost(page: Page, projectId: string, opts: { unannotatedShow?
       await session.call(`app-${APP}`, 'show', {}, { callId })
     },
     agentSummarizes: (sessionId) => rt.call(ref, 'summarize', {}, { kind: 'session', sessionId }),
+    agentIncrements: (sessionId) => rt.call(ref, 'increment', { by: 1 }, { kind: 'session', sessionId }),
     releaseAgent: () => release(),
     close: async () => {
       release()
@@ -270,10 +281,15 @@ test('a pinned view and an inline view open together do not wake each other — 
   await expect(inlineView(page).locator('#count')).toHaveText('1')
   await expect(pinnedView(page, pid).locator('#count')).toHaveText('1')
   await expect.poll(() => viewShows(page, pinned)).toBe(before.pinned + 1)
-  // The notification reaches both views in the same broadcast window — waiting two more broadcast windows still shows the view that made the change never re-read
-  await page.waitForTimeout(500)
-  expect(await viewShows(page, inline)).toBe(before.inline)
-  expect(await viewShows(page, pinned)).toBe(before.pinned + 1)
+  /*
+   * The view that made the change never re-reads. Seen through the next change, an agent's: the
+   * inline view re-reads for that one and draws its answer, and a view's calls reach the host in
+   * the order it makes them, so a re-read of its own change would have been counted before that
+   * one.
+   */
+  await host.agentIncrements(sid)
+  await expect(inlineView(page).locator('#count')).toHaveText('2')
+  expect(await viewShows(page, inline)).toBe(before.inline + 1)
 })
 
 test('even an app whose read tool is missing readOnlyHint has the mutual-wakeup loop between two views capped at 4 calls per second per app', async ({ page }) => {
@@ -319,9 +335,14 @@ test('an agent chain raised by a read-only tool shows up in the run panel withou
   await summarized
   await expect(rows.nth(0).getByTestId('run-status')).toHaveText('ok')
   await expect(rows.nth(1).getByTestId('run-status')).toHaveText('ok')
-  // It only read — an open view still does not re-read after waiting two more broadcast windows
-  await page.waitForTimeout(APP_CHANGE_WINDOW_MS * 2)
-  expect(await viewShows(page, pinned)).toBe(shown)
+  /*
+   * It only read — an open view does not re-read. Seen through a change that comes after it (an
+   * agent's increment): the view re-reads for that one and draws its answer, and its calls reach
+   * the host in the order it makes them, so a re-read for the chain would have been counted first.
+   */
+  await host.agentIncrements(sid)
+  await expect(pinnedView(page, pid).locator('#count')).toHaveText('1')
+  expect(await viewShows(page, pinned)).toBe(shown + 1)
 })
 
 /**

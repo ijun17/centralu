@@ -210,3 +210,63 @@ describe('the guard', () => {
     expect(r.stdout).toContain('does not match APP_VERSION')
   })
 })
+
+/*
+ * #1042 (owner decision, 2026-10-18): a tagged run skips `pnpm verify` in the platform jobs and the shim when a
+ * successful rehearsal ran on the same tree. `guard` asks GitHub itself, so a tag pushed by hand skips nothing it has not
+ * earned, and anything it cannot tell runs verify.
+ */
+describe('a tagged run skips verify only after a rehearsal on the same tree', () => {
+  const TREE = 't'.repeat(40)
+  const runOf = (extra: Record<string, unknown>) => ({ id: 70, event: 'workflow_dispatch', status: 'completed', conclusion: 'success', head_sha: 'a'.repeat(40), html_url: 'https://github.com/ijun17/centralu/actions/runs/70', ...extra })
+  /** A GitHub that lists `runs` and gives each commit `trees[sha]` (default TREE). */
+  const github = (runs: Record<string, unknown>[], trees: Record<string, string> = {}) => {
+    const asked: string[] = []
+    const api = async (path: string) => {
+      asked.push(path)
+      if (path.includes('/actions/workflows/release.yml/runs?')) return { workflow_runs: runs }
+      const sha = /\/git\/commits\/([0-9a-f]+)$/.exec(path)?.[1]
+      if (sha) return { tree: { sha: trees[sha] ?? TREE } }
+      throw new Error(`unexpected ${path}`)
+    }
+    return { api, asked }
+  }
+  const decide = async (event: string, gh: { api: (p: string) => Promise<unknown> }) =>
+    // @ts-expect-error — a plain .mjs script the workflow runs with the runner's own Node
+    (await import('../scripts/release-rehearsal.mjs')).decide({ event, repo: 'ijun17/centralu', tree: TREE, api: gh.api })
+
+  it('skips it on a tag push after a successful rehearsal on the same tree, and says which', async () => {
+    const gh = github([runOf({ id: 71, head_sha: 'b'.repeat(40) }), runOf({})], { ['b'.repeat(40)]: 'x'.repeat(40) })
+    const d = await decide('push', gh)
+    expect(d.skip).toBe(true)
+    expect(d.why).toContain('Rehearsal run 70')
+    expect(gh.asked[0]).toBe('repos/ijun17/centralu/actions/workflows/release.yml/runs?event=workflow_dispatch&status=success&per_page=100')
+  })
+
+  it('runs it for a rehearsal, another tree, a run that did not succeed, a tag run, or when GitHub does not answer', async () => {
+    const dispatch = github([runOf({})])
+    expect((await decide('workflow_dispatch', dispatch)).skip).toBe(false)
+    expect(dispatch.asked).toEqual([])
+    expect((await decide('push', github([runOf({})], { ['a'.repeat(40)]: 'x'.repeat(40) }))).skip).toBe(false)
+    expect((await decide('push', github([runOf({ conclusion: 'failure' }), runOf({ status: 'in_progress', conclusion: null })]))).skip).toBe(false)
+    // An earlier tag push's run is not a rehearsal: it may itself have skipped verify
+    expect((await decide('push', github([runOf({ event: 'push' })]))).skip).toBe(false)
+    const down = await decide('push', { api: async () => Promise.reject(new Error('HTTP 502')) })
+    expect(down).toMatchObject({ skip: false, why: expect.stringContaining('HTTP 502') })
+  })
+
+  it('asks in guard, with read access to the runs, and passes --skip-verify only on "true", to the platform jobs and the shim', () => {
+    const guard = job('guard').join('\n')
+    expect(guard).toMatch(/permissions:\n {6}contents: read\n {6}actions: read/)
+    expect(guard).toContain('skip_verify: ${{ steps.rehearsal.outputs.skip_verify }}')
+    expect(guard).toMatch(/id: rehearsal\n {8}env:\n {10}GITHUB_TOKEN: \$\{\{ github\.token \}\}\n {8}run: node scripts\/release-rehearsal\.mjs/)
+    for (const name of ['platform', 'shim']) {
+      const body = job(name).join('\n')
+      expect(body, name).toContain('SKIP_VERIFY: ${{ needs.guard.outputs.skip_verify }}')
+      expect(body, name).toContain('if [ "$SKIP_VERIFY" = "true" ]; then args="$args --skip-verify"; fi')
+    }
+    const script = readFileSync(new URL('../scripts/release-npm.mts', import.meta.url), 'utf8')
+    expect(script).toContain("const skipVerify = process.argv.includes('--skip-verify')")
+    expect(script).toMatch(/if \(skipVerify\) console\.log\([^\n]*\)\nelse for \(const script of target\?\.verify \?\? \['verify'\]\) sh\('pnpm', \[script\]\)/)
+  })
+})

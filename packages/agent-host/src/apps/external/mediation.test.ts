@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, resultText, type AgentRunRequest, type AppCaller, type AppRef, type BrokerHost } from './runtime.js'
 import { PROJECT_APPS, fakeBrokerHost, plantApp, until } from './test-helpers.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * The broker (M4 A-4) — the single path for calling an app's tool, and fd 3, where an app makes
@@ -26,7 +26,7 @@ let changed: AppRef[] = []
 let causes: (AppCaller | null)[] = []
 let rt: ExternalApps
 
-type Rec = { t: string; pid: number; runId?: string | null; mode?: string; text?: string }
+type Rec = { t: string; pid: number; runId?: string | null; mode?: string; text?: string; method?: string }
 const records = (id: string): Rec[] => {
   const f = join(appLogs, `${id}.jsonl`)
   if (!existsSync(f)) return []
@@ -69,7 +69,7 @@ const make = (host?: BrokerHost) => {
 }
 
 beforeEach(() => {
-  fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-apps-med-')))
+  fixture = tempRoot('cc-apps-med-')
   dataRoot = join(fixture, 'data')
   projRoot = join(fixture, 'proj')
   appLogs = join(fixture, 'fixture-logs')
@@ -81,7 +81,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await rt?.dispose()
-  rmSync(fixture, { recursive: true, force: true })
+  await removeTree(fixture)
 })
 
 describe('audience — both directions', () => {
@@ -199,8 +199,8 @@ describe('cancellation', () => {
     const parent = rt.call(ref('notes'), 'slow', {}, SESSION, { signal: parentAc.signal })
     const parentId = await openRunOf('notes')
     const child = rt.call(ref('other'), 'slow', {}, { kind: 'app', parentRunId: parentId })
-    await until(() => records('other').some((r) => r.t === 'start'), (x) => x)
-    await new Promise((r) => setTimeout(r, 200))
+    // The child call has reached the other app, rather than a fixed 200 ms after it started (#845)
+    await until(() => records('other').some((r) => r.t === 'method' && r.method === 'tools/call'), (x) => x)
     parentAc.abort()
     expect((await parent).status).toBe('cancelled')
     expect((await child).status).toBe('cancelled')

@@ -4,6 +4,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { TabActions } from './tabActions.jsx'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
+import { SkeletonLines } from '../../components/Skeleton.jsx'
 import { useLoad } from '../../app/useLoad.js'
 
 /**
@@ -104,7 +105,7 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
           Folder access permission required — System Settings → Privacy & Security → Files and Folders
         </p>
       ) : files === undefined ? (
-        status.error === null && <p className="px-3 pb-2 text-xs text-ink-faint">Loading…</p>
+        status.error === null && <SkeletonLines lines={3} className="px-3 pb-2 pt-1" label="Loading the changes" />
       ) : files.length === 0 ? (
         <p className="px-3 pb-2 text-xs text-ink-faint" data-testid="evidence-clean">
           No changes

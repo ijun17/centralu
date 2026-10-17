@@ -53,18 +53,32 @@ async function streamingAtBottom(page: Page) {
 /** Lets later answer lines land, then asserts the view stayed where the person left it */
 async function staysPut(page: Page) {
   await expect.poll(() => distanceFromBottom(page)).toBeGreaterThan(80)
-  // The scroll has to have come to rest before the baseline is taken (keyboard scrolling animates)
+  /*
+   * The scroll has to have come to rest before the baseline is taken (keyboard scrolling
+   * animates). Counted in frames, since an animating scroll moves once per frame and a busy
+   * machine can let 120ms pass without one.
+   */
   await expect
-    .poll(async () => {
-      const now = await stream(page).evaluate((el) => el.scrollTop)
-      await page.waitForTimeout(120)
-      return (await stream(page).evaluate((el) => el.scrollTop)) === now
-    })
+    .poll(() =>
+      stream(page).evaluate(async (el) => {
+        const now = el.scrollTop
+        for (let i = 0; i < 3; i++) await new Promise((r) => requestAnimationFrame(r))
+        return el.scrollTop === now
+      }),
+    )
     .toBe(true)
-  const before = await stream(page).evaluate((el) => el.scrollTop)
+  // Every position the list takes from here on, so a pull down that is put back still counts
+  const before = await stream(page).evaluate((el) => {
+    const w = window as any
+    w.__followTops = []
+    el.addEventListener('scroll', () => w.__followTops.push(el.scrollTop))
+    return el.scrollTop
+  })
   await burst(page, 20, 60)
   await expect(page.getByText('answer line 79')).toBeAttached()
-  await page.waitForTimeout(300)
+  // The follow runs in the effect after the render that grew the list, and once more a frame later (useChatScroll.ts)
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
+  expect((await page.evaluate(() => (window as any).__followTops as number[])).filter((top) => top !== before)).toEqual([])
   expect(await stream(page).evaluate((el) => el.scrollTop)).toBe(before)
   expect(await distanceFromBottom(page)).toBeGreaterThan(80)
 }

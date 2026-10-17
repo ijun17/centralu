@@ -176,7 +176,9 @@ async function scenarioSwap() {
   check(!listening(view.hostPid).includes(port) && listening(view.hostPid).length > 0, 'clients are given the front door, not the host’s own port', `door ${port}, host listens on ${listening(view.hostPid)}`)
   const env = startEnv(view.hostPid)
   check(env.includes(`CC_FRONT_DOOR=${door}`), 'the host is told the front door, which it gives the Codex bridge')
-  check(env.includes(`CC_HOST_TOKEN=${token}`), 'the host is given the front door’s token, so clients keep one token across hosts')
+  // The host gets the front door's token on its stdin (#538), so clients keep one token across hosts (c1 below)
+  check(!env.includes(token), 'the front door’s token is not in the host’s start environment, which this user’s processes can read (#538)')
+  check(env.includes('CC_HOST_TOKEN_ON_STDIN=1'), 'the host is told its token comes on stdin (#538)')
 
   const project = mkdtempSync('/tmp/ck-proj-')
   tempDirs.push(project)

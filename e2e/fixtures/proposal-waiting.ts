@@ -83,7 +83,7 @@ export function proposalWaitingTests() {
     await expect(page.getByTestId('skill-proposal-weekly-report')).toBeVisible()
   })
 
-  test('from another session the wait is seen on the orchestrator row, in the count and in the waiting list, and the list leads to the card', async ({ page }) => {
+  test('from another session the wait is seen in the count and in the waiting list, and the list leads to the card', async ({ page }) => {
     const { orc, other } = await orchestratorAndElsewhere(page)
     await expect(page.getByTestId('orchestrator-proposal-waiting')).toHaveCount(0)
     await expect(page.getByTestId('count-waiting')).toContainText('0')
@@ -93,10 +93,9 @@ export function proposalWaitingTests() {
       'mcp__centralu__propose_mcp_server',
     )
 
-    // Still on the other session: the orchestrator's row says something waits, like a session waiting on an approval
+    // Still on the other session: the count says something waits (the orchestrator's row carries no dot since 2026-10-17)
     expect(await page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(other)
-    await expect(page.getByTestId('orchestrator-proposal-waiting')).toBeVisible()
-    await expect(page.getByTestId('orchestrator-proposal-waiting').getByTestId('dot-waiting_approval')).toBeVisible()
+    await expect(page.getByTestId('orchestrator-proposal-waiting')).toHaveCount(0)
     await expect(page.getByTestId('count-waiting')).toContainText('1')
 
     await page.getByTestId('counter').click()
@@ -112,13 +111,13 @@ export function proposalWaitingTests() {
     await expect(page.getByTestId('orchestrator-button')).toHaveAttribute('aria-pressed', 'true')
   })
 
-  test('answering the card takes the wait off the row, the count and the list', async ({ page }) => {
+  test('answering the card takes the wait off the count and the list', async ({ page }) => {
     const { orc } = await orchestratorAndElsewhere(page)
     await proposeAfterToolCall(
       page, orc, { skill: { name: 'weekly-report', content: 'Every Friday, write the summary.' } },
       'mcp__centralu__propose_skill',
     )
-    await expect(page.getByTestId('orchestrator-proposal-waiting')).toBeVisible()
+    await expect(page.getByTestId('count-waiting')).toContainText('1')
 
     await page.getByTestId('orchestrator-button').click()
     await page.getByTestId('skill-dismiss-weekly-report').click()

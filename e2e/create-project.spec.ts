@@ -148,9 +148,9 @@ test('a new-project card takes y and n from the keyboard, and a does nothing —
   const card = page.getByTestId('approval-card')
   await expect(card).toHaveAttribute('data-kind', 'project_create')
   await card.getByTestId('approval-detail').click()
+  // Keys are handled in the order they are pressed, so the y after it is the proof: had the a
+  // answered, its answer would come first in the list (or the card would be gone for the y)
   await page.keyboard.press('a')
-  await page.waitForTimeout(200)
-  expect(await page.evaluate(() => (window as any).__mock.approvalAnswers)).toEqual([])
   await page.keyboard.press('y')
   await expect.poll(() => page.evaluate(() => (window as any).__mock.approvalAnswers)).toEqual([{ sessionId: sid, requestId: 'mk-2', decision: 'allow' }])
 })

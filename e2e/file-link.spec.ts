@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { newSession, setup } from './fixtures/control.js'
 
 /**
  * Clicking a file an agent named (#39).
@@ -9,37 +10,11 @@ import { expect, test, type Page } from '@playwright/test'
  * "what happens when the guess is wrong", and those are what this file asks.
  */
 
-async function setup(page: Page, path = '/tmp/alpha') {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.getByTestId('intro-card-claude').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-  await page.evaluate((p: string) => {
-    ;(window as any).__mock.nextPickedDirectory = p
-  }, path)
-  await page.getByTestId('orchestrator-pick-folder').click()
-  // Registering a project the first time leads straight into creating a session — this test
-  // only needs the project, so close it
-  await page.getByTestId('new-session-dialog').waitFor()
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId(`project-${path.split('/').pop()}`)).toBeVisible()
-}
-
 async function seedFiles(page: Page, files: Record<string, string>) {
   await page.evaluate((f: Record<string, string>) => {
     const m = (window as any).__mock
     m.fsState.files = { ...m.fsState.files, ...f }
   }, files)
-}
-
-async function newSession(page: Page, projectName: string, prompt: string) {
-  await page.getByTestId(`project-menu-${projectName}`).click()
-  await page.getByTestId(`new-session-${projectName}`).click()
-  await page.getByTestId('create-session-confirm').click()
-  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  // The first instruction goes through the composer, not the modal — the dialog has no prompt field (#8)
-  await page.getByTestId('prompt-input').fill(prompt)
-  await page.getByTestId('prompt-input').press('Enter')
 }
 
 /** Put words in the agent's mouth. Without an id, the session that is on screen */
@@ -60,7 +35,7 @@ async function agentSays(page: Page, text: string, sessionId?: string) {
  * a paragraph of ordinary technical prose turns into a wall of links that lead nowhere.
  */
 test('a backticked path opens the file; prose with a slash in it does not', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedFiles(page, { 'src/a.ts': 'first line\nsecond line' })
   await newSession(page, 'alpha', 'work')
   await agentSays(
@@ -79,7 +54,7 @@ test('a backticked path opens the file; prose with a slash in it does not', asyn
 })
 
 test('viewer Open in IDE uses a host-resolved absolute path and reports resolve failures', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedFiles(page, { 'src/a.ts': 'first line\nsecond line' })
   await newSession(page, 'alpha', 'work')
   await agentSays(page, 'See `src/a.ts`.')
@@ -107,7 +82,7 @@ test('viewer Open in IDE uses a host-resolved absolute path and reports resolve 
  * anything above the root, so it could only ever open an error.
  */
 test('an absolute path inside the project opens; one outside it stays text', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedFiles(page, { 'src/a.ts': 'first line' })
   await newSession(page, 'alpha', 'work')
   await agentSays(page, 'Changed `/tmp/alpha/src/a.ts`, left `/etc/hosts.conf` alone.')
@@ -126,7 +101,7 @@ test('an absolute path inside the project opens; one outside it stays text', asy
  * landing on the line costs the same as landing at the top.
  */
 test('`path:line` lands on that line, and says which one it landed on', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedFiles(page, {
     'big.ts': Array.from({ length: 400 }, (_, i) => `line ${i + 1} of the file`).join('\n'),
   })
@@ -148,7 +123,7 @@ test('`path:line` lands on that line, and says which one it landed on', async ({
  * of sitting on "Loading…" about a file that will never load.
  */
 test('a path that is not there says so, in the viewer and on top of it', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   await page.evaluate(() => {
     ;(window as any).__mock.fs.readFile = async () => {
@@ -186,7 +161,7 @@ test('a path that is not there says so, in the viewer and on top of it', async (
  * project is searched for a file with that tail and that file is opened instead.
  */
 test('a path written from a subdirectory still opens (#39)', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -211,7 +186,7 @@ test('a path written from a subdirectory still opens (#39)', async ({ page }) =>
  * guess dressed up as a fact.
  */
 test('when several files share the tail the viewer asks which one', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   await page.evaluate(() => {
     const m = (window as any).__mock
@@ -241,7 +216,7 @@ test('when several files share the tail the viewer asks which one', async ({ pag
  * file is the same thing as a backticked path, so it gets the same button.
  */
 test('a markdown link to a project file opens the viewer', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedFiles(page, { 'src/a.ts': 'first line' })
   await newSession(page, 'alpha', 'work')
   await agentSays(page, 'I changed [the manager](src/a.ts) and left [the docs](https://example.com) alone.')
@@ -256,7 +231,7 @@ test('a markdown link to a project file opens the viewer', async ({ page }) => {
 
 /** Right-click means Finder — the door for when the actual file is needed, not the viewer */
 test('right-clicking a file link reveals it in Finder', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedFiles(page, { 'src/a.ts': 'first line' })
   await newSession(page, 'alpha', 'work')
   await agentSays(page, 'See `src/a.ts`.')
@@ -273,7 +248,7 @@ test('right-clicking a file link reveals it in Finder', async ({ page }) => {
  * be smuggled into.
  */
 test('a link that is neither a file nor a web URL renders as plain text', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await newSession(page, 'alpha', 'work')
   await agentSays(page, 'Do not click [here](foo://bar) or [there](packages/ui).')
 
@@ -290,7 +265,7 @@ test('a link that is neither a file nor a web URL renders as plain text', async 
  * project session and stays text here.
  */
 test('the same path links in a project session and stays text in the orchestrator', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedFiles(page, { 'src/a.ts': 'first line' })
   await newSession(page, 'alpha', 'work')
   await agentSays(page, 'Look at `src/a.ts`.')
@@ -332,7 +307,7 @@ async function agentCalls(page: Page, tool: string, title: string, paths: string
  * card still opens and closes from its header, with the mouse or the keyboard.
  */
 test('the path in a tool card opens the file; a path outside the project stays text', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedFiles(page, { 'src/a.ts': 'first line\nsecond line' })
   await newSession(page, 'alpha', 'work')
   await agentCalls(page, 'Read', 'Read: /tmp/alpha/src/a.ts', ['/tmp/alpha/src/a.ts'], 'c1')

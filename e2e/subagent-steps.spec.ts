@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import { newSession, setup as setupProjects } from './fixtures/control.js'
 
 /**
  * A native subagent's steps under the card that launched it (#222).
@@ -9,23 +10,10 @@ import { test, expect, type Page } from '@playwright/test'
  * card's rows, `messages.subagent` → `loadSubagentMessages`).
  */
 
+/** The project alpha with one session on screen, already asked something */
 async function setup(page: Page) {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.getByTestId('intro-card-claude').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-  await page.evaluate(() => {
-    ;(window as any).__mock.nextPickedDirectory = '/tmp/alpha'
-  })
-  await page.getByTestId('orchestrator-pick-folder').click()
-  await page.getByTestId('new-session-dialog').waitFor()
-  await page.keyboard.press('Escape')
-  await page.getByTestId('project-menu-alpha').click()
-  await page.getByTestId('new-session-alpha').click()
-  await page.getByTestId('create-session-confirm').click()
-  await expect(page.getByTestId('new-session-dialog')).toBeHidden()
-  await page.getByTestId('prompt-input').fill('look into the boundaries test')
-  await page.getByTestId('prompt-input').press('Enter')
+  await setupProjects(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'look into the boundaries test')
 }
 
 /** An event for the session on screen, as the host would send it */

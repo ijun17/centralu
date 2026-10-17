@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { setup } from './fixtures/control.js'
 
 /**
  * The side of the file tree that **changes** files (#18, #19).
@@ -13,22 +14,6 @@ import { expect, test, type Page } from '@playwright/test'
  * panel watches what the screen picks when several are open. This one watches only **whether
  * files move**.
  */
-
-async function setup(page: Page, path = '/tmp/alpha') {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.getByTestId('intro-card-claude').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-  await page.evaluate((p: string) => {
-    ;(window as any).__mock.nextPickedDirectory = p
-  }, path)
-  await page.getByTestId('orchestrator-pick-folder').click()
-  // Registering a project the first time leads straight into creating a session — this test
-  // only needs the project, so close it
-  await page.getByTestId('new-session-dialog').waitFor()
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId(`project-${path.split('/').pop()}`)).toBeVisible()
-}
 
 /** Draws the mock's file tree. `entries` is "parent path → the items inside it" */
 async function seedTree(page: Page, entries: Record<string, { name: string; isDir?: boolean; ignored?: boolean }[]>) {
@@ -69,7 +54,7 @@ async function openTree(page: Page, prompt = 'work') {
  * where the file went — a row simply vanishing communicates only "it is gone," nothing more.
  */
 test('right-click → Trash: the row disappears, and it says where it went', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedTree(page, { '': [{ name: 'a.ts' }, { name: 'keep.ts' }] })
   await openTree(page)
 
@@ -89,7 +74,7 @@ test('right-click → Trash: the row disappears, and it says where it went', asy
 
 /** The label reads however this desktop names it — the UI never asks which OS it is (same rule as #32) */
 test('right-click → reveal in file manager', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedTree(page, { '': [{ name: 'a.ts' }] })
   await openTree(page)
 
@@ -103,7 +88,7 @@ test('right-click → reveal in file manager', async ({ page }) => {
 
 /** An ignored file is still just a file (#17) — if it is visible, it must be actionable too */
 test('a file caught by .gitignore can still be sent to Trash', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedTree(page, { '': [{ name: '.env.local', ignored: true }] })
   await openTree(page)
 
@@ -118,7 +103,7 @@ test('a file caught by .gitignore can still be sent to Trash', async ({ page }) 
  */
 
 test('dropping onto a folder moves the file into it', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedTree(page, { '': [{ name: 'src', isDir: true }, { name: 'a.ts' }], src: [] })
   await openTree(page)
 
@@ -134,7 +119,7 @@ test('dropping onto a folder moves the file into it', async ({ page }) => {
  * currently editing, and a silent swap is the one outcome that has no way back at all.
  */
 test('when the spot is occupied, nothing moves and it says what it collided with', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedTree(page, {
     '': [{ name: 'src', isDir: true }, { name: 'a.ts' }],
     src: [{ name: 'a.ts' }],
@@ -152,7 +137,7 @@ test('when the spot is occupied, nothing moves and it says what it collided with
 
 /** Moving something out of a folder again — the root has no row of its own, so empty space stands in for it */
 test('dropping into the tree\'s empty space moves the file to the project root', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedTree(page, {
     '': [{ name: 'src', isDir: true }],
     src: [{ name: 'a.ts' }],
@@ -179,7 +164,7 @@ test('dropping into the tree\'s empty space moves the file to the project root',
  * ours, and that is the only distinction.
  */
 test('a file dragged in from Finder lands in the folder it was dropped on', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedTree(page, { '': [{ name: 'src', isDir: true }], src: [] })
   await openTree(page)
 
@@ -205,7 +190,7 @@ test('a file dragged in from Finder lands in the folder it was dropped on', asyn
  * happens," which the eye alone cannot catch.
  */
 test('dropping onto the composer still inserts the path into the sentence, as before', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedTree(page, { '': [{ name: 'a.ts' }] })
   await openTree(page)
 
@@ -222,7 +207,7 @@ test('dropping onto the composer still inserts the path into the sentence, as be
  * made it attach to a path of the same name in a different project too.
  */
 test('the touched-file indicator attaches only to files touched by a session of this project (#185)', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedTree(page, { '': [{ name: 'a.ts' }, { name: 'b.ts' }] })
   await openTree(page)
   await page.evaluate(() => {
@@ -246,7 +231,7 @@ test('the touched-file indicator attaches only to files touched by a session of 
  * right, and at the window's right edge it landed entirely outside the window.
  */
 test('with text zoomed in, the right-click menu still appears where clicked and stays inside the window (#183)', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedTree(page, { '': [{ name: 'a.ts' }] })
   await openTree(page)
   await page.evaluate(() => (window as any).__store.getState().setPrefs({ textSize: 1.25 }))
@@ -268,7 +253,7 @@ test('with text zoomed in, the right-click menu still appears where clicked and 
  * host was watching was never reported.
  */
 test('after a host resync the tree registers its watches again and re-reads what is open', async ({ page }) => {
-  await setup(page)
+  await setup(page, { projects: ['/tmp/alpha'] })
   await seedTree(page, { '': [{ name: 'a.ts' }] })
   await openTree(page)
   await expect(page.getByTestId('file-a.ts')).toBeVisible()

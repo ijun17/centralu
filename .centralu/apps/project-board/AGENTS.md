@@ -194,8 +194,10 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   run left #971 UNSTABLE for good; `onlySupersededFailures`. Landed as usual, nothing rerun: a rerun
   of the duplicate would spend a whole CI run to change nothing) → every open lower must be inside the top's head
   (compare: the green run, read on that head, ran on all of them) and no lower's own latest CI run on
-  its head may have failed (cancelled or none is fine; a red one means the top's run may not cover it,
-  → attention `lower-failed`), then squash with `--match-head-commit` on the head read, subject `Title (#N)` without
+  its head may have failed at or after the run that proved the top was created, its own or its batch's
+  (`lowerFailureCounts`, → attention `lower-failed`). A later failure is evidence the top's run
+  missed (#1072 under #1075: a runner-dependent Windows bug); an earlier one is outlived by the top's
+  run on a newer main (#1039 under #1040: a test main had since fixed). Then squash with `--match-head-commit` on the head read, subject `Title (#N)` without
   attribution lines (`squashMessage`, as `merge_when_green`). Only GitHub's word that it merged counts:
   `gh pr merge` can exit 0 under GitHub's own merge queue without merging (→ attention, not asked again
   on that head). A stack lands only when the top merged into the default branch, here or found merged
@@ -237,7 +239,7 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 The free plan runs about one CI build at a time, so pull requests queued together each waited for
 their own run in one line. `batch.mjs` holds the rules (pure), `queue-batch.mjs` does them on GitHub,
 and the tick drives the running batch before any item, under the same lease. On while `project.json`
-has `queue.batch` (`min` items to start one, at least 2; `max`, default 6).
+has `queue.batch` (`min` items to start one, at least 2, or 1 with two tiers of CI below; `max`, default 6).
 
 - **Which**: active items in CI whose own CI was read on their head and has not started (every run
   `queued`, `waiting`, `requested` or `pending`: cancelling it throws no work away), not sent back
@@ -291,6 +293,40 @@ has `queue.batch` (`min` items to start one, at least 2; `max`, default 6).
   Tests: `tooling/project-board-queue.test.ts` (the rules, and the app against the fake `gh`: green,
   red and split, the default branch moved, dispatch refused, a conflict).
 
+### Two tiers of CI (2026-10-18)
+
+GitHub Actions was the bottleneck: a full run of `build.yml` is about 24 jobs, the free plan runs 20
+at once, and every push of every pull request started one. The owner chose two tiers: a pull
+request's own run is the **quick tier** (`changes`, `verify`, the Windows unit tests); the **full
+tier** (every job) runs on main, on a manual run (a batch's dispatch, or a person's) and on a release
+bump's pull request (`.github/scripts/ci-changes.mjs`). A skipped job counts as passed, so a quick run
+alone is green on what it reports. **Invariant: nothing lands that has not passed the full tier on
+what lands.** On while `project.json` has `ci.fullTier`, the name of the check that passes on a full
+run only (build.yml's `full tier` job; `ranTier` reads it: `full` when it passed, `quick` when it
+finished otherwise, null while not reported).
+
+- **An item lands from a full run**: its own head's (`decideCi` merges only when `ranTier` is `full`:
+  a release bump, or a full run a person started on its branch), or a batch's. A head whose own run
+  finished, ran less than the full tier and passed what it ran (`quickGreen`) waits for a batch
+  (`ci.verdict` `quick`); one the queue cannot batch (a fork's, a release bump's quick run, batches
+  off) → attention `full-tier`, saying how to start the full tier on it.
+- **Every item lands through a batch** then, **a batch of one included**: `min` may be 1 (this
+  repository's), and the fewest left after a conflict or a change is `min(2, min)`. A batch also takes
+  items whose quick tier passed, oldest first; one sent back from a batch on its head (`batchless`)
+  is taken alone, when it is the oldest. The batch's run must have passed the full tier's check too,
+  or nothing lands from it (the batch is dropped).
+- **A batch of one that ended without landing its member** (red, refused, stopped, three errors, a
+  conflict alone) marks it `alone` with why: not batched again on that head, and its next poll tells
+  its session (`full-tier`, with the batch's reason). A new head, or queueing it again, clears it.
+  Without this a red batch of one was formed again every tick.
+- **`merge_when_green`** refuses a head whose own run was the quick tier (`quick-tier`, saying to use
+  `queue_merge` or to start the full tier), and waits while the full tier's check has not passed.
+- **The release** takes a bump PR's run as evidence only when the full tier's check passed on it,
+  when the required set names it (`ciForRelease` `tier`): a quick run skipped what main's runs test.
+- `PROJECT_BOARD_CI_FULL_TIER` sets the check's name for tests only (empty: no tiers, as a repository
+  without them); the queue's app tests run both ways. Tests: `tooling/project-board-queue.test.ts`,
+  `tooling/project-board-ci.test.ts`, `tooling/build-workflow.test.ts`.
+
 ## Which tool for which task (#957)
 
 `help` (model only, read-only) answers a fixed table: which of this app's tools to use for a
@@ -329,6 +365,9 @@ and refuses with every reason at once, sending nothing.
   heading whose guidance says "keep the heading" (Usability) must not be empty. The title must pass
   the commit subject rules, since it becomes the squash subject; a title that will run past the
   length once ` (#N)` is added is a warning. `dryRun` answers the description without opening.
+  With a `base` that is another open pull request's branch, it turns that one into a draft
+  (`markDraft`, `gh pr ready --undo`) and says so: a stack's lower pull requests are drafts, and
+  build.yml runs no CI for a draft (#1066). Refused, it is a warning, not a failure.
 - **`commit_check`** (`message` or `messages`, `repo?`): the subject (`<type>(<scope>)!?: <description>`,
   a type from the conventions' table, lowercase scope and description, no trailing period, the
   subject's length in characters), a blank second line, and the public text rules. Body lines past
@@ -348,7 +387,9 @@ and refuses with every reason at once, sending nothing.
   it pushes with `--force-with-lease` on the head it read and moves the base. The person's checkout
   never changes: the worktree and the app's temporary refs are removed whatever happens. `lower`
   names the lower pull request when GitHub already moved `pr`'s base to main after deleting the
-  merged branch. `path` defaults to the checkout this app is in.
+  merged branch. `path` defaults to the checkout this app is in. When `pr` is a draft and no open
+  pull request is based on its branch, it says to mark it ready: it is its stack's top now, and a
+  draft runs no CI (#1066). It does not mark it itself: a draft may also be work in progress.
 - Tests: `tooling/project-board-contribute.test.ts`, with a fake `gh` and real git repositories
   (a bare one standing for GitHub's).
 

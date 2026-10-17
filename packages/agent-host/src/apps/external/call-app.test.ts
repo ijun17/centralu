@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, type AppRef } from './runtime.js'
 import { PROJECT_APPS, fakeBrokerHost, memoryLedger, plantApp, until } from './test-helpers.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * Apps calling each other (M4 D-2) — when an app asks for `call_app` over fd 3, the desk checks the
@@ -43,7 +43,7 @@ const askCallApp = async (asker: AppRef, args: Record<string, unknown>, signal?:
 }
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-call-app-')))
+  root = tempRoot('cc-call-app-')
   dataRoot = join(root, 'data')
   roots = { p1: join(root, 'p1'), p2: join(root, 'p2') }
   logs = join(root, 'fixture-logs')
@@ -64,7 +64,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await rt.dispose()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 describe('call_app — only the agent-facing tools of listed apps', () => {

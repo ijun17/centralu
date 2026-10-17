@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, type AppCaller, type AppRef, type BrokerHost } from './runtime.js'
 import { PROJECT_APPS, fakeBrokerHost, memoryLedger, plantApp, until } from './test-helpers.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * The ledger record of a broker request (M4 D-6) — whatever an app requested over fd 3 is **one row,
@@ -47,7 +47,7 @@ const ask = async (appId: string, tool: string, args: Record<string, unknown>, e
 }
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-broker-records-')))
+  root = tempRoot('cc-broker-records-')
   mkdirSync(join(root, 'p1'))
   mkdirSync(join(root, 'data'))
   ledger = memoryLedger()
@@ -55,7 +55,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await rt.dispose()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 describe('one row per request — under the run that triggered it', () => {

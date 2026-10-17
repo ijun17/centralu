@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, type AppCaller, type AppRef, type BrokerHost, type CapabilityQuestion, type RuntimeTiming } from './runtime.js'
 import { PROJECT_APPS, fakeBrokerHost, memoryLedger, plantApp, until } from './test-helpers.js'
+import { SLOW } from '../../../../../tooling/test-timing.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * Runaway prevention (M4 D-5) — the broker counts calls so a cycle of apps cannot spend the
@@ -69,7 +70,7 @@ const call = async (first: string, body: Record<string, unknown>) => {
 }
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-broker-limits-')))
+  root = tempRoot('cc-broker-limits-')
   mkdirSync(join(root, 'p1'))
   mkdirSync(join(root, 'data'))
   ledger = memoryLedger()
@@ -78,7 +79,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await rt.dispose()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 describe('chains', () => {
@@ -139,9 +140,14 @@ describe('agent', () => {
     })
     const first = call('notes', { mode: 'run', tool: 'run_agent', args: { prompt: 'one' } })
     await until(() => releases.length, (n) => n === 1)
-    // The second one gets its answer immediately, without waiting — if no answer comes within one second, it has been queued
+    /*
+     * The second one gets its answer while the first still runs, without waiting for it: a queued one would answer only
+     * once the first is released, which happens after this. The bound only names the failure. It used to be one second,
+     * and the refusal's round trip through the app process (call, broker, answer) took longer than that on a loaded
+     * Windows runner (#845)
+     */
     const pending = call('notes', { mode: 'run', tool: 'run_agent', args: { prompt: 'two' } })
-    const second = await Promise.race([pending, new Promise((r) => setTimeout(() => r('still waiting after 1 s'), 1_000))])
+    const second = await Promise.race([pending, new Promise((r) => setTimeout(() => r('still waiting: queued behind the first'), 5_000 * SLOW))])
     for (const r of releases.slice(1)) r()
     expect(second).toMatchObject({ isError: true })
     expect((second as { text: string }).text).toMatch(

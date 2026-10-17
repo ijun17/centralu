@@ -44,6 +44,7 @@ const REQUIRED = [
 ]
 
 let css = ''
+let js = ''
 let jsBytes = 0
 let outDir = ''
 
@@ -67,9 +68,11 @@ beforeAll(() => {
   const files = readdirSync(assets).filter((f) => f.endsWith('.css'))
   expect(files.length, 'no CSS file in the build output').toBeGreaterThan(0)
   css = files.map((f) => readFileSync(join(assets, f), 'utf8')).join('\n')
-  jsBytes = readdirSync(assets)
+  const chunks = readdirSync(assets)
     .filter((f) => f.endsWith('.js'))
-    .reduce((n, f) => n + readFileSync(join(assets, f)).length, 0)
+    .map((f) => readFileSync(join(assets, f)))
+  js = chunks.map((b) => b.toString('utf8')).join('\n')
+  jsBytes = chunks.reduce((n, b) => n + b.length, 0)
 }, 120_000 * SLOW)
 
 afterAll(() => {
@@ -81,8 +84,8 @@ describe('the built CSS actually contains styles', () => {
     expect(css).toContain(needle)
   })
 
-  it('is not down at the level of only default styles (under 4KB)', () => {
-    // This was the exact size when source detection failed (preflight alone is 4.19KB).
+  it('is more than 8KB, well past the 4.19KB of default styles alone', () => {
+    // When source detection failed, the build held only Tailwind's preflight: 4.19KB.
     expect(css.length).toBeGreaterThan(8_000)
   })
 
@@ -248,36 +251,20 @@ describe('the typography settings start from the stylesheet', () => {
 })
 
 describe('bundle regression (decision C-3: no editor engine in the viewer)', () => {
-  it('CodeMirror and Shiki are not in the bundle', () => {
+  it('neither the JS nor the CSS chunks carry CodeMirror or Shiki', () => {
     // An editor engine is overkill for a read-only viewer. Including one would require lazy
     // loading as a precondition, and Shiki's default engine is WASM, which conflicts with the
-    // Tauri CSP too (on the tech-stack ban list).
+    // Tauri CSP too (on the tech-stack ban list). Both arrive as script: CodeMirror writes its
+    // `cm-editor` styles from JS and Shiki's themes are JS, so reading the CSS alone missed them.
+    expect(js).not.toMatch(/cm-editor|shiki/i)
     expect(css).not.toMatch(/cm-editor|shiki/i)
   })
 
-  it('the app\'s total JS does not exceed 1.8MB', () => {
-    // 1.31MB in the release build (measured at M4 B-3c, including lazy-loaded chunks). It was
-    // 1.16MB at 988713e, and the app screen's bridge (ext-apps app-bridge, 138KB loaded the
-    // first time a screen opens) has been added since. Crossing this line means a heavy
-    // dependency came in, so raise it with a reason recorded.
-    //
-    // Raised from 1.5MB for the theme engine and its Settings editor (#312 step 3): 1,495,774B
-    // on main at 2bafb869's successor, 1,516,889B with it (+21KB, no dependency). Main was 4KB
-    // under the old line, so any feature would have crossed it next.
-    //
-    // Raised from 1.6MB for updating linked machines from Settings → Machines (#82, phase 3
-    // step 4): 1,604,944B with it, no dependency. Main sat just under the old line again.
-    //
-    // Raised from 1.65MB for the Search button, the open project's + and apps in the palette
-    // (#529): 1,648,218B on main at 27027fb1, 1,650,238B with it (+2KB, no dependency).
-    //
-    // Raised from 1.7MB for answering approvals from the waiting list and sidebar rows (#683, with
-    // its review's guards: the row's line, its fit check, the list's key rules): 1,696,097B on
-    // main at 29ffab50, 1,704,574B with it (+8KB, no dependency).
-    //
-    // Raised from 1.75MB for the UI audit (#842: dialogs with focus and Tab of their own, keyboard resizing, the terminal
-    // and file-tree reconnects, stale-search guards): 1,747,083B on main at 5a6f0cc7, 1,753,981B with it (+7KB, no
-    // dependency). Main was 3KB under the old line.
+  it('the app\'s total JS, lazy chunks included, stays under 1.8MB', () => {
+    // The release build's JS, every chunk counted. Crossing this line means a heavy dependency
+    // came in or a feature grew more than it should: find out which before raising it, and give
+    // the measurement and the reason in the commit that raises it. `git log -L` on this line
+    // lists every raise so far with its reason.
     expect(jsBytes).toBeLessThan(1_800_000)
   })
 })

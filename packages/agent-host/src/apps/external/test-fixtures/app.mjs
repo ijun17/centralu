@@ -80,9 +80,11 @@ if (MODE === 'stubborn-grandchild') {
    * A grandchild that ignores SIGTERM — the app itself ends cleanly once its input closes, but this
    * grandchild holds on against the SIGTERM the group receives. Recorded only **after** attaching its
    * handler: measured, a grandchild still starting (state R in ps) received SIGTERM and died before it
-   * ever attached the handler.
+   * ever attached the handler. The SIGTERM it holds off is written to the log (`sigterm-held`), so a test knows the
+   * first blow came, rather than sleeping and hoping it had.
    */
-  const kid = spawn(process.execPath, ['-e', "process.on('SIGTERM', () => {}); process.stdout.write('ready\\n'); setInterval(() => {}, 1000)"], {
+  const held = `process.on('SIGTERM', () => require('node:fs').appendFileSync(${JSON.stringify(LOG)}, JSON.stringify({ pid: process.pid, at: Date.now(), t: 'sigterm-held' }) + '\\n'))`
+  const kid = spawn(process.execPath, ['-e', `${held}; process.stdout.write('ready\\n'); setInterval(() => {}, 1000)`], {
     stdio: ['ignore', 'pipe', 'ignore'],
   })
   kid.stdout.once('data', () => {

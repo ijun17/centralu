@@ -529,6 +529,20 @@ export async function markReady(repo, number) {
   }
 }
 
+/**
+ * Turns a pull request into a draft (open_pr, for the one a new pull request is stacked on): a stack's
+ * lower pull requests are drafts, and build.yml runs no CI for a draft (#1066).
+ */
+export async function markDraft(repo, number) {
+  checkRepo(repo)
+  try {
+    await runGh(['pr', 'ready', String(number), '--undo', '-R', repo], { cwd: tmpdir() })
+  } catch (e) {
+    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+    throw new GitHubError('github', `GitHub refused to turn ${repo}#${number} into a draft: ${firstLine(e)}`)
+  }
+}
+
 /** Deletes a branch of the repository on GitHub. Returns null, or the reason GitHub gave. */
 export async function deleteBranch(repo, branch) {
   checkRepo(repo)
@@ -754,7 +768,7 @@ export async function setPrBase(repo, number, base) {
 export async function prsWithHead(repo, branch) {
   checkRepo(repo)
   if (!REF.test(String(branch))) return []
-  const out = await runGh(['pr', 'list', '-R', repo, '--head', branch, '--state', 'all', '--limit', '10', '--json', 'number,state,headRefName,baseRefName,headRefOid,mergeCommit'])
+  const out = await runGh(['pr', 'list', '-R', repo, '--head', branch, '--state', 'all', '--limit', '10', '--json', 'number,state,isDraft,headRefName,baseRefName,headRefOid,mergeCommit'])
   const list = parseJson(out)
   return Array.isArray(list) ? list.sort((a, b) => b.number - a.number) : []
 }

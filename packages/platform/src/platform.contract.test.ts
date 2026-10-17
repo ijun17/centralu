@@ -1,11 +1,12 @@
 /**
- * T4-2 completion criterion: runs the same contract test suite against two implementations
- * (web/mock). A split between implementations is caught here — when a Tauri implementation is
- * added, it goes in as a third entry.
+ * T4-2 completion criterion: runs the same contract test suite against every implementation
+ * (mock, web, Tauri). A split between implementations is caught here. The Tauri one is the web
+ * one plus what it asks the Rust shell, so it runs on the same real host with a fake shell; its
+ * own seams with the shell are in tauri/*.test.ts.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, posix, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,6 +32,50 @@ import { APP_VERSION, DEFAULT_UI_PREFERENCES, agentDepthOf } from '@cc/protocol'
 import type { Platform } from './ports/index.js'
 import { createMockPlatform } from './mock/index.js'
 import { createWebPlatform } from './web/index.js'
+import { createTauriPlatform } from './tauri/index.js'
+
+/*
+ * The Rust shell, as the Tauri implementation reaches it: `invoke` and `listen`. Everything else
+ * that implementation does goes over the same WebSocket as the web one, to the real host below,
+ * so only the commands it sends the shell are answered here, the way the shell on a Mac answers
+ * them. A command the shell is not given here fails, as one missing from the handler list would.
+ * Failures are bare strings because that is how Rust's `Err(String)` reaches the webview.
+ */
+vi.mock('@tauri-apps/api/core', () => ({ invoke: (cmd: string, args?: Record<string, unknown>) => fakeShell(cmd, args) }))
+vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }))
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({}) }))
+vi.mock('@tauri-apps/plugin-notification', () => ({ isPermissionGranted: async () => true, requestPermission: async () => 'granted', sendNotification: () => {} }))
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: async () => null }))
+
+/** The host a Tauri implementation being created attaches to, as the shell's `host_info` reports it */
+let shellHost: { port: number; token: string } | null = null
+
+async function fakeShell(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
+  switch (cmd) {
+    case 'host_info':
+      return shellHost
+    case 'host_error':
+      return null
+    // The app runs the host itself (`pnpm app:dev`): no keeper, so no relaunch swap and no background mode
+    case 'host_build':
+      return { mode: 'direct' }
+    case 'window_controls_inset':
+      return 0
+    case 'shortcut_keys':
+      return { mod: '⌘', alt: '⌥', join: '' }
+    case 'file_manager_name':
+      return 'Finder'
+    // The OS trash takes the file out of its folder; this one does not keep it
+    case 'trash_path':
+      rmSync(String(args?.path), { recursive: true })
+      return null
+    case 'reveal_path':
+      if (!existsSync(String(args?.path))) throw `${String(args?.path)} does not exist`
+      return null
+    default:
+      throw `the fake shell has no command ${cmd}`
+  }
+}
 
 /** The minimal real host for testing the web implementation (only the adapter is fake) */
 class EchoHandle implements SessionHandle {
@@ -85,7 +130,32 @@ type Harness = {
   agentSays: (events: NormalizedEvent[]) => void
 }
 
-async function makeWeb(): Promise<Harness> {
+/** The web implementation, connected straight to the real host */
+const makeWeb = () =>
+  makeOnRealHost(async (port, token) =>
+    createWebPlatform({
+      hostUrl: `ws://127.0.0.1:${port}`,
+      token,
+      WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket,
+    }),
+  )
+
+/**
+ * The Tauri implementation, started the way the desktop starts it, on the same real host. What
+ * a webview would get from the Rust shell comes from `fakeShell` below.
+ */
+const makeTauri = () =>
+  makeOnRealHost(async (port, token) => {
+    shellHost = { port, token }
+    try {
+      return await createTauriPlatform()
+    } finally {
+      shellHost = null
+    }
+  })
+
+/** A real host (only the agent adapter is fake), with the implementation `connect` builds on top of it */
+async function makeOnRealHost(connect: (port: number, token: string) => Promise<Platform>): Promise<Harness> {
   const store = new Store()
   const echo = new EchoAdapter()
   const adapters = new Map<ToolName, AgentAdapter>([['claude', echo]])
@@ -121,11 +191,7 @@ async function makeWeb(): Promise<Harness> {
     onRpc: createRpcHandler(mgr, adapters, { updates, themes, agentVersions }),
   })
   const port = await server.listen()
-  const platform = createWebPlatform({
-    hostUrl: `ws://127.0.0.1:${port}`,
-    token: 'contract',
-    WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket,
-  })
+  const platform = await connect(port, 'contract')
   await waitFor(() => platform.agents.listSessions().then(() => true).catch(() => false))
   return {
     platform,
@@ -193,27 +259,37 @@ async function waitFor(pred: () => boolean | Promise<boolean>, ms = 3000): Promi
 describe.each([
   ['mock', makeMock],
   ['web(+real host)', makeWeb],
+  ['tauri(+fake shell, real host)', makeTauri],
 ])('Platform contract: %s', (_name, make) => {
   let h: Harness
   let events: NormalizedEvent[]
 
-  beforeAll(async () => {
+  /*
+   * Every case gets a fresh implementation and sets up what it reads. One harness shared by the
+   * whole file let a case read the project an earlier case had registered, so a case run alone
+   * (`-t`) or in another order failed for a reason that was not its own (#845).
+   */
+  beforeEach(async () => {
     h = await make()
     events = []
     h.platform.agents.subscribe((e) => events.push(e))
   })
-  afterAll(async () => h.cleanup())
+  afterEach(async () => h.cleanup())
+
+  /** A project for this case. The temp directory, since the host only registers a folder that is on disk */
+  const aProject = () => h.platform.projects.add(tmpdir())
 
   it('registers a project and it shows up in the list', async () => {
-    const p = await h.platform.projects.add(tmpdir())
+    const p = await aProject()
     expect(p.path).toBe(tmpdir())
     const list = await h.platform.projects.list()
     expect(list.some((x) => x.id === p.id)).toBe(true)
   })
 
   it('re-registering the same path does not create a duplicate', async () => {
+    await aProject()
     const before = (await h.platform.projects.list()).length
-    await h.platform.projects.add(tmpdir())
+    await aProject()
     expect((await h.platform.projects.list()).length).toBe(before)
   })
 
@@ -226,35 +302,35 @@ describe.each([
    * implementations answer the same way is what this checks.
    */
   it('a shell command registered on a project comes back with the list (#44, label 2026-09-06)', async () => {
-    const [p] = await h.platform.projects.list()
-    const saved = await h.platform.projects.setCommands(p!.id, [
+    const p = await aProject()
+    const saved = await h.platform.projects.setCommands(p.id, [
       { command: 'pnpm test', label: '  test  ' },
       { command: '   ' },
       { command: 'pnpm lint', label: '' },
     ])
     // An empty command is not saved, a label is trimmed, and an empty label means no label
     expect(saved).toEqual([{ command: 'pnpm test', label: 'test' }, { command: 'pnpm lint' }])
-    const found = (await h.platform.projects.list()).find((x) => x.id === p!.id)
+    const found = (await h.platform.projects.list()).find((x) => x.id === p.id)
     expect(found?.commands).toEqual([{ command: 'pnpm test', label: 'test' }, { command: 'pnpm lint' }])
 
     // Deleting also comes through the same door — sending only what remains is the new list
-    await h.platform.projects.setCommands(p!.id, [{ command: 'pnpm lint' }])
-    expect((await h.platform.projects.list()).find((x) => x.id === p!.id)?.commands).toEqual([
+    await h.platform.projects.setCommands(p.id, [{ command: 'pnpm lint' }])
+    expect((await h.platform.projects.list()).find((x) => x.id === p.id)?.commands).toEqual([
       { command: 'pnpm lint' },
     ])
   })
 
   it('creating a session shows up in the list', async () => {
-    const [p] = await h.platform.projects.list()
-    const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
+    const p = await aProject()
+    const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
     expect(s.id).toBeTruthy()
     const list = await h.platform.agents.listSessions()
     expect(list.some((x) => x.id === s.id)).toBe(true)
   })
 
   it('sending delivers an event to subscribers', async () => {
-    const [p] = await h.platform.projects.list()
-    const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
+    const p = await aProject()
+    const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
     events.length = 0
     await h.platform.agents.send(s.id, 'hi')
     await waitFor(() => events.length > 0)
@@ -262,15 +338,15 @@ describe.each([
   })
 
   it('the first message becomes the session name (FR-18)', async () => {
-    const [p] = await h.platform.projects.list()
-    const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
+    const p = await aProject()
+    const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
     await h.platform.agents.send(s.id, 'refactor auth please')
     await waitFor(async () => (await h.platform.agents.listSessions()).find((x) => x.id === s.id)?.name === 'refactor auth please')
   })
 
   it('after a rename, the automatic name does not overwrite it', async () => {
-    const [p] = await h.platform.projects.list()
-    const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
+    const p = await aProject()
+    const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
     await h.platform.agents.rename(s.id, 'my session')
     await h.platform.agents.send(s.id, 'a different prompt')
     const found = (await h.platform.agents.listSessions()).find((x) => x.id === s.id)
@@ -278,8 +354,8 @@ describe.each([
   })
 
   it('markRead does not move backward', async () => {
-    const [p] = await h.platform.projects.list()
-    const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
+    const p = await aProject()
+    const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
     await h.platform.agents.markRead(s.id, 10)
     await h.platform.agents.markRead(s.id, 3)
     const found = (await h.platform.agents.listSessions()).find((x) => x.id === s.id)
@@ -287,8 +363,8 @@ describe.each([
   })
 
   it('saves a message and reads it back', async () => {
-    const [p] = await h.platform.projects.list()
-    const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
+    const p = await aProject()
+    const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
     await h.platform.agents.send(s.id, 'a message to record')
     await waitFor(async () => (await h.platform.agents.loadMessages(s.id)).length > 0)
     const msgs = await h.platform.agents.loadMessages(s.id)
@@ -302,7 +378,7 @@ describe.each([
    * and the demo draw the mock's rows, so a mock that merged them showed a conversation the real host never stores.
    */
   it('keeps one row per message and the marker row of an error, as the host stores them', async () => {
-    const p = await h.platform.projects.add(tmpdir())
+    const p = await aProject()
     const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
     events.length = 0
     h.agentSays([
@@ -389,8 +465,8 @@ describe.each([
    * implementations — the e2e scenarios drive the mock, so a mock that deleted for real would pass them all.
    */
   it('a deleted session goes to the trash, reads, comes back, and is deleted for good only from there', async () => {
-    const [p] = await h.platform.projects.list()
-    const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
+    const p = await aProject()
+    const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
     await h.platform.agents.send(s.id, 'kept in the trash')
     await waitFor(async () => (await h.platform.agents.loadMessages(s.id)).length > 0)
     const said = (await h.platform.agents.loadMessages(s.id)).map((m) => [m.seq, m.role, m.payload])
@@ -400,14 +476,14 @@ describe.each([
     expect((await h.platform.agents.listSessions()).some((x) => x.id === s.id)).toBe(false)
     const listed = await h.platform.trash.list()
     const row = listed.sessions.find((x) => x.id === s.id)
-    expect(row).toMatchObject({ project: { id: p!.id, exists: true }, worktree: null })
+    expect(row).toMatchObject({ project: { id: p.id, exists: true }, worktree: null })
     expect(row!.conversationFile).not.toBe('remove') // nothing was chosen to go with it
     expect(row!.messages).toBe(said.length)
     expect(listed.bytes).toBeGreaterThan(0)
     expect((await h.platform.trash.read(s.id)).map((m) => [m.seq, m.role, m.payload])).toEqual(said)
 
     const back = await h.platform.trash.restore(s.id)
-    expect(back).toMatchObject({ session: { id: s.id, projectId: p!.id }, project: null })
+    expect(back).toMatchObject({ session: { id: s.id, projectId: p.id }, project: null })
     expect((await h.platform.agents.listSessions()).some((x) => x.id === s.id)).toBe(true)
     expect((await h.platform.trash.list()).sessions.some((x) => x.id === s.id)).toBe(false)
 
@@ -425,7 +501,8 @@ describe.each([
   describe('what the mock used to answer differently (#999)', () => {
     let parent = ''
     let repo = ''
-    beforeAll(() => {
+    // Per case, as the harness is: each case sets up the projects it reads
+    beforeEach(() => {
       parent = mkdtempSync(join(tmpdir(), 'cc-contract-new-'))
       // A real repository for the host; the mock reads any registered folder as one
       repo = mkdtempSync(join(tmpdir(), 'cc-contract-repo-'))
@@ -434,12 +511,12 @@ describe.each([
       execFileSync('git', ['-C', repo, 'config', 'user.name', 'Contract'])
       execFileSync('git', ['-C', repo, 'config', 'user.email', 'contract@example.invalid'])
     })
-    afterAll(() => {
+    afterEach(() => {
       rmSync(parent, { recursive: true, force: true })
       rmSync(repo, { recursive: true, force: true })
     })
     const session = async (projectId?: string) => {
-      const p = projectId ?? (await h.platform.projects.list())[0]!.id
+      const p = projectId ?? (await aProject()).id
       return h.platform.agents.createSession({ projectId: p, cwd: tmpdir(), tool: 'claude', permissionPreset: 'normal' })
     }
     const sessionNamed = async (id: string) => (await h.platform.agents.listSessions()).find((x) => x.id === id)
@@ -481,7 +558,7 @@ describe.each([
           worktree: true,
           ...(worktreeBranch ? { worktreeBranch } : {}),
         })
-      const empty = (await h.platform.projects.list()).find((p) => p.name === 'fresh')!
+      const empty = await h.platform.projects.create('fresh', parent)
       await expect(worktree(empty)).rejects.toThrow(/need a git repository/)
       const r = await h.platform.projects.add(repo)
       await expect(worktree(r)).rejects.toThrow(/need a trusted project/)
@@ -514,15 +591,20 @@ describe.each([
     })
 
     it("a model chosen for a session becomes the project's default for that tool, and windows hear of it", async () => {
-      const [p] = await h.platform.projects.list()
-      const s = await session(p!.id)
+      const p = await aProject()
+      const s = await session(p.id)
       events.length = 0
       await h.platform.agents.updateSettings(s.id, { model: 'opus', effort: 'high' })
-      expect((await h.platform.projects.list()).find((x) => x.id === p!.id)!.defaultModels.claude).toEqual({ model: 'opus', effort: 'high' })
+      expect((await h.platform.projects.list()).find((x) => x.id === p.id)!.defaultModels.claude).toEqual({ model: 'opus', effort: 'high' })
       expect(events.some((e) => e.type === 'projects_changed')).toBe(true)
     })
 
     it('a reorder that leaves ids out keeps them at the end, in the order they had', async () => {
+      for (const name of ['one', 'two', 'three']) mkdirSync(join(parent, name))
+      const first = await h.platform.projects.add(join(parent, 'one'))
+      await h.platform.projects.add(join(parent, 'two'))
+      await h.platform.projects.add(join(parent, 'three'))
+      for (let i = 0; i < 3; i++) await session(first.id)
       const ids = (await h.platform.projects.list()).map((p) => p.id)
       const last = ids.at(-1)!
       expect((await h.platform.projects.reorder([last])).map((p) => p.id)).toEqual([last, ...ids.slice(0, -1)])
@@ -546,7 +628,8 @@ describe.each([
      * machine (its identity, its language), so the contract does not pin them; the mock's are in its git.ts.
      */
     it('a commit with nothing staged fails and says why', async () => {
-      const r = (await h.platform.projects.list()).find((p) => p.name === basename(repo))!
+      const r = await h.platform.projects.add(repo)
+      expect(r.name).toBe(basename(repo))
       const res = await h.platform.git.commit(r.id, 'nothing here')
       expect(res.ok).toBe(false)
       expect(res.message?.trim()).toBeTruthy()
@@ -557,14 +640,14 @@ describe.each([
    * The keyboard's labels are also a capability (issue #32).
    *
    * ui has no implementation behind it, so putting an OS branch there would be invisible to
-   * any test we run — that is why `⌘` comes through the port. This checks that both
+   * any test we run — that is why `⌘` comes through the port. This checks that the
    * implementations answer alike here: if only one silently changed, the screen seen in a
    * browser and the one seen in the app would diverge.
    *
-   * **The Mac labels are the right answer for both implementations.** Only Rust (the tauri
-   * implementation) actually knows the keyboard; these two belong to the dev server and to
-   * e2e respectively, so guessing the keyboard here would make the result depend on whatever
-   * machine the test runs on.
+   * **The Mac labels are the right answer for the mock and web implementations.** Only Rust
+   * actually knows the keyboard; these two belong to e2e and to the dev server respectively, so
+   * guessing the keyboard here would make the result depend on whatever machine the test runs
+   * on. The Tauri implementation passes on what the shell answers, here the fake shell's Mac.
    */
   it('answers what the keyboard calls a modifier combination (#32)', () => {
     const keys = h.platform.capabilities.shortcutKeys
@@ -586,16 +669,24 @@ describe.each([
   describe('file operations (#18, #19)', () => {
     let projectId = ''
     let dir = ''
+    /** Brings a file in from outside, through the port like everything else here */
+    const dropIn = (name: string, text: string) => h.platform.fs.importFile(projectId, '', name, btoa(text))
+    /** `dropped.txt` already moved into `sub/`, the state the move cases start from */
+    const dropInAndMoveToSub = async () => {
+      h.makeDir(dir, 'sub')
+      await dropIn('dropped.txt', 'hello')
+      await h.platform.fs.move(projectId, 'dropped.txt', 'sub')
+    }
 
-    beforeAll(async () => {
+    beforeEach(async () => {
       // The real host side really writes to disk — it never takes one step outside the temp directory
       dir = mkdtempSync(join(tmpdir(), 'cc-contract-fs-'))
       projectId = (await h.platform.projects.add(dir)).id
     })
-    afterAll(() => rmSync(dir, { recursive: true, force: true }))
+    afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
     it('a file dropped in from outside appears in the listing', async () => {
-      const res = await h.platform.fs.importFile(projectId, '', 'dropped.txt', btoa('hello'))
+      const res = await dropIn('dropped.txt', 'hello')
       expect(res.path).toBe('dropped.txt')
       const listed = await h.platform.fs.listDir(projectId, '')
       expect(listed.map((e) => e.name)).toContain('dropped.txt')
@@ -612,9 +703,8 @@ describe.each([
     })
 
     it('does not import if the same name already exists', async () => {
-      await expect(h.platform.fs.importFile(projectId, '', 'dropped.txt', btoa('other'))).rejects.toThrow(
-        /already exists/,
-      )
+      await dropIn('dropped.txt', 'hello')
+      await expect(dropIn('dropped.txt', 'other')).rejects.toThrow(/already exists/)
       expect((await h.platform.fs.readFile(projectId, 'dropped.txt')).text).toBe('hello')
     })
 
@@ -624,12 +714,14 @@ describe.each([
 
     it('moving within the tree changes the parent', async () => {
       h.makeDir(dir, 'sub')
+      await dropIn('dropped.txt', 'hello')
       const moved = await h.platform.fs.move(projectId, 'dropped.txt', 'sub')
       expect(moved).toEqual({ path: 'sub/dropped.txt', moved: true })
       expect((await h.platform.fs.listDir(projectId, 'sub')).map((e) => e.name)).toContain('dropped.txt')
     })
 
     it('dropping something back where it already is is not a failure (moved:false)', async () => {
+      await dropInAndMoveToSub()
       expect(await h.platform.fs.move(projectId, 'sub/dropped.txt', 'sub')).toEqual({
         path: 'sub/dropped.txt',
         moved: false,
@@ -637,13 +729,16 @@ describe.each([
     })
 
     it('does not move if the destination is already taken', async () => {
-      await h.platform.fs.importFile(projectId, '', 'dropped.txt', btoa('second'))
+      await dropInAndMoveToSub()
+      await dropIn('dropped.txt', 'second')
       await expect(h.platform.fs.move(projectId, 'dropped.txt', 'sub')).rejects.toThrow(/already exists/)
       // The original has to stay where it was — a half-moved state is the worst outcome
       expect((await h.platform.fs.listDir(projectId, '')).map((e) => e.name)).toContain('dropped.txt')
     })
 
+    // The file exists, so the refusal can only be about where it would go
     it('cannot move outside the project', async () => {
+      await dropIn('dropped.txt', 'hello')
       await expect(h.platform.fs.move(projectId, 'dropped.txt', '../..')).rejects.toThrow()
     })
 
@@ -651,12 +746,13 @@ describe.each([
      * The trash and the file manager **answer whether they can, first** (the same shape as
      * `models()`).
      *
-     * It is normal for the two implementations to answer differently here: a browser has no
+     * It is normal for the implementations to answer differently here: a browser has no
      * trash, and never will. The contract is not "it works" but **"if it does not, a reason
      * comes with it"** — a supported:false with no reason is indistinguishable on screen from
      * quietly doing nothing.
      */
     it('the trash answers whether it can, and gives a reason if it cannot', async () => {
+      await dropIn('dropped.txt', 'hello')
       const res = await h.platform.fs.trash(projectId, 'dropped.txt')
       if (res.supported) {
         expect((await h.platform.fs.listDir(projectId, '')).map((e) => e.name)).not.toContain('dropped.txt')
@@ -666,6 +762,7 @@ describe.each([
     })
 
     it('viewing in the file manager answers in the same shape', async () => {
+      h.makeDir(dir, 'sub')
       const res = await h.platform.fs.reveal(projectId, 'sub')
       if (!res.supported) expect(res.reason).toMatch(/\S/)
     })
@@ -712,6 +809,8 @@ describe.each([
    * request keeps going out from the machine of someone who was told it is off.
    */
   it('turning off automatic checking keeps automatic calls from reaching the registry (#43)', async () => {
+    h.offerUpdate('9999.0.0')
+    await h.platform.updates.status(true)
     await h.platform.updates.setAuto(false)
     h.offerUpdate('9999.0.1')
     // The automatic call went nowhere — the previously known answer stays
@@ -759,14 +858,9 @@ describe.each([
    * as `failed`, the refusal stayed on the line through every later check.
    */
   it('an install with nothing newer known refreshes first and answers up to date, not failed (#645)', async () => {
-    const fresh = await make()
-    try {
-      fresh.offerUpdate(APP_VERSION)
-      const s = await fresh.platform.updates.apply()
-      expect(s).toMatchObject({ phase: 'idle', latest: APP_VERSION, newer: false, error: null })
-    } finally {
-      await fresh.cleanup()
-    }
+    h.offerUpdate(APP_VERSION)
+    const s = await h.platform.updates.apply()
+    expect(s).toMatchObject({ phase: 'idle', latest: APP_VERSION, newer: false, error: null })
   })
 
   /**
@@ -774,16 +868,11 @@ describe.each([
    * a value out of range is not saved.
    */
   it('the agent depth reads as 1 until set, keeps what is set, and refuses a value out of range (#867)', async () => {
-    const fresh = await make()
-    try {
-      expect(agentDepthOf(await fresh.platform.prefs.load())).toBe(1)
-      expect((await fresh.platform.prefs.save({ agentDepth: 3 })).agentDepth).toBe(3)
-      expect(agentDepthOf(await fresh.platform.prefs.load())).toBe(3)
-      await fresh.platform.prefs.save({ agentDepth: 4 }).catch(() => null)
-      expect(agentDepthOf(await fresh.platform.prefs.load())).not.toBe(4)
-    } finally {
-      await fresh.cleanup()
-    }
+    expect(agentDepthOf(await h.platform.prefs.load())).toBe(1)
+    expect((await h.platform.prefs.save({ agentDepth: 3 })).agentDepth).toBe(3)
+    expect(agentDepthOf(await h.platform.prefs.load())).toBe(3)
+    await h.platform.prefs.save({ agentDepth: 4 }).catch(() => null)
+    expect(agentDepthOf(await h.platform.prefs.load())).not.toBe(4)
   })
 
   /**
@@ -832,18 +921,12 @@ describe.each([
    * carries the old step (written by an older window) does not override a size chosen since.
    */
   describe('a fresh install with a snapshot from before #312', () => {
-    let fresh: Harness
-    beforeAll(async () => {
-      fresh = await make()
-    })
-    afterAll(async () => fresh.cleanup())
-
     it('a text size kept in the workspace snapshot moves into the preferences once', async () => {
-      await fresh.platform.workspace.save({ textScale: 4 })
-      expect((await fresh.platform.prefs.load()).textSize).toBe(1.25)
-      expect((await fresh.platform.prefs.save({ textSize: 0.925 })).textSize).toBe(0.925)
-      await fresh.platform.workspace.save({ textScale: 4 })
-      expect((await fresh.platform.prefs.load()).textSize).toBe(0.925)
+      await h.platform.workspace.save({ textScale: 4 })
+      expect((await h.platform.prefs.load()).textSize).toBe(1.25)
+      expect((await h.platform.prefs.save({ textSize: 0.925 })).textSize).toBe(0.925)
+      await h.platform.workspace.save({ textScale: 4 })
+      expect((await h.platform.prefs.load()).textSize).toBe(0.925)
     })
   })
 
@@ -880,8 +963,8 @@ describe.each([
   it('unsubscribing works', async () => {
     const seen: NormalizedEvent[] = []
     const off = h.platform.agents.subscribe((e) => seen.push(e))
-    const [p] = await h.platform.projects.list()
-    const s = await h.platform.agents.createSession({ projectId: p!.id, cwd: p!.path, tool: 'claude', permissionPreset: 'normal' })
+    const p = await aProject()
+    const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
     await h.platform.agents.send(s.id, 'a')
     await waitFor(() => seen.length > 0)
     const count = seen.length

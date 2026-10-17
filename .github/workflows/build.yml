@@ -10,11 +10,16 @@ name: build
 on:
   push:
     branches: [main]
+  # A draft runs `changes` alone (#1066: a stack's lower PRs are drafts). Marked ready, it runs again;
+  # turned into a draft, the run it starts cancels the one going (concurrency below).
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   workflow_dispatch:
     inputs:
+      # A manual run is the full tier (.github/scripts/ci-changes.mjs): the merge queue's batches, or a
+      # person asking for it on a branch (`gh workflow run build.yml --ref <branch>`, CONTRIBUTING.md)
       everything:
-        description: Run every job, whatever the commit changes
+        description: Run every job, whatever the commit changes (unticked, the files leave out what they cannot affect)
         type: boolean
         default: true
 
@@ -26,25 +31,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Which jobs a pull request needs, from the files it adds to main (.github/scripts/ci-changes.mjs,
-  # 2026-10-17). About 25 jobs run per push and the free plan runs about 20 at once, so every job a
-  # change cannot affect delays the next run. Documents run only `verify`, `windows tests` and the
-  # WebKit UI scenarios; tests skip the bundles, the keeper and the content verifier; the window alone
-  # (packages/ui, core, platform, apps/web) skips the keeper, the content verifier and the host's tests
-  # on the remotes' Node; a build or CI config runs everything. A commit already on main runs
-  # everything. A pull request is compared with its merge-base with main, whatever its base branch, so
-  # a stacked one is judged by the whole stack. The rule reads no event context (docs/releasing.md,
-  # event audit). `changes` must be in any required set: it is what the gated jobs wait on.
+  # Which jobs a run needs: its tier, then the files it adds to main (.github/scripts/ci-changes.mjs,
+  # 2026-10-17; tiers 2026-10-18, the owner's decision). About 25 jobs run per push and the free plan
+  # runs about 20 at once, so every job a run does not need delays the next one.
   #
-  # A job left out still reports its check under its own name, which a required check waits for:
-  # a job without a matrix reports `skipped`; a matrix job has a `…-skipped` stand-in with the same
-  # name and matrix, since a skipped matrix job reports its name unexpanded (`${{ matrix.target }}`).
-  # Each pair is `== 'true'` / `== 'false'`, so a missing answer runs neither and the check never
-  # reports, instead of passing unbuilt. tooling/build-workflow.test.ts holds the pairs together.
+  # A draft pull request (a stack's lower, #1066) runs `changes` alone, and every other job skips.
+  #
+  # The quick tier, on a pull request: `changes`, `verify` and the Windows unit tests. The full tier,
+  # every job: a push to main, a manual run (the merge queue's batches; a person on a branch) and a
+  # release bump's pull request (it changes the file that declares the version). The merge queue lands
+  # nothing on the quick tier alone: only from a full run on what lands, which the `full tier` job
+  # passing says (skipped on a quick run). Inside the full tier, documents run only `verify`, the
+  # `windows tests` jobs and the WebKit UI scenarios; tests skip the bundles, the keeper and the
+  # content verifier; the window alone (packages/ui, core, platform, apps/web) skips the keeper, the
+  # content verifier and the host's tests on the remotes' Node; a build or CI config runs everything.
+  # A pull request is compared with its merge-base with main, whatever its base branch, so a stacked
+  # one is judged by the whole stack. The rule reads no event context (docs/releasing.md, event
+  # audit). `changes` must be in any required set: it is what the gated jobs wait on.
+  #
+  # On a full run, a job left out by the files still reports its check under its own name, which a
+  # required check waits for: a job without a matrix reports `skipped`; a matrix job has a `…-skipped`
+  # stand-in with the same name and matrix, since a skipped matrix job reports its name unexpanded
+  # (`${{ matrix.target }}`). Each pair is `== 'true'` / `== 'false'`, so a missing answer, or `off`
+  # on a quick run, runs neither. tooling/build-workflow.test.ts holds the pairs together.
   changes:
     name: changes
     runs-on: ubuntu-24.04
     outputs:
+      quick: ${{ steps.classify.outputs.quick }}
+      full: ${{ steps.classify.outputs.full }}
       bundle: ${{ steps.classify.outputs.bundle }}
       host: ${{ steps.classify.outputs.host }}
       host_tests: ${{ steps.classify.outputs.host_tests }}
@@ -59,9 +74,21 @@ jobs:
       - name: Classify the changed files
         id: classify
         env:
-          # Unset on a push or a pull request; a manual run asks for everything by default
+          # Empty on a push or a pull request; set (true by default) on a manual run, which is the full tier
           EVERYTHING: ${{ inputs.everything }}
         run: node .github/scripts/ci-changes.mjs
+
+  # Passes on a full run only, and is skipped on a quick one: how the merge queue and the release tell a
+  # full run from a quick one (project.json `ci.fullTier`). Every check of a skipped job counts as
+  # passed, so a quick run alone looks green; the queue lands a pull request only from a run where this
+  # one passed (a batch's, or its own full run).
+  full-tier:
+    name: full tier
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "The full tier runs (.github/scripts/ci-changes.mjs)"
 
   bundle:
     name: ${{ matrix.target }}
@@ -275,7 +302,7 @@ jobs:
     steps:
       - run: echo "Nothing a bundle is built from changed (.github/scripts/ci-changes.mjs)"
 
-  # `pnpm verify` on every pull request (2026-10-05). Until this job existed the full suite ran
+  # `pnpm verify` on every run, quick tier included (2026-10-05). Until this job existed the full suite ran
   # only inside release.yml, so a change merged with a partial local run surfaced in the release
   # rehearsal instead: #333 renamed the Windows package, and tooling/release-workflow.test.ts,
   # which derived the old name, failed the 0.1.0-beta.9 rehearsal on all three Unix platforms.
@@ -283,6 +310,8 @@ jobs:
   # Node 22's EventTarget all failed there first).
   verify:
     name: verify
+    needs: changes
+    if: needs.changes.outputs.quick == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -343,8 +372,15 @@ jobs:
   # lint, dependency rules and types (about a minute), so the check every required set already
   # names (the board's, read from main's workflow) still reports; `windows-tests-unit` runs the
   # unit tests in two `vitest --shard` halves side by side.
+  #
+  # Tiers (2026-10-18): the unit tests are in the quick tier, every pull request; lint and types, which
+  # `verify` already runs on Linux, only in the full one. Of the 140 failed pull request runs from
+  # 2026-10-11 to 2026-10-18, 94 passed `verify`, and 53 of those failed `windows tests` (then one
+  # job, its unit tests): no other job caught as much that `verify` did not.
   windows-tests:
     name: windows tests
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -366,9 +402,11 @@ jobs:
       - if: ${{ !cancelled() }}
         run: pnpm typecheck
 
-  # `pnpm test` on Windows, the rest of the job above, halved by `vitest --shard` (#1035).
+  # `pnpm test` on Windows, the rest of the job above, halved by `vitest --shard` (#1035). In the quick tier.
   windows-tests-unit:
     name: windows tests (vitest ${{ matrix.shard }}/${{ matrix.shards }})
+    needs: changes
+    if: needs.changes.outputs.quick == 'true'
     runs-on: windows-2022
     strategy:
       fail-fast: false
@@ -396,11 +434,12 @@ jobs:
         # unknown option of its own
         run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }}
 
-  # The UI scenarios (e2e/, Playwright) in WebKit, on every pull request (owner decision,
-  # 2026-10-11). The desktop app is WKWebView, and until this job existed no CI job ran Playwright at
-  # all: nine WebKit-only failures piled up on main unseen (#424), two of them real product bugs
-  # (#480). `E2E_BROWSER=webkit` runs every spec in WebKit (e2e/playwright.config.ts). Not gated by
-  # `changes`: every pull request runs it, documents only included (owner decision, 2026-10-11).
+  # The UI scenarios (e2e/, Playwright) in WebKit, on every full run (owner decisions, 2026-10-11:
+  # every pull request; 2026-10-18: every full run, which is what lands). The desktop app is WKWebView,
+  # and until this job existed no CI job ran Playwright at all: nine WebKit-only failures piled up on
+  # main unseen (#424), two of them real product bugs (#480). `E2E_BROWSER=webkit` runs every spec in
+  # WebKit (e2e/playwright.config.ts). Not gated by the files: every full run has it, documents only
+  # included.
   #
   # Sharded so the job finishes inside the time the slowest other job already takes (`windows
   # tests`, about 6.5 minutes). Measured 2026-10-11: the suite is about 18 minutes of one runner's
@@ -412,6 +451,8 @@ jobs:
   # Playwright itself never retries: a test that needs either is still a test to fix.
   e2e:
     name: e2e (webkit ${{ matrix.shard }}/${{ matrix.shards }})
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     # A first run that fails and the retry below must both fit (#1035): a shard takes 4 to 6 minutes
     timeout-minutes: 30

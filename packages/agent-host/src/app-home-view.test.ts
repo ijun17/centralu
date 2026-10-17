@@ -123,6 +123,20 @@ const openView = (appId: string) =>
 
 const runs = async (appId: string) => (await rpc('apps.runs', { appId, projectId: 'p1' })) as AppRun[]
 
+const statusOf = (appId: string) => rt.list().find((a) => a.appId === appId)?.status
+
+/**
+ * Waits until an app no view holds has been stopped as idle (#845): what proves a held app's idle wait, had it
+ * started, has run out too. Its own wait starts here, after the held app's would have, and both are `idleMs`, which
+ * Node's timers run in the order they were set; a stop marks the app stopped at once. A fixed sleep proved nothing
+ * on a loaded machine, where it could end before a late idle timer fired.
+ */
+async function idlePassed(appId = 'control') {
+  const v = await openView(appId)
+  await rpc('apps.closeView', { instanceId: v.instanceId })
+  await until(() => statusOf(appId), (s) => s === 'stopped', 8000)
+}
+
 function get(url: string) {
   return new Promise<{ status: number; body: string }>((resolve, reject) => {
     const u = new URL(url)
@@ -246,10 +260,12 @@ describe('apps.openView', () => {
 describe('apps.closeView', () => {
   it('an open view holds the app open, and closing it releases the app so the idle shutdown runs again — closing twice is the same', async () => {
     plant('slider', { home: 'home' })
+    plant('control', { home: 'home' })
     await start({ idleMs: 250 })
     const v = await openView('slider')
     const pid = v.toolResult._meta!['fixture/served-by']!
-    await new Promise((r) => setTimeout(r, 900))
+    await idlePassed()
+    expect(statusOf('slider')).toBe('running')
     expect(alive(pid)).toBe(true)
 
     await expect(rpc('apps.closeView', { instanceId: v.instanceId })).resolves.toEqual({ ok: true })
@@ -289,11 +305,13 @@ describe('a pinned view leased to the window (#392)', () => {
 
   it('a window that reloads lets go of its views: once the grace passes the app is no longer held and stops as idle', async () => {
     plant('slider', { home: 'home' })
+    plant('control', { home: 'home' })
     const port = await start({ idleMs: 250 }, 300)
     const before = await window(port)
     const v = await before.call<Opened>('apps.openView', { appId: 'slider', projectId: 'p1', lease: true })
     const pid = v.toolResult._meta!['fixture/served-by']!
-    await new Promise((r) => setTimeout(r, 600))
+    await idlePassed()
+    expect(statusOf('slider')).toBe('running')
     expect(alive(pid)).toBe(true)
 
     // A reload: the page's socket closes, and the new page opens a socket of its own and none of the old views
@@ -308,16 +326,25 @@ describe('a pinned view leased to the window (#392)', () => {
 
   it('a window that reconnects and claims its view keeps it, and the app stays up', async () => {
     plant('slider', { home: 'home' })
+    plant('control', { home: 'home' })
     const port = await start({ idleMs: 250 }, 300)
     const first = await window(port)
     const v = await first.call<Opened>('apps.openView', { appId: 'slider', projectId: 'p1', lease: true })
     const pid = v.toolResult._meta!['fixture/served-by']!
+    // A view the window that comes back does not claim: its close, and its app's idle stop after it, mark the time
+    const unclaimed = await first.call<Opened>('apps.openView', { appId: 'control', projectId: 'p1', lease: true })
     first.ws.close()
     await first.gone()
     const back = await window(port)
     // Another machine's view, qualified by the hub, is not this host's to report missing
     expect(await back.call<{ missing: string[] }>('apps.holdViews', { instanceIds: [v.instanceId, 'm1.other-machine-view-id'] })).toEqual({ missing: [] })
-    await new Promise((r) => setTimeout(r, 1500))
+    /*
+     * Both views waited out the same grace and were swept together (#845); had the claim not held, slider's view
+     * would have been closed in that sweep and its app stopped before control's, whose idle wait started after
+     */
+    await until(() => views.describe(unclaimed.instanceId), (d) => d === null, 8000)
+    await until(() => statusOf('control'), (s) => s === 'stopped', 8000)
+    expect(statusOf('slider')).toBe('running')
     expect(alive(pid)).toBe(true)
     expect(views.describe(v.instanceId)).not.toBeNull()
     back.ws.close()
@@ -325,13 +352,18 @@ describe('a pinned view leased to the window (#392)', () => {
 
   it('a view opened without a lease (an older window) outlives the window as before', async () => {
     plant('slider', { home: 'home' })
+    plant('control', { home: 'home' })
     const port = await start({ idleMs: 250 }, 300)
     const old = await window(port)
     const v = await old.call<Opened>('apps.openView', { appId: 'slider', projectId: 'p1' })
     const pid = v.toolResult._meta!['fixture/served-by']!
+    // A leased view of the same window: once it is closed for want of a claim, and its app stopped, the grace is over (#845)
+    const leased = await old.call<Opened>('apps.openView', { appId: 'control', projectId: 'p1', lease: true })
     old.ws.close()
     await old.gone()
-    await new Promise((r) => setTimeout(r, 1500))
+    await until(() => views.describe(leased.instanceId), (d) => d === null, 8000)
+    await until(() => statusOf('control'), (s) => s === 'stopped', 8000)
+    expect(statusOf('slider')).toBe('running')
     expect(alive(pid)).toBe(true)
     expect(views.describe(v.instanceId)).not.toBeNull()
   })

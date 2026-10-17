@@ -1,9 +1,10 @@
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { fakeExe, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { rmFakeDir } from '../packages/agent-host/src/fake-exe.test-helpers.js'
+import { fakeGh, type FakeGh } from './fake-gh.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import { buildViewCsp } from '../packages/agent-host/src/views/csp.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
@@ -230,13 +231,8 @@ describe('the reader renders GitHub Markdown', () => {
 
 // --- The app, against a fake gh ---------------------------------------------------------------------
 
-const FAKE_GH = String.raw`#!/usr/bin/env node
-const fs = require('node:fs')
-const args = process.argv.slice(2)
-const stdin = args.includes('--input') ? fs.readFileSync(0, 'utf8') : null
-fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify({ args, stdin }) + '\n')
-const st = JSON.parse(fs.readFileSync(process.env.FAKE_GH_STATE, 'utf8'))
-const save = () => fs.writeFileSync(process.env.FAKE_GH_STATE, JSON.stringify(st))
+/** How the fake gh answers (fake-gh.test-helpers.ts gives it args, stdin, st and save, and logs each call) */
+const FAKE_GH = String.raw`
 const fail = (stderr, code = 1, stdout = '') => { process.stdout.write(stdout); process.stderr.write(stderr); process.exit(code) }
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 if (st.mode === 'offline') fail('error connecting to api.github.com\ncheck your internet connection or https://githubstatus.com\n')
@@ -363,20 +359,13 @@ const ref: AppRef = { projectId: 'p1', appId: 'project-board' }
 const screen: AppCaller = { kind: 'view' }
 let root = ''
 let rt: ExternalApps | null = null
-let statePath = ''
-let logPath = ''
+let gh: FakeGh
 
 beforeEach(() => {
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-project-board-reader-')))
-  mkdirSync(join(root, 'bin'))
   mkdirSync(join(root, 'data'))
-  mkdirSync(join(root, 'node'))
-  linkNode(join(root, 'node'))
-  fakeExe(join(root, 'bin'), 'gh', FAKE_GH)
-  statePath = join(root, 'state.json')
-  logPath = join(root, 'gh.log')
-  writeFileSync(statePath, JSON.stringify(state()))
-  writeFileSync(logPath, '')
+  gh = fakeGh(root, FAKE_GH)
+  gh.setState(state())
 })
 
 afterEach(async () => {
@@ -390,7 +379,7 @@ function runtime() {
     projects: () => [{ id: 'p1', path: REPO_ROOT, trusted: true }],
     dataRoot: join(root, 'data'),
     reservedIds: [],
-    env: { PATH: `${join(root, 'bin')}${delimiter}${join(root, 'node')}`, HOME: root, ...windowsSystemEnv(), FAKE_GH_STATE: statePath, FAKE_GH_LOG: logPath },
+    env: gh.env(),
     timing: { idleMs: 60_000, graceMs: 1_000, backoffBaseMs: 20, probeTimeoutMs: 5_000, connectTimeoutMs: 10_000 },
   })
   rt.refresh()
@@ -403,19 +392,10 @@ async function call(name: string, args: Record<string, unknown> = {}, caller: Ap
   if (!out.result) throw new Error(`${name} did not answer: ${out.status} ${out.error}`)
   return { text: resultText(out.result), isError: out.result.isError === true, data: out.result.structuredContent as any }
 }
-const ghCalls = () =>
-  readFileSync(logPath, 'utf8')
-    .trim()
-    .split('\n')
-    .filter(Boolean)
-    .map((l) => JSON.parse(l) as { args: string[]; stdin: string | null })
+const ghCalls = () => gh.calls()
 const threadReads = () => ghCalls().filter((c) => c.args.some((a) => a.includes('comments(last:')))
 const posts = () => ghCalls().filter((c) => c.args[2] === 'POST')
-const patch = (fn: (s: ReturnType<typeof state>) => void) => {
-  const s = JSON.parse(readFileSync(statePath, 'utf8'))
-  fn(s)
-  writeFileSync(statePath, JSON.stringify(s))
-}
+const patch = (fn: (s: ReturnType<typeof state>) => void) => gh.patchState(fn)
 
 describe('the board app reads and answers items', { timeout: 60_000 * SLOW }, () => {
   it('passes check, and its screen declares GitHub image hosts, and only those, in the CSP Centralu reads', async () => {
@@ -654,7 +634,7 @@ describe('the board app reads and answers items', { timeout: 60_000 * SLOW }, ()
     const edited = await call('edit_comment', { item: 113, url, body: 'Clarified in English.' }, agent)
     expect(edited.isError).toBe(false)
     expect(edited.text).toBe(`Edited your comment on #113: ${url}.`)
-    expect(JSON.parse(readFileSync(statePath, 'utf8')).threads['ijun17/centralu#113'].comments[0].body).toBe('Clarified in English.')
+    expect(gh.state().threads['ijun17/centralu#113'].comments[0].body).toBe('Clarified in English.')
     const refreshed = await call('read_item', { item: 113 })
     expect(refreshed.data.comments[0].html).toContain('Clarified in English.')
     const other = await call('edit_comment', { item: 113, url: 'https://github.com/ijun17/centralu/issues/113#issuecomment-2', body: 'No.' }, agent)
@@ -693,7 +673,7 @@ describe('the board app reads and answers items', { timeout: 60_000 * SLOW }, ()
     patch((s) => ((s as unknown as { threadDelayMs: number }).threadDelayMs = 1500))
     const slow = call('read_item', { item: 113 })
     // The slow read is under way (its gh call is logged) before the post goes out
-    await expect.poll(() => threadReads().length, { timeout: 10_000 }).toBe(1)
+    await expect.poll(() => threadReads().length, { timeout: 10_000 * SLOW }).toBe(1)
     patch((s) => ((s as unknown as { threadDelayMs: number }).threadDelayMs = 0))
     expect((await call('comment', { item: 113, body: 'An answer.' }, agent)).isError).toBe(false)
     const stale = await slow

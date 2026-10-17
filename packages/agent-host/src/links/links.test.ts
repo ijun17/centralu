@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { WebSocketServer } from 'ws'
+import WsSocket, { WebSocketServer } from 'ws'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
@@ -279,8 +279,11 @@ describe('a hub linked to another host (#82)', () => {
     expect((await u.call('sessions.list')).map((x: any) => x.id)).toEqual(['m1.worker1'])
     remote.server.broadcast({ type: 'session_title', sessionId: 'orch', title: 'secret plan', auto: true })
     remote.server.broadcast({ type: 'session_title', sessionId: 'worker1', title: 'visible', auto: true })
-    await eventually(() => u.events().some((e) => e.type === 'session_title'))
-    await new Promise((r) => setTimeout(r, 100))
+    /*
+     * The orchestrator's title went out first, and a link relays a machine's events in order, as they come (#845):
+     * once the worker's has arrived, the orchestrator's would have before it
+     */
+    await eventually(() => u.events().some((e) => e.type === 'session_title' && e.sessionId === 'm1.worker1'))
     expect(u.events().filter((e) => e.type === 'session_title').map((e) => e.sessionId)).toEqual(['m1.worker1'])
     // Hub-only events of the remote stay there
     remote.server.broadcast({ type: 'themes_changed' })
@@ -411,18 +414,45 @@ describe('a hub linked to another host (#82)', () => {
 
   it('a refused token asks the remote again once, then reports and backs off instead of looping', async () => {
     const remote = await remoteHost()
-    let asked = 0
-    const hub = await hubHost(() => {
-      asked++
-      return lineFor(remote.port, { token: 'rotated-but-serve-keeps-the-old-one' })
-    })
+    // Each ask, and each time the row was reported refused, in order: so a slow check of the row cannot miscount
+    const timeline: string[] = []
+    const asks: number[] = []
+    /** When the remote refused each socket: noted before the link's client hears of it */
+    const refusals: number[] = []
+    class Noting extends WsSocket {
+      constructor(...args: ConstructorParameters<typeof WsSocket>) {
+        super(...args)
+        this.on('close', (code) => void (code === 4001 && refusals.push(performance.now())))
+      }
+    }
+    const hub = await hubHost(
+      () => {
+        timeline.push('ask')
+        asks.push(performance.now())
+        return lineFor(remote.port, { token: 'rotated-but-serve-keeps-the-old-one' })
+      },
+      new Store(),
+      true,
+      {
+        log: (l) => void (l.includes(': refused: ') && timeline.push('refused')),
+        client: { maxBackoffMs: 100, WebSocketImpl: Noting as unknown as typeof WsSocket },
+      },
+    )
     await eventually(() => status(hub) === 'refused')
     expect(hub.links.list()[0]!.error).toMatch(/restart `centralu serve` there/)
-    const atRefusal = asked
-    await new Promise((r) => setTimeout(r, 300))
-    // Backoff from 50 ms doubling (the test's retry): a handful of asks, not one per event-loop turn
-    expect(asked - atRefusal).toBeLessThanOrEqual(3)
-    expect(atRefusal).toBe(2)
+    // Asked again once at the first refusal, then reported
+    expect(timeline.indexOf('refused')).toBe(2)
+    /*
+     * Backoff from 50 ms doubling (the test's retry), not one ask per event-loop turn: measured from each refusal to
+     * the ask after it, a wait a loaded machine only lengthens (#845). A count of asks within a fixed sleep let a
+     * loop through where each round took long enough, and a wait from ask to ask holds the round's own time
+     */
+    await eventually(() => asks.length >= 5)
+    const waits = [2, 3, 4].map((k) => asks[k]! - refusals[k - 1]!)
+    // A timer may fire a ms early
+    expect(waits[0]).toBeGreaterThanOrEqual(45)
+    expect(waits[1]).toBeGreaterThanOrEqual(95)
+    expect(waits[2]).toBeGreaterThanOrEqual(190)
   })
 
   it('adds and removes a machine through the hub, and removing it takes its sessions and panels away', async () => {
@@ -627,12 +657,14 @@ describe('a machine whose Node is below the floor (#699)', () => {
     let installed = false
     let running = false
     let starts = 0
+    /** How many times the link opened the tunnel: each retry opens it again */
+    let opens = 0
     const answers = [
       'CENTRALU-PREFLIGHT os=Linux arch=x86_64 glibc=2.39 musl=0 freeKb=99999999 tar=1 gzip=1 fetch=curl sha=sha256sum\n',
       'CENTRALU-INSTALL node ok\n',
       `CENTRALU-INSTALL done ${JSON.stringify({ current: { version: APP_VERSION, node: PINNED }, previous: null, removed: [], left: [] })}\n`,
     ]
-    const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { hostRunning: running, install: installed ? MANAGED : OLD, ...o.line })), {
+    const tunnel = Object.assign(new DirectTunnel(() => (opens++, lineFor(remote.port, { hostRunning: running, install: installed ? MANAGED : OLD, ...o.line }))), {
       exec: async (cmd: string) => {
         runs.push(cmd)
         if (o.failInstall) return { code: 1, stderr: 'curl: (6) Could not resolve host', stdout: '' }
@@ -672,7 +704,12 @@ describe('a machine whose Node is below the floor (#699)', () => {
     })
     cleanups.push(() => links.stop())
     links.start()
-    return { links, runs, calls, logs, row: () => links.list()[0]!, starts: () => starts }
+    /** Waits until the link has opened the tunnel twice more: a retry has run through, and the next has begun (#845) */
+    const retried = async () => {
+      const at = opens
+      await eventually(() => opens >= at + 2)
+    }
+    return { links, runs, calls, logs, row: () => links.list()[0]!, starts: () => starts, retried }
   }
 
   it('installs the pinned Node before it tries to start a host under the old one, and says so in one sentence', async () => {
@@ -720,7 +757,7 @@ describe('a machine whose Node is below the floor (#699)', () => {
       },
     })
     await eventually(() => l.calls.length >= 2 && l.row().status === 'not_running')
-    await new Promise((r) => setTimeout(r, 400))
+    await l.retried()
     expect(l.runs).toHaveLength(3)
     expect(l.row().error).toBe('Centralu could not be started on Remote box: centralu serve exited (3221225477) before its host answered')
   })
@@ -728,7 +765,7 @@ describe('a machine whose Node is below the floor (#699)', () => {
   it('tries a failing install once, not at every retry (each one is a download)', async () => {
     const l = await linkTo({ failInstall: true, startHost: async () => ({ how: 'detached', note: null }) })
     await eventually(() => l.row().status === 'not_running')
-    await new Promise((r) => setTimeout(r, 700))
+    await l.retried()
     // Preflight failed once; the retries (every 50 to 200 ms here) report instead of trying again
     expect(l.runs).toHaveLength(1)
     expect(l.row().error).toMatch(/older than 22\.14\.0[\s\S]*installing it failed/)
@@ -764,7 +801,7 @@ describe('a machine whose Node is below the floor (#699)', () => {
     await l.links.uninstall('m1')
     await eventually(() => l.row().status === 'not_running')
     expect(l.row().error).toMatch(/older than 22\.14\.0[\s\S]*removed from there on request/)
-    await new Promise((r) => setTimeout(r, 400))
+    await l.retried()
     expect(l.runs).toHaveLength(6)
   })
 
@@ -1146,6 +1183,9 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
 
   it('sends to a machine’s session as the hub’s orchestrator, and reports the end of that turn once (step 2)', async () => {
     const { tool, remote, hub } = await rig()
+    // What the hub relayed: an event reaches its windows in the same call that hands it to the manager's reports
+    const u = await ui(hub.port)
+    const turnsEnded = () => u.events().filter((e) => e.type === 'turn_complete' && e.sessionId === 'm1.w1').length
     expect(await tool('send_to_session', { sessionId: 'm1.w1', text: 'run the backup', reportBack: true })).toMatchObject({
       text: 'Sent: m1.w1 (I will let you know once it is done)',
     })
@@ -1158,12 +1198,21 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(report).toContain('id: m1.w1')
     expect(report).toMatch(/Project: .+ on Remote box/)
     expect(report).toContain('echo: run the backup')
+    await eventually(() => turnsEnded() === 1)
 
     // No report was asked for this time: none comes, and the first one is not repeated
     await tool('send_to_session', { sessionId: 'm1.w1', text: 'and again' })
-    await eventually(() => remote.store.loadMessages('w1', 5).some((m) => (m.payload as { text?: string }).text === 'echo: and again'))
-    await new Promise((r) => setTimeout(r, 200))
-    expect(told(hub).filter((t) => t.startsWith('[Centralu]'))).toHaveLength(1)
+    await eventually(() => turnsEnded() === 2)
+    /*
+     * The hub has seen that turn end, so a report of it would be on its way. The next report asked for is the next
+     * one to come (#845): one of that turn would have begun before it, on the same path, where a fixed sleep could
+     * end before a late one arrived
+     */
+    await tool('send_to_session', { sessionId: 'm1.w1', text: 'and a third time', reportBack: true })
+    await eventually(() => told(hub).filter((t) => t.startsWith('[Centralu]')).length >= 2)
+    const reports = told(hub).filter((t) => t.startsWith('[Centralu]'))
+    expect(reports).toHaveLength(2)
+    expect(reports[1]).toContain('echo: and a third time')
   })
 
   it('reaches a machine’s session that has children (a former worktree manager, #561) as an instruction, not as someone else’s words (step 2)', async () => {

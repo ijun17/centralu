@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { RelativeAge } from '../../components/RelativeAge.jsx'
+import { SkeletonLines } from '../../components/Skeleton.jsx'
 import type { ExternalSession, GitBranch } from '@cc/protocol'
 import { useStore } from '../../store/store.js'
 import { usePlatform } from '../../app/PlatformProvider.jsx'
@@ -318,9 +319,7 @@ export function NewSessionDialog({ projectId, onClose }: { projectId: string; on
               meta=""
             />
             {past.status === 'loading' && (
-              <p className="px-2.5 py-2 text-xs text-ink-faint" data-testid="past-loading">
-                Looking for past conversations…
-              </p>
+              <SkeletonLines lines={3} className="px-2.5 py-2" label="Looking for past conversations" testId="past-loading" />
             )}
             {/* Using an older tool version does not block a new session too — only the reason is quietly stated */}
             {past.status === 'unsupported' && (

@@ -86,11 +86,10 @@ test('in the composer, y/n/a are typed and mod+⇧Y / mod+⇧D / mod+⇧L answer
   await expect(card.getByTestId('approve-deny')).toContainText('⌘⇧D')
   await expect(card.getByTestId('approve-always')).toContainText('⌘⇧L')
 
-  // The letters go into the message and answer nothing
+  // The letters go into the message and answer nothing: keys are handled in the order they are
+  // pressed, so had one answered, its answer would come before the combo's in the list below
   await page.keyboard.type(' no and')
   await expect(input).toHaveValue('yes no and')
-  await page.waitForTimeout(200)
-  expect(await answers(page)).toEqual([])
 
   await page.keyboard.press('ControlOrMeta+Shift+Y')
   await expect.poll(() => answers(page)).toEqual([{ sessionId: sid, requestId: 'r1', decision: 'allow' }])

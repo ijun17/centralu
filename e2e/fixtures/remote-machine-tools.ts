@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { setup } from './control.js'
 
 /**
  * Phase 2 of linked machines on the mock platform (#82, docs/plans/remote-hub.md §6): usage gauges per machine, and
@@ -13,20 +14,6 @@ const WEEKLY = (percent: number) => ({
   supported: true,
   usage: { plan: 'max', windows: [{ id: 'weekly_all', label: 'Weekly', percent, resetsAt: null, scope: null }], daily: [] },
 })
-
-async function setup(page: Page): Promise<void> {
-  await page.goto('/?mock=1')
-  await expect(page.getByTestId('intro')).toBeVisible()
-  await page.getByTestId('intro-card-claude').click()
-  await expect(page.getByTestId('orchestrator-suggestions')).toBeVisible()
-  await page.evaluate(() => {
-    ;(window as unknown as MockWindow).__mock.nextPickedDirectory = '/tmp/alpha'
-  })
-  await page.getByTestId('orchestrator-pick-folder').click()
-  await page.getByTestId('new-session-dialog').waitFor()
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId('project-alpha')).toBeVisible()
-}
 
 /** Links a mock machine: it stands as connected at once and its `machine_status` reaches the store */
 async function link(page: Page, spec: { name: string; sshTarget: string; shell?: 'posix' | 'powershell' | 'wsl' }): Promise<void> {
@@ -57,7 +44,7 @@ export function remoteMachineToolsTests(): void {
   test.describe('usage per machine (#82)', () => {
     test('each connected machine gets its own donuts after this computer, and a machine that is away is named, not asked', async ({ page }) => {
       await page.clock.install()
-      await setup(page)
+      await setup(page, { projects: ['/tmp/alpha'] })
       await page.evaluate((w) => {
         const m = (window as unknown as MockWindow).__mock
         m.usageState = w.here
@@ -125,7 +112,7 @@ export function remoteMachineToolsTests(): void {
     })
 
     test('a machine logged in to the same account says so, and one that cannot be read gives its reason, not a blank meter (#726)', async ({ page }) => {
-      await setup(page)
+      await setup(page, { projects: ['/tmp/alpha'] })
       await page.evaluate((w) => {
         const m = (window as unknown as MockWindow).__mock
         m.usageState = w.here
@@ -163,7 +150,7 @@ export function remoteMachineToolsTests(): void {
 
     test('a hidden window is not polled, a tool that is not logged in is not asked, and the window in view again is asked at once (#726)', async ({ page }) => {
       await page.clock.install()
-      await setup(page)
+      await setup(page, { projects: ['/tmp/alpha'] })
       await page.evaluate(() => {
         const m = (window as unknown as MockWindow).__mock
         // Codex is installed but signed out here: it has no limits to read, and reading it could start a process
@@ -192,7 +179,7 @@ export function remoteMachineToolsTests(): void {
     })
 
     test('a machine with no usable agent says so in its group, and this computer with none still shows the machines', async ({ page }) => {
-      await setup(page)
+      await setup(page, { projects: ['/tmp/alpha'] })
       await page.evaluate(() => {
         const m = (window as unknown as MockWindow).__mock
         m.machineDetected = { box: [] }
@@ -237,7 +224,7 @@ export function remoteMachineToolsTests(): void {
     const opened = (page: Page) => page.evaluate(() => (window as unknown as MockWindow).__mock.openedUrls as string[])
 
     test('the project, a folder, a file and a diff line each open on the machine; nothing opens on this computer', async ({ page }) => {
-      await setup(page)
+      await setup(page, { projects: ['/tmp/alpha'] })
       await page.evaluate(() => {
         const m = (window as unknown as MockWindow).__mock
         m.fsState.entries[''] = [{ name: 'src', path: 'src', isDir: true, ignored: false }]
@@ -297,7 +284,7 @@ export function remoteMachineToolsTests(): void {
     })
 
     test('a WSL machine offers nothing: Remote-SSH reaches the Windows side, not the distro', async ({ page }) => {
-      await setup(page)
+      await setup(page, { projects: ['/tmp/alpha'] })
       await page.evaluate(() => {
         const m = (window as unknown as MockWindow).__mock
         m.fsState.entries[''] = [{ name: 'a.ts', path: 'a.ts', isDir: false, ignored: false }]

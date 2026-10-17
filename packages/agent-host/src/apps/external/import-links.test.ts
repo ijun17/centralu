@@ -1,9 +1,9 @@
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, rmdirSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, rmdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { IMPORT_LIMITS, stageLocal } from './imports.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * A link inside the folder being imported is skipped, not refused. It is told from a link that leaves the folder by
@@ -13,13 +13,13 @@ import { IMPORT_LIMITS, stageLocal } from './imports.js'
  */
 
 const dirs: string[] = []
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+afterEach(async () => {
+  await Promise.all(dirs.splice(0).map(removeTree))
 })
 
 /** A folder with a manifest-less app tree: `real/a.txt`, and `link` pointing at `real` (a junction on Windows, which needs no privilege) */
 function folderWithInternalLink(): string {
-  const long = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-import-link-long-folder-name-')))
+  const long = tempRoot('cc-import-link-long-folder-name-')
   dirs.push(long)
   mkdirSync(join(long, 'real'))
   writeFileSync(join(long, 'real', 'a.txt'), 'x')

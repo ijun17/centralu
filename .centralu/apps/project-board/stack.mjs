@@ -20,7 +20,7 @@ export class StackRefusal extends Error {}
 const listFiles = (files) => listSome(files, 8)
 
 /**
- * `gh`: { readPr, prsWithHead, setPrBase } (github.mjs). `ref(n)` writes a pull request's number the
+ * `gh`: { readPr, prsWithHead, setPrBase, openPrsOnBase } (github.mjs). `ref(n)` writes a pull request's number the
  * way the board does. Answers { summary, lines, pushed, rebased, sameTree }.
  */
 export async function rebaseStack({ repo, pr, lower: lowerNumber, dir, push = false }, gh, ref = (n) => `#${n}`) {
@@ -126,6 +126,9 @@ export async function rebaseStack({ repo, pr, lower: lowerNumber, dir, push = fa
         return { summary: `${U} restacked, but its base is still ${upper.baseRefName}.`, lines, pushed: !alreadyIn, rebased, sameTree, partial: true }
       }
     } else lines.push(`${U}'s base is already ${base}.`)
+    // A stack's lowers are drafts and run no CI (#1066): one nothing is stacked on any more is its stack's top
+    if (upper.isDraft && gh.openPrsOnBase && !(await gh.openPrsOnBase(repo, branch)).length)
+      lines.push(`${U} is a draft, and no open pull request is based on ${branch}: if it is its stack's top now, mark it ready for review (mark_ready, or gh pr ready ${upper.number}) so CI runs on it.`)
     return { summary: `${U} restacked onto ${base}${alreadyIn ? '' : ` at ${short(rebased)}`}.`, lines, pushed: !alreadyIn, rebased, sameTree }
   } catch (e) {
     if (e instanceof StackRefusal || !(e instanceof GitError)) throw e
