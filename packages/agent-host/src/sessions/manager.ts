@@ -19,6 +19,7 @@ import { UpdatesAsked, type UpdatesAskedHost } from './updates-asked.js'
 import { ProjectConsents, type ProjectConsentsHost } from './project-consents.js'
 import { UiPreferenceStore, type UiPreferenceStoreHost } from './ui-preferences.js'
 import { SessionAppWiring, type SessionAppWiringHost } from './session-app-wiring.js'
+import { SessionTools, type SessionToolsHost } from './session-tools.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -65,7 +66,7 @@ import {
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
 import { registeredTool } from '../adapters/registry.js'
-import { codeIntelligenceKey, codeIntelligenceOff, toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
+import { codeIntelligenceKey, codeIntelligenceOff } from './tool-profiles.js'
 import type { MemoryGate } from './memory-gate.js'
 
 /**
@@ -144,7 +145,7 @@ export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS }
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost & SessionToolsHost
 
 /**
  * Where the marker "conversation up to here belongs to the old tool" is stored.
@@ -245,6 +246,8 @@ export class SessionManager {
   private readonly prefs: UiPreferenceStore
   /** The external app runtime as the sessions meet it: attached apps, on-demand access, the broker (session-app-wiring.ts) */
   private readonly apps: SessionAppWiring
+  /** The tools a session receives: its profile, its bundle, the reader's set (session-tools.ts) */
+  private readonly tools: SessionTools
   /** ask_project, here or on a linked machine (ask-project-flow.ts) */
   private readonly askProjectFlow: AskProjectFlow
   /** The conversations a tool keeps on its own side: listing, holders, import and catch-up (external-conversations.ts) */
@@ -340,6 +343,7 @@ export class SessionManager {
     } = {},
   ) {
     this.children = new ChildOwnership(store)
+    this.tools = new SessionTools(this.parts())
     this.apps = new SessionAppWiring(this.parts())
     this.prefs = new UiPreferenceStore(this.parts())
     this.consents = new ProjectConsents(this.parts())
@@ -1125,7 +1129,7 @@ export class SessionManager {
     const apps = this.apps.appsFor(info)
     // The same rule runs again on every wake (toolProfileOf). The builder slot was just written (setBuilder), so the
     // flag says what the row's slot already says
-    const { profile, tools } = this.toolChoice(info, !!params.builderOf)
+    const { profile, tools } = this.tools.toolChoice(info, !!params.builderOf)
     // Code intelligence (#686): decided once, here, from what the session is, and recorded below for every wake
     const noCodeIntelligence = codeIntelligenceOff({
       kind: info.kind,
@@ -1658,7 +1662,7 @@ export class SessionManager {
     // If this is a builder session, it gets its own app's check (C-3) — the directory is re-checked right now
     // (a different session could have taken over in between)
     const builds = this.appSessions.builderRefOf(m) !== null
-    const { profile, tools } = this.toolChoice(m, builds)
+    const { profile, tools } = this.tools.toolChoice(m, builds)
     const from = this.handleSink()
     /*
      * **The configuration the process will receive is read here, exactly once** (#162). If the
@@ -2586,7 +2590,7 @@ export class SessionManager {
     const adapterText =
       fromApp ? appMessageFrame(fromApp, text, fromAppVia)
       // A hub's orchestrator directs as this host's own does (`sendFromHub`)
-      : from && (relayed || (this.directs(sessionId) && !this.directs(from.sessionId) && from.sessionId !== HUB_SENDER))
+      : from && (relayed || (this.tools.directs(sessionId) && !this.tools.directs(from.sessionId) && from.sessionId !== HUB_SENDER))
         ? untrustedSourceSessionNotification(from.sessionId)
         : attachments?.length
           ? `${text}\n\n${attachments.map((a) => `@${a.path}`).join('\n')}`
@@ -3338,51 +3342,6 @@ export class SessionManager {
     return this.launches.refreshToolDefinitions()
   }
 
-  /**
-   * The light set an ordinary session gets (#320): its own project's sessions, read-only.
-   *
-   * Only the three readers are taken from the project-scoped view; everything that acts is a refusal
-   * here, not just a name the profile leaves out. profileAllows already stops both exposure and the
-   * bridge's calls, but a read-only seat should not be holding a working sendToSession behind one
-   * check — the object itself cannot act.
-   */
-  private readerToolsFor(sessionId: string): OrchestratorTools {
-    const view = this.orchestratorToolsFor(sessionId, undefined, true)
-    const error = 'This session can only read other sessions'
-    const refuse = async () => ({ ok: false, error })
-    /*
-     * The setting is asked again on every call. Its schemas stay until the session next starts (a live
-     * session's tool list does not change), but a person who turned the set off must not keep seeing it
-     * work in a running Claude session — the bridge already refuses through toolProfileOf.
-     */
-    const off = () => !this.uiPreferences().sessionTools
-    const offError = 'Turned off in Settings'
-    return {
-      updateCentralu: async (action, signal) => (off() ? { ok: false, error: offError } : this.updatesAsked.updateCentraluAsked(sessionId, action, signal)),
-      listSessions: async () => (off() ? [] : view.listSessions()),
-      readSession: async (...a) => (off() ? { ok: false, error: offError } : view.readSession(...a)),
-      recall: async (...a) => (off() ? { hits: [] } : view.recall(...a)),
-      // The one reach outside its project (#371 part B) — behind the person's consent for the pair, inside askProject
-      askProject: async (opts, signal) => (off() ? { ok: false, error: offError } : this.askProject(sessionId, opts, signal)),
-      // Other agents in its own project (#561) — behind the person's consent, never above this session's preset
-      startAgent: async (opts, signal) => (off() ? { ok: false, error: offError } : this.startAgent(sessionId, opts, signal)),
-      agentSession: async (opts, signal) => (off() ? { ok: false, error: offError } : this.agentSession(sessionId, opts, signal)),
-      // An ordinary session answers through agent_session (#676)
-      answerQuestion: async () => ({ ok: false, error: 'Answer it with agent_session, action "answer"' }),
-      sendToSession: refuse,
-      createSession: refuse,
-      updateSessionSettings: refuse,
-      proposeMcpServer: refuse,
-      proposeSkill: refuse,
-      createProject: async () => ({ ok: false as const, error }),
-      checkApp: async () => ({ ok: false, text: error }),
-      createApp: refuse,
-      // Another project's apps, on demand (#371 part A) — the one thing this seat may change, and only for itself
-      findApps: async (query) => (off() ? { ok: false, error: offError } : this.apps.requireAppAccess().find(sessionId, query)),
-      attachApp: async (app) => (off() ? { ok: false, error: offError } : this.apps.requireAppAccess().attach(sessionId, app)),
-      detachApp: async (app) => (off() ? { ok: false, error: offError } : this.apps.requireAppAccess().detach(sessionId, app)),
-    }
-  }
 
   private partsHost: ManagerParts | undefined
   /**
@@ -3399,6 +3358,7 @@ export class SessionManager {
       get adapters() {
         return self.adapters
       },
+      agentSession: (...a) => self.agentSession(...a),
       get agentRuns() {
         return self.agentRuns
       },
@@ -3408,6 +3368,7 @@ export class SessionManager {
       applyDeferredRestart: (...a) => self.restartPolicy.applyDeferredRestart(...a),
       applyStateHint: (...a) => self.applyStateHint(...a),
       askGateError: (...a) => self.askProjectFlow.askGateError(...a),
+      askProject: (...a) => self.askProject(...a),
       askCapability: (...a) => self.hostCards.askCapability(...a),
       askHost: (...a) => self.hostCards.askHost(...a),
       get appAccess() {
@@ -3490,6 +3451,7 @@ export class SessionManager {
       modelsWithin: (...a) => self.toolQueries.modelsWithin(...a),
       moveChildren: (...a) => self.handoffChildren.moveChildren(...a),
       observeCommit: (...a) => self.observeCommit(...a),
+      orchestratorToolsFor: (...a) => self.orchestratorToolsFor(...a),
       onEvent: (e: NormalizedEvent, from?: SessionHandle | null) => self.onEvent(e, from),
       ownTasksRunning: (...a) => self.reports.ownTasksRunning(...a),
       pauseReport: (...a) => self.reports.pauseReport(...a),
@@ -3524,6 +3486,7 @@ export class SessionManager {
       },
       rememberBackgroundTasks: (...a) => self.launches.rememberBackgroundTasks(...a),
       rename: (...a) => self.rename(...a),
+      requireAppAccess: (...a) => self.apps.requireAppAccess(...a),
       respondApproval: (...a) => self.respondApproval(...a),
       runAppAgent: (...a) => self.runAppAgent(...a),
       reportBackIfAwaited: (...a) => self.reports.reportBackIfAwaited(...a),
@@ -3545,6 +3508,7 @@ export class SessionManager {
       settingFilesFor: (...a) => self.settingFilesFor(...a),
       settleState: (...a) => self.settleState(...a),
       sleepSession: (...a) => self.sleepSession(...a),
+      startAgent: (...a) => self.startAgent(...a),
       startDelegation: (...a) => self.delegationFlow.startDelegation(...a),
       stopBackgroundTask: (...a) => self.stopBackgroundTask(...a),
       stopWatchingReconnect: (...a) => self.interruptions.stopWatchingReconnect(...a),
@@ -3572,6 +3536,7 @@ export class SessionManager {
       },
       uiPreferences: (...a) => self.uiPreferences(...a),
       untilCard: (...a) => self.cards.untilCard(...a),
+      updateCentraluAsked: (...a) => self.updatesAsked.updateCentraluAsked(...a),
       untilHandedOver: (...a) => self.delegationFlow.untilHandedOver(...a),
       untilWakeWithdrawn: (...a) => self.untilWakeWithdrawn(...a),
       get updateApplyConsents() {
@@ -3637,6 +3602,11 @@ export class SessionManager {
       checkApp: (ref) => this.checkApp(ref),
       createApp: (params) => this.createApp(params),
     })
+  }
+
+  /** `SessionTools.toolProfileOf` (session-tools.ts), kept on the manager for its callers */
+  toolProfileOf(...a: Parameters<SessionTools['toolProfileOf']>): ReturnType<SessionTools['toolProfileOf']> {
+    return this.tools.toolProfileOf(...a)
   }
 
   /** The tools given to an orchestrator (FR-11), built over this manager (`orchestrator-seat.ts`) */
@@ -3820,7 +3790,7 @@ export class SessionManager {
    */
   async runOrchestratorTool(sessionId: string, name: string, args: Record<string, unknown>) {
     const m = this.meta.get(sessionId)
-    const { profile, tools } = m ? this.toolChoice(m) : { profile: null, tools: () => undefined }
+    const { profile, tools } = m ? this.tools.toolChoice(m) : { profile: null, tools: () => undefined }
     if (!m || !profile) {
       throw rpcError('Only the orchestrator can use this tool')
     }
@@ -3911,59 +3881,6 @@ export class SessionManager {
     return this.apps.setAppShared(...a)
   }
 
-  /**
-   * What the profile rule (tool-profiles.ts) reads about this session: its row, whether its app's builder
-   * slot points at it (looked up unless the caller just wrote it), and the Settings switch (#320) as it is
-   * right now.
-   */
-  private profileFacts(
-    m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId'>,
-    builder: boolean = this.appSessions.builderRefOf(m) !== null,
-  ): ToolProfileFacts {
-    return { kind: m.kind, projectId: m.projectId, appId: m.appId ?? null, builder, sessionTools: this.uiPreferences().sessionTools }
-  }
-
-  /**
-   * The tool bundle this session receives (#69). null means no tools. The rule is `toolProfileFor`
-   * (tool-profiles.ts); creation and every wake hand the adapter the same answer, and the bridge asks
-   * here on every call.
-   */
-  toolProfileOf(sessionId: string): ToolProfile | null {
-    const m = this.meta.get(sessionId)
-    return m ? this.toolChoice(m).profile : null
-  }
-
-  /**
-   * The one place a session's tools are chosen (#428): its profile by `toolProfileFor`, and the bundle that goes with
-   * it, for creation, every wake, every bridge call and `toolProfileOf`. `builder` is passed by a caller that has just
-   * read or written the app's builder slot, and looked up otherwise. The bundle is built only when `tools` is called,
-   * where the adapter's options are put together.
-   */
-  private toolChoice(
-    m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId' | 'scopeSessionIds'>,
-    builder?: boolean,
-  ): { profile: ToolProfile | null; tools: () => OrchestratorTools | undefined } {
-    const profile = toolProfileFor(this.profileFacts(m, builder))
-    return { profile, tools: () => this.toolBundleOf(m.id, profile, m) }
-  }
-
-  /** The object behind a profile's bundle: the full set, a coordinator's scope, or the reader's view of its own project */
-  private toolBundleOf(sessionId: string, profile: ToolProfile | null, m: Pick<SessionInfo, 'scopeSessionIds'>): OrchestratorTools | undefined {
-    return toolBundleFor(profile, m.scopeSessionIds, {
-      orchestrator: () => this.orchestratorToolsFor(sessionId),
-      scoped: (ids) => this.orchestratorToolsFor(sessionId, ids),
-      reader: () => this.readerToolsFor(sessionId),
-    })
-  }
-
-  /**
-   * A profile that directs other sessions — every profile but the reader. The reader set (#320)
-   * cannot send, so for provenance (#90) its session is still an ordinary worker.
-   */
-  private directs(sessionId: string): boolean {
-    const p = this.toolProfileOf(sessionId)
-    return p !== null && p !== 'reader'
-  }
 
   /** This project's trunk branch (#76): the one chosen for the former worktree manager's slot, still read from its row (#561
    * part 3). null if none was set — HEAD is then used as the baseline */
