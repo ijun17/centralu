@@ -2626,8 +2626,9 @@ was **put on hold**. This directory is used as is in prod today. The name is a h
 - **store**: better-sqlite3 + a `user_version` migration runner. `Store` (`store.ts`) opens the file and runs the
   migrations through the two classes it extends: the runner (`store/migrate-runner.ts`, which also answers
   `Store.inspect`) and, below it, the min-reader version gate (`store/reader-gate.ts`); an owed `VACUUM` is
-  `store/vacuum.ts`. Its other methods pass the call on to one module per concept in `dev-services/store/` (projects,
-  sessions, messages, the trash, app runs, …), and the step list is in `store/migrations/`. The schema DDL lives in exactly one place,
+  `store/vacuum.ts`. The records are one module per concept in `dev-services/store/` (projects, sessions, messages,
+  the trash, app runs, …), held as fields that callers name (`store.projects.listProjects()`), and the step list is in
+  `store/migrations/`. The schema DDL lives in exactly one place,
   `protocol/src/schema/schema.sql`. In the bundle it is copied next to the build output and ships with it (F-0).
   The rule for migration steps is below (§5.1).
 - **fs**: lazy readdir listing + `git check-ignore` (once per directory) + path escape blocking.

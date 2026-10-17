@@ -65,6 +65,11 @@ const SCHEMA_PATH = resolveSchemaPath()
  */
 export class Store extends MigrationRunner {
   protected db: Database.Database
+  /*
+   * The records, one module per concept in `store/`, each holding its queries and the comments that say what they do.
+   * Callers reach them through these fields (`store.projects.listProjects()`), so `Store` itself is only the
+   * connection, the migration runner and these fields.
+   */
   readonly projects: ProjectRecords
   readonly sessions: SessionRecords
   readonly grid: GridRecords
@@ -183,8 +188,8 @@ export class Store extends MigrationRunner {
   }
 
   /*
-   * Everything below only passes the call on to the module named in its heading, which holds the code and the comment
-   * that says what it does. The methods stay here so that no caller names a module.
+   * Everything below only passes the call on to the module named in its heading. They are the last pass-throughs: open
+   * pull requests still call them on `Store` (#428), and they go once those land. New code names the module.
    */
 
   // ── ProjectRecords (store/projects.ts) ──
