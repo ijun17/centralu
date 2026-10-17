@@ -186,7 +186,9 @@ pub fn hide_console(cmd: &mut Command) {
     let _ = cmd;
 }
 
-/// Whether a process exists and is not a zombie waiting for someone else to reap it.
+/// Whether a process exists and is not a zombie waiting for someone else to reap it: whether it
+/// *runs*. Not whether its number is taken, which a zombie still does (`children::number_in_use`,
+/// the question before signalling a group by a number that may be reused).
 ///
 /// `kill(pid, 0)` alone succeeds on a zombie. A host handed over by the previous keeper is that
 /// keeper's child, not ours: when it died before that keeper reaped it, signal 0 kept saying it
@@ -222,10 +224,43 @@ pub fn group_signal_after_exit_is_safe(pid: u32) -> bool {
 /// SIGTERM to the single host process only — children (codex, etc.) are cleaned up by the
 /// host itself via EOF (#57).
 pub fn kill_pid(pid: u32) {
-    if let Some(pid) = signal_target(pid) {
-        // SAFETY: a plain syscall to one positive pid.
-        unsafe { libc::kill(pid, libc::SIGTERM) };
+    let _ = signal_pid(pid, libc::SIGTERM);
+}
+
+/**
+ * Sends `signal` to the one process `pid`. Refused (`InvalidInput`) for a number `kill(2)` reads as
+ * something other than one process (`signal_target`). The one way the keeper signals a single
+ * process: the host, a handed-over host, a child it holds (#840 item 13, which found four signal
+ * helpers, each with guards of its own).
+ */
+pub fn signal_pid(pid: u32, signal: libc::c_int) -> io::Result<()> {
+    let Some(target) = signal_target(pid) else { return Err(refused(pid)) };
+    // SAFETY: a plain syscall to one positive pid.
+    if unsafe { libc::kill(target, signal) } == -1 {
+        return Err(io::Error::last_os_error());
     }
+    Ok(())
+}
+
+/**
+ * Sends `signal` to the process group `pgid`, under `signal_pid`'s rule and never to the caller's own
+ * group. The one way the keeper signals a group: a host's, a child's, a terminal session's.
+ */
+pub fn signal_group(pgid: u32, signal: libc::c_int) -> io::Result<()> {
+    let Some(target) = signal_target(pgid) else { return Err(refused(pgid)) };
+    // SAFETY: getpgrp takes no arguments.
+    if target == unsafe { libc::getpgrp() } {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "refusing to signal the keeper's own process group"));
+    }
+    // SAFETY: a plain syscall; a negative pid is the group, and `signal_target` ruled out 0 and 1.
+    if unsafe { libc::kill(-target, signal) } == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+fn refused(pid: u32) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, format!("refusing to signal pid {pid}: it names more than one process"))
 }
 
 /**
@@ -248,24 +283,14 @@ pub fn signal_target(pid: u32) -> Option<i32> {
  * which is why only Linux ever saw it (docs/spikes/2026-10-linux-keeper.md).
  */
 pub fn kill_group(pid: u32) {
-    signal_group(pid, libc::SIGTERM);
+    let _ = signal_group(pid, libc::SIGTERM);
 }
 
 /// SIGKILL to the process group `pid` leads, under `kill_group`'s rules: for a host that ignored
 /// TERM and its grace (#840 item 1). Only while the host is still held unreaped, so its number is
 /// still its group's.
 pub fn kill_group_now(pid: u32) {
-    signal_group(pid, libc::SIGKILL);
-}
-
-fn signal_group(pid: u32, signal: libc::c_int) {
-    let Some(pgid) = signal_target(pid) else { return };
-    // SAFETY: getpgrp takes no arguments.
-    if pgid == unsafe { libc::getpgrp() } {
-        return;
-    }
-    // SAFETY: a plain syscall; a negative pid is the group, and `signal_target` ruled out 0 and 1.
-    unsafe { libc::kill(-pgid, signal) };
+    let _ = signal_group(pid, libc::SIGKILL);
 }
 
 /// Asks the login shell where node is. It has to be interactive (-i) for .zshrc's nvm/mise

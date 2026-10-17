@@ -129,10 +129,9 @@ impl Foreign {
 
     /// SIGKILL, if it is still there.
     pub(super) fn kill(&mut self) {
+        // It has not ended, so the number is still its own
         if !self.watch.ended() {
-            // SAFETY: a plain syscall; the pid is the host we supervise and it has not ended, so
-            // the number is still its own.
-            unsafe { libc::kill(self.pid as i32, libc::SIGKILL) };
+            let _ = crate::os::signal_pid(self.pid, libc::SIGKILL);
         }
     }
 

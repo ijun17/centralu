@@ -454,12 +454,11 @@ fn spawn_successor(k: &Keeper, exe: &Path, target: &BuildSource) -> std::io::Res
     // first keeper.
     cmd.stdin(Stdio::null());
     let fd = theirs.as_raw_fd();
-    // SAFETY: setsid, dup2 and fcntl are async-signal-safe, which is all pre_exec requires.
+    os::new_session(&mut cmd);
+    // SAFETY: dup2 and fcntl are async-signal-safe, which is all pre_exec requires. Runs after
+    // `new_session`'s step: pre-exec steps run in the order they were added.
     unsafe {
         cmd.pre_exec(move || {
-            if libc::setsid() == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
             if fd == 3 {
                 // Already in place: only the close-on-exec flag has to go
                 if libc::fcntl(3, libc::F_SETFD, 0) == -1 {

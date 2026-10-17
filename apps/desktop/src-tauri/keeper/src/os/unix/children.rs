@@ -100,12 +100,11 @@ pub fn spawn_pty(
     c.stdin(Stdio::from(slave.try_clone()?))
         .stdout(Stdio::from(slave.try_clone()?))
         .stderr(Stdio::from(slave.try_clone()?));
-    // SAFETY: setsid and ioctl are async-signal-safe.
+    crate::os::new_session(&mut c);
+    // SAFETY: ioctl is async-signal-safe. Runs after `new_session`'s `setsid`: pre-exec steps run in
+    // the order they were added.
     unsafe {
         c.pre_exec(|| {
-            if libc::setsid() == -1 {
-                return Err(io::Error::last_os_error());
-            }
             // stdin is the slave by now: make it this new session's controlling terminal.
             if libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
                 return Err(io::Error::last_os_error());
@@ -224,12 +223,11 @@ pub fn signal(pid: i32, sig: i32, group: bool) -> io::Result<()> {
     if pid <= 1 {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "refusing to signal pid <= 1"));
     }
-    let target = if group { -pid } else { pid };
-    // SAFETY: a plain syscall.
-    if unsafe { libc::kill(target, sig) } == -1 {
-        return Err(io::Error::last_os_error());
+    if group {
+        crate::os::signal_group(pid as u32, sig)
+    } else {
+        crate::os::signal_pid(pid as u32, sig)
     }
-    Ok(())
 }
 
 /**
@@ -246,11 +244,10 @@ pub fn signal(pid: i32, sig: i32, group: bool) -> io::Result<()> {
  */
 pub fn signal_leftovers(pgid: i32, sig: i32) -> bool {
     // SAFETY: getpgrp takes no arguments.
-    if pgid <= 1 || exists(pgid) || pgid == unsafe { libc::getpgrp() } {
+    if pgid <= 1 || number_in_use(pgid) || pgid == unsafe { libc::getpgrp() } {
         return false;
     }
-    // SAFETY: a plain syscall; a negative pid is the group.
-    unsafe { libc::kill(-pgid, sig) == 0 }
+    crate::os::signal_group(pgid as u32, sig).is_ok()
 }
 
 /// Whether any process is still in the group.
@@ -279,8 +276,7 @@ pub fn signal_session(sid: i32, sig: i32, leader_alive: bool) -> bool {
     groups.dedup();
     let mut any = false;
     for pgid in groups {
-        // SAFETY: a plain syscall; a negative pid is the group.
-        any |= unsafe { libc::kill(-pgid, sig) } == 0;
+        any |= crate::os::signal_group(pgid as u32, sig).is_ok();
     }
     any
 }
@@ -305,7 +301,7 @@ fn session_groups(sid: i32, leader_alive: bool) -> Vec<i32> {
 fn session_groups_among(pids: Vec<i32>, sid: i32, leader_alive: bool) -> Vec<i32> {
     // SAFETY: getsid(0) and getpgrp take or need no pointers.
     let (own_session, own_group) = unsafe { (libc::getsid(0), libc::getpgrp()) };
-    if sid <= 1 || sid == own_session || (!leader_alive && exists(sid)) {
+    if sid <= 1 || sid == own_session || (!leader_alive && number_in_use(sid)) {
         return Vec::new();
     }
     // SAFETY (both calls): plain syscalls; a process gone meanwhile answers -1.
@@ -355,8 +351,10 @@ pub fn try_reap(pid: i32) -> Option<ExitStatus> {
     }
 }
 
-/// Whether a process with this pid exists (whoever owns it).
-pub fn exists(pid: i32) -> bool {
+/// Whether anyone holds `pid` as a process id, a zombie included (whoever owns it): while it is held,
+/// the number cannot be given to a new process, and a group or session by that number is the one it
+/// always was. Not whether that process runs (`os::pid_alive`, which reads a zombie as ended).
+pub fn number_in_use(pid: i32) -> bool {
     // SAFETY: signal 0 only checks.
     let rc = unsafe { libc::kill(pid, 0) };
     rc == 0 || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
@@ -515,7 +513,7 @@ impl ExitWatch {
         for pid in polled {
             match try_reap(pid) {
                 Some(st) => out.push((pid, st)),
-                None if !exists(pid) => {
+                None if !number_in_use(pid) => {
                     let st = self.unknown_status(pid);
                     out.push((pid, st))
                 }
