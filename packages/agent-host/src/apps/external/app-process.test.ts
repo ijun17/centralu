@@ -3,6 +3,7 @@
  * the write lands on a closed pipe, and a stream 'error' nobody listens to is an uncaught exception
  * that ends the host and every session. The start fails; nothing escapes.
  */
+import { spawnSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -172,16 +173,29 @@ describe("a Python app's stderr", () => {
       exitWaitMs: 10_000,
     }).catch((e: unknown) => e)) as AppStartError
   }
-  const printEnv = "process.stderr.write('PYTHONUTF8=' + process.env.PYTHONUTF8 + String.fromCharCode(10)); process.exit(3)"
+  const printEnv = "process.stderr.write([process.env.PYTHONIOENCODING, process.env.PYTHONUTF8].join(' ') + String.fromCharCode(10)); process.exit(3)"
+  const clean = { ...process.env, PYTHONUTF8: undefined, PYTHONIOENCODING: undefined }
 
-  it("an app runs with Python's UTF-8 mode on, unless its own environment says otherwise", async () => {
-    expect((await start(process.execPath, ['-e', printEnv], { ...process.env, PYTHONUTF8: undefined })).stderr).toEqual(['PYTHONUTF8=1'])
-    expect((await start(process.execPath, ['-e', printEnv], { ...process.env, PYTHONUTF8: '0' })).stderr).toEqual(['PYTHONUTF8=0'])
+  it("an app's Python writes its standard streams in UTF-8, unless the app's own environment chooses", async () => {
+    expect((await start(process.execPath, ['-e', printEnv], clean)).stderr).toEqual(['utf-8 '])
+    expect((await start(process.execPath, ['-e', printEnv], { ...clean, PYTHONIOENCODING: 'cp949' })).stderr).toEqual(['cp949 '])
+    expect((await start(process.execPath, ['-e', printEnv], { ...clean, PYTHONUTF8: '0' })).stderr).toEqual([' 0'])
+  }, 30_000 * SLOW)
+
+  /*
+   * Only the streams (a review of #964): PYTHONUTF8=1 also made UTF-8 what open() and the locale default to, so an app
+   * reading its own code page's files (cp949 on a Korean Windows) without naming an encoding failed. Compared with the
+   * same Python started directly, so the answer is this machine's own.
+   */
+  it.runIf(python !== null)("leaves Python's UTF-8 mode and open()'s default encoding as the machine has them", async () => {
+    const script = "import locale, sys; print(sys.flags.utf8_mode, locale.getpreferredencoding(False), file=sys.stderr); sys.exit(3)"
+    const direct = spawnSync(python!, ['-c', script], { env: clean, encoding: 'utf8', windowsHide: true }).stderr.trim()
+    const err = await start(python!, ['-c', script], clean)
+    expect(err.stderr).toEqual([direct])
   }, 30_000 * SLOW)
 
   it.runIf(python !== null)('reaches the log as the app wrote it, Korean included', async () => {
-    const env = { ...process.env, PYTHONUTF8: undefined, PYTHONIOENCODING: undefined }
-    const err = await start(python!, ['-c', "import sys; print('실패: 한글 설정 오류', file=sys.stderr); sys.exit(3)"], env)
+    const err = await start(python!, ['-c', "import sys; print('실패: 한글 설정 오류', file=sys.stderr); sys.exit(3)"], clean)
     expect(err).toBeInstanceOf(AppStartError)
     expect(err.stderr).toEqual(['실패: 한글 설정 오류'])
   }, 30_000 * SLOW)

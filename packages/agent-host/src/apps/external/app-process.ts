@@ -320,17 +320,19 @@ export class AppProcess {
 }
 
 /**
- * An app's environment with Python's UTF-8 mode on, unless the app's environment already says (#849).
+ * An app's environment with Python's standard streams in UTF-8, unless the app's environment already chooses (#849).
  *
  * The host reads an app's stderr as UTF-8 (`AppLog`). Python writes a pipe in the locale's code page instead, which on
  * Windows is the ANSI one: on a Korean machine every Korean line of a Python app's stderr (its crash reason) reached the
- * log and the person as U+FFFD. `PYTHONUTF8=1` (PEP 540, Python 3.7+) makes its standard streams UTF-8 everywhere; off
- * Windows, where the locale is UTF-8 already, it changes nothing a person sees. Other programs ignore it.
+ * log and the person as U+FFFD. `PYTHONIOENCODING=utf-8` changes the standard streams and nothing else. Not
+ * `PYTHONUTF8=1`: that also makes UTF-8 what `open()` and the locale default to, so an app, or a Python program a Node
+ * app starts, reading its own code page's files without naming an encoding would fail. An app that sets either itself
+ * keeps its choice. Other programs ignore both.
  */
 export function withUtf8Python(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   // Windows spells names in any case, and a copy of its environment is a plain object
-  if (Object.entries(env).some(([k, v]) => v !== undefined && k.toUpperCase() === 'PYTHONUTF8')) return env
-  return { ...env, PYTHONUTF8: '1' }
+  const chosen = Object.entries(env).some(([k, v]) => v !== undefined && (k.toUpperCase() === 'PYTHONIOENCODING' || k.toUpperCase() === 'PYTHONUTF8'))
+  return chosen ? env : { ...env, PYTHONIOENCODING: 'utf-8' }
 }
 
 function describeExit(e: ExitInfo): string {
