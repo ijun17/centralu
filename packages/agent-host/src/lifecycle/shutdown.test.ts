@@ -71,6 +71,7 @@ function parts() {
     agentVersions: { stop: rec('agent versions') },
     sleeper: { stop: rec('sleeper') },
     stopActivity: rec('activity'),
+    git: { stopAll: async () => void did.push('git') },
     links: { stop: async () => void did.push('links') },
     apps: { dispose: async () => void did.push('apps') },
     sessions: {
@@ -156,6 +157,15 @@ describe('detach or stop (HO15)', () => {
     expect(f.did).not.toContain('terminals end')
     expect(f.did).not.toContain('commands end')
     expect(f.did).not.toContain('sessions end')
+  })
+
+  // #982: git runs in a group of its own, out of reach of the keeper's stop and of a Ctrl+C; nothing else ends it
+  it.each(['stop', 'detach'] as const)('ends the git calls still running (%s), before the sessions are let go of', async (mode) => {
+    const f = parts()
+    f.releaseSessions()
+    await runSteps(stopPlan(mode, false, f.p), () => {})
+    expect(f.did).toContain('git')
+    expect(f.did.indexOf('git')).toBeLessThan(f.did.indexOf(mode === 'stop' ? 'sessions end' : 'sessions detach'))
   })
 })
 

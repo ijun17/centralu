@@ -1,18 +1,15 @@
 import { execFile } from 'node:child_process'
 import { lstat, readdir } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
-import { promisify } from 'node:util'
 import { assertExistingPath, isInside, isMissingPathError } from './path-guard.js'
 import type { GitBranch, GitCommit, GitFileStatus } from '@cc/protocol'
 import { runGit, streamGit, type GitTrust } from './git-exec.js'
 import { killTree } from './kill-tree.js'
-import { killHandle } from './grouped-child.js'
+import { killHandle, spawnGrouped } from './grouped-child.js'
 import { programPath } from '../tool-launch.js'
 import { raceTimeout } from '../timing.js'
 import { measuresWithDu } from '../os.js'
 import { rpcError } from '../rpc-error.js'
-
-const exec = promisify(execFile)
 
 /**
  * Reads and operates on git (B-1).
@@ -127,7 +124,7 @@ export async function gitSummary(cwd: string, trust: GitTrust = {}, limits: Summ
     const msg = String(err.stderr || err.message || '')
     // macOS TCC: an unsigned app reading a protected folder ends up here
     if (/Operation not permitted|EPERM|EACCES|permission denied/i.test(msg)) return { isRepo: true, branch: '', changedFiles: 0, denied: true }
-    // What git says of a folder that is no repository (in English: `streamGit` reads git under LC_ALL=C, as Git for
+    // What git says of a folder that is no repository (in English: every git call runs untranslated, `gitEnv`, as Git for
     // Windows and WSL translate it otherwise), and a machine with no git at all
     if (/not a git repository/i.test(msg) || err.code === 'ENOENT') return { isRepo: false, branch: '', changedFiles: 0 }
     /*
@@ -722,25 +719,49 @@ export type BranchPr = {
  * Neither branch throws — this signal is the basis for one badge, not a precondition for the
  * session list.
  */
-export async function gitBranchPr(projectCwd: string, branch: string, signal?: AbortSignal): Promise<BranchPr | 'unavailable' | null> {
-  const run = exec(programPath('gh'), ['pr', 'view', branch, '--json', 'number,state,url,headRefOid'], { cwd: projectCwd, ...OK })
-  const closed = new Promise<void>((done) => run.child.once('close', () => done()))
-  const exited = new Promise<void>((done) => run.child.once('exit', () => done()))
+export async function gitBranchPr(
+  projectCwd: string,
+  branch: string,
+  signal?: AbortSignal,
+  timeoutMs = OK.timeout,
+): Promise<BranchPr | 'unavailable' | null> {
   /*
-   * **An abort ends gh with the processes it started, and returns once gh is gone** (the host stopping, #368).
+   * Started as the root of a tree this host can end (`spawnGrouped`), as git is: off Windows in a process group of its
+   * own, so the tree kill below reaches what gh started (it runs git to read the remotes); in the host's group it
+   * spared them (#982 review). No `timeout` of execFile's own either: it ended gh alone. Running past `timeoutMs`
+   * takes the abort's path.
+   */
+  const { child } = spawnGrouped(programPath('gh'), ['pr', 'view', branch, '--json', 'number,state,url,headRefOid'], {
+    cwd: projectCwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  const out: Buffer[] = []
+  let outBytes = 0
+  child.stdout!.on('data', (chunk: Buffer) => {
+    outBytes += chunk.length
+    if (outBytes <= OK.maxBuffer) out.push(chunk)
+  })
+  child.stderr!.resume()
+  const run = new Promise<string>((resolve, reject) => {
+    child.once('error', reject)
+    child.once('close', (code) => (code === 0 ? resolve(Buffer.concat(out).toString('utf8')) : reject(Object.assign(new Error(`gh exited with ${code}`), { code }))))
+  })
+  const closed = new Promise<void>((done) => child.once('close', () => done()))
+  const exited = new Promise<void>((done) => child.once('exit', () => done()))
+  /*
+   * **An abort, or running past `timeoutMs`, ends gh with the processes it started, and returns once gh is gone** (the
+   * host stopping, #368; a gh that does not answer, #982).
    * They work in the project's folder, and Windows refuses to remove a folder a running process works in (EBUSY).
-   * execFile's own `signal` is not enough: it ends gh alone (gh runs git to read the remotes) and rejects at the
-   * kill, before gh has exited. `killTree` ends the tree (`taskkill /T /F` on Windows). The wait is for gh's `exit`,
-   * then for `close` (every process holding gh's output has ended) for at most a second: on macOS and Linux the tree
-   * kill does not reach a child that left gh's process group, and that child can hold the output open for as long as
-   * it runs, which must not hold the host's shutdown (nor does it hold the folder there: those systems remove a
-   * folder a process works in).
+   * `killTree` ends the tree (gh's group; `taskkill /T /F` on Windows). The wait is for gh's `exit`, then for `close`
+   * (every process holding gh's output has ended) for at most a second: on macOS and Linux the tree kill does not
+   * reach a child that left gh's process group, and that child can hold the output open for as long as it runs,
+   * which must not hold the host's shutdown (nor does it hold the folder there: those systems remove a folder a
+   * process works in).
    */
   const stop = () => {
-    killTree(killHandle(run.child), 'SIGKILL')
-    // gh itself as well: elsewhere than Windows it shares the host's process group, which the tree kill spares, and
-    // once that kill has hit a group of gh's children it does not fall back to gh
-    run.child.kill('SIGKILL')
+    killTree(killHandle(child), 'SIGKILL')
+    // gh itself as well, should the tree kill have found no group to fire at
+    child.kill('SIGKILL')
   }
   let onAbort: (() => void) | undefined
   const aborted = new Promise<never>((_, reject) => {
@@ -754,8 +775,9 @@ export async function gitBranchPr(projectCwd: string, branch: string, signal?: A
   aborted.catch(() => {})
   if (signal?.aborted) onAbort!()
   else signal?.addEventListener('abort', onAbort!, { once: true })
+  const timer = setTimeout(onAbort!, timeoutMs)
   try {
-    const { stdout } = await Promise.race([run, aborted])
+    const stdout = await Promise.race([run, aborted])
     const j = JSON.parse(stdout) as { number?: unknown; state?: unknown; url?: unknown; headRefOid?: unknown }
     if (typeof j.number !== 'number' || typeof j.state !== 'string' || typeof j.url !== 'string') return null
     return {
@@ -768,6 +790,7 @@ export async function gitBranchPr(projectCwd: string, branch: string, signal?: A
     // Not started at all (ENOENT) has nothing to wait for
     return (e as NodeJS.ErrnoException).code === 'ENOENT' ? 'unavailable' : null
   } finally {
+    clearTimeout(timer)
     if (onAbort) signal?.removeEventListener('abort', onAbort)
   }
 }

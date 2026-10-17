@@ -41,6 +41,7 @@ import { parseSleepSetting, SessionSleeper, sleepOverrideFrom, storedSleepSettin
 import { acquireInstanceLock, lockConflictMessage } from './dev-services/instance-lock.js'
 import { hostLogPath, startupBanner, teeStderrToFile } from './log-file.js'
 import { hostDrain } from './drain.js'
+import { stopGitChildren } from './dev-services/git-exec.js'
 import { Gate } from './lifecycle/gate.js'
 import { Shutdown, signalMode, stopPlan } from './lifecycle/shutdown.js'
 import { crashRecorder, holdSignals, wireEndings } from './lifecycle/endings.js'
@@ -579,6 +580,7 @@ const shutdown = new Shutdown({
       agentVersions,
       sleeper,
       stopActivity: () => stopActivity(),
+      git: { stopAll: () => stopGitChildren() },
       links,
       apps: externalApps,
       sessions: mgr,
