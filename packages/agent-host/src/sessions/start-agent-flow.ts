@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { rm } from 'node:fs/promises'
-import type { AgentStartRecord, AgentStartRequest, Delegation, LowMemory } from './child-ownership.js'
+import type { AgentStartRequest, Delegation } from './child-ownership.js'
 import { ASK_WAIT_MS, taskLine } from './ask-project.js'
 import { agentChoice, agentFrame, agentName, distinguishingText, givenAgentName, presetWithin } from './start-agent.js'
 import { labelOf } from './transcript-view.js'
@@ -10,18 +10,13 @@ import type {
   PermissionPreset,
   SessionInfo,
 } from '@cc/protocol'
-import {
-  // The frame's single-line field (#120) — lives in protocol (app-frames.ts) because the mock
-  // also needs to put words into a session built with the same frame.
-  frameField,
-} from '@cc/protocol'
 import type { ChildRunResult, StartAgentOpts } from '../adapters/contract.js'
-import { gigabytes, type MemoryShortfall } from './memory-gate.js'
 import type { DelegationHost } from './delegation-host.js'
 import { newOrchestratorAgentFolder } from './orchestrator-home.js'
 import { AgentStartGates } from './agent-start-gates.js'
 import { AgentConsents } from './agent-consents.js'
 import { AgentChoices } from './agent-choices.js'
+import { AgentStartRequests } from './agent-start-requests.js'
 import {
   ASK_THE_PERSON,
   ORCHESTRATOR_PLACE,
@@ -30,22 +25,11 @@ import {
   agentStartPending,
   agentStartPersonText,
   orchestratorPlace,
+  type StartProgress,
 } from './start-agent-terms.js'
 
 // Moved to the terms start_agent's modules share (#428); still importable from here
 export { ASK_THE_PERSON, ORCHESTRATOR_PLACE, START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS, agentStartPending, agentStartPersonText } from './start-agent-terms.js'
-
-/** How far start_agent's setup had come when its bound passed (#660) */
-type StartProgress = {
-  stage: 'checking' | 'asking' | 'creating' | 'created'
-  /** The card's request, while one stands (#673): past the bound the call answers "pending" and the card stays */
-  requestId?: string
-  childId?: string
-  /** Set once the child's run is registered, so a late answer can describe it as the normal path does */
-  d?: Delegation
-  /** Said when the model or effort asked for could not be checked */
-  unchecked?: string
-}
 
 /** The answer when start_agent's setup outlasts its bound: it states whether a session exists, and what to do next */
 function startAgentLate(progress: StartProgress): ChildRunResult {
@@ -77,18 +61,6 @@ function startAgentLate(progress: StartProgress): ChildRunResult {
   }
 }
 
-/** The sender Centralu's own messages to a session are recorded under (#673): like `HUB_SENDER`, no session's id */
-const HOST_SENDER = '_centralu'
-
-/** Reads a stored request back; a row this build cannot read is dropped rather than raised half-formed */
-function readAgentStartRequest(raw: unknown): AgentStartRequest | null {
-  const r = raw as Partial<AgentStartRequest> | null
-  if (!r || typeof r !== 'object') return null
-  if (typeof r.requestId !== 'string' || typeof r.callerId !== 'string' || typeof r.projectId !== 'string') return null
-  if (typeof r.tool !== 'string' || typeof r.task !== 'string' || r.detail?.kind !== 'agent_start') return null
-  return r as AgentStartRequest
-}
-
 /** What start_agent reaches of the rest of the delegation flow (`DelegationFlow`): the child's run, its wait, its answers */
 export type StartAgentDelegations = {
   startDelegation(key: string, callerId: string, sessionId: string, target: { id: string; name: string; path: string }, agent?: boolean, joinedTurn?: boolean): Delegation
@@ -109,6 +81,8 @@ export class AgentStartFlow {
   private readonly consents: AgentConsents
   /** A child's worktree branch, and its model and effort checked (agent-choices.ts) */
   private readonly choices: AgentChoices
+  /** start_agent requests that outlive their call: a card standing, or memory short (agent-start-requests.ts) */
+  private readonly requests: AgentStartRequests
 
   constructor(
     private readonly host: DelegationHost,
@@ -117,6 +91,7 @@ export class AgentStartFlow {
     this.gates = new AgentStartGates(host)
     this.consents = new AgentConsents(host)
     this.choices = new AgentChoices(host)
+    this.requests = new AgentStartRequests(host, flow, this)
   }
 
   /** `AgentConsents.agentConsents` (agent-consents.ts), kept on the flow for its callers */
@@ -360,7 +335,7 @@ export class AgentStartFlow {
    * synchronous step (`agentStartReserved`), held until the child's delegation counts it or the start fails. Checked
    * and counted on either side of `createSession`, eight calls at once all passed a ceiling of four.
    */
-  private async createAgentChild(
+  async createAgentChild(
     callerId: string,
     project: { id: string; name: string; path: string },
     choice: Pick<AgentStartRequest, 'tool' | 'model' | 'effort' | 'worktreeBranch' | 'task' | 'unchecked' | 'lsp' | 'name'>,
@@ -549,189 +524,43 @@ export class AgentStartFlow {
     return this.consents.agentConsentFrom(...a)
   }
 
-  /** A start_agent request whose card now stands (#673): kept, in memory and in the store, until it is answered */
-  private openAgentStart(req: AgentStartRequest): AgentStartRecord {
-    let end!: () => void
-    const done = new Promise<void>((resolve) => (end = resolve))
-    const rec: AgentStartRecord = { req, detached: false, done, end }
-    this.host.children.addAgentStart(rec)
-    this.host.store.children.putAgentStartRequest(req.requestId, req.callerId, req)
-    return rec
+  /** `AgentStartRequests.openAgentStart` (agent-start-requests.ts), kept on the flow for its callers */
+  private openAgentStart(...a: Parameters<AgentStartRequests['openAgentStart']>): ReturnType<AgentStartRequests['openAgentStart']> {
+    return this.requests.openAgentStart(...a)
   }
 
-  /**
-   * How a start_agent request ended (#673), once: the row goes, a wait on its handle returns, and unless a session
-   * started, the person is shown why in the caller's session (not only the model, in a tool result). A request whose
-   * call already answered "pending" is told to the caller as a message, since no call is left to answer it.
-   * A refusal the person gave on the card while the call waited needs no line: the card itself says "Denied".
-   */
-  private endAgentStart(requestId: string | undefined, ended: { childId: string } | { error: string; person: string; denied?: boolean }): void {
-    const rec = requestId ? this.host.children.agentStarts.get(requestId) : undefined
-    if (!rec || rec.ended) return
-    rec.ended = 'childId' in ended ? { childId: ended.childId } : { error: ended.error }
-    rec.end()
-    rec.stopWaiting?.()
-    this.host.store.children.deleteAgentStartRequest(rec.req.requestId)
-    if ('childId' in ended) return
-    const { callerId } = rec.req
-    if (!this.host.meta.has(callerId)) return
-    if (!ended.denied || rec.detached) {
-      this.host.onEvent({ type: 'notice', sessionId: callerId, level: 'warning', from: 'Centralu', label: 'agent request', audience: 'you', text: ended.person })
-    }
-    if (rec.detached) void this.tellAgentStartEnded(rec.req, ended.error)
+  /** `AgentStartRequests.endAgentStart` (agent-start-requests.ts), kept on the flow for its callers */
+  private endAgentStart(...a: Parameters<AgentStartRequests['endAgentStart']>): ReturnType<AgentStartRequests['endAgentStart']> {
+    return this.requests.endAgentStart(...a)
   }
 
-  /** The caller of a request that already answered "pending" hears how it ended (#673), as a message in its session */
-  private async tellAgentStartEnded(req: AgentStartRequest, why: string): Promise<void> {
-    await this.host.tellSession(
-      req.callerId,
-      `[Centralu] Your start_agent request ${req.requestId} did not start a session.\n` +
-        `Agent: ${frameField(req.detail.tool)}\n` +
-        `Task: ${frameField(req.detail.text)}\n\n` +
-        `Reason: ${why.slice(0, 600)}`,
-      { sessionId: HOST_SENDER, name: 'Centralu' },
-      false,
-    )
+  /** `AgentStartRequests.withdrawAgentStart` (agent-start-requests.ts), kept on the flow for its callers */
+  withdrawAgentStart(...a: Parameters<AgentStartRequests['withdrawAgentStart']>): ReturnType<AgentStartRequests['withdrawAgentStart']> {
+    return this.requests.withdrawAgentStart(...a)
   }
 
-  /**
-   * Withdraws a request's card, when the session that asked withdraws it or is deleted (#673): the card closes, the
-   * request ends with `person` shown, and whatever waits on the card hears no answer.
-   */
-  withdrawAgentStart(requestId: string, error: string, person: string): void {
-    const rec = this.host.children.agentStarts.get(requestId)
-    if (!rec || rec.ended) return
-    this.endAgentStart(requestId, { error, person })
-    this.host.withdrawHostAsk(requestId)
+  /** `AgentStartRequests.resumeAgentStart` (agent-start-requests.ts), kept on the flow for its callers */
+  resumeAgentStart(...a: Parameters<AgentStartRequests['resumeAgentStart']>): ReturnType<AgentStartRequests['resumeAgentStart']> {
+    return this.requests.resumeAgentStart(...a)
   }
 
-  /**
-   * A request the previous host left standing (#673, `agent_start_requests`): its card is raised again, and an
-   * approval starts the child here, with the report armed, as the call would have. A request whose caller is gone ends.
-   */
-  resumeAgentStart(req: AgentStartRequest): void {
-    const caller = this.host.meta.get(req.callerId)
-    if (!caller) {
-      this.host.store.children.deleteAgentStartRequest(req.requestId)
-      return
-    }
-    const rec = this.openAgentStart(req)
-    rec.detached = true
-    /*
-     * Allowed already and waiting for memory (#686): no card again, only the wait. Begun on the next turn of the event
-     * loop: this runs inside the constructor, and the gate is wired just after it (`useMemoryGate`, main.ts)
-     */
-    if (req.allowed) {
-      setImmediate(() => void this.startWhenMemory(rec))
-      return
-    }
-    void (async () => {
-      const decision = await this.host.askHost(req.callerId, req.detail, undefined, { requestId: req.requestId, shown: true })
-      // The host is leaving again: the row stays for the next one
-      if (decision === null && (this.host.handingOver || this.host.disposing)) return
-      const consent = this.agentConsentFrom(req.callerId, req.projectId, decision)
-      if (!consent.ok) {
-        this.endAgentStart(req.requestId, { error: consent.error, person: agentStartPersonText(req, consent.why === 'denied' ? 'denied' : 'withdrawn'), denied: consent.why === 'denied' })
-        return
-      }
-      await this.startWhenMemory(rec)
-    })()
+  /** `AgentStartRequests.memoryShort` (agent-start-requests.ts), kept on the flow for its callers */
+  memoryShort(...a: Parameters<AgentStartRequests['memoryShort']>): ReturnType<AgentStartRequests['memoryShort']> {
+    return this.requests.memoryShort(...a)
   }
 
-  /** Whether the machine has no room for another agent now (#686): null when it has, or when no gate is wired (tests) */
-  async memoryShort(): Promise<MemoryShortfall | null> {
-    return this.host.memoryGate ? this.host.memoryGate.short() : null
+  /** `AgentStartRequests.lowMemory` (agent-start-requests.ts), kept on the flow for its callers */
+  lowMemory(...a: Parameters<AgentStartRequests['lowMemory']>): ReturnType<AgentStartRequests['lowMemory']> {
+    return this.requests.lowMemory(...a)
   }
 
-  /** A shortfall in the words the caller and the person read (#686) */
-  lowMemory(short: MemoryShortfall): LowMemory {
-    return { available: gigabytes(short.available), floor: gigabytes(short.floor), maxWaitMinutes: this.host.memoryGate?.maxWaitMinutes ?? 0 }
+  /** `AgentStartRequests.queueAgentStart` (agent-start-requests.ts), kept on the flow for its callers */
+  private queueAgentStart(...a: Parameters<AgentStartRequests['queueAgentStart']>): ReturnType<AgentStartRequests['queueAgentStart']> {
+    return this.requests.queueAgentStart(...a)
   }
 
-  /**
-   * Queues an allowed start until memory recovers (#686): the request is kept (stored, so a host swap carries it), marked
-   * allowed, and answered "pending" with its handle; the wait goes on in the background (`startWhenMemory`).
-   */
-  private queueAgentStart(req: AgentStartRequest, short: MemoryShortfall): ChildRunResult {
-    req.allowed = true
-    const rec = this.host.children.agentStarts.get(req.requestId) ?? this.openAgentStart(req)
-    this.host.store.children.putAgentStartRequest(req.requestId, req.callerId, req)
-    rec.detached = true
-    rec.lowMemory = this.lowMemory(short)
-    void this.startWhenMemory(rec, short)
-    return agentStartPending(req, rec.lowMemory)
-  }
-
-  /**
-   * An allowed start (#673, #686): started now when memory allows; otherwise the person is told in the caller's session,
-   * and it waits (oldest first, re-read every `MEMORY_RECHECK_MS`, at most `MEMORY_WAIT_MAX_MS`). It ends without a
-   * session when withdrawn, when the caller goes, or when the bound passes; a host leaving keeps it stored for the next.
-   * Once started, the caller is told when the child's turn ends, as for any start whose call already answered.
-   */
-  private async startWhenMemory(rec: AgentStartRecord, known?: MemoryShortfall): Promise<void> {
-    const { req } = rec
-    const short = known ?? (await this.memoryShort())
-    if (short && this.host.memoryGate && !rec.ended) {
-      if (!req.allowed) {
-        req.allowed = true
-        this.host.store.children.putAgentStartRequest(req.requestId, req.callerId, req)
-      }
-      rec.lowMemory = this.lowMemory(short)
-      if (this.host.meta.has(req.callerId)) {
-        this.host.onEvent({
-          type: 'notice',
-          sessionId: req.callerId,
-          level: 'info',
-          from: 'Centralu',
-          label: 'waiting for memory',
-          audience: 'you',
-          text:
-            `Starting ${req.detail.tool} (“${req.detail.text}”) waits for memory: ${rec.lowMemory.available} free, ${rec.lowMemory.floor} needed. ` +
-            `It starts when memory frees up, or gives up after ${rec.lowMemory.maxWaitMinutes} minutes.`,
-        })
-      }
-      const ctl = new AbortController()
-      rec.stopWaiting = () => ctl.abort()
-      const outcome = await this.host.memoryGate.wait(ctl.signal)
-      rec.stopWaiting = undefined
-      // Withdrawn while it waited, or the host is leaving: the stored request goes to the next host
-      if (rec.ended || outcome === 'aborted' || this.host.handingOver || this.host.disposing) return
-      if (outcome === 'timeout') {
-        const error =
-          `Memory stayed below ${rec.lowMemory.floor} for ${rec.lowMemory.maxWaitMinutes} minutes, so no agent was started. ` +
-          `Close something or wait for other agents to finish, then call start_agent again. ${ASK_THE_PERSON}`
-        this.endAgentStart(req.requestId, { error, person: agentStartPersonText(req, 'failed', `memory stayed below ${rec.lowMemory.floor} for ${rec.lowMemory.maxWaitMinutes} minutes`) })
-        return
-      }
-    }
-    if (rec.ended) return
-    const caller = this.host.meta.get(req.callerId)
-    const project = req.projectId === ORCHESTRATOR_PLACE && caller?.kind === 'orchestrator' ? orchestratorPlace(caller) : this.host.store.projects.listProjects().find((p) => p.id === req.projectId)
-    const r = project
-      ? await this.createAgentChild(req.callerId, { id: project.id, name: project.name, path: project.path }, req, { stage: 'creating' }, req.detail.preset, req.requestId)
-      : { done: { ok: false as const, error: "This session's project is no longer registered." } }
-    if ('key' in r) {
-      this.endAgentStart(req.requestId, { childId: r.d.sessionId })
-      this.flow.agentWorking(r.d)
-    } else {
-      const error = r.done.ok ? 'No session was created.' : r.done.error
-      this.endAgentStart(req.requestId, { error, person: agentStartPersonText(req, 'failed', error) })
-    }
-  }
-
-  /** At startup (#673): the start_agent requests the previous host left standing, raised again */
-  restoreAgentStarts(): void {
-    /*
-     * start_agent requests the previous host left standing (#673): the person has not answered yet, so the card is
-     * raised again in its session and an approval starts the child here. A request whose caller is gone ends.
-     */
-    for (const row of this.host.store.children.listAgentStartRequests()) {
-      const req = readAgentStartRequest(row.request)
-      if (!req || req.requestId !== row.requestId || req.callerId !== row.callerSessionId) {
-        this.host.store.children.deleteAgentStartRequest(row.requestId)
-        continue
-      }
-      this.resumeAgentStart(req)
-    }
+  /** `AgentStartRequests.restoreAgentStarts` (agent-start-requests.ts), kept on the flow for its callers */
+  restoreAgentStarts(...a: Parameters<AgentStartRequests['restoreAgentStarts']>): ReturnType<AgentStartRequests['restoreAgentStarts']> {
+    return this.requests.restoreAgentStarts(...a)
   }
 }

@@ -6,7 +6,7 @@
  */
 import type { SessionInfo, ToolName } from '@cc/protocol'
 import type { ChildRunResult } from '../adapters/contract.js'
-import type { AgentStartRequest, LowMemory } from './child-ownership.js'
+import type { AgentStartRequest, Delegation, LowMemory } from './child-ownership.js'
 
 /** How long start_agent waits for a model list to check the model and effort asked for, before it starts anyway (#660) */
 export const START_AGENT_MODEL_CHECK_MS = 3_000
@@ -72,4 +72,16 @@ export const ORCHESTRATOR_PLACE = ''
  */
 export function orchestratorPlace(caller: SessionInfo): { id: string; name: string; path: string; trusted: true; defaultTool: ToolName } {
   return { id: ORCHESTRATOR_PLACE, name: 'a folder of its own, outside any project', path: '', trusted: true, defaultTool: caller.tool }
+}
+
+/** How far start_agent's setup had come when its bound passed (#660) */
+export type StartProgress = {
+  stage: 'checking' | 'asking' | 'creating' | 'created'
+  /** The card's request, while one stands (#673): past the bound the call answers "pending" and the card stays */
+  requestId?: string
+  childId?: string
+  /** Set once the child's run is registered, so a late answer can describe it as the normal path does */
+  d?: Delegation
+  /** Said when the model or effort asked for could not be checked */
+  unchecked?: string
 }
