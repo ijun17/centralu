@@ -556,6 +556,18 @@ describe('a handoff whose original goes takes the settled children too (#738)', 
     expect(h.mgr.listSessions().some((s) => s.id === child)).toBe(false)
   })
 
+  it('names a moved child in the note as read_session lists it', async () => {
+    const h = host()
+    const { project, parent } = await parentOf(h)
+    const live = await startChild(h, parent, 'long work')
+    // A resumed conversation's own name is its compaction summary's first line, which no list shows
+    h.mgr.rename(live, 'This session is being continued from a previous conversation that ran out of context.')
+    await handOff(h, project, parent)
+    const note = readFileSync(handoffNotePath(project, parent), 'utf8')
+    expect(note).not.toContain('This session is being continued')
+    expect(note).toContain(`(resumed session)" — working — handle: ${live}.`)
+  })
+
   it('lists every moved child in the note, a settled one as waiting for more work', async () => {
     const h = host()
     const { project, parent } = await parentOf(h)

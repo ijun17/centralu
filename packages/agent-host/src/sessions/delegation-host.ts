@@ -39,6 +39,8 @@ export type DelegationHost = {
   cleanUpWorktreeChild: (target: SessionInfo) => Promise<{ ok: true; branch: string; setAside: { changedFiles: number; commits: number; }; warning?: string; note?: string; } | { ok: false; error: string; }>
   createSession: (params: Omit<CreateSessionParams, "projectId" | "tool"> & { projectId: string | null; tool: ToolName | null; kind?: Exclude<SessionInfo["kind"], "coordinator">; roleAppend?: string; appId?: string | null; builderOf?: AppRef; appAgent?: { outputSchema?: Record<string, unknown>; }; askedBy?: string; forkedFrom?: string; lsp?: boolean; }) => Promise<SessionInfo>
   cwdFor: (m: SessionInfo) => string
+  /** A session as Centralu's word names it to another: as read_session lists it, or its id once it is gone */
+  nameOf: (sessionId: string) => string
   /** Tells a session something in its conversation, never while the host leaves, never throwing (`SessionManager.tellSession`, #428) */
   tellSession: (sessionId: string, text: string, from: { sessionId: string; name: string }, relayed: boolean) => Promise<void>
   deliver: (sessionId: string, text: string, attachments: Attachment[] | undefined, from: { sessionId: string; name: string } | undefined, relayed: boolean, fromApp?: undefined, fromAppVia?: 'inline', sendInput?: (handle: SessionHandle, text: string) => void) => Promise<void>

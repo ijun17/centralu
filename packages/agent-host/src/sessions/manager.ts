@@ -2697,6 +2697,12 @@ export class SessionManager {
     return { name: labelOf(this.store, m), project }
   }
 
+  /** A session as Centralu's word names it to another (`reportedAs`), or its id once it is gone */
+  private nameOf(sessionId: string): string {
+    const m = this.meta.get(sessionId)
+    return m ? this.reportedAs(m).name : sessionId
+  }
+
   /**
    * A session start_agent started stopped in a turn nobody was owed a report of (#698): on 2026-10-15 the internet
    * dropped twice, and children's turns their CLI had opened itself (a Monitor firing) ended in a network error. Their
@@ -4208,6 +4214,7 @@ export class SessionManager {
       },
       sweepOrphanHandoffNotes: (...a) => self.sweepOrphanHandoffNotes(...a),
       tellSession: (...a) => self.tellSession(...a),
+      nameOf: (...a) => self.nameOf(...a),
       toolProblem: async (tool) => {
         const adapter = self.adapters.get(tool)
         if (!adapter) return `${JSON.stringify(tool)} is not a tool Centralu runs here`
@@ -4638,7 +4645,7 @@ export class SessionManager {
         : s.askedBy === from
           ? `${told ? 'Its report comes to you. ' : state === SETTLED_CHILD ? 'Give it more work with agent_session (send) and its report comes to you. ' : ''}agent_session works on it as on a session you started (status, wait, send, stop, delete).`
           : `${told ? 'Its report comes to you' : 'Nothing about it comes to you unless you ask'}${owns ? ', and you are told of the cards of the turn you now own' : ''}. You did not start it, so agent_session works on it only with the auto preset.`
-      moved.push({ handle: id, name: s.name, state, can, ...(project !== undefined ? { project } : {}) })
+      moved.push({ handle: id, name: this.reportedAs(s).name, state, can, ...(project !== undefined ? { project } : {}) })
     }
     // A removed original's requests still open are withdrawn by the trash, not raised in another session
     const starts = removed ? [] : [...this.children.agentStarts.values()].filter((r) => r.req.callerId === from && !r.ended)
@@ -4783,7 +4790,7 @@ export class SessionManager {
   private async tellCardRaised(callerId: string, sessionId: string, kind: 'question' | 'approval', requestId: string): Promise<void> {
     const profile = this.toolProfileOf(callerId)
     const text = cardNotice(kind, sessionId, cardCall(profile, sessionId), kind === 'approval' && this.answersApproval(callerId, sessionId, requestId))
-    const name = this.meta.get(sessionId)?.name ?? sessionId
+    const name = this.nameOf(sessionId)
     try {
       // Relayed, as a report: the stored line names the source, and the agent reads the same host-written words, which
       // carry nothing of the target's
@@ -5094,7 +5101,7 @@ export class SessionManager {
 
   /** A queued request could not be delivered (#677): said in the requester's session, as a report is */
   private async tellQueuedFailed(callerId: string, sessionId: string, why: string): Promise<void> {
-    const name = this.meta.get(sessionId)?.name ?? sessionId
+    const name = this.nameOf(sessionId)
     await this.tellSession(
       callerId,
       `[Centralu] Your queued request to another session was not delivered.\nSession: ${frameField(name)}\nid: ${sessionId}\n\nReason: ${why.slice(0, 600)}`,

@@ -495,7 +495,7 @@ export class DelegationFlow {
 
   /** The observer's note was refused after its send returned (#646): said in the observer's session, as a report is */
   private async tellNoteRefused(observerId: string, sessionId: string, why: string): Promise<void> {
-    const name = this.host.meta.get(sessionId)?.name ?? sessionId
+    const name = this.host.nameOf(sessionId)
     await this.host.tellSession(
       observerId,
       `[Centralu] Your note to another session was not delivered.\n` +
