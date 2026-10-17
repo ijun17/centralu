@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { workflowCheckNames, workflowEventJobs } from '../.centralu/apps/project-board/ci.mjs'
@@ -135,6 +136,8 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
     ['host tests only', ['packages/agent-host/src/store.test.ts', 'packages/agent-host/src/fake-exe.test-helpers.ts'], { ...none, host_tests: true, code: true }],
     ['UI scenarios only', ['e2e/control-loop.spec.ts', 'e2e/fixtures/control.ts'], { ...none, code: true }],
     ['tooling tests', ['tooling/launcher-serve.test.ts', 'vitest.config.ts'], { ...none, host_tests: true, code: true }],
+    // Read by the keeper's Rust tests too (host_proc/tests.rs), which only the host jobs run
+    ['the Node floor fixture', ['tooling/fixtures/node-floor.json'], { ...none, host: true, host_tests: true, code: true }],
     ['the window only', ['packages/ui/src/app/App.tsx', 'packages/core/src/grid/grid.ts', 'apps/web/index.html'], { ...none, bundle: true, code: true }],
     ['the host', ['packages/agent-host/src/rpc.ts'], { bundle: true, host: true, host_tests: true, code: true }],
     ['the shell', ['apps/desktop/src-tauri/src/main.rs'], { bundle: true, host: true, host_tests: true, code: true }],
@@ -151,6 +154,27 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
     ['nothing', [], none],
   ])('%s', (_what, files, needs) => {
     expect(classify(files)).toEqual(needs)
+  })
+
+  /*
+   * A file under tooling/ counts as a test, which the keeper jobs skip. One the keeper's Rust tests take in with
+   * `include_str!` must still run them, or a change to it alone would never reach the Rust half of its test.
+   */
+  it('runs the host jobs for every tooling/ file the Rust tests include', () => {
+    const root = fileURLToPath(new URL('..', import.meta.url))
+    const rust = (dir: string): string[] =>
+      (readdirSync(join(root, dir), { recursive: true }) as string[])
+        .map((f) => `${dir}/${f.split(sep).join('/')}`)
+        .filter((f) => f.endsWith('.rs') && !f.includes('/target/'))
+    const included = new Set<string>()
+    for (const file of [...rust('apps/desktop/src-tauri/keeper/src'), ...rust('apps/desktop/src-tauri/shell/src'), ...rust('apps/desktop/content-verify')]) {
+      for (const m of readFileSync(join(root, file), 'utf8').matchAll(/include_str!\("([^"]+)"\)/g)) {
+        const rel = relative(root, resolve(root, dirname(file), m[1]!)).split(sep).join('/')
+        if (rel.startsWith('tooling/')) included.add(rel)
+      }
+    }
+    expect([...included]).toContain('tooling/fixtures/node-floor.json')
+    for (const f of included) expect(classify([f]).host, f).toBe(true)
   })
 
   it('runs everything when the changed files are not known', () => {
