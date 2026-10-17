@@ -1,10 +1,10 @@
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs'
 import { isIP } from 'node:net'
 import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { wireJoin, wireSegments, type AppReview } from '@cc/protocol'
 import { removeDataQuietly } from '../../dev-services/data-folder.js'
-import { assertExistingPathSync, isInside } from '../../dev-services/path-guard.js'
+import { assertExistingPathSync, canonicalPath, isInside } from '../../dev-services/path-guard.js'
 import { proposedMcpServerNameError } from '../contract.js'
 import { APP_FOLDER_DEPTH, STOP, hiddenName, walkAppFolder } from './folder-walk.js'
 import { reviewKey } from './import-book.js'
@@ -186,14 +186,15 @@ export type StagedFiles = {
 
 /**
  * Stages a source on this machine (a folder or a `.zip`) into `dest` (a folder that does not exist
- * yet). The root is resolved to its **real path** — if the person chose a path that is itself a
+ * yet). The root is resolved to its **real path** (`canonicalPath`, so a Windows short name is the long one a link's target comes back with) — if the person chose a path that is itself a
  * link, that link was the person's choice (`/tmp` is `/private/tmp` on macOS), but a link **inside**
  * it is never followed.
  */
 export function stageLocal(path: string, dest: string, limits: ImportLimits): StagedFiles {
   let root: string
   try {
-    root = realpathSync(path)
+    statSync(path)
+    root = canonicalPath(path)
   } catch {
     throw new ImportRefused(`Nothing to import at ${path}`)
   }
@@ -253,7 +254,9 @@ function copyFolder(root: string, dest: string, limits: ImportLimits): StagedFil
       link: (r) => {
         let target: string
         try {
-          target = realpathSync(join(root, r))
+          // A link to nothing has no real path (`canonicalPath` would make one up from the parent)
+          statSync(join(root, r))
+          target = canonicalPath(join(root, r))
         } catch {
           t.skip(r, 'link to nothing')
           return

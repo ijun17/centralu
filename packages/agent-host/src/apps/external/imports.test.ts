@@ -474,8 +474,9 @@ describe('what never gets brought in', () => {
     writeFileSync(join(outside, 'id_rsa'), 'PRIVATE KEY')
     const dir = plantSource('linky', 'linky', { 'lib/real.mjs': '// real' })
     symlinkSync(join(outside, 'id_rsa'), join(dir, 'lib', 'key'))
+    // The refusal names the link's real path, spelled as the file system spells it (a Windows runner's temp folder is `RUNNER~1` here and `runneradmin` there)
     expect(await refusal(rt.prepareImport(dir))).toBe(
-      `lib/key is a link to ${join(outside, 'id_rsa')}, outside the folder. Links are not followed; remove it and import again`,
+      `lib/key is a link to ${realpathSync.native(join(outside, 'id_rsa'))}, outside the folder. Links are not followed; remove it and import again`,
     )
     rmSync(join(dir, 'lib', 'key'))
     symlinkSync(outside, join(dir, 'escape-dir'))
