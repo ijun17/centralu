@@ -208,14 +208,16 @@ export type ExternalSessionSummary = {
 }
 
 /**
- * One line of conversation for restoration. Regardless of the tool, only "what the person said" and "what the model
- * said" survive — plus the point where the tool compacted its context, when its record says so (#303). That point is
- * stored as the same marker a live compaction leaves, so a conversation read back from the tool shows where it was
- * folded, just as one watched live does.
+ * One line of conversation for restoration: what the person said, what the model said, and the recorded events the
+ * tool's record holds between them, read by the adapter's live normalizer (#843): its tool calls and their results,
+ * and the points where it compacted its context (#303). Each event is stored as the row the same event leaves live,
+ * so a conversation read back from the tool shows its tool cards and where it was folded, just as one watched live
+ * does. The event's `sessionId` is the adapter's placeholder; the host stores it under the session's own.
  */
+export type HistoryEvent = Extract<NormalizedEvent, { type: 'tool_call' | 'tool_result' | 'compaction' }>
 export type HistoryMessage =
   | { role: 'user' | 'assistant'; text: string; ts?: number }
-  | { role: 'system'; marker: 'compaction'; ts?: number }
+  | { role: 'system'; event: HistoryEvent; ts?: number }
 
 export type DetectResult = { tool: ToolName; installed: boolean; loggedIn: boolean; detail: string }
 

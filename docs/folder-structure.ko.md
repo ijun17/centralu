@@ -124,7 +124,8 @@ centralu/
 │        │                      #   옮기고, 그것이 읽는 부분이 옆에 있다: items, approvals, thread-settings, token-readings,
 │        │                      #   child-tracker, known-notifications. contract.ts는 contract/의 orchestrator, session-apps,
 │        │                      #   process를 다시 내보낸다. 두 도구가 함께 쓰는 것:
-│        │                      #   tool-result, file-changes, images, plan, token-usage, tool-titles, retry-activity, session-kit (#843)
+│        │                      #   tool-result, file-changes, images, plan, token-usage, tool-titles, retry-activity, session-kit,
+│        │                      #   subagent-steps, history-events (#843)
 │        ├─ sessions/           # SessionManager(manager.ts)와 거기서 떼어 낸 부분(#428): child-ownership, delegation-flow(start_agent는 start-agent-flow, 매니저에서 닿는 것은 delegation-host), ask-project-flow, handoff-flow, handoff-record, external-conversations, session-record, tool-queries, app-sessions, app-messages, session-trash, host-cards, card-rest, delegated-cards, interruptions, sleep, turn-answer, linked-reports, orchestrator-seat, restart-policy, worktree-sessions, transcript-view, orchestrator-proposals, queued-requests, routed-cards, handoff-children, child-reports, interruption-watch, launch-records, merge-checks, project-creation, updates-asked, project-consents, ui-preferences, session-app-wiring, session-tools, handoff-notes; 세션 앱(session-apps, app-access, app-agents, app-builder, app-guide); 오케스트레이터 도구의 실행부(orchestrator-tools)와 거기서 떼어 낸 부분(#850): tool-definitions, tool-seats, tool-answers, tool-profiles
 │        ├─ apps/external/      # 외부 앱: 매니페스트, 찾기, 실행, 브로커, capability (apps.ko.md)
 │        ├─ views/              # 앱 뷰: 뷰 호스트, 그 CSP, 프록시 페이지

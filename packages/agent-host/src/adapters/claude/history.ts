@@ -1,6 +1,8 @@
 import type { ExternalSessionSummary, HistoryMessage } from '../contract.js'
 import { finite, trimmed } from '../../json-value.js'
+import { HISTORY_SESSION, historyEvents } from '../history-events.js'
 import { cleanTitle, stripInjectedBlocks } from '../history-text.js'
+import { normalizeMessage } from './normalize.js'
 
 /**
  * Reads past sessions Claude Code has kept.
@@ -126,39 +128,53 @@ export async function readClaudeHistory(
   if (!Array.isArray(rows)) return []
   const out: HistoryMessage[] = []
   for (const r of rows) {
-    const role = r?.type === 'user' ? 'user' : r?.type === 'assistant' ? 'assistant' : null
-    if (!role) continue
-    // Only stripped from user turns — a tag inside the model's own words is something the model actually wrote.
-    const raw = textOf(r.message)
-    if (role === 'user' && COMPACT_SUMMARY.test(raw)) {
-      out.push({ role: 'system', marker: 'compaction' })
-      continue
-    }
-    const text = role === 'user' ? stripInjectedBlocks(raw) : raw
-    if (!text) continue
-    out.push({ role, text })
+    if (r?.type === 'assistant') out.push(...assistantLines(r.message))
+    else if (r?.type === 'user') out.push(...userLines(r.message))
   }
   return out
 }
 
 /**
- * Anthropic message to the text shown in the UI.
- *
- * Tool calls and results are dropped on purpose. The point of loading history is **to bring
- * back the conversation**, not to replay the execution log — pulling the log in as well just
- * lengthens the scroll and buries what was actually said. (Only the tool name is kept, as a
- * single line.)
+ * A model message read back: its words, then its tool calls, as the live normalizer reads the same message when it
+ * arrives whole (#843). Tool calls used to be dropped, leaving only the tool's name as a line of the model's words, so
+ * an imported conversation showed `Bash` where a watched one showed the command and its output. Its thinking, usage
+ * and plan are not part of a conversation read back (`historyEvents`).
  */
-function textOf(message: unknown): string {
+function assistantLines(message: unknown): HistoryMessage[] {
+  const out: HistoryMessage[] = []
+  const events = normalizeMessage({ type: 'assistant', message }, HISTORY_SESSION)
+  for (const e of events) {
+    // A tag inside the model's own words is something the model actually wrote, so nothing is stripped here
+    if (e.type === 'message_delta' && e.text.trim()) out.push({ role: 'assistant', text: e.text.trim() })
+    else out.push(...historyEvents([e]))
+  }
+  return out
+}
+
+/**
+ * A user message read back: the person's words with the blocks the harness injected stripped, or the compaction a
+ * summary row marks, then the results of the tool calls it carries, as the live normalizer reads them (#843).
+ */
+function userLines(message: unknown): HistoryMessage[] {
+  const raw = userText(message)
+  if (COMPACT_SUMMARY.test(raw)) return [{ role: 'system', event: { type: 'compaction', sessionId: HISTORY_SESSION, failed: false } }]
+  const text = stripInjectedBlocks(raw)
+  const out: HistoryMessage[] = text ? [{ role: 'user', text }] : []
+  const content = (message as { content?: unknown } | null)?.content
+  if (Array.isArray(content)) out.push(...historyEvents(normalizeMessage({ type: 'user', message }, HISTORY_SESSION)))
+  return out
+}
+
+/** The text blocks of a user message: what the person typed, before injected blocks are stripped */
+function userText(message: unknown): string {
   if (typeof message === 'string') return message.trim()
   const content = (message as { content?: unknown } | null)?.content
   if (typeof content === 'string') return content.trim()
   if (!Array.isArray(content)) return ''
   const parts: string[] = []
   for (const b of content) {
-    const block = b as { type?: unknown; text?: unknown; name?: unknown }
+    const block = b as { type?: unknown; text?: unknown }
     if (block?.type === 'text' && typeof block.text === 'string') parts.push(block.text)
-    else if (block?.type === 'tool_use' && typeof block.name === 'string') parts.push(`\`${block.name}\``)
   }
   return parts.join('\n\n').trim()
 }

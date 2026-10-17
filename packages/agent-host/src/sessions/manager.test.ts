@@ -24,7 +24,7 @@ import { join, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { AdapterCapabilities, ApprovalDecision, GridPanel, NormalizedEvent, SessionInfo, StoredMessage, ToolName, TrashedSession, Attachment } from '@cc/protocol'
 import { CENTRALU_APPLY, CENTRALU_APPLY_QUESTION, NormalizedEvent as NormalizedEventSchema, sessionLiveDefaults } from '@cc/protocol'
-import type { AgentAdapter, CreateSessionOpts, EventSink, HistoryMessage, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, CreateSessionOpts, EventSink, HistoryEvent, HistoryMessage, OrchestratorTools, SessionHandle } from '../adapters/contract.js'
 import { WORKTREE_RECOVERY_MAX_BYTES, worktreeRecoveryDir } from '../dev-services/worktree-recovery.js'
 import { Store } from '../dev-services/store.js'
 import { plantedRepo } from '../dev-services/planted-repo.test-helpers.js'
@@ -1988,7 +1988,7 @@ describe('catching up on a conversation continued outside', () => {
   const rows = async (call: ReturnType<typeof createRpcHandler>, id: string) =>
     ((await call('messages.load', { sessionId: id, limit: 200 })) as { kind: string; payload: { text?: string; type?: string } }[])
       .map((r) => (r.kind === 'marker' ? `[${r.payload.type}]` : r.payload.text))
-  const compaction = { role: 'system', marker: 'compaction' } as const
+  const compaction = { role: 'system', event: { type: 'compaction', sessionId: '', failed: false } } as const
 
   it('stores a compaction in the tool\'s record as the marker a live compaction leaves (import)', async () => {
     const { a, call } = setup()
@@ -2017,6 +2017,70 @@ describe('catching up on a conversation continued outside', () => {
     await m.resumeSession(s.id)
     expect(await rows(call, s.id)).toEqual([
       'First question', 'First answer', '[compaction]', 'said in the terminal', '[compaction]', 'a terminal answer',
+    ])
+  })
+
+  /*
+   * #843: the tool's record holds a turn's tool calls too, read by the adapter's live normalizer. They are stored as
+   * the rows the same events leave live, and once: a call that ran while the app watched is already ours.
+   */
+  const toolCall = (callId: string, command: string): HistoryEvent => ({ type: 'tool_call', sessionId: '', callId, summary: { tool: 'Bash', title: command, paths: [] }, input: { command } })
+  const toolResult = (callId: string, output: string): HistoryEvent => ({ type: 'tool_result', sessionId: '', callId, ok: true, summary: output, output })
+  const recorded = (e: HistoryEvent) => ({ role: 'system', event: e }) as const
+  const shapes = (rows: StoredMessage[]) =>
+    rows.map((r) => (r.kind === 'text' ? r.payload : { kind: r.kind, payload: { ...(r.payload as object), sessionId: undefined } }))
+
+  it("stores the tool calls in the tool's record as the rows live ones leave (import)", async () => {
+    const { a, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    a.toolHistory = [
+      { role: 'user', text: 'List the files' },
+      recorded(toolCall('tu1', 'ls')),
+      recorded(toolResult('tu1', 'a.txt')),
+      { role: 'assistant', text: 'One file' },
+    ]
+    const imported = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })) as { id: string }
+    const stored = (await call('messages.load', { sessionId: imported.id, limit: 200 })) as StoredMessage[]
+    expect(stored.filter((r) => r.kind !== 'text').map((r) => r.payload)).toEqual([
+      expect.objectContaining({ type: 'tool_call', sessionId: imported.id, callId: 'tu1' }),
+      expect.objectContaining({ type: 'tool_result', sessionId: imported.id, callId: 'tu1' }),
+    ])
+    // The same call made while the app watched leaves the same rows
+    const watched = (await call('agents.createSession', { projectId: p.id, cwd: tmpdir(), tool: 'claude' })) as { id: string }
+    for (const e of [toolCall('tu1', 'ls'), toolResult('tu1', 'a.txt')]) a.last!.emitEvent({ ...e, sessionId: watched.id })
+    const live = (await call('messages.load', { sessionId: watched.id, limit: 200 })) as StoredMessage[]
+    expect(shapes(stored.filter((r) => r.kind !== 'text'))).toEqual(shapes(live.filter((r) => r.kind !== 'text')))
+  })
+
+  it('a tool call seen live is not stored again when catching up, and one made outside is', async () => {
+    const { a, m, call } = setup()
+    const p = (await call('projects.add', { path: tmpdir() })) as { id: string }
+    a.toolHistory = [{ role: 'user', text: 'List the files' }]
+    const s = (await call('agents.createSession', {
+      projectId: p.id, cwd: tmpdir(), tool: 'claude', resumeExternalId: 'ext-1', importHistory: true,
+    })) as { id: string }
+    // While the app watched: the model said something and ran a command, then the process went away
+    a.last!.emitEvent({ type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'Let me look' })
+    a.last!.emitEvent({ ...toolCall('tu1', 'ls'), sessionId: s.id })
+    a.last!.emitEvent({ ...toolResult('tu1', 'a.txt'), sessionId: s.id })
+    await m.disposeAll()
+    // The tool's record has that call too, then work went on in the terminal with a call of its own
+    a.toolHistory.push(
+      { role: 'assistant', text: 'Let me look' },
+      recorded(toolCall('tu1', 'ls')),
+      recorded(toolResult('tu1', 'a.txt')),
+      { role: 'user', text: 'said in the terminal' },
+      recorded(toolCall('tu2', 'pwd')),
+      recorded(toolResult('tu2', '/work')),
+      { role: 'assistant', text: 'a terminal answer' },
+    )
+    await m.resumeSession(s.id)
+    const stored = (await call('messages.load', { sessionId: s.id, limit: 200 })) as StoredMessage[]
+    expect(stored.map((r) => (r.kind === 'text' ? (r.payload as { text: string }).text : `${r.kind}:${(r.payload as { callId: string }).callId}`))).toEqual([
+      'List the files', 'Let me look', 'tool_call:tu1', 'tool_result:tu1',
+      'said in the terminal', 'tool_call:tu2', 'tool_result:tu2', 'a terminal answer',
     ])
   })
 

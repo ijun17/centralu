@@ -1,4 +1,4 @@
-import { oneLineText } from '@cc/protocol'
+import { oneLineText, recordedRowKind } from '@cc/protocol'
 import { remember } from './folder-cache.js'
 import type {
   ExternalSession,
@@ -34,22 +34,28 @@ const SYNC_LIMIT = 600
 const externalSyncedKey = (sessionId: string) => `external_synced:${sessionId}`
 
 /**
- * A line read back from the tool into a stored row. A compaction point becomes the same row a live `compaction` event
- * leaves (`onEvent`: kind marker, the event as its payload), so the screen and the handoff pivot cannot tell them
- * apart (#303).
+ * A line read back from the tool into a stored row. An event (a tool call, its result, a compaction point) becomes the
+ * same row the event leaves live (`persistMessage`: its recorded kind, the event as its payload, under this session's
+ * id), so the screen, the handoff record and its pivot cannot tell them apart (#303, #843).
  */
 function historyRow(sessionId: string, seq: number, h: HistoryMessage, fallbackTs: number): StoredMessage {
   const ts = h.ts ?? fallbackTs
   if (h.role === 'system') {
-    return { sessionId, seq, role: 'system', kind: 'marker', payload: { type: 'compaction', sessionId, failed: false }, ts }
+    const payload = { ...h.event, sessionId }
+    return { sessionId, seq, role: 'system', kind: recordedRowKind(payload) ?? 'marker', payload, ts }
   }
   return { sessionId, seq, role: h.role, kind: 'text', payload: { text: h.text }, ts }
 }
 
-/** A stored marker of a compaction that folded something (a failed one did not) */
-function isCompactionMarker(row: StoredMessage): boolean {
-  const p = row.payload as { type?: string; failed?: boolean } | null
-  return row.kind === 'marker' && p?.type === 'compaction' && !p.failed
+/**
+ * What a stored row and a line read back are the same record of, when it is not words: a compaction that folded
+ * something (a failed one did not), or a tool call or result by its id. Null for anything else.
+ */
+function eventKey(row: StoredMessage): string | null {
+  const p = row.payload as { type?: string; failed?: boolean; callId?: string } | null
+  if (row.kind === 'marker') return p?.type === 'compaction' && !p.failed ? 'compaction' : null
+  if (row.kind === 'tool_call' || row.kind === 'tool_result') return `${row.kind}:${p?.callId ?? ''}`
+  return null
 }
 
 /** Length of the conversation list received from the tool before waking — receiving this many may
@@ -291,17 +297,24 @@ export class ExternalConversations {
     }
 
     /*
-     * A compaction right after that message may already be ours (#303): one that ran while this host was watching
-     * left its marker live, and the tool's record has the same compaction at the same spot. Those are skipped, as
-     * many as our record holds after its last message, so the marker is stored once. One that ran outside the app
-     * is not in our record and is attached like any other line.
+     * The events right after that message may already be ours (#303, #843): a compaction or a tool call that ran while
+     * this host was watching left its row live, and the tool's record has the same event at the same spot. Those are
+     * skipped, each as many times as our record holds it after its last message, so the row is stored once. An event
+     * that ran outside the app is not in our record and is attached like any other line.
      */
-    let known = 0
+    const known = new Map<string, number>()
     for (let i = ours.length - 1; i >= 0 && ours[i]!.kind !== 'text'; i--) {
-      if (isCompactionMarker(ours[i]!)) known++
+      const key = eventKey(ours[i]!)
+      if (key) known.set(key, (known.get(key) ?? 0) + 1)
     }
     let skip = 0
-    while (skip < known && history[start + skip]?.role === 'system') skip++
+    while (history[start + skip]?.role === 'system') {
+      const key = eventKey(historyRow(info.id, 0, history[start + skip]!, 0))
+      const left = key ? (known.get(key) ?? 0) : 0
+      if (!key || left === 0) break
+      known.set(key, left - 1)
+      skip++
+    }
     const fresh = history.slice(start + skip)
     if (fresh.length === 0) {
       mark()
