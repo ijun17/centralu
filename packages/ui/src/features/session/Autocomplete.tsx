@@ -266,13 +266,21 @@ export function useAutocomplete({
   }
 }
 
+/** The id of an option in the list `listId` names, which the composer points at as the active one (#842 item 7) */
+export function suggestionId(listId: string, index: number): string {
+  return `${listId}-${index}`
+}
+
 export function AutocompleteMenu({
+  listId,
   items,
   index,
   loading,
   kind,
   onPick,
 }: {
+  /** The list's id: the composer names it as what it controls */
+  listId: string
   items: Suggestion[]
   index: number
   loading: boolean
@@ -298,11 +306,14 @@ export function AutocompleteMenu({
           {kind === 'command' ? 'Loading skills…' : 'Searching…'}
         </p>
       ) : (
-        <ul ref={listRef} className="max-h-56 overflow-y-auto">
+        <ul ref={listRef} id={listId} role="listbox" aria-label={kind === 'command' ? 'Commands' : 'Suggestions'} className="max-h-56 overflow-y-auto">
           {items.map((item, i) => (
-            <li key={item.value}>
+            <li key={item.value} role="presentation">
               <button
                 type="button"
+                id={suggestionId(listId, i)}
+                role="option"
+                tabIndex={-1}
                 data-idx={i}
                 data-testid={`autocomplete-item-${i}`}
                 aria-selected={i === index}
@@ -323,7 +334,7 @@ export function AutocompleteMenu({
           {/* GUI commands can already be listed while skills are still not yet — "not yet"
           speaks up below the list too */}
           {loading && (
-            <li>
+            <li role="presentation">
               <p
                 className="border-t border-line px-2.5 py-1.5 text-xs text-ink-faint"
                 data-testid="autocomplete-loading"

@@ -1,8 +1,9 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { useDismiss } from './useDismiss.js'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store/store.js'
 import { useFocusReturn } from './focusReturn.js'
+import { useDialogFocus } from './dialogFocus.js'
 
 /**
  * Raises the store's `openLayers` while a single screen-covering layer is floating (#158).
@@ -51,6 +52,9 @@ export function Modal({
   useOpenLayer()
   // Escape only: the scrim below takes the outside press, and a modal stays up when the window loses focus
   useDismiss({ onClose })
+  // A dialog to the keyboard and to a screen reader: focus starts inside and Tab stays there (#842 item 7)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const dialog = useDialogFocus(panelRef)
 
   return createPortal(
     <div
@@ -60,7 +64,9 @@ export function Modal({
       onClick={onClose}
       data-testid={testId}
     >
-      <div onClick={(e) => e.stopPropagation()}>{children}</div>
+      <div ref={panelRef} {...dialog} className="outline-none" onClick={(e) => e.stopPropagation()}>
+        {children}
+      </div>
     </div>,
     document.body,
   )
