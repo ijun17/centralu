@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import Database from 'better-sqlite3'
-import { spawnSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -95,7 +95,7 @@ describe('a vacuum cut off by a kill is still owed', () => {
   const owed = (file: string) =>
     raw(file, (db) => db.prepare(`SELECT 1 FROM app_settings WHERE key = 'vacuum_owed'`).get() !== undefined)
 
-  function openAndDieAtVacuum(file: string, swap: boolean) {
+  async function openAndDieAtVacuum(file: string, swap: boolean): Promise<void> {
     const script = join(dirname(file), 'die-at-vacuum.mts')
     writeFileSync(
       script,
@@ -116,18 +116,21 @@ if (${swap}) s.runDeferred()
 writeSync(1, 'survived\\n')
 `,
     )
-    const r = spawnSync(process.execPath, ['--import', 'tsx', script], {
-      cwd: root,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 60_000,
+    /*
+     * Not spawnSync (#368): starting tsx and a store took most of the test's 15 s on a loaded windows-2022 runner, and
+     * a synchronous wait holds the worker, which answers nothing meanwhile (vitest gives up on its own messages at 60 s).
+     */
+    const stdout = await new Promise<string>((resolve) => {
+      execFile(process.execPath, ['--import', 'tsx', script], { cwd: root, timeout: 60_000 * SLOW }, (_err, out) => resolve(String(out)))
     })
     // Not the signal: on Windows a SIGKILL ends the process with an exit code and no signal
-    expect(String(r.stdout)).toBe('killed at the vacuum\n')
+    expect(stdout).toBe('killed at the vacuum\n')
   }
 
-  it('the next open vacuums', () => {
+  // A Node with tsx started, and a store opened and migrated in it: seconds on a loaded Windows runner
+  it('the next open vacuums', { timeout: 60_000 * SLOW }, async () => {
     const file = storeWithFreePages()
-    openAndDieAtVacuum(file, false)
+    await openAndDieAtVacuum(file, false)
     // v40 committed; its vacuum did not happen
     expect(raw(file, (db) => db.pragma('user_version', { simple: true }))).toBe(40)
     expect(freePages(file)).toBeGreaterThan(0)
@@ -142,9 +145,9 @@ writeSync(1, 'survived\\n')
     expect(said.mock.calls.some(([line]) => String(line).includes('left it owed'))).toBe(true)
   })
 
-  it('in a swap, the steps left for later are run with it, not the open', () => {
+  it('in a swap, the steps left for later are run with it, not the open', { timeout: 60_000 * SLOW }, async () => {
     const file = storeWithFreePages()
-    openAndDieAtVacuum(file, true)
+    await openAndDieAtVacuum(file, true)
     expect(owed(file)).toBe(true)
 
     vi.spyOn(console, 'error').mockImplementation(() => {})
