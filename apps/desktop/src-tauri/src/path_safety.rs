@@ -39,11 +39,11 @@ impl fmt::Display for NativePathError {
 /// Whether the path as written ends in a separator, or in a `.` component.
 fn ends_like_a_folder(path: &Path) -> bool {
     let text = path.as_os_str().to_string_lossy();
-    let separators: &[char] = if cfg!(windows) { &['/', '\\'] } else { &['/'] };
-    if path.parent().is_some() && text.ends_with(separators) {
+    // `is_separator` is this platform's own rule (`\\` too on Windows), so no OS is asked here
+    if path.parent().is_some() && text.ends_with(std::path::is_separator) {
         return true;
     }
-    let last = text.rsplit(separators).next().unwrap_or("");
+    let last = text.rsplit(std::path::is_separator).next().unwrap_or("");
     last == "."
 }
 
@@ -99,7 +99,9 @@ fn check_native_path(path: &Path, final_link_allowed: bool) -> Result<(), Native
 
 #[cfg(test)]
 mod tests {
-    use super::{assert_safe_native_entry, assert_safe_native_path, NativePathError};
+    use super::{assert_safe_native_path, NativePathError};
+    #[cfg(unix)]
+    use super::assert_safe_native_entry;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};

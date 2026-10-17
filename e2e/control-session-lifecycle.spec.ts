@@ -738,7 +738,9 @@ test('Deleting a project: unlocks only by typing the name, and the file checkbox
   await expect(page.getByTestId('delete-project-dialog')).toBeHidden()
   await expect(page.getByTestId('project-alpha')).toHaveCount(0)
   await expect(page.getByTestId('sidebar').getByTestId(/^session-row-/)).toHaveCount(0)
-  expect(await page.evaluate(() => (window as any).__mock.trashed)).toEqual(['.'])
+  // Through the project folder's own door (#838): the file tree's trash never reaches the project folder
+  expect(await page.evaluate(() => (window as any).__mock.trashedProjects)).toHaveLength(1)
+  expect(await page.evaluate(() => (window as any).__mock.trashed)).toEqual([])
 })
 
 /** With the files option off, the folder is left untouched — confirming the default is really the default (through behavior, not just the warning text) */
@@ -752,6 +754,7 @@ test('Deleting a project: leaving the file checkbox off keeps the folder untouch
   await page.getByTestId('delete-project-confirm').click()
 
   await expect(page.getByTestId('project-alpha')).toHaveCount(0)
+  expect(await page.evaluate(() => (window as any).__mock.trashedProjects)).toEqual([])
   expect(await page.evaluate(() => (window as any).__mock.trashed)).toEqual([])
 })
 
