@@ -3,11 +3,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const invoke = vi.fn()
 const handlers = new Map<string, (e: { payload: unknown }) => void>()
 const unlistened: string[] = []
+/** Every listener still registered, in order — `handlers` keeps only the last one per event */
+const listeners: { name: string; cb: (e: { payload: unknown }) => void }[] = []
+const fire = (name: string, payload: unknown) => {
+  for (const l of listeners.filter((x) => x.name === name)) l.cb({ payload })
+}
 vi.mock('@tauri-apps/api/core', () => ({ invoke: (...args: unknown[]) => invoke(...args) }))
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(async (name: string, cb: (e: { payload: unknown }) => void) => {
     handlers.set(name, cb)
-    return () => unlistened.push(name)
+    const entry = { name, cb }
+    listeners.push(entry)
+    return () => {
+      listeners.splice(listeners.indexOf(entry), 1)
+      unlistened.push(name)
+    }
   }),
 }))
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: vi.fn() }))
@@ -25,6 +35,7 @@ beforeEach(() => {
   invoke.mockReset()
   handlers.clear()
   unlistened.length = 0
+  listeners.length = 0
 })
 
 describe('the receiver for a quit request', () => {
@@ -123,5 +134,44 @@ describe('a relaunched window whose automatic swap fails', () => {
         expect(unlistened).toContain('host-build')
       } finally { await platform.dispose() }
     } finally { warn.mockRestore() }
+  })
+})
+
+describe('a host restart during startup (#972 item 1)', () => {
+  it('is followed: a ready for a new port between reading host_info and the web platform subscribing moves the client there', async () => {
+    const urls: string[] = []
+    class FakeSocket {
+      onopen: (() => void) | null = null
+      onmessage: (() => void) | null = null
+      onclose: (() => void) | null = null
+      onerror: (() => void) | null = null
+      constructor(url: string) {
+        urls.push(url)
+      }
+      send() {}
+      close() {}
+    }
+    vi.stubGlobal('WebSocket', FakeSocket)
+    invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'host_info') return { port: 1, token: 't' }
+      if (cmd === 'host_error') return null
+      if (cmd === 'host_build') return { mode: 'direct' }
+      // The supervisor restarts the host while startup is still asking the shell about the window
+      if (cmd === 'window_controls_inset') fire('host-status', { state: 'ready', port: 2, token: 'u' })
+      return null
+    })
+    try {
+      const p = await createTauriPlatform()
+      try {
+        expect(urls[0]).toBe('ws://127.0.0.1:1/')
+        expect(urls.at(-1)).toBe('ws://127.0.0.1:2')
+      } finally {
+        await p.dispose()
+      }
+      // The startup subscription goes with the platform
+      expect(listeners.filter((l) => l.name === 'host-status')).toEqual([])
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

@@ -430,7 +430,55 @@ export function tauriRelaunchPort(): RelaunchPort {
 
 export type TauriPlatform = Platform & { relaunchSwap: RelaunchSwapResult }
 
+/**
+ * Follows the host's address from before the first read of it (#972 item 1).
+ *
+ * The order `waitForHost` keeps, for the whole of startup: the listener is registered first, and only then is the
+ * address read. Startup reads the address and then awaits several more shell calls before the web platform exists; a
+ * `ready` for a new port in that gap (a crash restart, a swap) used to be lost, and the client retried the old
+ * address forever. Here the latest `ready` heard is kept, and handed to the web platform the moment it subscribes,
+ * then every later one; the client ignores an address it already has.
+ */
+async function followEndpoint(): Promise<{
+  onEndpointChange: (cb: (info: HostInfo) => void) => () => void
+  stop: () => void
+}> {
+  let latest: HostInfo | null = null
+  let forward: ((info: HostInfo) => void) | null = null
+  let stopped = false
+  // A listener that cannot be registered costs only the following, as it did before: startup itself goes on
+  const un = await listenHostStatus((p) => {
+    if (stopped || p.state !== 'ready') return
+    latest = { port: p.port, token: p.token }
+    forward?.(latest)
+  }).catch(() => () => {})
+  const stop = () => {
+    if (stopped) return
+    stopped = true
+    forward = null
+    un()
+  }
+  return {
+    onEndpointChange: (cb) => {
+      forward = cb
+      if (latest) cb(latest)
+      return stop
+    },
+    stop,
+  }
+}
+
 export async function createTauriPlatform(): Promise<TauriPlatform> {
+  const endpoint = await followEndpoint()
+  try {
+    return await createOnHost(endpoint.onEndpointChange)
+  } catch (e) {
+    endpoint.stop()
+    throw e
+  }
+}
+
+async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => () => void): Promise<TauriPlatform> {
   await waitForHost()
   const attached = await hostBuild().catch(() => null)
   const relaunchSwap = attached
@@ -466,6 +514,7 @@ export async function createTauriPlatform(): Promise<TauriPlatform> {
 
   // If the supervisor revives the host, the port and token change → this has to switch to the new address.
   // Without this subscription, the app stays stuck at 'disconnected' after the sidecar crashes (measured at L4-2).
+  // It was registered before the address above was read (`followEndpoint`), so a restart during startup is not missed.
   const base = createWebPlatform({
     hostUrl: `ws://127.0.0.1:${port}`,
     token,
@@ -481,10 +530,7 @@ export async function createTauriPlatform(): Promise<TauriPlatform> {
       trash: (path) => invoke<void>('trash_path', { path }).catch(rethrowAsError),
       reveal: (path) => invoke<void>('reveal_path', { path }).catch(rethrowAsError),
     },
-    onEndpointChange: (cb) =>
-      onHostStatus((p) => {
-        if (p.state === 'ready') cb({ port: p.port, token: p.token })
-      }),
+    onEndpointChange,
   })
 
   return {
