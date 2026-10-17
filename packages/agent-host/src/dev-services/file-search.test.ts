@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { heldFileIndexes, invalidateFileIndex, score, searchFiles } from './file-search.js'
+import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 
 /**
  * When someone types `@ses`, what they are usually looking for is `SessionView.tsx`.
@@ -91,10 +92,16 @@ describe('searchFiles — Korean file names', () => {
 })
 
 describe('the file index cache lets go of roots nobody searches any more (#392)', () => {
+  const dirs: string[] = []
+  afterEach(async () => {
+    for (const d of dirs.splice(0)) await removeTree(d)
+  })
+
   it('a stale index is swept when another root is searched', async () => {
     invalidateFileIndex()
-    const a = mkdtempSync(join(tmpdir(), 'cc-fs-a-'))
-    const b = mkdtempSync(join(tmpdir(), 'cc-fs-b-'))
+    const a = tempRoot('cc-fs-a-')
+    const b = tempRoot('cc-fs-b-')
+    dirs.push(a, b)
     writeFileSync(join(a, 'one.ts'), '')
     writeFileSync(join(b, 'two.ts'), '')
     const now = Date.now()

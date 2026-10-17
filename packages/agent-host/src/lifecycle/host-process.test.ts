@@ -6,8 +6,7 @@
  * cannot see, because they are about the order `main.ts` takes its steps in.
  */
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -16,14 +15,23 @@ import { PROTOCOL_VERSION } from '@cc/protocol'
 import { acquireInstanceLock } from '../dev-services/instance-lock.js'
 import { LAUNCH_VARIABLES } from './launch-env.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 
 const ROOT = fileURLToPath(new URL('../../../../', import.meta.url))
 const MAIN = 'packages/agent-host/src/main.ts'
 const posix = process.platform !== 'win32'
 
 const started: ChildProcess[] = []
-afterEach(() => {
-  for (const p of started.splice(0)) if (p.exitCode === null && p.signalCode === null) p.kill('SIGKILL')
+const dirs: string[] = []
+afterEach(async () => {
+  // Each host ends before its folder goes: Windows will not delete a folder a live process still has open
+  for (const p of started.splice(0)) {
+    if (p.exitCode !== null || p.signalCode !== null) continue
+    const exited = new Promise((r) => p.once('exit', r))
+    p.kill('SIGKILL')
+    await exited
+  }
+  for (const d of dirs.splice(0)) await removeTree(d)
 })
 
 /**
@@ -34,7 +42,8 @@ afterEach(() => {
  * so one of them is made to exist (`%APPDATA%\npm`) for the step to have something to say.
  */
 function setup() {
-  const dir = mkdtempSync(join(tmpdir(), 'cc-lifecycle-'))
+  const dir = tempRoot('cc-lifecycle-')
+  dirs.push(dir)
   const shell = join(dir, 'login-shell')
   const tools = join(dir, 'tools')
   writeFileSync(shell, `#!/bin/sh\nenv > "${join(dir, 'probe-env')}"\necho "__CC_PATH__:${tools}"\n`)

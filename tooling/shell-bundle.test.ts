@@ -14,11 +14,11 @@
  * - **The lock.** `packaging/shell/shell.lock` parses, and a download that is not the pinned bytes
  *   is refused.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { removeTree, tempRoot } from '../packages/agent-host/src/temp-dir.test-helpers.js'
 import {
   assetUrl,
   BUNDLE_ID,
@@ -137,7 +137,9 @@ describe("the shell's identity", () => {
 })
 
 describe('packaging/shell/shell.lock', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'cc-shell-lock-'))
+  let dir = ''
+  beforeAll(() => void (dir = tempRoot('cc-shell-lock-')))
+  afterAll(() => removeTree(dir))
   const write = (body: unknown) => {
     const f = join(dir, `lock-${Math.random().toString(16).slice(2)}.json`)
     writeFileSync(f, JSON.stringify(body))

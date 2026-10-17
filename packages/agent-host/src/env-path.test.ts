@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
 import { __resetToolPathCache, ensureToolPath, fallbackDirs, probeLoginShell, whichTool } from './env-path.js'
 import { alive as isAlive } from './process.test-helpers.js'
+import { removeTree, tempRoot } from './temp-dir.test-helpers.js'
 
 /**
  * Regression test for the packaged app not being able to find the CLI.
@@ -106,7 +106,10 @@ describe('CLI search path augmentation', () => {
  */
 // The shells here are sh scripts, which Windows cannot run; that Windows asks none is the last test, by parameter
 describe.skipIf(process.platform === 'win32')('the login-shell probe', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'cc-probe-'))
+  // Made in a hook, not in the describe's body: a skipped describe's body still runs on Windows, and its folder was left there
+  let dir = ''
+  beforeAll(() => void (dir = tempRoot('cc-probe-')))
+  afterAll(() => removeTree(dir))
   function shell(name: string, body: string): string {
     const path = join(dir, name)
     writeFileSync(path, `#!/bin/sh\n${body}\n`)

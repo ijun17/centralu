@@ -3,12 +3,13 @@
  * HO15), against a stand-in process the test sends signals and errors to.
  */
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { REPEAT_AFTER_MS, crashRecorder, guardErrors, holdSignals, watchParent, wireEndings } from './endings.js'
 import type { LeaveMode } from './shutdown.js'
+import { removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 
 function fakeProcess() {
   const emitter = new EventEmitter()
@@ -118,8 +119,14 @@ describe('errors nobody caught (HO10)', () => {
 })
 
 describe('host-errors.log (HO4)', () => {
+  const dirs: string[] = []
+  afterEach(async () => {
+    for (const d of dirs.splice(0)) await removeTree(d)
+  })
+
   it('keeps one previous generation once it passes its size, and the new entry starts the file', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cc-crash-log-'))
+    const dir = tempRoot('cc-crash-log-')
+    dirs.push(dir)
     const path = join(dir, 'host-errors.log')
     writeFileSync(path, 'x'.repeat(2048))
     const record = crashRecorder(path, () => {}, 1024)
