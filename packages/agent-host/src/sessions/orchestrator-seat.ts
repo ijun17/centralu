@@ -127,6 +127,8 @@ export function orchestratorToolsFor(
    * sees nothing: `null === null` must not become "every session without a project".
    */
   const ownProjectId = () => host.meta.get(orchestratorId)?.projectId ?? null
+  /** Where the calling session's context last lost what came before (#974), or null; a hub's view has no caller */
+  const ownCut = () => (orchestratorId && host.meta.has(orchestratorId) ? host.store.lastContextCut(orchestratorId) : null)
   const inScope = (s: SessionInfo) =>
     // Coordinator session (#80, #81): the allow list is its entire view
     scopeIds !== undefined ? scopeIds.includes(s.id)
@@ -261,11 +263,13 @@ export function orchestratorToolsFor(
       // Fetches generously, dedupes overlapping hits, then trims — trimming before dedupe would let `limit`
       // get eaten by duplicates
       const raw = host.store.searchMessages(query, limit * 12)
+      const cut = ownCut()
       const mine = raw.filter((h) => {
+        // Its own words only from before its last compaction (#974): above that the model's context lost them and
+        // our record did not. After it, or with no compaction, they are still in context and finding them is an echo
+        if (h.sessionId === orchestratorId) return cut !== null && h.seq < cut
         const s = host.meta.get(h.sessionId)
-        // Excludes the orchestrator's own words — tracing back from something it said itself would just be
-        // an echo
-        return s && s.id !== orchestratorId && inScope(s)
+        return s && inScope(s)
       })
       const out: RecallHit[] = []
       // Asked at once, while this host's own search runs: each machine is a round trip
@@ -274,7 +278,7 @@ export function orchestratorToolsFor(
         const s = host.meta.get(h.sessionId)!
         out.push({
           sessionId: s.id,
-          session: labelOf(host.store, s),
+          session: s.id === orchestratorId ? `${labelOf(host.store, s)} (this session, before compaction)` : labelOf(host.store, s),
           project: s.projectId ? (byId.get(s.projectId) ?? '(project no longer exists)') : '(none)',
           // Cut from **the surrounding conversation**, not a single delta chunk (a chunk alone says
           // nothing)
@@ -294,13 +298,26 @@ export function orchestratorToolsFor(
     },
 
     readSession: async (sessionId, limit = 40, opts) => {
-      // The scope check follows the same rule as sendToSession — only a session within its own scope
-      if (sessionId === orchestratorId) return { ok: false, error: 'Does not read itself' }
+      /*
+       * Itself only at a recall hit from before its last compaction (#974), and only up to that point: the rest is
+       * still in its context. A plain self-read would just echo it back.
+       */
+      const self = sessionId === orchestratorId
+      const cut = self ? ownCut() : null
+      if (self && (cut === null || opts?.around == null || opts.around >= cut)) {
+        return {
+          ok: false,
+          error:
+            cut === null ? 'Does not read itself: your conversation has not been compacted, so all of it is still in your context.'
+            : 'Reads itself only before its last compaction, from a recall hit: search with recall, then pass that hit\'s seq as around.',
+        }
+      }
       // A linked machine's session is read there, by the machine that holds it (#82 phase 4)
       const reader = linked()
-      if (reader?.machineOf(sessionId)) return reader.read(sessionId, limit, opts)
+      if (!self && reader?.machineOf(sessionId)) return reader.read(sessionId, limit, opts)
+      // The scope check follows the same rule as sendToSession — only a session within its own scope
       const target = host.meta.get(sessionId)
-      if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
+      if (!target || (!self && !inScope(target))) return { ok: false, error: scopeError(sessionId) }
 
       /*
        * If `around` is given, reads near that point — the seq recall gave can just be passed
@@ -313,12 +330,13 @@ export function orchestratorToolsFor(
        * row was a delta, unchanged, to today's merged rows would mean pulling up hundreds of messages.
        */
       const around = opts?.around
-      const rows = around
+      const read = around
         ? [
             ...host.store.loadMessages(sessionId, limit, around + 1),
             ...host.store.loadMessagesFrom(sessionId, around, limit),
           ]
         : host.store.loadMessages(sessionId, limit * 2)
+      const rows = cut === null ? read : read.filter((r) => r.seq < cut)
 
       const lines: string[] = []
       /** The line that contains the seq `around` points at — the window is cut to align with this */

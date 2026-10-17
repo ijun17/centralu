@@ -213,6 +213,25 @@ export class MessageRecords {
   }
 
   /**
+   * The seq of this session's last point where the model lost what came before (#974): a compaction that folded
+   * something (a failed one did not), or a fresh conversation (`conversation_reset`, Claude Code's `/clear`). Null when
+   * there is none. Both adapters store a compaction as the same marker row, live or read back from the tool
+   * (`recordedRowKind`, `historyRow`), so one query covers Claude's `compact_boundary` and Codex's `contextCompaction`.
+   * Everything above this seq is in our record but no longer in the model's context.
+   */
+  lastContextCut(sessionId: string): number | null {
+    const row = this.db
+      .prepare(
+        `SELECT MAX(seq) as seq FROM messages
+         WHERE session_id = ? AND kind = 'marker' AND json_valid(payload) AND (
+           json_extract(payload, '$.type') = 'conversation_reset' OR
+           (json_extract(payload, '$.type') = 'compaction' AND COALESCE(json_extract(payload, '$.failed'), 0) = 0))`,
+      )
+      .get(sessionId) as { seq: number | null }
+    return row.seq
+  }
+
+  /**
    * Updates a row while it is still streaming — **the index is left untouched** (#66).
    *
    * Re-indexing a growing body with trigram on every delta would make the cost grow with the
