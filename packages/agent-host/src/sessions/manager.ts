@@ -16,6 +16,7 @@ import { LaunchRecords, type LaunchRecordsHost } from './launch-records.js'
 import { MergeChecks, type MergeChecksHost } from './merge-checks.js'
 import { ProjectCreation, type ProjectCreationHost } from './project-creation.js'
 import { UpdatesAsked, type UpdatesAskedHost } from './updates-asked.js'
+import { ProjectConsents, type ProjectConsentsHost } from './project-consents.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -32,8 +33,6 @@ import type {
   RebuildCause,
   AppReach,
   BackgroundTask,
-  ProjectConsent,
-  ProjectConsentKind,
   ApprovalDecision,
   Attachment,
   ApprovalScope,
@@ -152,7 +151,7 @@ export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS }
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost
 
 /**
  * Where the marker "conversation up to here belongs to the old tool" is stored.
@@ -255,6 +254,8 @@ export class SessionManager {
   private readonly projectCreation: ProjectCreation
   /** An agent's update_centralu: check, install and apply, behind its preset and the person's card (updates-asked.ts) */
   private readonly updatesAsked: UpdatesAsked
+  /** Whether a session of one project may reach another, and the consents remembered for it (project-consents.ts) */
+  private readonly consents: ProjectConsents
   /** ask_project, here or on a linked machine (ask-project-flow.ts) */
   private readonly askProjectFlow: AskProjectFlow
   /** The conversations a tool keeps on its own side: listing, holders, import and catch-up (external-conversations.ts) */
@@ -358,6 +359,7 @@ export class SessionManager {
     } = {},
   ) {
     this.children = new ChildOwnership(store)
+    this.consents = new ProjectConsents(this.parts())
     this.updatesAsked = new UpdatesAsked(this.parts())
     this.projectCreation = new ProjectCreation(this.parts())
     this.merges = new MergeChecks(this.parts())
@@ -3636,6 +3638,7 @@ export class SessionManager {
         return self.updatesAsked.updateConsents
       },
       withdrawHostAsk: (...a) => self.hostCards.withdrawHostAsk(...a),
+      withdrawReaches: (...a) => self.queue.withdrawReaches(...a),
       get worktreeRoot() {
         return self.worktreeRoot
       },
@@ -3748,79 +3751,19 @@ export class SessionManager {
     }
   }
 
-  /**
-   * Raises a capability question in front of the person (M4 D-4) — **at wherever the chain started.**
-   *
-   *   Started from a session   That session's approval card. The person is looking at that session's
-   *                            agent having called the app (or the inbox calls it out), and while the
-   *                            answer is awaited that session sits in waiting-for-approval — riding the
-   *                            same traffic light, inbox and notification as an adapter's own card.
-   *   Started from a screen    That app's question over its pinned view (`apps.questions`) and a badge
-   *                            on the app's sidebar row. A screen is the app's own code and has no
-   *                            session — the screen the person clicked is where the answer belongs.
-   *
-   * If the session has disappeared (deleted), this falls back to a screen question, standing in the
-   * requesting app's own slot instead. If the signal fires (timed out, canceled), the card or question
-   * is torn down and this ends with null.
-   */
-  /**
-   * Whether a session of one project may reach another (#371) — the one gate for both parts: 'delegate'
-   * (ask_project) and 'apps' (another project's app tools). Same project needs no consent. A remembered "always" for
-   * the pair and kind passes at once; otherwise a card stands in the calling session (the same slot as an approval,
-   * so it waits behind one already up) until the person answers or `signal` fires.
-   *
-   *   allow once   passes this call only
-   *   always       remembered for (caller's project, target, kind) — listed and revoked in Settings
-   *   deny         refused, and not remembered: the next call asks again, like a denied approval
-   *
-   * The refusal is worded for the model that called: what happened and that it should not retry on its own.
-   */
-  async ensureProjectAccess(
-    callerSessionId: string,
-    toProjectId: string,
-    access: ProjectConsentKind,
-    what: { text: string; app?: { appId: string; name: string }; session?: { id: string; name: string } },
-    signal?: AbortSignal,
-  ): Promise<{ ok: true } | { ok: false; error: string }> {
-    const caller = this.meta.get(callerSessionId)
-    if (!caller) return { ok: false, error: 'The calling session is gone' }
-    const fromId = caller.projectId
-    if (!fromId) return { ok: false, error: 'This session belongs to no project, so it cannot reach another project' }
-    if (fromId === toProjectId) return { ok: true }
-    const projects = this.store.listProjects()
-    const from = projects.find((p) => p.id === fromId)
-    const to = projects.find((p) => p.id === toProjectId)
-    if (!from || !to) return { ok: false, error: 'That project is no longer registered' }
-    if (this.store.getProjectConsent(fromId, toProjectId, access)) return { ok: true }
-    const decision = await this.hostCards.askHost(
-      callerSessionId,
-      {
-        kind: 'project_access',
-        access,
-        from: { id: from.id, name: from.name },
-        // Said on the card (#382): the selected session there follows its trust, so the person should know before allowing
-        to: { id: to.id, name: to.name, trusted: to.trusted },
-        text: what.text,
-        ...(what.app ? { app: what.app } : {}),
-        ...(what.session ? { session: what.session } : {}),
-      },
-      signal,
-    )
-    // Either project may have been removed while the card stood: nothing is remembered for a pair that no longer exists
-    const both = this.store.listProjects()
-    if (decision !== null && (!both.some((p) => p.id === fromId) || !both.some((p) => p.id === toProjectId))) {
-      return { ok: false, error: 'That project is no longer registered' }
-    }
-    if (decision === 'always') {
-      this.store.setProjectConsent(fromId, toProjectId, access)
-      this.emit({ type: 'project_consents_changed' })
-      return { ok: true }
-    }
-    if (decision === 'allow') return { ok: true }
-    if (decision === 'deny') {
-      return { ok: false, error: `The person did not allow ${from.name} to reach ${to.name} this way. Do not ask again unless they tell you to.` }
-    }
-    return { ok: false, error: `The question to the person was withdrawn before they answered, so ${to.name} was not reached.` }
+  /** `ProjectConsents.ensureProjectAccess` (project-consents.ts), kept on the manager for its callers */
+  ensureProjectAccess(...a: Parameters<ProjectConsents['ensureProjectAccess']>): ReturnType<ProjectConsents['ensureProjectAccess']> {
+    return this.consents.ensureProjectAccess(...a)
+  }
+
+  /** `ProjectConsents.projectConsents` (project-consents.ts), kept on the manager for its callers */
+  projectConsents(...a: Parameters<ProjectConsents['projectConsents']>): ReturnType<ProjectConsents['projectConsents']> {
+    return this.consents.projectConsents(...a)
+  }
+
+  /** `ProjectConsents.revokeProjectConsent` (project-consents.ts), kept on the manager for its callers */
+  revokeProjectConsent(...a: Parameters<ProjectConsents['revokeProjectConsent']>): ReturnType<ProjectConsents['revokeProjectConsent']> {
+    return this.consents.revokeProjectConsent(...a)
   }
 
   /** The caller's own preset, read at the boundary, never its project's or parent's preset. */
@@ -3828,35 +3771,6 @@ export class SessionManager {
     if (this.meta.get(sessionId)?.permissionPreset !== 'auto') return false
     if (boundary) console.error(`[permissions] auto session ${sessionId}: ${boundary} allowed`)
     return true
-  }
-
-  /** Every remembered cross-project consent, with the projects' names as they are now (#371, Settings) */
-  projectConsents(): ProjectConsent[] {
-    const names = new Map(this.store.listProjects().map((p) => [p.id, p.name]))
-    return this.store.listProjectConsents().map((c) => ({
-      ...c,
-      fromName: names.get(c.fromProjectId) ?? '(project no longer exists)',
-      toName: names.get(c.toProjectId) ?? '(project no longer exists)',
-    }))
-  }
-
-  /**
-   * Revokes one remembered consent (#371) — the next reach asks again. A delegation already running is left to finish;
-   * an ask for the pair still queued is not delivered (`withdrawReaches`)
-   */
-  revokeProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): void {
-    if (!this.store.forgetProjectConsent(fromProjectId, toProjectId, kind)) return
-    this.emit({ type: 'project_consents_changed' })
-    if (kind === 'delegate') {
-      this.queue.withdrawReaches(
-        () => false,
-        (_r, from, to) => from === fromProjectId && to === toProjectId,
-        'The person revoked the consent for the asking project to ask this one.',
-        true,
-      )
-    }
-    // Apps attached under that "always" step back now (#371 part A): the sessions recount, and the app is gone from them
-    if (kind === 'apps') this.appsHub?.rt.sharingChanged()
   }
 
   /** Whether a session may read this path because another project handed it back (#371, `CreateSessionOpts.mayRead`) */

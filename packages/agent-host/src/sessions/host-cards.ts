@@ -139,6 +139,21 @@ export class HostCards {
     else ask.resolve(answer as HostAskAnswer)
   }
 
+  /**
+   * Raises a capability question in front of the person (M4 D-4) — **at wherever the chain started.**
+   *
+   *   Started from a session   That session's approval card. The person is looking at that session's
+   *                            agent having called the app (or the inbox calls it out), and while the
+   *                            answer is awaited that session sits in waiting-for-approval — riding the
+   *                            same traffic light, inbox and notification as an adapter's own card.
+   *   Started from a screen    That app's question over its pinned view (`apps.questions`) and a badge
+   *                            on the app's sidebar row. A screen is the app's own code and has no
+   *                            session — the screen the person clicked is where the answer belongs.
+   *
+   * If the session has disappeared (deleted), this falls back to a screen question, standing in the
+   * requesting app's own slot instead. If the signal fires (timed out, canceled), the card or question
+   * is torn down and this ends with null.
+   */
   askCapability(q: CapabilityQuestion, signal: AbortSignal): Promise<'allow' | 'deny' | null> {
     return new Promise((resolve) => {
       if (signal.aborted) return resolve(null)
