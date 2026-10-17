@@ -47,7 +47,8 @@ describe('temporary folders and fixture repositories (#845)', () => {
 
   /*
    * Windows will not delete a folder a process is still working in. A process the test started that is ending as the
-   * test does (here one told to leave the moment the removal starts) failed a cleanup without retries with EBUSY.
+   * test does (here one told to leave the moment the removal starts) failed a cleanup without retries with EBUSY, or
+   * EPERM on some Node versions (the remote-Node CI job saw EPERM); `rm`'s retries cover both.
    */
   it.runIf(process.platform === 'win32')('removes a folder a process is still leaving', async () => {
     const d = tempRoot('cc-temp-dir-busy-')
@@ -60,7 +61,7 @@ describe('temporary folders and fixture repositories (#845)', () => {
     const exited = new Promise((r) => child.once('exit', r))
     try {
       await new Promise((r) => child.stdout!.once('data', r))
-      expect(() => rmSync(d, { recursive: true, force: true })).toThrow(/EBUSY/)
+      expect(() => rmSync(d, { recursive: true, force: true })).toThrow(/EBUSY|EPERM/)
       child.stdin!.end()
       await removeTree(d)
       expect(existsSync(d)).toBe(false)
