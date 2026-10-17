@@ -1,0 +1,75 @@
+import type { MachineSide, NormalizedEvent } from '@cc/protocol'
+import type { RemoteRuntime } from './install.js'
+import type { RegistryOptions } from './registry.js'
+import type { RemoteClientOptions } from './remote-client.js'
+import type { RemoteSpec, Tunnel } from './tunnel.js'
+
+/** What the hub's links are given (links.ts): the registry, the mirror, the tunnels and the installer */
+
+/** One linked machine as the registry keeps it (store: `linked_machines`) */
+export type MachineRecord = {
+  id: string
+  name: string
+  sshTarget: string
+  /** The remote's shell, and what runs in place of `centralu` there (tunnel.ts) */
+  remote: RemoteSpec
+  /** The machine's number for folding numeric ids (machine-ids.ts). Never reused while the row exists */
+  slot: number
+  addedAt: number
+  /** The version pair the person chose to connect without aligning, if any (versions.ts) */
+  acceptedVersions: string | null
+}
+
+export interface MachineRegistry {
+  list(): MachineRecord[]
+  add(record: Omit<MachineRecord, 'slot'>): MachineRecord
+  remove(id: string): void
+  setAcceptedVersions(id: string, key: string | null): void
+}
+
+/**
+ * What the hub last heard from a machine, for when it cannot ask (mirror.ts): the session and
+ * project headers in the remote's own terms, never a conversation.
+ */
+export interface HeadersMirror {
+  read(machine: string, kind: 'sessions' | 'projects'): unknown[] | null
+  replace(machine: string, kind: 'sessions' | 'projects', list: unknown[]): void
+  upsertSession(machine: string, session: Record<string, unknown>): void
+  patchSession(machine: string, sessionId: string, patch: Record<string, unknown>): void
+  removeSession(machine: string, sessionId: string): void
+  forget(machine: string): void
+}
+
+export type LinkDeps = {
+  hub: MachineSide
+  /** Into the hub's own event log, under the hub's sequence numbers */
+  broadcast: (event: NormalizedEvent) => void
+  /** Into the hub's own terminal lane */
+  terminal: (frame: { terminalId: string; data?: string; exitCode?: number | null }) => void
+  mirror: HeadersMirror
+  registry: MachineRegistry
+  tunnelFor: (record: MachineRecord) => Tunnel
+  log?: (line: string) => void
+  /** For tests: the client's options beyond url and token */
+  client?: Partial<RemoteClientOptions>
+  /** Backoff between attempts while a machine is away; doubles up to the second value */
+  retryMs?: [number, number]
+  /** What `machines.install` sends (install.ts). Without it this hub installs nothing */
+  installer?: LinkInstaller
+  /** For tests: how long an updated host has to answer (update.ts `CHECK_MS`) */
+  checkMs?: number
+  /**
+   * For tests: the ssh binary, config file and home folder `machines.sshHosts` and `machines.probe` use
+   * in place of the person's own (ssh-config.ts, probe.ts)
+   */
+  ssh?: { ssh?: string; configFile?: string; home?: string; env?: NodeJS.ProcessEnv }
+}
+
+export type LinkInstaller = {
+  /** The pinned Node (`remote-runtime.json`) */
+  runtime: () => RemoteRuntime
+  /** `remote-install.mjs`'s text */
+  script: () => string
+  registry?: RegistryOptions
+  nodeDist?: string
+}
