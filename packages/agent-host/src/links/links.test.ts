@@ -846,6 +846,22 @@ describe('machines.update never installs an older release than the remote runs (
     expect(ran).toEqual([])
     expect(hub.links.list()[0]!.operation).toBeNull()
   })
+
+  it('takes a dev build put there from a commit (`<base>.local.N`, #1036) back to its own release: that is no downgrade', async () => {
+    const dev = `${APP_VERSION}.local.3`
+    const remote = await remoteHost(0, new Store(), { version: dev })
+    const ran: string[] = []
+    // The first step answers nothing the installer can read: what matters is that the update got that far
+    const tunnel = Object.assign(new DirectTunnel(() => lineFor(remote.port, { version: dev })), { exec: async (cmd: string) => (ran.push(cmd), { code: 0, stderr: '', stdout: '' }) })
+    const installer = { runtime: () => ({ node: { version: '24.21.0', archives: {} } }), script: () => '// the installer', registry: {} }
+    const hub = await hubHost(() => lineFor(remote.port, { version: dev }), new Store(), true, { tunnelFor: () => tunnel, installer })
+    await eventually(() => status(hub) === 'connected' && hub.links.list()[0]!.versions?.remote.version === dev)
+    // A dev build of the hub's own release does not make the hub the older side
+    expect(hub.links.list()[0]!.versions).toMatchObject({ older: null, compatible: true })
+    const u = await ui(hub.port)
+    await expect(u.call('machines.update', { machineId: 'm1' })).rejects.toThrow(/did not answer the install check/)
+    expect(ran.length).toBe(1)
+  })
 })
 
 describe('machines.update through the link (#82, plan §10.5)', () => {

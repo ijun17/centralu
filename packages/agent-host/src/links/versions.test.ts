@@ -25,6 +25,12 @@ describe('the version check before a link connects (docs/plans/remote-hub.md §4
     expect(mayConnect(compareVersions(side('0.3.0-beta.7.local.2'), side('0.3.0-beta.7'), false))).toBe(true)
   })
 
+  it('compares a remote running a dev build (`pnpm remote-dev`, #1036) as its release too: the hub on that release is not "older"', () => {
+    expect(compareVersions(side('0.3.0-beta.7'), side('0.3.0-beta.7.local.3'), false).older).toBeNull()
+    expect(compareVersions(side('0.3.0-beta.8'), side('0.3.0-beta.7.local.3'), false).older).toBe('remote')
+    expect(compareVersions(side('0.3.0-beta.6'), side('0.3.0-beta.7.local.3'), false).older).toBe('hub')
+  })
+
   it('never connects across protocols, accepted or not', () => {
     const v = compareVersions(side('0.2.0', 2), side('0.1.0', 1), true)
     expect(v).toMatchObject({ compatible: false, accepted: false, older: 'remote' })
