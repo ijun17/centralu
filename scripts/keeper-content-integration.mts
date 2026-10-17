@@ -37,13 +37,12 @@
  */
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { rawPublicKey, throwawayKey, writeContentManifest, type SigningKey } from './content-manifest.mjs'
-import { cleanupOnExit, killFamily, once, printLogTails } from './keeper-test-processes.mjs'
+import { alive, cleanupOnExit, heldChildren, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
 import { buildShellExe, TAURI_DIR } from './shell-bundle.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -66,30 +65,6 @@ function check(cond: unknown, what: string, detail = ''): boolean {
     log(`  FAIL ${what}${detail ? `\n       ${detail}` : ''}`)
   }
   return Boolean(cond)
-}
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-async function waitFor<T>(fn: () => Promise<T> | T, timeoutMs: number, stepMs = 200): Promise<T | undefined> {
-  const end = Date.now() + timeoutMs
-  for (;;) {
-    let v: T | undefined
-    try {
-      v = await fn()
-    } catch {
-      v = undefined
-    }
-    if (v) return v
-    if (Date.now() > end) return undefined
-    await sleep(stepMs)
-  }
-}
-function alive(pid: number | undefined): boolean {
-  if (!pid) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === 'EPERM'
-  }
 }
 const real = (p: string) => {
   try {
@@ -114,40 +89,6 @@ function exeOf(pid: number): string {
 }
 
 type Json = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
-
-/** One request, one answer line, on a fresh connection to a keeper socket */
-function request(sock: string, body: Json, timeoutMs = 8000): Promise<Json> {
-  return new Promise((resolve, reject) => {
-    const c = createConnection(sock)
-    let buf = ''
-    const timer = setTimeout(() => {
-      c.destroy()
-      reject(new Error('timeout'))
-    }, timeoutMs)
-    c.on('connect', () => c.write(`${JSON.stringify(body)}\n`))
-    c.on('data', (d) => {
-      buf += String(d)
-      const lines = buf.split('\n')
-      for (const l of lines.slice(0, -1)) {
-        const v = JSON.parse(l) as Json
-        if (body.op === 'hello' && v.rid === undefined && v.keeperPid) {
-          c.write(`${JSON.stringify({ op: 'list', rid: 1 })}\n`)
-          continue
-        }
-        clearTimeout(timer)
-        c.end()
-        return resolve(v)
-      }
-      buf = lines.at(-1) ?? ''
-    })
-    c.on('error', (e) => {
-      clearTimeout(timer)
-      reject(e)
-    })
-  })
-}
-const status = (sock: string) => request(sock, { op: 'status' }).then((r) => r.view as Json)
-const heldChildren = (data: string) => request(join(data, 'children.sock'), { op: 'hello', protocol: 1 }).then((r) => (r.children ?? []) as Json[])
 
 /** A stand-in for the window: attached until killed, writing every pushed line to a file */
 function attachClient(sock: string, out: string): number {

@@ -28,10 +28,9 @@
  */
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs'
-import { createConnection } from 'node:net'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { cleanupOnExit, killFamily, once, printLogTails } from './keeper-test-processes.mjs'
+import { alive, cleanupOnExit, heldChildren, killFamily, once, printLogTails, request, sleep, status, waitFor } from './keeper-test-processes.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const TARGET = process.env.KEEPER_TARGET_DIR || '/tmp/centralu-keeper-target'
@@ -56,66 +55,6 @@ function check(cond, what, detail = '') {
   }
   return cond
 }
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-async function waitFor(fn, timeoutMs, stepMs = 200) {
-  const end = Date.now() + timeoutMs
-  for (;;) {
-    let v
-    try {
-      v = await fn()
-    } catch {
-      v = undefined
-    }
-    if (v) return v
-    if (Date.now() > end) return undefined
-    await sleep(stepMs)
-  }
-}
-function alive(pid) {
-  if (!pid) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return e.code === 'EPERM'
-  }
-}
-
-/** One request, one answer line, on a fresh connection to a keeper socket */
-function request(sock, body, timeoutMs = 8000) {
-  return new Promise((resolve, reject) => {
-    const c = createConnection(sock)
-    let buf = ''
-    const timer = setTimeout(() => {
-      c.destroy()
-      reject(new Error('timeout'))
-    }, timeoutMs)
-    c.on('connect', () => c.write(`${JSON.stringify(body)}\n`))
-    c.on('data', (d) => {
-      buf += d
-      const lines = buf.split('\n')
-      for (const l of lines.slice(0, -1)) {
-        const v = JSON.parse(l)
-        // The child socket answers hello first; the request after it carries a rid
-        if (body.op === 'hello' && v.rid === undefined && v.keeperPid) {
-          c.write(`${JSON.stringify({ op: 'list', rid: 1 })}\n`)
-          continue
-        }
-        clearTimeout(timer)
-        c.end()
-        return resolve(v)
-      }
-      buf = lines.at(-1)
-    })
-    c.on('error', (e) => {
-      clearTimeout(timer)
-      reject(e)
-    })
-  })
-}
-const status = (sock) => request(sock, { op: 'status' }).then((r) => r.view)
-/** What the keeper holds, from its child socket */
-const heldChildren = (data) => request(join(data, 'children.sock'), { op: 'hello', protocol: 1 }).then((r) => r.children ?? [])
 
 function startKeeper(data) {
   const logFd = openSync(join(data, 'keeper.log'), 'a')
