@@ -124,3 +124,47 @@ test('The search field sits vertically centered inside the top bar', async ({ pa
   const bottom = box.y + box.height - (field.y + field.height)
   expect(Math.abs(top - bottom)).toBeLessThanOrEqual(1.5)
 })
+
+/* #842 item 11: what starts a drag, what ends one, and the keyboard */
+test('a right-click on a resize handle does not start a drag that follows the pointer', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'task')
+  const sidebar = page.getByTestId('sidebar')
+  const before = (await sidebar.boundingBox())!.width
+  const hb = (await page.getByTestId('sidebar-resize').boundingBox())!
+  await page.mouse.move(hb.x + 1, hb.y + 200)
+  await page.mouse.down({ button: 'right' })
+  // The context menu takes the release; the pointer then moves with no button held
+  await page.mouse.move(hb.x + 120, hb.y + 200, { steps: 8 })
+  expect((await sidebar.boundingBox())!.width).toBe(before)
+  await page.mouse.up({ button: 'right' })
+})
+
+test('closing the evidence panel in the middle of a drag gives its width animation back', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'task')
+  const panel = page.getByTestId('evidence-panel')
+  await expect(panel).toHaveClass(/transition-\[width\]/)
+  const pb = (await page.getByTestId('evidence-resize').boundingBox())!
+  await page.mouse.move(pb.x + 1, pb.y + 200)
+  await page.mouse.down()
+  await page.mouse.move(pb.x - 40, pb.y + 200, { steps: 4 })
+  await expect(panel).not.toHaveClass(/transition-\[width\]/)
+  // The panel closes under the handle (⌘B), and the release never reaches it
+  await page.evaluate(() => (window as any).__store.getState().togglePanel())
+  await page.mouse.up()
+  await expect(page.getByTestId('evidence-rail-shell')).toHaveClass(/transition-\[width\]/)
+})
+
+test('the keyboard resizes the sidebar from its handle', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await newSession(page, 'alpha', 'task')
+  const sidebar = page.getByTestId('sidebar')
+  const before = (await sidebar.boundingBox())!.width
+  await page.getByTestId('sidebar-resize').focus()
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(async () => Math.round((await sidebar.boundingBox())!.width)).toBe(Math.round(before) + 16)
+  await page.keyboard.press('ArrowLeft')
+  await expect.poll(async () => Math.round((await sidebar.boundingBox())!.width)).toBe(Math.round(before))
+  await expect(page.getByTestId('sidebar-resize')).toHaveAttribute('aria-valuenow', String(Math.round(before)))
+})
