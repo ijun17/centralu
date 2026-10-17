@@ -272,15 +272,17 @@ describe('an idle app stops', () => {
 describe('the shutdown rule (S-5)', () => {
   it('closing stdin and fd 3 together lets even an app holding fd 3 open end on its own within the grace period', async () => {
     plant('holder', 'hold-fd3')
-    make({ graceMs: 3_000 })
+    const graceMs = 4_000 * SLOW
+    make({ graceMs })
     await rt.tools(ref('holder'))
     const pid = starts('holder')[0]!.pid
 
     const t0 = Date.now()
     await rt.restart(ref('holder'))
     expect(alive(pid)).toBe(false)
-    // Not the result of using up the full grace period (3s) and killing the tree — it ended on its own
-    expect(Date.now() - t0).toBeLessThan(1_500)
+    // Not the result of using up the full grace period and killing the tree — it ended on its own. Bounded by the grace
+    // itself: half of a 3 s grace left a loaded Windows runner too little room for a stop that does end on its own (#845)
+    expect(Date.now() - t0).toBeLessThan(graceMs)
     expect(hostLog('holder')).not.toContain('did not exit within')
   })
 
@@ -314,7 +316,8 @@ describe('the shutdown rule (S-5)', () => {
   // exist. What it guards, that no orphan is left behind, is the Windows test below (#14).
   it.skipIf(process.platform === 'win32')('a descendant that ignores SIGTERM, left by an app that ended on its own, is collected with SIGKILL after the grace period — no orphan is left behind', async () => {
     plant('parent', 'stubborn-grandchild')
-    make()
+    // Long enough that the check right after the first blow is not raced by the second on a loaded machine
+    make({ graceMs: 3_000 * SLOW })
     await rt.tools(ref('parent'))
     const pid = starts('parent')[0]!.pid
     // Recorded only after the grandchild attaches its own signal handler — signalling it earlier would not test what this test is about (a descendant that holds on)
@@ -323,14 +326,16 @@ describe('the shutdown rule (S-5)', () => {
       await rt.restart(ref('parent'))
       expect(alive(pid)).toBe(false)
       expect(hostLog('parent')).not.toContain('did not exit within')
-      // The first blow (SIGTERM) was held off — proof that this test is watching the second blow
-      await new Promise((r) => setTimeout(r, 500))
+      // The first blow (SIGTERM) came and was held off — proof that this test is watching the second blow. The fixed
+      // sleep this replaces proved neither on a loaded machine: it could end before the SIGTERM was sent, or after the
+      // SIGKILL (#845)
+      await until(() => records('parent').some((r) => r.t === 'sigterm-held' && r.pid === grandchild), (x) => x, 3_000)
       expect(alive(grandchild)).toBe(true)
       await until(() => alive(grandchild), (a) => a === false, 6_000)
     } finally {
       if (alive(grandchild)) process.kill(grandchild, 'SIGKILL')
     }
-    // The test's own cap must exceed the wait (6s) for `finally` to run — a shorter one would leave the grandchild orphaned on a failing day
+    // The test's own cap must exceed the waits (3 s and 6 s) for `finally` to run — a shorter one would leave the grandchild orphaned on a failing day
   }, 15_000 * SLOW)
 
   /*

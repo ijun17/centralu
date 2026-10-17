@@ -5,6 +5,7 @@ import { ExternalApps, resultText, type AppRef, type RuntimeTiming } from './run
 import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { until } from './test-helpers.js'
 import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
+import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /**
  * Reflecting changes (M4 C-4) — when the app folder changes, this restarts once, **when the building
@@ -171,21 +172,30 @@ describe('restarts when the building session\'s turn ends', () => {
 })
 
 describe('restarts after going quiet when there is no building session', () => {
+  /*
+   * Judged by when the reload happened, from its own log line, rather than by asking the app at a moment chosen with
+   * sleeps: that check had 150 ms to spare on each side (two 250 ms sleeps against 400 ms of quiet), and a loaded
+   * machine either reloaded before the second change or had not yet answered by the time the quiet ran out (#845).
+   */
   it('waits for things to go quiet after the last change — a continuing change resets the count', async () => {
     plant()
-    make({ builder: false })
+    const quietMs = 1_000 * SLOW
+    make({ builder: false, timing: { reloadQuietMs: quietMs } })
     await rt.tools(ref)
     const before = await pid()
     addTool('one')
     rt.refresh()
-    await sleep(250)
+    await sleep(300)
     addTool('two')
-    rt.refresh() // resets the count — the 400ms starts from here
-    await sleep(250)
-    expect(await pid()).toBe(before) // 500ms passed since the first change, but only 250ms since the last
+    const last = Date.now()
+    rt.refresh() // resets the count — the quiet starts from here
     await until(known, (names) => names.includes('one') && names.includes('two'))
     expect(await pid()).not.toBe(before)
     expect(reloads()).toBe(1)
+    const reloadedAt = Date.parse(/^(\S+) \[centralu\] reloading: /m.exec(readFileSync(join(dataRoot, 'app-logs', 'p1', `${ID}.log`), 'utf8'))![1]!)
+    // Counted from the first change, it would have come 300 ms sooner. The few ms off are a timer that fires early and
+    // the log's millisecond clock
+    expect(reloadedAt - last).toBeGreaterThanOrEqual(quietMs - 5)
   })
 
   it('follows the same path when the building session is idle (edited from an editor) — waits for turn end if mid-turn', async () => {

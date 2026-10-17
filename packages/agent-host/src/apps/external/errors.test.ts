@@ -165,9 +165,9 @@ describe('the bundle sent to the building session (C-6)', () => {
     // right after the failure — sent 150ms before stderr is re-captured
     expect(r.markErrorSent(ref('thrower'), at)).toMatchObject({ kind: 'tool', at })
     expect(r.markErrorSent(ref('thrower'), at)).toBe('sent')
-    await new Promise((res) => setTimeout(res, 300))
+    // Waits for the re-capture itself: a fixed 300 ms could end before the app's late line reached the host (#845)
+    await until(() => r.errors(ref('thrower')).latest!.stderr.join('\n'), (t) => t.includes('written after the reply'))
     expect(r.errors(ref('thrower')).latest).toMatchObject({ at, sentAt: expect.any(Number) })
-    expect(r.errors(ref('thrower')).latest!.stderr.join('\n')).toContain('written after the reply')
     r.unmarkErrorSent(ref('thrower'), at)
     expect(r.errors(ref('thrower')).latest?.sentAt).toBeNull()
     expect(r.markErrorSent(ref('thrower'), at + 1)).toBeNull()

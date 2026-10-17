@@ -26,7 +26,7 @@ let changed: AppRef[] = []
 let causes: (AppCaller | null)[] = []
 let rt: ExternalApps
 
-type Rec = { t: string; pid: number; runId?: string | null; mode?: string; text?: string }
+type Rec = { t: string; pid: number; runId?: string | null; mode?: string; text?: string; method?: string }
 const records = (id: string): Rec[] => {
   const f = join(appLogs, `${id}.jsonl`)
   if (!existsSync(f)) return []
@@ -199,8 +199,8 @@ describe('cancellation', () => {
     const parent = rt.call(ref('notes'), 'slow', {}, SESSION, { signal: parentAc.signal })
     const parentId = await openRunOf('notes')
     const child = rt.call(ref('other'), 'slow', {}, { kind: 'app', parentRunId: parentId })
-    await until(() => records('other').some((r) => r.t === 'start'), (x) => x)
-    await new Promise((r) => setTimeout(r, 200))
+    // The child call has reached the other app, rather than a fixed 200 ms after it started (#845)
+    await until(() => records('other').some((r) => r.t === 'method' && r.method === 'tools/call'), (x) => x)
     parentAc.abort()
     expect((await parent).status).toBe('cancelled')
     expect((await child).status).toBe('cancelled')
