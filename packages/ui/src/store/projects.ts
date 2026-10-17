@@ -1,7 +1,7 @@
 import type { ProjectInfo } from '@cc/protocol'
 import type { AppState, StoreGet, StoreSet } from './state.js'
 import { forgetSessions } from './sessionList.js'
-import { omitKey } from './patch.js'
+import { inOrder, omitKey } from './patch.js'
 
 /**
  * Projects in the store: the list and its reads, which leave alone a project this window is writing
@@ -370,7 +370,7 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
     await writingProject(projectId, () => void get().refreshProjects(), async () => {
       // Draw it first. This is a list being edited by hand, and a row that appears only after
       // a round trip reads as a click that missed.
-      set((s) => ({ projects: { ...s.projects, [projectId]: { ...before, commands } } }))
+      set((s) => ({ projects: { ...s.projects, [projectId]: { ...(s.projects[projectId] ?? before), commands } } }))
       try {
         const saved = await platform.projects.setCommands(projectId, commands)
         set((s) => {
@@ -384,10 +384,14 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
          * next launch is the worse half of this: the menu would then say "nothing saved yet",
          * which reads as never having added it rather than as having lost it.
          */
-        set((s) => ({
-          projects: { ...s.projects, [projectId]: before },
-          toast: `Could not save commands: ${(e as Error).message}`,
-        }))
+        set((s) => {
+          // Only the list goes back (#842 item 3): a rename made meanwhile stays, and a project removed meanwhile is not revived
+          const now = s.projects[projectId]
+          return {
+            ...(now ? { projects: { ...s.projects, [projectId]: { ...now, commands: before.commands } } } : {}),
+            toast: `Could not save commands: ${(e as Error).message}`,
+          }
+        })
       }
     })
   },
@@ -448,7 +452,8 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
       const fresh = await platform.projects.reorder(orderedIds)
       set({ projects: Object.fromEntries(fresh.map((p) => [p.id, p])) })
     } catch (e) {
-      set({ projects: before, toast: `Could not save order: ${(e as Error).message}` })
+      // The projects as they are now, in the order from before the drag (#842 item 3): one deleted meanwhile stays deleted
+      set((s) => ({ projects: inOrder(s.projects, Object.keys(before)), toast: `Could not save order: ${(e as Error).message}` }))
     }
   },
 })
