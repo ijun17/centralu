@@ -169,10 +169,28 @@ describe.skipIf(keeperless)('an agent process the keeper holds', () => {
 
   it('reports an exit when the keeper itself goes away, since the pipes went with it', async () => {
     const p = KeeperAgentProcess.spawn(children, echo, tag)
-    await until(() => p.childId !== null)
+    /*
+     * Attached first: an echo has come back (#368). Waiting for the spawn's answer alone left the attach under way
+     * on a loaded runner, and a keeper gone mid-attach is the next test's case, which ends in 'error', so this one
+     * waited for an 'exit' that never came and timed out.
+     */
+    p.stdin.write('{"attached":1}\n')
+    await readUntil(p, '{"attached":1}')
     const exited = new Promise<[number | null, string | null]>((r) => p.once('exit', (c, s) => r([c, s])))
     await keeper.close()
     expect(await exited).toEqual([null, 'SIGHUP'])
+  })
+
+  it('fails with an error when the keeper goes away while the streams attach', async () => {
+    // The keeper answers the spawn and holds both attaches: the keeper goes in the middle of them, every time
+    keeper.holdAttach = true
+    const p = KeeperAgentProcess.spawn(children, echo, tag)
+    await until(() => keeper.heldAttaches.length === 2)
+    const failed = new Promise<Error>((r) => p.once('error', r))
+    await keeper.close()
+    // No attach is a failure (held-child.ts): 'error', whether or not the lost connection also reported an exit
+    expect((await failed).message).not.toBe('')
+    expect(p.childId).not.toBeNull()
   })
 })
 
