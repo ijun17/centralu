@@ -1,6 +1,6 @@
-import { launchesSubagent, type ApprovalDetail, type ToolSummary } from '@cc/protocol'
+import { launchesSubagent, mcpNameParts, type ApprovalDetail, type ToolSummary } from '@cc/protocol'
 import { diffLines, fileEditDetail, type FileChange } from '../file-changes.js'
-import { centraluRunCommand, isCentraluTool } from '../tool-titles.js'
+import { centraluMark, centraluRunCommand, isCentraluTool } from '../tool-titles.js'
 import { str, type Json } from './json.js'
 
 const FILE_EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
@@ -39,7 +39,10 @@ export function toolSummary(name: string, input: Json): ToolSummary {
    * which (a dogfooding session: all three showed the same line).
    */
   else if (launchesSubagent(name)) title = str(input.description, name)
-  return { tool: name, title, paths }
+  // Centralu's own servers (#730): marked, and titled by what the call does
+  const parts = mcpNameParts(name)
+  const mark = parts ? centraluMark(parts.server, parts.tool, input) : null
+  return { tool: name, title: mark?.title ?? title, paths, ...(mark ? { centralu: mark.centralu } : {}) }
 }
 
 /**

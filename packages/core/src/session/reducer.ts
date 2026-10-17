@@ -1,4 +1,4 @@
-import { applyBackgroundTasks } from '@cc/protocol'
+import { applyBackgroundTasks, toolCallLine } from '@cc/protocol'
 import type {
   BackgroundTask,
   Interruption,
@@ -222,7 +222,7 @@ export function applyEvent(s: SessionSummary, event: NormalizedEvent, now: numbe
     case 'message_delta':
       return { ...next, preview: truncate((s.state === 'working' ? s.preview : '') + event.text) }
     case 'tool_call':
-      return { ...next, preview: truncate(event.summary.title) }
+      return { ...next, preview: truncate(toolCallLine(event.summary)) }
     case 'question_request':
       // The same id arriving again replaces its entry; otherwise it is added at the end (never overwritten)
       return {

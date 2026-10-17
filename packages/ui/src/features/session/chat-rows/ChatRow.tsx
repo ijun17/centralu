@@ -1,5 +1,5 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { launchesSubagent } from '@cc/protocol'
+import { centraluCallOf, launchesSubagent } from '@cc/protocol'
 import { messagesToChat, useStore, type ChatItem } from '../../../store/store.js'
 import { ChevronIcon } from '../../../components/icons.jsx'
 import { ZoomableImage } from '../ZoomableImage.jsx'
@@ -9,6 +9,7 @@ import { InlineViewSlot } from '../InlineView.jsx'
 import { NoticeMark } from '../NoticeMark.jsx'
 import { UserAttachment } from './attachments.jsx'
 import { AskProjectRow, WorktreeProposalRow } from './delegation.jsx'
+import { CentraluCallHeader } from './CentraluCall.jsx'
 
 /*
  * One row of the conversation (#428): which card a chat item is drawn as, and the cards that
@@ -280,6 +281,8 @@ export function ToolCard({
   projectId: string | null
 }) {
   const [open, setOpen] = useState(false)
+  // A call to Centralu's own tools (#730): its own title row and a stronger edge; the rest is this card's
+  const call = useMemo(() => centraluCallOf(item), [item])
   // The files the title names that the viewer can open are links (the audit of 2026-10, item 6)
   const pieces = useMemo(() => titlePieces(item.title, item.paths, projectRoot), [item.title, item.paths, projectRoot])
   const linked = pieces.some((p) => p.ref)
@@ -319,8 +322,18 @@ export function ToolCard({
       : []
 
   return (
-    <div className="rounded-md border border-line bg-surface-raised/60" data-testid="tool-card">
-      {linked ? (
+    /*
+      A Centralu call's card (#730) keeps the card's shape and adds a left edge in the strong hairline: emphasis by
+      shape and weight, never the signal's white, which is kept for what waits on the person.
+    */
+    <div
+      className={`rounded-md border border-line bg-surface-raised/60 ${call ? 'border-l-2 border-l-line-strong' : ''}`}
+      data-testid="tool-card"
+      data-centralu-call={call ? (call.app ? 'app' : 'centralu') : undefined}
+    >
+      {call ? (
+        <CentraluCallHeader item={item} call={call} sessionId={sessionId} open={open} onToggle={() => setOpen((o) => !o)} />
+      ) : linked ? (
         /*
          * A title with a file the viewer can open (the audit of 2026-10, item 6). A link cannot sit inside the
          * toggle button (a button holds no button), so the toggle is the chevron and the tool's name, the

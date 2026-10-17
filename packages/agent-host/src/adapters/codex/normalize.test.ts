@@ -513,11 +513,15 @@ describe('state and gauges', () => {
    */
   it('an MCP tool call shows the server and tool name', () => {
     const out = n('item/started', {
-      item: { type: 'mcpToolCall', id: 'm1', server: 'centralu', tool: 'list_sessions', status: 'inProgress' },
+      item: { type: 'mcpToolCall', id: 'm1', server: 'browser', tool: 'list_tabs', status: 'inProgress' },
     })
     expect(out[0]).toMatchObject({
       type: 'tool_call',
-      summary: { tool: 'list_sessions', title: 'centralu: list_sessions' },
+      summary: { tool: 'list_tabs', title: 'browser: list_tabs' },
+    })
+    // Centralu's own say what they did instead, with the mark the card draws them by (#730)
+    expect(n('item/started', { item: { type: 'mcpToolCall', id: 'm2', server: 'centralu', tool: 'list_sessions', status: 'inProgress' } })[0]).toMatchObject({
+      summary: { tool: 'list_sessions', title: 'Listed sessions', centralu: { tool: 'list_sessions', label: 'Listed sessions' } },
     })
   })
 
