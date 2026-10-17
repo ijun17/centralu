@@ -6,7 +6,11 @@ import { expect, type Locator, type Page } from '@playwright/test'
  */
 
 /** Helper that drives the mock inside the browser (window.__mock) */
-export async function setup(page: Page, opts: { projects?: string[] } = {}) {
+/**
+ * `trusted` trusts every project it registers, as a person does before a worktree session: the host (and the mock,
+ * #999) refuses a worktree in an untrusted project, since checking out runs the repository's hooks and filters (#407).
+ */
+export async function setup(page: Page, opts: { projects?: string[]; trusted?: boolean } = {}) {
   await page.goto('/?mock=1')
   // On first run the intro screen comes first (#63) — pick one tool card for the orchestrator to run
   await expect(page.getByTestId('intro')).toBeVisible()
@@ -36,6 +40,12 @@ export async function setup(page: Page, opts: { projects?: string[] } = {}) {
       await page.getByTestId('add-project').click()
     }
     await expect(page.getByTestId(`project-${path.split('/').pop()}`)).toBeVisible()
+  }
+  if (opts.trusted) {
+    await page.evaluate(async () => {
+      const m = (window as any).__mock
+      for (const p of m.projectsList) await m.projects.setTrusted(p.id, true)
+    })
   }
 }
 

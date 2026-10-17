@@ -1,5 +1,6 @@
 import type { RelaunchCheck, RelaunchPort } from '../ports/index.js'
 import type { UpdatesMock } from './updates.js'
+import { deliver } from '../deliver.js'
 
 /** What the desktop app's keeper offers: background mode (#280), leftover processes, and "Apply now" (#352) */
 export class KeeperMock {
@@ -67,7 +68,7 @@ export class KeeperMock {
   /** Scenario helper: what the keeper's activity report says (a session working, a terminal…) */
   setHostBusy(busy: boolean | null): void {
     this.hostBusy = busy
-    for (const cb of this.busyWatchers) cb(busy)
+    deliver(this.busyWatchers, busy)
   }
 
   constructor(

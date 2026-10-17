@@ -57,6 +57,16 @@ test('New folder: another location is a full path, typed or chosen with the pick
   expect(await page.evaluate(() => (window as any).__mock.createProjectCalls)).toEqual([{ name: 'site', parent: '/Users/you/code' }])
 })
 
+test('New folder: a picker the shell refuses says why in the form (#972)', async ({ page }) => {
+  await start(page)
+  await page.getByTestId('create-project').click()
+  const dialog = page.getByTestId('create-project-dialog')
+  await dialog.getByTestId('create-project-change-parent').click()
+  await page.evaluate(() => ((window as any).__mock.pickFails = 'dialog.open not allowed'))
+  await dialog.getByTestId('create-project-pick-parent').click()
+  await expect(dialog.getByTestId('create-project-error')).toHaveText('dialog.open not allowed')
+})
+
 /**
  * The location comes from the host a moment after the dialog opens (the preview waits 150 ms for typing to pause).
  * Change used to follow that text, so it jumped when the text arrived: a click on it as the dialog opened went down

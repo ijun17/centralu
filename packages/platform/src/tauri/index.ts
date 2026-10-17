@@ -1,4 +1,4 @@
-import { frameDragEndInPage } from '../engine.js'
+import { ANY_FILE_MANAGER, MAC_SHORTCUT_KEYS, badgeCount } from '../capabilities.js'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
@@ -8,6 +8,7 @@ import type { AlertKind, Platform, RelaunchCheck, RelaunchPort, ShortcutKeys, Sy
 import type { HostBuild } from '@cc/protocol'
 import { createWebPlatform } from '../web/index.js'
 import { finishRelaunchSwap, type RelaunchSwapResult } from './relaunch-swap.js'
+import { asError, rethrowAsError, toError } from './to-error.js'
 import type { ShellStart, SwapView } from './switch-plan.js'
 
 export {
@@ -129,7 +130,12 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
  * false if it was already running (an answer will follow shortly).
  */
 export async function restartHost(): Promise<boolean> {
-  return invoke<boolean>('restart_host')
+  return invoke<boolean>('restart_host').catch(rethrowAsError)
+}
+
+/** Quits the app (`quit_app`), rejecting with an Error that names the shell's reason */
+export async function quitApp(): Promise<void> {
+  await invoke('quit_app').catch(rethrowAsError)
 }
 
 /**
@@ -150,7 +156,7 @@ export function listenForQuit(): (ask: (() => void) | null) => void {
   let ask: (() => void) | null = null
   void listen('quit-requested', () => {
     if (ask) ask()
-    else void invoke('quit_app')
+    else void quitApp().catch((e: Error) => console.error('Could not quit:', e.message))
   })
   return (next) => {
     ask = next
@@ -211,7 +217,7 @@ export type ShellHostBuild = {
 }
 
 export async function hostBuild(): Promise<ShellHostBuild> {
-  return invoke<ShellHostBuild>('host_build')
+  return invoke<ShellHostBuild>('host_build').catch(rethrowAsError)
 }
 
 /**
@@ -219,7 +225,11 @@ export async function hostBuild(): Promise<ShellHostBuild> {
  * @returns a promise of the unsubscribe, settled once the listener is registered
  */
 function listenHostBuild(cb: (b: ShellHostBuild) => void): Promise<() => void> {
-  return listen<ShellHostBuild>('host-build', (e) => cb(e.payload))
+  // Read as `listenHostStatus` reads its report (#972 item 7): anything that is not an object with a mode is dropped
+  return listen<unknown>('host-build', (e) => {
+    const p = e.payload
+    if (typeof p === 'object' && p !== null && typeof (p as { mode?: unknown }).mode === 'string') cb(p as ShellHostBuild)
+  })
 }
 
 /**
@@ -295,14 +305,14 @@ export class TauriSystemPort implements SystemPort {
    */
   async notify(title: string, body: string): Promise<void> {
     if (this.granted === null) {
-      this.granted = (await isPermissionGranted()) || (await requestPermission()) === 'granted'
+      this.granted = await asError(async () => (await isPermissionGranted()) || (await requestPermission()) === 'granted')
     }
     if (!this.granted) {
       if (this.warned) return
       this.warned = true
       throw new Error('Notifications are turned off — enable them for Centralu in System Settings')
     }
-    sendNotification({ title, body })
+    await asError(() => sendNotification({ title, body }))
   }
 
   /**
@@ -320,11 +330,11 @@ export class TauriSystemPort implements SystemPort {
    * impossible to find out.
    */
   async alert(kind: AlertKind, sound: boolean): Promise<void> {
-    await invoke('alert', { kind, sound })
+    await invoke('alert', { kind, sound }).catch(rethrowAsError)
   }
 
   async setBadge(count: number): Promise<void> {
-    await invoke('set_badge', { count: Math.max(0, Math.trunc(count)) })
+    await invoke('set_badge', { count: badgeCount(count) }).catch(rethrowAsError)
   }
 
   async openInIde(path: string, line?: number): Promise<void> {
@@ -348,12 +358,14 @@ export class TauriSystemPort implements SystemPort {
 
   /** One file (M4 E-3 — the .zip to import). This is the dialog plugin's `open`, so it uses the `dialog:default` permission already granted, as is */
   async pickFile(opts: { title: string; extensions: string[] }): Promise<string | null> {
-    const picked = await openDialog({ directory: false, multiple: false, title: opts.title, filters: [{ name: opts.title, extensions: opts.extensions }] })
+    const picked = await asError(() =>
+      openDialog({ directory: false, multiple: false, title: opts.title, filters: [{ name: opts.title, extensions: opts.extensions }] }),
+    )
     return typeof picked === 'string' ? picked : null
   }
 
   async startWindowDrag(): Promise<void> {
-    await getCurrentWindow().startDragging()
+    await asError(() => getCurrentWindow().startDragging())
   }
 
   /**
@@ -363,10 +375,12 @@ export class TauriSystemPort implements SystemPort {
    * CSS colour (`rgb(15, 15, 15)`); Tauri wants channels, so anything else is left alone.
    */
   async setWindowAppearance(scheme: 'dark' | 'light' | null, background: string): Promise<void> {
-    const win = getCurrentWindow()
-    await win.setTheme(scheme)
-    const rgb = /^rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)/.exec(background)
-    if (rgb) await win.setBackgroundColor([Number(rgb[1]), Number(rgb[2]), Number(rgb[3])])
+    await asError(async () => {
+      const win = getCurrentWindow()
+      await win.setTheme(scheme)
+      const rgb = /^rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)/.exec(background)
+      if (rgb) await win.setBackgroundColor([Number(rgb[1]), Number(rgb[2]), Number(rgb[3])])
+    })
   }
 
   /**
@@ -375,6 +389,12 @@ export class TauriSystemPort implements SystemPort {
    * with `take_app_links` (retrieving it clears it from the shell). Drains once as soon as
    * subscribed: if the app was launched by a link, a link that arrived before the webview came
    * up is already sitting in the queue.
+   *
+   * Taking clears the shell's queue, so a link taken for a listener that unsubscribed while the
+   * call was out is not dropped (#972 item 6): it goes to a listener still there, or is kept for
+   * the next one, as the shell would have. Kept for the window, not the port (#1010 review): a
+   * platform made again makes a new port, and a listener that joined while the call was out has
+   * already looked at what was kept.
    */
   onAppLink(cb: (link: string) => void): () => void {
     let alive = true
@@ -382,37 +402,41 @@ export class TauriSystemPort implements SystemPort {
       void invoke<string[]>('take_app_links')
         .then((links) => {
           if (alive) for (const l of links) cb(l)
+          else handOnAppLinks(links)
         })
         .catch(() => {})
+    appLinkListeners.add(cb)
+    for (const l of heldAppLinks.splice(0)) cb(l)
     const un = listen('app-link', drain)
     drain()
     return () => {
       alive = false
-      void un.then((f) => f())
+      appLinkListeners.delete(cb)
+      void un.then((f) => f()).catch(() => {})
     }
   }
 }
 
-/**
- * Turns the `Err(String)` a command gave into an Error and rethrows it.
- *
- * Tauri passes a Rust-side `Err` through as a rejection value **exactly as the string it is**.
- * Since it is not an Error, `e.message` comes out undefined, and the screen shows a failure
- * with no reason, like "Could not delete a.ts: undefined" — the most useless shape a failure
- * can take, saying that it failed without saying why.
- */
-function rethrowAsError(e: unknown): never {
-  throw e instanceof Error ? e : new Error(String(e))
+/** The app-link listeners of this window, on any port */
+const appLinkListeners = new Set<(link: string) => void>()
+/** Links taken from the shell after their listener had gone and before another came */
+const heldAppLinks: string[] = []
+
+/** Links whose listener left while they were being taken: to a listener still here, or kept for the next one */
+function handOnAppLinks(links: string[]): void {
+  const listener = appLinkListeners.values().next().value
+  if (!listener) return void heldAppLinks.push(...links)
+  for (const l of links) listener(l)
 }
 
 /** Brings the window forward (a notification click, a global shortcut) */
 export async function focusWindow(): Promise<void> {
-  await invoke('focus_window')
+  await invoke('focus_window').catch(rethrowAsError)
 }
 
 /** Directory picker — replaces typing a path, which is what web dev does instead (FR-19) */
 export async function pickDirectory(): Promise<string | null> {
-  const picked = await openDialog({ directory: true, multiple: false, title: 'Choose project directory' })
+  const picked = await asError(() => openDialog({ directory: true, multiple: false, title: 'Choose project directory' }))
   return typeof picked === 'string' ? picked : null
 }
 
@@ -423,7 +447,7 @@ export async function pickDirectory(): Promise<string | null> {
  */
 export function tauriRelaunchPort(): RelaunchPort {
   return {
-    check: () => invoke<RelaunchCheck>('relaunch_info').catch((e) => ({ ready: false, reason: String(e) })),
+    check: () => invoke<RelaunchCheck>('relaunch_info').catch((e: unknown) => ({ ready: false, reason: toError(e).message })),
     relaunch: () => invoke<void>('apply_update_relaunch').catch(rethrowAsError),
     watchBusy: (cb) =>
       watchHostBuild(
@@ -435,7 +459,55 @@ export function tauriRelaunchPort(): RelaunchPort {
 
 export type TauriPlatform = Platform & { relaunchSwap: RelaunchSwapResult }
 
+/**
+ * Follows the host's address from before the first read of it (#972 item 1).
+ *
+ * The order `waitForHost` keeps, for the whole of startup: the listener is registered first, and only then is the
+ * address read. Startup reads the address and then awaits several more shell calls before the web platform exists; a
+ * `ready` for a new port in that gap (a crash restart, a swap) used to be lost, and the client retried the old
+ * address forever. Here the latest `ready` heard is kept, and handed to the web platform the moment it subscribes,
+ * then every later one; the client ignores an address it already has.
+ */
+async function followEndpoint(): Promise<{
+  onEndpointChange: (cb: (info: HostInfo) => void) => () => void
+  stop: () => void
+}> {
+  let latest: HostInfo | null = null
+  let forward: ((info: HostInfo) => void) | null = null
+  let stopped = false
+  // A listener that cannot be registered costs only the following, as it did before: startup itself goes on
+  const un = await listenHostStatus((p) => {
+    if (stopped || p.state !== 'ready') return
+    latest = { port: p.port, token: p.token }
+    forward?.(latest)
+  }).catch(() => () => {})
+  const stop = () => {
+    if (stopped) return
+    stopped = true
+    forward = null
+    un()
+  }
+  return {
+    onEndpointChange: (cb) => {
+      forward = cb
+      if (latest) cb(latest)
+      return stop
+    },
+    stop,
+  }
+}
+
 export async function createTauriPlatform(): Promise<TauriPlatform> {
+  const endpoint = await followEndpoint()
+  try {
+    return await createOnHost(endpoint.onEndpointChange)
+  } catch (e) {
+    endpoint.stop()
+    throw e
+  }
+}
+
+async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => () => void): Promise<TauriPlatform> {
   await waitForHost()
   const attached = await hostBuild().catch(() => null)
   const relaunchSwap = attached
@@ -455,13 +527,11 @@ export async function createTauriPlatform(): Promise<TauriPlatform> {
   // The fallback is the Mac spelling because a failure here can only mean the command is
   // missing from the handler list, which is a build-time mistake affecting every platform
   // equally — and every other implementation in this package answers the same way.
-  const shortcutKeys = await invoke<ShortcutKeys>('shortcut_keys').catch(
-    (): ShortcutKeys => ({ mod: '⌘', alt: '⌥', join: '' }),
-  )
+  const shortcutKeys = await invoke<ShortcutKeys>('shortcut_keys').catch((): ShortcutKeys => MAC_SHORTCUT_KEYS)
 
   // And the same again for what this desktop calls its file manager (#19), so the context
   // menu can say "Reveal in Finder" here without ui ever learning which OS it is on.
-  const fileManagerName = await invoke<string>('file_manager_name').catch(() => 'file manager')
+  const fileManagerName = await invoke<string>('file_manager_name').catch(() => ANY_FILE_MANAGER)
 
   // Background mode exists only when the keeper holds the host (#280). A failure to ask is read
   // as "no keeper": the setting then stays hidden instead of offering a switch that cannot work.
@@ -471,10 +541,12 @@ export async function createTauriPlatform(): Promise<TauriPlatform> {
 
   // If the supervisor revives the host, the port and token change → this has to switch to the new address.
   // Without this subscription, the app stays stuck at 'disconnected' after the sidecar crashes (measured at L4-2).
+  // It was registered before the address above was read (`followEndpoint`), so a restart during startup is not missed.
   const base = createWebPlatform({
     hostUrl: `ws://127.0.0.1:${port}`,
     token,
-    fileManagerName,
+    // WKWebView or WebKitGTK answers false for frameDragEndInPage, WebView2 true: the webview answers for itself
+    capabilities: { windowControlsInset, shortcutKeys, fileManagerName },
     /*
       The trash and "reveal in file manager" are the two things the host cannot do (#18/#19).
       A real trash is macOS's `NSFileManager trashItem` or the freedesktop spec, not an unlink
@@ -486,10 +558,7 @@ export async function createTauriPlatform(): Promise<TauriPlatform> {
       trash: (path) => invoke<void>('trash_path', { path }).catch(rethrowAsError),
       reveal: (path) => invoke<void>('reveal_path', { path }).catch(rethrowAsError),
     },
-    onEndpointChange: (cb) =>
-      onHostStatus((p) => {
-        if (p.state === 'ready') cb({ port: p.port, token: p.token })
-      }),
+    onEndpointChange,
   })
 
   return {
@@ -505,18 +574,6 @@ export async function createTauriPlatform(): Promise<TauriPlatform> {
         }
       : {}),
     system: new TauriSystemPort(),
-    capabilities: {
-      osNotifications: true,
-      dockBadge: true,
-      globalShortcuts: true,
-      processSupervision: true,
-      openInIde: true,
-      windowControlsInset,
-      shortcutKeys,
-      fileManagerName,
-      // WKWebView or WebKitGTK answers false, WebView2 true: the webview answers for itself
-      frameDragEndInPage: frameDragEndInPage(),
-    },
   }
 }
 

@@ -56,6 +56,18 @@ export class GitMock {
       )
     },
     commit: async (_projectId: string, message: string) => {
+      /*
+       * Nothing staged: `git commit` fails and the host passes git's own words on (gitCommit, #999). With changes left
+       * unstaged git says how to add them; with none, that the tree is clean.
+       */
+      if (!this.gitState.files.some((f) => f.staged)) {
+        return {
+          ok: false,
+          message: this.gitState.files.length
+            ? 'no changes added to commit (use "git add" and/or "git commit -a")'
+            : 'nothing to commit, working tree clean',
+        }
+      }
       this.gitState.lastCommitMessage = message
       this.gitState.files = this.gitState.files.filter((f) => !f.staged)
       return { ok: true }

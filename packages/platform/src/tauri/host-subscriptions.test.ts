@@ -89,6 +89,22 @@ describe('following the build report', () => {
   })
 })
 
+describe('the build report payload (#972 item 7)', () => {
+  it('passes on a report and drops a payload that is not one, as the status report does', async () => {
+    const seen: unknown[] = []
+    const stop = watchHostBuild((b) => seen.push(b))
+    registered()
+    await flush()
+    const send = handlers.get('host-build')!
+    send({ payload: null })
+    send({ payload: 'keeper' })
+    send({ payload: { busy: true } })
+    send({ payload: { mode: 'keeper', busy: true } })
+    expect(seen).toEqual([{ mode: 'keeper', busy: true }])
+    stop()
+  })
+})
+
 describe('the status report', () => {
   it('passes on a status and drops a payload that is not one', async () => {
     const seen: unknown[] = []

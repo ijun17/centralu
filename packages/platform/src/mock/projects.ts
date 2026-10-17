@@ -16,6 +16,14 @@ function projectNotFound(projectId: string): Error {
   return Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
 }
 
+/** `items` in the order `orderedIds` names them; ids not named keep their order after them, unknown ids are ignored */
+export function putInOrder<T extends { id: string }>(items: readonly T[], orderedIds: readonly string[]): T[] {
+  const byId = new Map(items.map((x) => [x.id, x]))
+  const named = [...new Set(orderedIds)].flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []))
+  const rest = items.filter((x) => !orderedIds.includes(x.id))
+  return [...named, ...rest]
+}
+
 /** The project port: adding, creating (#515), trust, commands and worktree settings */
 export class ProjectsMock {
   /** For tests: paths a new project may not take, as if a folder of that name were already there (#515) */
@@ -50,9 +58,9 @@ export class ProjectsMock {
   /** The record of trust turned on and off — tests check "it only asks, it does not send" (M4) */
   readonly trustCalls: { projectId: string; trusted: boolean }[] = []
   readonly projects: ProjectPort = {
+    /** The same rule as the real thing (manager.reorderProjects, #999): a project missing from the list stays at the end, as it was */
     reorder: async (orderedIds: string[]) => {
-      const rank = new Map(orderedIds.map((id, i) => [id, i]))
-      this.projectStore.list.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
+      this.projectStore.list = putInOrder(this.projectStore.list, orderedIds)
       return [...this.projectStore.list]
     },
     create: async (name: string, parent?: string, machine?: string | null, source?: GitSource) => {
@@ -64,10 +72,18 @@ export class ProjectsMock {
       this.nextCloneError = null
       if (cloneError) throw Object.assign(new Error(cloneError), { code: 'internal' })
       this.takenPaths.add(t.path)
-      // A new folder is empty: no repository, until an agent makes one. A clone is one, on its branch
+      /*
+       * The same rule as the real thing (project-creation.ts createProject, #655, #999): a folder made empty holds only
+       * what Centralu and the person write, so it starts trusted, and with no repository its git is null (projectInfo)
+       * until an agent makes one. A clone is a repository on its branch, and untrusted: a stranger's code is in it.
+       */
       const info = await this.projects.add(t.path, machine)
-      const made = { ...info, git: source ? { branch: source.branch ?? 'main', changedFiles: 0, isRepo: true } : { branch: '', changedFiles: 0, isRepo: false } }
+      const made: ProjectInfo = source
+        ? { ...info, git: { branch: source.branch ?? 'main', changedFiles: 0, isRepo: true } }
+        : { ...info, trusted: true, git: null }
       this.projectStore.list = this.projectStore.list.map((p) => (p.id === info.id ? made : p))
+      // Every window learns of it, the one that asked included
+      this.emit({ type: 'projects_changed' })
       return made
     },
     createPreview: async (name: string, parent?: string, machine?: string | null, source?: GitSource) => this.newProjectTarget(name, parent, machine, source),

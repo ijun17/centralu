@@ -46,6 +46,11 @@ export async function seedDemo(mock: MockPlatform, scene: DemoScene = 'focus'): 
 
   const centralu = await mock.projects.add('/Users/you/code/centralu')
   const site = await mock.projects.add('/Users/you/code/landing-site')
+  /*
+   * The project the scene works in has been trusted, as one a person works in would be: a worktree session needs a
+   * trusted project, as on the host (#407, #999). The landing site stays as newly added.
+   */
+  await mock.projects.setTrusted(centralu.id, true)
 
   /*
    * Usage — the donut needs a weekly window to show up. Leaves both tools logged in
@@ -682,5 +687,18 @@ function installResponder(mock: MockPlatform): void {
       [1900, () => mock.emit({ type: 'turn_complete', sessionId })],
     ]
     for (const [at, run] of steps) setTimeout(run, at)
+  }
+  /*
+   * An answer lets the agent go on, as the host's does (#999): it no longer ends the turn by itself. The demo's agent
+   * finishes the call it asked about with a line and ends its turn, so an approved card does not leave it working forever.
+   */
+  const answer = mock.agents.respondApproval.bind(mock.agents)
+  mock.agents.respondApproval = async (sessionId, requestId, decision, scope, matcher) => {
+    const asked = mock.sessions.get(sessionId)?.pendingApproval?.requestId === requestId
+    await answer(sessionId, requestId, decision, scope, matcher)
+    if (!asked || requestId.startsWith('cap-')) return
+    const line = decision === 'deny' ? 'Understood — I left that alone.' : 'Done — that went through.'
+    setTimeout(() => mock.emit({ type: 'message_delta', sessionId, role: 'assistant', text: line }), 400)
+    setTimeout(() => mock.emit({ type: 'turn_complete', sessionId }), 800)
   }
 }

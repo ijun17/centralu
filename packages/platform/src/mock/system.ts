@@ -1,4 +1,6 @@
 import type { AlertKind, SystemPort } from '../ports/index.js'
+import { badgeCount } from '../capabilities.js'
+import { deliver } from '../deliver.js'
 
 /** The OS side the mock stands in for: notifications, the dock badge, pickers, the window and app links */
 export class SystemMock {
@@ -6,6 +8,8 @@ export class SystemMock {
   nextPickedDirectory: string | null = '/tmp/picked'
   /** The value the file picker will return (M4 E-3 — the .zip to import). Null means the person cancelled */
   nextPickedFile: string | null = '/tmp/picked.zip'
+  /** For tests: both pickers fail with this reason, as a shell refusing the dialog would (#972 item 2) */
+  pickFails: string | null = null
   /** What the file picker was asked to filter by */
   readonly pickedFileAsks: { title: string; extensions: string[] }[] = []
   /** The side that listens for app links (M4 E-4) — `openAppLink` hands one over like the OS would */
@@ -19,7 +23,7 @@ export class SystemMock {
   /** As if the OS handed this app a link (M4 E-4, called by e2e) — passes it through raw, unfiltered by the shell */
   openAppLink(link: string): void {
     if (this.appLinkListeners.size === 0) this.pendingAppLinks.push(link)
-    for (const l of this.appLinkListeners) l(link)
+    deliver(this.appLinkListeners, link)
   }
   readonly notifications: { title: string; body: string }[] = []
   readonly opened: { path: string; line?: number }[] = []
@@ -34,7 +38,7 @@ export class SystemMock {
       this.alerts.push({ kind, sound })
     },
     setBadge: async (count: number) => {
-      this.badge = count
+      this.badge = badgeCount(count)
     },
     openInIde: async (path: string, line?: number) => {
       this.opened.push({ path, line })
@@ -50,9 +54,13 @@ export class SystemMock {
     setWindowAppearance: async (scheme, background) => {
       this.windowAppearance = { scheme, background }
     },
-    pickDirectory: async () => this.nextPickedDirectory,
+    pickDirectory: async () => {
+      if (this.pickFails) throw new Error(this.pickFails)
+      return this.nextPickedDirectory
+    },
     pickFile: async (opts: { title: string; extensions: string[] }) => {
       this.pickedFileAsks.push(opts)
+      if (this.pickFails) throw new Error(this.pickFails)
       return this.nextPickedFile
     },
     onAppLink: (cb: (link: string) => void) => {

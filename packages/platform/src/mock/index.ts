@@ -1,4 +1,4 @@
-import { frameDragEndInPage } from '../engine.js'
+import { defaultCapabilities } from '../capabilities.js'
 import { changedFileCount, type NormalizedEvent } from '@cc/protocol'
 import type { AgentPort, Platform } from '../ports/index.js'
 import { AgentVersionsMock } from './agent-versions.js'
@@ -67,7 +67,8 @@ export class MockPlatform implements Platform {
   private readonly appBuilderMock = new AppBuilderMock(this.clock, this.forward, this.store, this.projectStore, this.registry, this.toolsMock, this.orchestratorMock)
   private readonly appImportsMock = new AppImportsMock(this.clock, this.forward, this.registry)
   private readonly appSettingsMock = new AppSettingsMock(this.forward, this.registry)
-  private readonly approvalsMock = new ApprovalsMock(this.clock, this.forward, this.store)
+  private readonly rulesMock = new RulesMock(this.forward)
+  private readonly approvalsMock = new ApprovalsMock(this.clock, this.forward, this.store, this.rulesMock)
   private readonly appsMock = new AppsMock(this.clock, this.forward, this.store, this.registry)
   private readonly terminalsMock = new TerminalsMock(this.clock, this.projectStore)
   private readonly commandsMock = new CommandsMock(this.clock, this.terminalsMock)
@@ -79,7 +80,6 @@ export class MockPlatform implements Platform {
   private readonly preferencesMock = new PreferencesMock()
   private readonly projectsMock = new ProjectsMock(this.clock, this.forward, this.store, this.projectStore, this.registry, this.toolsMock, this.gridMock, this.machinesMock, this.trashMock)
   private readonly proposalsMock = new ProposalsMock(this.forward)
-  private readonly rulesMock = new RulesMock(this.forward)
   private readonly systemMock = new SystemMock()
   private readonly themesMock = new ThemesMock(this.forward)
   private readonly usageMock = new UsageMock()
@@ -127,25 +127,12 @@ export class MockPlatform implements Platform {
     if (opts.now) this.clock.now = opts.now
   }
 
-  readonly capabilities = {
-    osNotifications: true,
-    dockBadge: true,
-    globalShortcuts: false,
-    processSupervision: false,
-    openInIde: true,
-    // A browser has no window controls to leave room for, and E2E runs against this
-    // mock — so the header it measures starts at the window edge.
-    windowControlsInset: 0,
-    // This mock has no OS to ask. Settles on the Mac notation as the answer — both development
-    // and e2e run on a Mac, and guessing the keyboard here would make the result depend on
-    // whatever machine the test happens to run on.
-    shortcutKeys: { mod: '⌘', alt: '⌥', join: '' },
-    // Same reason: settles on the Mac name as the answer — guessing the machine e2e runs on
-    // would make what gets written on screen vary from test to test.
-    fileManagerName: 'Finder',
-    // E2E drives this mock in Chromium and in WebKit, and the engine running it is the real one
-    frameDragEndInPage: frameDragEndInPage(),
-  }
+  /*
+   * The defaults, with the window edge where E2E measures the header from. The file manager settles on the Mac name:
+   * guessing the machine e2e runs on would make what gets written on screen vary from test to test. E2E drives this
+   * mock in Chromium and in WebKit, and the engine running it is the real one.
+   */
+  readonly capabilities = defaultCapabilities({ fileManagerName: 'Finder' })
 
   /** The channel through which tests inject events */
   emit(event: NormalizedEvent): void {
@@ -381,6 +368,8 @@ export class MockPlatform implements Platform {
   get nextPickedFile() { return this.systemMock.nextPickedFile }
   set nextPickedFile(value: SystemMock['nextPickedFile']) { this.systemMock.nextPickedFile = value }
   get pickedFileAsks() { return this.systemMock.pickedFileAsks }
+  get pickFails() { return this.systemMock.pickFails }
+  set pickFails(value: SystemMock['pickFails']) { this.systemMock.pickFails = value }
   get notifications() { return this.systemMock.notifications }
   get opened() { return this.systemMock.opened }
   get openedUrls() { return this.systemMock.openedUrls }

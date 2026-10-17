@@ -3,12 +3,12 @@ import {
   parseRpcResult,
   parseServerFrame,
   type NormalizedEvent,
-  type ProtocolError,
   type RpcMethodName,
   type RpcParams,
   type RpcResult,
 } from '@cc/protocol'
 import type { ConnectionState, Unsubscribe } from '../ports/index.js'
+import { deliver } from '../deliver.js'
 
 /**
  * The WS RPC client — reconnect + backoff + afterSeq restore (tech-stack.md: hand-rolled,
@@ -61,6 +61,7 @@ const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000
 const DEFAULT_MAX_PENDING_CALLS = 512
 const DEFAULT_MAX_QUEUED_BYTES = 64 * 1024 * 1024
 
+/** Every error a call rejects with, the host's and the client's own, is built here: an Error with the protocol's `code` and `retryable` (#972 item 7) */
 const rpcError = (message: string, code: string, retryable: boolean) => Object.assign(new Error(message), { code, retryable })
 
 /** The default RPC response timeout. Session creation and git reads also finish within this (measured at a few seconds) */
@@ -122,6 +123,9 @@ const GIT_WRITE_CALLS = new Set<string>(['git.stage', 'git.commit', 'git.checkou
  */
 const APP_CALL_TIMEOUT_MS = 15 * 60_000
 
+/** An endpoint in the one spelling `URL` gives it, so two spellings of one address compare equal */
+const endpointUrl = (url: string): string => new URL(url).toString()
+
 /** How long a call waits for the host before it is cut */
 function callBudget(method: string): number {
   if (method === 'apps.invoke') return APP_CALL_TIMEOUT_MS
@@ -182,7 +186,14 @@ export class RpcClient {
    * port). Retrying the old address forever would leave the app stuck at 'disconnected' — a
    * defect confirmed by measurement.
    */
-  updateEndpoint(url: string, token: string): void {
+  updateEndpoint(next: string, token: string): void {
+    /*
+     * The same endpoint is no change (#1009 review): compared as one spelling, since `ws://127.0.0.1:N` and
+     * `ws://127.0.0.1:N/` are one address. In keeper mode the shell repeats `ready` whenever the keeper's view changes
+     * (an agent's turn flips `busy`), and read as a new address each one dropped the socket, rejected the calls in
+     * flight and forced a resync.
+     */
+    const url = endpointUrl(next)
     if (this.opts.url === url && this.opts.token === token) return
     this.opts = { ...this.opts, url, token }
     this.attempt = 0
@@ -224,6 +235,7 @@ export class RpcClient {
   }
 
   constructor(private opts: RpcClientOptions) {
+    this.opts = { ...opts, url: endpointUrl(opts.url) }
     this.WS = opts.WebSocketImpl ?? WebSocket
   }
 
@@ -380,7 +392,7 @@ export class RpcClient {
        * list without `backgroundTasks` (#305) and crashed on `undefined.filter`: the field's
        * `.default([])` was never applied, because nothing parsed the payload.
        */
-      if (!frame.ok) return p.reject(toError(frame.error))
+      if (!frame.ok) return p.reject(rpcError(frame.error.message, frame.error.code, frame.error.retryable))
       /*
        * The call is already out of `pending`, its timer cleared: if reading the result threw here,
        * nothing would ever settle it and its caller would wait forever. A result that cannot be read
@@ -423,7 +435,7 @@ export class RpcClient {
     const p = this.take(f.id)
     if (!p) return
     const message = typeof f.error?.message === 'string' ? f.error.message : 'Malformed response from the host'
-    p.reject(Object.assign(new Error(message), { code: 'internal', retryable: false }))
+    p.reject(rpcError(message, 'internal', false))
   }
 
   /** Takes one out of pending — "taking out" includes clearing its timer and its queued bytes (otherwise a ghost timer stays behind) */
@@ -508,7 +520,7 @@ export class RpcClient {
        */
       const timer = setTimeout(() => {
         if (!this.take(id)) return
-        reject(Object.assign(new Error(`RPC timed out: ${method}`), { code: 'timeout', retryable: true }))
+        reject(rpcError(`RPC timed out: ${method}`, 'timeout', true))
       }, this.opts.callTimeoutMs ?? callBudget(method))
       // Sent now if the host is ready, otherwise after the next hello_ok
       const ws = this.ready ? this.ws : null
@@ -561,24 +573,4 @@ export class RpcClient {
       this.take(id)?.reject(rpcError('Connection closed', 'connection_closed', false))
     }
   }
-}
-
-/**
- * Hands one value to every subscriber, each on its own. A subscriber that throws is reported and the
- * rest still get the value: the client has already moved past it (an event's seq is the cursor, a
- * connection change has already happened), so nothing would ever hand it to them again, and a throw
- * from inside a socket callback would also leave the client half-way through what it was doing.
- */
-function deliver<T>(handlers: Iterable<(v: T) => void>, value: T): void {
-  for (const h of handlers) {
-    try {
-      h(value)
-    } catch (e) {
-      console.error('A subscriber of the host connection threw', e)
-    }
-  }
-}
-
-function toError(e: ProtocolError): Error {
-  return Object.assign(new Error(e.message), { code: e.code, retryable: e.retryable })
 }
