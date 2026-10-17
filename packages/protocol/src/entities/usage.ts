@@ -10,7 +10,7 @@ import { z } from 'zod'
  *
  * So all the input the model actually read is the sum of the three. Codex reports input that
  * came from cache **inside** its input count, so the adapter subtracts it to fit this shape
- * (`codex/normalize.ts`). If the two tools did not carry the same meaning here, whatever sums
+ * (`codex/token-readings.ts`). If the two tools did not carry the same meaning here, whatever sums
  * them up (an app's requested-agent history, M4 D-5) would record a different number depending
  * on the tool.
  */

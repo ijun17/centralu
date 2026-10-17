@@ -1,7 +1,8 @@
 import { homedir } from 'node:os'
 import { describe, expect, it, vi } from 'vitest'
 import type { NormalizedEvent } from '@cc/protocol'
-import { normalizeNotification, threadSettingsChanged, threadSettingsOf } from './normalize.js'
+import { normalizeNotification } from './normalize.js'
+import { threadSettingsChanged, threadSettingsOf } from './thread-settings.js'
 
 /**
  * What Codex tells the person (#304): warnings, a model it answered with instead, an MCP server that did not start, a
