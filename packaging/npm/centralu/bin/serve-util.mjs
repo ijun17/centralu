@@ -3,7 +3,7 @@
  * output, a process check, and waiting.
  */
 import { spawn } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { closeSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 
 /**
  * Where `say` writes: stderr, except in a detached launcher, which nobody reads the stderr of and
@@ -19,6 +19,22 @@ export function say(line) {
 /** Points `say` at `write` from here on (a detached launcher's serve.log) */
 export function sayTo(write) {
   sink = write
+}
+
+/**
+ * Replaces `file` with `text` at once: written to a temporary file beside it, then renamed over it, so a reader finds
+ * the old file or the new one and never half of one. `mode` and `flag` are the temporary file's: a private file is
+ * created with its mode from the first byte, and with `wx`, never written into a file that is already there.
+ */
+export function replaceFile(file, text, { mode = 0o666, flag = 'w' } = {}) {
+  const tmp = `${file}.${process.pid}.tmp`
+  const fd = openSync(tmp, flag, mode)
+  try {
+    writeFileSync(fd, text)
+  } finally {
+    closeSync(fd)
+  }
+  renameSync(tmp, file)
 }
 
 export function runCaptured(command, args, env) {

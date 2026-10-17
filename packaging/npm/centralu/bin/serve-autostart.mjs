@@ -3,10 +3,10 @@
  * sign-in on Windows and for WSL, and the mark in the data folder that `--connection` reports.
  */
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join, posix } from 'node:path'
-import { say, runCaptured } from './serve-util.mjs'
+import { replaceFile, say, runCaptured } from './serve-util.mjs'
 import { serveDataDir } from './serve-files.mjs'
 import { askPowershell, detachHow, encodedCommand, wslInterop, PS_MODULE_PATH, windowsArg, windowsPowershell, psText, wslDistro, wslUser } from './serve-windows.mjs'
 import { keepLauncher, remoteLayout } from './serve-install.mjs'
@@ -208,9 +208,7 @@ export function readAutostartMark(dataDir) {
 function writeAutostartMark(dataDir, mark) {
   mkdirSync(dataDir, { recursive: true })
   const file = join(dataDir, AUTOSTART_FILE)
-  const tmp = `${file}.${process.pid}.tmp`
-  writeFileSync(tmp, `${JSON.stringify({ v: 1, ...mark, at: Date.now() })}\n`)
-  renameSync(tmp, file)
+  replaceFile(file, `${JSON.stringify({ v: 1, ...mark, at: Date.now() })}\n`)
 }
 
 function clearAutostartMark(dataDir) {
@@ -272,9 +270,7 @@ async function systemdAutostart(action, { dataDir, env, home, name, run, user })
   const launcher = autostartLauncher(dataDir, 'linux')
   if (!launcher) return { ...base, ok: false, on: false, linger: null, message: `there is no Centralu launcher in ${dataDir} to start at boot` }
   mkdirSync(dir, { recursive: true })
-  const tmp = `${file}.${process.pid}.tmp`
-  writeFileSync(tmp, systemdUnit({ launcher, env }))
-  renameSync(tmp, file)
+  replaceFile(file, systemdUnit({ launcher, env }))
   let r = await ctl('daemon-reload')
   if (r.code === 0) r = await ctl('enable', name)
   if (r.code !== 0) {

@@ -3,9 +3,9 @@
  * install, and the managed install the hub writes over ssh (`<data>/remote/`, docs/plans/remote-hub.md
  * §10.1), with the launcher that never changes and the pointers it reads.
  */
-import { chmodSync, mkdirSync, openSync, readFileSync, renameSync, statSync, writeSync, closeSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { say } from './serve-util.mjs'
+import { replaceFile, say } from './serve-util.mjs'
 
 /**
  * The launcher `serve` keeps at `<data folder>/bin/centralu` (`centralu.cmd` on Windows).
@@ -64,14 +64,7 @@ export function ensureLauncher(dataDir, { platform = process.platform, execPath 
   }
   if (have !== want) {
     mkdirSync(dirname(file), { recursive: true })
-    const tmp = `${file}.${process.pid}.tmp`
-    const fd = openSync(tmp, 'w', 0o755)
-    try {
-      writeSync(fd, want)
-    } finally {
-      closeSync(fd)
-    }
-    renameSync(tmp, file)
+    replaceFile(file, want, { mode: 0o755 })
   }
   if (platform !== 'win32' && (statSync(file).mode & 0o777) !== 0o755) chmodSync(file, 0o755)
   return file

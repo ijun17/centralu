@@ -5,9 +5,9 @@
  */
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeSync, closeSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync, closeSync } from 'node:fs'
 import { join } from 'node:path'
-import { isAlive } from './serve-util.mjs'
+import { isAlive, replaceFile } from './serve-util.mjs'
 
 /**
  * The file in the data folder that holds the token and the port, mode 0600.
@@ -78,10 +78,7 @@ export function recordServePort(dataDir, port, platform = process.platform) {
   const state = readServeState(dataDir)
   if (!state) throw new Error(`${file} is missing or unreadable`)
   if (state.port === port) return
-  const tmp = `${file}.${process.pid}.tmp`
-  writePrivate(tmp, { v: 1, token: state.token, port }, 'wx')
-  renameSync(tmp, file)
-  keepPrivate(file, platform)
+  replacePrivate(file, { v: 1, token: state.token, port }, platform)
 }
 
 /**
@@ -91,11 +88,7 @@ export function recordServePort(dataDir, port, platform = process.platform) {
  */
 export function rotateServeToken(dataDir, platform = process.platform) {
   const before = ensureServeState(dataDir, platform)
-  const file = join(dataDir, SERVE_STATE_FILE)
-  const tmp = `${file}.${process.pid}.tmp`
-  writePrivate(tmp, { v: 1, token: randomBytes(32).toString('base64url'), port: before.port }, 'wx')
-  renameSync(tmp, file)
-  keepPrivate(file, platform)
+  replacePrivate(join(dataDir, SERVE_STATE_FILE), { v: 1, token: randomBytes(32).toString('base64url'), port: before.port }, platform)
   return readServeState(dataDir)
 }
 
@@ -110,6 +103,12 @@ function writePrivate(file, value, flag) {
   } finally {
     closeSync(fd)
   }
+}
+
+/** Replaces a private file whole (`replaceFile`), created 0600 as `writePrivate` creates one */
+function replacePrivate(file, value, platform) {
+  replaceFile(file, `${JSON.stringify(value)}\n`, { mode: 0o600, flag: 'wx' })
+  keepPrivate(file, platform)
 }
 
 /**
