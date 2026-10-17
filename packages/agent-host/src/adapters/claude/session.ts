@@ -45,6 +45,8 @@ export type ClaudeLaunch = {
   /** Disposed sessions whose process has not ended yet: what `settle` waits for */
   closing: Set<Promise<void>>
   exitGraceMs: number
+  /** How long a Stop waits for the CLI to confirm it (see `interrupt`) */
+  stopConfirmMs: number
 }
 
 export class ClaudeSession implements SessionHandle {
@@ -323,6 +325,8 @@ export class ClaudeSession implements SessionHandle {
       // Capture this result before a later turn's frames can overwrite the host's answer.
       if (e.type === 'turn_complete' && completedInputs) this.inputReceipts.complete(completedInputs)
     }
+    // A result ends the open turn: a Stop still waiting for the interrupt's answer is confirmed by it (see `interrupt`)
+    if (m.type === 'result') this.confirmStop()
     this.schedules.arm()
     // Once a turn ends, asks what is currently in the context window (FR-14).
     if (m.type === 'result' && !retrying) void this.reportContext(q)
@@ -556,17 +560,67 @@ export class ClaudeSession implements SessionHandle {
      */
     if (this.turnOpen) this.stream.stopped()
 
+    /*
+     * **A running turn is said stopped once the CLI says so**, the way Codex waits for its `turn/completed`: the
+     * interrupt's answer or the stopped turn's result, whichever comes first (`confirmStop`). Said at once, a rejected
+     * interrupt showed the turn as stopped while the CLI kept working, and the "Could not stop" after it came once the
+     * host had already ended the turn. A rejection keeps the turn running, so its own ending is its own again
+     * (`stopFailed`). No confirmation within `stopConfirmMs` is said as a failure too, rather than a Stop with nothing
+     * on screen; one that comes after that still ends the turn as stopped. With no turn open there is nothing to wait
+     * on, and the session is said stopped at once, as before.
+     */
+    const wait = this.turnOpen && this.query ? this.awaitStop() : null
     void this.query?.interrupt(cancelQueued ? { cancelQueued: true } : undefined).then((response) => {
       // cancel_queued sweeps SDK-held messages too, including the person's. The CLI's receipt
       // identifies exactly which did not run; do not silently discard their already-visible rows.
       const cancelled = (response as { cancelled?: unknown } | undefined)?.cancelled
-      if (!Array.isArray(cancelled)) return
-      let count = 0
-      for (const id of cancelled) if (typeof id === 'string' && this.personInputs.delete(id)) count++
-      this.reportUndelivered(count)
-    }).catch((err: Error) => this.emit(couldNotStop(this.sessionId, err)))
+      if (Array.isArray(cancelled)) {
+        let count = 0
+        for (const id of cancelled) if (typeof id === 'string' && this.personInputs.delete(id)) count++
+        this.reportUndelivered(count)
+      }
+      if (wait) this.confirmStop(wait)
+    }).catch((err: Error) => {
+      if (!wait) {
+        this.emit(couldNotStop(this.sessionId, err))
+        return
+      }
+      // Confirmed by the turn's result already, or closed: the turn is over either way
+      if (this.stopWait !== wait || this.closed) return
+      clearTimeout(wait.bound)
+      this.stopWait = null
+      this.stream.stopFailed()
+      if (!wait.late) this.emit(couldNotStop(this.sessionId, err))
+    })
 
-    this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
+    if (!wait) this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
+  }
+
+  /** A Stop of the running turn the CLI has not confirmed yet (see `interrupt`); `late` once its bound passed */
+  private stopWait: { bound: ReturnType<typeof setTimeout>; late: boolean } | null = null
+
+  /** Waits for the CLI to confirm a Stop of the running turn, saying "Could not stop" once `stopConfirmMs` passes */
+  private awaitStop(): { bound: ReturnType<typeof setTimeout>; late: boolean } {
+    if (this.stopWait) clearTimeout(this.stopWait.bound)
+    const wait = {
+      late: false,
+      bound: setTimeout(() => {
+        wait.late = true
+        if (this.closed) return
+        this.emit(couldNotStop(this.sessionId, new Error(`Claude Code did not confirm the stop within ${Math.round(this.launch.stopConfirmMs / 1000)} s`)))
+      }, this.launch.stopConfirmMs),
+    }
+    wait.bound.unref?.()
+    this.stopWait = wait
+    return wait
+  }
+
+  /** The CLI confirmed the Stop (the interrupt answered, or the stopped turn's result came): the turn is said stopped once */
+  private confirmStop(wait = this.stopWait): void {
+    if (!wait || this.stopWait !== wait) return
+    clearTimeout(wait.bound)
+    this.stopWait = null
+    if (!this.closed) this.emit({ type: 'state_change', sessionId: this.sessionId, state: 'waiting_input', reason: 'interrupted' })
   }
 
   /** A failed turn is already over. Cancel its parent notes without interrupting the person's next turn. */
