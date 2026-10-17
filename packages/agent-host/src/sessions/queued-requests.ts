@@ -26,7 +26,7 @@ export type QueuedRequestsHost = Pick<
     /** ask_project's gates on the caller, read again when its queued request is delivered (ask-project-flow.ts) */
     askGateError: (callerId: string) => string | null
     /** A registered project's row, read now */
-    projectRow: (projectId: string | null | undefined) => ReturnType<DelegationHost['store']['listProjects']>[number] | undefined
+    projectRow: (projectId: string | null | undefined) => ReturnType<DelegationHost['store']['projects']['listProjects']>[number] | undefined
     /** Whether a turn runs in the session for anyone: its state, or a wait on it not settled yet */
     turnRunning: (m: SessionInfo) => boolean
   }

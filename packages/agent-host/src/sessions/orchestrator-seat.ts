@@ -342,7 +342,7 @@ export function orchestratorToolsFor(
           project: projectLabel(s.projectId, byId, untrusted),
           // Cut from **the surrounding conversation**, not a single delta chunk (a chunk alone says
           // nothing); its own hit stops at its compaction (#974)
-          snippet: windowAround(contextAt(host.store.messages, s.id, h.seq, s.id === orchestratorId && cut !== null ? cut : undefined) || h.body, query, 160),
+          snippet: windowAround(contextAt(host.store, s.id, h.seq, s.id === orchestratorId && cut !== null ? cut : undefined) || h.body, query, 160),
           seq: h.seq, // Passed as `around` to read_session, it jumps straight to that spot
           at: timeOf(host.store.messages, h.sessionId, h.seq),
         })

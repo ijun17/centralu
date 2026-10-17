@@ -265,7 +265,7 @@ export class WorktreeSessions {
    * existing disappears.
    */
   private async provisionWorktree(projectCwd: string, worktree: Worktree, projectId: string): Promise<string[]> {
-    const setup = this.host.store.worktreeSetup(projectId) ?? { copyFiles: [], command: '' }
+    const setup = this.host.store.projects.worktreeSetup(projectId) ?? { copyFiles: [], command: '' }
     const problems: string[] = []
     const problem = (line: string) => {
       console.error(`[worktree] ${line}`)

@@ -1471,7 +1471,7 @@ describe('starting another agent in the same project', () => {
       w.mgr.respondApproval(orch.id, agentCard(orch.id)!.requestId, 'always', 'project')
       expect(await p).toMatchObject({ ok: true })
       expect(await tools.startAgent({ task: 'second lookup', wait: false })).toMatchObject({ ok: true, state: 'working' })
-      expect(w.store.getProjectConsent('', '', 'agents')).toBeFalsy()
+      expect(w.store.permissions.getProjectConsent('', '', 'agents')).toBeFalsy()
     })
   })
 
@@ -1724,7 +1724,7 @@ describe('starting another agent in the same project', () => {
     it("tells the child what its worktree's setup could not do, in its task", async () => {
       repo()
       allowProject()
-      w.store.setWorktreeSetup(w.caller.id, { command: '', copyFiles: ['.env'] })
+      w.store.projects.setWorktreeSetup(w.caller.id, { command: '', copyFiles: ['.env'] })
       const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
         const s = await session()

@@ -272,7 +272,7 @@ export class AgentStartFlow {
     // How deep agents may start agents (#867): a setting, read now, that no preset opens
     const deep = agentDepthRefusal(this.host, callerId, 'start agents')
     if (deep) return done({ ok: false, error: deep })
-    const project = fromOrchestrator ? orchestratorPlace(caller) : this.host.store.listProjects().find((p) => p.id === caller.projectId)
+    const project = fromOrchestrator ? orchestratorPlace(caller) : this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)
     if (!project) return done({ ok: false, error: 'This session\'s project is no longer registered.' })
     if (fromOrchestrator && (opts.worktree || opts.branch)) {
       return done({ ok: false, error: 'A session the orchestrator starts works outside any project, so it has no worktree. Start it without one, or hand the work to a project\'s session with send_to_session.' })
@@ -295,7 +295,7 @@ export class AgentStartFlow {
     const full = this.agentCeilingError(callerId, project.id)
     if (full) return done({ ok: false, error: full })
     // The model named, else the person's for the difficulty named (#729), else the project's remembered one (#107)
-    const { model, effort, difficulty } = agentChoice(opts, fromOrchestrator ? undefined : this.host.store.projectToolDefaults(project.id)[tool], this.host.uiPreferences().agentModels?.[tool])
+    const { model, effort, difficulty } = agentChoice(opts, fromOrchestrator ? undefined : this.host.store.projects.projectToolDefaults(project.id)[tool], this.host.uiPreferences().agentModels?.[tool])
     // A setting's choice is checked as a named one is: a model retired since it was picked is refused with the list.
     // The caller never named it, so the remedy it reads is to tell the person or name a model, not to leave it out
     const setting = difficulty ? `the person's choice for ${difficulty} work in Settings → Orchestrator` : ''
@@ -468,7 +468,7 @@ export class AgentStartFlow {
     if (!caller) return 'The session that asked is no longer here.'
     // The orchestrator's place is no project (#853): nothing to be registered or trusted
     if (projectId === ORCHESTRATOR_PLACE && caller.kind === 'orchestrator') return agentDepthRefusal(this.host, callerId, 'start agents')
-    const now = this.host.store.listProjects().find((p) => p.id === projectId)
+    const now = this.host.store.projects.listProjects().find((p) => p.id === projectId)
     if (!now) return 'This session\'s project is no longer registered.'
     const auto = caller.permissionPreset === 'auto'
     if (now.trusted !== true && !auto) return `This session's project is no longer trusted, so it cannot start agents. ${ASK_THE_PERSON}`
@@ -544,7 +544,7 @@ export class AgentStartFlow {
     // worktree of the project's repository (part 2), which createSession makes in the worktree root
     // The orchestrator's child: a folder of its own, never the orchestrator's (#994 review)
     const scratch = project.id === ORCHESTRATOR_PLACE ? newOrchestratorAgentFolder() : null
-    const cwd = scratch ?? (worktree ? project.path : (this.host.store.sessionCwd(callerId) ?? caller.worktree?.path ?? project.path))
+    const cwd = scratch ?? (worktree ? project.path : (this.host.store.sessions.sessionCwd(callerId) ?? caller.worktree?.path ?? project.path))
     let child: SessionInfo
     let setupProblems: string[] = []
     progress.stage = 'creating'
@@ -596,7 +596,7 @@ export class AgentStartFlow {
     release()
     progress.d = d
     try {
-      await this.host.deliver(child.id, agentFrame(labelOf(this.host.store, caller), choice.task, setupProblems), undefined, { sessionId: callerId, name: labelOf(this.host.store, caller) }, false)
+      await this.host.deliver(child.id, agentFrame(labelOf(this.host.store.messages, caller), choice.task, setupProblems), undefined, { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }, false)
     } catch (e) {
       this.host.children.dropDelegation(key, d)
       if (this.host.agentRuns.get(child.id) === d.wait) this.host.agentRuns.delete(child.id)
@@ -704,7 +704,7 @@ export class AgentStartFlow {
     onCard?: (requestId: string) => void,
   ): Promise<AgentConsent> {
     if (this.agentConsents.has(callerId)) return { ok: true }
-    if (detail.project.id && this.host.store.getProjectConsent(detail.project.id, detail.project.id, 'agents')) return { ok: true }
+    if (detail.project.id && this.host.store.permissions.getProjectConsent(detail.project.id, detail.project.id, 'agents')) return { ok: true }
     if (this.trustIsAgentConsent(callerId, detail.project.id)) return { ok: true }
     const requestId = `ag-${randomUUID()}`
     if (this.host.meta.get(callerId)?.permissionPreset !== 'auto') onCard?.(requestId)
@@ -897,7 +897,7 @@ export class AgentStartFlow {
     }
     if (rec.ended) return
     const caller = this.host.meta.get(req.callerId)
-    const project = req.projectId === ORCHESTRATOR_PLACE && caller?.kind === 'orchestrator' ? orchestratorPlace(caller) : this.host.store.listProjects().find((p) => p.id === req.projectId)
+    const project = req.projectId === ORCHESTRATOR_PLACE && caller?.kind === 'orchestrator' ? orchestratorPlace(caller) : this.host.store.projects.listProjects().find((p) => p.id === req.projectId)
     const r = project
       ? await this.createAgentChild(req.callerId, { id: project.id, name: project.name, path: project.path }, req, { stage: 'creating' }, req.detail.preset, req.requestId)
       : { done: { ok: false as const, error: "This session's project is no longer registered." } }

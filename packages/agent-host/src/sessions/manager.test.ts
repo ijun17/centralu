@@ -3419,7 +3419,7 @@ describe('worktree sessions', () => {
   it('leaves no worktree or branch behind when its setup throws after the checkout (#774)', async () => {
     const branches = () =>
       execFileSync('git', ['branch', '--format=%(refname:short)'], { cwd: repo }).toString().split('\n').filter(Boolean)
-    const setup = vi.spyOn(store, 'worktreeSetup').mockImplementation(() => {
+    const setup = vi.spyOn(store.projects, 'worktreeSetup').mockImplementation(() => {
       throw new Error('the settings could not be read')
     })
     try {
@@ -3453,7 +3453,7 @@ describe('worktree sessions', () => {
 
   // #841 item 3: setup failures were in host.log only, so the person and the agent met them as a failing command later
   it('what the setup could not do is said at the top of the new session', async () => {
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['.env'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['.env'] })
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     let s: SessionInfo
     try {
@@ -3464,7 +3464,7 @@ describe('worktree sessions', () => {
     const notice = events.find((e) => e.type === 'notice' && e.sessionId === s.id && e.label === 'worktree setup')
     expect(notice && 'text' in notice ? notice.text : '').toContain('copy skipped (missing): .env')
     // A setup that did everything says nothing
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: [] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: [] })
     const clean = await create(true)
     expect(events.some((e) => e.type === 'notice' && e.sessionId === clean.id && e.label === 'worktree setup')).toBe(false)
   })
@@ -4608,12 +4608,12 @@ describe('worktree sessions', () => {
     expect(r.purged).toBe(0)
     expect(r.failed).toEqual([{ sessionId: s.id, name: expect.any(String), error: expect.stringContaining(`Could not remove the worktree at ${path}`) }])
     expect(existsSync(path)).toBe(true)
-    expect(store.trashedSession(s.id)).not.toBeNull()
+    expect(store.trash.trashedSession(s.id)).not.toBeNull()
 
     execFileSync('git', ['worktree', 'unlock', path], { cwd: repo })
     await wtRpc('trash.purge', { sessionId: s.id })
     expect(existsSync(path)).toBe(false)
-    expect(store.trashedSession(s.id)).toBeNull()
+    expect(store.trash.trashedSession(s.id)).toBeNull()
   })
 
   it('a worktree whose project folder moved says to delete it by hand, and goes once that is done', async () => {
@@ -4626,7 +4626,7 @@ describe('worktree sessions', () => {
       await expect(wtRpc('trash.purge', { sessionId: s.id })).rejects.toThrow(`The project folder ${repo} is not there any more (moved or deleted), so git cannot remove its worktree at ${path}. It stays in the trash: delete that folder yourself, then delete this entry again.`)
       rmSync(path, { recursive: true, force: true })
       await wtRpc('trash.purge', { sessionId: s.id })
-      expect(store.trashedSession(s.id)).toBeNull()
+      expect(store.trash.trashedSession(s.id)).toBeNull()
     } finally {
       renameSync(moved, repo)
     }
@@ -4637,7 +4637,7 @@ describe('worktree sessions', () => {
     await wtRpc('agents.deleteSession', { sessionId: s.id, deleteWorktree: true })
     rmSync(s.worktree!.path, { recursive: true, force: true })
     await wtRpc('trash.purge', { sessionId: s.id })
-    expect(store.trashedSession(s.id)).toBeNull()
+    expect(store.trash.trashedSession(s.id)).toBeNull()
   })
 
   it('a restored worktree session finds its worktree, and the uncommitted work in it, where it was', async () => {

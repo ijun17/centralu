@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import type { ProjectInfo, SessionInfo, StoredMessage, ToolDefaults } from '@cc/protocol'
+import type { SessionInfo, StoredMessage } from '@cc/protocol'
 import { AppRunRecords, type AppRunRecord } from './store/app-runs.js'
 import { ChildOwnershipRecords, type QueuedRequest } from './store/child-ownership.js'
 import { GridRecords } from './store/grid.js'
@@ -192,32 +192,10 @@ export class Store extends MigrationRunner {
    * pull requests still call them on `Store` (#428), and they go once those land. New code names the module.
    */
 
-  // ── ProjectRecords (store/projects.ts) ──
-
-  listProjects(): Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels'>[] {
-    return this.projects.listProjects()
-  }
-
-  worktreeSetup(projectId: string): { command: string; copyFiles: string[] } | null {
-    return this.projects.worktreeSetup(projectId)
-  }
-
-  setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): void {
-    return this.projects.setWorktreeSetup(projectId, setup)
-  }
-
-  projectToolDefaults(projectId: string): Record<string, ToolDefaults> {
-    return this.projects.projectToolDefaults(projectId)
-  }
-
   // ── SessionRecords (store/sessions.ts) ──
 
   upsertSession(s: SessionInfo): void {
     return this.sessions.upsertSession(s)
-  }
-
-  sessionCwd(sessionId: string): string | null {
-    return this.sessions.sessionCwd(sessionId)
   }
 
   // ── MessageRecords (store/messages.ts) ──
@@ -242,12 +220,6 @@ export class Store extends MigrationRunner {
     return this.messages.nextSeq(sessionId)
   }
 
-  // ── TrashRecords (store/trash.ts) ──
-
-  trashedSession(sessionId: string): { session: SessionInfo; record: TrashRecord; deletedAt: number } | null {
-    return this.trash.trashedSession(sessionId)
-  }
-
   // ── SettingsRecords (store/settings.ts) ──
 
   appSetting(key: string): string | null {
@@ -255,10 +227,6 @@ export class Store extends MigrationRunner {
   }
 
   // ── PermissionRecords (store/permissions.ts) ──
-
-  getProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): ConsentRow | null {
-    return this.permissions.getProjectConsent(fromProjectId, toProjectId, kind)
-  }
 
   setProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): void {
     return this.permissions.setProjectConsent(fromProjectId, toProjectId, kind)

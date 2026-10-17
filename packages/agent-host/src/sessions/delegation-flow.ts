@@ -560,7 +560,7 @@ export class DelegationFlow {
     if (deep) return deep.replace(/^This/, 'this').replace(/\.$/, '')
     // A session with no project (the orchestrator's child, #853) has no repository to fork from (#994 review)
     if (!target.projectId) return 'it works outside any project, so there is nothing to fork it from; send to it once its turn ends, or start a new session'
-    const project = this.host.store.listProjects().find((p) => p.id === target.projectId)
+    const project = this.host.store.projects.listProjects().find((p) => p.id === target.projectId)
     if (!project) return 'its project is no longer registered'
     if (project.trusted !== true && !this.host.autoBoundaryOpen(callerId)) return "its project is not trusted (the person can trust it from the project menu)"
     return null

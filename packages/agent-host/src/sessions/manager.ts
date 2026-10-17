@@ -4066,12 +4066,12 @@ export class SessionManager {
   }
 
   /** A registered project's row, read now (trust and paths change under a running host) */
-  private projectRow(projectId: string | null | undefined): ReturnType<Store['listProjects']>[number] | undefined {
+  private projectRow(projectId: string | null | undefined): ReturnType<Store['projects']['listProjects']>[number] | undefined {
     return projectId ? this.store.projects.listProjects().find((p) => p.id === projectId) : undefined
   }
 
   /** A registered project's row, or `Project not found` */
-  private requireProject(projectId: string): ReturnType<Store['listProjects']>[number] {
+  private requireProject(projectId: string): ReturnType<Store['projects']['listProjects']>[number] {
     const p = this.projectRow(projectId)
     if (!p) throw rpcError(`Project not found: ${projectId}`)
     return p
