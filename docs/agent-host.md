@@ -1453,7 +1453,7 @@ Not decided by the window, each in its own place:
 | What the shell does once opened: install or keep, pinned or not, verify, copy, and the reasons it refuses | `shell::prepare`, `shell::install::plan`, `shell::start::start` in the window; the shell crate ([plans/thin-shell.md](plans/thin-shell.md) §10.1, §10.2) |
 | A keeper started directly handing itself over (§4.4): to the `centralu-keeper` the window names (since #444). An executable of any other name (a window from before #440 names its own) is refused and the keeper stays on its build (#461) | `server::switch`, `server::upgrade`, `handoff::give` |
 | A keeper from verified content handing itself over: verifies and copies the new content, then hands over to `<data>/content/<new>/centralu-keeper` | `server::content_route` (§4.4) |
-| `centralu serve` on a remote: the npm launcher runs the bundled host on the system Node; no window, no keeper | `packaging/npm/centralu/bin/serve.mjs` (§4.7) |
+| `centralu serve` on a remote: the npm launcher runs the bundled host on the system Node; no window, no keeper | `packaging/npm/centralu/bin/serve.mjs` and the `serve-*.mjs` modules beside it, one concern each (§4.7) |
 | `pnpm dev` and e2e: `pnpm host` runs the source host; no window, no keeper | `CONTRIBUTING.md` |
 
 ### 4.1 Who holds the host: the keeper (#280, option C step 1)

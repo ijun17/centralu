@@ -1002,7 +1002,7 @@ app relaunches  → "Apply now" (#352): the app announces it first, so with eith
 | 열린 셸이 하는 일: 설치할지 둘지, 고정됐는지, 검증, 복사, 거절 이유 | 창의 `shell::prepare`, `shell::install::plan`, `shell::start::start`, 그리고 셸 크레이트([plans/thin-shell.md](plans/thin-shell.md) §10.1, §10.2) |
 | 직접 띄운 키퍼의 넘겨주기(§4.4): 창이 지정한 `centralu-keeper`로(#444부터). 다른 이름의 실행 파일(#440 이전의 창은 제 실행 파일을 지정한다)은 거절되고 키퍼는 제 빌드에 남는다(#461) | `server::switch`, `server::upgrade`, `handoff::give` |
 | 검증된 콘텐츠에서 뜬 키퍼의 넘겨주기: 새 콘텐츠를 검증하고 복사한 뒤 `<data>/content/<new>/centralu-keeper`로 넘겨준다 | `server::content_route`(§4.4) |
-| 원격의 `centralu serve`: npm 런처가 시스템 Node로 번들된 호스트를 돌린다. 창도 키퍼도 없다 | `packaging/npm/centralu/bin/serve.mjs`(§4.7) |
+| 원격의 `centralu serve`: npm 런처가 시스템 Node로 번들된 호스트를 돌린다. 창도 키퍼도 없다 | `packaging/npm/centralu/bin/serve.mjs`와 그 옆에서 관심사 하나씩을 맡는 `serve-*.mjs` 모듈들(§4.7) |
 | `pnpm dev`와 e2e: `pnpm host`가 소스 호스트를 돌린다. 창도 키퍼도 없다 | `CONTRIBUTING.md` |
 
 ### 4.1 호스트를 쥐는 쪽: 키퍼 (#280, 옵션 C 1단계)

@@ -309,7 +309,7 @@ or `CC_DATA_DIR`):
 <data>/remote/
   node/v24.21.0/                      the pinned Node, pruned (§10.2); shared by every version that pins it
   versions/0.1.0-beta.13/
-    node_modules/centralu/            the npm shim package: bin/centralu.mjs, serve.mjs, platform.mjs
+    node_modules/centralu/            the npm shim package: bin/centralu.mjs, serve.mjs (and serve-*.mjs), platform.mjs
     node_modules/@centralu/host-linux-x64/host/   the bundled host, the host-only package (step 5);
                                       versions published before it: @centralu/linux-x64/host/
                                       (Windows: …/win32-x64/Centralu/resources/host/)

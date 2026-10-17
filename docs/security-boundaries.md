@@ -858,7 +858,7 @@ A host started with `centralu serve` on another machine is reached by the app th
   (a machine rolled back to such a build) is a refusal: the hub reads the line again rather than retrying.
 - **The same on the linked machine.** `serve --connection`, `serve` and `serve --stop` ask the host on the recorded
   port with the token, and another account there can hold that port while the host is down. When the installed
-  build proves, they send `prove` first and the hello only to a host that proved it (`helloSocket` in `serve.mjs`).
+  build proves, they send `prove` first and the hello only to a host that proved it (`helloSocket` in `serve-host.mjs`, beside `serve.mjs`).
   Something on the port that does not prove is not this folder's host unless the folder's `host.lock` names a live
   process that started when the lock says (`ps -o lstart`, `lockHolderIsAlive`): a host from before #838 still running
   after an update, which then counts as running and is stopped by its pid. A lock a dead host left, whose pid another
