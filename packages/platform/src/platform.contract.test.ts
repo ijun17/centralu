@@ -323,6 +323,63 @@ describe.each([
   })
 
   /*
+   * An agent's image is a row of its own between the text around it (#868). The host left the text row open across it
+   * and wrote the image's row only once its file was saved, so text, image, text was stored as one text row above the
+   * image, while the live screen drew three. The image here names a path and carries no bytes: nothing is written to
+   * an attachments folder.
+   */
+  it('text, an image, then text are three rows in that order', async () => {
+    const p = await h.platform.projects.add(tmpdir())
+    const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
+    events.length = 0
+    h.agentSays([
+      { type: 'state_change', sessionId: s.id, state: 'working' },
+      { type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'Here is the chart: ' },
+      { type: 'message_image', sessionId: s.id, mime: 'image/png', data: '', path: '/tmp/chart.png' },
+      { type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'and that is all.' },
+      { type: 'turn_complete', sessionId: s.id },
+    ])
+    await waitFor(() => events.some((e) => e.type === 'turn_complete' && e.sessionId === s.id))
+    const rows = (await h.platform.agents.loadMessages(s.id)).map((m) => {
+      const payload = m.payload as { text?: string; path?: string }
+      return [m.seq, m.kind, payload.text ?? payload.path]
+    })
+    expect(rows).toEqual([
+      [1, 'text', 'Here is the chart: '],
+      [2, 'image', '/tmp/chart.png'],
+      [3, 'text', 'and that is all.'],
+    ])
+  })
+
+  // The same order when the image carries its bytes and the host writes them to a file (each test file has its own data folder)
+  it('text, an image with its bytes, then text are three rows in that order, and the image row ends up with its picture', async () => {
+    const p = await h.platform.projects.add(tmpdir())
+    const s = await h.platform.agents.createSession({ projectId: p.id, cwd: p.path, tool: 'claude', permissionPreset: 'normal' })
+    events.length = 0
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+    h.agentSays([
+      { type: 'state_change', sessionId: s.id, state: 'working' },
+      { type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'Before. ' },
+      { type: 'message_image', sessionId: s.id, mime: 'image/png', data: png },
+      { type: 'message_delta', sessionId: s.id, role: 'assistant', text: 'After.' },
+      { type: 'turn_complete', sessionId: s.id },
+    ])
+    await waitFor(() => events.some((e) => e.type === 'turn_complete' && e.sessionId === s.id))
+    // The host writes the file after the row is taken: the row points at it once it is written
+    await waitFor(async () => {
+      const image = (await h.platform.agents.loadMessages(s.id)).find((m) => m.kind === 'image')
+      const payload = image?.payload as { path?: string; data?: string } | undefined
+      return !!(payload?.path || payload?.data)
+    })
+    const rows = (await h.platform.agents.loadMessages(s.id)).map((m) => [m.seq, m.kind, (m.payload as { text?: string }).text])
+    expect(rows).toEqual([
+      [1, 'text', 'Before. '],
+      [2, 'image', undefined],
+      [3, 'text', 'After.'],
+    ])
+  })
+
+  /*
    * The trash (#204): deleting moves a session there with its conversation, and the ways out answer alike in both
    * implementations — the e2e scenarios drive the mock, so a mock that deleted for real would pass them all.
    */

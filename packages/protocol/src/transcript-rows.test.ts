@@ -26,6 +26,8 @@ describe('transcript rows', () => {
     expect(endsStreamRow(error)).toBe(true)
     expect(endsStreamRow({ type: 'state_change', sessionId: 's', state: 'working' })).toBe(false)
     expect(endsStreamRow({ type: 'turn_complete', sessionId: 's' })).toBe(true)
+    // An agent's image is a row of its own between the text around it (#868)
+    expect(endsStreamRow({ type: 'message_image', sessionId: 's', mime: 'image/png', data: '' })).toBe(true)
   })
 
   it('a subagent step keeps its kind and role, and a chunk with no text is dropped (#222)', () => {
