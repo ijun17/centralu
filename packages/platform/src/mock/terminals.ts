@@ -1,3 +1,4 @@
+import { deliver } from '../deliver.js'
 import type { TerminalPort } from '../ports/index.js'
 import type { MockClock } from './clock.js'
 import type { ProjectStore } from './project-store.js'
@@ -23,7 +24,7 @@ export class TerminalsMock {
     for (const [, list] of this.terminalState.byCwd) {
       for (const t of list) if (t.id === terminalId) t.history += data
     }
-    for (const h of this.termHandlers) h({ terminalId, data })
+    deliver(this.termHandlers, { terminalId, data })
   }
 
   /** For tests: the shell has died — an exit that is not a command run (runId) rides the same lane */
@@ -31,7 +32,7 @@ export class TerminalsMock {
     for (const [, list] of this.terminalState.byCwd) {
       for (const t of list) if (t.id === terminalId) t.alive = false
     }
-    for (const h of this.termExitHandlers) h({ terminalId, exitCode })
+    deliver(this.termExitHandlers, { terminalId, exitCode })
   }
 
   private cwdOf(projectId: string): string {

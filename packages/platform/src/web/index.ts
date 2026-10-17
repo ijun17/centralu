@@ -1,4 +1,4 @@
-import { frameDragEndInPage } from '../engine.js'
+import { defaultCapabilities } from '../capabilities.js'
 import type {
   Attachment,
   ApprovalDecision,
@@ -19,6 +19,7 @@ import type {
   ConnectionState,
   MachineRef,
   Platform,
+  PlatformCapabilities,
   ProjectPort,
   SystemPort,
   Unsubscribe,
@@ -50,8 +51,11 @@ export type WebPlatformOptions = {
     trash(absPath: string): Promise<void>
     reveal(absPath: string): Promise<void>
   }
-  /** Answered by the shell, for the same reason as the keyboard labels — a browser has no file manager to ask */
-  fileManagerName?: string
+  /**
+   * What the desktop shell answered about the machine (the keyboard, the window controls, the file manager), over the
+   * defaults a browser keeps — so the Tauri build hands over one capability object instead of building a second one
+   */
+  capabilities?: Partial<PlatformCapabilities>
 }
 
 /**
@@ -283,11 +287,46 @@ class WebProjectPort implements ProjectPort {
   }
 }
 
-/** The web fallback — since the capability is false, the UI hides the feature on its own */
+/** Whether this page has asked for notification permission: a page asks once (#1010 review) */
+let askedNotifications = false
+
+/**
+ * Why a notification cannot be shown, or null when it can. A notice comes from a host event, not a click, so the
+ * permission is asked only while it is undecided and only once a page: Safari and Firefox refuse a request outside a
+ * gesture, and Chrome blocks a page that keeps asking. An undecided answer is not reported as blocked.
+ */
+async function notificationRefusal(): Promise<string | null> {
+  if (typeof Notification === 'undefined') return 'This browser has no notifications — use the desktop app'
+  if (Notification.permission === 'default' && !askedNotifications) {
+    askedNotifications = true
+    await Promise.resolve(Notification.requestPermission()).catch(() => 'default')
+  }
+  if (Notification.permission === 'granted') return null
+  return Notification.permission === 'denied'
+    ? "Notifications are blocked for this page — allow them in the browser's site settings"
+    : "Notifications are not allowed for this page yet — allow them in the browser's site settings"
+}
+
+/**
+ * The browser's system port (the dev build). What a browser cannot do is refused with the reason and where to go
+ * instead, never resolved as if it had happened (#972 item 5): the UI shows every one of these failures as a toast.
+ */
 class WebSystemPort implements SystemPort {
+  private warned = false
+
+  /**
+   * A browser notification, after asking for permission the first time. Like the desktop's, a notification that cannot
+   * be shown says so once rather than on every notice.
+   */
   async notify(title: string, body: string) {
-    if (typeof Notification === 'undefined') return
-    if (Notification.permission === 'granted') new Notification(title, { body })
+    const reason = await notificationRefusal()
+    if (reason === null) {
+      new Notification(title, { body })
+      return
+    }
+    if (this.warned) return
+    this.warned = true
+    throw new Error(reason)
   }
   async alert(_kind: AlertKind, sound: boolean) {
     // A browser has no dock. Sound can be played, but it is routinely blocked by autoplay
@@ -314,11 +353,17 @@ class WebSystemPort implements SystemPort {
     return window.prompt(`${opts.title} — enter the full path (${opts.extensions.map((e) => `.${e}`).join(', ')})`, '')
   }
   async openInIde(_path: string, _line?: number) {
-    /* Only on Tauri (the UI disables this via capability) */
+    throw new Error('A browser cannot open an IDE — use the desktop app')
   }
+  /**
+   * In a browser this is simply opening it outside — a new tab, so it never touches this app's own work. With the
+   * `noopener` feature `window.open` answers null even when the tab opened, which would hide a blocked pop-up; so the
+   * tab is opened plainly and cut off from this page right after.
+   */
   async openUrl(url: string) {
-    // In a browser this is simply opening it outside — a new tab, so it never touches this app's own work
-    window.open(url, '_blank', 'noopener,noreferrer')
+    const tab = window.open(url, '_blank')
+    if (!tab) throw new Error('The browser blocked the new tab — allow pop-ups for this page')
+    tab.opener = null
   }
   onAppLink(_cb: (link: string) => void): () => void {
     // A browser has no OS handing links to this app (M4 E-4) — those only arrive on desktop
@@ -632,28 +677,8 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       answerApply: (a) => rpc.call('updates.answerApply', a),
       reportApply: async (r) => void (await rpc.call('updates.reportApply', r)),
     },
-    capabilities: {
-      osNotifications: typeof Notification !== 'undefined',
-      dockBadge: false,
-      globalShortcuts: false,
-      processSupervision: false,
-      openInIde: false,
-      // The browser draws no window controls over our page.
-      windowControlsInset: 0,
-      /*
-        A page could sniff the keyboard from the user agent, and deliberately does not.
-        This build is the dev server and the contract-test harness, both of which run on a
-        Mac, and a capability that answers differently depending on the machine running the
-        suite is one the contract test cannot pin. The shipped desktop app asks Rust
-        (`packages/platform/src/tauri/index.ts`), which is the answer that has to be right.
-      */
-      shortcutKeys: { mod: '⌘', alt: '⌥', join: '' },
-      // Same reason as the keyboard above: the page does not guess. The desktop build
-      // passes the shell's answer in; the browser gets the phrase that is true anywhere.
-      fileManagerName: opts.fileManagerName ?? 'file manager',
-      // Unlike the keyboard, the engine is the page's own: the dev browser is whichever one runs it
-      frameDragEndInPage: frameDragEndInPage(),
-    },
+    // The page does not guess the machine: the desktop build passes the shell's answers in (`defaultCapabilities`)
+    capabilities: defaultCapabilities(opts.capabilities),
     async dispose() {
       unsubscribeEndpoint?.()
       rpc.close()

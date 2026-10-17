@@ -1,4 +1,4 @@
-import { frameDragEndInPage } from '../engine.js'
+import { ANY_FILE_MANAGER, MAC_SHORTCUT_KEYS, badgeCount } from '../capabilities.js'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification'
@@ -220,7 +220,11 @@ export async function hostBuild(): Promise<ShellHostBuild> {
  * @returns a promise of the unsubscribe, settled once the listener is registered
  */
 function listenHostBuild(cb: (b: ShellHostBuild) => void): Promise<() => void> {
-  return listen<ShellHostBuild>('host-build', (e) => cb(e.payload))
+  // Read as `listenHostStatus` reads its report (#972 item 7): anything that is not an object with a mode is dropped
+  return listen<unknown>('host-build', (e) => {
+    const p = e.payload
+    if (typeof p === 'object' && p !== null && typeof (p as { mode?: unknown }).mode === 'string') cb(p as ShellHostBuild)
+  })
 }
 
 /**
@@ -325,7 +329,7 @@ export class TauriSystemPort implements SystemPort {
   }
 
   async setBadge(count: number): Promise<void> {
-    await invoke('set_badge', { count: Math.max(0, Math.trunc(count)) }).catch(rethrowAsError)
+    await invoke('set_badge', { count: badgeCount(count) }).catch(rethrowAsError)
   }
 
   async openInIde(path: string, line?: number): Promise<void> {
@@ -380,6 +384,12 @@ export class TauriSystemPort implements SystemPort {
    * with `take_app_links` (retrieving it clears it from the shell). Drains once as soon as
    * subscribed: if the app was launched by a link, a link that arrived before the webview came
    * up is already sitting in the queue.
+   *
+   * Taking clears the shell's queue, so a link taken for a listener that unsubscribed while the
+   * call was out is not dropped (#972 item 6): it goes to a listener still there, or is kept for
+   * the next one, as the shell would have. Kept for the window, not the port (#1010 review): a
+   * platform made again makes a new port, and a listener that joined while the call was out has
+   * already looked at what was kept.
    */
   onAppLink(cb: (link: string) => void): () => void {
     let alive = true
@@ -387,15 +397,31 @@ export class TauriSystemPort implements SystemPort {
       void invoke<string[]>('take_app_links')
         .then((links) => {
           if (alive) for (const l of links) cb(l)
+          else handOnAppLinks(links)
         })
         .catch(() => {})
+    appLinkListeners.add(cb)
+    for (const l of heldAppLinks.splice(0)) cb(l)
     const un = listen('app-link', drain)
     drain()
     return () => {
       alive = false
-      void un.then((f) => f())
+      appLinkListeners.delete(cb)
+      void un.then((f) => f()).catch(() => {})
     }
   }
+}
+
+/** The app-link listeners of this window, on any port */
+const appLinkListeners = new Set<(link: string) => void>()
+/** Links taken from the shell after their listener had gone and before another came */
+const heldAppLinks: string[] = []
+
+/** Links whose listener left while they were being taken: to a listener still here, or kept for the next one */
+function handOnAppLinks(links: string[]): void {
+  const listener = appLinkListeners.values().next().value
+  if (!listener) return void heldAppLinks.push(...links)
+  for (const l of links) listener(l)
 }
 
 /** Brings the window forward (a notification click, a global shortcut) */
@@ -496,13 +522,11 @@ async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => 
   // The fallback is the Mac spelling because a failure here can only mean the command is
   // missing from the handler list, which is a build-time mistake affecting every platform
   // equally — and every other implementation in this package answers the same way.
-  const shortcutKeys = await invoke<ShortcutKeys>('shortcut_keys').catch(
-    (): ShortcutKeys => ({ mod: '⌘', alt: '⌥', join: '' }),
-  )
+  const shortcutKeys = await invoke<ShortcutKeys>('shortcut_keys').catch((): ShortcutKeys => MAC_SHORTCUT_KEYS)
 
   // And the same again for what this desktop calls its file manager (#19), so the context
   // menu can say "Reveal in Finder" here without ui ever learning which OS it is on.
-  const fileManagerName = await invoke<string>('file_manager_name').catch(() => 'file manager')
+  const fileManagerName = await invoke<string>('file_manager_name').catch(() => ANY_FILE_MANAGER)
 
   // Background mode exists only when the keeper holds the host (#280). A failure to ask is read
   // as "no keeper": the setting then stays hidden instead of offering a switch that cannot work.
@@ -516,7 +540,8 @@ async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => 
   const base = createWebPlatform({
     hostUrl: `ws://127.0.0.1:${port}`,
     token,
-    fileManagerName,
+    // WKWebView or WebKitGTK answers false for frameDragEndInPage, WebView2 true: the webview answers for itself
+    capabilities: { windowControlsInset, shortcutKeys, fileManagerName },
     /*
       The trash and "reveal in file manager" are the two things the host cannot do (#18/#19).
       A real trash is macOS's `NSFileManager trashItem` or the freedesktop spec, not an unlink
@@ -544,18 +569,6 @@ async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => 
         }
       : {}),
     system: new TauriSystemPort(),
-    capabilities: {
-      osNotifications: true,
-      dockBadge: true,
-      globalShortcuts: true,
-      processSupervision: true,
-      openInIde: true,
-      windowControlsInset,
-      shortcutKeys,
-      fileManagerName,
-      // WKWebView or WebKitGTK answers false, WebView2 true: the webview answers for itself
-      frameDragEndInPage: frameDragEndInPage(),
-    },
   }
 }
 
