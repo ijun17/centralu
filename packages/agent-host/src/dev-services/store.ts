@@ -335,6 +335,10 @@ export class Store extends MigrationRunner {
     return this.messages.loadMessagesFrom(sessionId, afterSeq, limit, opts)
   }
 
+  lastContextCut(sessionId: string): number | null {
+    return this.messages.lastContextCut(sessionId)
+  }
+
   upsertMessageNoIndex(m: StoredMessage): void {
     return this.messages.upsertMessageNoIndex(m)
   }

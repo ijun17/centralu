@@ -26,5 +26,14 @@ export const CI = {
   pollMs: Number(process.env.PROJECT_BOARD_CI_POLL_MS) || Number(config.ci?.pollSeconds ?? 30) * 1000,
 }
 
+// The merge queue's batches (#962, batch.mjs): off unless project.json has `queue.batch`. `min` items
+// waiting for CI that has not started make a batch (at least 2), `max` at most (default 6).
+// PROJECT_BOARD_QUEUE_BATCH_MIN: for the tests only, which queue several pull requests one call at a time
+const batch = config.queue?.batch
+const batchMin = Number(process.env.PROJECT_BOARD_QUEUE_BATCH_MIN) || Number(batch?.min ?? 2) || 2
+export const QUEUE = {
+  batch: batch && batch.enabled !== false ? { min: Math.max(2, batchMin), max: Math.max(2, batchMin, Number(batch.max ?? 6) || 6) } : null,
+}
+
 // The checkout rebase_stack works from by default: the one this app is committed in
 export const APP_DIR = fileURLToPath(new URL('.', import.meta.url))

@@ -843,12 +843,13 @@ function SessionToolsSwitch() {
       <SettingToggle
         checked={on}
         onChange={(next) => setPrefs({ sessionTools: next })}
-        label="Let sessions look at their own project"
+        label="Let sessions look at other sessions"
         testId="settings-session-tools"
         hint={
           <>
-            Every session can read the other sessions in its project, search that project&apos;s past
-            conversations, and read Centralu&apos;s guide. With your consent it can also ask another
+            Every session can read other sessions and search their past conversations: from a trusted
+            project, any project&apos;s and linked machines&apos; (not the orchestrator&apos;s or an app&apos;s);
+            from an untrusted one, its own project&apos;s. It can also read Centralu&apos;s guide. With your consent it can also ask another
             project to do a task and attach apps other projects share. It can start agents in its own project under its own permission preset. Auto opens these boundaries without asking. Turning this off stops those tools at once,
             apps it attached included; turning it on reaches a session the next time it starts.
           </>

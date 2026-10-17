@@ -11,11 +11,20 @@ export function trustedJsonText(value: string): string {
   return JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
 }
 
-export async function listSessionsText(tools: OrchestratorTools, caller: ToolCaller): Promise<ToolOutput> {
-  const list = await tools.listSessions()
-  if (list.length === 0) {
-    return { text: caller.profile === 'reader' ? 'There are no other sessions in this project.' : 'There are no sessions under management.' }
+/**
+ * How many rows a reader's list shows (#984): its view spans every project and linked machine, and the list rides in
+ * its context. The rest are counted, with the way to narrow.
+ */
+export const READER_LIST_CAP = 40
+
+export async function listSessionsText(tools: OrchestratorTools, caller: ToolCaller, project?: string): Promise<ToolOutput> {
+  const all = await tools.listSessions(project ? { project } : undefined)
+  if (all.length === 0) {
+    if (project) return { text: `No session in a project called ${frameField(project)}. Leave project out to list every one.` }
+    return { text: caller.profile === 'reader' ? 'There are no other sessions.' : 'There are no sessions under management.' }
   }
+  const list = caller.profile === 'reader' ? all.slice(0, READER_LIST_CAP) : all
+  const more = all.length - list.length
   return {
     text: list
       .map(
@@ -33,7 +42,7 @@ export async function listSessionsText(tools: OrchestratorTools, caller: ToolCal
           (s.lastActive ? ` · last ${s.lastActive}` : '') +
           (s.preview ? `\n    recent (JSON): ${trustedJsonText(s.preview)}` : ''),
       )
-      .join('\n'),
+      .join('\n') + (more > 0 ? `\n${more} more; pass project to narrow.` : ''),
   }
 }
 

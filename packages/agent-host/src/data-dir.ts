@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, lstatSync, mkdirSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { DATA_DIR } from '@cc/protocol'
+import { DATA_DIR, DATA_DIR_DEV, DATA_DIR_LEGACY } from '@cc/protocol'
 import { HOST_PLATFORM, modesGuardFiles, type Platform } from './os.js'
 import { canonicalPath } from './dev-services/path-guard.js'
 
@@ -53,6 +53,29 @@ export function migrateLegacyDataDir(from: string, to: string): boolean {
  */
 export function dataRoot(): string {
   return process.env.CC_DATA_DIR || join(homedir(), DATA_DIR)
+}
+
+/**
+ * Which folder this host keeps its data in (#973), and which legacy folder (if any) is moved into it first.
+ *
+ * One rule: `CC_DATA_DIR` when it is set, else `~/.centralu` (`~/.centralu-dev` when `CC_DEV=1`). The legacy folder
+ * is moved only into the default folder: a folder the person or a test chose is theirs, and moving the real
+ * `~/.control-center` into a temporary folder would take the conversations out of the home folder. (legacy-name)
+ *
+ * Before this the host built the folder from the home folder alone and overwrote `CC_DATA_DIR` with it, so
+ * `CC_DATA_DIR=/tmp/x pnpm host` opened the real `~/.centralu/store.db`.
+ */
+export function chooseDataDir(
+  env: { CC_DATA_DIR?: string; CC_DEV?: string } = process.env,
+  home: string = homedir(),
+): { dir: string; legacy: string | null } {
+  if (env.CC_DATA_DIR) return { dir: env.CC_DATA_DIR, legacy: null }
+  // Packaged when run from the bundled output, dev when run from source (the supervisor tells this)
+  const isDev = env.CC_DEV === '1'
+  return {
+    dir: join(home, isDev ? DATA_DIR_DEV : DATA_DIR),
+    legacy: join(home, isDev ? DATA_DIR_LEGACY.dev : DATA_DIR_LEGACY.prod),
+  }
 }
 
 /** The files directly in the data folder that hold conversations, tokens or their traces: the store and the host's logs */

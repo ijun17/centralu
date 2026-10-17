@@ -34,7 +34,7 @@ describe('toolProfileFor — which bundle a session gets (#69, #320)', () => {
     expect(toolProfileFor(facts())).toBe('reader')
   })
 
-  it('an ordinary session gets nothing once "Let sessions look at their own project" is off', () => {
+  it('an ordinary session gets nothing once "Let sessions look at other sessions" is off', () => {
     expect(toolProfileFor(facts({ sessionTools: false }))).toBeNull()
   })
 

@@ -30,9 +30,10 @@ export default defineConfig({
      *
      * The setup file gives each test file a temporary folder of its own: a shared one let one
      * file's managers sweep away what another file had just written there (#368). It also points
-     * `CLAUDE_CONFIG_DIR` away from the person's `~/.claude` (#382).
+     * `CLAUDE_CONFIG_DIR` away from the person's `~/.claude` (#382). The second names a test that holds
+     * its worker's event loop long enough to fail the run with vitest's "Timeout calling onTaskUpdate" (#368).
      */
-    setupFiles: [r('./tooling/vitest-data-dir.ts')],
+    setupFiles: [r('./tooling/vitest-data-dir.ts'), r('./tooling/vitest-stall-setup.ts')],
     /*
      * A test that points CC_DATA_DIR (or anything else) somewhere for itself does so with `vi.stubEnv`, and every stub
      * is undone before the next test. Tests used to assign and restore it by hand: one deleted it after each test, which
