@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, type AppCaller, type AppRef, type BrokerHost, type CapabilityQuestion, type RuntimeTiming } from './runtime.js'
 import { PROJECT_APPS, fakeBrokerHost, memoryLedger, plantApp, until } from './test-helpers.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * Runaway prevention (M4 D-5) — the broker counts calls so a cycle of apps cannot spend the
@@ -69,7 +69,7 @@ const call = async (first: string, body: Record<string, unknown>) => {
 }
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-broker-limits-')))
+  root = tempRoot('cc-broker-limits-')
   mkdirSync(join(root, 'p1'))
   mkdirSync(join(root, 'data'))
   ledger = memoryLedger()
@@ -78,7 +78,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await rt.dispose()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 describe('chains', () => {

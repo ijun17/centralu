@@ -1,11 +1,11 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, type AppCaller, type AppRef, type CapabilityQuestion, type RuntimeTiming } from './runtime.js'
 import { MANIFEST_FILE } from './manifest.js'
 import { PROJECT_APPS, fakeBrokerHost, memoryLedger, plantApp, until } from './test-helpers.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * Capability approval (M4 D-4) — the person is asked once, the **first** time an app uses a
@@ -65,7 +65,7 @@ const make = (timing: Partial<RuntimeTiming> = {}) => {
 }
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-capabilities-')))
+  root = tempRoot('cc-capabilities-')
   mkdirSync(join(root, 'p1'))
   mkdirSync(join(root, 'data'))
   asked = []
@@ -74,7 +74,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await rt.dispose()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 describe('asks once on first use, and remembers the answer', () => {

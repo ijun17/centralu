@@ -1,12 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps } from './runtime.js'
 import { PROJECT_APPS, plantApp, until } from './test-helpers.js'
 import { alive } from '../../process.test-helpers.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * An app still starting when it is stopped (#839, items 14 and 15). The process is spawned at once and counts as
@@ -32,7 +31,7 @@ const spawned = (): number[] => {
 const ref = { projectId: 'p1', appId: 'notes' }
 
 beforeEach(() => {
-  fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-apps-starting-')))
+  fixture = tempRoot('cc-apps-starting-')
   projRoot = join(fixture, 'proj')
   appLogs = join(fixture, 'logs')
   for (const d of [join(fixture, 'data'), projRoot, appLogs]) mkdirSync(d)
@@ -66,7 +65,7 @@ afterEach(async () => {
   await rt?.dispose()
   for (const pid of [...spawned(), ...pids]) if (alive(pid)) process.kill(pid, 'SIGKILL')
   pids.length = 0
-  await rm(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
+  await removeTree(fixture)
 })
 
 describe('an app still starting (#839)', () => {

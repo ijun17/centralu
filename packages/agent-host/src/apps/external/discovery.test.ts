@@ -1,11 +1,11 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps } from './runtime.js'
 import { MANIFEST_FILE } from './manifest.js'
 import { PROJECT_APPS, plantApp } from './test-helpers.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * Discovery and trust (M4 A-2).
@@ -25,7 +25,7 @@ let rt: ExternalApps
 const byId = (id: string) => rt.list().find((a) => a.appId === id)
 
 beforeEach(() => {
-  fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-apps-disc-')))
+  fixture = tempRoot('cc-apps-disc-')
   dataRoot = join(fixture, 'data')
   projRoot = join(fixture, 'proj')
   mkdirSync(dataRoot)
@@ -34,9 +34,9 @@ beforeEach(() => {
   rt = new ExternalApps({ projects: () => projects, dataRoot, reservedIds: ['control'], watchFlushMs: 40 })
 })
 
-afterEach(() => {
+afterEach(async () => {
   rt.dispose()
-  rmSync(fixture, { recursive: true, force: true })
+  await removeTree(fixture)
 })
 
 describe('discovery', () => {

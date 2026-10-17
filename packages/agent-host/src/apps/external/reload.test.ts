@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, resultText, type AppRef, type RuntimeTiming } from './runtime.js'
 import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { until } from './test-helpers.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * Reflecting changes (M4 C-4) — when the app folder changes, this restarts once, **when the building
@@ -27,7 +27,7 @@ const ref: AppRef = { projectId: 'p1', appId: ID }
 const SESSION = { kind: 'session' as const, sessionId: 's1' }
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-app-reload-')))
+  root = tempRoot('cc-app-reload-')
   dataRoot = join(root, 'data')
   projRoot = join(root, 'proj')
   mkdirSync(dataRoot)
@@ -37,7 +37,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await rt?.dispose()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 function make(opts: { builder?: boolean; timing?: Partial<RuntimeTiming> } = {}) {

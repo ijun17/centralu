@@ -1,12 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps } from './runtime.js'
 import { PROJECT_APPS, plantApp, until } from './test-helpers.js'
 import { alive } from '../../process.test-helpers.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * An app an `auto` session started in an untrusted project (#839, item 4). `auto` opens the trust boundary for its own
@@ -31,7 +30,7 @@ const starts = (id: string): { pid: number }[] => {
 const ref = { projectId: 'p1', appId: 'notes' }
 
 beforeEach(() => {
-  fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-apps-trust-')))
+  fixture = tempRoot('cc-apps-trust-')
   projRoot = join(fixture, 'proj')
   appLogs = join(fixture, 'fixture-logs')
   for (const d of [join(fixture, 'data'), projRoot, appLogs]) mkdirSync(d)
@@ -52,7 +51,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await rt?.dispose()
-  await rm(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
+  await removeTree(fixture)
 })
 
 describe('an app auto started in a project never trusted (#839)', () => {

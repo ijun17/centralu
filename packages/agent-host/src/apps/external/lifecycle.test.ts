@@ -1,6 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
-import { rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -9,6 +7,7 @@ import { SECRETS_FILE } from './secrets.js'
 import { PROJECT_APPS, plantApp, until } from './test-helpers.js'
 import { alive } from '../../process.test-helpers.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * An app process's lifecycle (M4 A-3) — exercised **with a real child process.**
@@ -63,7 +62,7 @@ const make = (timing: Partial<RuntimeTiming> = {}, env?: NodeJS.ProcessEnv) => {
 }
 
 beforeEach(() => {
-  fixture = realpathSync(mkdtempSync(join(tmpdir(), 'cc-apps-life-')))
+  fixture = tempRoot('cc-apps-life-')
   dataRoot = join(fixture, 'data')
   projRoot = join(fixture, 'proj')
   appLogs = join(fixture, 'fixture-logs')
@@ -81,7 +80,7 @@ beforeEach(() => {
  */
 afterEach(async () => {
   await rt?.dispose()
-  await rm(fixture, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })
+  await removeTree(fixture)
 })
 
 describe('starts only the first time it is needed', () => {

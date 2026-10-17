@@ -1,8 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import type { Socket } from 'node:net'
-import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Client } from '@modelcontextprotocol/client'
@@ -13,6 +12,7 @@ import { ExternalApps, resultText, type AgentRunRequest, type AppRef, type Broke
 import { appTemplateDir, scaffoldApp } from './scaffold.js'
 import { StreamTransport } from './stream-transport.js'
 import { fakeBrokerHost, until } from './test-helpers.js'
+import { removeTree, tempRoot } from '../../temp-dir.test-helpers.js'
 
 /**
  * The app template and its runtime (M4 C-1) — exercised by starting a template-scaffolded app with a
@@ -32,7 +32,7 @@ let projRoot = ''
 let rt: ExternalApps | null = null
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-app-template-')))
+  root = tempRoot('cc-app-template-')
   dataRoot = join(root, 'data')
   projRoot = join(root, 'proj')
   mkdirSync(dataRoot)
@@ -42,7 +42,7 @@ beforeEach(() => {
 afterEach(async () => {
   await rt?.dispose()
   rt = null
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 /** Expands the template into a project app's location — the same function creation (C-1b) uses */
