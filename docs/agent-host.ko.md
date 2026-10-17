@@ -879,7 +879,10 @@ interface AdapterCapabilities {
   물리는 오류 하나 안에 그 메시지를 적는다.
   열린 카드는 `PendingCards`에 둔다: 카드가 닫히는 모든 길(답, CLI의 철회, 턴 정지, 핸들 닫힘)은 `take`나
   `release`를 거치고, 이 둘은 카드를 닫기 전에 먼저 빼며, 어댑터는 거기서 `approval_resolved` / `question_resolved`를
-  말한다. CLI에 닿지 않은 정지는 `couldNotStop`이다.
+  말한다. CLI에 닿지 않은 정지는 `couldNotStop`이고, 턴은 도구가 정지를 확인한 뒤에야 멈췄다고 말한다: Codex는
+  `turn/completed`, Claude는 SDK `interrupt()`의 답이나 멈춘 턴의 결과 중 먼저 온 것. Claude는 전에는 곧바로 말해서, 거절된 중단이 CLI가 계속 일하는
+  동안 턴을 멈춘 것으로 보였다. 거절되면 턴은 계속 돈다. `stopConfirmMs`(10초) 안에 답이 오지 않으면 그것도
+  `couldNotStop`으로 말하고, 그 뒤에 온 답은 여전히 턴을 멈춤으로 끝낸다.
 - **"항상 허용"은 답에 실린 매처를 더하고, 매처가 없으면 아무것도 더하지 않는다** (`always-allow.ts`, 두 어댑터 모두).
   매처는 UI가 계산해 보여 주고 매니저가 그대로 저장하므로, 살아 있는 규칙과 저장된 규칙과 화면이 일치한다. Claude는
   예전에 명령 글로 대신했다: 아무도 저장하거나 보여 주지 않은 규칙이라 다음 재시작에 사라졌다.
@@ -1482,7 +1485,7 @@ host.log에 그렇다는 줄 하나를 쓴다. 탐침은 여기에 꽂힌다.
 
 | 결정 | 이유 |
 |---|---|
-| 턴 도중 취소된 앱 요청은 세션을 중단하기 전에 기다림을 실패로 끝낸다 | Claude 어댑터는 중단되는 순간 턴을 끝내므로, 기다림이 취소를 "끝나기 전에 멈춤"으로 읽었다 |
+| 턴 도중 취소된 앱 요청은 세션을 중단하기 전에 기다림을 실패로 끝낸다 | Claude 어댑터는 CLI가 중단을 확인하는 즉시, 턴의 결과보다 먼저 턴을 끝내므로, 기다림이 취소를 "끝나기 전에 멈춤"으로 읽었다 |
 | 분류해서 보여 주고, 스스로 다시 보내지 않는다 | 다시 보낸 턴은 부작용(push, 댓글, 출시)을 되풀이할 수 있다. 이어 가는 일은 사람이나 요청한 세션이 보내는 메시지 하나이고, 두 쪽 모두 같은 문장이다: "Continue where you stopped. Check what already happened before repeating a step." 다시 연결될 때 자동으로 보내는 기능은 나중에 선택 사항으로 더할 수 있다 |
 | Codex의 `interrupted` 턴은 `turn_complete`가 아니라 Stop처럼(`state_change waiting_input`) 끝난다 | `turn_complete`는 "끝났다"는 뜻이어서 오케스트레이터는 일이 끝났다고 들었다. 이제 중단 뒤에 `turn_complete`가 오지 않으므로, 턴을 기다리는 쪽(`AgentRunWait`)은 중단에서 기다림을 끝낸다 |
 | Codex 어댑터는 자기가 보낸 중단과 Codex가 보낸 중단을 구별해 로그에 남긴다(`interruptsSent`, "interrupted by a stop from Centralu" / "by Codex"). 메모의 `turn/start`가 오가는 사이에 누른 Stop은 답이 알려 준 턴을 중단하고, 이것도 우리 것으로 센다(`takeInputTurn`) | 실제 사례에서는 사람의 Stop, 호스트, CLI 중 누가 보냈는지 알 수 없었다 |

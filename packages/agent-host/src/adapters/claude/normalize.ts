@@ -394,6 +394,11 @@ export class ClaudeStreamNormalizer {
     this.stopping = true
   }
 
+  /** The interrupt did not reach the CLI: the turn goes on, and however it ends is its own ending (see `stopping`). */
+  stopFailed(): void {
+    this.stopping = false
+  }
+
   /** Raises `retrying` once per episode and puts the previous activity back when output flows again (see `retry`). */
   private followRetry(type: string, events: NormalizedEvent[]): NormalizedEvent[] {
     const out = events.filter((e) => e.type !== 'activity' || this.retry.admit(e.activity))
