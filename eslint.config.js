@@ -29,7 +29,14 @@ export const PLATFORM_MODULES = [
   // TODO: move the launcher's own checks into platform.mjs once remote phase 3's launcher work has
   // landed (it is changing serve.mjs and centralu.mjs now); listed so that work is not blocked.
   'packaging/npm/centralu/bin/centralu.mjs',
-  'packaging/npm/centralu/bin/serve.mjs',
+  // serve.mjs and the modules it is split into
+  'packaging/npm/centralu/bin/serve-autostart.mjs',
+  'packaging/npm/centralu/bin/serve-detach.mjs',
+  'packaging/npm/centralu/bin/serve-files.mjs',
+  'packaging/npm/centralu/bin/serve-host.mjs',
+  'packaging/npm/centralu/bin/serve-install.mjs',
+  'packaging/npm/centralu/bin/serve-run.mjs',
+  'packaging/npm/centralu/bin/serve-windows.mjs',
   // TODO: remote phase 3 is changing the hub's links; revisit what platform checks they need then.
   'packages/agent-host/src/links/**',
 ]
