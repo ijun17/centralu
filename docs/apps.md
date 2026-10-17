@@ -382,7 +382,7 @@ A summary; the reasoning is in security-boundaries.md, "App views".
   hub is not told when it is removed there.
 - **CSP** comes from the resource's `_meta.ui.csp` (the standard's place) and is stricter than the
   standard's default: no network, no nested frames, no form submission, no `'self'` source, and
-  loopback addresses dropped even when declared. `_meta.ui.permissions` passes only what is declared
+  this machine's addresses (loopback, unspecified and link-local, `isThisMachineHost`) dropped even when declared. `_meta.ui.permissions` passes only what is declared
   (camera, microphone, geolocation, clipboard-write). Both are read from the resource's **contents**
   entry, which the template runtime's `uiResource` leaves without `_meta`; the project-board app adds
   it there (`viewResource` in its server.mjs) to declare GitHub's image hosts as `resourceDomains`,

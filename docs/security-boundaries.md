@@ -1393,8 +1393,9 @@ its own `<meta>`, never widen it. By default: `default-src 'none'`; inline scrip
 unless declared; `form-action 'none'`; `object-src 'none'`. `'self'` is not a source: under the
 opaque origin it would mean the host port. A declared entry must be `scheme://host[:port][/path]`
 with http(s) or ws(s) (a `*.` subdomain or a `:*` port is allowed). A bare `*`, bare schemes,
-keywords, anything containing a space, `;` or `,`, and loopback hosts (where the host's routes and
-other apps' ports live) are dropped, and the drop is logged. A declared host is parsed the way a
+keywords, anything containing a space, `;` or `,`, and hosts of this machine (loopback, unspecified and
+link-local, also with a trailing dot or inside a `::`-compatible or NAT64 IPv6 address: where the host's routes and other apps' ports live, and cloud metadata; the same check an
+import's download address goes through) are dropped, and the drop is logged. A declared host is parsed the way a
 browser parses a URL (WHATWG) before it is checked, and the policy carries that canonical form, so
 `127.1`, `2130706433` and `0x7f000001` are read as `127.0.0.1` and dropped (#407). This is
 hardening, not a closed hole: CSP host matching is literal, and Chromium and WebKit (Playwright)

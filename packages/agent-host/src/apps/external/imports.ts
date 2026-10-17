@@ -1,10 +1,10 @@
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs'
-import { isIP } from 'node:net'
 import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { wireJoin, wireSegments, type AppReview } from '@cc/protocol'
 import { removeDataQuietly } from '../../dev-services/data-folder.js'
 import { assertExistingPathSync, canonicalPath, isInside } from '../../dev-services/path-guard.js'
+import { isThisMachineHost } from '../../this-machine.js'
 import { proposedMcpServerNameError } from '../contract.js'
 import { APP_FOLDER_DEPTH, STOP, hiddenName, walkAppFolder } from './folder-walk.js'
 import { reviewKey } from './import-book.js'
@@ -116,14 +116,9 @@ export function classifySource(raw: string, isAbs: (path: string) => boolean = i
 function httpsProblem(url: URL): string | null {
   if (url.protocol !== 'https:') return `Only https links can be downloaded: ${url.href}`
   if (url.username || url.password) return 'Links with a user name or password in them are not accepted'
-  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
-  if (host === 'localhost' || host.endsWith('.localhost')) return `A link to this machine cannot be downloaded: ${url.href}`
-  if (isIP(host) === 4) {
-    const [a, b] = host.split('.').map(Number) as [number, number]
-    if (a === 127 || a === 0 || (a === 169 && b === 254)) return `A link to this machine or a link-local address cannot be downloaded: ${url.href}`
-  }
-  if (isIP(host) === 6 && (host === '::1' || host === '::' || /^fe[89ab]/.test(host) || host.startsWith('::ffff:'))) {
-    return `A link to this machine or a link-local address cannot be downloaded: ${url.href}`
+  if (isThisMachineHost(url.hostname)) {
+    const named = url.hostname === 'localhost' || url.hostname.endsWith('.localhost')
+    return named ? `A link to this machine cannot be downloaded: ${url.href}` : `A link to this machine or a link-local address cannot be downloaded: ${url.href}`
   }
   return null
 }
