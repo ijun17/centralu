@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync, spawnSync, type ChildProcess } from 'node:child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -21,7 +21,7 @@ import {
   type SshTunnelOptions,
 } from './tunnel.js'
 import { fakeExe, rmFakeDir } from '../fake-exe.test-helpers.js'
-import { SLOW } from '../../../../tooling/test-timing.js'
+import { SLOW, eventually } from '../../../../tooling/test-timing.js'
 import { alive as isAlive } from '../process.test-helpers.js'
 
 /**
@@ -293,9 +293,13 @@ describe('the ssh transport, against a fake ssh (#82)', () => {
     })
     const forwards = () => (logged() as string[][]).filter((a) => Array.isArray(a) && a.includes('-L')).length
     await reopen()
+    const first = (t as unknown as { child: ChildProcess }).child
     await reopen()
-    // Long enough for several rounds of the churn (each about 50 ms plus one ssh round trip)
-    await new Promise((r) => setTimeout(r, 1500))
+    /*
+     * The first forward's exit is where a down would be reported, by its own exit listener, so once it has exited
+     * there is nothing more to wait for (#845); a fixed sleep could end first on a loaded machine
+     */
+    await eventually(() => first.exitCode !== null || first.signalCode !== null)
     expect(downs).toEqual([])
     expect(forwards()).toBe(2)
   })

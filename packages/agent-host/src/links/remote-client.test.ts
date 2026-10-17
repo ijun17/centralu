@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { WebSocketServer } from 'ws'
+import WebSocket, { WebSocketServer } from 'ws'
 import { PROTOCOL_VERSION } from '@cc/protocol'
 import { HostServer } from '../transport/server.js'
 import { RemoteClient, type RemoteHello } from './remote-client.js'
@@ -37,6 +37,37 @@ function client(port: number, extra: Partial<ConstructorParameters<typeof Remote
 }
 
 const ev = (text: string) => ({ type: 'message_delta' as const, sessionId: 's1', role: 'assistant' as const, text })
+
+/** A socket class that counts the sockets a client opens: a retry is a new one, made the moment its delay runs out */
+function counted() {
+  const opened = { n: 0 }
+  class Counted extends WebSocket {
+    constructor(...args: ConstructorParameters<typeof WebSocket>) {
+      super(...args)
+      opened.n++
+    }
+  }
+  // Its one constructor stands for ws's overloads, which TypeScript cannot match one by one
+  return { opened, Counted: Counted as unknown as typeof WebSocket }
+}
+
+/**
+ * Waits until a client has had its reconnect delay run out `n` times (#845), against a socket that closes at once:
+ * what proves that a retry another client would have made in the meantime has been made, where a fixed sleep proved
+ * nothing on a loaded machine. Every client here has the same delay (`maxBackoffMs`), and Node runs timers of one
+ * delay in the order they were set, so a retry set before this one's is made first.
+ */
+async function retriesPassed(n: number) {
+  const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
+  await new Promise<void>((r) => wss.once('listening', () => r()))
+  cleanups.push(() => new Promise<void>((r) => wss.close(() => r())))
+  wss.on('connection', (ws) => ws.close(1011))
+  const { opened, Counted } = counted()
+  const { c } = client((wss.address() as { port: number }).port, { WebSocketImpl: Counted })
+  c.connect()
+  await eventually(() => opened.n > n)
+  c.close()
+}
 
 describe('the link client (#82)', () => {
   it('a first contact takes the host’s number as its start and drops the replay, reporting the remote’s build', async () => {
@@ -115,19 +146,22 @@ describe('the link client (#82)', () => {
 
   it('reports a refused token and a refused protocol, and does not retry either', async () => {
     const { port } = await host()
-    const wrong = client(port, { token: 'stale' })
+    const sockets = counted()
+    const wrong = client(port, { token: 'stale', WebSocketImpl: sockets.Counted })
     wrong.c.connect()
     await eventually(() => wrong.seen.refusals.length === 1)
     expect(wrong.seen.refusals[0]).toMatchObject({ code: 4001 })
 
-    const other = client(port, { protocolVersion: PROTOCOL_VERSION + 1 })
+    const other = client(port, { protocolVersion: PROTOCOL_VERSION + 1, WebSocketImpl: sockets.Counted })
     other.c.connect()
     await eventually(() => other.seen.refusals.length === 1)
     expect(other.seen.refusals[0]).toMatchObject({
       code: 4002,
       error: { code: 'version_mismatch', data: { protocolVersion: PROTOCOL_VERSION, version: '0.1.0-beta.11' } },
     })
-    await new Promise((r) => setTimeout(r, 400))
+    await retriesPassed(2)
+    // One socket each: neither refusal was tried again
+    expect(sockets.opened.n).toBe(2)
     expect(wrong.seen.refusals).toHaveLength(1)
     expect(other.seen.refusals).toHaveLength(1)
     expect(wrong.c.connected || other.c.connected).toBe(false)
@@ -146,7 +180,10 @@ describe('the link client (#82)', () => {
           ws.send(JSON.stringify({ kind: 'hello_ok', protocolVersion: PROTOCOL_VERSION, resyncRequired: false, currentSeq: 0, streamEpoch: 'e' }))
           ws.send(JSON.stringify({ kind: 'rpc', id: 'r1', method: 'fs.readFile', params: { projectId: 'p', path: '.ssh/id_ed25519' } }))
           ws.send(JSON.stringify({ kind: 'hello', token: 'x', protocolVersion: PROTOCOL_VERSION }))
+          // Read only after the two before it: once it arrives, the client has had its chance to act on them
+          ws.send(JSON.stringify({ kind: 'event', seq: 1, event: ev('after') }))
         }
+        if (f.kind === 'rpc') ws.send(JSON.stringify({ kind: 'res', id: (f as { id?: string }).id, ok: true, result: null }))
       })
     })
     await new Promise((r) => wss.once('listening', r))
@@ -154,10 +191,12 @@ describe('the link client (#82)', () => {
     const { c, seen } = client(port)
     c.connect()
     await eventually(() => c.connected)
-    await new Promise((r) => setTimeout(r, 200))
-    // Only the hub's own hello went out: nothing answered the request, nothing was dispatched
-    expect(fromHub).toEqual([expect.objectContaining({ kind: 'hello' })])
-    expect(seen.events).toEqual([])
+    await eventually(() => seen.events.length > 0)
+    // A call of the hub's own: what it sent before this reaches the remote before it does, on the same socket
+    await c.call('sessions.list', {})
+    // Only the hub's own hello and call went out: nothing answered the request, nothing was dispatched
+    expect(fromHub).toEqual([expect.objectContaining({ kind: 'hello' }), expect.objectContaining({ kind: 'rpc', method: 'sessions.list' })])
+    expect(seen.events).toEqual([ev('after')])
   })
 
   it('terminal output arrives with its exit', async () => {
@@ -182,7 +221,12 @@ describe('a host asked to prove it holds the token (#838)', () => {
     const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' })
     await new Promise<void>((r) => wss.once('listening', () => r()))
     const got: string[] = []
+    /** Per connection, in order: whether the hub has closed it */
+    const conns: { closed: boolean }[] = []
     wss.on('connection', (ws) => {
+      const conn = { closed: false }
+      conns.push(conn)
+      ws.on('close', () => (conn.closed = true))
       ws.on('message', (d) => {
         got.push(String(d))
         const reply = answer(JSON.parse(String(d)) as Record<string, unknown>)
@@ -190,7 +234,7 @@ describe('a host asked to prove it holds the token (#838)', () => {
       })
     })
     cleanups.push(() => new Promise<void>((r) => wss.close(() => r())))
-    return { port: (wss.address() as { port: number }).port, got }
+    return { port: (wss.address() as { port: number }).port, got, conns }
   }
 
   it('the real host proves it, and the link comes up as before', async () => {
@@ -211,11 +255,13 @@ describe('a host asked to prove it holds the token (#838)', () => {
       opened++
       ws.on('message', () => ws.close(4001, 'not a hello'))
     })
-    const { c, seen } = client((wss.address() as { port: number }).port, { proveHost: true })
+    const sockets = counted()
+    const { c, seen } = client((wss.address() as { port: number }).port, { proveHost: true, WebSocketImpl: sockets.Counted })
     c.connect()
     await eventually(() => seen.refusals.length === 1)
-    await new Promise((r) => setTimeout(r, 300))
+    await retriesPassed(2)
     expect(seen.refusals).toEqual([expect.objectContaining({ code: 4001 })])
+    expect(sockets.opened.n).toBe(1)
     expect(opened).toBe(1)
     expect(seen.downs).toEqual([])
   })
@@ -229,11 +275,14 @@ describe('a host asked to prove it holds the token (#838)', () => {
       const s = await squatter(answer)
       const { c } = client(s.port, { proveHost: true, handshakeTimeoutMs: 300 })
       c.connect()
-      await eventually(() => s.got.length > 0)
-      await new Promise((r) => setTimeout(r, 400))
+      /*
+       * The client gave up on the first socket (closed, and all it sent on it received) and came back with a new
+       * prove: it is done with that answer, where a fixed sleep could end first on a loaded machine (#845)
+       */
+      await eventually(() => s.conns[0]?.closed && s.got.length >= 2)
       expect(c.connected).toBe(false)
       expect(s.got.join('\n')).not.toContain(TOKEN)
-      expect(JSON.parse(s.got[0]!)).toMatchObject({ kind: 'prove' })
+      for (const frame of s.got) expect(JSON.parse(frame)).toMatchObject({ kind: 'prove' })
       c.close()
     }
   })
