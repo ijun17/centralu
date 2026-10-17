@@ -55,8 +55,26 @@ describe('TauriSystemPort', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(first).toEqual([])
     const next: string[] = []
-    port.onAppLink((l) => next.push(l))
+    const stopNext = port.onAppLink((l) => next.push(l))
     expect(next).toEqual(['centralu://import?source=x'])
+    stopNext()
+  })
+
+  it('a link taken for a listener that left goes to a listener on another port that joined meanwhile (#1010 review)', async () => {
+    let answer: (links: string[]) => void = () => {}
+    invoke.mockImplementation((cmd: string) =>
+      cmd === 'take_app_links' ? new Promise<string[]>((resolve) => (answer = resolve)) : Promise.resolve(null),
+    )
+    const stop = new TauriSystemPort().onAppLink(() => {})
+    const first = answer
+    const later: string[] = []
+    // A platform made again: a new port, whose own first take answers nothing
+    new TauriSystemPort().onAppLink((l) => later.push(l))
+    answer([])
+    stop()
+    first(['centralu://import?source=y'])
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(later).toEqual(['centralu://import?source=y'])
   })
 
   it('a failed window drag is an Error carrying the reason', async () => {

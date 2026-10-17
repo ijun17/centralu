@@ -386,8 +386,10 @@ export class TauriSystemPort implements SystemPort {
    * up is already sitting in the queue.
    *
    * Taking clears the shell's queue, so a link taken for a listener that unsubscribed while the
-   * call was out is not dropped (#972 item 6): it is kept here and handed to the next listener, as
-   * the shell would have.
+   * call was out is not dropped (#972 item 6): it goes to a listener still there, or is kept for
+   * the next one, as the shell would have. Kept for the window, not the port (#1010 review): a
+   * platform made again makes a new port, and a listener that joined while the call was out has
+   * already looked at what was kept.
    */
   onAppLink(cb: (link: string) => void): () => void {
     let alive = true
@@ -395,20 +397,31 @@ export class TauriSystemPort implements SystemPort {
       void invoke<string[]>('take_app_links')
         .then((links) => {
           if (alive) for (const l of links) cb(l)
-          else this.heldLinks.push(...links)
+          else handOnAppLinks(links)
         })
         .catch(() => {})
-    for (const l of this.heldLinks.splice(0)) cb(l)
+    appLinkListeners.add(cb)
+    for (const l of heldAppLinks.splice(0)) cb(l)
     const un = listen('app-link', drain)
     drain()
     return () => {
       alive = false
+      appLinkListeners.delete(cb)
       void un.then((f) => f()).catch(() => {})
     }
   }
+}
 
-  /** Links taken from the shell after their listener had gone, kept for the next one */
-  private readonly heldLinks: string[] = []
+/** The app-link listeners of this window, on any port */
+const appLinkListeners = new Set<(link: string) => void>()
+/** Links taken from the shell after their listener had gone and before another came */
+const heldAppLinks: string[] = []
+
+/** Links whose listener left while they were being taken: to a listener still here, or kept for the next one */
+function handOnAppLinks(links: string[]): void {
+  const listener = appLinkListeners.values().next().value
+  if (!listener) return void heldAppLinks.push(...links)
+  for (const l of links) listener(l)
 }
 
 /** Brings the window forward (a notification click, a global shortcut) */
