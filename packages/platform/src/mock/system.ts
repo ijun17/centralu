@@ -1,4 +1,5 @@
 import type { AlertKind, SystemPort } from '../ports/index.js'
+import { deliver } from '../deliver.js'
 
 /** The OS side the mock stands in for: notifications, the dock badge, pickers, the window and app links */
 export class SystemMock {
@@ -21,7 +22,7 @@ export class SystemMock {
   /** As if the OS handed this app a link (M4 E-4, called by e2e) — passes it through raw, unfiltered by the shell */
   openAppLink(link: string): void {
     if (this.appLinkListeners.size === 0) this.pendingAppLinks.push(link)
-    for (const l of this.appLinkListeners) l(link)
+    deliver(this.appLinkListeners, link)
   }
   readonly notifications: { title: string; body: string }[] = []
   readonly opened: { path: string; line?: number }[] = []

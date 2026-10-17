@@ -1,5 +1,6 @@
 import type { NormalizedEvent } from '@cc/protocol'
 import type { AgentPort, ConnectionState, Unsubscribe } from '../ports/index.js'
+import { deliver } from '../deliver.js'
 
 /** The mock's `emit`, handed to a module so it can broadcast without importing MockPlatform */
 export type Emit = (event: NormalizedEvent) => void
@@ -9,13 +10,13 @@ export class EventBus {
   private handlers = new Set<(e: NormalizedEvent) => void>()
   private connHandlers = new Set<(s: ConnectionState) => void>()
 
-  /** Hands one event on to every subscriber */
+  /** Hands one event on to every subscriber; one that throws does not keep it from the rest, as in the web client */
   broadcast(event: NormalizedEvent): void {
-    for (const h of this.handlers) h(event)
+    deliver(this.handlers, event)
   }
 
   setConnectionState(s: ConnectionState): void {
-    for (const h of this.connHandlers) h(s)
+    deliver(this.connHandlers, s)
   }
 
   async dispose(): Promise<void> {

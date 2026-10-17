@@ -9,6 +9,7 @@ import {
   type RpcResult,
 } from '@cc/protocol'
 import type { ConnectionState, Unsubscribe } from '../ports/index.js'
+import { deliver } from '../deliver.js'
 
 /**
  * The WS RPC client — reconnect + backoff + afterSeq restore (tech-stack.md: hand-rolled,
@@ -553,22 +554,6 @@ export class RpcClient {
     for (const [id] of [...this.pending]) {
       // take() clears the timer — if it is not cleared, a closed client keeps the process alive
       this.take(id)?.reject(rpcError('Connection closed', 'connection_closed', false))
-    }
-  }
-}
-
-/**
- * Hands one value to every subscriber, each on its own. A subscriber that throws is reported and the
- * rest still get the value: the client has already moved past it (an event's seq is the cursor, a
- * connection change has already happened), so nothing would ever hand it to them again, and a throw
- * from inside a socket callback would also leave the client half-way through what it was doing.
- */
-function deliver<T>(handlers: Iterable<(v: T) => void>, value: T): void {
-  for (const h of handlers) {
-    try {
-      h(value)
-    } catch (e) {
-      console.error('A subscriber of the host connection threw', e)
     }
   }
 }
