@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { fakeExe, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agent-host/src/fake-exe.test-helpers.js'
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
+import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { decideBefore, decideCi, emptyQueue, enqueue, noticeKey, dequeue, normalize } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -178,11 +179,20 @@ describe('what the merge queue decides for one poll', () => {
       expect(takeLease(dir, 'server:1', NOW + 2_000 + 3 * 60_000 + 2)).toBe(false)
       releaseLease(dir, 'watch:2')
       expect(takeLease(dir, 'server:1', NOW + 2_000 + 3 * 60_000 + 3)).toBe(true)
+      // A holder killed before it let go (its pid is gone) holds nothing, however fresh its lease
+      writeFileSync(join(dir, 'merge-queue.lease.json'), JSON.stringify({ holder: 'server:dead', pid: deadPid(), until: new Date(NOW + 60 * 60_000).toISOString() }))
+      expect(takeLease(dir, 'watch:3', NOW)).toBe(true)
     } finally {
       rmFakeDir(dir)
     }
   })
 })
+
+/** The pid of a process that has ended. */
+function deadPid(): number {
+  const r = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(process.pid))'], { encoding: 'utf8' })
+  return Number(r.stdout)
+}
 
 // --- The app, against a fake gh ---------------------------------------------------------------------
 
@@ -367,7 +377,7 @@ const notices = () => (queueOnDisk().events as { kind: string; notify: boolean; 
 
 /** Polls until `ok` holds, through merge_queue (which also keeps the app awake), for at most 20 s. */
 async function until(ok: (q: any) => boolean, what: string) {
-  const end = Date.now() + 20_000
+  const end = Date.now() + 20_000 * SLOW
   for (;;) {
     const q = (await call('merge_queue', { all: true })).data
     if (ok(q)) return q
@@ -383,7 +393,7 @@ async function morePolls(n = 2) {
   await until(() => reads() >= target, `${n} more polls`)
 }
 
-describe('the project board app: the merge queue', { timeout: 60_000 }, () => {
+describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, () => {
   it('passes check, with queue_merge and unqueue as changes and merge_queue as a read', async () => {
     const r = await runtime(ghState()).check(appRef)
     expect(r.text.split('\n').filter((l) => l.startsWith('- problem'))).toEqual([])
@@ -627,7 +637,7 @@ describe('the project board app: the merge queue', { timeout: 60_000 }, () => {
  * replaces, so a search for the verb finds it, and help answers which tool for which task, on demand
  * (not in the server's instructions, which every session's cached prompt would carry, #512).
  */
-describe('agents find the board tool for the gh command they would type', { timeout: 60_000 }, () => {
+describe('agents find the board tool for the gh command they would type', { timeout: 60_000 * SLOW }, () => {
   it('names the gh command each tool replaces in its description, and help lists only tools that exist, the same text every time', async () => {
     runtime(ghState())
     const tools = await rt!.tools(appRef)
@@ -665,14 +675,14 @@ function watch(args: string[]): Promise<{ code: number | null; out: string; err:
     let err = ''
     child.stdout.on('data', (d) => (out += d))
     child.stderr.on('data', (d) => (err += d))
-    const t = setTimeout(() => (child.kill(), reject(new Error(`watch did not end: ${out} ${err}`))), 30_000)
+    const t = setTimeout(() => (child.kill(), reject(new Error(`watch did not end: ${out} ${err}`))), 30_000 * SLOW)
     child.on('close', (code) => (clearTimeout(t), resolve({ code, out, err })))
   })
 }
 
 const IDLE_SERVER = { PROJECT_BOARD_QUEUE_TICK_MS: String(3_600_000) }
 
-describe('the watch command: the queuing session hears about its items', { timeout: 60_000 }, () => {
+describe('the watch command: the queuing session hears about its items', { timeout: 60_000 * SLOW }, () => {
   it('drives the queue while the app is stopped, and exits 3 with the attention message for its owner only', async () => {
     // This app's server polls only at its start here, so the watch command is what drives the queue
     runtime(ghState({ prs: { '77': ghPr(77, { mergeStateStatus: 'DIRTY' }), '78': ghPr(78, { mergeStateStatus: 'DIRTY' }) } }), IDLE_SERVER)

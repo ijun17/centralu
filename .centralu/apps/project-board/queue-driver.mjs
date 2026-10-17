@@ -111,10 +111,24 @@ export function readLease(dir) {
   }
 }
 
-/** Takes or renews the lease for `holder`. False when another driver holds a fresh one. */
+/**
+ * Whether the process that wrote a lease still runs (the data folder is this computer's, so its pid is
+ * too). A driver killed before it could let go (SIGKILL after Centralu's grace) holds nothing.
+ */
+function alive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return true
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (e) {
+    return e.code === 'EPERM' // it runs, as another user
+  }
+}
+
+/** Takes or renews the lease for `holder`. False when another driver, still running, holds a fresh one. */
 export function takeLease(dir, holder, now = Date.now()) {
   const cur = readLease(dir)
-  if (cur && cur.holder !== holder && Date.parse(cur.until) > now) return false
+  if (cur && cur.holder !== holder && Date.parse(cur.until) > now && alive(cur.pid)) return false
   mkdirSync(dir, { recursive: true })
   writeAtomic(join(dir, LEASE_FILE), { holder, pid: process.pid, until: new Date(now + LEASE_MS).toISOString() })
   // Two drivers that found it stale at once: the last write wins, and the other sees it here

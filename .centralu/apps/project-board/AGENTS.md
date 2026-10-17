@@ -196,7 +196,8 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   open screen and no call after 5 minutes (docs/apps.md §4), and an app cannot message a session on
   its own (§13), so the queue has two drivers: this server while it runs, and the **watch command** a
   session runs in the background. One drives at a time through `merge-queue.lease.json` (renewed
-  every tick and before every write, free after 3 minutes of silence, let go on exit).
+  every tick and before every write, free after 3 minutes of silence or as soon as its process is gone,
+  let go on exit).
 - **Telling the session**: every change worth a message is an event with a sequence number and the
   item's owner. Attention is one event per change (`noticeKey`: the reason, the head and the job), not
   one per poll; a merge or a close is one too. `node .centralu/apps/project-board/bin/merge-queue.mjs
