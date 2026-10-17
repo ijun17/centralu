@@ -174,10 +174,12 @@ const REAL_OS: KillOs = {
  * Windows itself forks an agent that attaches to the shell's console to list its processes, and 5 s
  * later `process.kill`s each one by pid. After our taskkill the shell is gone: the agent failed with
  * "AttachConsole failed" on the host's stderr at every Stop, restart and tab close, and the late
- * kill went to a pid Windows may have handed to someone else by then (measured on Windows 11). The
- * pty still releases itself once its shell has ended (its exit closes the output pipe and reports
- * the exit), so nothing is lost by leaving it alone. A tree taskkill could not end (no pid, a
- * timeout) still gets `kill()`, the one thing left to try.
+ * kill went to a pid Windows may have handed to someone else by then (measured on Windows 11).
+ * Leaving it alone loses nothing: once its shell has ended, node-pty reports the exit (its output
+ * pipe closes), but it does not let go of the pty's pipes and output thread, with or without
+ * `kill()` (the shipped ConPTY's kill frees them only after one more output event, which never
+ * comes). The pty slot does, on that exit (`pty-slot.ts` `releaseEnded`). A tree taskkill could not
+ * end (no pid, a timeout) still gets `kill()`, the one thing left to try.
  */
 function shootWindows(handle: KillablePty, os: KillOs): void {
   const pid = handle.pid

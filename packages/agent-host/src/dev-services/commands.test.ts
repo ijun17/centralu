@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { CommandRunner } from './commands.js'
-import { alive, cleanUp, consoleHosts, plantTreeScript, settle, treePids } from './process-tree.test-helpers.js'
+import { alive, cleanUp, consoleHosts, plantTreeScript, processCounters, settle, treePids } from './process-tree.test-helpers.js'
 import type { PtyModule } from './terminal.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
@@ -305,6 +305,41 @@ describe.runIf(process.platform === 'win32')('CommandRunner — the whole tree o
      */
     expect(await settle(r.ended, (x) => x, 10_000)).toBe(true)
   }, 60_000 * SLOW)
+
+  /*
+   * #849: node-pty frees nothing of a Windows pty that has ended. Every one kept a worker thread, its pipes (17 handles)
+   * and 21 MB of private memory in the host until it exited, stopped by taskkill or ended on its own (measured with 20
+   * per round). The slot lets go of them when the pty ends (`releaseEnded`). Ten runs, half of each kind, against a
+   * baseline taken after one warm-up round: what node-pty loads once is not counted.
+   */
+  it('runs that ended, stopped or on their own, leave no threads, handles or memory behind in the host', async () => {
+    dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-cmd-leak-')))
+    let ended = 0
+    const svc = new CommandRunner((f) => {
+      if (f.exitCode !== undefined) ended++
+    }, ptyModule)
+    const long = (i: number) => `ping -n 60 127.0.0.1 >nul & rem ${i}`
+    const round = async (n: number) => {
+      ended = 0
+      for (let i = 0; i < n; i++) svc.run(dir, i % 2 ? `echo run ${i}` : long(i))
+      // Every long one is running (its pty has printed nothing yet, so wait on the short ones' exits)
+      expect(await settle(() => ended, (x) => x >= Math.floor(n / 2), 30_000)).toBeGreaterThanOrEqual(Math.floor(n / 2))
+      for (let i = 0; i < n; i += 2) svc.stop(dir, long(i))
+      expect(await settle(() => ended, (x) => x === n, 30_000)).toBe(n)
+    }
+    await round(2)
+    const before = processCounters()
+    const n = 10
+    await round(n)
+    // The worker threads end asynchronously: wait until the counts are back, or the bound runs out and the check names them
+    const grew = () => {
+      const now = processCounters()
+      return { threads: now.threads - before.threads, handles: now.handles - before.handles, privateMb: now.privateMb - before.privateMb }
+    }
+    const left = await settle(grew, (g) => g.threads <= 2 && g.handles <= n * 5 && g.privateMb <= n * 4, 20_000)
+    // Before the fix, measured on Windows 11: +10 threads, +110 handles, +121 MB
+    expect({ threads: left.threads <= 2, handles: left.handles <= n * 5, privateMb: left.privateMb <= n * 4 }, `grew by ${JSON.stringify(left)}`).toEqual({ threads: true, handles: true, privateMb: true })
+  }, 120_000 * SLOW)
 
   /*
    * #849: with the ConPTY of Windows, every command left its console host (`conhost.exe`, ~7 MB) running until the host

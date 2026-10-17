@@ -116,6 +116,8 @@ export class PtySlot {
       this.emit({ terminalId: this.streamId, data })
     })
     handle.onExit(({ exitCode }) => {
+      // Whoever owns the slot now: an old pty that ended after a restart holds as much as any other (#849)
+      releaseEnded(handle)
       /*
        * **This clears the slot only when it is still that slot's owner.**
        *
@@ -194,4 +196,57 @@ export function spawnPty(mod: PtyModule, launch: ShellLaunch, opts: Record<strin
     console.error(`[pty] ${(err as Error).message}; using the console of Windows instead`)
     return mod.spawn(launch.file, launch.args, opts)
   }
+}
+
+/** node-pty's Windows pty, as far as `releaseEnded` reaches into it (node-pty 1.1.0, lib/windowsPtyAgent.js) */
+type WindowsPtyInternals = {
+  _agent?: {
+    _inSocket?: { destroy?: () => void }
+    _outSocket?: { destroy?: () => void }
+    _conoutSocketWorker?: { _worker?: { terminate?: () => Promise<number> } }
+  }
+}
+
+let warnedInternals = false
+
+/**
+ * Lets go of what node-pty keeps for a Windows pty whose shell has ended (#849): node-pty does not.
+ *
+ * On Windows node-pty 1.1.0 holds, per pty, the input pipe (`_inSocket`), the output socket and a worker thread that
+ * copies the console's output to it (`_conoutSocketWorker`). Its exit handler frees none of them with the ConPTY it
+ * ships (`useConptyDll`), and its `kill()` ends the worker only after one more output event, which never comes once
+ * the pty has ended. Measured on Windows 11 with real ptys, 20 per round: every one that had ended kept a thread, 17
+ * handles and 21 MB of private memory in the host until it exited. Destroying both sockets and terminating the worker
+ * here brings that back to the baseline.
+ *
+ * These are node-pty's private fields, so each is checked before it is touched. A pty that has none (macOS and Linux,
+ * the keeper's, a test's) is left alone; one that looks like node-pty's Windows pty but lacks them says so once on
+ * stderr, and is left as node-pty leaves it: never a throw on the way out of a terminal.
+ */
+export function releaseEnded(handle: Pty): void {
+  const agent = (handle as WindowsPtyInternals)._agent
+  if (!agent) {
+    if (handle.constructor?.name === 'WindowsTerminal') warnInternals('no _agent')
+    return
+  }
+  const worker = agent._conoutSocketWorker?._worker
+  const missing = [
+    typeof agent._inSocket?.destroy !== 'function' && '_inSocket',
+    typeof agent._outSocket?.destroy !== 'function' && '_outSocket',
+    typeof worker?.terminate !== 'function' && '_conoutSocketWorker._worker',
+  ].filter(Boolean)
+  if (missing.length > 0) warnInternals(`no ${missing.join(', ')}`)
+  try {
+    agent._inSocket?.destroy?.()
+    agent._outSocket?.destroy?.()
+    void worker?.terminate?.().catch(() => {})
+  } catch (err) {
+    warnInternals((err as Error).message)
+  }
+}
+
+function warnInternals(what: string): void {
+  if (warnedInternals) return
+  warnedInternals = true
+  console.error(`[pty] node-pty's Windows pty is not shaped as expected (${what}): an ended terminal may keep a thread and its pipes until the host exits`)
 }

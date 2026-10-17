@@ -7,7 +7,7 @@ import { join, sep } from 'node:path'
 import { alive as isAlive, cleanUp, consoleHosts, plantTreeScript, settle, treePids } from './process-tree.test-helpers.js'
 import { TerminalService, commandShell, interactiveShell, shellPath, shortCwd, type PtyModule } from './terminal.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
-import { spawnPty } from './pty-slot.js'
+import { releaseEnded, spawnPty } from './pty-slot.js'
 
 /**
  * The terminal has one core rule: **its identity is its cwd.**
@@ -436,6 +436,37 @@ describe('shell selection', () => {
     expect(asked).toEqual([opts, { ...opts, useConptyDll: true }, { ...opts, useConptyDll: true }, opts])
     // Any other failure is the shell's own and would fail the same way again
     expect(() => spawnPty(mod('File not found: '), launch, {}, true)).toThrow('File not found')
+  })
+
+  /*
+   * #849, simulated: node-pty frees nothing of a Windows pty that ended (its pipes and its output thread), so the slot
+   * does. Those are node-pty's private fields: a pty without them is left alone, and a missing one is said once, never
+   * thrown. The real thing is measured in commands.test.ts.
+   */
+  it("lets go of an ended Windows pty's pipes and output thread, and never throws over node-pty's internals", () => {
+    const freed: string[] = []
+    const internals = {
+      _inSocket: { destroy: () => void freed.push('in') },
+      _outSocket: { destroy: () => void freed.push('out') },
+      _conoutSocketWorker: { _worker: { terminate: () => (freed.push('worker'), Promise.resolve(1)) } },
+    }
+    const pty = { onData() {}, onExit() {}, write() {}, resize() {}, kill() {} }
+    releaseEnded({ ...pty, _agent: internals } as never)
+    expect(freed).toEqual(['in', 'out', 'worker'])
+
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      // A Unix pty, the keeper's or a test's: nothing to free, nothing said
+      releaseEnded(pty)
+      expect(error).not.toHaveBeenCalled()
+      // node-pty's Windows pty without what it is expected to have: said once, never thrown
+      class WindowsTerminal {}
+      expect(() => releaseEnded(Object.assign(new WindowsTerminal(), pty))).not.toThrow()
+      expect(() => releaseEnded({ ...pty, _agent: { _inSocket: { destroy: () => { throw new Error('gone') } } } } as never)).not.toThrow()
+      expect(error).toHaveBeenCalledOnce()
+    } finally {
+      error.mockRestore()
+    }
   })
 
   it('shortens the home path to ~', () => {
