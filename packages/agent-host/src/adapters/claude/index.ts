@@ -7,7 +7,7 @@ import { promisify } from 'node:util'
 import type { AdapterCapabilities, NormalizedEvent, ToolDescriptor, UsageSnapshot } from '@cc/protocol'
 import { dataRoot } from '../../data-dir.js'
 import { whichTool } from '../../env-path.js'
-import { launchFor, toolExecutable, type ToolLaunch } from '../../tool-launch.js'
+import { launchFor, toolCommand, toolExecutable, type ToolLaunch } from '../../tool-launch.js'
 import { installedCliVersion } from '../../cli-version.js'
 import { ClaudeLinks, ClaudePlaceholderError, windowsStart, type ExeFs } from './exe-link.js'
 import { StartGate } from './start-gate.js'
@@ -407,7 +407,7 @@ export class ClaudeAdapter implements AgentAdapter {
   private statusLaunch(): ToolLaunch {
     const exe = this.launch.windows ? this.launch.executable() : null
     if (exe && /\.exe$/i.test(exe)) return { command: this.launch.links.prepare(exe).path, args: [] }
-    return launchFor(whichTool('claude') ?? 'claude')
+    return launchFor(toolCommand('claude'))
   }
 
   async listModels() {
