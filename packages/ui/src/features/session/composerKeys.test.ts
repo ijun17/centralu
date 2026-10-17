@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isComposerSendKey, type ComposerKey } from './composerKeys.js'
+import { autocompleteKeyAction, isComposerSendKey, type ComposerKey } from './composerKeys.js'
 
 /**
  * With the setting off, behavior **must not differ from before by even a single character**,
@@ -68,5 +68,23 @@ describe('isComposerSendKey — a key that is not Enter', () => {
   it('is never involved, under either setting', () => {
     expect(isComposerSendKey(key({ key: 'a' }), false)).toBe(false)
     expect(isComposerSendKey(key({ key: 'a', metaKey: true }), true)).toBe(false)
+  })
+})
+
+describe('autocompleteKeyAction (#842 item 12)', () => {
+  const k = (key: string, shiftKey = false) => ({ key, shiftKey })
+
+  it('moves with the arrows, closes on Esc, and picks on Enter and Tab', () => {
+    expect(autocompleteKeyAction(k('ArrowDown'))).toBe('down')
+    expect(autocompleteKeyAction(k('ArrowUp'))).toBe('up')
+    expect(autocompleteKeyAction(k('Escape'))).toBe('close')
+    expect(autocompleteKeyAction(k('Enter'))).toBe('pick')
+    expect(autocompleteKeyAction(k('Tab'))).toBe('pick')
+  })
+
+  it('leaves Shift+Tab to move focus back and Shift+Enter to break the line', () => {
+    expect(autocompleteKeyAction(k('Tab', true))).toBeNull()
+    expect(autocompleteKeyAction(k('Enter', true))).toBeNull()
+    expect(autocompleteKeyAction(k('a'))).toBeNull()
   })
 })

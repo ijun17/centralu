@@ -3,6 +3,7 @@ import type { MachineProbe, RemoteShell, SshHost, SshHostList } from '@cc/protoc
 import { firstChoice, probeChoices, probeProblem, sshHostDetail, type MachineChoice } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { offerFocus } from '../../components/offerFocus.js'
+import { isPlainEscape } from '../../app/keys.js'
 
 export const SHELL_LABEL: Record<RemoteShell, string> = {
   posix: 'Linux or macOS',
@@ -140,8 +141,13 @@ export function AddMachineForm({ onDone, canCancel }: { onDone: () => void; canC
           setBusy(false)
         }
       }}
-      // Typing here must not reach the app's shortcuts
-      onKeyDown={(e) => e.stopPropagation()}
+      /*
+        Typing here must not reach the app's shortcuts. A plain Esc still does (#842 item 8): it is how Settings closes,
+        and stopping it here left Settings open for as long as a field of this form had the keyboard.
+      */
+      onKeyDown={(e) => {
+        if (!isPlainEscape(e.nativeEvent)) e.stopPropagation()
+      }}
     >
       <p className="text-sm text-ink">Add a machine</p>
       {hosts === undefined && (

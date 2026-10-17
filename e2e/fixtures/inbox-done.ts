@@ -112,6 +112,26 @@ export function inboxDoneTests() {
     await expect(page.getByTestId('inbox-empty')).toBeVisible()
   })
 
+  /*
+   * Enter on a focused button presses that button (#842 item 2). The list heard Enter on the window and opened the row
+   * under its cursor instead, and its preventDefault kept the button from pressing at all: a keyboard user could not
+   * press Done, Continue, Allow or Deny with Enter.
+   */
+  test('Enter on a focused Done presses Done, and does not open the row', async ({ page }) => {
+    const { target, shown } = await twoSessions(page)
+    await answer(page, target, 'a finished answer')
+    await page.keyboard.press('Meta+i')
+    await expect(item(page, target)).toBeVisible()
+
+    await page.getByTestId(`inbox-done-${target}`).focus()
+    await expect(page.getByTestId(`inbox-done-${target}`)).toBeFocused()
+    await page.keyboard.press('Enter')
+
+    await expect(item(page, target)).toHaveCount(0)
+    await expect(page.getByTestId('inbox')).toBeVisible()
+    expect(await page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe(shown)
+  })
+
   test('Done leaves the cursor on a row, and a second d takes the next one', async ({ page }) => {
     await setup(page, ['/tmp/alpha'])
     const a = await newSession(page, 'alpha')
