@@ -62,6 +62,9 @@ export function tokenUsageEvents(sessionId: string, p: Record<string, unknown>):
     /*
      * Codex counts cached input inside `inputTokens` (its `totalTokens` is input + output). The protocol's
      * TokenUsage keeps the two apart, as Anthropic does, so the uncached part is what goes in `inputTokens`.
+     * Codex says nothing of writing to the cache, and TokenUsage's `cacheCreationTokens` is required (0 when not
+     * reported, `TokenUsage`): the request's own reading, which the cache accounting reads, leaves it absent
+     * (`CodexRequestInputs`).
      */
     { type: 'usage_update', sessionId, tokens: { inputTokens: Math.max(0, input - cached), outputTokens: output, cacheReadTokens: cached, cacheCreationTokens: 0 } },
   ]

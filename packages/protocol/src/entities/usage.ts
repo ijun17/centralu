@@ -13,6 +13,11 @@ import { z } from 'zod'
  * (`codex/token-readings.ts`). If the two tools did not carry the same meaning here, whatever sums
  * them up (an app's requested-agent history, M4 D-5) would record a different number depending
  * on the tool.
+ *
+ * `cacheCreationTokens` is 0 when the tool does not report cache writes (Codex), not absent (#843): every reader sums
+ * it as a number (an app's requested-agent usage, `app-agents.ts`), so making it optional would change its meaning
+ * for each of them, a change rather than an addition (protocol.md §4). Where "wrote nothing" and "not reported" must
+ * differ, the prompt cache accounting, the reading is `RequestInput`, which leaves it absent.
  */
 export const TokenUsage = z.object({
   inputTokens: z.number(),
