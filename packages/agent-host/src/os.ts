@@ -208,3 +208,11 @@ export function measuresWithDu(platform: Platform = HOST_PLATFORM): boolean {
 export function hasWindowsFileNames(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'win32'
 }
+
+/**
+ * A process's children outlive it unless it puts them in a job object that ends them (Windows, #1067): there the host
+ * joins one at start (`lifecycle/work-job.ts`). macOS and Linux end a tree by its process groups instead.
+ */
+export function endsWorkWithJob(platform: Platform = HOST_PLATFORM): boolean {
+  return platform === 'win32'
+}

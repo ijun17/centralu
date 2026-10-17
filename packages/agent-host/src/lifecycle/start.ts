@@ -23,6 +23,8 @@ export const START_ORDER = [
   // HO6: right after the lock, a signal is held until the shutdown exists
   'hold signals',
   'store',
+  // Windows (#1067): the job that ends this host's work with it, joined before anything is started (lifecycle/work-job.ts)
+  'work job',
   // Under the keeper, the children a previous host left (#280 step 2)
   'keeper children',
   // Sessions, apps, terminals, views, links: wiring only, nothing is pushed to a screen (HO11)
