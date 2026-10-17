@@ -43,7 +43,7 @@ export class AgentSessionActions {
    * call away, but nothing showed it what was left. Only its own children (`askedBy`), in its own project, as the
    * other actions take them; a session another started is not its to delete.
    */
-  listAgents(callerId: string): AgentListRow[] {
+  async listAgents(callerId: string): Promise<AgentListRow[]> {
     const here = ownAgents(this.host, callerId).map((s) => {
       const lastActive = lastActiveOf(this.host.store.messages, s.id)
       return {
@@ -57,7 +57,7 @@ export class AgentSessionActions {
       }
     })
     // And those it started on linked machines (#1038), each with its machine
-    return [...here, ...this.flow.remote.rows(callerId)]
+    return [...here, ...(await this.flow.remote.rows(callerId))]
   }
 
   /**

@@ -850,7 +850,7 @@ export class SessionManager {
       const ask = this.askProjectFlow.linkedAsks.get(e.sessionId)
       if (ask) this.askProjectFlow.observeLinkedAsk(ask, e)
     }
-    // Before the reports: a call waiting on a child there reads its turn's end, which is then not reported too (#1038)
+    // A call waiting on a child there reads its turn's end; no report is armed while it waits, so nothing comes twice (#1038)
     this.delegationFlow.remote.observe(e)
     this.linkedReports.observe(e)
   }

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { gitRemoteKey, type ApprovalDetail, type BackgroundTask, type SessionState } from '@cc/protocol'
-import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, StartAgentOpts } from '../adapters/contract.js'
+import { gitRemoteKey, type ApprovalDetail, type BackgroundTask, type PermissionPreset, type SessionState } from '@cc/protocol'
+import type { AgentListRow, AgentSessionOpts, ChildRunResult, LinkedProject, LinkedSessions, OrchestratedSession, StartAgentOpts } from '../adapters/contract.js'
 import { gitValidBranchName } from '../dev-services/git-worktree.js'
 import { readJsonObjects } from '../dev-services/store/json.js'
 import { inTurn } from '../idle.js'
@@ -9,7 +9,7 @@ import { ASK_WAIT_MS, clipAnswer, taskLine } from './ask-project.js'
 import type { DelegationHost } from './delegation-host.js'
 import type { LinkedEvent } from './linked-reports.js'
 import { linkedTurnEnd } from './linked-turn-end.js'
-import { agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText, givenAgentName, remoteAgentFrame } from './start-agent.js'
+import { agentBranch, agentChoice, agentName, agentNoteFrame, distinguishingText, givenAgentName, presetWithin, remoteAgentFrame } from './start-agent.js'
 import { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_SETUP_MS } from './start-agent-terms.js'
 import { labelOf } from './transcript-view.js'
 import { raceBound } from './with-timeout.js'
@@ -35,6 +35,18 @@ export type RemoteAgent = {
 
 /** A machine's sentence to go inside another, without its own full stop */
 const bare = (error: string): string => error.trim().replace(/\.+$/, '')
+
+/**
+ * A remote address as an answer may show it (#1038 review): the repository it names, never the address as written, which
+ * can carry a user and a token (`https://user:ghp_…@github.com/…`). A local path is said to be one.
+ */
+const shownRemote = (url: string | null): string => (url === null ? 'no origin' : (gitRemoteKey(url) ?? 'a local path'))
+
+/**
+ * The most a child on another machine runs under (#1038 review, as create_session over a link, #838): `normal`. `auto`
+ * there is the person's to give on that machine, never a caller's to carry across.
+ */
+const remotePreset = (caller: PermissionPreset): PermissionPreset => (presetWithin(caller, 'normal') ? caller : 'normal')
 
 /** Where the hub keeps its children on linked machines: one app setting, so an older build leaves it alone */
 export const REMOTE_AGENTS_KEY = 'remote_agents'
@@ -75,18 +87,44 @@ export class RemoteAgents {
     return this.records().find((r) => r.sessionId === sessionId)
   }
 
-  /** The caller's children on linked machines, as agent_session list shows them (#690), each with its machine */
-  rows(callerId: string): AgentListRow[] {
-    return this.records()
-      .filter((r) => r.callerId === callerId)
-      .map((r) => ({
-        sessionId: r.sessionId,
-        name: r.name,
-        tool: r.tool,
-        state: this.waits.has(r.sessionId) || this.reportArmed(r) ? 'working' : 'finished',
-        asleep: false,
-        machine: r.machine,
-      }))
+  /**
+   * The caller's children on linked machines, as agent_session list shows them (#690), each with its machine and the
+   * state that machine reports (as last known when it cannot be asked). One gone from its machine, or whose machine was
+   * removed, is dropped from the record here (#1038 review).
+   */
+  async rows(callerId: string): Promise<AgentListRow[]> {
+    const mine = this.records().filter((r) => r.callerId === callerId)
+    const reader = this.host.linkedReader
+    if (!mine.length || !reader) return []
+    const listed = await reader.list().catch(() => null)
+    const out: AgentListRow[] = []
+    for (const r of mine) {
+      if (listed && this.gone(r, reader, listed)) {
+        this.forget(r.sessionId)
+        continue
+      }
+      const there = listed?.find((s) => s.sessionId === r.sessionId)
+      const state: AgentListRow['state'] =
+        there?.state === 'waiting_approval' || there?.state === 'waiting_question' ? 'waiting'
+        : there ? (inTurn(there.state as SessionState) ? 'working' : 'finished')
+        : this.waits.has(r.sessionId) || this.reportArmed(r) ? 'working' : 'finished'
+      out.push({ sessionId: r.sessionId, name: r.name, tool: r.tool, state, asleep: false, machine: r.machine })
+    }
+    return out
+  }
+
+  /** The caller is gone (trashed): its children's records go, and nothing is owed to it (#1038 review) */
+  forgetCaller(callerId: string): void {
+    for (const r of this.records().filter((x) => x.callerId === callerId)) this.forget(r.sessionId)
+  }
+
+  /** A handoff gave the original's work to `to` (#693): its children on linked machines are the heir's, report included */
+  moveCaller(from: string, to: string): void {
+    if (!this.records().some((r) => r.callerId === from)) return
+    this.save(this.records().map((r) => (r.callerId === from ? { ...r, callerId: to } : r)))
+    for (const [id, report] of [...this.host.children.linkedReports]) {
+      if (report.orchestratorId === from && this.of(id)) this.host.children.setLinkedReport(id, { ...report, orchestratorId: to })
+    }
   }
 
   async startAgent(callerId: string, opts: StartAgentOpts & { machine: string }, signal?: AbortSignal): Promise<ChildRunResult> {
@@ -126,7 +164,7 @@ export class RemoteAgents {
       tool,
       ...(model ? { model } : {}),
       ...(difficulty ? { difficulty } : {}),
-      preset: caller.permissionPreset,
+      preset: remotePreset(caller.permissionPreset),
       ...(branch ? { worktree: { branch } } : {}),
       text: taskLine(opts.task),
       ...(given ? { name: given } : {}),
@@ -140,7 +178,8 @@ export class RemoteAgents {
     const timer = setTimeout(() => ctl.abort(), START_AGENT_SETUP_MS)
     let decision: Awaited<ReturnType<RemoteAgentsHost['askHost']>>
     try {
-      decision = await this.host.askHost(callerId, detail, ctl.signal)
+      // Asked each time, `auto` included (#1038 review): the card says so, and nothing opens another computer unasked
+      decision = await this.host.askHost(callerId, detail, ctl.signal, { alwaysAsk: true })
     } finally {
       clearTimeout(timer)
       signal?.removeEventListener('abort', onAbort)
@@ -155,7 +194,7 @@ export class RemoteAgents {
     const made = await reader.createSession(target, {
       tool: tool as never,
       ...(name ? { name } : {}),
-      preset: caller.permissionPreset,
+      preset: remotePreset(caller.permissionPreset),
       ...(model ? { model } : {}),
       ...(effort ? { effort } : {}),
       ...(branch ? { worktreeBranch: branch } : {}),
@@ -167,17 +206,30 @@ export class RemoteAgents {
       project: target.name, ...(branch ? { worktree: branch } : {}), startedAt: Date.now(),
     }
     this.save([...this.records(), rec])
-    // Armed before the send: the machine's first events can reach the hub before its answer does
-    this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
+    /*
+     * Set before the send, as the machine's first events can reach the hub before its answer does (#1038 review: a turn
+     * that failed at once was reported, and the wait that came after it waited out its bound): the call's wait when it
+     * waits, otherwise the report
+     */
+    const waiting = opts.wait === false ? undefined : this.openWait(rec.sessionId)
+    if (!waiting) this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
     const label = labelOf(this.host.store, caller)
-    const sent = await reader.send(rec.sessionId, remoteAgentFrame(label, opts.task), label)
+    // The machine counts the task's turn one level below the caller too, whatever it keeps of the session (#838)
+    const sent = await reader.send(rec.sessionId, remoteAgentFrame(label, opts.task), label, { depth: depthOf(this.host, callerId) + 1 })
     if (!sent.ok) {
+      if (waiting && this.waits.get(rec.sessionId) === waiting) this.waits.delete(rec.sessionId)
       if (this.host.children.linkedReports.get(rec.sessionId)?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
       return { ok: false, error: `The session "${rec.name}" [${rec.sessionId}] was made on ${machine.name} but did not take the task: ${bare(sent.error)}. Send it again with agent_session, or delete it.` }
     }
-    const unchecked = model || effort ? `${[model && `model "${model}"`, effort && `effort "${effort}"`].filter(Boolean).join(' and ')} not checked against ${machine.name}'s list` : undefined
+    const unchecked = [
+      model || effort ? `${[model && `model "${model}"`, effort && `effort "${effort}"`].filter(Boolean).join(' and ')} not checked against ${machine.name}'s list` : '',
+      // Not passed across (#1038 review): said, rather than dropped without a word
+      opts.lsp ? `lsp is not passed to another machine: it starts as ${machine.name} starts a session` : '',
+      caller.permissionPreset === 'auto' ? `it runs under normal on ${machine.name}: auto is not carried to another computer` : '',
+    ].filter(Boolean).join('; ') || undefined
     const left = Math.max(1_000, START_AGENT_CALL_MS - (Date.now() - startedAt))
-    const result = opts.wait === false ? this.working(rec, true) : await this.awaitTurn(rec, signal, Math.min(ASK_WAIT_MS, left))
+    // The wait opened before the send: a turn that ended inside the send has settled it already
+    const result = waiting ? await this.awaitTurn(rec, signal, Math.min(ASK_WAIT_MS, left), waiting) : this.working(rec, true)
     return result.ok && unchecked ? { ...result, notice: [result.notice, unchecked].filter(Boolean).join('; ') } : result
   }
 
@@ -215,7 +267,7 @@ export class RemoteAgents {
         const refused = this.gateError(callerId)
         if (refused) return { ok: false, error: refused }
         this.host.children.setLinkedReport(rec.sessionId, { orchestratorId: callerId, busy: false })
-        const sent = await reader.send(rec.sessionId, agentNoteFrame(label, text), label)
+        const sent = await reader.send(rec.sessionId, agentNoteFrame(label, text), label, { depth: depthOf(this.host, callerId) + 1 })
         if (!sent.ok) {
           if (this.host.children.linkedReports.get(rec.sessionId)?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
           return { ok: false, error: `Could not send to "${rec.name}" on ${rec.machine}: ${bare(sent.error)}.` }
@@ -235,13 +287,26 @@ export class RemoteAgents {
         return { ok: true, state: 'stopped', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool }
       }
       case 'delete': {
+        // Gone already (#1038 review): deleted there, or its machine removed, while the hub could not see it
+        const listed = await reader.list().catch(() => null)
+        if (listed && this.gone(rec, reader, listed)) {
+          this.forget(rec.sessionId)
+          return {
+            ok: true, state: 'deleted', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool,
+            notice: reader.machineLinked(rec.machineId) ? `It was no longer on ${rec.machine}; nothing was left to delete.` : `${rec.machine} was removed from Centralu; the session is forgotten here.`,
+          }
+        }
         const now = await stateOf()
         if (!now.ok) return now
         if (inTurn(now.state)) {
-          // Nothing is owed of a child being deleted, and its stopped turn's end may come in first
-          if (this.reportArmed(rec)) this.host.children.dropLinkedReport(rec.sessionId)
+          // Nothing is owed of a child being deleted, and its stopped turn's end may come in first; put back if the stop fails
+          const owed = this.host.children.linkedReports.get(rec.sessionId)
+          if (owed?.orchestratorId === callerId) this.host.children.dropLinkedReport(rec.sessionId)
           const stopped = await reader.interrupt(rec.sessionId)
-          if (!stopped.ok) return { ok: false, error: `Could not stop "${rec.name}" on ${rec.machine} before deleting it: ${bare(stopped.error)}.` }
+          if (!stopped.ok) {
+            if (owed?.orchestratorId === callerId && !this.host.children.linkedReports.has(rec.sessionId)) this.host.children.setLinkedReport(rec.sessionId, owed)
+            return { ok: false, error: `Could not stop "${rec.name}" on ${rec.machine} before deleting it: ${bare(stopped.error)}.` }
+          }
         }
         const r = await reader.deleteSession(rec.sessionId)
         if (!r.ok) return { ok: false, error: `Could not delete "${rec.name}" on ${rec.machine}: ${bare(r.error)}.` }
@@ -299,30 +364,30 @@ export class RemoteAgents {
   ): Promise<{ project: LinkedProject } | { error: string }> {
     const origin = await this.host.projectOrigin(project.id)
     const key = origin ? gitRemoteKey(origin) : null
-    if (!origin || !key) return { error: `This project has no origin remote, so no checkout of it on ${machine.name} can be told apart. Start the agent here, without machine.` }
+    if (!origin || !key) {
+      return { error: `This project has ${origin ? 'a local folder as its origin remote' : 'no origin remote'}, so no checkout of it on ${machine.name} can be told apart. Start the agent here, without machine.` }
+    }
     const all = await reader.projects()
     const away = all.away.find((a) => a.machineId === machine.id)
     if (away) return { error: `${machine.name} cannot be reached (${away.why}), so nothing was started there. Try again once its link is back.` }
     const theirs = all.projects.filter((p) => p.machineId === machine.id)
     const read = await Promise.all(theirs.map(async (p) => ({ p, r: await reader.origin(p) })))
+    // A build from before #1038 would not keep the child within the agent depth: a loop of starts between machines
+    if (read.some(({ r }) => !r.ok && 'olderBuild' in r)) {
+      return { error: `${machine.name} runs an older Centralu, which would not keep a session started from here within the agent depth, so nothing was started there. Update Centralu on ${machine.name}, then try again.` }
+    }
     const same = read.filter(({ r }) => r.ok && r.origin && gitRemoteKey(r.origin) === key).map(({ p }) => p)
     const chosen = same.length === 1 ? same[0] : same.filter((p) => p.name === project.name).length === 1 ? same.find((p) => p.name === project.name) : undefined
     if (chosen) return { project: chosen }
-    if (same.length) return { error: `${machine.name} has more than one checkout of ${origin}: ${same.map((p) => `"${p.name}"`).join(', ')}, none named as this project is. Choosing among them is not available yet: the person can remove the extra one there.` }
-    const listed = read.map(({ p, r }) => `"${p.name}" (${r.ok ? (r.origin ?? 'no origin') : 'not read'})`).join(', ')
-    return { error: `${machine.name} has no checkout of ${origin}, so nothing was started there.${listed ? ` Its projects: ${listed}.` : ' It has no projects.'} The person can clone it there first.` }
+    if (same.length) return { error: `${machine.name} has more than one checkout of ${key}: ${same.map((p) => `"${p.name}"`).join(', ')}, none named as this project is. Choosing among them is not available yet: the person can remove the extra one there.` }
+    const listed = read.map(({ p, r }) => `"${p.name}" (${r.ok ? shownRemote(r.origin) : 'not read'})`).join(', ')
+    return { error: `${machine.name} has no checkout of ${key}, so nothing was started there.${listed ? ` Its projects: ${listed}.` : ' It has no projects.'} The person can clone it there first.` }
   }
 
   /** Waits on the child's turn up to the bound; while it waits, the answer is the call's and no report is sent */
-  private async awaitTurn(rec: RemoteAgent, signal: AbortSignal | undefined, boundMs: number): Promise<ChildRunResult> {
+  private async awaitTurn(rec: RemoteAgent, signal: AbortSignal | undefined, boundMs: number, opened?: TurnWait): Promise<ChildRunResult> {
     const reader = this.host.linkedReader
-    let wait = this.waits.get(rec.sessionId)
-    if (!wait) {
-      let end!: (step: Step) => void
-      const done = new Promise<Step>((resolve) => (end = resolve))
-      wait = { busy: this.host.children.linkedReports.get(rec.sessionId)?.busy ?? false, done, end }
-      this.waits.set(rec.sessionId, wait)
-    }
+    const wait = opened ?? this.waits.get(rec.sessionId) ?? this.openWait(rec.sessionId)
     // As a local child's wait takes its report down (#561): the call reads the answer, and it is put back if the call does not
     if (this.reportArmed(rec)) this.host.children.dropLinkedReport(rec.sessionId)
     const r = await raceBound(wait.done, boundMs, signal)
@@ -354,6 +419,24 @@ export class RemoteAgents {
     }
   }
 
+  /** A wait on the child's turn, which the machine's events end (`observe`); `busy` as far as the hub has seen */
+  private openWait(sessionId: string): TurnWait {
+    let end!: (step: Step) => void
+    const done = new Promise<Step>((resolve) => (end = resolve))
+    const wait = { busy: this.host.children.linkedReports.get(sessionId)?.busy ?? false, done, end }
+    this.waits.set(sessionId, wait)
+    return wait
+  }
+
+  /**
+   * Whether the child is no longer anywhere (#1038 review): its machine removed from Centralu, or the machine's sessions
+   * (read now, or as last known when it cannot be asked) do not have it
+   */
+  private gone(rec: RemoteAgent, reader: LinkedSessions, listed: readonly OrchestratedSession[]): boolean {
+    if (!reader.machineLinked(rec.machineId)) return true
+    return !listed.some((s) => s.sessionId === rec.sessionId)
+  }
+
   private working(rec: RemoteAgent, reported: boolean): Extract<ChildRunResult, { state: 'working' }> {
     return { ok: true, state: 'working', sessionId: rec.sessionId, sessionName: rec.name, tool: rec.tool, reported }
   }
@@ -383,6 +466,8 @@ export class RemoteAgents {
       if (wait) {
         this.waits.delete(rec.sessionId)
         wait.end({ step: 'unreachable', machine: name })
+        // The call said it; what ended while the link was down is reported once it is back, seen working or not (#1038 review)
+        this.toldDown.add(rec.sessionId)
         continue
       }
       const report = this.host.children.linkedReports.get(rec.sessionId)

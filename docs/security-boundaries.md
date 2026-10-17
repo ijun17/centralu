@@ -364,6 +364,15 @@ stored and shown as the orchestrator's (`from`), not the person's. It was `norma
 under, with the instruction recorded as the person's, so a `safe` orchestrator that read a planted instruction could
 start a `normal` session carrying it without a card.
 
+**`start_agent` on a linked machine** (#1038) follows the same rule: the child there runs under the caller's preset,
+`normal` at most (`auto` gets `normal`; Codex's `auto` would be `danger-full-access` on that computer), and the card
+naming the machine is raised every time, for an `auto` caller too (`askHost`'s `alwaysAsk`), with no "always": nothing
+is remembered for another machine's project. The machine keeps the child one level below the caller in the agent
+depth (`agentDepth`); a machine whose build would drop it (it has no `projects.origin`) is refused, so two machines
+linked both ways cannot start each other's sessions past the setting. The checkout is matched by its origin's
+repository (`gitRemoteKey`): a local-path remote never matches across machines, and answers show the repository,
+never the address as written, which can carry a token.
+
 **Proposals** (`propose_mcp_server`, `propose_skill`, #838) are approved by name, and approval installs or saves what
 is stored when the person presses it. A proposal under the name of one still waiting is refused, never replaced: a
 second one used to swap the command or text the person was reading for one they never saw. The person dismisses the

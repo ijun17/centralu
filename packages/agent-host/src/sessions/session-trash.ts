@@ -179,6 +179,8 @@ export class SessionTrash {
     }
     this.host.readGrants.delete(sessionId)
     this.host.delegationFlow.starts.agentConsents.delete(sessionId)
+    // Its children on linked machines (#1038 review): nobody is left to report to; they stay on their machines
+    this.host.delegationFlow.remote.forgetCaller(sessionId)
     // What a handoff gave away from it, or to it, or the given work itself (#693)
     this.host.children.forgetHandedOver(sessionId)
     // Its start_agent requests (#673): a standing card is withdrawn, with a line saying so if the session is restored

@@ -116,7 +116,7 @@ export class SessionTools {
       startAgent: async (opts, signal) => (off() ? { ok: false, error: offError } : this.host.startAgent(sessionId, opts, signal)),
       agentSession: async (opts, signal) => (off() ? { ok: false, error: offError } : this.host.agentSession(sessionId, opts, signal)),
       // Off, it says so as the other actions do (#690 review): an empty list read as "nothing left"
-      listAgents: async () => (off() ? { ok: false, error: offError } : { ok: true, agents: this.host.listAgents(sessionId) }),
+      listAgents: async () => (off() ? { ok: false, error: offError } : { ok: true, agents: await this.host.listAgents(sessionId) }),
       // An ordinary session answers through agent_session (#676)
       answerQuestion: async () => ({ ok: false, error: 'Answer it with agent_session, action "answer"' }),
       sendToSession: refuse,

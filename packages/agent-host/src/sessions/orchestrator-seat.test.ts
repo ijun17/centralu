@@ -58,7 +58,7 @@ beforeEach(() => {
     createProjectOnMachine: vi.fn(),
     startAgent: vi.fn(async () => ({ ok: false as const, error: 'reached the start flow' })),
     agentSession: vi.fn(async () => ({ ok: false as const, error: 'reached the start flow' })),
-    listAgents: vi.fn(() => []),
+    listAgents: vi.fn(async () => []),
     handoff: vi.fn(async () => ({ ok: false as const, error: 'reached the flow' })),
     handoffWait: vi.fn(async () => ({ ok: false as const, error: 'reached the wait' })),
     builderRefOf: vi.fn(() => null),

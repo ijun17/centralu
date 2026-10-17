@@ -43,7 +43,7 @@ function movedLabel(c: Pick<MovedChild, 'name' | 'project' | 'request'>): string
  * when used, never kept.
  */
 export type HandoffChildrenHost = Pick<DelegationHost, 'children' | 'emit' | 'meta' | 'nameOf' | 'onEvent' | 'store'> &
-  Pick<SessionTrashHost, 'hostCards'> &
+  Pick<SessionTrashHost, 'delegationFlow' | 'hostCards'> &
   Pick<QueuedRequestsHost, 'turnRunning'> & {
     /** Requests of a session that only `auto` let through, dropped when they would go on without it (#606) */
     dropOpenedByAuto: (sessionId: string, tell?: string) => void
@@ -97,6 +97,8 @@ export class HandoffChildren {
     const original = this.host.meta.get(from)
     const heir = this.host.meta.get(to)
     if (!original || !heir || from === to || original.projectId !== heir.projectId) return []
+    // Its children on linked machines go to the heir too, their reports with them (#1038 review)
+    this.host.delegationFlow.remote.moveCaller(from, to)
     const removed = scope === 'removed'
     // What only `auto` let the original queue does not go to a successor that is not `auto`; the original is told.
     // A removed original's queue moves nowhere: the trash drops it

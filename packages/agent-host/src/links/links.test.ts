@@ -45,13 +45,17 @@ afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c()
 })
 
-async function remoteHost(port = 0, store = new Store(), o: { version?: string; activity?: () => HostActivity } = {}) {
-    const adapters = scriptedAdapters()
+async function remoteHost(
+  port = 0,
+  store = new Store(),
+  o: { version?: string; activity?: () => HostActivity; immediate?: boolean; without?: readonly string[] } = {},
+) {
+    const adapters = scriptedAdapters({ immediate: o.immediate })
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   const server: HostServer = new HostServer({
     port,
     token: TOKEN,
-    onRpc: createRpcHandler(mgr, adapters, o.activity ? { activity: o.activity } : {}),
+    onRpc: without(createRpcHandler(mgr, adapters, o.activity ? { activity: o.activity } : {}), o.without ?? []),
     build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? APP_VERSION },
   })
   const p = await server.listen()
@@ -64,6 +68,14 @@ async function remoteHost(port = 0, store = new Store(), o: { version?: string; 
   }
   cleanups.push(close)
   return { server, mgr, store, port: p, close }
+}
+
+/** An RPC handler without these methods, as a build from before them answers */
+function without(handler: ReturnType<typeof createRpcHandler>, methods: readonly string[]): ReturnType<typeof createRpcHandler> {
+  return (method, ...rest) => {
+    if (methods.includes(method)) return Promise.reject(new Error(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`))
+    return handler(method, ...rest)
+  }
 }
 
 type Hub = Awaited<ReturnType<typeof hubHost>>
@@ -1485,13 +1497,14 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
 
   /**
    * A remote with two projects, one a checkout of the hub's repository written another way, and a hub whose trusted
-   * project's session h1 starts the child
+   * project's session h1 starts the child. `remote`: how the machine's host answers (a synchronous agent, methods an
+   * older build lacks)
    */
-  async function rig() {
+  async function rig(o: { remote?: { immediate?: boolean; without?: readonly string[] } } = {}) {
     const remoteStore = new Store()
     remoteStore.projects.addProject({ id: 'p-other', path: checkout('git@github.com:me/other.git'), name: 'other' })
-    remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@github.com:Me/App.git'), name: 'app-checkout' })
-    const remote = await remoteHost(0, remoteStore)
+    remoteStore.projects.addProject({ id: 'p-app', path: checkout('git@GitHub.com:me/app.git'), name: 'app-checkout' })
+    const remote = await remoteHost(0, remoteStore, o.remote ?? {})
     const hubStore = new Store()
     hubStore.projects.addProject({ id: 'p-hub', path: checkout('https://github.com/me/app'), name: 'app' })
     seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
@@ -1509,14 +1522,18 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
       hub.mgr.startAgent('h1', { task: 'say hello', machine: 'Remote box', ...opts })
     const agent = (sessionId: string, action: 'status' | 'send' | 'wait' | 'stop' | 'delete', text?: string) =>
       hub.mgr.agentSession('h1', { sessionId, action, ...(text ? { text } : {}) })
+    const list = (id = 'h1') => (hub.mgr as unknown as { delegationFlow: { listAgents(id: string): Promise<unknown[]> } }).delegationFlow.listAgents(id)
     // As the machine names its projects (the folder's name), which is what the hub reads
     const nameOf = async (id: string) => (await remote.mgr.listProjects()).find((p) => p.id === id)!.name
     const told = () => hub.store.loadMessages('h1', 50).map((m) => (m.payload as { text?: string }).text ?? '').filter((t) => t.startsWith('[Centralu]'))
-    return { remote, remoteStore, hub, card, answer, start, agent, told, nameOf }
+    const reports = () => told().filter((t) => t.startsWith('[Centralu] The assigned work')).length
+    const records = () => JSON.parse(hub.store.appSetting('remote_agents') ?? '[]') as { sessionId: string; callerId: string }[]
+    return { remote, remoteStore, hub, card, answer, start, agent, list, told, reports, records, nameOf }
   }
 
   it("starts it in the machine's checkout of the same repository, behind a card that names the machine, and waits for its answer", async () => {
-    const { remote, remoteStore, hub, answer, start, agent, nameOf } = await rig()
+    const { remote, remoteStore, hub, answer, start, agent, list, nameOf } = await rig()
+    const sent = vi.spyOn(remote.mgr, 'sendFromHub')
     const call = start()
     const c = await answer('allow')
     expect(c.detail).toMatchObject({ kind: 'agent_start', machine: 'Remote box', project: { id: 'm1.p-app', name: await nameOf('p-app') }, preset: 'normal' })
@@ -1524,13 +1541,13 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     expect(r).toMatchObject({ ok: true, state: 'done', notice: expect.stringContaining('works on Remote box') })
     if (!r.ok) return
     expect((r as { answer: string }).answer).toContain('echo: [A session working on this repository on another computer')
-    // It is a session of that project there, recorded on that machine one level below the caller
+    // It is a session of that project there, recorded on that machine one level below the caller, and so is its task's turn
     const child = remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)!
     expect(child).toMatchObject({ projectId: 'p-app', permissionPreset: 'normal' })
     expect(remoteStore.appSetting(`agent_depth:${child.id}`)).toBe('1')
+    expect(sent).toHaveBeenCalledWith(child.id, expect.stringContaining('say hello'), expect.any(String), { depth: 1 })
     // The caller's own: listed with its machine, and followed through the link
-    const listAgents = (id: string) => (hub.mgr as unknown as { delegationFlow: { listAgents(id: string): unknown } }).delegationFlow.listAgents(id)
-    expect(listAgents('h1')).toEqual([expect.objectContaining({ sessionId: r.sessionId, machine: 'Remote box', state: 'finished' })])
+    expect(await list()).toEqual([expect.objectContaining({ sessionId: r.sessionId, machine: 'Remote box', state: 'finished' })])
     expect(await agent(r.sessionId, 'status')).toMatchObject({ ok: true, state: 'at_rest', answer: expect.stringContaining('echo:') })
     // A card for another machine has no "always": the next start asks again
     const again = start({ task: 'once more' })
@@ -1542,20 +1559,60 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     expect(await third).toMatchObject({ ok: false, error: expect.stringContaining('did not allow this session to start an agent on Remote box') })
   })
 
-  it('refuses with what the machine has when none of its projects is a checkout of this repository', async () => {
+  // #1038 review: a turn that ended inside the send was reported, and the call then waited out its bound as "working"
+  it('reads the answer of a turn that ends before the send returns, and owes no report of it', async () => {
+    const { answer, start, agent, list, reports } = await rig({ remote: { immediate: true } })
+    const call = start()
+    await answer('allow')
+    const r = await call
+    expect(r).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('echo:') })
+    if (!r.ok) return
+    expect(await list()).toEqual([expect.objectContaining({ state: 'finished' })])
+    // Nothing is left armed: a wait now reads the rest at once, and no report of that turn comes
+    expect(await agent(r.sessionId, 'wait')).toMatchObject({ ok: true, state: 'at_rest' })
+    expect(reports()).toBe(0)
+  })
+
+  it('refuses with what the machine has when none of its projects is a checkout of this repository, tokens left out', async () => {
     const { remoteStore, start, card, nameOf } = await rig()
     const there = remoteStore.projects.listProjects().find((p) => p.id === 'p-app')!.path
-    execFileSync('git', ['-C', there, 'remote', 'set-url', 'origin', 'git@github.com:me/elsewhere.git'], { stdio: 'ignore' })
+    execFileSync('git', ['-C', there, 'remote', 'set-url', 'origin', 'https://someone:ghp_secret123@github.com/me/elsewhere.git'], { stdio: 'ignore' })
     const r = await start()
-    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Remote box has no checkout of https://github.com/me/app') })
-    expect((r as { error: string }).error).toContain(`"${await nameOf('p-other')}" (git@github.com:me/other.git)`)
-    expect((r as { error: string }).error).toContain(`"${await nameOf('p-app')}" (git@github.com:me/elsewhere.git)`)
+    expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Remote box has no checkout of github.com/me/app') })
+    const error = (r as { error: string }).error
+    expect(error).toContain(`"${await nameOf('p-other')}" (github.com/me/other)`)
+    expect(error).toContain(`"${await nameOf('p-app')}" (github.com/me/elsewhere)`)
+    expect(error).not.toMatch(/ghp_secret123|someone/)
+    // A local folder as the remote names a repository on that computer only: never a match across machines
+    execFileSync('git', ['-C', there, 'remote', 'set-url', 'origin', '/srv/git/app.git'], { stdio: 'ignore' })
+    expect(await start()).toMatchObject({ ok: false, error: expect.stringContaining(`"${await nameOf('p-app')}" (a local path)`) })
     expect(await start({ machine: 'nowhere' })).toMatchObject({ ok: false, error: expect.stringContaining('No linked machine is called "nowhere"') })
     expect(card()).toBeFalsy()
   })
 
+  // #1038 review: a build that drops agentDepth would let two machines linked both ways start each other's sessions for good
+  it('refuses a machine whose Centralu would not keep the child within the agent depth', async () => {
+    const { start, card } = await rig({ remote: { without: ['projects.origin'] } })
+    expect(await start()).toMatchObject({ ok: false, error: expect.stringContaining('Remote box runs an older Centralu') })
+    expect(card()).toBeFalsy()
+  })
+
+  // #1038 review, as create_session over a link (#838): auto is never carried to another computer, and the card is always asked
+  it('asks an auto caller with the card too, and starts the child there under normal', async () => {
+    const { remote, hub, answer, start } = await rig()
+    await hub.mgr.updateSettings('h1', { permissionPreset: 'auto' })
+    const call = start({ lsp: true })
+    const c = await answer('allow')
+    expect(c.detail).toMatchObject({ kind: 'agent_start', machine: 'Remote box', preset: 'normal' })
+    const r = await call
+    expect(r).toMatchObject({ ok: true, notice: expect.stringContaining('it runs under normal on Remote box') })
+    expect((r as { notice: string }).notice).toContain('lsp is not passed to another machine')
+    if (!r.ok) return
+    expect(remote.mgr.listSessions().find((s) => `m1.${s.id}` === r.sessionId)).toMatchObject({ permissionPreset: 'normal' })
+  })
+
   it('reports the end of a turn it was not waited on to the session that started it, and takes sends, a stop and a delete', async () => {
-    const { remote, answer, start, agent, told } = await rig()
+    const { remote, answer, start, agent, told, reports } = await rig()
     const call = start({ wait: false })
     await answer('allow')
     const r = await call
@@ -1565,7 +1622,7 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     // More work, waited on: its answer is the call's, and no second report comes
     expect(await agent(r.sessionId, 'send', 'and now this')).toMatchObject({ ok: true, state: 'working' })
     expect(await agent(r.sessionId, 'wait')).toMatchObject({ ok: true, state: 'done', answer: expect.stringContaining('and now this') })
-    const reports = told().filter((t) => t.startsWith('[Centralu] The assigned work finished')).length
+    const before = reports()
     // A turn that waits on the person there, stopped from here
     expect(await agent(r.sessionId, 'send', 'please approve the command')).toMatchObject({ ok: true, state: 'working' })
     const id = r.sessionId.slice('m1.'.length)
@@ -1575,7 +1632,37 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     expect(await agent(r.sessionId, 'delete')).toMatchObject({ ok: true, state: 'deleted', notice: expect.stringContaining("Remote box's trash") })
     expect(remote.mgr.listSessions().some((s) => s.id === id)).toBe(false)
     expect(await agent(r.sessionId, 'status')).toMatchObject({ ok: false, error: expect.stringContaining('is not a session this session started') })
-    expect(told().filter((t) => t.startsWith('[Centralu] The assigned work finished')).length).toBe(reports)
+    expect(reports()).toBe(before)
+  })
+
+  // #1038 review: the turn a delete stops ends before the machine answers the stop; it is owed to nobody
+  it('reports nothing of the turn a delete stops', async () => {
+    const { remote, answer, start, agent, reports } = await rig()
+    const call = start({ task: 'please approve the command', wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const id = r.sessionId.slice('m1.'.length)
+    await eventually(() => remote.mgr.listSessions().find((s) => s.id === id)?.state === 'waiting_approval')
+    expect(await agent(r.sessionId, 'delete')).toMatchObject({ ok: true, state: 'deleted' })
+    // Room for a report to arrive, if one were sent
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(reports()).toBe(0)
+  })
+
+  // #1038 review: a delete whose stop failed left the child running and owed nothing
+  it('keeps the report owed when a delete cannot stop the turn first', async () => {
+    const { remote, answer, start, agent, told } = await rig({ remote: { without: ['agents.interrupt'] } })
+    const call = start({ task: 'please approve the command', wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    const id = r.sessionId.slice('m1.'.length)
+    await eventually(() => remote.mgr.listSessions().find((s) => s.id === id)?.state === 'waiting_approval')
+    expect(await agent(r.sessionId, 'delete')).toMatchObject({ ok: false, error: expect.stringContaining('before deleting it') })
+    // The person answers there: the turn ends, and its report comes
+    await remote.mgr.respondApproval(id, remote.mgr.listSessions().find((s) => s.id === id)!.pendingApproval!.requestId, 'allow')
+    await eventually(() => told().some((t) => t.startsWith('[Centralu] The assigned work finished')))
   })
 
   it('starts it in a new worktree there on the branch asked for', async () => {
@@ -1608,6 +1695,46 @@ describe('start_agent starts a child on a linked machine (#1038)', () => {
     await remoteHost(remote.port, remoteStore)
     await eventually(() => status(hub) === 'connected')
     await eventually(() => told().some((t) => t.startsWith('[Centralu] The assigned work')), 10_000)
+  })
+
+  // #1038 review: deleted there, or its machine removed, while the hub could not see it
+  it('clears a child that was deleted on its machine while the link was down, and the children of a removed machine', async () => {
+    const { remote, remoteStore, hub, answer, start, agent, list, records } = await rig()
+    const first = start({ wait: false })
+    await answer('allow')
+    const a = await first
+    const second = start({ task: 'another', wait: false })
+    await answer('allow')
+    const b = await second
+    if (!a.ok || !b.ok) throw new Error('not started')
+    await eventually(async () => (await list()).length === 2)
+    await remote.close()
+    await eventually(() => status(hub) !== 'connected')
+    // Trashed there while the hub could not see it
+    const there = new SessionManager(remoteStore, scriptedAdapters(), () => {})
+    await there.trashSession(a.sessionId.slice('m1.'.length))
+    await there.disposeAll()
+    await remoteHost(remote.port, remoteStore)
+    await eventually(() => status(hub) === 'connected')
+    await eventually(async () => (await list()).length === 1)
+    expect(records().map((r) => r.sessionId)).toEqual([b.sessionId])
+    // The machine removed from Centralu: its child is forgotten here, by delete as by list
+    await hub.links.remove('m1')
+    expect(await agent(b.sessionId, 'delete')).toMatchObject({ ok: true, state: 'deleted', notice: expect.stringContaining('was removed from Centralu') })
+    expect(records()).toEqual([])
+  })
+
+  // #1038 review: the records outlived the session that started them
+  it("forgets the caller's children here when the caller is trashed, leaving them on their machine", async () => {
+    const { remote, hub, answer, start, records } = await rig()
+    const call = start({ wait: false })
+    await answer('allow')
+    const r = await call
+    if (!r.ok) throw new Error(r.error)
+    expect(records()).toHaveLength(1)
+    await hub.mgr.trashSession('h1')
+    expect(records()).toEqual([])
+    expect(remote.mgr.listSessions().some((s) => `m1.${s.id}` === r.sessionId)).toBe(true)
   })
 })
 

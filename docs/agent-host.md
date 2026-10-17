@@ -553,12 +553,16 @@ sides (`projects.origin`, compared by `gitRemoteKey`, so `git@github.com:me/app.
 one repository). No such checkout is refused with that machine's projects and their origins; two checkouts are
 refused unless one has the caller's project's name; a machine that cannot be reached is refused as unreachable. The
 caller's gates are the same (an ordinary session of a trusted project, above the agent depth) and are read again after
-the card. The card is `agent_start` with `machine`: it names the computer, and offers no "always", as ask_project's
-card for another machine's project (#700); it is bounded like a local start's setup (`START_AGENT_SETUP_MS`). The
-child is made over the link (`agents.createSession` there) under the caller's preset, with the model, effort and
-worktree branch asked for (the machine's own rules apply: a worktree needs a project trusted there), and kept one
-level below the caller in the agent depth on that machine (`agentDepth`). Its task goes in `remoteAgentFrame`, sent as
-from the caller ("… on <hub>"). The hub records it (`remote_agents`, an app setting) and arms a linked report for the
+the card. The card is `agent_start` with `machine`: it names the computer, is raised every time (an `auto` caller
+included), and offers no "always", as ask_project's card for another machine's project (#700); it is bounded like a
+local start's setup (`START_AGENT_SETUP_MS`). The child is made over the link (`agents.createSession` there) under
+the caller's preset capped at `normal` (as create_session over a link, #838), with the model, effort and worktree
+branch asked for (the machine's own rules apply: a worktree needs a project trusted there; `lsp` is not passed, and
+the answer says so), and kept one level below the caller in the agent depth on that machine (`agentDepth`, and the
+task's turn is sent with that depth too); a machine whose build would drop it is refused, with a line to update it.
+Only network remotes match (`gitRemoteKey`), and a refusal names repositories, never the addresses as written. Its
+task goes in `remoteAgentFrame`, sent as from the caller ("… on <hub>"); a call that waits opens its wait before the
+send, so a turn that ends at once is its answer, not a report. The hub records it (`remote_agents`, an app setting) and arms a linked report for the
 caller before the send (`LinkedReport`, as the orchestrator's `reportBack`), so the end of its turn comes back as a
 local child's does, with the same pause over its own background work (#723); a call waiting on it (`wait`,
 `agent_session wait`) reads the answer instead (`RemoteAgents.observe`, read before the reports). `agent_session`
@@ -570,7 +574,9 @@ said, and a caller still owed a report is told once that the child cannot be fol
 is back, a child whose turn ended meanwhile is reported then. The paths its answer names are that machine's, and none
 is made readable here. Not yet: the child is not counted under this host's per-project ceiling (it runs on the other
 computer), and a linked report lives in the hub's memory, so a hub restart still finds the child (the record is
-stored) but no longer owes its report.
+stored; `list` reads its state from the machine) but no longer owes its report. A child deleted there, or whose
+machine was removed, while the hub could not see it is cleared by `list` and `delete`; the caller's trash clears its
+children's records, and a handoff gives them to the heir.
 
 **Creator and worktree ancestry** (#637). `askedBy` records who started an agent, regardless of its folder.
 `parentSessionId` records worktree ancestry (including former manager children); `start_agent` sets it only

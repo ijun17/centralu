@@ -85,13 +85,15 @@ export class HostCards {
   /**
    * Auto allows and logs; other presets raise a host card, withdrawn if the signal fires. `requestId` is given when the
    * caller tracks the card itself (a start_agent request, #673); `shown` raises one the conversation already records
-   * (a request carried over from the previous host) without recording it again; `log` is what auto's log line names.
+   * (a request carried over from the previous host) without recording it again; `log` is what auto's log line names;
+   * `alwaysAsk` raises the card for auto too.
    */
-  askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal, card: { requestId?: string; shown?: boolean; log?: string } = {}): Promise<HostAskAnswer> {
+  askHost(sessionId: string, detail: HostAsk['detail'], signal?: AbortSignal, card: { requestId?: string; shown?: boolean; log?: string; alwaysAsk?: boolean } = {}): Promise<HostAskAnswer> {
     if (signal?.aborted) return Promise.resolve(null)
     const note = detail.kind === 'project_access' && !detail.to.trusted ? ' (target not trusted)' : ''
     // `log` names what an `other` card is about in the auto log line, which would otherwise say only "other" (#694 review)
-    if (this.host.autoBoundaryOpen(sessionId, card.log ?? `${detail.kind}${note}`)) return Promise.resolve('allow')
+    // `alwaysAsk`: a card auto does not answer either (#1038 review: start_agent on another computer)
+    if (!card.alwaysAsk && this.host.autoBoundaryOpen(sessionId, card.log ?? `${detail.kind}${note}`)) return Promise.resolve('allow')
     return new Promise<HostAskAnswer>((resolve) => {
       if (signal?.aborted) return resolve(null)
       const requestId = card.requestId ?? `${detail.kind === 'project_access' ? 'xp' : detail.kind === 'agent_start' ? 'ag' : detail.kind === 'centralu_update' || isCentraluApply(detail) ? 'up' : 'mk'}-${randomUUID()}`

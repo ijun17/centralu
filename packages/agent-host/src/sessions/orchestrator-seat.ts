@@ -69,7 +69,7 @@ export type OrchestratorSeatHost = {
   /** start_agent and agent_session for the central orchestrator (#853): the start flow, with the orchestrator as the caller */
   startAgent(callerId: string, opts: StartAgentOpts, signal?: AbortSignal): Promise<ChildRunResult>
   agentSession(callerId: string, opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
-  listAgents(callerId: string): AgentListRow[]
+  listAgents(callerId: string): Promise<AgentListRow[]>
   /** handoff_session (#694): `HandoffFlow.handoff`, after this seat's own scope checks */
   handoff(
     callerId: string,
@@ -496,7 +496,7 @@ export function orchestratorToolsFor(
         : { ok: false, error: 'Only an ordinary project session or the orchestrator can start agents this way' },
     listAgents: async () =>
       central && host.meta.get(orchestratorId)?.kind === 'orchestrator'
-        ? { ok: true, agents: host.listAgents(orchestratorId) }
+        ? { ok: true, agents: await host.listAgents(orchestratorId) }
         : { ok: false, error: 'Only an ordinary project session or the orchestrator can start agents this way' },
 
     sendToSession: async (sessionId, text, reportBack, ifBusy) => {

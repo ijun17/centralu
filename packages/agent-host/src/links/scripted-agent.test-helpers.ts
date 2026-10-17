@@ -20,11 +20,14 @@ class ScriptedHandle implements SessionHandle {
   constructor(
     readonly sessionId: string,
     private readonly emit: EventSink,
+    /** Answers inside `send` rather than a moment later, as a tool that refuses at once does */
+    private readonly immediate = false,
   ) {
     this.externalId = `scripted-${sessionId}`
   }
 
   send(text: string): void {
+    if (this.immediate) return this.turn(text)
     setTimeout(() => this.turn(text), 20)
   }
 
@@ -92,7 +95,10 @@ export class ScriptedAdapter implements AgentAdapter {
   readonly descriptor: AgentAdapter['descriptor']
   readonly created: string[] = []
 
-  constructor(readonly tool: ToolName = 'claude') {
+  constructor(
+    readonly tool: ToolName = 'claude',
+    private readonly immediate = false,
+  ) {
     this.descriptor = { name: tool, label: `Scripted ${tool}`, mark: tool.slice(0, 1).toUpperCase(), install: 'none', login: 'none' }
   }
 
@@ -102,7 +108,7 @@ export class ScriptedAdapter implements AgentAdapter {
 
   async createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle> {
     this.created.push(opts.sessionId)
-    return new ScriptedHandle(opts.sessionId, emit)
+    return new ScriptedHandle(opts.sessionId, emit, this.immediate)
   }
 
   /** The conversation lives nowhere but in this object; deleting it for good has nothing to remove */
@@ -113,9 +119,9 @@ export class ScriptedAdapter implements AgentAdapter {
   }
 }
 
-export function scriptedAdapters(): Map<ToolName, AgentAdapter> {
+export function scriptedAdapters(o: { immediate?: boolean } = {}): Map<ToolName, AgentAdapter> {
   return new Map<ToolName, AgentAdapter>([
-    ['claude', new ScriptedAdapter('claude')],
-    ['codex', new ScriptedAdapter('codex')],
+    ['claude', new ScriptedAdapter('claude', o.immediate)],
+    ['codex', new ScriptedAdapter('codex', o.immediate)],
   ])
 }
