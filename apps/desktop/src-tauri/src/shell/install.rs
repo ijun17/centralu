@@ -295,25 +295,36 @@ fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
     fs::set_permissions(to, fs::Permissions::from_mode(fs::metadata(from)?.permissions().mode() & 0o777))
 }
 
+/**
+ * Removes a leftover `.Centralu.app.new` or `.Centralu.app.old`, or whatever else is at `p`; nothing there
+ * is not an error. Best effort on the way, unlike the verifier's `remove_content`: every folder is made
+ * writable where it can be, a folder that cannot be (one root owns, after an install run with sudo) or
+ * cannot be listed is passed over, and the removal is tried all the same. It can still succeed when what
+ * could not be changed was writable already, and when it cannot, its error is the one to report.
+ */
 fn remove_any(p: &Path) -> io::Result<()> {
+    remove_any_with(p, &|dir| fs::set_permissions(dir, fs::Permissions::from_mode(0o700)))
+}
+
+/// `remove_any` with the chmod given, so a test can make it fail as it does on a folder of another user.
+fn remove_any_with(p: &Path, chmod: &dyn Fn(&Path) -> io::Result<()>) -> io::Result<()> {
     match fs::symlink_metadata(p) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
         Ok(m) if m.is_dir() => {
-            // A copy this module made may hold read-only folders; make them writable to remove them.
-            make_writable(p);
+            make_writable(p, chmod);
             fs::remove_dir_all(p)
         }
         Ok(_) => fs::remove_file(p),
     }
 }
 
-fn make_writable(dir: &Path) {
-    let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
+fn make_writable(dir: &Path, chmod: &dyn Fn(&Path) -> io::Result<()>) {
+    let _ = chmod(dir);
     if let Ok(entries) = fs::read_dir(dir) {
         for e in entries.flatten() {
             if fs::symlink_metadata(e.path()).map(|m| m.is_dir()).unwrap_or(false) {
-                make_writable(&e.path());
+                make_writable(&e.path(), chmod);
             }
         }
     }

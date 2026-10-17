@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use super::super::content::{origin_of, version_dir, Origin};
 use super::*;
+use content_verify::remove_content;
 
 struct Case {
     t: PathBuf,

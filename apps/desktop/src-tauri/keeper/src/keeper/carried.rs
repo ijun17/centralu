@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use content_verify::version::Version;
-use content_verify::{remove_content, MANIFEST_NAME};
+use content_verify::{discard, MANIFEST_NAME};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -240,15 +240,6 @@ fn hash_file(path: &Path) -> io::Result<String> {
         h.update(&buf[..n]);
     }
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
-}
-
-/// Removes a folder this module wrote (read-only inside), or whatever else is at `dest`.
-fn discard(dest: &Path) -> io::Result<()> {
-    if fs::symlink_metadata(dest)?.is_dir() {
-        remove_content(dest)
-    } else {
-        fs::remove_file(dest)
-    }
 }
 
 #[cfg(test)]

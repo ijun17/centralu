@@ -1,16 +1,16 @@
 //! One start: verify, copy (or verify the copy already there), refuse a downgrade, start the keeper
 //! from the copy, wait for it to answer.
 
-use std::fs::{self, DirBuilder, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::time::{Duration, Instant};
 
 use centralu_keeper_core::keeper::{self as keeper, client, exe::Start, EXIT_ALREADY_RUNNING};
 use content_verify::version::{check_not_downgrade, read_highest_seen, record_started, Rollback};
-use content_verify::{read_verified_manifest, remove_content, verify_and_copy, verify_in_place, Error, Expect, Manifest, TrustedKey};
+use content_verify::{read_verified_manifest, Error, Expect, Fault, Manifest, PlaceError, Placement, Placing, TrustedKey};
 
 use crate::args::Args;
 use crate::{Reason, Refusal, READY_TIMEOUT, SHELL_VERSION};
@@ -182,59 +182,26 @@ fn check_runnable(m: &Manifest) -> Result<(), Refusal> {
 }
 
 /// `<data>/content/<version>/`, verified: the copy already there when it verifies and was made from
-/// the same signed manifest, else a new copy. Never runs anything from `a.content`.
+/// the same signed manifest, else a new copy (`content_verify::place`). Never runs anything from
+/// `a.content`.
 fn place(a: &Args, env: &Env, expect: &Expect, manifest: &Manifest, manifest_bytes: &[u8]) -> Result<PathBuf, Refusal> {
     let root = content_root(&a.data_dir);
-    DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&root)
-        .map_err(|e| Refusal::new(Reason::Copy, format!("cannot create {}: {e}", root.display())))?;
-    // `Version::parse` admits only digits, letters, dots and dashes, and digits first: never a path.
-    let dest = root.join(&manifest.app_version);
-    let reuse = |dest: &Path| -> Option<String> {
-        match verify_in_place(dest, &env.keys, expect) {
-            Ok((_, bytes)) if bytes == manifest_bytes => None,
-            Ok(_) => Some("holds a differently signed manifest".to_string()),
-            Err(e) => Some(format!("does not verify ({e})")),
+    let placement = Placement { root: &root, src: &a.content, manifest, manifest_bytes, keys: &env.keys, expect, in_use: false };
+    content_verify::place(&placement, &mut |step| match step {
+        Placing::Reused(dest) => log(&a.data_dir, &format!("{} verifies; starting from it", dest.display())),
+        Placing::Replacing(dest, why) => log(&a.data_dir, &format!("{} {why}; copying again", dest.display())),
+        Placing::Copied(dest, files) => log(&a.data_dir, &format!("verified and copied {files} files into {}", dest.display())),
+    })
+    .map_err(|e| match e {
+        PlaceError::CreateRoot(root, e) => Refusal::new(Reason::Copy, format!("cannot create {}: {e}", root.display())),
+        // Not asked for (`in_use: false`); the folder was left alone
+        PlaceError::InUse(dest, why) => Refusal::new(Reason::Copy, format!("{} {why}", dest.display())),
+        PlaceError::Remove(dest, e) => Refusal::new(Reason::Copy, format!("cannot remove {}: {e}", dest.display())),
+        PlaceError::SourceChanged => {
+            Refusal::new(Reason::Content, format!("the content at {} changed while it was being copied", a.content.display()))
         }
-    };
-    if fs::symlink_metadata(&dest).is_ok() {
-        match reuse(&dest) {
-            None => {
-                log(&a.data_dir, &format!("{} verifies; starting from it", dest.display()));
-                return Ok(dest);
-            }
-            Some(why) => {
-                log(&a.data_dir, &format!("{} {why}; copying again", dest.display()));
-                discard(&dest).map_err(|e| Refusal::new(Reason::Copy, format!("cannot remove {}: {e}", dest.display())))?;
-            }
-        }
-    }
-    match verify_and_copy(&a.content, &dest, &env.keys, expect) {
-        Ok(copied) if copied == *manifest => {
-            log(&a.data_dir, &format!("verified and copied {} files into {}", copied.files.len(), dest.display()));
-            Ok(dest)
-        }
-        Ok(_) => {
-            // The source changed between reading its manifest and copying it.
-            let _ = remove_content(&dest);
-            Err(Refusal::new(Reason::Content, format!("the content at {} changed while it was being copied", a.content.display())))
-        }
-        // Another shell copied the same version in the meantime: use its copy if it verifies.
-        Err(Error::DestinationExists(_)) if reuse(&dest).is_none() => Ok(dest),
-        Err(e) => Err(refusal(e, &a.content, Stage::Copy)),
-    }
-}
-
-/// Removes a folder at `dest` this crate wrote, or whatever else is there (a symlink, a file).
-fn discard(dest: &Path) -> std::io::Result<()> {
-    let meta = fs::symlink_metadata(dest)?;
-    if meta.is_dir() {
-        remove_content(dest)
-    } else {
-        fs::remove_file(dest)
-    }
+        PlaceError::Copy(e) => refusal(e, &a.content, Stage::Copy),
+    })
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -246,26 +213,17 @@ enum Stage {
 }
 
 fn refusal(e: Error, source: &Path, stage: Stage) -> Refusal {
-    match e {
-        Error::ShellTooOld { needed, have } => Refusal::new(
+    if let Error::ShellTooOld { needed, have } = e {
+        return Refusal::new(
             Reason::ShellTooOld,
             format!("this version of Centralu needs a newer agent shell (version {needed}; the installed one is {have})"),
-        ),
-        Error::Io { ref context, .. } if stage == Stage::Copy && !reads_the_source(context) => {
-            Refusal::new(Reason::Copy, format!("could not copy the content: {e}"))
-        }
-        Error::DestinationExists(_) => Refusal::new(Reason::Copy, format!("could not copy the content: {e}")),
-        other @ (Error::Missing(_) | Error::Io { .. }) => {
-            Refusal::new(Reason::Content, format!("the content at {} is incomplete or unreadable: {other}", source.display()))
-        }
-        other => Refusal::new(Reason::Content, format!("the content at {} is not what the project signed: {other}", source.display())),
+        );
     }
-}
-
-/// Whether an I/O failure was reading the window's content (a missing or unreadable file there is
-/// the content's fault) rather than writing the copy (the data folder's). By the verifier's contexts.
-fn reads_the_source(context: &str) -> bool {
-    !context.starts_with("read back") && (context.starts_with("open ") || context.starts_with("read ") || context.starts_with("stat "))
+    match e.fault(stage == Stage::Copy) {
+        Fault::Copy => Refusal::new(Reason::Copy, format!("could not copy the content: {e}")),
+        Fault::Unreadable => Refusal::new(Reason::Content, format!("the content at {} is incomplete or unreadable: {e}", source.display())),
+        Fault::Unsigned => Refusal::new(Reason::Content, format!("the content at {} is not what the project signed: {e}", source.display())),
+    }
 }
 
 /// Waits until a keeper answers on `sock`. True when the one answering is another keeper (ours

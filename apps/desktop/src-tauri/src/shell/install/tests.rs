@@ -216,3 +216,26 @@ fn reads_the_shell_version_from_the_plist() {
     fs::write(app.join("Contents/Info.plist"), "<key>CentraluShellVersion</key><string>7</string>").unwrap();
     assert_eq!(bundle_version(&app), None);
 }
+
+/// A leftover `.new` or `.old` whose folders cannot all be made writable (a folder root owns, after an
+/// install run with sudo) is still removed when the removal itself can go through: the verifier's
+/// `remove_content`, which this used for a while, gave up at the first chmod and left it there.
+#[test]
+fn a_leftover_whose_folders_cannot_be_made_writable_is_still_removed_when_it_can_be() {
+    let dir = temp("leftover-chmod");
+    let left = dir.join(".Centralu.app.new");
+    fs::create_dir_all(left.join("Contents/MacOS")).unwrap();
+    fs::write(left.join("Contents/MacOS/centralu-shell"), b"x").unwrap();
+    fs::set_permissions(left.join("Contents/MacOS/centralu-shell"), fs::Permissions::from_mode(0o444)).unwrap();
+    let refused = |_: &Path| -> io::Result<()> { Err(io::Error::from(io::ErrorKind::PermissionDenied)) };
+    remove_any_with(&left, &refused).unwrap();
+    assert!(fs::symlink_metadata(&left).is_err(), "removed");
+    // Nothing there is not an error, and a read-only copy of this module's own goes with the real chmod
+    remove_any(&left).unwrap();
+    let copy = dir.join(".Centralu.app.old");
+    fs::create_dir_all(copy.join("Contents")).unwrap();
+    fs::set_permissions(copy.join("Contents"), fs::Permissions::from_mode(0o555)).unwrap();
+    remove_any(&copy).unwrap();
+    assert!(fs::symlink_metadata(&copy).is_err());
+    let _ = fs::remove_dir_all(&dir);
+}

@@ -56,7 +56,32 @@ pub enum Error {
     Io {
         context: String,
         source: io::Error,
+        step: IoStep,
     },
+}
+
+/// What a failed I/O call was doing, so a caller can tell reading the content apart from writing
+/// the copy without reading the words of `context`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IoStep {
+    /// Opening, examining or reading a file or folder the verifier was given to read. Opening the
+    /// copy to read it back counts here too, as it always has: the shell's and the keeper's refusals
+    /// must read an error the same way, and a shell already installed reads it this way.
+    Read,
+    /// Anything else: creating, writing, syncing, listing or reading back the copy, renaming it into
+    /// place, locking or writing the floor.
+    Other,
+}
+
+/// Whose fault a refusal is, for the reason and the words a caller gives it (`Error::fault`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fault {
+    /// Writing the copy into the data folder failed: the data folder's fault, not the content's.
+    Copy,
+    /// The content is incomplete or a file of it cannot be read.
+    Unreadable,
+    /// The content is not what the project signed (or not for this platform or shell).
+    Unsigned,
 }
 
 impl Error {
@@ -64,6 +89,33 @@ impl Error {
         Error::Io {
             context: context.into(),
             source,
+            step: IoStep::Other,
+        }
+    }
+
+    /// An I/O failure while opening, examining or reading what was given to read (`IoStep::Read`).
+    pub(crate) fn read_io(context: impl Into<String>, source: io::Error) -> Error {
+        Error::Io {
+            context: context.into(),
+            source,
+            step: IoStep::Read,
+        }
+    }
+
+    /// Whether this is an I/O failure reading the content rather than writing the copy.
+    pub fn reads_the_source(&self) -> bool {
+        matches!(self, Error::Io { step: IoStep::Read, .. })
+    }
+
+    /// Whose fault this refusal is. `copying`: the error came from `verify_and_copy` (or `place`),
+    /// where an I/O failure other than a read is the copy's, not the content's. The shell and the
+    /// keeper both word their refusals from this.
+    pub fn fault(&self, copying: bool) -> Fault {
+        match self {
+            Error::Io { .. } if copying && !self.reads_the_source() => Fault::Copy,
+            Error::DestinationExists(_) => Fault::Copy,
+            Error::Missing(_) | Error::Io { .. } => Fault::Unreadable,
+            _ => Fault::Unsigned,
         }
     }
 }
@@ -109,7 +161,9 @@ impl fmt::Display for Error {
                     "{candidate} is older than {highest}, which has already run"
                 )
             }
-            Error::Io { context, source } => write!(f, "{context}: {source}"),
+            Error::Io {
+                context, source, ..
+            } => write!(f, "{context}: {source}"),
         }
     }
 }
