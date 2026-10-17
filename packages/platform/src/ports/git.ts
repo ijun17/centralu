@@ -18,9 +18,14 @@ export interface GitPort {
   branches(projectId: string): Promise<GitBranch[]>
   /** Things git ignores (#76) — things a new worktree will not have; flagged as copy candidates */
   ignoredEntries(projectId: string): Promise<{ path: string; bytes: number | null }[]>
-  /** With dryRun, only reports what would conflict (show it, do not block it) */
-  checkout(projectId: string, branch: string, dryRun?: boolean): Promise<{ ok: boolean; conflicts: string[]; message?: string }>
+  /**
+   * The writes below answer `cancelled` when the person ended them with `cancel` (#1007). With dryRun, checkout only
+   * reports what would conflict (show it, do not block it).
+   */
+  checkout(projectId: string, branch: string, dryRun?: boolean): Promise<{ ok: boolean; conflicts: string[]; message?: string; cancelled?: true }>
   stage(projectId: string, paths: string[], unstage?: boolean): Promise<void>
-  commit(projectId: string, message: string): Promise<{ ok: boolean; message?: string }>
-  push(projectId: string): Promise<{ ok: boolean; message?: string }>
+  commit(projectId: string, message: string): Promise<{ ok: boolean; message?: string; cancelled?: true }>
+  push(projectId: string): Promise<{ ok: boolean; message?: string; cancelled?: true }>
+  /** Ends the write still running for this project (a hook, a credential helper waiting on a sign-in); whether there was one */
+  cancel(projectId: string): Promise<{ cancelled: boolean }>
 }
