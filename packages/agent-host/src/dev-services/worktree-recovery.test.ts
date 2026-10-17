@@ -1,16 +1,16 @@
 import { randomUUID } from 'node:crypto'
 import { execFile, execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { FIXTURE_GIT_CONFIG, fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 import * as gitModule from './git-exec.js'
 import { clearRecoveredBranchMark, repairWorktreeRecoveryRemovals, restoreWorktreeRecovery, saveWorktreeRecovery, worktreeRecoveryDir } from './worktree-recovery.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
-const git = (cwd: string, args: string[]) => execFileSync('git', [
+const git = (cwd: string, args: string[]) => fixtureGit(cwd, [
   '-c', 'user.name=Recovery test', '-c', 'user.email=recovery@example.test', '-c', 'core.autocrlf=false', ...args,
-], { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim()
+]).trim()
 const gitPath = (path: string) => path.replaceAll('\\', '/')
 const canonicalPath = (path: string) => gitPath(realpathSync.native(path))
 
@@ -22,7 +22,7 @@ describe('worktree recovery follow-ups (#608)', () => {
   const branch = 'worker'
 
   beforeEach(() => {
-    dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-recovery-')))
+    dir = tempRoot('cc-recovery-')
     vi.stubEnv('CC_DATA_DIR', join(dir, 'data'))
     repo = join(dir, 'repo')
     child = join(dir, 'child')
@@ -35,9 +35,9 @@ describe('worktree recovery follow-ups (#608)', () => {
     git(repo, ['commit', '-qm', 'base'])
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllEnvs()
-    rmSync(dir, { recursive: true, force: true })
+    await removeTree(dir)
   })
 
   const commit = (cwd: string, content: string) => {
@@ -380,7 +380,7 @@ describe('worktree recovery follow-ups (#608)', () => {
      * and a held worker answers nothing (vitest gives up on its own messages at 60 s).
      */
     const inputGit = (args: string[], input: string) => new Promise<string>((resolve, reject) => {
-      const child = execFile('git', ['-c', 'user.name=Recovery test', '-c', 'user.email=recovery@example.test', ...args], {
+      const child = execFile('git', [...FIXTURE_GIT_CONFIG, '-c', 'user.name=Recovery test', '-c', 'user.email=recovery@example.test', ...args], {
         cwd: repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
       }, (err, out) => (err ? reject(err) : resolve(out.trim())))
       child.stdin!.end(input)

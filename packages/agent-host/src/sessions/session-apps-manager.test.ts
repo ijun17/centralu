@@ -1,6 +1,4 @@
-import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdapterCapabilities, SessionInfo, ToolName } from '@cc/protocol'
@@ -11,6 +9,7 @@ import { Store } from '../dev-services/store.js'
 import { createRpcHandler } from '../rpc.js'
 import { SessionManager } from './manager.js'
 import { FIXTURE_APP } from './session-apps.test-helpers.js'
+import { fixtureGit, removeTree, tempRoot } from '../temp-dir.test-helpers.js'
 
 /**
  * Whether the manager hands apps to a session according to decision 4 when it spawns it (M4 A-5)
@@ -67,15 +66,15 @@ const create = (extra: Record<string, unknown> = {}) =>
   rpc('agents.createSession', { projectId, cwd: repo, tool: 'claude', ...extra }) as Promise<SessionInfo>
 
 beforeEach(async () => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), 'cc-apps-mgr-')))
+  root = tempRoot('cc-apps-mgr-')
   repo = join(root, 'repo')
   const dataRoot = join(root, 'data')
   vi.stubEnv('CC_DATA_DIR', dataRoot)
   mkdirSync(dataRoot)
-  execFileSync('git', ['init', '-q', '-b', 'main', repo], { cwd: root })
+  fixtureGit(root, ['init', '-q', '-b', 'main', repo])
   writeFileSync(join(repo, 'a.txt'), 'hello\n')
-  execFileSync('git', ['add', '.'], { cwd: repo })
-  execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init'], { cwd: repo })
+  fixtureGit(repo, ['add', '.'])
+  fixtureGit(repo, ['commit', '-qm', 'init'])
   const app = { server: { command: process.execPath, args: [FIXTURE_APP, '--mode', 'attach'] } }
   plantApp(join(repo, ...PROJECT_APPS), 'notes', app)
   plantApp(join(dataRoot, 'apps'), 'helper', app)
@@ -95,7 +94,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await mgr.disposeAll()
   await rt.dispose()
-  rmSync(root, { recursive: true, force: true })
+  await removeTree(root)
 })
 
 describe('apps handed to a session by the manager (decision 4)', () => {
