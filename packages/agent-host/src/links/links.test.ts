@@ -194,6 +194,41 @@ function seedSession(store: Store, projectId: string | null, id: string, kind: S
 }
 
 describe('a hub linked to another host (#82)', () => {
+  /*
+   * Three builds (review of #936): a linked machine newer than the hub raises a card the hub cannot read. The hub's own
+   * windows show a fallback with allow and deny only, but a window from before #844 on that hub still offers "always",
+   * and the machine would keep it for its own kind. So the hub refuses "always" for a card it read as a fallback.
+   */
+  it('refuses "always" for a linked machine\'s card the hub could not read, and passes allow on', async () => {
+    const remote = await remoteHost()
+    await remote.mgr.addProject(folder())
+    const hub = await hubHost(() => lineFor(remote.port))
+    await until(() => status(hub) === 'connected')
+    const u = await ui(hub.port)
+    const projects = await u.call('projects.list')
+    const s = await u.call('agents.createSession', { projectId: projects[0].id, cwd: projects[0].path, tool: 'claude' })
+    const remoteId = s.id.slice(3)
+    const newer = { kind: 'project_access', access: 'terminals', from: { id: 'p1', name: 'web' }, to: { id: 'p2', name: 'api' }, text: 'export the sprites' }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    remote.server.broadcast({ type: 'approval_request', sessionId: remoteId, requestId: 'r-newer', detail: newer } as unknown as NormalizedEvent)
+    remote.server.broadcast({ type: 'approval_request', sessionId: remoteId, requestId: 'r-known', detail: { kind: 'command', command: 'ls', cwd: '/' } } as unknown as NormalizedEvent)
+    await until(() => u.events().filter((e) => e.type === 'approval_request').length === 2)
+    warn.mockRestore()
+    expect(u.events().find((e) => e.requestId === 'r-newer')!.detail).toMatchObject({ kind: 'other', about: 'unknown_card' })
+    const answered: [string, string][] = []
+    const real = remote.mgr.respondApproval.bind(remote.mgr)
+    remote.mgr.respondApproval = ((id: string, requestId: string, decision: string, ...rest: unknown[]) => {
+      answered.push([requestId, decision])
+      return (real as (...a: unknown[]) => unknown)(id, requestId, decision, ...rest)
+    }) as typeof remote.mgr.respondApproval
+    await expect(u.call('agents.respondApproval', { sessionId: s.id, requestId: 'r-newer', decision: 'always' })).rejects.toThrow(/cannot be allowed always/)
+    // A card the hub read is answered "always" as before
+    await u.call('agents.respondApproval', { sessionId: s.id, requestId: 'r-known', decision: 'always' }).catch(() => {})
+    await u.call('agents.respondApproval', { sessionId: s.id, requestId: 'r-newer', decision: 'allow' }).catch(() => {})
+    await until(() => answered.length === 2)
+    expect(answered).toEqual([['r-known', 'always'], ['r-newer', 'allow']])
+  })
+
   it('works a remote session end to end: lists, create, send, approve, with ids qualified and events under the hub’s numbers', async () => {
     const remote = await remoteHost()
     const remoteProject = await remote.mgr.addProject(folder())

@@ -291,6 +291,64 @@ coordinator sessions stamped with it.
 
 External apps keep their state in their own process ([apps.md](apps.md)).
 
+## 3.3 What a peer of another build loses ([#844](https://github.com/ijun17/centralu/issues/844))
+
+A window and a host one or more builds apart meet often: a window stays attached to an older host until the person
+switches (#280), a host swap keeps the previous build serving for a moment, and a hub links machines that run other
+releases (#692). The rules in §4 make most additions free. These are the ones that still cost an older peer something,
+with the build where each arrived, so a report from a mixed setup can be read against them.
+
+**Approval cards.** An `approval_request` is an event, and an event that does not parse is dropped whole. From #844 on,
+a card a window cannot read, of a kind it does not know or a known kind with a word it does not have, reads as an
+`other` card instead (`ApprovalDetail`'s fallback, `about: 'unknown_card'`). It says first that it is a fallback and of
+which kind (for a known kind, the values that did not read), then the projects, app or machine it names, then its own
+text quoted and marked as not checked (often the asking agent's words), and last a line on why. It offers allow and
+deny only, since "always" would remember a question the person never read in full; the host that raised it applies the
+answer the way its own kind says. A hub refuses "always" for a linked machine's card it read this way (`unreadCard`),
+since a window from before #844 on that hub would still offer it. A window from before #844 still drops such a card, and its session waits with no card on screen until a
+window of the host's build answers it:
+
+| Card | First build | A window before it |
+|---|---|---|
+| `project_create` (#515) | beta.16 | drops the card |
+| `agent_start` (#561) | beta.17 | drops the card |
+| `centralu_update` (#581) | beta.18 | drops the card |
+| a remembered `agents` consent (#561), in Settings' list of consents | beta.17 | lists it without saying what it allows |
+| the apply card (#665) and the handoff card (#694) | beta.23, beta.25 | reads them, since they ride on `other` |
+
+So a new card kind that has to reach released windows rides on `other` with an `about`, the question whole in `raw`,
+as the apply and handoff cards do; a kind of its own is for a card a generic one can stand in for.
+
+**Words on events.** An enum carried on an event drops the event when a newer host widens it, unless it has a
+fallback. Those with one: a notice's `level` and `audience` (#304, #342), an interruption's `reason` (#698), a
+background task's `kind` (#290), the update `phase` (#844, read as `updating`, which shows the host's `error` text).
+A window from before beta.18 drops every `update_status` while the host waits for npm (`waiting_for_npm`), and its
+update line stays where it was.
+
+**Event types an older window drops** (§4). Nothing breaks; the window misses what the event says until it reads the
+same thing another way:
+
+| Event | First build | A window before it |
+|---|---|---|
+| `projects_changed` | beta.16 | sees a project another window or an agent added or removed after its next reload |
+| `session_live` | beta.18 | does not see a session go to sleep or wake (#568); the list says so on its next read |
+| `update_apply_request`, `update_apply_go` | beta.23 | never answers an agent's apply card's request (#665): after 5 seconds the agent's call ends with "No Centralu window answered", which tells it to ask the person to click Apply now |
+| `interruption`, `session_owner`, `orchestrator_proposals_changed` | beta.24 | shows no interruption line (#698); until it reads the list again, it keeps a moved child under its old owner and does not refresh the orchestrator's proposals |
+
+**Fields an older host strips.** A field a newer window sends that an older host does not declare is dropped there
+(§4). Where it changes what happens:
+
+- `createSession`'s `handoff.removesOriginal` (#738, beta.25). A host before it moves only the predecessor's live
+  children to the successor (#693, beta.24; none before that), and does not move the settled ones when the window
+  then removes the predecessor: they stay with it in the trash, and come back with it if it is restored.
+
+**Fields whose meaning moved.** `SessionInfo.askedBy` named the session of another project that asked for this one
+(ask_project, #371); since #561 part 3 and #614 it names only the session that started this one in its own project
+(start_agent), and store step v48 copied `parent_session_id` into it for former worktree managers' sessions. A window
+of beta.20 or before shows a start_agent child as "asked by" its parent, which is now what it means. A host of beta.20
+or before still writes the cross-project meaning; a newer host clears those rows once (store step v55,
+[agent-host.md](agent-host.md) §5.1), and a row such a host writes after that keeps its mark, as that host showed it.
+
 ## 4. Schema and version rules (the C6 defence)
 
 - Every message is defined by a zod schema and validated **only at the boundary** (once, on receipt. Re-validating internally is forbidden — performance).
@@ -298,6 +356,7 @@ External apps keep their state in their own process ([apps.md](apps.md)).
 - `protocolVersion` is a single integer. Compatibility rules:
   - **Additions are free** (a new event type, a new optional field) — the version does not change.
   - The receiver **must ignore event types and fields it does not know** (a plain zod object drops a field it does not declare; an event of an unknown type is dropped whole).
+  - **A word or a shape carried on an event has a fallback before anyone widens it** (#844). An event is parsed whole, so a value this build cannot read inside it (an enum's new word, an approval card's new kind) drops the whole event, not just the value. An enum on an event therefore carries a `.catch()` to the nearest honest word (`level` to `info`, an update `phase` to `updating`), and an approval card this build cannot read becomes an `other` card that says so (§3.3). A window released before a fallback existed still drops the event, so §3.3 lists what each such change costs it.
   - **A field added to a host payload must have a default, and the client applies it** (#280, #337). The two halves are one rule. Under the keeper a window can stay attached to a host of an older build until the person switches, so every field added after the first release may be missing from what the host sends. A `.default()` alone does not help: the window's types are the parser's output, so the code reads the field as always there, and that is true only if the payload went through the schema. Events always did (`parseServerFrame`); RPC results were `unknown` in the envelope and reached the screen as sent, and a beta.9 window on a beta.7 host crashed on a session list without `backgroundTasks` (#305). A new field is therefore either optional (and every reader handles its absence) or carries a default; a required field with no default can only arrive with a version increment.
   - **The client reads every RPC result through its method's result schema, once, where it arrives** (`RpcClient`, `parseRpcResult`), the way the host reads every RPC's params. The read is tolerant (`parseTolerant`): when the whole parse fails, the result is read again field by field and element by element, and a value that still fails on its own is kept as it came — so a word a newer host's enum has and this build's does not costs that one value, not the whole list. Measured on Node: a 200-session list takes 0.33 ms, a 200-row history page 0.03 ms. The test that guards the rule (`e2e/older-host.spec.ts`) runs the real UI against a real host with every defaulted field taken out of every result, event and handshake (`withoutDefaultedFields`).
   - Removing a field or changing its meaning = version increment = rejected at the handshake. **Avoid this wherever possible** — adding a new field and keeping the old one for one milestone is always cheaper.

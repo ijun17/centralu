@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { alwaysAllowKey, isCentraluApply, SESSION_HANDOFF, sessionOnlyAlways, type ApprovalDetail } from '@cc/protocol'
+import { alwaysAllowKey, isCentraluApply, isUnknownCard, SESSION_HANDOFF, sessionOnlyAlways, type ApprovalDetail } from '@cc/protocol'
 import { agentStartQuestion, approvalNotes, centraluUpdateQuestion, projectAccessQuestion, projectCreateQuestion } from '@cc/core'
 import { inFlightKey, useStore } from '../../store/store.js'
 import { isCovered, type CoveringLayers } from '../../store/layers.js'
@@ -438,9 +438,11 @@ function ActionKey({
  * "(no path)", which the host never matches, so it would be saved, listed and announced while doing nothing. Not for
  * a command with no key either (#838): an empty one, one the card flags (outside the sandbox, the network, input to a
  * running terminal) since a rule of its text would also let the plain command through, and one ending in `*`, which
- * an older host reads as a prefix.
+ * an older host reads as a prefix. Nor for a card this window could not read (#844): "always" would remember a
+ * question the person never saw in full.
  */
 export function offersAlways(detail: ApprovalDetail): boolean {
+  if (isUnknownCard(detail)) return false
   return (detail.kind !== 'file_edit' && detail.kind !== 'command') || alwaysAllowKey(detail) !== ''
 }
 

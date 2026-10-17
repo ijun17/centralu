@@ -32,7 +32,7 @@ export type ApprovalScope = z.infer<typeof ApprovalScope>
  * `uses` changes). This is why there is no "always allow" here: whether allowed or denied, a
  * single answer is remembered either way.
  */
-export const ApprovalDetail = z.discriminatedUnion('kind', [
+const ApprovalDetailKinds = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('command'),
     command: z.string(),
@@ -161,7 +161,92 @@ export const ApprovalDetail = z.discriminatedUnion('kind', [
     machine: z.string().optional(),
   }),
 ])
-export type ApprovalDetail = z.infer<typeof ApprovalDetail>
+
+/**
+ * The approval card as a window reads it: a card it cannot read is shown as one it can, never dropped (#844).
+ *
+ * An `approval_request` is an event, and `parseServerFrame` drops an event it cannot parse whole. A card of a kind this
+ * build does not know (a newer host's, or a linked machine's on a newer build), or of a known kind with a word this
+ * build does not have (`project_access` with a new `access`), used to cost the whole event: the session sat waiting
+ * on a question nobody could see. Now it reads as `other`, whose text says first that it is a fallback and of which
+ * kind, then what the card names and says (`unknownApprovalCard`), with `about: UNKNOWN_CARD` so the window offers
+ * allow and deny only: "always" on a question this build cannot describe would remember something the person never
+ * read. A hub that relays a linked machine's card as such refuses "always" for it too, since a window from before this
+ * change would still offer it (`Qualifier.unreadCard`). The answer still goes back under the
+ * card's `requestId`, and the host that raised the card applies it the way its own kind says.
+ *
+ * Windows released before this change still drop such a card, so a new kind that must reach them rides on `other`
+ * with an `about` instead, as the apply (#665) and handoff (#694) cards do (protocol.md §3.3).
+ */
+export const ApprovalDetail = ApprovalDetailKinds.catch((ctx) => unknownApprovalCard(ctx.value))
+export type ApprovalDetail = z.infer<typeof ApprovalDetailKinds>
+
+/** The `about` of a card this build could not read (#844), on an `other` detail */
+export const UNKNOWN_CARD = 'unknown_card'
+
+/** The last line of a card of a kind this build does not know */
+export const UNKNOWN_CARD_NOTE = 'A newer Centralu may have sent it. Allow it only if you know what it asks; updating Centralu shows it in full.'
+
+/** The last line of a card of a known kind that did not read: from a newer build, or malformed */
+export const UNREADABLE_CARD_NOTE = 'It may come from a newer Centralu, or be malformed. Allow it only if you know what it asks.'
+
+const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined)
+const quoted = (v: unknown, max = 500): string => {
+  const cut = (t: string) => (t.length > max ? `${t.slice(0, max)}…` : t)
+  // JSON quoting keeps a text on one line, so it cannot pass itself off as the card's own lines; a value that is not
+  // text is written as JSON, also one line
+  return typeof v === 'string' ? JSON.stringify(cut(v)) : cut(JSON.stringify(v) ?? String(v))
+}
+const nameOf = (v: unknown): string | undefined => (typeof v === 'object' && v !== null ? str((v as Record<string, unknown>).name) : undefined)
+
+/**
+ * A card this build could not read, as the `other` card that says what it can of it (#844). In this order, so the person
+ * reads what it is before what it says: that it is a fallback and of which kind (for a known kind, the values that did
+ * not read), the projects, app or machine it names, then its own text, quoted and marked as unchecked (a task or a
+ * question is often the asking agent's words, not Centralu's), and last a line on why it says so little.
+ */
+function unknownApprovalCard(raw: unknown): ApprovalDetail {
+  const card = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {}
+  const kind = str(card.kind)?.slice(0, 60)
+  const branch = kind ? ApprovalDetailKinds.options.find((o) => o.shape.kind.value === kind) : undefined
+  const lines: string[] = []
+  let problems = ''
+  if (branch) {
+    const parsed = branch.safeParse(raw)
+    problems = (parsed.error?.issues ?? [])
+      .slice(0, 3)
+      .map((issue) => {
+        const value = issue.path.reduce<unknown>((at, key) => (typeof at === 'object' && at !== null ? (at as Record<PropertyKey, unknown>)[key as PropertyKey] : undefined), raw)
+        return `${issue.path.join('.') || 'the card'}: ${value === undefined ? 'missing' : quoted(value, 60)}`
+      })
+      .join(', ')
+    lines.push(`Centralu cannot show this question as it should: a "${kind}" question with something this window cannot read (${problems || 'its shape'}).`)
+  } else {
+    problems = kind ? `kind ${quoted(kind, 60)}` : 'no kind'
+    lines.push(kind ? `Centralu cannot show this question: it is of a kind this window does not know (${quoted(kind, 60)}).` : 'Centralu cannot show this question: it does not say what kind it is.')
+  }
+  const from = nameOf(card.from)
+  const to = nameOf(card.to)
+  if (from || to) lines.push(`It reaches from project ${from ? quoted(from, 80) : '(unnamed)'} to project ${to ? quoted(to, 80) : '(unnamed)'}.`)
+  const named = [
+    nameOf(card.project) && `project ${quoted(nameOf(card.project), 80)}`,
+    nameOf(card.app) && `app ${quoted(nameOf(card.app), 80)}`,
+    str(card.machine) && `machine ${quoted(str(card.machine), 80)}`,
+  ].filter(Boolean)
+  if (named.length) lines.push(`It names ${named.join(', ')}.`)
+  for (const [key, label] of [['text', 'Its text'], ['raw', 'Its text'], ['command', 'The command'], ['path', 'The file']] as const) {
+    const v = str(card[key])
+    if (v) lines.push(`${label}, as the request gives it (not checked by Centralu): ${quoted(v)}`)
+  }
+  lines.push(branch ? UNREADABLE_CARD_NOTE : UNKNOWN_CARD_NOTE)
+  console.warn(`[centralu] an approval card did not read and is shown as a fallback: ${kind ?? '(no kind)'}${problems ? ` (${problems})` : ''}`)
+  return { kind: 'other', raw: lines.join('\n'), about: UNKNOWN_CARD }
+}
+
+/** A card this build could not read (#844): shown as a fallback that says its kind, answered by allow or deny */
+export function isUnknownCard(d: ApprovalDetail): boolean {
+  return d.kind === 'other' && d.about === UNKNOWN_CARD
+}
 
 /** The path of a file edit whose request names no file (#169): said as such rather than drawn as an empty card */
 export const NO_PATH = '(no path)'

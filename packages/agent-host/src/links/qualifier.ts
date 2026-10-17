@@ -1,3 +1,4 @@
+import { ApprovalDetail, isUnknownCard } from '@cc/protocol'
 import { qualify } from './machine-ids.js'
 import { isObj, type Obj } from '../json-value.js'
 
@@ -34,6 +35,25 @@ export class Qualifier {
 
   private readonly prefix = (): string => `${this.machine}.`
 
+  /**
+   * This machine's approval cards the hub could not read (#844), by the machine's own session id and the request id.
+   * The hub's windows show such a card as a fallback with allow and deny only, but a window from before #844 still
+   * offers "always", and the machine would keep it for a kind it knows (a project consent, an agent start). So the hub
+   * refuses "always" for these (`LinkedMachine.call`): nobody can grant for good what was never shown in full here.
+   * Seen on the card's event and on a session row that carries it; an answered card leaves.
+   */
+  private readonly unread = new Set<string>()
+
+  private noteCard(sessionId: unknown, requestId: unknown, detail: unknown): void {
+    if (typeof sessionId !== 'string' || typeof requestId !== 'string') return
+    if (isUnknownCard(ApprovalDetail.parse(detail))) this.unread.add(`${sessionId}\u0000${requestId}`)
+  }
+
+  /** Whether the hub read this card of the machine (in the machine's own ids) as a fallback */
+  unreadCard(sessionId: unknown, requestId: unknown): boolean {
+    return typeof sessionId === 'string' && typeof requestId === 'string' && this.unread.has(`${sessionId}\u0000${requestId}`)
+  }
+
   /** An id of this machine as the hub's UI sees it */
   id(value: string): string {
     return qualify(this.machine, value)
@@ -65,6 +85,7 @@ export class Qualifier {
   /** `SessionInfo` (and `UpdateSettingsResult`, which extends it) */
   session(s: unknown): unknown {
     if (!isObj(s)) return s
+    if (isObj(s.pendingApproval)) this.noteCard(s.id, s.pendingApproval.requestId, s.pendingApproval.detail)
     return {
       ...s,
       id: this.maybeId(s.id),
@@ -273,7 +294,11 @@ export class Qualifier {
       case 'session_owner':
         return { ...base, askedBy: this.maybeId(e.askedBy), parentSessionId: this.maybeId(e.parentSessionId) }
       case 'approval_request':
+        this.noteCard(e.sessionId, e.requestId, e.detail)
         return { ...base, detail: this.approvalDetail(e.detail) }
+      case 'approval_resolved':
+        if (typeof e.sessionId === 'string' && typeof e.requestId === 'string') this.unread.delete(`${e.sessionId}\u0000${e.requestId}`)
+        return base
       // The view's instance, which the window opens, calls and closes it by (plan §11)
       case 'app_view':
         return { ...base, projectId: this.maybeId(e.projectId), instanceId: this.maybeId(e.instanceId) }

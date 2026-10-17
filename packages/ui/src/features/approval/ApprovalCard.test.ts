@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { NO_PATH } from '@cc/protocol'
+import { ApprovalDetail, NO_PATH, UNKNOWN_CARD } from '@cc/protocol'
 import { approvalCardCovered, approvalKeyAction, offersAlways } from './ApprovalCard.jsx'
 
 /**
@@ -204,5 +204,12 @@ describe('offersAlways', () => {
     expect(offersAlways({ ...c, stdin: true })).toBe(false)
     expect(offersAlways({ ...c, command: '  ' })).toBe(false)
     expect(offersAlways({ ...c, command: 'cat logs/*' })).toBe(false)
+  })
+
+  // A card this window could not read (#844): "always" would remember a question nobody saw in full
+  it('is off for a card of a kind this window does not know', () => {
+    const unread = ApprovalDetail.parse({ kind: 'machine_link', text: 'Link this computer?' })
+    expect(offersAlways(unread)).toBe(false)
+    expect(offersAlways({ kind: 'other', raw: 'Link this computer?', about: UNKNOWN_CARD })).toBe(false)
   })
 })

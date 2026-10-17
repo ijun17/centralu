@@ -11,6 +11,11 @@ const KIND_LABEL: Record<ProjectConsent['kind'], string> = {
   agents: 'sessions may start agents',
 }
 
+/** What a consent row says it allows; a kind a newer host added (#844) is said by its own word rather than as a gap */
+export function consentKindLabel(kind: string): string {
+  return (KIND_LABEL as Record<string, string | undefined>)[kind] ?? `may ${kind}`
+}
+
 /**
  * The projects allowed to reach other projects (#371) — every "always for this pair" the person gave on a consent
  * card, from either kind: asking another project to do a task (ask_project) or using its apps. Revoking one makes
@@ -38,7 +43,7 @@ export function ProjectConsentsSection() {
         keyOf={keyOf}
         row={(c) => (
           <span className="min-w-0 truncate text-sm text-ink">
-            {c.fromName} <span className="text-ink-faint">{KIND_LABEL[c.kind]}</span>
+            {c.fromName} <span className="text-ink-faint">{consentKindLabel(c.kind)}</span>
             {c.kind === 'agents' ? null : ` ${c.toName}`}
           </span>
         )}

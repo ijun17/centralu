@@ -216,6 +216,15 @@ export class LinkedMachine implements RoutedMachine {
 
   call(method: string, params: unknown): Promise<unknown> {
     if (!this.client) return Promise.reject(Object.assign(new Error(`${this.name} is not reachable right now`), { code: 'internal', retryable: true }))
+    // A card the hub could not read is never allowed for good from here, whatever the window offered (#844, `unreadCard`)
+    if (method === 'agents.respondApproval' && isObj(params) && params.decision === 'always' && this.q.unreadCard(params.sessionId, params.requestId)) {
+      return Promise.reject(
+        Object.assign(new Error(`This question from ${this.name} could not be read in full here, so it cannot be allowed always. Allow it once or deny it.`), {
+          code: 'internal',
+          retryable: false,
+        }),
+      )
+    }
     return this.client.call(method, params)
   }
 

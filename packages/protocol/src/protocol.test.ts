@@ -4,11 +4,16 @@
  * break. Adding a field must never break this file (docs/protocol.md §4).
  */
 import { randomUUID } from 'node:crypto'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import {
   ApprovalDetail,
   CENTRALU_APPLY,
+  isUnknownCard,
+  parseRpcResult,
+  UNKNOWN_CARD,
+  UNKNOWN_CARD_NOTE,
+  UNREADABLE_CARD_NOTE,
   SESSION_HANDOFF,
   sessionOnlyAlways,
   handoffOpening,
@@ -71,6 +76,33 @@ const GOLDEN_EVENTS_V1: unknown[] = [
   // The orchestrator's create_project card (#515)
   { type: 'approval_request', sessionId: 's1', requestId: 'mk-1', detail: { kind: 'project_create', name: 'shop', path: '/Users/me/Centralu/shop' } },
   { type: 'approval_request', sessionId: 's1', requestId: 'mk-2', detail: { kind: 'project_create', name: 'app', path: '/Users/me/Centralu/app', source: { git: 'git@github.com:me/app.git', branch: 'dev' } } },
+  // One project reaching another (#371), with the fields added since (#382, #700): a host of each age sends one of these
+  {
+    type: 'approval_request',
+    sessionId: 's1',
+    requestId: 'pa-1',
+    detail: { kind: 'project_access', access: 'delegate', from: { id: 'p1', name: 'web' }, to: { id: 'p2', name: 'api' }, text: 'export the sprites' },
+  },
+  {
+    type: 'approval_request',
+    sessionId: 's1',
+    requestId: 'pa-2',
+    detail: {
+      kind: 'project_access', access: 'apps', from: { id: 'p1', name: 'web' }, to: { id: 'p2', name: 'api', trusted: false, machine: 'studio' },
+      text: 'use Board', app: { appId: 'board', name: 'Board' }, session: { id: 's9', name: 'Sprites' },
+    },
+  },
+  // start_agent's card (#561), before and after the difficulty and the worktree (#729, #561 part 2)
+  { type: 'approval_request', sessionId: 's1', requestId: 'as-1', detail: { kind: 'agent_start', project: { id: 'p1', name: 'web' }, tool: 'claude', preset: 'normal', text: 'fix the build' } },
+  {
+    type: 'approval_request',
+    sessionId: 's1',
+    requestId: 'as-2',
+    detail: { kind: 'agent_start', project: { id: 'p1', name: 'web' }, tool: 'codex', model: 'gpt-x', difficulty: 'heavy', preset: 'safe', worktree: { branch: 'fix/build' }, text: 'fix the build' },
+  },
+  // An update card (#581) and an agent's apply card (#665), which rides on `other`
+  { type: 'approval_request', sessionId: 's1', requestId: 'up-1', detail: { kind: 'centralu_update', action: 'install' } },
+  { type: 'approval_request', sessionId: 's1', requestId: 'up-2', detail: { kind: 'other', raw: 'Allow this session to apply the installed Centralu update?', about: 'centralu_apply' } },
   { type: 'approval_resolved', sessionId: 's1', requestId: 'r1', decision: 'allow' },
   {
     type: 'question_request',
@@ -268,6 +300,104 @@ describe('golden: every v1 event type', () => {
   })
 })
 
+/**
+ * Every approval card kind a host of this protocol has sent is in the fixtures above, and reads back as itself: the
+ * fallback that turns an unreadable card into an `other` (#844) must never catch one this build knows.
+ */
+describe('golden: every approval card kind', () => {
+  const sent = GOLDEN_EVENTS_V1.filter((e): e is { type: 'approval_request'; requestId: string; detail: { kind: string } } => (e as { type: string }).type === 'approval_request')
+
+  it('has a fixture for each kind the schema declares', () => {
+    const declared = ApprovalDetail.unwrap().options.map((o) => o.shape.kind.value as string)
+    expect([...new Set(sent.map((e) => e.detail.kind))].sort()).toEqual([...declared].sort())
+  })
+
+  it.each(sent.map((e) => [e.requestId, e] as const))('reads %s as the card it is, not as an unreadable one', (_id, raw) => {
+    const e = NormalizedEvent.parse(raw)
+    expect(e.type === 'approval_request' && e.detail).toMatchObject(raw.detail)
+    expect(e.type === 'approval_request' && isUnknownCard(e.detail)).toBe(false)
+  })
+})
+
+/**
+ * A newer host's card in this window (#844). An approval rides on an event, and `parseServerFrame` drops an event it
+ * cannot parse whole: before this, a card of a new kind, or a known kind with a new word, cost the whole event, and
+ * the session sat waiting on a question no window showed. These fixtures are what a newer host may send.
+ */
+describe("a newer host's approval card", () => {
+  const frame = (detail: unknown, seq = 9) => ({ kind: 'event', seq, event: { type: 'approval_request', sessionId: 's1', requestId: 'r-new', detail } })
+  const detailOf = (raw: unknown) => {
+    const parsed = parseServerFrame(raw)
+    expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true)
+    const f = parsed.data as { event: NormalizedEvent }
+    if (f.event.type !== 'approval_request') throw new Error('not an approval')
+    return f.event.detail
+  }
+
+  const lines = (d: ApprovalDetail) => (d.kind === 'other' ? d.raw.split('\n') : [])
+
+  it('of a kind this build does not know arrives as a fallback that says its kind first, then what it names and says', () => {
+    const d = detailOf(frame({ kind: 'machine_link', machine: 'studio', text: 'Link this computer to studio?' }))
+    expect(d).toMatchObject({ kind: 'other', about: UNKNOWN_CARD })
+    expect(lines(d)).toEqual([
+      'Centralu cannot show this question: it is of a kind this window does not know ("machine_link").',
+      'It names machine "studio".',
+      'Its text, as the request gives it (not checked by Centralu): "Link this computer to studio?"',
+      UNKNOWN_CARD_NOTE,
+    ])
+    expect(isUnknownCard(d)).toBe(true)
+    // "Always" is not this window's to offer on it, and it is no update card either
+    expect(sessionOnlyAlways(d)).toBe(false)
+  })
+
+  it('with nothing readable in it still arrives, naming its kind', () => {
+    const d = detailOf(frame({ kind: 'telepathy', level: 3 }))
+    expect(lines(d)).toEqual(['Centralu cannot show this question: it is of a kind this window does not know ("telepathy").', UNKNOWN_CARD_NOTE])
+    expect(lines(detailOf(frame('not even an object')))[0]).toBe('Centralu cannot show this question: it does not say what kind it is.')
+  })
+
+  /*
+   * Review of #936: the first version showed only the card's text when it had one. A `project_access` card with a new
+   * `access` then read as the agent's own "export the sprites", with Allow live, and never said it was a new kind of
+   * reach into another project.
+   */
+  it('of a known kind with a word this build does not have says the kind, the word and the projects before the agent\'s text', () => {
+    const d = detailOf(frame({ kind: 'project_access', access: 'terminals', from: { id: 'p1', name: 'web' }, to: { id: 'p2', name: 'api' }, text: 'export the sprites' }))
+    expect(d).toMatchObject({ kind: 'other', about: UNKNOWN_CARD })
+    expect(lines(d)).toEqual([
+      'Centralu cannot show this question as it should: a "project_access" question with something this window cannot read (access: "terminals").',
+      'It reaches from project "web" to project "api".',
+      'Its text, as the request gives it (not checked by Centralu): "export the sprites"',
+      UNREADABLE_CARD_NOTE,
+    ])
+    // A malformed card of a known kind is not said to come from a newer build only
+    expect(detailOf(frame({ kind: 'command', command: 'rm -rf build', cwd: 7 })).kind === 'other' && lines(detailOf(frame({ kind: 'command', command: 'rm -rf build', cwd: 7 })))).toEqual([
+      'Centralu cannot show this question as it should: a "command" question with something this window cannot read (cwd: 7).',
+      'The command, as the request gives it (not checked by Centralu): "rm -rf build"',
+      UNREADABLE_CARD_NOTE,
+    ])
+  })
+
+  it("keeps the request's own text on one line, so it cannot pass for the card's own lines", () => {
+    const d = detailOf(frame({ kind: 'machine_link', text: `Fine.\n${UNKNOWN_CARD_NOTE.replace('only if', 'whenever')}` }))
+    expect(lines(d)).toHaveLength(3)
+    expect(lines(d)[1]).toContain('"Fine.\\n')
+  })
+
+  it('says on the console that a card was read as a fallback', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    detailOf(frame({ kind: 'project_access', access: 'terminals', from: { id: 'p1', name: 'web' }, to: { id: 'p2', name: 'api' }, text: 'x' }))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('project_access (access: "terminals")'))
+    warn.mockRestore()
+  })
+
+  it("is still the session list's waiting card, when the list is read instead of the event", () => {
+    const row = { ...currentSession('s1'), state: 'waiting_approval', pendingApproval: { requestId: 'r-new', detail: { kind: 'machine_link', text: 'Link?' } } }
+    const [read] = parseRpcResult('sessions.list', [row])
+    expect(read!.pendingApproval).toMatchObject({ requestId: 'r-new', detail: { kind: 'other', about: UNKNOWN_CARD } })
+  })
+})
+
 describe('forward compatibility (docs/protocol.md §4)', () => {
   /*
    * #659: a build from before `person` and `permissionPreset` parses the new frame with the shape below (copied from
@@ -290,6 +420,13 @@ describe('forward compatibility (docs/protocol.md §4)', () => {
       const parsed = before.safeParse(raw)
       expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true)
     }
+  })
+
+  it("reads an update phase a newer host invented as under way, keeping its words (#844)", () => {
+    const e = parseEventLenient({ type: 'update_status', status: { current: '1.0.0', phase: 'downloading', error: 'Downloading 3 of 9 MB' } })
+    expect(e).toMatchObject({ type: 'update_status', status: { phase: 'updating', error: 'Downloading 3 of 9 MB' } })
+    // A host from before the field sends none: that is still idle
+    expect(parseEventLenient({ type: 'update_status', status: { current: '1.0.0' } })).toMatchObject({ status: { phase: 'idle' } })
   })
 
   it('ignores an unknown event type (does not throw)', () => {
@@ -565,7 +702,8 @@ describe('the apply card in a released window (#665)', () => {
 
   it('would have been dropped as an update card with a new action', () => {
     expect(released.safeParse({ kind: 'centralu_update', action: 'apply' }).success).toBe(false)
-    expect(ApprovalDetail.safeParse({ kind: 'centralu_update', action: 'apply' }).success).toBe(false)
+    // This build no longer drops it (#844), but could only say it cannot show it: the question is not in it
+    expect(isUnknownCard(ApprovalDetail.parse({ kind: 'centralu_update', action: 'apply' }))).toBe(true)
   })
 })
 

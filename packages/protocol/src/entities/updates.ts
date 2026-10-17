@@ -41,8 +41,13 @@ export const UpdateStatus = z.object({
    * comes next is the window's (#352): "Apply now" relaunches it from the updated bundle, or,
    * with `autoApply`, it does so by itself once no session is working or waiting and no
    * terminal or command is running — never mid-turn.
+   *
+   * A phase this build does not know (a newer host's) reads as `updating` (#844): it rides on the `update_status`
+   * event, and an event that fails to parse is dropped whole, which would leave the line saying whatever it said
+   * before. `updating` is the honest "something is under way", and it shows `error`, where the host puts its words for
+   * a phase such as `waiting_for_npm` (which windows before beta.18 do not know either).
    */
-  phase: z.enum(['idle', 'checking', 'updating', 'waiting_for_npm', 'restart_required', 'failed']).default('idle'),
+  phase: z.enum(['idle', 'checking', 'updating', 'waiting_for_npm', 'restart_required', 'failed']).default('idle').catch('updating'),
   /**
    * Why the last check or update did not work, or null when nothing went wrong.
    *

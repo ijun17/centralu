@@ -353,6 +353,26 @@
           "type": "string",
           "maxLength": 400,
           "description": "Shadows: Session chip. A CSS box-shadow"
+        },
+        "activity-1": {
+          "type": "string",
+          "description": "Retired: Centralu no longer uses this token and ignores it."
+        },
+        "activity-2": {
+          "type": "string",
+          "description": "Retired: Centralu no longer uses this token and ignores it."
+        },
+        "activity-3": {
+          "type": "string",
+          "description": "Retired: Centralu no longer uses this token and ignores it."
+        },
+        "activity-4": {
+          "type": "string",
+          "description": "Retired: Centralu no longer uses this token and ignores it."
+        },
+        "activity-5": {
+          "type": "string",
+          "description": "Retired: Centralu no longer uses this token and ignores it."
         }
       }
     }
