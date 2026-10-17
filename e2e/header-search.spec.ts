@@ -25,7 +25,7 @@ async function expectCentredAndClear(page: Page): Promise<void> {
   const win = page.viewportSize()!
   const field = await box(page.getByTestId('search-button'))
   expect(Math.abs(field.x + field.width / 2 - win.width / 2)).toBeLessThanOrEqual(1)
-  expect(field.width).toBeLessThanOrEqual(560)
+  expect(field.width).toBeLessThanOrEqual(400)
   const left = await box(page.getByTestId('counter'))
   const right = await box(page.getByTestId('open-settings'))
   const donuts = page.locator('[data-testid^="usage-donut-"]')
