@@ -11,6 +11,11 @@ import type { MachinesMock } from './machines.js'
 import type { TrashMock } from './trash.js'
 import type { Emit } from './event-bus.js'
 
+/** The host's wording and code for a project id it does not know (`SessionManager.requireProject`) */
+function projectNotFound(projectId: string): Error {
+  return Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
+}
+
 /** The project port: adding, creating (#515), trust, commands and worktree settings */
 export class ProjectsMock {
   /** For tests: paths a new project may not take, as if a folder of that name were already there (#515) */
@@ -105,7 +110,7 @@ export class ProjectsMock {
      */
     setTrusted: async (projectId: string, trusted: boolean) => {
       const at = this.projectStore.list.findIndex((x) => x.id === projectId)
-      if (at === -1) throw Object.assign(new Error(`Project not found: ${projectId}`), { code: 'internal' })
+      if (at === -1) throw projectNotFound(projectId)
       // Swaps in a new object — the screen holds onto the object `add` returned as-is, so mutating it would let a value that never crossed the wire leak into the screen (the real thing's response is always a new object)
       this.projectStore.list[at] = { ...this.projectStore.list[at]!, trusted }
       this.trustCalls.push({ projectId, trusted })
@@ -122,7 +127,7 @@ export class ProjectsMock {
     gitStatus: async (projectId: string) => {
       this.gitStatusCalls++
       const p = this.projectStore.list.find((x) => x.id === projectId)
-      if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
+      if (!p) throw projectNotFound(projectId)
       return this.projectStore.withGit(p)
     },
     /*
@@ -134,7 +139,7 @@ export class ProjectsMock {
      */
     remove: async (projectId: string) => {
       const at = this.projectStore.list.findIndex((x) => x.id === projectId)
-      if (at === -1) throw Object.assign(new Error('Project not found'), { code: 'internal' })
+      if (at === -1) throw projectNotFound(projectId)
       for (const s of [...this.store.sessions.values()].filter((s) => s.projectId === projectId)) {
         this.trashMock.moveToTrash(s.id, false, false)
       }
@@ -152,7 +157,7 @@ export class ProjectsMock {
      */
     setCommands: async (projectId: string, commands: SavedCommand[]) => {
       const p = this.projectStore.list.find((x) => x.id === projectId)
-      if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
+      if (!p) throw projectNotFound(projectId)
       p.commands = commands.flatMap((c): SavedCommand[] => {
         const command = c.command.trim()
         if (!command) return []
@@ -164,7 +169,7 @@ export class ProjectsMock {
     // The same rule as the real thing (#69): an empty setup lays down as null — a mock that is more forgiving would split the contract apart
     setWorktreeSetup: async (projectId: string, setup: { command: string; copyFiles: string[] } | null) => {
       const p = this.projectStore.list.find((x) => x.id === projectId)
-      if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
+      if (!p) throw projectNotFound(projectId)
       const clean = setup
         ? { command: setup.command.trim(), copyFiles: setup.copyFiles.map((f) => f.trim()).filter(Boolean) }
         : null
@@ -173,7 +178,7 @@ export class ProjectsMock {
     /** The project's worktree trunk (#76), as the real host's `worktrees.setTrunk` sets it */
     setWorktreeTrunk: async (projectId: string, baseBranch: string) => {
       const p = this.projectStore.list.find((x) => x.id === projectId)
-      if (!p) throw Object.assign(new Error('Project not found'), { code: 'internal' })
+      if (!p) throw projectNotFound(projectId)
       const branch = baseBranch.trim()
       if (!branch) throw Object.assign(new Error('Pick the branch worktrees should fork from'), { code: 'internal' })
       p.worktreeManager = { sessionId: p.worktreeManager?.sessionId ?? '', baseBranch: branch }
