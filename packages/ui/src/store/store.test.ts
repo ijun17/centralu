@@ -24,6 +24,7 @@ import {
   type ChatItem,
 } from './store.js'
 import { computeInbox } from './selectors.js'
+import { omitKey } from './patch.js'
 
 /**
  * Store regression tests — ports go through `MockPlatform` (no ad-hoc mocking, or the contract falls
@@ -5596,5 +5597,115 @@ describe('a project git count the host could not read (#850 review of item 10)',
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+/*
+ * A failed save puts back only what it changed (#842 item 3). The rollbacks used to put back the whole map from before
+ * the save, so whatever happened while the save was out was lost with it.
+ */
+describe('a failed reorder or command save puts back only what it changed (#842 item 3)', () => {
+  /** A promise this test settles by hand */
+  function held() {
+    let fail!: (e: Error) => void
+    const p = new Promise<never>((_, reject) => (fail = reject))
+    return { p, fail }
+  }
+
+  it('a failed session reorder keeps a session created and a state changed while it was out', async () => {
+    const platform = new MockPlatform()
+    const save = held()
+    vi.spyOn(platform.agents, 'reorderSessions').mockReturnValue(save.p)
+    useStore.setState({
+      platform,
+      sessions: { a: sessionInfo('a') as never, b: sessionInfo('b') as never },
+    })
+
+    const reordering = useStore.getState().reorderSessions('p1', ['b', 'a'])
+    expect(Object.keys(useStore.getState().sessions)).toEqual(['b', 'a'])
+    // While the save is out: a new session arrives, and one already listed starts working
+    useStore.setState((st) => ({
+      sessions: { ...st.sessions, a: { ...st.sessions.a!, state: 'working' }, c: sessionInfo('c') as never },
+    }))
+    save.fail(new Error('offline'))
+    await reordering
+
+    const st = useStore.getState()
+    expect(Object.keys(st.sessions)).toEqual(['a', 'b', 'c'])
+    expect(st.sessions.a!.state).toBe('working')
+    expect(st.toast).toContain('offline')
+  })
+
+  it('a failed session reorder does not undo a later reorder that the host kept', async () => {
+    const platform = new MockPlatform()
+    const first = held()
+    const spy = vi.spyOn(platform.agents, 'reorderSessions').mockReturnValueOnce(first.p).mockResolvedValueOnce(undefined as never)
+    useStore.setState({ platform, sessions: { a: sessionInfo('a') as never, b: sessionInfo('b') as never, c: sessionInfo('c') as never } })
+
+    const failing = useStore.getState().reorderSessions('p1', ['b', 'a', 'c'])
+    await useStore.getState().reorderSessions('p1', ['c', 'b', 'a'])
+    first.fail(new Error('offline'))
+    await failing
+
+    expect(spy).toHaveBeenCalledTimes(2)
+    expect(Object.keys(useStore.getState().sessions)).toEqual(['c', 'b', 'a'])
+  })
+
+  it('a failed project reorder does not bring back a project deleted while it was out', async () => {
+    const platform = new MockPlatform()
+    const save = held()
+    vi.spyOn(platform.projects, 'reorder').mockReturnValue(save.p)
+    const project = (id: string) => ({ id, path: `/tmp/${id}`, name: id, commands: [] }) as never
+    useStore.setState({ platform, projects: { p1: project('p1'), p2: project('p2'), p3: project('p3') } })
+
+    const reordering = useStore.getState().reorderProjects(['p3', 'p2', 'p1'])
+    useStore.setState((st) => ({ projects: omitKey(st.projects, 'p2') }))
+    save.fail(new Error('offline'))
+    await reordering
+
+    expect(Object.keys(useStore.getState().projects)).toEqual(['p1', 'p3'])
+  })
+
+  it('a failed command save puts back the list and keeps a rename made while it was out', async () => {
+    const platform = new MockPlatform()
+    const p = await platform.projects.add('/tmp/cmds')
+    await useStore.getState().attach(platform)
+    const save = held()
+    vi.spyOn(platform.projects, 'setCommands').mockReturnValue(save.p)
+
+    const saving = useStore.getState().setProjectCommands(p.id, [{ command: 'pnpm dev' }])
+    expect(useStore.getState().projects[p.id]?.commands).toEqual([{ command: 'pnpm dev' }])
+    useStore.setState((st) => ({ projects: { ...st.projects, [p.id]: { ...st.projects[p.id]!, name: 'renamed' } } }))
+    save.fail(new Error('disk full'))
+    await saving
+
+    expect(useStore.getState().projects[p.id]).toMatchObject({ name: 'renamed', commands: [] })
+    expect(useStore.getState().toast).toContain('disk full')
+  })
+
+  it('a failed command save does not bring back a project removed while it was out', async () => {
+    const platform = new MockPlatform()
+    const p = await platform.projects.add('/tmp/cmds-gone')
+    await useStore.getState().attach(platform)
+    const save = held()
+    vi.spyOn(platform.projects, 'setCommands').mockReturnValue(save.p)
+
+    const saving = useStore.getState().setProjectCommands(p.id, [{ command: 'pnpm dev' }])
+    useStore.setState((st) => ({ projects: omitKey(st.projects, p.id) }))
+    save.fail(new Error('disk full'))
+    await saving
+
+    expect(useStore.getState().projects[p.id]).toBeUndefined()
+  })
+})
+
+describe('markRead offline (#842 item 14)', () => {
+  it('a mark the host refuses resolves, and the session stays unread', async () => {
+    const platform = new MockPlatform()
+    vi.spyOn(platform.agents, 'markRead').mockRejectedValue(new Error('offline'))
+    useStore.setState({ platform, sessions: { m: sessionInfo('m', { lastSeq: 4, lastReadSeq: 1 }) as never } })
+
+    await expect(useStore.getState().markRead('m')).resolves.toBeUndefined()
+    expect(useStore.getState().sessions.m!.lastReadSeq).toBe(1)
   })
 })

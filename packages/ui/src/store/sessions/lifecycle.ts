@@ -2,7 +2,7 @@ import type { NormalizedEvent, ToolDefaults, ToolName } from '@cc/protocol'
 import { initialSession, markRead as markReadPure, rename as renamePure } from '@cc/core'
 import type { Platform } from '@cc/platform/ports'
 import type { AppState, StoreGet, StoreSet } from '../state.js'
-import { ifSessionStill } from '../patch.js'
+import { ifSessionStill, inOrder } from '../patch.js'
 import { writingProject } from '../projects.js'
 import { liveFactsOf, replayPendingEvents } from '../sessionList.js'
 import { bumpChatKeysAbove, messagesToChat, nextChatKey, type ChatItem } from '../transcript.js'
@@ -303,7 +303,16 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
   async markRead(sessionId) {
     const s = get().sessions[sessionId]
     if (!s || s.lastReadSeq >= s.lastSeq) return
-    await get().platform!.agents.markRead(sessionId, s.lastSeq)
+    try {
+      await get().platform!.agents.markRead(sessionId, s.lastSeq)
+    } catch {
+      /*
+       * Offline, or the host is being swapped (#842 item 14). Callers fire this and forget it (opening a session, Done in
+       * the waiting list), so a rejection here was an unhandled one. Nothing is said: the session simply stays unread,
+       * which is what the host still holds, and the next look at it marks it again.
+       */
+      return
+    }
     set(ifSessionStill(sessionId, (st, cur) => ({ sessions: { ...st.sessions, [sessionId]: markReadPure(cur, s.lastSeq) } })))
   },
 
@@ -322,7 +331,20 @@ export const lifecycleActions = (set: StoreSet, get: StoreGet): LifecycleActions
     try {
       await platform.agents.reorderSessions(projectId, orderedIds)
     } catch (e) {
-      set({ sessions: before, toast: `Could not save order: ${(e as Error).message}` })
+      /*
+       * Only the order goes back (#842 item 3): the sessions as they are now, in the order from before the drag. Putting
+       * `before` back whole lost every session created and every state change made while the save was out. And only
+       * while the order shown is still this drag's: a later drag that was saved is not undone by this one failing.
+       */
+      set((st) => {
+        const shown = Object.keys(st.sessions).filter((id) => mine.has(id))
+        const ours = orderedIds.filter((id) => Object.hasOwn(st.sessions, id))
+        const stillOurs = shown.length === ours.length && shown.every((id, i) => id === ours[i])
+        return {
+          ...(stillOurs ? { sessions: inOrder(st.sessions, Object.keys(before)) } : {}),
+          toast: `Could not save order: ${(e as Error).message}`,
+        }
+      })
     }
   },
 })
