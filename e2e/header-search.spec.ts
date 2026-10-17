@@ -48,11 +48,13 @@ for (const width of [1440, 1100, 900]) {
 test('the field shrinks as the window narrows and stays centred', async ({ page }) => {
   await demo(page, 1440)
   const wide = (await box(page.getByTestId('search-button'))).width
-  expect(wide).toBeGreaterThan(400)
+  // At its widest (SEARCH_MAX) in a wide window
+  expect(Math.round(wide)).toBe(400)
+  // At 400px the field still fits a 900px window whole
   await page.setViewportSize({ width: 900, height: 900 })
-  await expect.poll(async () => (await box(page.getByTestId('search-button'))).width).toBeLessThan(wide)
+  await expect.poll(async () => (await box(page.getByTestId('search-button'))).width).toBeLessThanOrEqual(wide)
   await expectCentredAndClear(page)
-  // Narrower than the desktop window can get: still no overlap, nothing negative
+  // Narrower than the desktop window can get: it gives way, still no overlap, nothing negative
   await page.setViewportSize({ width: 760, height: 900 })
   await expect.poll(async () => (await box(page.getByTestId('search-button'))).width).toBeLessThan(wide)
   await expectCentredAndClear(page)
