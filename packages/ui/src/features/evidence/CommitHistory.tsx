@@ -6,6 +6,7 @@ import { usePlatform } from '../../app/PlatformProvider.jsx'
 import { useStore } from '../../store/store.js'
 import { COMMIT_LIMIT, hasMultipleAuthors } from './commits.js'
 import { LoadFailed } from '../../components/LoadFailed.jsx'
+import { SkeletonLines } from '../../components/Skeleton.jsx'
 import { useLoad } from '../../app/useLoad.js'
 import { useGitRefreshKey } from './GitChanges.jsx'
 
@@ -56,9 +57,7 @@ export function CommitHistory({ projectId }: { projectId: string }) {
   if (commits === undefined) {
     return (
       failed || (
-        <p className="px-3 py-2 text-xs text-ink-faint" data-testid="evidence-history">
-          Loading…
-        </p>
+        <SkeletonLines lines={5} className="px-3 py-2" label="Loading the history" testId="evidence-history" />
       )
     )
   }
