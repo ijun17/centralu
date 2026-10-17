@@ -220,7 +220,11 @@ export async function hostBuild(): Promise<ShellHostBuild> {
  * @returns a promise of the unsubscribe, settled once the listener is registered
  */
 function listenHostBuild(cb: (b: ShellHostBuild) => void): Promise<() => void> {
-  return listen<ShellHostBuild>('host-build', (e) => cb(e.payload))
+  // Read as `listenHostStatus` reads its report (#972 item 7): anything that is not an object with a mode is dropped
+  return listen<unknown>('host-build', (e) => {
+    const p = e.payload
+    if (typeof p === 'object' && p !== null && typeof (p as { mode?: unknown }).mode === 'string') cb(p as ShellHostBuild)
+  })
 }
 
 /**
