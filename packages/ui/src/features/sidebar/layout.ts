@@ -25,7 +25,12 @@ export const GUIDE = 'before:absolute before:inset-y-0 before:-left-px before:w-
  * (the gutter is both inside the band and subtracted from the name column).
  */
 const GUTTER = 28
-export const SIDEBAR_VARS = { '--sidebar-gutter': `${GUTTER}px` } as CSSProperties
+export const SIDEBAR_VARS = {
+  '--sidebar-gutter': `${GUTTER}px`,
+  // The sidebar's lines stand a step further from its background than elsewhere (styles/index.css, --color-line-side)
+  '--color-line': 'var(--color-line-side)',
+  '--color-line-strong': 'var(--color-line-strong-side)',
+} as CSSProperties
 export const GUTTER_WIDTH = 'w-(--sidebar-gutter)'
 /** The project name's own column, which "Your apps" title shares: the 2px bar, 2px of padding, then the gutter */
 export const NAME_PAD = 'pl-[calc(var(--sidebar-gutter)+4px)]'
