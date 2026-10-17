@@ -14,6 +14,7 @@ import { ChildReports, type ChildReportsHost } from './child-reports.js'
 import { InterruptionWatch, type InterruptionWatchHost } from './interruption-watch.js'
 import { LaunchRecords, type LaunchRecordsHost } from './launch-records.js'
 import { MergeChecks, type MergeChecksHost } from './merge-checks.js'
+import { ProjectCreation, type ProjectCreationHost } from './project-creation.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -23,12 +24,9 @@ import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.
 import { AgentRunWait } from './app-agents.js'
 import { CacheLedger } from './cache-ledger.js'
 import { underGrant } from './ask-project.js'
-import { makeProjectFolder, projectFolderTarget, type ProjectFolderTarget } from '../dev-services/project-folder.js'
-import { cloneInto } from '../dev-services/project-clone.js'
 import { orchestratorMemory } from './transcript-view.js'
 import { homedir } from 'node:os'
 import { basename, join, relative, resolve, sep } from 'node:path'
-import { existsSync, realpathSync, rmSync, statSync } from 'node:fs'
 import type {
   RebuildCause,
   AppReach,
@@ -54,7 +52,6 @@ import type {
   UiPreferences,
   UiPreferencesPatch,
   SettingsApplied,
-  GitSource,
   FsResolvePurpose,
 } from '@cc/protocol'
 import {
@@ -65,9 +62,7 @@ import {
   CENTRALU_APPLY_QUESTION,
   sessionOnlyAlways,
   DATA_DIR,
-  gitSourceError,
   oneLineText,
-  repoNameOf,
   parseUiPreferences,
   textSizeFromLegacyStep,
   sessionLiveDefaults,
@@ -152,14 +147,13 @@ import { appMessageFrame, type AppMessageSource, type AppMessageVia, type AppVie
 import { SessionTrash, type SessionTrashHost } from './session-trash.js'
 import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
-import { foldsPathCase } from '../os.js'
 export { appMessageFrame } from './app-messages.js'
 export type { AppMessageSource, AppMessageVia, AppViewPlace } from './app-messages.js'
 export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './delegation-flow.js'
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost
 
 /**
  * Where the marker "conversation up to here belongs to the old tool" is stored.
@@ -258,6 +252,8 @@ export class SessionManager {
   private readonly launches: LaunchRecords
   /** Whether worktree branches have landed on their trunk, by git or by their PR (merge-checks.ts) */
   private readonly merges: MergeChecks
+  /** A project added or made here, and the orchestrator's create_project (project-creation.ts) */
+  private readonly projectCreation: ProjectCreation
   /** ask_project, here or on a linked machine (ask-project-flow.ts) */
   private readonly askProjectFlow: AskProjectFlow
   /** The conversations a tool keeps on its own side: listing, holders, import and catch-up (external-conversations.ts) */
@@ -368,6 +364,7 @@ export class SessionManager {
     } = {},
   ) {
     this.children = new ChildOwnership(store)
+    this.projectCreation = new ProjectCreation(this.parts())
     this.merges = new MergeChecks(this.parts())
     this.launches = new LaunchRecords(this.parts())
     this.interruptions = new InterruptionWatch(this.parts())
@@ -520,64 +517,24 @@ export class SessionManager {
     throw rpcError('The worktree manager is gone: make a worktree session from New session, or have a session start one with start_agent')
   }
 
-  /**
-   * `trusted` is the trust a project new to this host starts with (#655); registering a folder that is already a
-   * project never changes its trust. Registering an existing folder from the screen leaves it untrusted, as the
-   * person decides; only `createProject` passes it, for a folder it made empty itself.
-   */
-  async addProject(path: string, opts: { trusted?: boolean } = {}): Promise<ProjectInfo> {
-    if (!existsSync(path) || !statSync(path).isDirectory()) {
-      throw rpcError(`Directory not found: ${path}`)
-    }
-    // One folder is one project (#849): `C:\proj\`, `c:\proj` and `C:\Proj` were three. A new one is kept without a
-    // trailing separator and with a capital drive letter; one already kept in another spelling is found and kept as is
-    const spelled = resolve(path).replace(/^[a-z]:/, (drive) => drive.toUpperCase())
-    const existing = this.projectAt(spelled)
-    const at = existing?.path ?? spelled
-    const id = existing?.id ?? randomUUID()
-    this.store.addProject({ id, path: at, name: basename(at), ...(opts.trusted ? { trusted: true } : {}) })
-    return this.projectInfo(id, at)
+  /** `ProjectCreation.addProject` (project-creation.ts), kept on the manager for its callers */
+  addProject(...a: Parameters<ProjectCreation['addProject']>): ReturnType<ProjectCreation['addProject']> {
+    return this.projectCreation.addProject(...a)
   }
 
-  /**
-   * The project kept for this folder, in whatever spelling it was kept. Where paths fold case (Windows), two spellings
-   * are one folder when their real paths are equal: `realpathSync.native` gives the case on disk and the long name for
-   * a short one. Case is not folded by JS's rules, which join names Windows keeps apart (the Kelvin sign lowers to k)
-   * and would merge two folders of a case-sensitive directory; only a kept path that is gone is matched by ASCII case.
-   * Only a kept path that could name this folder is resolved (equal but for ASCII case, or with a short name in it),
-   * and never one on a share, which may not answer: a registration does not touch every project's folder.
-   */
-  private projectAt(path: string): { id: string; path: string } | undefined {
-    const exact = this.store.findProjectByPath(path)
-    if (exact) return { id: exact.id, path }
-    const kept = this.store.listProjects()
-    if (!foldsPathCase()) return kept.find((p) => resolve(p.path) === path)
-    const ascii = (p: string) => p.replace(/[A-Z]/g, (c) => c.toLowerCase())
-    const real = canonicalPath(path)
-    const near = new Set([ascii(path), ascii(real)])
-    return kept.find((p) => {
-      const spelled = resolve(p.path)
-      if (!near.has(ascii(spelled)) && !spelled.includes('~')) return false
-      if (spelled.startsWith('\\\\')) return ascii(spelled) === ascii(real)
-      try {
-        return realpathSync.native(spelled) === real
-      } catch {
-        return ascii(spelled) === ascii(real)
-      }
-    })
+  /** `ProjectCreation.useProjectsHome` (project-creation.ts), kept on the manager for its callers */
+  useProjectsHome(...a: Parameters<ProjectCreation['useProjectsHome']>): ReturnType<ProjectCreation['useProjectsHome']> {
+    return this.projectCreation.useProjectsHome(...a)
   }
 
-  /**
-   * Where a new project goes by default: this machine's `~/Centralu` (#515, `projectsHome`). Unset, there is none and
-   * creating without a parent is refused — main.ts wires the real one in, so a test that forgets to give a folder
-   * fails instead of writing in the home of whoever runs it.
-   */
-  private projectsHome: () => string = () => {
-    throw rpcError('This host has no default location for a new project — give a parent folder')
+  /** `ProjectCreation.projectCreatePreview` (project-creation.ts), kept on the manager for its callers */
+  projectCreatePreview(...a: Parameters<ProjectCreation['projectCreatePreview']>): ReturnType<ProjectCreation['projectCreatePreview']> {
+    return this.projectCreation.projectCreatePreview(...a)
   }
 
-  useProjectsHome(resolve: () => string): void {
-    this.projectsHome = resolve
+  /** `ProjectCreation.createProject` (project-creation.ts), kept on the manager for its callers */
+  createProject(...a: Parameters<ProjectCreation['createProject']>): ReturnType<ProjectCreation['createProject']> {
+    return this.projectCreation.createProject(...a)
   }
 
   /**
@@ -587,131 +544,6 @@ export class SessionManager {
   private memoryGate: MemoryGate | null = null
   useMemoryGate(gate: MemoryGate | null): void {
     this.memoryGate = gate
-  }
-
-  /**
-   * The folder a new project would get, and whether a clone source is one this host clones (#515) — checked, nothing
-   * made. With a source and no name, the folder is named after the repository.
-   */
-  private async newProjectTarget(name: string, parent?: string, source?: GitSource): Promise<ProjectFolderTarget> {
-    if (source) {
-      const urlError = gitSourceError(source.git)
-      if (urlError) throw rpcError(urlError)
-      if (source.branch !== undefined && !(await gitValidBranchName(source.branch))) {
-        throw rpcError(`"${source.branch}" is not a branch name.`)
-      }
-    }
-    const folder = name.trim() || (source ? repoNameOf(source.git) : '')
-    if (!folder && source) throw rpcError('The repository address gives no name for the folder — give one.')
-    return projectFolderTarget({ name: folder, parent }, parent?.trim() ? null : this.projectsHome())
-  }
-
-  /** Where `projects.create` would make the folder, and why it would refuse (#515) — nothing is made */
-  async projectCreatePreview(name: string, parent?: string, source?: GitSource): Promise<{ parent: string; path: string | null; error: string | null }> {
-    const given = parent?.trim()
-    const location = given || this.projectsHome()
-    if (!name.trim() && !source?.git.trim()) return { parent: location, path: null, error: null }
-    try {
-      const t = await this.newProjectTarget(name, given, source)
-      return { parent: t.parent, path: t.path, error: null }
-    } catch (e) {
-      return { parent: location, path: null, error: (e as Error).message }
-    }
-  }
-
-  /**
-   * Makes a new project (#515): a folder named `name` in `parent` (this machine's `~/Centralu` when absent), empty, or a
-   * clone of `source` made with this machine's git and saved sign-ins, then registers it. Never reuses anything
-   * already there (`projectFolderTarget`). An empty folder is registered trusted, a clone untrusted (#655). A clone that fails leaves nothing behind: the folder this made is removed
-   * and no project is registered.
-   */
-  async createProject(name: string, parent?: string, source?: GitSource): Promise<ProjectInfo> {
-    const target = await this.newProjectTarget(name, parent, source)
-    makeProjectFolder(target)
-    if (source) {
-      console.error(`[projects] cloning ${source.git}${source.branch ? ` (${source.branch})` : ''} into ${target.path}`)
-      try {
-        await cloneInto(source.git, target.path, target.parent, source.branch)
-      } catch (e) {
-        // Only the folder made just above: it held nothing before the clone
-        rmSync(target.path, { recursive: true, force: true })
-        console.error(`[projects] clone into ${target.path} failed, folder removed: ${(e as Error).message}`)
-        throw e
-      }
-    }
-    console.error(`[projects] made ${target.path}`)
-    // A folder made empty here holds only what Centralu and the person write, so it starts trusted (#655). A clone
-    // holds what a stranger's repository put there (an agent can ask for any URL), so the person decides, as today.
-    const info = await this.addProject(target.path, { trusted: !source })
-    // Every window learns of it, the one that asked included: the orchestrator's card answers no list (#515)
-    this.emit({ type: 'projects_changed' })
-    return info
-  }
-
-  /**
-   * create_project (#515): the orchestrator's request becomes a card in its own approval slot, with the full path (and
-   * the repository, for a clone) on it, and the folder is made only when the person allows it. Checked before the card
-   * (a refusal costs the person nothing) and again after it (a folder of that name may have appeared while the card
-   * stood). A clone says so in the conversation while it runs, since it can take minutes.
-   */
-  private async createProjectAsked(
-    sessionId: string,
-    spec: { name: string; parent?: string; source?: GitSource },
-    signal?: AbortSignal,
-  ): Promise<{ ok: true; projectId: string; name: string; path: string } | { ok: false; error: string }> {
-    let target: ProjectFolderTarget
-    try {
-      target = await this.newProjectTarget(spec.name, spec.parent, spec.source)
-    } catch (e) {
-      return { ok: false, error: (e as Error).message }
-    }
-    const refused = await this.askProjectCreate(sessionId, { name: target.name, path: target.path }, spec.source, target.path, signal)
-    if (refused) return { ok: false, error: refused }
-    try {
-      const info = await this.createProject(target.name, spec.parent, spec.source)
-      return { ok: true, projectId: info.id, name: info.name, path: info.path }
-    } catch (e) {
-      return { ok: false, error: (e as Error).message }
-    }
-  }
-
-  /**
-   * The orchestrator's create_project on a linked machine (#82 phase 4): the same card as here, naming the machine,
-   * with the path that machine would make (`projects.createPreview` there, in its own path terms); on Create, the
-   * machine makes and registers it (`projects.create` there). Nothing is made on either machine before the answer.
-   */
-  private async createProjectOnMachine(
-    sessionId: string,
-    reader: LinkedSessions,
-    machine: { id: string; name: string },
-    spec: { name: string; parent?: string; source?: GitSource },
-    signal?: AbortSignal,
-  ): Promise<{ ok: true; projectId: string; name: string; path: string; machine: string } | { ok: false; error: string }> {
-    const preview = await reader.previewProject(machine.id, spec)
-    if (!preview.ok) return preview
-    const refused = await this.askProjectCreate(sessionId, { name: preview.name, path: preview.path, machine: machine.name }, spec.source, `${preview.path} on ${machine.name}`, signal)
-    if (refused) return { ok: false, error: refused }
-    const made = await reader.createProject(machine.id, spec)
-    return made.ok ? { ...made, machine: machine.name } : made
-  }
-
-  /**
-   * create_project's card (#515), here or for a linked machine: the person's refusal or a withdrawn card as the error
-   * the orchestrator reads, or null once allowed. A clone says so in the conversation while it runs (into `where`),
-   * since it can take minutes.
-   */
-  private async askProjectCreate(
-    sessionId: string,
-    card: { name: string; path: string; machine?: string },
-    source: GitSource | undefined,
-    where: string,
-    signal?: AbortSignal,
-  ): Promise<string | null> {
-    const decision = await this.hostCards.askHost(sessionId, { kind: 'project_create', name: card.name, path: card.path, ...(source ? { source } : {}), ...(card.machine ? { machine: card.machine } : {}) }, signal)
-    if (decision === 'deny') return 'The person did not approve it. Do not ask again unless they tell you to.'
-    if (decision === null) return 'The card was withdrawn before the person answered, so nothing was made.'
-    if (source) this.onEvent({ type: 'notice', sessionId, level: 'info', from: 'Centralu', label: 'cloning', text: `Cloning ${source.git} into ${where}…` })
-    return null
   }
 
   /**
@@ -3856,8 +3688,8 @@ export class SessionManager {
       enqueue: (callerId, target, via, text) => this.queue.enqueue(callerId, target, via, text),
       forkFor: (callerId, target, text, readOnly, via, signal) => this.delegationFlow.forkFor(callerId, target, text, readOnly, via, signal),
       autoBoundaryOpen: (sessionId, boundary) => this.autoBoundaryOpen(sessionId, boundary),
-      createProjectAsked: (sessionId, spec, signal) => this.createProjectAsked(sessionId, spec, signal),
-      createProjectOnMachine: (sessionId, reader, machine, spec, signal) => this.createProjectOnMachine(sessionId, reader, machine, spec, signal),
+      createProjectAsked: (sessionId, spec, signal) => this.projectCreation.createProjectAsked(sessionId, spec, signal),
+      createProjectOnMachine: (sessionId, reader, machine, spec, signal) => this.projectCreation.createProjectOnMachine(sessionId, reader, machine, spec, signal),
       handoff: (callerId, target, opts, signal) => this.handoffFlow.handoff(callerId, target, opts, signal),
       handoffWait: (callerId, handle, signal) => this.handoffFlow.wait(callerId, handle, signal),
       builderRefOf: (m) => this.appSessions.builderRefOf(m),
