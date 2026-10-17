@@ -4,6 +4,8 @@
  * (from Windows itself, or through the drive a WSL distro mounts).
  */
 import { existsSync, readFileSync } from 'node:fs'
+import { systemRoot } from './platform.mjs'
+import { runCaptured } from './serve-util.mjs'
 
 /**
  * How `--detach` starts the launcher so that it outlives the session that asked (measured,
@@ -27,6 +29,18 @@ export function detachHow(platform, env, interop = wslInterop) {
 
 export function wslInterop() {
   return existsSync('/proc/sys/fs/binfmt_misc/WSLInterop') || existsSync('/proc/sys/fs/binfmt_misc/WSLInterop-late')
+}
+
+/** A WSL distro's name for `wsl.exe -d`, refused when it could be read as anything else */
+export function wslDistro(distro) {
+  if (!/^[A-Za-z0-9._-]{1,64}$/.test(distro ?? '')) throw new Error(`not a WSL distro name: ${distro}`)
+  return distro
+}
+
+/** A Linux user's name for `wsl.exe -u`, refused when it could be read as anything else */
+export function wslUser(user) {
+  if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/.test(user ?? '')) throw new Error(`cannot name the user ${user} to wsl.exe`)
+  return user
 }
 
 /**
@@ -56,13 +70,12 @@ export function psText(s) {
 
 /** The PowerShell that asks WMI to create `commandLine`. Values cross as base64, so no quoting can break */
 export function wmiScript({ commandLine, cwd = null }) {
-  const text = (s) => `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(s, 'utf8').toString('base64')}'))`
   return [
     "$ErrorActionPreference = 'Stop'",
     PS_MODULE_PATH,
     '[Console]::OutputEncoding = [Text.Encoding]::UTF8',
-    `$a = @{ CommandLine = ${text(commandLine)} }`,
-    ...(cwd ? [`$a.CurrentDirectory = ${text(cwd)}`] : []),
+    `$a = @{ CommandLine = ${psText(commandLine)} }`,
+    ...(cwd ? [`$a.CurrentDirectory = ${psText(cwd)}`] : []),
     // No console window when this runs from a desktop session; left out where it cannot be built
     'try { $a.ProcessStartupInformation = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 } } catch { }',
     'try {',
@@ -111,7 +124,7 @@ export function windowsPowershell(how, env, mounts) {
 
 /** A program under the Windows folder, by full path, from Windows or from inside a WSL distro; null when unreachable */
 export function windowsTool(how, env, rel, mounts = () => readFileSync('/proc/mounts', 'utf8')) {
-  if (how === 'wmi') return [env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows', ...rel].join('\\')
+  if (how === 'wmi') return [systemRoot(env), ...rel].join('\\')
   let text = ''
   try {
     text = mounts()
@@ -125,4 +138,19 @@ export function windowsTool(how, env, rel, mounts = () => readFileSync('/proc/mo
     if (existsSync(candidate)) return candidate
   }
   return null
+}
+
+/** A script as `-EncodedCommand` takes it: UTF-16LE, in base64 */
+export function encodedCommand(script) {
+  return Buffer.from(script, 'utf16le').toString('base64')
+}
+
+/**
+ * Runs `script` in the Windows PowerShell at `ps` and reads what it printed with `parse` (`{ ok, … }`). When it printed
+ * nothing and PowerShell itself complained (a policy, a module it could not load), the answer is the last line of that.
+ */
+export async function askPowershell(ps, script, env, parse, run = runCaptured) {
+  const r = await run(ps, ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodedCommand(script)], env)
+  const a = parse(r.stdout)
+  return a.ok || r.stdout.trim() || !r.stderr.trim() ? a : { ok: false, message: r.stderr.trim().split(/\r?\n/).at(-1) }
 }

@@ -8,7 +8,7 @@ import { userInfo } from 'node:os'
 import { join, posix } from 'node:path'
 import { say, runCaptured } from './serve-util.mjs'
 import { serveDataDir } from './serve-files.mjs'
-import { detachHow, wslInterop, PS_MODULE_PATH, windowsPowershell, psText } from './serve-windows.mjs'
+import { askPowershell, detachHow, encodedCommand, wslInterop, PS_MODULE_PATH, windowsArg, windowsPowershell, psText, wslDistro, wslUser } from './serve-windows.mjs'
 import { keepLauncher, remoteLayout } from './serve-install.mjs'
 
 /**
@@ -73,8 +73,7 @@ export function autostartName(how, { dataDir, home, env, platform = process.plat
   const key = pathKey(dataDir, platform)
   const own = key === pathKey(`${home}/.centralu`, platform) ? '' : createHash('sha256').update(key).digest('hex').slice(0, 8)
   if (how === 'systemd') return `centralu-serve${own ? `-${own}` : ''}.service`
-  const distro = env.WSL_DISTRO_NAME
-  if (distro && !/^[A-Za-z0-9._-]{1,64}$/.test(distro)) throw new Error(`not a WSL distro name: ${distro}`)
+  const distro = env.WSL_DISTRO_NAME && wslDistro(env.WSL_DISTRO_NAME)
   return `Centralu host${distro ? ` (WSL ${distro})` : ''}${own ? ` ${own}` : ''}`
 }
 
@@ -146,10 +145,9 @@ export function systemdUnit({ launcher, env }) {
 export function taskActionScript({ how, launcher, env, distro = null, user = null }) {
   const carried = AUTOSTART_ENV.filter((k) => env[k])
   if (how === 'wmi') return [...carried.map((k) => `$env:${k} = ${psText(env[k])}`), `& ${psText(launcher)} serve`].join('\n')
-  if (!/^[A-Za-z0-9._-]{1,64}$/.test(distro ?? '')) throw new Error(`not a WSL distro name: ${distro}`)
-  if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/.test(user ?? '')) throw new Error(`cannot name the user ${user} to wsl.exe`)
-  const args = ['-d', distro, '-u', user, '--cd', '~', '--exec', ...(carried.length ? ['/usr/bin/env', ...carried.map((k) => `${k}=${env[k]}`)] : []), launcher, 'serve']
-  for (const a of args) if (/["\r\n\0]/.test(a)) throw new Error(`cannot pass ${JSON.stringify(a)} on a Windows command line`)
+  const args = ['-d', wslDistro(distro), '-u', wslUser(user), '--cd', '~', '--exec', ...(carried.length ? ['/usr/bin/env', ...carried.map((k) => `${k}=${env[k]}`)] : []), launcher, 'serve']
+  // PowerShell writes the command line itself; what windowsArg could not quote, it would not either
+  for (const a of args) windowsArg(a)
   return [`$a = @(${args.map(psText).join(', ')})`, "& (Join-Path $env:SystemRoot 'System32\\wsl.exe') @a"].join('\n')
 }
 
@@ -169,7 +167,7 @@ export function taskScript(action, { name, run = '' }) {
   if (action === 'off') {
     return [...head, 'try {', `  ${find}`, "  if ($t) { Unregister-ScheduledTask -TaskName $name -TaskPath '\\' -Confirm:$false }", `  '${TASK_WORD} off'`, fail].join('\n')
   }
-  const encoded = Buffer.from(run, 'utf16le').toString('base64')
+  const encoded = encodedCommand(run)
   return [
     ...head,
     'try {',
@@ -300,11 +298,7 @@ async function taskAutostart(action, { dataDir, env, name, run, user, platform, 
   const ps = windowsPowershell(detach, env)
   const base = { ok: true, how: 'task', linger: null }
   if (!ps) return { ...base, ok: false, on: false, message: 'Windows PowerShell is not reachable from this WSL distro' }
-  const ask = async (script) => {
-    const r = await run(ps, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], env)
-    const a = parseTaskAnswer(r.stdout)
-    return a.ok || r.stdout.trim() || !r.stderr.trim() ? a : { ok: false, message: r.stderr.trim().split(/\r?\n/).at(-1) }
-  }
+  const ask = (script) => askPowershell(ps, script, env, parseTaskAnswer, run)
   if (action === 'status') {
     const a = await ask(taskScript('status', { name }))
     if (!a.ok) return { ...base, ok: false, on: readAutostartMark(dataDir)?.how === 'task', message: `Task Scheduler did not answer: ${a.message}` }

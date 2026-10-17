@@ -381,6 +381,17 @@ describe('centralu serve --autostart on Windows, with a fake PowerShell', () => 
     expect((await autostart({ ...w.base, action: 'status' })).line).toMatchObject({ ok: true, on: false })
   })
 
+  it('when PowerShell fails before the script answers, says PowerShell’s last line, or that nothing answered', async () => {
+    const stderr = 'Get-ScheduledTask : The term is not recognized.\r\nAt line:1 char:1\r\n    + FullyQualifiedErrorId : CommandNotFoundException\r\n'
+    const w = windows(() => ({ code: 1, stderr }))
+    expect((await autostart({ ...w.base, action: 'status' })).line).toMatchObject({ ok: false, message: 'Task Scheduler did not answer:     + FullyQualifiedErrorId : CommandNotFoundException' })
+    // Something on stdout is read as the script's answer, whatever stderr says
+    const v = windows(() => ({ stdout: 'not a task line\r\n', stderr }))
+    expect((await autostart({ ...v.base, action: 'status' })).line).toMatchObject({ ok: false, message: 'Task Scheduler did not answer: PowerShell did not answer' })
+    const silent = windows(() => ({ code: 1 }))
+    expect((await autostart({ ...silent.base, action: 'off' })).line).toMatchObject({ ok: false, on: true, message: 'Task Scheduler did not remove the task "Centralu host": PowerShell did not answer' })
+  })
+
   it('inside WSL with no way to Windows PowerShell, it says so instead of writing anything', async () => {
     const h = home()
     const r = await autostart({ env: { WSL_DISTRO_NAME: 'Ubuntu' }, home: h, platform: 'linux', how: 'task', interop: () => true, user: 'me', cliPath: null, action: 'on', run: runner().run })

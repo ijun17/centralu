@@ -8,7 +8,7 @@ import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { isAlive, say, sayTo, runCaptured, tail, sleep, waitUntil } from './serve-util.mjs'
 import { SERVE_LOG_FILE, serveDataDir, readServeState, ensureServeState, heldHere, lockHolderPid, readServePid } from './serve-files.mjs'
-import { detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool } from './serve-windows.mjs'
+import { askPowershell, detachHow, windowsArg, wmiScript, parseWmiAnswer, wmiBlockedMessage, windowsPowershell, windowsTool, wslDistro, wslUser } from './serve-windows.mjs'
 import { DEFAULT_SERVE_PORT } from './serve-port.mjs'
 import { CHILD_FLAG } from './serve-args.mjs'
 import { keepLauncher } from './serve-install.mjs'
@@ -69,19 +69,16 @@ export async function startDetached({ how, execPath, args, env, cwd }) {
   try {
     if (how === 'wmi') commandLine = [execPath, ...args].map(windowsArg).join(' ')
     else {
-      const distro = env.WSL_DISTRO_NAME ?? ''
-      const user = userInfo().username
-      if (!/^[A-Za-z0-9._-]{1,64}$/.test(distro)) throw new Error(`not a WSL distro name: ${distro}`)
-      if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/.test(user)) throw new Error(`cannot name the user ${user} to wsl.exe`)
+      const distro = wslDistro(env.WSL_DISTRO_NAME ?? '')
+      const user = wslUser(userInfo().username)
       commandLine = ['wsl.exe', '-d', distro, '-u', user, '--cd', cwd, '--exec', execPath, ...args].map(windowsArg).join(' ')
     }
   } catch (e) {
     return { ok: false, blocked: false, message: e.message }
   }
   const script = wmiScript({ commandLine, cwd: how === 'wmi' ? cwd : null })
-  const r = await runCaptured(ps, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], env)
-  const answer = parseWmiAnswer(r.stdout)
-  if (!answer.ok) return { ok: false, blocked: true, message: wmiBlockedMessage(r.stdout.trim() || !r.stderr.trim() ? answer.message : r.stderr.trim().split(/\r?\n/).at(-1)) }
+  const answer = await askPowershell(ps, script, env, parseWmiAnswer)
+  if (!answer.ok) return { ok: false, blocked: true, message: wmiBlockedMessage(answer.message) }
   // A Windows pid can be watched from Windows; from inside WSL it names nothing here
   /*
    * Measured on a Windows 11 laptop (2026-10-08): a `wsl.exe` that WMI creates can hang without

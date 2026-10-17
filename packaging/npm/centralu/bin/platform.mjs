@@ -200,7 +200,8 @@ export function installedPaths(platform, env, home) {
   return [posix.join(home, '.local/share/applications/centralu.desktop')]
 }
 
-function systemRoot(env) {
+/** The Windows folder (`%SystemRoot%`), where Windows' own programs are named from */
+export function systemRoot(env) {
   return env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows'
 }
 
