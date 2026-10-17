@@ -7,8 +7,8 @@ import { callForm, FILL } from './tool-seats.js'
  * Cards in a delegated turn (#676): a session P gave another session A a turn (ask_project, start_agent,
  * agent_session send, send_to_session), and A raised a card during it. P is told, reads the card through a tool and
  * may answer a question; the person may answer too, and the first answer wins. The rules live in
- * `SessionManager.routeCard` / `answerRoutedCard`; this module holds the pure parts: how P's answer is read, and the
- * words P is told with.
+ * `RoutedCards.routeCard` / `answerRoutedCard` (routed-cards.ts); this module holds the pure parts: how P's answer is
+ * read, and the words P is told with.
  */
 
 /**
