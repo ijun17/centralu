@@ -420,8 +420,8 @@ export class SessionManager {
      *
      * A requester the same quit cut is skipped when the notice is given (`tellAskerOfInterruption`, its `quit`).
      */
-    const marks = new Map(store.listReportMarks().map((r) => [r.sessionId, r.callerSessionId]))
-    const turnGivers = new Map(store.listDelegatedTurns().map((r) => [r.sessionId, r.callerSessionId]))
+    const marks = new Map(store.children.listReportMarks().map((r) => [r.sessionId, r.callerSessionId]))
+    const turnGivers = new Map(store.children.listDelegatedTurns().map((r) => [r.sessionId, r.callerSessionId]))
     for (const s of stoppedByQuit) {
       const requester = [marks.get(s.id), turnGivers.get(s.id), s.askedBy].find((id): id is string => !!id && id !== s.id && this.meta.has(id))
       if (requester) this.quitNotices.push({ sessionId: s.id, requester })

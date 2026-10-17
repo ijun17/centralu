@@ -171,7 +171,7 @@ export class HandoffChildren {
     }
     if (!moved.length) return []
     try {
-      this.host.store.moveChildren(from, to, {
+      this.host.store.children.moveChildren(from, to, {
         sessions,
         startRequests: starts.map((r) => ({ requestId: r.req.requestId, request: { ...r.req, callerId: to } })),
         armReports,

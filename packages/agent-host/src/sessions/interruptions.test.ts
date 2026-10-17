@@ -401,7 +401,7 @@ describe('a turn a quit stopped (#698)', () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
     // The report is owed to a session deleted since; the child was started by the parent
-    store.setReportMark(child, 'a-session-deleted-since')
+    store.children.setReportMark(child, 'a-session-deleted-since')
     host()
     await until(() => reportsTo(parent, child).length === 1)
     expect(reportsTo(parent, child)[0]).toContain('Centralu quit or restarted during its turn')

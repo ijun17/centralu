@@ -100,7 +100,7 @@ describe('a child that waits on its own background work (#721)', () => {
     // Woken: a process again, and its model was handed the wake
     expect(w.mgr.listSessions().find((s) => s.id === caller)!.live).toBe(true)
     expect(wakes(caller, child)).toHaveLength(1)
-    expect(w.store.listReportMarks()).toEqual([])
+    expect(w.store.children.listReportMarks()).toEqual([])
 
     // Told once: a later turn of the child's own is not the assigned work
     handleOf(child)!.event({ type: 'state_change', sessionId: child, state: 'working' })
@@ -144,7 +144,7 @@ describe('a child that waits on its own background work (#721)', () => {
     expect(reportsTo(caller, child)[1]).toContain("[Centralu] The assigned work's background work ended (pnpm verify: stopped) and no turn followed, so the work may not have finished")
     expect(reportsTo(caller, child)[1]).not.toContain('The assigned work finished.')
     expect(reportsTo(caller, child)[1]).toContain('Waiting for verify to finish.')
-    expect(w.store.listReportMarks()).toEqual([])
+    expect(w.store.children.listReportMarks()).toEqual([])
   })
 
   it('a turn the tasks start after they end is waited for, not cut short by the settling', async () => {
@@ -220,7 +220,7 @@ describe('a child that waits on its own background work (#721)', () => {
     expect(await sent).toMatchObject({ ok: true, state: 'done', answer: 'Opened the PR without it.' })
     await settle()
     expect(reportsTo(caller, child)).toHaveLength(1)
-    expect(w.store.listReportMarks()).toEqual([])
+    expect(w.store.children.listReportMarks()).toEqual([])
   })
 
   it('the work ends by a task the tool stops itself: the report says it failed, not finished', async () => {
@@ -255,7 +255,7 @@ describe('a child that waits on its own background work (#721)', () => {
     expect(r).toMatchObject({ ok: true, state: 'stopped', notice: expect.stringContaining('Stopped its background work: pnpm dev.') })
     expect(r.ok && r.notice).toContain('Not stoppable from here, still running: a watcher')
     expect(stoppedTasks).toEqual(['bg-dev'])
-    expect(w.store.listReportMarks()).toEqual([])
+    expect(w.store.children.listReportMarks()).toEqual([])
     expect(w.store.settings.appSetting(`report_paused:${child}`)).toBeNull()
     // The turn the stopped task may start is the child's own
     h.event({ type: 'state_change', sessionId: child, state: 'working' })
@@ -271,7 +271,7 @@ describe('a child that waits on its own background work (#721)', () => {
     handleOf(child)!.answer('Done; I will check CI again in 10 minutes.')
     await w.until(() => reportsTo(caller, child).length === 1)
     expect(reportsTo(caller, child)[0]).toContain('[Centralu] The assigned work finished.')
-    expect(w.store.listReportMarks()).toEqual([])
+    expect(w.store.children.listReportMarks()).toEqual([])
   })
 
   it('a paused child trashed, or its caller trashed, owes nothing more', async () => {
@@ -279,13 +279,13 @@ describe('a child that waits on its own background work (#721)', () => {
     pauseOnVerify(one.child)
     await w.until(() => reportsTo(one.caller, one.child).length === 1)
     await w.mgr.trashSession(one.child)
-    expect(w.store.listReportMarks()).toEqual([])
+    expect(w.store.children.listReportMarks()).toEqual([])
 
     const two = await started()
     pauseOnVerify(two.child)
     await w.until(() => reportsTo(two.caller, two.child).length === 1)
     await w.mgr.trashSession(two.caller)
-    expect(w.store.listReportMarks()).toEqual([])
+    expect(w.store.children.listReportMarks()).toEqual([])
     verifyEndsAndChildFinishes(two.child)
     await settle()
     expect(w.mgr.waitsOn(two.caller)).toEqual([])
@@ -298,7 +298,7 @@ describe('a child that waits on its own background work (#721)', () => {
     h.event({ type: 'error', sessionId: child, error: { code: 'internal', message: 'the tool broke', retryable: false } })
     await w.until(() => reportsTo(caller, child).length === 1)
     expect(reportsTo(caller, child)[0]).toContain('[Centralu] The assigned work failed.')
-    expect(w.store.listReportMarks()).toEqual([])
+    expect(w.store.children.listReportMarks()).toEqual([])
   })
 
   it('a Codex child with no background work is reported once when its turn ends, as before', async () => {

@@ -74,7 +74,7 @@ export class Store extends MigrationRunner {
   readonly settings: SettingsRecords
   readonly permissions: PermissionRecords
   readonly appRuns: AppRunRecords
-  private readonly children: ChildOwnershipRecords
+  readonly children: ChildOwnershipRecords
   readonly machines: LinkedMachineRecords
 
   constructor(
@@ -349,64 +349,16 @@ export class Store extends MigrationRunner {
     return this.children.listReportMarks()
   }
 
-  setReportMark(sessionId: string, callerSessionId: string): void {
-    return this.children.setReportMark(sessionId, callerSessionId)
-  }
-
-  clearReportMark(sessionId: string): void {
-    return this.children.clearReportMark(sessionId)
-  }
-
   listAgentStartRequests(): { requestId: string; callerSessionId: string; request: unknown; askedAt: number }[] {
     return this.children.listAgentStartRequests()
-  }
-
-  putAgentStartRequest(requestId: string, callerSessionId: string, request: unknown): void {
-    return this.children.putAgentStartRequest(requestId, callerSessionId, request)
-  }
-
-  deleteAgentStartRequest(requestId: string): void {
-    return this.children.deleteAgentStartRequest(requestId)
   }
 
   listDelegatedTurns(): { sessionId: string; callerSessionId: string; told: string[]; turnId: string }[] {
     return this.children.listDelegatedTurns()
   }
 
-  setDelegatedTurn(sessionId: string, callerSessionId: string, turnId: string): void {
-    return this.children.setDelegatedTurn(sessionId, callerSessionId, turnId)
-  }
-
-  setDelegatedTurnTold(sessionId: string, told: readonly string[]): void {
-    return this.children.setDelegatedTurnTold(sessionId, told)
-  }
-
   listQueuedRequests(): QueuedRequest[] {
     return this.children.listQueuedRequests()
-  }
-
-  addQueuedRequest(r: QueuedRequest): void {
-    return this.children.addQueuedRequest(r)
-  }
-
-  markQueuedDelivering(id: string, at: number | null): void {
-    return this.children.markQueuedDelivering(id, at)
-  }
-
-  markQueuedOpenedByAuto(id: string): void {
-    return this.children.markQueuedOpenedByAuto(id)
-  }
-
-  removeQueuedRequest(id: string): void {
-    return this.children.removeQueuedRequest(id)
-  }
-
-  clearDelegatedTurn(sessionId: string): void {
-    return this.children.clearDelegatedTurn(sessionId)
-  }
-
-  moveChildren(from: string, to: string, move: { sessions: readonly string[]; startRequests: readonly { requestId: string; request: unknown }[]; armReports?: readonly string[]; queued?: boolean }): void {
-    return this.children.moveChildren(from, to, move)
   }
 }
 

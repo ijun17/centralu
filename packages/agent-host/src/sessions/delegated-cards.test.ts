@@ -353,7 +353,7 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
         expect(await w.mgr.agentSession(caller, { sessionId: target, action: 'answer', card, text: 'allow' })).toMatchObject({ ok: false })
       }
       expect(cards.answered).toEqual([])
-      expect(w.store.listDelegatedTurns()).toEqual([])
+      expect(w.store.children.listDelegatedTurns()).toEqual([])
     })
 
     it('an auto parent\'s note into the turn the person started in its child', async () => {
@@ -454,7 +454,7 @@ describe('a delegated turn\'s link across a host swap (#676)', () => {
     const told = () => w.store.loadMessages(parent, 50).filter((m) => (m.payload as { from?: { sessionId: string } }).from?.sessionId === child)
     await w.until(() => told().length === 1)
     await w.mgr.detachAll()
-    expect(w.store.listDelegatedTurns()).toEqual([{ sessionId: child, callerSessionId: parent, told: [expect.stringMatching(/^q-1\./)], turnId: expect.any(String) }])
+    expect(w.store.children.listDelegatedTurns()).toEqual([{ sessionId: child, callerSessionId: parent, told: [expect.stringMatching(/^q-1\./)], turnId: expect.any(String) }])
 
     const claude = new CrossAdapter('claude')
     const next = new SessionManager(w.store, new Map<ToolName, AgentAdapter>([['claude', claude], ['codex', new CrossAdapter('codex')]]), () => {}, undefined, undefined, { keptSessions: new Set([child]) })
@@ -476,7 +476,7 @@ describe('a delegated turn\'s link across a host swap (#676)', () => {
     // The turn ends under the new host, and the link with it
     claude.handles.get(child)!.answer('done')
     await new Promise((r) => setTimeout(r, 20))
-    expect(w.store.listDelegatedTurns()).toEqual([])
+    expect(w.store.children.listDelegatedTurns()).toEqual([])
   })
 
   it('is dropped by a host that finds no process for the session', async () => {
@@ -487,6 +487,6 @@ describe('a delegated turn\'s link across a host swap (#676)', () => {
     await w.mgr.detachAll()
     const next = new SessionManager(w.store, new Map<ToolName, AgentAdapter>([['claude', new CrossAdapter('claude')]]), () => {}, undefined, undefined, {})
     hosts.push(next)
-    expect(w.store.listDelegatedTurns()).toEqual([])
+    expect(w.store.children.listDelegatedTurns()).toEqual([])
   })
 })

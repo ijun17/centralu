@@ -347,11 +347,11 @@ describe('starting another agent in the same project', () => {
     w.mgr.respondApproval(s, requestId, 'allow')
     await w.until(() => childrenOf(s).length === 1)
     const child = childrenOf(s)[0]!.id
-    await w.until(() => w.store.listReportMarks().length === 1)
-    expect(w.store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: s }])
+    await w.until(() => w.store.children.listReportMarks().length === 1)
+    expect(w.store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: s }])
     // The handle now leads to the child
     expect(await w.mgr.agentSession(s, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: true, state: 'working', sessionId: child })
-    expect(w.store.listAgentStartRequests()).toEqual([])
+    expect(w.store.children.listAgentStartRequests()).toEqual([])
   })
 
   it('a pending request the person denies later is told to the caller, and shown in its session (#673)', async () => {
@@ -370,7 +370,7 @@ describe('starting another agent in the same project', () => {
     expect(handleOf(s)!.sent.find((t) => t.includes(requestId))).toContain('did not allow')
     expect(childrenOf(s)).toEqual([])
     expect(await w.mgr.agentSession(s, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: false, error: expect.stringContaining('did not allow') })
-    expect(w.store.listAgentStartRequests()).toEqual([])
+    expect(w.store.children.listAgentStartRequests()).toEqual([])
   })
 
   it('agent_session waits on a pending request for the answer, and stop withdraws it with a line for the person (#673)', async () => {
@@ -433,7 +433,7 @@ describe('starting another agent in the same project', () => {
       await w.until(() => !!told(s, requestId))
       expect(told(s, requestId)).toContain('stopped trusting')
       expect(w.store.loadMessages(s, 30).map((m) => JSON.stringify(m.payload)).some((t) => t.includes('no longer trusted'))).toBe(true)
-      expect(w.store.listAgentStartRequests()).toEqual([])
+      expect(w.store.children.listAgentStartRequests()).toEqual([])
     })
 
     it('trust taken away elsewhere (another host): an approval starts nothing, and the session is told', async () => {
@@ -584,10 +584,10 @@ describe('starting another agent in the same project', () => {
     // A host swap's drain cut the first call short and told the model to call again
     expect(await w.mgr.startAgent(s, { task: 'one job', wait: false })).toMatchObject({ ok: true, state: 'pending', sessionId: requestId })
     expect(w.events.filter((e) => e.type === 'approval_request' && e.sessionId === s && (e as { seq?: number }).seq != null)).toHaveLength(1)
-    expect(w.store.listAgentStartRequests()).toHaveLength(1)
+    expect(w.store.children.listAgentStartRequests()).toHaveLength(1)
     // Another job is another request
     const other = w.mgr.startAgent(s, { task: 'another job', wait: false })
-    await w.until(() => w.store.listAgentStartRequests().length === 2)
+    await w.until(() => w.store.children.listAgentStartRequests().length === 2)
     w.mgr.respondApproval(s, requestId, 'deny')
     await w.until(() => agentCard(s)?.requestId !== requestId && !!agentCard(s))
     w.mgr.respondApproval(s, agentCard(s)!.requestId, 'deny')
@@ -601,7 +601,7 @@ describe('starting another agent in the same project', () => {
     await w.mgr.trashSession(s)
     expect(await p).toMatchObject({ ok: false })
     expect(childrenOf(s)).toEqual([])
-    expect(w.store.listAgentStartRequests()).toEqual([])
+    expect(w.store.children.listAgentStartRequests()).toEqual([])
     const notice = w.store.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('this session was deleted'))
     expect(notice).toBeDefined()
   })
@@ -661,7 +661,7 @@ describe('starting another agent in the same project', () => {
       // The report promised for any child that outlives the call is there
       expect(await w.mgr.agentSession(s, { sessionId: childrenOf(s)[0]!.id, action: 'status' })).toMatchObject({ ok: true, state: 'working', reported: true })
       // and stored, so a host swap keeps it (#646)
-      expect(w.store.listReportMarks()).toEqual([{ sessionId: childrenOf(s)[0]!.id, callerSessionId: s }])
+      expect(w.store.children.listReportMarks()).toEqual([{ sessionId: childrenOf(s)[0]!.id, callerSessionId: s }])
     })
 
     it('a task still being handed over at the bound is answered as "working", with the report and the unchecked note', async () => {
@@ -676,7 +676,7 @@ describe('starting another agent in the same project', () => {
       const r = await p
       expect(r).toMatchObject({ ok: true, state: 'working', reported: true, notice: expect.stringContaining('"gpt-x" not checked') })
       // The armed report is stored, so a host swap keeps it (#646)
-      expect(w.store.listReportMarks()).toEqual([{ sessionId: r.ok ? r.sessionId : '', callerSessionId: s }])
+      expect(w.store.children.listReportMarks()).toEqual([{ sessionId: r.ok ? r.sessionId : '', callerSessionId: s }])
     })
 
     it('an approval and the bound in the same instant: the answer is "pending", and the child starts with its report (#673)', async () => {
@@ -693,7 +693,7 @@ describe('starting another agent in the same project', () => {
       for (let i = 0; i < 20; i++) await vi.advanceTimersByTimeAsync(0)
       expect(childrenOf(s)).toHaveLength(1)
       expect(agentCard(s)).toBeUndefined()
-      expect(w.store.listReportMarks()).toEqual([{ sessionId: childrenOf(s)[0]!.id, callerSessionId: s }])
+      expect(w.store.children.listReportMarks()).toEqual([{ sessionId: childrenOf(s)[0]!.id, callerSessionId: s }])
     })
   })
 

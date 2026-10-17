@@ -746,7 +746,7 @@ export class AgentStartFlow {
     const done = new Promise<void>((resolve) => (end = resolve))
     const rec: AgentStartRecord = { req, detached: false, done, end }
     this.host.children.addAgentStart(rec)
-    this.host.store.putAgentStartRequest(req.requestId, req.callerId, req)
+    this.host.store.children.putAgentStartRequest(req.requestId, req.callerId, req)
     return rec
   }
 
@@ -762,7 +762,7 @@ export class AgentStartFlow {
     rec.ended = 'childId' in ended ? { childId: ended.childId } : { error: ended.error }
     rec.end()
     rec.stopWaiting?.()
-    this.host.store.deleteAgentStartRequest(rec.req.requestId)
+    this.host.store.children.deleteAgentStartRequest(rec.req.requestId)
     if ('childId' in ended) return
     const { callerId } = rec.req
     if (!this.host.meta.has(callerId)) return
@@ -803,7 +803,7 @@ export class AgentStartFlow {
   resumeAgentStart(req: AgentStartRequest): void {
     const caller = this.host.meta.get(req.callerId)
     if (!caller) {
-      this.host.store.deleteAgentStartRequest(req.requestId)
+      this.host.store.children.deleteAgentStartRequest(req.requestId)
       return
     }
     const rec = this.openAgentStart(req)
@@ -846,7 +846,7 @@ export class AgentStartFlow {
   private queueAgentStart(req: AgentStartRequest, short: MemoryShortfall): ChildRunResult {
     req.allowed = true
     const rec = this.host.children.agentStarts.get(req.requestId) ?? this.openAgentStart(req)
-    this.host.store.putAgentStartRequest(req.requestId, req.callerId, req)
+    this.host.store.children.putAgentStartRequest(req.requestId, req.callerId, req)
     rec.detached = true
     rec.lowMemory = this.lowMemory(short)
     void this.startWhenMemory(rec, short)
@@ -865,7 +865,7 @@ export class AgentStartFlow {
     if (short && this.host.memoryGate && !rec.ended) {
       if (!req.allowed) {
         req.allowed = true
-        this.host.store.putAgentStartRequest(req.requestId, req.callerId, req)
+        this.host.store.children.putAgentStartRequest(req.requestId, req.callerId, req)
       }
       rec.lowMemory = this.lowMemory(short)
       if (this.host.meta.has(req.callerId)) {
@@ -916,10 +916,10 @@ export class AgentStartFlow {
      * start_agent requests the previous host left standing (#673): the person has not answered yet, so the card is
      * raised again in its session and an approval starts the child here. A request whose caller is gone ends.
      */
-    for (const row of this.host.store.listAgentStartRequests()) {
+    for (const row of this.host.store.children.listAgentStartRequests()) {
       const req = readAgentStartRequest(row.request)
       if (!req || req.requestId !== row.requestId || req.callerId !== row.callerSessionId) {
-        this.host.store.deleteAgentStartRequest(row.requestId)
+        this.host.store.children.deleteAgentStartRequest(row.requestId)
         continue
       }
       this.resumeAgentStart(req)

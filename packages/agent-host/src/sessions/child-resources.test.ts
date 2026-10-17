@@ -100,7 +100,7 @@ describe('child sessions and the machine (#686)', () => {
       expect(await w.mgr.agentSession(s, { sessionId: handle, action: 'status' })).toMatchObject({ state: 'pending', lowMemory: { floor: '2.0 GB' } })
       expect(await w.mgr.agentSession(s, { sessionId: handle, action: 'send', text: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('waiting for memory') })
       // Stored as allowed: a host that takes it over waits for memory, never asks the person again
-      expect(w.store.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId: handle, request: expect.objectContaining({ allowed: true, lsp: true }) })])
+      expect(w.store.children.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId: handle, request: expect.objectContaining({ allowed: true, lsp: true }) })])
 
       await new Promise((r) => setTimeout(r, 100))
       expect(childrenOf(s)).toEqual([])
@@ -111,7 +111,7 @@ describe('child sessions and the machine (#686)', () => {
       expect(handleOf(child).sent[0]).toContain('refactor the parser')
       // The choice made at the call is the child's
       expect(handleOf(child).opts.noCodeIntelligence).toBeUndefined()
-      expect(w.store.listAgentStartRequests()).toEqual([])
+      expect(w.store.children.listAgentStartRequests()).toEqual([])
       // The handle now leads to the child, and the caller is told when its turn ends
       expect(await w.mgr.agentSession(s, { sessionId: handle, action: 'status' })).toMatchObject({ ok: true, sessionId: child })
       handleOf(child).answer('parser refactored')
@@ -138,7 +138,7 @@ describe('child sessions and the machine (#686)', () => {
       expect(handleOf(s).sent.at(-1)).toContain('Memory stayed below 2.0 GB')
       expect(said(s, 'memory stayed below 2.0 GB')).toBe(true)
       expect(childrenOf(s)).toEqual([])
-      expect(w.store.listAgentStartRequests()).toEqual([])
+      expect(w.store.children.listAgentStartRequests()).toEqual([])
     })
 
     it('a request withdrawn while it waits never starts', async () => {

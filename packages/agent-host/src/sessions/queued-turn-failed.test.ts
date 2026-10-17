@@ -60,7 +60,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     await w.until(() => handleOf(a).sent.some((t) => t.includes('first in line')))
     // An error is a rest of its own: the person's Continue, or the next request, starts the next turn
     await w.until(() => handleOf(a).sent.some((t) => t.includes('second in line')))
-    expect(w.store.listQueuedRequests()).toEqual([])
+    expect(w.store.children.listQueuedRequests()).toEqual([])
   })
 
   it("an ask queued into another project's busy session is reported as failed once, and the person's next turn is not", async () => {
@@ -109,7 +109,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     expect(await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'add the index', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
     handleOf(a).answer("the person's answer")
     await w.until(() => handleOf(a).sent.some((t) => t.includes('add the index')))
-    await w.until(() => w.store.listQueuedRequests().length === 0)
+    await w.until(() => w.store.children.listQueuedRequests().length === 0)
     // Its requester is told once that the work failed, and only of that work
     await w.until(() => told(b, a).length === before + 1)
     expect(told(b, a).at(-1)).toContain('The assigned work failed')
@@ -145,7 +145,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     const { a, b, before, release } = await queuedThroughWake()
     // Codex reports an account-wide limit change at any moment
     handleOf(a).event({ type: 'limit_reached', sessionId: a })
-    expect(w.store.listQueuedRequests()).toHaveLength(1)
+    expect(w.store.children.listQueuedRequests()).toHaveLength(1)
     release()
     await w.until(() => handleOf(a).sent.some((t) => t.includes('add the index')))
     expect(told(b, a)).toHaveLength(before)

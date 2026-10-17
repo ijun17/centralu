@@ -110,7 +110,7 @@ describe('requests to a busy session (#677)', () => {
     const { a, b } = await busyChild()
     const queued = await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'add the index', ifBusy: 'queue' })
     expect(queued).toMatchObject({ ok: true, state: 'queued', position: 1, queueId: expect.stringMatching(/^qr-/) })
-    expect(w.store.listQueuedRequests()).toHaveLength(1)
+    expect(w.store.children.listQueuedRequests()).toHaveLength(1)
     expect(handleOf(a).sent).toHaveLength(2)
     expect(await w.mgr.agentSession(b, { sessionId: a, action: 'status' })).toMatchObject({ state: 'queued', position: 1 })
     // The first job's report is already there
@@ -120,7 +120,7 @@ describe('requests to a busy session (#677)', () => {
     await w.until(() => handleOf(a).sent.length === 3)
     expect(handleOf(a).sent[2]).toContain('add the index')
     expect(handleOf(a).sent[2]).toContain("Centralu's start_agent")
-    expect(w.store.listQueuedRequests()).toEqual([])
+    expect(w.store.children.listQueuedRequests()).toEqual([])
     // The person's turn was not reported as the assigned work; the queued one is, once it ends
     expect(reportsTo(b, a)).toHaveLength(before)
     handleOf(a).answer('index added')
@@ -150,7 +150,7 @@ describe('requests to a busy session (#677)', () => {
     handleOf(a).answer("the person's answer")
     await new Promise((r) => setTimeout(r, 30))
     expect(handleOf(a).sent).toHaveLength(2)
-    expect(w.store.listQueuedRequests()).toEqual([])
+    expect(w.store.children.listQueuedRequests()).toEqual([])
   })
 
   it('queues through ask_project and send_to_session too, framed as each tool frames its work', async () => {
@@ -191,13 +191,13 @@ describe('requests to a busy session (#677)', () => {
     /** The person's turn ends, and the queue empties: a request still in it is delivered or refused now */
     const turnEnds = async (target: string) => {
       handleOf(target).answer("the person's answer")
-      await w.until(() => w.store.listQueuedRequests().length === 0)
+      await w.until(() => w.store.children.listQueuedRequests().length === 0)
     }
 
     it("is withdrawn when the caller's project loses trust, and the caller is told", async () => {
       const { target, asker } = await queuedAsk()
       void w.mgr.setProjectTrusted(w.caller.id, false)
-      expect(w.store.listQueuedRequests()).toEqual([])
+      expect(w.store.children.listQueuedRequests()).toEqual([])
       await turnEnds(target)
       expect(handleOf(target).sent).toEqual(["the person's own work"])
       await w.until(() => toldNotDelivered(asker))
@@ -206,7 +206,7 @@ describe('requests to a busy session (#677)', () => {
     it('is withdrawn when the person revokes the pair in Settings', async () => {
       const { target, asker } = await queuedAsk()
       w.mgr.revokeProjectConsent(w.caller.id, w.target.id, 'delegate')
-      expect(w.store.listQueuedRequests()).toEqual([])
+      expect(w.store.children.listQueuedRequests()).toEqual([])
       await turnEnds(target)
       expect(handleOf(target).sent).toEqual(["the person's own work"])
       await w.until(() => toldNotDelivered(asker))
@@ -215,7 +215,7 @@ describe('requests to a busy session (#677)', () => {
     it('is withdrawn when the asked project is removed, and the caller is told', async () => {
       const { asker } = await queuedAsk()
       const removing = w.mgr.deleteProject(w.target.id)
-      expect(w.store.listQueuedRequests()).toEqual([])
+      expect(w.store.children.listQueuedRequests()).toEqual([])
       await removing
       await w.until(() => toldNotDelivered(asker))
     })
@@ -224,7 +224,7 @@ describe('requests to a busy session (#677)', () => {
       const { target, asker } = await queuedAsk()
       await w.mgr.updateSettings(asker, { permissionPreset: 'auto' })
       void w.mgr.setProjectTrusted(w.caller.id, false)
-      expect(w.store.listQueuedRequests()).toHaveLength(1)
+      expect(w.store.children.listQueuedRequests()).toHaveLength(1)
       await turnEnds(target)
       expect(handleOf(target).sent[1]).toContain('export it')
     })
@@ -235,7 +235,7 @@ describe('requests to a busy session (#677)', () => {
       w.store.projects.setProjectTrusted(w.caller.id, false)
       await turnEnds(target)
       expect(handleOf(target).sent).toEqual(["the person's own work"])
-      expect(w.store.listQueuedRequests()).toEqual([])
+      expect(w.store.children.listQueuedRequests()).toEqual([])
       await w.until(() => toldNotDelivered(asker))
     })
   })
@@ -266,14 +266,14 @@ describe('requests to a busy session (#677)', () => {
     }
     const endsWithNothingDelivered = async (target: string) => {
       handleOf(target).answer("the person's answer")
-      await w.until(() => w.store.listQueuedRequests().length === 0)
+      await w.until(() => w.store.children.listQueuedRequests().length === 0)
       expect(handleOf(target).sent).toEqual(["the person's own work"])
     }
 
     it('an ask with no consent for the pair is dropped when the caller is moved off auto', async () => {
       const { target, asker } = await autoAsk()
       await lower(asker)
-      expect(w.store.listQueuedRequests()).toEqual([])
+      expect(w.store.children.listQueuedRequests()).toEqual([])
       await endsWithNothingDelivered(target)
       await w.until(() => told(asker))
     })
@@ -298,14 +298,14 @@ describe('requests to a busy session (#677)', () => {
       expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
       w.mgr.revokeProjectConsent(w.caller.id, w.target.id, 'delegate')
       // Kept, as auto's reach is
-      expect(w.store.listQueuedRequests()).toHaveLength(1)
+      expect(w.store.children.listQueuedRequests()).toHaveLength(1)
       return { target, asker }
     }
 
     it('an ask whose consent the person revoked while the caller was auto is dropped when the caller leaves auto', async () => {
       const { target, asker } = await consentedThenRevoked()
       await lower(asker)
-      expect(w.store.listQueuedRequests()).toEqual([])
+      expect(w.store.children.listQueuedRequests()).toEqual([])
       await endsWithNothingDelivered(target)
       await w.until(() => told(asker))
     })
@@ -321,7 +321,7 @@ describe('requests to a busy session (#677)', () => {
       const { target, asker } = await autoAsk()
       w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
       await lower(asker)
-      expect(w.store.listQueuedRequests()).toHaveLength(1)
+      expect(w.store.children.listQueuedRequests()).toHaveLength(1)
       handleOf(target).answer("the person's answer")
       await w.until(() => handleOf(target).sent.length === 2)
       expect(handleOf(target).sent[1]).toContain('export it')
@@ -330,7 +330,7 @@ describe('requests to a busy session (#677)', () => {
     it('a send to a session it did not start is dropped when the caller is moved off auto', async () => {
       const { other, sender } = await autoSend()
       await lower(sender)
-      expect(w.store.listQueuedRequests()).toEqual([])
+      expect(w.store.children.listQueuedRequests()).toEqual([])
       await endsWithNothingDelivered(other)
       await w.until(() => told(sender))
     })
@@ -644,7 +644,7 @@ describe('a queued request across a host swap (#677)', () => {
   it('is delivered by the next host when the kept session\'s turn ends there', async () => {
     const { a } = await queuedFor()
     await w.mgr.detachAll()
-    expect(w.store.listQueuedRequests()).toHaveLength(1)
+    expect(w.store.children.listQueuedRequests()).toHaveLength(1)
     const { host, claude } = next([a])
     await host.adoptKept([{ sessionId: a, tool: 'claude', process: {} as never }])
     await new Promise((r) => setTimeout(r, 30))
@@ -654,7 +654,7 @@ describe('a queued request across a host swap (#677)', () => {
     claude.handles.get(a)!.answer("the person's answer")
     await w.until(() => claude.handles.get(a)!.sent.length === 1)
     expect(claude.handles.get(a)!.sent[0]).toContain('queued work')
-    expect(w.store.listQueuedRequests()).toEqual([])
+    expect(w.store.children.listQueuedRequests()).toEqual([])
   })
 
   it.each(['marked by this build', 'written by an older build'] as const)(
@@ -674,7 +674,7 @@ describe('a queued request across a host swap (#677)', () => {
         ;(w.store as unknown as { db: { prepare(sql: string): { run(): void } } }).db.prepare('UPDATE queued_requests SET opened_by_auto = NULL').run()
       }
       const { claude } = next([])
-      await w.until(() => w.store.listQueuedRequests().length === 0)
+      await w.until(() => w.store.children.listQueuedRequests().length === 0)
       expect(claude.handles.get(target)?.sent ?? []).toEqual([])
       await w.until(() => w.store.loadMessages(asker, 50).some((m) => JSON.stringify(m.payload).includes('The asking session is no longer auto')))
     },
@@ -742,7 +742,7 @@ describe('the queue delivers each request once, in turn, through restarts and sw
     const before = handleOf(a)
     before.answer("the person's answer")
     await w.until(() => handleOf(a) !== before && handleOf(a).sent.includes('first'))
-    expect(w.store.listQueuedRequests()).toEqual([])
+    expect(w.store.children.listQueuedRequests()).toEqual([])
   })
 
   it('keeps the session busy while it wakes for a queued request, and lets one request in at a time', async () => {
@@ -751,7 +751,7 @@ describe('the queue delivers each request once, in turn, through restarts and sw
     // The next host finds the session asleep, with the request still queued: waking it takes a while
     const next = nextHost(true)
     await w.until(() => next.starts.includes(a))
-    expect(w.store.listQueuedRequests()).toEqual([expect.objectContaining({ text: 'first', deliveringAt: expect.any(Number) })])
+    expect(w.store.children.listQueuedRequests()).toEqual([expect.objectContaining({ text: 'first', deliveringAt: expect.any(Number) })])
     const tools = toolsOf(next.host, orch)
     // Busy while it wakes: another request is not let in beside the one being delivered
     expect(await tools.sendToSession(a, 'second', false)).toMatchObject({ ok: true, busy: { state: 'busy' } })
@@ -761,7 +761,7 @@ describe('the queue delivers each request once, in turn, through restarts and sw
     await new Promise((r) => setTimeout(r, 30))
     expect(next.adapter.handles.get(a)!.sent).toEqual(['first'])
     // Delivered once its turn started; the second waits for that turn to end
-    expect(w.store.listQueuedRequests().map((r) => r.text)).toEqual(['second'])
+    expect(w.store.children.listQueuedRequests().map((r) => r.text)).toEqual(['second'])
     next.adapter.handles.get(a)!.answer('first done')
     await w.until(() => next.adapter.handles.get(a)!.sent.length === 2)
     expect(next.adapter.handles.get(a)!.sent).toEqual(['first', 'second'])
@@ -774,18 +774,18 @@ describe('the queue delivers each request once, in turn, through restarts and sw
     await w.until(() => waking.starts.includes(a))
     // The host leaves before the session took the request
     await waking.host.detachAll()
-    expect(w.store.listQueuedRequests()).toEqual([expect.objectContaining({ text: 'first' })])
+    expect(w.store.children.listQueuedRequests()).toEqual([expect.objectContaining({ text: 'first' })])
     const after = nextHost(false)
     await w.until(() => after.adapter.handles.get(a)?.sent.includes('first') ?? false)
-    expect(w.store.listQueuedRequests()).toEqual([])
+    expect(w.store.children.listQueuedRequests()).toEqual([])
   })
 
   it('holds a retried request once', async () => {
     const { a, orch } = await queuedBehindThePerson()
     const tools = toolsOf(w.mgr, orch)
-    const first = w.store.listQueuedRequests()[0]!.id
+    const first = w.store.children.listQueuedRequests()[0]!.id
     expect(await tools.sendToSession(a, 'first', false, 'queue')).toMatchObject({ busy: { state: 'queued', queueId: first, position: 1 } })
     expect(await tools.sendToSession(a, 'another', false, 'queue')).toMatchObject({ busy: { state: 'queued', position: 2 } })
-    expect(w.store.listQueuedRequests().map((r) => r.text)).toEqual(['first', 'another'])
+    expect(w.store.children.listQueuedRequests().map((r) => r.text)).toEqual(['first', 'another'])
   })
 })
