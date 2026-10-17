@@ -203,7 +203,7 @@ describe('asking another project', () => {
     expect(!list.ok && list.error).toContain('"name":"Sprites","state":"idle","lastActive":null')
     expect(!list.ok && list.error).toContain('"name":"Review","state":"waiting_input","lastActive":"')
     expect(w.card(caller)).toBeUndefined()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     for (const session of ['Sprites', targetSession]) {
       const call = w.mgr.askProject(caller, { project: w.target.id, session, task: 'export' })
       await w.until(() => handleOf(targetSession)!.sent.length === (session === 'Sprites' ? 1 : 2))
@@ -233,7 +233,7 @@ describe('asking another project', () => {
     for (const session of excluded) {
       expect(await w.mgr.askProject(caller, { project: w.target.id, session: session.id, task: 'export' })).toMatchObject({ ok: false })
     }
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const call = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
     await w.until(() => handleOf(targetSession)!.sent.length === 1)
     handleOf(targetSession)!.answer('done')
@@ -244,7 +244,7 @@ describe('asking another project', () => {
     const caller = await w.callerSession()
     const blank = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })
     expect(blank).toMatchObject({ name: 'New session', autoNamed: true })
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const call = w.mgr.askProject(caller, { project: w.target.id, session: blank.id, task: 'export the sprites' })
     await w.until(() => handleOf(blank.id)!.sent.length === 1)
     expect(w.mgr.listSessions().find((s) => s.id === blank.id)).toMatchObject({ name: 'New session', autoNamed: true })
@@ -258,7 +258,7 @@ describe('asking another project', () => {
   it.each(['claude', 'codex'] as const)('%s delivers a busy session a visible mid-turn note and waits for its receipt', async (tool) => {
     await w.mgr.switchTool(targetSession, tool)
     const caller = await autoCaller()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     await w.mgr.send(targetSession, 'person work')
     const h = handleOf(targetSession)!
     const call = w.mgr.askProject(caller, { project: w.target.id, task: 'export', ifBusy: 'note' })
@@ -280,7 +280,7 @@ describe('asking another project', () => {
     const directing = await w.mgr.createSession({ projectId: null, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal', kind: 'orchestrator' })
     const directingHandle = handleOf(directing.id)!
     await directingHandle.opts.orchestratorTools!.sendToSession(targetSession, 'original task', true)
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const call = w.mgr.askProject(caller, { project: w.target.id, task: 'export', ifBusy: 'note' })
     const h = handleOf(targetSession)!
     await w.until(() => h.sent.length === 2)
@@ -329,7 +329,7 @@ describe('asking another project', () => {
   it("does not replace another caller's active delegation watcher", async () => {
     const caller = await w.callerSession()
     const other = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const first = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
     await w.until(() => handleOf(targetSession)!.sent.length === 1)
     // Busy with another caller's task (#677): the choices, and no note into that task even for auto
@@ -393,7 +393,7 @@ describe('asking another project', () => {
     w.store.projects.setProjectDefaultTool(w.target.id, 'codex')
     w.store.projects.setProjectToolDefaults(w.target.id, 'codex', { model: 'gpt-5.6-luna', effort: 'low' })
     const s = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const p = w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
     await w.until(() => delegatedIn(s).length === 1 && !!handleOf(delegatedIn(s)[0]!.id)?.sent.length)
     const d = delegatedIn(s)[0]!
@@ -423,7 +423,7 @@ describe('asking another project', () => {
   it('makes the files the answer names readable to the caller, and only those', async () => {
     const s = await w.callerSession()
     const callerHandle = handleOf(s)!
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     mkdirSync(join(w.target.path, 'out'))
     writeFileSync(join(w.target.path, 'out', 'a.png'), 'x')
     writeFileSync(join(w.target.path, 'secret.env'), 'x')
@@ -440,7 +440,7 @@ describe('asking another project', () => {
 
   it('the next ask from the same caller goes to the same session, which keeps its context', async () => {
     const s = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const first = w.mgr.askProject(s, { project: w.target.name, task: 'export' })
     await w.until(() => !!delegatedIn(s)[0] && !!handleOf(delegatedIn(s)[0]!.id)?.sent.length)
     const d = delegatedIn(s)[0]!.id
@@ -456,7 +456,7 @@ describe('asking another project', () => {
 
   it('Stop on the caller stops the delegated turn, and the model reads that it was stopped', async () => {
     const s = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const p = w.mgr.askProject(s, { project: w.target.name, task: 'export' })
     await w.until(() => !!delegatedIn(s)[0] && !!handleOf(delegatedIn(s)[0]!.id)?.sent.length)
     const h = handleOf(delegatedIn(s)[0]!.id)!
@@ -469,7 +469,7 @@ describe('asking another project', () => {
 
   it('the call\'s own cancellation stops the delegated turn too', async () => {
     const s = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const ac = new AbortController()
     const p = w.mgr.askProject(s, { project: w.target.name, task: 'export' }, ac.signal)
     await w.until(() => !!delegatedIn(s)[0] && !!handleOf(delegatedIn(s)[0]!.id)?.sent.length)
@@ -484,7 +484,7 @@ describe('asking another project', () => {
   ] as const)("%s: caller %s ends its wait without interrupting the person's running turn", async (tool, action) => {
     await w.mgr.switchTool(targetSession, tool)
     const caller = await autoCaller()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     await w.mgr.send(targetSession, 'person work')
     const h = handleOf(targetSession)!
     const ac = new AbortController()
@@ -511,7 +511,7 @@ describe('asking another project', () => {
 
   it('an explicit stop of the target still interrupts a task that joined its running turn', async () => {
     const caller = await autoCaller()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     await w.mgr.send(targetSession, 'person work')
     const h = handleOf(targetSession)!
     const asking = w.mgr.askProject(caller, { project: w.target.id, task: 'export', ifBusy: 'note' })
@@ -524,7 +524,7 @@ describe('asking another project', () => {
 
   it.each([false, true])('Stop after an ask bound leaves the target running (joined turn: %s)', async (joinedTurn) => {
     const caller = joinedTurn ? await autoCaller() : await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     if (joinedTurn) await w.mgr.send(targetSession, 'person work')
     const h = handleOf(targetSession)!
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
@@ -542,7 +542,7 @@ describe('asking another project', () => {
 
   it('Stop reaches an assigned idle target again while the caller waits after the bound', async () => {
     const caller = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const h = handleOf(targetSession)!
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const asking = w.mgr.askProject(caller, { project: w.target.id, task: 'export' })
@@ -560,7 +560,7 @@ describe('asking another project', () => {
 
   it('a failed delegated turn comes back as an error naming the session and what to do', async () => {
     const s = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const p = w.mgr.askProject(s, { project: w.target.name, task: 'export' })
     await w.until(() => !!delegatedIn(s)[0] && !!handleOf(delegatedIn(s)[0]!.id)?.sent.length)
     const d = delegatedIn(s)[0]!.id
@@ -573,7 +573,7 @@ describe('asking another project', () => {
 
   it('past the bound it answers "still working", and a call with no task waits for the same turn', async () => {
     const s = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const first = w.mgr.askProject(s, { project: w.target.name, task: 'export' })
     for (let i = 0; i < 50 && !delegatedIn(s)[0]; i++) await vi.advanceTimersByTimeAsync(0)
@@ -594,7 +594,7 @@ describe('asking another project', () => {
 
   it('a turn the network stopped past the bound is told to the session that asked, which waits on nothing now (#698)', async () => {
     const s = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const first = w.mgr.askProject(s, { project: w.target.name, task: 'export' })
     for (let i = 0; i < 50 && !delegatedIn(s)[0]; i++) await vi.advanceTimersByTimeAsync(0)
@@ -618,7 +618,7 @@ describe('asking another project', () => {
   it('a session in an untrusted project cannot ask another project: no card, nothing started', async () => {
     w.mgr.setProjectTrusted(w.caller.id, false)
     const s = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const r = await w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
     expect(!r.ok && r.error).toContain("This session's project is not trusted, so it cannot ask another project")
     expect(w.card(s)).toBeUndefined()
@@ -649,11 +649,11 @@ describe('asking another project', () => {
     const unknown = await w.mgr.askProject(s, { project: 'nowhere', task: 'x' })
     expect(!unknown.ok && unknown.error).toContain(`The other projects are: ${w.target.name}`)
 
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const p = w.mgr.askProject(s, { project: w.target.name, task: 'export' })
     await w.until(() => !!delegatedIn(s)[0] && !!handleOf(delegatedIn(s)[0]!.id)?.sent.length)
     const d = delegatedIn(s)[0]!.id
-    w.store.setProjectConsent(w.target.id, w.caller.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.target.id, w.caller.id, 'delegate')
     const back = await w.mgr.askProject(d, { project: w.caller.name, task: 'do it for me' })
     expect(!back.ok && back.error).toContain('cannot ask a project')
     handleOf(d)!.answer('done')
@@ -694,7 +694,7 @@ describe('asking another project', () => {
       expect(w.card(s)).toBeUndefined()
       await removing
       expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('was not reached') })
-      expect(w.store.listProjectConsents()).toEqual([])
+      expect(w.store.permissions.listProjectConsents()).toEqual([])
     })
 
     it('remembers nothing for a pair whose project was removed while "always" was being answered', async () => {
@@ -705,7 +705,7 @@ describe('asking another project', () => {
       w.store.deleteProject(w.target.id)
       w.mgr.respondApproval(s, w.card(s)!.requestId, 'always')
       expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('removed') })
-      expect(w.store.listProjectConsents()).toEqual([])
+      expect(w.store.permissions.listProjectConsents()).toEqual([])
     })
   })
 })

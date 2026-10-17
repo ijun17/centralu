@@ -1322,7 +1322,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     const again = ask({ project: name, task: 'x' })
     await answer('always')
     await again
-    expect(hub.store.listProjectConsents()).toEqual([])
+    expect(hub.store.permissions.listProjectConsents()).toEqual([])
     const third = ask({ project: name, task: 'x' })
     await answer('deny')
     await third

@@ -165,7 +165,7 @@ describe('handoff_session (#694)', () => {
 
   it("moves the original's live children to the successor, which the note lists (#693)", async () => {
     const { project, target, orch } = await world('auto')
-    store.setProjectConsent(project, project, 'agents')
+    store.permissions.setProjectConsent(project, project, 'agents')
     const started = await mgr.startAgent(target, { task: 'Write the lexer', wait: false })
     if (!started.ok) throw new Error(started.error)
     const child = started.sessionId

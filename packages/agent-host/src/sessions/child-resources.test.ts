@@ -32,7 +32,7 @@ describe('child sessions and the machine (#686)', () => {
   const childrenOf = (id: string) => w.mgr.listSessions().filter((s) => s.askedBy === id)
   const session = async (preset: PermissionPreset = 'normal') =>
     (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: preset })).id
-  const allowProject = () => w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+  const allowProject = () => w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
   const gate = (maxWaitMs = 10_000) => {
     const g = new MemoryGate({ read: async () => free, recheckMs: 20, maxWaitMs })
     w.mgr.useMemoryGate(g)

@@ -22,7 +22,7 @@ describe('a queued request whose turn never starts (#839)', () => {
   const session = async () => (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'auto' })).id
   /** B with a child A it started, which the person is now using for a turn of their own */
   const busyChild = async () => {
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const b = await session()
     const started = await w.mgr.startAgent(b, { task: 'first job', wait: false })
     if (!started.ok) throw new Error(started.error)
@@ -68,7 +68,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     handleOf(t).externalId = 'ext-t'
     await w.mgr.send(t, "the person's own work")
     const s = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     refuses(t, 'export the sprites', { type: 'error', sessionId: t, error: { code: 'internal', message: 'the API refused the request', retryable: false } })
     expect(await w.mgr.askProject(s, { project: w.target.name, session: t, task: 'export the sprites', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
     handleOf(t).answer("the person's answer")
@@ -85,7 +85,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     handleOf(t).externalId = 'ext-t'
     await w.mgr.send(t, "the person's own work")
     const s = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     expect(await w.mgr.askProject(s, { project: w.target.name, session: t, task: 'export the sprites', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
     // The process goes down with the person's turn, and the tool cannot start again for the delivery
     const adapter = w.adapters.get('claude')!

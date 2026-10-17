@@ -72,7 +72,7 @@ export class Store extends MigrationRunner {
   readonly handoffs: HandoffMarkers
   private readonly trash: TrashRecords
   readonly settings: SettingsRecords
-  private readonly permissions: PermissionRecords
+  readonly permissions: PermissionRecords
   readonly appRuns: AppRunRecords
   private readonly children: ChildOwnershipRecords
   readonly machines: LinkedMachineRecords
@@ -335,66 +335,12 @@ export class Store extends MigrationRunner {
 
   // ── PermissionRecords (store/permissions.ts) ──
 
-  addApprovalRule(r: {
-    scope: string
-    projectId?: string
-    sessionId?: string
-    matcher: string
-    decision: string
-  }): void {
-    return this.permissions.addApprovalRule(r)
-  }
-
-  dropWildcardApprovalRules(): number {
-    return this.permissions.dropWildcardApprovalRules()
-  }
-
-  listApprovalRules(): {
-    id: number
-    scope: string
-    matcher: string
-    decision: string
-    projectId: string | null
-    sessionId: string | null
-    createdAt: number
-  }[] {
-    return this.permissions.listApprovalRules()
-  }
-
-  deleteApprovalRule(id: number): void {
-    return this.permissions.deleteApprovalRule(id)
-  }
-
-  getAppPermission(appKey: string, capability: string): AppPermissionRecord | null {
-    return this.permissions.getAppPermission(appKey, capability)
-  }
-
-  putAppPermission(appKey: string, projectId: string | null, r: AppPermissionRecord): void {
-    return this.permissions.putAppPermission(appKey, projectId, r)
-  }
-
-  forgetAppPermission(appKey: string, capability: string): void {
-    return this.permissions.forgetAppPermission(appKey, capability)
-  }
-
-  listAppPermissions(appKey: string): AppPermissionRecord[] {
-    return this.permissions.listAppPermissions(appKey)
-  }
-
   getProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): ConsentRow | null {
     return this.permissions.getProjectConsent(fromProjectId, toProjectId, kind)
   }
 
   setProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): void {
     return this.permissions.setProjectConsent(fromProjectId, toProjectId, kind)
-  }
-
-  forgetProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): boolean {
-    return this.permissions.forgetProjectConsent(fromProjectId, toProjectId, kind)
-  }
-
-  listProjectConsents(): ConsentRow[] {
-    return this.permissions.listProjectConsents()
   }
 
   // ── ChildOwnershipRecords (store/child-ownership.ts) ──

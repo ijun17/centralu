@@ -120,7 +120,7 @@ const until = async (ok: () => boolean, ms = 2000) => {
 async function parentOf(h: ReturnType<typeof host>, preset: 'normal' | 'safe' = 'normal') {
   const project = await h.mgr.addProject(root)
   h.mgr.setProjectTrusted(project.id, true)
-  if (preset === 'normal') store.setProjectConsent(project.id, project.id, 'agents')
+  if (preset === 'normal') store.permissions.setProjectConsent(project.id, project.id, 'agents')
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: preset })).id
   h.mgr.rename(parent, 'Planner')
   return { project: project.id, parent }
@@ -373,7 +373,7 @@ describe('a handoff moves the live children to the new session (#693)', () => {
     const h = host()
     const project = await h.mgr.addProject(root)
     h.mgr.setProjectTrusted(project.id, true)
-    store.setProjectConsent(project.id, project.id, 'agents')
+    store.permissions.setProjectConsent(project.id, project.id, 'agents')
     // An auto session gives work to a session the person opened: the turn is its own, the session is not its child
     const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'auto' })).id
     const other = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
@@ -468,7 +468,7 @@ describe("a handoff moves the original's ask_project delegations (#693)", () => 
       const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
       w.mgr.rename(target, 'Sprites')
       const caller = await w.callerSession()
-      w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+      w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
       const call = w.mgr.askProject(caller, { project: w.target.id, session: target, task: 'export the sprites' })
       // The bound passes: the call answers "working" and the original never comes back for the answer

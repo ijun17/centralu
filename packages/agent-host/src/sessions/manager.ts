@@ -450,7 +450,7 @@ export class SessionManager {
     this.recoveryRepair = repairWorktreeRecoveryRemovals((id) => store.isTrashed(id)).catch((e) => console.error(`[trash] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
     this.nameUnnamedWorktrees()
     // "Always allow" rules ending in `*` (#838): since #908 none allows anything, and an older build read them as prefixes
-    const wildcards = store.dropWildcardApprovalRules()
+    const wildcards = store.permissions.dropWildcardApprovalRules()
     if (wildcards > 0) console.error(`[permissions] removed ${wildcards} "always allow" rule(s) ending in * (#838): their commands are asked again`)
     /*
      * Merge detection also runs once at startup (#69) — a merge could have happened in a terminal
@@ -2710,7 +2710,7 @@ export class SessionManager {
     // restart (C-2)
     // Only the card's own key (`remembered` above): an edit with no path has none (#428), so "(no path)" is never a rule
     if (decision === 'always' && m && remembered) {
-      this.store.addApprovalRule({
+      this.store.permissions.addApprovalRule({
         scope: scope ?? 'session',
         sessionId: scope === 'project' ? undefined : sessionId,
         projectId: scope === 'project' ? (m.projectId ?? undefined) : undefined,
@@ -2997,7 +2997,7 @@ export class SessionManager {
     sessionId: string | null
   }[] {
     return this.store
-      .listApprovalRules()
+      .permissions.listApprovalRules()
       .filter((r) => r.matcher)
       .map((r) => ({
         id: r.id,
@@ -3012,7 +3012,7 @@ export class SessionManager {
   }
 
   deleteApprovalRule(id: number): void {
-    this.store.deleteApprovalRule(id)
+    this.store.permissions.deleteApprovalRule(id)
   }
 
   /**
@@ -3029,7 +3029,7 @@ export class SessionManager {
   /** Saved rules that apply to this session (session-scoped plus project-scoped) */
   private rulesFor(sessionId: string, projectId: string | null): string[] {
     return this.store
-      .listApprovalRules()
+      .permissions.listApprovalRules()
       .filter((r) => (r.sessionId ? r.sessionId === sessionId : r.projectId === projectId))
       .map((r) => r.matcher)
       .filter(Boolean)

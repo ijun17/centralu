@@ -14,7 +14,7 @@ describe('a parent is told to clean up the children whose answers it used (#690)
   let w: CrossWorld
   beforeEach(async () => {
     w = await crossWorld()
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
   })
   afterEach(async () => {
     await w.dispose()

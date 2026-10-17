@@ -50,7 +50,7 @@ export type AppAccessStore = {
     setAppSetting(key: string, value: string): void
     deleteAppSetting(key: string): void
   }
-  getProjectConsent(from: string, to: string, kind: 'apps'): unknown
+  permissions: { getProjectConsent(from: string, to: string, kind: 'apps'): unknown }
 }
 
 export type AppAccessDeps = {
@@ -137,7 +137,7 @@ export class AppAccess implements OnDemandApps {
     const r = this.records(session.id).find((x) => x.appId === app.appId && x.projectId === app.projectId)
     if (!r) return false
     // "Once" was this attachment's own answer; "always" holds only while the person keeps it (revoking detaches)
-    return !!this.deps.boundaryOpen?.(session.id) || r.consent === 'once' || !!this.deps.store.getProjectConsent(from, app.projectId, 'apps')
+    return !!this.deps.boundaryOpen?.(session.id) || r.consent === 'once' || !!this.deps.store.permissions.getProjectConsent(from, app.projectId, 'apps')
   }
 
   // ── The three tools ──
@@ -179,7 +179,7 @@ export class AppAccess implements OnDemandApps {
         signal,
       )
       if (!res.ok) return res
-      consent = this.deps.boundaryOpen?.(sessionId) ? 'auto' : this.deps.store.getProjectConsent(session.projectId!, app.projectId, 'apps') ? 'always' : 'once'
+      consent = this.deps.boundaryOpen?.(sessionId) ? 'auto' : this.deps.store.permissions.getProjectConsent(session.projectId!, app.projectId, 'apps') ? 'always' : 'once'
       // The person may have taken a while: the app could have stopped being shared, or this session gone, meanwhile
       const again = this.gate(sessionId)
       if (!again.ok) return again

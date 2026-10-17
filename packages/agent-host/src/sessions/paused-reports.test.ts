@@ -29,7 +29,7 @@ describe('a child that waits on its own background work (#721)', () => {
       h.externalId = opts.resumeExternalId ?? `ext-${opts.sessionId}`
       return h
     }
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
   })
   afterEach(async () => {
     vi.useRealTimers()

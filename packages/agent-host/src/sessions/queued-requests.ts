@@ -219,7 +219,7 @@ export class QueuedRequests {
   /** A remembered "always" for the caller's project to ask the target's (#371), read now */
   pairConsented(callerId: string, target: SessionInfo): boolean {
     const from = this.host.meta.get(callerId)?.projectId
-    return !!from && !!target.projectId && (from === target.projectId || !!this.host.store.getProjectConsent(from, target.projectId, 'delegate'))
+    return !!from && !!target.projectId && (from === target.projectId || !!this.host.store.permissions.getProjectConsent(from, target.projectId, 'delegate'))
   }
 
   /**

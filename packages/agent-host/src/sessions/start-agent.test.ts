@@ -138,7 +138,7 @@ describe('starting another agent in the same project', () => {
     const p = w.mgr.listSessions().find((s) => s.id === id)?.pendingApproval
     return p?.detail.kind === 'agent_start' ? p : undefined
   }
-  const allowProject = () => w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+  const allowProject = () => w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
   /** Starts a child that keeps running, and returns its id */
   const startRunning = async (s: string, task = 'write it') => {
     const before = childrenOf(s).length
@@ -535,7 +535,7 @@ describe('starting another agent in the same project', () => {
       await w.mgr.setProjectTrusted(w.target.id, true)
       // The session waits on its card, a turn that is not the asker's: the task joins it as a note (#677), which needs auto
       const asker = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'auto' })).id
-      w.store.setProjectConsent(w.target.id, w.caller.id, 'delegate')
+      w.store.permissions.setProjectConsent(w.target.id, w.caller.id, 'delegate')
       void w.mgr.askProject(asker, { project: w.caller.id, session: s, task: 'check something', ifBusy: 'note' })
       await w.until(() => !!handleOf(s)?.sent.some((t) => t.includes('check something')))
       w.mgr.respondApproval(s, requestId, 'allow')
@@ -832,7 +832,7 @@ describe('starting another agent in the same project', () => {
     const c = await startRunning(s)
     const r = await w.mgr.startAgent(c, { task: 'and another', wait: false })
     expect(!r.ok && r.error).toContain('cannot start agents')
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const q = await w.mgr.askProject(c, { project: w.target.name, task: 'x' })
     expect(!q.ok && q.error).toContain('cannot ask a project')
     expect(childrenOf(c)).toEqual([])

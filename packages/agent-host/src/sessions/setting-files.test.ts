@@ -207,7 +207,7 @@ const MAKE: Record<Kind, (tool: ToolName) => Promise<string>> = {
   'start_agent child': async (tool) => {
     await rpc('projects.setTrusted', { projectId, trusted: true })
     adapters.get(tool)!.detect = async () => ({ tool, installed: true, loggedIn: true, detail: 'test' })
-    store.setProjectConsent(projectId, projectId, 'agents')
+    store.permissions.setProjectConsent(projectId, projectId, 'agents')
     const caller = await MAKE.worker(tool)
     const result = await mgr.startAgent(caller, { task: 'look around', tool, wait: false })
     expect(result.ok).toBe(true)

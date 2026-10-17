@@ -117,7 +117,7 @@ const until = async (ok: () => boolean, ms = 2000) => {
 async function parentAndChild(h: ReturnType<typeof host>) {
   const project = await h.mgr.addProject(root)
   h.mgr.setProjectTrusted(project.id, true)
-  store.setProjectConsent(project.id, project.id, 'agents')
+  store.permissions.setProjectConsent(project.id, project.id, 'agents')
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
   const started = await h.mgr.startAgent(parent, { task: 'long work', wait: false })
   if (!started.ok) throw new Error(started.error)

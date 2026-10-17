@@ -13,9 +13,9 @@ import { appKeyOf } from '@cc/protocol'
 export function storePermissionBook(store: Store): CapabilityBook {
   const key = (app: AppRef) => appKeyOf(app.projectId, app.appId)
   return {
-    get: (app, capability) => store.getAppPermission(key(app), capability),
-    put: (app, d) => store.putAppPermission(key(app), app.projectId, d),
-    forget: (app, capability) => store.forgetAppPermission(key(app), capability),
-    list: (app) => store.listAppPermissions(key(app)),
+    get: (app, capability) => store.permissions.getAppPermission(key(app), capability),
+    put: (app, d) => store.permissions.putAppPermission(key(app), app.projectId, d),
+    forget: (app, capability) => store.permissions.forgetAppPermission(key(app), capability),
+    list: (app) => store.permissions.listAppPermissions(key(app)),
   }
 }

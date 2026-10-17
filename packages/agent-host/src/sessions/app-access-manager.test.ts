@@ -111,7 +111,7 @@ beforeEach(async () => {
 })
 
 /** The person allowed alpha → beta "always" before — for the tests about what attaching does, not about asking */
-const allowedBefore = () => store.setProjectConsent(alpha, beta, 'apps')
+const allowedBefore = () => store.permissions.setProjectConsent(alpha, beta, 'apps')
 
 /** The consent card up in a session, if any (part B's card, `project_access`) */
 const card = (sessionId: string) => {
@@ -356,7 +356,7 @@ describe('consent per pair of projects, through the card', () => {
     expect(r.isError).toBe(true)
     expect(r.text).toContain('did not allow')
     expect(servers(claude.last())).toEqual([])
-    expect(store.getProjectConsent(alpha, beta, 'apps')).toBeNull()
+    expect(store.permissions.getProjectConsent(alpha, beta, 'apps')).toBeNull()
     void tool(s.id, 'attach_app', { app: 'beta/board' })
     await waitFor(() => !!card(s.id))
   })

@@ -234,8 +234,8 @@ describe('Store (dev sqlite)', () => {
 
   it('saves and lists approval rules', () => {
     const s = seeded()
-    s.addApprovalRule({ scope: 'session', sessionId: 's1', matcher: 'npm test*', decision: 'allow' })
-    const rules = s.listApprovalRules()
+    s.permissions.addApprovalRule({ scope: 'session', sessionId: 's1', matcher: 'npm test*', decision: 'allow' })
+    const rules = s.permissions.listApprovalRules()
     expect(rules).toHaveLength(1)
     expect(rules[0]!.matcher).toBe('npm test*')
   })
@@ -777,10 +777,10 @@ describe('remembered consents between projects across builds (#384)', () => {
   it('a kind a newer build added stays in the store but is not listed here', () => {
     const s = seeded()
     s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
-    s.setProjectConsent('p1', 'p2', 'delegate')
+    s.permissions.setProjectConsent('p1', 'p2', 'delegate')
     const db = (s as unknown as { db: Database.Database }).db
     db.prepare(`INSERT INTO project_consents (from_project_id, to_project_id, kind, decided_at) VALUES ('p1', 'p2', 'files', 1)`).run()
-    expect(s.listProjectConsents().map((c) => c.kind)).toEqual(['delegate'])
+    expect(s.permissions.listProjectConsents().map((c) => c.kind)).toEqual(['delegate'])
     expect(db.prepare(`SELECT kind FROM project_consents ORDER BY kind`).all()).toEqual([{ kind: 'delegate' }, { kind: 'files' }])
     s.close()
   })
@@ -1672,27 +1672,27 @@ describe('the person\'s answers to an app\'s capability requests (M4 D-4)', () =
 
   it('one row per app and capability — answering again overwrites, forgetting deletes, and a user-folder app is also one row', () => {
     const s = new Store()
-    s.putAppPermission('p1/notes', 'p1', allow('agent:claude', 1))
-    s.putAppPermission('p1/notes', 'p1', { ...allow('agent:claude', 2), decision: 'deny' })
-    s.putAppPermission('p1/notes', 'p1', allow('host:git.status', 3))
+    s.permissions.putAppPermission('p1/notes', 'p1', allow('agent:claude', 1))
+    s.permissions.putAppPermission('p1/notes', 'p1', { ...allow('agent:claude', 2), decision: 'deny' })
+    s.permissions.putAppPermission('p1/notes', 'p1', allow('host:git.status', 3))
     // Even with project_id null, the same key is one row — why null was kept out of the PRIMARY KEY
-    s.putAppPermission('_user/timer', null, allow('agent:claude', 4))
-    s.putAppPermission('_user/timer', null, allow('agent:claude', 5))
-    expect(s.getAppPermission('p1/notes', 'agent:claude')).toEqual({ ...allow('agent:claude', 2), decision: 'deny' })
-    expect(s.listAppPermissions('p1/notes').map((r) => r.capability)).toEqual(['host:git.status', 'agent:claude'])
-    expect(s.listAppPermissions('_user/timer')).toEqual([allow('agent:claude', 5)])
-    s.forgetAppPermission('p1/notes', 'host:git.status')
-    expect(s.getAppPermission('p1/notes', 'host:git.status')).toBeNull()
+    s.permissions.putAppPermission('_user/timer', null, allow('agent:claude', 4))
+    s.permissions.putAppPermission('_user/timer', null, allow('agent:claude', 5))
+    expect(s.permissions.getAppPermission('p1/notes', 'agent:claude')).toEqual({ ...allow('agent:claude', 2), decision: 'deny' })
+    expect(s.permissions.listAppPermissions('p1/notes').map((r) => r.capability)).toEqual(['host:git.status', 'agent:claude'])
+    expect(s.permissions.listAppPermissions('_user/timer')).toEqual([allow('agent:claude', 5)])
+    s.permissions.forgetAppPermission('p1/notes', 'host:git.status')
+    expect(s.permissions.getAppPermission('p1/notes', 'host:git.status')).toBeNull()
   })
 
   it('deleting a project clears the answers for that project\'s apps too — a user-folder app\'s answer survives', () => {
     const s = new Store()
     s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-    s.putAppPermission('p1/notes', 'p1', allow('agent:claude', 1))
-    s.putAppPermission('_user/timer', null, allow('agent:claude', 2))
+    s.permissions.putAppPermission('p1/notes', 'p1', allow('agent:claude', 1))
+    s.permissions.putAppPermission('_user/timer', null, allow('agent:claude', 2))
     s.deleteProject('p1')
-    expect(s.listAppPermissions('p1/notes')).toEqual([])
-    expect(s.listAppPermissions('_user/timer')).toHaveLength(1)
+    expect(s.permissions.listAppPermissions('p1/notes')).toEqual([])
+    expect(s.permissions.listAppPermissions('_user/timer')).toHaveLength(1)
   })
 })
 
@@ -1831,7 +1831,7 @@ describe('the trash (#204)', () => {
   it('a trashed session leaves every listing and search at once, and keeps its messages', async () => {
     const s = seeded()
     s.appendMessages(galaxy('s1', 5))
-    s.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
+    s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
     s.grid.setGridView([sp('s1')])
     session(s, 'orch', null, { kind: 'orchestrator' })
     expect(s.orchestratorId()).toBe('orch')
@@ -1844,7 +1844,7 @@ describe('the trash (#204)', () => {
     expect(s.grid.listGridView()).toEqual([])
     expect(s.searchMessages('galaxy')).toEqual([])
     expect(s.searchMessages('ga')).toEqual([]) // the short-query path (LIKE) is a second way into the index
-    expect(s.listApprovalRules()).toEqual([])
+    expect(s.permissions.listApprovalRules()).toEqual([])
     expect(indexRowsOf(s, 's1')()).toBe(0)
     // Out of reach is not gone: the conversation is all there, and the trash lists it with where it came from
     expect(s.loadMessages('s1', 10)).toHaveLength(5)
@@ -1889,7 +1889,7 @@ describe('the trash (#204)', () => {
     const s = seeded()
     s.appendMessages(galaxy('s1', 5))
     s.appendMessages([{ sessionId: 's1', seq: 6, role: 'assistant', kind: 'tool_call', payload: { id: 'x' }, ts: 6 }])
-    s.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
+    s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
     const before = s.listSessions()[0]!
     await s.trashSession('s1', KEEP_ALL)
 
@@ -1899,7 +1899,7 @@ describe('the trash (#204)', () => {
     expect(s.listTrash()).toEqual([])
     expect(s.searchMessages('galaxy')).toHaveLength(5)
     expect(indexRowsOf(s, 's1')()).toBe(5) // a message with no text gets no index row, as when it was written
-    expect(s.listApprovalRules().map((r) => r.sessionId)).toEqual(['s1'])
+    expect(s.permissions.listApprovalRules().map((r) => r.sessionId)).toEqual(['s1'])
     expect(await s.restoreSession('s1', 'p1')).toBeNull() // only what is in the trash comes back
     s.close()
   })
@@ -1943,7 +1943,7 @@ describe('the trash (#204)', () => {
     session(s, 's2', 'p1')
     for (const id of ['s1', 's2']) {
       s.appendMessages(galaxy(id, 3))
-      s.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: id, matcher: 'Bash(ls)', decision: 'allow' })
+      s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: id, matcher: 'Bash(ls)', decision: 'allow' })
       s.recordCommit('p1', `sha-${id}`, id)
       const run = { projectId: 'p1', appId: 'notes', kind: 'broker', tool: 'run_agent', callerKind: 'session', parentRunId: null,
         status: 'ok', durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt: 1 }
@@ -1982,8 +1982,8 @@ describe('the trash (#204)', () => {
     s.appendMessages(galaxy('s1', 3))
     s.appendMessages(galaxy('s2', 2))
     await s.trashSession('s2', KEEP_ALL) // already in the trash when the project goes
-    s.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
-    s.addApprovalRule({ scope: 'project', projectId: 'p1', matcher: 'Bash(pwd)', decision: 'allow' })
+    s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
+    s.permissions.addApprovalRule({ scope: 'project', projectId: 'p1', matcher: 'Bash(pwd)', decision: 'allow' })
     s.recordCommit('p1', 'sha-s1', 's1')
     s.recordCommit('p1', 'sha-gone', 'purged-long-ago')
     const run = { projectId: 'p1', appId: 'notes', kind: 'tool', tool: 't', callerKind: 'view', parentRunId: null,
@@ -2044,17 +2044,17 @@ describe('migration v44 — consent from one project to another', () => {
   it('remembers a pair per direction and kind, lists it, and forgets it on revoke', () => {
     const s = seeded()
     s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
-    expect(s.getProjectConsent('p1', 'p2', 'delegate')).toBeNull()
-    s.setProjectConsent('p1', 'p2', 'delegate')
-    expect(s.getProjectConsent('p1', 'p2', 'delegate')).toMatchObject({ fromProjectId: 'p1', toProjectId: 'p2', kind: 'delegate' })
+    expect(s.permissions.getProjectConsent('p1', 'p2', 'delegate')).toBeNull()
+    s.permissions.setProjectConsent('p1', 'p2', 'delegate')
+    expect(s.permissions.getProjectConsent('p1', 'p2', 'delegate')).toMatchObject({ fromProjectId: 'p1', toProjectId: 'p2', kind: 'delegate' })
     // The other direction and the other kind are separate consents
-    expect(s.getProjectConsent('p2', 'p1', 'delegate')).toBeNull()
-    expect(s.getProjectConsent('p1', 'p2', 'apps')).toBeNull()
-    s.setProjectConsent('p1', 'p2', 'delegate')
-    expect(s.listProjectConsents()).toHaveLength(1)
-    expect(s.forgetProjectConsent('p1', 'p2', 'delegate')).toBe(true)
-    expect(s.forgetProjectConsent('p1', 'p2', 'delegate')).toBe(false)
-    expect(s.listProjectConsents()).toEqual([])
+    expect(s.permissions.getProjectConsent('p2', 'p1', 'delegate')).toBeNull()
+    expect(s.permissions.getProjectConsent('p1', 'p2', 'apps')).toBeNull()
+    s.permissions.setProjectConsent('p1', 'p2', 'delegate')
+    expect(s.permissions.listProjectConsents()).toHaveLength(1)
+    expect(s.permissions.forgetProjectConsent('p1', 'p2', 'delegate')).toBe(true)
+    expect(s.permissions.forgetProjectConsent('p1', 'p2', 'delegate')).toBe(false)
+    expect(s.permissions.listProjectConsents()).toEqual([])
     s.close()
   })
 
@@ -2062,11 +2062,11 @@ describe('migration v44 — consent from one project to another', () => {
     const s = seeded()
     s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
     s.projects.addProject({ id: 'p3', path: '/tmp/p3', name: 'p3' })
-    s.setProjectConsent('p1', 'p2', 'delegate')
-    s.setProjectConsent('p2', 'p3', 'apps')
-    s.setProjectConsent('p1', 'p3', 'delegate')
+    s.permissions.setProjectConsent('p1', 'p2', 'delegate')
+    s.permissions.setProjectConsent('p2', 'p3', 'apps')
+    s.permissions.setProjectConsent('p1', 'p3', 'delegate')
     s.deleteProject('p2')
-    expect(s.listProjectConsents().map((c) => `${c.fromProjectId}>${c.toProjectId}`)).toEqual(['p1>p3'])
+    expect(s.permissions.listProjectConsents().map((c) => `${c.fromProjectId}>${c.toProjectId}`)).toEqual(['p1>p3'])
     s.close()
   })
 })

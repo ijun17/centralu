@@ -416,7 +416,7 @@ describe('ordinary session update consent (#581)', () => {
     expect(apply).toHaveBeenCalledTimes(1)
     expect(setAutoApply).not.toHaveBeenCalled()
     expect(updates.current().autoApply).toBe(false)
-    expect(store.listProjectConsents()).toEqual([])
+    expect(store.permissions.listProjectConsents()).toEqual([])
 
     const other = mgr.runOrchestratorTool(second.id, 'update_centralu', { action: 'check' })
     await answer(second.id, 'deny')
@@ -484,7 +484,7 @@ describe('applying an installed update for an agent (#665)', () => {
     expect((await always).isError).toBeUndefined()
     expect((await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })).isError).toBeUndefined()
     expect(card(session.id)).toBeUndefined()
-    expect(store.listProjectConsents()).toEqual([])
+    expect(store.permissions.listProjectConsents()).toEqual([])
     expect(w.relaunches).toHaveLength(3)
     const other = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
 

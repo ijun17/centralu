@@ -47,7 +47,7 @@ export class ProjectConsents {
     const from = projects.find((p) => p.id === fromId)
     const to = projects.find((p) => p.id === toProjectId)
     if (!from || !to) return { ok: false, error: 'That project is no longer registered' }
-    if (this.host.store.getProjectConsent(fromId, toProjectId, access)) return { ok: true }
+    if (this.host.store.permissions.getProjectConsent(fromId, toProjectId, access)) return { ok: true }
     const decision = await this.host.askHost(
       callerSessionId,
       {
@@ -68,7 +68,7 @@ export class ProjectConsents {
       return { ok: false, error: 'That project is no longer registered' }
     }
     if (decision === 'always') {
-      this.host.store.setProjectConsent(fromId, toProjectId, access)
+      this.host.store.permissions.setProjectConsent(fromId, toProjectId, access)
       this.host.emit({ type: 'project_consents_changed' })
       return { ok: true }
     }
@@ -82,7 +82,7 @@ export class ProjectConsents {
   /** Every remembered cross-project consent, with the projects' names as they are now (#371, Settings) */
   projectConsents(): ProjectConsent[] {
     const names = new Map(this.host.store.projects.listProjects().map((p) => [p.id, p.name]))
-    return this.host.store.listProjectConsents().map((c) => ({
+    return this.host.store.permissions.listProjectConsents().map((c) => ({
       ...c,
       fromName: names.get(c.fromProjectId) ?? '(project no longer exists)',
       toName: names.get(c.toProjectId) ?? '(project no longer exists)',
@@ -94,7 +94,7 @@ export class ProjectConsents {
    * an ask for the pair still queued is not delivered (`withdrawReaches`)
    */
   revokeProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): void {
-    if (!this.host.store.forgetProjectConsent(fromProjectId, toProjectId, kind)) return
+    if (!this.host.store.permissions.forgetProjectConsent(fromProjectId, toProjectId, kind)) return
     this.host.emit({ type: 'project_consents_changed' })
     if (kind === 'delegate') {
       this.host.withdrawReaches(

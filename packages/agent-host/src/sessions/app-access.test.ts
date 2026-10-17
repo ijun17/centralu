@@ -43,7 +43,7 @@ function newAccess(): AppAccess {
       setAppSetting: (k, v) => w.store.settings.setAppSetting(k, v),
       deleteAppSetting: (k) => w.store.settings.deleteAppSetting(k),
     },
-    getProjectConsent: (from, to) => (consents.has(`${from}>${to}`) ? { from, to } : null),
+    permissions: { getProjectConsent: (from, to) => (consents.has(`${from}>${to}`) ? { from, to } : null) },
   }
   return new AppAccess({
     hub,

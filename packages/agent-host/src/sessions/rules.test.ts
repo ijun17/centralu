@@ -138,9 +138,9 @@ describe('approval rules persist (C-2)', () => {
   // A rule ending in * allows nothing since #838, and an older build reads it as a prefix: it goes at startup
   it('drops saved rules ending in * when the host starts, and keeps the rest', async () => {
     const store = new Store()
-    store.addApprovalRule({ scope: 'project', projectId: 'p', matcher: 'npm test*', decision: 'allow' })
-    store.addApprovalRule({ scope: 'project', projectId: 'p', matcher: 'git status', decision: 'allow' })
-    store.addApprovalRule({ scope: 'project', projectId: 'p', matcher: 'git * origin', decision: 'allow' })
+    store.permissions.addApprovalRule({ scope: 'project', projectId: 'p', matcher: 'npm test*', decision: 'allow' })
+    store.permissions.addApprovalRule({ scope: 'project', projectId: 'p', matcher: 'git status', decision: 'allow' })
+    store.permissions.addApprovalRule({ scope: 'project', projectId: 'p', matcher: 'git * origin', decision: 'allow' })
     const mgr = new SessionManager(store, new Map([['claude', fakeAdapter(fake())]]), () => {})
     expect(mgr.listApprovalRules().map((r) => r.matcher).sort()).toEqual(['git * origin', 'git status'])
   })

@@ -72,7 +72,7 @@ describe.each([20, 39, 47])('a store the v%i build wrote', (version) => {
       expect(store.searchMessages('galaxy colour')).toHaveLength(2)
       expect(store.searchMessages('docs/colour.md')).toEqual([])
 
-      expect(store.listApprovalRules()).toEqual([expect.objectContaining({ scope: 'project', projectId: 'p1', matcher: 'npm test', decision: 'allow' })])
+      expect(store.permissions.listApprovalRules()).toEqual([expect.objectContaining({ scope: 'project', projectId: 'p1', matcher: 'npm test', decision: 'allow' })])
     } finally {
       store.close()
     }

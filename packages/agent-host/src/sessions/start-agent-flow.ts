@@ -725,7 +725,7 @@ export class AgentStartFlow {
       return { ok: true }
     }
     if (decision === 'always_project') {
-      this.host.store.setProjectConsent(projectId, projectId, 'agents')
+      this.host.store.permissions.setProjectConsent(projectId, projectId, 'agents')
       this.host.emit({ type: 'project_consents_changed' })
       return { ok: true }
     }

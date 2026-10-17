@@ -79,7 +79,7 @@ describe('auto Centralu boundaries (#603)', () => {
     // A child starts agents and asks projects only from an agent depth of 2 (#867)
     w.mgr.setUiPreferences({ agentDepth: 2 })
     const parent = await session()
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const first = await start(parent)
     expect(first.ok).toBe(true)
     if (!first.ok) return
@@ -109,7 +109,7 @@ describe('auto Centralu boundaries (#603)', () => {
     '%s: ask_project preserves the target preset',
     async (preset) => {
       const id = await session(preset)
-      w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+      w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
       const child = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'auto' })
       const call = w.mgr.askProject(id, { project: w.target.id, task: 'check' }, AbortSignal.timeout(1000))
       expect(child.permissionPreset).toBe('auto')
@@ -188,7 +188,7 @@ describe('auto Centralu boundaries (#603)', () => {
      */
     it.each(['auto', 'safe'] as const)('%s: a caller at it is refused before the tool is detected, a model checked or a card raised', async (preset) => {
       const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-      w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+      w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
       const parent = await session(preset)
       const child = await w.mgr.startAgent(parent, { task: 'check', wait: false }, AbortSignal.timeout(5000))
       if (!child.ok) throw new Error(child.error)
@@ -279,7 +279,7 @@ describe('auto Centralu boundaries (#603)', () => {
 
   it("opens ownership for every same-project action, including another parent's running child", async () => {
     const owner = await session()
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const caller = await session()
     const child = await start(owner)
     if (!child.ok) throw new Error(child.error)
@@ -325,7 +325,7 @@ describe('auto Centralu boundaries (#603)', () => {
 
   it('defaults to unlimited for auto; configured ceilings apply at every count and survive saving', async () => {
     const id = await session()
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     // Sweep zero through twice the old ceiling, including its immediate neighbours.
     for (let n = 0; n < 9; n++) expect((await start(id)).ok).toBe(true)
     for (let ceiling = 1; ceiling <= 9; ceiling++) {
@@ -345,7 +345,7 @@ describe('auto Centralu boundaries (#603)', () => {
     '%s defaults to four and can use an explicit unlimited setting',
     async (preset) => {
       const id = await session(preset)
-      w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+      w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
       for (let n = 0; n < 4; n++) expect((await start(id)).ok).toBe(true)
       expect((await start(id)).ok).toBe(false)
       w.mgr.setUiPreferences({ agentCeiling: 0 })

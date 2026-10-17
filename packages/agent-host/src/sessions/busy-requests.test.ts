@@ -32,7 +32,7 @@ describe('requests to a busy session (#677)', () => {
   const info = (id: string) => w.mgr.listSessions().find((s) => s.id === id)!
   /** B with a child A it started, which the person is now using for a turn of their own */
   const busyChild = async (preset: PermissionPreset = 'normal') => {
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const b = await session(preset)
     const started = await w.mgr.startAgent(b, { task: 'first job', wait: false })
     if (!started.ok) throw new Error(started.error)
@@ -77,7 +77,7 @@ describe('requests to a busy session (#677)', () => {
   })
 
   it('a request queued behind a card raised between turns goes in once the card is answered (#428)', async () => {
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const b = await session()
     const started = await w.mgr.startAgent(b, { task: 'first job', wait: false })
     if (!started.ok) throw new Error(started.error)
@@ -155,7 +155,7 @@ describe('requests to a busy session (#677)', () => {
 
   it('queues through ask_project and send_to_session too, framed as each tool frames its work', async () => {
     const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const asker = await w.callerSession()
     await w.mgr.send(target, "the person's own work")
     expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it' })).toMatchObject({ ok: true, state: 'busy' })
@@ -180,7 +180,7 @@ describe('requests to a busy session (#677)', () => {
     /** An ask_project request queued behind the person's own turn in the target project */
     const queuedAsk = async () => {
       const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
-      w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+      w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
       const asker = await w.callerSession()
       await w.mgr.send(target, "the person's own work")
       expect(await w.mgr.askProject(asker, { project: w.target.id, task: 'export it', ifBusy: 'queue' })).toMatchObject({ ok: true, state: 'queued' })
@@ -291,7 +291,7 @@ describe('requests to a busy session (#677)', () => {
      */
     const consentedThenRevoked = async () => {
       const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
-      w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+      w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
       const asker = await w.callerSession()
       await w.mgr.updateSettings(asker, { permissionPreset: 'auto' })
       await w.mgr.send(target, "the person's own work")
@@ -319,7 +319,7 @@ describe('requests to a busy session (#677)', () => {
 
     it('an ask the pair has consent for still goes in', async () => {
       const { target, asker } = await autoAsk()
-      w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+      w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
       await lower(asker)
       expect(w.store.listQueuedRequests()).toHaveLength(1)
       handleOf(target).answer("the person's answer")
@@ -452,7 +452,7 @@ describe('requests to a busy session (#677)', () => {
      * itself a child here, and A is B's child the person is using.
      */
     it('follows the agent depth: a requester at it is refused fork and fork_read under auto, and allowed once it is raised', async () => {
-      w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+      w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
       w.mgr.setUiPreferences({ agentDepth: 2 })
       const top = await session('auto')
       const middle = await w.mgr.startAgent(top, { task: 'middle job', wait: false })
@@ -627,7 +627,7 @@ describe('a queued request across a host swap (#677)', () => {
     return { host, claude }
   }
   const queuedFor = async () => {
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const b = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })).id
     const started = await w.mgr.startAgent(b, { task: 'first job', wait: false })
     if (!started.ok) throw new Error(started.error)
