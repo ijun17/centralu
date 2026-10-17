@@ -814,6 +814,11 @@ function say(line) {
   sink(`[centralu serve] ${line}\n`)
 }
 
+/** Points `say` at `write` from here on (a detached launcher's serve.log) */
+function sayTo(write) {
+  sink = write
+}
+
 /** What `--connection` answers, as fields: the running host's versions when one answers, else the installed ones */
 async function describe({ env, dataDir, state, entry, version }) {
   const port = state.port ?? DEFAULT_SERVE_PORT
@@ -1322,13 +1327,13 @@ export async function runDetachedChild({ spec, ...opts }) {
   let fd = null
   try {
     fd = openSync(spec.log, 'a')
-    sink = (text) => {
+    sayTo((text) => {
       try {
         writeSync(fd, text)
       } catch {
         // nowhere left to say it
       }
-    }
+    })
   } catch {
     // no log: say() keeps stderr, which nobody reads; --detach then reports the start as never run
   }
