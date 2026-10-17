@@ -304,6 +304,13 @@ pub fn probe_login_shell() -> Option<String> {
 }
 
 /// How long the login shell gets to answer before the fixed paths are used (lessons PA2).
+///
+/// Longer than the host's 3 s (`PROBE_TIMEOUT_MS` in `agent-host/src/env-path.ts`) on purpose. Both
+/// return as soon as the marked line arrives, so the bound only costs time with a shell that never
+/// answers. What a miss costs differs: the host falls back to the fixed folders and at worst misses
+/// an agent tool, but the keeper without the shell's answer seldom finds an nvm or mise Node in its
+/// fixed paths, and then no host starts at all. A slow configuration (a framework plus a version
+/// manager, on a cold disk) gets the extra time here, where it matters.
 pub const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// `probe_login_shell` with the shell and the bound given, so a test can hand it a shell that hangs

@@ -229,7 +229,7 @@ Happened: some shells ignore SIGTERM, and a hung probe meant the host never beca
 controlling terminal (the npm launcher runs the AppImage attached to one) an interactive bash in its own process group
 is stopped by SIGTTOU, so the keeper's probe waited out 5 s every time (measured, #458).
 Rule: both probes run the shell in a session of its own and kill its whole group at the bound: the host's 3 s, the
-keeper's 5 s. The host's: `SIGKILL`, stdin ignored, `TERM=dumb`, `CI=1`, the marked line trimmed, any failure falls
+keeper's 5 s (longer since a miss there starts no host at all; `PROBE_TIMEOUT` in `os/unix.rs`). The host's: `SIGKILL`, stdin ignored, `TERM=dumb`, `CI=1`, the marked line trimmed, any failure falls
 back. Killing the host's shell alone left what its config had started running (#428).
 Guard: `host/env-path.test.ts` "a shell that never answers is cut off at the bound and the fallback is used (PA2)",
 "a shell that ignores SIGTERM is still cut off at the bound: the probe is killed, not asked (PA2)" and "a shell stopped
