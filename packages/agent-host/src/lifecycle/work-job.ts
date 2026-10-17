@@ -5,39 +5,52 @@ import { endsWorkWithJob, systemTool } from '../os.js'
 /**
  * **The host's work ends with it on Windows** (#1067, #840 item 7, owner's option b).
  *
- * Windows does not end a process's children when it ends. Node (libuv) puts each child it starts into a job of its
- * own that ends that child with the host, but lets the child's own children leave it silently, and node-pty's ConPTY
- * children are in no job at all. So whatever an agent CLI, a terminal, a Run command or an app server started through
- * a program that is not Node (codex's MCP servers and shell commands, a dev server PowerShell started, `start`) kept
- * running after a crash, a quit or a host swap, holding its ports and memory (measured on Windows 11: every such
- * grandchild survived `taskkill /F` of the host).
+ * Windows does not end a process's children when it ends. Node (libuv) puts each child it starts into a job of its own
+ * with `KILL_ON_JOB_CLOSE`, so a direct child ends with the host, but that job also lets a child's own children leave it
+ * silently (`SILENT_BREAKAWAY_OK`), and what a ConPTY starts leaves it the same way. So whatever an agent CLI, a Run
+ * command, a git hook or an app server started through a program that is not Node (codex's MCP servers, a dev server
+ * PowerShell started, `start`) kept running after the host crashed or was ended, holding its ports and memory
+ * (measured on Windows 11: every such grandchild survived `taskkill /F` of the host, and was in no job).
  *
- * At start the host puts **itself** into a new job with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and holds the only
- * handle to it, not inheritable. Every process it starts from then on, and everything those start, is created in that
- * job (nested under libuv's, which Windows 8 and later allow); when the host ends, however it ends, its handle closes
- * and Windows ends them all. The host itself rather than each child: a child added by its pid after the spawn could
- * already have started its own (cmd.exe runs its command at once), while a child of a process in a job is in it from
- * its creation, in all five ways the host starts one.
+ * At start the host puts **itself** into a new job with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and no breakaway, and
+ * holds the only handle to it, not inheritable. Every process it starts from then on, and everything those start, is
+ * created in it, in all five ways the host starts one. Two things then end them with the host (both measured):
  *
- * - **What the host opens for the person** is not in it: there is nothing the host itself opens. "Open in IDE" and
- *   `system.openUrl` are opened by the window, outside the host's tree. What the person starts from a terminal is part
- *   of that terminal's tree: a program already running (a browser, an editor) takes the request in its own process and
- *   is untouched; one that was not running starts inside the job and ends with the host.
- * - **No breakaway** (`JOB_OBJECT_LIMIT_BREAKAWAY_OK` is not set): the host starts nothing that needs it, and with it
- *   allowed, what Git for Windows' sh (MSYS) started left the job: a git hook's, or anything under Git Bash (Claude
+ * 1. **No process can leave any more.** The job allows no breakaway, so libuv's silent breakaway no longer lets a
+ *    child's children out of libuv's job, and that job (`KILL_ON_JOB_CLOSE`) ends them when the host does. A Node
+ *    process is itself in a job once it has started a child (measured: in none before its first spawn, in one after);
+ *    with this job held open by another process, so that it could not close, everything still ended.
+ * 2. **This job's own `KILL_ON_JOB_CLOSE`**, when the host's handle closes. It does not depend on how libuv sets up
+ *    its jobs, which is libuv's to change; `work-job.test.ts` reads the flag back from the job the host holds.
+ *
+ * The host itself rather than each child: a child added by its pid after the spawn could already have started its own
+ * (cmd.exe runs its command at once), while a child of a process in a job is in it from its creation.
+ *
+ * - **Terminals are not in it.** What a person starts in a Centralu terminal is theirs, not the host's work: it must
+ *   outlive a host that crashes (the owner's decision on #840 item 7), as it does today. Terminals are started by a
+ *   broker the host starts **before** it joins (`dev-services/broker-pty.ts`), which is in no job of the host's. Run
+ *   commands are the host's work and stay in the job.
+ * - **What the host opens for the person** is not in it either: "Open in IDE" and `system.openUrl` are opened by the
+ *   window, outside the host's tree.
+ * - **No breakaway** (`JOB_OBJECT_LIMIT_BREAKAWAY_OK` is not set): only a process that asks to break away could leave,
+ *   and Git for Windows' sh (MSYS) asks. With it allowed, what a git hook started, or anything under Git Bash (Claude
  *   Code's Bash tool on Windows), outlived the host (measured with the real host; without it, it ended, and the hook ran
  *   as before).
- * - **A host swap:** the next host is started by the window, not by this host, so it is in no job of this one's.
+ * - **Under a keeper** the host does not join one: the keeper holds the agents, terminals and commands so that they
+ *   outlive a host swap, and a job of the host's would end them with it. Windows has no keeper yet
+ *   (docs/plans/runtime-unification.md step 9); there, an update is a quit and a new start, and the host ends its
+ *   terminals, commands and agents on the way out with or without the job (measured).
+ * - **A host swap or restart:** the next host is started by the window, not by this host, so it is in no job of this
+ *   one's.
  * - **Already in a job** (a Node launcher's under `pnpm dev`, a CI runner's): the new job nests inside it (measured
  *   under a Node parent). Where Windows refuses (an outer job that forbids it), the host goes on as before and says so
  *   in its log.
  *
- * Node has no Job Object API. One PowerShell (~0.4–0.8 s on Windows 11, almost all of it PowerShell starting) creates
+ * Node has no Job Object API. One PowerShell (~0.3–0.8 s on Windows 11, almost all of it PowerShell starting) creates
  * the job, puts the host in it, copies the handle into the host and exits. It runs while the host opens its store, and
  * the host waits for it before it starts anything (`START_ORDER`'s `work job`). A native addon would be a build step
- * per architecture for one call; the keeper could own the job once Windows has one (docs/plans/runtime-unification.md
- * step 9), but today the window starts the host directly, and `pnpm dev` and a Windows remote's `serve` would not be
- * covered.
+ * per architecture for one call; the window (Rust) could create it, but `pnpm dev`, e2e and a Windows remote's
+ * `serve` start the host without the window.
  */
 
 /** `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` alone (no breakaway, see the file header) */
@@ -46,7 +59,8 @@ export const WORK_JOB_LIMITS = 0x2000
 /**
  * Creates the job, sets its limits, copies the handle into the process (not inheritable: a child holding it would
  * keep the job, and its processes, alive past the host), puts the process in the job and closes its own handles.
- * Prints `ok`, or the step that failed and Windows' error number.
+ * Prints `ok <handle>` (the handle's number in the process, for a test to read the job back), or the step that failed
+ * and Windows' error number.
  */
 const JOIN_SCRIPT = (pid: number, limits: number) => `
 $ErrorActionPreference = 'Stop'
@@ -78,7 +92,7 @@ public static class CentraluWorkJob {
         // DUPLICATE_SAME_ACCESS, not inheritable
         if (!DuplicateHandle(GetCurrentProcess(), job, host, out copy, 0, false, 2)) return "handle " + Marshal.GetLastWin32Error();
         if (!AssignProcessToJobObject(job, host)) return "assign " + Marshal.GetLastWin32Error();
-        return "ok";
+        return "ok " + copy.ToInt64();
       } finally { CloseHandle(host); }
     } finally { CloseHandle(job); }
   }
@@ -88,7 +102,7 @@ public static class CentraluWorkJob {
 `
 
 /** What joining the job came to */
-export type WorkJob = { state: 'joined' } | { state: 'not needed' } | { state: 'failed'; reason: string }
+export type WorkJob = { state: 'joined'; handle: number } | { state: 'not needed' } | { state: 'failed'; reason: string }
 
 /** What joining needs from the system, as a parameter so it can be tested anywhere */
 export type WorkJobOs = {
@@ -110,12 +124,16 @@ const REAL_OS: WorkJobOs = {
   },
 }
 
-/** Puts process `pid` (this host) into a new job that ends its processes when the host ends. Never throws */
-export async function joinWorkJob(pid: number = process.pid, os: WorkJobOs = REAL_OS): Promise<WorkJob> {
-  if (!os.needed) return { state: 'not needed' }
+/**
+ * Puts process `pid` (this host) into a new job that ends its processes when the host ends. Not under a keeper (see the
+ * file header). Never throws
+ */
+export async function joinWorkJob(place: { underKeeper: boolean }, pid: number = process.pid, os: WorkJobOs = REAL_OS): Promise<WorkJob> {
+  if (!workJobWanted(place, os)) return { state: 'not needed' }
   try {
     const said = (await os.powershell(JOIN_SCRIPT(pid, WORK_JOB_LIMITS))).trim()
-    return said === 'ok' ? { state: 'joined' } : { state: 'failed', reason: said || 'no answer' }
+    const joined = /^ok (\d+)$/.exec(said)
+    return joined ? { state: 'joined', handle: Number(joined[1]) } : { state: 'failed', reason: said || 'no answer' }
   } catch (e) {
     // PowerShell missing or refusing (Add-Type is off under Constrained Language Mode), or past its time
     const err = e as { stderr?: string; message?: string }
@@ -123,9 +141,14 @@ export async function joinWorkJob(pid: number = process.pid, os: WorkJobOs = REA
   }
 }
 
+/** Whether this host joins a work job, and so starts its terminals through the broker: on Windows, without a keeper */
+export function workJobWanted(place: { underKeeper: boolean }, os: Pick<WorkJobOs, 'needed'> = REAL_OS): boolean {
+  return os.needed && !place.underKeeper
+}
+
 /** The log line for `job`; nothing where no job is needed */
 export function workJobLine(job: WorkJob): string | null {
-  if (job.state === 'joined') return "[agent-host] work processes end with this host (a Windows job object)"
+  if (job.state === 'joined') return '[agent-host] work processes end with this host (a Windows job object); terminals are outside it'
   if (job.state === 'failed') return `[agent-host] could not tie work processes to this host (a Windows job object): ${job.reason}. What they start may outlive it`
   return null
 }

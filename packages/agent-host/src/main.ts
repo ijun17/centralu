@@ -57,7 +57,8 @@ import { projectsHome } from './dev-services/project-folder.js'
 import { parseJson } from './dev-services/store/json.js'
 import { asObj } from './json-value.js'
 import { flagSetting } from './dev-services/store/settings.js'
-import { joinWorkJob, workJobLine } from './lifecycle/work-job.js'
+import { joinWorkJob, workJobLine, workJobWanted } from './lifecycle/work-job.js'
+import { PtyBroker, brokerPtyModule } from './dev-services/broker-pty.js'
 
 /**
  * Agent Host entry point.
@@ -77,10 +78,20 @@ const start = new StartSequence()
 start.at('launch variables')
 const launch = takeLaunchEnv()
 /*
- * Windows (#1067): this host joins a job that ends what it starts when it ends. Asked now, so the PowerShell it takes
- * runs while the store opens; awaited at `work job`, before anything is started.
+ * Windows (#1067): this host joins a job that ends what it starts when it ends. Terminals are the person's, not the
+ * host's work: their broker is started first, so it is outside the job (dev-services/broker-pty.ts). Asked now, so the
+ * PowerShell it takes runs while the store opens; awaited at `work job`, before anything else is started.
  */
-const workJob = joinWorkJob()
+let ptyBroker: PtyBroker | null = null
+if (workJobWanted(launch)) {
+  try {
+    ptyBroker = PtyBroker.start()
+  } catch (err) {
+    // Terminals then start in the host, inside the job: they work, but what is started there ends with the host
+    console.error(`[agent-host] ${(err as Error).message}; terminals start in the host`)
+  }
+}
+const workJob = joinWorkJob(launch)
 
 /**
  * The build identifier. The bundler swaps `__CC_BUILD__` for the actual commit
@@ -341,7 +352,7 @@ mgr.useExternalApps(externalApps)
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
  * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).
  */
-const terminals = new TerminalService(screens.push, held?.ptys)
+const terminals = new TerminalService(screens.push, held?.ptys ?? (ptyBroker ? brokerPtyModule(ptyBroker) : undefined))
 // Runner for frequently used commands (#60) — its output rides the same frame lane as the terminal
 const commandRuns = new CommandRunner(screens.push, held?.ptys)
 if (held) {
