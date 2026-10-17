@@ -282,7 +282,13 @@ export function ToolCard({
 }) {
   const [open, setOpen] = useState(false)
   // A call to Centralu's own tools (#730): its own title row and a stronger edge; the rest is this card's
-  const call = useMemo(() => centraluCallOf(item), [item])
+  const read = useMemo(() => centraluCallOf(item), [item])
+  /*
+   * A record with no mark (an older host's) is read by its Claude name; `app-<x>` there is an app's only for an app this
+   * window knows, since a repository's own server may carry that name (#730 review)
+   */
+  const knownApp = useStore((s) => !read?.app || !!item.centralu || s.externalApps.some((a) => a.appId === read.app))
+  const call = knownApp ? read : null
   // The files the title names that the viewer can open are links (the audit of 2026-10, item 6)
   const pieces = useMemo(() => titlePieces(item.title, item.paths, projectRoot), [item.title, item.paths, projectRoot])
   const linked = pieces.some((p) => p.ref)

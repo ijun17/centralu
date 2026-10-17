@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { centraluCallOf, mcpNameParts, toolCallLine, type ToolSummary } from '@cc/protocol'
 import { toolSummary } from './claude/normalize.js'
 import { normalizeNotification } from './codex/normalize.js'
+import { keepAttachedAppMarks } from './tool-titles.js'
 
 /**
  * Centralu's own tool calls, marked by the adapter that knows the server (#730). Claude names the server in the tool
@@ -50,5 +51,25 @@ describe('reading a mark (#730)', () => {
     expect(toolCallLine(toolSummary('mcp__centralu__start_agent', { task: 'write the parser' }))).toBe('Started an agent: write the parser')
     expect(toolCallLine(toolSummary('mcp__centralu__agent_session', { sessionId: 'c1', action: 'list' }))).toBe('Listed its agents')
     expect(toolCallLine(toolSummary('Bash', { command: 'ls' }))).toBe('ls')
+  })
+})
+
+describe('review follow-ups (#730)', () => {
+  it("a blank project leaves ask_project's title to its row, which says \"another project\"", () => {
+    expect(toolSummary('mcp__centralu__ask_project', { project: '  ' }).title).toBe('mcp__centralu__ask_project')
+    expect(codex('centralu', 'ask_project', { project: '' }).title).toBe('ask_project')
+  })
+
+  it("keeps an app's mark only for an app attached to the session; a repository's own app-<x> server is ordinary", () => {
+    const call = { type: 'tool_call' as const, sessionId: 's', callId: 'c', summary: toolSummary('mcp__app-notes__add', { text: 'x' }) }
+    expect(keepAttachedAppMarks(call, () => ['app-notes'])).toBe(call)
+    const stray = keepAttachedAppMarks(call, () => ['app-board'])
+    expect(stray.type === 'tool_call' && stray.summary).toEqual({ tool: 'mcp__app-notes__add', title: 'mcp__app-notes__add', paths: [] })
+    const step = { type: 'subagent_event' as const, sessionId: 's', parentCallId: 'p', step: call }
+    const strayStep = keepAttachedAppMarks(step, () => [])
+    expect(strayStep.type === 'subagent_event' && strayStep.step.type === 'tool_call' && strayStep.step.summary.centralu).toBeUndefined()
+    // Centralu's own server is never stripped
+    const own = { ...call, summary: toolSummary('mcp__centralu__start_agent', { task: 'x' }) }
+    expect(keepAttachedAppMarks(own, () => [])).toBe(own)
   })
 })

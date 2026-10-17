@@ -13,8 +13,11 @@ export function mcpNameParts(name: string): { server: string; tool: string } | n
 }
 
 /**
- * Whether a server is Centralu's: its own (`centralu`) or an app's (`app-<id>`, with the id). A server name cannot hold
- * `__` (`serverNameProblem`) and no proposed server may take either prefix, so a name that matches is Centralu's.
+ * Whether a server's name is Centralu's: its own (`centralu`, which no other server may take: `serverNameProblem`) or
+ * an app's (`app-<id>`, with the id). The second is only the name's shape: a proposed server may not take the `app-`
+ * prefix, but a repository's own `.mcp.json` or the person's CLI config may name a server `app-notes`. So an adapter
+ * keeps an app's mark only for a server the session has that app attached under (`keepAttachedAppMarks`), and the
+ * screen reads an unmarked record's `mcp__app-<id>__…` name as an app's only for an app it knows.
  */
 export function centraluServer(server: string): { app?: string } | null {
   if (server === RESERVED_NAME_PREFIX) return {}

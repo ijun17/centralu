@@ -20,6 +20,7 @@ import { CodexSlashCommands } from './slash-commands.js'
 import { runningTurnOf, threadIdOf, turnIdOf } from './turn-reads.js'
 import { permissionOptionsFor, repoFilesConfig, spawnInKeeper } from './launch-config.js'
 import { rpcError } from '../../rpc-error.js'
+import { keepAttachedAppMarks } from '../tool-titles.js'
 
 /** How long we let a resume wait in front of the person — a lock error ("active writer") arrives within this window (measured ~0.3s) */
 export const LAZY_RESUME_WAIT_MS = 3_000
@@ -125,6 +126,9 @@ export class CodexSession implements SessionHandle {
     private emit: EventSink,
   ) {
     this.sessionId = opts.sessionId
+    // An app's mark only for an app attached here (#730 review): a repository's own server may be named `app-<x>`
+    const sink = emit
+    this.emit = (e) => sink(keepAttachedAppMarks(e, () => (opts.apps?.current() ?? []).map((a) => a.server)))
     this.unmapped = new UnmappedTypes('codex', opts.sessionId, CODEX_KNOWN_NOTIFICATIONS)
     this.retry = new RetryActivity(opts.sessionId)
     this.slashCommands = new CodexSlashCommands({

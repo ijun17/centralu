@@ -20,6 +20,7 @@ import { ClaudeCards } from './session-cards.js'
 import { ClaudeServers } from './session-servers.js'
 import { appToolOf, isOrchestratorTool, permissionOptionsFor, settingSourcesFor } from './permissions.js'
 import { liveQueries, probeIds, querySessions } from './live-queries.js'
+import { keepAttachedAppMarks } from '../tool-titles.js'
 
 type ClaudeInput = { text: string; uuid: ReturnType<typeof randomUUID>; parentNote: boolean }
 
@@ -169,6 +170,9 @@ export class ClaudeSession implements SessionHandle {
     private launch: ClaudeLaunch,
   ) {
     this.ended = new Promise<void>((resolve) => (this.markEnded = resolve))
+    // An app's mark only for an app attached here (#730 review): a repository's own server may be named `app-<x>`
+    const sink = emit
+    this.emit = (e) => sink(keepAttachedAppMarks(e, () => (opts.apps?.current() ?? []).map((a) => a.server)))
     this.servers = new ClaudeServers({ sessionId, opts, closed: () => this.closed, query: () => this.query })
     this.cards = new ClaudeCards({ sessionId, opts, emit: (e) => this.emit(e), ownServer: () => this.servers.orchestratorServer !== null })
     // The process runs with these until it is replaced; a model switch the CLI makes is reported against them (#304)
