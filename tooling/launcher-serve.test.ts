@@ -53,6 +53,7 @@ import {
 // @ts-expect-error — plain .mjs shipped inside the npm shim, no types on purpose
 import { hostDirIn } from '../packaging/npm/centralu/bin/platform.mjs'
 import { SLOW } from './test-timing.js'
+import { alive } from '../packages/agent-host/src/process.test-helpers.js'
 
 /**
  * `centralu serve` (#82): the host without the app, on a machine the app reaches over SSH. The
@@ -761,15 +762,6 @@ async function cli(dataDir: string, args: string[]) {
   })
 }
 
-/** Whether the pid names a live process */
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
 
 describe('centralu serve --detach and --stop, end to end (a host from source, a temporary data folder)', () => {
   /** Ends what a failed test left running: only the processes this data folder's files name, which this test started */

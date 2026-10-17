@@ -17,6 +17,7 @@ import { SessionManager } from './sessions/manager.js'
 import { HostServer } from './transport/server.js'
 import { OriginPorts } from './views/origin-ports.js'
 import { ViewHost } from './views/view-host.js'
+import { alive } from './process.test-helpers.js'
 
 /**
  * The fixed view (M4 B-2) — knocks on the real `apps.openView` / `apps.closeView` RPC door.
@@ -54,14 +55,6 @@ const homeCalls = (id: string) => {
   return readFileSync(f, 'utf8').split('\n').filter((l) => l.includes('"t":"home"')).length
 }
 
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
 
 async function start(timing: Partial<RuntimeTiming> = {}, leaseGraceMs?: number) {
   store = new Store()

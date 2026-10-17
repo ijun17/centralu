@@ -16,6 +16,7 @@ import { fixtureGit, removeTree, tempRoot } from './temp-dir.test-helpers.js'
 import { OriginPorts } from './views/origin-ports.js'
 import { ViewHost } from './views/view-host.js'
 import { recordViewHandover, restoreViewHandover, VIEW_HANDOVER_KEY } from './view-handover.js'
+import { alive } from './process.test-helpers.js'
 
 /**
  * App views inside a conversation (M4 B-1) — end to end on the host's side.
@@ -125,14 +126,6 @@ async function start(idleMs = 60_000, limits: Partial<InlineLimits> = {}, maxFai
 }
 
 const frame = (instanceId: string, appId = 'viewer') => views.frame({ app: { appId, projectId }, instanceId, hostOrigin: HOST_ORIGIN })
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
 const viewerPid = () => {
   const lines = readFileSync(join(logs, 'viewer.jsonl'), 'utf8').trim().split('\n')
   return (JSON.parse(lines.findLast((l) => l.includes('"t":"start"'))!) as { pid: number }).pid
