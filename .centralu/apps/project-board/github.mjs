@@ -513,6 +513,17 @@ export async function mergePr(repo, number, sha, subject, body) {
   }
 }
 
+/** Marks a draft pull request ready for review (mark_ready). */
+export async function markReady(repo, number) {
+  checkRepo(repo)
+  try {
+    await runGh(['pr', 'ready', String(number), '-R', repo], { cwd: tmpdir() })
+  } catch (e) {
+    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+    throw new GitHubError('github', `GitHub refused to mark ${repo}#${number} ready for review: ${firstLine(e)}`)
+  }
+}
+
 /** Deletes a branch of the repository on GitHub. Returns null, or the reason GitHub gave. */
 export async function deleteBranch(repo, branch) {
   checkRepo(repo)

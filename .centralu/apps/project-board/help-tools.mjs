@@ -6,7 +6,7 @@ import { answer } from './reply.mjs'
 
 export const GUIDE = [
   'Project board: which tool for which repository task, instead of gh or git by hand.',
-  '- Merge one PR once CI is green → merge_when_green (not gh pr merge).',
+  '- Merge one PR once CI is green → merge_when_green (not gh pr merge). Without maintain or admin, mark it ready for the maintainer → mark_ready (not gh pr ready).',
   '- Merge several PRs or a stack, unattended → queue_merge, then merge_queue to follow and unqueue to take one out (not a loop of gh pr merge / gh run rerun). Run the watch command queue_merge answers in the background to hear when an item needs you or lands.',
   '- A stacked PR after the PR under it merged → rebase_stack (not git rebase --onto and git push --force).',
   '- CI of a PR or commit → ci_status; a failed job → read_failed_job (not gh pr checks / gh run view).',

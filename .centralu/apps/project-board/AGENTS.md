@@ -131,7 +131,14 @@ intermittent failures (#368), and how long a merge may wait.
   `pollSeconds` up to `waitMinutes`, sends a progress notification each poll (Centralu ends a call
   after 10 minutes without one), and stops if the PR's head moves. A Codex session gets an early
   "still running" at 240 s and follows the call with `run_status`.
-- **Never call `merge_when_green` against a real PR in a test**; the tests use a fake `gh`.
+- **`mark_ready`** (`pr`, `note?`, `detail?`): the end of a contributor's flow (#386 merge policy:
+  merging is the maintainer's act, and `merge_when_green`/`queue_merge` refuse without maintain or
+  admin). Marks a draft ready for review (`gh pr ready`) unless a required check failed, which it
+  names as `ci_status` does; pending checks do not stop it, and the answer says CI goes on. `note`
+  becomes a comment for the maintainer under the public text rules (checked before anything is
+  written), ending with the CI line. No permission check: anyone who may push to the pull request
+  may mark it ready.
+- **Never call `merge_when_green` or `mark_ready` against a real PR in a test**; the tests use a fake `gh`.
 
 ### Waiting without blocking
 
@@ -403,7 +410,7 @@ step shows on the screen.
   `reader-tools.mjs` (read_item, read_discussion), `decision-tools.mjs` (the owner's saved answers,
   decision_summaries, list_needs_decision), `contribute-tools.mjs` (comment, edit_comment, file_issue,
   open_pr, commit_check, rebase_stack), `ci-tools.mjs` (ci_status, merge_when_green,
-  read_failed_job), `queue-tools.mjs` (queue_merge, merge_queue, unqueue), `help-tools.mjs` (help),
+  mark_ready, read_failed_job), `queue-tools.mjs` (queue_merge, merge_queue, unqueue), `help-tools.mjs` (help),
   `release-tools.mjs` (release_status, release), `words-tools.mjs` (private_words,
   edit_private_words).
 - What the families share: `config.mjs` (project.json, read once at start), `board.mjs` (the cached
