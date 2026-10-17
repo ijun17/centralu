@@ -666,7 +666,8 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(ghWrites()).toEqual([])
   })
 
-  it.each(['pending', 'failing', 'none'] as const)('blocks every publication approval while main CI is %s despite green PR and release checks', async (ci) => {
+  // A failed own run is never overridden; pending or absent, the bump PR's run on the same tree stands for it (#1042, below)
+  it.each(['failing'] as const)('blocks every publication approval while main CI is %s despite green PR and release checks', async (ci) => {
     const s = repo({ bumped: true })
     bumpEvidence(s)
     g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
@@ -701,6 +702,59 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     const again = await call('release', { step: 'approve', path: s.work, confirm: true })
     expect(again.isError, again.text).toBe(true)
     expect(ghWrites()).toHaveLength(1)
+  })
+
+  /*
+   * #1042 (owner decision, 2026-10-18): approval may use the bump PR's run instead of waiting about 14 minutes for main's
+   * push build, only when the tagged commit's tree is the very tree that run tested.
+   */
+  it.each(['pending', 'none'] as const)("approves from the bump PR's run while the tagged commit's own CI is %s, on the tree that run tested", async (ci) => {
+    const s = repo({ bumped: true })
+    bumpEvidence(s)
+    g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
+    patchState((st) => {
+      st.ci = ci
+      st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'waiting', conclusion: null }))
+      st.pending['61'] = [{ environment: { id: 7, name: 'npm-publish' }, current_user_can_approve: true, reviewers: [] }]
+      st.jobs['61'] = [{ name: 'linux-x64', status: 'waiting', conclusion: null }]
+    })
+    runtime()
+    const status = await call('release_status', { path: s.work })
+    expect(status.data.summary).not.toContain('Wait for green CI')
+    expect(status.data.lines.join(' ')).toContain("CI: PR #900's run on the same tree as the tagged commit")
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.data.approved).toBe(true)
+    expect(r.data.lines.join(' ')).toContain(`The tagged commit's own CI at ${s.tip.slice(0, 7)}: ${ci}.`)
+    expect(r.data.lines.join(' ')).toContain("CI: PR #900's run on the same tree as the tagged commit")
+    expect(ghWrites()).toHaveLength(1)
+    // The PR's run failing now: no evidence, and the own run is still not green
+    patchState((st) => { st.prCi = 'failing' })
+    const again = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(again.isError, again.text).toBe(true)
+    expect(again.data.problems.join(' ')).toContain("The bump PR's run cannot stand for it: PR #900's head checks are not all green")
+    expect(ghWrites()).toHaveLength(1)
+  })
+
+  it("waits for the tagged commit's own CI when its tree is not the one the bump PR's run tested", async () => {
+    const s = repo({ bumped: true })
+    bumpEvidence(s, { differentTree: true })
+    g(s.work, 'push', '-q', 'origin', `${s.tip}:refs/tags/v${NEXT}`)
+    patchState((st) => {
+      st.ci = 'pending'
+      st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status: 'waiting', conclusion: null }))
+      st.pending['61'] = [{ environment: { id: 7, name: 'npm-publish' }, current_user_can_approve: true, reviewers: [] }]
+      st.jobs['61'] = [{ name: 'linux-x64', status: 'waiting', conclusion: null }]
+    })
+    runtime()
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(r.isError, r.text).toBe(true)
+    expect(r.data.problems.join(' ')).toContain('must be green before npm-publish approval')
+    expect(r.data.problems.join(' ')).toContain("The bump PR's run cannot stand for it: PR #900's head has a different tree from the tagged commit")
+    expect(ghWrites()).toEqual([])
+    patchState((st) => { st.ci = 'green' })
+    const approved = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(approved.data.approved, approved.text).toBe(true)
   })
 
   it('does not let a newer green main authorize a tag whose own main CI failed', async () => {

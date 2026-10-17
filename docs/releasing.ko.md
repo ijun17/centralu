@@ -61,7 +61,7 @@ Linux 패키지는 번들 호스트를 한 번 더, 풀린 채로 AppImage 옆�
 - 같은 워크플로가 Playwright 시나리오(`e2e/`)를 ubuntu-24.04에서 데스크톱 앱이 그려지는 두 엔진, WebKit과 Chromium으로 돌린다. 엔진마다 나란히 도는 샤드로 나눈다(`e2e (webkit i/n)`, `e2e (chromium i/n)` 잡). 실패한 샤드는 잡 안에서 한 번 더 돌고, 실행에 그 샤드를 가리키는 `::warning::`을 남긴다(#1035: 흔들리는 샤드 하나가 잡 전체를 다시 돌리게 해 5–7분이 들었다). Playwright 자체는 재시도하지 않으며, 두 번째에야 통과한 테스트도 고칠 테스트다. 첫 시도의 blob 리포트와 트레이스는 `e2e-first-attempt-<엔진>-<샤드>` 아티팩트로 남고, 잡의 30분 제한은 두 번 다 돌 여유를 둔다. 샤드가 두 번 다 실패하면 `e2e report`가 엔진마다 샤드 리포트를 트레이스가 담긴 HTML 리포트 하나로 합쳐, 엔진별 폴더가 든 `e2e-report` 아티팩트로 올린다.
 - **두 단계(tier)** (2026-10-18 오너 결정): PR은 **quick tier**만 돈다. `changes`, `verify`, Windows 단위 테스트(`windows tests (vitest i/n)`)다. 2026-10-11부터 10-18까지 `verify`를 통과하고도 실패한 PR 실행 94개 중 53개를 Windows 테스트가 잡았다. 나머지 잡은 빠지고 아무것도 보고하지 않는다. **full tier**(모든 잡)는 main 푸시, 수동 실행(`workflow_dispatch`: 머지 큐의 batch, 또는 사람), 릴리스 bump PR(버전을 선언하는 `packages/protocol/src/brand.ts`를 바꾸는 PR)에서 돈다. `full tier` 잡은 full 실행에서만 통과하고 quick 실행에서는 skipped다. skipped 잡은 통과로 치므로 보드는 이 체크로 둘을 구분한다. **랜딩하는 것은 모두 그 내용으로 full tier를 통과해야 한다.** 머지 큐는 main 위에 만든 batch(하나짜리 포함)를 full로 돌려 랜딩하거나, PR head 자체의 full 실행으로 랜딩한다. `merge_when_green`은 quick 실행만 있는 PR을 거절한다. PR에 full tier를 직접 돌리려면(UI 작업을 큐에 넣기 전 등) `gh workflow run build.yml --ref <branch>`.
 - 첫 잡 `changes`(`.github/scripts/ci-changes.mjs`)는 tier를 정하고, full tier 안에서는 실행이 main에 더하는 파일을 보고(PR의 base 브랜치가 무엇이든 main과의 merge-base와 비교하므로, 쌓인 PR은 스택 전체로 판단한다. 이름 바꾸기는 옛 경로와 새 경로 둘 다로 센다) 영향을 줄 수 없는 잡을 뺀다. 문서만 바꾸면 `verify`, `windows tests`, WebKit UI 시나리오만 돈다. 테스트만 바꾸면 번들, keeper 종단 테스트, 콘텐츠 검증기를 건너뛴다. 창(`packages/ui`, `core`, `platform`, `apps/web`)만 바꾸면 keeper, 콘텐츠 검증기, 원격 Node의 호스트 테스트를 건너뛴다. 빌드나 CI 설정(`tsconfig*.json`, `package.json`, lockfile, vite 설정, `.github/`)을 바꾸면 모두 돈다. **main에 이미 있는 커밋은 모두 돈다.** full 실행에서 빠진 체크도 제 이름으로 보고된다(`skipped`, 또는 matrix 잡이면 이름이 같은 `…-skipped` 대역). quick 실행에서는 둘 다 돌지 않는다. 브랜치 보호나 ruleset이 필수 체크를 정한다면 `changes`와 `full tier`를 넣어야 한다. 수동 실행(`workflow_dispatch`)은 `everything`을 끄지 않는 한 모두 돌리고, 끄면 파일이 필요로 하는 것만 돌린다(여전히 full tier).
-- `.github/workflows/release.yml` — **릴리스 그 자체.** `v*` 태그 push가 모든 패키지를 순서대로, 한 번의 실행에서 배포한다. `workflow_dispatch`는 태그 없이 같은 것을 리허설한다(`dry_run`, 기본 켜짐). 아래에서 설명한다.
+- `.github/workflows/release.yml` — **릴리스 그 자체.** `v*` 태그 push가 모든 패키지를 순서대로, 한 번의 실행에서 배포한다. `workflow_dispatch`는 태그 없이 같은 것을 리허설한다(`dry_run`, 기본 켜짐). 아래에서 설명한다. 태그 push는 같은 트리에서 리허설이 성공했으면 플랫폼 잡과 shim의 `pnpm verify`를 건너뛴다(#1042, 2026-10-18 오너 결정: 약 13분). `guard`가 GitHub API로 태그된 커밋과 트리가 같은 커밋에서 성공한 `release.yml`의 `workflow_dispatch` 실행을 찾는다(`scripts/release-rehearsal.mjs`). 그래서 손으로 push한 태그는 그런 리허설 없이는 아무것도 건너뛰지 않고, GitHub이 답하지 않으면 verify를 돌린다. macOS, ubuntu-22.04, arm64에서 verify가 도는 곳은 여전히 리허설이다.
 
 브랜치 push나 머지는 여전히 아무것도 배포하지 않는다. **`v*` 태그는 이제 배포한다** — 태그가 존재하는 이유가 그것이다.
 
@@ -91,10 +91,17 @@ commit-to-PR association is required. Release/rehearsal checks with the same job
 cannot replace build checks; check names alone are not evidence of their source.
 
 Tagging does not authorize publication. Before every `npm-publish` approval (platform
-jobs and the later shim job), `approve` requires the tagged commit's **own** CI green, with
-no PR fallback, using only the tagged commit. Unrelated later commits on main do not
-gate platform or shim approval and cannot strand a partially published release. Pending, absent or failed
-CI refuses approval, and tagged `release_status` explains this gate before suggesting
+jobs and the later shim job), `approve` requires CI on the tagged commit, using only the tagged
+commit: its **own** CI green, or, while that is pending or absent, the bump PR's run on the
+same tree (#1042, owner decision 2026-10-18). The PR evidence counts on the rules above (the
+merged bump PR for the tagged version, its squash commit the tagged commit, `git rev-parse
+<sha>^{tree}` identical for both, every required check reported and green on the PR head, the
+`full tier` check passed, the audited workflows): the tagged commit is then exactly the files
+that run tested, and main's push build (about 14 minutes) adds nothing to them. Any other tree
+waits for main's own run, as before. A failed or cancelled own run still refuses: PR evidence
+never overrides a failure. Unrelated later commits on main do not gate platform or shim approval
+and cannot strand a partially published release. Pending or absent CI with no PR evidence, and
+failed CI, refuse approval, and tagged `release_status` explains this gate before suggesting
 approval. Direct approval in GitHub's UI is outside this tool's enforcement.
 
 Generated `chore(release):` bump commits on main use a concurrency group per commit
@@ -134,7 +141,8 @@ change. A clean inline scan is not proof that called code behaves identically. I
 required called script behaves differently on push-to-main and pull requests, wait
 for main's own green run before invoking `rehearse` or `tag`; the automated fallback
 cannot establish equivalence for that script. Publication still waits for main's
-own CI through the approval gate above.
+own CI through the approval gate above, or for the same bump PR evidence on the tagged commit's
+very tree.
 
 ## 1회성 설정
 
@@ -171,7 +179,7 @@ bump는 원격 main에서 git이 추적하는 모든 텍스트 파일을 검사�
 
 4. **승인한다.** 배포는 `npm-publish` 환경에서 대기한다. GitHub은 두 번 묻는다: 함께 대기하는 네 플랫폼 잡에 대해 한 번, 모두 성공한 뒤 shim 잡에 대해 다시 한 번. 그 두 번째 승인이 아직 무언가를 되돌릴 수 있는 마지막 순간이다.
 
-   보드의 `approve`는 매번 게이트를 확인한다: 태그된 커밋 자신의 CI가 green이고, shim 앞에서는 그 실행의 다른 잡이 모두 성공했으며 모든 플랫폼·호스트 전용 패키지가 이 버전으로, 태그된 커밋(`gitHead`)에서 배포되어 레지스트리에 있어야 한다. `wait: true`(와 `confirm: true`)를 주면 그 게이트를 기다렸다가 통과하는 순간 승인한다. 사람이 나중에 알아차리기를 기다리지 않는다(#1035: 0.1.0-beta.26에서 플랫폼 앞 5–6분, shim 앞 14분). 최대 `waitMinutes`(기본 45, 많아야 60)까지 기다리고, 시간이 다 되면 아무것도 승인하지 않고 무엇을 아직 기다렸는지 말한다. 저절로 통과할 수 없는 것(실패한 CI, 실패한 플랫폼 잡, 다른 커밋의 패키지)은 `wait` 없이와 같이 곧바로 거부한다. 태그 뒤에 한 번, 플랫폼 승인 뒤에 한 번 더 부른다. 두 승인은 그대로 남는다. 게이트는 태그된 커밋의 필수 체크를 main이 아니라 그 커밋 자신의 `build.yml`에서 읽는다: main에 나중에 생긴 잡은 태그된 커밋에서 보고되지 않는다. 그 커밋의 빌드 실행이 모두 끝났는데도 빠진 필수 체크가 있으면 곧바로 거부한다. 기다리는 호출은 처음 읽은 것(버전, 태그된 커밋, 릴리스 실행)만 승인한다. 그중 하나가 바뀌거나, GitHub이 아직 대기 중인 잡을 보여 주지 않아 플랫폼과 shim을 구별할 수 없으면 승인하지 않는다. 취소된 호출은 아무것도 승인하지 않는다.
+   보드의 `approve`는 매번 게이트를 확인한다: 태그된 커밋 자신의 CI가 green이고(그것이 아직 pending이면 트리가 똑같은 bump PR의 실행으로 대신한다, #1042), shim 앞에서는 그 실행의 다른 잡이 모두 성공했으며 모든 플랫폼·호스트 전용 패키지가 이 버전으로, 태그된 커밋(`gitHead`)에서 배포되어 레지스트리에 있어야 한다. `wait: true`(와 `confirm: true`)를 주면 그 게이트를 기다렸다가 통과하는 순간 승인한다. 사람이 나중에 알아차리기를 기다리지 않는다(#1035: 0.1.0-beta.26에서 플랫폼 앞 5–6분, shim 앞 14분). 최대 `waitMinutes`(기본 45, 많아야 60)까지 기다리고, 시간이 다 되면 아무것도 승인하지 않고 무엇을 아직 기다렸는지 말한다. 저절로 통과할 수 없는 것(실패한 CI, 실패한 플랫폼 잡, 다른 커밋의 패키지)은 `wait` 없이와 같이 곧바로 거부한다. 태그 뒤에 한 번, 플랫폼 승인 뒤에 한 번 더 부른다. 두 승인은 그대로 남는다. 게이트는 태그된 커밋의 필수 체크를 main이 아니라 그 커밋 자신의 `build.yml`에서 읽는다: main에 나중에 생긴 잡은 태그된 커밋에서 보고되지 않는다. 그 커밋의 빌드 실행이 모두 끝났는데도 빠진 필수 체크가 있으면 곧바로 거부한다. 기다리는 호출은 처음 읽은 것(버전, 태그된 커밋, 릴리스 실행)만 승인한다. 그중 하나가 바뀌거나, GitHub이 아직 대기 중인 잡을 보여 주지 않아 플랫폼과 shim을 구별할 수 없으면 승인하지 않는다. 취소된 호출은 아무것도 승인하지 않는다.
 
 5. 한 번도 설치한 적 없는 머신에서 확인한다: `npm i -g centralu@beta && centralu`.
 

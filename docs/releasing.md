@@ -137,7 +137,12 @@ script rehearses by default and why nothing publishes automatically.
   them as the `e2e-report` artifact, a folder per engine.
 - `.github/workflows/release.yml` — **the release.** A `v*` tag push publishes every
   package, in order, from one run. `workflow_dispatch` rehearses the same thing without a
-  tag (`dry_run`, default on). See below.
+  tag (`dry_run`, default on). See below. A tag push skips `pnpm verify` in its platform jobs
+  and the shim when a rehearsal passed on the same tree (#1042, owner decision 2026-10-18:
+  about 13 minutes): `guard` asks GitHub for a successful `workflow_dispatch` run of
+  `release.yml` on a commit whose tree is the tagged commit's (`scripts/release-rehearsal.mjs`),
+  so a tag pushed by hand skips nothing it has not earned, and anything GitHub does not answer
+  runs verify. The rehearsal stays the one place verify runs on macOS, ubuntu-22.04 and arm64.
 
 A push to a branch or a merge still publishes nothing. **A `v*` tag now does** — that is what
 the tag is for.
@@ -170,10 +175,17 @@ commit-to-PR association is required. Release/rehearsal checks with the same job
 cannot replace build checks; check names alone are not evidence of their source.
 
 Tagging does not authorize publication. Before every `npm-publish` approval (platform
-jobs and the later shim job), `approve` requires the tagged commit's **own** CI green, with
-no PR fallback, using only the tagged commit. Unrelated later commits on main do not
-gate platform or shim approval and cannot strand a partially published release. Pending, absent or failed
-CI refuses approval, and tagged `release_status` explains this gate before suggesting
+jobs and the later shim job), `approve` requires CI on the tagged commit, using only the tagged
+commit: its **own** CI green, or, while that is pending or absent, the bump PR's run on the
+same tree (#1042, owner decision 2026-10-18). The PR evidence counts on the rules above (the
+merged bump PR for the tagged version, its squash commit the tagged commit, `git rev-parse
+<sha>^{tree}` identical for both, every required check reported and green on the PR head, the
+`full tier` check passed, the audited workflows): the tagged commit is then exactly the files
+that run tested, and main's push build (about 14 minutes) adds nothing to them. Any other tree
+waits for main's own run, as before. A failed or cancelled own run still refuses: PR evidence
+never overrides a failure. Unrelated later commits on main do not gate platform or shim approval
+and cannot strand a partially published release. Pending or absent CI with no PR evidence, and
+failed CI, refuse approval, and tagged `release_status` explains this gate before suggesting
 approval. Direct approval in GitHub's UI is outside this tool's enforcement.
 
 Generated `chore(release):` bump commits on main use a concurrency group per commit
@@ -213,7 +225,8 @@ change. A clean inline scan is not proof that called code behaves identically. I
 required called script behaves differently on push-to-main and pull requests, wait
 for main's own green run before invoking `rehearse` or `tag`; the automated fallback
 cannot establish equivalence for that script. Publication still waits for main's
-own CI through the approval gate above.
+own CI through the approval gate above, or for the same bump PR evidence on the tagged commit's
+very tree.
 
 ## One-time setup
 
@@ -331,7 +344,8 @@ The steps by hand:
    for the four platform jobs, which wait together, and again for the shim job after all of
    them have succeeded. That second approval is the last moment anything is reversible.
 
-   The board's `approve` checks its gate each time: the tagged commit's own CI green, and
+   The board's `approve` checks its gate each time: the tagged commit's own CI green (or,
+   while that is pending, the bump PR's run on the very same tree, #1042), and
    before the shim also every other job of the run succeeded and every platform and host-only
    package on the registry at this version, published from the tagged commit (`gitHead`).
    With `wait: true` (and `confirm: true`) it waits for that gate and approves the moment it

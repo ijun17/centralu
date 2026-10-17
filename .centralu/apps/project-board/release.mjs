@@ -146,21 +146,36 @@ async function releaseCi(s, cfg, gh, ci) {
   if (main.verdict === 'failing') return refuse('Main CI failed; PR evidence cannot override it.')
   if (main.verdict === 'green') return { problems: [], lines: [`CI: ${s.main}'s own checks on ${short(s.tip)} are green.`] }
 
-  const pr = (await gh.prsWithHead(s.repo, `${cfg.branchPrefix}${s.version}`)).find((p) => p.state === 'MERGED' && p.baseRefName === s.main)
-  if (!pr) return refuse('No merged bump PR for this version; main CI is required.')
-  if (pr.mergeCommit?.oid !== s.tip) return refuse(`PR #${pr.number}'s merge commit is not main's head; something merged after it or it is not this bump.`)
-  const parents = (await git(s.root, ['rev-list', '--parents', '-n', '1', s.tip])).trim().split(/\s+/).slice(1)
-  if (parents.length !== 1) return refuse(`PR #${pr.number} did not land as a squash commit; main CI is required.`)
-  if (!/^[0-9a-f]{40}$/.test(pr.headRefOid ?? '')) return refuse(`PR #${pr.number}'s head commit is unavailable.`)
-  const [prHead] = await fetchRefs(s.root, s.remote, [pr.headRefOid], `refs/centralu-release/${process.pid}-${++calls}`)
-  if (await treeOf(s.root, s.tip) !== await treeOf(s.root, prHead)) return refuse(`PR #${pr.number}'s head has a different tree from main; main CI is required.`)
+  const ev = await bumpPrEvidence(s, cfg, gh, ci, { sha: s.tip, version: s.version, own: main, at: "main's head", vs: 'main' })
+  if (!ev.ok) return refuse(ev.why)
+  return { problems: [], lines: [`CI: PR #${ev.pr.number}'s run on the same tree (${short(ev.prHead)}); ${s.main} at ${short(s.tip)} is ${main.verdict}.`] }
+}
 
-  const required = main.required ?? []
+/**
+ * The bump PR's run as CI evidence for `sha` (#629; for approval, #1042): the merged bump PR of
+ * `version` (its branch `branchPrefix` + version, into the default branch), whose squash merge
+ * commit `sha` is, with one parent and the same tree as the PR's head; the workflows that hold
+ * `own`'s required checks audited for event context; every required check reported and green on
+ * the PR head, and its full tier run. `at` and `vs` name `sha` in the reasons. Answers
+ * `{ ok: true, pr, prHead }` or `{ ok: false, why }` (why main's own CI is needed).
+ */
+async function bumpPrEvidence(s, cfg, gh, ci, { sha, version, own, at, vs }) {
+  const no = (why) => ({ ok: false, why })
+  const pr = (await gh.prsWithHead(s.repo, `${cfg.branchPrefix}${version}`)).find((p) => p.state === 'MERGED' && p.baseRefName === s.main)
+  if (!pr) return no('No merged bump PR for this version; main CI is required.')
+  if (pr.mergeCommit?.oid !== sha) return no(`PR #${pr.number}'s merge commit is not ${at}; something merged after it or it is not this bump.`)
+  const parents = (await git(s.root, ['rev-list', '--parents', '-n', '1', sha])).trim().split(/\s+/).slice(1)
+  if (parents.length !== 1) return no(`PR #${pr.number} did not land as a squash commit; main CI is required.`)
+  if (!/^[0-9a-f]{40}$/.test(pr.headRefOid ?? '')) return no(`PR #${pr.number}'s head commit is unavailable.`)
+  const [prHead] = await fetchRefs(s.root, s.remote, [pr.headRefOid], `refs/centralu-release/${process.pid}-${++calls}`)
+  if (await treeOf(s.root, sha) !== await treeOf(s.root, prHead)) return no(`PR #${pr.number}'s head has a different tree from ${vs}; main CI is required.`)
+
+  const required = own.required ?? []
   const covered = new Set()
   const reasons = []
   // Release workflows reuse build job names but are a separate gate, not the source of PR CI.
-  for (const file of main.workflows ?? []) {
-    for (const job of workflowEventJobs(await showFile(s.root, s.tip, file))) {
+  for (const file of own.workflows ?? []) {
+    for (const job of workflowEventJobs(await showFile(s.root, sha, file))) {
       const names = job.names.filter((n) => required.includes(n))
       for (const name of names) covered.add(name)
       if (names.length && job.reason) reasons.push(`${file}: ${names.join(', ')} ${job.reason}`)
@@ -168,24 +183,37 @@ async function releaseCi(s, cfg, gh, ci) {
   }
   const unknown = required.filter((name) => !covered.has(name))
   if (!required.length || unknown.length) reasons.push(`required jobs could not be audited${unknown.length ? `: ${unknown.join(', ')}` : ''}`)
-  if (reasons.length) return refuse(`Main CI is required because ${reasons.join('; ')}.`)
+  if (reasons.length) return no(`Main CI is required because ${reasons.join('; ')}.`)
 
   const tested = await ci(prHead, { pr })
-  if (tested.verdict !== 'green') return refuse(`PR #${pr.number}'s head checks are not all green: ${tested.summary}.`)
+  if (tested.verdict !== 'green') return no(`PR #${pr.number}'s head checks are not all green: ${tested.summary}.`)
   // Two tiers: a quick run is green on every check it skipped, and proves nothing about them
-  if (tested.tier !== undefined && tested.tier !== 'full') return refuse(`PR #${pr.number}'s run did not run the full tier of CI (its full tier's check did not pass), so it is no evidence; main CI is required.`)
-  return { problems: [], lines: [`CI: PR #${pr.number}'s run on the same tree (${short(prHead)}); ${s.main} at ${short(s.tip)} is ${main.verdict}.`] }
+  if (tested.tier !== undefined && tested.tier !== 'full') return no(`PR #${pr.number}'s run did not run the full tier of CI (its full tier's check did not pass), so it is no evidence; main CI is required.`)
+  return { ok: true, pr, prHead }
 }
 
 /**
  * Every publication approval judges the bytes under the immutable tag, not a later merge. `later` says
  * the CI may still turn green by itself (pending, or not reported yet), which a waiting approve waits out.
+ *
+ * While the tagged commit's own run is pending or absent, the bump PR's run counts instead when the
+ * tagged commit is that PR's squash with the very tree the run tested (#1042, owner decision
+ * 2026-10-18; `bumpPrEvidence`): main's push build (about 14 minutes) would test the same files
+ * again. Any other tree waits for main's run. A failed or cancelled own run is never overridden.
+ * `version`: the tagged version, whose bump PR is read; without `cfg` and `gh`, the own run only.
  */
-async function approvalCi(s, tagSha, ci) {
+async function approvalCi(s, tagSha, ci, { cfg, gh, version } = {}) {
   // The required set of the tagged commit's own workflows: main's may name jobs it never had (#1035)
   const r = await ci(tagSha, { own: true })
   const lines = [`The tagged commit's own CI at ${short(tagSha)}: ${r.verdict}.`]
   const cancelled = (r.cancelledRuns ?? []).map((run) => `The build for ${tagSha} was cancelled${tagSha !== s.tip ? ' by a newer push' : ''}; re-run it: gh run rerun ${run.id} --repo ${s.repo}`)
+  // Not green and not failed: the bump PR's run on the same tree may stand for it (#1042)
+  let notEvidence = null
+  if (!cancelled.length && (r.verdict === 'pending' || r.verdict === 'none') && cfg && gh && version) {
+    const ev = await bumpPrEvidence(s, cfg, gh, ci, { sha: tagSha, version, own: r, at: 'the tagged commit', vs: 'the tagged commit' })
+    if (ev.ok) return { problems: [], later: false, lines: [...lines, `CI: PR #${ev.pr.number}'s run on the same tree as the tagged commit (${short(ev.prHead)}), in place of its own run, which is ${r.verdict} (#1042).`] }
+    notEvidence = ev.why
+  }
   // Every build run on the commit completed and a required check is still missing: it never will report
   const stuck = !cancelled.length && r.verdict === 'pending' && r.settled && !r.running && r.missing?.length > 0
   const problems = cancelled.length
@@ -193,7 +221,7 @@ async function approvalCi(s, tagSha, ci) {
     : r.verdict === 'green'
       ? []
       : [
-          `The tagged commit's own CI at ${short(tagSha)} must be green before npm-publish approval: ${r.summary}. PR evidence cannot authorize publication.`,
+          `The tagged commit's own CI at ${short(tagSha)} must be green before npm-publish approval: ${r.summary}. ${notEvidence ? `The bump PR's run cannot stand for it: ${notEvidence}` : 'PR evidence cannot authorize publication.'}`,
           ...(stuck ? [`Its build runs have all completed without reporting ${list(r.missing)}, so waiting will not bring them; look at the run, or re-run it.`] : []),
         ]
   return { problems, later: !cancelled.length && !stuck && (r.verdict === 'pending' || r.verdict === 'none'), lines: [...lines, ...cancelled] }
@@ -345,7 +373,7 @@ function notesLines(s) {
 export async function releaseStatus({ repo, dir, cfg, gh, ci }) {
   const s = { repo, ...(await readState({ repo, dir, cfg, gh })) }
   const lines = []
-  const evidence = s.tagged ? await approvalCi(s, s.tagged.sha, ci) : await releaseCi(s, cfg, gh, ci)
+  const evidence = s.tagged ? await approvalCi(s, s.tagged.sha, ci, { cfg, gh, version: s.version }) : await releaseCi(s, cfg, gh, ci)
   lines.push(...evidence.lines)
   const local = await checkoutProblems(s)
   lines.push(local.length ? `Checkout: ${local.join(' ')}` : `Checkout: clean, on ${s.main} at ${short(s.tip)}.`)
@@ -765,7 +793,7 @@ async function approvalGate({ repo, dir, cfg, gh, ci, registry }, version, pin) 
   }
   const what = list(jobs)
   const last = jobs.every((j) => /shim/i.test(j))
-  const evidence = await approvalCi(s, t.sha, ci)
+  const evidence = await approvalCi(s, t.sha, ci, { cfg, gh, version: want })
   const shim = last ? await shimGate(s, cfg, all, jobs, t.sha, want, registry) : { problems: [], later: true, lines: [] }
   const problems = [...evidence.problems, ...shim.problems]
   if (problems.length) return (evidence.problems.length && !evidence.later) || !shim.later ? { refuse: problems } : { later: { problems, why: problems.join(' ') }, pin: pinned }
