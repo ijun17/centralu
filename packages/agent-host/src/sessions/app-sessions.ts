@@ -386,7 +386,7 @@ export class AppSessions {
     this.host.agentRuns.set(id, wait)
     const onAbort = () => {
       if (this.host.agentRuns.get(id) !== wait) return
-      // Failed first: Claude's interrupt ends the turn at once, and the wait would read that as "stopped" (#698)
+      // Failed first: Claude's interrupt ends the turn once the CLI confirms it, and the wait would read that as "stopped" (#698)
       wait.fail(new Error('the request was cancelled, so the agent was stopped'))
       try {
         this.host.handles.get(id)?.interrupt()
