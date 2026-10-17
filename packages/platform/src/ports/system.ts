@@ -66,12 +66,11 @@ export interface SystemPort {
   setWindowAppearance(scheme: 'dark' | 'light' | null, background: string): Promise<void>
 }
 
+/**
+ * What the screen has to know about the platform under it. Only what the UI reads is here: a yes/no that nothing
+ * gates on only lies (#972 item 5), so a port method that cannot work rejects with the reason instead.
+ */
 export type PlatformCapabilities = {
-  osNotifications: boolean
-  dockBadge: boolean
-  globalShortcuts: boolean
-  processSupervision: boolean
-  openInIde: boolean
   /**
    * How many px the OS window controls occupy at the left edge of our own top bar.
    *

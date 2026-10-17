@@ -545,11 +545,6 @@ async function createOnHost(onEndpointChange: (cb: (info: HostInfo) => void) => 
       : {}),
     system: new TauriSystemPort(),
     capabilities: {
-      osNotifications: true,
-      dockBadge: true,
-      globalShortcuts: true,
-      processSupervision: true,
-      openInIde: true,
       windowControlsInset,
       shortcutKeys,
       fileManagerName,

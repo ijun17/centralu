@@ -128,11 +128,6 @@ export class MockPlatform implements Platform {
   }
 
   readonly capabilities = {
-    osNotifications: true,
-    dockBadge: true,
-    globalShortcuts: false,
-    processSupervision: false,
-    openInIde: true,
     // A browser has no window controls to leave room for, and E2E runs against this
     // mock — so the header it measures starts at the window edge.
     windowControlsInset: 0,

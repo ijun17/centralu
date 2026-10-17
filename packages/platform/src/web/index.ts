@@ -283,11 +283,31 @@ class WebProjectPort implements ProjectPort {
   }
 }
 
-/** The web fallback — since the capability is false, the UI hides the feature on its own */
+/**
+ * The browser's system port (the dev build). What a browser cannot do is refused with the reason and where to go
+ * instead, never resolved as if it had happened (#972 item 5): the UI shows every one of these failures as a toast.
+ */
 class WebSystemPort implements SystemPort {
+  private warned = false
+
+  /**
+   * A browser notification, after asking for permission the first time. Like the desktop's, a notification that cannot
+   * be shown says so once rather than on every notice.
+   */
   async notify(title: string, body: string) {
-    if (typeof Notification === 'undefined') return
-    if (Notification.permission === 'granted') new Notification(title, { body })
+    const reason =
+      typeof Notification === 'undefined'
+        ? 'This browser has no notifications — use the desktop app'
+        : (Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission) !== 'granted'
+          ? "Notifications are blocked for this page — allow them in the browser's site settings"
+          : null
+    if (reason === null) {
+      new Notification(title, { body })
+      return
+    }
+    if (this.warned) return
+    this.warned = true
+    throw new Error(reason)
   }
   async alert(_kind: AlertKind, sound: boolean) {
     // A browser has no dock. Sound can be played, but it is routinely blocked by autoplay
@@ -314,11 +334,17 @@ class WebSystemPort implements SystemPort {
     return window.prompt(`${opts.title} — enter the full path (${opts.extensions.map((e) => `.${e}`).join(', ')})`, '')
   }
   async openInIde(_path: string, _line?: number) {
-    /* Only on Tauri (the UI disables this via capability) */
+    throw new Error('A browser cannot open an IDE — use the desktop app')
   }
+  /**
+   * In a browser this is simply opening it outside — a new tab, so it never touches this app's own work. With the
+   * `noopener` feature `window.open` answers null even when the tab opened, which would hide a blocked pop-up; so the
+   * tab is opened plainly and cut off from this page right after.
+   */
   async openUrl(url: string) {
-    // In a browser this is simply opening it outside — a new tab, so it never touches this app's own work
-    window.open(url, '_blank', 'noopener,noreferrer')
+    const tab = window.open(url, '_blank')
+    if (!tab) throw new Error('The browser blocked the new tab — allow pop-ups for this page')
+    tab.opener = null
   }
   onAppLink(_cb: (link: string) => void): () => void {
     // A browser has no OS handing links to this app (M4 E-4) — those only arrive on desktop
@@ -633,11 +659,6 @@ export function createWebPlatform(opts: WebPlatformOptions): Platform {
       reportApply: async (r) => void (await rpc.call('updates.reportApply', r)),
     },
     capabilities: {
-      osNotifications: typeof Notification !== 'undefined',
-      dockBadge: false,
-      globalShortcuts: false,
-      processSupervision: false,
-      openInIde: false,
       // The browser draws no window controls over our page.
       windowControlsInset: 0,
       /*
