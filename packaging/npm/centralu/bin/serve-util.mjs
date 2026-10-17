@@ -3,7 +3,8 @@
  * output, a process check, and waiting.
  */
 import { spawn } from 'node:child_process'
-import { closeSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { closeSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { renameWaitsForReaders } from './platform.mjs'
 
 /**
  * Where `say` writes: stderr, except in a detached launcher, which nobody reads the stderr of and
@@ -31,12 +32,39 @@ export function sayTo(write) {
   sink = write
 }
 
+/** Blocks this thread for `ms`, for the synchronous callers that cannot await (a rename that is retried) */
+export function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+/** What a rename over a file says on Windows while another handle has the target open (a reader, a virus scanner) */
+const BUSY_CODES = new Set(['EPERM', 'EBUSY', 'EACCES'])
+
+/**
+ * `rename`, tried again for up to `budgetMs` while the system refuses it because someone has the target open (#1041;
+ * `retry`: Windows only, `renameWaitsForReaders`). With `retry` off, and for any other error, it is one try. Backs off 10, 20, 40 ... 200 ms between tries; the last
+ * error is thrown when the budget is spent.
+ */
+export function renameRetrying(from, to, { retry = renameWaitsForReaders(), rename = renameSync, sleep = sleepSync, budgetMs = 5_000, now = Date.now } = {}) {
+  const t0 = now()
+  for (let delay = 10; ; delay = Math.min(delay * 2, 200)) {
+    try {
+      return rename(from, to)
+    } catch (e) {
+      if (!retry || !BUSY_CODES.has(e?.code) || now() - t0 + delay > budgetMs) throw e
+    }
+    sleep(delay)
+  }
+}
+
 /**
  * Replaces `file` with `text` at once: written to a temporary file beside it, then renamed over it, so a reader finds
  * the old file or the new one and never half of one. `mode` and `flag` are the temporary file's: a private file is
  * created with its mode from the first byte, and with `wx`, never written into a file that is already there.
+ * On Windows a rename fails while a reader has the target open, so it is retried (`renameRetrying`); when it still
+ * fails, the temporary file is removed and the error thrown, the old file untouched.
  */
-export function replaceFile(file, text, { mode = 0o666, flag = 'w' } = {}) {
+export function replaceFile(file, text, { mode = 0o666, flag = 'w', ...rename } = {}) {
   const tmp = `${file}.${process.pid}.tmp`
   const fd = openSync(tmp, flag, mode)
   try {
@@ -44,7 +72,12 @@ export function replaceFile(file, text, { mode = 0o666, flag = 'w' } = {}) {
   } finally {
     closeSync(fd)
   }
-  renameSync(tmp, file)
+  try {
+    renameRetrying(tmp, file, rename)
+  } catch (e) {
+    rmSync(tmp, { force: true })
+    throw e
+  }
 }
 
 export function runCaptured(command, args, env) {

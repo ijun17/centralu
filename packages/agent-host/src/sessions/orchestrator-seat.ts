@@ -1,4 +1,4 @@
-import { blockedOnQuestion, type Attachment, type ExternalAppInfo, type GitSource, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus } from '@cc/protocol'
+import { blockedOnQuestion, RESERVED_APP_IDS, type Attachment, type ExternalAppInfo, type GitSource, type NormalizedEvent, type PermissionPreset, type SessionInfo, type SettingsApplied, type ToolName, type UpdateStatus } from '@cc/protocol'
 import type { BusyAnswer, BusyChoice, ChildRunResult, HandoffResult, LinkedSessions, OrchestratedSession, OrchestratorTools, RecallHit, RoutedCard } from '../adapters/contract.js'
 import type { AppCheckReport, AppRef } from '../apps/external/runtime.js'
 import type { QueuedRequest, Store } from '../dev-services/store.js'
@@ -111,9 +111,9 @@ export function orchestratorToolsFor(
 ): OrchestratorTools {
   const projects = () => new Map(host.store.listProjects().map((p) => [p.id, p.name]))
   /*
-   * The central orchestrator alone reads the linked machines too (#82 phase 4): a lead and an ordinary
-   * session each have a view inside one machine. Asked when the call runs, as the links are wired after a session
-   * may already have started.
+   * The central orchestrator alone acts on the linked machines (#82 phase 4); an ordinary session of a trusted project
+   * reads them too (#984, `readLinks`), and a lead's view stays inside its members. Asked when the call runs, as the
+   * links are wired after a session may already have started.
    */
   const central = scopeIds === undefined && !ownProject && !hubView
   const linked = () => (central ? host.linkedReader() : null)
@@ -123,10 +123,12 @@ export function orchestratorToolsFor(
     return reader?.machineOf(id) ? reader : null
   }
   /*
-   * The reader's view (#320) is its own project, read when the call runs. A session with no project
-   * sees nothing: `null === null` must not become "every session without a project".
+   * The reader's own project (#320), read when the call runs: what it acts in, and all it reads from an untrusted
+   * project (#984). A session with no project has none: `null === null` must not become "every session without a project".
    */
   const ownProjectId = () => host.meta.get(orchestratorId)?.projectId ?? null
+  /** Where the calling session's context last lost what came before (#974), or null; a hub's view has no caller */
+  const ownCut = () => (orchestratorId && host.meta.has(orchestratorId) ? host.store.lastContextCut(orchestratorId) : null)
   const inScope = (s: SessionInfo) =>
     // Coordinator session (#80, #81): the allow list is its entire view
     scopeIds !== undefined ? scopeIds.includes(s.id)
@@ -134,6 +136,44 @@ export function orchestratorToolsFor(
     // What a hub's window shows of this host: never its orchestrator or coordinators (remote-hub.md §3.4)
     : hubView ? s.kind !== 'orchestrator' && s.kind !== 'coordinator'
     : true
+  /*
+   * What a seat may read (#984, owner decision 2026-10-17). An ordinary session of a **trusted** project reads every
+   * project's sessions, on this computer and on the linked machines, so it can find the session to talk to later. From
+   * an untrusted project it reads its own project only, as before: text planted in a clone nobody trusted could
+   * otherwise search every conversation (the reason #382 keeps ask_project and attach_app from there).
+   *
+   * Outside its own project it reads ordinary sessions only: never an orchestrator or a coordinator, whose
+   * conversations direct others, and never an app's (its builder, or an agent an app asked for), whose conversations
+   * carry what an app was given and nobody else was (`readsOwnProject`, `projectSessions` on a machine). Acting stays
+   * inside `inScope` and behind ask_project's consent; the reader object refuses it anyway.
+   */
+  const trustedIds = () => new Set(host.store.listProjects().filter((p) => p.trusted === true).map((p) => p.id))
+  /** This reader's view reaches past its own project: only from a trusted one */
+  const wide = () => {
+    const own = ownProjectId()
+    return !!ownProject && own !== null && trustedIds().has(own)
+  }
+  const ordinary = (s: SessionInfo) => s.kind === 'worker' && s.projectId !== null && !(s.appId && !RESERVED_APP_IDS.includes(s.appId))
+  const readable = (s: SessionInfo) => inScope(s) || (wide() && ordinary(s))
+  /** The links a read reaches: the central orchestrator's, and a trusted reader's (#984); acting reaches them from the centre only */
+  const readLinks = () => (central || wide() ? host.linkedReader() : null)
+  /** A machine's session as a reader may see it: null when it may not, else whether to mark it untrusted */
+  const remoteReadable = (reader: LinkedSessions, id: string): { untrusted: boolean } | null => {
+    if (central) return { untrusted: false }
+    const facts = reader.readerFacts(id)
+    return facts && !facts.app ? { untrusted: !facts.trusted } : null
+  }
+  /** Said on every row a trusted reader sees of a project nobody trusted (#984): its text may be planted */
+  const NOT_TRUSTED = ' (not trusted)'
+  const projectLabel = (projectId: string | null, names: Map<string, string>, untrusted: (id: string) => boolean) =>
+    !projectId ? '(none)' : (names.get(projectId) ?? '(project no longer exists)') + (names.has(projectId) && untrusted(projectId) ? NOT_TRUSTED : '')
+  /** Which projects a row is marked untrusted for: only in a trusted reader's wide view, where its own is trusted */
+  const untrustedMark = () => {
+    if (!wide()) return () => false
+    const trusted = trustedIds()
+    return (id: string) => !trusted.has(id)
+  }
+  const readError = (id: string) => (ownProject && wide() ? `Not a session you can read: ${id}` : scopeError(id))
   const scopeError = (id: string) =>
     scopeIds !== undefined ? `Not a member of this coordinating session: ${id}`
     : ownProject ? `Not a session in this project: ${id}`
@@ -142,15 +182,23 @@ export function orchestratorToolsFor(
 
   return {
     updateCentralu: async (action, signal) => host.updateCentraluAsked(orchestratorId, action, signal),
-    listSessions: async () => {
+    listSessions: async (opts) => {
       const byId = projects()
-      const mine: OrchestratedSession[] = [...host.meta.values()]
+      const untrusted = untrustedMark()
+      /** The project asked for (#984): by name or id, here or as a machine's row names it */
+      const wanted = opts?.project?.trim().toLowerCase()
+      const inProject = (id: string | null, name: string) => !wanted || id?.toLowerCase() === wanted || name.toLowerCase() === wanted
+      // Its own project's sessions first: the ones it most likely means (#984)
+      const own = ownProject ? ownProjectId() : undefined
+      const all = [...host.meta.values()]
+      const ordered = own ? [...all.filter((s) => s.projectId === own), ...all.filter((s) => s.projectId !== own)] : all
+      const mine: OrchestratedSession[] = ordered
         // Excludes itself — instructing itself would create a loop
-        .filter((s) => s.id !== orchestratorId && inScope(s))
+        .filter((s) => s.id !== orchestratorId && readable(s) && inProject(s.projectId, s.projectId ? (byId.get(s.projectId) ?? '') : ''))
         .map((s) => ({
           sessionId: s.id,
           name: labelOf(host.store, s),
-          project: s.projectId ? (byId.get(s.projectId) ?? '(project no longer exists)') : '(none)',
+          project: projectLabel(s.projectId, byId, untrusted),
           state: s.state,
           ...(blockedOnQuestion(s) ? { waitingOn: 'question' as const } : {}),
           ...(s.worktreeMerged ? { merged: true } : {}),
@@ -162,8 +210,14 @@ export function orchestratorToolsFor(
           lastActive: lastActiveOf(host.store, s.id),
           ...(s.interruption ? { interruption: s.interruption } : {}),
         }))
-      const reader = linked()
-      return reader ? [...mine, ...(await reader.list())] : mine
+      const reader = readLinks()
+      if (!reader) return mine
+      const theirs: OrchestratedSession[] = []
+      for (const row of await reader.list()) {
+        const seen = remoteReadable(reader, row.sessionId)
+        if (seen && inProject(null, row.project)) theirs.push(seen.untrusted ? { ...row, project: row.project + NOT_TRUSTED } : row)
+      }
+      return [...mine, ...theirs]
     },
 
     updateSessionSettings: async (sessionId, s) => {
@@ -258,27 +312,33 @@ export function orchestratorToolsFor(
 
     recall: async (query, limit = 12) => {
       const byId = projects()
+      const untrusted = untrustedMark()
       // Fetches generously, dedupes overlapping hits, then trims — trimming before dedupe would let `limit`
       // get eaten by duplicates
       const raw = host.store.searchMessages(query, limit * 12)
+      const cut = ownCut()
       const mine = raw.filter((h) => {
+        // Its own words only earlier than its last compaction (#974): the model's context lost those and our record
+        // did not. Later ones, or all of them with no compaction, are still in context and finding them is an echo
+        if (h.sessionId === orchestratorId) return cut !== null && h.seq < cut
         const s = host.meta.get(h.sessionId)
-        // Excludes the orchestrator's own words — tracing back from something it said itself would just be
-        // an echo
-        return s && s.id !== orchestratorId && inScope(s)
+        return s && readable(s)
       })
+      // Its own project's hits first, each in its rank (#984): the ones it most likely means
+      const own = ownProject ? ownProjectId() : null
+      if (own) mine.sort((x, y) => Number(host.meta.get(y.sessionId)?.projectId === own) - Number(host.meta.get(x.sessionId)?.projectId === own))
       const out: RecallHit[] = []
       // Asked at once, while this host's own search runs: each machine is a round trip
-      const remote = linked()?.recall(query, limit)
+      const remote = readLinks()?.recall(query, limit)
       for (const h of dedupeNearbyHits(mine)) {
         const s = host.meta.get(h.sessionId)!
         out.push({
           sessionId: s.id,
-          session: labelOf(host.store, s),
-          project: s.projectId ? (byId.get(s.projectId) ?? '(project no longer exists)') : '(none)',
+          session: s.id === orchestratorId ? `${labelOf(host.store, s)} (this session, before compaction)` : labelOf(host.store, s),
+          project: projectLabel(s.projectId, byId, untrusted),
           // Cut from **the surrounding conversation**, not a single delta chunk (a chunk alone says
-          // nothing)
-          snippet: windowAround(contextAt(host.store, s.id, h.seq) || h.body, query, 160),
+          // nothing); its own hit stops at its compaction (#974)
+          snippet: windowAround(contextAt(host.store, s.id, h.seq, s.id === orchestratorId && cut !== null ? cut : undefined) || h.body, query, 160),
           seq: h.seq, // Passed as `around` to read_session, it jumps straight to that spot
           at: timeOf(host.store, h.sessionId, h.seq),
         })
@@ -290,17 +350,41 @@ export function orchestratorToolsFor(
        * do not compare, and appending would let the first source fill the limit before another is heard
        */
       const { hits, notSearched } = await remote
-      return { hits: takeInTurns([out, ...hits], limit), ...(notSearched.length ? { notSearched } : {}) }
+      const links = readLinks()!
+      const theirs = hits.map((list) =>
+        list.flatMap((h) => {
+          const seen = remoteReadable(links, h.sessionId)
+          return !seen ? [] : seen.untrusted ? [{ ...h, project: h.project + NOT_TRUSTED }] : [h]
+        }),
+      )
+      return { hits: takeInTurns([out, ...theirs], limit), ...(notSearched.length ? { notSearched } : {}) }
     },
 
     readSession: async (sessionId, limit = 40, opts) => {
-      // The scope check follows the same rule as sendToSession — only a session within its own scope
-      if (sessionId === orchestratorId) return { ok: false, error: 'Does not read itself' }
+      /*
+       * Itself only at a recall hit from before its last compaction (#974), and only up to that point: the rest is
+       * still in its context. A plain self-read would just echo it back.
+       */
+      const self = sessionId === orchestratorId
+      const cut = self ? ownCut() : null
+      if (self && (cut === null || opts?.around == null || opts.around >= cut)) {
+        return {
+          ok: false,
+          error:
+            cut === null ? 'Does not read itself: your conversation has not been compacted, so all of it is still in your context.'
+            : 'Reads itself only before its last compaction, from a recall hit: search with recall, then pass that hit\'s seq as around.',
+        }
+      }
       // A linked machine's session is read there, by the machine that holds it (#82 phase 4)
-      const reader = linked()
-      if (reader?.machineOf(sessionId)) return reader.read(sessionId, limit, opts)
+      const reader = readLinks()
+      if (!self && reader?.machineOf(sessionId)) {
+        const seen = remoteReadable(reader, sessionId)
+        if (!seen) return { ok: false, error: readError(sessionId) }
+        const r = await reader.read(sessionId, limit, opts)
+        return seen.untrusted && r.ok ? { ...r, untrusted: true } : r
+      }
       const target = host.meta.get(sessionId)
-      if (!target || !inScope(target)) return { ok: false, error: scopeError(sessionId) }
+      if (!target || (!self && !readable(target))) return { ok: false, error: readError(sessionId) }
 
       /*
        * If `around` is given, reads near that point — the seq recall gave can just be passed
@@ -313,12 +397,13 @@ export function orchestratorToolsFor(
        * row was a delta, unchanged, to today's merged rows would mean pulling up hundreds of messages.
        */
       const around = opts?.around
-      const rows = around
+      const read = around
         ? [
             ...host.store.loadMessages(sessionId, limit, around + 1),
             ...host.store.loadMessagesFrom(sessionId, around, limit),
           ]
         : host.store.loadMessages(sessionId, limit * 2)
+      const rows = cut === null ? read : read.filter((r) => r.seq < cut)
 
       const lines: string[] = []
       /** The line that contains the seq `around` points at — the window is cut to align with this */
@@ -374,6 +459,7 @@ export function orchestratorToolsFor(
       return {
         ok: true,
         state: target.state,
+        ...(target.projectId && untrustedMark()(target.projectId) ? { untrusted: true } : {}),
         lines: picked.map((l) => (l.length > 2000 ? l.slice(0, 2000) + '…' : l)),
         ...(cards.length ? { cards } : {}),
       }

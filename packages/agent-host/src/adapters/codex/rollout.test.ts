@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { findRolloutPath, lastCompactSummary } from './rollout.js'
 
 /**
@@ -113,5 +113,25 @@ describe("codex rollout's compact summary (#78)", () => {
   it('an encrypted compaction after a readable one leaves no summary — the older one stopped covering the conversation', async () => {
     put('t-mixed', [compactedLine('', 'older summary. ' + SUMMARY), encryptedLine])
     expect(await lastCompactSummary('t-mixed', dir)).toBeNull()
+  })
+})
+
+describe('where the rollout is looked for when no folder is given', () => {
+  let home = ''
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'cc-codex-home-'))
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  it('reads the summary under CODEX_HOME, where the CLI writes the rollout', async () => {
+    const day = join(home, 'sessions', '2026', '10', '17')
+    mkdirSync(day, { recursive: true })
+    writeFileSync(join(day, 'rollout-2026-10-17T01-02-03-t-home.jsonl'), compactedLine('', SUMMARY) + '\n')
+    vi.stubEnv('CODEX_HOME', home)
+
+    expect(await lastCompactSummary('t-home')).toContain('MGH skill effect')
   })
 })

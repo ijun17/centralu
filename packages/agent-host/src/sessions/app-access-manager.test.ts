@@ -252,7 +252,7 @@ describe('attaching from a session (find_apps, attach_app, detach_app)', () => {
   })
 
   /*
-   * #382: the switch "Let sessions look at their own project" stops the set at once, and detach_app is part of that
+   * #382: the switch "Let sessions look at other sessions" stops the set at once, and detach_app is part of that
    * set — so an app attached through it has to go with it, or the session keeps tools it can no longer detach.
    */
   it('turning the session tools off in Settings takes attached apps away at once; turning them on brings them back', async () => {

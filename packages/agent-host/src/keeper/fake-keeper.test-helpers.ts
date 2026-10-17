@@ -22,6 +22,10 @@ export class FakeKeeper {
   readonly detaches: string[] = []
   /** Refuses every attach (true), or the next n of them, as a keeper whose stream could not be opened does */
   refuseAttach: boolean | number = false
+  /** Answers no attach while set: the attach stays under way, so a test can act in the middle of it */
+  holdAttach = false
+  /** The children whose attach is held, one entry per stream asked for */
+  readonly heldAttaches: string[] = []
   private server: Server
   private controls = new Set<Socket>()
   private sockets = new Set<Socket>()
@@ -112,6 +116,7 @@ export class FakeKeeper {
         }
         const c = this.children.get(String(req.id))
         if (!c) return void s.end(`${JSON.stringify({ ok: false, error: 'no child' })}\n`)
+        if (this.holdAttach) return void this.heldAttaches.push(String(req.id))
         if (this.refuseAttach === true || (typeof this.refuseAttach === 'number' && this.refuseAttach-- > 0)) {
           return void s.end(`${JSON.stringify({ ok: false, error: 'attach refused' })}\n`)
         }

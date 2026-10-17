@@ -193,6 +193,57 @@ describe('reading a linked machine for the hub’s orchestrator', () => {
   })
 })
 
+describe("a linked machine in every session's list and search (#984)", () => {
+  const slow = (): RoutedMachine => ({
+    ...machine({}, { mirror: { sessions: [{ id: 'w9', name: 'Mirrored', projectId: 'p', kind: 'worker', state: 'idle', tool: 'claude' }], projects: [{ id: 'p', name: 'api' }] } }),
+    id: 'slow',
+    name: 'Slow box',
+    q: new Qualifier('slow', 2),
+    call: () => new Promise(() => {}),
+  })
+
+  it('does not wait on a machine that never answers: its list comes from the mirror and its search is named as not searched', async () => {
+    const fine = machine({ 'host.sessions': [row()], 'host.recall': [{ sessionId: 'w1', session: 'Worker', project: 'api', snippet: 'found', seq: 4 }] })
+    const reader = linkedSessions(() => [slow(), fine], undefined, undefined, { lookupMs: 30 })
+    const listed = await reader.list()
+    expect(listed.map((s) => [s.sessionId, s.away])).toEqual([
+      ['slow.w9', 'did not answer within 30 ms'],
+      ['m1.w1', undefined],
+    ])
+    const { hits, notSearched } = await reader.recall('found', 5)
+    expect(hits.flat().map((h) => h.sessionId)).toEqual(['m1.w1'])
+    expect(notSearched).toEqual(['Slow box (did not answer within 30 ms)'])
+  })
+
+  it("tells a reader from the mirror whether a machine's session is an app's and whether its project is trusted", () => {
+    const m = machine(
+      {},
+      {
+        mirror: {
+          sessions: [
+            { id: 'w1', projectId: 'p1', kind: 'worker' },
+            { id: 'w2', projectId: 'p2', kind: 'worker' },
+            { id: 'ag', projectId: 'p1', kind: 'worker', appId: 'notes' },
+            { id: 'bu', projectId: null, kind: 'worker', appId: 'notes' },
+            { id: 'or', projectId: null, kind: 'orchestrator' },
+          ],
+          projects: [{ id: 'p1', trusted: true }, { id: 'p2', trusted: false }],
+        },
+      },
+    )
+    const reader = linkedSessions(() => [m])
+    expect(['m1.w1', 'm1.w2', 'm1.ag', 'm1.bu', 'm1.or', 'm1.gone', 'w1'].map((id) => reader.readerFacts(id))).toEqual([
+      { app: false, trusted: true },
+      { app: false, trusted: false },
+      { app: true, trusted: true },
+      { app: true, trusted: false },
+      null,
+      null,
+      null,
+    ])
+  })
+})
+
 describe('the projects of linked machines, for ask_project (#700)', () => {
   it('does not wait on a machine that is slow to list its projects: it is counted as away, from its mirror, and the others are heard', async () => {
     const slow: RoutedMachine = {

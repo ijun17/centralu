@@ -21,6 +21,7 @@ agent-host/src/
 │  └─ json-lines.ts     # 줄 단위 JSON: \n에서만 나눈다(U+2028에서도 끊는 readline은 쓰지 않는다), 대기 중인 요청 (#428)
 ├─ adapters/
 │  ├─ contract.ts       # AgentAdapter 인터페이스 + 능력 타입
+│  ├─ contract/         # 계약의 큰 부분: 오케스트레이터 도구, 세션 앱, 도구의 프로세스
 │  ├─ registry.ts       # 도구 → 어댑터 지도
 │  ├─ claude/           # Claude Agent SDK 기반 (orchestrator-mcp.ts 포함)
 │  └─ codex/            # app-server JSON-RPC 클라이언트 (직접 작성. stdio 다리 포함)
@@ -70,7 +71,7 @@ agent-host/src/
 | `orchestrator` | 하나뿐인 오케스트레이터 | 모든 세션 | 빌더 전용을 뺀 전부 | 역할과 사용법 |
 | `scoped` | 코디네이터(#80). 관제 앱의 작업만 만들었고, 그것은 만들던 RPC와 함께 #372에서 걷어냈다. 저장소에 있는 것은 이 프로필로 깨어난다 | 자기 멤버 | 목록, 읽기, 보내기 | 자기 경계 |
 | `builder` | 앱을 만드는 세션 (M4 C-3) | 자기 앱 | `check` | 만들고 검사하기 |
-| `reader` | 프로젝트에 속한 그 밖의 모든 세션 (#320), 예전 워크트리 매니저 포함 | 자기 프로젝트, 호출할 때 읽음. 자기가 띄운 에이전트에 손을 댄다 | `read_session`(id 없으면 목록), `recall`, `app_guide`; `ask_project`(#371, §1.2); `start_agent`, `agent_session`(#561, §1.2.1). 그리고 `find_apps`, `attach_app`, `detach_app`(#371 A, apps.md §9.4) | 사람이 달리 말하지 않는 한 Centralu의 도구를 먼저 (#564) |
+| `reader` | 프로젝트에 속한 그 밖의 모든 세션 (#320), 예전 워크트리 매니저 포함 | 신뢰한 프로젝트에서는 이 컴퓨터와 연결된 기계의 모든 프로젝트에서 평범한 세션을 읽는다(오케스트레이터, 코디네이터, 앱의 세션은 빼고). 신뢰하지 않은 프로젝트에서는 자기 프로젝트만 읽는다 (#984). 자기가 띄운 에이전트에 손을 댄다 | `read_session`(id 없으면 목록), `recall`, `app_guide`; `ask_project`(#371, §1.2); `start_agent`, `agent_session`(#561, §1.2.1). 그리고 `find_apps`, `attach_app`, `detach_app`(#371 A, apps.md §9.4) | 사람이 달리 말하지 않는 한 Centralu의 도구를 먼저 (#564) |
 
 지침은 두 CLI 모두에서 모델에 닿지만, 들어가는 문이 다르다. Claude는 프로세스 안 서버의 `instructions`로
 받는다. codex-cli 0.160.0은 서버의 지침을 어떤 모델에게도 보여 주지 않으므로(#525,
@@ -161,7 +162,7 @@ Centralu 안에서 도는 에이전트는 Centralu의 기능을 먼저 쓴다. �
 말하는 머리말로 시작한다(`orchestratorRole`. 명령 층이 있는 자리에서는 `centralu_commands`를 이름으로 부른다). 이
 머리말은 tool-cost.md §9의 2차 측정에서 요청마다 33~55토큰이 들었고 퇴행도, 유지된 이득도 없었으며, #564부터 기본으로
 켜진다. 역할이 없는 일반 세션은 같은 규칙을 도구의 지시문으로 받는다(`READER_INSTRUCTIONS`): 어떤 필요에 어떤 도구인지를
-말하는 한 문장이다(`READER_FIRST`: 예전 대화는 `recall`, 이 프로젝트의 다른 세션은 `read_session`, 다른 프로젝트의 일은
+말하는 한 문장이다(`READER_FIRST`: 예전 대화는 `recall`, 다른 세션은 `read_session`, 다른 프로젝트의 일은
 `ask_project`, 다른 프로젝트의 앱은 `find_apps`, 그리고 오래 걸리는 일, 다른 CLI나 워크트리에서 할 일, 사람이
 지켜보거나 이어 갈 일은 CLI 자신의 Agent 도구가 아니라 `start_agent`. 턴 안의 짧은 보조 일은 CLI 자신의 서브에이전트가
 맡는다: 2026-10-12 소유자 결정). 일반 세션 묶음에 들어오면서 사람이 말로 하는 필요에 답하는 도구는
@@ -1187,7 +1188,7 @@ id로 다시 연다: 각 인스턴스는 `open()`처럼 자기 앱을 다시 붙
 sessionId, version?}`(띄운 CLI 버전, #297, §4.6), `{kind:"terminal", id, cwd}`, `{kind:"command", cwd, command, runId, startedAt}`. 새 호스트는 옛 호스트의
 태그를 계속 읽을 수 있어야 한다: 자식은 자기를 띄운 빌드보다 오래 산다.
 
-- **에이전트.** 매니저는 어댑터에 `ProcessSource`(`adapters/contract.ts`)를 넘긴다: 키퍼에서 `spawn`하거나, 쥐어 둔
+- **에이전트.** 매니저는 어댑터에 `ProcessSource`(`adapters/contract/process.ts`)를 넘긴다: 키퍼에서 `spawn`하거나, 쥐어 둔
   프로세스를 `adopt`한다. claude는 이것을 `spawnClaudeCodeProcess`로 받고, `CodexClient`는 띄우는 대신 그 프로세스를
   받는다. `KeeperAgentProcess`는 둘이 쓰는 `ChildProcess`의 표면을 갖지만, `kill()`은 CLI의 프로세스 그룹 전체(아래)에
   대해 키퍼에 보내는 요청이고 프로세스를 놓았거나 호스트가 끝나는 중이면 결코 보내지 않는다(SDK는 주인이 끝날 때 자기
@@ -1990,19 +1991,28 @@ UI는 `supported: false`를 에러가 아니라 안내로 그린다.
 `adapters/history-text.ts`는 이런 블록만 제거한다 — 전체를 버리지는 않는데,
 주입된 블록 뒤에 진짜 사용자 발화가 이어지는 경우가 많기 때문이다.
 제거하고 나서 아무것도 남지 않을 때만 그 줄을 버린다.
-도구 호출과 결과는 이름만 남기고 버린다: 가져오기의 목적은 대화를 되찾는 것이지,
-실행 로그를 되살리는 것이 아니다.
+**도구 호출은 실시간으로 보였던 대로 돌아온다** ([#843](https://github.com/ijun17/centralu/issues/843)). 기록에서 말이 아닌
+것은 모두 어댑터의 실시간 정규화기가 읽고(Claude 메시지는 `normalizeMessage`, Codex 항목은 시작하고 끝난 것처럼
+`normalizeNotification`), 읽는 쪽은 그중 도구 호출, 그 결과, 압축을 남긴다(`adapters/history-events.ts`). 생각, 사용량,
+계획, 이미지, 활동은 다시 읽은 대화에 들어가지 않는다. 전에는 말만 돌아오고 Claude 호출은 이름 한 줄로 남았기 때문에,
+가져온 대화는 지켜본 대화가 명령과 출력을 보여 주던 자리에 `Bash`만 보여 줬다. 한도는 가장 새로운 쪽의 말과 압축만
+센다(`lastLines`): 한 턴의 도구 행은 그 턴에 딸려 오므로, 호출이 많은 턴이 오래된 턴을 밀어내지 않는다. Claude 쪽 읽기도
+기록을 통째로 읽고 같은 끝을 남긴다: SDK의 `limit`은 앞에서부터 잘라서 가장 오래된 행을 주고 도구 행까지 셌다(#1006).
+가져오기 한 번은 이를 한꺼번에 쓰므로, 가장 새로운 호출부터 도구 행 400개까지, 결과마다 기록 20,000자까지만 남긴다.
+실시간과 다른 점: Claude 에이전트 카드는 보고가 기록에 없다고 말한다(`getSessionMessages`가 `tool_use_result`를 남기지
+않아 결과가 모델에게 보내는 글이다). 결과 안의 이미지는 돌아오지 않는다.
 
 **도구가 압축한 자리는 남긴다** ([#303](https://github.com/ijun17/centralu/issues/303)). Codex의 기록(지금은 full 항목의
 `thread/turns/list`, #342 전에는 `thread/read`)은
 압축 하나하나를 그것이 돈 턴 안의 `{ type: 'contextCompaction', id }` 항목으로 돌려준다 — `/compact`는 자기만의
 턴으로, 자동 압축은 사용자 메시지 앞에 (codex-cli 0.147.0, 0.153.4, 0.160.0에서 측정,
-`scripts/probe-codex-compaction.mts`). 읽는 쪽은 이것을 압축 줄(`role: 'system', marker: 'compaction'`인
-`HistoryMessage`)로 바꾸고, 호스트는 그것을 실시간 `compaction` 이벤트가 남기는 것과 똑같은 행(kind `marker`,
-이벤트 자체가 payload)으로 저장한다. 그래서 화면도 인계 기준점(pivot)도 다시 읽은 압축과 실시간으로 본 압축을
-구별하지 못한다. 한 번만 저장한다: 따라잡기는 우리 마지막 메시지 바로 뒤의 압축 줄을, 우리 기록이 그 자리에 이미
-가진 수만큼 건너뛰고(이 호스트가 실시간으로 본 압축은 양쪽에 다 있다) 나머지를 붙인다. Claude 쪽 읽기는
-`getSessionMessages`에서 사용자·어시스턴트 메시지만 남기므로, 가져온 Claude 대화에는 여전히 마커가 없다.
+`scripts/probe-codex-compaction.mts`). 읽는 쪽은 이것을 이벤트 줄(`role: 'system', event`인
+`HistoryMessage`)로 바꾸고, 호스트는 그것을 같은 이벤트가 실시간으로 남기는 것과 똑같은 행(기록 종류, 압축이면
+`marker`, 이벤트 자체가 payload)으로 저장한다. 그래서 화면도 인계 기준점(pivot)도 다시 읽은 압축이나 도구 호출과
+실시간으로 본 것을 구별하지 못한다. 한 번만 저장한다: 따라잡기는 우리 마지막 메시지 바로 뒤의 이벤트 줄 가운데 우리
+기록이 그 자리에 이미 가진 것(압축은 수로, 도구 호출과 결과는 id로 맞춘다. 이 호스트가 실시간으로 본 것은 양쪽에 다
+있다)을 건너뛰고 나머지를 붙인다. Claude 기록에는 압축 행이 없으므로(`getSessionMessages`가 시스템 행을 버린다),
+읽는 쪽은 CLI의 요약이 사용자 턴으로 서 있는 자리에 압축을 표시한다.
 
 ### 8.4 가져온 세션의 정체성
 

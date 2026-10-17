@@ -14,7 +14,9 @@ holding the read-only `reader` set (#320) is still a worker here: the gate asks 
 source directs sessions, not whether it has tools. Worker-originated records are excluded from
 privileged conversation memory. Read-session, preview and recall text is framed as structured
 untrusted data, not human authorization — that now includes what one ordinary session reads of
-another in the same project; the reader set reads no other project and cannot send.
+another. The reader set cannot send. From a trusted project it reads other projects' and linked machines' ordinary
+sessions (#984), each row of a project nobody trusted marked "(not trusted)"; from an untrusted project it reads its
+own project only, so text planted there cannot search every conversation (the #382 rule).
 
 Who wrote each line travels with it (#838). `read_session` gives a line another session sent `from` and one an app
 sent `fromApp` (`authorOf` in `sessions/transcript-view.ts`); `recall`'s context marks every message
@@ -279,7 +281,7 @@ front door" below).
 | `orchestrator` | The central orchestrator | Every session |
 | `scoped` | A coordinating session | Its member sessions |
 | `builder` | An app's builder session | Its own app (`check`) |
-| `reader` | Every other session in a project, while Settings → Orchestrator → "Let sessions look at their own project" is on | Its own project; acts only on the agents it started (`start_agent`: the project's trust under `normal`, a consent card under `safe`, #673) and another project only through a consent card |
+| `reader` | Every other session in a project, while Settings → Orchestrator → "Let sessions look at other sessions" is on | From a trusted project, reads every project's ordinary sessions on this computer and the linked machines (not an orchestrator's, a coordinator's or an app's); from an untrusted one, its own project only (#984); acts only on the agents it started (`start_agent`: the project's trust under `normal`, a consent card under `safe`, #673) and another project only through a consent card |
 | none | A session with the switch off, a session with no project, and an agent an app started (`run_agent`) | No Centralu server at all |
 
 The worktree manager's profile (`manager`: list, read and send to its worktree sessions, propose one, delete a merged
@@ -520,7 +522,7 @@ downgrade. The session-tools switch and app-sharing switch still apply to every 
 
 | Change | orchestrator | scoped | builder | reader |
 |---|---|---|---|---|
-| "Let sessions look at their own project" off | — | — | — | Becomes none. Calls refused at once (`readerToolsFor`; the bridge through `toolProfileOf`); apps it attached leave at once (`onDemand.allowed` in `useExternalApps`, recounted by `setUiPreferences`). Ones allowed "once" are forgotten (`AppAccess.dropOnce`); the rest come back if it is turned on again (#382); the schemas leave Claude at the next start |
+| "Let sessions look at other sessions" off | — | — | — | Becomes none. Calls refused at once (`readerToolsFor`; the bridge through `toolProfileOf`); apps it attached leave at once (`onDemand.allowed` in `useExternalApps`, recounted by `setUiPreferences`). Ones allowed "once" are forgotten (`AppAccess.dropOnce`); the rest come back if it is turned on again (#382); the schemas leave Claude at the next start |
 | Its project loses trust | No change (reads no project files) | No change (reads no project files) | Its app stops, so `check` cannot start it | Settings files at the next start; its project's apps stop and leave at once; `find_apps` and `attach_app` refused; apps it attached leave at once. `ask_project` and `start_agent` refused (#382, #561); its standing `start_agent` cards, its sessions' `ask_project` and fork cards, and its queued `ask_project` requests are withdrawn and their callers told (#673); those of an `auto` session stay, and are read again at delivery |
 | The other project loses trust | — | — | — | Apps attached from it leave at once; `ask_project` to it still runs, its card says it is not trusted, and the existing target session follows its trust |
 | The person revokes a pair in Settings | — | — | — | Apps attached under "always" leave at once; the next `ask_project` or `attach_app` asks again, and an `ask_project` request for the pair still queued is withdrawn (one an `auto` session queued stays, and is read again at delivery); for a project's `agents` row, the next `start_agent` of a `safe` session asks again (a child already running is left to finish; a `normal` session needs no row in a trusted project, #673) |

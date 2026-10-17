@@ -15,6 +15,9 @@
     "waitMinutes": 40,
     "pollSeconds": 30
   },
+  "queue": {
+    "batch": { "min": 2, "max": 6 }
+  },
   "release": {
     "source": { "path": "packages/protocol/src/brand.ts", "pattern": "^export const APP_VERSION = '([^']+)'" },
     "versionFiles": [

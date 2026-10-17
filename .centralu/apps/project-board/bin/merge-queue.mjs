@@ -12,7 +12,7 @@
 // 2 a wrong argument or an unreadable queue, 130 or 143 stopped by SIGINT or SIGTERM (the tick in
 // flight finishes and is written down first).
 import { releaseLease, readQueue, startDriver, TICK_MS } from '../queue-driver.mjs'
-import { ACTIVE } from '../queue.mjs'
+import { watchState } from '../queue.mjs'
 import { shellQuote } from '../util.mjs'
 
 const USAGE = 'Usage: node .centralu/apps/project-board/bin/merge-queue.mjs watch --data <folder> [--owner <name>] [--after <seq>] [--minutes <n>]'
@@ -33,7 +33,6 @@ if (!ok || !opts.data || (opts.after !== null && !Number.isInteger(opts.after)) 
   process.exit(2)
 }
 
-const mine = (x) => !opts.owner || x.owner === opts.owner
 let after
 try {
   after = opts.after ?? readQueue(opts.data).seq
@@ -65,12 +64,17 @@ function look() {
     console.error(e.message)
     return finish(2, [])
   }
-  const news = q.events.filter((e) => e.seq > after && e.notify && mine(e))
-  const left = q.items.filter((i) => ACTIVE.has(i.state) && mine(i))
-  const tail = left.length ? [`${left.length} still queued${opts.owner ? ` for ${opts.owner}` : ''}. To hear about them, run again in the background:`, again(q.seq)] : ['Nothing left queued.']
-  if (news.length) return finish(news.some((e) => e.kind === 'attention') ? 3 : 0, [...news.map((e) => e.text), ...tail])
-  if (!left.length) return finish(0, [`Nothing queued${opts.owner ? ` for ${opts.owner}` : ''}.`])
-  if (Date.now() > deadline) return finish(6, [`No news in ${opts.minutes} minutes.`, ...tail])
+  // A batch whose last member landed still has its end to do (and maybe a notice): wait for it
+  const { news, left, batchPending, done } = watchState(q, { owner: opts.owner, after })
+  const tail = left.length
+    ? [`${left.length} still queued${opts.owner ? ` for ${opts.owner}` : ''}. To hear about them, run again in the background:`, again(q.seq)]
+    : batchPending
+      ? ['A batch is still finishing. To hear when it has, run again in the background:', again(q.seq)]
+      : ['Nothing left queued.']
+  const code = news.some((e) => e.kind === 'attention') ? 3 : 0
+  if (done && news.length) return finish(code, [...news.map((e) => e.text), ...tail])
+  if (done) return finish(0, [`Nothing queued${opts.owner ? ` for ${opts.owner}` : ''}.`])
+  if (Date.now() > deadline) return news.length ? finish(code, [...news.map((e) => e.text), ...tail]) : finish(6, [`No news in ${opts.minutes} minutes.`, ...tail])
   // The driver's timer does not hold the process; this one does
   setTimeout(look, TICK_MS)
 }

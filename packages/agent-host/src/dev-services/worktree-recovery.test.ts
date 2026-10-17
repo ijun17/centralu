@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { execFileSync } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -375,15 +375,22 @@ describe('worktree recovery follow-ups (#608)', () => {
   }, 30_000 * SLOW)
 
   it('review: scans a long missing-trunk history and a tree larger than the stdout limit in bounded calls', async () => {
-    const inputGit = (args: string[], input: string) => execFileSync('git', [
-      '-c', 'user.name=Recovery test', '-c', 'user.email=recovery@example.test', ...args,
-    ], { cwd: repo, input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim()
+    /*
+     * Not execFileSync (#368): writing a 32 MiB tree and 2,000 commits held the worker for 10 s on a fast Windows PC,
+     * and a held worker answers nothing (vitest gives up on its own messages at 60 s).
+     */
+    const inputGit = (args: string[], input: string) => new Promise<string>((resolve, reject) => {
+      const child = execFile('git', ['-c', 'user.name=Recovery test', '-c', 'user.email=recovery@example.test', ...args], {
+        cwd: repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+      }, (err, out) => (err ? reject(err) : resolve(out.trim())))
+      child.stdin!.end(input)
+    })
     const blob = git(repo, ['rev-parse', 'HEAD:file.txt'])
     // No giant checkout: real Git trees/commits are sufficient to reproduce the old
     // 32 MiB ls-tree overflow, and raw history exceeds that buffer as well.
     const rows = Array.from({ length: 140_000 }, (_, n) => `100644 blob ${blob}\t${String(n).padStart(6, '0')}-${'x'.repeat(190)}\n`).join('')
     expect(Buffer.byteLength(rows)).toBeGreaterThan(32 * 1024 * 1024)
-    const tree = inputGit(['mktree'], rows)
+    const tree = await inputGit(['mktree'], rows)
     const initial = git(repo, ['rev-parse', 'HEAD'])
     let stream = ''
     for (let n = 0; n < 2_000; n++) {
@@ -392,7 +399,7 @@ describe('worktree recovery follow-ups (#608)', () => {
       if (n === 1_999) stream += `deleteall\nM 100644 ${blob} file.txt\n`
       stream += '\n'
     }
-    inputGit(['fast-import', '--quiet'], stream)
+    await inputGit(['fast-import', '--quiet'], stream)
     git(repo, ['worktree', 'add', child, branch])
     const calls = vi.spyOn(gitModule, 'runGit')
     try {

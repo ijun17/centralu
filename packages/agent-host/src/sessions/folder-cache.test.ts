@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AdapterCapabilities, ToolName } from '@cc/protocol'
 import type { AgentAdapter, CreateSessionOpts, EventSink, SessionHandle } from '../adapters/contract.js'
 import { Store } from '../dev-services/store.js'
@@ -121,10 +121,28 @@ describe('the session manager writes its per-folder caches through remember (#39
 
   it('slash commands the tool answered', async () => {
     adapter.answers = true
+    /*
+     * Waits on the save itself (#786). Polling for it with `vi.waitFor` cost one 50 ms interval per folder, about
+     * 2 of the test's 3 to 4 s, and a loaded full run then took it past its 5 s limit.
+     */
+    const saved = new Set<string>()
+    let onSave = () => {}
+    const save = store.saveCommands.bind(store)
+    store.saveCommands = (tool, cwd, commands) => {
+      save(tool, cwd, commands)
+      saved.add(cwd)
+      onSave()
+    }
+    const savedIn = (dir: string) =>
+      new Promise<void>((resolve) => {
+        onSave = () => saved.has(dir) && resolve()
+        onSave()
+      })
     for (let i = 0; i < FOLDERS; i++) {
       const { dir } = await sessionIn(i)
       // Creating a session fetches its commands ahead of time; the answer is saved right after it is cached
-      await vi.waitFor(() => expect(store.loadCommands('claude', dir)).not.toBeNull())
+      await savedIn(dir)
+      expect(store.loadCommands('claude', dir)).not.toBeNull()
     }
     expect(held('commandCache')).toBe(FOLDER_CACHE_KEYS)
   })

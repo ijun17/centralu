@@ -1464,6 +1464,7 @@
           el('a', { class: 'num', href: url, tabindex: '-1', onclick: read }, item.ref),
           el('a', { class: 'title', href: url, tabindex: '0', title: 'Read it here (with ⌘ or Ctrl: on GitHub)', onclick: read }, item.title ?? item.ref),
           stack ? el('span', { class: 'tag' }, stack) : null,
+          item.batch ? el('span', { class: 'tag', title: `Tested together with others on ${item.batch.branch}` }, `batch ${item.batch.id}${item.batch.state === 'landing' ? ', landing' : ''}`) : null,
           item.state === 'attention' && item.reason?.kind ? el('span', { class: 'tag decision' }, item.reason.kind) : null,
           state ? el('span', { class: 'state' }, state) : null,
           button,

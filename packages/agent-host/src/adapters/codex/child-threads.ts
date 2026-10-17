@@ -1,5 +1,5 @@
 import type { EventSink } from '../contract.js'
-import { childSteps, CodexChildTracker } from './normalize.js'
+import { childSteps, CodexChildTracker } from './child-tracker.js'
 
 /**
  * How many child items wait for their launch call at most (#222, `unlinked`). The wait is milliseconds long (measured:

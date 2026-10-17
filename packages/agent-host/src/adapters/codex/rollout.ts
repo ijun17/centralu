@@ -1,7 +1,7 @@
 import { createReadStream } from 'node:fs'
 import { readdir } from 'node:fs/promises'
-import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { codexHome } from './home.js'
 import { readLines } from '../../transport/json-lines.js'
 
 /**
@@ -33,7 +33,7 @@ const MIN_SUMMARY_CHARS = 200
 
 export async function findRolloutPath(
   threadId: string,
-  sessionsDir = join(homedir(), '.codex', 'sessions'),
+  sessionsDir = join(codexHome(), 'sessions'),
 ): Promise<string | null> {
   try {
     const suffix = `-${threadId}.jsonl`

@@ -56,7 +56,14 @@ describe('gh stopped by an abort (#368)', () => {
   let root: string
   let childPid: number | undefined
   afterEach(() => {
-    if (childPid !== undefined && alive(childPid)) process.kill(childPid)
+    // It can end between the check and the kill (ESRCH failed this cleanup on Linux CI, #368)
+    if (childPid !== undefined && alive(childPid)) {
+      try {
+        process.kill(childPid)
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'ESRCH') throw e
+      }
+    }
     vi.unstubAllEnvs()
     __forgetPrograms()
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 })

@@ -238,14 +238,27 @@ const viewState = (page: Page, sid: string, callId: string) =>
     return v ? { state: v.state as string, reason: (v.reason ?? null) as string | null, instanceId: v.instanceId as string | null } : null
   }, { s: sid, c: callId })
 /** The conversation list's scrolling panel — the ancestor that scrolls, of the box the rows sit on with absolute positioning */
-const scrollChat = (page: Page, to: 'top' | 'bottom') =>
+const chatScrollTop = (page: Page, set?: 'bottom') =>
   page.evaluate((where) => {
     const row = document.querySelector('[data-index]') as HTMLElement | null
     let el: HTMLElement | null = row
     while (el && !(el.scrollHeight > el.clientHeight && /(auto|scroll)/.test(getComputedStyle(el).overflowY))) el = el.parentElement
     if (!el) throw new Error('no scrolling chat')
-    el.scrollTop = where === 'top' ? 0 : el.scrollHeight
-  }, to)
+    if (where === 'bottom') el.scrollTop = el.scrollHeight
+    return el.scrollTop
+  }, set)
+/*
+ * Up by a wheel, as a person does (#368). Set by script, a scrollTop of 0 with no input behind it is what the list
+ * reads as layout moving the view, not the reader: when a row finished measuring in the same frame (WebKit, 2 of 20
+ * runs), the follow effect put the view back at the bottom and the row above never mounted.
+ */
+const scrollChat = async (page: Page, to: 'top' | 'bottom') => {
+  if (to === 'bottom') return void (await chatScrollTop(page, 'bottom'))
+  await page.locator('[data-index]').first().hover()
+  await page.mouse.wheel(0, -100_000)
+  // WebKitGTK animates a wheel's scroll over several frames (see e2e/fixtures/app-theme.ts)
+  await expect.poll(() => chatScrollTop(page)).toBe(0)
+}
 
 test('a view scrolled far out of view sends teardown then collapses into a placeholder, and Reopen reopens it with the input and result it held', async ({ page }) => {
   const { pid, sid } = await sessionWithApp(page)

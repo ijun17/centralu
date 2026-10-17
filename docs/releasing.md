@@ -70,6 +70,20 @@ script rehearses by default and why nothing publishes automatically.
   the bundles as artifacts. Since nobody on the project owns a Linux machine, this is the
   only place a Linux build is ever exercised. Download the artifact to try it; GitHub
   artifacts are zips and drop the exec bit, so `chmod +x` the AppImage after unzipping.
+- Its first job, `changes` (`.github/scripts/ci-changes.mjs`), leaves out of a pull request
+  what it cannot affect, by the files it adds to main (compared with its merge-base with main,
+  whatever its base branch, so a stacked pull request is judged by the whole stack; renames count
+  as both paths): documents alone run `verify`, `windows tests` and the WebKit UI scenarios only
+  (WebKit runs on every pull request, owner decision 2026-10-11); tests alone skip the bundles,
+  the keeper end to end and the content verifier; the window alone (`packages/ui`, `core`,
+  `platform`, `apps/web`) skips the keeper, the content verifier and the host's tests on the
+  remotes' Node; a build or CI config (`tsconfig*.json`, `package.json`, the lockfile, a vite
+  config, `.github/`) runs everything. **A commit already on main runs everything**, so main's own
+  runs never skip. A left-out check still reports under its name (`skipped`, or a `…-skipped`
+  stand-in for a matrix job), so a required set sees it. If branch protection or a ruleset ever
+  names the required checks, it must include `changes`: the gated jobs and their stand-ins wait
+  on it, and without it a failed `changes` leaves both skipped. A manual run
+  (`workflow_dispatch`) runs everything unless `everything` is unticked.
 - On macOS, CI passes `--bundles app` and uploads `Centralu-app.tar.gz`, preserving the app's
   executable bits and signature. It no longer creates or uploads a DMG (#628): intermittent
   `bundle_dmg.sh` failures blocked otherwise valid builds, and no workflow consumes that image.
@@ -146,7 +160,7 @@ Workflow event audit (2026-10-13):
 
 | Workflow and jobs | Event-dependent behavior | Required for this CI gate? |
 | --- | --- | --- |
-| `build.yml`: `bundle`, `verify`, `content-verify`, `windows-tests`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux` | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps without changing test behavior. | Yes: the configured CI workflow, unless branch protection specifies the set. |
+| `build.yml`: `changes`, `bundle`, `verify`, `content-verify`, `windows-tests`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux`, and the `…-skipped` stand-ins | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps without changing test behavior. `changes` (2026-10-17, `.github/scripts/ci-changes.mjs`, reviewed by hand: it reads no event) runs everything for a commit already on main and leaves out of a pull request the jobs its files cannot affect. A bump PR changes the product's version files, which run everything, so its run is the same set of jobs as main's (`tooling/build-workflow.test.ts` checks the version's source file). | Yes: the configured CI workflow, unless branch protection specifies the set. |
 | `release.yml`: `guard`, `platform`, `shim` | Tag push or manual dispatch; `guard` validates the tag on push and dry-run controls publishing. Neither main push nor PR runs it. | No; rehearsal remains a separate tag prerequisite. |
 | `shell-release.yml`: `guard`, `build`, `publish` | Manual dispatch only. | No. |
 | `local-content-sign.yml`: `validate`, `sign` | Manual dispatch only; real signing requires main. | No. |

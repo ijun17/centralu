@@ -122,7 +122,7 @@ Every session has a permission preset: Safe (ask for everything), Normal (ask wh
 Changing a live session's settings restarts the conversation in place — the change applies from
 the next turn on.
 App settings (the Settings button in the top bar): Orchestrator (change the orchestrator's tools
-and approved skills, and whether every session can look at its own project), Apps (the app list), Notifications, Appearance, Permissions (saved approval rules),
+and approved skills, and whether every session can look at other sessions), Apps (the app list), Notifications, Appearance, Permissions (saved approval rules),
 Shortcuts (the shortcut list), and Updates.`,
 
   updates: `# Updates
@@ -188,9 +188,11 @@ ${toolLines(seats.orchestrator)}
 ${toolLines(seats.scoped)}
 
 ## Tools every other session calls
-Only that session's own project: it reads its sessions, and with the person's consent starts other
-agents there (in its folder or a new worktree) and works with the ones it started; ask_project
-reaches another project. Settings → Orchestrator can turn them off.
+It reads other sessions: from a trusted project any project's, here and on linked machines (not the
+orchestrator's or an app's); from an untrusted one its own project's. It acts
+only in its own project: with the person's consent it starts other agents there (in its folder or a
+new worktree) and works with the ones it started; ask_project reaches another project. Settings →
+Orchestrator can turn them off.
 ${toolLines(seats.reader)}`
 }
 

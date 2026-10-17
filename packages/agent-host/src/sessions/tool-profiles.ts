@@ -23,7 +23,7 @@ export type ToolProfileFacts = {
    * the bridge asks about.
    */
   builder: boolean
-  /** Settings' "Let sessions look at their own project" (#320): the reader set is on unless the person turned it off */
+  /** Settings' "Let sessions look at other sessions" (#320): the reader set is on unless the person turned it off */
   sessionTools: boolean
 }
 

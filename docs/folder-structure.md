@@ -118,10 +118,16 @@ centralu/
 │        │                      #   reader (usage.ts) and the orchestrator's MCP server (claude/orchestrator-mcp.ts,
 │        │                      #   codex/orchestrator-bridge.mjs)
 │        │                      #   each tool's index.ts is the adapter, session.ts its session, with the session's
-│        │                      #   parts beside it (#850): claude/ session-cards, session-servers, permissions;
+│        │                      #   parts beside it (#850): claude/ session-cards, session-servers, permissions, sdk-query,
+│        │                      #   refresh-race, tracked-input, schedule-look;
 │        │                      #   codex/ server-requests, thread-servers, child-threads, slash-commands,
-│        │                      #   launch-config. Shared by both: tool-result, file-changes, images, plan,
-│        │                      #   token-usage, tool-titles, retry-activity, session-kit (#843)
+│        │                      #   launch-config, thread-open, turns, background-resume. codex/normalize.ts maps notifications, with what it reads beside
+│        │                      #   it: items, approvals, thread-settings, token-readings, child-tracker,
+│        │                      #   known-notifications. claude/normalize.ts maps messages, one family per file:
+│        │                      #   cli-messages, model-messages, turn-ending. contract.ts re-exports contract/: orchestrator,
+│        │                      #   session-apps, process. Shared by both: tool-result, file-changes, images, plan,
+│        │                      #   token-usage, tool-titles, retry-activity, session-kit, subagent-steps,
+│        │                      #   history-events (#843)
 │        ├─ sessions/           # SessionManager (manager.ts) and the parts moved out of it (#428): child-ownership, delegation-flow (start_agent in start-agent-flow, what it reaches of the manager in delegation-host), ask-project-flow, handoff-flow, handoff-record, external-conversations, session-record, tool-queries, app-sessions, app-messages, session-trash, host-cards, card-rest, delegated-cards, interruptions, sleep, turn-answer, linked-reports, orchestrator-seat, restart-policy, worktree-sessions, transcript-view, orchestrator-proposals, queued-requests, routed-cards, handoff-children, child-reports, interruption-watch, launch-records, merge-checks, project-creation, updates-asked, project-consents, ui-preferences, session-app-wiring, session-tools, handoff-notes; the session apps (session-apps, app-access, app-agents, app-builder, app-guide); the orchestrator tools' runner (orchestrator-tools) and the parts moved out of it (#850): tool-definitions, tool-seats, tool-answers, tool-profiles
 │        ├─ apps/external/      # external apps (apps.md): runtime.ts is the one door (ExternalApps); the parts moved out of it (#850): runtime-types, app-entry, app-lifecycle, app-calls, change-reflector, app-check, app-folders, error-log; and placement, folder-walk, discovery, manifest, desk/broker, capabilities, runs, handover/imports/versions
 │        ├─ views/              # app views: the view host, its CSP, the proxy page

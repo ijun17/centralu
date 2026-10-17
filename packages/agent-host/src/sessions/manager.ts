@@ -859,7 +859,7 @@ export class SessionManager {
     this.linkedApps = lookup
   }
 
-  /** The linked machines' sessions, for the central orchestrator's reading tools (#82 phase 4). None without links */
+  /** The linked machines' sessions, for the central orchestrator's and a trusted reader's reading tools (#82 phase 4, #984). None without links */
   private linkedReader: LinkedSessions | null = null
 
   useLinkedReader(reader: LinkedSessions): void {
