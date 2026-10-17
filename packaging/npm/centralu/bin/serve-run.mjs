@@ -7,7 +7,7 @@ import { isAlive, say } from './serve-util.mjs'
 import { SERVE_STATE_FILE, SERVE_PID_FILE, serveDataDir, ensureServeState, recordServePort, rotateServeToken, heldHere, lockHolderPid, removeServePid } from './serve-files.mjs'
 import { DEFAULT_SERVE_PORT, SERVE_PORT_TRIES, chooseServePort, listensHere, windowsListening } from './serve-port.mjs'
 import { keepLauncher, installInfo } from './serve-install.mjs'
-import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, hostProvesOf, probeHost } from './serve-host.mjs'
+import { protocolVersionOf, connectionLine, hostEnv, hostCommand, readyPort, hostProvesOf, probeHost, tokenLine } from './serve-host.mjs'
 import { autostartInfo } from './serve-autostart.mjs'
 
 /**
@@ -99,10 +99,12 @@ export async function runServe({ env, home, entry, version, cliPath, port: asked
   const plan = hostCommand(execPath, entry, { port, dataDir, platform })
   const child = spawn(plan.command, plan.args, {
     stdio: ['pipe', 'pipe', logFd === null ? 'inherit' : 'pipe'],
-    env: hostEnv(env, { token: state.token, dataDir, version, hostDir: dirname(entry) }),
+    env: hostEnv(env, { dataDir, version, hostDir: dirname(entry) }),
     detached: plan.detached,
     windowsHide: true,
   })
+  // The token, before anything else on the pipe the host watches (#538); stdin stays open for --watch-parent
+  child.stdin.write(tokenLine(state.token))
 
   let ready = false
   if (logFd !== null) {

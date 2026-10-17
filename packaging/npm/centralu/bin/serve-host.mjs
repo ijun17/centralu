@@ -54,9 +54,10 @@ export function connectionLine({ port, token, version, protocolVersion, dataDir,
 /**
  * The host's environment.
  *
- * - The token travels in `CC_HOST_TOKEN`, not `--token`: arguments are readable by every user on
- *   the machine (`ps`), a process's environment only by its owner. The host deletes it after
- *   reading, so nothing it spawns inherits it.
+ * - The token is in neither: arguments are readable by every user on the machine (`ps`), and a
+ *   process's start environment by every process of its user for as long as it runs (`ps eww`,
+ *   #502). `CC_HOST_TOKEN_ON_STDIN=1` tells the host it comes as the first line on its stdin
+ *   (`tokenLine`, #538), which is a pipe to this launcher anyway (`--watch-parent`).
  * - `CC_HOST_SOURCE` is the record `hello_ok.build` is made from (keeper-link.ts); without it a
  *   client could not see which version the host it reached is.
  * - Headless: no `DISPLAY` / `WAYLAND_DISPLAY`. Nothing the host or an agent starts gets a screen
@@ -66,15 +67,20 @@ export function connectionLine({ port, token, version, protocolVersion, dataDir,
  *   `CENTRALU_MANAGED`, which is the launcher's business and would otherwise reach every agent.
  * - `CC_SERVE=1` lets the host take `host.stop` (`--stop`); a host the app runs refuses it.
  */
-export function hostEnv(env, { token, dataDir, version, hostDir }) {
+export function hostEnv(env, { dataDir, version, hostDir }) {
   const out = { ...env }
-  for (const k of ['DISPLAY', 'WAYLAND_DISPLAY', 'CC_KEEPER', 'CC_FRONT_DOOR', 'CC_DEV', 'CC_HOST_TOKEN', 'CC_HOST_SOURCE', 'CENTRALU_MANAGED']) delete out[k]
+  for (const k of ['DISPLAY', 'WAYLAND_DISPLAY', 'CC_KEEPER', 'CC_FRONT_DOOR', 'CC_DEV', 'CC_HOST_TOKEN', 'CC_HOST_TOKEN_ON_STDIN', 'CC_HOST_SOURCE', 'CENTRALU_MANAGED']) delete out[k]
   out.CC_DATA_DIR = dataDir
   // The host `host.stop` may end (`centralu serve --stop`): nothing else stops it in order on Windows
   out.CC_SERVE = '1'
-  out.CC_HOST_TOKEN = token
+  out.CC_HOST_TOKEN_ON_STDIN = '1'
   out.CC_HOST_SOURCE = JSON.stringify({ version, bundlePath: hostDir })
   return out
+}
+
+/** The first line on the host's stdin: the token (#538, the host's `readHandedToken`) */
+export function tokenLine(token) {
+  return `${JSON.stringify({ token })}\n`
 }
 
 /**
