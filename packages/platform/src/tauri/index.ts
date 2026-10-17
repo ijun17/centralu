@@ -8,6 +8,7 @@ import type { AlertKind, Platform, RelaunchCheck, RelaunchPort, ShortcutKeys, Sy
 import type { HostBuild } from '@cc/protocol'
 import { createWebPlatform } from '../web/index.js'
 import { finishRelaunchSwap, type RelaunchSwapResult } from './relaunch-swap.js'
+import { asError, rethrowAsError, toError } from './to-error.js'
 import type { ShellStart, SwapView } from './switch-plan.js'
 
 export {
@@ -129,7 +130,7 @@ async function waitForHost(timeoutMs = 30_000): Promise<HostInfo> {
  * false if it was already running (an answer will follow shortly).
  */
 export async function restartHost(): Promise<boolean> {
-  return invoke<boolean>('restart_host')
+  return invoke<boolean>('restart_host').catch(rethrowAsError)
 }
 
 /**
@@ -206,7 +207,7 @@ export type ShellHostBuild = {
 }
 
 export async function hostBuild(): Promise<ShellHostBuild> {
-  return invoke<ShellHostBuild>('host_build')
+  return invoke<ShellHostBuild>('host_build').catch(rethrowAsError)
 }
 
 /**
@@ -290,14 +291,14 @@ export class TauriSystemPort implements SystemPort {
    */
   async notify(title: string, body: string): Promise<void> {
     if (this.granted === null) {
-      this.granted = (await isPermissionGranted()) || (await requestPermission()) === 'granted'
+      this.granted = await asError(async () => (await isPermissionGranted()) || (await requestPermission()) === 'granted')
     }
     if (!this.granted) {
       if (this.warned) return
       this.warned = true
       throw new Error('Notifications are turned off — enable them for Centralu in System Settings')
     }
-    sendNotification({ title, body })
+    await asError(() => sendNotification({ title, body }))
   }
 
   /**
@@ -315,11 +316,11 @@ export class TauriSystemPort implements SystemPort {
    * impossible to find out.
    */
   async alert(kind: AlertKind, sound: boolean): Promise<void> {
-    await invoke('alert', { kind, sound })
+    await invoke('alert', { kind, sound }).catch(rethrowAsError)
   }
 
   async setBadge(count: number): Promise<void> {
-    await invoke('set_badge', { count: Math.max(0, Math.trunc(count)) })
+    await invoke('set_badge', { count: Math.max(0, Math.trunc(count)) }).catch(rethrowAsError)
   }
 
   async openInIde(path: string, line?: number): Promise<void> {
@@ -343,12 +344,14 @@ export class TauriSystemPort implements SystemPort {
 
   /** One file (M4 E-3 — the .zip to import). This is the dialog plugin's `open`, so it uses the `dialog:default` permission already granted, as is */
   async pickFile(opts: { title: string; extensions: string[] }): Promise<string | null> {
-    const picked = await openDialog({ directory: false, multiple: false, title: opts.title, filters: [{ name: opts.title, extensions: opts.extensions }] })
+    const picked = await asError(() =>
+      openDialog({ directory: false, multiple: false, title: opts.title, filters: [{ name: opts.title, extensions: opts.extensions }] }),
+    )
     return typeof picked === 'string' ? picked : null
   }
 
   async startWindowDrag(): Promise<void> {
-    await getCurrentWindow().startDragging()
+    await asError(() => getCurrentWindow().startDragging())
   }
 
   /**
@@ -358,10 +361,12 @@ export class TauriSystemPort implements SystemPort {
    * CSS colour (`rgb(15, 15, 15)`); Tauri wants channels, so anything else is left alone.
    */
   async setWindowAppearance(scheme: 'dark' | 'light' | null, background: string): Promise<void> {
-    const win = getCurrentWindow()
-    await win.setTheme(scheme)
-    const rgb = /^rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)/.exec(background)
-    if (rgb) await win.setBackgroundColor([Number(rgb[1]), Number(rgb[2]), Number(rgb[3])])
+    await asError(async () => {
+      const win = getCurrentWindow()
+      await win.setTheme(scheme)
+      const rgb = /^rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)/.exec(background)
+      if (rgb) await win.setBackgroundColor([Number(rgb[1]), Number(rgb[2]), Number(rgb[3])])
+    })
   }
 
   /**
@@ -388,26 +393,14 @@ export class TauriSystemPort implements SystemPort {
   }
 }
 
-/**
- * Turns the `Err(String)` a command gave into an Error and rethrows it.
- *
- * Tauri passes a Rust-side `Err` through as a rejection value **exactly as the string it is**.
- * Since it is not an Error, `e.message` comes out undefined, and the screen shows a failure
- * with no reason, like "Could not delete a.ts: undefined" — the most useless shape a failure
- * can take, saying that it failed without saying why.
- */
-function rethrowAsError(e: unknown): never {
-  throw e instanceof Error ? e : new Error(String(e))
-}
-
 /** Brings the window forward (a notification click, a global shortcut) */
 export async function focusWindow(): Promise<void> {
-  await invoke('focus_window')
+  await invoke('focus_window').catch(rethrowAsError)
 }
 
 /** Directory picker — replaces typing a path, which is what web dev does instead (FR-19) */
 export async function pickDirectory(): Promise<string | null> {
-  const picked = await openDialog({ directory: true, multiple: false, title: 'Choose project directory' })
+  const picked = await asError(() => openDialog({ directory: true, multiple: false, title: 'Choose project directory' }))
   return typeof picked === 'string' ? picked : null
 }
 
@@ -418,7 +411,7 @@ export async function pickDirectory(): Promise<string | null> {
  */
 export function tauriRelaunchPort(): RelaunchPort {
   return {
-    check: () => invoke<RelaunchCheck>('relaunch_info').catch((e) => ({ ready: false, reason: String(e) })),
+    check: () => invoke<RelaunchCheck>('relaunch_info').catch((e: unknown) => ({ ready: false, reason: toError(e).message })),
     relaunch: () => invoke<void>('apply_update_relaunch').catch(rethrowAsError),
     watchBusy: (cb) =>
       watchHostBuild(
