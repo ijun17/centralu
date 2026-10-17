@@ -665,6 +665,8 @@ export const Composer = memo(function Composer({
               if (action === 'up') return (e.preventDefault(), ac.move(-1))
               if (action === 'close') return (e.preventDefault(), setCaret(-1))
               if (action === 'pick') {
+                // The list on screen answers the previous keystroke: wait for this one's answer, never send meanwhile
+                if (ac.stale) return void e.preventDefault()
                 const item = ac.items[ac.index]
                 if (item) {
                   e.preventDefault()

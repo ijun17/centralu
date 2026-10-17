@@ -755,3 +755,83 @@ test('Nothing sends while an attachment is uploading, and it goes out with the t
     await page.evaluate(() => (window as any).__mock.sentAttachments.map((a: { name: string }) => a.name)),
   ).toEqual(['shot.png'])
 })
+
+/*
+ * #842 item 13: the file list on screen answers the previous keystroke until the new search answers. Enter in that
+ * moment inserted one of the previous query's files.
+ */
+test('Enter while the @ search for the latest keystroke is on its way picks nothing stale, and sends nothing', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [
+      { name: 'store.ts', path: 'src/store.ts', isDir: false, ignored: false },
+      { name: 'stats.ts', path: 'src/stats.ts', isDir: false, ignored: false },
+    ]
+    const real = m.fs.search
+    // The searches for "sta" and "stat" wait for the test; "st" answers at once
+    const waiting: (() => void)[] = []
+    ;(window as any).__answerStat = () => waiting.splice(0).forEach((answer) => answer())
+    m.fs.search = (projectId: string, query: string, limit: number) => {
+      if (!query.startsWith('sta')) return real(projectId, query, limit)
+      return new Promise((done) => waiting.push(() => done(real(projectId, query, limit))))
+    }
+  })
+  await newSession(page, 'alpha', 'task')
+  const input = page.getByTestId('prompt-input')
+  await input.fill('look at @st')
+  await expect(page.getByTestId('autocomplete-item-0')).toContainText('store.ts')
+
+  // Enter at once: the list waits for this keystroke's answer, and says it is searching
+  await page.keyboard.type('at')
+  await page.keyboard.press('Enter')
+  await expect(input).toHaveValue('look at @stat')
+  await expect(page.getByTestId('autocomplete-loading')).toHaveText('Searching…')
+
+  await page.evaluate(() => (window as any).__answerStat())
+  await expect(page.getByTestId('autocomplete-item-0')).toContainText('stats.ts')
+  await page.keyboard.press('Enter')
+  await expect(input).toHaveValue('look at @src/stats.ts ')
+})
+
+/* #842 review of item 13: a search that never answers does not hold the composer, and a query that found nothing does not reopen the menu */
+test('a hung @ search stops holding Enter, and the message goes out', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [{ name: 'store.ts', path: 'src/store.ts', isDir: false, ignored: false }]
+    const real = m.fs.search
+    m.fs.search = (projectId: string, query: string, limit: number) =>
+      query === 'nev' ? new Promise(() => {}) : real(projectId, query, limit)
+  })
+  await newSession(page, 'alpha', 'task')
+  const input = page.getByTestId('prompt-input')
+  await input.fill('look at @ne')
+  await page.keyboard.type('v')
+  // The wait is bounded: once it gives up the list closes, and Enter sends
+  await expect(page.getByTestId('autocomplete')).toBeHidden({ timeout: 10_000 })
+  await page.keyboard.press('Enter')
+  await expect(input).toHaveValue('')
+  await expect(page.getByTestId('chat-stream')).toContainText('look at @nev')
+})
+
+test('narrowing an @ query that found nothing does not bring the menu back', async ({ page }) => {
+  await setup(page, { projects: ['/tmp/alpha'] })
+  await page.evaluate(() => {
+    const m = (window as any).__mock
+    m.fsState.entries[''] = [{ name: 'store.ts', path: 'src/store.ts', isDir: false, ignored: false }]
+    ;(window as any).__menuSeen = 0
+    new MutationObserver(() => {
+      if (document.querySelector('[data-testid="autocomplete"]')) (window as any).__menuSeen++
+    }).observe(document.body, { childList: true, subtree: true })
+  })
+  await newSession(page, 'alpha', 'task')
+  const input = page.getByTestId('prompt-input')
+  await input.fill('look at @zz')
+  await expect(page.getByTestId('autocomplete')).toBeHidden()
+  await page.evaluate(() => ((window as any).__menuSeen = 0))
+  await page.keyboard.type('zzz')
+  await expect(input).toHaveValue('look at @zzzzz')
+  await page.waitForTimeout(300)
+  expect(await page.evaluate(() => (window as any).__menuSeen)).toBe(0)
+})
