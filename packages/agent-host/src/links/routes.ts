@@ -137,6 +137,8 @@ export const ROUTES: { readonly [M in RpcMethodName]: Route } = {
   'projects.setCommands': project(),
   'projects.setWorktreeSetup': project(),
   'projects.gitStatus': project(projectInfo),
+  // A remote address, nothing of this machine's ids in it
+  'projects.origin': project(),
   'worktrees.createManager': project(sessionInfo),
   'worktrees.setTrunk': project(),
   'git.status': project(),

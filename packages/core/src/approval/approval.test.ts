@@ -30,6 +30,10 @@ describe('the start-agent question (#561)', () => {
     expect(agentStartQuestion({ ...d, worktree: { branch: 'centralu/parser' } })).toBe(
       'Start Codex in "website", in a new worktree on "centralu/parser", with safe permissions, to write the parser?',
     )
+    // On a linked machine (#1038): whose computer it runs on is part of what is agreed to
+    expect(agentStartQuestion({ ...d, machine: 'Windows PC', worktree: { branch: 'centralu/parser' } })).toBe(
+      'Start Codex in "website" on "Windows PC", in a new worktree on "centralu/parser", with safe permissions, to write the parser?',
+    )
   })
 })
 

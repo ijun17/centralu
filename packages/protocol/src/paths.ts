@@ -133,6 +133,38 @@ export function gitSourceError(url: string): string | null {
   return 'A local folder is not cloned — give an https://, ssh:// or user@host:path address.'
 }
 
+/**
+ * Which repository a remote address names, for telling two checkouts of one repository apart from two repositories
+ * (#1038: start_agent on a linked machine finds the project there that is a checkout of the caller's). Every way to
+ * write one address gives one key: the scheme, the user, a port, a trailing `/` or `.git` and the case are dropped, so
+ * `git@github.com:Me/App.git`, `ssh://git@github.com/me/app` and `https://github.com/me/app/` are all
+ * `github.com/me/app`. A local path keeps its separators as `/`. Null for an empty address.
+ */
+export function gitRemoteKey(url: string): string | null {
+  let u = url.trim()
+  if (!u) return null
+  u = u.replace(/[?#].*$/, '').replace(/[/\\]+$/, '').replace(/\.git$/i, '').replace(/[/\\]+$/, '')
+  const scheme = /^([A-Za-z][A-Za-z0-9+.-]*):\/\/(.*)$/.exec(u)
+  let key: string
+  if (scheme) {
+    // [user@]host[:port]/path; a file:// address is its path
+    const rest = scheme[2]!
+    if (scheme[1]!.toLowerCase() === 'file') key = rest
+    else {
+      const slash = rest.indexOf('/')
+      const authority = slash < 0 ? rest : rest.slice(0, slash)
+      const host = authority.replace(/^[^@]*@/, '').replace(/:\d*$/, '')
+      key = `${host}/${slash < 0 ? '' : rest.slice(slash + 1)}`
+    }
+  } else {
+    // scp-like [user@]host:path, where the host is more than a Windows drive letter; otherwise a local path
+    const scp = /^(?:[^@/\\]+@)?([A-Za-z0-9.-]{2,}):(.+)$/.exec(u)
+    key = scp ? `${scp[1]}/${scp[2]}` : u
+  }
+  key = key.replace(/\\/g, '/').replace(/\/~\//, '/').replace(/\/{2,}/g, '/').replace(/\/+$/, '').toLowerCase()
+  return key || null
+}
+
 /** The folder name a clone of `url` gets by default: the repository's own name, without `.git` (#515) */
 export function repoNameOf(url: string): string {
   const path = url.trim().replace(/[?#].*$/, '').replace(/[/\\]+$/, '').replace(/\.git$/i, '')

@@ -615,6 +615,7 @@ export function createRpcHandler(
     'processes.stop': async (p) =>
       stopStrays(RpcMethods['processes.stop'].params.parse(p).pids, mgr.folderRoots(), process.pid, await heldOrUnknown()),
     'projects.list': async () => mgr.listProjects(),
+    'projects.origin': async (p) => ({ origin: await mgr.projectOrigin(RpcMethods['projects.origin'].params.parse(p).projectId) }),
     'projects.reorder': async (p) =>
       mgr.reorderProjects(RpcMethods['projects.reorder'].params.parse(p).orderedIds),
     'projects.delete': async (p) => {

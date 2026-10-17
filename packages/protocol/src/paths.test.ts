@@ -1,6 +1,6 @@
 import { posix, win32 } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { folderNameError, gitSourceError, osPathBaseName, repoNameOf, wireBaseName, wireJoin, wireParent, wireSegments } from './paths.js'
+import { folderNameError, gitRemoteKey, gitSourceError, osPathBaseName, repoNameOf, wireBaseName, wireJoin, wireParent, wireSegments } from './paths.js'
 
 /** A repository a new project is cloned from (#515): https, ssh and scp-like only */
 describe('a clone source', () => {
@@ -48,6 +48,36 @@ describe('a clone source', () => {
     expect(repoNameOf('git@github.com:me/app.git')).toBe('app')
     expect(repoNameOf('host:app.git')).toBe('app')
     expect(repoNameOf('ssh://git@host:22/team/site.GIT')).toBe('site')
+  })
+})
+
+/** Which repository a remote names (#1038): every way to write one address is one key, two repositories are two */
+describe('a remote address as one repository', () => {
+  it('reads https, ssh and scp-like addresses of one repository as the same', () => {
+    const one = [
+      'https://github.com/Me/App.git',
+      'https://github.com/me/app/',
+      'https://user@github.com:443/me/app',
+      'ssh://git@github.com/me/app.git',
+      'ssh://git@github.com:22/me/app',
+      'git@github.com:me/app.git',
+      'github.com:me/app',
+      '  git@github.com:me/app.git/  ',
+    ]
+    for (const url of one) expect(gitRemoteKey(url), url).toBe('github.com/me/app')
+  })
+
+  it('tells two repositories, or two hosts, apart', () => {
+    expect(gitRemoteKey('git@github.com:me/app.git')).not.toBe(gitRemoteKey('git@github.com:me/app-two.git'))
+    expect(gitRemoteKey('git@github.com:me/app.git')).not.toBe(gitRemoteKey('git@gitlab.com:me/app.git'))
+    expect(gitRemoteKey('https://github.com/me/app')).not.toBe(gitRemoteKey('https://github.com/you/app'))
+  })
+
+  it('keeps a local path as a path, with one kind of separator, and has no key for nothing', () => {
+    expect(gitRemoteKey('C:\\repos\\app.git')).toBe('c:/repos/app')
+    expect(gitRemoteKey('/srv/git/app.git')).toBe('/srv/git/app')
+    expect(gitRemoteKey('file:///srv/git/app.git')).toBe('/srv/git/app')
+    expect(gitRemoteKey('   ')).toBeNull()
   })
 })
 

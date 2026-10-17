@@ -109,7 +109,9 @@ function quoted(name: string): string {
 export function agentStartQuestion(d: Extract<ApprovalDetail, { kind: 'agent_start' }>): string {
   // The orchestrator's child (#853) works in no project: its card names no project id, and the place is said as such
   const place = d.project.id ? quoted(d.project.name) : d.project.name
-  const where = d.worktree ? `${place}, in a new worktree on ${quoted(d.worktree.branch)},` : `${place},`
+  // On a linked machine (#1038) the project is that machine's checkout: the sentence says whose computer it runs on
+  const on = d.machine ? `${place} on ${quoted(d.machine)}` : place
+  const where = d.worktree ? `${on}, in a new worktree on ${quoted(d.worktree.branch)},` : `${on},`
   // A model the person's setting chose for the difficulty the caller named (#729) says so: the person picked it, not the agent
   const model = d.model ? ` (${d.model}${d.difficulty ? `, your choice for ${d.difficulty} work` : ''})` : ''
   // The name the caller gave it (#861) is what the sidebar will show, so the person reads it here first

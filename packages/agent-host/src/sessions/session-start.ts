@@ -7,6 +7,7 @@ import type { AppRef } from '../apps/external/runtime.js'
 import type { Worktree } from '../dev-services/git-worktree.js'
 import { writeHandoffNoteSync } from '../dev-services/handoff-notes.js'
 import { rpcError } from '../rpc-error.js'
+import { agentDepthKey } from './agent-depth.js'
 import type { AppSessions } from './app-sessions.js'
 import type { CardRests } from './card-rest.js'
 import type { DelegationHost } from './delegation-flow.js'
@@ -318,6 +319,8 @@ export class SessionStarts {
     this.host.meta.set(id, info)
     this.host.store.sessions.upsertSession(info)
     if (noCodeIntelligence) this.host.store.settings.setAppSetting(codeIntelligenceKey(id), 'off')
+    // Started by another machine's session (#1038): that depth is this session's own, kept as one started here keeps its
+    if (params.agentDepth) this.host.store.settings.setAppSetting(agentDepthKey(id), String(params.agentDepth))
     this.host.launches.rememberToolPrefix(id)
     this.host.launches.rememberLaunchSettings(info, cwd)
     this.host.store.sessions.setSessionCwd(id, cwd)

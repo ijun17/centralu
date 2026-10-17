@@ -82,6 +82,7 @@ import { rpcError, sessionNotFound } from '../rpc-error.js'
 import {
   gitSummary,
   gitStatusFiles,
+  gitOriginUrl,
   gitDiff,
   gitLog,
   gitCommitDetail,
@@ -1646,6 +1647,11 @@ export class SessionManager {
    */
   gitTrust(projectId: string | null): { trusted: boolean } {
     return { trusted: this.projectTrusted(projectId) }
+  }
+
+  /** The project's `origin` remote (#1038), read as a git read is, under its trust; null with no repository or no origin */
+  projectOrigin(projectId: string): Promise<string | null> {
+    return gitOriginUrl(this.cwdOf(projectId), this.gitTrust(projectId))
   }
 
   gitStatusFiles(projectId: string) {

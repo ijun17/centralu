@@ -316,6 +316,18 @@ export async function gitCommitDetail(
 }
 
 /** The current HEAD — a fallback for commit attribution (#50) when the tool's output was truncated and the hash could not be picked up */
+/**
+ * The `origin` remote's address as the repository's config has it (#1038), or null: not a repository, or no `origin`.
+ * Only the config is read, so nothing of the repository runs, trusted or not.
+ */
+export async function gitOriginUrl(cwd: string, trust: GitTrust = {}): Promise<string | null> {
+  try {
+    return (await git(cwd, ['config', '--get', 'remote.origin.url'], trust)).trim() || null
+  } catch {
+    return null
+  }
+}
+
 export async function gitHeadSha(cwd: string): Promise<string | null> {
   if (!(await isRepo(cwd))) return null
   try {

@@ -243,6 +243,12 @@ export const projectMethods = {
   },
   'projects.list': { params: z.object({}), result: z.array(ProjectInfo) },
   'projects.gitStatus': { params: z.object({ projectId: ProjectId }), result: ProjectInfo },
+  /**
+   * The project's `origin` remote, as git has it (#1038): how a hub tells which project of a linked machine is a checkout
+   * of the same repository as one of its own (`gitRemoteKey`). Null when the folder is not a git repository or has no
+   * `origin`.
+   */
+  'projects.origin': { params: z.object({ projectId: ProjectId }), result: z.object({ origin: z.string().nullable() }) },
   'files.search': {
     params: z.object({ projectId: ProjectId, query: z.string(), limit: z.number().default(20) }),
     result: z.array(z.object({ path: z.string(), name: z.string() })),

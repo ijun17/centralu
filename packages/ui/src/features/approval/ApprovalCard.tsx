@@ -55,6 +55,8 @@ export function ApprovalCard({
       if (!canAlways && action.decision === 'always') return
       // Nor does a project of another machine (#700): the consent is for this call, nothing is remembered for it
       if (detail.kind === 'project_access' && detail.to.machine && action.decision === 'always') return
+      // Nor an agent started on another machine (#1038), for the same reason
+      if (detail.kind === 'agent_start' && detail.machine && action.decision === 'always') return
       // A cross-project consent's "always" is for the pair (#371) — there is no session or project scope to pick
       if (detail.kind === 'project_access') {
         void respond(sessionId, requestId, action.decision)
@@ -300,6 +302,8 @@ function AgentStartCard({
 }) {
   // The orchestrator's child (#853) works in no project: there is no project to always allow it for
   const inProject = detail.project.id !== ''
+  // A child on a linked machine (#1038) is allowed once: nothing is remembered for another machine's project
+  const remote = !!detail.machine
   return (
     <div
       className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
@@ -315,21 +319,25 @@ function AgentStartCard({
         {agentStartQuestion(detail)}
       </p>
       <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
-        {inProject
+        {remote
+          ? `It opens on ${detail.machine}, in that machine's checkout of this repository, with that machine's own logins and its own approvals and Stop there; its answer comes back here. Nothing is remembered for another machine: it asks each time.`
+          : inProject
           ? 'It opens as its own session in this project, linked to this one, with its own approvals and Stop; its answer comes back here. Always for the project is remembered; revoke it in Settings.'
           : 'It opens as its own session under this one, in a folder of its own outside any project, with its own approvals and Stop; its answer comes back here. Always for this session lasts until Centralu restarts.'}
       </p>
       <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
         <ActionKey k={keys.allow} label="Allow once" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
-        <ActionKey
-          k={keys.always}
-          label="Always for this session"
-          title={inProject ? `Hold ${projectHint} and click for the whole project` : undefined}
-          onClick={(alt) => onAnswer('always', alt && inProject ? 'project' : 'session')}
-          testId="approve-always"
-          disabled={busy}
-        />
-        {inProject && (
+        {!remote && (
+          <ActionKey
+            k={keys.always}
+            label="Always for this session"
+            title={inProject ? `Hold ${projectHint} and click for the whole project` : undefined}
+            onClick={(alt) => onAnswer('always', alt && inProject ? 'project' : 'session')}
+            testId="approve-always"
+            disabled={busy}
+          />
+        )}
+        {inProject && !remote && (
           <button
             className="rounded-md px-1.5 py-1 text-sm text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-50"
             onClick={() => onAnswer('always', 'project')}
@@ -340,7 +348,7 @@ function AgentStartCard({
           </button>
         )}
         <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
-        {showProjectKey && inProject && (
+        {showProjectKey && inProject && !remote && (
           <span className="ml-auto text-2xs text-ink-faint">
             <Kbd alt /> <Kbd>a</Kbd> whole project
           </span>

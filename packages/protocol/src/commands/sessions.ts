@@ -91,6 +91,13 @@ export const CreateSessionParams = z.object({
    * original folder, there would be no reason left to use a worktree.
    */
   worktreeBase: z.string().optional(),
+  /**
+   * How deep below a session the person started this one is (#867), when another machine's session starts it (#1038:
+   * start_agent on a linked machine). Kept as the new session's own depth, so it starts agents and asks projects here
+   * only as far as the setting allows; it can only make the session deeper, never shallower, so a caller that sends it
+   * gains nothing. Absent: a session the person started.
+   */
+  agentDepth: z.number().int().min(1).max(100).optional(),
 })
 export type CreateSessionParams = z.infer<typeof CreateSessionParams>
 

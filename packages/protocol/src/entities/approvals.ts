@@ -133,6 +133,12 @@ const ApprovalDetailKinds = z.discriminatedUnion('kind', [
     text: z.string(),
     /** The short name the caller gave the new session (#861), shown in the sidebar; absent: named from its task */
     name: z.string().optional(),
+    /**
+     * The linked machine the new session starts on (#1038), by the name the person gave it; `project` is then that
+     * machine's checkout of the caller's repository. Absent: this computer. A card that names a machine has no
+     * "always": the consent is for this call only, as for ask_project's (#700).
+     */
+    machine: z.string().optional(),
   }),
   /**
    * An ordinary session asks to check or install Centralu itself (#581). Applying the installed build (#665) is not an
