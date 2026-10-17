@@ -17,6 +17,7 @@ import { MergeChecks, type MergeChecksHost } from './merge-checks.js'
 import { ProjectCreation, type ProjectCreationHost } from './project-creation.js'
 import { UpdatesAsked, type UpdatesAskedHost } from './updates-asked.js'
 import { ProjectConsents, type ProjectConsentsHost } from './project-consents.js'
+import { UiPreferenceStore, type UiPreferenceStoreHost } from './ui-preferences.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -49,8 +50,6 @@ import type {
   Interruption,
   StoredMessage,
   ToolName,
-  UiPreferences,
-  UiPreferencesPatch,
   SettingsApplied,
   FsResolvePurpose,
 } from '@cc/protocol'
@@ -61,8 +60,6 @@ import {
   sessionOnlyAlways,
   DATA_DIR,
   oneLineText,
-  parseUiPreferences,
-  textSizeFromLegacyStep,
   sessionLiveDefaults,
   withoutToolRecord,
   appKeyOf,
@@ -143,15 +140,13 @@ import { withTimeout } from './with-timeout.js'
 import { AppSessions, type AppSessionsHost } from './app-sessions.js'
 import { appMessageFrame, type AppMessageSource, type AppMessageVia, type AppViewPlace } from './app-messages.js'
 import { SessionTrash, type SessionTrashHost } from './session-trash.js'
-import { parseJson } from '../dev-services/store/json.js'
-import { isObj } from '../json-value.js'
 export { appMessageFrame } from './app-messages.js'
 export type { AppMessageSource, AppMessageVia, AppViewPlace } from './app-messages.js'
 export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS } from './delegation-flow.js'
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost
 
 /**
  * Where the marker "conversation up to here belongs to the old tool" is stored.
@@ -163,14 +158,6 @@ type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost
  */
 const freshStartKey = (sessionId: string) => `fresh_start:${sessionId}`
 
-/**
- * The single app_setting key where the whole set of screen preferences lives.
- *
- * If each preference got its own key, reading them would grow the same way, and above all
- * "fetch all screen preferences on startup" would only be possible for whoever knows the list of
- * keys. As one blob, that list belongs to the schema (UiPreferences).
- */
-const UI_PREFS_KEY = 'ui_preferences'
 
 function untrustedSourceSessionNotification(sourceSessionId: string): string {
   return (
@@ -256,6 +243,8 @@ export class SessionManager {
   private readonly updatesAsked: UpdatesAsked
   /** Whether a session of one project may reach another, and the consents remembered for it (project-consents.ts) */
   private readonly consents: ProjectConsents
+  /** The screen's preferences and workspace layout (ui-preferences.ts) */
+  private readonly prefs: UiPreferenceStore
   /** ask_project, here or on a linked machine (ask-project-flow.ts) */
   private readonly askProjectFlow: AskProjectFlow
   /** The conversations a tool keeps on its own side: listing, holders, import and catch-up (external-conversations.ts) */
@@ -359,6 +348,7 @@ export class SessionManager {
     } = {},
   ) {
     this.children = new ChildOwnership(store)
+    this.prefs = new UiPreferenceStore(this.parts())
     this.consents = new ProjectConsents(this.parts())
     this.updatesAsked = new UpdatesAsked(this.parts())
     this.projectCreation = new ProjectCreation(this.parts())
@@ -3097,74 +3087,26 @@ export class SessionManager {
     return purpose === 'trash' ? resolveEntry(root, path) : resolveTarget(root, path)
   }
 
-  saveWorkspace(layout: Record<string, unknown>): void {
-    this.store.saveWorkspace(layout)
+  /** `UiPreferenceStore.saveWorkspace` (ui-preferences.ts), kept on the manager for its callers */
+  saveWorkspace(...a: Parameters<UiPreferenceStore['saveWorkspace']>): ReturnType<UiPreferenceStore['saveWorkspace']> {
+    return this.prefs.saveWorkspace(...a)
   }
 
-  loadWorkspace(): Record<string, unknown> | null {
-    return this.store.loadWorkspace<Record<string, unknown>>()
+  /** `UiPreferenceStore.loadWorkspace` (ui-preferences.ts), kept on the manager for its callers */
+  loadWorkspace(...a: Parameters<UiPreferenceStore['loadWorkspace']>): ReturnType<UiPreferenceStore['loadWorkspace']> {
+    return this.prefs.loadWorkspace(...a)
   }
 
-  /**
-   * Screen preferences (UiPreferences) — read as one blob, and written back accepting **only what
-   * changed.**
-   *
-   * Corrupted JSON is treated the same as if it did not exist (parseUiPreferences), and said once on
-   * stderr with the row it came from. The app failing to start because of a single broken setting is
-   * worse than losing one value the person had chosen.
-   */
-  uiPreferences(): UiPreferences {
-    const stored = this.storedUiPreferences()
-    const prefs = parseUiPreferences(stored)
-    /*
-     * The text size moved here from the workspace snapshot (#312 step 5), where the screen kept
-     * it as a step index. Moved once: the first read that finds no `textSize` in the record takes
-     * the snapshot's step and writes it into the record, and from then on the record has the
-     * field, so a snapshot an older window still writes never overrides a size chosen since.
-     */
-    if (!('textSize' in stored)) {
-      const legacy = textSizeFromLegacyStep(this.loadWorkspace()?.textScale)
-      if (legacy !== null) {
-        prefs.textSize = legacy
-        this.store.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...stored, textSize: legacy }))
-      }
-    }
-    return prefs
+  /** `UiPreferenceStore.uiPreferences` (ui-preferences.ts), kept on the manager for its callers */
+  uiPreferences(...a: Parameters<UiPreferenceStore['uiPreferences']>): ReturnType<UiPreferenceStore['uiPreferences']> {
+    return this.prefs.uiPreferences(...a)
   }
 
-  /**
-   * Writes the patch **over the stored record, not over this build's reading of it** (#384). Another
-   * build reads and writes the same row: during a host swap, and after a person goes back a release.
-   * A field this build does not know, or a value it cannot read (a theme mode a newer build added),
-   * stays as it was unless the patch sets it, so changing the text size in an older build does not
-   * reset what a newer one chose.
-   */
-  setUiPreferences(patch: UiPreferencesPatch): UiPreferences {
-    const current = this.uiPreferences()
-    this.store.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...this.storedUiPreferences(), ...patch }))
-    // The session tools switch also decides the apps a session attached through them (#382): recount every live one
-    if (patch.sessionTools !== undefined && patch.sessionTools !== current.sessionTools) {
-      // Off ends what was allowed "once"; "always" and the person's own folder come back with the switch (#382)
-      if (!patch.sessionTools) this.appAccess?.dropOnce(this.meta.keys())
-      for (const id of this.meta.keys()) this.appsHub?.sessionAppsChanged(id)
-    }
-    return { ...current, ...patch }
+  /** `UiPreferenceStore.setUiPreferences` (ui-preferences.ts), kept on the manager for its callers */
+  setUiPreferences(...a: Parameters<UiPreferenceStore['setUiPreferences']>): ReturnType<UiPreferenceStore['setUiPreferences']> {
+    return this.prefs.setUiPreferences(...a)
   }
 
-  /** The stored record as written, every field kept; `{}` for none or for one that is not a JSON object */
-  private storedUiPreferences(): Record<string, unknown> {
-    const raw = this.store.appSetting(UI_PREFS_KEY)
-    if (raw === null) return {}
-    const v = parseJson(raw)
-    if (isObj(v)) return v
-    if (!this.brokenPrefsSaid) {
-      this.brokenPrefsSaid = true
-      console.error(`[agent-host] app_settings.${UI_PREFS_KEY} is not a JSON object; screen preferences read as their defaults until the next change`)
-    }
-    return {}
-  }
-
-  private brokenPrefsSaid = false
 
   /** The settings screen must be able to see and delete rules (FR-3: make the outcome visible) */
   listApprovalRules(): {
@@ -3473,6 +3415,9 @@ export class SessionManager {
       applyStateHint: (...a) => self.applyStateHint(...a),
       askGateError: (...a) => self.askProjectFlow.askGateError(...a),
       askHost: (...a) => self.hostCards.askHost(...a),
+      get appAccess() {
+        return self.appAccess
+      },
       get appsHub() {
         return self.appsHub
       },
