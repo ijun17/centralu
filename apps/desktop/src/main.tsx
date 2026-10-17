@@ -18,7 +18,7 @@ import {
   watchHostBuild,
 } from '@cc/platform/tauri'
 import { invoke } from '@tauri-apps/api/core'
-import { BuildBarView, RestartKeeperDialog } from './build-bar.js'
+import { BuildBarView, RestartKeeperDialog, SwitchBuildDialog } from './build-bar.js'
 import { QuitDialog } from './quit-dialog.js'
 import '../../../packages/ui/src/styles/index.css'
 
@@ -344,46 +344,15 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
         </div>
       )}
       {askSwitch && build && plan && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-scrim-thin"
-          data-testid="confirm-switch-build"
-          onClick={() => setAskSwitch(false)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Switch the agent host to this build?"
-            className="w-[380px] rounded-lg border border-line bg-surface-side p-4 shadow-(--shadow-modal)"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="text-md text-ink">Switch the agent host to this window's build?</p>
-            <p className="mt-2 text-xs leading-body text-ink-muted" data-testid="confirm-switch-build-loses">
-              {plan.loses}
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                className="rounded-md px-2 py-1 text-sm text-ink-faint hover:text-ink"
-                onClick={() => setAskSwitch(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className={
-                  build.keepsAgents
-                    ? 'rounded-md border border-line px-3 py-1 text-sm text-ink hover:border-line-strong'
-                    : 'rounded-md border border-danger/40 bg-danger-bg px-3 py-1 text-sm text-danger hover:border-danger/70'
-                }
-                data-testid="confirm-switch-build-yes"
-                onClick={() => {
-                  setAskSwitch(false)
-                  startSwitch()
-                }}
-              >
-                Switch
-              </button>
-            </div>
-          </div>
-        </div>
+        <SwitchBuildDialog
+          loses={plan.loses}
+          keepsAgents={build.keepsAgents}
+          onCancel={() => setAskSwitch(false)}
+          onConfirm={() => {
+            setAskSwitch(false)
+            startSwitch()
+          }}
+        />
       )}
       {askRestart && (
         <RestartKeeperDialog

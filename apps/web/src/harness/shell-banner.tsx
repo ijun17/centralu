@@ -5,13 +5,13 @@ import { createMockPlatform } from '@cc/platform/mock'
 import { isDemoScene, seedDemo } from '@cc/platform/mock/demo'
 import type { ShellHostBuild } from '@cc/platform/tauri'
 import { buildBar } from '../../../../packages/platform/src/tauri/switch-plan.js'
-import { BuildBarView, RestartKeeperDialog } from '../../../desktop/src/build-bar.js'
+import { BuildBarView, RestartKeeperDialog, SwitchBuildDialog } from '../../../desktop/src/build-bar.js'
 import { QuitDialog } from '../../../desktop/src/quit-dialog.js'
 import '../../../../packages/ui/src/styles/index.css'
 
 /**
  * A test rig for the desktop shell's own surfaces (#326, #387, exclusively for
- * e2e/shell-banner*.spec.ts and e2e/quit-dialog.spec.ts).
+ * e2e/shell-banner*.spec.ts, e2e/quit-dialog.spec.ts and e2e/desktop-dialog-layers.spec.ts).
  *
  * The keeper's build bar and the quit question only exist inside Tauri. So this stands the whole
  * App up on the mock, the way the browser entry does, and draws **the desktop's own components**
@@ -34,7 +34,8 @@ import '../../../../packages/ui/src/styles/index.css'
  *     "Message too long", the second click), `keeper-later-first`: the same on the first click
  *   - `shell`: everything on this build, but a release started its keeper without the permission
  *     shell (thin-shell plan §6), which refused the content
- * `?dialog=quit&background=on|off` opens the quit question instead.
+ * `?dialog=quit&background=on|off` opens the quit question instead; `?dialog=switch` and `?dialog=restart` the
+ * switch-build and restart-completely questions (e2e/desktop-dialog-layers.spec.ts).
  *
  * Only on the dev server: `vite build`'s only input is index.html.
  */
@@ -182,6 +183,26 @@ function Quit() {
   )
 }
 
+/** The desktop's other two questions, drawn alone; a press outside or a button closes them, as in the app */
+function Ask({ kind }: { kind: 'switch' | 'restart' }) {
+  const [open, setOpen] = useState(true)
+  if (!open) return null
+  const answer = (call: string) => {
+    calls.push(call)
+    setOpen(false)
+  }
+  return kind === 'switch' ? (
+    <SwitchBuildDialog
+      loses="Stops 2 agents and 1 terminal."
+      keepsAgents={false}
+      onCancel={() => setOpen(false)}
+      onConfirm={() => answer('switch_host_build')}
+    />
+  ) : (
+    <RestartKeeperDialog onCancel={() => setOpen(false)} onConfirm={() => answer('restart_keeper')} />
+  )
+}
+
 function TrafficLights() {
   return (
     <div
@@ -211,8 +232,9 @@ void (async () => {
   await seedDemo(mock, isDemoScene(scene) ? scene : 'focus')
   createRoot(document.getElementById('root')!).render(
     <>
-      <App platform={mock} banner={dialog === 'quit' ? null : <Banner />} />
+      <App platform={mock} banner={dialog ? null : <Banner />} />
       {dialog === 'quit' && <Quit />}
+      {(dialog === 'switch' || dialog === 'restart') && <Ask kind={dialog} />}
       <TrafficLights />
     </>,
   )
