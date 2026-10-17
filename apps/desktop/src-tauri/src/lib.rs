@@ -237,6 +237,27 @@ mod keeper_command_tests {
     }
 }
 
+/**
+ * `host-status` carries a `HostStatus` object, and the UI's one listener drops anything else
+ * (`listenHostStatus` in packages/platform/src/tauri/index.ts). The window used to send the bare
+ * string `"shutdown"` on exit, which nothing ever read.
+ */
+#[cfg(test)]
+mod host_status_tests {
+    #[test]
+    fn host_status_is_only_ever_sent_a_status() {
+        let mut sends = 0;
+        for (file, src) in [("lib.rs", include_str!("lib.rs")), ("sidecar/mod.rs", include_str!("sidecar/mod.rs"))] {
+            for (i, _) in src.match_indices(".emit(\"host-status\",") {
+                let arg = src[i..].split_once(',').map(|(_, rest)| rest.trim_start()).unwrap_or("");
+                assert!(!arg.starts_with('"'), "{file}: {}", src[i..].lines().next().unwrap());
+                sends += 1;
+            }
+        }
+        assert_eq!(sends, 1, "the one send is `sidecar::emit`, which takes a `HostStatus`");
+    }
+}
+
 #[cfg(test)]
 mod working_dir_tests {
     use super::working_dir_away_from;
@@ -375,9 +396,10 @@ pub fn run() {
             }
             // Direct mode: make sure the sidecar is killed when the app closes (no zombie
             // processes). Keeper mode: detach; the keeper applies background mode.
+            // Nothing is told: the page goes with the window, and `host-status` carries a status
+            // object only (the listener drops anything else, #850 item 17).
             if let RunEvent::ExitRequested { .. } | RunEvent::Exit = event {
                 supervisor.shutdown();
-                let _ = app.emit("host-status", "shutdown");
             }
         });
 }
