@@ -54,3 +54,15 @@ test('background mode on: the primary "Quit" is the plain quit', async ({ page }
   await page.getByTestId('confirm-quit-yes').click()
   expect(await calls(page)).toEqual(['quit_app'])
 })
+
+// #841 item 7, #990 review: an empty list because the host could not tell must not read as nothing left running
+test('says why it could not check for leftover processes', async ({ page }) => {
+  await page.goto('/shell-banner.html?dialog=quit&background=off&strays=unknown')
+  await expect(page.getByTestId('quit-strays-unknown')).toContainText('Could not check for processes left running in your project folders: The keeper could not say')
+  await expect(page.getByTestId('quit-strays')).toHaveCount(0)
+})
+
+test('says nothing of it when the list was read', async ({ page }) => {
+  await open(page, 'off')
+  await expect(page.getByTestId('quit-strays-unknown')).toHaveCount(0)
+})

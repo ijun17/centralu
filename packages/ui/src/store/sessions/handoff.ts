@@ -143,7 +143,18 @@ export const handoffActions = (set: StoreSet, get: StoreGet): HandoffActions => 
         if (Date.now() > deadline) throw new Error('timed out waiting for the handoff note')
         if (st.connection !== 'connected') continue // No decision is made while disconnected
         if (isInTurn(cur.state)) continue
-        const got = await s.platform.agents.exportHandoffNote(sessionId, before).catch(() => null)
+        /*
+         * null is "no reply yet": asked again. A throw is not (#841 item 5): the host could not place the note (a
+         * full disk, a folder it cannot write), and reading it as "not yet" polled to the ten-minute timeout and blamed
+         * that. A throw because the connection dropped is asked again once it is back.
+         */
+        let got: Awaited<ReturnType<typeof s.platform.agents.exportHandoffNote>>
+        try {
+          got = await s.platform.agents.exportHandoffNote(sessionId, before)
+        } catch (e) {
+          if (get().connection !== 'connected') continue
+          throw new Error(`could not save the handoff note: ${(e as Error).message}`)
+        }
         if (got) {
           note = got.text
           notePath = got.path
