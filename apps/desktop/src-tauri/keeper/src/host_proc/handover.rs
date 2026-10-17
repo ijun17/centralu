@@ -10,7 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::{HostInfo, HostProc, Launcher, Lines, StatusSink, Supervisor};
-use crate::os::pid_alive;
+use crate::os::children::ProcessWatch;
 
 /// A host's stdout reader that can be paused for a keeper handoff.
 pub type Gate = Arc<LineGate>;
@@ -80,7 +80,7 @@ impl Supervisor {
         let out = HostOut::new(h.stdout, h.buffered);
         if let Ok(mut inner) = self.inner.lock() {
             inner.last_output.clear();
-            inner.child = Some(HostProc::Foreign(Foreign { pid: h.pid, stdin: Some(std::fs::File::from(h.stdin)) }));
+            inner.child = Some(HostProc::Foreign(Foreign { pid: h.pid, stdin: Some(std::fs::File::from(h.stdin)), watch: h.watch }));
             inner.gate = Some(out.gate());
             inner.info = Some(h.info.clone());
         }
@@ -105,6 +105,9 @@ impl HostProc {
 pub struct Foreign {
     pid: u32,
     stdin: Option<std::fs::File>,
+    /// Whether it has ended, by its identity rather than its number (#840 item 8): once it has, its
+    /// pid may be someone else's.
+    watch: ProcessWatch,
 }
 
 impl Foreign {
@@ -121,13 +124,14 @@ impl Foreign {
     }
 
     pub(super) fn has_exited(&mut self) -> bool {
-        !pid_alive(self.pid)
+        self.watch.ended()
     }
 
     /// SIGKILL, if it is still there.
     pub(super) fn kill(&mut self) {
-        if pid_alive(self.pid) {
-            // SAFETY: a plain syscall; the pid is the host we supervise and is still there.
+        if !self.watch.ended() {
+            // SAFETY: a plain syscall; the pid is the host we supervise and it has not ended, so
+            // the number is still its own.
             unsafe { libc::kill(self.pid as i32, libc::SIGKILL) };
         }
     }
@@ -136,7 +140,7 @@ impl Foreign {
     /// that started it has gone) does, and its exit code is not ours to read.
     pub(super) fn wait(&mut self) -> Option<i32> {
         let end = Instant::now() + Duration::from_secs(10);
-        while pid_alive(self.pid) && Instant::now() < end {
+        while !self.watch.ended() && Instant::now() < end {
             thread::sleep(Duration::from_millis(50));
         }
         None
@@ -321,8 +325,64 @@ pub struct HostFreeze {
 /// A host another keeper started, handed over at a commit (#280 step 4).
 pub struct ForeignAdopt {
     pub pid: u32,
+    /// Made while the host cannot have been reaped yet (`ProcessWatch`).
+    pub watch: ProcessWatch,
     pub stdin: std::os::fd::OwnedFd,
     pub stdout: std::os::fd::OwnedFd,
     pub buffered: Vec<u8>,
     pub info: HostInfo,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    /**
+     * #840 item 8: a handed-over host that has ended is ended for good, even once its number is
+     * someone else's. It was tracked by its bare pid: after its parent reaped it, a new process given
+     * that pid read as the host still running, and a stop sent that process SIGKILL. Here the
+     * "number" is a live stranger's while the watch is of the host that ended, as a reused pid would be.
+     */
+    #[test]
+    fn a_handed_over_host_that_ended_stays_ended_when_its_number_is_reused() {
+        let mut host = Command::new("/bin/sh").args(["-c", "sleep 0.2"]).spawn().unwrap();
+        let watch = ProcessWatch::new(host.id()).unwrap();
+        host.wait().unwrap();
+        let mut stranger = Command::new("/bin/sh").args(["-c", "sleep 30"]).spawn().unwrap();
+        let mut f = Foreign { pid: stranger.id(), stdin: None, watch };
+        let ended = f.has_exited();
+        f.kill();
+        thread::sleep(Duration::from_millis(100));
+        let stranger_alive = stranger.try_wait().unwrap().is_none();
+        let _ = stranger.kill();
+        let _ = stranger.wait();
+        assert!(ended, "the ended host reads as running under its reused number");
+        assert!(stranger_alive, "the process now holding the number was killed");
+    }
+
+    /// A watch made on a host still running sees it end, and one made on a zombie (ended, not yet
+    /// reaped: what a host that exited during the freeze is) reads as ended at once.
+    #[test]
+    fn a_watch_sees_a_running_host_end_and_a_zombie_as_ended() {
+        let mut host = Command::new("/bin/sh").args(["-c", "sleep 0.2"]).spawn().unwrap();
+        let mut watch = ProcessWatch::new(host.id()).unwrap();
+        assert!(!watch.ended());
+        host.wait().unwrap();
+        let end = Instant::now() + Duration::from_secs(5);
+        while !watch.ended() && Instant::now() < end {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(watch.ended(), "the end was not seen");
+
+        let mut zombie = Command::new("/bin/sh").args(["-c", "exit 0"]).spawn().unwrap();
+        let pid = zombie.id();
+        // SAFETY: info is a valid out-pointer; WNOWAIT leaves the child to be reaped below.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        assert_eq!(unsafe { libc::waitid(libc::P_PID, pid, &mut info, libc::WEXITED | libc::WNOWAIT) }, 0);
+        let mut watch = ProcessWatch::new(pid).unwrap();
+        let ended = watch.ended();
+        zombie.wait().unwrap();
+        assert!(ended, "a zombie host read as running");
+    }
 }

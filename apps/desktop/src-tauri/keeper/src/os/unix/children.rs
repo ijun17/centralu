@@ -410,6 +410,23 @@ pub enum Watch {
     Poll,
 }
 
+impl Watch {
+    /**
+     * What a registration that failed with `e` means (#840 item 8, review): `ESRCH`, no process by
+     * that number, is the one answer that says it has gone (kqueue refuses a zombie this way too).
+     * Anything else (a kernel without `pidfd_open`, out of descriptors) says nothing about the
+     * process, which is then polled by its number. Read as "gone", such an error had a handed-over
+     * host that still ran treated as ended.
+     */
+    pub fn after_error(e: io::Error) -> Watch {
+        if e.raw_os_error() == Some(libc::ESRCH) {
+            Watch::Gone
+        } else {
+            Watch::Poll
+        }
+    }
+}
+
 /// A child the backend has news of, or may have.
 pub struct Seen {
     pub pid: i32,
@@ -512,6 +529,54 @@ impl ExitWatch {
             self.known.remove(pid);
         }
         out
+    }
+}
+
+/**
+ * One process watched by its identity rather than its number (#840 item 8): a kqueue registration on
+ * macOS, a pidfd on Linux. A process another keeper started (a handed-over host) is not ours to reap,
+ * so once it has ended and its parent has reaped it, its pid may be given to someone else, and
+ * `kill(pid, 0)` would then find that someone: the host would read as running, and a stop would
+ * signal a stranger. The watch is made while the process cannot have been reaped yet (the outgoing
+ * keeper, its parent, reaps only after the commit), and once it reports the end that answer stays.
+ * Where neither is available (a kernel before pidfds, another unix) it falls back to `pid_alive`.
+ */
+pub struct ProcessWatch {
+    pid: i32,
+    backend: ExitBackend,
+    polled: bool,
+    ended: bool,
+}
+
+impl ProcessWatch {
+    pub fn new(pid: u32) -> io::Result<Self> {
+        let pid = i32::try_from(pid).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "pid out of range"))?;
+        let mut backend = ExitBackend::new()?;
+        let watch = backend.watch(pid);
+        Ok(Self::with(pid, backend, watch))
+    }
+
+    fn with(pid: i32, backend: ExitBackend, watch: Watch) -> Self {
+        let (polled, ended) = match watch {
+            Watch::Registered => (false, false),
+            Watch::Gone => (false, true),
+            Watch::Poll => (true, false),
+        };
+        ProcessWatch { pid, backend, polled, ended }
+    }
+
+    /// Whether the process has ended. Once true, always true, whoever holds the number next.
+    pub fn ended(&mut self) -> bool {
+        if !self.ended {
+            self.ended = if self.polled {
+                !crate::os::pid_alive(self.pid as u32)
+            } else {
+                let pid = self.pid;
+                let seen = self.backend.seen();
+                seen.iter().any(|s| s.pid == pid && (s.exited.is_some() || self.backend.gone(pid)))
+            };
+        }
+        self.ended
     }
 }
 
@@ -770,6 +835,27 @@ mod tests {
         assert!(session_groups_among(Vec::new(), sid, false).is_empty());
         let _ = child.kill();
         let _ = child.wait();
+    }
+
+    /// #840 item 8, review: only "no such process" means gone; any other failure to register
+    /// falls back to polling the number instead of reading as an end.
+    #[test]
+    fn only_esrch_means_a_process_has_gone() {
+        assert!(matches!(Watch::after_error(io::Error::from_raw_os_error(libc::ESRCH)), Watch::Gone));
+        for e in [libc::ENOSYS, libc::EMFILE, libc::EINVAL, libc::EPERM] {
+            assert!(matches!(Watch::after_error(io::Error::from_raw_os_error(e)), Watch::Poll), "errno {e}");
+        }
+    }
+
+    /// The fallback: a process watched by polling its number is running until it ends.
+    #[test]
+    fn a_polled_process_watch_sees_the_process_end() {
+        let mut child = std::process::Command::new("/bin/sh").args(["-c", "sleep 0.2"]).spawn().unwrap();
+        let pid = child.id() as i32;
+        let mut w = ProcessWatch::with(pid, ExitBackend::new().unwrap(), Watch::Poll);
+        assert!(!w.ended(), "a running process read as ended");
+        child.wait().unwrap();
+        assert!(w.ended(), "the end of a polled process was not seen");
     }
 
     #[test]

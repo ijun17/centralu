@@ -522,6 +522,12 @@ fn prepare(data: &Path, msg: wire::Message) -> Result<Prepared, String> {
     let host = match &snap.host {
         Some(h) => Some(ForeignAdopt {
             pid: h.pid,
+            // Now, before `ready` (#840 item 8). The outgoing keeper is the host's parent only if it
+            // started the host: then it reaps the host after `ready` at the earliest, and the number
+            // is still the host's here. A host handed over before has init (or a subreaper) as its
+            // parent, which reaps it the moment it ends: a host that ended during the freeze could
+            // then have its number taken in between only if the pid space wrapped meanwhile.
+            watch: os::children::ProcessWatch::new(h.pid).map_err(|e| format!("cannot watch the host (pid {}): {e}", h.pid))?,
             stdin: u.fd(h.stdin)?,
             stdout: u.fd(h.stdout)?,
             buffered: u.blob(h.buffered)?,

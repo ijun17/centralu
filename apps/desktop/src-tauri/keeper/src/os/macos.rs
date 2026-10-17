@@ -87,8 +87,7 @@ impl ExitBackend {
         if rc == 0 {
             Watch::Registered
         } else {
-            // ESRCH: it is already gone.
-            Watch::Gone
+            Watch::after_error(io::Error::last_os_error())
         }
     }
 

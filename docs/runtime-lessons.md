@@ -649,10 +649,15 @@ Rule: a group stop ends with KILL to the group, like the children's stop (CH8).
 Guard: **UNGUARDED**.
 Platforms: macOS, Linux.
 
-**SU7. A host the keeper did not start is supervised by pid.**
-Rule: a handed-over host is not the keeper's child: it is watched and waited on by pid; EPERM from `kill(pid, 0)`
-means alive.
-Guard: `keeper/os/unix.rs` `a_process_we_may_not_signal_is_alive`; `scripts/keeper-handoff-integration.mjs` stops a
+**SU7. A host the keeper did not start is supervised by its identity, not its number.**
+Happened: #840 item 8: a handed-over host was watched by its bare pid, so once it ended and its parent reaped it, a
+new process given that pid read as the host still running, and a stop would have sent it SIGKILL.
+Rule: a handed-over host is not the keeper's child: it is watched by a kqueue registration (macOS) or a pidfd
+(Linux) made in the handoff's `prepare`, before `ready` (`os::children::ProcessWatch`), and an end once seen stays
+seen. Only "no such process" (`ESRCH`) at registration means it has gone; any other failure, and a system with
+neither, falls back to the pid, where EPERM from `kill(pid, 0)` means alive.
+Guard: `host_proc/handover.rs` `a_handed_over_host_that_ended_stays_ended_when_its_number_is_reused`;
+`keeper/os/unix.rs` `a_process_we_may_not_signal_is_alive`; `scripts/keeper-handoff-integration.mjs` stops a
 foreign host at its end.
 Platforms: macOS, Linux.
 

@@ -47,8 +47,8 @@ impl ExitBackend {
         // SAFETY: pidfd_open(pid, 0) takes no pointers.
         let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) } as libc::c_int;
         if fd < 0 {
-            // A kernel without pidfd_open (before 5.3).
-            return Watch::Poll;
+            // Gone (ESRCH), or a kernel without pidfd_open (before 5.3) and anything else: polled
+            return Watch::after_error(io::Error::last_os_error());
         }
         let _ = set_cloexec(fd);
         // SAFETY: the syscall just returned it.
