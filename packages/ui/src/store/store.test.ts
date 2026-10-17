@@ -1331,7 +1331,7 @@ describe('the cursor for a session where an event arrives before history (#79)',
     expect(await readAll('s79')).toEqual([...L(10), 'Hello'])
   })
 
-  it('an unnumbered tail (a sent message, an image, an error) already in history shows only once, and an approval row stays in its own place', async () => {
+  it('a tail (a sent message and an image numbered, an error not) already in history shows only once, and an approval row stays in its own place', async () => {
     const mock = new MockPlatform()
     mock.sessions.set('e79', sessionInfo('e79'))
     mock.sessions.set('e79-other', sessionInfo('e79-other'))
@@ -1340,8 +1340,8 @@ describe('the cursor for a session where an event arrives before history (#79)',
     useStore.getState().focusSession('e79-other')
 
     // Before this session is opened: a command that went through approval, a human message (numbered by
-    // its user_message, as the host announces it, #999), an agent's image (its event carries no
-    // number), a failed turn (the schema strips the number, #161)
+    // its user_message, as the host announces it, #999), an agent's image (numbered like any recorded
+    // row since #868), a failed turn (the schema strips the number, #161)
     mock.emit({ type: 'approval_request', sessionId: 'e79', requestId: 'q1', detail: { kind: 'command', command: 'rm -rf build' } } as never)
     mock.emit({ type: 'approval_resolved', sessionId: 'e79', requestId: 'q1', decision: 'allow' } as never)
     await useStore.getState().send('e79', 'Hi')
@@ -1349,7 +1349,7 @@ describe('the cursor for a session where an event arrives before history (#79)',
     const error = { type: 'error', sessionId: 'e79', error: { code: 'internal', message: 'boom', retryable: false } }
     mock.messages.get('e79')!.push({ sessionId: 'e79', seq: 10, role: 'system', kind: 'marker', payload: error, ts: 10 })
     useStore.getState().dispatchEvent(error as NormalizedEvent)
-    expect(useStore.getState().chat['e79']!.map((i) => i.storedSeq)).toEqual([6, 8, undefined, undefined])
+    expect(useStore.getState().chat['e79']!.map((i) => i.storedSeq)).toEqual([6, 8, 9, undefined])
 
     useStore.getState().focusSession('e79')
 

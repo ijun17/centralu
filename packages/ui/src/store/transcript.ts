@@ -86,9 +86,10 @@ export type ChatItem = (
    * session for an app's requested agent was opened, a stored 8-line session ended up with a
    * cursor of 48, and the whole conversation got appended a second time (measured 2026-09-25).
    *
-   * Absent on rows that are never stored (like `message_image`, whose event carries no number, or
-   * an optimistic message before confirmation). A merged message carries the number of its first chunk
-   * — the same rule the host's `loadMessages` uses.
+   * Absent on rows that are never stored (an optimistic message before confirmation) and on an event
+   * from a host that sends no number. An agent's image carries its row's number since #868, as every
+   * recorded row does. A merged message carries the number of its first chunk — the same rule the
+   * host's `loadMessages` uses.
    */
   storedSeq?: number
 }
@@ -223,9 +224,14 @@ export function appendChat(items: ChatItem[], e: NormalizedEvent): ChatItem[] {
         },
       ]
     case 'message_image':
+      /*
+       * With its row's number (#868), so a re-read of history matches it by number. The host's row holds a file path and
+       * no bytes, so matching by content (`sameLine`) never paired them, and the image showed twice after a re-read.
+       */
+      if (holds(items, e.seq)) return items
       return [
         ...items,
-        { kind: 'image', seq: ++chatSeq, mime: e.mime, data: e.data, path: e.path, note: e.note },
+        { kind: 'image', seq: ++chatSeq, ...stored(e.seq), mime: e.mime, data: e.data, path: e.path, note: e.note },
       ]
     case 'tool_result': {
       /*

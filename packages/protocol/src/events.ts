@@ -334,15 +334,16 @@ export const NormalizedEvent = z.discriminatedUnion('type', [
    * the path case, the adapter reads the file and fills in data before emitting it. The UI
    * always draws the same single shape (a data URL).
    *
-   * **The absence of persistedSeq is a decision** (2026-08-24): this is display-only. The
-   * database only keeps the text, and an image disappears on restart just like terminal
-   * scrollback. This will be reconsidered if dogfooding shows people going back to look for a
-   * past image.
+   * Recorded as a row of its own since #40's second decision (2026-08-26: the bytes in an
+   * attachments file, the path in the row), and announced with that row's number (#868), as every
+   * recorded event is: a re-read of history matches the image by number, since the stored row holds
+   * a path and no bytes.
    *
    * If data is empty, note states why (too large, failed to read — a failure should be visible).
    */
   z.object({
     ...base,
+    ...persistedSeq,
     type: z.literal('message_image'),
     mime: z.string(),
     /** base64. Empty means display failed — see note */
