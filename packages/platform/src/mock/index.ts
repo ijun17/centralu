@@ -381,6 +381,8 @@ export class MockPlatform implements Platform {
   get nextPickedFile() { return this.systemMock.nextPickedFile }
   set nextPickedFile(value: SystemMock['nextPickedFile']) { this.systemMock.nextPickedFile = value }
   get pickedFileAsks() { return this.systemMock.pickedFileAsks }
+  get pickFails() { return this.systemMock.pickFails }
+  set pickFails(value: SystemMock['pickFails']) { this.systemMock.pickFails = value }
   get notifications() { return this.systemMock.notifications }
   get opened() { return this.systemMock.opened }
   get openedUrls() { return this.systemMock.openedUrls }
