@@ -238,7 +238,7 @@ export const tools = {
   read_failed_job: {
     config: {
       title: 'Read a failed Actions job log',
-      description: 'Read a short log excerpt around the first failure in a GitHub Actions job.',
+      description: 'Instead of gh run view --log-failed: read a short log excerpt around the first failure in a GitHub Actions job.',
       inputSchema: z.object({ job: z.number().int().positive().describe('GitHub Actions job id'), repo: repoInput }),
       annotations: { readOnlyHint: true, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
@@ -250,7 +250,7 @@ export const tools = {
     config: {
       title: 'CI status of a pull request or commit',
       description:
-        'The required checks of a pull request (pr) or a branch, tag or commit (ref), and whether every one is reported and passed. Verdict green, pending, failing, or none (no checks reported, which is not green). The required set comes from branch protection, else the CI workflow jobs on the base branch plus any job a pull request adds. For each failed job: the first failing test line of its log, the error after it, and whether the known intermittent failures issue quotes it.',
+        'Instead of gh pr checks / gh run list: the required checks of a pull request (pr) or a branch, tag or commit (ref), and whether every one is reported and passed. Verdict green, pending, failing, or none (no checks reported, which is not green). The required set comes from branch protection, else the CI workflow jobs on the base branch plus any job a pull request adds. For each failed job: the first failing test line of its log, the error after it, and whether the known intermittent failures issue quotes it.',
       inputSchema: z.object({
         pr: itemRef.optional().describe(`A pull request: ${REF_HELP}`),
         ref: z.string().optional().describe('Instead of pr: a branch, tag or commit sha'),
@@ -267,7 +267,7 @@ export const tools = {
     config: {
       title: 'Merge a pull request once CI is green',
       description:
-        'Squash-merge a pull request only when the gh account has maintain or admin permission, the PR is open and not a draft, every required check is reported and passed (none reported, or any pending, is not green), and GitHub can merge it. Never auto-merge. Subject "Title (#N)"; body from `body` or the PR description\'s Why / What changed / Closes, without Co-Authored-By or "Generated with" lines; the PR author stays the author. Pending: answers at once, or with wait: true polls until green or failed (up to waitMinutes, default 40) and then merges or reports the failure like ci_status.',
+        'Instead of gh pr merge: squash-merge one pull request (several, or a stack, unattended: queue_merge) only when the gh account has maintain or admin permission, the PR is open and not a draft, every required check is reported and passed (none reported, or any pending, is not green), and GitHub can merge it. Never auto-merge. Subject "Title (#N)"; body from `body` or the PR description\'s Why / What changed / Closes, without Co-Authored-By or "Generated with" lines; the PR author stays the author. Pending: answers at once, or with wait: true polls until green or failed (up to waitMinutes, default 40) and then merges or reports the failure like ci_status.',
       inputSchema: z.object({
         pr: itemRef.describe(`The pull request: ${REF_HELP}`),
         body: z.string().optional().describe('The squash commit body; default a summary of the PR description'),

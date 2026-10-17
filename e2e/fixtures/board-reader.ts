@@ -108,10 +108,25 @@ const SUMMARIES = {
 
 let fx: FixtureHost
 
-/** The board on the test bed, its tool calls answered as the server would. `failSaves`: how many saves fail first */
-async function showBoard(page: Page, { failSaves = 0 } = {}) {
+/** What merge_queue answers (#956): one item in each of the screen's groups */
+const QUEUE = {
+  content: [{ type: 'text', text: 'queue' }],
+  structuredContent: {
+    summary: 'Merge queue: 1 need attention, 1 in CI, 1 waiting, 1 merged. Driven by the board app.',
+    items: [],
+    queue: [
+      { repo: REPO, pr: 120, ref: '#120', title: 'fix(ui): keep focus', state: 'attention', lowers: [], reason: { kind: 'dirty', text: '#120 conflicts with main (GitHub: DIRTY) at c0ffee0. Rebase it onto main and push.' }, head: 'c0ffee0000', commit: null },
+      { repo: REPO, pr: 121, ref: '#121', title: 'feat(apps): a stack top', state: 'ci', lowers: [119], reason: null, head: 'beef000000', commit: null },
+      { repo: REPO, pr: 122, ref: '#122', title: 'docs: a note', state: 'waiting', lowers: [], reason: null, head: null, commit: null },
+      { repo: REPO, pr: 118, ref: '#118', title: 'fix(host): a merged one', state: 'merged', lowers: [], reason: null, head: 'abc', commit: 'abcdef1234' },
+    ],
+  },
+}
+
+/** The board on the test bed, its tool calls answered as the server would. `failSaves`: how many saves fail first; `queue`: what merge_queue answers */
+async function showBoard(page: Page, { failSaves = 0, queue = null as typeof QUEUE | null } = {}) {
   await page.evaluate(
-    ({ board, threads, summaries, failSaves, recorded }) => {
+    ({ board, threads, summaries, failSaves, recorded, queue }) => {
       const w = window as any
       let failures = failSaves
       // #101's last answer was recorded by an agent already
@@ -120,6 +135,7 @@ async function showBoard(page: Page, { failSaves = 0 } = {}) {
       const wordList = () => ({ content: [{ type: 'text', text: `${words.length} private words.` }], structuredContent: { count: words.length, words } })
       w.__mock.appToolHandler = async (_app: string, tool: string, args: any) => {
         if (tool === 'show') return { content: [{ type: 'text', text: 'board' }], structuredContent: board }
+        if (tool === 'merge_queue' && queue) return queue
         if (tool === 'private_words') return wordList()
         // Where the release stands, a step further on each read (an agent tagged in between)
         if (tool === 'release_status') {
@@ -150,7 +166,7 @@ async function showBoard(page: Page, { failSaves = 0 } = {}) {
         return { content: [{ type: 'text', text: 'ok' }] }
       }
     },
-    { board: BOARD_STATE, threads: THREADS, summaries: SUMMARIES, failSaves, recorded: RECORDED },
+    { board: BOARD_STATE, threads: THREADS, summaries: SUMMARIES, failSaves, recorded: RECORDED, queue },
   )
   const instanceId = fx.open({ projectId: null, appId: 'project-board' }, URI)
   await page.evaluate((p) => (window as any).__appFrame.mount('a', p), { appId: 'project-board', projectId: null, instanceId, fill: true, className: 'flex flex-col', changeSignal: 1 })
@@ -389,8 +405,29 @@ export function boardReaderTests(): void {
       await expect(opener).toBeFocused()
     })
 
+    test('the merge queue shows above the board in its groups, attention first with why, and Unqueue takes an item out', async ({ page }) => {
+      const v = await showBoard(page, { queue: QUEUE })
+      const queue = v.locator('#queue')
+      await expect(queue).toBeVisible()
+      await expect(queue.locator('.q-group .q-label')).toHaveText(['Needs attention1', 'CI1', 'Waiting1', 'Merged1'])
+      const attention = queue.locator('.q-row[data-state="attention"]')
+      await expect(attention).toContainText('fix(ui): keep focus')
+      await expect(attention.locator('.why')).toHaveText('#120 conflicts with main (GitHub: DIRTY) at c0ffee0. Rebase it onto main and push.')
+      await expect(queue.locator('.q-row[data-state="ci"] .tag')).toHaveText('stack over #119')
+      await expect(queue.locator('.q-row[data-state="merged"]')).toContainText('merged as abcdef1')
+      await expect(queue.locator('.q-row[data-state="merged"] button')).toHaveCount(0)
+      // A title reads the pull request in place, like a card's
+      await attention.locator('.title').click()
+      expect(await callsTo(page, 'read_item')).toEqual([{ item: `${REPO}#120` }])
+      await page.keyboard.press('Escape')
+      await attention.getByRole('button', { name: 'Unqueue' }).click()
+      await expect.poll(() => callsTo(page, 'unqueue')).toEqual([{ pr: `${REPO}#120` }])
+    })
+
     test('the release dialog shows where the release stands, reads again on demand, and Esc gives the keyboard back', async ({ page }) => {
       const v = await showBoard(page)
+      // Nothing queued (#956): no queue section at all
+      await expect(v.locator('#queue')).toBeHidden()
       const opener = v.locator('#release-open')
       await opener.click()
       await expect(v.locator('dialog#release')).toBeVisible()

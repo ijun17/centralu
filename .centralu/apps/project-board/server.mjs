@@ -12,12 +12,14 @@ import { tools as boardTools } from './board-tools.mjs'
 import { tools as ciTools } from './ci-tools.mjs'
 import { tools as contributeTools } from './contribute-tools.mjs'
 import { tools as decisionTools } from './decision-tools.mjs'
+import { tools as helpTools } from './help-tools.mjs'
+import { startQueue, tools as queueTools } from './queue-tools.mjs'
 import { tools as readerTools } from './reader-tools.mjs'
 import { tools as releaseTools } from './release-tools.mjs'
 import { UI, VIEW_CSP, tools as viewTools, viewResource } from './view-tools.mjs'
 import { tools as wordsTools } from './words-tools.mjs'
 
-const TOOLS = { ...viewTools, ...readerTools, ...ciTools, ...decisionTools, ...contributeTools, ...releaseTools, ...wordsTools, ...boardTools }
+const TOOLS = { ...viewTools, ...readerTools, ...ciTools, ...helpTools, ...queueTools, ...decisionTools, ...contributeTools, ...releaseTools, ...wordsTools, ...boardTools }
 
 /** The order agents and the screen list the tools in, as it was before the tools moved into families. */
 const ORDER = [
@@ -47,6 +49,10 @@ const ORDER = [
   'add_item',
   'ci_status',
   'merge_when_green',
+  'help',
+  'queue_merge',
+  'merge_queue',
+  'unqueue',
 ]
 const unlisted = Object.keys(TOOLS).filter((name) => !ORDER.includes(name))
 if (unlisted.length) throw new Error(`server.mjs: add ${unlisted.join(', ')} to ORDER`)
@@ -60,3 +66,6 @@ serveStdio(() => {
 
   return server
 })
+
+// The merge queue carries on in this server while it runs (queue-driver.mjs)
+startQueue()

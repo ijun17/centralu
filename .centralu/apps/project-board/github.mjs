@@ -21,6 +21,9 @@ const SCOPE = /INSUFFICIENT_SCOPES|required scopes|has not been granted the requ
 // A login that can read the project but not change it (GitHub's GraphQL error type FORBIDDEN, or
 // the REST-style wording gh passes on). Not seen live: the owner's own login can always write.
 const FORBIDDEN = /\bFORBIDDEN\b|Resource not accessible by|does not have permission to|must have (?:write|admin) access/i
+// GitHub's primary and secondary rate limits (HTTP 403 or 429 with this wording). Every call fails the
+// same way until the limit resets, so the merge queue pauses and backs off instead of polling on.
+const RATE = /rate limit|HTTP 429|abuse detection/i
 const AUTH = /gh auth login|not logged in|authentication required|HTTP 401|Bad credentials|no oauth token/i
 const NETWORK =
   /error connecting to|could not resolve host|no such host|dial tcp|i\/o timeout|connection refused|network is unreachable|TLS handshake|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|ENOTFOUND/i
@@ -34,6 +37,7 @@ export function classify(text) {
       'scope',
       'The GitHub login gh uses lacks the "project" scope this app needs. Run `gh auth refresh -s project` in a terminal, then refresh.',
     )
+  if (RATE.test(t)) return new GitHubError('rate', `GitHub's rate limit was reached (${first.replace(/^gh:\s*/, '')}). Wait a few minutes, then try again.`)
   if (FORBIDDEN.test(t))
     return new GitHubError(
       'forbidden',
@@ -298,8 +302,8 @@ const firstLine = (e) =>
     .split('\n')
     .map((l) => l.replace(/^gh:\s*/, '').trim())
     .find(Boolean) ?? 'no message'
-// Failures that say nothing about the thing asked for: gh cannot reach GitHub at all.
-export const FATAL = new Set(['network', 'auth', 'gh-missing'])
+// Failures that say nothing about the thing asked for: gh cannot reach GitHub at all, or may not for now.
+export const FATAL = new Set(['network', 'auth', 'gh-missing', 'rate'])
 
 /** Refuses anything but owner/name before it reaches a REST path. */
 export function checkRepo(repo) {
@@ -331,12 +335,15 @@ export async function readRepo(repo) {
 
 const PR_FIELDS = 'number,title,body,state,isDraft,mergeable,headRefOid,headRefName,baseRefName,isCrossRepository,url,mergeCommit'
 
+// The merge queue also reads how GitHub would merge it (DIRTY, BEHIND, BLOCKED, CLEAN, …)
+export const QUEUE_PR_FIELDS = `${PR_FIELDS},mergeStateStatus`
+
 /** One pull request, as `gh pr view --json` gives it. */
-export async function readPr(repo, number) {
+export async function readPr(repo, number, fields = PR_FIELDS) {
   checkRepo(repo)
   let out
   try {
-    out = await runGh(['pr', 'view', String(number), '-R', repo, '--json', PR_FIELDS])
+    out = await runGh(['pr', 'view', String(number), '-R', repo, '--json', fields])
   } catch (e) {
     if (e instanceof GitHubError && !FATAL.has(e.kind)) throw new GitHubError('not-found', `${repo}#${number} is not a pull request this GitHub login can see (${firstLine(e)}).`)
     throw e
@@ -515,6 +522,60 @@ export async function deleteBranch(repo, branch) {
   } catch (e) {
     return firstLine(e)
   }
+}
+
+// --- The merge queue (queue-driver.mjs) ---------------------------------------------------------------
+
+/** The latest run of each CI workflow on a commit: id, attempt, status and conclusion, newest first. */
+export async function runsForHead(repo, sha, workflows) {
+  checkRepo(repo)
+  const out = []
+  for (const path of workflows ?? []) {
+    const file = String(path).split('/').pop()
+    if (!WORKFLOW.test(file)) throw new GitHubError('input', `"${path}" is not a workflow file name.`)
+    const r = await restJson(`repos/${repo}/actions/workflows/${file}/runs?${new URLSearchParams({ head_sha: sha, per_page: '5' })}`, { missing: [404] })
+    const run = (r?.workflow_runs ?? []).filter((w) => w.head_sha === sha).sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))[0]
+    if (run) out.push({ id: run.id, workflow: file, attempt: run.run_attempt ?? 1, status: run.status, conclusion: run.conclusion ?? null, url: run.html_url ?? null })
+  }
+  return out
+}
+
+/** Starts a completed run again: all of its jobs, or only the failed ones. GitHub answers nothing. */
+export async function rerunRun(repo, runId, { failedOnly = false } = {}) {
+  checkRepo(repo)
+  try {
+    await runGh(['api', '-X', 'POST', `repos/${repo}/actions/runs/${Number(runId)}/${failedOnly ? 'rerun-failed-jobs' : 'rerun'}`])
+  } catch (e) {
+    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+    throw new GitHubError('github', `GitHub refused to rerun run ${runId}: ${firstLine(e)}`)
+  }
+}
+
+/** Closes a pull request with a comment (never its branch: that is deleted on its own, through the API). */
+export async function closePr(repo, number, comment) {
+  checkRepo(repo)
+  try {
+    await runGh(['pr', 'close', String(number), '-R', repo, '--comment', comment], { cwd: tmpdir() })
+    return null
+  } catch (e) {
+    if (e instanceof GitHubError && FATAL.has(e.kind)) throw e
+    return firstLine(e)
+  }
+}
+
+/** Whether `head` contains `ancestor` (GitHub's compare: ahead or identical). */
+export async function containsCommit(repo, ancestor, head) {
+  checkRepo(repo)
+  const c = await restJson(`repos/${repo}/compare/${encodeURIComponent(ancestor)}...${encodeURIComponent(head)}`, { missing: [404] })
+  return c?.status === 'ahead' || c?.status === 'identical'
+}
+
+/** The open pull requests whose base is `branch` (deleting it would close them). */
+export async function openPrsOnBase(repo, branch) {
+  checkRepo(repo)
+  if (!REF.test(String(branch))) return []
+  const list = parseJson(await runGh(['pr', 'list', '-R', repo, '--base', branch, '--state', 'open', '--limit', '50', '--json', 'number']))
+  return Array.isArray(list) ? list.map((p) => p.number) : []
 }
 
 // --- Reading an item and answering it (the reader in the view) --------------------------------------

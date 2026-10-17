@@ -179,7 +179,7 @@ export const tools = {
     config: {
       title: 'Comment on an issue or pull request',
       description:
-        'Post a comment on an issue or pull request on GitHub, as the gh login. Refused, with nothing posted, when it is empty, not in English (code and > quotes aside), holds a word from the private list, or carries an attribution line (Co-Authored-By, "Generated with"). Answers the comment as GitHub stored it.',
+        'Instead of gh pr comment / gh issue comment: post a comment on an issue or pull request on GitHub, as the gh login. Refused, with nothing posted, when it is empty, not in English (code and > quotes aside), holds a word from the private list, or carries an attribution line (Co-Authored-By, "Generated with"). Answers the comment as GitHub stored it.',
       inputSchema: z.object({ item: itemInput, body: z.string().max(65536).describe('The comment, in Markdown') }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       _meta: { ui: { visibility: ['model'] } },
@@ -202,7 +202,7 @@ export const tools = {
     config: {
       title: 'File an issue',
       description:
-        "File an issue on this project's repository (or repo). Refused, with nothing filed, when the title is empty or the title or body is not in English (code and > quotes aside), holds a word from the private list, or carries an attribution line. dryRun checks only.",
+        "Instead of gh issue create: file an issue on this project's repository (or repo). Refused, with nothing filed, when the title is empty or the title or body is not in English (code and > quotes aside), holds a word from the private list, or carries an attribution line. dryRun checks only.",
       inputSchema: z.object({
         title: z.string().max(256),
         body: z.string().max(65536).describe('The issue, in Markdown'),
@@ -220,7 +220,7 @@ export const tools = {
     config: {
       title: 'Open a pull request from the template',
       description:
-        "Open a pull request with its description filled into the repository's pull request template (read from the base branch): why, whatChanged, verified, usability, notExercised, closes, or sections keyed by any other heading. A heading left out is dropped, as the template asks, except Not exercised, which must name what was not run (\"Nothing\" when true), and a heading the template says to keep (Usability: numbers, or n/a). Refused, with nothing opened, when the title does not follow docs/commit-conventions.md, a heading is not in the template, or the text is not in English, holds a private word or carries an attribution line. dryRun answers the filled description without opening.",
+        "Instead of gh pr create: open a pull request with its description filled into the repository's pull request template (read from the base branch): why, whatChanged, verified, usability, notExercised, closes, or sections keyed by any other heading. A heading left out is dropped, as the template asks, except Not exercised, which must name what was not run (\"Nothing\" when true), and a heading the template says to keep (Usability: numbers, or n/a). Refused, with nothing opened, when the title does not follow docs/commit-conventions.md, a heading is not in the template, or the text is not in English, holds a private word or carries an attribution line. dryRun answers the filled description without opening.",
       inputSchema: z.object({
         title: z.string().max(256).describe('Conventional commit form, e.g. "fix(ui): keep grid focus on the orchestrator"; it becomes the squash subject'),
         head: z.string().min(1).describe('The branch with the changes (owner:branch for a fork), already pushed'),
@@ -262,7 +262,7 @@ export const tools = {
     config: {
       title: 'Restack a pull request after the one under it was merged',
       description:
-        "Move a stacked pull request (pr) onto its base after the pull request under it (its base branch's pull request, or lower) was squash-merged. Reads both fresh, replays only pr's own commits (after the lower one's last head) onto the lower one's merge commit in a temporary worktree, and confirms the change is the one CI tested and whether the tree is the tested tree. Refuses when the lower one is not merged, pr was built on an older version of it, the replay conflicts, or the change differs. Without push it only reports; push: true pushes with a lease on the head it read and moves the base.",
+        "Instead of git rebase --onto and git push --force by hand: move a stacked pull request (pr) onto its base after the pull request under it (its base branch's pull request, or lower) was squash-merged. Reads both fresh, replays only pr's own commits (after the lower one's last head) onto the lower one's merge commit in a temporary worktree, and confirms the change is the one CI tested and whether the tree is the tested tree. Refuses when the lower one is not merged, pr was built on an older version of it, the replay conflicts, or the change differs. Without push it only reports; push: true pushes with a lease on the head it read and moves the base.",
       inputSchema: z.object({
         pr: itemRef.describe(`The upper pull request: ${REF_HELP}`),
         lower: itemRef.optional().describe('The pull request it was stacked on, when GitHub already moved its base'),

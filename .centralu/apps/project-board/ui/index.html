@@ -164,6 +164,33 @@
       .num { text-decoration: none; }
       a.num:hover { color: var(--ink); text-decoration: underline; text-decoration-color: var(--ink-3); }
 
+      /*
+       * The merge queue (#956): above the board, only while it has items. What needs attention waits
+       * on someone, so it takes the signal colour, like the decision column.
+       */
+      .queue { margin: 12px 16px 0; border: var(--border) solid var(--edge); border-radius: var(--radius-lg); background: var(--surface); }
+      .queue[hidden] { display: none; }
+      .queue.attention { border-color: var(--edge-strong); }
+      .q-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; padding: 8px 10px 4px; color: var(--ink-2); font-weight: var(--semibold); }
+      .q-head .quiet { font-weight: var(--regular); }
+      .q-groups { display: flex; flex-direction: column; gap: 2px; padding: 0 10px 8px; }
+      .q-group { display: grid; grid-template-columns: 9.5em 1fr; gap: 0 10px; }
+      .q-group > .q-label { color: var(--ink-2); padding-top: 2px; }
+      .q-group.attention > .q-label { color: var(--beacon); font-weight: var(--semibold); }
+      .q-group .count { color: var(--ink-3); font-weight: var(--regular); font-variant-numeric: tabular-nums; margin-left: 4px; }
+      .q-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .q-row { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; padding: 2px 0; min-width: 0; }
+      .q-row .title { color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
+      .q-row .title:hover { text-decoration: underline; text-decoration-color: var(--ink-3); }
+      .q-row .why { flex-basis: 100%; color: var(--ink-2); font-size: var(--text-sm); overflow-wrap: anywhere; }
+      .q-group.attention .why { color: var(--ink); }
+      .q-row .state { color: var(--ink-3); font-size: var(--text-sm); }
+      .q-row button { padding: 0 6px; font-size: var(--text-sm); margin-left: auto; }
+      @media (max-width: 520px) {
+        .queue { margin: 10px 12px 0; }
+        .q-group { grid-template-columns: 1fr; }
+      }
+
       /* Board or "Needs decision": two pressed-or-not buttons in the header */
       .modes { display: flex; gap: 4px; }
       .modes button { background: transparent; border-color: transparent; color: var(--ink-2); }
@@ -416,6 +443,7 @@
       <button id="release-open" type="button" tabindex="0" title="Where the release stands">Release</button>
     </header>
     <div id="notice" hidden></div>
+    <section class="queue" id="queue" hidden aria-labelledby="queue-title"></section>
     <nav class="tabs" id="tabs" aria-label="Statuses"></nav>
     <main class="board" id="board" aria-live="polite"></main>
     <main class="decisions" id="decisions" hidden aria-label="Items that need a decision"></main>
@@ -1379,6 +1407,99 @@
       releaseDlg.addEventListener('close', () => (releaseOpener?.isConnected ? releaseOpener : $('release-open')).focus())
       releaseDlg.addEventListener('click', (e) => e.target === releaseDlg && releaseDlg.close())
 
+      // --- The merge queue (#956) -------------------------------------------------------------------
+      // The server drives it on its own, so nothing tells this screen when an item moves: while the
+      // queue has items in flight, it reads merge_queue (read-only, from the app's data folder) again.
+      const QUEUE_GROUPS = [
+        ['attention', 'Needs attention'],
+        ['ci', 'CI'],
+        ['waiting', 'Waiting'],
+        ['merged', 'Merged'],
+      ]
+      const QUEUE_POLL_MS = 15_000
+      let queue = null // merge_queue's structuredContent
+      let queueTimer = null
+
+      async function loadQueue() {
+        let r
+        try {
+          r = await app.callServerTool({ name: 'merge_queue', arguments: {} })
+        } catch {
+          r = null
+        }
+        queue = r && !r.isError ? r.structuredContent : null
+        renderQueue()
+        clearTimeout(queueTimer)
+        if (queue?.queue?.some((i) => i.state === 'ci' || i.state === 'waiting' || i.state === 'attention')) queueTimer = setTimeout(loadQueue, QUEUE_POLL_MS)
+      }
+
+      async function unqueueItem(item, button) {
+        button.disabled = true
+        const r = await app.callServerTool({ name: 'unqueue', arguments: { pr: `${item.repo}#${item.pr}` } }).catch((e) => ({ isError: true, content: [{ type: 'text', text: String(e?.message ?? e) }] }))
+        if (r?.isError) {
+          notice = { strong: `Could not take ${item.ref} out of the queue.`, text: textOf(r), dismiss: true }
+          renderNotice()
+        }
+        loadQueue()
+      }
+
+      function queueRow(item) {
+        const key = `${item.repo}#${item.pr}`
+        const url = `https://github.com/${item.repo}/pull/${item.pr}`
+        const read = (e) => {
+          e.preventDefault()
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return open(url)
+          openReader(key, e.currentTarget)
+        }
+        const active = item.state !== 'merged' && item.state !== 'closed'
+        const stack = item.lowers?.length ? `stack over ${item.lowers.map((n) => `#${n}`).join(', ')}` : null
+        const state =
+          item.state === 'merged' ? (item.commit ? `merged as ${item.commit.slice(0, 7)}` : 'merged') : item.state === 'ci' && item.head ? `at ${item.head.slice(0, 7)}` : null
+        const why = item.state === 'attention' ? item.reason?.text : item.lastError ? `Last poll failed: ${item.lastError}` : null
+        const button = active ? el('button', { type: 'button', tabindex: '0', title: 'Take it out of the queue; nothing on GitHub changes' }, 'Unqueue') : null
+        button?.addEventListener('click', () => unqueueItem(item, button))
+        return el(
+          'li',
+          { class: 'q-row', 'data-ref': key, 'data-state': item.state },
+          el('a', { class: 'num', href: url, tabindex: '-1', onclick: read }, item.ref),
+          el('a', { class: 'title', href: url, tabindex: '0', title: 'Read it here (with ⌘ or Ctrl: on GitHub)', onclick: read }, item.title ?? item.ref),
+          stack ? el('span', { class: 'tag' }, stack) : null,
+          item.state === 'attention' && item.reason?.kind ? el('span', { class: 'tag decision' }, item.reason.kind) : null,
+          state ? el('span', { class: 'state' }, state) : null,
+          button,
+          why ? el('span', { class: 'why' }, why) : null,
+        )
+      }
+
+      function renderQueue() {
+        const box = $('queue')
+        const items = queue?.queue ?? []
+        if (!items.length) {
+          box.hidden = true
+          box.replaceChildren()
+          return
+        }
+        box.hidden = false
+        const attention = items.some((i) => i.state === 'attention')
+        box.className = `queue${attention ? ' attention' : ''}`
+        const groups = QUEUE_GROUPS.map(([state, label]) => ({ state, label, items: items.filter((i) => i.state === state || (state === 'merged' && i.state === 'closed')) })).filter((g) => g.items.length)
+        box.replaceChildren(
+          el('div', { class: 'q-head' }, el('span', { id: 'queue-title' }, 'Merge queue'), el('span', { class: 'quiet' }, queue.summary.replace(/^Merge queue: /, ''))),
+          el(
+            'div',
+            { class: 'q-groups' },
+            ...groups.map((g) =>
+              el(
+                'section',
+                { class: `q-group ${g.state}`, 'aria-label': g.label },
+                el('div', { class: 'q-label' }, g.label, el('span', { class: 'count' }, String(g.items.length))),
+                el('ul', { class: 'q-rows' }, ...g.items.map(queueRow)),
+              ),
+            ),
+          ),
+        )
+      }
+
       function show(result) {
         const sc = result?.structuredContent
         if (!sc) {
@@ -1426,15 +1547,16 @@
         if (n.method !== 'centralu/notifications/changed') return
         // Someone moved an item or commented: the board, the decisions and an open item read again
         // A release step (the release tool) shows in the open release dialog too
-        await Promise.all([load(false), mode === 'decisions' ? loadDecisions(false) : null, dlg.open ? loadReader({ quiet: true }) : null, releaseDlg.open ? loadRelease() : null])
+        await Promise.all([load(false), loadQueue(), mode === 'decisions' ? loadDecisions(false) : null, dlg.open ? loadReader({ quiet: true }) : null, releaseDlg.open ? loadRelease() : null])
       }
-      $('refresh').onclick = () => (load(true), mode === 'decisions' ? loadDecisions(true) : null)
+      $('refresh').onclick = () => (load(true), loadQueue(), mode === 'decisions' ? loadDecisions(true) : null)
       $('area').onchange = render
       $('priority').onchange = render
       $('mode-board').onclick = () => setMode('board')
       $('mode-decisions').onclick = () => setMode('decisions')
       app.connect().then(() => {
         applyTheme()
+        loadQueue()
         if (!state) return load(false)
       })
     </script>
