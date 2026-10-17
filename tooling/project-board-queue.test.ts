@@ -1133,7 +1133,7 @@ describe('the merge queue batches pull requests waiting for CI into one run (#96
         prs: {
           ...base.prs,
           '78': ghPr(78, { headRefOid: B, mergeStateStatus: 'UNSTABLE', isCrossRepository: true }),
-          '79': ghPr(79, { headRefOid: C, mergeStateStatus: 'UNSTABLE', headRefName: 'chore/release-0.1.0-beta.27', title: 'chore(release): 0.1.0-beta.27' }),
+          '79': ghPr(79, { headRefOid: C, mergeStateStatus: 'UNSTABLE', headRefName: 'chore/release-9.9.9-beta.1', title: 'chore(release): 9.9.9-beta.1' }),
         },
         runs: { ...base.runs, [C]: [ownRun(79, C, 903, 5003)] },
         checks: { ...base.checks, [C]: ownChecks(5003, null) },
