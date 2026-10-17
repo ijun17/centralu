@@ -192,9 +192,9 @@ describe('starting another agent in the same project', () => {
     const said = () => w.store.loadMessages(s, 50).filter((m) => String((m.payload as { text?: string }).text ?? '').startsWith('[Centralu]'))
     // The report the quit's failed wait leads to, awaited to its end rather than for a while
     const reports: Promise<void>[] = []
-    const mgr = w.mgr as unknown as { deliverReport: (...a: unknown[]) => Promise<void> }
-    const deliverReport = mgr.deliverReport.bind(w.mgr)
-    vi.spyOn(mgr, 'deliverReport').mockImplementation((...a) => {
+    const reporter = (w.mgr as unknown as { reports: { deliverReport: (...a: unknown[]) => Promise<void> } }).reports
+    const deliverReport = reporter.deliverReport.bind(reporter)
+    vi.spyOn(reporter, 'deliverReport').mockImplementation((...a) => {
       const p = deliverReport(...a)
       reports.push(p)
       return p

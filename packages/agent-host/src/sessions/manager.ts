@@ -11,8 +11,9 @@ import { hubAskDepthKey } from './agent-depth.js'
 import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
 import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { HandoffChildren, movedChildrenNote, type HandoffChildrenHost } from './handoff-children.js'
+import { ChildReports, type ChildReportsHost } from './child-reports.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
-import { LinkedReports, type LinkedEvent, type LinkedReportsHost, type ReportWork } from './linked-reports.js'
+import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
 import { SessionAppsHub } from './session-apps.js'
 import { AppAccess, writeShared } from './app-access.js'
@@ -22,8 +23,7 @@ import { CacheLedger } from './cache-ledger.js'
 import { underGrant } from './ask-project.js'
 import { makeProjectFolder, projectFolderTarget, type ProjectFolderTarget } from '../dev-services/project-folder.js'
 import { cloneInto } from '../dev-services/project-clone.js'
-import { labelOf, orchestratorMemory, previewOf } from './transcript-view.js'
-import { clipPreview } from './turn-answer.js'
+import { orchestratorMemory } from './transcript-view.js'
 import { RECONNECTING_FLAG_MS, interruptionAfter } from './interruptions.js'
 import { homedir } from 'node:os'
 import { basename, join, relative, resolve, sep } from 'node:path'
@@ -63,11 +63,7 @@ import {
   CENTRALU_APPLY,
   CENTRALU_APPLY_QUESTION,
   sessionOnlyAlways,
-  liveBackgroundTasks,
   DATA_DIR,
-  // The frame's single-line field (#120) — lives in protocol (app-frames.ts) because the mock
-  // also needs to put words into a session built with the same frame.
-  frameField,
   gitSourceError,
   oneLineText,
   repoNameOf,
@@ -142,7 +138,7 @@ import { handoffNoteDir, sweepHandoffNotes, writeHandoffNote, writeHandoffNoteSy
 import { attachCommitSessions, looksLikeGitCommit, parseCommitSha } from '../dev-services/git-attrib.js'
 import { AskProjectFlow, type AskProjectHost } from './ask-project-flow.js'
 import { HandoffFlow, type HandoffFlowHost, type HandoffTimings } from './handoff-flow.js'
-import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, HUB_SENDER, agentStartPersonText, taskList } from './delegation-flow.js'
+import { DelegationFlow, type DelegationHost, ASK_THE_PERSON, HUB_SENDER, agentStartPersonText } from './delegation-flow.js'
 import type { AgentStartFlow } from './start-agent-flow.js'
 import { RestartPolicy, type RestartHost } from './restart-policy.js'
 import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
@@ -164,7 +160,7 @@ export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS }
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost
 
 /**
  * Where the marker "conversation up to here belongs to the old tool" is stored.
@@ -195,43 +191,6 @@ function untrustedSourceSessionNotification(sourceSessionId: string): string {
 
 // Lives with the paused reports it times (child-ownership.ts), here and for a linked machine's (#723)
 export { PAUSED_REPORT_SETTLE_MS }
-/** The first line of a report held over the session's own background work (#721) */
-function pausedReportLine(running: readonly BackgroundTask[], stoppable: boolean): string {
-  return (
-    `[Centralu] The assigned work paused: its turn ended while its own background work is still running (${taskList(running)}). ` +
-    'If that work is a server or watcher it leaves running, the answer below may be its final one. ' +
-    'A final report follows only if that work ends' +
-    (stoppable ? '; agent_session(action="stop") on it stops that work and ends the wait.\n' : '.\n')
-  )
-}
-/**
- * The first line of a linked machine's paused report whose link dropped before the work ended (#723): the hub cannot see
- * that end, so the report goes out now
- */
-function linkLostReportLine(machine: string, paused: readonly BackgroundTask[]): string {
-  return (
-    `[Centralu] The assigned work paused on its own background work (${taskList(paused)}), and the link to ${frameField(machine)} dropped before that work ended, ` +
-    'so its end will not be reported. It may still be running there; read the session once the link is back.\n'
-  )
-}
-/** The first line of a linked machine's report whose machine was removed before the work ended (#723) */
-function machineRemovedReportLine(machine: string, paused: readonly BackgroundTask[] | undefined): string {
-  return (
-    (paused
-      ? `[Centralu] The assigned work paused on its own background work (${taskList(paused)}), and its machine ${frameField(machine)} was removed from Centralu before that work ended`
-      : `[Centralu] The assigned work's machine ${frameField(machine)} was removed from Centralu before its turn ended`) +
-    ', so its end will not be reported.\n'
-  )
-}
-/** The first line of a paused report settled with no turn after its work ended (#721): how that work ended */
-function settledReportLine(tasks: readonly BackgroundTask[]): string {
-  const clean = tasks.every((t) => t.status === 'completed')
-  return (
-    `[Centralu] The assigned work's background work ended (${taskList(tasks, true)}) and no turn followed` +
-    (clean ? '; its last answer is below.\n' : ', so the work may not have finished; its last answer is below.\n')
-  )
-}
-
 /**
  * The most a hub's orchestrator reads of this host in one call (`hostReader`, #82 phase 4): lines of one conversation
  * and hits of one search. Five times the tools' defaults (40 and 12), so no read a model makes is cut, while one call
@@ -292,6 +251,8 @@ export class SessionManager {
   private readonly cards: RoutedCards
   /** A handoff's move of the original's children to the session that took over (handoff-children.ts) */
   private readonly handoffChildren: HandoffChildren
+  /** What a session is told of work it gave: reports, paused reports, stops nobody was owed (child-reports.ts) */
+  private readonly reports: ChildReports
   /** ask_project, here or on a linked machine (ask-project-flow.ts) */
   private readonly askProjectFlow: AskProjectFlow
   /** The conversations a tool keeps on its own side: listing, holders, import and catch-up (external-conversations.ts) */
@@ -312,52 +273,6 @@ export class SessionManager {
   private readonly hostCards: HostCards
   /** The orchestrator's reports from linked machines' sessions, and the work they pause on (linked-reports.ts) */
   private readonly linkedReports: LinkedReports
-  /** Holds the session's owed report over its own background work (#721); the mark itself stays as it is */
-  private pauseReport(sessionId: string, running: readonly BackgroundTask[]): void {
-    this.children.pauseReport(sessionId, running)
-    this.settlePausedReport(sessionId)
-  }
-  private stopSettlingPausedReports(): void {
-    this.children.stopSettling()
-  }
-  /**
-   * The background work the session's tool lists as running, which a turn ending now does not end (#721). A timer the
-   * tool holds (`/loop`, a scheduled prompt) is not work: a report is not held for it, or a loop would hold it for good
-   */
-  private ownTasksRunning(sessionId: string): BackgroundTask[] {
-    const m = this.meta.get(sessionId)
-    return m ? liveBackgroundTasks(m.backgroundTasks).filter((t) => !t.timer) : []
-  }
-  /** The tasks a paused report waited on, as the session lists them now: how each ended, or still running (#721) */
-  private pausedTasksNow(sessionId: string): BackgroundTask[] {
-    const listed = this.meta.get(sessionId)?.backgroundTasks ?? []
-    return (this.children.pausedReports.get(sessionId) ?? []).map((t) =>
-      listed.find((l) => l.id === t.id) ?? { id: t.id, kind: 'other' as const, description: t.description, status: 'completed' as const })
-  }
-  /**
-   * A paused report whose background work has ended with no turn running (#721): the turn that ending starts ends the
-   * work and reports it. If none starts within `PAUSED_REPORT_SETTLE_MS` (a task the person stopped, a tool that
-   * starts no turn for it), the report goes out as the work's end with the last answer. Each change of the work starts
-   * the wait again; a turn running when it is up reports at its own end.
-   */
-  private settlePausedReport(sessionId: string): void {
-    this.children.stopSettling(sessionId)
-    if (this.disposing || this.handingOver) return
-    const quiet = () => {
-      const m = this.meta.get(sessionId)
-      return this.children.pausedReports.has(sessionId) && !!m && !inTurn(m.state) && !this.inputsHeld(sessionId) && !this.children.delivering.has(sessionId) &&
-        this.ownTasksRunning(sessionId).length === 0
-    }
-    if (!quiet()) return
-    const timer = setTimeout(() => {
-      this.children.stopSettling(sessionId)
-      if (!quiet() || this.handingOver || this.disposing) return
-      console.error(`[sessions] ${sessionId.slice(0, 8)}: its background work ended and no turn followed; reporting the work as ended`)
-      void this.reportBackIfAwaited(sessionId, { type: 'turn_complete', sessionId }, undefined, this.pausedTasksNow(sessionId))
-    }, PAUSED_REPORT_SETTLE_MS)
-    timer.unref?.()
-    this.children.settleAfter(sessionId, timer)
-  }
   /**
    * Session currently being resumed -> its promise.
    *
@@ -450,6 +365,7 @@ export class SessionManager {
     } = {},
   ) {
     this.children = new ChildOwnership(store)
+    this.reports = new ChildReports(this.parts())
     this.handoffChildren = new HandoffChildren(this.parts())
     this.cards = new RoutedCards(this.parts())
     this.queue = new QueuedRequests(this.parts())
@@ -1814,15 +1730,15 @@ export class SessionManager {
             this.store.upsertSession(m)
             this.emit(change)
             // Its turn is over: the report it owed says so now, rather than naming a later turn (#698)
-            if (this.children.awaitingReport.has(m.id)) void this.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' })
-            else void this.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId)
+            if (this.children.awaitingReport.has(m.id)) void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' })
+            else void this.reports.tellAskerOfInterruption(m.id, this.children.turnOwners.get(m.id)?.callerId)
           } else if (this.children.pausedReports.has(m.id)) {
             // The background work its report waited on went with the process (#721): the work stopped
-            void this.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' })
+            void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' })
           }
         } else if (this.children.pausedReports.has(m.id)) {
           // Its background work may have ended during the swap with no turn following (#721)
-          this.settlePausedReport(m.id)
+          this.reports.settlePausedReport(m.id)
         }
       }),
     )
@@ -1835,7 +1751,7 @@ export class SessionManager {
     if (this.disposing || this.handingOver) return
     const now = this.quitNotices.filter((n) => ready(n.requester))
     this.quitNotices = this.quitNotices.filter((n) => !ready(n.requester))
-    for (const n of now) void this.tellAskerOfInterruption(n.sessionId, n.requester)
+    for (const n of now) void this.reports.tellAskerOfInterruption(n.sessionId, n.requester)
   }
 
   private async doResumeSession(
@@ -2579,8 +2495,8 @@ export class SessionManager {
      * reported, the marker stayed set, and a later, unrelated turn ended up reported as "it finished".
      */
     // A wait settled in an earlier turn holds that turn's answer, not this one's
-    if (endedTurn && e.sessionId && !run?.tracksInputs) void this.reportBackIfAwaited(e.sessionId, e, runOpen ? run?.completedAnswer : undefined)
-    if (endedTurn && e.sessionId && !owed) void this.tellAskerOfInterruption(e.sessionId, delegation?.callerId)
+    if (endedTurn && e.sessionId && !run?.tracksInputs) void this.reports.reportBackIfAwaited(e.sessionId, e, runOpen ? run?.completedAnswer : undefined)
+    if (endedTurn && e.sessionId && !owed) void this.reports.tellAskerOfInterruption(e.sessionId, delegation?.callerId)
     // A card in a delegated turn goes to the session that gave the turn too (#676); a turn-long link ends with the turn
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.cards.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
     if (endedTurn && e.sessionId && this.children.turnOwners.get(e.sessionId)?.untilTurnEnd) this.children.releaseTurn(e.sessionId)
@@ -2603,7 +2519,7 @@ export class SessionManager {
     // A deferred restart also waits for the session's background work (#648): the moment it ends is a boundary too
     if (e.type === 'background_tasks' && e.sessionId) this.restartPolicy.applyDeferredRestart(e.sessionId)
     // A paused report's work may just have ended (#721)
-    if (e.type === 'background_tasks' && e.sessionId && this.children.pausedReports.has(e.sessionId)) this.settlePausedReport(e.sessionId)
+    if (e.type === 'background_tasks' && e.sessionId && this.children.pausedReports.has(e.sessionId)) this.reports.settlePausedReport(e.sessionId)
   }
 
   /** A queued note not yet taken, on the delegation's wait or an observer's own reader (#646): the session is not between turns */
@@ -2611,94 +2527,6 @@ export class SessionManager {
     if (this.agentRuns.get(sessionId)?.waitingForInputs) return true
     for (const observer of this.turnObservers.get(sessionId) ?? []) if (observer.waitingForInputs) return true
     return false
-  }
-
-  /**
-   * Notifies the orchestrator when the work it assigned finishes — **the other half of "one window".**
-   *
-   * Without this, giving the instruction happens in one window and seeing the result means going to
-   * that session. That leaves exactly the pain of hopping between windows in place — the thing this
-   * was built to remove in the first place.
-   *
-   * Pushing a notification is risky, so it only ever happens **when it was asked for**:
-   *  - Only work that had reportBack turned on when it was assigned comes back this way
-   *  - Once notified, the marker is cleared. Otherwise that session would wake the orchestrator on
-   *    every turn it runs on its own afterward — which would become a loop of waking each other
-   *  - **Except at a turn that ends with the session's own background work still running** (#721): a child that
-   *    backgrounded its `pnpm verify` and ended its turn "waiting for verify" has not finished. Its caller is told once
-   *    that the work paused, the marker stays, and the turn that work's ending starts reports the end. The turns that
-   *    keep it are its own work's, never a loop between sessions: a report does not start the reporting session's turn
-   */
-  private async reportBackIfAwaited(
-    sessionId: string,
-    ending: NormalizedEvent,
-    answer?: string,
-    /** The paused work's tasks, ended with no turn after them (#721): the report says how they ended */
-    settled?: readonly BackgroundTask[],
-  ): Promise<void> {
-    const orchestratorId = this.children.awaitingReport.get(sessionId)
-    if (!orchestratorId || this.handingOver) return
-    // Only a turn that completed is paused: a failed or stopped one is reported as it ended (#698)
-    const running = ending.type === 'turn_complete' && !settled ? this.ownTasksRunning(sessionId) : []
-    const paused = running.length > 0
-    const toldPaused = paused && this.children.pausedReports.has(sessionId)
-    if (paused) this.pauseReport(sessionId, running)
-    else this.children.clearReport(sessionId)
-    if (toldPaused) return
-
-    const target = this.meta.get(sessionId)
-    if (!target || !this.meta.has(orchestratorId)) return
-
-    /*
-     * The store and UI keep identifying information and a preview of the last response, as before.
-     * What reaches the adapter's input is transformed by deliver(relayed) into a wake with no body —
-     * the same whether the reporting side is a manager or a coordinator (#120). In other words, the
-     * raw report is record/screen provenance, and the vendor turn is the trust boundary.
-     */
-    const { name, project } = this.reportedAs(target)
-    const work = paused ? { paused: running, stoppable: target.askedBy === orchestratorId } : settled ? { settled } : undefined
-    await this.deliverReport(orchestratorId, sessionId, name, project, answer !== undefined ? clipPreview(answer, 600) : previewOf(this.store, sessionId, 600), ending, work)
-  }
-
-  /**
-   * How a report names the session it is about, and its project: as read_session lists it (`labelOf`), so a resumed
-   * conversation is not named by its compaction summary's first line. The two report paths used to name it each, and
-   * a finished turn's report used the raw name.
-   */
-  private reportedAs(m: SessionInfo): { name: string; project: string } {
-    const project = m.projectId ? (this.projectRow(m.projectId)?.name ?? '(project no longer exists)') : '(none)'
-    return { name: labelOf(this.store, m), project }
-  }
-
-  /** A session as Centralu's word names it to another (`reportedAs`), or its id once it is gone */
-  private nameOf(sessionId: string): string {
-    const m = this.meta.get(sessionId)
-    return m ? this.reportedAs(m).name : sessionId
-  }
-
-  /**
-   * A session start_agent started stopped in a turn nobody was owed a report of (#698): on 2026-10-15 the internet
-   * dropped twice, and children's turns their CLI had opened itself (a Monitor firing) ended in a network error. Their
-   * asker had been told of the work it gave and heard nothing of these; the children sat in `error` until the person
-   * sent "continue" by hand. The asker is told once per stopped turn, through the same report: a further report needs
-   * another turn, so two sessions cannot wake each other in a loop.
-   */
-  private async tellAskerOfInterruption(sessionId: string, requester?: string): Promise<void> {
-    const m = this.meta.get(sessionId)
-    const stop = m?.interruption
-    // The session that gave the turn (an ask_project, a delegation past its bound), else the one that started it
-    const asker = requester ?? m?.askedBy ?? undefined
-    if (!m || !asker || asker === sessionId || !stop || stop.reason === 'reconnecting' || this.handingOver) return
-    /*
-     * **Not a requester a quit stopped** (#698). It waits for the person's Continue under its own "stopped" line; a
-     * notice would resume it and start a model turn with nobody there (at launch, when the same quit cut it), and that
-     * turn would clear its own mark before the person saw it. Once continued, its children's rows say they stopped.
-     */
-    const askerInfo = this.meta.get(asker)
-    if (!askerInfo || askerInfo.interruption?.reason === 'quit') return
-    console.error(`[sessions] ${sessionId.slice(0, 8)} stopped (${stop.reason}) in a turn no report was owed for; telling ${asker.slice(0, 8)}, which started it`)
-    const { name, project } = this.reportedAs(m)
-    await this.deliverReport(asker, sessionId, name, project, previewOf(this.store, sessionId, 600), { type: stop.reason === 'network' ? 'error' : 'state_change' })
   }
 
   /**
@@ -2763,67 +2591,6 @@ export class SessionManager {
     if (!announce) return
     this.emit(seq != null ? ({ ...notice, seq } as NormalizedEvent) : notice)
     this.emit({ type: 'interruption', sessionId: m.id, interruption: m.interruption })
-  }
-
-  /** Reports the end of a turn the orchestrator asked to hear about, as one message in its session (#166) */
-  private async deliverReport(
-    orchestratorId: string,
-    sessionId: string,
-    name: string,
-    project: string,
-    preview: string,
-    ending: Pick<NormalizedEvent, 'type'> & { error?: { message?: string } },
-    /**
-     * The session's own background work (#721): `paused`, what its turn ended with (the report is still owed, and
-     * `stoppable` when the caller can stop it with agent_session); `settled`, the paused work's tasks that ended with no
-     * turn after them; `linkLost`, a linked machine's paused work whose link dropped before it ended (#723);
-     * `machineRemoved`, a linked machine removed before the work or its turn ended
-     */
-    work?: ReportWork,
-  ): Promise<void> {
-    /*
-     * How it ended is stated on the first line (#166) — writing a failed run as "it finished" makes
-     * both the person and the orchestrator read it as a success. On failure, the error message is
-     * included too. The error is not the agent's last response, so it never shows up in the preview.
-     */
-    /*
-     * A turn cut short by the network or by its tool is not a failure of the work (#698): it continues where it stopped
-     * once it is sent a message, and nothing else will continue it. Said first, so the caller does not redo the work.
-     */
-    const stop = this.meta.get(sessionId)?.interruption
-    const cutShort = stop?.reason === 'network' || stop?.reason === 'interrupted' || stop?.reason === 'quit'
-    const outcome =
-      work && 'machineRemoved' in work ? machineRemovedReportLine(work.machineRemoved, work.paused)
-      : work && 'linkLost' in work ? linkLostReportLine(work.linkLost, work.paused)
-      : work && 'paused' in work ? pausedReportLine(work.paused, work.stoppable)
-      : work && 'settled' in work ? settledReportLine(work.settled)
-      : stop?.reason === 'network' ? `[Centralu] The assigned work stopped before finishing: a network error ended its turn.\n`
-      : stop?.reason === 'interrupted' ? `[Centralu] The assigned work stopped before finishing: its tool interrupted the turn.\n`
-      : stop?.reason === 'quit' ? `[Centralu] The assigned work stopped before finishing: Centralu quit or restarted during its turn.\n`
-      : ending.type === 'error' ? `[Centralu] The assigned work failed.\n`
-      : ending.type === 'limit_reached' ? `[Centralu] The assigned work stopped after hitting a usage limit.\n`
-      : ending.type === 'turn_complete' ? `[Centralu] The assigned work finished.\n`
-      : `[Centralu] The assigned work stopped before finishing.\n`
-    const message = stop?.detail ?? (ending.type === 'error' ? String(ending.error?.message ?? '') : '')
-    const failure = message ? `Error: ${message.slice(0, 600)}\n\n` : ''
-    const resume = cutShort
-      ? `It keeps its conversation: send it a message to go on${stop?.reason === 'network' ? ', once the network is back' : ''}, the same one the person's Continue sends: "Continue where you stopped. Check what already happened before repeating a step."\n`
-      : ''
-    await this.tellSession(
-      orchestratorId,
-      outcome +
-        `Session: ${frameField(name)}\n` +
-        `id: ${sessionId}\n` +
-        `Project: ${frameField(project)}\n\n` +
-        failure +
-        resume +
-        `Last response:\n${preview || '(no content)'}\n\n` +
-        `If you need more, you can read that session's recent conversation with read_session.`,
-      // A report is not the person's own words either (FR-11) — the reporting session is tagged as its
-      // source
-      { sessionId, name },
-      true,
-    )
   }
 
   /** A state hint, for storage: the core reducer's rules on the host's copy (`applySessionState`, protocol session-state.ts) */
@@ -4094,7 +3861,7 @@ export class SessionManager {
         return self.delegationFlow
       },
       deliver: (...a) => self.deliver(...a),
-      deliverReport: (...a) => self.deliverReport(...a),
+      deliverReport: (...a) => self.reports.deliverReport(...a),
       dropOpenedByAuto: (...a) => self.queue.dropOpenedByAuto(...a),
       get disposing() {
         return self.disposing
@@ -4140,9 +3907,9 @@ export class SessionManager {
       moveChildren: (...a) => self.handoffChildren.moveChildren(...a),
       observeCommit: (...a) => self.observeCommit(...a),
       onEvent: (e: NormalizedEvent, from?: SessionHandle | null) => self.onEvent(e, from),
-      ownTasksRunning: (...a) => self.ownTasksRunning(...a),
-      pauseReport: (...a) => self.pauseReport(...a),
-      pausedTasksNow: (...a) => self.pausedTasksNow(...a),
+      ownTasksRunning: (...a) => self.reports.ownTasksRunning(...a),
+      pauseReport: (...a) => self.reports.pauseReport(...a),
+      pausedTasksNow: (...a) => self.reports.pausedTasksNow(...a),
       get prCheckedAt() {
         return self.prCheckedAt
       },
@@ -4168,7 +3935,7 @@ export class SessionManager {
       rememberBackgroundTasks: (...a) => self.rememberBackgroundTasks(...a),
       rename: (...a) => self.rename(...a),
       respondApproval: (...a) => self.respondApproval(...a),
-      reportBackIfAwaited: (...a) => self.reportBackIfAwaited(...a),
+      reportBackIfAwaited: (...a) => self.reports.reportBackIfAwaited(...a),
       get restartPolicy() {
         return self.restartPolicy
       },
@@ -4192,9 +3959,9 @@ export class SessionManager {
         return self.store
       },
       sweepOrphanHandoffNotes: (...a) => self.sweepOrphanHandoffNotes(...a),
-      tellSession: (...a) => self.tellSession(...a),
+      tellSession: (...a) => self.reports.tellSession(...a),
       toolProfileOf: (...a) => self.toolProfileOf(...a),
-      nameOf: (...a) => self.nameOf(...a),
+      nameOf: (...a) => self.reports.nameOf(...a),
       toolProblem: async (tool) => {
         const adapter = self.adapters.get(tool)
         if (!adapter) return `${JSON.stringify(tool)} is not a tool Centralu runs here`
@@ -4533,23 +4300,6 @@ export class SessionManager {
   }
 
 
-  /**
-   * Tells a session something in its conversation (#428): a report, or Centralu's word on a request, a note or a queued
-   * request that did not go. Never while this host is leaving. Handing over, a report whose mark the store keeps is the
-   * next host's to give (#646); one held only in memory (a linked machine's, #723) and a notice like these are dropped
-   * in that window, as anything said then would be. Quitting, the next start tells what the quit cut (#698), where a
-   * word now would read "failed" and could wake a sleeping session on the way out. Never to a session that is gone, and it never throws: the session may be asleep
-   * or deleted, and a notice must not destabilize the host. The four ways of telling each kept their own guard, and
-   * the report and a queued request's had none.
-   */
-  private async tellSession(sessionId: string, text: string, from: { sessionId: string; name: string }, relayed: boolean): Promise<void> {
-    if (this.handingOver || this.disposing || !this.meta.has(sessionId)) return
-    try {
-      await this.deliver(sessionId, text, undefined, from, relayed)
-    } catch {
-      // The session may be asleep or deleted — a notice must not destabilize the host
-    }
-  }
 
   /** `HostCards.appQuestionList` (host-cards.ts), kept on the manager for its callers */
   appQuestionList(...a: Parameters<HostCards['appQuestionList']>): ReturnType<HostCards['appQuestionList']> {
@@ -5302,7 +5052,7 @@ export class SessionManager {
     for (const id of [...this.reconnecting.keys()]) this.stopWatchingReconnect(id)
     // So do the waits of paused reports (#721): quitting, the work ends with its process and the next start drops the
     // mark; handing over, the wait is the next host's, which starts it again on adoption
-    this.stopSettlingPausedReports()
+    this.reports.stopSettlingPausedReports()
     this.linkedReports.dispose()
     // So does a start waiting for memory (#686); handing over, it stays stored for the next host
     this.memoryGate?.close()
