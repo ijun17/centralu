@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps } from './runtime.js'
 import { PROJECT_APPS, plantApp, until } from './test-helpers.js'
+import { alive } from '../../process.test-helpers.js'
 
 /**
  * An app an `auto` session started in an untrusted project (#839, item 4). `auto` opens the trust boundary for its own
@@ -26,14 +27,6 @@ const starts = (id: string): { pid: number }[] => {
   const f = join(appLogs, `${id}.jsonl`)
   if (!existsSync(f)) return []
   return readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as { t: string; pid: number }).filter((r) => r.t === 'start')
-}
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === 'EPERM'
-  }
 }
 const ref = { projectId: 'p1', appId: 'notes' }
 

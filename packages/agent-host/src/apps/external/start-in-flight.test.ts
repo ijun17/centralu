@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps } from './runtime.js'
 import { PROJECT_APPS, plantApp, until } from './test-helpers.js'
+import { alive } from '../../process.test-helpers.js'
 
 /**
  * An app still starting when it is stopped (#839, items 14 and 15). The process is spawned at once and counts as
@@ -23,14 +24,6 @@ let hold = ''
 let rt: ExternalApps
 const pids: number[] = []
 
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
 /** The pids the wrapper wrote as each process came up, before it waited */
 const spawned = (): number[] => {
   const f = join(appLogs, 'spawned')

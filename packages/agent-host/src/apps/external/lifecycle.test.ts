@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExternalApps, type RuntimeTiming } from './runtime.js'
 import { SECRETS_FILE } from './secrets.js'
 import { PROJECT_APPS, plantApp, until } from './test-helpers.js'
+import { alive } from '../../process.test-helpers.js'
 import { SLOW } from '../../../../../tooling/test-timing.js'
 
 /**
@@ -34,15 +35,6 @@ const records = (id: string): Rec[] => {
   return readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l) as Rec)
 }
 const starts = (id: string) => records(id).filter((r) => r.t === 'start')
-
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
 
 /** Plants one app that starts the fixture */
 const plant = (id: string, mode = 'normal', over: Record<string, unknown> = {}) =>
