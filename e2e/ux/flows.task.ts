@@ -278,10 +278,11 @@ uxTask({
   task: 'Start a session in its own git worktree',
   path: 'mouse',
   access: 'discoverable',
-  notes: ["The chevron beside the project's + (#543), then the dialog's worktree box; the branch left blank takes the default name"],
+  notes: ["The project menu's New session, then the dialog's worktree box; the branch left blank takes the default name"],
   start: demo,
   run: async (u, page) => {
-    await u.click(page.getByTestId('project-new-session-options-centralu'))
+    await u.click(page.getByTestId('project-menu-centralu'))
+    await u.click(page.getByTestId('new-session-centralu'))
     await u.until('the new-session dialog', () => expect(page.getByTestId('new-session-dialog')).toBeVisible())
     await u.click(page.getByTestId('worktree-toggle'))
     await u.until('the worktree options', () => expect(page.getByTestId('worktree-options')).toBeVisible())

@@ -288,7 +288,6 @@ export function sidebarGroupTests(): void {
         await expectCentred('project-header-alpha', [
           'project-fold-alpha',
           'project-new-session-alpha',
-          'project-new-session-options-alpha',
           'project-menu-alpha',
         ])
         await expectCentred('project-header-beta', ['project-fold-beta', 'fold-summary-beta', 'project-new-session-beta', 'project-menu-beta'])
