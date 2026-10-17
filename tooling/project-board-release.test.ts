@@ -231,7 +231,7 @@ if (args[0] === 'api' && args[1] === '-X') {
 }
 if (args[0] === 'api' && args[1] === '-H') {
   const m = /^repos\/[^/]+\/[^/]+\/contents\/([^?]+)(?:\?ref=(.*))?$/.exec(args[3])
-  const text = m && st.files[decodeURIComponent(m[1])]
+  const text = m && (st.filesAt?.[decodeURIComponent(m[2] || '')]?.[decodeURIComponent(m[1])] ?? st.files[decodeURIComponent(m[1])])
   if (text === undefined || text === null) fail('gh: Not Found (HTTP 404)\n', 1, '{"message":"Not Found"}')
   process.stdout.write(text)
   process.exit(0)
@@ -242,7 +242,10 @@ if (args[0] === 'api') {
   if (path === R + '/commits/main') json({ sha: st.dispatchSha })
   if (/\/commits\/[0-9a-f]+\/pulls$/.test(path)) json(st.commitPrOverrides || st.prs.map(association))
   if (path === R) json({ default_branch: 'main', permissions: st.permissions })
-  if (path === R + '/branches/main/protection/required_status_checks') json({ contexts: ['build'], checks: [] })
+  if (path === R + '/branches/main/protection/required_status_checks') {
+    if (st.noProtection) fail('gh: Branch not protected (HTTP 404)\n', 1, '{"message":"Branch not protected"}')
+    json({ contexts: ['build'], checks: [] })
+  }
   if (path === R + '/rules/branches/main') json([])
   if (/\/commits\/[0-9a-f]+\/check-runs$/.test(path)) {
     const sha = path.split('/').at(-2)
@@ -255,6 +258,7 @@ if (args[0] === 'api') {
   }
   if (/\/commits\/[0-9a-f]+\/status$/.test(path)) json({ statuses: [] })
   if (path === R + '/actions/runs') json({ workflow_runs: (st.activeRuns || []).filter((r) => r.status === q.get('status')) })
+  if (path === R + '/actions/workflows/release.yml/runs' && q.get('event') === 'push' && st.seq?.tagRuns) json({ workflow_runs: next('tagRuns', []) })
   if (path === R + '/actions/workflows/release.yml/runs')
     json({ workflow_runs: st.runs.filter((r) => (!q.get('event') || r.event === q.get('event')) && (!q.get('head_sha') || r.head_sha === q.get('head_sha')) && (!q.get('branch') || r.head_branch === q.get('branch'))).reverse() })
   const jobs = /\/actions\/runs\/(\d+)\/jobs$/.exec(path)
@@ -284,6 +288,10 @@ type State = {
   dispatchSha?: string
   cancelled?: string[]
   seq?: Record<string, unknown[]>
+  /** No branch protection: the required set comes from the workflow files */
+  noProtection?: boolean
+  /** A file's text at one ref (the contents API's ?ref=), before `files` */
+  filesAt?: Record<string, Record<string, string>>
   /** Every workflow's runs not completed, for how busy the runners are */
   activeRuns?: { id: number; status: string }[]
   /** The npm registry: package name → the commit it was published from; a name not here is absent */
@@ -298,7 +306,11 @@ const REGISTRY_NAMES = CARRIERS.filter((p) => /^packaging\/npm\/[^/]+\/package\.
 )
 /** A local npm registry for the shim's gate, answering from the fake gh's state */
 function registryServer() {
-  const server = createServer((req, res) => {
+  const server = createServer(async (req, res) => {
+    if (registryHold) {
+      registryAsked?.()
+      await registryHold
+    }
     const st = JSON.parse(readFileSync(statePath, 'utf8')) as State
     const m = /^\/(.+)\/([^/]+)$/.exec(req.url ?? '')
     const name = m ? decodeURIComponent(m[1]!) : ''
@@ -325,6 +337,9 @@ let rt: ExternalApps | null = null
 let statePath = ''
 let logPath = ''
 let registry: { url: string; close: () => Promise<void> } | null = null
+/** While set, the registry answers only once it settles; `registryAsked` is called on each request */
+let registryHold: Promise<void> | null = null
+let registryAsked: (() => void) | null = null
 
 beforeEach(async () => {
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'cc-project-board-release-')))
@@ -351,6 +366,8 @@ beforeEach(async () => {
 afterEach(async () => {
   await rt?.dispose()
   rt = null
+  registryHold = null
+  registryAsked = null
   await registry?.close()
   registry = null
   rmFakeDir(root)
@@ -377,8 +394,9 @@ function runtime(ignore?: string[]) {
   return rt
 }
 
-async function call(name: string, args: Record<string, unknown> = {}, caller: AppCaller = agent) {
-  const out = await rt!.call(ref, name, args, caller)
+async function call(name: string, args: Record<string, unknown> = {}, caller: AppCaller = agent, signal?: AbortSignal) {
+  const out = await rt!.call(ref, name, args, caller, signal ? { signal } : {})
+  if (signal?.aborted) return { text: out.status, isError: true, data: { status: out.status } as any }
   if (!out.result) throw new Error(`${name} did not answer: ${out.status} ${out.error}`)
   return { text: resultText(out.result), isError: out.result.isError === true, data: out.result.structuredContent as any }
 }
@@ -666,6 +684,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
       st.ci = 'green'
       st.ciBySha = { [tagged]: 'failing' }
       st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: tagged, status: 'waiting', conclusion: null }))
+      st.jobs['61'] = [{ name: 'linux-x64', status: 'waiting', conclusion: null }]
       st.pending['61'] = [{ environment: { id: 7, name: 'npm-publish' }, current_user_can_approve: true, reviewers: [] }]
     })
     runtime()
@@ -757,6 +776,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
       st.ciBySha = { [tagged]: 'cancelled' }
       st.ciRunOverrides = { [tagged]: { id: 42, status: 'completed', conclusion: 'cancelled', run_attempt: 1 } }
       st.runs.push(run({ id: 61, event: 'push', head_branch: `v${NEXT}`, head_sha: tagged, status: 'waiting', conclusion: null }))
+      st.jobs['61'] = [{ name: 'linux-x64', status: 'waiting', conclusion: null }]
       st.pending['61'] = [{ environment: { id: 7, name: 'npm-publish' }, current_user_can_approve: true, reviewers: [] }]
     })
     runtime()
@@ -1398,6 +1418,80 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     patchState((st) => (st.jobs['61'] = SHIM_WAITING))
     const ok = await call('release', { step: 'approve', path: s.work, confirm: true })
     expect(ok.data.approved, ok.text).toBe(true)
+  })
+
+  /** build.yml with these jobs, by name */
+  const buildYml = (...names: string[]) => `on:\n  push:\n  pull_request:\njobs:\n${names.map((n, i) => `  job${i}:\n    name: ${n}\n    runs-on: ubuntu-24.04\n`).join('')}`
+
+  it("judges the tagged commit by its own workflow's checks, not main's newer ones", async () => {
+    const s = waitingRelease(PLATFORMS_WAITING)
+    patchState((st) => {
+      st.noProtection = true
+      // main's workflow gained a job after the tag; the tagged commit's run never had it
+      st.files['.github/workflows/build.yml'] = buildYml('build', 'windows tests (vitest 1/2)')
+      st.filesAt = { [s.tip]: { '.github/workflows/build.yml': buildYml('build') } }
+    })
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(r.isError, r.text).toBe(false)
+    expect(r.data.approved).toBe(true)
+  })
+
+  it('with wait, refuses at once when the build runs completed without a required check', async () => {
+    const s = waitingRelease(PLATFORMS_WAITING)
+    patchState((st) => {
+      st.noProtection = true
+      st.filesAt = { [s.tip]: { '.github/workflows/build.yml': buildYml('build', 'never reported') } }
+    })
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true, wait: true, waitMinutes: 0.05 })
+    expect(r.isError, r.text).toBe(true)
+    expect(r.data.problems.join(' ')).toContain('Its build runs have all completed without reporting never reported, so waiting will not bring them')
+    expect(approvals()).toEqual([])
+  })
+
+  it('does not approve the shim past its gate while GitHub lists no waiting job yet', async () => {
+    const s = waitingRelease(SHIM_WAITING)
+    // Nothing on the registry: only the shim gate stands in the way
+    patchState((st) => (st.seq = { 'jobs:61': [[SHIM_WAITING[0], SHIM_WAITING[1], { ...SHIM_WAITING[2], status: 'queued' }], SHIM_WAITING] }))
+    const first = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(first.isError).toBe(true)
+    expect(first.data.problems).toEqual([`GitHub says the release run for v${NEXT} waits on npm-publish but lists no waiting job yet, so which approval it is cannot be told.`])
+    const second = await call('release', { step: 'approve', path: s.work, confirm: true })
+    expect(second.isError).toBe(true)
+    expect(second.data.problems[0]).toContain(`Not on the registry at ${NEXT} yet`)
+    expect(approvals()).toEqual([])
+  })
+
+  it('with wait, approves nothing once the call is cancelled, even when the gate then passes', async () => {
+    const s = waitingRelease(SHIM_WAITING)
+    published(s.tip)
+    let release!: () => void
+    registryHold = new Promise((r) => (release = r))
+    const asked = new Promise<void>((r) => (registryAsked = r))
+    const abort = new AbortController()
+    const answer = call('release', { step: 'approve', path: s.work, confirm: true, wait: true }, agent, abort.signal)
+    await asked
+    abort.abort()
+    expect((await answer).data.status).toBe('cancelled')
+    // Let the cancellation reach the app before the registry answers and the gate passes
+    await new Promise((r) => setTimeout(r, 1_000 * SLOW))
+    registryHold = null
+    release()
+    await new Promise((r) => setTimeout(r, 2_000 * SLOW))
+    expect(approvals()).toEqual([])
+  })
+
+  it('with wait, refuses when the release run changes under it', async () => {
+    const s = waitingRelease(PLATFORMS_WAITING)
+    const at = (id: number, status: string) => run({ id, event: 'push', head_branch: `v${NEXT}`, head_sha: s.tip, status, conclusion: null })
+    patchState((st) => {
+      st.seq = { tagRuns: [[at(61, 'in_progress')], [at(62, 'waiting'), at(61, 'in_progress')]], 'pending:61': [[]] }
+      st.pending['62'] = st.pending['61']!
+      st.jobs['62'] = PLATFORMS_WAITING
+    })
+    const r = await call('release', { step: 'approve', path: s.work, confirm: true, wait: true })
+    expect(r.isError, r.text).toBe(true)
+    expect(r.data.problems).toEqual([`The release run for v${NEXT} is now 62, not run 61 this wait started on; nothing was approved. Look at both runs before approving.`])
+    expect(approvals()).toEqual([])
   })
 
   it('refuses to approve a version with no tag, and says so when nothing waits', async () => {

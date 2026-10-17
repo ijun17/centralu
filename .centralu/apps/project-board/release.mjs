@@ -180,11 +180,21 @@ async function releaseCi(s, cfg, gh, ci) {
  * the CI may still turn green by itself (pending, or not reported yet), which a waiting approve waits out.
  */
 async function approvalCi(s, tagSha, ci) {
-  const r = await ci(tagSha)
+  // The required set of the tagged commit's own workflows: main's may name jobs it never had (#1035)
+  const r = await ci(tagSha, { own: true })
   const lines = [`The tagged commit's own CI at ${short(tagSha)}: ${r.verdict}.`]
   const cancelled = (r.cancelledRuns ?? []).map((run) => `The build for ${tagSha} was cancelled${tagSha !== s.tip ? ' by a newer push' : ''}; re-run it: gh run rerun ${run.id} --repo ${s.repo}`)
-  const problems = cancelled.length ? cancelled : r.verdict === 'green' ? [] : [`The tagged commit's own CI at ${short(tagSha)} must be green before npm-publish approval: ${r.summary}. PR evidence cannot authorize publication.`]
-  return { problems, later: !cancelled.length && (r.verdict === 'pending' || r.verdict === 'none'), lines: [...lines, ...cancelled] }
+  // Every build run on the commit completed and a required check is still missing: it never will report
+  const stuck = !cancelled.length && r.verdict === 'pending' && r.settled && !r.running && r.missing?.length > 0
+  const problems = cancelled.length
+    ? cancelled
+    : r.verdict === 'green'
+      ? []
+      : [
+          `The tagged commit's own CI at ${short(tagSha)} must be green before npm-publish approval: ${r.summary}. PR evidence cannot authorize publication.`,
+          ...(stuck ? [`Its build runs have all completed without reporting ${list(r.missing)}, so waiting will not bring them; look at the run, or re-run it.`] : []),
+        ]
+  return { problems, later: !cancelled.length && !stuck && (r.verdict === 'pending' || r.verdict === 'none'), lines: [...lines, ...cancelled] }
 }
 
 /**
@@ -194,11 +204,11 @@ async function approvalCi(s, tagSha, ci) {
  * approval rather than after it. `later`: what may still come by itself (a package not visible yet,
  * a registry that did not answer).
  */
-async function shimGate(s, cfg, run, jobs, tagSha, version, gh, registry) {
+async function shimGate(s, cfg, all, jobs, tagSha, version, registry) {
   // `final`: what does not mend itself (a failed job, a package from other code), so nothing to wait for
   const final = []
   const pending = []
-  const others = (await gh.runJobs(s.repo, run.id)).filter((j) => !jobs.includes(j.name))
+  const others = all.filter((j) => !jobs.includes(j.name))
   const failed = others.filter((j) => j.status === 'completed' && j.conclusion !== 'success')
   const unfinished = others.filter((j) => j.status !== 'completed')
   if (failed.length) final.push(`Not every platform job succeeded (${list(failed.map((j) => `${j.name}: ${j.conclusion}`))}); the shim may not go out before all of them have.`)
@@ -681,13 +691,19 @@ export async function approveRelease(ctx, { version, comment, confirm = false, w
   const waiting = wait && confirm
   const limitMs = Math.min(APPROVE_WAIT_MAX_MINUTES, Math.max(0, Number(waitMinutes ?? APPROVE_WAIT_MINUTES) || 0)) * 60_000
   const started = Date.now()
+  const cancelled = { summary: 'Not approved: cancelled while waiting for the gate.', lines: [], approved: false, cancelled: true }
+  // What the first read found (version, tagged commit, run): a wait approves only that, never what replaced it
+  let pin = null
   for (let beat = 1; ; beat++) {
-    const g = await approvalGate(ctx, version)
+    const g = await approvalGate(ctx, version, pin)
     if (g.answer) return g.answer
     if (g.refuse) throw new ReleaseRefusal(g.refuse)
+    pin = g.pin ?? pin
     if (g.ready) {
       const { run, pending, tag, what, last, lines } = g.ready
       if (!confirm) return { summary: `${tag}'s release run waits for approval on ${ctx.cfg.environment} (${what}); nothing approved yet. Call again with confirm: true to approve, or approve on GitHub: ${run.url}`, lines, approved: false, run: run.url }
+      // A call cancelled while the gate was read last approves nothing
+      if (signal?.aborted) return cancelled
       await ctx.gh.approveDeployments(ctx.repo, run.id, [...new Set(pending.map((p) => p.environmentId))], String(comment ?? '').trim() || `Approved through the project board's release tool for ${tag}.`)
       const after = waiting && beat > 1 ? ` after ${span(Date.now() - started)} of waiting for the gate` : ''
       return { summary: `Approved ${ctx.cfg.environment} for ${tag} (${what})${after}${run.url ? `: ${run.url}` : ''}.${last ? '' : ' The shim asks again once every platform job succeeds: approve with wait: true to approve it the moment it may go.'}`, lines, approved: true, run: run.url }
@@ -701,46 +717,58 @@ export async function approveRelease(ctx, { version, comment, confirm = false, w
     if (Date.now() - started + APPROVE_POLL_MS > limitMs)
       return { summary: `Not approved: the gate did not pass within ${span(limitMs)} of waiting, so nothing was approved. Still: ${why} Call again with wait: true to wait longer, or look at the run.`, lines: problems ?? [], approved: false, timedOut: true, run: answer?.run ?? null }
     progress(beat, `Waiting to approve (${span(Date.now() - started)} so far): ${why}`)
-    if (!(await sleep(APPROVE_POLL_MS, signal))) return { summary: 'Not approved: cancelled while waiting for the gate.', lines: [], approved: false, cancelled: true }
+    if (!(await sleep(APPROVE_POLL_MS, signal))) return cancelled
   }
 }
 
 /**
  * The approval's gate, read fresh: `answer` (nothing to approve, for good), `refuse` (problems that do
  * not mend themselves), `later` (not yet: what a plain call answers or refuses with, and what a
- * waiting one waits on) or `ready` (approve now).
+ * waiting one waits on) or `ready` (approve now). `pin`: the version, tagged commit and run an earlier
+ * read of the same wait found; anything else now refuses. Each answer but `refuse` carries the pin.
  */
-async function approvalGate({ repo, dir, cfg, gh, ci, registry }, version) {
+async function approvalGate({ repo, dir, cfg, gh, ci, registry }, version, pin) {
   const s = { repo, ...(await readState({ repo, dir, cfg, gh })) }
-  const want = version !== undefined ? String(version).replace(/^v/, '') : s.version
+  // A bump merged meanwhile changes main's version, not the one this wait is for
+  const want = pin ? pin.want : version !== undefined ? String(version).replace(/^v/, '') : s.version
   const tag = `${cfg.tagPrefix}${want}`
   const t = s.tags.find((x) => x.name === tag)
   if (!t) return { refuse: [`${tag} is not tagged; there is no release run to approve.`] }
+  if (pin && t.sha !== pin.sha) return { refuse: [`${tag} moved from ${short(pin.sha)} to ${short(t.sha)} while waiting; nothing was approved. A release tag is never moved: look at what happened before approving anything.`] }
   const candidates = (await gh.workflowRuns(repo, workflowFile(cfg), { event: 'push', headSha: t.sha })).filter((r) => r.headBranch === tag)
   let run = candidates.find((r) => r.status !== 'completed') ?? candidates[0]
   for (const r of candidates.filter((x) => x.status !== 'completed')) if ((await gh.pendingDeployments(repo, r.id)).some((p) => p.environment === cfg.environment)) { run = r; break }
   if (!run) {
     const why = `GitHub lists no ${workflowFile(cfg)} run for ${tag} (${short(t.sha)}).`
-    return { later: { problems: [why], why } }
+    return { later: { problems: [why], why }, pin: { want, sha: t.sha, runId: null } }
   }
+  if (pin?.runId && Number(run.id) !== Number(pin.runId)) return { refuse: [`The release run for ${tag} is now ${run.id}, not run ${pin.runId} this wait started on; nothing was approved. Look at both runs before approving.`] }
+  const pinned = { want, sha: t.sha, runId: run.id }
   if (run.headSha !== t.sha) return { refuse: [`The run for ${tag} is on ${short(run.headSha)}, but ${tag} is ${short(t.sha)}.`] }
   if (run.status === 'completed') return { answer: { summary: `The release run for ${tag} ${runState(run)}${run.url ? `: ${run.url}` : ''}; nothing waits for approval.`, lines: [], approved: false, run: run.url } }
   const pending = (await gh.pendingDeployments(repo, run.id)).filter((p) => p.environment === cfg.environment)
   if (!pending.length) {
     const summary = `The release run for ${tag} is ${runState(run)}; nothing waits for approval on ${cfg.environment} now${run.url ? `: ${run.url}` : ''}.`
-    return { later: { answer: { summary, lines: [], approved: false, run: run.url }, why: summary } }
+    return { later: { answer: { summary, lines: [], approved: false, run: run.url }, why: summary }, pin: pinned }
   }
   const cannot = pending.filter((p) => !p.canApprove)
   if (cannot.length) return { refuse: [`GitHub says this login may not approve ${cfg.environment} for this run${cannot[0].reviewers.length ? ` (reviewers: ${cannot[0].reviewers.join(', ')})` : ''}. Approve on GitHub: ${run.url}`] }
-  const jobs = (await gh.runJobs(repo, run.id)).filter((j) => j.status === 'waiting').map((j) => j.name)
-  const what = jobs.length ? list(jobs) : 'the waiting jobs'
-  const last = jobs.length > 0 && jobs.every((j) => /shim/i.test(j))
+  // One read of the jobs decides which approval this is; GitHub may show the environment waiting
+  // before it lists the job that waits on it
+  const all = await gh.runJobs(repo, run.id)
+  const jobs = all.filter((j) => j.status === 'waiting').map((j) => j.name)
+  if (!jobs.length) {
+    const why = `GitHub says the release run for ${tag} waits on ${cfg.environment} but lists no waiting job yet, so which approval it is cannot be told.`
+    return { later: { problems: [why], why }, pin: pinned }
+  }
+  const what = list(jobs)
+  const last = jobs.every((j) => /shim/i.test(j))
   const evidence = await approvalCi(s, t.sha, ci)
-  const shim = last ? await shimGate(s, cfg, run, jobs, t.sha, want, gh, registry) : { problems: [], later: true, lines: [] }
+  const shim = last ? await shimGate(s, cfg, all, jobs, t.sha, want, registry) : { problems: [], later: true, lines: [] }
   const problems = [...evidence.problems, ...shim.problems]
-  if (problems.length) return (evidence.problems.length && !evidence.later) || !shim.later ? { refuse: problems } : { later: { problems, why: problems.join(' ') } }
+  if (problems.length) return (evidence.problems.length && !evidence.later) || !shim.later ? { refuse: problems } : { later: { problems, why: problems.join(' ') }, pin: pinned }
   const lines = [...evidence.lines, ...shim.lines, `Waiting on ${cfg.environment}: ${what}.`, ...(last ? ['This is the shim: the last moment anything is reversible (docs/releasing.md).'] : [])]
-  return { ready: { run, pending, tag, what, last, lines } }
+  return { ready: { run, pending, tag, what, last, lines }, pin: pinned }
 }
 
 /** Cancel only an extra tag run whose publish job has not succeeded. */

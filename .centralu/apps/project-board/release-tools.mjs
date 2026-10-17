@@ -17,14 +17,22 @@ import { BUMPS } from './versions.mjs'
 // it, the tag prefix, the workflow and its environment).
 const RELEASE = releaseConfig(config.release)
 
-/** Release CI: only configured workflow suites, on the exact commit and source event. */
-async function ciForRelease(repo, sha, { pr } = {}) {
+/**
+ * Release CI: only configured workflow suites, on the exact commit and source event. `own`: the
+ * required set from that commit's own workflows rather than main's (an approval judges the tagged
+ * commit, whose run reports the jobs its workflow had). `settled`: every build run on it completed,
+ * so a check still missing will never report.
+ */
+async function ciForRelease(repo, sha, { pr, own = false } = {}) {
   const { defaultBranch } = await readRepo(repo)
-  const req = await readRequired(repo, defaultBranch, CI.workflows, workflowCheckNames)
+  const req = await readRequired(repo, defaultBranch, CI.workflows, workflowCheckNames, undefined, own ? { at: sha } : {})
   const { reported, runs } = await readWorkflowChecks(repo, sha, { workflows: CI.workflows, event: pr ? 'pull_request' : 'push', ...(pr ? { pr } : { branch: defaultBranch }) })
   const checks = evaluateChecks({ required: req.names, reported, alsoReported: req.unresolved.length > 0 })
   const cancelledRuns = runs.filter((r) => r.status === 'completed' && r.conclusion === 'cancelled')
-  return { cancelledRuns, verdict: cancelledRuns.length ? 'failing' : checks.verdict, required: checks.rows.map((r) => r.name), workflows: CI.workflows, summary: cancelledRuns.length ? `Build run ${cancelledRuns.map((r) => r.id).join(', ')} cancelled` : ciLines(defaultBranch, sha, req, checks).summary }
+  const settled = runs.length > 0 && runs.every((r) => r.status === 'completed')
+  const missing = checks.rows.filter((r) => r.state === 'missing').map((r) => r.name)
+  const running = checks.rows.some((r) => r.state === 'pending')
+  return { cancelledRuns, verdict: cancelledRuns.length ? 'failing' : checks.verdict, settled, missing, running, required: checks.rows.map((r) => r.name), workflows: CI.workflows, summary: cancelledRuns.length ? `Build run ${cancelledRuns.map((r) => r.id).join(', ')} cancelled` : ciLines(defaultBranch, sha, req, checks).summary }
 }
 
 // PROJECT_BOARD_NPM_REGISTRY: for the tests only, which answer from a local server

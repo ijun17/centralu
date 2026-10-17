@@ -371,8 +371,12 @@ export async function resolveRef(repo, ref) {
  * With `head` (a pull request's head commit), the jobs its own workflows add count too: they can
  * only add to the set, never remove from it. Without this a job a pull request introduces was "not
  * required" for that very pull request, and #445 merged with its new job red.
+ *
+ * With `at` (a commit), the workflows are read at that commit instead of on `base`, and `head` is
+ * ignored: the checks that commit's own run reports (a release's tagged commit, after main's
+ * workflow changed, #1035). Branch protection still comes first.
  */
-export async function readRequired(repo, base, workflows, workflowCheckNames, head) {
+export async function readRequired(repo, base, workflows, workflowCheckNames, head, { at } = {}) {
   checkRepo(repo)
   const names = new Set()
   // 404: not protected; 403: this login may not read protection (that needs admin). Rulesets are
@@ -389,7 +393,8 @@ export async function readRequired(repo, base, workflows, workflowCheckNames, he
   const unresolved = []
   const read = []
   let added = 0
-  for (const ref of head ? [base, head] : [base]) {
+  const own = at ?? base
+  for (const ref of at ? [at] : head ? [base, head] : [base]) {
     for (const path of workflows ?? []) {
       let text
       try {
@@ -400,7 +405,7 @@ export async function readRequired(repo, base, workflows, workflowCheckNames, he
       }
       const w = workflowCheckNames(text)
       const file = path.split('/').pop()
-      if (ref === base) {
+      if (ref === own) {
         found.push(...w.names)
         unresolved.push(...w.unresolved.map((j) => `${file} job ${j}`))
         read.push(file)
@@ -413,7 +418,7 @@ export async function readRequired(repo, base, workflows, workflowCheckNames, he
   }
   if (!found.length && !unresolved.length) return { names: null, unresolved: [], source: 'no required set found, so every reported check counts' }
   const plus = added ? `, plus ${added} job${added === 1 ? '' : 's'} the pull request adds` : ''
-  return { names: [...new Set(found)], unresolved, added, source: `${read.join(', ')} on ${base}${plus}` }
+  return { names: [...new Set(found)], unresolved, added, source: `${read.join(', ')} on ${at ? short(at) : base}${plus}` }
 }
 
 /** CI runs carry workflow identity; job names alone can collide with release jobs. */

@@ -312,6 +312,13 @@ The steps by hand:
    once, as without `wait`. Call it once after the tag and once more after the platform
    approval; both approvals stay.
 
+   The gate reads the tagged commit's required checks from that commit's own `build.yml`, not
+   main's: a job main gained later never reports on the tagged commit. A required check still
+   missing once every build run on that commit completed refuses at once. A wait approves only
+   what its first read found: the version, the tagged commit and the release run; if any of
+   them changes, or GitHub lists no waiting job yet (so it cannot tell the platforms from the
+   shim), it does not approve. A cancelled call approves nothing.
+
 5. Verify from a machine that has never had it: `npm i -g centralu@beta && centralu`.
 
 ### What the job graph guarantees

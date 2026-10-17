@@ -422,7 +422,10 @@ step shows on the screen.
     approves at once, up to `waitMinutes` (default 45, at most 60), with progress; a gate that cannot
     pass by itself (failed CI or job, a package from other code, no permission) refuses at once, and a
     timeout approves nothing and says what it still waited for. A waiting call does not hold other
-    board writes up (`serially` is skipped for it).
+    board writes up (`serially` is skipped for it). The required set is the tagged commit's own
+    workflow's (`readRequired` with `at`), and a required check missing after every build run on it
+    completed refuses. A wait pins the version, tagged commit and run of its first read and refuses
+    if any changes; no job listed as waiting is "not yet"; an aborted call never approves.
   - With duplicate tag runs, status chooses one waiting on the configured environment (otherwise the
     newest active run), names the duplicates, and offers `cancel_duplicate` only before publishing.
 - **Never run a `release` step against the real repository in a test**: the tests use a fake `gh`
