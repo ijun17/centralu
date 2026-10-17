@@ -338,7 +338,13 @@ is cut by `clipPreview` (its head and an ellipsis), on this host and for a linke
 them until the person said it could; asked why, it said it had forgotten the last step, and nothing it read named it.
 Every answer that hands a child's result to the session that started it now ends with one line naming the delete:
 `done` and `at_rest` (`cleanUpLine`, `sessions/tool-answers.ts`), and the report of a finished turn
-(`ChildReports.cleanUpWords`), which also says how many of its other children are at rest and that `list` shows them.
+(`ChildReports.cleanUpWords`), which also says how many of its other children are finished and that `list` shows them.
+The line is said only of the caller's own child (`askedBy`; under `auto` agent_session also reads the person's sessions
+and siblings) whose work is over: not a turn cut short (`interruption`), failed or limited, nor one owing a report over
+its own background work (`cleanUpDue`, `sessions/own-agents.ts`). The report counts with the same rule `list` uses
+(`ownAgents`, `agentState`: a delegation still running is working, a cut-short turn is stopped, one being trashed is
+gone). `list` takes `askedBy` only, as status, send, wait and stop do: a `parentSessionId`-only link is the former
+worktree manager's, which store step v48 copied into `askedBy`. With the session tools turned off it says so.
 The line rides in the answer, not in `start_agent`'s description: it costs nothing until the result is read, which
 is the moment it applies. Nothing deletes a child on its own: a delete can drop a branch, and even with the trash it
 stays the parent's or the person's call. Sleep (#568) already frees a finished child's memory.

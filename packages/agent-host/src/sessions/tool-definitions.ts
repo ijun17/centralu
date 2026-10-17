@@ -400,7 +400,7 @@ export const AGENT_TOOLS = [
  * 1,100 until #729: start_agent's `difficulty` and the words on it and on `worktree` (551 → 798 characters, the set
  * 1,085 → 1,332), loaded on Claude, so every ordinary Claude request carries the 247: 68 tokens, measured live
  * (docs/tool-cost.md §10). Guidance a caller needs before
- * its first call has no answer to ride in.
+ * its first call has no answer to ride in. #690's `list` made the set 1,333 (agent_session 534 → 535, deferred on Claude).
  */
 export const AGENT_BUDGET_CHARS = 1350
 

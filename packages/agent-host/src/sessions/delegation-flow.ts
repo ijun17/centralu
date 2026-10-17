@@ -6,6 +6,7 @@ import { ASK_WAIT_MS, clipAnswer, pathsIn, readableGrants, taskLine } from './as
 import { agentFrame, agentNoteFrame, presetWithin } from './start-agent.js'
 import { labelOf, lastActiveOf } from './transcript-view.js'
 import { agentDepthRefusal, recordAgentDepth } from './agent-depth.js'
+import { agentState, cleanUpDue, ownAgents } from './own-agents.js'
 import type {
   BackgroundTask,
   PermissionPreset,
@@ -194,29 +195,18 @@ export class DelegationFlow {
    * other actions take them; a session another started is not its to delete.
    */
   listAgents(callerId: string): AgentListRow[] {
-    const caller = this.host.meta.get(callerId)
-    if (!caller?.projectId) return []
-    return [...this.host.meta.values()]
-      .filter((s) => s.id !== callerId && s.askedBy === callerId && s.projectId === caller.projectId && !this.host.trashing.has(s.id))
-      .sort((a, b) => a.createdAt - b.createdAt)
-      .map((s) => {
-        const running = [...this.host.children.delegations.values()].some((d) => d.sessionId === s.id && !d.settled)
-        const state: AgentListRow['state'] =
-          s.pendingApproval || s.pendingQuestions.length ? 'waiting'
-          : inTurn(s.state) || running ? 'working'
-          : s.state === 'error' || s.state === 'limited' || s.interruption ? 'stopped'
-          : 'finished'
-        const lastActive = lastActiveOf(this.host.store, s.id)
-        return {
-          sessionId: s.id,
-          name: labelOf(this.host.store, s),
-          tool: s.tool,
-          state,
-          asleep: !s.live,
-          ...(lastActive ? { lastActive } : {}),
-          ...(s.worktree ? { worktree: { branch: s.worktree.branch, unmerged: !s.worktreeMerged } } : {}),
-        }
-      })
+    return ownAgents(this.host, callerId).map((s) => {
+      const lastActive = lastActiveOf(this.host.store, s.id)
+      return {
+        sessionId: s.id,
+        name: labelOf(this.host.store, s),
+        tool: s.tool,
+        state: agentState(this.host, s),
+        asleep: !s.live,
+        ...(lastActive ? { lastActive } : {}),
+        ...(s.worktree ? { worktree: { branch: s.worktree.branch, unmerged: !s.worktreeMerged } } : {}),
+      }
+    })
   }
 
   /**
@@ -697,6 +687,7 @@ export class DelegationFlow {
       sessionState: child.state,
       ...(child.interruption ? { interruption: child.interruption } : {}),
       ...(notice ? { notice } : {}),
+      ...(callerId && cleanUpDue(child, callerId, notice) ? { cleanUp: true } : {}),
     }
   }
 
@@ -880,6 +871,7 @@ export class DelegationFlow {
       this.host.pauseReport(d.sessionId, left)
     }
     const notice = this.pausedNotice(d.sessionId, d.callerId)
+    const child = this.host.meta.get(d.sessionId)
     return {
       ok: true,
       state: 'done',
@@ -890,6 +882,7 @@ export class DelegationFlow {
       readable: granted,
       outside,
       ...(notice ? { notice } : {}),
+      ...(child && cleanUpDue(child, d.callerId, notice) ? { cleanUp: true } : {}),
     }
   }
 
