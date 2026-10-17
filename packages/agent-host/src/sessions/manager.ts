@@ -5,12 +5,12 @@ import { orchestratorHome, orchestratorRole } from './orchestrator-home.js'
 import { windowAround } from './snippet.js'
 import { notAToolText, profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
 import { answersFrom, cardCall, cardHandle, cardNotice, decisionFrom } from './delegated-cards.js'
-import type { QueuedRequest } from '../dev-services/store.js'
 import type { ToolProfile } from '../apps/contract.js'
 import { buildHandoffRecord } from './handoff-record.js'
 import { orchestratorToolsFor, type OrchestratorSeatHost } from './orchestrator-seat.js'
 import { hubAskDepthKey } from './agent-depth.js'
-import { ChildOwnership, PAUSED_REPORT_SETTLE_MS, type Delegation } from './child-ownership.js'
+import { QueuedRequests, type QueuedRequestsHost } from './queued-requests.js'
+import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost, type ReportWork } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
 import { SessionAppsHub } from './session-apps.js'
@@ -18,8 +18,7 @@ import { AppAccess, writeShared } from './app-access.js'
 import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.js'
 import { AgentRunWait } from './app-agents.js'
 import { CacheLedger } from './cache-ledger.js'
-import { askFrame, underGrant } from './ask-project.js'
-import { agentFrame, presetWithin } from './start-agent.js'
+import { underGrant } from './ask-project.js'
 import { makeProjectFolder, projectFolderTarget, type ProjectFolderTarget } from '../dev-services/project-folder.js'
 import { cloneInto } from '../dev-services/project-clone.js'
 import { labelOf, orchestratorMemory, previewOf } from './transcript-view.js'
@@ -59,7 +58,6 @@ import type {
 import {
   applyBackgroundTasks,
   applySessionState,
-  blockedOnQuestion,
   nextStateFor,
   CENTRALU_APPLY,
   CENTRALU_APPLY_QUESTION,
@@ -79,7 +77,7 @@ import {
   appKeyOf,
   alwaysAllowKey,
 } from '@cc/protocol'
-import type { AgentAdapter, AgentProcess, AgentSpawnSpec, BusyAnswer, BusyChoice, ChildRunResult, RoutedCard, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
+import type { AgentAdapter, AgentProcess, AgentSpawnSpec, ChildRunResult, RoutedCard, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
 import type { LaunchSettings } from '../adapters/contract.js'
 import { registeredTool } from '../adapters/registry.js'
 import { codeIntelligenceKey, codeIntelligenceOff, isAppAgent, toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
@@ -148,7 +146,7 @@ import type { AgentStartFlow } from './start-agent-flow.js'
 import { RestartPolicy, type RestartHost } from './restart-policy.js'
 import { WorktreeSessions, type WorktreeHost } from './worktree-sessions.js'
 import { canonicalPath, isInside, pathParts } from '../dev-services/path-guard.js'
-import { HostCards, type HostAsk, type HostCardsHost } from './host-cards.js'
+import { HostCards, type HostCardsHost } from './host-cards.js'
 import { ExternalConversations, type ExternalConversationsHost, truncate } from './external-conversations.js'
 import { SessionRecord, type SessionRecordHost } from './session-record.js'
 import { ToolQueries, type ToolQueriesHost } from './tool-queries.js'
@@ -165,7 +163,7 @@ export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS }
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost
 
 /**
  * One piece of the original's live work a handoff moved to the session that took over (#693), as the handoff note
@@ -320,6 +318,8 @@ export class SessionManager {
   private readonly delegationFlow: DelegationFlow
   /** The orchestrator's handoff_session (#694): who may hand off what, and the handoff itself */
   private readonly handoffFlow: HandoffFlow
+  /** Requests for a session busy with another's turn: the choices, the queue and its delivery (queued-requests.ts) */
+  private readonly queue: QueuedRequests
   /** ask_project, here or on a linked machine (ask-project-flow.ts) */
   private readonly askProjectFlow: AskProjectFlow
   /** The conversations a tool keeps on its own side: listing, holders, import and catch-up (external-conversations.ts) */
@@ -480,6 +480,7 @@ export class SessionManager {
     } = {},
   ) {
     this.children = new ChildOwnership(store)
+    this.queue = new QueuedRequests(this.parts())
     this.cardRests = new CardRests(appSettingRests(store))
     this.delegationFlow = new DelegationFlow(this.parts())
     this.handoffFlow = new HandoffFlow(this.parts(), keeperOpts.handoffTimings)
@@ -562,10 +563,10 @@ export class SessionManager {
     this.children.restoreReports(this.meta, keeperOpts.keptSessions)
     this.delegationFlow.starts.restoreAgentStarts()
     this.children.restoreTurns(this.meta, keeperOpts.keptSessions)
-    this.children.restoreQueued(this.meta, (r) => r.via === 'ask_project' && !this.pairConsented(r.callerSessionId, this.meta.get(r.sessionId)!))
+    this.children.restoreQueued(this.meta, (r) => r.via === 'ask_project' && !this.queue.pairConsented(r.callerSessionId, this.meta.get(r.sessionId)!))
     if (this.children.queued.size) {
       setTimeout(() => {
-        for (const id of this.children.queued.keys()) if (!keeperOpts.keptSessions?.has(id)) this.scheduleDrain(id)
+        for (const id of this.children.queued.keys()) if (!keeperOpts.keptSessions?.has(id)) this.queue.scheduleDrain(id)
       }, 0)
     }
     // A requester the keeper kept is told once it is adopted (`adoptKept`), so the note does not start a second process
@@ -842,7 +843,7 @@ export class SessionManager {
    */
   async deleteProject(projectId: string): Promise<void> {
     // Cards and queued asks that reach into it or out of it end first, before any wait: none outlives the project
-    this.withdrawReaches(
+    this.queue.withdrawReaches(
       (ask) => ask.detail.kind === 'project_access'
         ? ask.detail.from.id === projectId || ask.detail.to.id === projectId
         : ask.detail.kind === 'agent_start' && ask.detail.project.id === projectId,
@@ -895,7 +896,7 @@ export class SessionManager {
         )
       }
       // So do its sessions' cards to reach another project, a fork's card for a session in it, and its queued asks
-      this.withdrawReaches(
+      this.queue.withdrawReaches(
         (ask) => ask.detail.kind === 'project_access' ? ask.detail.from.id === projectId : ask.detail.kind === 'agent_start' && ask.detail.project.id === projectId,
         (_r, from) => from === projectId,
         "The person stopped trusting the asking session's project.",
@@ -1830,7 +1831,7 @@ export class SessionManager {
         m.agentVersion = k.version ?? null
         const r = await this.resumeSession(k.sessionId, k.process).catch((err: Error) => ({ resumed: false, reason: err.message }))
         // A request queued for it under the old host goes in now if its turn ended during the swap (#677)
-        if (this.children.queued.has(k.sessionId)) this.scheduleDrain(k.sessionId)
+        if (this.children.queued.has(k.sessionId)) this.queue.scheduleDrain(k.sessionId)
         if (!r.resumed) {
           console.error(`[agent-host] could not re-attach ${k.sessionId.slice(0, 8)}: ${r.reason ?? 'unknown'}`)
           if (inTurn(m.state)) {
@@ -2341,7 +2342,7 @@ export class SessionManager {
     const wasAuto = m.permissionPreset === 'auto'
     if (s.permissionPreset) m.permissionPreset = s.permissionPreset
     this.store.upsertSession(m)
-    if (wasAuto && m.permissionPreset !== 'auto') this.dropOpenedByAuto(sessionId)
+    if (wasAuto && m.permissionPreset !== 'auto') this.queue.dropOpenedByAuto(sessionId)
     /*
      * The model and effort chosen most recently become this project's default (#69, item 5). The
      * same lesson default_tool learned: instead of building a settings screen, the fact is recorded
@@ -2538,7 +2539,7 @@ export class SessionManager {
          * once the input was handed to the process: one the tool reports while the session wakes for it (Codex's account-wide
          * limit, a crash) refuses nothing yet, and the input still goes in or the delivery fails on its own.
          */
-        if (!wasBusy && !inTurn(m.state) && (e.type === 'error' || e.type === 'limit_reached') && this.children.delivering.has(m.id) && this.queuedHandedIn.has(m.id)) {
+        if (!wasBusy && !inTurn(m.state) && (e.type === 'error' || e.type === 'limit_reached') && this.children.delivering.has(m.id) && this.queue.queuedHandedIn.has(m.id)) {
           this.children.queuedTurnStarted(m.id)
           endedTurn = true
         }
@@ -2887,7 +2888,7 @@ export class SessionManager {
     this.store.upsertSession(m)
     this.emit(change)
     // At rest by a statement, not a turn's end that `onEvent` would see: a request queued for it goes in now (#677)
-    if (!inTurn(m.state) && this.children.queued.has(m.id)) this.scheduleDrain(m.id)
+    if (!inTurn(m.state) && this.children.queued.has(m.id)) this.queue.scheduleDrain(m.id)
   }
 
   /**
@@ -4087,6 +4088,7 @@ export class SessionManager {
       answerRoutedCard: (...a) => self.answerRoutedCard(...a),
       applyDeferredRestart: (...a) => self.restartPolicy.applyDeferredRestart(...a),
       applyStateHint: (...a) => self.applyStateHint(...a),
+      askGateError: (...a) => self.askProjectFlow.askGateError(...a),
       askHost: (...a) => self.hostCards.askHost(...a),
       get appsHub() {
         return self.appsHub
@@ -4095,9 +4097,9 @@ export class SessionManager {
       awaitTurn: (...a) => self.delegationFlow.awaitTurn(...a),
       backgroundTasksKey: (...a) => self.backgroundTasksKey(...a),
       builderRefOf: (...a) => self.appSessions.builderRefOf(...a),
-      busyAnswer: (...a) => self.busyAnswer(...a),
-      busyChoices: (...a) => self.busyChoices(...a),
-      busyForCaller: (...a) => self.busyForCaller(...a),
+      busyAnswer: (...a) => self.queue.busyAnswer(...a),
+      busyChoices: (...a) => self.queue.busyChoices(...a),
+      busyForCaller: (...a) => self.queue.busyForCaller(...a),
       get cacheLedger() {
         return self.cacheLedger
       },
@@ -4126,7 +4128,7 @@ export class SessionManager {
       get emit() {
         return self.emit
       },
-      enqueue: (...a) => self.enqueue(...a),
+      enqueue: (...a) => self.queue.enqueue(...a),
       ensureProjectAccess: (...a) => self.ensureProjectAccess(...a),
       exportHandoffNote: (...a) => self.exportHandoffNote(...a),
       exportHandoffRecord: (...a) => self.exportHandoffRecord(...a),
@@ -4170,8 +4172,9 @@ export class SessionManager {
         return self.prCheckedAt
       },
       projectInfo: (...a) => self.projectInfo(...a),
+      projectRow: (...a) => self.projectRow(...a),
       projectTrusted: (...a) => self.projectTrusted(...a),
-      queuedOf: (...a) => self.queuedOf(...a),
+      queuedOf: (...a) => self.queue.queuedOf(...a),
       get quitNotices() {
         return self.quitNotices
       },
@@ -4201,7 +4204,7 @@ export class SessionManager {
       get running() {
         return self.running
       },
-      scheduleDrain: (...a) => self.scheduleDrain(...a),
+      scheduleDrain: (...a) => self.queue.scheduleDrain(...a),
       send: (...a) => self.send(...a),
       sessionsInside: (...a) => self.sessionsInside(...a),
       settleState: (...a) => self.settleState(...a),
@@ -4226,6 +4229,7 @@ export class SessionManager {
         return self.trash.trashing
       },
       trunkOf: (...a) => self.trunkOf(...a),
+      turnRunning: (...a) => self.turnRunning(...a),
       get turnObservers() {
         return self.turnObservers
       },
@@ -4281,10 +4285,10 @@ export class SessionManager {
       send: (sessionId, text, attachments, from) => this.send(sessionId, text, attachments, from),
       routedCards: (sessionId, callerId) => this.routedCards(sessionId, callerId),
       answerRoutedCard: (callerId, sessionId, card, text) => this.answerRoutedCard(callerId, sessionId, card, text),
-      busyForCaller: (callerId, sessionId) => this.busyForCaller(callerId, sessionId),
-      busyAnswer: (callerId, target, from) => this.busyAnswer(callerId, target, from),
-      busyChoices: (callerId, target, from) => this.busyChoices(callerId, target, from),
-      enqueue: (callerId, target, via, text) => this.enqueue(callerId, target, via, text),
+      busyForCaller: (callerId, sessionId) => this.queue.busyForCaller(callerId, sessionId),
+      busyAnswer: (callerId, target, from) => this.queue.busyAnswer(callerId, target, from),
+      busyChoices: (callerId, target, from) => this.queue.busyChoices(callerId, target, from),
+      enqueue: (callerId, target, via, text) => this.queue.enqueue(callerId, target, via, text),
       forkFor: (callerId, target, text, readOnly, via, signal) => this.delegationFlow.forkFor(callerId, target, text, readOnly, via, signal),
       autoBoundaryOpen: (sessionId, boundary) => this.autoBoundaryOpen(sessionId, boundary),
       createProjectAsked: (sessionId, spec, signal) => this.createProjectAsked(sessionId, spec, signal),
@@ -4452,7 +4456,7 @@ export class SessionManager {
     if (!this.store.forgetProjectConsent(fromProjectId, toProjectId, kind)) return
     this.emit({ type: 'project_consents_changed' })
     if (kind === 'delegate') {
-      this.withdrawReaches(
+      this.queue.withdrawReaches(
         () => false,
         (_r, from, to) => from === fromProjectId && to === toProjectId,
         'The person revoked the consent for the asking project to ask this one.',
@@ -4594,7 +4598,7 @@ export class SessionManager {
     const removed = scope === 'removed'
     // What only `auto` let the original queue does not go to a successor that is not `auto`; the original is told.
     // A removed original's queue moves nowhere: the trash drops it
-    if (!removed && heir.permissionPreset !== 'auto') this.dropOpenedByAuto(from)
+    if (!removed && heir.permissionPreset !== 'auto') this.queue.dropOpenedByAuto(from)
     const queuedBy = removed ? new Set<string>() : new Set([...this.children.queued.values()].flat().filter((r) => r.callerSessionId === from).map((r) => r.sessionId))
     const delegated = [...this.children.delegations.values()].filter((d) => d.callerId === from)
     const stateOf = (s: SessionInfo): string | null => {
@@ -4857,260 +4861,6 @@ export class SessionManager {
   }
 
   /**
-   * Whether a request from `callerId` finds the session busy with a turn that is not the caller's (#677): a turn
-   * running (the person's, another session's or an app's), or requests queued ahead of it. The caller's own running
-   * turn there is not busy for it: a note into its own work stays its own path.
-   */
-  private busyForCaller(callerId: string, sessionId: string): boolean {
-    const m = this.meta.get(sessionId)
-    if (!m) return false
-    if (this.children.queued.get(sessionId)?.length || this.children.delivering.has(sessionId)) return true
-    if (!this.turnRunning(m)) return false
-    return this.children.turnOwners.get(sessionId)?.callerId !== callerId
-  }
-
-  /**
-   * What a requester may do about a busy session (#677), each with whether it can, now. The requester chooses; nothing
-   * was sent. `from`: the tool the request came through, which decides what a note is and whether a fork can be.
-   */
-  private busyChoices(callerId: string, target: SessionInfo, from: QueuedRequest['via']): BusyChoice[] {
-    const auto = this.meta.get(callerId)?.permissionPreset === 'auto'
-    const adapter = this.adapters.get(target.tool)
-    const midTurn = !!adapter?.capabilities.midTurnInput && !!this.handles.get(target.id)?.sendTracked
-    const running = this.turnRunning(target)
-    const noteWhy = !auto
-      ? 'only a session whose permission preset is auto adds a note to a turn that is not its own (#606)'
-      : !running
-        ? 'nothing is running there to add it to: requests are queued ahead of yours'
-        : from === 'ask_project' && this.agentRuns.has(target.id) && !this.agentRuns.get(target.id)!.finished
-          ? "another session's task runs there"
-          : from !== 'send_to_session' && !midTurn
-            ? 'its CLI cannot take a note during a turn'
-            : undefined
-    const forkWhy = from === 'ask_project'
-      ? 'ask_project never creates a session in another project'
-      : !adapter?.forkConversation
-        ? `${adapter?.descriptor.label ?? target.tool} cannot fork a conversation`
-        : !(target.externalId ?? target.importedFrom)
-          ? 'it has no conversation to copy yet'
-          : this.delegationFlow.forkGateError(callerId, target) ?? undefined
-    return [
-      { choice: 'note', available: !noteWhy, ...(noteWhy ? { why: noteWhy } : {}) },
-      { choice: 'queue', available: true },
-      { choice: 'fork', available: !forkWhy, ...(forkWhy ? { why: forkWhy } : {}) },
-    ]
-  }
-
-  private busyAnswer(callerId: string, target: SessionInfo, from: QueuedRequest['via']): Extract<BusyAnswer, { state: 'busy' }> {
-    return { state: 'busy', sessionId: target.id, sessionName: target.name, sessionState: this.children.queued.get(target.id)?.length && !inTurn(target.state) ? 'queued requests' : blockedOnQuestion(target) ? 'waiting on a question' : target.state, choices: this.busyChoices(callerId, target, from) }
-  }
-
-  /** Holds a request for a busy session until its turn ends (#677); the handle and the place in its queue */
-  private enqueue(callerId: string, target: SessionInfo, via: QueuedRequest['via'], text: string): Extract<BusyAnswer, { state: 'queued' }> {
-    // A retry of the same request (same requester, tool and words) is the one already held, not a second (#684 review)
-    const held = this.children.queued.get(target.id) ?? []
-    const same = held.findIndex((x) => x.callerSessionId === callerId && x.via === via && x.text === text)
-    if (same >= 0) return { state: 'queued', sessionId: target.id, sessionName: target.name, queueId: held[same]!.id, position: same + 1 }
-    // Marked, and stored with the row, when only `auto` let an ask through: the delivery gate reads it (`queuedGateError`)
-    const openedByAuto = via === 'ask_project' && this.meta.get(callerId)?.permissionPreset === 'auto' && !this.pairConsented(callerId, target)
-    const r: QueuedRequest = { id: `qr-${randomUUID()}`, sessionId: target.id, callerSessionId: callerId, via, text, queuedAt: Date.now(), openedByAuto }
-    const position = this.children.enqueue(r)
-    // The turn may have ended while the caller chose
-    this.scheduleDrain(target.id)
-    return { state: 'queued', sessionId: target.id, sessionName: target.name, queueId: r.id, position }
-  }
-
-  /** Sessions whose queued request being delivered has been handed to the process (#839): only then can the tool refuse it */
-  private readonly queuedHandedIn = new Set<string>()
-
-  /** After the event that freed the session has run its course (reports, observers), the next queued request goes in */
-  private scheduleDrain(sessionId: string): void {
-    setTimeout(() => void this.drainQueue(sessionId), 0)
-  }
-
-  /**
-   * Delivers the oldest request queued for a session now at rest (#677), as a new turn its requester owns: the
-   * requester's delegation (`agent_session`, `ask_project`) or turn (`send_to_session`), with its cards (#676) and the
-   * report when it ends. One at a time; the next waits for that turn to end. Not while the host is leaving: the next
-   * one delivers it.
-   */
-  private async drainQueue(sessionId: string): Promise<void> {
-    if (this.disposing || this.handingOver || this.children.delivering.has(sessionId)) return
-    const m = this.meta.get(sessionId)
-    const list = this.children.queued.get(sessionId)
-    if (!m || !list?.length) return
-    // A deferred restart is not waited out here: `deliver` waits for it, and its end schedules this again
-    if (this.turnRunning(m) || this.inputsHeld(sessionId) || this.trash.trashing.has(sessionId)) return
-    const r = list[0]!
-    const caller = this.meta.get(r.callerSessionId)
-    if (!caller) {
-      this.children.dropQueued((x) => x.id === r.id)
-      return this.scheduleDrain(sessionId)
-    }
-    // It may have waited hours, or a host swap: the request tool's gates are read again before it goes in
-    const refused = this.queuedGateError(r, caller, m)
-    if (refused) {
-      this.children.dropQueued((x) => x.id === r.id)
-      void this.tellQueuedFailed(caller.id, sessionId, refused)
-      return this.scheduleDrain(sessionId)
-    }
-    // Reserved before the first await: the session is busy from here, and this is the only drain for it
-    this.children.startDelivering(sessionId, r.id)
-    this.queuedHandedIn.delete(sessionId)
-    /*
-     * The input goes to the process here, after any wake (#839). The requester is told when the turn ends, as for work it
-     * did not wait on: marked as the input is handed in, so a tool that refuses it at once ends the request with that
-     * end reported, and a delivery that fails before (a crash while waking) is said once, as not delivered.
-     */
-    const handIn = (h: SessionHandle, input: string) => {
-      this.children.markReport(sessionId, caller.id)
-      this.queuedHandedIn.add(sessionId)
-      h.send(input)
-    }
-    const from = { sessionId: caller.id, name: labelOf(this.store, caller) }
-    const project = this.projectRow(m.projectId)
-    const target = { id: m.projectId ?? '', name: project?.name ?? '', path: this.store.sessionCwd(m.id) ?? m.worktree?.path ?? project?.path ?? '' }
-    let d: Delegation | undefined
-    try {
-      if (r.via === 'send_to_session') {
-        this.children.ownTurn(sessionId, caller.id, true)
-        await this.deliver(sessionId, r.text, undefined, from, false, undefined, 'inline', handIn)
-      } else if (r.via === 'agent_session') {
-        d = this.delegationFlow.startDelegation(`${caller.id}>${sessionId}`, caller.id, sessionId, target, true)
-        await this.deliver(sessionId, agentFrame(from.name, r.text), undefined, from, false, undefined, 'inline', handIn)
-      } else {
-        d = this.delegationFlow.startDelegation(`${caller.id}>${target.id}>${sessionId}`, caller.id, sessionId, target, false)
-        const callerProject = this.projectRow(caller.projectId)?.name ?? 'another project'
-        await this.deliver(sessionId, askFrame(callerProject, r.text), undefined, from, false, undefined, 'inline', handIn)
-      }
-      // Its turn may have started without this host seeing the step into it
-      if (inTurn(this.meta.get(sessionId)?.state ?? 'idle')) this.children.queuedTurnStarted(sessionId)
-    } catch (e) {
-      // Leaving: the row stays, marked, and the next host delivers it
-      if (this.handingOver || this.disposing) return
-      // Said once, below, rather than as a report too
-      if (this.children.awaitingReport.get(sessionId) === caller.id) this.children.clearReport(sessionId)
-      if (d) {
-        d.wait.fail(e as Error)
-      } else this.children.releaseTurn(sessionId, caller.id)
-      this.children.dropQueued((x) => x.id === r.id)
-      void this.tellQueuedFailed(caller.id, sessionId, (e as Error).message)
-      this.scheduleDrain(sessionId)
-    }
-  }
-
-  /**
-   * What the tool that queued a request checked before queuing it, read again at delivery, with the caller's preset as
-   * it is now. ask_project: the gates on the caller, the target project still registered, and the pair's consent when
-   * only the caller's `auto` let the request pass without it (`QueuedRequest.openedByAuto`, stored with the row); a consent the person gave once on a
-   * card covers the request, and revoking a remembered one drops the queue (`withdrawReaches`). agent_session: the
-   * ownership a caller that is not `auto` needs (a session it started) and the preset rule (never work for a session
-   * now above the caller). send_to_session queues behind the orchestrator's scope, which no card stands for.
-   */
-  private queuedGateError(r: QueuedRequest, caller: SessionInfo, target: SessionInfo): string | null {
-    const auto = caller.permissionPreset === 'auto'
-    if (r.via === 'ask_project') {
-      const project = this.projectRow(target.projectId)
-      const gate = this.askProjectFlow.askGateError(caller.id) ?? (project ? null : 'The project asked was removed from Centralu.')
-      if (gate) return gate
-      if (!auto && r.openedByAuto && !this.pairConsented(caller.id, target)) {
-        return "The asking session is no longer auto, and the person has not allowed its project to ask this one."
-      }
-      return null
-    }
-    if (r.via === 'agent_session') {
-      if (!auto && (target.askedBy !== caller.id || target.projectId !== caller.projectId)) {
-        return `The asking session is no longer auto, and "${target.name}" is not a session it started.`
-      }
-      if (!presetWithin(target.permissionPreset, caller.permissionPreset)) {
-        return `"${target.name}" now has more permissions (${target.permissionPreset}) than the session that queued the request (${caller.permissionPreset}).`
-      }
-    }
-    return null
-  }
-
-  /** A remembered "always" for the caller's project to ask the target's (#371), read now */
-  private pairConsented(callerId: string, target: SessionInfo): boolean {
-    const from = this.meta.get(callerId)?.projectId
-    return !!from && !!target.projectId && (from === target.projectId || !!this.store.getProjectConsent(from, target.projectId, 'delegate'))
-  }
-
-  /**
-   * Requests of `sessionId` that only `auto` let through, dropped when they would go on without it (#606), as `auto`'s
-   * attachments stop counting: the session moved off `auto`, or a handoff giving them to a session that is not `auto`
-   * (`moveChildren`). An ask marked `openedByAuto` whose pair still has no remembered consent, and an agent_session
-   * send to a session it did not start. One being delivered now is left to the delivery gate, which reads the mark
-   * again if a swap delivers it once more. `tell` (default: the session itself) is told.
-   */
-  private dropOpenedByAuto(sessionId: string, tell = sessionId): void {
-    const dropped = this.children.dropQueued((r) => {
-      if (r.callerSessionId !== sessionId || this.children.delivering.get(r.sessionId) === r.id) return false
-      const target = this.meta.get(r.sessionId)
-      if (!target) return false
-      if (r.via === 'ask_project') return !!r.openedByAuto && !this.pairConsented(sessionId, target)
-      if (r.via === 'agent_session') return target.askedBy !== sessionId
-      return false
-    })
-    for (const r of dropped) {
-      void this.tellQueuedFailed(tell, r.sessionId, 'The asking session is no longer auto, and only auto let this request through.')
-    }
-  }
-
-  /**
-   * Withdraws what rests on a project's trust, on a pair's consent, or on the project itself, when the person takes it
-   * away: the cards a session raised to reach another project (`project_access`) or to fork (start_agent cards with no
-   * request of their own, `forkFor`), and the ask_project requests still queued. A call waiting on a card reads the gate
-   * that now refuses it; a queued request's caller is told, as for one that could not be delivered.
-   *
-   * `keepAuto`: trust and a revoked consent do not close an `auto` session's reach (#603), so its cards and requests
-   * stay; the delivery gate reads them again if it is moved off `auto` (`queuedGateError`, `dropOpenedByAuto`).
-   * A removed project keeps nothing.
-   */
-  private withdrawReaches(
-    cards: (ask: HostAsk) => boolean,
-    queued: (r: QueuedRequest, callerProjectId: string | null | undefined, targetProjectId: string | null | undefined) => boolean,
-    why: string,
-    keepAuto: boolean,
-  ): void {
-    const kept = (sessionId: string) => keepAuto && this.meta.get(sessionId)?.permissionPreset === 'auto'
-    for (const ask of [...this.hostCards.hostAsks.values()]) {
-      const reach = ask.detail.kind === 'project_access' || (ask.detail.kind === 'agent_start' && !this.children.agentStarts.has(ask.requestId))
-      if (reach && !kept(ask.sessionId) && cards(ask)) this.hostCards.withdrawHostAsk(ask.requestId)
-    }
-    const dropped = this.children.dropQueued((r) =>
-      r.via === 'ask_project' &&
-      this.children.delivering.get(r.sessionId) !== r.id &&
-      !kept(r.callerSessionId) &&
-      queued(r, this.meta.get(r.callerSessionId)?.projectId, this.meta.get(r.sessionId)?.projectId),
-    )
-    for (const r of dropped) void this.tellQueuedFailed(r.callerSessionId, r.sessionId, why)
-    /*
-     * A request kept only because its caller is `auto` now rests on `auto` alone (#838): the consent or trust it was
-     * queued under is gone. Marked, and stored, so moving the caller off `auto` drops it (`dropOpenedByAuto`) and the
-     * delivery gate refuses it, on this host or the next. Unmarked, an ask queued under a remembered consent was
-     * delivered after the person revoked the consent and the caller left `auto`.
-     */
-    for (const list of this.children.queued.values()) {
-      for (const r of list) {
-        if (r.via === 'ask_project' && kept(r.callerSessionId) && queued(r, this.meta.get(r.callerSessionId)?.projectId, this.meta.get(r.sessionId)?.projectId)) {
-          this.children.markOpenedByAuto(r)
-        }
-      }
-    }
-  }
-
-  /** A queued request could not be delivered (#677): said in the requester's session, as a report is */
-  private async tellQueuedFailed(callerId: string, sessionId: string, why: string): Promise<void> {
-    const name = this.nameOf(sessionId)
-    await this.tellSession(
-      callerId,
-      `[Centralu] Your queued request to another session was not delivered.\nSession: ${frameField(name)}\nid: ${sessionId}\n\nReason: ${why.slice(0, 600)}`,
-      { sessionId, name },
-      true,
-    )
-  }
-
-  /**
    * Tells a session something in its conversation (#428): a report, or Centralu's word on a request, a note or a queued
    * request that did not go. Never while this host is leaving. Handing over, a report whose mark the store keeps is the
    * next host's to give (#646); one held only in memory (a linked machine's, #723) and a notice like these are dropped
@@ -5126,15 +4876,6 @@ export class SessionManager {
     } catch {
       // The session may be asleep or deleted — a notice must not destabilize the host
     }
-  }
-
-  /** The caller's requests still queued for a session (#677), as status reads them */
-  private queuedOf(callerId: string, sessionId: string): ChildRunResult | undefined {
-    const list = this.children.queued.get(sessionId) ?? []
-    const i = list.findIndex((r) => r.callerSessionId === callerId)
-    const m = this.meta.get(sessionId)
-    if (i < 0 || !m) return undefined
-    return { ok: true, state: 'queued', sessionId, sessionName: m.name, tool: m.tool, queueId: list[i]!.id, position: i + 1 }
   }
 
   /** `HostCards.appQuestionList` (host-cards.ts), kept on the manager for its callers */
