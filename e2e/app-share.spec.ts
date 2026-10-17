@@ -375,8 +375,10 @@ test.describe('app links (E-4)', () => {
     await expect(dialog).toBeVisible()
     await expect(dialog.getByTestId('import-from-link')).toContainText('Nothing is read or downloaded until you choose Review')
     await expect(dialog.getByTestId('import-source')).toHaveValue(source)
-    // The link only opened the dialog — downloading (preparing) happens only after the person clicks
-    await page.waitForTimeout(300)
+    // The link only opened the dialog — downloading (preparing) happens only after the person clicks.
+    // The dialog drawn with the link's source is the link handled; a prepare it asked for would be
+    // sent by then or by an effect of that render, which runs within two frames
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
     expect(await mockList<string[]>(page, 'importPrepares')).toEqual([])
 
     await dialog.getByTestId('import-review').click()

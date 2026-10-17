@@ -524,6 +524,11 @@ async function logged(v: FrameLocator, k: string): Promise<unknown> {
   await expect(li).toBeVisible()
   return JSON.parse(((await li.textContent()) ?? '').slice(k.length + 1))
 }
+/**
+ * Two frames of the page. Version events are taken into the store as they are emitted, and a view is opened again
+ * from the effect of the render they cause, so after two frames any reopen they asked for has been asked.
+ */
+const twoFrames = (page: Page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
 const openedViews = (page: Page) => page.evaluate(() => ((window as any).__mock.openedViews as unknown[]).length)
 const reopenedViews = (page: Page) => page.evaluate(() => (window as any).__mock.reopenedViews as { sessionId: string; callId: string }[])
 const closedViews = (page: Page) => page.evaluate(() => (window as any).__mock.closedViews as string[])
@@ -605,7 +610,8 @@ test.describe('C-4: when an app relaunches with new code, its open views refresh
     await version(page, pid, 'v1', 'crashed')
     await version(page, pid, 'v1', 'running')
     for (let i = 0; i < 3; i++) await emit(page, { type: 'external_app_state_changed', appId: 'reloader', projectId: pid })
-    await page.waitForTimeout(500)
+    // The exact counts after each new version below hold this too: a reopen asked for here would come before theirs
+    await twoFrames(page)
     expect(await openedViews(page)).toBe(1)
     expect(await reopenedViews(page)).toEqual([])
 
@@ -622,7 +628,8 @@ test.describe('C-4: when an app relaunches with new code, its open views refresh
     await expect
       .poll(() => page.evaluate(({ s }) => (window as any).__store.getState().inlineViews[s].toolu_r.stale as boolean | undefined, { s: sid }))
       .toBe(true)
-    await page.waitForTimeout(500)
+    // Marked stale is the same decision as not reopening, already drawn; the count after the click below holds it too
+    await twoFrames(page)
     expect(await openedViews(page)).toBe(4)
     expect(await reopenedViews(page)).toHaveLength(3)
     await expect(marker).toHaveText('v4')
@@ -631,7 +638,7 @@ test.describe('C-4: when an app relaunches with new code, its open views refresh
     await pinned.getByTestId('pinned-stale').click()
     await expect(marker).toHaveText('v5')
     await expect(pinned.getByTestId('pinned-stale')).toHaveCount(0)
-    await page.waitForTimeout(500)
+    await twoFrames(page)
     expect(await openedViews(page)).toBe(5)
   })
 })
