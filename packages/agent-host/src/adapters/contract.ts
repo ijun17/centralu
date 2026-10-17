@@ -425,7 +425,8 @@ export type OrchestratorTools = {
   agentSession(opts: AgentSessionOpts, signal?: AbortSignal): Promise<ChildRunResult>
   /**
    * Answers a card standing in a session whose turn this seat gave it (#676, answer_question): the directing seats'
-   * way, as agent_session's `answer` is an ordinary session's. Same rules (`SessionManager.answerRoutedCard`).
+   * way, as agent_session's `answer` is an ordinary session's. Same rules (`RoutedCards.answerRoutedCard`,
+   * sessions/routed-cards.ts).
    */
   answerQuestion(opts: { sessionId: string; card?: string; text: string }): Promise<ChildRunResult>
   recall(

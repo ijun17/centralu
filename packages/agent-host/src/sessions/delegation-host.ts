@@ -41,7 +41,7 @@ export type DelegationHost = {
   cwdFor: (m: SessionInfo) => string
   /** A session as Centralu's word names it to another: as read_session lists it, or its id once it is gone */
   nameOf: (sessionId: string) => string
-  /** Tells a session something in its conversation, never while the host leaves, never throwing (`SessionManager.tellSession`, #428) */
+  /** Tells a session something in its conversation, never while the host leaves, never throwing (`ChildReports.tellSession`, #428) */
   tellSession: (sessionId: string, text: string, from: { sessionId: string; name: string }, relayed: boolean) => Promise<void>
   deliver: (sessionId: string, text: string, attachments: Attachment[] | undefined, from: { sessionId: string; name: string } | undefined, relayed: boolean, fromApp?: undefined, fromAppVia?: 'inline', sendInput?: (handle: SessionHandle, text: string) => void) => Promise<void>
   readonly disposing: boolean

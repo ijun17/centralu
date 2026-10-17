@@ -1447,7 +1447,7 @@ host.log에 그렇다는 줄 하나를 쓴다. 탐침은 여기에 꽂힌다.
 
 **CLI 자신의 타이머도 백그라운드 작업으로 센다.** `/loop`와 예약 프롬프트는 Claude 프로세스 안의
 타이머(`ScheduleWakeup`, `CronCreate`)이고, CLI는 이것을 작업으로 알리지 않는다. 프로세스가 잠들거나 다시 뜨면
-조용히 사라진다. Claude 어댑터가 호출과 구조화된 결과에서 읽어(`adapters/claude/normalize.ts`의
+조용히 사라진다. Claude 어댑터가 호출과 구조화된 결과에서 읽어(`adapters/claude/schedules.ts`의
 `ClaudeSchedules`) 기다리는 것마다 세션의 백그라운드 작업으로 올린다(kind `other`, 따로 멈출 수 없음). 그래서
 `sessionIdle`은 `background`라고 한다. 깨우기는 `scheduledFor`까지(없으면 요청한 지연, 그것도 없으면 런타임의
 최대 1시간), 또는 `ScheduleWakeup {stop: true}`까지 기다린다. cron 작업은 `CronDelete`가 그 id를 말하거나,

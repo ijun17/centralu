@@ -2064,7 +2064,7 @@ resume and the transcript catch-up included.
 **The CLI's own timers count as background work.** `/loop` and scheduled prompts are timers inside the Claude process
 (`ScheduleWakeup`, `CronCreate`), which the CLI does not report as tasks; a process put to sleep or restarted loses
 them silently. The Claude adapter reads them off the calls and their structured results (`ClaudeSchedules` in
-`adapters/claude/normalize.ts`) and lists each pending one with the session's background tasks (kind `other`, not
+`adapters/claude/schedules.ts`) and lists each pending one with the session's background tasks (kind `other`, not
 stoppable on its own), so `sessionIdle` says `background`. A wake-up is pending until its `scheduledFor` (else the
 asked delay, else the runtime's one-hour maximum), or until `ScheduleWakeup {stop: true}`; a cron job until
 `CronDelete` names it, a `CronList` answer omits it, or it auto-expires after seven days (a one-shot job is kept as
