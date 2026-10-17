@@ -8,7 +8,6 @@ import { labelOf, lastActiveOf } from './transcript-view.js'
 import { agentDepthRefusal, recordAgentDepth } from './agent-depth.js'
 import { agentState, cleanUpDue, ownAgents } from './own-agents.js'
 import type {
-  BackgroundTask,
   PermissionPreset,
   SessionInfo,
 } from '@cc/protocol'
@@ -23,10 +22,13 @@ import type { AgentListRow, BusyAnswer, ChildRunResult, AgentSessionOpts, Routed
 import { raceBound } from './with-timeout.js'
 import type { DelegationHost } from './delegation-host.js'
 import { AgentStartFlow, agentStartPending, agentStartPersonText } from './start-agent-flow.js'
+import { BackgroundStops, taskList } from './background-stops.js'
 
 // Moved with start_agent (#850); still importable from here
 export type { DelegationHost } from './delegation-host.js'
 export { ASK_THE_PERSON, START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS, agentStartPersonText } from './start-agent-flow.js'
+// Moved with stopping a child's background work (#428); still importable from here
+export { STOP_REPORTED_MS, taskList } from './background-stops.js'
 
 /** How a wait on a delegation's turn ended (`DelegationFlow.awaitTurn`), for each caller to word (#428) */
 export type TurnWait =
@@ -42,14 +44,6 @@ export type TurnWait =
   | { kind: 'failed'; error: string }
   | { kind: 'done'; answer: string }
 
-/** Tasks named for another session's model: each description is a single framed field (#120), with how it ended */
-/** How long `agent_session stop` waits for the tool to report the end of the background work it stopped (#718) */
-export const STOP_REPORTED_MS = 3_000
-
-export function taskList(tasks: readonly BackgroundTask[], status = false): string {
-  return tasks.map((t) => (status ? `${frameField(t.description)}: ${t.status}` : frameField(t.description))).join(', ')
-}
-
 /**
  * The sender a hub's orchestrator's instruction is recorded under (`sendFromHub`). Not a session of this host: no id
  * this host makes starts with `_`. The window shows only the sender's name; the id is what the injection gate reads
@@ -64,9 +58,12 @@ export const HUB_SENDER = '_hub-orchestrator'
 export class DelegationFlow {
   /** start_agent and its requests (start-agent-flow.ts, #850) */
   readonly starts: AgentStartFlow
+  /** Stopping a child's own background work (background-stops.ts) */
+  private readonly stops: BackgroundStops
 
   constructor(private readonly host: DelegationHost) {
     this.starts = new AgentStartFlow(host, this)
+    this.stops = new BackgroundStops(host)
   }
 
   /**
@@ -713,69 +710,19 @@ export class DelegationFlow {
     )
   }
 
-  /**
-   * `agent_session stop` on a child whose report is paused over its own background work (#721): the caller is done
-   * waiting. The tasks it paused on that still run are stopped where the tool can stop them one by one, and the report
-   * is taken down; the turns their ending may start are the child's own. What could not be stopped is named.
-   */
-  private stopPausedWork(child: SessionInfo): Promise<ChildRunResult> {
-    const held = new Set((this.host.children.pausedReports.get(child.id) ?? []).map((t) => t.id))
-    const running = this.host.ownTasksRunning(child.id).filter((t) => held.has(t.id))
-    this.host.children.clearReport(child.id)
-    return this.stopOwnWork(child, running, true)
+  /** `BackgroundStops.stopPausedWork` (background-stops.ts), kept on the flow for its callers */
+  stopPausedWork(...a: Parameters<BackgroundStops['stopPausedWork']>): ReturnType<BackgroundStops['stopPausedWork']> {
+    return this.stops.stopPausedWork(...a)
   }
 
-  /**
-   * Stops a child's own background work one task at a time, where the tool can (`stopBackgroundTask`), and names what
-   * it could not stop. `paused`: the work a paused report waited on (#721), whose report is already down; otherwise
-   * the work a child at rest still runs (#718), which keeps its worktree from being cleaned up.
-   */
-  private async stopOwnWork(child: SessionInfo, running: readonly BackgroundTask[], paused: boolean): Promise<ChildRunResult> {
-    const stopped: BackgroundTask[] = []
-    const left: BackgroundTask[] = []
-    for (const t of running) {
-      try {
-        await this.host.stopBackgroundTask(child.id, t.id)
-        stopped.push(t)
-      } catch {
-        left.push(t)
-      }
-    }
-    const unstoppable = left.length ? `Not stoppable from here, still running: ${taskList(left)}; the person can stop it, or you can ask the child to stop it.` : ''
-    // Nothing stopped and no wait ended: nothing was done (#718 review)
-    if (!paused && !stopped.length) return { ok: false, error: `Nothing of "${child.name}" was stopped. ${unstoppable}` }
-    /*
-     * The tool reports a task's end after its stop returns (Claude's `background_tasks_changed` follows `stopTask`), so
-     * a delete right after this would still see it running. The answer waits a moment for that end, and says so if it
-     * did not come
-     */
-    const ids = new Set(stopped.map((t) => t.id))
-    const stillListed = () => this.host.ownTasksRunning(child.id).filter((t) => ids.has(t.id))
-    for (const until = Date.now() + STOP_REPORTED_MS; stillListed().length && Date.now() < until;) await new Promise((r) => setTimeout(r, 25))
-    const unreported = stillListed()
-    const notice = [
-      stopped.length ? `Stopped its background work: ${taskList(stopped)}.` : 'None of the background work it paused on was still running.',
-      unreported.length ? `Its tool has not reported the end of ${taskList(unreported)} yet; a delete waits for that.` : '',
-      unstoppable,
-      paused ? 'You will not be told more about this work.' : '',
-    ].filter(Boolean).join(' ')
-    return { ok: true, state: 'stopped', sessionId: child.id, sessionName: child.name, tool: child.tool, notice }
+  /** `BackgroundStops.stopOwnWork` (background-stops.ts), kept on the flow for its callers */
+  stopOwnWork(...a: Parameters<BackgroundStops['stopOwnWork']>): ReturnType<BackgroundStops['stopOwnWork']> {
+    return this.stops.stopOwnWork(...a)
   }
 
-  /**
-   * The background work `stop` may end on a child at rest (#718): its own, when this caller started it, no turn and no
-   * card stand there, nobody's delegation or wait is on it, and no report paused over that work is owed to another
-   * session. A turn the person or another session gives it is theirs, and so is the work that turn starts while it
-   * runs. Work an earlier, finished turn of the person's left running cannot be told apart from the caller's.
-   */
-  private restingWork(child: SessionInfo, callerId: string): BackgroundTask[] {
-    if (child.askedBy !== callerId || inTurn(child.state) || child.pendingApproval || child.pendingQuestions.length) return []
-    if ([...this.host.children.delegations.values()].some((r) => r.sessionId === child.id && !r.settled)) return []
-    const run = this.host.agentRuns.get(child.id)
-    if (run && !run.finished) return []
-    const owed = this.host.children.awaitingReport.get(child.id)
-    if (owed && owed !== callerId && this.host.children.pausedReports.has(child.id)) return []
-    return this.host.ownTasksRunning(child.id)
+  /** `BackgroundStops.restingWork` (background-stops.ts), kept on the flow for its callers */
+  restingWork(...a: Parameters<BackgroundStops['restingWork']>): ReturnType<BackgroundStops['restingWork']> {
+    return this.stops.restingWork(...a)
   }
 
   /**
