@@ -1332,7 +1332,21 @@ Implementation rules:
   resume that fails or outlives its cap names them inside the one error that retires the handle.
   Open cards are a `PendingCards`: every way a card goes (answered, withdrawn by the CLI, the turn stopped, the handle
   closed) goes through `take` or `release`, which removes it before it is closed, and the adapter says
-  `approval_resolved` / `question_resolved` there. A Stop that did not reach the CLI is `couldNotStop`.
+  `approval_resolved` / `question_resolved` there. A turn is said stopped only once the tool confirms the
+  stop: Codex's `turn/completed`, Claude's answer to the SDK's `interrupt()` or the stopped turn's result, whichever
+  comes first. Claude used to say it at once, so a rejected interrupt showed the turn stopped while the CLI kept
+  working. A Stop that has not taken effect (either tool refuses the interrupt, or nothing confirms Claude's within
+  `stopConfirmMs`, 10 s) leaves the turn running, and is said as a notice (`stopNotConfirmed`, label
+  `STOP_NOT_CONFIRMED_LABEL`), not an error: an error moves the session to `error`, which the manager takes as the
+  turn's end (delegation waits settle, queued requests go in), and the turn's own ending (`waiting_input`) is not a
+  move `error` allows. The notice also clears the wait's `stoppedByPerson` (`AgentRunWait`), so a child that then
+  finishes hands its answer to the one waiting. A second Stop joins the first one's wait and bound; one pressed after
+  the bound was said starts the bound again on the same wait. A confirmation after the bound still ends the turn as
+  stopped. A turn that fails or hits a limit while a Stop waits ends as it did: nothing says it stopped after that.
+  Only an idle Claude session's refused interrupt is still `couldNotStop`, after it was said stopped. The window's
+  Stop button says "Stopping…" from the click until the turn ends, through an approval in it, and shows the notice's
+  text when there is one (`stopping`, ActivityRow). Cards are still answered with a refusal before the stop is known
+  to work, so a tool whose card was denied stays denied when the stop is refused.
 - **"Always allow" adds the matcher the answer carried, and nothing without one** (`always-allow.ts`, both adapters).
   The UI computes and shows the matcher and the manager saves exactly it, so the live rule, the saved rule and the
   screen agree. Claude used to fall back to the command text: a rule nobody saved or named, gone at the next restart.
@@ -2182,7 +2196,7 @@ tool-neutral (`sessions/interruptions.ts`):
 
 | Decision | Why |
 |---|---|
-| An app request cancelled mid-turn fails its wait before it interrupts the session | Claude's adapter ends the turn the moment it is interrupted, so the wait read the cancel as "stopped before it finished" |
+| An app request cancelled mid-turn fails its wait before it interrupts the session | Claude's adapter ends the turn as soon as the CLI confirms the interrupt, before the turn's result, so the wait read the cancel as "stopped before it finished" |
 | Classify and surface; never resend by itself | A resent turn can repeat side effects (a push, a comment, a release). Continuing is one message from the person or the asker, the same sentence both ways: "Continue where you stopped. Check what already happened before repeating a step." Auto-resend on reconnect could come later as an opt-in |
 | A Codex `interrupted` turn ends as a Stop does (`state_change waiting_input`), not as `turn_complete` | `turn_complete` is "finished": the orchestrator was told the work was done. A wait on the turn (`AgentRunWait`) ends on the interrupt, since no `turn_complete` follows it now |
 | The Codex adapter tells its own interrupts from Codex's and logs which (`interruptsSent`, "interrupted by a stop from Centralu" / "by Codex"). A Stop that lands while a note's `turn/start` is in flight interrupts the turn the answer names, and counts as ours too (`takeInputTurn`) | The real case could not tell whether the person's Stop, the host or the CLI sent it |

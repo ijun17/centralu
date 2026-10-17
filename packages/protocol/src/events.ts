@@ -61,6 +61,13 @@ const persistedSeq = { seq: z.number().optional() }
 export const APP_VIEWS_LIVE_PER_SESSION = 3
 
 /**
+ * The `label` of the notice that says a Stop has not taken effect (#1060): the tool refused the interrupt or did not
+ * confirm it in time, and the turn is still running. A notice rather than an error, since an error ends the turn on
+ * screen. The UI's Stop button reads it to stop saying "Stopping…" and show why.
+ */
+export const STOP_NOT_CONFIRMED_LABEL = 'stop not confirmed'
+
+/**
  * The owner of the call that produced an external app's "changed" event (M4 B-5) — exactly the
  * shape of the host runtime's caller (`AppCaller`). If a screen made the call, that screen's
  * instance id is carried here. That screen never hears its own change again — it already
