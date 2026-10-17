@@ -164,6 +164,12 @@ export const MachineInfo = z.object({
    * Additive
    */
   autostart: MachineAutostart.nullable().catch(null).default(null),
+  /**
+   * The machine's host said in its hello that it runs with administrator rights (#702): on Windows, an account in the
+   * Administrators group linked over ssh gets a full token with no UAC split, so every agent there and every tool call
+   * runs as an administrator. Null when the host has not said (not connected yet, or a build that predates it). Additive
+   */
+  elevated: z.boolean().nullable().catch(null).default(null),
 })
 export type MachineInfo = z.infer<typeof MachineInfo>
 

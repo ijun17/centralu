@@ -216,3 +216,25 @@ export function hasWindowsFileNames(platform: Platform = HOST_PLATFORM): boolean
 export function endsWorkWithJob(platform: Platform = HOST_PLATFORM): boolean {
   return platform === 'win32'
 }
+
+/**
+ * How to tell whether this host runs with administrator rights (#702). Windows: the token's integrity level, as
+ * `whoami /groups` lists it; High (`S-1-16-12288`) or System (`S-1-16-16384`) is an elevated token. Windows OpenSSH
+ * gives an account in the Administrators group a full token for a network logon, with no UAC split, so a host the hub
+ * started over ssh runs elevated where the same person at the desktop would not. The SIDs read the same in every
+ * language. Elsewhere: whether it runs as root (uid 0).
+ */
+export function elevationSource(
+  platform: Platform = HOST_PLATFORM,
+  env: Record<string, string | undefined> = process.env,
+): { kind: 'command'; file: string; args: string[] } | { kind: 'uid' } {
+  if (platform === 'win32') return { kind: 'command', file: systemTool(['whoami.exe'], env), args: ['/groups', '/fo', 'csv', '/nh'] }
+  return { kind: 'uid' }
+}
+
+/** Whether `whoami /groups` lists an elevated integrity level (`elevationSource`); null when it lists none at all */
+export function elevatedFromGroups(stdout: string): boolean | null {
+  const levels = [...stdout.matchAll(/S-1-16-(\d+)/g)].map((m) => Number(m[1]))
+  if (levels.length === 0) return null
+  return levels.some((l) => l >= 12288)
+}

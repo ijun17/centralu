@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MachineInfo, MachineVersions } from '@cc/protocol'
-import { autostartRow, hostStartNote, installNote, isAway, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, versionPrompt } from './machines.js'
+import { autostartRow, elevatedNote, hostStartNote, installNote, isAway, MACHINE_STATUS_LABEL, machineProblem, operationNote, updateStops, versionPrompt } from './machines.js'
 
 const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   id: 'box',
@@ -19,6 +19,7 @@ const machine = (patch: Partial<MachineInfo> = {}): MachineInfo => ({
   install: null,
   operation: null,
   autostart: null,
+  elevated: null,
   ...patch,
 })
 
@@ -226,5 +227,17 @@ describe('the start-at-boot switch (plan §10.4, owner decision 4)', () => {
 
   it('names the uninstall step that removes it', () => {
     expect(operationNote(machine({ operation: { kind: 'uninstall', step: 'autostart', target: null, at: 1 } }))).toBe('Removing Centralu: removing its start at boot…')
+  })
+})
+
+describe('a machine whose host runs with administrator rights (#702)', () => {
+  it('says so in one sentence with the way out, for Windows and elsewhere, and nothing when the host did not say', () => {
+    expect(elevatedNote(machine({ name: 'Win', shell: 'powershell', elevated: true }))).toEqual({
+      title: 'Agents on Win run with administrator rights: Windows gives an administrator who signs in over ssh a full, elevated token.',
+      fix: 'To run them as an ordinary user, link Win through a standard account with its own ssh key.',
+    })
+    expect(elevatedNote(machine({ elevated: true }))?.title).toBe('Agents on Box run with administrator rights: its host runs as root.')
+    expect(elevatedNote(machine({ elevated: false }))).toBeNull()
+    expect(elevatedNote(machine({ elevated: null }))).toBeNull()
   })
 })

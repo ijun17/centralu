@@ -40,6 +40,8 @@ export type RemoteHello = {
   newLifetime: boolean
   protocolVersion: number
   build?: HostBuild
+  /** The remote host runs with administrator rights (#702); absent when it did not say */
+  elevated?: boolean
 }
 
 /** `proving`: refused the `prove` itself (#838), as a host from before the proof, still running, does */
@@ -277,7 +279,7 @@ export class RemoteClient {
       this.cursorValid = true
       this.ready = true
       this.attempt = 0
-      this.on.hello?.({ resync, newLifetime: !sameLifetime, protocolVersion: frame.protocolVersion, ...(frame.build ? { build: frame.build } : {}) })
+      this.on.hello?.({ resync, newLifetime: !sameLifetime, protocolVersion: frame.protocolVersion, ...(frame.build ? { build: frame.build } : {}), ...(typeof frame.elevated === 'boolean' ? { elevated: frame.elevated } : {}) })
       return
     }
     if (frame.kind === 'res') {
