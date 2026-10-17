@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileS
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { __resetToolPathCache, ensureToolPath, fallbackDirs, probeLoginShell, whichTool } from './env-path.js'
+import { alive as isAlive } from './process.test-helpers.js'
 
 /**
  * Regression test for the packaged app not being able to find the CLI.
@@ -163,14 +164,7 @@ describe.skipIf(process.platform === 'win32')('the login-shell probe', () => {
     // A bound a loaded machine's shell still writes its helper's pid within
     expect(probeLoginShell('darwin', { SHELL: starts }, 2000)).toEqual([])
     const helper = Number(readFileSync(pidFile, 'utf8'))
-    const alive = () => {
-      try {
-        process.kill(helper, 0)
-        return true
-      } catch {
-        return false
-      }
-    }
+    const alive = () => isAlive(helper)
     for (let i = 0; i < 40 && alive(); i++) await new Promise((r) => setTimeout(r, 50))
     const left = alive()
     if (left) process.kill(helper, 'SIGKILL')

@@ -8,6 +8,7 @@ import { alive as isAlive, cleanUp, consoleHosts, plantTreeScript, settle, treeP
 import { TerminalService, commandShell, interactiveShell, shellPath, shortCwd, type PtyModule } from './terminal.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 import { releaseEnded, spawnPty } from './pty-slot.js'
+import { alive } from '../process.test-helpers.js'
 
 /**
  * The terminal has one core rule: **its identity is its cwd.**
@@ -180,14 +181,6 @@ describe('multiple terminals', () => {
     const t = svc.create(dir, 80, 24)
     for (let i = 0; i < 250 && !existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 20))
     const server = Number(readFileSync(pidFile, 'utf8'))
-    const alive = (pid: number) => {
-      try {
-        process.kill(pid, 0)
-        return true
-      } catch {
-        return false
-      }
-    }
     try {
       svc.close(t.id)
       for (let i = 0; i < 150 && (alive(server) || alive(shells[0]!.pid!)); i++) await new Promise((r) => setTimeout(r, 20))

@@ -5,15 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { __forgetPrograms } from '../tool-launch.js'
 import { gitBranchPr } from './git.js'
 import { eventually, SLOW } from '../../../../tooling/test-timing.js'
+import { alive } from '../process.test-helpers.js'
 
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
 
 /**
  * A gh that runs the script `pr` in its working directory with Node. On Windows it is Node itself under gh's name (an

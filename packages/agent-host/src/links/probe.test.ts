@@ -6,6 +6,7 @@ import { parseProbe, probeCommand, probeTarget } from './probe.js'
 import { WINDOWS_INLINE_MAX } from './tunnel.js'
 import { fakeExe, rmFakeDir } from '../fake-exe.test-helpers.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
+import { alive as isAlive } from '../process.test-helpers.js'
 
 /**
  * The probe the Add machine dialog runs when the person picks a host (#514), against a fake `ssh`
@@ -157,14 +158,7 @@ describe('what it tells apart', () => {
     const r = await probeTarget('ijun1', { ssh: stubborn, env: process.env, timeoutMs: 2000 })
     expect(r).toMatchObject({ reachable: false, error: 'ssh to ijun1 did not answer in time' })
     const pid = Number(readFileSync(pidFile, 'utf8'))
-    const alive = () => {
-      try {
-        process.kill(pid, 0)
-        return true
-      } catch {
-        return false
-      }
-    }
+    const alive = () => isAlive(pid)
     // The KILL follows the TERM after 2 s (`SSH_KILL_GRACE_MS`)
     for (let i = 0; i < 100 && alive(); i++) await new Promise((res) => setTimeout(res, 50))
     const left = alive()
