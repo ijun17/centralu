@@ -287,6 +287,26 @@ class WebProjectPort implements ProjectPort {
   }
 }
 
+/** Whether this page has asked for notification permission: a page asks once (#1010 review) */
+let askedNotifications = false
+
+/**
+ * Why a notification cannot be shown, or null when it can. A notice comes from a host event, not a click, so the
+ * permission is asked only while it is undecided and only once a page: Safari and Firefox refuse a request outside a
+ * gesture, and Chrome blocks a page that keeps asking. An undecided answer is not reported as blocked.
+ */
+async function notificationRefusal(): Promise<string | null> {
+  if (typeof Notification === 'undefined') return 'This browser has no notifications — use the desktop app'
+  if (Notification.permission === 'default' && !askedNotifications) {
+    askedNotifications = true
+    await Promise.resolve(Notification.requestPermission()).catch(() => 'default')
+  }
+  if (Notification.permission === 'granted') return null
+  return Notification.permission === 'denied'
+    ? "Notifications are blocked for this page — allow them in the browser's site settings"
+    : "Notifications are not allowed for this page yet — allow them in the browser's site settings"
+}
+
 /**
  * The browser's system port (the dev build). What a browser cannot do is refused with the reason and where to go
  * instead, never resolved as if it had happened (#972 item 5): the UI shows every one of these failures as a toast.
@@ -299,12 +319,7 @@ class WebSystemPort implements SystemPort {
    * be shown says so once rather than on every notice.
    */
   async notify(title: string, body: string) {
-    const reason =
-      typeof Notification === 'undefined'
-        ? 'This browser has no notifications — use the desktop app'
-        : (Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission) !== 'granted'
-          ? "Notifications are blocked for this page — allow them in the browser's site settings"
-          : null
+    const reason = await notificationRefusal()
     if (reason === null) {
       new Notification(title, { body })
       return
