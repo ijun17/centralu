@@ -1797,7 +1797,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 | 화면 설정 (`UiPreferences`) | `app_settings.ui_preferences` | `parseUiPreferences` (protocol), `SessionManager.uiPreferences` / `setUiPreferences` | 빠진 필드마다 기본값 | 못 읽는 값은 기본값으로 보이고, 이 빌드가 변경을 쓸 때 모르는 필드와 못 읽는 값은 남는다 | 기본값, 행 이름을 댄 stderr 한 줄. 다음 변경이 덮어쓴다 | `theme.test.ts`, `ui-preferences.test.ts` |
 | 작업 공간 스냅샷 | `workspace` 행 | UI 스토어의 복원(`attach`), `readNotifyPolicy` (core), `sanitizeLayout` | 필드마다 따로 확인. 스냅샷에 없는 알림 스위치는 꺼짐이 아니라 기본값(켜짐) | 무시. 창이 스냅샷을 통째로 다시 쓰므로 옛 창은 새 창의 배치 필드를 떨군다. 의도된 것: 스냅샷은 설정이 아니라 배치다 | 호스트가 `null`을 답하고 화면은 기본값에서 시작 | `store.test.ts` (ui), `notify.test.ts` |
 | 테마·글꼴 캐시 | 페이지의 `localStorage` | `applyCachedTheme`, `applyCachedTypography` | 값마다 확인 | 무시 | 캐시 없음과 같다. 첫 프레임만이고 호스트의 답이 뒤따른다 | (캐시뿐) |
-| 키퍼 설정 | `keeper-settings.json` | `source::load_settings` (키퍼, 기본값 있는 serde) | `background` 기본값은 꺼짐 | 읽을 때 무시, **다음 저장에서 떨어진다** | **말 없이** 꺼짐으로 읽힌다 | `background_mode_is_off_unless_saved_on` (새 모양 테스트는 아직 없음) |
+| 키퍼 설정 | `keeper-settings.json` | `source::load_settings` / `save_background` (키퍼) | `background` 기본값은 꺼짐 | 모르는 필드는 그대로 두었다가 다시 쓴다. `background`가 참·거짓이 아니면 그 값만 꺼짐으로 읽고 stderr에 한 줄 남긴다 | 꺼짐으로 읽고 파일 이름을 밝힌 stderr 한 줄을 남긴다. 다음 저장이 덮어쓴다 | `background_mode_is_off_unless_saved_on`, `a_newer_settings_file_keeps_what_this_build_does_not_know` |
 | 그리드 배치 | `grid_layout` | `Store.listGridView` / `setGridView` | 스팬 없는 행은 고른 것 없음으로 읽힌다 (v43) | `kind`에 CHECK가 있어 새 패널 종류는 테이블 재구성, 곧 §5.1의 깨는 단계다. 범위 밖 스팬은 없음으로 읽힌다 | (행) | `store.test.ts` (v42, v43) |
 | 프로젝트 사이의 동의 (#371) | `project_consents` | `Store.listProjectConsents` / `getProjectConsent` | (행) | 이 빌드가 모르는 종류는 저장소에 남고 목록에는 안 나온다 (#384) | (행) | `store.test.ts` |
 | 세션의 앱 동의 | `app_settings.session_apps:<id>` | `sessions/app-access.ts`의 `parse` | (목록) | 모르는 동의의 원소는 버린다 | 빈 목록 | |
@@ -1816,8 +1816,7 @@ M1.5에서 Node 사이드카가 배포 경로가 되면서, "Tauri 4단계에서
 | 원격 연결 줄 | `centralu serve --connection` stdout | `parseConnectionLine` (`links/tunnel.ts`) | `version`과 `dataDir`는 기본값 | 다른 `v`는 어느 쪽을 업데이트할지 말하는 오류, 포트나 토큰이 없으면 오류 | JSON이 아닌 줄은 건너뛴다 | `tunnel.test.ts` |
 | 호스트 ↔ UI 페이로드 | RPC 결과, 이벤트, `hello_ok` | `parseRpcResult`, `parseServerFrame`, `parseTolerant` (protocol, #339) | 기본값 적용 | 선언 안 된 필드는 버리고, 못 읽는 값은 그 값만 온 그대로 둔다 | | `tolerant.test.ts`, `rpc-client.test.ts`, `e2e/older-host.spec.ts` |
 
-아직 덮지 못한 것: `keeper-settings.json`은 저장할 때 모르는 필드를 떨구고, 못 읽는 파일은 말 없이 꺼짐으로 읽힌다(키퍼의
-Rust, 따로 바꾼다). 이전 릴리스의 호스트로 새 저장소를 여는 e2e도 아직이다. `older-host.spec.ts`는 페이로드 쪽 절반을 덮는다.
+아직 덮지 못한 것: 이전 릴리스의 호스트로 새 저장소를 여는 e2e. `older-host.spec.ts`는 페이로드 쪽 절반을 덮는다.
 
 ## 6. 사용량과 한도 (FR-9)
 

@@ -2673,7 +2673,7 @@ The rules for every shape:
 | Screen preferences (`UiPreferences`) | `app_settings.ui_preferences` | `parseUiPreferences` (protocol), `SessionManager.uiPreferences` / `setUiPreferences` | each missing field is its default | an unreadable value shows its default; unknown fields and unreadable values are kept when this build writes a change | defaults, one stderr line naming the row; the next change replaces it | `theme.test.ts`, `ui-preferences.test.ts` |
 | Workspace snapshot | `workspace` row | the UI store's restore (`attach`), `readNotifyPolicy` (core), `sanitizeLayout` | every field is checked on its own; a notification switch the snapshot lacks is on by default, not off | ignored. The window rewrites the snapshot whole, so an older window drops a newer one's layout fields: deliberate, the snapshot is layout, not settings | the host answers `null`, the screen starts from its defaults | `store.test.ts` (ui), `notify.test.ts` |
 | Theme and typography cache | the page's `localStorage` | `applyCachedTheme`, `applyCachedTypography` | each value checked | ignored | same as no cache: only the first frame, the host's answer follows | (cache only) |
-| Keeper settings | `keeper-settings.json` | `source::load_settings` (keeper, serde with defaults) | `background` defaults to off | ignored on read, **dropped on the next save** | reads as off, **with no message** | `background_mode_is_off_unless_saved_on` (no newer-shape test yet) |
+| Keeper settings | `keeper-settings.json` | `source::load_settings` / `save_background` (keeper) | `background` defaults to off | unknown fields kept and written back; a `background` that is not true or false reads as off, alone, with a stderr line | reads as off, one stderr line naming the file; the next save replaces it | `background_mode_is_off_unless_saved_on`, `a_newer_settings_file_keeps_what_this_build_does_not_know` |
 | Grid placements | `grid_layout` | `Store.listGridView` / `setGridView` | a row without a span reads as none chosen (v43) | `kind` has a CHECK, so a new panel kind is a table rebuild: a breaking step under §5.1. A span out of bounds reads as none | (rows) | `store.test.ts` (v42, v43) |
 | Consents between projects (#371) | `project_consents` | `Store.listProjectConsents` / `getProjectConsent` | (rows) | a kind this build does not know stays in the store and is not listed (#384) | (rows) | `store.test.ts` |
 | A session's app consents | `app_settings.session_apps:<id>` | `parse` in `sessions/app-access.ts` | (list) | an element with an unknown consent is dropped | empty list | |
@@ -2692,9 +2692,8 @@ The rules for every shape:
 | Remote connection line | `centralu serve --connection` stdout | `parseConnectionLine` (`links/tunnel.ts`) | `version` and `dataDir` default | another `v` is an error that says which side to update; a missing port or token is an error | lines that are not JSON are skipped | `tunnel.test.ts` |
 | Host ↔ UI payloads | RPC results, events, `hello_ok` | `parseRpcResult`, `parseServerFrame`, `parseTolerant` (protocol, #339) | defaults applied | undeclared fields dropped; an unreadable value is kept as sent, alone | | `tolerant.test.ts`, `rpc-client.test.ts`, `e2e/older-host.spec.ts` |
 
-Not covered yet: `keeper-settings.json` drops fields it does not know when it saves, and an unreadable file reads as
-off without a message (the keeper's Rust, left for its own change). An e2e that opens a newer store with the
-previous release's host is still to come; `older-host.spec.ts` covers the payload half.
+Not covered yet: an e2e that opens a newer store with the previous release's host; `older-host.spec.ts` covers the
+payload half.
 
 ## 6. Usage and limits (FR-9)
 

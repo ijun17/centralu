@@ -88,7 +88,7 @@ fn test_keeper(data: &Path) -> Arc<Keeper> {
         children: Children::disabled(),
         copies: source::Copies::new(data, None),
         // Background on: a window leaving does not stop the test's process.
-        state: Mutex::new(State::new(BuildSource::dev(), Settings { background: true })),
+        state: Mutex::new(State::new(BuildSource::dev(), Settings { background: true, ..Default::default() })),
         idle: Duration::from_secs(3600),
         started: Instant::now(),
         lock: File::create(data.join("keeper.lock")).unwrap(),
