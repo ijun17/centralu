@@ -292,7 +292,11 @@ uxTask({
     await expect(page.getByTestId('new-session-dialog')).toBeHidden()
     await expect(page.getByTestId('worktree-badge').first()).toBeVisible()
   },
-  budget: { operators: 15, M: 3, seconds: 9.5 },
+  /*
+   * One click more than the chevron beside the + took (2026-10-17): the owner removed the chevron, and the dialog that
+   * offers a worktree is the project menu's New session. A worktree session is the rarer start; the + stays one click.
+   */
+  budget: { operators: 17, M: 4, seconds: 11.3 },
 })
 
 uxTask({
