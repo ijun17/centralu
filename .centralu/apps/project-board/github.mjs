@@ -812,11 +812,12 @@ const runOf = (w) => ({
   createdAt: w.created_at ?? null,
 })
 
-/** The workflow's latest runs, newest first, for one event and commit when given. */
-export async function workflowRuns(repo, workflow, { event, headSha } = {}) {
+/** The workflow's latest runs, newest first, for one event, commit and branch when given. */
+export async function workflowRuns(repo, workflow, { event, headSha, branch } = {}) {
   checkRepo(repo)
   if (!WORKFLOW.test(String(workflow))) throw new GitHubError('input', `"${workflow}" is not a workflow file name.`)
-  const q = new URLSearchParams({ per_page: '30', ...(event ? { event } : {}), ...(headSha ? { head_sha: headSha } : {}) })
+  if (branch !== undefined && !REF.test(String(branch))) return []
+  const q = new URLSearchParams({ per_page: '30', ...(event ? { event } : {}), ...(headSha ? { head_sha: headSha } : {}), ...(branch ? { branch } : {}) })
   const r = await restJson(`repos/${repo}/actions/workflows/${workflow}/runs?${q}`, { missing: [404] })
   return (r?.workflow_runs ?? []).map(runOf)
 }

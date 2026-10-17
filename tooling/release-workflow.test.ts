@@ -25,7 +25,10 @@
  * Both halves of that are easy to undo by hand and invisible until a release day.
  */
 import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const WORKFLOW = '.github/workflows/release.yml'
 const lines = readFileSync(new URL(`../${WORKFLOW}`, import.meta.url), 'utf8').split('\n')
@@ -158,5 +161,52 @@ describe('the content signing key stays behind the gate', () => {
     const at = platform.findIndex((l) => l.includes('name: Keep the content manifest'))
     expect(at).toBeGreaterThan(-1)
     expect(platform.slice(at, at + 4).some((l) => l.trim() === 'continue-on-error: true')).toBe(true)
+  })
+})
+
+/**
+ * The board's `release` step `rehearse` dispatches on the open bump PR's branch (#1035), not only
+ * on main. `guard` must then read the version off that branch and stay a rehearsal: it checks
+ * the ref only for a tag push. Run here as written, on what the step's `run:` holds.
+ */
+describe('the guard', () => {
+  const at = lines.findIndex((l) => l.trim() === '- id: plan')
+  const run = lines.findIndex((l, i) => i > at && l.trim() === 'run: |')
+  const indent = (lines[run + 1] ?? '').search(/\S/)
+  const body = lines.slice(run + 1)
+  const end = body.findIndex((l) => l.trim() !== '' && l.search(/\S/) < indent)
+  const script = (end === -1 ? body : body.slice(0, end)).map((l) => l.slice(indent)).join('\n')
+  const brand = readFileSync(new URL('../packages/protocol/src/brand.ts', import.meta.url), 'utf8')
+  const version = /^export const APP_VERSION = '([^']+)'/m.exec(brand)![1]
+
+  function guard(env: Record<string, string>) {
+    const dir = mkdtempSync(join(tmpdir(), 'cc-release-guard-'))
+    try {
+      mkdirSync(join(dir, 'packages/protocol/src'), { recursive: true })
+      writeFileSync(join(dir, 'packages/protocol/src/brand.ts'), brand)
+      const out = join(dir, 'output')
+      const r = spawnSync('bash', ['-c', script], { cwd: dir, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: join(dir, 'summary'), ...env } })
+      return { status: r.status, stdout: r.stdout, output: existsSync(out) ? readFileSync(out, 'utf8') : '' }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  // Windows: `bash` on PATH may be WSL's, not Git's; the Linux and macOS runs hold it
+  it.skipIf(process.platform === 'win32')('rehearses a manual run on a bump branch, as on main', () => {
+    expect(script).toContain('GITHUB_EVENT_NAME')
+    const r = guard({ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF_NAME: `chore/release-${version}`, INPUT_DRY_RUN: 'true', INPUT_ALSO_LATEST: 'true' })
+    expect(r.status, r.stdout).toBe(0)
+    expect(r.output).toContain(`version=${version}\n`)
+    expect(r.output).toContain('dry_run=true\n')
+    // An empty input is a rehearsal too
+    expect(guard({ GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REF_NAME: 'chore/release-x', INPUT_DRY_RUN: '', INPUT_ALSO_LATEST: '' }).output).toContain('dry_run=true\n')
+  })
+
+  it.skipIf(process.platform === 'win32')('refuses a tag push that does not match the version', () => {
+    expect(guard({ GITHUB_EVENT_NAME: 'push', GITHUB_REF_NAME: `v${version}` }).output).toContain('dry_run=false\n')
+    const r = guard({ GITHUB_EVENT_NAME: 'push', GITHUB_REF_NAME: 'v0.0.0' })
+    expect(r.status).toBe(1)
+    expect(r.stdout).toContain('does not match APP_VERSION')
   })
 })

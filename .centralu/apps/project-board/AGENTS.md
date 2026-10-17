@@ -398,10 +398,16 @@ step shows on the screen.
     checked with `dryRun` before the push: the merged list under Why, the files under What changed.
   - `rehearse`: CI green, the version untagged and its files consistent; starts the workflow on main
     with `rehearsalInputs` (`dry_run=true`: builds and packs, publishes nothing, asks no approval).
-    A rehearsal already running or passed on that commit is not started again.
+    A rehearsal already running or passed on that commit is not started again. While main's version
+    is released (#1035), it rehearses the open bump PR instead: on its branch, with no CI required,
+    when exactly one `branchPrefix` branch after main's version has an open PR into main (or
+    `version` names it), its head is the PR's head, main's head is an ancestor of it (else the
+    squash would give main another tree), and it carries that version consistently and untagged.
   - `tag` (`version?`, `skipRehearsal?`): the checkout as for bump, CI green, main's version after the
     latest tag and untagged (a release tag is never moved), its files consistent, and a successful
-    rehearsal on that commit unless `skipRehearsal: true`. Pushes the tag on main's commit by its id
+    rehearsal on that commit, or on `branchPrefix` + the version at a commit with main's tree (the
+    bump PR's rehearsal; the rule #629 uses for its CI), unless `skipRehearsal: true`. The newest of
+    those counts. Pushes the tag on main's commit by its id
     (lightweight, as before; no local tag is made) and answers the release run.
   - `approve` (`version?`, `comment?`): only the tag's release run (event push, head the tag, on the
     tag's commit), only the configured environment, only what GitHub says this login may approve

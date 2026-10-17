@@ -116,6 +116,8 @@ the tag is for.
 
 ### Reusing the bump PR's CI (#629)
 
+The same tree rule lets `tag` count a rehearsal that ran on the bump branch (step 2 below).
+
 For `rehearse` and `tag`, the board can use the bump PR's green required checks while
 main's checks are pending or absent. The PR must be merged into main from
 `release.branchPrefix` plus the current version, main's head must be its single-parent
@@ -266,7 +268,16 @@ The steps by hand:
    and what is in git cannot differ.
 
 2. **Rehearse.** Actions → `release` → Run workflow, `dry_run` left checked. It builds every
-   platform, packs every package and publishes nothing. It asks for no approval:
+   platform, packs every package and publishes nothing. Run it on the bump pull request's
+   branch while that pull request's CI runs, not after the merge (#1035, about 27 min off the
+   critical path): the board's `rehearse` does that while main's version is still the released
+   one. `guard` reads the version from that branch's `brand.ts` and checks the ref only for a
+   tag push, so a dispatch on any branch rehearses (`tooling/release-workflow.test.ts` runs its
+   script); publishing from a branch is refused by the `npm-publish` environment's branch
+   policy (main and `v*` only). The squash gives main a new commit with the same tree, and
+   `tag` accepts a successful rehearsal on the bump branch whose commit has main's tree, as
+   it accepts the bump PR's CI (#629). Rehearse only once the branch is up to date with main:
+   `rehearse` refuses otherwise, since the squash would then build other files. It asks for no approval:
    `npm pack` needs no token, and gating a rehearsal costs an approval per attempt — three
    were spent that way on the first release.
 

@@ -255,7 +255,7 @@ if (args[0] === 'api') {
   }
   if (/\/commits\/[0-9a-f]+\/status$/.test(path)) json({ statuses: [] })
   if (path === R + '/actions/workflows/release.yml/runs')
-    json({ workflow_runs: st.runs.filter((r) => (!q.get('event') || r.event === q.get('event')) && (!q.get('head_sha') || r.head_sha === q.get('head_sha'))).reverse() })
+    json({ workflow_runs: st.runs.filter((r) => (!q.get('event') || r.event === q.get('event')) && (!q.get('head_sha') || r.head_sha === q.get('head_sha')) && (!q.get('branch') || r.head_branch === q.get('branch'))).reverse() })
   const jobs = /\/actions\/runs\/(\d+)\/jobs$/.exec(path)
   if (jobs) json({ jobs: next('jobs:' + jobs[1], st.jobs[jobs[1]] || []) })
   const pending = /\/actions\/runs\/(\d+)\/pending_deployments$/.exec(path)
@@ -1068,7 +1068,7 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     const s = repo({ bumped: true })
     runtime()
     const none = await call('release', { step: 'tag', path: s.work, confirm: true })
-    expect(none.data.problems).toEqual([`No rehearsal ran on ${s.tip.slice(0, 7)}: rehearse first (release step rehearse), or pass skipRehearsal: true to tag without one.`])
+    expect(none.data.problems).toEqual([`No rehearsal ran on ${s.tip.slice(0, 7)} or on its bump branch at the same tree: rehearse first (release step rehearse), or pass skipRehearsal: true to tag without one.`])
     patchState((st) => st.runs.push(run({ head_sha: s.tip, conclusion: 'failure' })))
     const failed = await call('release', { step: 'tag', path: s.work, confirm: true })
     expect(failed.data.problems).toEqual([`The rehearsal on ${s.tip.slice(0, 7)} ended failure (https://github.com/ijun17/centralu/actions/runs/50); fix that first, or pass skipRehearsal: true.`])
@@ -1100,6 +1100,100 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     expect(ghWrites()).toEqual([])
     const twice = await call('release', { step: 'tag', path: s.work, confirm: true, skipRehearsal: true })
     expect(twice.data.problems).toEqual([`v${NEXT} is tagged already; a release tag is never moved. Bump to the next version instead.`])
+  })
+
+  /** main released at APP_VERSION, and the bump to NEXT open as PR #900 on its branch: answers its head */
+  function openBump(s: Repo) {
+    const branch = `chore/release-${NEXT}`
+    g(s.work, 'checkout', '-q', '-b', branch)
+    for (const f of CARRIERS) write(s.work, f, bumpText(readFileSync(join(s.work, f), 'utf8'), APP_VERSION, NEXT).text)
+    const head = commitAll(s.work, `chore(release): ${NEXT}`)
+    g(s.work, 'push', '-q', 'origin', branch)
+    g(s.work, 'checkout', '-q', 'main')
+    patchState((st) => {
+      st.prs.push({ number: 900, state: 'OPEN', headRefName: branch, baseRefName: 'main', headRefOid: head })
+      st.dispatchSha = head
+    })
+    return { branch, head }
+  }
+  /** The bump PR squashed onto main: a new commit with `tree` (default the PR head's) on main's head */
+  function squash(s: Repo, head: string, tree = g(s.work, 'rev-parse', `${head}^{tree}`)) {
+    const tip = g(s.work, 'commit-tree', tree, '-p', s.tip, '-m', `chore(release): ${NEXT} (#900)`)
+    g(s.work, 'reset', '-q', '--hard', tip)
+    g(s.work, 'push', '-q', 'origin', 'main')
+    patchState((st) => {
+      st.prs[0]!.state = 'MERGED'
+      st.prs[0]!.mergeCommit = { oid: tip }
+      for (const r of st.runs) if (r.id === 77) Object.assign(r, { status: 'completed', conclusion: 'success' })
+    })
+    s.tip = tip
+    return tip
+  }
+
+  it('rehearses the open bump PR on its branch, and tags main after the squash on that rehearsal (same tree)', async () => {
+    const s = repo()
+    const { branch, head } = openBump(s)
+    runtime()
+    const plan = await call('release', { step: 'rehearse', path: s.work })
+    expect(plan.isError, plan.text).toBe(false)
+    expect(plan.data.summary).toBe(
+      `Ready to rehearse ${NEXT} on bump PR #900's head ${head.slice(0, 7)} (release.yml on ${branch} with dry_run=true; builds and packs, publishes nothing, asks no approval). Call again with confirm: true to start it.`,
+    )
+    const r = await call('release', { step: 'rehearse', path: s.work, confirm: true })
+    expect(r.data.started, r.text).toBe(true)
+    expect(ghWrites()).toEqual([{ args: ['api', '-X', 'POST', 'repos/ijun17/centralu/actions/workflows/release.yml/dispatches', '--input', '-'], stdin: JSON.stringify({ ref: branch, inputs: { dry_run: 'true' } }) }])
+    const again = await call('release', { step: 'rehearse', path: s.work, confirm: true })
+    expect(again.data.summary).toBe(`A rehearsal of PR #900 at ${head.slice(0, 7)} queued: https://github.com/ijun17/centralu/actions/runs/77; not starting another.`)
+
+    const tip = squash(s, head)
+    expect(tip).not.toBe(head)
+    const status = await call('release_status', { path: s.work })
+    expect(status.data.lines).toContain(`Rehearsal on ${head.slice(0, 7)} on ${branch}, the same tree as main at ${tip.slice(0, 7)}: succeeded, https://github.com/ijun17/centralu/actions/runs/77.`)
+    const tag = await call('release', { step: 'tag', path: s.work, confirm: true })
+    expect(tag.isError, tag.text).toBe(false)
+    expect(tag.data.lines).toContain(`Rehearsal: succeeded on ${head.slice(0, 7)} on ${branch}, the same tree as main at ${tip.slice(0, 7)}, https://github.com/ijun17/centralu/actions/runs/77.`)
+    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBe(tip)
+    // Main still needs no second rehearsal
+    expect(ghWrites()).toHaveLength(1)
+  })
+
+  it('does not count a bump branch rehearsal once main after the squash has another tree', async () => {
+    const s = repo()
+    const { head } = openBump(s)
+    runtime()
+    expect((await call('release', { step: 'rehearse', path: s.work, confirm: true })).data.started).toBe(true)
+    // Squashed onto a main that got one more change meanwhile: the files differ from what was rehearsed
+    write(s.work, 'c.txt', 'three\n')
+    s.tip = commitAll(s.work, 'fix: three (#12)')
+    g(s.work, 'push', '-q', 'origin', 'main')
+    g(s.work, 'checkout', '-q', head)
+    write(s.work, 'c.txt', 'three\n')
+    g(s.work, 'add', 'c.txt')
+    const merged = g(s.work, 'write-tree')
+    g(s.work, 'checkout', '-q', '-f', 'main')
+    squash(s, head, merged)
+    const tag = await call('release', { step: 'tag', path: s.work, confirm: true })
+    expect(tag.isError).toBe(true)
+    expect(tag.data.problems).toEqual([`No rehearsal ran on ${s.tip.slice(0, 7)} or on its bump branch at the same tree: rehearse first (release step rehearse), or pass skipRehearsal: true to tag without one.`])
+    expect(remoteHas(s.origin, `refs/tags/v${NEXT}`)).toBeNull()
+  })
+
+  it('refuses to rehearse a bump PR that is not on main head, or when none is open', async () => {
+    const s = repo()
+    runtime()
+    const none = await call('release', { step: 'rehearse', path: s.work, confirm: true })
+    expect(none.isError).toBe(true)
+    expect(none.data.problems[0]).toContain(`${APP_VERSION} is released already (v${APP_VERSION}) and no bump pull request is open into main`)
+    const { head } = openBump(s)
+    write(s.work, 'c.txt', 'three\n')
+    const tip = commitAll(s.work, 'fix: three (#12)')
+    g(s.work, 'push', '-q', 'origin', 'main')
+    const behind = await call('release', { step: 'rehearse', path: s.work, confirm: true })
+    expect(behind.isError).toBe(true)
+    expect(behind.data.problems).toEqual([
+      `PR #900 (${head.slice(0, 7)}) is not on main's head ${tip.slice(0, 7)}: after its squash main's tree would differ from what was rehearsed, so the tag would not count the rehearsal. Bring the branch up to date with main first.`,
+    ])
+    expect(ghWrites()).toEqual([])
   })
 
   it('refuses to tag another version than main carries, or while CI on main is red', async () => {

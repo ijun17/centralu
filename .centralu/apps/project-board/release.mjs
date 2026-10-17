@@ -223,9 +223,9 @@ async function shimGate(s, cfg, run, jobs, tagSha, version, gh, registry) {
   return { problems, later: !final.length, lines: problems.length ? [] : [`Before the shim: every other job of the run succeeded, and the ${plural(names.length, 'package')} it needs are on the registry at ${version} from ${short(tagSha)}.`] }
 }
 
-/** The version files main carries, the bumped text of each, and every problem with them. */
-async function versionFiles(s, cfg, from, to) {
-  const all = await filesAt(s.root, s.tip)
+/** The version files main (or `at`) carries, the bumped text of each, and every problem with them. */
+async function versionFiles(s, cfg, from, to, at = s.tip) {
+  const all = await filesAt(s.root, at)
   const named = filesNamed(cfg.versionFiles, all)
   const problems = []
   if (!named.length) problems.push('project.json release.versionFiles names no file of the repository.')
@@ -233,25 +233,64 @@ async function versionFiles(s, cfg, from, to) {
   const files = {}
   const counts = {}
   for (const path of named) {
-    const text = await showFile(s.root, s.tip, path)
+    const text = await showFile(s.root, at, path)
     const r = bumpText(text ?? '', from, to ?? from)
     if (!r.count) problems.push(`${path} is in release.versionFiles but does not carry "${from}"; it fell behind, or the list is wrong.`)
     files[path] = r.text
     counts[path] = r.count
   }
   // A file that carries the version and is not listed would keep the old one after the bump
-  const holding = await filesHolding(s.root, s.tip, [from])
+  const holding = await filesHolding(s.root, at, [from])
   for (const p of holding.filter((p) => !named.includes(p) && !filesNamed(cfg.ignore, [p]).length)) {
-    for (const line of versionLines(await showFile(s.root, s.tip, p), from, p))
+    for (const line of versionLines(await showFile(s.root, at, p), from, p))
       problems.push(`${p}:${line} carries "${from}" but is not in project.json release.versionFiles; derive it from the version source, or add it to release.ignore if it intentionally pins a version.`)
   }
   return { named, files, counts, problems }
 }
 
-/** What GitHub says about the release workflow's runs on main's commit and for the tag. */
+/** A commit's tree, fetched by its id; null when the remote does not give it. */
+async function remoteTree(s, sha) {
+  if (!/^[0-9a-f]{40}$/.test(sha ?? '')) return null
+  try {
+    const [c] = await fetchRefs(s.root, s.remote, [sha], `refs/centralu-release/${process.pid}-${++calls}`)
+    return await treeOf(s.root, c)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The rehearsals that count for main's commit, newest first: those on it, and those on its bump branch
+ * (`branchPrefix` + main's version) at a commit with the same tree (#1035). A rehearsal of the open
+ * bump PR runs beside its CI; after the squash main's commit is another, but what was built is the
+ * same files, the rule #629 reuses the PR's CI by. The workflow file is part of that tree too.
+ */
+async function rehearsalsFor(s, cfg, gh) {
+  const file = workflowFile(cfg)
+  const branch = `${cfg.branchPrefix}${s.version}`
+  const onTip = await gh.workflowRuns(s.repo, file, { event: 'workflow_dispatch', headSha: s.tip })
+  const onBranch = (await gh.workflowRuns(s.repo, file, { event: 'workflow_dispatch', branch })).filter((r) => r.headBranch === branch && r.headSha !== s.tip)
+  const same = []
+  if (onBranch.length) {
+    const tree = await treeOf(s.root, s.tip)
+    const trees = new Map()
+    for (const r of onBranch) {
+      if (!trees.has(r.headSha)) trees.set(r.headSha, await remoteTree(s, r.headSha))
+      if (trees.get(r.headSha) === tree) same.push(r)
+    }
+  }
+  const at = (r) => Date.parse(r.createdAt ?? '') || 0
+  return [...onTip, ...same].sort((a, b) => at(b) - at(a) || Number(b.id) - Number(a.id))
+}
+
+/** Where a rehearsal ran, said against main's commit. */
+const rehearsedOn = (s, r) => (r.headSha === s.tip ? short(s.tip) : `${short(r.headSha)} on ${r.headBranch}, the same tree as ${s.main} at ${short(s.tip)}`)
+
+/** What GitHub says about the release workflow's runs on main's commit (or its tree) and for the tag. */
 async function runsFor(s, cfg, gh) {
   const file = workflowFile(cfg)
-  const rehearsals = await gh.workflowRuns(s.repo, file, { event: 'workflow_dispatch', headSha: s.tip })
+  // Only an untagged version is still rehearsed
+  const rehearsals = s.tagged ? [] : await rehearsalsFor(s, cfg, gh)
   const candidates = s.tagged ? (await gh.workflowRuns(s.repo, file, { event: 'push', headSha: s.tagged.sha })).filter((r) => r.headBranch === s.tag) : []
   const active = candidates.filter((r) => r.status !== 'completed')
   // A run GitHub says is waiting on the release environment is the one a maintainer can act on;
@@ -326,7 +365,7 @@ export async function releaseStatus({ repo, dir, cfg, gh, ci }) {
   } else {
     phase = 'ready-to-tag'
     const rh = runs.rehearsal
-    lines.push(rh ? `Rehearsal on ${short(s.tip)}: ${runState(rh)}${rh.url ? `, ${rh.url}` : ''}.` : `No rehearsal on ${short(s.tip)} yet.`)
+    lines.push(rh ? `Rehearsal on ${rehearsedOn(s, rh)}: ${runState(rh)}${rh.url ? `, ${rh.url}` : ''}.` : `No rehearsal on ${short(s.tip)} yet.`)
     next =
       rh?.conclusion === 'success'
         ? `Tag ${s.tag} with release step tag (confirm: true).`
@@ -455,20 +494,25 @@ async function findRun(gh, repo, file, filter, match, after) {
   return null
 }
 
-/** The rehearsal: the release workflow by hand on main, with its dry-run input. Builds and packs, publishes nothing. */
-export async function rehearseRelease({ repo, dir, cfg, gh, ci, permissions }, { confirm = false }) {
+/**
+ * The rehearsal: the release workflow by hand, with its dry-run input. Builds and packs, publishes
+ * nothing. On main once main carries an untagged version; while main's version is released, on the
+ * open bump PR's head (#1035), beside its CI, which the tag accepts once the squash gives main the
+ * same tree.
+ */
+export async function rehearseRelease({ repo, dir, cfg, gh, ci, permissions }, { version, confirm = false }) {
   if (!canMerge(permissions)) throw new ReleaseRefusal([NOT_MAINTAINER])
   const s = { repo, ...(await readState({ repo, dir, cfg, gh })) }
+  if (s.tagged) return rehearseBumpPr(s, cfg, gh, { version, confirm })
   const evidence = await releaseCi(s, cfg, gh, ci)
   const problems = [...evidence.problems]
-  if (s.tagged) problems.push(`${s.version} is released already (${s.tag}); bump first.`)
   const vf = await versionFiles(s, cfg, s.version)
   problems.push(...vf.problems)
   if (problems.length) throw new ReleaseRefusal(problems)
   const file = workflowFile(cfg)
   const { rehearsal } = await runsFor(s, cfg, gh)
   if (rehearsal && (rehearsal.status !== 'completed' || rehearsal.conclusion === 'success'))
-    return { summary: `A rehearsal on ${short(s.tip)} ${runState(rehearsal)}${rehearsal.url ? `: ${rehearsal.url}` : ''}; not starting another.`, lines: evidence.lines, started: false, run: rehearsal.url }
+    return { summary: `A rehearsal on ${rehearsedOn(s, rehearsal)} ${runState(rehearsal)}${rehearsal.url ? `: ${rehearsal.url}` : ''}; not starting another.`, lines: evidence.lines, started: false, run: rehearsal.url }
   const inputs = Object.entries(cfg.rehearsalInputs).map(([k, v]) => `${k}=${v}`).join(', ')
   if (!confirm)
     return {
@@ -482,6 +526,63 @@ export async function rehearseRelease({ repo, dir, cfg, gh, ci, permissions }, {
   return {
     summary: `Started the rehearsal of ${s.version} on ${short(s.tip)}${run?.url ? `: ${run.url}` : `; GitHub does not list the run yet, look at ${file}'s runs`}. Tag once it succeeds.`,
     lines: evidence.lines,
+    started: true,
+    run: run?.url ?? null,
+  }
+}
+
+/** The open bump PR's head, rehearsed on its branch: the version it carries, untagged, its files consistent, on main's head. */
+async function rehearseBumpPr(s, cfg, gh, { version, confirm }) {
+  const file = workflowFile(cfg)
+  const want = version !== undefined ? String(version).replace(/^v/, '') : null
+  const branches = (await remoteRefs(s.root, s.remote, `refs/heads/${cfg.branchPrefix}`))
+    .map((b) => ({ ...b, version: b.name, name: `${cfg.branchPrefix}${b.name}` }))
+    .filter((b) => parseVersion(b.version) && compareVersions(b.version, s.version) > 0 && (want === null || b.version === want))
+  const open = []
+  for (const b of branches) {
+    const pr = (await gh.prsWithHead(s.repo, b.name)).find((p) => p.state === 'OPEN' && p.baseRefName === s.main)
+    if (pr) open.push({ ...b, pr })
+  }
+  if (!open.length) throw new ReleaseRefusal([`${s.version} is released already (${s.tag}) and no bump pull request${want ? ` for ${want}` : ''} is open into ${s.main} (${cfg.branchPrefix}<version>): bump first (release step bump), then rehearse its pull request.`])
+  if (open.length > 1) throw new ReleaseRefusal([`Several bump pull requests are open (${list(open.map((b) => `#${b.pr.number} for ${b.version}`))}); say which with version.`])
+  const [b] = open
+  const pr = b.pr
+  const problems = []
+  if (pr.headRefOid !== b.sha) problems.push(`PR #${pr.number}'s head is ${short(pr.headRefOid)} but ${b.name} is at ${short(b.sha)} on ${s.remote}; it moved, call again.`)
+  const [head] = await fetchRefs(s.root, s.remote, [`refs/heads/${b.name}`], `refs/centralu-release/${process.pid}-${++calls}`)
+  // The squash gives main this tree only when main's head is under the PR's head
+  if (!(await isAncestor(s.root, s.tip, head)))
+    problems.push(`PR #${pr.number} (${short(head)}) is not on ${s.main}'s head ${short(s.tip)}: after its squash ${s.main}'s tree would differ from what was rehearsed, so the tag would not count the rehearsal. Bring the branch up to date with ${s.main} first.`)
+  const source = await showFile(s.root, head, cfg.source.path)
+  const declared = source === null ? null : declaredVersion(source, cfg.source.pattern)
+  if (declared !== b.version) problems.push(`${b.name} at ${short(head)} declares ${declared ?? 'no version'} in ${cfg.source.path}, not ${b.version}.`)
+  else {
+    if (s.tags.some((t) => t.name === `${cfg.tagPrefix}${b.version}`)) problems.push(`${cfg.tagPrefix}${b.version} is tagged already.`)
+    if (s.last && compareVersions(b.version, s.last.version) <= 0) problems.push(`${b.version} is not after ${s.last.name}, the latest release tag.`)
+    problems.push(...(await versionFiles(s, cfg, b.version, undefined, head)).problems)
+  }
+  if (problems.length) throw new ReleaseRefusal(problems)
+  const lines = [
+    `Bump PR #${pr.number} for ${b.version}: its head ${short(head)} on ${b.name}, on ${s.main}'s head ${short(s.tip)}.`,
+    `No CI is required to rehearse it; the tag still needs green CI, and counts this rehearsal only if ${s.main}'s tree after the squash is the tree rehearsed.`,
+  ]
+  const runs = (await gh.workflowRuns(s.repo, file, { event: 'workflow_dispatch', headSha: head })).filter((r) => r.headBranch === b.name)
+  const rehearsal = runs[0]
+  if (rehearsal && (rehearsal.status !== 'completed' || rehearsal.conclusion === 'success'))
+    return { summary: `A rehearsal of PR #${pr.number} at ${short(head)} ${runState(rehearsal)}${rehearsal.url ? `: ${rehearsal.url}` : ''}; not starting another.`, lines, started: false, run: rehearsal.url }
+  const inputs = Object.entries(cfg.rehearsalInputs).map(([k, v]) => `${k}=${v}`).join(', ')
+  if (!confirm)
+    return {
+      summary: `Ready to rehearse ${b.version} on bump PR #${pr.number}'s head ${short(head)} (${file} on ${b.name} with ${inputs}; builds and packs, publishes nothing, asks no approval). Call again with confirm: true to start it.`,
+      lines,
+      started: false,
+    }
+  const at = Date.now()
+  await gh.dispatchWorkflow(s.repo, file, b.name, cfg.rehearsalInputs)
+  const run = await findRun(gh, s.repo, file, { event: 'workflow_dispatch', headSha: head }, (r) => r.headBranch === b.name, at)
+  return {
+    summary: `Started the rehearsal of ${b.version} on bump PR #${pr.number}'s head ${short(head)}${run?.url ? `: ${run.url}` : `; GitHub does not list the run yet, look at ${file}'s runs`}. Merge the PR once its CI is green; the tag counts this rehearsal when ${s.main} gets the same tree.`,
+    lines,
     started: true,
     run: run?.url ?? null,
   }
@@ -502,16 +603,16 @@ export async function tagRelease({ repo, dir, cfg, gh, ci, permissions }, { vers
   problems.push(...vf.problems)
   const { rehearsal } = await runsFor(s, cfg, gh)
   if (!skipRehearsal && !s.tagged) {
-    if (!rehearsal) problems.push(`No rehearsal ran on ${short(s.tip)}: rehearse first (release step rehearse), or pass skipRehearsal: true to tag without one.`)
-    else if (rehearsal.status !== 'completed') problems.push(`The rehearsal on ${short(s.tip)} is still running${rehearsal.url ? ` (${rehearsal.url})` : ''}; tag once it succeeds.`)
-    else if (rehearsal.conclusion !== 'success') problems.push(`The rehearsal on ${short(s.tip)} ${runState(rehearsal)}${rehearsal.url ? ` (${rehearsal.url})` : ''}; fix that first, or pass skipRehearsal: true.`)
+    if (!rehearsal) problems.push(`No rehearsal ran on ${short(s.tip)} or on its bump branch at the same tree: rehearse first (release step rehearse), or pass skipRehearsal: true to tag without one.`)
+    else if (rehearsal.status !== 'completed') problems.push(`The rehearsal on ${rehearsedOn(s, rehearsal)} is still running${rehearsal.url ? ` (${rehearsal.url})` : ''}; tag once it succeeds.`)
+    else if (rehearsal.conclusion !== 'success') problems.push(`The rehearsal on ${rehearsedOn(s, rehearsal)} ${runState(rehearsal)}${rehearsal.url ? ` (${rehearsal.url})` : ''}; fix that first, or pass skipRehearsal: true.`)
   }
   if (problems.length) throw new ReleaseRefusal(problems)
 
   const lines = [
     ...evidence.lines,
     `${s.main} at ${short(s.tip)}: CI green, every version file carries ${s.version}.`,
-    skipRehearsal ? 'Rehearsal: skipped (skipRehearsal: true).' : `Rehearsal: succeeded${rehearsal?.url ? `, ${rehearsal.url}` : ''}.`,
+    skipRehearsal ? 'Rehearsal: skipped (skipRehearsal: true).' : `Rehearsal: succeeded on ${rehearsedOn(s, rehearsal)}${rehearsal?.url ? `, ${rehearsal.url}` : ''}.`,
     ...notesLines(s),
   ]
   if (!confirm)
