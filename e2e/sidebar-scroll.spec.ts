@@ -36,3 +36,13 @@ test('scrolled to the bottom of a long project list, the top doors and the botto
   await page.mouse.up()
   expect((await sidebar.boundingBox())!.width).toBeGreaterThan(box.width + 60)
 })
+
+test('in a window too short for everything, the list keeps room and its rows stay reachable', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 150 })
+  await setup(page, ['/tmp/alpha'])
+  const list = (await page.getByTestId('sidebar-projects').boundingBox())!
+  expect(list.height).toBeGreaterThanOrEqual(60)
+  // The bottom area gave way, not the list: the row's menu opens with a click
+  await page.getByTestId('project-menu-alpha').click()
+  await expect(page.getByTestId('project-menu-open-alpha')).toBeVisible()
+})

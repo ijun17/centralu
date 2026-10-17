@@ -72,7 +72,11 @@ export function Sidebar() {
         <OrchestratorButton />
         <GridButton />
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto" data-testid="sidebar-projects">
+      {/*
+        The list keeps room for about two rows however short the window (#988 follow-up): in a 150px window the fixed
+        top and bottom left it none, and a project's row could not be reached at all. The bottom area gives way first.
+      */}
+      <div className="min-h-[4.5rem] flex-1 overflow-y-auto" data-testid="sidebar-projects">
         {ids.length === 0 ? (
           <p className="px-4 py-6 text-sm leading-body text-ink-faint">
             No projects yet.
@@ -85,9 +89,10 @@ export function Sidebar() {
       </div>
       {/*
         The bottom area stands still under the list (#988). Capped, so many apps cannot push the list off the screen:
-        past the cap it scrolls on its own. How this area is laid out is #732's to decide.
+        past the cap it scrolls on its own, and in a window too short for both it shrinks before the list does. How this
+        area is laid out is #732's to decide.
       */}
-      <div className="max-h-[45%] shrink-0 overflow-y-auto border-t border-line/70" data-testid="sidebar-bottom">
+      <div className="max-h-[45%] min-h-0 shrink overflow-y-auto border-t border-line/70" data-testid="sidebar-bottom">
         <UserApps />
         {/*
           **Where the person presses and where the result appears must be the same place** (issue

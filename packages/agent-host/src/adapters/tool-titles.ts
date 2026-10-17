@@ -1,7 +1,6 @@
 import { APP_SERVER_PREFIX, centraluServer, type NormalizedEvent, type ToolSummary } from '@cc/protocol'
-import { trimmed } from '../json-value.js'
 import { ORCHESTRATOR_MCP_NAME } from '../apps/contract.js'
-import { jsonObject, str, type Obj } from '../json-value.js'
+import { jsonObject, str, trimmed, type Obj } from '../json-value.js'
 
 /**
  * Whether an MCP call is one of Centralu's own tools (#843): Claude names it `mcp__centralu__<tool>`, Codex by its
