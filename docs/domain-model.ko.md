@@ -117,7 +117,7 @@ GyuHo123이 [#411](https://github.com/ijun17/centralu/issues/411)에 그린 모�
 | 호스트 | 세션, 스토어, 앱을 가진 Node 프로세스. 데이터 폴더마다 하나(소유 잠금) | `packages/agent-host/src/main.ts`; `dev-services/instance-lock.ts` | 서버, 백엔드, 사이드카(직접 경로만 그렇다) |
 | 스토어 | 호스트의 SQLite 데이터베이스 `<data>/store.db`. 쓰는 것은 호스트뿐이다 | `packages/agent-host/src/dev-services/store.ts`; [generated/schema.md](generated/schema.md) | |
 | 데이터 폴더 | `~/.centralu`(개발 중에는 `~/.centralu-dev`, `CC_DATA_DIR`로 바꿀 수 있다) | `packages/agent-host/src/data-dir.ts` | |
-| 키퍼 | 창의 실행 파일 옆에 실린 자기 실행 파일 `centralu-keeper`. 창에서 떨어져 돈다(0.1.0-beta.11까지는 창의 실행 파일을 `centralu --keeper`로 띄운 것이었고, #461부터 그렇게 띄우면 디버그 창이 요청한 때가 아니면 거절한다). 호스트를 띄우고 지켜보며, 오래 사는 자식들을 쥐고, 정문을 가진다. macOS 릴리스 빌드에서 쓰고, Linux와 디버그 빌드는 `CC_USE_KEEPER=1`일 때 쓴다 | `apps/desktop/src-tauri/keeper/` (Tauri 없는 크레이트 `centralu-keeper-core`), 띄우는 곳은 `sidecar.rs`; [architecture.ko.md](architecture.ko.md) §4.1 | 데몬 |
+| 키퍼 | 창의 실행 파일 옆에 실린 자기 실행 파일 `centralu-keeper`. 창에서 떨어져 돈다(0.1.0-beta.11까지는 창의 실행 파일을 `centralu --keeper`로 띄운 것이었고, #461부터 그렇게 띄우면 디버그 창이 요청한 때가 아니면 거절한다). 호스트를 띄우고 지켜보며, 오래 사는 자식들을 쥐고, 정문을 가진다. macOS 릴리스 빌드에서 쓰고, Linux와 디버그 빌드는 `CC_USE_KEEPER=1`일 때 쓴다 | `apps/desktop/src-tauri/keeper/` (Tauri 없는 크레이트 `centralu-keeper-core`), 띄우는 곳은 `src-tauri/src/sidecar/`; [architecture.ko.md](architecture.ko.md) §4.1 | 데몬 |
 | 정문 | 키퍼의 루프백 포트 하나와 토큰. 지금의 호스트에게 바이트를 그대로 옮겨 주므로, 클라이언트는 호스트 자신의 포트를 보지 않는다 | `apps/desktop/src-tauri/keeper/src/keeper/front_door.rs`; [architecture.ko.md](architecture.ko.md) §4.2 | 프록시 |
 | 자식 서비스 | 키퍼의 `<data>/children.sock`. 호스트는 이것으로 키퍼에게 에이전트 CLI, 터미널, 명령 실행을 띄워 쥐고 있으라고 부탁하고, 그래서 그것들은 호스트보다 오래 산다 | `apps/desktop/src-tauri/keeper/src/keeper/children/`; `packages/agent-host/src/keeper/`; [architecture.ko.md](architecture.ko.md) §4.3 | |
 | 빌드별 사본 | `<data>/hosts/<build>/`: 키퍼가 돌리는 빌드의 호스트 사본. 다시 빌드해도 두 빌드가 섞이지 않는다 | `apps/desktop/src-tauri/keeper/src/keeper/source.rs` | |
@@ -517,7 +517,7 @@ flowchart TD
   bridge -. "WebSocket" .-> host
 ```
 
-- Tauri 셸이 호스트의 부모다(`sidecar.rs`, 키퍼가 쓰는 것과 같은 `host_proc` 감독자). 브라우저 개발(`pnpm host`와
+- Tauri 셸이 호스트의 부모다(`sidecar/`, 키퍼가 쓰는 것과 같은 `host_proc` 감독자). 브라우저 개발(`pnpm host`와
   `pnpm dev`)에서는 브라우저가 셸에서 받은 토큰으로 호스트에 바로 붙는다.
 - 모든 자식이 호스트 자신의 것이므로, 호스트가 다시 뜨면 그것들도 끝난다.
 - `centralu serve`는 창조차 없는 이 방식이다. 루프백에 묶이고 SSH 포워드로 닿는다.

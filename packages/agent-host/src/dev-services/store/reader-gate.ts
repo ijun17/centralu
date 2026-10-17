@@ -25,7 +25,7 @@ export class StoreTooNewError extends Error {
 
 /**
  * Said on startup refusal. The phrase "written by a newer Centralu" is what the desktop supervisor matches to show
- * this at once instead of retrying (`sidecar.rs`, `is_final_refusal`): a retry gets the same answer.
+ * this at once instead of retrying (`host_proc`, `is_final_refusal`): a retry gets the same answer.
  */
 export function storeTooNewMessage(minReaderVersion: number, knownVersion: number, dbPath: string): string {
   return (

@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
  * (`http://127.0.0.1:<host port>`). The original CSP had no `frame-src`, so it fell back to
  * `default-src 'self'`, and the proxy frame was blocked (measured in S-1). The port cannot be
  * fixed — the host comes up with `--port 0`, so the number changes on every run
- * (sidecar.rs). So `127.0.0.1:*` is opened instead. Every path over that port sits behind a
+ * (sidecar/). So `127.0.0.1:*` is opened instead. Every path over that port sits behind a
  * secret slot created fresh on every run (transport/http.ts).
  *
  * **This is not widened beyond this.** Opening `*` or `http:` would let any page, not just an

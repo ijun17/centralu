@@ -90,7 +90,7 @@ Rule: `prepare_default_dir` runs before `create_dir_all(data)`, before `keeper.l
 only when the old folder exists and the new one does not, and a failed move leaves the old folder intact.
 Guard: `keeper/keeper/mod.rs` `the_legacy_folder_is_moved_before_the_new_one_exists`;
 `host/data-dir.test.ts` "moves everything whole (content unchanged) when only the old folder exists";
-`host/data-dir.test.ts` "does not damage the old folder when the move fails". The call order in `sidecar.rs` is
+`host/data-dir.test.ts` "does not damage the old folder when the move fails". The call order in `sidecar/link.rs` is
 **UNGUARDED**.
 Platforms: all.
 
@@ -1539,7 +1539,7 @@ Platforms: all.
 **UP3. Under a keeper, quitting only detaches.**
 Rule: the window never stops the host or waits on it; background mode and the relaunch grace are the keeper's; in
 direct mode the window kills its host on exit.
-Guard: `window/sidecar.rs` `a_supervisor_that_never_started_reports_direct_mode` (direct mode); detach is **UNGUARDED**.
+Guard: `window/sidecar/mod.rs` `a_supervisor_that_never_started_reports_direct_mode` (direct mode); detach is **UNGUARDED**.
 Platforms: all.
 
 **UP4. "Apply now" only when a relaunch starts a different build.**
@@ -1547,7 +1547,7 @@ Happened: under `pnpm app:open` the window runs the build output, which the upda
 bundle could start nothing (#352, 7c226b70).
 Rule: offered only when the window is in a bundle, the build on disk is readable and differs; never in direct mode,
 where the host is the window's child; never from a window already on the installed version; once per window.
-Guard: `window/sidecar.rs` `apply_now_relaunches_only_into_a_different_build_on_disk`;
+Guard: `window/sidecar/relaunch.rs` `apply_now_relaunches_only_into_a_different_build_on_disk`;
 `packages/ui/src/features/settings/apply-update.test.ts` "does not loop: not from the relaunched window, not twice from
 one window, not where a relaunch changes nothing".
 Platforms: macOS, Linux.
@@ -1824,8 +1824,8 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 
 | # | Rule | Module | Platforms | Plan step |
 |---|---|---|---|---|
-| 1 | ST3: the dev flag becomes `CC_DEV` in the host's environment | `window/sidecar.rs` | all | 7 |
-| 2 | ST4: the legacy folder move runs before `create_dir_all` in the window | `window/sidecar.rs` | all | 7 |
+| 1 | ST3: the dev flag becomes `CC_DEV` in the host's environment | `window/sidecar/launch.rs` | all | 7 |
+| 2 | ST4: the legacy folder move runs before `create_dir_all` in the window | `window/sidecar/link.rs` | all | 7 |
 | 4 | ST11: `leave_app_folder()` runs before anything is started | `window/lib.rs` | Windows | 7 |
 | 5 | ST13: no console window (CREATE_NO_WINDOW, `windowsHide`, not `detached`) | `keeper/host_proc.rs`, `host/adapters/local-process.ts`, `host/apps/external/app-process.ts` | Windows | 2 |
 | 10 | PA11: `taskkill` and PowerShell by System32 path | `host/dev-services/kill-tree.ts` | Windows | 8 |
@@ -1850,21 +1850,21 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 | 52 | HD9: B takes over after `ready` only if A is gone | `keeper/keeper/handoff/mod.rs` | macOS, Linux | 5 |
 | 53 | HD11: A reaps at the commit and B completes those children | `keeper/keeper/handoff/mod.rs` | macOS, Linux | 5 |
 | 54 | HD12: a rolled-back handoff still runs the host swap | `keeper/keeper/server/switch.rs` | macOS, Linux | 5 |
-| 56 | FI5 on the direct path: the AppImage's variables still reach the host the window starts itself | `window/sidecar.rs` | Linux | 4b |
+| 56 | FI5 on the direct path: the AppImage's variables still reach the host the window starts itself | `window/sidecar/launch.rs` | Linux | 4b |
 | 57 | TC2: the responsible process (manual probe, per shell version and major macOS) | `window/shell/` | macOS | 6 |
 | 58 | TC3: a nested shell loses Screen Recording (manual) | `window/shell/` | macOS | 6 |
 | 59 | TC4: no extended attributes copied with the shell | `window/shell/install.rs` | macOS | 6 |
 | 60 | TC6: `open` bounded at 15 s | `window/shell/start.rs` | macOS | 6 |
 | 61 | TC7: a keeper exiting 3 while another answers counts as ready | `shell/run.rs` | macOS | 6 |
-| 62 | TC15: one shell fallback lasts the window's life | `window/sidecar.rs` (`KeeperLink`) | macOS | 7 |
+| 62 | TC15: one shell fallback lasts the window's life | `window/sidecar/link.rs` (`KeeperLink`) | macOS | 7 |
 | 63 | TC17: trash without an automation prompt | `window/lib.rs` | macOS | — |
 | 64 | UP1: the custom Quit item (Rust side) | `window/lib.rs` | macOS | 7 |
 | 65 | UP2: the exit gate | `window/lib.rs` | all | 7 |
-| 66 | UP3: under a keeper quitting only detaches | `window/sidecar.rs` | all | 7 |
+| 66 | UP3: under a keeper quitting only detaches | `window/sidecar/mod.rs` | all | 7 |
 | 67 | UP5: relaunch through `request_restart` | `window/lib.rs` | macOS | 7 |
-| 68 | UP6: the window refuses a relaunch an old keeper cannot hold | `window/sidecar.rs` | macOS, Linux | 7 |
-| 69 | UP8: "Restart completely" starts a keeper of the window's build | `window/sidecar.rs` | macOS, Linux | 7 |
-| 70 | UP9: `switch` names the keeper inside the bundle | `window/sidecar.rs` | macOS, Linux | 7 |
+| 68 | UP6: the window refuses a relaunch an old keeper cannot hold | `window/sidecar/` | macOS, Linux | 7 |
+| 69 | UP8: "Restart completely" starts a keeper of the window's build | `window/sidecar/link.rs` | macOS, Linux | 7 |
+| 70 | UP9: `switch` names the keeper inside the bundle | `window/sidecar/link.rs` | macOS, Linux | 7 |
 | 71 | RE8: `serve --stop` on Windows, in CI | `packaging/npm/centralu/bin/serve.mjs` | Windows | 10 |
 | 72 | RE9: the hub's ssh in the host's process group | `host/links/tunnel.ts` | macOS, Linux | 10 |
 | 73 | RE10: no `ControlMaster`/`ControlPersist` options | `host/links/tunnel.ts` | macOS, Linux | 10 |

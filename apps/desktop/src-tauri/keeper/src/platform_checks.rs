@@ -42,7 +42,7 @@ const NOT_YET: &[(&str, usize)] = &[
     // integration (menus, traffic lights, badge, trash), which moves out of it to a module of its
     // own then, so that what is left here is runtime.
     ("src/lib.rs", 36),
-    ("src/sidecar.rs", 28),
+    ("src/sidecar/mod.rs", 27),
 ];
 
 const OS_WORDS: &[&str] = &["unix", "windows", "target_os", "target_family", "target_vendor", "target_env"];

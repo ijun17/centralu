@@ -36,7 +36,7 @@ pub const EXIT_NOT_A_KEEPER: i32 = 64;
 
 /**
  * How a keeper is started: its arguments, the environment it gets on top of the starter's, and
- * where its output goes. The window (`sidecar.rs`, the direct start) and the shell (thin-shell plan
+ * where its output goes. The window (`sidecar/link.rs`, the direct start) and the shell (thin-shell plan
  * §3, a keeper from verified content) both start keepers through this, so the two cannot drift
  * apart: what the shell starts is what the window would have started, from another place.
  */

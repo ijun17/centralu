@@ -173,7 +173,7 @@ export type BuildSource = Omit<HostBuild, 'protocolVersion'> & {
  * Which builds are involved (#280): this window's and the running host's. `mode` says whether the
  * host is held by the keeper (release builds) or is the app's own child (`pnpm app:dev`).
  * `sameBuild` is false when a window of one build is attached to a host of another — the case the
- * window offers to switch. The shell's `HostBuild` (sidecar.rs), named apart from the protocol's `HostBuild`, which is
+ * window offers to switch. The shell's `HostBuild` (sidecar/mod.rs), named apart from the protocol's `HostBuild`, which is
  * one host's record (#428).
  */
 export type ShellHostBuild = {

@@ -115,7 +115,7 @@ Diagrams are UML in Mermaid. `<<kind>>` marks what a session is created as; `<<r
 | Host | The Node process that owns sessions, the store and apps. One per data folder (ownership lock) | `packages/agent-host/src/main.ts`; `dev-services/instance-lock.ts` | server, backend, sidecar (only the direct path is) |
 | Store | The host's SQLite database, `<data>/store.db`; the only writer is the host | `packages/agent-host/src/dev-services/store.ts`; [generated/schema.md](generated/schema.md) | |
 | Data folder | `~/.centralu` (`~/.centralu-dev` in development; `CC_DATA_DIR` overrides, also without `--db`; the legacy folder is moved only into the default one) | `packages/agent-host/src/data-dir.ts` (`chooseDataDir`) | |
-| Keeper | Its own executable, `centralu-keeper`, shipped next to the window's and started detached from it (until 0.1.0-beta.11, the window's executable started as `centralu --keeper`, which since #461 refuses unless a debug window asked). Starts and supervises the host, holds its long-lived children, and owns the front door. macOS release builds; Linux and debug builds with `CC_USE_KEEPER=1` | `apps/desktop/src-tauri/keeper/` (crate `centralu-keeper-core`, no Tauri), started by `sidecar.rs`; [architecture.md](architecture.md) §4.1 | daemon |
+| Keeper | Its own executable, `centralu-keeper`, shipped next to the window's and started detached from it (until 0.1.0-beta.11, the window's executable started as `centralu --keeper`, which since #461 refuses unless a debug window asked). Starts and supervises the host, holds its long-lived children, and owns the front door. macOS release builds; Linux and debug builds with `CC_USE_KEEPER=1` | `apps/desktop/src-tauri/keeper/` (crate `centralu-keeper-core`, no Tauri), started by `src-tauri/src/sidecar/`; [architecture.md](architecture.md) §4.1 | daemon |
 | Front door | The keeper's one loopback port and token, relaying bytes to whichever host is current, so clients never see a host's own port | `apps/desktop/src-tauri/keeper/src/keeper/front_door.rs`; [architecture.md](architecture.md) §4.2 | proxy |
 | Children service | The keeper's `<data>/children.sock`, through which the host asks the keeper to spawn and hold agent CLIs, terminals and command runs, so they outlive a host | `apps/desktop/src-tauri/keeper/src/keeper/children/`; `packages/agent-host/src/keeper/`; [architecture.md](architecture.md) §4.3 | |
 | Per-build copy | `<data>/hosts/<build>/`: the copy of a build's host that a keeper runs, so a rebuild cannot mix two builds | `apps/desktop/src-tauri/keeper/src/keeper/source.rs` | |
@@ -524,7 +524,7 @@ flowchart TD
   bridge -. "WebSocket" .-> host
 ```
 
-- The Tauri shell is the host's parent (`sidecar.rs`, the same `host_proc` supervisor the keeper uses). In browser
+- The Tauri shell is the host's parent (`sidecar/`, the same `host_proc` supervisor the keeper uses). In browser
   development (`pnpm host` and `pnpm dev`) the browser connects to the host directly with the token from the shell.
 - Every child is the host's own, so a host restart ends them.
 - `centralu serve` is this mode with no window at all, bound to loopback and reached over an SSH forward.
