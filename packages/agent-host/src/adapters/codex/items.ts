@@ -1,21 +1,12 @@
-import { asObj, str } from '../../json-value.js'
+import { asObj, jsonObject, str } from '../../json-value.js'
 import { type FileChange } from '../file-changes.js'
-import { firstLine, isCentraluTool } from '../tool-titles.js'
+import { centraluRunCommand, firstLine, isCentraluTool } from '../tool-titles.js'
 
 /**
  * Codex's tool items (generated/v2/ThreadItem.ts), read: what a call was asked to do, how it is titled, what it
  * answered and whether it went through. Pure, like normalize.ts, which turns them into events.
  */
 
-/** An object, or JSON text of one; anything else is empty */
-const jsonObject = (v: unknown): Record<string, unknown> => {
-  if (typeof v !== 'string') return asObj(v)
-  try {
-    return jsonObject(JSON.parse(v) as unknown)
-  } catch {
-    return {}
-  }
-}
 
 /**
  * What the tool **actually answered** — the body that goes on the card.
@@ -115,23 +106,15 @@ export function itemSummary(item: Record<string, unknown>): { tool: string; titl
      * stays centralu_run; the screen re-reads both proposal lists for such a call.
      */
     if (isCentraluTool({ server, tool }, 'centralu_run')) {
-      const args = jsonObject(item.arguments ?? asObj(item.invocation).arguments)
-      const command = str(args.command).trim()
-      if (/^[a-z]+(?:_[a-z]+)*$/.test(command)) {
-        const inner = jsonObject(args.args)
-        return itemSummary({ ...item, tool: command, arguments: inner, invocation: { ...asObj(item.invocation), tool: command, arguments: inner } })
+      const run = centraluRunCommand(jsonObject(item.arguments ?? asObj(item.invocation).arguments))
+      if (run) {
+        return itemSummary({ ...item, tool: run.command, arguments: run.args, invocation: { ...asObj(item.invocation), tool: run.command, arguments: run.args } })
       }
     }
     // ask_project (#371) — the project asked is the title, the same rule as toolSummary on the claude side
     if (isCentraluTool({ server, tool }, 'ask_project')) {
-      const rawArgs = item.arguments ?? asObj(item.invocation).arguments
-      let project = ''
-      try {
-        const parsed = typeof rawArgs === 'string' ? (JSON.parse(rawArgs) as unknown) : rawArgs
-        project = str(asObj(parsed).project)
-      } catch {
-        /* If the arguments are not JSON, the card names no project — it still finds the session it asked */
-      }
+      // Arguments that are not JSON name no project: the card still finds the session it asked
+      const project = str(jsonObject(item.arguments ?? asObj(item.invocation).arguments).project)
       return { tool, title: project || tool, paths: [] }
     }
     /*
