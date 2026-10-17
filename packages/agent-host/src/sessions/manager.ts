@@ -18,12 +18,11 @@ import { ProjectCreation, type ProjectCreationHost } from './project-creation.js
 import { UpdatesAsked, type UpdatesAskedHost } from './updates-asked.js'
 import { ProjectConsents, type ProjectConsentsHost } from './project-consents.js'
 import { UiPreferenceStore, type UiPreferenceStoreHost } from './ui-preferences.js'
+import { SessionAppWiring, type SessionAppWiringHost } from './session-app-wiring.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
-import { SessionAppsHub } from './session-apps.js'
-import { AppAccess, writeShared } from './app-access.js'
-import type { AppRef, BrokerHost, ExternalApps } from '../apps/external/runtime.js'
+import type { AppRef } from '../apps/external/runtime.js'
 import { AgentRunWait } from './app-agents.js'
 import { CacheLedger } from './cache-ledger.js'
 import { underGrant } from './ask-project.js'
@@ -32,7 +31,6 @@ import { homedir } from 'node:os'
 import { basename, join, relative, resolve, sep } from 'node:path'
 import type {
   RebuildCause,
-  AppReach,
   BackgroundTask,
   ApprovalDecision,
   Attachment,
@@ -67,7 +65,7 @@ import {
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
 import { registeredTool } from '../adapters/registry.js'
-import { codeIntelligenceKey, codeIntelligenceOff, isAppAgent, toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
+import { codeIntelligenceKey, codeIntelligenceOff, toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
 import type { MemoryGate } from './memory-gate.js'
 
 /**
@@ -146,7 +144,7 @@ export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS }
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost & MergeChecksHost & ProjectCreationHost & UpdatesAskedHost & ProjectConsentsHost & UiPreferenceStoreHost & SessionAppWiringHost
 
 /**
  * Where the marker "conversation up to here belongs to the old tool" is stored.
@@ -245,6 +243,8 @@ export class SessionManager {
   private readonly consents: ProjectConsents
   /** The screen's preferences and workspace layout (ui-preferences.ts) */
   private readonly prefs: UiPreferenceStore
+  /** The external app runtime as the sessions meet it: attached apps, on-demand access, the broker (session-app-wiring.ts) */
+  private readonly apps: SessionAppWiring
   /** ask_project, here or on a linked machine (ask-project-flow.ts) */
   private readonly askProjectFlow: AskProjectFlow
   /** The conversations a tool keeps on its own side: listing, holders, import and catch-up (external-conversations.ts) */
@@ -285,14 +285,6 @@ export class SessionManager {
    * that had joined the wake and was waiting is also not sent.
    */
   private leaving = new Map<string, string>()
-  /**
-   * Where external apps are attached to a session (M4 A-5). It is null on a host with no runtime
-   * (most tests), and in that case the session accepts no apps — it is optional, like any other
-   * service.
-   */
-  private appsHub: SessionAppsHub | null = null
-  /** Another project's apps, attached on demand (#371 part A) — null exactly when `appsHub` is */
-  private appAccess: AppAccess | null = null
   /** The orchestrator's MCP-server and skill proposals and its approved skills (#71, M4 A-7) */
   private readonly proposals: OrchestratorProposals
   /**
@@ -348,6 +340,7 @@ export class SessionManager {
     } = {},
   ) {
     this.children = new ChildOwnership(store)
+    this.apps = new SessionAppWiring(this.parts())
     this.prefs = new UiPreferenceStore(this.parts())
     this.consents = new ProjectConsents(this.parts())
     this.updatesAsked = new UpdatesAsked(this.parts())
@@ -374,7 +367,7 @@ export class SessionManager {
     this.linkedReports = new LinkedReports(this.parts())
     this.proposals = new OrchestratorProposals(
       this.store,
-      () => this.appsHub?.rt,
+      () => this.apps.appsHub?.rt,
       // `this.emit` is wrapped just below; the callback looks it up when a list changes, not now
       () => this.emit({ type: 'orchestrator_proposals_changed' }),
     )
@@ -678,7 +671,7 @@ export class SessionManager {
      * (below): that session runs inside the project, and whether it gets the project's settings was
      * already decided by the person through trust.
      */
-    if (m.projectId === null && this.isAppAgentSession(m)) return { projectTrusted: false }
+    if (m.projectId === null && this.apps.isAppAgentSession(m)) return { projectTrusted: false }
     return { projectTrusted: this.projectTrusted(m.projectId) }
   }
 
@@ -1129,7 +1122,7 @@ export class SessionManager {
     if (params.builderOf) this.appSessions.setBuilder(params.builderOf, id)
     // External apps (M4 A-5) — a worker gets these too. If the handle never comes up, the catch below closes
     // it
-    const apps = this.appsFor(info)
+    const apps = this.apps.appsFor(info)
     // The same rule runs again on every wake (toolProfileOf). The builder slot was just written (setBuilder), so the
     // flag says what the row's slot already says
     const { profile, tools } = this.toolChoice(info, !!params.builderOf)
@@ -1661,7 +1654,7 @@ export class SessionManager {
 
     // External apps (M4 A-5) — decision 4 is re-checked **right now** even on resume (an app could have come
     // or gone in between)
-    const apps = this.appsFor(m)
+    const apps = this.apps.appsFor(m)
     // If this is a builder session, it gets its own app's check (C-3) — the directory is re-checked right now
     // (a different session could have taken over in between)
     const builds = this.appSessions.builderRefOf(m) !== null
@@ -2239,7 +2232,7 @@ export class SessionManager {
         if (wasBusy && !inTurn(m.state)) {
           endedTurn = true
           const ref = this.appSessions.builderRefOf(m)
-          if (ref) this.appsHub?.rt.builderTurnEnded(ref)
+          if (ref) this.apps.appsHub?.rt.builderTurnEnded(ref)
         }
         seq = this.record.persistMessage(e, m)
         // An image is persisted as a file (#40, part 2) — it is async, so no seq is taken here
@@ -3385,9 +3378,9 @@ export class SessionManager {
       checkApp: async () => ({ ok: false, text: error }),
       createApp: refuse,
       // Another project's apps, on demand (#371 part A) — the one thing this seat may change, and only for itself
-      findApps: async (query) => (off() ? { ok: false, error: offError } : this.requireAppAccess().find(sessionId, query)),
-      attachApp: async (app) => (off() ? { ok: false, error: offError } : this.requireAppAccess().attach(sessionId, app)),
-      detachApp: async (app) => (off() ? { ok: false, error: offError } : this.requireAppAccess().detach(sessionId, app)),
+      findApps: async (query) => (off() ? { ok: false, error: offError } : this.apps.requireAppAccess().find(sessionId, query)),
+      attachApp: async (app) => (off() ? { ok: false, error: offError } : this.apps.requireAppAccess().attach(sessionId, app)),
+      detachApp: async (app) => (off() ? { ok: false, error: offError } : this.apps.requireAppAccess().detach(sessionId, app)),
     }
   }
 
@@ -3410,16 +3403,18 @@ export class SessionManager {
         return self.agentRuns
       },
       answerRoutedCard: (...a) => self.cards.answerRoutedCard(...a),
+      appHostData: (...a) => self.appSessions.appHostData(...a),
       answerQuestion: (...a) => self.answerQuestion(...a),
       applyDeferredRestart: (...a) => self.restartPolicy.applyDeferredRestart(...a),
       applyStateHint: (...a) => self.applyStateHint(...a),
       askGateError: (...a) => self.askProjectFlow.askGateError(...a),
+      askCapability: (...a) => self.hostCards.askCapability(...a),
       askHost: (...a) => self.hostCards.askHost(...a),
       get appAccess() {
-        return self.appAccess
+        return self.apps.appAccess
       },
       get appsHub() {
-        return self.appsHub
+        return self.apps.appsHub
       },
       autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
       awaitTurn: (...a) => self.delegationFlow.awaitTurn(...a),
@@ -3479,12 +3474,13 @@ export class SessionManager {
         return self.hostCards
       },
       inputsHeld: (...a) => self.inputsHeld(...a),
-      isAppAgentSession: (...a) => self.isAppAgentSession(...a),
+      isAppAgentSession: (...a) => self.apps.isAppAgentSession(...a),
       get linkedReader() {
         return self.linkedReader
       },
       listSessions: (...a) => self.listSessions(...a),
       loadMessages: (...a) => self.loadMessages(...a),
+      migrateApprovedMcpServers: (...a) => self.proposals.migrateApprovedMcpServers(...a),
       get memoryGate() {
         return self.memoryGate
       },
@@ -3529,6 +3525,7 @@ export class SessionManager {
       rememberBackgroundTasks: (...a) => self.launches.rememberBackgroundTasks(...a),
       rename: (...a) => self.rename(...a),
       respondApproval: (...a) => self.respondApproval(...a),
+      runAppAgent: (...a) => self.runAppAgent(...a),
       reportBackIfAwaited: (...a) => self.reports.reportBackIfAwaited(...a),
       get restartPolicy() {
         return self.restartPolicy
@@ -3544,6 +3541,7 @@ export class SessionManager {
       scheduleDrain: (...a) => self.queue.scheduleDrain(...a),
       send: (...a) => self.send(...a),
       sessionsInside: (...a) => self.sessionsInside(...a),
+      sessionOf: (...a) => self.sessionOf(...a),
       settingFilesFor: (...a) => self.settingFilesFor(...a),
       settleState: (...a) => self.settleState(...a),
       sleepSession: (...a) => self.sleepSession(...a),
@@ -3684,17 +3682,6 @@ export class SessionManager {
     return this.firstTool(this.store.appSetting('orchestrator_tool'))
   }
 
-  /** The session's share of the broker's body (M4 D) — called only after the runtime's gate has verified the
-   * declaration */
-  private brokerHost(): BrokerHost {
-    return {
-      defaultAgentTool: (projectId) => this.defaultToolFor(projectId),
-      runAgent: (req, ctx) => this.runAppAgent(req, ctx),
-      hostData: (name, app) => this.appSessions.appHostData(name, app),
-      agentLabel: (tool) => this.adapters.get(tool)?.descriptor.label ?? tool,
-      askCapability: (q, signal) => this.hostCards.askCapability(q, signal),
-    }
-  }
 
   /** `ProjectConsents.ensureProjectAccess` (project-consents.ts), kept on the manager for its callers */
   ensureProjectAccess(...a: Parameters<ProjectConsents['ensureProjectAccess']>): ReturnType<ProjectConsents['ensureProjectAccess']> {
@@ -3889,170 +3876,39 @@ export class SessionManager {
     })
   }
 
-  useExternalApps(rt: ExternalApps, opts?: Omit<NonNullable<ConstructorParameters<typeof SessionAppsHub>[1]>, 'onDemand'>): void {
-    this.appAccess?.dispose()
-    this.appsHub?.dispose()
-    /*
-     * What a session attached itself (#371 part A) is counted by the hub on every count, through this
-     * port — the hub keeps no copy, so the person's sharing switch and consent are read fresh each time.
-     */
-    this.appsHub = new SessionAppsHub(rt, {
-      ...opts,
-      boundaryOpen: (id) => this.autoBoundaryOpen(id),
-      onDemand: {
-        attached: (id) => this.appAccess?.attached(id) ?? [],
-        /*
-         * Only while the session holds the reader set (#382): attach_app and detach_app are part of it, so a
-         * session the person turned the set off for (or that became a manager) would keep tools it can no
-         * longer detach. The records stay; they count again once the set is back.
-         */
-        allowed: (session, app) => this.toolProfileOf(session.id) === 'reader' && (this.appAccess?.allowed(session, app) ?? false),
-      },
-    })
-    rt.setSessionBoundaryPolicy((id) => this.autoBoundaryOpen(id))
-    this.appAccess = new AppAccess({
-      boundaryOpen: (id, boundary) => this.autoBoundaryOpen(id, boundary),
-      hub: this.appsHub,
-      store: this.store,
-      session: (id) => {
-        const m = this.meta.get(id)
-        if (!m || this.isAppAgentSession(m)) return null
-        return { id: m.id, kind: m.kind, projectId: m.projectId, builderOf: this.appSessions.builderRefOf(m) }
-      },
-      projects: () => this.store.listProjects().map((p) => ({ id: p.id, name: p.name, trusted: p.trusted })),
-      ensureAccess: (id, to, what, signal) => this.ensureProjectAccess(id, to, 'apps', what, signal),
-      attachedChanged: (id) => this.sessionAppsChanged(id),
-      ...(opts?.toolListWaitMs !== undefined ? { toolListWaitMs: opts.toolListWaitMs } : {}),
-    })
-    /*
-     * Progress text sent by a session's app call (M4 D) — a line like "waiting on the person to
-     * approve in session X" is attached as running output to that call's tool card
-     * (`tool_output_delta`: a display-only chunk, never recorded). While an agent an app asked for is
-     * waiting on the person, the calling session's card otherwise says nothing but "still running".
-     */
-    this.appsHub.onCallProgress((p) => {
-      if (this.meta.has(p.sessionId)) this.onEvent({ type: 'tool_output_delta', sessionId: p.sessionId, callId: p.callId, text: `${p.message}\n` })
-    })
-    // The session's share of the broker's body (M4 D) — the runtime knows nothing about sessions, so this is
-    // filled in here
-    rt.attachBrokerHost(this.brokerHost())
-    // Migrates a previously approved MCP server into an app (A-7) — this runs before any session comes up, so
-    // the orchestrator has it from the very start
-    this.proposals.migrateApprovedMcpServers(rt)
+  /** `SessionAppWiring.useExternalApps` (session-app-wiring.ts), kept on the manager for its callers */
+  useExternalApps(...a: Parameters<SessionAppWiring['useExternalApps']>): ReturnType<SessionAppWiring['useExternalApps']> {
+    return this.apps.useExternalApps(...a)
   }
 
-  /**
-   * The list of app tools and calls a bridge makes (M4 A-5, the Codex path). Answered by whatever is
-   * attached to **the session's currently living handle** — decision 4, the caller (that session), and
-   * the record all pass through the exact same place as Claude's in-process path.
-   */
-  /**
-   * Whether a session can use one app's tools right now (#308, `apps.reach`) — asked when an item from
-   * that app's view is dropped on the session's composer. Decision 4 with the session as `appsFor`
-   * sees it (a session stood up by an app gets none), and what its live agent actually has.
-   */
-  appReach(sessionId: string, ref: AppRef): AppReach {
-    const m = this.sessionOf(sessionId)
-    if (!this.appsHub) return { reachable: false, reason: 'unavailable' }
-    const key = this.isAppAgentSession(m) ? null : { id: m.id, kind: m.kind, projectId: m.projectId, builderOf: this.appSessions.builderRefOf(m) }
-    return this.appsHub.reach(key, ref, this.handles.get(sessionId))
+  /** `SessionAppWiring.appReach` (session-app-wiring.ts), kept on the manager for its callers */
+  appReach(...a: Parameters<SessionAppWiring['appReach']>): ReturnType<SessionAppWiring['appReach']> {
+    return this.apps.appReach(...a)
   }
 
-  async appSessionTools(sessionId: string, server: string): Promise<Record<string, unknown>[]> {
-    return (await this.requireAppsHub().forSession(sessionId).tools(server)) as Record<string, unknown>[]
+  /** `SessionAppWiring.appSessionTools` (session-app-wiring.ts), kept on the manager for its callers */
+  appSessionTools(...a: Parameters<SessionAppWiring['appSessionTools']>): ReturnType<SessionAppWiring['appSessionTools']> {
+    return this.apps.appSessionTools(...a)
   }
 
-  async callAppForSession(sessionId: string, server: string, name: string, args: Record<string, unknown>, waitMs?: number) {
-    return this.requireAppsHub().forSession(sessionId).call(server, name, args, { waitMs })
+  /** `SessionAppWiring.callAppForSession` (session-app-wiring.ts), kept on the manager for its callers */
+  callAppForSession(...a: Parameters<SessionAppWiring['callAppForSession']>): ReturnType<SessionAppWiring['callAppForSession']> {
+    return this.apps.callAppForSession(...a)
   }
 
-  /** The hub for a session's app attachments — an inline app view (M4 B-1) listens to a session's app calls
-   * here. null if there is no runtime */
-  sessionAppsHub(): SessionAppsHub | null {
-    return this.appsHub
+  /** `SessionAppWiring.sessionAppsHub` (session-app-wiring.ts), kept on the manager for its callers */
+  sessionAppsHub(...a: Parameters<SessionAppWiring['sessionAppsHub']>): ReturnType<SessionAppWiring['sessionAppsHub']> {
+    return this.apps.sessionAppsHub(...a)
   }
 
-  /**
-   * An inline app view's event (M4 B-1). This event is produced by the host (inline-views.ts), not an
-   * adapter, but goes through the same path — recorded (open and rejected only, with no body) and
-   * broadcast. An event for a deleted session is dropped.
-   */
-  recordAppView(e: Extract<NormalizedEvent, { type: 'app_view' }>): void {
-    if (!this.meta.has(e.sessionId)) return
-    this.onEvent(e)
+  /** `SessionAppWiring.recordAppView` (session-app-wiring.ts), kept on the manager for its callers */
+  recordAppView(...a: Parameters<SessionAppWiring['recordAppView']>): ReturnType<SessionAppWiring['recordAppView']> {
+    return this.apps.recordAppView(...a)
   }
 
-  /**
-   * A session attached or detached an app itself (#371 part A). Claude follows its set live, so the
-   * tools are there now. A Codex thread keeps the servers it started with (`appAttachment`), so it is
-   * restarted through resume: when the turn ends if it is in one (the tool call that asked is), at once
-   * otherwise. Every call is checked against the current set either way, so a detached app's name
-   * that lingers in the thread until then is refused.
-   */
-  private sessionAppsChanged(sessionId: string): 'now' | 'next_turn' {
-    this.appsHub?.sessionAppsChanged(sessionId)
-    const handle = this.handles.get(sessionId)
-    if (!handle) return 'next_turn'
-    // Claude takes the new tools at once, and a changed tool list is a changed prompt (§6.1)
-    if (!handle.appAttachment) {
-      this.cacheLedger.note(sessionId, 'instructions')
-      return 'now'
-    }
-    const m = this.meta.get(sessionId)
-    if (m && inTurn(m.state)) {
-      this.restartPolicy.restartAfterTurn.add(sessionId)
-      this.restartPolicy.appsRestartAfterTurn.add(sessionId)
-    } else {
-      void this.restartSession(sessionId, 'thread_restart').catch(() => {})
-    }
-    return 'next_turn'
-  }
-
-  /**
-   * Shares a project app with the person's other projects, or stops (#371 part A, `apps.setShared`).
-   * Stored beside the person's other settings; the runtime reads it into the app list, and turning it
-   * off detaches the app from every session that attached it (the hub's count asks again).
-   */
-  setAppShared(ref: { projectId: string; appId: string }, shared: boolean): void {
-    const rt = this.requireAppsHub().rt
-    if (!rt.list().some((a) => a.projectId === ref.projectId && a.appId === ref.appId)) {
-      throw rpcError(`No such app: ${ref.appId}`)
-    }
-    writeShared(this.store, ref, shared)
-    rt.sharingChanged()
-  }
-
-  private requireAppAccess(): AppAccess {
-    if (!this.appAccess) throw rpcError('External apps are unavailable')
-    return this.appAccess
-  }
-
-  private requireAppsHub(): SessionAppsHub {
-    if (!this.appsHub) throw rpcError('External apps are unavailable')
-    return this.appsHub
-  }
-
-  /** App attachment for a single handle — passed to the adapter, and closed together whenever the adapter
-   * that owns it closes */
-  private appsFor(m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId'>): SessionApps | undefined {
-    /*
-     * No app is ever attached to an agent session stood up at an app's request (M4 D-1) — not even on
-     * resume (a person continuing the conversation after it finished). Attaching one would let that
-     * session's agent call a project's own apps. That would let apps not even in `uses.apps` become
-     * reachable through the agent (the agent carries an app's own declaration past its boundary), and
-     * a called app asking for another agent would form a loop that sits entirely outside the chain (the
-     * depth limit only counts a chain of app-to-app calls). The agent here only ever unpacks a single
-     * piece of text the app handed it.
-     */
-    if (this.isAppAgentSession(m)) return undefined
-    // A builder session receives its own app (C-3) — a user-folder app only ever goes to the orchestrator
-    // under decision 4, so it is added here
-    return this.appsHub?.attach({ id: m.id, kind: m.kind, projectId: m.projectId, builderOf: this.appSessions.builderRefOf(m) }) ?? undefined
-  }
-
-  /** Is this an agent session stood up at an external app's request (M4 D-1; `isAppAgent` in tool-profiles.ts) */
-  private isAppAgentSession(m: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId'>): boolean {
-    return isAppAgent({ kind: m.kind, appId: m.appId ?? null, builder: this.appSessions.builderRefOf(m) !== null })
+  /** `SessionAppWiring.setAppShared` (session-app-wiring.ts), kept on the manager for its callers */
+  setAppShared(...a: Parameters<SessionAppWiring['setAppShared']>): ReturnType<SessionAppWiring['setAppShared']> {
+    return this.apps.setAppShared(...a)
   }
 
   /**
@@ -4431,15 +4287,15 @@ export class SessionManager {
     // Ends a merge check's gh; the check itself is waited for with the processes (#368). The next host checks merges
     // again at its start
     this.merges.mergeChecksStop.abort()
-    this.appsHub?.rt.attachBrokerHost(null)
+    this.apps.appsHub?.rt.attachBrokerHost(null)
     for (const run of [...this.agentRuns.values()]) run.fail(new Error(why))
     for (const readers of this.turnObservers.values()) for (const observer of readers) observer.fail(new Error(why))
     for (const ask of [...this.hostCards.hostAsks.values()]) ask.resolve(null)
     this.hostCards.hostAsks.clear()
     for (const q of [...this.hostCards.appQuestions.values()]) q.resolve(null)
     this.hostCards.appQuestions.clear()
-    this.appAccess?.dispose()
-    this.appsHub?.dispose()
+    this.apps.appAccess?.dispose()
+    this.apps.appsHub?.dispose()
   }
 
   /** A session's row, or `session_not_found` */
