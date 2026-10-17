@@ -24,6 +24,7 @@ import {
   mergePr,
   openPrsOnBase,
   QUEUE_PR_FIELDS,
+  readChecks,
   readJobLog,
   readPr,
   readRepo,
@@ -33,7 +34,7 @@ import {
   sameRepo,
   setPrBase,
 } from './github.mjs'
-import { ACTIVE, attentionText, decideBefore, decideCi, dueItem, emptyQueue, ERROR_LIMIT, errorReason, itemKey, normalize, noticeKey, POLL_MS, pushEvent, rerunRefused, resetFor } from './queue.mjs'
+import { ACTIVE, attentionText, decideBefore, decideCi, dueItem, emptyQueue, ERROR_LIMIT, errorReason, itemKey, normalize, noticeKey, onlySupersededFailures, POLL_MS, pushEvent, rerunRefused, resetFor } from './queue.mjs'
 import { activeBatch } from './batch.mjs'
 import { batchTick, batchWork, formDue } from './queue-batch.mjs'
 import { short } from './util.mjs'
@@ -308,7 +309,10 @@ async function pollItem(item, { now, ref, renew, save }) {
     let lowerBranches = []
     if (checks.verdict === 'green' && pr.baseRefName !== defaultBranch && item.lowers?.length)
       lowerBranches = (await Promise.all(item.lowers.map((l) => readPr(repo, l).catch(() => null)))).filter(Boolean).map((l) => l.headRefName)
-    d = decideCi({ item: view, pr, checks, runs, defaultBranch, lowerBranches, now, ref })
+    // UNSTABLE on a green head: is it only a cancelled duplicate, or an older run (#1015)? Every check on it says
+    let supersededOnly = false
+    if (checks.verdict === 'green' && pr.mergeStateStatus === 'UNSTABLE') supersededOnly = onlySupersededFailures(await readChecks(repo, pr.headRefOid), scoped.runs)
+    d = decideCi({ item: view, pr, checks, runs, defaultBranch, lowerBranches, supersededOnly, now, ref })
   }
 
   let wait = pollMs(d.state === 'attention' ? 'attention' : d.state === 'waiting' ? 'waiting' : 'ci')

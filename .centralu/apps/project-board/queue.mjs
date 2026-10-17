@@ -260,11 +260,12 @@ export function decideRun({ subject, head, checks, runs = [], now, n }) {
 /**
  * The decision once CI is read. `checks` is evaluateChecks' answer for the head; `runs` the latest
  * run of each CI workflow on it (only read when the checks failed or none are reported);
- * `lowerBranches` the head branches of the item's lowers (a stack's top is based on one of them).
- * Answers `{ state, action?, reason?, patch? }`; action `rerun` (a run, all jobs or the failed ones),
+ * `lowerBranches` the head branches of the item's lowers (a stack's top is based on one of them);
+ * `supersededOnly` that GitHub's UNSTABLE comes only from runs a successful one made moot
+ * (onlySupersededFailures). Answers `{ state, action?, reason?, patch? }`; action `rerun` (a run, all jobs or the failed ones),
  * `retarget` (onto the default branch) or `merge`.
  */
-export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBranches = [], now, ref }) {
+export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBranches = [], supersededOnly = false, now, ref }) {
   const n = ref(item.repo, item.pr)
   const head = pr.headRefOid
   const at = new Date(now).toISOString()
@@ -283,7 +284,9 @@ export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBran
     return attention('subject', `${n}: the squash subject "${subject}" is ${[...subject].length} characters, over ${SUBJECT_MAX}. Shorten the PR title; the queue carries on by itself.`)
   if (pr.mergeStateStatus === 'BEHIND') return attention('behind', `${n} is behind ${defaultBranch}, and GitHub requires it up to date. Rebase it onto ${defaultBranch} and push.`)
   if (pr.mergeStateStatus === 'BLOCKED') return attention('blocked', `${n} is green, but GitHub blocks merging it (a required review or rule). Look at the PR on GitHub.`)
-  if (pr.mergeable !== 'MERGEABLE' || !MERGEABLE_STATES.has(pr.mergeStateStatus)) {
+  // UNSTABLE only from a run a successful one made moot (a cancelled duplicate, #1015): as CLEAN
+  const clean = MERGEABLE_STATES.has(pr.mergeStateStatus) || (pr.mergeStateStatus === 'UNSTABLE' && supersededOnly)
+  if (pr.mergeable !== 'MERGEABLE' || !clean) {
     // GitHub still working it out (UNKNOWN), or not CLEAN (UNSTABLE, HAS_HOOKS): wait, and say so in time
     const since = item.head === head && item.uncleanSince ? item.uncleanSince : at
     if (now - Date.parse(since) > UNCLEAN_MS)
@@ -294,6 +297,39 @@ export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBran
     return { state: 'waiting', patch: { uncleanSince: since } }
   }
   return { state: 'ci', action: { type: 'merge' }, patch: { uncleanSince: null, missingSince: null } }
+}
+
+/**
+ * The check suites of runs a successful run has made moot (#1015): for each CI workflow that has a
+ * completed, successful run on the head, its other runs on that head that were cancelled or started
+ * before the newest successful one. `runs` are the raw workflow runs on the head (readWorkflowChecks).
+ */
+export function supersededSuites(runs) {
+  const key = (r) => r.workflow_id ?? r.path ?? r.name ?? 'ci'
+  const out = new Set()
+  const byWorkflow = new Map()
+  for (const r of runs ?? []) byWorkflow.set(key(r), [...(byWorkflow.get(key(r)) ?? []), r])
+  for (const list of byWorkflow.values()) {
+    const ok = list.filter((r) => r.status === 'completed' && OK_CONCLUSIONS.has(r.conclusion))
+    if (!ok.length) continue
+    const newest = ok.map((r) => String(r.created_at ?? '')).sort().at(-1)
+    for (const r of list)
+      if (!ok.includes(r) && r.check_suite_id != null && r.status === 'completed' && (r.conclusion === 'cancelled' || String(r.created_at ?? '') < newest)) out.add(r.check_suite_id)
+  }
+  return out
+}
+
+/**
+ * Whether GitHub's UNSTABLE comes only from runs a successful run made moot (#1015): every check on
+ * the head passed, or belongs to such a run; every commit status succeeded. A cancelled duplicate run
+ * (a second pull_request run started for the same head) otherwise kept a green pull request UNSTABLE
+ * for as long as its head stayed, and the queue waits for CLEAN.
+ */
+export function onlySupersededFailures(checks, runs) {
+  const moot = supersededSuites(runs)
+  return checks.every((c) =>
+    c.kind === 'status' ? c.state === 'success' : (c.status === 'completed' && OK_CONCLUSIONS.has(c.conclusion)) || moot.has(c.suiteId),
+  )
 }
 
 /** A rerun GitHub refused, as attention: the run, and what GitHub said. */

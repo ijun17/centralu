@@ -8,7 +8,7 @@ import { fakeExe, linkNode, rmFakeDir, windowsSystemEnv } from '../packages/agen
 import { ExternalApps, resultText, type AppCaller, type AppRef } from '../packages/agent-host/src/apps/external/runtime.js'
 import { SLOW } from './test-timing.js'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
-import { decideBefore, decideCi, emptyQueue, enqueue, noticeKey, dequeue, normalize } from '../.centralu/apps/project-board/queue.mjs'
+import { decideBefore, decideCi, emptyQueue, enqueue, noticeKey, dequeue, normalize, onlySupersededFailures } from '../.centralu/apps/project-board/queue.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
 import { evaluateChecks } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — plain .mjs of a Centralu app
@@ -116,6 +116,26 @@ describe('what the merge queue decides for one poll', () => {
       const later = decideCi({ item: fresh(first.patch), pr: openPr({ mergeStateStatus }), checks: GREEN(), defaultBranch: 'main', now: NOW + 31 * 60_000, ref })
       expect(later, mergeStateStatus).toMatchObject({ state: 'attention', reason: { kind: 'not-clean' } })
     }
+  })
+
+  it('merges a green UNSTABLE head when only a cancelled duplicate or an older run of the CI workflow did not pass (#1015)', () => {
+    const wf = (id: number, conclusion: string | null, created: string, suite: number) => ({ id, workflow_id: 7, check_suite_id: suite, status: conclusion ? 'completed' : 'in_progress', conclusion, created_at: created })
+    const job = (conclusion: string | null, suiteId: number) => ({ kind: 'run', name: 'verify', status: conclusion ? 'completed' : 'in_progress', conclusion, suiteId })
+    // #971: run 39008366931 passed, its duplicate 39008366932 was cancelled, both on one head
+    const runs = [wf(931, 'success', '2026-10-17T05:00:00Z', 51), wf(932, 'cancelled', '2026-10-17T05:00:02Z', 52)]
+    expect(onlySupersededFailures([job('success', 51), job('cancelled', 52)], runs)).toBe(true)
+    // An older run that failed, made moot by a newer success
+    expect(onlySupersededFailures([job('failure', 50), job('success', 51)], [wf(930, 'failure', '2026-10-17T04:00:00Z', 50), runs[0]])).toBe(true)
+    // Not moot: a newer failure, a run still going, no success at all, a check of another workflow, a failed status
+    expect(onlySupersededFailures([job('success', 51), job('failure', 53)], [runs[0], wf(933, 'failure', '2026-10-17T06:00:00Z', 53)])).toBe(false)
+    expect(onlySupersededFailures([job('success', 51), job(null, 53)], [runs[0], wf(933, null, '2026-10-17T06:00:00Z', 53)])).toBe(false)
+    expect(onlySupersededFailures([job('cancelled', 52)], [runs[1]])).toBe(false)
+    expect(onlySupersededFailures([job('success', 51), job('failure', 70)], runs)).toBe(false)
+    expect(onlySupersededFailures([job('success', 51), { kind: 'status', name: 'x', state: 'failure' }], runs)).toBe(false)
+    // decideCi: UNSTABLE merges only with that proof
+    const unstable = openPr({ mergeStateStatus: 'UNSTABLE' })
+    expect(decideCi({ item: fresh(), pr: unstable, checks: GREEN(), defaultBranch: 'main', supersededOnly: true, now: NOW, ref })).toMatchObject({ action: { type: 'merge' } })
+    expect(decideCi({ item: fresh(), pr: unstable, checks: GREEN(), defaultBranch: 'main', supersededOnly: false, now: NOW, ref })).toMatchObject({ state: 'waiting' })
   })
 
   it('says when a required check never reports, once nothing else is running (a renamed job, a path-filtered workflow)', () => {
@@ -812,6 +832,35 @@ describe('the project board app: the merge queue', { timeout: 60_000 * SLOW }, (
     runtime(ghState({ checks: { [SHA]: [...green(), release] } }))
     await call('queue_merge', { pr: 77, owner: 'tester' })
     await until((x) => stateOf(x) === 'merged', 'the merge')
+  })
+
+  it('lands a green PR GitHub calls UNSTABLE because of a cancelled duplicate run on its head, and waits when something else failed (#1015)', async () => {
+    const twoRuns = (extra: Gh = {}) =>
+      ghState({
+        prs: { '77': ghPr(77, { mergeStateStatus: 'UNSTABLE' }) },
+        // #971: the run that passed and its cancelled duplicate, started after the base moved to main
+        runs: { [SHA]: [ghRun('success', 1, SHA, { id: 931, workflow_id: 7, check_suite_id: 5000 }), ghRun('cancelled', 1, SHA, { id: 932, workflow_id: 7, check_suite_id: 5001, created_at: '2026-10-17T08:00:02Z' })] },
+        checks: { [SHA]: [...green('2026-10-17T08:01:00Z'), { ...ghCheck('verify', 'cancelled', 21, '2026-10-17T08:00:30Z'), check_suite: { id: 5001 } }, { ...ghCheck('windows tests', 'cancelled', 22, '2026-10-17T08:00:30Z'), check_suite: { id: 5001 } }] },
+        ...extra,
+      })
+    runtime(twoRuns())
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'merged', 'the merge')
+    expect(writes().filter((w) => w[0] === 'merge')[0]![2]).toEqual(expect.arrayContaining(['--match-head-commit', SHA]))
+    // Nothing rerun: the duplicate's checks are moot, not a reason to spend a run
+    expect(writes().filter((w) => w[0].startsWith('rerun'))).toEqual([])
+    await rt!.dispose()
+    rt = null
+    // A failed check that is not the duplicate's (another workflow's) still keeps it waiting
+    rmFakeDir(join(root, 'data'))
+    mkdirSync(join(root, 'data'))
+    const base = twoRuns()
+    runtime({ ...base, checks: { [SHA]: [...base.checks[SHA], { ...ghCheck('lint pr title', 'failure', 31, '2026-10-17T08:02:00Z'), check_suite: { id: 7000 } }] } })
+    await call('queue_merge', { pr: 77, owner: 'tester' })
+    await until((x) => stateOf(x) === 'waiting', 'it to wait')
+    await morePolls(3)
+    expect(writes().filter((w) => w[0] === 'merge')).toEqual([])
+    expect(stateOf((await call('merge_queue')).data)).toBe('waiting')
   })
 
   it('keeps the queue in the data folder across a restart of the app, and carries on', async () => {

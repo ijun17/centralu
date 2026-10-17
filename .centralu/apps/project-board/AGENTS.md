@@ -185,7 +185,11 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
   for 15 minutes, or a required check never reported for 20 minutes while nothing else runs (a renamed
   job, a path-filtered workflow) → attention. A head that moved starts over (reruns, required set,
   clocks, attention). Green and **CLEAN only** (an unattended queue is strict: UNSTABLE, HAS_HOOKS and
-  UNKNOWN wait, and after 30 minutes → attention) → every open lower must be inside the top's head
+  UNKNOWN wait, and after 30 minutes → attention; one exception, #1015: UNSTABLE when every check on
+  the head passed or belongs to a run of a CI workflow that a successful run on the same head made
+  moot, cancelled or older, and every commit status succeeded, as a cancelled duplicate pull_request
+  run left #971 UNSTABLE for good; `onlySupersededFailures`. Landed as usual, nothing rerun: a rerun
+  of the duplicate would spend a whole CI run to change nothing) → every open lower must be inside the top's head
   (compare), then squash with `--match-head-commit` on the head read, subject `Title (#N)` without
   attribution lines (`squashMessage`, as `merge_when_green`). Only GitHub's word that it merged counts:
   `gh pr merge` can exit 0 under GitHub's own merge queue without merging (→ attention, not asked again
