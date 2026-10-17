@@ -112,6 +112,9 @@ const LONG_CALLS = new Set<string>([
  */
 const APP_CALL_TIMEOUT_MS = 15 * 60_000
 
+/** An endpoint in the one spelling `URL` gives it, so two spellings of one address compare equal */
+const endpointUrl = (url: string): string => new URL(url).toString()
+
 export class RpcClient {
   private ws: WebSocket | null = null
   /** Every call waiting for the host, in the order they were made (the order unsent frames go out in) */
@@ -165,7 +168,14 @@ export class RpcClient {
    * port). Retrying the old address forever would leave the app stuck at 'disconnected' — a
    * defect confirmed by measurement.
    */
-  updateEndpoint(url: string, token: string): void {
+  updateEndpoint(next: string, token: string): void {
+    /*
+     * The same endpoint is no change (#1009 review): compared as one spelling, since `ws://127.0.0.1:N` and
+     * `ws://127.0.0.1:N/` are one address. In keeper mode the shell repeats `ready` whenever the keeper's view changes
+     * (an agent's turn flips `busy`), and read as a new address each one dropped the socket, rejected the calls in
+     * flight and forced a resync.
+     */
+    const url = endpointUrl(next)
     if (this.opts.url === url && this.opts.token === token) return
     this.opts = { ...this.opts, url, token }
     this.attempt = 0
@@ -207,6 +217,7 @@ export class RpcClient {
   }
 
   constructor(private opts: RpcClientOptions) {
+    this.opts = { ...opts, url: endpointUrl(opts.url) }
     this.WS = opts.WebSocketImpl ?? WebSocket
   }
 

@@ -24,7 +24,7 @@ vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: vi.fn() }))
 vi.mock('@tauri-apps/plugin-notification', () => ({ isPermissionGranted: vi.fn(), requestPermission: vi.fn(), sendNotification: vi.fn() }))
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }))
 
-const { createTauriPlatform, listenForQuit } = await import('./index.js')
+const { createTauriPlatform, listenForQuit, quitApp } = await import('./index.js')
 
 /**
  * The desktop at the moment the host fails to come up (#184). Checks only the seam with the
@@ -57,6 +57,15 @@ describe('the receiver for a quit request', () => {
     setAsker(null)
     quit({ payload: null })
     expect(invoke).toHaveBeenCalledWith('quit_app')
+  })
+})
+
+describe('quitting (#1009 review)', () => {
+  it('a quit the shell refuses is an Error carrying its reason', async () => {
+    invoke.mockRejectedValue('quit refused')
+    const err = await quitApp().catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).message).toBe('quit refused')
   })
 })
 
@@ -163,8 +172,10 @@ describe('a host restart during startup (#972 item 1)', () => {
     try {
       const p = await createTauriPlatform()
       try {
-        expect(urls[0]).toBe('ws://127.0.0.1:1/')
-        expect(urls.at(-1)).toBe('ws://127.0.0.1:2')
+        expect(urls).toEqual(['ws://127.0.0.1:1/', 'ws://127.0.0.1:2/'])
+        // The shell repeats ready for the same host (keeper mode, on every change of its view): no new socket
+        fire('host-status', { state: 'ready', port: 2, token: 'u' })
+        expect(urls).toEqual(['ws://127.0.0.1:1/', 'ws://127.0.0.1:2/'])
       } finally {
         await p.dispose()
       }
