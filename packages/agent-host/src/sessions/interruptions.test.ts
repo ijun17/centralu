@@ -9,6 +9,7 @@ import { INTERRUPTED_BY_TOOL, type AgentAdapter, type AgentProcess, type CreateS
 import { Store } from '../dev-services/store.js'
 import { isNetworkFailure, RECONNECTING_FLAG_MS } from './interruptions.js'
 import { SessionManager, type AgentProcessHost } from './manager.js'
+import { eventually } from '../../../../tooling/test-timing.js'
 
 /**
  * Sessions stopped by a network outage or a quit (#698). On 2026-10-15 the internet dropped twice while several child
@@ -147,14 +148,6 @@ function host() {
   return { mgr, claude }
 }
 
-const until = async (ok: () => boolean, ms = 2000) => {
-  const end = Date.now() + ms
-  while (!ok()) {
-    if (Date.now() > end) throw new Error('timed out')
-    await new Promise((r) => setTimeout(r, 5))
-  }
-}
-
 async function parentAndChild(h: ReturnType<typeof host>) {
   const project = await h.mgr.addProject(root)
   h.mgr.setProjectTrusted(project.id, true)
@@ -182,7 +175,7 @@ describe('a turn the network stopped (#698)', () => {
     const kid = a.claude.handles.get(child)!
     // The work it was given finished and was reported; the mark is gone
     kid.answer('waiting on pnpm verify with a Monitor')
-    await until(() => reportsTo(parent, child).length === 1)
+    await eventually(() => reportsTo(parent, child).length === 1)
     expect(store.listReportMarks()).toEqual([])
 
     kid.ownTurnFails(ECONNREFUSED)
@@ -192,7 +185,7 @@ describe('a turn the network stopped (#698)', () => {
     expect(types.lastIndexOf('interruption')).toBeGreaterThan(types.lastIndexOf('error'))
     expect(interruptions(child).at(-1)).toMatchObject({ interruption: { reason: 'network' } })
 
-    await until(() => reportsTo(parent, child).length === 2)
+    await eventually(() => reportsTo(parent, child).length === 2)
     const told = reportsTo(parent, child)[1]!
     expect(told).toContain('stopped before finishing: a network error ended its turn')
     expect(told).toContain('ECONNREFUSED')
@@ -206,7 +199,7 @@ describe('a turn the network stopped (#698)', () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.emit({ type: 'error', sessionId: child, error: { code: 'internal', message: ECONNREFUSED, retryable: true } })
-    await until(() => reportsTo(parent, child).length === 1)
+    await eventually(() => reportsTo(parent, child).length === 1)
     expect(reportsTo(parent, child)[0]).toContain('stopped before finishing: a network error ended its turn')
     expect(reportsTo(parent, child)[0]).not.toContain('The assigned work failed')
   })
@@ -230,7 +223,7 @@ describe('a turn the network stopped (#698)', () => {
     const { parent, child } = await parentAndChild(a)
     const kid = a.claude.handles.get(child)!
     kid.answer('done')
-    await until(() => reportsTo(parent, child).length === 1)
+    await eventually(() => reportsTo(parent, child).length === 1)
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
     // Put back after this test, or every later test in the file writes its errors nowhere (#845)
     onTestFinished(() => log.mockRestore())
@@ -249,9 +242,9 @@ async function waitingParent(h: ReturnType<typeof host>) {
   store.setProjectConsent(project.id, project.id, 'agents')
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
   const call = h.mgr.startAgent(parent, { task: 'fix the sidebar indent', wait: true })
-  await until(() => h.claude.handles.size === 2)
+  await eventually(() => h.claude.handles.size === 2)
   const child = [...h.claude.handles.keys()].find((id) => id !== parent)!
-  await until(() => (h.claude.handles.get(child)?.sent.length ?? 0) > 0)
+  await eventually(() => (h.claude.handles.get(child)?.sent.length ?? 0) > 0)
   return { parent, child, call }
 }
 
@@ -306,7 +299,7 @@ describe('a turn its tool interrupted (#698)', () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.emit({ type: 'state_change', sessionId: child, state: 'waiting_input', reason: INTERRUPTED_BY_TOOL })
-    await until(() => reportsTo(parent, child).length === 1)
+    await eventually(() => reportsTo(parent, child).length === 1)
     expect(reportsTo(parent, child)[0]).toContain('stopped before finishing: its tool interrupted the turn')
     // Nothing to do with the network: no waiting for it
     expect(reportsTo(parent, child)[0]).toContain('send it a message to go on, the same one')
@@ -364,7 +357,7 @@ describe('a turn a quit stopped (#698)', () => {
     await a.mgr.trashSession(gone)
 
     const b = host()
-    await until(() => reportsTo(parent, child).length === 1)
+    await eventually(() => reportsTo(parent, child).length === 1)
     expect(reportsTo(parent, child)[0]).toContain('stopped before finishing: Centralu quit or restarted during its turn')
     expect(reportsTo(parent, child)[0]).not.toContain('network')
     expect(info(b, orphan.sessionId).interruption).toMatchObject({ reason: 'quit' })
@@ -403,7 +396,7 @@ describe('a turn a quit stopped (#698)', () => {
     // The report is owed to a session deleted since; the child was started by the parent
     store.setReportMark(child, 'a-session-deleted-since')
     host()
-    await until(() => reportsTo(parent, child).length === 1)
+    await eventually(() => reportsTo(parent, child).length === 1)
     expect(reportsTo(parent, child)[0]).toContain('Centralu quit or restarted during its turn')
   })
 
@@ -428,9 +421,9 @@ describe('the session a report names', () => {
     expect(listed).toContain('(resumed session)')
     const kid = a.claude.handles.get(child)!
     kid.answer('done')
-    await until(() => reportsTo(parent, child).length === 1)
+    await eventually(() => reportsTo(parent, child).length === 1)
     kid.ownTurnFails(ECONNREFUSED)
-    await until(() => reportsTo(parent, child).length === 2)
+    await eventually(() => reportsTo(parent, child).length === 2)
     for (const report of reportsTo(parent, child)) {
       expect(report).not.toContain('This session is being continued')
       expect(report).toContain('(resumed session)')

@@ -18,7 +18,7 @@ import { SLOW } from '../../../../tooling/test-timing.js'
 
 const unix = process.platform !== 'win32'
 // Real process trees: a node start costs seconds on a loaded machine, and every wait below is bounded on its own
-vi.setConfig({ testTimeout: 30_000 })
+vi.setConfig({ testTimeout: 30_000 * SLOW })
 const started: number[] = []
 afterEach(() => killLeftovers(started))
 
