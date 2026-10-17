@@ -4,7 +4,7 @@ use super::*;
 use crate::host_proc::{backoff, MAX_RESTARTS, STABLE_UPTIME};
 use crate::keeper::{client, exe as keeper_exe, source::BuildSource, KeeperView};
 use centralu_keeper_core::start_plan::{Shell, StartMode};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -35,6 +35,32 @@ mod tests {
         assert!(!keeper_same_build(Some(&build("bbbbbbb")), &app));
         assert!(!keeper_same_build(None, &app));
     }
+
+    /// The UI used to be told only when one of seven fields of the keeper's view changed, named one
+    /// by one, so a field added to `HostBuild` but not to that list never reached it. Now any change
+    /// to what the UI is given counts.
+    #[test]
+    fn the_ui_hears_of_any_change_to_the_build_and_of_nothing_else() {
+        let build = HostBuild { mode: "keeper", busy: Some(false), ..Default::default() };
+        let before = (HostStatus::Starting, build.clone());
+        assert!(is_news(None, &HostStatus::Starting, &build), "the first view after an attach");
+        assert!(!is_news(Some(&before), &HostStatus::Starting, &build));
+        assert!(is_news(Some(&before), &HostStatus::Restarting { attempt: 1 }, &build));
+        for changed in [
+            HostBuild { busy: Some(true), ..build.clone() },
+            HostBuild { relaunched: true, ..build.clone() },
+            HostBuild { swap_to_this_build: Some(true), ..build.clone() },
+            HostBuild { keeper_same_build: Some(false), ..build.clone() },
+        ] {
+            assert!(is_news(Some(&before), &HostStatus::Starting, &changed), "{changed:?}");
+        }
+    }
+}
+
+/// Whether the UI hears of a view: the first after an attach, or one whose status or build differs
+/// from what the UI was last told.
+fn is_news(before: Option<&(HostStatus, HostBuild)>, status: &HostStatus, after: &HostBuild) -> bool {
+    before.is_none_or(|(was, built)| was != status || built != after)
 }
 
 #[derive(Default)]
@@ -42,6 +68,9 @@ struct LinkState {
     info: Option<HostInfo>,
     error: Option<String>,
     view: Option<KeeperView>,
+    /// The status and the build the UI was last told from a view (`on_view`). None until the first
+    /// view of an attachment: losing the keeper ends with `Restarting` or `Failed`, sent past this.
+    told: Option<(HostStatus, HostBuild)>,
     same_build: Option<bool>,
     /// The keeper said this window is the one an announced relaunch started (#352). Kept for
     /// the window's life: a later re-attach (the keeper restarted) does not undo it.
@@ -59,6 +88,8 @@ pub struct KeeperLink {
     /// What the window knew when it started, for asking the start plan again on every attempt.
     facts: Facts,
     dev: bool,
+    /// Whether the data folder is the dev one: a dev plan, or `CC_DEV=1` in the environment.
+    dev_data: bool,
     data: PathBuf,
     sock: PathBuf,
     host_dir: Option<PathBuf>,
@@ -88,10 +119,12 @@ impl KeeperLink {
             ),
             None => BuildSource::dev(),
         };
-        let data = crate::keeper::data_dir_with(dev || std::env::var("CC_DEV").as_deref() == Ok("1"));
+        let dev_data = dev || std::env::var("CC_DEV").as_deref() == Ok("1");
+        let data = crate::keeper::data_dir_with(dev_data);
         KeeperLink {
             facts,
             dev,
+            dev_data,
             sock: crate::keeper::socket_path(&data),
             data,
             host_dir,
@@ -118,6 +151,11 @@ impl KeeperLink {
 
     pub fn build(&self) -> HostBuild {
         let Ok(st) = self.state.lock() else { return HostBuild::default() };
+        self.build_of(&st)
+    }
+
+    /// What `build` says for the state `st`.
+    fn build_of(&self, st: &LinkState) -> HostBuild {
         HostBuild {
             mode: "keeper",
             app: Some(self.app_build.clone()),
@@ -157,15 +195,14 @@ impl KeeperLink {
     }
 
     pub fn announce_relaunch(&self) -> Result<u64, String> {
-        let v = client::request(&self.sock, &json!({ "op": "relaunching" }), Duration::from_secs(5))?;
-        Ok(v.get("graceSecs").and_then(Value::as_u64).unwrap_or(0))
+        client::relaunching(&self.sock)
     }
 
     /// Starts a keeper the way the plan says (`mode`, never `Direct` or `Attach` here).
     fn launch_keeper(&self, mode: StartMode) -> std::io::Result<()> {
         let me = std::env::current_exe()?;
         // The legacy folder moves before this creates the new one (keeper::prepare_default_dir).
-        let _ = crate::keeper::prepare_default_dir(&self.data, self.dev || std::env::var("CC_DEV").as_deref() == Ok("1"));
+        let _ = crate::keeper::prepare_default_dir(&self.data, self.dev_data);
         let _ = std::fs::create_dir_all(&self.data);
         let mode = match mode {
             StartMode::ThroughShell { allow_unpinned } => {
@@ -351,6 +388,7 @@ impl KeeperLink {
             st.attached = None;
             st.info = None;
             st.view = None;
+            st.told = None;
         }
         Ok(())
     }
@@ -368,19 +406,6 @@ impl KeeperLink {
         let status = view.status.clone();
         let changed = {
             let Ok(mut st) = self.state.lock() else { return };
-            let changed = st
-                .view
-                .as_ref()
-                .map(|v| {
-                    v.status != view.status
-                        || v.keeper != view.keeper
-                        || v.source != view.source
-                        || v.background != view.background
-                        || v.swap != view.swap
-                        || v.keeps_agents != view.keeps_agents
-                        || v.busy != view.busy
-                })
-                .unwrap_or(true);
             match &status {
                 HostStatus::Ready(info) => {
                     st.info = Some(info.clone());
@@ -393,11 +418,18 @@ impl KeeperLink {
                 _ => st.info = None,
             }
             st.view = Some(view);
-            changed
+            // Compared with what the UI was last told, whole: a field added to `HostBuild` is noticed
+            // without being named here, and so is a change made between views (`shell`, `relaunched`).
+            let after = self.build_of(&st);
+            let news = is_news(st.told.as_ref(), &status, &after);
+            if news {
+                st.told = Some((status.clone(), after.clone()));
+            }
+            news.then_some(after)
         };
-        if changed {
+        if let Some(build) = changed {
             emit(app, &status);
-            let _ = app.emit("host-build", self.build());
+            let _ = app.emit("host-build", build);
         }
     }
 
@@ -415,10 +447,7 @@ impl KeeperLink {
         if let Ok(mut st) = self.state.lock() {
             st.error = None;
         }
-        client::request(&self.sock, &json!({ "op": "restart" }), Duration::from_secs(5))
-            .ok()
-            .and_then(|v| v.get("started").and_then(Value::as_bool))
-            .unwrap_or(false)
+        client::restart_host(&self.sock).unwrap_or(false)
     }
 
     /// Switches to this window's build. The keeper is handed this build's keeper executable, inside
@@ -438,28 +467,22 @@ impl KeeperLink {
                 source.host_dir = Some(host.to_string_lossy().to_string());
             }
         }
-        let mut req = json!({ "op": "switch", "source": source });
-        if let Some(exe) = exe.filter(|_| !self.dev) {
-            req["keeper"] = json!({ "exe": exe });
-        }
-        client::request(&self.sock, &req, Duration::from_secs(10)).map(|_| ())
+        client::switch(&self.sock, &source, exe.as_deref().filter(|_| !self.dev))
     }
 
     pub fn background(&self) -> Result<bool, String> {
-        let v = client::request(&self.sock, &json!({ "op": "settings" }), Duration::from_secs(5))?;
-        Ok(v.get("background").and_then(Value::as_bool).unwrap_or(false))
+        client::background(&self.sock)
     }
 
     pub fn set_background(&self, on: bool) -> Result<bool, String> {
-        let v = client::request(&self.sock, &json!({ "op": "set_background", "on": on }), Duration::from_secs(5))?;
-        Ok(v.get("background").and_then(Value::as_bool).unwrap_or(on))
+        client::set_background(&self.sock, on)
     }
 
     pub fn stop(&self) -> Result<(), String> {
         if let Ok(mut st) = self.state.lock() {
             st.shutting_down = true;
         }
-        client::request(&self.sock, &json!({ "op": "stop" }), Duration::from_secs(5)).map(|_| ())
+        client::stop(&self.sock)
     }
 
     /// Stops the keeper and everything it holds, like `stop`, but stays: the attach loop (`run`)
@@ -467,7 +490,7 @@ impl KeeperLink {
     /// window's own executable, with this window's host. The keeper removes its socket before it
     /// stops anything, so nothing reaches it on its way out, and the next one waits for its lock.
     pub fn restart_keeper(&self) -> Result<(), String> {
-        client::request(&self.sock, &json!({ "op": "stop" }), Duration::from_secs(5)).map(|_| ())
+        client::stop(&self.sock)
     }
 
     /// Detaches without asking for anything: the keeper decides what that means.

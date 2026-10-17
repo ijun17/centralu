@@ -38,7 +38,7 @@ use launch::direct_launcher;
 use relaunch::{bundle_version, relaunch_decision};
 
 /// What the UI is told about the builds involved (`host_build`, and the `host-build` event).
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostBuild {
     /// `keeper` or `direct`.
@@ -170,7 +170,7 @@ impl Supervisor {
     pub fn info(&self) -> Option<HostInfo> {
         match self.choice() {
             #[cfg(unix)]
-            Choice::Keeper => self.link().and_then(|l| l.info()),
+            Choice::Keeper => self.link().ok().and_then(|l| l.info()),
             _ => self.direct.info(),
         }
     }
@@ -178,7 +178,7 @@ impl Supervisor {
     pub fn last_error(&self) -> Option<String> {
         match self.choice() {
             #[cfg(unix)]
-            Choice::Keeper => self.link().and_then(|l| l.last_error()),
+            Choice::Keeper => self.link().ok().and_then(|l| l.last_error()),
             _ => self.direct.last_error(),
         }
     }
@@ -208,7 +208,7 @@ impl Supervisor {
     pub fn restart(&self, app: AppHandle) -> bool {
         match self.choice() {
             #[cfg(unix)]
-            Choice::Keeper => self.link().map(|l| l.restart(app)).unwrap_or(false),
+            Choice::Keeper => self.link().ok().map(|l| l.restart(app)).unwrap_or(false),
             _ => {
                 let start = start_plan(&app);
                 self.direct.restart(Arc::new(TauriSink(app)), direct_launcher(&start))
@@ -226,7 +226,7 @@ impl Supervisor {
         match self.choice() {
             #[cfg(unix)]
             Choice::Keeper => {
-                if let Some(l) = self.link() {
+                if let Ok(l) = self.link() {
                     l.detach();
                 }
             }
@@ -237,7 +237,7 @@ impl Supervisor {
     pub fn build(&self) -> HostBuild {
         match self.choice() {
             #[cfg(unix)]
-            Choice::Keeper => self.link().map(|l| l.build()).unwrap_or_default(),
+            Choice::Keeper => self.link().ok().map(|l| l.build()).unwrap_or_default(),
             _ => HostBuild { mode: "direct", ..Default::default() },
         }
     }
@@ -247,7 +247,7 @@ impl Supervisor {
     pub fn switch_build(&self) -> Result<(), String> {
         match self.choice() {
             #[cfg(unix)]
-            Choice::Keeper => self.link().ok_or("not attached to a keeper")?.switch_build(),
+            Choice::Keeper => self.link()?.switch_build(),
             _ => Err("the host is not held by a keeper in this build".into()),
         }
     }
@@ -255,7 +255,7 @@ impl Supervisor {
     pub fn background(&self) -> Result<bool, String> {
         match self.choice() {
             #[cfg(unix)]
-            Choice::Keeper => self.link().ok_or("not attached to a keeper")?.background(),
+            Choice::Keeper => self.link()?.background(),
             _ => Err("background mode needs the keeper, which this build does not use".into()),
         }
     }
@@ -264,7 +264,7 @@ impl Supervisor {
     pub fn set_background(&self, on: bool) -> Result<bool, String> {
         match self.choice() {
             #[cfg(unix)]
-            Choice::Keeper => self.link().ok_or("not attached to a keeper")?.set_background(on),
+            Choice::Keeper => self.link()?.set_background(on),
             _ => Err("background mode needs the keeper, which this build does not use".into()),
         }
     }
@@ -275,7 +275,7 @@ impl Supervisor {
     pub fn relaunch_info(&self) -> RelaunchInfo {
         match self.choice() {
             #[cfg(unix)]
-            Choice::Keeper => self.link().map(|l| l.relaunch_info()).unwrap_or_else(|| RelaunchInfo {
+            Choice::Keeper => self.link().ok().map(|l| l.relaunch_info()).unwrap_or_else(|| RelaunchInfo {
                 reason: Some("not attached to the background keeper".into()),
                 ..Default::default()
             }),
@@ -295,7 +295,7 @@ impl Supervisor {
     pub fn announce_relaunch(&self) -> Result<u64, String> {
         match self.choice() {
             #[cfg(unix)]
-            Choice::Keeper => self.link().ok_or("not attached to a keeper")?.announce_relaunch(),
+            Choice::Keeper => self.link()?.announce_relaunch(),
             _ => Err("the host is not held by a keeper in this build".into()),
         }
     }
@@ -306,7 +306,7 @@ impl Supervisor {
     pub fn stop_agents(&self) -> Result<(), String> {
         match self.choice() {
             #[cfg(unix)]
-            Choice::Keeper => self.link().ok_or("not attached to a keeper")?.stop(),
+            Choice::Keeper => self.link()?.stop(),
             _ => Ok(()),
         }
     }
@@ -318,14 +318,15 @@ impl Supervisor {
     pub fn restart_keeper(&self) -> Result<(), String> {
         match self.choice() {
             #[cfg(unix)]
-            Choice::Keeper => self.link().ok_or("not attached to a keeper")?.restart_keeper(),
+            Choice::Keeper => self.link()?.restart_keeper(),
             _ => Err("the host is not held by a keeper in this build".into()),
         }
     }
 
+    /// The keeper link, or the error every request through it gives before the window is attached.
     #[cfg(unix)]
-    fn link(&self) -> Option<Arc<link::KeeperLink>> {
-        self.keeper.lock().ok()?.clone()
+    fn link(&self) -> Result<Arc<link::KeeperLink>, String> {
+        self.keeper.lock().ok().and_then(|k| k.clone()).ok_or_else(|| "not attached to a keeper".to_string())
     }
 }
 
