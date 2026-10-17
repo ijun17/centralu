@@ -125,7 +125,7 @@ centralu/
 │        ├─ sessions/           # SessionManager(manager.ts)와 거기서 떼어 낸 부분(#428): child-ownership, delegation-flow(start_agent는 start-agent-flow, 매니저에서 닿는 것은 delegation-host), ask-project-flow, handoff-flow, handoff-record, external-conversations, session-record, tool-queries, app-sessions, app-messages, session-trash, host-cards, card-rest, delegated-cards, interruptions, sleep, turn-answer, linked-reports, orchestrator-seat, restart-policy, worktree-sessions, transcript-view, orchestrator-proposals, queued-requests, routed-cards, handoff-children, child-reports, interruption-watch, launch-records, merge-checks, project-creation, updates-asked, project-consents, ui-preferences, session-app-wiring, session-tools, handoff-notes; 세션 앱(session-apps, app-access, app-agents, app-builder, app-guide); 오케스트레이터 도구의 실행부(orchestrator-tools)와 거기서 떼어 낸 부분(#850): tool-definitions, tool-seats, tool-answers, tool-profiles
 │        ├─ apps/external/      # 외부 앱: 매니페스트, 찾기, 실행, 브로커, capability (apps.ko.md)
 │        ├─ views/              # 앱 뷰: 뷰 호스트, 그 CSP, 프록시 페이지
-│        ├─ links/              # 링크된 기기(#82): 링크, 원격 클라이언트, ssh로 하는 설치와 업데이트
+│        ├─ links/              # 링크된 기기(#82): links.ts가 문(다시 내보내기). 기기 하나의 연결과 작업, 링크 목록, 원격 클라이언트, ssh로 하는 설치와 업데이트
 │        ├─ dev-services/       # 이름과 달리 prod 경로다(agent-host.ko.md §5): git, fs, store(sqlite), 감시자,
 │        │                      #   터미널과 명령
 │        │  └─ store/           # Store(store.ts)를 이루는 부분. Store는 파일을 열고 마이그레이션을 돌리며 호출을 넘겨 준다

@@ -1607,7 +1607,8 @@ cmd.exe는 그때 이미 줄 전체를 읽었고, Ctrl+C로 배치 작업이 끝
 |---|---|---|
 | 레지스트리 | `stored.ts`, store v46 `linked_machines` | 사람이 링크한 기기: id, 이름, ssh 대상, 원격 셸, 숫자를 접는 `slot`, 받아들인 버전 쌍 |
 | 전송 | `tunnel.ts` (`SshTunnel`) | ssh로 원격에 연결 줄을 묻고, ssh 로컬 포워드를 잡고 있는다 |
-| 링크 | `links.ts` (`LinkedMachine`) | 기기마다 하나: 전송, 버전 확인, 클라이언트, 재시도 간격, 상태, 숨기는 세션 집합, 미러 갱신 |
+| 링크 | `linked-machine-connection.ts`, `linked-machine-ops.ts` (`LinkedMachine`) | 기기마다 하나: 전송, 버전 확인, 클라이언트, 재시도 간격, 상태, 숨기는 세션 집합, 미러 갱신. 그리고 사람이 그 기기에 시키는 일(설치, 업데이트, 되돌리기, 제거, 자동 시작, 활동) |
+| 링크 목록 | `links-registry.ts` (`Links`), `link-deps.ts`. `links.ts`가 다시 내보낸다 | 이 허브의 모든 링크. 레지스트리와 함께 더하고 빼며, ssh 호스트 목록과 probe도 여기 있다 |
 | 클라이언트 | `remote-client.ts` | 허브가 원격 호스트에 거는 WebSocket: hello, 커서와 에포크, 호출, 이벤트, 터미널 프레임 |
 | 라우터 | `router.ts`, `routes.ts` | `HostServer.onRpc` 앞에서: id가 가리키는 기기로 호출을 보내고, 목록을 합치고, 나머지는 로컬로 답한다 |
 | 한정자 | `qualifier.ts`, `machine-ids.ts` | 들어올 때 `<machine>.<id>`를 붙이고 나갈 때 뗀다. 숫자는 slot마다 접는다 |
