@@ -9,17 +9,19 @@ import { isNewerVersion, releaseOf, type MachineSide, type MachineVersions } fro
  *     the remote over ssh); nothing waits for the person to answer.
  *   - A dev build (run from source, not from npm) has no "newer".
  *   - A local build (`<base>.local.N`) is compared as its base release: the remote at `<base>` is
- *     the version the hub installs there, so it is not "older" than the hub.
+ *     the version the hub installs there, so it is not "older" than the hub. On either side: a remote
+ *     running a dev build of the hub's release (`pnpm remote-dev`, #1036) does not make the hub "older".
  *   - Releases of two channels (a beta and a stable) are not ranked against each other.
  */
 export function compareVersions(hub: MachineSide, remote: MachineSide, accepted: boolean): MachineVersions {
   const compatible = hub.protocolVersion === remote.protocolVersion
   const hubRelease = releaseOf(hub.version)
-  const sameChannel = channel(hubRelease) === channel(remote.version)
+  const remoteRelease = releaseOf(remote.version)
+  const sameChannel = channel(hubRelease) === channel(remoteRelease)
   const dev = hub.dev || remote.dev
   let older: 'hub' | 'remote' | null = null
-  if (!dev && sameChannel && hubRelease !== remote.version) {
-    older = isNewerVersion(hubRelease, remote.version) ? 'remote' : isNewerVersion(remote.version, hubRelease) ? 'hub' : null
+  if (!dev && sameChannel && hubRelease !== remoteRelease) {
+    older = isNewerVersion(hubRelease, remoteRelease) ? 'remote' : isNewerVersion(remoteRelease, hubRelease) ? 'hub' : null
   }
   return { hub, remote, older, compatible, sameChannel, accepted: compatible && accepted }
 }
