@@ -55,10 +55,16 @@ function git(cwd: string, args: string[], trust: GitTrust = {}): Promise<string>
  * filters included, trusted or not. Turning a clean filter off here would change what gets
  * committed (an LFS pointer, a git-crypt file), which is worse than not committing at all.
  * docs/security-boundaries.md lists this as a limit.
+ *
+ * It gets a bound of its own (`WRITE_TIMEOUT_MS`), not a read's 10 s (#980): a write runs the repository's hooks (a
+ * pre-commit type check, a pre-push test run) and the person's credential helper, which can wait on a sign-in.
  */
 function gitWrite(cwd: string, args: string[]): Promise<string> {
-  return runGit(cwd, args, { allowRepoPrograms: true })
+  return runGit(cwd, args, { allowRepoPrograms: true, timeout: WRITE_TIMEOUT_MS })
 }
+
+/** How long a write the person asked for may take before git is stopped: the clone's bound (`CLONE_TIMEOUT_MS`) */
+export const WRITE_TIMEOUT_MS = 10 * 60_000
 
 /** Every read function returns an empty result when this is not a git repository — so callers do not have to guard every time */
 async function isRepo(cwd: string): Promise<boolean> {
