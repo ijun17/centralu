@@ -29,7 +29,7 @@ describe("auto observes another caller's delegation without consuming it", () =>
   const start = async () => {
     const owner = await session('normal')
     const observer = await session('auto')
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const result = await w.mgr.startAgent(owner, { task: 'owner work', wait: false })
     if (!result.ok) throw new Error(result.error)
     return { owner, observer, child: result.sessionId }
@@ -114,7 +114,7 @@ describe("auto observes another caller's delegation without consuming it", () =>
     })
     await ownerReport(owner, child)
     const report = w.store
-      .loadMessages(owner, 20)
+      .messages.loadMessages(owner, 20)
       .find((m) => JSON.stringify(m.payload).includes('assigned work failed'))
     expect(report).toBeDefined()
     expect(await w.mgr.agentSession(owner, { sessionId: child, action: 'wait' })).toMatchObject({
@@ -165,7 +165,7 @@ describe("auto observes another caller's delegation without consuming it", () =>
       w.mgr.setProjectTrusted(w.target.id, true)
       const owner = await session('normal', w.target)
       const observer = await session('auto')
-      w.store.setProjectConsent(w.target.id, w.caller.id, 'delegate')
+      w.store.permissions.setProjectConsent(w.target.id, w.caller.id, 'delegate')
       const child = await session('normal')
       const asking = w.mgr.askProject(owner, { project: w.caller.id, session: child, task: 'other project work' })
       await w.until(() => !!handle(child)?.sent.length)
@@ -187,7 +187,7 @@ describe("auto observes another caller's delegation without consuming it", () =>
       w.mgr.setProjectTrusted(w.target.id, true)
       const owner = await session('normal', w.target)
       const observer = await session('auto')
-      w.store.setProjectConsent(w.target.id, w.caller.id, 'delegate')
+      w.store.permissions.setProjectConsent(w.target.id, w.caller.id, 'delegate')
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
       const child = await session('normal')
       const asking = w.mgr.askProject(owner, { project: w.caller.id, session: child, task: 'other project work' })
@@ -221,7 +221,7 @@ describe("auto observes another caller's delegation without consuming it", () =>
     w.mgr.setProjectTrusted(w.target.id, true)
     const owner = await session('normal', w.target)
     const observer = await session('auto')
-    w.store.setProjectConsent(w.target.id, w.caller.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.target.id, w.caller.id, 'delegate')
     const child = await session('normal')
     const asking = w.mgr.askProject(owner, { project: w.caller.id, session: child, task: 'other project work' })
     await w.until(() => !!handle(child)?.sent.length)
@@ -260,7 +260,7 @@ describe("auto observes another caller's delegation without consuming it", () =>
     expect(handle(owner).sent).toEqual([])
     // The observer is told, once, in its own session: its send had already returned "working"
     expect(reports(observer, child)).toHaveLength(1)
-    const notice = w.store.loadMessages(observer, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('was not delivered'))
+    const notice = w.store.messages.loadMessages(observer, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('was not delivered'))
     expect(notice).toHaveLength(1)
     expect(notice[0]).toContain('the note was refused')
     expect(await w.mgr.agentSession(observer, { sessionId: child, action: 'status' })).toMatchObject({ ok: false, error: expect.stringContaining('not delivered') })

@@ -111,7 +111,7 @@ export class SessionRecord {
       // A row is never started with an empty chunk — the "" delta codex sends at the end once created 1,853
       // empty rows
       if (!text) return null
-      const seq = this.host.store.nextSeq(m.id)
+      const seq = this.host.store.messages.nextSeq(m.id)
       const fresh = { seq, kind: streamKind, payload: { ...e } as Record<string, unknown>, text, written: 0, lastWrite: 0 }
       this.streams.set(m.id, fresh)
       this.flushStream(m.id, fresh)
@@ -123,11 +123,11 @@ export class SessionRecord {
     const kind = recordedRowKind(e)
     if (endsStreamRow(e)) this.closeStream(m.id)
     if (!kind) return null
-    const seq = this.host.store.nextSeq(m.id)
+    const seq = this.host.store.messages.nextSeq(m.id)
     // The record of an app view never carries the body (`appViewRecord`)
     const payload = e.type === 'app_view' ? appViewRecord(e) : e
     const msg: StoredMessage = { sessionId: m.id, seq, role: 'system', kind, payload, ts: Date.now() }
-    this.host.store.appendMessages([msg])
+    this.host.store.messages.appendMessages([msg])
     m.lastSeq = seq
     return seq
   }
@@ -158,7 +158,7 @@ export class SessionRecord {
       changed = true
     }
     if (!changed) return
-    this.host.store.upsertSession(m)
+    this.host.store.sessions.upsertSession(m)
     this.host.emit({
       type: 'settings_changed',
       sessionId: m.id,
@@ -186,7 +186,7 @@ export class SessionRecord {
     if (!m) return
     const step = e.step
     if (!keepsSubagentStep(step)) return
-    const stepSeq = this.host.store.appendSubagentMessage(m.id, e.parentCallId, { ...subagentStepRow(step), payload: step, ts: Date.now() })
+    const stepSeq = this.host.store.messages.appendSubagentMessage(m.id, e.parentCallId, { ...subagentStepRow(step), payload: step, ts: Date.now() })
     if (step.type === 'tool_call' || step.type === 'tool_result') this.host.observeCommit(step, m)
     this.host.emit({ ...e, stepSeq })
   }
@@ -194,7 +194,7 @@ export class SessionRecord {
   /** Writes an open stream row to disk exactly as it stands right now — indexed only once, when it closes
    * (#66) */
   flushStream(sessionId: string, run: { seq: number; kind: 'text' | 'reasoning'; payload: Record<string, unknown>; text: string; written: number; lastWrite: number }): void {
-    this.host.store.upsertMessageNoIndex({
+    this.host.store.messages.upsertMessageNoIndex({
       sessionId, seq: run.seq, role: 'assistant', kind: run.kind,
       payload: { ...run.payload, text: run.text }, ts: Date.now(),
     })
@@ -207,7 +207,7 @@ export class SessionRecord {
     const run = this.streams.get(sessionId)
     if (!run) return
     this.streams.delete(sessionId)
-    this.host.store.appendMessages([
+    this.host.store.messages.appendMessages([
       {
         sessionId, seq: run.seq, role: 'assistant', kind: run.kind,
         payload: { ...run.payload, text: run.text }, ts: Date.now(),
@@ -268,7 +268,7 @@ export class SessionRecord {
   repliesName(sessionId: string, written: string): boolean {
     const open = this.streams.get(sessionId)
     if (open?.kind === 'text' && mentions(open.text, written)) return true
-    return writtenForms(written).some((form) => this.host.store.replyTextsContaining(sessionId, form).some((text) => mentions(text, written)))
+    return writtenForms(written).some((form) => this.host.store.messages.replyTextsContaining(sessionId, form).some((text) => mentions(text, written)))
   }
 
   /**
@@ -277,11 +277,11 @@ export class SessionRecord {
    * A trashed session's cards can be opened in its read-only view, so this does not refuse the trash.
    */
   loadSubagentMessages(sessionId: string, parentCallId: string, afterSeq: number | undefined, limit: number): StoredMessage[] {
-    return this.host.store.loadSubagentMessages(sessionId, parentCallId, { afterSeq, limit })
+    return this.host.store.messages.loadSubagentMessages(sessionId, parentCallId, { afterSeq, limit })
   }
 
   async loadMessages(sessionId: string, limit: number, beforeSeq?: number): Promise<StoredMessage[]> {
-    const rows = this.host.store.loadMessages(sessionId, limit, beforeSeq)
+    const rows = this.host.store.messages.loadMessages(sessionId, limit, beforeSeq)
     /*
      * An image row stores only a path (#40) — the bytes are loaded back in when handing it to the
      * screen. If the file is gone (cleaned up by the 500MB cap, or deleted outside), the reason is

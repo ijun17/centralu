@@ -41,10 +41,10 @@ describe('report marks', () => {
   it('a mark is stored with it, and clearing takes both down', () => {
     own.markReport('child', 'caller')
     expect(own.awaitingReport.get('child')).toBe('caller')
-    expect(store.listReportMarks()).toEqual([{ sessionId: 'child', callerSessionId: 'caller' }])
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: 'child', callerSessionId: 'caller' }])
     own.clearReport('child')
     expect(own.awaitingReport.has('child')).toBe(false)
-    expect(store.listReportMarks()).toEqual([])
+    expect(store.children.listReportMarks()).toEqual([])
   })
 
   it('a pause is stored once per new task, and a new mark drops it', () => {
@@ -52,13 +52,13 @@ describe('report marks', () => {
     own.pauseReport('child', [{ id: 't1', description: 'dev server' }])
     own.pauseReport('child', [{ id: 't1', description: 'dev server' }, { id: 't2', description: 'watcher' }])
     expect(own.pausedReports.get('child')?.map((t) => t.id)).toEqual(['t1', 't2'])
-    expect(JSON.parse(store.appSetting(pausedReportKey('child'))!)).toEqual([
+    expect(JSON.parse(store.settings.appSetting(pausedReportKey('child'))!)).toEqual([
       { id: 't1', description: 'dev server' },
       { id: 't2', description: 'watcher' },
     ])
     own.markReport('child', 'caller')
     expect(own.pausedReports.has('child')).toBe(false)
-    expect(store.appSetting(pausedReportKey('child'))).toBeNull()
+    expect(store.settings.appSetting(pausedReportKey('child'))).toBeNull()
     expect(own.awaitingReport.get('child')).toBe('caller')
   })
 
@@ -66,7 +66,7 @@ describe('report marks', () => {
     own.adoptReport('child', 'caller', [{ id: 't1', description: 'd' }])
     expect(own.awaitingReport.get('child')).toBe('caller')
     expect(own.pausedReports.get('child')).toEqual([{ id: 't1', description: 'd' }])
-    expect(store.listReportMarks()).toEqual([])
+    expect(store.children.listReportMarks()).toEqual([])
   })
 
   it('unpausing ends the settle timer, and stopSettling ends them all', () => {
@@ -87,12 +87,12 @@ describe('delegated turns', () => {
     own.ownTurn('child', 'caller', false)
     const turnId = own.turnOwners.get('child')!.turnId
     own.markTurnTold('child', 'card-1')
-    expect(store.listDelegatedTurns()).toEqual([{ sessionId: 'child', callerSessionId: 'caller', told: ['card-1'], turnId }])
+    expect(store.children.listDelegatedTurns()).toEqual([{ sessionId: 'child', callerSessionId: 'caller', told: ['card-1'], turnId }])
     own.releaseTurn('child', 'someone-else')
     expect(own.turnOwners.has('child')).toBe(true)
     own.releaseTurn('child', 'caller')
     expect(own.turnOwners.has('child')).toBe(false)
-    expect(store.listDelegatedTurns()).toEqual([])
+    expect(store.children.listDelegatedTurns()).toEqual([])
   })
 })
 
@@ -102,11 +102,11 @@ describe('queued requests', () => {
     expect(own.enqueue(request('q2', 'busy', 'b'))).toBe(2)
     own.startDelivering('busy', 'q1')
     expect(own.delivering.get('busy')).toBe('q1')
-    expect(store.listQueuedRequests().find((r) => r.id === 'q1')?.deliveringAt).toEqual(expect.any(Number))
+    expect(store.children.listQueuedRequests().find((r) => r.id === 'q1')?.deliveringAt).toEqual(expect.any(Number))
     own.queuedTurnStarted('busy')
     expect(own.delivering.has('busy')).toBe(false)
     expect(own.queued.get('busy')?.map((r) => r.id)).toEqual(['q2'])
-    expect(store.listQueuedRequests().map((r) => r.id)).toEqual(['q2'])
+    expect(store.children.listQueuedRequests().map((r) => r.id)).toEqual(['q2'])
   })
 
   it('dropping the request being delivered ends its delivery; an empty queue goes', () => {
@@ -115,7 +115,7 @@ describe('queued requests', () => {
     expect(own.dropQueued((r) => r.callerSessionId === 'a').map((r) => r.id)).toEqual(['q1'])
     expect(own.delivering.has('busy')).toBe(false)
     expect(own.queued.has('busy')).toBe(false)
-    expect(store.listQueuedRequests()).toEqual([])
+    expect(store.children.listQueuedRequests()).toEqual([])
   })
 })
 
@@ -226,32 +226,32 @@ describe('restoring what the previous host left (#646, #676, #677)', () => {
   const kept = new Set(['kept-working', 'kept-paused', 'kept-idle'])
 
   it("keeps the report marks a kept session still owes, a paused one's too, and drops the rest from the store", () => {
-    for (const id of ['kept-working', 'kept-paused', 'kept-idle', 'gone-process']) store.setReportMark(id, 'caller')
-    store.setReportMark('kept-working-no-caller', 'nobody')
-    store.setAppSetting(pausedReportKey('kept-paused'), JSON.stringify([{ id: 't1', description: 'dev server' }]))
-    store.setAppSetting(pausedReportKey('gone-process'), '[]')
+    for (const id of ['kept-working', 'kept-paused', 'kept-idle', 'gone-process']) store.children.setReportMark(id, 'caller')
+    store.children.setReportMark('kept-working-no-caller', 'nobody')
+    store.settings.setAppSetting(pausedReportKey('kept-paused'), JSON.stringify([{ id: 't1', description: 'dev server' }]))
+    store.settings.setAppSetting(pausedReportKey('gone-process'), '[]')
     own.restoreReports(sessions, kept)
     expect([...own.awaitingReport].sort()).toEqual([['kept-paused', 'caller'], ['kept-working', 'caller']])
     expect(own.pausedReports.get('kept-paused')).toEqual([{ id: 't1', description: 'dev server' }])
-    expect(store.listReportMarks().map((r) => r.sessionId).sort()).toEqual(['kept-paused', 'kept-working'])
-    expect(store.appSetting(pausedReportKey('gone-process'))).toBeNull()
+    expect(store.children.listReportMarks().map((r) => r.sessionId).sort()).toEqual(['kept-paused', 'kept-working'])
+    expect(store.settings.appSetting(pausedReportKey('gone-process'))).toBeNull()
   })
 
   it('keeps the delegated turn of a kept session still in it, ending with that turn', () => {
-    store.setDelegatedTurn('kept-working', 'caller', 'turn-1')
-    store.setDelegatedTurnTold('kept-working', ['card-1'])
-    store.setDelegatedTurn('kept-idle', 'caller', 'turn-2')
+    store.children.setDelegatedTurn('kept-working', 'caller', 'turn-1')
+    store.children.setDelegatedTurnTold('kept-working', ['card-1'])
+    store.children.setDelegatedTurn('kept-idle', 'caller', 'turn-2')
     own.restoreTurns(sessions, kept)
     expect(own.turnOwners.get('kept-working')).toEqual({ callerId: 'caller', untilTurnEnd: true, told: new Set(['card-1']), turnId: 'turn-1' })
     expect(own.turnOwners.has('kept-idle')).toBe(false)
-    expect(store.listDelegatedTurns().map((r) => r.sessionId)).toEqual(['kept-working'])
+    expect(store.children.listDelegatedTurns().map((r) => r.sessionId)).toEqual(['kept-working'])
   })
 
   it('keeps every queued request whose sessions exist, delivers a half-delivered one again, and reads an old row', () => {
     own.enqueue(request('q1', 'kept-idle', 'caller'))
     own.enqueue(request('q2', 'kept-idle', 'nobody'))
     own.enqueue({ ...request('q3', 'gone-process', 'caller'), via: 'ask_project' })
-    store.markQueuedDelivering('q1', 5)
+    store.children.markQueuedDelivering('q1', 5)
     ;(store as unknown as { db: { prepare(sql: string): { run(): void } } }).db.prepare("UPDATE queued_requests SET opened_by_auto = NULL WHERE id = 'q3'").run()
     const next = new ChildOwnership(store)
     const read: string[] = []
@@ -259,6 +259,6 @@ describe('restoring what the previous host left (#646, #676, #677)', () => {
     expect(next.queued.get('kept-idle')?.map((r) => [r.id, r.deliveringAt])).toEqual([['q1', null]])
     expect(next.queued.get('gone-process')?.map((r) => [r.id, r.openedByAuto])).toEqual([['q3', true]])
     expect(read).toEqual(['q3'])
-    expect(store.listQueuedRequests().map((r) => [r.id, r.deliveringAt]).sort()).toEqual([['q1', null], ['q3', null]])
+    expect(store.children.listQueuedRequests().map((r) => [r.id, r.deliveringAt]).sort()).toEqual([['q1', null], ['q3', null]])
   })
 })

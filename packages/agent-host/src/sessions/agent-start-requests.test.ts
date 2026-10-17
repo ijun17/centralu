@@ -123,10 +123,10 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
   it('is kept in the store while it stands, and gone once answered', async () => {
     const a = host()
     const { parent, call, requestId } = await asking(a)
-    expect(store.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId, callerSessionId: parent })])
+    expect(store.children.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId, callerSessionId: parent })])
     a.mgr.respondApproval(parent, requestId, 'allow')
     expect(await call).toMatchObject({ ok: true, state: 'working' })
-    expect(store.listAgentStartRequests()).toEqual([])
+    expect(store.children.listAgentStartRequests()).toEqual([])
   })
 
   it('outlives a host swap: the call answers "pending", the next host raises the card, and its approval starts the child with the report', async () => {
@@ -135,8 +135,8 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     await a.mgr.detachAll()
     // Letting go is not the person's answer: the call says the request is still waiting, and nothing ended it
     expect(await call).toMatchObject({ ok: true, state: 'pending', sessionId: requestId })
-    expect(store.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId })])
-    expect(store.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('No agent was started'))).toEqual([])
+    expect(store.children.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId })])
+    expect(store.messages.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('No agent was started'))).toEqual([])
 
     const b = host()
     expect(card(b.mgr, parent)?.requestId).toBe(requestId)
@@ -162,7 +162,7 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     b.mgr.respondApproval(parent, requestId, 'deny')
     await eventually(() => !!b.claude.handles.get(parent)?.sent.some((t) => t.includes(`start_agent request ${requestId} did not start a session`)))
     expect(children(b.mgr, parent)).toEqual([])
-    expect(store.listAgentStartRequests()).toEqual([])
+    expect(store.children.listAgentStartRequests()).toEqual([])
   })
 
   it('is dropped by the next host when the session that asked is gone', async () => {
@@ -170,9 +170,9 @@ describe('a start_agent card nobody has answered yet (#673)', () => {
     const { parent, requestId } = await asking(a)
     await a.mgr.detachAll()
     // Another build trashed it meanwhile; the row this one left is all that remains
-    store.putAgentStartRequest(requestId, 'no-such-session', { ...store.listAgentStartRequests()[0]!.request as object, callerId: 'no-such-session' })
+    store.children.putAgentStartRequest(requestId, 'no-such-session', { ...store.children.listAgentStartRequests()[0]!.request as object, callerId: 'no-such-session' })
     host()
-    expect(store.listAgentStartRequests()).toEqual([])
+    expect(store.children.listAgentStartRequests()).toEqual([])
     expect(card(hosts[1]!, parent)).toBeUndefined()
   })
 
@@ -225,11 +225,11 @@ describe('a start allowed but waiting for memory (#686)', () => {
     a.mgr.respondApproval(parent, requestId, 'allow')
     // Allowed on the card, then queued: the same handle, now waiting for memory
     expect(await call).toMatchObject({ ok: true, state: 'pending', sessionId: requestId, lowMemory: { floor: '2.0 GB' } })
-    expect(store.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId, request: expect.objectContaining({ allowed: true }) })])
+    expect(store.children.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId, request: expect.objectContaining({ allowed: true }) })])
     await a.mgr.detachAll()
     // Letting go ends the wait without starting anything, and keeps the request for the next host
     expect(children(a.mgr, parent)).toEqual([])
-    expect(store.listAgentStartRequests()).toHaveLength(1)
+    expect(store.children.listAgentStartRequests()).toHaveLength(1)
 
     const b = host()
     b.mgr.useMemoryGate(gate())

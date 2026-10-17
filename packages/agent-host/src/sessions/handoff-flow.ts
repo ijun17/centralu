@@ -208,7 +208,7 @@ export class HandoffFlow {
    * read from the store once the turn ends (`exportHandoffNote`), never from the screen.
    */
   private async fromAgent(callerId: string, target: SessionInfo, tool: ToolName, instructions: string | undefined): Promise<HandoffResult> {
-    const before = this.host.store.loadMessages(target.id, 1).at(-1)?.seq ?? 0
+    const before = this.host.store.messages.loadMessages(target.id, 1).at(-1)?.seq ?? 0
     // Watched before the send, since an adapter can emit the turn's events while sending
     const turn = new AgentRunWait(() => {}, () => target.name)
     const readers = this.host.turnObservers.get(target.id) ?? new Set<AgentRunWait>()

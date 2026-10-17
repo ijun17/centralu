@@ -181,7 +181,7 @@ describe('run_agent — a fresh session per assignment, owned by that app', () =
     expect(agent.tool).toBe('codex')
     expect(codex.opened.find((o) => o.sessionId === agent.id)!.outputSchema).toEqual(schema)
     // A tool the app chose does not move the person's default
-    expect(store.listProjects().find((p) => p.id === projectId)!.defaultTool).toBe('claude')
+    expect(store.projects.listProjects().find((p) => p.id === projectId)!.defaultTool).toBe('claude')
   })
 
   it('a tool outside the declaration and a tool that is not logged in are refused with a reason, before a session is ever stood up', async () => {

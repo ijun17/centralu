@@ -14,7 +14,7 @@ import { sessionLiveDefaults } from '@cc/protocol'
 import { Store } from './store.js'
 
 const session = (s: Store, id: string) =>
-  s.upsertSession({
+  s.sessions.upsertSession({
     id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id, autoNamed: false, state: 'idle',
     lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
     verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
@@ -23,7 +23,7 @@ const session = (s: Store, id: string) =>
 
 const seeded = (file = ':memory:') => {
   const s = new Store(file)
-  s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+  s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
   session(s, 's1')
   return s
 }
@@ -59,12 +59,12 @@ const indexRows = (s: Store): number => {
 describe('the search index holds what was said, not the tool calls (#221)', () => {
   it('a tool call is not found by its command, and what was said around it is', () => {
     const s = seeded()
-    s.appendMessages(conversation('s1'))
-    expect(s.searchMessages('zebracorn')).toEqual([])
-    expect(s.searchMessages('ze')).toEqual([]) // the short-query path (LIKE) reads the same index
-    expect(s.searchMessages('build the package').map((h) => h.seq)).toEqual([1])
-    expect(s.searchMessages('workspace').map((h) => h.seq)).toEqual([2])
-    expect(s.searchMessages('failed at the end').map((h) => h.seq)).toEqual([5])
+    s.messages.appendMessages(conversation('s1'))
+    expect(s.messages.searchMessages('zebracorn')).toEqual([])
+    expect(s.messages.searchMessages('ze')).toEqual([]) // the short-query path (LIKE) reads the same index
+    expect(s.messages.searchMessages('build the package').map((h) => h.seq)).toEqual([1])
+    expect(s.messages.searchMessages('workspace').map((h) => h.seq)).toEqual([2])
+    expect(s.messages.searchMessages('failed at the end').map((h) => h.seq)).toEqual([5])
     // One row for each thing said: the user, the reasoning, the answer
     expect(indexRows(s)).toBe(3)
     s.close()
@@ -72,12 +72,12 @@ describe('the search index holds what was said, not the tool calls (#221)', () =
 
   it('a session restored from the trash gets its index back without its tool calls', async () => {
     const s = seeded()
-    s.appendMessages(conversation('s1'))
-    await s.trashSession('s1', KEEP_ALL)
+    s.messages.appendMessages(conversation('s1'))
+    await s.trash.trashSession('s1', KEEP_ALL)
     expect(indexRows(s)).toBe(0)
-    await s.restoreSession('s1', 'p1')
-    expect(s.searchMessages('zebracorn')).toEqual([])
-    expect(s.searchMessages('build the package').map((h) => h.seq)).toEqual([1])
+    await s.trash.restoreSession('s1', 'p1')
+    expect(s.messages.searchMessages('zebracorn')).toEqual([])
+    expect(s.messages.searchMessages('build the package').map((h) => h.seq)).toEqual([1])
     expect(indexRows(s)).toBe(3)
     s.close()
   })
@@ -86,22 +86,22 @@ describe('the search index holds what was said, not the tool calls (#221)', () =
 describe('the store keeps the whole record and reads back the card (#221)', () => {
   it('a tool call keeps its input and a result its output, and a reader gets them only by asking', () => {
     const s = seeded()
-    s.appendMessages(conversation('s1'))
+    s.messages.appendMessages(conversation('s1'))
     const card = (rows: StoredMessage[]) => rows.filter((r) => r.kind === 'tool_call' || r.kind === 'tool_result').map((r) => r.payload)
 
     // What every reader gets: the card, for the page and for `loadMessagesFrom` alike
-    for (const rows of [s.loadMessages('s1'), s.loadMessagesFrom('s1', 0)]) {
+    for (const rows of [s.messages.loadMessages('s1'), s.messages.loadMessagesFrom('s1', 0)]) {
       expect(card(rows)).toEqual([
         { type: 'tool_call', sessionId: 's1', callId: 'c1', summary: { tool: 'Bash', title: COMMAND, paths: [] } },
         { type: 'tool_result', sessionId: 's1', callId: 'c1', ok: false, summary: OUTPUT.slice(0, 300) },
       ])
     }
     // What is on disk: the whole of it
-    for (const rows of [s.loadMessages('s1', 200, undefined, { full: true }), s.loadMessagesFrom('s1', 0, 20, { full: true })]) {
+    for (const rows of [s.messages.loadMessages('s1', 200, undefined, { full: true }), s.messages.loadMessagesFrom('s1', 0, 20, { full: true })]) {
       expect(card(rows)).toMatchObject([{ input: INPUT }, { output: OUTPUT }])
     }
     // Nothing else changes shape: the words are read as they were written
-    expect(s.loadMessages('s1').filter((r) => r.kind !== 'tool_call' && r.kind !== 'tool_result')).toEqual(
+    expect(s.messages.loadMessages('s1').filter((r) => r.kind !== 'tool_call' && r.kind !== 'tool_result')).toEqual(
       conversation('s1').filter((r) => r.kind !== 'tool_call' && r.kind !== 'tool_result'),
     )
     s.close()
@@ -132,14 +132,14 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
     template = join(dir, 'template.db')
     const s = seeded(template)
     session(s, 'gone')
-    s.appendMessages([...conversation('s1'), ...conversation('gone')])
-    await s.trashSession('gone', KEEP_ALL)
+    s.messages.appendMessages([...conversation('s1'), ...conversation('gone')])
+    await s.trash.trashSession('gone', KEEP_ALL)
     const calls: StoredMessage[] = Array.from({ length: 400 }, (_, i) => ({
       sessionId: 's1', seq: 100 + i, role: 'system', kind: 'tool_call',
       payload: { type: 'tool_call', sessionId: 's1', callId: `c${i}`, summary: { tool: 'Bash', title: COMMAND, paths: [] } },
       ts: 100 + i,
     }))
-    s.appendMessages(calls)
+    s.messages.appendMessages(calls)
     s.close()
 
     // What the index held before #221: every tool call's title, keyed by its message's rowid (padded, see above)
@@ -176,8 +176,8 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
 
     const s = new Store(file)
     expect(s.migrationsRun).toBe(16) // v40, then v41 (#222), v42 (#288), v43 (#306), v44 and v45 (#371), v46 and v47 (#82), v48 (#561), v49 (#646), v50 (#673), v51 (#676), v52 (#677), v53 (#698), v54, v55 (#844) after it
-    expect(s.searchMessages('zebracorn')).toEqual([])
-    expect(s.searchMessages('build the package').map((h) => [h.sessionId, h.seq])).toEqual([['s1', 1]])
+    expect(s.messages.searchMessages('zebracorn')).toEqual([])
+    expect(s.messages.searchMessages('build the package').map((h) => [h.sessionId, h.seq])).toEqual([['s1', 1]])
     expect(indexRows(s)).toBe(3) // s1's three things said; the session in the trash has none
     s.close()
     const after = statSync(file).size
@@ -210,7 +210,7 @@ describe('v40 — tool calls leave an existing index, and the file shrinks (#221
 
     const s = new Store(file)
     expect(s.schemaVersion).toBe(s.latestKnownVersion)
-    expect(s.searchMessages('zebracorn')).toEqual([])
+    expect(s.messages.searchMessages('zebracorn')).toEqual([])
     expect(indexRows(s)).toBe(3)
     expect(said.mock.calls.some(([line]) => String(line).includes('could not vacuum'))).toBe(true)
     s.close()

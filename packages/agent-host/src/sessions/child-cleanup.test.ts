@@ -14,7 +14,7 @@ describe('a parent is told to clean up the children whose answers it used (#690)
   let w: CrossWorld
   beforeEach(async () => {
     w = await crossWorld()
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
   })
   afterEach(async () => {
     await w.dispose()
@@ -32,7 +32,7 @@ describe('a parent is told to clean up the children whose answers it used (#690)
   /** The report the parent was told about a child, as its conversation keeps it */
   const reportOf = (parent: string, child: string) =>
     w.store
-      .loadMessages(parent, 50)
+      .messages.loadMessages(parent, 50)
       .filter((m) => m.role === 'user' && (m.payload as { from?: { sessionId: string } }).from?.sessionId === child)
       .map((m) => (m.payload as { text: string }).text)
   const list = async (s: string) => (await w.mgr.runOrchestratorTool(s, 'agent_session', { action: 'list' })).text

@@ -38,8 +38,8 @@ function newestStore(file: string): Store {
 
 function seeded() {
   const s = new Store()
-  s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-  s.upsertSession({
+  s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+  s.sessions.upsertSession({
     id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'New session',
     autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
     createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
@@ -53,7 +53,7 @@ const sp = (sessionId: string): GridPanel => ({ kind: 'session', sessionId })
 
 /** A plain worker session in `projectId`, for the grid's tests */
 function gridSession(s: Store, id: string, projectId: string) {
-  s.upsertSession({
+  s.sessions.upsertSession({
     id, projectId, kind: 'worker', tool: 'claude', externalId: null, name: id, autoNamed: false, state: 'idle',
     lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
     verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
@@ -112,18 +112,18 @@ describe('v10 migration — allows a session with no project', () => {
 
     const store = new Store(file)
     expect(store.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(store.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
-    expect(store.listSessions().find((x) => x.id === 's2')?.name).toBe('name s2')
-    expect(store.loadMessages('s1').length).toBe(1)
+    expect(store.sessions.listSessions().map((x) => x.id).sort()).toEqual(['s1', 's2', 's3'])
+    expect(store.sessions.listSessions().find((x) => x.id === 's2')?.name).toBe('name s2')
+    expect(store.messages.loadMessages('s1').length).toBe(1)
 
     // And now a session with no project is inserted
-    store.upsertSession({
+    store.sessions.upsertSession({
       id: 'orc', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: null, name: 'Orchestrator',
       autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
       permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
     })
-    expect(store.listSessions().find((x) => x.id === 'orc')?.projectId).toBeNull()
+    expect(store.sessions.listSessions().find((x) => x.id === 'orc')?.projectId).toBeNull()
     // Closed before the folder goes: Windows cannot delete a file that is still open
     store.close()
     rmSync(dir, { recursive: true, force: true })
@@ -154,14 +154,14 @@ describe('Store (dev sqlite)', () => {
     const first = new Store(file)
     expect(first.migrationsRun).toBeGreaterThan(0)
     expect(first.schemaVersion).toBe(LATEST_SCHEMA)
-    first.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    first.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     first.close()
 
     const again = new Store(file)
     expect(again.migrationsRun).toBe(0)
     expect(again.schemaVersion).toBe(LATEST_SCHEMA)
     // And the data is intact — "did not run" must not mean "cannot be read"
-    expect(again.listProjects().map((p) => p.id)).toEqual(['p1'])
+    expect(again.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
     again.close()
 
     rmSync(dir, { recursive: true, force: true })
@@ -169,18 +169,18 @@ describe('Store (dev sqlite)', () => {
 
   it('registers and lists projects; a duplicate path is treated as an update', () => {
     const s = seeded()
-    s.addProject({ id: 'p1b', path: '/tmp/p1', name: 'Renamed' })
-    const list = s.listProjects()
+    s.projects.addProject({ id: 'p1b', path: '/tmp/p1', name: 'Renamed' })
+    const list = s.projects.listProjects()
     expect(list).toHaveLength(1)
     expect(list[0]!.name).toBe('Renamed')
   })
 
   it('session upsert and listing', () => {
     const s = seeded()
-    const before = s.listSessions()[0]!
+    const before = s.sessions.listSessions()[0]!
     expect(before.autoNamed).toBe(true)
-    s.upsertSession({ ...before, name: 'auth refactor', autoNamed: false, state: 'working' })
-    const after = s.listSessions()[0]!
+    s.sessions.upsertSession({ ...before, name: 'auth refactor', autoNamed: false, state: 'working' })
+    const after = s.sessions.listSessions()[0]!
     expect(after.name).toBe('auth refactor')
     expect(after.autoNamed).toBe(false)
     expect(after.state).toBe('working')
@@ -194,48 +194,48 @@ describe('Store (dev sqlite)', () => {
    */
   it('a tool switch is saved — it is still codex after restart', () => {
     const s = seeded()
-    const before = s.listSessions()[0]!
-    s.upsertSession({ ...before, tool: 'codex', externalId: null, importedFrom: null })
-    const after = s.listSessions()[0]!
+    const before = s.sessions.listSessions()[0]!
+    s.sessions.upsertSession({ ...before, tool: 'codex', externalId: null, importedFrom: null })
+    const after = s.sessions.listSessions()[0]!
     expect(after.tool).toBe('codex')
     expect(after.externalId).toBeNull()
   })
 
   it('message append/load and seq incrementing', () => {
     const s = seeded()
-    expect(s.nextSeq('s1')).toBe(1)
-    s.appendMessages([
+    expect(s.messages.nextSeq('s1')).toBe(1)
+    s.messages.appendMessages([
       { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: 'hello' }, ts: 1 },
       { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { text: 'yes' }, ts: 2 },
     ])
-    expect(s.nextSeq('s1')).toBe(3)
-    const msgs = s.loadMessages('s1')
+    expect(s.messages.nextSeq('s1')).toBe(3)
+    const msgs = s.messages.loadMessages('s1')
     expect(msgs.map((m) => m.seq)).toEqual([1, 2])
     expect(msgs[0]!.payload).toEqual({ text: 'hello' })
-    expect(s.listSessions()[0]!.lastSeq).toBe(2)
+    expect(s.sessions.listSessions()[0]!.lastSeq).toBe(2)
   })
 
   it('pagination: only what comes before beforeSeq', () => {
     const s = seeded()
-    s.appendMessages(
+    s.messages.appendMessages(
       Array.from({ length: 5 }, (_, i) => ({
         sessionId: 's1', seq: i + 1, role: 'user' as const, kind: 'text' as const, payload: { i }, ts: i,
       })),
     )
-    expect(s.loadMessages('s1', 2, 4).map((m) => m.seq)).toEqual([2, 3])
+    expect(s.messages.loadMessages('s1', 2, 4).map((m) => m.seq)).toEqual([2, 3])
   })
 
   it('the read position never moves backward', () => {
     const s = seeded()
-    s.markRead('s1', 5)
-    s.markRead('s1', 3)
-    expect(s.listSessions()[0]!.lastReadSeq).toBe(5)
+    s.sessions.markRead('s1', 5)
+    s.sessions.markRead('s1', 3)
+    expect(s.sessions.listSessions()[0]!.lastReadSeq).toBe(5)
   })
 
   it('saves and lists approval rules', () => {
     const s = seeded()
-    s.addApprovalRule({ scope: 'session', sessionId: 's1', matcher: 'npm test*', decision: 'allow' })
-    const rules = s.listApprovalRules()
+    s.permissions.addApprovalRule({ scope: 'session', sessionId: 's1', matcher: 'npm test*', decision: 'allow' })
+    const rules = s.permissions.listApprovalRules()
     expect(rules).toHaveLength(1)
     expect(rules[0]!.matcher).toBe('npm test*')
   })
@@ -264,16 +264,16 @@ describe('migrations (E-0)', () => {
     expect(store.schemaVersion).toBe(LATEST_SCHEMA)
 
     // Only the backfill lets an old conversation be found
-    const hits = store.searchMessages('승인')
+    const hits = store.messages.searchMessages('승인')
     expect(hits.length).toBe(1)
     expect(hits[0]!.sessionId).toBe('s1')
 
     // The new column is usable too
-    store.setTouchedPaths('s1', ['src/a.ts'])
-    expect(store.getTouchedPaths('s1')).toEqual(['src/a.ts'])
+    store.sessions.setTouchedPaths('s1', ['src/a.ts'])
+    expect(store.sessions.getTouchedPaths('s1')).toEqual(['src/a.ts'])
 
     // v4: model and permission are also attached to an existing session (with default values)
-    const migrated = store.listSessions().find((s) => s.id === 's1')
+    const migrated = store.sessions.listSessions().find((s) => s.id === 's1')
     expect(migrated).toMatchObject({ model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null })
 
     store.close()
@@ -282,12 +282,12 @@ describe('migrations (E-0)', () => {
 
   it('a search still matches a word with a Korean particle attached (trigram tokenizer)', () => {
     const s = seeded()
-    s.appendMessages([
+    s.messages.appendMessages([
       { sessionId: 's1', seq: 10, role: 'assistant', kind: 'text', payload: { text: '승인을 기다리는 중입니다' }, ts: 0 },
     ])
     // With unicode61, searching '승인' would not find '승인을' — a real problem this app runs into
-    expect(s.searchMessages('승인').length).toBe(1)
-    expect(s.searchMessages('기다리').length).toBe(1)
+    expect(s.messages.searchMessages('승인').length).toBe(1)
+    expect(s.messages.searchMessages('기다리').length).toBe(1)
     s.close()
   })
 
@@ -303,18 +303,18 @@ describe('migrations (E-0)', () => {
       sessionId: 's1', seq: 10, role: 'assistant' as const, kind: 'text' as const,
       payload: { text: 'milky way gradient' }, ts: 0,
     }
-    for (let i = 0; i < 5; i++) s.appendMessages([msg])
-    expect(s.searchMessages('milky way').length).toBe(1)
+    for (let i = 0; i < 5; i++) s.messages.appendMessages([msg])
+    expect(s.messages.searchMessages('milky way').length).toBe(1)
     s.close()
   })
 
   it('rewriting the content makes the old content unsearchable', () => {
     const s = seeded()
     const at = { sessionId: 's1', seq: 11, role: 'assistant' as const, kind: 'text' as const, ts: 0 }
-    s.appendMessages([{ ...at, payload: { text: 'old content' } }])
-    s.appendMessages([{ ...at, payload: { text: 'new content' } }])
-    expect(s.searchMessages('old content').length).toBe(0)
-    expect(s.searchMessages('new content').length).toBe(1)
+    s.messages.appendMessages([{ ...at, payload: { text: 'old content' } }])
+    s.messages.appendMessages([{ ...at, payload: { text: 'new content' } }])
+    expect(s.messages.searchMessages('old content').length).toBe(0)
+    expect(s.messages.searchMessages('new content').length).toBe(1)
     s.close()
   })
 
@@ -327,16 +327,16 @@ describe('migrations (E-0)', () => {
   it('rewriting an indexed spot with no body leaves the batch intact and makes the old body unsearchable', () => {
     const s = seeded()
     const at = { sessionId: 's1', role: 'assistant' as const, kind: 'text' as const, ts: 0 }
-    s.appendMessages([{ ...at, seq: 1, payload: { text: 'hello world' } }])
-    expect(s.searchMessages('hello').length).toBe(1)
-    s.appendMessages([
+    s.messages.appendMessages([{ ...at, seq: 1, payload: { text: 'hello world' } }])
+    expect(s.messages.searchMessages('hello').length).toBe(1)
+    s.messages.appendMessages([
       { ...at, seq: 2, role: 'user', payload: { text: 'newly arrived words' } },
       { ...at, seq: 1, payload: { type: 'tool' } },
     ])
-    expect(s.loadMessages('s1').map((m) => m.seq)).toEqual([1, 2])
-    expect(s.loadMessages('s1')[0]!.payload).toEqual({ type: 'tool' })
-    expect(s.searchMessages('hello').length).toBe(0)
-    expect(s.searchMessages('newly arrived').length).toBe(1)
+    expect(s.messages.loadMessages('s1').map((m) => m.seq)).toEqual([1, 2])
+    expect(s.messages.loadMessages('s1')[0]!.payload).toEqual({ type: 'tool' })
+    expect(s.messages.searchMessages('hello').length).toBe(0)
+    expect(s.messages.searchMessages('newly arrived').length).toBe(1)
     s.close()
   })
 
@@ -351,7 +351,7 @@ describe('migrations (E-0)', () => {
   it('purging a session lets the event loop go between chunks, and its messages and index rows leave together', async () => {
     const s = seeded()
     const n = 1000
-    s.appendMessages(
+    s.messages.appendMessages(
       Array.from({ length: n }, (_, i) => ({
         // A human's words are never joined together — loadMessages's count is exactly the row count
         sessionId: 's1', seq: i + 1, role: 'user' as const, kind: 'text' as const,
@@ -359,26 +359,26 @@ describe('migrations (E-0)', () => {
       })),
     )
     const fts = indexRowsOf(s, 's1')
-    await s.trashSession('s1', KEEP_ALL)
-    s.appendMessages(s.loadMessages('s1', n)) // the index rows a cut-short trash step would have left
+    await s.trash.trashSession('s1', KEEP_ALL)
+    s.messages.appendMessages(s.messages.loadMessages('s1', n)) // the index rows a cut-short trash step would have left
     expect(fts()).toBe(n)
     const seen: { messages: number; hits: number }[] = []
     let deleting = true
     const look = () => {
       if (!deleting) return
-      seen.push({ messages: s.loadMessages('s1', n).length, hits: fts() })
+      seen.push({ messages: s.messages.loadMessages('s1', n).length, hits: fts() })
       setImmediate(look)
     }
     setImmediate(look)
-    await s.purgeSession('s1', 100)
+    await s.trash.purgeSession('s1', 100)
     deleting = false
     // If this finished in one shot, look would never have run even once
     expect(seen.length).toBeGreaterThanOrEqual(5)
     for (const at of seen) expect(at.hits).toBe(at.messages)
     expect(seen.some((at) => at.messages > 0 && at.messages < n)).toBe(true)
-    expect(s.listSessions().map((x) => x.id)).not.toContain('s1')
-    expect(s.listTrash()).toEqual([])
-    expect(s.loadMessages('s1')).toEqual([])
+    expect(s.sessions.listSessions().map((x) => x.id)).not.toContain('s1')
+    expect(s.trash.listTrash()).toEqual([])
+    expect(s.messages.loadMessages('s1')).toEqual([])
     expect(fts()).toBe(0)
     s.close()
   })
@@ -386,11 +386,11 @@ describe('migrations (E-0)', () => {
   it('returns the whole body — trimming it is left to the caller', () => {
     const s = seeded()
     const long = `${'앞'.repeat(300)}은하수${'뒤'.repeat(300)}`
-    s.appendMessages([
+    s.messages.appendMessages([
       { sessionId: 's1', seq: 12, role: 'assistant', kind: 'text', payload: { text: long }, ts: 0 },
     ])
     // This used to be cut off at around 15 characters by snippet(...,12), unable to tell what it was
-    expect(s.searchMessages('은하수')[0]!.body).toBe(long)
+    expect(s.messages.searchMessages('은하수')[0]!.body).toBe(long)
     s.close()
   })
 })
@@ -398,7 +398,7 @@ describe('migrations (E-0)', () => {
 describe('migration v5 — the original conversation an import inherited', () => {
   it('the imported_from column exists and round-trips', () => {
     const store = new Store()
-    store.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    store.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     const base = {
       id: 's-import', projectId: 'p1', kind: 'worker' as const, tool: 'claude' as const, externalId: 'ext-new',
       name: 'Imported conversation', autoNamed: true, state: 'idle' as const,
@@ -406,8 +406,8 @@ describe('migration v5 — the original conversation an import inherited', () =>
       model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal' as const, importedFrom: 'ext-old', worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
       ...sessionLiveDefaults(),
     }
-    store.upsertSession(base)
-    const back = store.listSessions().find((s) => s.id === 's-import')!
+    store.sessions.upsertSession(base)
+    const back = store.sessions.listSessions().find((s) => s.id === 's-import')!
     // Even when resume issues a new identifier, which conversation it came from must survive
     expect(back.importedFrom).toBe('ext-old')
     expect(back.externalId).toBe('ext-new')
@@ -431,8 +431,8 @@ describe('migration v7 — reasoning effort', () => {
 
   it('the effort column exists and round-trips', () => {
     const store = seeded()
-    store.upsertSession(row({ id: 's-effort', effort: 'xhigh', model: 'fable' }))
-    const back = store.listSessions().find((r) => r.id === 's-effort')
+    store.sessions.upsertSession(row({ id: 's-effort', effort: 'xhigh', model: 'fable' }))
+    const back = store.sessions.listSessions().find((r) => r.id === 's-effort')
     expect(back?.effort).toBe('xhigh')
     expect(back?.model).toBe('fable')
     store.close()
@@ -440,8 +440,8 @@ describe('migration v7 — reasoning effort', () => {
 
   it('a session with no effort chosen stays null — distinct from an empty string', () => {
     const store = seeded()
-    store.upsertSession(row({ id: 's-none' }))
-    expect(store.listSessions().find((r) => r.id === 's-none')?.effort).toBeNull()
+    store.sessions.upsertSession(row({ id: 's-none' }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-none')?.effort).toBeNull()
     store.close()
   })
 })
@@ -464,28 +464,28 @@ describe('migration v18 — response length', () => {
 
   it('the verbosity column exists and round-trips', () => {
     const store = seeded()
-    store.upsertSession(row({ id: 's-verb', verbosity: 'low' }))
-    expect(store.listSessions().find((r) => r.id === 's-verb')?.verbosity).toBe('low')
+    store.sessions.upsertSession(row({ id: 's-verb', verbosity: 'low' }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-verb')?.verbosity).toBe('low')
     // An update persists too — missing it from the UPDATE clause would save it only the first time and never after
-    store.upsertSession(row({ id: 's-verb', verbosity: 'high' }))
-    expect(store.listSessions().find((r) => r.id === 's-verb')?.verbosity).toBe('high')
+    store.sessions.upsertSession(row({ id: 's-verb', verbosity: 'high' }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-verb')?.verbosity).toBe('high')
     store.close()
   })
 
   it('a session with none chosen is null — distinct from the tool default', () => {
     const store = seeded()
-    store.upsertSession(row({ id: 's-verb-none' }))
-    expect(store.listSessions().find((r) => r.id === 's-verb-none')?.verbosity).toBeNull()
+    store.sessions.upsertSession(row({ id: 's-verb-none' }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-verb-none')?.verbosity).toBeNull()
     store.close()
   })
 
   /** Response speed (v20) is the same kind of property — the same round-trip contract */
   it('the service_tier column exists and round-trips', () => {
     const store = seeded()
-    store.upsertSession(row({ id: 's-tier', serviceTier: 'priority' }))
-    expect(store.listSessions().find((r) => r.id === 's-tier')?.serviceTier).toBe('priority')
-    store.upsertSession(row({ id: 's-tier', serviceTier: null }))
-    expect(store.listSessions().find((r) => r.id === 's-tier')?.serviceTier).toBeNull()
+    store.sessions.upsertSession(row({ id: 's-tier', serviceTier: 'priority' }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-tier')?.serviceTier).toBe('priority')
+    store.sessions.upsertSession(row({ id: 's-tier', serviceTier: null }))
+    expect(store.sessions.listSessions().find((r) => r.id === 's-tier')?.serviceTier).toBeNull()
     store.close()
   })
 })
@@ -500,7 +500,7 @@ describe('migration v8 — sidebar order', () => {
   it('saves session order and reads it back in that order', () => {
     const s = seeded()
     for (const id of ['s2', 's3']) {
-      s.upsertSession({
+      s.sessions.upsertSession({
         id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id,
         autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
         createdAt: Date.now(), waitingSince: null, live: true,
@@ -508,25 +508,25 @@ describe('migration v8 — sidebar order', () => {
         ...sessionLiveDefaults(),
       })
     }
-    s.setSessionOrder(['s3', 's1', 's2'])
-    expect(s.listSessions().map((x) => x.id)).toEqual(['s3', 's1', 's2'])
+    s.sessions.setSessionOrder(['s3', 's1', 's2'])
+    expect(s.sessions.listSessions().map((x) => x.id)).toEqual(['s3', 's1', 's2'])
     s.close()
   })
 
   it('saving a session again does not disturb the order', () => {
     const s = seeded()
-    s.setSessionOrder(['s1'])
-    const before = s.listSessions()[0]!
-    s.upsertSession({ ...before, name: 'renamed' })
-    expect(s.listSessions().map((x) => x.name)).toEqual(['renamed'])
+    s.sessions.setSessionOrder(['s1'])
+    const before = s.sessions.listSessions()[0]!
+    s.sessions.upsertSession({ ...before, name: 'renamed' })
+    expect(s.sessions.listSessions().map((x) => x.name)).toEqual(['renamed'])
     s.close()
   })
 
   it('project order is saved too', () => {
     const s = seeded()
-    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
-    s.setProjectOrder(['p2', 'p1'])
-    expect(s.listProjects().map((p) => p.id)).toEqual(['p2', 'p1'])
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.projects.setProjectOrder(['p2', 'p1'])
+    expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p2', 'p1'])
     s.close()
   })
 })
@@ -540,7 +540,7 @@ describe('migration v9 — the grid layout', () => {
   it('comes back in the order it was placed', () => {
     const s = seeded()
     for (const id of ['s2', 's3']) {
-      s.upsertSession({
+      s.sessions.upsertSession({
         id, projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: id,
         autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
         createdAt: Date.now(), waitingSince: null, live: true,
@@ -548,33 +548,33 @@ describe('migration v9 — the grid layout', () => {
         ...sessionLiveDefaults(),
       })
     }
-    s.setGridView([sp('s3'), sp('s1')])
-    expect(s.listGridView()).toEqual([sp('s3'), sp('s1')])
+    s.grid.setGridView([sp('s3'), sp('s1')])
+    expect(s.grid.listGridView()).toEqual([sp('s3'), sp('s1')])
     s.close()
   })
 
   it('rewrites the whole thing — adding, removing and reordering all come through the same call', () => {
     const s = seeded()
-    s.setGridView([sp('s1')])
-    s.setGridView([])
-    expect(s.listGridView()).toEqual([])
+    s.grid.setGridView([sp('s1')])
+    s.grid.setGridView([])
+    expect(s.grid.listGridView()).toEqual([])
     s.close()
   })
 
   it('the layout stays put even after resaving a session', () => {
     const s = seeded()
-    s.setGridView([sp('s1')])
-    const before = s.listSessions()[0]!
-    s.upsertSession({ ...before, name: 'renamed' })
-    expect(s.listGridView()).toEqual([sp('s1')])
+    s.grid.setGridView([sp('s1')])
+    const before = s.sessions.listSessions()[0]!
+    s.sessions.upsertSession({ ...before, name: 'renamed' })
+    expect(s.grid.listGridView()).toEqual([sp('s1')])
     s.close()
   })
 
   it('deleting a session drops it from the layout too — it must not try to draw something that no longer exists', async () => {
     const s = seeded()
-    s.setGridView([sp('s1')])
-    await s.trashSession('s1', KEEP_ALL)
-    expect(s.listGridView()).toEqual([])
+    s.grid.setGridView([sp('s1')])
+    await s.trash.trashSession('s1', KEEP_ALL)
+    expect(s.grid.listGridView()).toEqual([])
     s.close()
   })
 })
@@ -592,7 +592,7 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
     const file = join(dir, 'store.db')
     try {
       const fresh = newestStore(file)
-      fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      fresh.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       for (const id of ['s1', 's2', 's3']) gridSession(fresh, id, 'p1')
       fresh.close()
       // Take the grid back to v41: one row per session id
@@ -610,10 +610,10 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
       const s = new Store(file)
       expect(s.schemaVersion).toBe(LATEST_SCHEMA)
       expect(s.migrationsRun).toBe(LATEST_SCHEMA - 41)
-      expect(s.listGridView()).toEqual([sp('s3'), sp('s1'), sp('s2')])
+      expect(s.grid.listGridView()).toEqual([sp('s3'), sp('s1'), sp('s2')])
       // Now an app can stand between them
-      s.setGridView([sp('s3'), ap('p1', 'slider'), sp('s1')])
-      expect(s.listGridView()).toEqual([sp('s3'), ap('p1', 'slider'), sp('s1')])
+      s.grid.setGridView([sp('s3'), ap('p1', 'slider'), sp('s1')])
+      expect(s.grid.listGridView()).toEqual([sp('s3'), ap('p1', 'slider'), sp('s1')])
       s.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -629,9 +629,9 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
     const file = join(dir, 'store.db')
     try {
       const s = newestStore(file)
-      s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       for (const id of ['s1', 's2']) gridSession(s, id, 'p1')
-      s.setGridView([ap('p1', 'slider'), sp('s1')])
+      s.grid.setGridView([ap('p1', 'slider'), sp('s1')])
       s.close()
 
       const older = new Database(file)
@@ -655,7 +655,7 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
       older.close()
 
       const again = new Store(file)
-      expect(again.listGridView()).toEqual([ap('p1', 'slider'), sp('s1')])
+      expect(again.grid.listGridView()).toEqual([ap('p1', 'slider'), sp('s1')])
       again.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -664,25 +664,25 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
 
   it('sessions, a project’s app and a user-folder app keep one order, and a panel named twice keeps its first place', () => {
     const s = seeded()
-    s.setGridView([ap(null, 'notes'), sp('s1'), ap('p1', 'slider'), ap('p1', 'slider'), ap(null, 'notes')])
-    expect(s.listGridView()).toEqual([ap(null, 'notes'), sp('s1'), ap('p1', 'slider')])
+    s.grid.setGridView([ap(null, 'notes'), sp('s1'), ap('p1', 'slider'), ap('p1', 'slider'), ap(null, 'notes')])
+    expect(s.grid.listGridView()).toEqual([ap(null, 'notes'), sp('s1'), ap('p1', 'slider')])
     s.close()
   })
 
   it('two projects’ apps with the same id are two panels', () => {
     const s = seeded()
-    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
-    s.setGridView([ap('p1', 'slider'), ap('p2', 'slider')])
-    expect(s.listGridView()).toEqual([ap('p1', 'slider'), ap('p2', 'slider')])
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.grid.setGridView([ap('p1', 'slider'), ap('p2', 'slider')])
+    expect(s.grid.listGridView()).toEqual([ap('p1', 'slider'), ap('p2', 'slider')])
     s.close()
   })
 
   it('deleting a project takes its apps off the grid and leaves the rest where they were', () => {
     const s = seeded()
-    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
-    s.setGridView([ap('p2', 'slider'), sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
-    s.deleteProject('p2')
-    expect(s.listGridView()).toEqual([sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.grid.setGridView([ap('p2', 'slider'), sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
+    s.trash.deleteProject('p2')
+    expect(s.grid.listGridView()).toEqual([sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
     s.close()
   })
 })
@@ -701,11 +701,11 @@ describe('migration v43 — an app panel keeps its span', () => {
 
   it('a span round-trips with its placement, and a panel without one reads without one', () => {
     const s = seeded()
-    s.setGridView([ap('p1', 'board', { cols: 2, rows: 1 }), sp('s1'), ap(null, 'notes')])
-    expect(s.listGridView()).toEqual([ap('p1', 'board', { cols: 2, rows: 1 }), sp('s1'), ap(null, 'notes')])
+    s.grid.setGridView([ap('p1', 'board', { cols: 2, rows: 1 }), sp('s1'), ap(null, 'notes')])
+    expect(s.grid.listGridView()).toEqual([ap('p1', 'board', { cols: 2, rows: 1 }), sp('s1'), ap(null, 'notes')])
     // Rewritten without it: the choice is gone, not kept from the last write
-    s.setGridView([sp('s1'), ap('p1', 'board')])
-    expect(s.listGridView()).toEqual([sp('s1'), ap('p1', 'board')])
+    s.grid.setGridView([sp('s1'), ap('p1', 'board')])
+    expect(s.grid.listGridView()).toEqual([sp('s1'), ap('p1', 'board')])
     s.close()
   })
 
@@ -714,7 +714,7 @@ describe('migration v43 — an app panel keeps its span', () => {
     const file = join(dir, 'store.db')
     try {
       const fresh = newestStore(file)
-      fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      fresh.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       gridSession(fresh, 's1', 'p1')
       fresh.close()
       // Take the table back to v42's shape, with an app and a session on it
@@ -737,9 +737,9 @@ describe('migration v43 — an app panel keeps its span', () => {
 
       const s = new Store(file)
       expect(s.schemaVersion).toBe(LATEST_SCHEMA)
-      expect(s.listGridView()).toEqual([ap('p1', 'board'), sp('s1')])
-      s.setGridView([ap('p1', 'board', { cols: 3, rows: 2 }), sp('s1')])
-      expect(s.listGridView()).toEqual([ap('p1', 'board', { cols: 3, rows: 2 }), sp('s1')])
+      expect(s.grid.listGridView()).toEqual([ap('p1', 'board'), sp('s1')])
+      s.grid.setGridView([ap('p1', 'board', { cols: 3, rows: 2 }), sp('s1')])
+      expect(s.grid.listGridView()).toEqual([ap('p1', 'board', { cols: 3, rows: 2 }), sp('s1')])
       s.close()
 
       // A v42 host's setGridView, copied from that build: it names neither column, and must still succeed
@@ -754,7 +754,7 @@ describe('migration v43 — an app panel keeps its span', () => {
       })()
       older.close()
       const again = new Store(file)
-      expect(again.listGridView()).toEqual([ap('p1', 'board')])
+      expect(again.grid.listGridView()).toEqual([ap('p1', 'board')])
       again.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -763,12 +763,12 @@ describe('migration v43 — an app panel keeps its span', () => {
 
   it('half a span, or one outside the bounds, reads as none chosen', () => {
     const s = seeded()
-    s.setGridView([ap('p1', 'a'), ap('p1', 'b'), ap('p1', 'c')])
+    s.grid.setGridView([ap('p1', 'a'), ap('p1', 'b'), ap('p1', 'c')])
     const db = (s as unknown as { db: Database.Database }).db
     db.exec(`UPDATE grid_layout SET span_cols = 2 WHERE app_id = 'a'`)
     db.exec(`UPDATE grid_layout SET span_cols = 9, span_rows = 1 WHERE app_id = 'b'`)
     db.exec(`UPDATE grid_layout SET span_cols = 2, span_rows = 2 WHERE app_id = 'c'`)
-    expect(s.listGridView()).toEqual([ap('p1', 'a'), ap('p1', 'b'), ap('p1', 'c', { cols: 2, rows: 2 })])
+    expect(s.grid.listGridView()).toEqual([ap('p1', 'a'), ap('p1', 'b'), ap('p1', 'c', { cols: 2, rows: 2 })])
     s.close()
   })
 })
@@ -776,11 +776,11 @@ describe('migration v43 — an app panel keeps its span', () => {
 describe('remembered consents between projects across builds (#384)', () => {
   it('a kind a newer build added stays in the store but is not listed here', () => {
     const s = seeded()
-    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
-    s.setProjectConsent('p1', 'p2', 'delegate')
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.permissions.setProjectConsent('p1', 'p2', 'delegate')
     const db = (s as unknown as { db: Database.Database }).db
     db.prepare(`INSERT INTO project_consents (from_project_id, to_project_id, kind, decided_at) VALUES ('p1', 'p2', 'files', 1)`).run()
-    expect(s.listProjectConsents().map((c) => c.kind)).toEqual(['delegate'])
+    expect(s.permissions.listProjectConsents().map((c) => c.kind)).toEqual(['delegate'])
     expect(db.prepare(`SELECT kind FROM project_consents ORDER BY kind`).all()).toEqual([{ kind: 'delegate' }, { kind: 'files' }])
     s.close()
   })
@@ -793,7 +793,7 @@ describe('remembered consents between projects across builds (#384)', () => {
  */
 describe('the orchestrator marker (kind)', () => {
   const mk = (s: Store, id: string, projectId: string | null, kind: 'worker' | 'orchestrator') =>
-    s.upsertSession({
+    s.sessions.upsertSession({
       id, projectId, kind, tool: 'claude', externalId: null, name: id,
       autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: 1, waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null,
@@ -801,17 +801,17 @@ describe('the orchestrator marker (kind)', () => {
     })
 
   it('the central orchestrator is null when there is no marker', () => {
-    expect(seeded().orchestratorId()).toBeNull()
+    expect(seeded().sessions.orchestratorId()).toBeNull()
   })
 
   it('kind round-trips through upsert — there is one write path', () => {
     const s = seeded()
     mk(s, 'orc', null, 'orchestrator')
-    expect(s.orchestratorId()).toBe('orc')
-    expect(s.listSessions().find((x) => x.id === 'orc')?.kind).toBe('orchestrator')
+    expect(s.sessions.orchestratorId()).toBe('orc')
+    expect(s.sessions.listSessions().find((x) => x.id === 'orc')?.kind).toBe('orchestrator')
     // A demotion persists through the same path
     mk(s, 'orc', null, 'worker')
-    expect(s.orchestratorId()).toBeNull()
+    expect(s.sessions.orchestratorId()).toBeNull()
     s.close()
   })
 
@@ -829,7 +829,7 @@ describe('the orchestrator marker (kind)', () => {
 
     // Build a v25 state: one project orchestrator plus one central orchestrator
     const before = newestStore(file)
-    before.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    before.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     mk(before, 'proj-orc', 'p1', 'orchestrator')
     mk(before, 'central', null, 'orchestrator')
     before.close()
@@ -840,9 +840,9 @@ describe('the orchestrator marker (kind)', () => {
     const after = new Store(file)
     expect(after.schemaVersion).toBe(LATEST_SCHEMA)
     // The marker with a project disappears — the conversation is untouched
-    expect(after.listSessions().find((x) => x.id === 'proj-orc')?.kind).toBe('worker')
+    expect(after.sessions.listSessions().find((x) => x.id === 'proj-orc')?.kind).toBe('worker')
     // The central one is untouched — the app's only orchestrator
-    expect(after.orchestratorId()).toBe('central')
+    expect(after.sessions.orchestratorId()).toBe('central')
     after.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -897,7 +897,7 @@ describe('v13 migration — the old-named table becomes grid_panels', () => { //
     const store = new Store(file)
 
     expect(store.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(store.listGridView()).toEqual([sp('s1')])
+    expect(store.grid.listGridView()).toEqual([sp('s1')])
     store.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -953,9 +953,9 @@ describe('v14 migration — remembers the directory a session was created in', (
     const store = new Store(file)
 
     expect(store.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(store.sessionCwd('plain')).toBe('/tmp/p1')
+    expect(store.sessions.sessionCwd('plain')).toBe('/tmp/p1')
     // A worktree session's history is filed under the worktree, not the project it came from
-    expect(store.sessionCwd('wt')).toBe('/tmp/wt/feature')
+    expect(store.sessions.sessionCwd('wt')).toBe('/tmp/wt/feature')
     store.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -974,7 +974,7 @@ describe('v14 migration — remembers the directory a session was created in', (
 
     const store = new Store(file)
 
-    expect(store.sessionCwd('orc')).toBeNull()
+    expect(store.sessions.sessionCwd('orc')).toBeNull()
     store.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -990,11 +990,11 @@ describe('v14 migration — remembers the directory a session was created in', (
     v13Db(file)
 
     const first = new Store(file)
-    first.setSessionCwd('plain', '/tmp/where-it-really-started')
+    first.sessions.setSessionCwd('plain', '/tmp/where-it-really-started')
     first.close()
 
     const second = new Store(file)
-    expect(second.sessionCwd('plain')).toBe('/tmp/where-it-really-started')
+    expect(second.sessions.sessionCwd('plain')).toBe('/tmp/where-it-really-started')
     second.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1029,12 +1029,12 @@ describe('v15 migration — remembers the shell commands a project registered', 
     const first = new Store(file)
     expect(first.schemaVersion).toBe(LATEST_SCHEMA)
     // A project that never existed correctly has none — an empty list is exactly 'never registered any'
-    expect(first.projectCommands('p1')).toEqual([])
-    first.setProjectCommands('p1', [{ command: 'pnpm test', label: 'Test' }, { command: 'pnpm e2e' }])
+    expect(first.projects.projectCommands('p1')).toEqual([])
+    first.projects.setProjectCommands('p1', [{ command: 'pnpm test', label: 'Test' }, { command: 'pnpm e2e' }])
     first.close()
 
     const second = new Store(file)
-    expect(second.projectCommands('p1')).toEqual([
+    expect(second.projects.projectCommands('p1')).toEqual([
       { command: 'pnpm test', label: 'Test' },
       { command: 'pnpm e2e' },
     ])
@@ -1044,10 +1044,10 @@ describe('v15 migration — remembers the shell commands a project registered', 
     raw2.prepare(`UPDATE projects SET commands = ? WHERE id = 'p1'`).run('["pnpm dev","pnpm lint"]')
     raw2.close()
     const third = new Store(file)
-    expect(third.projectCommands('p1')).toEqual([{ command: 'pnpm dev' }, { command: 'pnpm lint' }])
+    expect(third.projects.projectCommands('p1')).toEqual([{ command: 'pnpm dev' }, { command: 'pnpm lint' }])
     // schema.sql resets user_version to 1, so steps replay on every open —
     // a second open must not recreate the column and wipe the list
-    expect(third.listProjects().map((p) => p.id)).toEqual(['p1'])
+    expect(third.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
     third.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1063,7 +1063,7 @@ describe('v15 migration — remembers the shell commands a project registered', 
     const file = join(dir, 'store.db')
 
     const first = newestStore(file)
-    first.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    first.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     first.close()
 
     const poke = new Database(file)
@@ -1071,8 +1071,8 @@ describe('v15 migration — remembers the shell commands a project registered', 
     poke.close()
 
     const second = new Store(file)
-    expect(second.projectCommands('p1')).toEqual([])
-    expect(second.listProjects().map((p) => p.name)).toEqual(['p1'])
+    expect(second.projects.projectCommands('p1')).toEqual([])
+    expect(second.projects.listProjects().map((p) => p.name)).toEqual(['p1'])
     second.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1103,34 +1103,34 @@ describe('v16 migration — the host settings survive a restart', () => {
 
     const first = new Store(file)
     // Something never written is null — distinct from 'false'
-    expect(first.appSetting('updates.auto')).toBeNull()
-    first.setAppSetting('updates.auto', 'false')
+    expect(first.settings.appSetting('updates.auto')).toBeNull()
+    first.settings.setAppSetting('updates.auto', 'false')
     first.close()
 
     const second = new Store(file)
-    expect(second.appSetting('updates.auto')).toBe('false')
+    expect(second.settings.appSetting('updates.auto')).toBe('false')
     // schema.sql resets user_version to 1, so steps replay on every open —
     // a second open must not recreate the table and wipe the answer
-    second.setAppSetting('updates.auto', 'true')
-    expect(second.appSetting('updates.auto')).toBe('true')
+    second.settings.setAppSetting('updates.auto', 'true')
+    expect(second.settings.appSetting('updates.auto')).toBe('true')
     second.close()
     rmSync(dir, { recursive: true, force: true })
   })
 
   it('updateAppSetting computes the next value from the stored one, and keeps the old value when that fails', () => {
     const s = new Store()
-    s.updateAppSetting('k', (cur) => {
+    s.settings.updateAppSetting('k', (cur) => {
       expect(cur).toBeNull()
       return 'a'
     })
-    s.updateAppSetting('k', (cur) => `${cur}b`)
-    expect(s.appSetting('k')).toBe('ab')
+    s.settings.updateAppSetting('k', (cur) => `${cur}b`)
+    expect(s.settings.appSetting('k')).toBe('ab')
     expect(() =>
-      s.updateAppSetting('k', () => {
+      s.settings.updateAppSetting('k', () => {
         throw new Error('nope')
       }),
     ).toThrow('nope')
-    expect(s.appSetting('k')).toBe('ab')
+    expect(s.settings.appSetting('k')).toBe('ab')
     s.close()
   })
 })
@@ -1191,20 +1191,20 @@ describe('v17 migration — context usage survives a restart', () => {
     const first = new Store(file)
     expect(first.schemaVersion).toBe(LATEST_SCHEMA)
     // A session that has never reported one is null — the `—` on screen is exactly this fact
-    expect(first.listSessions().find((s) => s.id === 'worked')!.context).toBeNull()
-    first.upsertSession(row({ context: { used: 168_000, window: 200_000, exactness: 'exact' } }))
+    expect(first.sessions.listSessions().find((s) => s.id === 'worked')!.context).toBeNull()
+    first.sessions.upsertSession(row({ context: { used: 168_000, window: 200_000, exactness: 'exact' } }))
     first.close()
 
     // The host restarted — an empty reading here would be exactly the bug this issue describes
     const second = new Store(file)
-    expect(second.listSessions().find((s) => s.id === 'worked')!.context).toEqual({
+    expect(second.sessions.listSessions().find((s) => s.id === 'worked')!.context).toEqual({
       used: 168_000, window: 200_000, exactness: 'exact',
     })
     // A session that has not had a single turn yet is still unknown — this must read as unknown, not 0%
-    expect(second.listSessions().find((s) => s.id === 'fresh')!.context).toBeNull()
+    expect(second.sessions.listSessions().find((s) => s.id === 'fresh')!.context).toBeNull()
     // schema.sql resets user_version to 1, so steps replay on every open —
     // a second open must not recreate the column and wipe the value
-    expect(second.listSessions().find((s) => s.id === 'fresh')!.tool).toBe('codex')
+    expect(second.sessions.listSessions().find((s) => s.id === 'fresh')!.tool).toBe('codex')
     second.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1216,9 +1216,9 @@ describe('v17 migration — context usage survives a restart', () => {
    */
   it('a later report overwrites an earlier one', () => {
     const store = seeded()
-    store.upsertSession(row({ id: 's1', context: { used: 190_000, window: 200_000, exactness: 'exact' } }))
-    store.upsertSession(row({ id: 's1', context: { used: 24_000, window: 200_000, exactness: 'exact' } }))
-    expect(store.listSessions().find((s) => s.id === 's1')!.context!.used).toBe(24_000)
+    store.sessions.upsertSession(row({ id: 's1', context: { used: 190_000, window: 200_000, exactness: 'exact' } }))
+    store.sessions.upsertSession(row({ id: 's1', context: { used: 24_000, window: 200_000, exactness: 'exact' } }))
+    expect(store.sessions.listSessions().find((s) => s.id === 's1')!.context!.used).toBe(24_000)
     store.close()
   })
 })
@@ -1226,15 +1226,15 @@ describe('v17 migration — context usage survives a restart', () => {
 describe('commit attribution (#50) — kept in our own database, not the repository', () => {
   it('records and looks up per project (the same hash: the last record wins)', () => {
     const s = new Store()
-    s.recordCommit('p1', '4ce6fc7', 's-auth')
-    s.recordCommit('p1', 'abc1234', 's-docs')
-    s.recordCommit('p2', '4ce6fc7', 's-other') // the same hash in a different project is a separate fact
-    s.recordCommit('p1', '4ce6fc7', 's-auth2') // recorded again — overwrites
-    const rows = s.commitSessions('p1')
+    s.sessions.recordCommit('p1', '4ce6fc7', 's-auth')
+    s.sessions.recordCommit('p1', 'abc1234', 's-docs')
+    s.sessions.recordCommit('p2', '4ce6fc7', 's-other') // the same hash in a different project is a separate fact
+    s.sessions.recordCommit('p1', '4ce6fc7', 's-auth2') // recorded again — overwrites
+    const rows = s.sessions.commitSessions('p1')
     expect(rows).toHaveLength(2)
     expect(rows.find((r) => r.sha === '4ce6fc7')?.sessionId).toBe('s-auth2')
-    expect(s.commitSessions('p2')).toEqual([{ sha: '4ce6fc7', sessionId: 's-other' }])
-    expect(s.commitSessions('p-none')).toEqual([])
+    expect(s.sessions.commitSessions('p2')).toEqual([{ sha: '4ce6fc7', sessionId: 's-other' }])
+    expect(s.sessions.commitSessions('p-none')).toEqual([])
   })
 })
 
@@ -1248,15 +1248,15 @@ describe('WAL checkpoint', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-wal-'))
     const path = join(dir, 'store.db')
     const s = new Store(path)
-    s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-    s.upsertSession({
+    s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    s.sessions.upsertSession({
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'New session',
       autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
       ...sessionLiveDefaults(),
     })
     for (let i = 1; i <= 200; i++) {
-      s.appendMessages([{ sessionId: 's1', seq: i, role: 'user', kind: 'text', payload: { text: 'x'.repeat(2000) }, ts: i }])
+      s.messages.appendMessages([{ sessionId: 's1', seq: i, role: 'user', kind: 'text', payload: { text: 'x'.repeat(2000) }, ts: i }])
     }
     expect(statSync(path + '-wal').size).toBeGreaterThan(0)
     s.checkpoint()
@@ -1281,7 +1281,7 @@ describe('loadMessages reads one row as one message (#77)', () => {
 
   it('neighboring assistant rows are two messages — neither replies nor reasoning are joined', () => {
     const s = seeded()
-    s.appendMessages([
+    s.messages.appendMessages([
       ask(1, 'run the review'),
       reply(2, 'One review is still running.'),
       // A new reply with no human turn in between — a background task finished and a new turn started
@@ -1289,7 +1289,7 @@ describe('loadMessages reads one row as one message (#77)', () => {
       { sessionId: 's1', seq: 4, role: 'assistant', kind: 'reasoning', payload: { text: 'earlier thought' }, ts: 4 },
       { sessionId: 's1', seq: 5, role: 'assistant', kind: 'reasoning', payload: { text: 'later thought' }, ts: 5 },
     ])
-    expect(texts(s.loadMessages('s1'))).toEqual([
+    expect(texts(s.messages.loadMessages('s1'))).toEqual([
       [1, 'run the review'],
       [2, 'One review is still running.'],
       [3, 'All six reviews are in.'],
@@ -1300,28 +1300,28 @@ describe('loadMessages reads one row as one message (#77)', () => {
 
   it('limit counts rows — reading onward by cursor never overlaps or joins neighboring replies', () => {
     const s = seeded()
-    s.appendMessages([ask(1, 'question1'), reply(2, 'answer1-a'), reply(3, 'answer1-b'), ask(4, 'question2'), reply(5, 'answer2-a'), reply(6, 'answer2-b')])
-    const page = s.loadMessages('s1', 2)
+    s.messages.appendMessages([ask(1, 'question1'), reply(2, 'answer1-a'), reply(3, 'answer1-b'), ask(4, 'question2'), reply(5, 'answer2-a'), reply(6, 'answer2-b')])
+    const page = s.messages.loadMessages('s1', 2)
     expect(texts(page)).toEqual([[5, 'answer2-a'], [6, 'answer2-b']])
-    const older = s.loadMessages('s1', 2, page[0]!.seq)
+    const older = s.messages.loadMessages('s1', 2, page[0]!.seq)
     expect(texts(older)).toEqual([[3, 'answer1-b'], [4, 'question2']])
-    expect(texts(s.loadMessages('s1', 2, older[0]!.seq))).toEqual([[1, 'question1'], [2, 'answer1-a']])
+    expect(texts(s.messages.loadMessages('s1', 2, older[0]!.seq))).toEqual([[1, 'question1'], [2, 'answer1-a']])
   })
 
   it('loadMessagesFrom reads what comes after a spot, by the same rule', () => {
     const s = seeded()
-    s.appendMessages([ask(1, 'question'), reply(2, 'the answer that came first.'), reply(3, 'the later answer.'), ask(4, 'the next question')])
-    const after = s.loadMessagesFrom('s1', 1, 10)
+    s.messages.appendMessages([ask(1, 'question'), reply(2, 'the answer that came first.'), reply(3, 'the later answer.'), ask(4, 'the next question')])
+    const after = s.messages.loadMessagesFrom('s1', 1, 10)
     expect(texts(after)).toEqual([[2, 'the answer that came first.'], [3, 'the later answer.'], [4, 'the next question']])
   })
 
   it('upsertMessageNoIndex updates only the body and leaves the index untouched', () => {
     const s = seeded()
-    s.upsertMessageNoIndex({ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: 'a growing body' }, ts: 1 })
-    expect((s.loadMessages('s1')[0]!.payload as { text?: string }).text).toBe('a growing body')
-    expect(s.searchMessages('a growing body').length).toBe(0) // the index is written once, when it closes (appendMessages)
-    s.appendMessages([{ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: 'a growing body, done' }, ts: 2 }])
-    expect(s.searchMessages('a growing body').length).toBe(1)
+    s.messages.upsertMessageNoIndex({ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: 'a growing body' }, ts: 1 })
+    expect((s.messages.loadMessages('s1')[0]!.payload as { text?: string }).text).toBe('a growing body')
+    expect(s.messages.searchMessages('a growing body').length).toBe(0) // the index is written once, when it closes (appendMessages)
+    s.messages.appendMessages([{ sessionId: 's1', seq: 1, role: 'assistant', kind: 'text', payload: { text: 'a growing body, done' }, ts: 2 }])
+    expect(s.messages.searchMessages('a growing body').length).toBe(1)
   })
 })
 
@@ -1338,8 +1338,8 @@ describe('v21 migration — merges delta rows into messages', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v21-'))
     const file = join(dir, 'store.db')
     const s = newestStore(file)
-    s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-    s.upsertSession({
+    s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    s.sessions.upsertSession({
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: 'New session',
       autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null,
@@ -1347,7 +1347,7 @@ describe('v21 migration — merges delta rows into messages', () => {
       ...sessionLiveDefaults(),
     })
     // The exact shape observed in the real data: one token is one row
-    s.appendMessages([
+    s.messages.appendMessages([
       { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: '맵 추출 어떻게 해?' }, ts: 1 },
       { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { type: 'message_delta', text: '한 ' }, ts: 2 },
       { sessionId: 's1', seq: 3, role: 'assistant', kind: 'text', payload: { type: 'message_delta', text: '번에 ' }, ts: 3 },
@@ -1358,8 +1358,8 @@ describe('v21 migration — merges delta rows into messages', () => {
       { sessionId: 's1', seq: 8, role: 'assistant', kind: 'reasoning', payload: { text: '생각 ' }, ts: 8 },
       { sessionId: 's1', seq: 9, role: 'assistant', kind: 'reasoning', payload: { text: '조각' }, ts: 9 },
     ])
-    s.markRead('s1', 3) // marked as read partway through a reply — "unread" must not come back after the move
-    const beforeRead = s.loadMessages('s1', 50).map((m) => [m.kind, (m.payload as { text?: string }).text])
+    s.sessions.markRead('s1', 3) // marked as read partway through a reply — "unread" must not come back after the move
+    const beforeRead = s.messages.loadMessages('s1', 50).map((m) => [m.kind, (m.payload as { text?: string }).text])
     s.close()
     return { file, beforeRead }
   }
@@ -1373,7 +1373,7 @@ describe('v21 migration — merges delta rows into messages', () => {
     raw.close()
 
     const s = new Store(file)
-    const rows = s.loadMessages('s1', 50)
+    const rows = s.messages.loadMessages('s1', 50)
     const afterRead = rows.map((m) => [m.kind, (m.payload as { text?: string }).text])
 
     // Different text means data was lost — the text joined from the 9 pre-move rows equals the text joined from the 5 post-move messages
@@ -1387,7 +1387,7 @@ describe('v21 migration — merges delta rows into messages', () => {
       ['reasoning', '생각 조각'],
     ])
     // 9 rows -> 5 rows
-    const nowRows = s.loadMessages('s1', 50).length
+    const nowRows = s.messages.loadMessages('s1', 50).length
     expect(rawRows).toBe(9)
     expect(nowRows).toBe(5)
     s.close()
@@ -1400,10 +1400,10 @@ describe('v21 migration — merges delta rows into messages', () => {
     raw.close()
 
     const s = new Store(file)
-    const merged = s.loadMessages('s1', 50)
+    const merged = s.messages.loadMessages('s1', 50)
     expect(merged[1]!.seq).toBe(2) // the spot where 2, 3, 4 merged is numbered 2
     // The read position (3) is unchanged, and since the first chunk (2) survives, a reply already read never comes back as unread
-    expect(s.listSessions()[0]!.lastReadSeq).toBe(3)
+    expect(s.sessions.listSessions()[0]!.lastReadSeq).toBe(3)
     s.close()
   })
 
@@ -1414,8 +1414,8 @@ describe('v21 migration — merges delta rows into messages', () => {
     raw.close()
 
     const s = new Store(file)
-    expect(s.searchMessages('번에 뽑게').length).toBe(1) // a phrase the old index could never have found
-    expect(s.searchMessages('결과는 이렇습니다').length).toBe(1)
+    expect(s.messages.searchMessages('번에 뽑게').length).toBe(1) // a phrase the old index could never have found
+    expect(s.messages.searchMessages('결과는 이렇습니다').length).toBe(1)
     s.close()
   })
 
@@ -1432,7 +1432,7 @@ describe('v21 migration — merges delta rows into messages', () => {
     raw.close()
 
     const s = new Store(file)
-    const ts = s.loadMessages('s1', 50).map((m) => m.ts)
+    const ts = s.messages.loadMessages('s1', 50).map((m) => m.ts)
     // [user 1] [2+3+4 merged -> 4] [tool 5] [6+7 merged -> 7] [8+9 merged -> 9]
     expect(ts).toEqual([1, 4, 5, 7, 9])
     s.close()
@@ -1450,15 +1450,15 @@ describe('v29 migration — narrows a trampled timestamp using its neighbor', ()
     const dir = mkdtempSync(join(tmpdir(), 'cc-v29-'))
     const file = join(dir, 'store.db')
     const s0 = newestStore(file)
-    s0.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-    s0.upsertSession({
+    s0.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    s0.sessions.upsertSession({
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'Session',
       autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: Date.now(), waitingSince: null, live: true, model: null, effort: null, verbosity: null,
       serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null,
       ...sessionLiveDefaults(),
     })
-    s0.appendMessages([
+    s0.messages.appendMessages([
       { sessionId: 's1', seq: 1, role: 'user', kind: 'text', payload: { text: 'question' }, ts: 100 },
       // A trampled row — it was really around 110, but the migration's own time (999999) was stamped on it
       { sessionId: 's1', seq: 2, role: 'assistant', kind: 'text', payload: { text: 'answer' }, ts: 999_999 },
@@ -1472,7 +1472,7 @@ describe('v29 migration — narrows a trampled timestamp using its neighbor', ()
     raw.close()
 
     const s = new Store(file)
-    expect(s.loadMessages('s1', 50).map((m) => m.ts)).toEqual([100, 120, 120, 130])
+    expect(s.messages.loadMessages('s1', 50).map((m) => m.ts)).toEqual([100, 120, 120, 130])
     s.close()
   })
 })
@@ -1481,12 +1481,12 @@ describe('v29 migration — narrows a trampled timestamp using its neighbor', ()
 describe('parent_session_id round-trip (#69)', () => {
   it('a parent link is saved and read back', () => {
     const s = seeded()
-    const before = s.listSessions().find((x) => x.id === 's1')!
+    const before = s.sessions.listSessions().find((x) => x.id === 's1')!
     expect(before.parentSessionId).toBeNull()
 
-    s.upsertSession({ ...before, parentSessionId: 'mgr-1' })
+    s.sessions.upsertSession({ ...before, parentSessionId: 'mgr-1' })
 
-    expect(s.listSessions().find((x) => x.id === 's1')?.parentSessionId).toBe('mgr-1')
+    expect(s.sessions.listSessions().find((x) => x.id === 's1')?.parentSessionId).toBe('mgr-1')
   })
 })
 
@@ -1494,14 +1494,14 @@ describe('parent_session_id round-trip (#69)', () => {
 describe('worktree_setup round-trip (#69)', () => {
   it('saves, reads back, and an empty setup lies down as null', () => {
     const s = seeded()
-    expect(s.worktreeSetup('p1')).toBeNull()
+    expect(s.projects.worktreeSetup('p1')).toBeNull()
 
-    s.setWorktreeSetup('p1', { command: 'pnpm install', copyFiles: ['.env.local'] })
-    expect(s.worktreeSetup('p1')).toEqual({ command: 'pnpm install', copyFiles: ['.env.local'] })
+    s.projects.setWorktreeSetup('p1', { command: 'pnpm install', copyFiles: ['.env.local'] })
+    expect(s.projects.worktreeSetup('p1')).toEqual({ command: 'pnpm install', copyFiles: ['.env.local'] })
 
     // Saving an empty setup means "no setup" — an empty string command must never be exec'd
-    s.setWorktreeSetup('p1', { command: '', copyFiles: [] })
-    expect(s.worktreeSetup('p1')).toBeNull()
+    s.projects.setWorktreeSetup('p1', { command: '', copyFiles: [] })
+    expect(s.projects.worktreeSetup('p1')).toBeNull()
   })
 })
 
@@ -1509,24 +1509,24 @@ describe('worktree_setup round-trip (#69)', () => {
 describe('worktree_manager round-trip (#76)', () => {
   it('saves, reads back, and clears', () => {
     const s = seeded()
-    expect(s.worktreeManager('p1')).toBeNull()
+    expect(s.projects.worktreeManager('p1')).toBeNull()
 
-    s.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'main' })
-    expect(s.worktreeManager('p1')).toEqual({ sessionId: 'mgr-1', baseBranch: 'main' })
+    s.projects.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'main' })
+    expect(s.projects.worktreeManager('p1')).toEqual({ sessionId: 'mgr-1', baseBranch: 'main' })
 
     // A path that changes only the trunk — the slot stays put and only the baseline changes
-    s.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'develop' })
-    expect(s.worktreeManager('p1')?.baseBranch).toBe('develop')
+    s.projects.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'develop' })
+    expect(s.projects.worktreeManager('p1')?.baseBranch).toBe('develop')
 
-    s.setWorktreeManager('p1', null)
-    expect(s.worktreeManager('p1')).toBeNull()
+    s.projects.setWorktreeManager('p1', null)
+    expect(s.projects.worktreeManager('p1')).toBeNull()
   })
 
   it('one per project — there cannot be two, since there is only one column', () => {
     const s = seeded()
-    s.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'main' })
-    s.setWorktreeManager('p1', { sessionId: 'mgr-2', baseBranch: 'main' })
-    expect(s.worktreeManager('p1')?.sessionId).toBe('mgr-2')
+    s.projects.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'main' })
+    s.projects.setWorktreeManager('p1', { sessionId: 'mgr-2', baseBranch: 'main' })
+    expect(s.projects.worktreeManager('p1')?.sessionId).toBe('mgr-2')
   })
 })
 
@@ -1554,7 +1554,7 @@ describe('v32 migration — the default model is per tool (#107)', () => {
     v31Db(file)
 
     const s = new Store(file)
-    expect(s.projectToolDefaults('p1')).toEqual({})
+    expect(s.projects.projectToolDefaults('p1')).toEqual({})
     const cols = (s as unknown as { db: Database.Database }).db
       .prepare(`PRAGMA table_info(projects)`)
       .all() as { name: string }[]
@@ -1562,12 +1562,12 @@ describe('v32 migration — the default model is per tool (#107)', () => {
     expect(cols.map((c) => c.name)).not.toContain('default_effort')
 
     // Each tool sits in its own slot, and neither overwrites the other
-    s.setProjectToolDefaults('p1', 'codex', { model: 'gpt-5.6-terra', effort: 'high' })
-    s.setProjectToolDefaults('p1', 'claude', { model: 'opus', effort: null })
+    s.projects.setProjectToolDefaults('p1', 'codex', { model: 'gpt-5.6-terra', effort: 'high' })
+    s.projects.setProjectToolDefaults('p1', 'claude', { model: 'opus', effort: null })
     s.close()
 
     const reopened = new Store(file)
-    expect(reopened.projectToolDefaults('p1')).toEqual({
+    expect(reopened.projects.projectToolDefaults('p1')).toEqual({
       codex: { model: 'gpt-5.6-terra', effort: 'high' },
       claude: { model: 'opus', effort: null },
     })
@@ -1587,14 +1587,14 @@ describe('v32 migration — the default model is per tool (#107)', () => {
 describe('addProject trust (#655)', () => {
   it('starts untrusted unless asked, and a second registration of the path keeps whatever trust the row has', () => {
     const s = new Store()
-    s.addProject({ id: 'a', path: '/tmp/a', name: 'a' })
-    s.addProject({ id: 'b', path: '/tmp/b', name: 'b', trusted: true })
-    expect(s.projectRoots().map((p) => [p.id, p.trusted])).toEqual([['a', false], ['b', true]])
+    s.projects.addProject({ id: 'a', path: '/tmp/a', name: 'a' })
+    s.projects.addProject({ id: 'b', path: '/tmp/b', name: 'b', trusted: true })
+    expect(s.projects.projectRoots().map((p) => [p.id, p.trusted])).toEqual([['a', false], ['b', true]])
     // Neither direction flips: a second call renames the row and leaves trust alone
-    s.addProject({ id: 'a2', path: '/tmp/a', name: 'a-renamed', trusted: true })
-    s.addProject({ id: 'b2', path: '/tmp/b', name: 'b-renamed' })
-    expect(s.projectRoots().map((p) => [p.id, p.trusted])).toEqual([['a', false], ['b', true]])
-    expect(s.listProjects().map((p) => p.name)).toEqual(['a-renamed', 'b-renamed'])
+    s.projects.addProject({ id: 'a2', path: '/tmp/a', name: 'a-renamed', trusted: true })
+    s.projects.addProject({ id: 'b2', path: '/tmp/b', name: 'b-renamed' })
+    expect(s.projects.projectRoots().map((p) => [p.id, p.trusted])).toEqual([['a', false], ['b', true]])
+    expect(s.projects.listProjects().map((p) => p.name)).toEqual(['a-renamed', 'b-renamed'])
     s.close()
   })
 })
@@ -1616,14 +1616,14 @@ describe('v33/v35 migration — the trust column, and only projects that existed
     oldProjects(file, 32)
 
     const s = new Store(file)
-    expect(s.projectRoots()).toEqual([{ id: 'p1', path: '/tmp/p1', trusted: true }])
-    expect(s.setProjectTrusted('p1', false)).toBe(true)
+    expect(s.projects.projectRoots()).toEqual([{ id: 'p1', path: '/tmp/p1', trusted: true }])
+    expect(s.projects.setProjectTrusted('p1', false)).toBe(true)
     // This does not silently succeed on a project that does not exist
-    expect(s.setProjectTrusted('nope', true)).toBe(false)
+    expect(s.projects.setProjectTrusted('nope', true)).toBe(false)
     s.close()
 
     const reopened = new Store(file)
-    expect(reopened.projectRoots()).toEqual([{ id: 'p1', path: '/tmp/p1', trusted: false }])
+    expect(reopened.projects.projectRoots()).toEqual([{ id: 'p1', path: '/tmp/p1', trusted: false }])
     reopened.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1635,22 +1635,22 @@ describe('v33/v35 migration — the trust column, and only projects that existed
 
     const s = new Store(file)
     expect(s.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(s.projectRoots().map((p) => [p.id, p.trusted])).toEqual([
+    expect(s.projects.projectRoots().map((p) => [p.id, p.trusted])).toEqual([
       ['p1', true],
       ['p2', true],
     ])
     // This is also carried in the shape sent to the screen — the trust toggle shows this value
-    expect(s.listProjects().map((p) => [p.id, p.trusted])).toEqual([
+    expect(s.projects.listProjects().map((p) => [p.id, p.trusted])).toEqual([
       ['p1', true],
       ['p2', true],
     ])
-    s.addProject({ id: 'p3', path: '/tmp/p3', name: 'p3' })
-    s.setProjectTrusted('p2', false)
+    s.projects.addProject({ id: 'p3', path: '/tmp/p3', name: 'p3' })
+    s.projects.setProjectTrusted('p2', false)
     s.close()
 
     // Reopening does not replay the migration — the trust a person turned off, and the new project's "no," both survive
     const reopened = new Store(file)
-    expect(reopened.projectRoots().map((p) => [p.id, p.trusted])).toEqual([
+    expect(reopened.projects.projectRoots().map((p) => [p.id, p.trusted])).toEqual([
       ['p1', true],
       ['p2', false],
       ['p3', false],
@@ -1661,9 +1661,9 @@ describe('v33/v35 migration — the trust column, and only projects that existed
 
   it('a project registered on a new database starts out untrusted', () => {
     const s = new Store()
-    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
-    expect(s.projectRoots()).toEqual([{ id: 'p2', path: '/tmp/p2', trusted: false }])
-    expect(s.listProjects()[0]?.trusted).toBe(false)
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    expect(s.projects.projectRoots()).toEqual([{ id: 'p2', path: '/tmp/p2', trusted: false }])
+    expect(s.projects.listProjects()[0]?.trusted).toBe(false)
   })
 })
 
@@ -1672,27 +1672,27 @@ describe('the person\'s answers to an app\'s capability requests (M4 D-4)', () =
 
   it('one row per app and capability — answering again overwrites, forgetting deletes, and a user-folder app is also one row', () => {
     const s = new Store()
-    s.putAppPermission('p1/notes', 'p1', allow('agent:claude', 1))
-    s.putAppPermission('p1/notes', 'p1', { ...allow('agent:claude', 2), decision: 'deny' })
-    s.putAppPermission('p1/notes', 'p1', allow('host:git.status', 3))
+    s.permissions.putAppPermission('p1/notes', 'p1', allow('agent:claude', 1))
+    s.permissions.putAppPermission('p1/notes', 'p1', { ...allow('agent:claude', 2), decision: 'deny' })
+    s.permissions.putAppPermission('p1/notes', 'p1', allow('host:git.status', 3))
     // Even with project_id null, the same key is one row — why null was kept out of the PRIMARY KEY
-    s.putAppPermission('_user/timer', null, allow('agent:claude', 4))
-    s.putAppPermission('_user/timer', null, allow('agent:claude', 5))
-    expect(s.getAppPermission('p1/notes', 'agent:claude')).toEqual({ ...allow('agent:claude', 2), decision: 'deny' })
-    expect(s.listAppPermissions('p1/notes').map((r) => r.capability)).toEqual(['host:git.status', 'agent:claude'])
-    expect(s.listAppPermissions('_user/timer')).toEqual([allow('agent:claude', 5)])
-    s.forgetAppPermission('p1/notes', 'host:git.status')
-    expect(s.getAppPermission('p1/notes', 'host:git.status')).toBeNull()
+    s.permissions.putAppPermission('_user/timer', null, allow('agent:claude', 4))
+    s.permissions.putAppPermission('_user/timer', null, allow('agent:claude', 5))
+    expect(s.permissions.getAppPermission('p1/notes', 'agent:claude')).toEqual({ ...allow('agent:claude', 2), decision: 'deny' })
+    expect(s.permissions.listAppPermissions('p1/notes').map((r) => r.capability)).toEqual(['host:git.status', 'agent:claude'])
+    expect(s.permissions.listAppPermissions('_user/timer')).toEqual([allow('agent:claude', 5)])
+    s.permissions.forgetAppPermission('p1/notes', 'host:git.status')
+    expect(s.permissions.getAppPermission('p1/notes', 'host:git.status')).toBeNull()
   })
 
   it('deleting a project clears the answers for that project\'s apps too — a user-folder app\'s answer survives', () => {
     const s = new Store()
-    s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-    s.putAppPermission('p1/notes', 'p1', allow('agent:claude', 1))
-    s.putAppPermission('_user/timer', null, allow('agent:claude', 2))
-    s.deleteProject('p1')
-    expect(s.listAppPermissions('p1/notes')).toEqual([])
-    expect(s.listAppPermissions('_user/timer')).toHaveLength(1)
+    s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    s.permissions.putAppPermission('p1/notes', 'p1', allow('agent:claude', 1))
+    s.permissions.putAppPermission('_user/timer', null, allow('agent:claude', 2))
+    s.trash.deleteProject('p1')
+    expect(s.permissions.listAppPermissions('p1/notes')).toEqual([])
+    expect(s.permissions.listAppPermissions('_user/timer')).toHaveLength(1)
   })
 })
 
@@ -1705,7 +1705,7 @@ describe('the run log chain (M4 D-6)', () => {
   const t0 = 1_760_000_000_000
   let seq = 0
   const put = (s: Store, id: string, appId: string, parentRunId: string | null, over: Record<string, unknown> = {}) =>
-    s.beginAppRun({
+    s.appRuns.beginAppRun({
       id, projectId: 'p1', appId, kind: 'tool', tool: 't', callerKind: parentRunId ? 'app' : 'view', callerSessionId: null, parentRunId,
       status: 'ok', durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt: t0 + seq++, sessionId: null, ...over,
     })
@@ -1720,17 +1720,17 @@ describe('the run log chain (M4 D-6)', () => {
     put(s, 'c1', 'other', null) // an unrelated app
     put(s, 'lonely', 'notes', null, { kind: 'broker', tool: 'host_data', callerKind: 'app', status: 'rejected' }) // requested with no open run
 
-    const ids = (appId: string, limit: number) => s.listAppRuns('p1', appId, limit).map((r) => r.id)
+    const ids = (appId: string, limit: number) => s.appRuns.listAppRuns('p1', appId, limit).map((r) => r.id)
     expect(ids('notes', 10)).toEqual(['lonely', 'a2', 'b1-ask', 'b1', 'a1-ask', 'a1'])
     // The limit counts roots — rows below a root do not push a root out
     expect(ids('notes', 2)).toEqual(['lonely', 'a2'])
     expect(ids('notes', 3)).toEqual(['lonely', 'a2', 'b1-ask', 'b1', 'a1-ask', 'a1'])
     // In helper's log, the row notes called is the root — its parent (notes's own row) does not belong to helper
     expect(ids('helper', 10)).toEqual(['b1-ask', 'b1'])
-    expect(s.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'b1-ask')).toMatchObject({ appId: 'helper', kind: 'broker', parentRunId: 'b1', sessionId: 's-10' })
+    expect(s.appRuns.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'b1-ask')).toMatchObject({ appId: 'helper', kind: 'broker', parentRunId: 'b1', sessionId: 's-10' })
 
-    s.linkAppRunSession('a1', 's-1')
-    expect(s.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'a1')?.sessionId).toBe('s-1')
+    s.appRuns.linkAppRunSession('a1', 's-1')
+    expect(s.appRuns.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'a1')?.sessionId).toBe('s-1')
   })
 
   it('v36 records all come up as tool-call rows', () => {
@@ -1748,7 +1748,7 @@ describe('the run log chain (M4 D-6)', () => {
 
     const s = new Store(file)
     expect(s.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(s.listAppRuns('p1', 'notes', 10)).toEqual([
+    expect(s.appRuns.listAppRuns('p1', 'notes', 10)).toEqual([
       expect.objectContaining({ id: 'r1', kind: 'tool', sessionId: null, tool: 'echo', status: 'ok' }),
     ])
     s.close()
@@ -1769,23 +1769,23 @@ describe('how much of an app\'s requested agents were used (M4 D-5)', () => {
 
   it('only counts run_agent rows a session stood up — duration and tokens are summed, and a run with no reported tokens is left out only of the token sum', () => {
     const s = new Store()
-    s.beginAppRun(row('old', { createdAt: t0 - 10_000, sessionId: 's0' }))
-    s.endAppRun('old', { status: 'ok', durationMs: 7_000, error: null, tokens: { input: 5_000, output: 500 } })
-    s.beginAppRun(row('a', { sessionId: 's1' }))
-    s.endAppRun('a', { status: 'ok', durationMs: 4_000, error: null, tokens: { input: 1_200, output: 80 } })
-    s.beginAppRun(row('b', { sessionId: 's2', createdAt: t0 + 1 }))
-    s.endAppRun('b', { status: 'cancelled', durationMs: 2_500, error: 'stopped', tokens: null })
-    s.beginAppRun(row('running', { sessionId: 's3', createdAt: t0 + 2 }))
+    s.appRuns.beginAppRun(row('old', { createdAt: t0 - 10_000, sessionId: 's0' }))
+    s.appRuns.endAppRun('old', { status: 'ok', durationMs: 7_000, error: null, tokens: { input: 5_000, output: 500 } })
+    s.appRuns.beginAppRun(row('a', { sessionId: 's1' }))
+    s.appRuns.endAppRun('a', { status: 'ok', durationMs: 4_000, error: null, tokens: { input: 1_200, output: 80 } })
+    s.appRuns.beginAppRun(row('b', { sessionId: 's2', createdAt: t0 + 1 }))
+    s.appRuns.endAppRun('b', { status: 'cancelled', durationMs: 2_500, error: 'stopped', tokens: null })
+    s.appRuns.beginAppRun(row('running', { sessionId: 's3', createdAt: t0 + 2 }))
     // A request that never stood up an agent, an unrelated request, another app's agent
-    s.beginAppRun(row('refused', { status: 'rejected', createdAt: t0 + 3 }))
-    s.beginAppRun(row('data', { tool: 'host_data', sessionId: null, createdAt: t0 + 4 }))
-    s.beginAppRun(row('other', { appId: 'other', sessionId: 's9', createdAt: t0 + 5 }))
+    s.appRuns.beginAppRun(row('refused', { status: 'rejected', createdAt: t0 + 3 }))
+    s.appRuns.beginAppRun(row('data', { tool: 'host_data', sessionId: null, createdAt: t0 + 4 }))
+    s.appRuns.beginAppRun(row('other', { appId: 'other', sessionId: 's9', createdAt: t0 + 5 }))
 
-    expect(s.appAgentUse('p1', 'notes', t0)).toEqual({ runs: 3, durationMs: 6_500, tokens: { input: 1_200, output: 80 } })
-    expect(s.appAgentUse('p1', 'notes', t0 - 60_000)).toEqual({ runs: 4, durationMs: 13_500, tokens: { input: 6_200, output: 580 } })
-    expect(s.appAgentUse('p1', 'nobody', 0)).toEqual({ runs: 0, durationMs: 0, tokens: null })
-    expect(s.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'a')?.tokens).toEqual({ input: 1_200, output: 80 })
-    expect(s.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'b')?.tokens).toBeNull()
+    expect(s.appRuns.appAgentUse('p1', 'notes', t0)).toEqual({ runs: 3, durationMs: 6_500, tokens: { input: 1_200, output: 80 } })
+    expect(s.appRuns.appAgentUse('p1', 'notes', t0 - 60_000)).toEqual({ runs: 4, durationMs: 13_500, tokens: { input: 6_200, output: 580 } })
+    expect(s.appRuns.appAgentUse('p1', 'nobody', 0)).toEqual({ runs: 0, durationMs: 0, tokens: null })
+    expect(s.appRuns.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'a')?.tokens).toEqual({ input: 1_200, output: 80 })
+    expect(s.appRuns.listAppRuns('p1', 'notes', 10).find((r) => r.id === 'b')?.tokens).toBeNull()
   })
 
   it('v37 records gain the token columns, and old rows are empty', () => {
@@ -1803,8 +1803,8 @@ describe('how much of an app\'s requested agents were used (M4 D-5)', () => {
 
     const s = new Store(file)
     expect(s.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(s.listAppRuns('p1', 'notes', 10)).toEqual([expect.objectContaining({ id: 'r1', kind: 'broker', sessionId: 's1', tokens: null })])
-    expect(s.appAgentUse('p1', 'notes', 0)).toEqual({ runs: 1, durationMs: 3, tokens: null })
+    expect(s.appRuns.listAppRuns('p1', 'notes', 10)).toEqual([expect.objectContaining({ id: 'r1', kind: 'broker', sessionId: 's1', tokens: null })])
+    expect(s.appRuns.appAgentUse('p1', 'notes', 0)).toEqual({ runs: 1, durationMs: 3, tokens: null })
     s.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1821,7 +1821,7 @@ describe('the trash (#204)', () => {
       sessionId, seq: i + 1, role: 'user' as const, kind: 'text' as const, payload: { text: `galaxy ${i}` }, ts: i,
     }))
   const session = (s: Store, id: string, projectId: string | null, over: Partial<SessionInfo> = {}) =>
-    s.upsertSession({
+    s.sessions.upsertSession({
       id, projectId, kind: 'worker', tool: 'claude', externalId: null, name: id, autoNamed: false, state: 'idle',
       lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
       verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
@@ -1830,29 +1830,29 @@ describe('the trash (#204)', () => {
 
   it('a trashed session leaves every listing and search at once, and keeps its messages', async () => {
     const s = seeded()
-    s.appendMessages(galaxy('s1', 5))
-    s.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
-    s.setGridView([sp('s1')])
+    s.messages.appendMessages(galaxy('s1', 5))
+    s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
+    s.grid.setGridView([sp('s1')])
     session(s, 'orch', null, { kind: 'orchestrator' })
-    expect(s.orchestratorId()).toBe('orch')
+    expect(s.sessions.orchestratorId()).toBe('orch')
 
-    expect(await s.trashSession('s1', KEEP_ALL)).toBe(true)
-    await s.trashSession('orch', { ...KEEP_ALL, projectId: null })
+    expect(await s.trash.trashSession('s1', KEEP_ALL)).toBe(true)
+    await s.trash.trashSession('orch', { ...KEEP_ALL, projectId: null })
 
-    expect(s.listSessions()).toEqual([])
-    expect(s.orchestratorId()).toBeNull()
-    expect(s.listGridView()).toEqual([])
-    expect(s.searchMessages('galaxy')).toEqual([])
-    expect(s.searchMessages('ga')).toEqual([]) // the short-query path (LIKE) is a second way into the index
-    expect(s.listApprovalRules()).toEqual([])
+    expect(s.sessions.listSessions()).toEqual([])
+    expect(s.sessions.orchestratorId()).toBeNull()
+    expect(s.grid.listGridView()).toEqual([])
+    expect(s.messages.searchMessages('galaxy')).toEqual([])
+    expect(s.messages.searchMessages('ga')).toEqual([]) // the short-query path (LIKE) is a second way into the index
+    expect(s.permissions.listApprovalRules()).toEqual([])
     expect(indexRowsOf(s, 's1')()).toBe(0)
     // Out of reach is not gone: the conversation is all there, and the trash lists it with where it came from
-    expect(s.loadMessages('s1', 10)).toHaveLength(5)
-    expect(s.listTrash().map((r) => [r.id, r.messages, r.record.projectId]).sort()).toEqual([
+    expect(s.messages.loadMessages('s1', 10)).toHaveLength(5)
+    expect(s.trash.listTrash().map((r) => [r.id, r.messages, r.record.projectId]).sort()).toEqual([
       ['orch', 0, null],
       ['s1', 5, 'p1'],
     ])
-    expect(await s.trashSession('s1', KEEP_ALL)).toBe(false) // twice is once
+    expect(await s.trash.trashSession('s1', KEEP_ALL)).toBe(false) // twice is once
     s.close()
   })
 
@@ -1887,40 +1887,40 @@ describe('the trash (#204)', () => {
 
   it('restoring rebuilds the index and brings the session back into its project as it was', async () => {
     const s = seeded()
-    s.appendMessages(galaxy('s1', 5))
-    s.appendMessages([{ sessionId: 's1', seq: 6, role: 'assistant', kind: 'tool_call', payload: { id: 'x' }, ts: 6 }])
-    s.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
-    const before = s.listSessions()[0]!
-    await s.trashSession('s1', KEEP_ALL)
+    s.messages.appendMessages(galaxy('s1', 5))
+    s.messages.appendMessages([{ sessionId: 's1', seq: 6, role: 'assistant', kind: 'tool_call', payload: { id: 'x' }, ts: 6 }])
+    s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
+    const before = s.sessions.listSessions()[0]!
+    await s.trash.trashSession('s1', KEEP_ALL)
 
-    const back = await s.restoreSession('s1', 'p1')
+    const back = await s.trash.restoreSession('s1', 'p1')
     expect(back).toEqual(before)
-    expect(s.listSessions()).toEqual([before])
-    expect(s.listTrash()).toEqual([])
-    expect(s.searchMessages('galaxy')).toHaveLength(5)
+    expect(s.sessions.listSessions()).toEqual([before])
+    expect(s.trash.listTrash()).toEqual([])
+    expect(s.messages.searchMessages('galaxy')).toHaveLength(5)
     expect(indexRowsOf(s, 's1')()).toBe(5) // a message with no text gets no index row, as when it was written
-    expect(s.listApprovalRules().map((r) => r.sessionId)).toEqual(['s1'])
-    expect(await s.restoreSession('s1', 'p1')).toBeNull() // only what is in the trash comes back
+    expect(s.permissions.listApprovalRules().map((r) => r.sessionId)).toEqual(['s1'])
+    expect(await s.trash.restoreSession('s1', 'p1')).toBeNull() // only what is in the trash comes back
     s.close()
   })
 
   it('moving to the trash and back let the event loop go between chunks, and search reaches it only once it is back', async () => {
     const s = seeded()
     const n = 1000
-    s.appendMessages(galaxy('s1', n))
+    s.messages.appendMessages(galaxy('s1', n))
     const seen: { messages: number; hits: number; listed: number }[] = []
     let busy = true
     const look = () => {
       if (!busy) return
       seen.push({
-        messages: s.loadMessages('s1', n).length,
-        hits: s.searchMessages('galaxy', n).length,
-        listed: s.listSessions().length,
+        messages: s.messages.loadMessages('s1', n).length,
+        hits: s.messages.searchMessages('galaxy', n).length,
+        listed: s.sessions.listSessions().length,
       })
       setImmediate(look)
     }
     setImmediate(look)
-    await s.trashSession('s1', KEEP_ALL, 100)
+    await s.trash.trashSession('s1', KEEP_ALL, 100)
     busy = false
     expect(seen.length).toBeGreaterThanOrEqual(5)
     // Out of reach from the first chunk, with every message still there
@@ -1930,11 +1930,11 @@ describe('the trash (#204)', () => {
     seen.length = 0
     busy = true
     setImmediate(look)
-    await s.restoreSession('s1', 'p1', 100)
+    await s.trash.restoreSession('s1', 'p1', 100)
     busy = false
     expect(seen.length).toBeGreaterThanOrEqual(5)
     expect(seen.every((at) => at.hits === 0 && at.listed === 0)).toBe(true)
-    expect(s.searchMessages('galaxy', n)).toHaveLength(n)
+    expect(s.messages.searchMessages('galaxy', n)).toHaveLength(n)
     s.close()
   })
 
@@ -1942,20 +1942,20 @@ describe('the trash (#204)', () => {
     const s = seeded()
     session(s, 's2', 'p1')
     for (const id of ['s1', 's2']) {
-      s.appendMessages(galaxy(id, 3))
-      s.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: id, matcher: 'Bash(ls)', decision: 'allow' })
-      s.recordCommit('p1', `sha-${id}`, id)
+      s.messages.appendMessages(galaxy(id, 3))
+      s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: id, matcher: 'Bash(ls)', decision: 'allow' })
+      s.sessions.recordCommit('p1', `sha-${id}`, id)
       const run = { projectId: 'p1', appId: 'notes', kind: 'broker', tool: 'run_agent', callerKind: 'session', parentRunId: null,
         status: 'ok', durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt: 1 }
-      s.beginAppRun({ ...run, id: `ran-${id}`, callerSessionId: null, sessionId: id })
-      s.beginAppRun({ ...run, id: `called-${id}`, callerSessionId: id, sessionId: null })
-      s.keepAppRunFailure({ runId: `called-${id}`, projectId: 'p1', appId: 'notes', args: '{}', result: null, createdAt: 1 }, 10)
+      s.appRuns.beginAppRun({ ...run, id: `ran-${id}`, callerSessionId: null, sessionId: id })
+      s.appRuns.beginAppRun({ ...run, id: `called-${id}`, callerSessionId: id, sessionId: null })
+      s.appRuns.keepAppRunFailure({ runId: `called-${id}`, projectId: 'p1', appId: 'notes', args: '{}', result: null, createdAt: 1 }, 10)
     }
-    expect(await s.purgeSession('s1')).toBe(false) // a live session has to go through the trash first
-    expect(s.loadMessages('s1', 10)).toHaveLength(3)
+    expect(await s.trash.purgeSession('s1')).toBe(false) // a live session has to go through the trash first
+    expect(s.messages.loadMessages('s1', 10)).toHaveLength(3)
 
-    await s.trashSession('s1', KEEP_ALL)
-    expect(await s.purgeSession('s1')).toBe(true)
+    await s.trash.trashSession('s1', KEEP_ALL)
+    expect(await s.trash.purgeSession('s1')).toBe(true)
 
     const db = (s as unknown as { db: Database.Database }).db
     const count = (sql: string, id: string) => (db.prepare(sql).get(id) as { n: number }).n
@@ -1972,34 +1972,34 @@ describe('the trash (#204)', () => {
       // the other session's rows are all still there
       expect([sql, count(sql, 's2')]).not.toEqual([sql, 0])
     }
-    expect(s.listTrash()).toEqual([])
+    expect(s.trash.listTrash()).toEqual([])
     s.close()
   })
 
   it('deleting a project moves its sessions to the trash and keeps the rows that point at them', async () => {
     const s = seeded()
     session(s, 's2', 'p1')
-    s.appendMessages(galaxy('s1', 3))
-    s.appendMessages(galaxy('s2', 2))
-    await s.trashSession('s2', KEEP_ALL) // already in the trash when the project goes
-    s.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
-    s.addApprovalRule({ scope: 'project', projectId: 'p1', matcher: 'Bash(pwd)', decision: 'allow' })
-    s.recordCommit('p1', 'sha-s1', 's1')
-    s.recordCommit('p1', 'sha-gone', 'purged-long-ago')
+    s.messages.appendMessages(galaxy('s1', 3))
+    s.messages.appendMessages(galaxy('s2', 2))
+    await s.trash.trashSession('s2', KEEP_ALL) // already in the trash when the project goes
+    s.permissions.addApprovalRule({ scope: 'session', projectId: 'p1', sessionId: 's1', matcher: 'Bash(ls)', decision: 'allow' })
+    s.permissions.addApprovalRule({ scope: 'project', projectId: 'p1', matcher: 'Bash(pwd)', decision: 'allow' })
+    s.sessions.recordCommit('p1', 'sha-s1', 's1')
+    s.sessions.recordCommit('p1', 'sha-gone', 'purged-long-ago')
     const run = { projectId: 'p1', appId: 'notes', kind: 'tool', tool: 't', callerKind: 'view', parentRunId: null,
       status: 'ok', durationMs: 1, argsDigest: 'x', argsSummary: '{}', error: null, createdAt: 1 }
-    s.beginAppRun({ ...run, id: 'of-s1', callerSessionId: 's1', sessionId: null })
-    s.beginAppRun({ ...run, id: 'of-view', callerSessionId: null, sessionId: null })
+    s.appRuns.beginAppRun({ ...run, id: 'of-s1', callerSessionId: 's1', sessionId: null })
+    s.appRuns.beginAppRun({ ...run, id: 'of-view', callerSessionId: null, sessionId: null })
 
-    s.deleteProject('p1')
+    s.trash.deleteProject('p1')
 
-    expect(s.listProjects()).toEqual([])
-    expect(s.listSessions()).toEqual([])
-    const trash = s.listTrash()
+    expect(s.projects.listProjects()).toEqual([])
+    expect(s.sessions.listSessions()).toEqual([])
+    const trash = s.trash.listTrash()
     expect(trash.map((r) => [r.id, r.messages])).toEqual(expect.arrayContaining([['s1', 3], ['s2', 2]]))
     // Nobody was asked about the tool's files or a worktree, so emptying the trash leaves them
     expect(trash.find((r) => r.id === 's1')?.record).toEqual(KEEP_ALL)
-    expect(s.searchMessages('galaxy')).toEqual([])
+    expect(s.messages.searchMessages('galaxy')).toEqual([])
     const db = (s as unknown as { db: Database.Database }).db
     const rows = (sql: string) => db.prepare(sql).all()
     expect(rows(`SELECT sha FROM commit_sessions`)).toEqual([{ sha: 'sha-s1' }])
@@ -2013,7 +2013,7 @@ describe('the trash (#204)', () => {
     const file = join(dir, 'store.db')
     try {
       const fresh = newestStore(file)
-      fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      fresh.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       fresh.close()
       // Take the store back to v38: no trash columns
       const raw = new Database(file)
@@ -2027,8 +2027,8 @@ describe('the trash (#204)', () => {
       const s = new Store(file)
       expect(s.schemaVersion).toBe(LATEST_SCHEMA)
       expect(s.migrationsRun).toBe(LATEST_SCHEMA - 38)
-      expect(s.listSessions().map((x) => x.id)).toEqual(['old'])
-      expect(s.listTrash()).toEqual([])
+      expect(s.sessions.listSessions().map((x) => x.id)).toEqual(['old'])
+      expect(s.trash.listTrash()).toEqual([])
       s.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -2043,30 +2043,30 @@ describe('the trash (#204)', () => {
 describe('migration v44 — consent from one project to another', () => {
   it('remembers a pair per direction and kind, lists it, and forgets it on revoke', () => {
     const s = seeded()
-    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
-    expect(s.getProjectConsent('p1', 'p2', 'delegate')).toBeNull()
-    s.setProjectConsent('p1', 'p2', 'delegate')
-    expect(s.getProjectConsent('p1', 'p2', 'delegate')).toMatchObject({ fromProjectId: 'p1', toProjectId: 'p2', kind: 'delegate' })
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    expect(s.permissions.getProjectConsent('p1', 'p2', 'delegate')).toBeNull()
+    s.permissions.setProjectConsent('p1', 'p2', 'delegate')
+    expect(s.permissions.getProjectConsent('p1', 'p2', 'delegate')).toMatchObject({ fromProjectId: 'p1', toProjectId: 'p2', kind: 'delegate' })
     // The other direction and the other kind are separate consents
-    expect(s.getProjectConsent('p2', 'p1', 'delegate')).toBeNull()
-    expect(s.getProjectConsent('p1', 'p2', 'apps')).toBeNull()
-    s.setProjectConsent('p1', 'p2', 'delegate')
-    expect(s.listProjectConsents()).toHaveLength(1)
-    expect(s.forgetProjectConsent('p1', 'p2', 'delegate')).toBe(true)
-    expect(s.forgetProjectConsent('p1', 'p2', 'delegate')).toBe(false)
-    expect(s.listProjectConsents()).toEqual([])
+    expect(s.permissions.getProjectConsent('p2', 'p1', 'delegate')).toBeNull()
+    expect(s.permissions.getProjectConsent('p1', 'p2', 'apps')).toBeNull()
+    s.permissions.setProjectConsent('p1', 'p2', 'delegate')
+    expect(s.permissions.listProjectConsents()).toHaveLength(1)
+    expect(s.permissions.forgetProjectConsent('p1', 'p2', 'delegate')).toBe(true)
+    expect(s.permissions.forgetProjectConsent('p1', 'p2', 'delegate')).toBe(false)
+    expect(s.permissions.listProjectConsents()).toEqual([])
     s.close()
   })
 
   it('a deleted project takes the consents to and from it', () => {
     const s = seeded()
-    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
-    s.addProject({ id: 'p3', path: '/tmp/p3', name: 'p3' })
-    s.setProjectConsent('p1', 'p2', 'delegate')
-    s.setProjectConsent('p2', 'p3', 'apps')
-    s.setProjectConsent('p1', 'p3', 'delegate')
-    s.deleteProject('p2')
-    expect(s.listProjectConsents().map((c) => `${c.fromProjectId}>${c.toProjectId}`)).toEqual(['p1>p3'])
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.projects.addProject({ id: 'p3', path: '/tmp/p3', name: 'p3' })
+    s.permissions.setProjectConsent('p1', 'p2', 'delegate')
+    s.permissions.setProjectConsent('p2', 'p3', 'apps')
+    s.permissions.setProjectConsent('p1', 'p3', 'delegate')
+    s.trash.deleteProject('p2')
+    expect(s.permissions.listProjectConsents().map((c) => `${c.fromProjectId}>${c.toProjectId}`)).toEqual(['p1>p3'])
     s.close()
   })
 })
@@ -2075,10 +2075,10 @@ describe('migration v44 — consent from one project to another', () => {
 describe('migration v45 — a delegated session remembers who asked', () => {
   it('round-trips askedBy, and a session nobody asked for reads it as null', () => {
     const s = seeded()
-    const [plain] = s.listSessions()
+    const [plain] = s.sessions.listSessions()
     expect(plain!.askedBy).toBeNull()
-    s.upsertSession({ ...plain!, id: 's2', askedBy: 's1' })
-    expect(s.listSessions().find((x) => x.id === 's2')!.askedBy).toBe('s1')
+    s.sessions.upsertSession({ ...plain!, id: 's2', askedBy: 's1' })
+    expect(s.sessions.listSessions().find((x) => x.id === 's2')!.askedBy).toBe('s1')
     s.close()
   })
 })
@@ -2090,14 +2090,14 @@ describe('migration v48 — worktree sessions become their former manager\'s sta
     const file = join(dir, 'store.db')
     try {
       const fresh = newestStore(file)
-      fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-      const base = { ...seeded().listSessions()[0]!, projectId: 'p1' }
+      fresh.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      const base = { ...seeded().sessions.listSessions()[0]!, projectId: 'p1' }
       const wt = (branch: string) => ({ path: `/tmp/wt/${branch}`, branch, base: 'abc' })
-      fresh.upsertSession({ ...base, id: 'mgr' })
-      fresh.upsertSession({ ...base, id: 'kid', worktree: wt('a'), parentSessionId: 'mgr' })
-      fresh.upsertSession({ ...base, id: 'asked', worktree: wt('b'), parentSessionId: 'mgr', askedBy: 'other' })
-      fresh.upsertSession({ ...base, id: 'plain-child', parentSessionId: 'mgr' })
-      fresh.upsertSession({ ...base, id: 'lone', worktree: wt('c') })
+      fresh.sessions.upsertSession({ ...base, id: 'mgr' })
+      fresh.sessions.upsertSession({ ...base, id: 'kid', worktree: wt('a'), parentSessionId: 'mgr' })
+      fresh.sessions.upsertSession({ ...base, id: 'asked', worktree: wt('b'), parentSessionId: 'mgr', askedBy: 'other' })
+      fresh.sessions.upsertSession({ ...base, id: 'plain-child', parentSessionId: 'mgr' })
+      fresh.sessions.upsertSession({ ...base, id: 'lone', worktree: wt('c') })
       fresh.close()
       const raw = new Database(file)
       raw.exec(`UPDATE sessions SET asked_by_session_id = NULL WHERE id = 'kid'`)
@@ -2106,9 +2106,9 @@ describe('migration v48 — worktree sessions become their former manager\'s sta
 
       const s = new Store(file)
       expect(s.schemaVersion).toBe(LATEST_SCHEMA)
-      const by = Object.fromEntries(s.listSessions().map((x) => [x.id, x.askedBy ?? null]))
+      const by = Object.fromEntries(s.sessions.listSessions().map((x) => [x.id, x.askedBy ?? null]))
       expect(by).toEqual({ mgr: null, kid: 'mgr', asked: 'other', 'plain-child': null, lone: null })
-      expect(s.listSessions().find((x) => x.id === 'kid')!.parentSessionId).toBe('mgr')
+      expect(s.sessions.listSessions().find((x) => x.id === 'kid')!.parentSessionId).toBe('mgr')
       s.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -2125,8 +2125,8 @@ describe('usage_facts is no longer touched', () => {
   it('deleting a project works on a store without the table', () => {
     const s = seeded()
     ;(s as unknown as { db: Database.Database }).db.exec(`DROP TABLE usage_facts`)
-    s.deleteProject('p1')
-    expect(s.listProjects()).toEqual([])
+    s.trash.deleteProject('p1')
+    expect(s.projects.listProjects()).toEqual([])
     s.close()
   })
 })

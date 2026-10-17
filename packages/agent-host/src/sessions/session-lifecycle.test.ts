@@ -124,7 +124,7 @@ async function until(ok: () => boolean): Promise<void> {
 }
 
 const texts = (sessionId: string) =>
-  store.loadMessages(sessionId, 100).map((r) => JSON.stringify(r.payload))
+  store.messages.loadMessages(sessionId, 100).map((r) => JSON.stringify(r.payload))
 
 describe('a swapped-out process speaking late (#157)', () => {
   it('keeps the new handle even if the old handle raises adapter_crashed after a restart, and does not record the old turn\'s text or its end', async () => {
@@ -182,7 +182,7 @@ describe('a swapped-out process speaking late (#157)', () => {
 describe('A reply cut by replacing the process stays one row (#213)', () => {
   const replies = (sessionId: string) =>
     store
-      .loadMessages(sessionId, 100)
+      .messages.loadMessages(sessionId, 100)
       .filter((r) => r.role === 'assistant')
       .map((r) => (r.payload as { text: string }).text)
 
@@ -206,7 +206,7 @@ describe('A reply cut by replacing the process stays one row (#213)', () => {
     expect(spoke).toBe(true)
     expect(replies(id)).toEqual(['I will commit it now'])
     // Closed and indexed once, whole — not the first half
-    expect(store.searchMessages('commit it now', 10).some((h) => h.sessionId === id)).toBe(true)
+    expect(store.messages.searchMessages('commit it now', 10).some((h) => h.sessionId === id)).toBe(true)
   })
 
   it('a shutdown cut short before the processes are down still leaves what was said so far on disk (#66)', async () => {
@@ -300,7 +300,7 @@ describe('a report goes exactly once, however the turn ends (#166)', () => {
     /** The reports stored in the orchestrator's conversation — the text the UI and the record read */
     const reports = () =>
       store
-        .loadMessages(orc.id, 100)
+        .messages.loadMessages(orc.id, 100)
         .map((r) => r.payload as { text?: string; from?: { sessionId: string } })
         .filter((p) => p.from?.sessionId === worker)
         .map((p) => p.text ?? '')
@@ -357,7 +357,7 @@ describe('deleting or switching tools while a session is waking up (#163)', () =
     await mgr.disposeAll()
     return id
   }
-  const listed = () => store.listSessions().map((x) => x.id)
+  const listed = () => store.sessions.listSessions().map((x) => x.id)
 
   it('a session deleted while waking does not come back to life, and the process that just came up is closed', async () => {
     const id = await sleeping()
@@ -451,7 +451,7 @@ describe('deleting or switching tools while a session is waking up (#163)', () =
 
     await rpc('agents.switchTool', { sessionId: id, tool: 'codex' })
     expect(mgr.listSessions().find((x) => x.id === id)!.state).toBe('idle')
-    expect(store.listSessions().find((x) => x.id === id)!.state).toBe('idle')
+    expect(store.sessions.listSessions().find((x) => x.id === id)!.state).toBe('idle')
   })
 
   it('a worktree session deleted while checking its PR does not leave behind a row with no id', async () => {

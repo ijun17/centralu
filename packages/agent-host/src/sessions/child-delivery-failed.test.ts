@@ -12,7 +12,7 @@ describe('work given to a child that never reaches it (#839)', () => {
   let w: CrossWorld
   beforeEach(async () => {
     w = await crossWorld()
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
   })
   afterEach(async () => {
     await w.dispose()

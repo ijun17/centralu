@@ -778,6 +778,26 @@ TERM) and ends its tree with `taskkill` only if it is still running after the gr
 worktree setup command runs under `cmd.exe`, so it reads `%CENTRALU_WORKTREE%`, not
 `$CENTRALU_WORKTREE`.
 
+**Its work ends with it; a terminal's does not (#1067).** Windows does not end a process's children when it ends. A
+host that crashed or was ended left behind whatever its work had started through a program that is not Node: codex's
+MCP servers, a dev server a Run command's PowerShell started, what a git hook started. libuv's own job lets a child's
+children leave it silently, and what a ConPTY starts leaves it too. At start the host joins a job object with
+`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` and no breakaway, and holds its only handle (`lifecycle/work-job.ts`, the `work
+job` start step; one PowerShell, run while the store opens). From then on nothing it starts can leave: libuv's job ends
+what can no longer leave it when the host ends, and the job's own flag ends the rest (the test reads the flag back).
+Breakaway stays off because Git for Windows' sh asks for it, and a hook's children then outlived the host.
+
+Terminals are the person's, not the host's work: what is started in one (`code .`, the browser `claude auth login`
+opens) must outlive a host that crashes. They are started by a broker the host starts **before** it joins
+(`dev-services/broker-pty.ts`, `pty-broker.mjs` beside the host): a Node process that owns node-pty and speaks one
+JSON line per message over its stdin and stdout, behind the same node-pty-shaped surface as the keeper's ptys. It ends
+with the host and its pseudoconsoles with it, so the shell ends as before, but what the shell started outside its
+console stays. A quit still ends each terminal's tree as before. Run commands, agents, git and app servers stay in the
+job. A broker that cannot start, or ends, leaves new terminals to start in the host. Under a keeper the host joins no
+job, since the keeper holds what must outlive a host swap. The host opens nothing for the person: "Open in IDE" and
+`system.openUrl` are the window's. A host that cannot join (PowerShell refused, an outer job that forbids it) says so
+in its log and runs as before.
+
 **How a Claude process is started on Windows (#353).** Claude Code installed with npm is one
 program, `node_modules\@anthropic-ai\claude-code\bin\claude.exe`, which npm's `claude.cmd` starts
 and which the host starts directly since #307. That file is a second name (a hard link) of the
@@ -2626,8 +2646,9 @@ was **put on hold**. This directory is used as is in prod today. The name is a h
 - **store**: better-sqlite3 + a `user_version` migration runner. `Store` (`store.ts`) opens the file and runs the
   migrations through the two classes it extends: the runner (`store/migrate-runner.ts`, which also answers
   `Store.inspect`) and, below it, the min-reader version gate (`store/reader-gate.ts`); an owed `VACUUM` is
-  `store/vacuum.ts`. Its other methods pass the call on to one module per concept in `dev-services/store/` (projects,
-  sessions, messages, the trash, app runs, …), and the step list is in `store/migrations/`. The schema DDL lives in exactly one place,
+  `store/vacuum.ts`. The records are one module per concept in `dev-services/store/` (projects, sessions, messages,
+  the trash, app runs, …), held as fields that callers name (`store.projects.listProjects()`), and the step list is in
+  `store/migrations/`. The schema DDL lives in exactly one place,
   `protocol/src/schema/schema.sql`. In the bundle it is copied next to the build output and ships with it (F-0).
   The rule for migration steps is below (§5.1).
 - **fs**: lazy readdir listing + `git check-ignore` (once per directory) + path escape blocking.

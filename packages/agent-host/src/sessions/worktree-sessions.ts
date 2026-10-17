@@ -265,7 +265,7 @@ export class WorktreeSessions {
    * existing disappears.
    */
   private async provisionWorktree(projectCwd: string, worktree: Worktree, projectId: string): Promise<string[]> {
-    const setup = this.host.store.worktreeSetup(projectId) ?? { copyFiles: [], command: '' }
+    const setup = this.host.store.projects.worktreeSetup(projectId) ?? { copyFiles: [], command: '' }
     const problems: string[] = []
     const problem = (line: string) => {
       console.error(`[worktree] ${line}`)
@@ -383,7 +383,7 @@ export class WorktreeSessions {
   worktreeCleanupBlocks(sessionId: string): boolean {
     if (this.worktreeCleanup.size === 0) return false
     if (this.worktreeCleanup.has(sessionId)) return true
-    const cwd = this.host.store.sessionCwd(sessionId) ?? this.host.meta.get(sessionId)?.worktree?.path
+    const cwd = this.host.store.sessions.sessionCwd(sessionId) ?? this.host.meta.get(sessionId)?.worktree?.path
     if (!cwd) return false
     const path = canonicalPath(cwd)
     for (const folder of this.worktreeCleanup.values()) if (isInside(folder, path)) return true

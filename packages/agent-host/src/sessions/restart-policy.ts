@@ -129,7 +129,7 @@ export class RestartPolicy {
   forgetBackground(sessionId: string): void {
     this.backgroundUnknown.delete(sessionId)
     this.clearBackgroundHold(sessionId)
-    this.host.store.deleteAppSetting(this.host.backgroundTasksKey(sessionId))
+    this.host.store.settings.deleteAppSetting(this.host.backgroundTasksKey(sessionId))
   }
 
   /**

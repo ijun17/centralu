@@ -304,7 +304,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
   /** A hub with its orchestrator, and links that accept every send and say the session finished with "all done" */
   async function hub() {
     const store = new Store()
-    store.upsertSession({
+    store.sessions.upsertSession({
       id: 'orch', projectId: null, kind: 'orchestrator', tool: 'claude', externalId: 'ext-orch', name: 'Orchestrator', autoNamed: false,
       state: 'idle', lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
       serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null,
@@ -328,7 +328,7 @@ describe('a report from a linked machine’s turn (#82 phase 4 step 2)', () => {
       backgroundTasks: (id: string) => (id === 'm1' ? listed() : Promise.resolve(null)),
     } as unknown as LinkedSessions
     mgr.useLinkedReader(links)
-    const reports = () => store.loadMessages('orch', 50).map((m) => String((m.payload as { text?: string }).text ?? '')).filter((t) => t.startsWith('[Centralu]'))
+    const reports = () => store.messages.loadMessages('orch', 50).map((m) => String((m.payload as { text?: string }).text ?? '')).filter((t) => t.startsWith('[Centralu]'))
     const settle = async (n: number) => {
       const t0 = Date.now()
       while (reports().length < n && Date.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 10))

@@ -412,8 +412,8 @@ describe('codex /goal — runs as a function', () => {
    */
   it("the confirmation is a row of its own, never glued onto the model's open reply", async () => {
     const store = new Store()
-    store.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-    store.upsertSession({
+    store.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    store.sessions.upsertSession({
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: 's1', autoNamed: false, state: 'idle',
       lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
       verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
@@ -432,7 +432,7 @@ describe('codex /goal — runs as a function', () => {
       h.send('/goal')
       await tick()
       rec.closeStream('s1')
-      const rows = store.loadMessages('s1', 50).filter((r) => r.kind === 'text').map((r) => (r.payload as { text: string }).text)
+      const rows = store.messages.loadMessages('s1', 50).filter((r) => r.kind === 'text').map((r) => (r.payload as { text: string }).text)
       expect(rows).toEqual(['Looking at the tests.', 'Goal set: all tests green', ' Still looking.', 'No goal set.'])
     } finally {
       store.close()

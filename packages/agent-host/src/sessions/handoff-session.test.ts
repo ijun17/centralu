@@ -153,12 +153,12 @@ describe('handoff_session (#694)', () => {
     expect(readFileSync(path, 'utf8')).toContain('Parser half done')
     // The original stays, told where its work went
     expect(info(target)).toBeTruthy()
-    expect(JSON.stringify(store.loadMessages(target, 20))).toContain(`handed this session off to a fresh codex session [${heir.id}]`)
+    expect(JSON.stringify(store.messages.loadMessages(target, 20))).toContain(`handed this session off to a fresh codex session [${heir.id}]`)
   })
 
   it("moves the original's live children to the successor, which the note lists (#693)", async () => {
     const { project, target, orch } = await world('auto')
-    store.setProjectConsent(project, project, 'agents')
+    store.permissions.setProjectConsent(project, project, 'agents')
     const started = await mgr.startAgent(target, { task: 'Write the lexer', wait: false })
     if (!started.ok) throw new Error(started.error)
     const child = started.sessionId
@@ -248,7 +248,7 @@ describe('handoff_session (#694)', () => {
     const h = claude.handles.get(target)!
     await eventually(() => h.sent.length === 2)
     expect(h.sent[1]).toBe(handoffPrompt())
-    const asked = store.loadMessages(target, 20).find((m) => (m.payload as { text?: string }).text === handoffPrompt())
+    const asked = store.messages.loadMessages(target, 20).find((m) => (m.payload as { text?: string }).text === handoffPrompt())
     expect((asked!.payload as { from?: { sessionId: string } }).from?.sessionId).toBe(orch)
     h.answer('# Note\nThe parser is half done.')
     const r = await call
@@ -374,7 +374,7 @@ describe('handoff_session (#694)', () => {
     const { target, orch } = await world('auto')
     await handoff(orch, { sessionId: target, instructions: 'Finish it.' })
     const heir = named('Long run').find((s) => s.id !== target)!
-    const opening = store.loadMessages(heir.id, 20).find((m) => m.role === 'user')!
+    const opening = store.messages.loadMessages(heir.id, 20).find((m) => m.role === 'user')!
     expect((opening.payload as { from?: { sessionId: string } }).from?.sessionId).toBe(orch)
   })
 

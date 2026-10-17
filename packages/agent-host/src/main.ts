@@ -57,6 +57,8 @@ import { projectsHome } from './dev-services/project-folder.js'
 import { parseJson } from './dev-services/store/json.js'
 import { asObj } from './json-value.js'
 import { flagSetting } from './dev-services/store/settings.js'
+import { joinWorkJob, workJobLine, workJobWanted } from './lifecycle/work-job.js'
+import { PtyBroker, brokerPtyModule } from './dev-services/broker-pty.js'
 
 /**
  * Agent Host entry point.
@@ -75,6 +77,21 @@ const start = new StartSequence()
  */
 start.at('launch variables')
 const launch = takeLaunchEnv()
+/*
+ * Windows (#1067): this host joins a job that ends what it starts when it ends. Terminals are the person's, not the
+ * host's work: their broker is started first, so it is outside the job (dev-services/broker-pty.ts). Asked now, so the
+ * PowerShell it takes runs while the store opens; awaited at `work job`, before anything else is started.
+ */
+let ptyBroker: PtyBroker | null = null
+if (workJobWanted(launch)) {
+  try {
+    ptyBroker = PtyBroker.start()
+  } catch (err) {
+    // Terminals then start in the host, inside the job: they work, but what is started there ends with the host
+    console.error(`[agent-host] ${(err as Error).message}; terminals start in the host`)
+  }
+}
+const workJob = joinWorkJob(launch)
 
 /**
  * The build identifier. The bundler swaps `__CC_BUILD__` for the actual commit
@@ -255,6 +272,10 @@ const adapters = createAdapters()
  * host left there is taken over below. Without a keeper (`pnpm dev`, e2e, a debug app, Windows)
  * this is null and everything is spawned here.
  */
+start.at('work job')
+const workJobSaid = workJobLine(await workJob)
+if (workJobSaid) console.error(workJobSaid)
+
 start.at('keeper children')
 const held = launch.underKeeper ? await connectHeldChildren(dirname(dbPath)) : null
 
@@ -306,7 +327,7 @@ const appChanges = broadcastAppChanges(events.push)
 // The run panel's signal is collected separately — a chain started by a read-only tool is reported too, but never wakes a view (app-change-events.ts)
 const appRunChanges = broadcastAppRuns(events.push)
 const externalApps = new ExternalApps({
-  projects: () => store.projectRoots(),
+  projects: () => store.projects.projectRoots(),
   dataRoot: dataRoot(),
   reservedIds: RESERVED_APP_IDS,
   // The run record (A-6) — the store fills in the shape the runtime declared. The runtime does not know Store
@@ -320,7 +341,7 @@ const externalApps = new ExternalApps({
   // Even if the app folder changes, if the building session is mid-turn it waits until the turn ends (C-4) — the manager tells the runtime when the turn ends
   builderBusy: (ref) => mgr.builderBusy(ref),
   // Whether the person shares a project app with their other projects (#371 part A) — read fresh, like trust
-  shared: (ref) => readShared(store, ref),
+  shared: (ref) => readShared(store.settings, ref),
 })
 externalApps.refresh()
 // An app's place or status changed (A-8) — the sidebar and the fixed view re-read apps.list
@@ -331,7 +352,7 @@ mgr.useExternalApps(externalApps)
  * Terminal and command output can arrive before the server exists: under the keeper an adopted pty
  * replays its buffered output as soon as it is attached (HO11, lifecycle/gate.ts).
  */
-const terminals = new TerminalService(screens.push, held?.ptys)
+const terminals = new TerminalService(screens.push, held?.ptys ?? (ptyBroker ? brokerPtyModule(ptyBroker) : undefined))
 // Runner for frequently used commands (#60) — its output rides the same frame lane as the terminal
 const commandRuns = new CommandRunner(screens.push, held?.ptys)
 if (held) {
@@ -354,9 +375,9 @@ if (held) {
 const AUTO_UPDATE_CHECK_KEY = 'updates.auto'
 const AUTO_APPLY_UPDATES_KEY = 'updates.autoApply'
 // On by default when nothing has been saved yet: see below
-const autoUpdateCheck = flagSetting(store, AUTO_UPDATE_CHECK_KEY, true)
+const autoUpdateCheck = flagSetting(store.settings, AUTO_UPDATE_CHECK_KEY, true)
 // Off unless the person turned it on (#352): installing without a click is asked for, never assumed
-const autoApplyUpdates = flagSetting(store, AUTO_APPLY_UPDATES_KEY, false)
+const autoApplyUpdates = flagSetting(store.settings, AUTO_APPLY_UPDATES_KEY, false)
 // Custom themes are files in <data>/themes, watched so a hand edit shows up live (#312, themes.ts)
 const themes = new ThemeFiles(join(dataRoot(), 'themes'), () => events.push({ type: 'themes_changed' }))
 await themes.start().catch((e: Error) => console.error(`[themes] the themes folder is unavailable: ${e.message}`))
@@ -385,7 +406,7 @@ mgr.useUpdateApply(updateApply)
  */
 const AUTO_APPLY_AGENT_VERSIONS_KEY = 'agents.autoApplyVersions'
 const AGENT_VERSIONS_SEEN_KEY = 'agents.versionsSeen'
-const autoApplyAgentVersions = flagSetting(store, AUTO_APPLY_AGENT_VERSIONS_KEY, true)
+const autoApplyAgentVersions = flagSetting(store.settings, AUTO_APPLY_AGENT_VERSIONS_KEY, true)
 const agentVersions = new AgentVersionService({
   tools: () => [...adapters.values()].map((a) => ({ tool: a.tool, installedVersion: a.installedVersion?.bind(a) })),
   sessions: mgr,
@@ -393,8 +414,8 @@ const agentVersions = new AgentVersionService({
   publish: (status) => events.push({ type: 'agent_versions', status }),
   readAutoApply: autoApplyAgentVersions.read,
   writeAutoApply: autoApplyAgentVersions.write,
-  readSeen: () => asObj(parseJson(store.appSetting(AGENT_VERSIONS_SEEN_KEY))) as Record<string, string>,
-  writeSeen: (seen) => store.setAppSetting(AGENT_VERSIONS_SEEN_KEY, JSON.stringify(seen)),
+  readSeen: () => asObj(parseJson(store.settings.appSetting(AGENT_VERSIONS_SEEN_KEY))) as Record<string, string>,
+  writeSeen: (seen) => store.settings.setAppSetting(AGENT_VERSIONS_SEEN_KEY, JSON.stringify(seen)),
 })
 versionsRef.current = agentVersions
 mgr.useVersionHint((tool) => agentVersions.installedNow(tool))
@@ -407,8 +428,8 @@ const SLEEP_AFTER_KEY = 'agents.sleepAfterMinutes'
 const sleeper = new SessionSleeper({
   sessions: mgr,
   canSleep: (tool) => !!adapters.get(tool)?.capabilities.sleep,
-  readAfterMinutes: () => parseSleepSetting(store.appSetting(SLEEP_AFTER_KEY)),
-  writeAfterMinutes: (minutes) => store.setAppSetting(SLEEP_AFTER_KEY, storedSleepSetting(minutes)),
+  readAfterMinutes: () => parseSleepSetting(store.settings.appSetting(SLEEP_AFTER_KEY)),
+  writeAfterMinutes: (minutes) => store.settings.setAppSetting(SLEEP_AFTER_KEY, storedSleepSetting(minutes)),
   overrideMs: sleepOverrideFrom(process.env.CC_SLEEP_AFTER_MS),
 })
 sleeperRef.current = sleeper
@@ -433,9 +454,9 @@ const views: ViewHost = new ViewHost({
   allowedOrigins,
   source: runtimeViewSource(externalApps),
   ports: new OriginPorts({
-    load: () => parseStoredPortBook(store.appSetting(VIEW_PORTS_KEY)),
-    save: (book) => store.setAppSetting(VIEW_PORTS_KEY, JSON.stringify(book)),
-    update: (fn) => store.updateAppSetting(VIEW_PORTS_KEY, (raw) => JSON.stringify(fn(parseStoredPortBook(raw)))),
+    load: () => parseStoredPortBook(store.settings.appSetting(VIEW_PORTS_KEY)),
+    save: (book) => store.settings.setAppSetting(VIEW_PORTS_KEY, JSON.stringify(book)),
+    update: (fn) => store.settings.updateAppSetting(VIEW_PORTS_KEY, (raw) => JSON.stringify(fn(parseStoredPortBook(raw)))),
   }),
   // Under the keeper, the front door's port: the address outlives this host (swap-control.ts)
   hostPort: () => viewPort(launch.frontDoor, port),
@@ -454,7 +475,7 @@ const inlineViews = attachInlineViews(mgr, externalApps, views)
  */
 if (launch.underKeeper) {
   try {
-    const { restored, skipped } = restoreViewHandover(store, views, inlineViews)
+    const { restored, skipped } = restoreViewHandover(store.settings, views, inlineViews)
     if (restored + skipped > 0) console.error(`[agent-host] app views handed over: ${restored} restored, ${skipped} not`)
   } catch (err) {
     console.error(`[agent-host] could not restore the app views handed over: ${(err as Error).stack ?? err}`)
@@ -565,7 +586,7 @@ const shutdown = new Shutdown({
     stopPlan(mode, handOver, {
       handOverViews: () => {
         try {
-          const n = recordViewHandover(store, views, inlineViews)
+          const n = recordViewHandover(store.settings, views, inlineViews)
           if (n > 0) console.error(`[agent-host] ${n} open app views handed over to the next host`)
         } catch (err) {
           console.error(`[agent-host] could not hand the open app views over: ${(err as Error).stack ?? err}`)

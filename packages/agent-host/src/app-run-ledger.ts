@@ -11,13 +11,13 @@ import type { Store } from './dev-services/store.js'
  */
 export function storeRunLedger(store: Store): RunLedger {
   return {
-    begin: (r) => store.beginAppRun(r),
-    end: (id, e) => store.endAppRun(id, e),
-    link: (id, sessionId) => store.linkAppRunSession(id, sessionId),
-    keepFailure: (f, keep) => store.keepAppRunFailure(f, keep),
-    list: (projectId, appId, limit) => store.listAppRuns(projectId, appId, limit),
-    agentUse: (projectId, appId, since) => store.appAgentUse(projectId, appId, since),
-    prune: (before) => store.pruneAppRuns(before),
-    settleUnfinished: (error) => store.settleUnfinishedAppRuns(error),
+    begin: (r) => store.appRuns.beginAppRun(r),
+    end: (id, e) => store.appRuns.endAppRun(id, e),
+    link: (id, sessionId) => store.appRuns.linkAppRunSession(id, sessionId),
+    keepFailure: (f, keep) => store.appRuns.keepAppRunFailure(f, keep),
+    list: (projectId, appId, limit) => store.appRuns.listAppRuns(projectId, appId, limit),
+    agentUse: (projectId, appId, since) => store.appRuns.appAgentUse(projectId, appId, since),
+    prune: (before) => store.appRuns.pruneAppRuns(before),
+    settleUnfinished: (error) => store.appRuns.settleUnfinishedAppRuns(error),
   }
 }

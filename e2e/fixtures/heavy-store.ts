@@ -591,7 +591,7 @@ export function seedHeavyStore(dataDir: string, profile: StoreProfile = 'owner',
       const path = join(dataDir, 'projects', name)
       mkdirSync(path, { recursive: true })
       const p = { id: `p${i + 1}`, name, path }
-      store.addProject(p)
+      store.projects.addProject(p)
       return p
     })
 
@@ -629,7 +629,7 @@ export function seedHeavyStore(dataDir: string, profile: StoreProfile = 'owner',
           ...sessionLiveDefaults(),
         })
       // The row goes in first: a subagent's steps refer to their session
-      store.upsertSession(info(0, 0))
+      store.sessions.upsertSession(info(0, 0))
       const s = seedSession(store, g, m, {
         id,
         projectId: project.id,
@@ -651,17 +651,17 @@ export function seedHeavyStore(dataDir: string, profile: StoreProfile = 'owner',
       images += s.images
       imageBytes += s.imageBytes
       // Most are read; every fourth has a few unread rows, as a morning's sidebar does
-      store.upsertSession(info(s.lastSeq, si % 4 === 1 ? Math.max(0, s.lastSeq - g.int(3, 40)) : s.lastSeq))
+      store.sessions.upsertSession(info(s.lastSeq, si % 4 === 1 ? Math.max(0, s.lastSeq - g.int(3, 40)) : s.lastSeq))
       sessions.push({ id, name, projectId: project.id, tool, rows: s.rows, lastSeq: s.lastSeq })
     })
 
     const gridSessionIds = sessions.slice(0, spec.gridPanels).map((s) => s.id)
-    store.setGridView(gridSessionIds.map((sessionId): GridPanel => ({ kind: 'session', sessionId })))
+    store.grid.setGridView(gridSessionIds.map((sessionId): GridPanel => ({ kind: 'session', sessionId })))
 
     for (let i = 0; i < spec.appRuns; i++) {
       const id = `run-${i + 1}`
       const createdAt = T0 + i * 600_000
-      store.beginAppRun({
+      store.appRuns.beginAppRun({
         id,
         projectId: projects[0]!.id,
         appId: g.pick(['project-board', 'notes', 'release-check']),
@@ -678,7 +678,7 @@ export function seedHeavyStore(dataDir: string, profile: StoreProfile = 'owner',
         createdAt,
         sessionId: null,
       })
-      store.endAppRun(id, {
+      store.appRuns.endAppRun(id, {
         status: g.chance(0.93) ? 'ok' : 'error',
         durationMs: g.int(5, 40_000),
         error: null,
@@ -738,7 +738,7 @@ function seedSession(store: Store, g: Gen, m: Material, s: SessionSeed) {
   let ts = s.createdAt
   let batch: StoredMessage[] = []
   const flush = () => {
-    if (batch.length) store.appendMessages(batch)
+    if (batch.length) store.messages.appendMessages(batch)
     batch = []
   }
   const push = (role: StoredMessage['role'], kind: StoredMessage['kind'], payload: unknown) => {
@@ -891,7 +891,7 @@ function seedSubagent(
   const calls = g.size(80, 0.6, 5, 400)
   let steps = 0
   const put = (kind: StoredMessage['kind'], role: StoredMessage['role'], payload: unknown) => {
-    store.appendSubagentMessage(s.id, parentCallId, { role, kind, payload, ts: ts + steps })
+    store.messages.appendSubagentMessage(s.id, parentCallId, { role, kind, payload, ts: ts + steps })
     steps++
   }
   for (let i = 0; i < calls; i++) {

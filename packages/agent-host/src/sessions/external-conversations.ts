@@ -108,7 +108,7 @@ export class ExternalConversations {
     tool: ToolName,
     limit: number,
   ): Promise<{ supported: boolean; reason?: string; sessions: ExternalSession[] }> {
-    const project = this.host.store.listProjects().find((p) => p.id === projectId)
+    const project = this.host.store.projects.listProjects().find((p) => p.id === projectId)
     if (!project) return { supported: false, reason: 'Project not found', sessions: [] }
 
     const adapter = this.host.adapters.get(tool)
@@ -234,12 +234,12 @@ export class ExternalConversations {
        save. If it is not in the list, the time is unknown, so it reads as before. */
     const changedAt = (await this.externalIndexOf(info.tool, cwd))?.ids.get(externalId) ?? null
     const key = externalSyncedKey(info.id)
-    if (changedAt !== null && changedAt <= Number(this.host.store.appSetting(key) ?? '-1')) return 0
+    if (changedAt !== null && changedAt <= Number(this.host.store.settings.appSetting(key) ?? '-1')) return 0
     /* Records the point that was read, even when there was nothing to attach — "read it" and "there
        was something new" are different facts, and failing to record the former means re-reading
        every single time instead of only when something changes. */
     const mark = () => {
-      if (changedAt !== null) this.host.store.setAppSetting(key, String(changedAt))
+      if (changedAt !== null) this.host.store.settings.setAppSetting(key, String(changedAt))
     }
 
     let history: HistoryMessage[]
@@ -255,7 +255,7 @@ export class ExternalConversations {
       return 0
     }
 
-    const ours = this.host.store.loadMessages(info.id, SYNC_LIMIT)
+    const ours = this.host.store.messages.loadMessages(info.id, SYNC_LIMIT)
     /*
      * loadMessages gives one row as one message (#77) — neighboring assistant rows are not merged
      * either. This restore loop stitches them back together the same way: it reconciles against the
@@ -327,11 +327,11 @@ export class ExternalConversations {
       mark()
       return 0
     }
-    const base = this.host.store.nextSeq(info.id)
-    this.host.store.appendMessages(fresh.map((h, i) => historyRow(info.id, base + i, h, Date.now())))
+    const base = this.host.store.messages.nextSeq(info.id)
+    this.host.store.messages.appendMessages(fresh.map((h, i) => historyRow(info.id, base + i, h, Date.now())))
     info.lastSeq = base + fresh.length - 1
     // This is a message that happened outside — since it was never read here, it stays marked unread
-    this.host.store.upsertSession(info)
+    this.host.store.sessions.upsertSession(info)
     mark()
     return fresh.length
   }
@@ -372,9 +372,9 @@ export class ExternalConversations {
     // inserted.**
     // Fetched once and incremented locally (otherwise every row would land on the same seq and overwrite each
     // other).
-    const base = this.host.store.nextSeq(info.id)
+    const base = this.host.store.messages.nextSeq(info.id)
     const rows: StoredMessage[] = history.map((h, i) => historyRow(info.id, base + i, h, info.createdAt))
-    this.host.store.appendMessages(rows)
+    this.host.store.messages.appendMessages(rows)
 
     info.lastSeq = rows[rows.length - 1]!.seq
     // Conversation that was loaded already counts as read — it must not flag the person with an unread marker
@@ -383,7 +383,7 @@ export class ExternalConversations {
       const firstUser = history.find((h) => h.role === 'user')
       if (firstUser && firstUser.role === 'user') info.name = truncate(firstUser.text)
     }
-    this.host.store.upsertSession(info)
+    this.host.store.sessions.upsertSession(info)
     this.host.emit({ type: 'session_title', sessionId: info.id, title: info.name, auto: true })
   }
 
@@ -410,7 +410,7 @@ export class ExternalConversations {
     const m = this.host.meta.get(sessionId)
     if (!m || !(m.externalId ?? m.importedFrom)) return
     if (!this.host.adapters.get(m.tool)?.capabilities.exclusiveWriter) return
-    this.host.store.setAppSetting(externalSyncedKey(sessionId), String(Date.now()))
+    this.host.store.settings.setAppSetting(externalSyncedKey(sessionId), String(Date.now()))
   }
 
   /**

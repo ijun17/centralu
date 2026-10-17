@@ -35,7 +35,7 @@ beforeEach(async () => {
   store = new Store()
   const adapters = new Map<ToolName, AgentAdapter>()
   mgr = new SessionManager(store, adapters, () => {})
-  rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot: join(root, 'data'), reservedIds: [] })
+  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot: join(root, 'data'), reservedIds: [] })
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
   projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
   await rpc('projects.setTrusted', { projectId, trusted: true })

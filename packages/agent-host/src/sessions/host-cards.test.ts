@@ -25,7 +25,7 @@ beforeEach(() => {
   open = false
   /** The manager's part, as far as the cards see it: a raised card takes the slot, a resolved one frees it */
   const host: HostCardsHost = {
-    store: { upsertSession: () => {} } as unknown as Store,
+    store: { sessions: { upsertSession: () => {} } } as unknown as Store,
     meta,
     emit: (e) => void events.push(e),
     autoBoundaryOpen: () => open,

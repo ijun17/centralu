@@ -110,7 +110,7 @@ function host(kept: ReadonlySet<string> = new Set()) {
 async function parentAndChild(h: ReturnType<typeof host>) {
   const project = await h.mgr.addProject(root)
   h.mgr.setProjectTrusted(project.id, true)
-  store.setProjectConsent(project.id, project.id, 'agents')
+  store.permissions.setProjectConsent(project.id, project.id, 'agents')
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
   const started = await h.mgr.startAgent(parent, { task: 'long work', wait: false })
   if (!started.ok) throw new Error(started.error)
@@ -120,13 +120,13 @@ async function parentAndChild(h: ReturnType<typeof host>) {
 
 /** What reaches the parent's model is a wake naming the source; the report's text is in the parent's conversation */
 const reports = (h: Handle | undefined, child: string) => (h?.sent ?? []).filter((t) => t.includes(`sourceSessionId: ${child}`))
-const stored = (parent: string) => store.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('The assigned work finished'))
+const stored = (parent: string) => store.messages.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('The assigned work finished'))
 
 describe('the report a child owes its parent, across a host swap (#646)', () => {
   it('is written to the store when it is asked for, and cleared once delivered', async () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
-    expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
     a.claude.handles.get(child)!.answer('done here')
     await eventually(() => reports(a.claude.handles.get(parent), child).length === 1)
     expect(store.listReportMarks()).toEqual([])
@@ -137,8 +137,8 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const { parent, child } = await parentAndChild(a)
     await a.mgr.detachAll()
     // Letting go is not the end of the child's turn: no failure report, and the mark stays for the next host
-    expect(store.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work'))).toEqual([])
-    expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    expect(store.messages.loadMessages(parent, 20).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work'))).toEqual([])
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
 
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
@@ -149,7 +149,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     expect(stored(parent)).toHaveLength(1)
     expect(stored(parent)[0]).toContain('finished under the new host')
     expect(reports(a.claude.handles.get(parent), child)).toEqual([])
-    expect(store.listReportMarks()).toEqual([])
+    expect(store.children.listReportMarks()).toEqual([])
     // Delivered once: a later turn of the child is the child's own
     b.claude.handles.get(child)!.answer('a later, unrelated turn')
     await new Promise((r) => setTimeout(r, 20))
@@ -161,11 +161,11 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const { parent, child } = await parentAndChild(a)
     a.claude.handles.get(child)!.endOnDetach = 'finished during the swap'
     await a.mgr.detachAll()
-    expect(store.listSessions().find((s) => s.id === child)!.state).toBe('waiting_input')
+    expect(store.sessions.listSessions().find((s) => s.id === child)!.state).toBe('waiting_input')
 
     const b = host(new Set([child]))
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
-    expect(store.listReportMarks()).toEqual([])
+    expect(store.children.listReportMarks()).toEqual([])
     expect(b.mgr.waitsOn(parent)).not.toContain(child)
     // The answer it finished with is there for the parent to read
     expect(await b.mgr.agentSession(parent, { sessionId: child, action: 'status' })).toMatchObject({ ok: true, state: 'at_rest', answer: 'finished during the swap' })
@@ -184,7 +184,7 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
 
     const c = host()
     expect(c.mgr.listSessions().find((s) => s.id === child)!.state).toBe('idle')
-    expect(store.listReportMarks()).toEqual([])
+    expect(store.children.listReportMarks()).toEqual([])
     expect(c.mgr.waitsOn((await parentAndChild(c)).parent)).not.toContain(child)
   })
 
@@ -202,15 +202,15 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     await b.mgr.adoptKept([{ sessionId: child, tool: 'claude', process: new FakeProcess() as unknown as AgentProcess }])
     // At rest, yet still owing: the verify runs on in the kept process
     expect(b.mgr.listSessions().find((s) => s.id === child)!.state).toBe('waiting_input')
-    expect(store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: parent }])
     const h = b.claude.handles.get(child)!
     h.emitEvent({ type: 'background_tasks', sessionId: child, live: [], ended: [{ ...verify, status: 'completed' }] })
     h.emitEvent({ type: 'state_change', sessionId: child, state: 'working' })
     h.answer('verify passed, PR opened')
     await eventually(() => stored(parent).length === 1)
     expect(stored(parent)[0]).toContain('verify passed, PR opened')
-    expect(store.listReportMarks()).toEqual([])
-    expect(store.appSetting(`report_paused:${child}`)).toBeNull()
+    expect(store.children.listReportMarks()).toEqual([])
+    expect(store.settings.appSetting(`report_paused:${child}`)).toBeNull()
   })
 
   it('held over background work, it is dropped by a host that finds no process: the work went with the old one', async () => {
@@ -223,8 +223,8 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     await a.mgr.detachAll()
 
     const c = host()
-    expect(store.listReportMarks()).toEqual([])
-    expect(store.appSetting(`report_paused:${child}`)).toBeNull()
+    expect(store.children.listReportMarks()).toEqual([])
+    expect(store.settings.appSetting(`report_paused:${child}`)).toBeNull()
     expect(c.mgr.waitsOn(parent)).toEqual([])
   })
 
@@ -232,12 +232,12 @@ describe('the report a child owes its parent, across a host swap (#646)', () => 
     const a = host()
     const { parent, child } = await parentAndChild(a)
     await a.mgr.trashSession(child)
-    expect(store.listReportMarks()).toEqual([])
+    expect(store.children.listReportMarks()).toEqual([])
 
     const second = await parentAndChild(a)
-    expect(store.listReportMarks()).toEqual([{ sessionId: second.child, callerSessionId: second.parent }])
+    expect(store.children.listReportMarks()).toEqual([{ sessionId: second.child, callerSessionId: second.parent }])
     await a.mgr.trashSession(second.parent)
-    expect(store.listReportMarks()).toEqual([])
+    expect(store.children.listReportMarks()).toEqual([])
     expect(a.mgr.waitsOn(parent)).toEqual([])
   })
 })

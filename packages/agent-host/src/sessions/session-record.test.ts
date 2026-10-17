@@ -20,8 +20,8 @@ const m = { id: 's', lastSeq: 0 } as SessionInfo
 
 function open(file?: string) {
   store = new Store(file)
-  store.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
-  store.upsertSession({
+  store.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+  store.sessions.upsertSession({
     id: 's', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 's', autoNamed: false, state: 'idle',
     lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null,
     verbosity: null, serviceTier: null, permissionPreset: 'normal', importedFrom: null, worktree: null,
@@ -35,17 +35,17 @@ afterEach(() => store.close())
 
 const delta = (text: string, messageId?: string): NormalizedEvent =>
   ({ type: 'message_delta', sessionId: 's', role: 'assistant', text, ...(messageId ? { messageId } : {}) }) as NormalizedEvent
-const texts = () => store.loadMessages('s', 50).filter((r) => r.kind === 'text').map((r) => (r.payload as { text: string }).text)
+const texts = () => store.messages.loadMessages('s', 50).filter((r) => r.kind === 'text').map((r) => (r.payload as { text: string }).text)
 
 describe('a streamed message', () => {
   it('grows in one row, and is written out and indexed when a boundary closes it', () => {
     const first = rec.persistMessage(delta('Hel'), m)
     expect(rec.persistMessage(delta('lo'), m)).toBe(first)
-    expect(store.searchMessages('Hello', 5)).toEqual([])
+    expect(store.messages.searchMessages('Hello', 5)).toEqual([])
     rec.persistMessage({ type: 'turn_complete', sessionId: 's' } as NormalizedEvent, m)
     expect(rec.streams.has('s')).toBe(false)
     expect(texts()).toEqual(['Hello'])
-    expect(store.searchMessages('Hello', 5).map((h) => h.seq)).toEqual([first])
+    expect(store.messages.searchMessages('Hello', 5).map((h) => h.seq)).toEqual([first])
     expect(m.lastSeq).toBe(first)
   })
 
@@ -63,7 +63,7 @@ describe('a streamed message', () => {
     rec.persistMessage(delta('Let me look.'), m)
     const call = rec.persistMessage({ type: 'tool_call', sessionId: 's', callId: 'c1', name: 'Read', input: {} } as unknown as NormalizedEvent, m)
     expect(texts()).toEqual(['Let me look.'])
-    expect(store.loadMessages('s', 50).map((r) => r.kind)).toEqual(['text', 'tool_call'])
+    expect(store.messages.loadMessages('s', 50).map((r) => r.kind)).toEqual(['text', 'tool_call'])
     expect(m.lastSeq).toBe(call)
   })
 

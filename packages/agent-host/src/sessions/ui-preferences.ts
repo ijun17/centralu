@@ -34,11 +34,11 @@ export class UiPreferenceStore {
   constructor(private readonly host: UiPreferenceStoreHost) {}
 
   saveWorkspace(layout: Record<string, unknown>): void {
-    this.host.store.saveWorkspace(layout)
+    this.host.store.settings.saveWorkspace(layout)
   }
 
   loadWorkspace(): Record<string, unknown> | null {
-    return this.host.store.loadWorkspace<Record<string, unknown>>()
+    return this.host.store.settings.loadWorkspace<Record<string, unknown>>()
   }
 
   /**
@@ -62,7 +62,7 @@ export class UiPreferenceStore {
       const legacy = textSizeFromLegacyStep(this.loadWorkspace()?.textScale)
       if (legacy !== null) {
         prefs.textSize = legacy
-        this.host.store.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...stored, textSize: legacy }))
+        this.host.store.settings.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...stored, textSize: legacy }))
       }
     }
     return prefs
@@ -77,7 +77,7 @@ export class UiPreferenceStore {
    */
   setUiPreferences(patch: UiPreferencesPatch): UiPreferences {
     const current = this.uiPreferences()
-    this.host.store.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...this.storedUiPreferences(), ...patch }))
+    this.host.store.settings.setAppSetting(UI_PREFS_KEY, JSON.stringify({ ...this.storedUiPreferences(), ...patch }))
     // The session tools switch also decides the apps a session attached through them (#382): recount every live one
     if (patch.sessionTools !== undefined && patch.sessionTools !== current.sessionTools) {
       // Off ends what was allowed "once"; "always" and the person's own folder come back with the switch (#382)
@@ -89,7 +89,7 @@ export class UiPreferenceStore {
 
   /** The stored record as written, every field kept; `{}` for none or for one that is not a JSON object */
   private storedUiPreferences(): Record<string, unknown> {
-    const raw = this.host.store.appSetting(UI_PREFS_KEY)
+    const raw = this.host.store.settings.appSetting(UI_PREFS_KEY)
     if (raw === null) return {}
     const v = parseJson(raw)
     if (isObj(v)) return v

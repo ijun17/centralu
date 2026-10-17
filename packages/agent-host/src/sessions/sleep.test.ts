@@ -341,7 +341,7 @@ describe('a parent and the agents it started (start_agent, #561)', () => {
   })
 
   it('a parent stays awake while a child runs the turn it gave it, and may sleep once the child has answered; the child sleeps by the ordinary rule', async () => {
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const parent = await w.callerSession()
     const r = await w.mgr.startAgent(parent, { task: 'write the parser', wait: false })
     expect(r).toMatchObject({ ok: true, state: 'working' })

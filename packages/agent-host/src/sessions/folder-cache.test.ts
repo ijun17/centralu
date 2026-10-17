@@ -112,7 +112,7 @@ async function sessionIn(i: number): Promise<{ dir: string; id: string }> {
 describe('the session manager writes its per-folder caches through remember (#392)', () => {
   it('slash commands read back from disk', async () => {
     for (let i = 0; i < FOLDERS; i++) {
-      store.saveCommands('claude', join(root, `f${i}`), [{ name: 'from-disk', description: '', argumentHint: '' }])
+      store.settings.saveCommands('claude', join(root, `f${i}`), [{ name: 'from-disk', description: '', argumentHint: '' }])
       const { id } = await sessionIn(i)
       expect((await mgr.listCommands(id)).commands.map((c) => c.name)).toEqual(['from-disk'])
     }
@@ -127,8 +127,8 @@ describe('the session manager writes its per-folder caches through remember (#39
      */
     const saved = new Set<string>()
     let onSave = () => {}
-    const save = store.saveCommands.bind(store)
-    store.saveCommands = (tool, cwd, commands) => {
+    const save = store.settings.saveCommands.bind(store.settings)
+    store.settings.saveCommands = (tool, cwd, commands) => {
       save(tool, cwd, commands)
       saved.add(cwd)
       onSave()
@@ -142,7 +142,7 @@ describe('the session manager writes its per-folder caches through remember (#39
       const { dir } = await sessionIn(i)
       // Creating a session fetches its commands ahead of time; the answer is saved right after it is cached
       await savedIn(dir)
-      expect(store.loadCommands('claude', dir)).not.toBeNull()
+      expect(store.settings.loadCommands('claude', dir)).not.toBeNull()
     }
     expect(held('commandCache')).toBe(FOLDER_CACHE_KEYS)
   })

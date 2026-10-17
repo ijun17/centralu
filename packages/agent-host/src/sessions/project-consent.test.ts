@@ -79,7 +79,7 @@ describe('consent from one project to another', () => {
 
   it('a revoked pair asks again', async () => {
     const s = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     expect(await w.mgr.ensureProjectAccess(s, w.target.id, 'delegate', what)).toEqual({ ok: true })
 
     w.events.length = 0
@@ -117,7 +117,7 @@ describe('consent from one project to another', () => {
   it('lists and revokes through the RPC Settings uses', async () => {
     const { createRpcHandler } = await import('../rpc.js')
     const rpc = createRpcHandler(w.mgr, w.adapters as never)
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'apps')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'apps')
     const list = (await rpc('projectConsents.list', {})) as { toName: string; kind: string }[]
     expect(list).toMatchObject([{ toName: w.target.name, kind: 'apps' }])
     await rpc('projectConsents.revoke', { fromProjectId: w.caller.id, toProjectId: w.target.id, kind: 'apps' })

@@ -47,7 +47,7 @@ describe('a session deleted while a switch or a fork waits (#839)', () => {
     const events = w.events.length
     release()
     await expect(switching).rejects.toMatchObject({ code: 'session_not_found' })
-    expect(w.store.trashedSession(id)?.session.tool).toBe('claude')
+    expect(w.store.trash.trashedSession(id)?.session.tool).toBe('claude')
     expect(w.events.slice(events).filter((e) => e.sessionId === id)).toEqual([])
   })
 
@@ -68,6 +68,6 @@ describe('a session deleted while a switch or a fork waits (#839)', () => {
     await w.mgr.trashSession(id)
     release()
     expect(await fork).toMatchObject({ resumed: false })
-    expect(w.store.trashedSession(id)?.session.externalId).toBe('ext-1')
+    expect(w.store.trash.trashedSession(id)?.session.externalId).toBe('ext-1')
   })
 })

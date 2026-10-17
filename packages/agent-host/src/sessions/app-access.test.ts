@@ -38,10 +38,12 @@ const session = (id: string, projectId: string | null): AppSessionKey => {
 
 function newAccess(): AppAccess {
   const store: AppAccessStore = {
-    appSetting: (k) => w.store.appSetting(k),
-    setAppSetting: (k, v) => w.store.setAppSetting(k, v),
-    deleteAppSetting: (k) => w.store.deleteAppSetting(k),
-    getProjectConsent: (from, to) => (consents.has(`${from}>${to}`) ? { from, to } : null),
+    settings: {
+      appSetting: (k) => w.store.settings.appSetting(k),
+      setAppSetting: (k, v) => w.store.settings.setAppSetting(k, v),
+      deleteAppSetting: (k) => w.store.settings.deleteAppSetting(k),
+    },
+    permissions: { getProjectConsent: (from, to) => (consents.has(`${from}>${to}`) ? { from, to } : null) },
   }
   return new AppAccess({
     hub,
@@ -66,14 +68,14 @@ function newAccess(): AppAccess {
 
 beforeEach(() => {
   const holder: { w?: AttachWorld } = {}
-  w = holder.w = attachWorld(kit, {}, { shared: (ref) => readShared(holder.w!.store, ref) })
+  w = holder.w = attachWorld(kit, {}, { shared: (ref) => readShared(holder.w!.store.settings, ref) })
   w.trust.p2 = true
   w.plant('p1', 'notes')
   w.plant('p2', 'board')
   w.plant('p2', 'secret')
   w.plant('user', 'helper')
   w.rt.refresh()
-  writeShared(w.store, { projectId: 'p2', appId: 'board' }, true)
+  writeShared(w.store.settings, { projectId: 'p2', appId: 'board' }, true)
   consents = new Set()
   asks = []
   answer = 'always'
@@ -103,9 +105,9 @@ describe('finding apps (find_apps)', () => {
   it("lists another project's app only while it is shared, the person's own apps always, and never this project's own", () => {
     session('w1', 'p1')
     expect(refs('w1')).toEqual(['Beta/board', 'helper'])
-    writeShared(w.store, { projectId: 'p2', appId: 'board' }, false)
+    writeShared(w.store.settings, { projectId: 'p2', appId: 'board' }, false)
     expect(refs('w1')).toEqual(['helper'])
-    writeShared(w.store, { projectId: 'p2', appId: 'secret' }, true)
+    writeShared(w.store.settings, { projectId: 'p2', appId: 'secret' }, true)
     expect(refs('w1')).toEqual(['Beta/secret', 'helper'])
   })
 
@@ -199,8 +201,8 @@ describe('attaching and detaching', () => {
 
 describe('consent per pair of projects', () => {
   it('asks once per pair: "always" covers every later attachment from that project, and the reverse pair still asks', async () => {
-    writeShared(w.store, { projectId: 'p2', appId: 'secret' }, true)
-    writeShared(w.store, { projectId: 'p1', appId: 'notes' }, true)
+    writeShared(w.store.settings, { projectId: 'p2', appId: 'secret' }, true)
+    writeShared(w.store.settings, { projectId: 'p1', appId: 'notes' }, true)
     session('w1', 'p1')
     session('w2', 'p1')
     session('v1', 'p2')
@@ -240,7 +242,7 @@ describe('consent per pair of projects', () => {
     consents.add('p1>p2')
     w.rt.sharingChanged()
     await kit.until(() => a.current().map((x) => x.server), (s) => s.includes('app-board'))
-    writeShared(w.store, { projectId: 'p2', appId: 'board' }, false)
+    writeShared(w.store.settings, { projectId: 'p2', appId: 'board' }, false)
     w.rt.sharingChanged()
     await kit.until(() => a.current().map((x) => x.server), (s) => !s.includes('app-board'))
   })

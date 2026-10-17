@@ -127,7 +127,7 @@ beforeEach(async () => {
     ['claude', offline(new ClaudeAdapter({ startGapMs: 0 }))],
     ['codex', offline(new CodexAdapter())],
   ])
-  rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot, reservedIds: ['control'], builderBusy: (ref) => mgr.builderBusy(ref) })
+  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], builderBusy: (ref) => mgr.builderBusy(ref) })
   rt.refresh()
   openManager()
   projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
@@ -207,7 +207,7 @@ const MAKE: Record<Kind, (tool: ToolName) => Promise<string>> = {
   'start_agent child': async (tool) => {
     await rpc('projects.setTrusted', { projectId, trusted: true })
     adapters.get(tool)!.detect = async () => ({ tool, installed: true, loggedIn: true, detail: 'test' })
-    store.setProjectConsent(projectId, projectId, 'agents')
+    store.permissions.setProjectConsent(projectId, projectId, 'agents')
     const caller = await MAKE.worker(tool)
     const result = await mgr.startAgent(caller, { task: 'look around', tool, wait: false })
     expect(result.ok).toBe(true)
@@ -243,7 +243,7 @@ const CODEX_PERMISSION: Record<PermissionPreset, string> = { safe: 'untrusted/wo
 const CODEX_FILES: Record<Files, string> = { none: 'repo-off', user: 'repo-off', all: 'all' }
 
 const settle = () => new Promise((r) => setTimeout(r, 5))
-const trustedNow = () => store.projectRoots().find((p) => p.id === projectId)!.trusted
+const trustedNow = () => store.projects.projectRoots().find((p) => p.id === projectId)!.trusted
 
 /** One line summarizing what the tool that just launched received — which path (new or resumed), which setting files, which permission */
 function launched(tool: ToolName, sessionId: string, preset: PermissionPreset): string {
@@ -269,7 +269,7 @@ function launched(tool: ToolName, sessionId: string, preset: PermissionPreset): 
   const { method, params } = state.codex.filter((r) => r.method === 'thread/start' || r.method === 'thread/resume').at(-1)!
   const config = params.config as { project_doc_max_bytes?: number; projects?: Record<string, { trust_level?: string }> }
   const doc = config.project_doc_max_bytes
-  const cwdTrust = config.projects?.[store.sessionCwd(sessionId)!]?.trust_level
+  const cwdTrust = config.projects?.[store.sessions.sessionCwd(sessionId)!]?.trust_level
   const files =
     doc === 0 && cwdTrust === 'untrusted' ? 'repo-off'
     : doc === undefined && config.projects === undefined ? 'all'

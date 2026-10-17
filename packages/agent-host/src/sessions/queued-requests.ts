@@ -26,7 +26,7 @@ export type QueuedRequestsHost = Pick<
     /** ask_project's gates on the caller, read again when its queued request is delivered (ask-project-flow.ts) */
     askGateError: (callerId: string) => string | null
     /** A registered project's row, read now */
-    projectRow: (projectId: string | null | undefined) => ReturnType<DelegationHost['store']['listProjects']>[number] | undefined
+    projectRow: (projectId: string | null | undefined) => ReturnType<DelegationHost['store']['projects']['listProjects']>[number] | undefined
     /** Whether a turn runs in the session for anyone: its state, or a wait on it not settled yet */
     turnRunning: (m: SessionInfo) => boolean
   }
@@ -154,9 +154,9 @@ export class QueuedRequests {
       this.queuedHandedIn.add(sessionId)
       h.send(input)
     }
-    const from = { sessionId: caller.id, name: labelOf(this.host.store, caller) }
+    const from = { sessionId: caller.id, name: labelOf(this.host.store.messages, caller) }
     const project = this.host.projectRow(m.projectId)
-    const target = { id: m.projectId ?? '', name: project?.name ?? '', path: this.host.store.sessionCwd(m.id) ?? m.worktree?.path ?? project?.path ?? '' }
+    const target = { id: m.projectId ?? '', name: project?.name ?? '', path: this.host.store.sessions.sessionCwd(m.id) ?? m.worktree?.path ?? project?.path ?? '' }
     let d: Delegation | undefined
     try {
       if (r.via === 'send_to_session') {
@@ -219,7 +219,7 @@ export class QueuedRequests {
   /** A remembered "always" for the caller's project to ask the target's (#371), read now */
   pairConsented(callerId: string, target: SessionInfo): boolean {
     const from = this.host.meta.get(callerId)?.projectId
-    return !!from && !!target.projectId && (from === target.projectId || !!this.host.store.getProjectConsent(from, target.projectId, 'delegate'))
+    return !!from && !!target.projectId && (from === target.projectId || !!this.host.store.permissions.getProjectConsent(from, target.projectId, 'delegate'))
   }
 
   /**

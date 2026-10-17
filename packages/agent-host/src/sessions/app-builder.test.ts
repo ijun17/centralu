@@ -97,7 +97,7 @@ beforeEach(async () => {
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
   rt = new ExternalApps({
-    projects: () => store.projectRoots(),
+    projects: () => store.projects.projectRoots(),
     dataRoot,
     reservedIds: ['control'],
     // The same seam as the host's main (C-4) — the manager knows whether the building session is mid-turn

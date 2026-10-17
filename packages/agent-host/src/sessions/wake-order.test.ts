@@ -61,7 +61,7 @@ describe('a send while the session wakes (#839)', () => {
     held.release([])
     await Promise.all([first, second])
     expect(handleOf(t).sent).toEqual(['first', 'second'])
-    const said = w.store.loadMessages(t, 20).filter((m) => m.role === 'user').map((m) => (m.payload as { text: string }).text)
+    const said = w.store.messages.loadMessages(t, 20).filter((m) => m.role === 'user').map((m) => (m.payload as { text: string }).text)
     expect(said).toEqual(['first', 'second'])
   })
 })

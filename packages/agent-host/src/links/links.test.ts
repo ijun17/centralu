@@ -150,13 +150,13 @@ function folder(): string {
 function seeded(sessions: [id: string, kind: SessionInfo['kind'], inProject: boolean][]): { store: Store; projectId: string } {
   const store = new Store()
   const projectId = 'p-remote'
-  store.addProject({ id: projectId, path: folder(), name: 'remote-project' })
+  store.projects.addProject({ id: projectId, path: folder(), name: 'remote-project' })
   for (const [id, kind, inProject] of sessions) seedSession(store, inProject ? projectId : null, id, kind)
   return { store, projectId }
 }
 
 function seedSession(store: Store, projectId: string | null, id: string, kind: SessionInfo['kind'] = 'worker', externalId: string | null = null) {
-  store.upsertSession({
+  store.sessions.upsertSession({
     id,
     projectId,
     kind,
@@ -1064,7 +1064,7 @@ process.exit(127)
 describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () => {
   /** A conversation in the store: the person's line, then the agent's, `n` exchanges, seq from 1 */
   function talk(store: Store, sessionId: string, lines: [user: string, agent: string][]) {
-    store.appendMessages(
+    store.messages.appendMessages(
       lines.flatMap(([user, agent], i) => [
         { sessionId, seq: 2 * i + 1, role: 'user' as const, kind: 'text' as const, payload: { text: user }, ts: 1_700_000_000_000 + i },
         { sessionId, seq: 2 * i + 2, role: 'assistant' as const, kind: 'text' as const, payload: { text: agent }, ts: 1_700_000_000_000 + i },
@@ -1089,12 +1089,12 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     talk(remoteStore, 'coord', [['lead', 'zebracrossing from a coordinator']])
     // A child under w1 makes it a worktree manager there: a seat that directs, whose input the injection gate guards (#120)
     if (o.worktreeChild) seedSession(remoteStore, 'p-remote', 'kid', 'worker')
-    if (o.worktreeChild) remoteStore.upsertSession({ ...remoteStore.listSessions().find((s) => s.id === 'kid')!, parentSessionId: 'w1' })
+    if (o.worktreeChild) remoteStore.sessions.upsertSession({ ...remoteStore.sessions.listSessions().find((s) => s.id === 'kid')!, parentSessionId: 'w1' })
     const remote = await remoteHost(0, remoteStore)
 
     const hubStore = new Store()
     const hubProject = 'p-hub'
-    hubStore.addProject({ id: hubProject, path: folder(), name: 'hub-project' })
+    hubStore.projects.addProject({ id: hubProject, path: folder(), name: 'hub-project' })
     seedSession(hubStore, null, 'hub-orch', 'orchestrator', 'ext-hub-orch')
     seedSession(hubStore, hubProject, 'h1', 'worker')
     talk(hubStore, 'h1', [['where is the backup', 'zebracrossing lives on the server']])
@@ -1138,11 +1138,11 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     expect(hidden).toMatchObject({ isError: true, text: expect.stringContaining('Not a session this machine shares') })
     const sent = await tool('send_to_session', { sessionId: 'm1.orch', text: 'do it' })
     expect(sent).toMatchObject({ isError: true, text: expect.stringContaining('Not a session this machine shares') })
-    expect(remote.store.loadMessages('orch', 5).map((m) => (m.payload as { text?: string }).text)).not.toContain('do it')
+    expect(remote.store.messages.loadMessages('orch', 5).map((m) => (m.payload as { text?: string }).text)).not.toContain('do it')
   })
 
   /** What the hub's orchestrator was told: the text of each message in its own session */
-  const told = (hub: Hub) => hub.store.loadMessages('hub-orch', 50).map((m) => String((m.payload as { text?: string }).text ?? ''))
+  const told = (hub: Hub) => hub.store.messages.loadMessages('hub-orch', 50).map((m) => String((m.payload as { text?: string }).text ?? ''))
 
   it('sends to a machine’s session as the hub’s orchestrator, and reports the end of that turn once (step 2)', async () => {
     const { tool, remote, hub } = await rig()
@@ -1192,7 +1192,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     // By name: the machine's project is found by the name its window shows; one name on two machines is not guessed
     const name = (await remote.mgr.listProjects()).find((p) => p.id === 'p-remote')!.name
     expect((await tool('create_session', { project: name })).text).toMatch(/^Created: .+ \[m1\./)
-    hub.store.addProject({ id: 'p-dup', path: folder(), name })
+    hub.store.projects.addProject({ id: 'p-dup', path: folder(), name })
     const both = await tool('create_session', { project: name })
     expect(both).toMatchObject({ isError: true })
     expect(both.text).toContain(`${name} [p-dup] on this computer`)
@@ -1212,7 +1212,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     const r = await pending
     expect(r.text).toMatch(/^Made the project "fresh" \[m1\.[^\]]+\], an empty folder at ".+" on Remote box\./)
     expect((await remote.mgr.listProjects()).some((p) => p.path === join(parent, 'fresh'))).toBe(true)
-    expect(hub.store.listProjects().some((p) => p.path === join(parent, 'fresh'))).toBe(false)
+    expect(hub.store.projects.listProjects().some((p) => p.path === join(parent, 'fresh'))).toBe(false)
 
     expect(await tool('create_project', { name: 'x', machine: 'Nowhere' })).toMatchObject({
       isError: true,
@@ -1259,7 +1259,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     seedSession(remoteStore, 'p-remote', 'w1', 'worker', 'ext-w1')
     const remote = await remoteHost(0, remoteStore)
     const hubStore = new Store()
-    hubStore.addProject({ id: 'p-hub', path: folder(), name: 'hub-project' })
+    hubStore.projects.addProject({ id: 'p-hub', path: folder(), name: 'hub-project' })
     seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
     const hub = await hubHost(() => lineFor(remote.port), hubStore)
     hub.mgr.setProjectTrusted('p-hub', true)
@@ -1288,7 +1288,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     expect(r).toMatchObject({ ok: true, state: 'done', project: `m1/${name}`, sessionId: 'm1.w1' })
     expect((r as { answer: string }).answer).toContain('echo: [A session in the project "hub-project" asks this project')
     // It ran on the machine, as an instruction from the hub's session, and the answer is that machine's last words
-    const there = remote.store.loadMessages('w1', 10).find((m) => (m.payload as { text?: string }).text?.includes('say hello'))!
+    const there = remote.store.messages.loadMessages('w1', 10).find((m) => (m.payload as { text?: string }).text?.includes('say hello'))!
     expect(there.payload).toMatchObject({ from: { name: expect.stringContaining('on Hub mac') } })
     expect(hub.mgr.listSessions().find((s) => s.id === 'h1')!.state).not.toBe('error')
   })
@@ -1315,7 +1315,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     const again = ask({ project: name, task: 'x' })
     await answer('always')
     await again
-    expect(hub.store.listProjectConsents()).toEqual([])
+    expect(hub.store.permissions.listProjectConsents()).toEqual([])
     const third = ask({ project: name, task: 'x' })
     await answer('deny')
     await third
@@ -1323,7 +1323,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
 
   it('refuses a name that is on two machines with both choices, and a machine-qualified name settles it', async () => {
     const { name, ask, hub, answer } = await rig()
-    hub.store.addProject({ id: 'p-dup', path: folder(), name })
+    hub.store.projects.addProject({ id: 'p-dup', path: folder(), name })
     const refused = await ask({ project: name, task: 'x' })
     expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('More than one project is called') })
     const text = (refused as { error: string }).error
@@ -1378,8 +1378,8 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     await answer('allow')
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining('started a turn of its own while the question to the person stood') })
     // The task did not join their turn: it is nowhere in the conversation there
-    expect(remote.store.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
-    expect(remote.store.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes("through Centralu's ask_project"))).toBe(false)
+    expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
+    expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes("through Centralu's ask_project"))).toBe(false)
   })
 
   it("withdraws the card when the caller's project loses trust, and sends nothing to the machine", async () => {
@@ -1389,7 +1389,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     void hub.mgr.setProjectTrusted('p-hub', false)
     expect(card()).toBeFalsy()
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
-    expect(remote.store.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
+    expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
   })
 
   it('refuses an approval that comes after the trust it rested on is gone, and sends nothing to the machine', async () => {
@@ -1397,10 +1397,10 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     const call = ask({ project: name, task: 'say hello' })
     await eventually(() => !!card())
     // Taken away at the store, so only the read after the answer can see it
-    hub.store.setProjectTrusted('p-hub', false)
+    hub.store.projects.setProjectTrusted('p-hub', false)
     await answer('allow')
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
-    expect(remote.store.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
+    expect(remote.store.messages.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)
   })
 
   it('ends the wait with a sentence when the link drops after the task was sent, instead of "still working" for good', async () => {

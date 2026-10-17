@@ -151,7 +151,7 @@ function host() {
 async function parentAndChild(h: ReturnType<typeof host>) {
   const project = await h.mgr.addProject(root)
   h.mgr.setProjectTrusted(project.id, true)
-  store.setProjectConsent(project.id, project.id, 'agents')
+  store.permissions.setProjectConsent(project.id, project.id, 'agents')
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
   const started = await h.mgr.startAgent(parent, { task: 'fix the sidebar indent', wait: false })
   if (!started.ok) throw new Error(started.error)
@@ -160,7 +160,7 @@ async function parentAndChild(h: ReturnType<typeof host>) {
 
 /** The report texts stored in the parent's conversation that name the child */
 const reportsTo = (parent: string, child: string) =>
-  store.loadMessages(parent, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(child))
+  store.messages.loadMessages(parent, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(child))
 /** The start's quit notices are taken on its first timer tick; this waits past it */
 const startNoticesRan = () => new Promise<void>((r) => setTimeout(() => setImmediate(r), 0))
 /** The host.log lines saying an asker is told of a stop; the decision is taken with the event that ended the turn */
@@ -210,12 +210,12 @@ describe('a turn the network stopped (#698)', () => {
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
     await a.mgr.send(s.id, 'go')
     a.claude.handles.get(s.id)!.ownTurnFails(ECONNREFUSED)
-    expect(store.listSessions().find((x) => x.id === s.id)?.interruption).toMatchObject({ reason: 'network' })
+    expect(store.sessions.listSessions().find((x) => x.id === s.id)?.interruption).toMatchObject({ reason: 'network' })
 
     await a.mgr.send(s.id, 'Continue where you stopped.')
     expect(info(a, s.id).interruption).toBeNull()
     expect(interruptions(s.id).at(-1)).toMatchObject({ interruption: null })
-    expect(store.listSessions().find((x) => x.id === s.id)?.interruption).toBeNull()
+    expect(store.sessions.listSessions().find((x) => x.id === s.id)?.interruption).toBeNull()
   })
 
   it('an error the network did not cause leaves no interruption, and nobody unasked is told', async () => {
@@ -239,7 +239,7 @@ describe('a turn the network stopped (#698)', () => {
 async function waitingParent(h: ReturnType<typeof host>) {
   const project = await h.mgr.addProject(root)
   h.mgr.setProjectTrusted(project.id, true)
-  store.setProjectConsent(project.id, project.id, 'agents')
+  store.permissions.setProjectConsent(project.id, project.id, 'agents')
   const parent = (await h.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })).id
   const call = h.mgr.startAgent(parent, { task: 'fix the sidebar indent', wait: true })
   await eventually(() => h.claude.handles.size === 2)
@@ -324,12 +324,12 @@ describe('a turn a quit stopped (#698)', () => {
     const project = await a.mgr.addProject(root)
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
     await a.mgr.send(s.id, 'a long job')
-    expect(store.listSessions().find((x) => x.id === s.id)?.state).toBe('working')
+    expect(store.sessions.listSessions().find((x) => x.id === s.id)?.state).toBe('working')
 
     // "Quit completely": the process is gone, and the next start finds the row still working
     const b = host()
     expect(info(b, s.id)).toMatchObject({ state: 'idle', interruption: { reason: 'quit' } })
-    const last = store.loadMessages(s.id, 5).at(-1)!
+    const last = store.messages.loadMessages(s.id, 5).at(-1)!
     expect(last.payload).toMatchObject({ type: 'notice', level: 'warning', from: 'Centralu' })
     expect(JSON.stringify(last.payload)).toContain('Centralu quit or restarted while this turn was running')
     expect(info(b, s.id).lastSeq).toBe(last.seq)
@@ -341,10 +341,10 @@ describe('a turn a quit stopped (#698)', () => {
     const s = await a.mgr.createSession({ projectId: project.id, cwd: root, tool: 'claude', permissionPreset: 'normal' })
     await a.mgr.send(s.id, 'short')
     a.claude.handles.get(s.id)!.answer('done')
-    const before = store.loadMessages(s.id, 10).length
+    const before = store.messages.loadMessages(s.id, 10).length
     const b = host()
     expect(info(b, s.id)).toMatchObject({ state: 'waiting_input', interruption: null })
-    expect(store.loadMessages(s.id, 10)).toHaveLength(before)
+    expect(store.messages.loadMessages(s.id, 10)).toHaveLength(before)
   })
 
   it('the next start tells an asker that delegated without waiting, once per child, and only while the asker exists', async () => {
@@ -394,7 +394,7 @@ describe('a turn a quit stopped (#698)', () => {
     const a = host()
     const { parent, child } = await parentAndChild(a)
     // The report is owed to a session deleted since; the child was started by the parent
-    store.setReportMark(child, 'a-session-deleted-since')
+    store.children.setReportMark(child, 'a-session-deleted-since')
     host()
     await eventually(() => reportsTo(parent, child).length === 1)
     expect(reportsTo(parent, child)[0]).toContain('Centralu quit or restarted during its turn')
@@ -452,7 +452,7 @@ describe('a tool reconnecting for too long (#698)', () => {
     vi.advanceTimersByTime(2000)
     expect(info(a, id)).toMatchObject({ state: 'working', interruption: { reason: 'reconnecting' } })
     // Live only: not stored
-    expect(store.listSessions().find((x) => x.id === id)?.interruption).toBeNull()
+    expect(store.sessions.listSessions().find((x) => x.id === id)?.interruption).toBeNull()
 
     // Other events of the same episode keep the flag and when it began
     h.emit({ type: 'usage_update', sessionId: id, tokens: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 0 } })

@@ -52,7 +52,7 @@ describe('linked machines in the store (#82)', () => {
     const store = new Store()
     storeRegistry(store).add(machine('a'))
     storeMirror(store).replace('a', 'sessions', [{ id: 's1' }])
-    store.setGridView(
+    store.grid.setGridView(
       [
         { kind: 'session', sessionId: 'a.s1' },
         { kind: 'session', sessionId: 'a.gone' },
@@ -60,9 +60,9 @@ describe('linked machines in the store (#82)', () => {
       () => true,
     )
     // a.gone is stored but not known to the mirror: not listed
-    expect(store.listGridView()).toEqual([{ kind: 'session', sessionId: 'a.s1' }])
+    expect(store.grid.listGridView()).toEqual([{ kind: 'session', sessionId: 'a.s1' }])
     storeRegistry(store).remove('a')
-    expect(store.listGridView()).toEqual([])
+    expect(store.grid.listGridView()).toEqual([])
   })
 
   it('keeps a grid panel of a remote app while its machine and project are known, apart from this host’s app of one id, and drops it with the machine', () => {
@@ -70,7 +70,7 @@ describe('linked machines in the store (#82)', () => {
     storeRegistry(store).add(machine('a'))
     storeMirror(store).replace('a', 'projects', [{ id: 'p1' }])
     const elsewhere = (p: { projectId: string | null; machine?: string }) => (p.projectId?.startsWith('a.') ? 'a' : (p.machine ?? null))
-    store.setGridView(
+    store.grid.setGridView(
       [
         { kind: 'app', projectId: null, appId: 'notes' },
         { kind: 'app', projectId: null, appId: 'notes', machine: 'a', span: { cols: 2, rows: 1 } },
@@ -81,13 +81,13 @@ describe('linked machines in the store (#82)', () => {
       elsewhere,
     )
     // a.gone's project is not known to the mirror: not listed
-    expect(store.listGridView()).toEqual([
+    expect(store.grid.listGridView()).toEqual([
       { kind: 'app', projectId: null, appId: 'notes' },
       { kind: 'app', projectId: null, appId: 'notes', machine: 'a', span: { cols: 2, rows: 1 } },
       { kind: 'app', projectId: 'a.p1', appId: 'board' },
     ])
     storeRegistry(store).remove('a')
-    expect(store.listGridView()).toEqual([{ kind: 'app', projectId: null, appId: 'notes' }])
+    expect(store.grid.listGridView()).toEqual([{ kind: 'app', projectId: null, appId: 'notes' }])
   })
 
   it('v47 only adds: a host before it reads only its own apps from the grid, never a machine’s app of the same id', () => {
@@ -96,7 +96,7 @@ describe('linked machines in the store (#82)', () => {
       const db = join(dir, 'store.db')
       const store = new Store(db)
       storeRegistry(store).add(machine('a'))
-      store.setGridView(
+      store.grid.setGridView(
         [
           { kind: 'app', projectId: null, appId: 'notes', machine: 'a' },
           { kind: 'app', projectId: null, appId: 'timer' },
@@ -128,7 +128,7 @@ describe('linked machines in the store (#82)', () => {
       const store = new Store(db)
       storeRegistry(store).add(machine('a'))
       storeMirror(store).replace('a', 'sessions', [{ id: 's1' }])
-      store.setGridView([{ kind: 'session', sessionId: 'a.s1' }], () => true)
+      store.grid.setGridView([{ kind: 'session', sessionId: 'a.s1' }], () => true)
       store.close()
       // What a v45 host runs to read the grid (store.ts before #82): the remote panel is left out, nothing fails
       const raw = new Database(db)
@@ -155,7 +155,7 @@ describe('the project order across machines in the store (#734)', () => {
     expect(order.read()).toEqual([])
     order.write(['m1.b', 'h2', 'm1.a'])
     expect(storeProjectOrder(store).read()).toEqual(['m1.b', 'h2', 'm1.a'])
-    store.setAppSetting('hub.projectOrder', '{oops')
+    store.settings.setAppSetting('hub.projectOrder', '{oops')
     expect(order.read()).toEqual([])
   })
 })

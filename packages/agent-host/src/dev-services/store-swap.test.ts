@@ -19,7 +19,7 @@ function currentStore(): string {
   dirs.push(d)
   const file = join(d, 'store.db')
   const s = new Store(file)
-  s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+  s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
   s.close()
   return file
 }
@@ -51,7 +51,7 @@ describe('migrations during a host swap (#280 step 3)', () => {
     expect(s.schemaVersion).toBe(KNOWN)
     expect(s.deferredSteps).toEqual([40])
     // The host works on the expanded store before the heavy step has run
-    expect(s.listProjects().map((p) => p.id)).toEqual(['p1'])
+    expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
 
     expect(s.runDeferred()).toBe(1)
     expect(s.deferredSteps).toEqual([])

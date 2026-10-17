@@ -68,7 +68,7 @@ beforeEach(async () => {
   const adapters = new Map<ToolName, AgentAdapter>([['claude', new FakeAdapter('claude')]])
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
-  rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot, reservedIds: ['control'] })
+  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'] })
   rt.refresh()
   mgr.useExternalApps(rt)
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
@@ -162,7 +162,7 @@ describe('apps.create', () => {
 describe('create_app (the orchestrator)', () => {
   it('names a project by its name to create through the same door, and a refusal returns its reason', async () => {
     const orch = await mgr.orchestrator()
-    const name = store.listProjects()[0]!.name
+    const name = store.projects.listProjects()[0]!.name
     const made = await mgr.runOrchestratorTool(orch.id, 'create_app', { id: 'board', name: 'Board', project: name })
     expect(made.isError).toBeFalsy()
     expect(made.text).toContain(`Created the "Board" app (project, id board): ${join(appsDir(), 'board')}`)

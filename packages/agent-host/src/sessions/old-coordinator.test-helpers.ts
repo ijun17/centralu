@@ -22,7 +22,7 @@ export function plantOldCoordinator(
   },
 ): string {
   const id = randomUUID()
-  store.upsertSession(
+  store.sessions.upsertSession(
     SessionInfo.parse({
       id,
       projectId: null,
@@ -39,6 +39,6 @@ export function plantOldCoordinator(
       appId: o.appId ?? null,
     }),
   )
-  store.setSessionCwd(id, orchestratorHome())
+  store.sessions.setSessionCwd(id, orchestratorHome())
   return id
 }

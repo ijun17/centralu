@@ -31,8 +31,8 @@ test('the UI recovers from a dropped socket and from a host restart, re-reading 
   test.setTimeout(120_000)
   const ws = workspace()
   withStore(ws.db, (store) => {
-    store.setAppSetting('updates.auto', 'false')
-    store.addProject({ id: PROJECT, path: ws.project, name: 'recovery' })
+    store.settings.setAppSetting('updates.auto', 'false')
+    store.projects.addProject({ id: PROJECT, path: ws.project, name: 'recovery' })
     seedSession(store, PROJECT, SESSION, 'alpha')
   })
   const port = await freePort()

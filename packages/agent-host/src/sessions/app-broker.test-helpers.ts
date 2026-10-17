@@ -152,7 +152,7 @@ export async function brokerWorld(kit: PlantKit, timing: Partial<RuntimeTiming> 
   const mgr = new SessionManager(store, adapters, onEvent, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
   const rt = new ExternalApps({
-    projects: () => store.projectRoots(),
+    projects: () => store.projects.projectRoots(),
     dataRoot,
     reservedIds: ['control'],
     runs: storeRunLedger(store),

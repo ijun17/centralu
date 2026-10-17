@@ -138,7 +138,7 @@ describe('starting another agent in the same project', () => {
     const p = w.mgr.listSessions().find((s) => s.id === id)?.pendingApproval
     return p?.detail.kind === 'agent_start' ? p : undefined
   }
-  const allowProject = () => w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+  const allowProject = () => w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
   /** Starts a child that keeps running, and returns its id */
   const startRunning = async (s: string, task = 'write it') => {
     const before = childrenOf(s).length
@@ -229,7 +229,7 @@ describe('starting another agent in the same project', () => {
     const s = await session('normal')
     const child = await startRunning(s)
     await w.until(() => !!handleOf(child)?.sent.length)
-    const said = () => w.store.loadMessages(s, 50).filter((m) => String((m.payload as { text?: string }).text ?? '').startsWith('[Centralu]'))
+    const said = () => w.store.messages.loadMessages(s, 50).filter((m) => String((m.payload as { text?: string }).text ?? '').startsWith('[Centralu]'))
     // The report the quit's failed wait leads to, awaited to its end rather than for a while
     const reports: Promise<void>[] = []
     const reporter = (w.mgr as unknown as { reports: { deliverReport: (...a: unknown[]) => Promise<void> } }).reports
@@ -347,11 +347,11 @@ describe('starting another agent in the same project', () => {
     w.mgr.respondApproval(s, requestId, 'allow')
     await w.until(() => childrenOf(s).length === 1)
     const child = childrenOf(s)[0]!.id
-    await w.until(() => w.store.listReportMarks().length === 1)
-    expect(w.store.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: s }])
+    await w.until(() => w.store.children.listReportMarks().length === 1)
+    expect(w.store.children.listReportMarks()).toEqual([{ sessionId: child, callerSessionId: s }])
     // The handle now leads to the child
     expect(await w.mgr.agentSession(s, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: true, state: 'working', sessionId: child })
-    expect(w.store.listAgentStartRequests()).toEqual([])
+    expect(w.store.children.listAgentStartRequests()).toEqual([])
   })
 
   it('a pending request the person denies later is told to the caller, and shown in its session (#673)', async () => {
@@ -370,7 +370,7 @@ describe('starting another agent in the same project', () => {
     expect(handleOf(s)!.sent.find((t) => t.includes(requestId))).toContain('did not allow')
     expect(childrenOf(s)).toEqual([])
     expect(await w.mgr.agentSession(s, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: false, error: expect.stringContaining('did not allow') })
-    expect(w.store.listAgentStartRequests()).toEqual([])
+    expect(w.store.children.listAgentStartRequests()).toEqual([])
   })
 
   it('agent_session waits on a pending request for the answer, and stop withdraws it with a line for the person (#673)', async () => {
@@ -405,7 +405,7 @@ describe('starting another agent in the same project', () => {
     expect(stopped).toMatchObject({ ok: true, state: 'stopped', sessionId: requestId })
     expect(agentCard(s)).toBeUndefined()
     expect(childrenOf(s)).toEqual([])
-    const notice = w.store.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('was withdrawn by this session'))
+    const notice = w.store.messages.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('was withdrawn by this session'))
     expect(notice).toBeDefined()
     // Another session cannot follow or withdraw it
     expect(await w.mgr.agentSession(second, { sessionId: requestId, action: 'status' })).toMatchObject({ ok: false })
@@ -432,13 +432,13 @@ describe('starting another agent in the same project', () => {
       expect(agentCard(s)).toBeUndefined()
       await w.until(() => !!told(s, requestId))
       expect(told(s, requestId)).toContain('stopped trusting')
-      expect(w.store.loadMessages(s, 30).map((m) => JSON.stringify(m.payload)).some((t) => t.includes('no longer trusted'))).toBe(true)
-      expect(w.store.listAgentStartRequests()).toEqual([])
+      expect(w.store.messages.loadMessages(s, 30).map((m) => JSON.stringify(m.payload)).some((t) => t.includes('no longer trusted'))).toBe(true)
+      expect(w.store.children.listAgentStartRequests()).toEqual([])
     })
 
     it('trust taken away elsewhere (another host): an approval starts nothing, and the session is told', async () => {
       const { s, requestId } = await pendingCard()
-      w.store.setProjectTrusted(w.caller.id, false)
+      w.store.projects.setProjectTrusted(w.caller.id, false)
       w.mgr.respondApproval(s, requestId, 'allow')
       await w.until(() => !!told(s, requestId))
       expect(told(s, requestId)).toContain('no longer trusted')
@@ -458,7 +458,7 @@ describe('starting another agent in the same project', () => {
       })
       const starting = w.mgr.startAgent(s, { task: 'write the parser', wait: false })
       await w.until(() => making)
-      w.store.setProjectTrusted(w.caller.id, false)
+      w.store.projects.setProjectTrusted(w.caller.id, false)
       release()
       expect(await starting).toMatchObject({ ok: false, error: expect.stringContaining('no longer trusted') })
       expect(childrenOf(s)).toEqual([])
@@ -481,7 +481,7 @@ describe('starting another agent in the same project', () => {
       vi.spyOn(w.mgr, 'trashSession').mockRejectedValue(new Error('the folder is locked'))
       const starting = w.mgr.startAgent(s, { task: 'write the parser', wait: false })
       await w.until(() => vi.mocked(w.mgr.createSession).mock.calls.length > 0)
-      w.store.setProjectTrusted(w.caller.id, false)
+      w.store.projects.setProjectTrusted(w.caller.id, false)
       release()
       const r = await starting
       expect(!r.ok && r.error).toContain('could not be moved to the trash (the folder is locked)')
@@ -535,7 +535,7 @@ describe('starting another agent in the same project', () => {
       await w.mgr.setProjectTrusted(w.target.id, true)
       // The session waits on its card, a turn that is not the asker's: the task joins it as a note (#677), which needs auto
       const asker = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'auto' })).id
-      w.store.setProjectConsent(w.target.id, w.caller.id, 'delegate')
+      w.store.permissions.setProjectConsent(w.target.id, w.caller.id, 'delegate')
       void w.mgr.askProject(asker, { project: w.caller.id, session: s, task: 'check something', ifBusy: 'note' })
       await w.until(() => !!handleOf(s)?.sent.some((t) => t.includes('check something')))
       w.mgr.respondApproval(s, requestId, 'allow')
@@ -584,10 +584,10 @@ describe('starting another agent in the same project', () => {
     // A host swap's drain cut the first call short and told the model to call again
     expect(await w.mgr.startAgent(s, { task: 'one job', wait: false })).toMatchObject({ ok: true, state: 'pending', sessionId: requestId })
     expect(w.events.filter((e) => e.type === 'approval_request' && e.sessionId === s && (e as { seq?: number }).seq != null)).toHaveLength(1)
-    expect(w.store.listAgentStartRequests()).toHaveLength(1)
+    expect(w.store.children.listAgentStartRequests()).toHaveLength(1)
     // Another job is another request
     const other = w.mgr.startAgent(s, { task: 'another job', wait: false })
-    await w.until(() => w.store.listAgentStartRequests().length === 2)
+    await w.until(() => w.store.children.listAgentStartRequests().length === 2)
     w.mgr.respondApproval(s, requestId, 'deny')
     await w.until(() => agentCard(s)?.requestId !== requestId && !!agentCard(s))
     w.mgr.respondApproval(s, agentCard(s)!.requestId, 'deny')
@@ -601,8 +601,8 @@ describe('starting another agent in the same project', () => {
     await w.mgr.trashSession(s)
     expect(await p).toMatchObject({ ok: false })
     expect(childrenOf(s)).toEqual([])
-    expect(w.store.listAgentStartRequests()).toEqual([])
-    const notice = w.store.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('this session was deleted'))
+    expect(w.store.children.listAgentStartRequests()).toEqual([])
+    const notice = w.store.messages.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('this session was deleted'))
     expect(notice).toBeDefined()
   })
 
@@ -614,7 +614,7 @@ describe('starting another agent in the same project', () => {
     ctl.abort()
     expect(await p).toMatchObject({ ok: false, error: expect.stringContaining('withdrawn') })
     expect(agentCard(s)).toBeUndefined()
-    const notice = w.store.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('the call that asked was cancelled'))
+    const notice = w.store.messages.loadMessages(s, 20).map((m) => JSON.stringify(m.payload)).find((t) => t.includes('the call that asked was cancelled'))
     expect(notice).toBeDefined()
   })
 
@@ -661,7 +661,7 @@ describe('starting another agent in the same project', () => {
       // The report promised for any child that outlives the call is there
       expect(await w.mgr.agentSession(s, { sessionId: childrenOf(s)[0]!.id, action: 'status' })).toMatchObject({ ok: true, state: 'working', reported: true })
       // and stored, so a host swap keeps it (#646)
-      expect(w.store.listReportMarks()).toEqual([{ sessionId: childrenOf(s)[0]!.id, callerSessionId: s }])
+      expect(w.store.children.listReportMarks()).toEqual([{ sessionId: childrenOf(s)[0]!.id, callerSessionId: s }])
     })
 
     it('a task still being handed over at the bound is answered as "working", with the report and the unchecked note', async () => {
@@ -676,7 +676,7 @@ describe('starting another agent in the same project', () => {
       const r = await p
       expect(r).toMatchObject({ ok: true, state: 'working', reported: true, notice: expect.stringContaining('"gpt-x" not checked') })
       // The armed report is stored, so a host swap keeps it (#646)
-      expect(w.store.listReportMarks()).toEqual([{ sessionId: r.ok ? r.sessionId : '', callerSessionId: s }])
+      expect(w.store.children.listReportMarks()).toEqual([{ sessionId: r.ok ? r.sessionId : '', callerSessionId: s }])
     })
 
     it('an approval and the bound in the same instant: the answer is "pending", and the child starts with its report (#673)', async () => {
@@ -693,7 +693,7 @@ describe('starting another agent in the same project', () => {
       for (let i = 0; i < 20; i++) await vi.advanceTimersByTimeAsync(0)
       expect(childrenOf(s)).toHaveLength(1)
       expect(agentCard(s)).toBeUndefined()
-      expect(w.store.listReportMarks()).toEqual([{ sessionId: childrenOf(s)[0]!.id, callerSessionId: s }])
+      expect(w.store.children.listReportMarks()).toEqual([{ sessionId: childrenOf(s)[0]!.id, callerSessionId: s }])
     })
   })
 
@@ -755,7 +755,7 @@ describe('starting another agent in the same project', () => {
     expect(h.opts.cwd).toBe(w.caller.path)
     expect(h.sent[0]).toContain("through Centralu's start_agent")
     expect(h.sent[0]).toContain('implement the parser')
-    const sent = w.store.loadMessages(c.id, 10).find((m) => m.role === 'user')
+    const sent = w.store.messages.loadMessages(c.id, 10).find((m) => m.role === 'user')
     expect((sent?.payload as { from?: { sessionId: string } }).from?.sessionId).toBe(s)
     h.answer('Parser done.')
     expect(await p).toMatchObject({ ok: true, state: 'done', sessionId: c.id, tool: 'codex', answer: 'Parser done.' })
@@ -832,7 +832,7 @@ describe('starting another agent in the same project', () => {
     const c = await startRunning(s)
     const r = await w.mgr.startAgent(c, { task: 'and another', wait: false })
     expect(!r.ok && r.error).toContain('cannot start agents')
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const q = await w.mgr.askProject(c, { project: w.target.name, task: 'x' })
     expect(!q.ok && q.error).toContain('cannot ask a project')
     expect(childrenOf(c)).toEqual([])
@@ -904,7 +904,7 @@ describe('starting another agent in the same project', () => {
     expect(h.sent[1]).toContain('A note from the parent session')
     expect(h.sent[1]).toContain('Use Chromium for e2e.')
     expect(h.interrupted).toBe(0)
-    const message = w.store.loadMessages(c, 10).filter((m) => m.role === 'user').at(-1)!
+    const message = w.store.messages.loadMessages(c, 10).filter((m) => m.role === 'user').at(-1)!
     expect(message.payload).toMatchObject({ text: h.sent[1], from: { sessionId: s } })
     expect(w.events).toContainEqual(expect.objectContaining({ type: 'user_message', sessionId: c, text: h.sent[1], from: expect.objectContaining({ sessionId: s }) }))
     h.answer('Done with Chromium.')
@@ -1169,7 +1169,7 @@ describe('starting another agent in the same project', () => {
         expect(await w.mgr.agentSession(s, { sessionId: c, action: 'delete' })).toMatchObject({ ok: false, error: expect.stringContaining('the person may be using it') })
         expect(dispose).not.toHaveBeenCalled()
         expect(w.mgr.listSessions().find((row) => row.id === c)).toEqual(before)
-        expect(w.store.trashedSession(c)).toBeNull()
+        expect(w.store.trash.trashedSession(c)).toBeNull()
         child.answer('The person\'s task is complete.')
         expect(await w.mgr.agentSession(s, { sessionId: c, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted' })
       })
@@ -1199,7 +1199,7 @@ describe('starting another agent in the same project', () => {
       let release!: () => void
       const gate = new Promise<void>((resolve) => { release = resolve })
       const dispose = vi.spyOn(handleOf(c)!, 'dispose').mockImplementation(() => gate)
-      const trash = vi.spyOn(w.store, 'trashSession')
+      const trash = vi.spyOn(w.store.trash, 'trashSession')
       const rpc = createRpcHandler(w.mgr, w.adapters)
       const parent = () => w.mgr.agentSession(s, { sessionId: c, action: 'delete' })
       const sidebar = () => rpc('agents.deleteSession', { sessionId: c })
@@ -1213,7 +1213,7 @@ describe('starting another agent in the same project', () => {
       expect(dispose).toHaveBeenCalledTimes(1)
       expect(trash).toHaveBeenCalledTimes(1)
       expect(w.events.filter((e) => e.type === 'session_deleted' && e.sessionId === c)).toHaveLength(1)
-      expect(w.store.trashedSession(c)?.record.projectId).toBe(w.caller.id)
+      expect(w.store.trash.trashedSession(c)?.record.projectId).toBe(w.caller.id)
     })
 
     it.each(['safe', 'normal', 'auto'] as const)('%s moves its completed child to the sidebar trash, preserving its history and creator link', async (preset) => {
@@ -1228,8 +1228,8 @@ describe('starting another agent in the same project', () => {
       expect(result).toEqual({ text: expect.stringContaining('to the trash. Tell the person in one line.') })
       expect(result.text).not.toMatch(/worktree|branch|undefined/)
       expect(w.mgr.listSessions().some((child) => child.id === c)).toBe(false)
-      expect(w.store.trashedSession(c)?.session).toMatchObject({ askedBy: s, parentSessionId: null })
-      expect(w.store.loadMessages(c, 50).some((m) => JSON.stringify(m.payload).includes('Research complete.'))).toBe(true)
+      expect(w.store.trash.trashedSession(c)?.session).toMatchObject({ askedBy: s, parentSessionId: null })
+      expect(w.store.messages.loadMessages(c, 50).some((m) => JSON.stringify(m.payload).includes('Research complete.'))).toBe(true)
       expect(w.events).toContainEqual({ type: 'session_deleted', sessionId: c })
       await w.mgr.restoreSession(c)
       expect(childrenOf(s).map((child) => child.id)).toContain(c)
@@ -1246,7 +1246,7 @@ describe('starting another agent in the same project', () => {
           ok: false, error: expect.stringContaining('not a session this session started'),
         })
         expect(dispose).not.toHaveBeenCalled()
-        expect(w.store.trashedSession(target)).toBeNull()
+        expect(w.store.trash.trashedSession(target)).toBeNull()
       }
     })
 
@@ -1265,7 +1265,7 @@ describe('starting another agent in the same project', () => {
       const deleting = w.mgr.agentSession(s, { sessionId: c, action: 'delete' })
       try {
         await w.until(() => dispose.mock.calls.length === 1)
-        expect(w.store.trashedSession(c)).toBeNull()
+        expect(w.store.trash.trashedSession(c)).toBeNull()
         expect(w.events.some((e) => e.type === 'session_deleted' && e.sessionId === c)).toBe(false)
         // Output already in flight is flushed with the conversation before it goes to the trash.
         child.event({ type: 'message_delta', sessionId: c, role: 'assistant', text: ' before stop' })
@@ -1274,8 +1274,8 @@ describe('starting another agent in the same project', () => {
       }
       expect(await deleting).toMatchObject({ ok: true, state: 'deleted', sessionId: c })
       expect(await waiting).toMatchObject({ ok: false, error: expect.stringContaining('deleted') })
-      expect(w.store.trashedSession(c)).not.toBeNull()
-      expect(w.store.loadMessages(c, 50).some((m) => JSON.stringify(m.payload).includes('Partial research before stop'))).toBe(true)
+      expect(w.store.trash.trashedSession(c)).not.toBeNull()
+      expect(w.store.messages.loadMessages(c, 50).some((m) => JSON.stringify(m.payload).includes('Partial research before stop'))).toBe(true)
       expect(w.mgr.isLive(c)).toBe(false)
       expect(parentDispose).not.toHaveBeenCalled()
       expect(handleOf(s)!.interrupted).toBe(0)
@@ -1289,12 +1289,12 @@ describe('starting another agent in the same project', () => {
       const s = await session()
       const c = await startRunning(s)
       await w.mgr.detachAll()
-      const row = w.store.listSessions().find((child) => child.id === c)!
-      w.store.upsertSession({ ...row, askedBy: null, parentSessionId: null, [link]: s })
+      const row = w.store.sessions.listSessions().find((child) => child.id === c)!
+      w.store.sessions.upsertSession({ ...row, askedBy: null, parentSessionId: null, [link]: s })
       const next = new SessionManager(w.store, w.adapters, (e) => w.events.push(e))
       try {
         expect(await next.agentSession(s, { sessionId: c, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted', sessionId: c })
-        expect(w.store.trashedSession(c)?.session).toMatchObject({ [link]: s })
+        expect(w.store.trash.trashedSession(c)?.session).toMatchObject({ [link]: s })
       } finally {
         await next.detachAll()
       }
@@ -1471,7 +1471,7 @@ describe('starting another agent in the same project', () => {
       w.mgr.respondApproval(orch.id, agentCard(orch.id)!.requestId, 'always', 'project')
       expect(await p).toMatchObject({ ok: true })
       expect(await tools.startAgent({ task: 'second lookup', wait: false })).toMatchObject({ ok: true, state: 'working' })
-      expect(w.store.getProjectConsent('', '', 'agents')).toBeFalsy()
+      expect(w.store.permissions.getProjectConsent('', '', 'agents')).toBeFalsy()
     })
   })
 
@@ -1503,7 +1503,7 @@ describe('starting another agent in the same project', () => {
         expect(next.listSessions().find((row) => row.id === c.id)?.worktree).toEqual(worktree)
         // The folder is gone, so there is nothing to lose: the session goes to the trash (#715)
         expect(await next.agentSession(s, { sessionId: c.id, action: 'delete' })).toMatchObject({ ok: true, state: 'deleted', note: expect.stringContaining('already gone') })
-        expect(w.store.trashedSession(c.id)).not.toBeNull()
+        expect(w.store.trash.trashedSession(c.id)).not.toBeNull()
         expect(next.listSessions().some((row) => row.id === c.id)).toBe(false)
       } finally {
         await next.disposeAll()
@@ -1553,7 +1553,7 @@ describe('starting another agent in the same project', () => {
       // Right after the stop, though the tool reported its end only after the stop returned
       const deleted = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
       expect(deleted).toMatchObject({ ok: true, state: 'deleted', note: 'Its timers ended with its process: Wakes itself at 12:00 (/loop).' })
-      expect(w.store.trashedSession(c.id)).not.toBeNull()
+      expect(w.store.trash.trashedSession(c.id)).not.toBeNull()
     })
 
     it('work that cannot be stopped on its own: delete does not point to stop, and stop says nothing was stopped (#718)', async () => {
@@ -1638,7 +1638,7 @@ describe('starting another agent in the same project', () => {
         expect(listed()).toContain(real)
         const r = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
         expect(r).toMatchObject({ ok: true, state: 'deleted', branch: 'feat/gone-ahead', note: expect.stringMatching(/already gone.*kept/) })
-        expect(w.store.trashedSession(c.id)).not.toBeNull()
+        expect(w.store.trash.trashedSession(c.id)).not.toBeNull()
         expect(listed()).not.toContain(real)
         expect(branches()).toContain('feat/gone-ahead')
       })
@@ -1670,7 +1670,7 @@ describe('starting another agent in the same project', () => {
         rmSync(dirname(c.worktree!.path), { recursive: true, force: true })
         const r = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
         expect(r).toMatchObject({ ok: false, error: expect.stringContaining('Cannot reach the worktree folder') })
-        expect(w.store.trashedSession(c.id)).toBeNull()
+        expect(w.store.trash.trashedSession(c.id)).toBeNull()
         expect(branches()).toContain('feat/gone-unmounted')
       })
 
@@ -1685,7 +1685,7 @@ describe('starting another agent in the same project', () => {
         } finally {
           chmodSync(parent, 0o755)
         }
-        expect(w.store.trashedSession(c.id)).toBeNull()
+        expect(w.store.trash.trashedSession(c.id)).toBeNull()
         expect(branches()).toContain('feat/gone-eacces')
       })
 
@@ -1694,7 +1694,7 @@ describe('starting another agent in the same project', () => {
         expect(listed()).toContain(real)
         const r = await w.mgr.agentSession(s, { sessionId: c.id, action: 'delete' })
         expect(r).toMatchObject({ ok: true, state: 'deleted', note: expect.stringContaining('already gone') })
-        expect(w.store.trashedSession(c.id)).not.toBeNull()
+        expect(w.store.trash.trashedSession(c.id)).not.toBeNull()
         expect(listed()).not.toContain(real)
         expect(branches()).not.toContain('feat/gone-merged')
       })
@@ -1724,7 +1724,7 @@ describe('starting another agent in the same project', () => {
     it("tells the child what its worktree's setup could not do, in its task", async () => {
       repo()
       allowProject()
-      w.store.setWorktreeSetup(w.caller.id, { command: '', copyFiles: ['.env'] })
+      w.store.projects.setWorktreeSetup(w.caller.id, { command: '', copyFiles: ['.env'] })
       const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
         const s = await session()

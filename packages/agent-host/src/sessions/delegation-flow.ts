@@ -77,7 +77,7 @@ export class DelegationFlow {
   private answerReader(sessionId: string): () => string {
     let after = this.host.meta.get(sessionId)?.lastSeq ?? 0
     return () => {
-      const answer = turnAnswer(this.host.store.loadMessages(sessionId, 50), { afterSeq: after })
+      const answer = turnAnswer(this.host.store.messages.loadMessages(sessionId, 50), { afterSeq: after })
       after = this.host.meta.get(sessionId)?.lastSeq ?? after
       return answer
     }
@@ -156,9 +156,9 @@ export class DelegationFlow {
      */
     const wait = shared ?? new AgentRunWait(() => {}, () => child.name, undefined, own
       ? this.answerReader(child.id)
-      : () => turnAnswer(this.host.store.loadMessages(child.id, 50)))
-    const project = this.host.store.listProjects().find((p) => p.id === child.projectId)
-    const target = { id: child.projectId ?? '', name: project?.name ?? '', path: this.host.store.sessionCwd(child.id) ?? project?.path ?? '' }
+      : () => turnAnswer(this.host.store.messages.loadMessages(child.id, 50)))
+    const project = this.host.store.projects.listProjects().find((p) => p.id === child.projectId)
+    const target = { id: child.projectId ?? '', name: project?.name ?? '', path: this.host.store.sessions.sessionCwd(child.id) ?? project?.path ?? '' }
     if (!shared && subscribe) {
       const readers = this.host.turnObservers.get(child.id) ?? new Set<AgentRunWait>()
       readers.add(wait)
@@ -196,10 +196,10 @@ export class DelegationFlow {
    */
   listAgents(callerId: string): AgentListRow[] {
     return ownAgents(this.host, callerId).map((s) => {
-      const lastActive = lastActiveOf(this.host.store, s.id)
+      const lastActive = lastActiveOf(this.host.store.messages, s.id)
       return {
         sessionId: s.id,
-        name: labelOf(this.host.store, s),
+        name: labelOf(this.host.store.messages, s),
         tool: s.tool,
         state: agentState(this.host, s),
         asleep: !s.live,
@@ -345,7 +345,7 @@ export class DelegationFlow {
               error: `"${child.name}" now has more permissions (${child.permissionPreset}) than this session (${caller.permissionPreset}), so this session cannot give it work. Tell the person.`,
             }
           }
-          const from = { sessionId: callerId, name: labelOf(this.host.store, caller) }
+          const from = { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }
           /*
            * Busy with a turn that is not the caller's (#677): the caller chooses what happens, a note into that turn,
            * a queue, or a fork; without `ifBusy` nothing is sent and the choices come back. Its own delegation's
@@ -421,8 +421,8 @@ export class DelegationFlow {
           if (d) this.host.children.dropDelegation(key)
           const full = this.starts.agentCeilingError(callerId, child.projectId ?? '')
           if (full) return { ok: false, error: full }
-          const project = this.host.store.listProjects().find((p) => p.id === child.projectId)
-          const cwd = this.host.store.sessionCwd(child.id) ?? child.worktree?.path ?? project?.path ?? ''
+          const project = this.host.store.projects.listProjects().find((p) => p.id === child.projectId)
+          const cwd = this.host.store.sessions.sessionCwd(child.id) ?? child.worktree?.path ?? project?.path ?? ''
           const next = this.startDelegation(key, callerId, child.id, { id: child.projectId ?? '', name: project?.name ?? '', path: cwd }, true)
           try {
             await this.host.deliver(child.id, agentFrame(from.name, opts.text ?? ''), undefined, from, false)
@@ -560,7 +560,7 @@ export class DelegationFlow {
     if (deep) return deep.replace(/^This/, 'this').replace(/\.$/, '')
     // A session with no project (the orchestrator's child, #853) has no repository to fork from (#994 review)
     if (!target.projectId) return 'it works outside any project, so there is nothing to fork it from; send to it once its turn ends, or start a new session'
-    const project = this.host.store.listProjects().find((p) => p.id === target.projectId)
+    const project = this.host.store.projects.listProjects().find((p) => p.id === target.projectId)
     if (!project) return 'its project is no longer registered'
     if (project.trusted !== true && !this.host.autoBoundaryOpen(callerId)) return "its project is not trusted (the person can trust it from the project menu)"
     return null
@@ -586,7 +586,7 @@ export class DelegationFlow {
     if (!fork.available) return { ok: false, error: `No fork of "${target.name}": ${fork.why}.` }
     const caller = this.host.meta.get(callerId)!
     const adapter = this.host.adapters.get(target.tool)!
-    const project = this.host.store.listProjects().find((p) => p.id === target.projectId)!
+    const project = this.host.store.projects.listProjects().find((p) => p.id === target.projectId)!
     const PRESETS: PermissionPreset[] = ['safe', 'normal', 'auto']
     const lowest = (...ps: PermissionPreset[]) => PRESETS[Math.min(...ps.map((p) => PRESETS.indexOf(p)))]!
     const preset = lowest(caller.permissionPreset, target.permissionPreset, ...(readOnly ? ['safe' as const] : []))
@@ -667,7 +667,7 @@ export class DelegationFlow {
       // The delegation counts the fork now
       place.release()
       try {
-        await this.host.deliver(child.id, agentFrame(labelOf(this.host.store, caller), text), undefined, { sessionId: callerId, name: labelOf(this.host.store, caller) }, false)
+        await this.host.deliver(child.id, agentFrame(labelOf(this.host.store.messages, caller), text), undefined, { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }, false)
       } catch (e) {
         d.wait.fail(e as Error)
         this.host.children.dropDelegation(key, d)
@@ -688,7 +688,7 @@ export class DelegationFlow {
       sessionId: child.id,
       sessionName: child.name,
       tool: child.tool,
-      answer: clipAnswer(turnAnswer(this.host.store.loadMessages(child.id, 50)), child.name),
+      answer: clipAnswer(turnAnswer(this.host.store.messages.loadMessages(child.id, 50)), child.name),
       sessionState: child.state,
       ...(child.interruption ? { interruption: child.interruption } : {}),
       ...(notice ? { notice } : {}),
@@ -815,7 +815,7 @@ export class DelegationFlow {
       if (r === 'bound') return { kind: 'bound' }
       if (!observing) this.host.children.dropDelegation(key, d)
       if (!r.ok) return { kind: 'failed', error: r.error }
-      return { kind: 'done', answer: r.answer ?? turnAnswer(this.host.store.loadMessages(d.sessionId, 50)) }
+      return { kind: 'done', answer: r.answer ?? turnAnswer(this.host.store.messages.loadMessages(d.sessionId, 50)) }
     } finally {
       card?.done()
       leaving?.done()

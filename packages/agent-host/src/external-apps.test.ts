@@ -42,7 +42,7 @@ beforeEach(() => {
   store = new Store()
   const adapters = new Map<ToolName, AgentAdapter>()
   const mgr = new SessionManager(store, adapters, () => {})
-  rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
+  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot: join(fixture, 'data'), reservedIds: ['control'] })
   rt.refresh()
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
 })
@@ -63,7 +63,7 @@ describe('external app RPC — trust', () => {
     expect((await list()).filter((a) => a.appId === 'notes').map((a) => [a.appId, a.projectId, a.status])).toEqual([['notes', id, 'untrusted']])
 
     await rpc('projects.setTrusted', { projectId: id, trusted: true })
-    expect(store.projectRoots()[0]?.trusted).toBe(true)
+    expect(store.projects.projectRoots()[0]?.trusted).toBe(true)
     // The value the project menu's trust toggle reads — also carried into the list
     expect(((await rpc('projects.list', {})) as { id: string; trusted: boolean }[]).map((p) => [p.id, p.trusted])).toEqual([[id, true]])
     expect((await list()).find((a) => a.appId === 'notes')?.status).toBe('stopped')

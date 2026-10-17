@@ -66,7 +66,7 @@ export class ToolQueries {
     const key = `${m.tool}:${cwd}`
     // Looked up in memory first, then on disk. The list has to survive the host being turned off and
     // back on, so slash commands still work for a sleeping session
-    const cached = this.commandCache.get(key) ?? this.host.store.loadCommands<CommandInfo[]>(m.tool, cwd) ?? undefined
+    const cached = this.commandCache.get(key) ?? this.host.store.settings.loadCommands<CommandInfo[]>(m.tool, cwd) ?? undefined
     if (cached) remember(this.commandCache, key, cached)
 
     const handle = this.host.handles.get(sessionId)
@@ -79,7 +79,7 @@ export class ToolQueries {
           .map((c) => ({ name: c.name, description: c.description ?? '', argumentHint: c.argumentHint ?? '' }))
         if (commands.length > 0) {
           remember(this.commandCache, key, commands)
-          this.host.store.saveCommands(m.tool, cwd, commands)
+          this.host.store.settings.saveCommands(m.tool, cwd, commands)
         }
         return { ready: true, commands }
       } catch {

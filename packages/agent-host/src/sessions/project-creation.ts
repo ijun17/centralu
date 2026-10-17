@@ -43,7 +43,7 @@ export class ProjectCreation {
     const existing = this.projectAt(spelled)
     const at = existing?.path ?? spelled
     const id = existing?.id ?? randomUUID()
-    this.host.store.addProject({ id, path: at, name: basename(at), ...(opts.trusted ? { trusted: true } : {}) })
+    this.host.store.projects.addProject({ id, path: at, name: basename(at), ...(opts.trusted ? { trusted: true } : {}) })
     return this.host.projectInfo(id, at)
   }
 
@@ -56,9 +56,9 @@ export class ProjectCreation {
    * and never one on a share, which may not answer: a registration does not touch every project's folder.
    */
   private projectAt(path: string): { id: string; path: string } | undefined {
-    const exact = this.host.store.findProjectByPath(path)
+    const exact = this.host.store.projects.findProjectByPath(path)
     if (exact) return { id: exact.id, path }
-    const kept = this.host.store.listProjects()
+    const kept = this.host.store.projects.listProjects()
     if (!foldsPathCase()) return kept.find((p) => resolve(p.path) === path)
     const ascii = (p: string) => p.replace(/[A-Z]/g, (c) => c.toLowerCase())
     const real = canonicalPath(path)

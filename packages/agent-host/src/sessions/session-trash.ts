@@ -210,7 +210,7 @@ export class SessionTrash {
      */
     this.host.record.closeStream(sessionId)
     let project: { name: string; path: string } | undefined
-    if (m.projectId) project = this.host.store.listProjects().find((p) => p.id === m.projectId)
+    if (m.projectId) project = this.host.store.projects.listProjects().find((p) => p.id === m.projectId)
     this.host.running.delete(sessionId)
     this.host.restartPolicy.restartAfterTurn.delete(sessionId)
     this.host.restartPolicy.trustRestartNotice.delete(sessionId)
@@ -232,7 +232,7 @@ export class SessionTrash {
     this.host.stopWatchingReconnect(sessionId)
     this.host.quitNotices = this.host.quitNotices.filter((n) => n.sessionId !== sessionId && n.requester !== sessionId)
     this.host.meta.delete(sessionId)
-    await this.host.store.trashSession(sessionId, {
+    await this.host.store.trash.trashSession(sessionId, {
       projectId: m.projectId,
       projectName: project?.name ?? null,
       projectPath: project?.path ?? null,
@@ -264,9 +264,9 @@ export class SessionTrash {
 
   /** The trash as Settings lists it (#204), with the total it takes on this machine */
   async listTrash(): Promise<{ sessions: TrashedSession[]; bytes: number }> {
-    const projects = new Map(this.host.store.listProjects().map((p) => [p.id, p]))
+    const projects = new Map(this.host.store.projects.listProjects().map((p) => [p.id, p]))
     const sessions = await Promise.all(
-      this.host.store.listTrash().map(async (r): Promise<TrashedSession> => {
+      this.host.store.trash.listTrash().map(async (r): Promise<TrashedSession> => {
         const { record } = r
         const live = record.projectId ? projects.get(record.projectId) : undefined
         const files =
@@ -299,7 +299,7 @@ export class SessionTrash {
 
   /** A trashed conversation, read-only (#204). Live sessions are read through `loadMessages`, not here */
   async readTrashed(sessionId: string, limit: number, beforeSeq?: number): Promise<StoredMessage[]> {
-    if (!this.host.store.isTrashed(sessionId)) {
+    if (!this.host.store.trash.isTrashed(sessionId)) {
       throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
     }
     return this.host.loadMessages(sessionId, limit, beforeSeq)
@@ -321,20 +321,20 @@ export class SessionTrash {
   async restoreSession(sessionId: string): Promise<{ session: SessionInfo; project: ProjectInfo | null }> {
     return this.trashOp(sessionId, async () => {
       await this.host.recoveryRepair
-      const t = this.host.store.trashedSession(sessionId)
+      const t = this.host.store.trash.trashedSession(sessionId)
       if (!t) throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
       const { record } = t
       let projectId: string | null = null
       let registered: ProjectInfo | null = null
       if (record.projectId) {
-        const projects = this.host.store.listProjects()
+        const projects = this.host.store.projects.listProjects()
         const home =
           projects.find((p) => p.id === record.projectId) ??
           (record.projectPath ? projects.find((p) => p.path === record.projectPath) : undefined)
         if (home) {
           projectId = home.id
         } else if (record.projectPath && existsSync(record.projectPath) && statSync(record.projectPath).isDirectory()) {
-          this.host.store.addProject({
+          this.host.store.projects.addProject({
             id: record.projectId,
             path: record.projectPath,
             name: record.projectName ?? basename(record.projectPath),
@@ -344,20 +344,20 @@ export class SessionTrash {
         } else {
           throw rpcError(`Its project was deleted and its folder is gone${record.projectPath ? ` (${record.projectPath})` : ''} — put the folder back, then restore`)
         }
-      } else if (t.session.kind === 'orchestrator' && this.host.store.orchestratorId()) {
+      } else if (t.session.kind === 'orchestrator' && this.host.store.sessions.orchestratorId()) {
         // Two central orchestrators would answer the same questions; the app has one (FR-11)
         throw rpcError('Another orchestrator is in place — the app runs one at a time')
       }
       let recovered: { branch: string; notice: string } | undefined
       if (record.recovery && t.session.worktree && projectId) {
-        const repo = this.host.store.listProjects().find((p) => p.id === projectId)!.path
+        const repo = this.host.store.projects.listProjects().find((p) => p.id === projectId)!.path
         recovered = await restoreWorktreeRecovery(sessionId, repo, t.session.worktree.path, t.session.worktree.branch, record.recovery, this.host.gitTrust(projectId))
       }
-      const back = await this.host.store.restoreSession(sessionId, projectId)
+      const back = await this.host.store.trash.restoreSession(sessionId, projectId)
       if (!back) throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
       const fixed = isInTurn(back.state) ? { ...back, state: 'idle' as const, waitingSince: null } : back
       if (recovered && fixed.worktree) fixed.worktree = { ...fixed.worktree, branch: recovered.branch }
-      if (fixed !== back || recovered) this.host.store.upsertSession(fixed)
+      if (fixed !== back || recovered) this.host.store.sessions.upsertSession(fixed)
       this.host.meta.set(sessionId, fixed)
       const session = { ...this.host.meta.get(sessionId)!, live: false }
       this.host.emit({ type: 'session_created', sessionId, session })
@@ -381,10 +381,10 @@ export class SessionTrash {
   async purgeSession(sessionId: string): Promise<void> {
     return this.trashOp(sessionId, async () => {
       await this.host.recoveryRepair
-      const t = this.host.store.trashedSession(sessionId)
+      const t = this.host.store.trash.trashedSession(sessionId)
       if (!t) throw rpcError(`Not in the trash: ${sessionId}`, 'session_not_found')
       const { session: s, record } = t
-      const cwd = this.host.store.sessionCwd(sessionId) ?? s.worktree?.path ?? record.projectPath
+      const cwd = this.host.store.sessions.sessionCwd(sessionId) ?? s.worktree?.path ?? record.projectPath
       const externalId = s.externalId ?? s.importedFrom
       if (record.removeExternal && externalId) {
         const held = [...this.host.meta.values()].some(
@@ -428,9 +428,9 @@ export class SessionTrash {
        */
       const recoveryRemoval = await stageWorktreeRecoveryRemoval(sessionId)
       try {
-        await this.host.store.purgeSession(sessionId)
+        await this.host.store.trash.purgeSession(sessionId)
         this.host.restartPolicy.forgetBackground(sessionId)
-        this.host.store.deleteAppSetting(codeIntelligenceKey(sessionId))
+        this.host.store.settings.deleteAppSetting(codeIntelligenceKey(sessionId))
       } catch (e) {
         // Not swallowed: the folder left aside carries the session id, and the next start puts it back (#647)
         await recoveryRemoval.abort().catch((cause: Error) => console.error(`[trash] recovery files of ${sessionId.slice(0, 8)} could not be put back after a failed purge and stay aside until the next start: ${cause.message}`))
@@ -456,7 +456,7 @@ export class SessionTrash {
   async emptyTrash(): Promise<{ purged: number; failed: { sessionId: string; name: string; error: string }[] }> {
     let purged = 0
     const failed: { sessionId: string; name: string; error: string }[] = []
-    for (const r of this.host.store.listTrash()) {
+    for (const r of this.host.store.trash.listTrash()) {
       try {
         await this.purgeSession(r.id)
         purged++

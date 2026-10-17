@@ -205,7 +205,7 @@ describe('tool definitions after a host switch (#581)', () => {
     const project = await addProject()
     const session = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
     const old = adapter.handleOf(session.id)!
-    store.setAppSetting(`tool_prefix:${session.id}`, 'old-prefix')
+    store.settings.setAppSetting(`tool_prefix:${session.id}`, 'old-prefix')
     await mgr.refreshToolDefinitions()
     expect(old.disposed).toBe(true)
     expect(adapter.handleOf(session.id)).not.toBe(old)
@@ -227,7 +227,7 @@ describe('tool definitions after a host switch (#581)', () => {
     await rpc('agents.send', { sessionId: session.id, text: 'work' })
     const restart = vi.spyOn(mgr, 'restartSession')
     old.emitApproval('held-card')
-    store.setAppSetting(`tool_prefix:${session.id}`, 'old-prefix')
+    store.settings.setAppSetting(`tool_prefix:${session.id}`, 'old-prefix')
     await mgr.refreshToolDefinitions()
     expect(old.disposed).toBe(false)
     await rpc('agents.respondApproval', { sessionId: session.id, requestId: 'held-card', decision: 'allow' })
@@ -251,7 +251,7 @@ describe('adapter launch settings after a host switch (#589)', () => {
 
     expect(old.disposed).toBe(true)
     expect(adapter.handleOf(session.id)).not.toBe(old)
-    expect(store.appSetting(`launch_settings:${session.id}`)).toContain('v2')
+    expect(store.settings.appSetting(`launch_settings:${session.id}`)).toContain('v2')
   })
 
   it.each(['idle', 'working'] as const)('restarts a kept %s process with unrecorded launch settings once and reports its own cause', async (state) => {
@@ -260,8 +260,8 @@ describe('adapter launch settings after a host switch (#589)', () => {
     const old = adapter.handleOf(session.id)!
     // A request before the handoff consumes the newly-created session's cold-start note.
     old.emitEvent({ type: 'usage_update', sessionId: session.id, tokens: { inputTokens: 5, outputTokens: 1, cacheReadTokens: 30_000, cacheCreationTokens: 0 }, request: { inputTokens: 5, cacheReadTokens: 30_000, cacheCreationTokens: 0 } })
-    store.deleteAppSetting(`launch_settings:${session.id}`)
-    store.deleteAppSetting(`tool_prefix:${session.id}`)
+    store.settings.deleteAppSetting(`launch_settings:${session.id}`)
+    store.settings.deleteAppSetting(`tool_prefix:${session.id}`)
     if (state === 'working') await rpc('agents.send', { sessionId: session.id, text: 'work' })
     const restart = vi.spyOn(mgr, 'restartSession')
     const log = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -275,7 +275,7 @@ describe('adapter launch settings after a host switch (#589)', () => {
     expect(old.disposed).toBe(true)
     expect(restart).toHaveBeenCalledWith(session.id, 'launch_settings')
     expect(log).toHaveBeenCalledWith(expect.stringContaining('launch settings changed or previously unrecorded'))
-    expect(store.appSetting(`launch_settings:${session.id}`)).toContain('v1')
+    expect(store.settings.appSetting(`launch_settings:${session.id}`)).toContain('v1')
     const current = adapter.handleOf(session.id)!
     current.emitEvent({ type: 'usage_update', sessionId: session.id, tokens: { inputTokens: 5, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 30_000 }, request: { inputTokens: 5, cacheReadTokens: 0, cacheCreationTokens: 30_000 } })
     const usage = await rpc('agents.usage', { tool: 'claude' }) as { cache: { windows: { rebuildCauses: Record<string, number> }[] } }
@@ -323,7 +323,7 @@ describe('registry defaults', () => {
     const project = (await emptyRpc('projects.add', { path: tmpdir() })) as { id: string; path: string }
 
     // A stale saved choice cannot turn an empty registry into a usable agent.
-    store.setProjectDefaultTool(project.id, 'claude')
+    store.projects.setProjectDefaultTool(project.id, 'claude')
     expect(await emptyRpc('projects.list', {})).toEqual([expect.objectContaining({ id: project.id, defaultTool: null })])
     expect(await emptyRpc('agents.detect', {})).toEqual([])
     await expect(emptyRpc('orchestrator.get', {})).rejects.toMatchObject({
@@ -417,7 +417,7 @@ describe('ordinary session update consent (#581)', () => {
     expect(apply).toHaveBeenCalledTimes(1)
     expect(setAutoApply).not.toHaveBeenCalled()
     expect(updates.current().autoApply).toBe(false)
-    expect(store.listProjectConsents()).toEqual([])
+    expect(store.permissions.listProjectConsents()).toEqual([])
 
     const other = mgr.runOrchestratorTool(second.id, 'update_centralu', { action: 'check' })
     await answer(second.id, 'deny')
@@ -485,7 +485,7 @@ describe('applying an installed update for an agent (#665)', () => {
     expect((await always).isError).toBeUndefined()
     expect((await mgr.runOrchestratorTool(session.id, 'update_centralu', { action: 'apply' })).isError).toBeUndefined()
     expect(card(session.id)).toBeUndefined()
-    expect(store.listProjectConsents()).toEqual([])
+    expect(store.permissions.listProjectConsents()).toEqual([])
     expect(w.relaunches).toHaveLength(3)
     const other = await mgr.createSession({ projectId: project.id, cwd: project.path, tool: 'claude', permissionPreset: 'normal' })
 
@@ -732,7 +732,7 @@ describe('session lifecycle', () => {
     const p = await addProject()
     const live = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
     await rpc('agents.send', { sessionId: live.id, text: 'hi' })
-    expect((store.listSessions().find((s) => s.id === live.id)!).state).toBe('working')
+    expect((store.sessions.listSessions().find((s) => s.id === live.id)!).state).toBe('working')
 
     // Restart the host — create a new manager with the same store (there is not a single process).
     const restarted = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e))
@@ -743,7 +743,7 @@ describe('session lifecycle', () => {
 
     expect(after.find((s) => s.id === live.id)!.state).toBe('idle')
     // The DB must be corrected too, not just the screen — it must not come back to life on the next start.
-    expect(store.listSessions().find((s) => s.id === live.id)!.state).toBe('idle')
+    expect(store.sessions.listSessions().find((s) => s.id === live.id)!.state).toBe('idle')
   })
 
   /*
@@ -770,7 +770,7 @@ describe('session lifecycle', () => {
     // A session that has never answered is still unknown — this is where the distinction between "—" and
     // "0%" begins.
     const quiet = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex' })) as { id: string }
-    expect(store.listSessions().find((x) => x.id === quiet.id)!.context).toBeNull()
+    expect(store.sessions.listSessions().find((x) => x.id === quiet.id)!.context).toBeNull()
   })
 
   /*
@@ -783,13 +783,13 @@ describe('session lifecycle', () => {
   it('when /clear changes the conversation id, the next event carries it through to the DB', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as { id: string }
-    expect(store.listSessions().find((x) => x.id === s.id)!.externalId).toBe('ext-1')
+    expect(store.sessions.listSessions().find((x) => x.id === s.id)!.externalId).toBe('ext-1')
 
     const h = adapter.handleOf(s.id)!
     h.externalId = 'ext-after-clear' // The state the adapter updates to on the new init
     h.finishTurn() // The event flows as the /clear turn finishes
 
-    expect(store.listSessions().find((x) => x.id === s.id)!.externalId).toBe('ext-after-clear')
+    expect(store.sessions.listSessions().find((x) => x.id === s.id)!.externalId).toBe('ext-after-clear')
   })
 
   it('create → send → event propagation', async () => {
@@ -2633,9 +2633,9 @@ describe("the orchestrator's tools see only this app's sessions", () => {
   it('an orchestrator that switched tools inherits the past conversation', async () => {
     const orc = await mgr.orchestrator()
     await mgr.send(orc.id, 'Look at the Alpha project status')
-    mgr['store'].appendMessages([
+    mgr['store'].messages.appendMessages([
       {
-        sessionId: orc.id, seq: mgr['store'].nextSeq(orc.id), role: 'assistant', kind: 'text',
+        sessionId: orc.id, seq: mgr['store'].messages.nextSeq(orc.id), role: 'assistant', kind: 'text',
         payload: { text: 'Alpha has two tests failing.' }, ts: Date.now(),
       },
     ])
@@ -2653,13 +2653,13 @@ describe("the orchestrator's tools see only this app's sessions", () => {
 
   it("an old row that has a source is not carried into the orchestrator's handoff memory", async () => {
     const orc = await mgr.orchestrator()
-    mgr['store'].appendMessages([
+    mgr['store'].messages.appendMessages([
       {
-        sessionId: orc.id, seq: mgr['store'].nextSeq(orc.id), role: 'user', kind: 'text',
+        sessionId: orc.id, seq: mgr['store'].messages.nextSeq(orc.id), role: 'user', kind: 'text',
         payload: { text: 'HOSTILE_LEGACY_FROM_SENTINEL', from: { sessionId: 'worker-1', name: 'worker' } }, ts: Date.now(),
       },
       {
-        sessionId: orc.id, seq: mgr['store'].nextSeq(orc.id) + 1, role: 'user', kind: 'text',
+        sessionId: orc.id, seq: mgr['store'].messages.nextSeq(orc.id) + 1, role: 'user', kind: 'text',
         payload: { text: 'HUMAN_MEMORY_CONTROL' }, ts: Date.now(),
       },
     ])
@@ -2775,7 +2775,7 @@ describe("an ordinary session's reader set (#320)", () => {
     // From an untrusted project it reads its own project only, as before (#984, the #382 rule)
     expect((await a1.tools.listSessions()).map((s) => s.sessionId)).toEqual([a2.id])
     expect((await a1.tools.recall('zanzibar')).hits).toEqual([])
-    store.setProjectTrusted(shop.id, true)
+    store.projects.setProjectTrusted(shop.id, true)
     const listed = (await a1.tools.listSessions()).map((s) => s.sessionId)
     expect(listed).toEqual([a2.id, b.id])
     expect(listed).not.toContain(orc.id)
@@ -2931,7 +2931,7 @@ describe('reordering within a project does not disturb the global order', () => 
     // Only p1's slots (1st and 3rd) change; p2 stays the same.
     expect(after).toEqual([a2, b1, a1, b2])
     // The storage matches the same order — it must not fall out of sync with the screen after a restart.
-    expect(store.listSessions().map((s) => s.id)).toEqual([a2, b1, a1, b2])
+    expect(store.sessions.listSessions().map((s) => s.id)).toEqual([a2, b1, a1, b2])
   })
 })
 
@@ -3350,7 +3350,7 @@ describe('worktree sessions', () => {
     restarted.prLookup = async () => null
     await restarted.resumeSession(s.id)
 
-    const texts = store.loadMessages(s.id, 200).map((r) => (r.payload as { text?: string }).text)
+    const texts = store.messages.loadMessages(s.id, 200).map((r) => (r.payload as { text?: string }).text)
     expect(texts).toContain('something said in the worktree terminal')
     expect(a.readFrom).toEqual([s.worktree!.path])
   })
@@ -3420,7 +3420,7 @@ describe('worktree sessions', () => {
   it('leaves no worktree or branch behind when its setup throws after the checkout (#774)', async () => {
     const branches = () =>
       execFileSync('git', ['branch', '--format=%(refname:short)'], { cwd: repo }).toString().split('\n').filter(Boolean)
-    const setup = vi.spyOn(store, 'worktreeSetup').mockImplementation(() => {
+    const setup = vi.spyOn(store.projects, 'worktreeSetup').mockImplementation(() => {
       throw new Error('the settings could not be read')
     })
     try {
@@ -3454,7 +3454,7 @@ describe('worktree sessions', () => {
 
   // #841 item 3: setup failures were in host.log only, so the person and the agent met them as a failing command later
   it('what the setup could not do is said at the top of the new session', async () => {
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['.env'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['.env'] })
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     let s: SessionInfo
     try {
@@ -3465,7 +3465,7 @@ describe('worktree sessions', () => {
     const notice = events.find((e) => e.type === 'notice' && e.sessionId === s.id && e.label === 'worktree setup')
     expect(notice && 'text' in notice ? notice.text : '').toContain('copy skipped (missing): .env')
     // A setup that did everything says nothing
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: [] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: [] })
     const clean = await create(true)
     expect(events.some((e) => e.type === 'notice' && e.sessionId === clean.id && e.label === 'worktree setup')).toBe(false)
   })
@@ -3486,7 +3486,7 @@ describe('worktree sessions', () => {
     const locked = process.platform === 'win32' ? openSync(join(nm, 'zzz', 'secret'), fsConstants.O_RDONLY | 0x10000000) : null
     if (locked === null) chmodSync(join(nm, 'zzz', 'secret'), 0o000)
     writeFileSync(join(repo, '.gitignore'), 'node_modules\n')
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['node_modules'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['node_modules'] })
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     try {
@@ -3584,7 +3584,7 @@ describe('worktree sessions', () => {
   it('provisioning (#69): files get copied, and setup runs inside the worktree with deterministic variables', async () => {
     // A gitignored file — the kind that git worktree add never brings along.
     writeFileSync(join(repo, '.env.local'), 'SECRET=1\n')
-    store.setWorktreeSetup(project.id, {
+    store.projects.setWorktreeSetup(project.id, {
       // The setup command runs in the platform's shell: cmd.exe on Windows, where a variable is %NAME% (agent-host.md)
       command:
         process.platform === 'win32'
@@ -3604,7 +3604,7 @@ describe('worktree sessions', () => {
   })
 
   it('a provisioning failure does not block session creation — a half-set workbench beats nothing at all', async () => {
-    store.setWorktreeSetup(project.id, { command: 'exit 7', copyFiles: ['does-not-exist.env'] })
+    store.projects.setWorktreeSetup(project.id, { command: 'exit 7', copyFiles: ['does-not-exist.env'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true,
@@ -3617,7 +3617,7 @@ describe('worktree sessions', () => {
   it('a path escaping the copy list is refused — only paths relative to the project are meant', async () => {
     const outside = join(root, 'outside-secret.txt')
     writeFileSync(outside, 'leak\n')
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['../outside-secret.txt'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['../outside-secret.txt'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true,
@@ -3637,7 +3637,7 @@ describe('worktree sessions', () => {
     const secret = join(root, 'id_rsa')
     writeFileSync(secret, 'ssh-private-key\n')
     symlinkSync(secret, join(repo, '.env'))
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['.env'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['.env'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/planted',
@@ -3655,7 +3655,7 @@ describe('worktree sessions', () => {
     mkdirSync(join(repo, 'vendor', 'deep'), { recursive: true })
     writeFileSync(join(repo, 'vendor', 'deep', 'blob.bin'), 'payload\n')
     symlinkSync(outside, join(repo, 'vendor', 'leak'))
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['vendor'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['vendor'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/planted-deep',
@@ -3671,7 +3671,7 @@ describe('worktree sessions', () => {
     mkdirSync(join(repo, 'secrets'))
     writeFileSync(join(repo, 'secrets', 'real.env'), 'SECRET=1\n')
     symlinkSync(join(repo, 'secrets', 'real.env'), join(repo, '.env'))
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['.env'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['.env'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/deref',
@@ -3690,7 +3690,7 @@ describe('worktree sessions', () => {
     mkdirSync(inner, { recursive: true })
     writeFileSync(join(inner, 'index.js'), 'module.exports = 1\n')
     symlinkSync(join('.pnpm', 'pkg@1.0.0', 'node_modules', 'pkg'), join(repo, 'node_modules', 'pkg'))
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['node_modules'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['node_modules'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/pnpm',
@@ -3714,7 +3714,7 @@ describe('worktree sessions', () => {
     rmSync(join(repo, 'out'))
     mkdirSync(join(repo, 'out'))
     writeFileSync(join(repo, 'out', 'app.env'), 'SECRET=1\n')
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['out/app.env'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['out/app.env'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/dst-link',
@@ -3869,7 +3869,7 @@ describe('worktree sessions', () => {
     }
     const remove = (s: SessionInfo, parent: string) => wtMgr.runOrchestratorTool(parent, 'agent_session', { sessionId: s.id, action: 'delete' })
     const saved = (s: SessionInfo) => {
-      const recovery = store.trashedSession(s.id)!.record.recovery!
+      const recovery = store.trash.trashedSession(s.id)!.record.recovery!
       return { recovery, dir: join(worktreeRecoveryDir(s.id), recovery.snapshot) }
     }
 
@@ -3964,7 +3964,7 @@ describe('worktree sessions', () => {
       g(s.worktree!.path, ['add', '.'])
       g(s.worktree!.path, ['commit', '-qm', 'work'])
       wtMgr.prLookup = async () => ({ number: 9, state: 'merged', url: 'https://github.com/x/y/pull/9', headOid: 'earlier-tip' })
-      store.setWorktreeTrunk(project.id, 'missing-trunk')
+      store.projects.setWorktreeTrunk(project.id, 'missing-trunk')
       expect((await remove(s, managerId)).isError).not.toBe(true)
       expect(saved(s).recovery.commits).toBe(2)
       expect(existsSync(join(saved(s).dir, '0.bundle'))).toBe(true)
@@ -4002,7 +4002,7 @@ describe('worktree sessions', () => {
       vi.spyOn(adapter.handleOf(s.id)!, 'dispose').mockRejectedValueOnce(new Error('process did not stop'))
       expect((await remove(s, managerId)).text).toContain('process did not stop')
       expect(existsSync(s.worktree!.path)).toBe(true)
-      expect(store.isTrashed(s.id)).toBe(false)
+      expect(store.trash.isTrashed(s.id)).toBe(false)
     })
 
     it('blocks concurrent input until disposal and cleanup finish', async () => {
@@ -4038,7 +4038,7 @@ describe('worktree sessions', () => {
       expect((await remove(s, managerId)).isError).not.toBe(true)
       g(repo, ['branch', 'feat/occupied', 'HEAD'])
       const before = g(repo, ['rev-parse', 'feat/occupied']).trim()
-      const restore = vi.spyOn(store, 'restoreSession').mockRejectedValueOnce(new Error('restore interrupted'))
+      const restore = vi.spyOn(store.trash, 'restoreSession').mockRejectedValueOnce(new Error('restore interrupted'))
       await expect(wtMgr.restoreSession(s.id)).rejects.toThrow('restore interrupted')
       const back = await wtMgr.restoreSession(s.id)
       restore.mockRestore()
@@ -4058,7 +4058,7 @@ describe('worktree sessions', () => {
       const result = await wtMgr.emptyTrash()
       expect(result.purged).toBe(0)
       expect(result.failed[0]!.error).toContain('cannot remove recovery files')
-      expect(store.isTrashed(s.id)).toBe(true)
+      expect(store.trash.isTrashed(s.id)).toBe(true)
       expect(existsSync(saved(s).dir)).toBe(true)
       cleanup.mockRestore()
       expect(await wtMgr.emptyTrash()).toEqual({ purged: 1, failed: [] })
@@ -4069,10 +4069,10 @@ describe('worktree sessions', () => {
       writeFileSync(join(s.worktree!.path, 'wip'), 'local\n')
       expect((await remove(s, managerId)).isError).not.toBe(true)
       const { dir } = saved(s)
-      const purge = vi.spyOn(store, 'purgeSession').mockRejectedValueOnce(new Error('database locked'))
+      const purge = vi.spyOn(store.trash, 'purgeSession').mockRejectedValueOnce(new Error('database locked'))
       await expect(wtMgr.purgeSession(s.id)).rejects.toThrow('database locked')
       purge.mockRestore()
-      expect(store.isTrashed(s.id)).toBe(true)
+      expect(store.trash.isTrashed(s.id)).toBe(true)
       expect(existsSync(dir)).toBe(true)
       expect((await wtMgr.listTrash()).sessions.find((t) => t.id === s.id)!.bytes).toBeGreaterThan(100)
       const back = await wtMgr.restoreSession(s.id)
@@ -4090,13 +4090,13 @@ describe('worktree sessions', () => {
       // A session in a sibling folder whose name merely starts the same way is not inside
       const sibling = await wtMgr.createSession({ projectId: project.id, cwd: repo, tool: 'claude', permissionPreset: 'normal' })
       wtMgr.rename(sibling.id, 'sibling')
-      store.setSessionCwd(sibling.id, `${s.worktree!.path}-old`)
+      store.sessions.setSessionCwd(sibling.id, `${s.worktree!.path}-old`)
       const r = await remove(s, managerId)
       expect(r.isError).toBe(true)
       expect(r.text).toContain(`"helper" is still in the worktree of "${s.name}"`)
       expect(r.text).not.toContain('sibling')
       expect(existsSync(s.worktree!.path)).toBe(true)
-      expect(store.isTrashed(s.id)).toBe(false)
+      expect(store.trash.isTrashed(s.id)).toBe(false)
       expect(wtMgr.listSessions().find((x) => x.id === s.id)!.live).toBe(true)
       await wtMgr.trashSession(helper.id)
       expect((await remove(s, managerId)).isError).not.toBe(true)
@@ -4115,7 +4115,7 @@ describe('worktree sessions', () => {
         expect(r.isError).toBe(true)
         expect(r.text).toContain('"helper" is still in the worktree')
         expect(existsSync(s.worktree!.path)).toBe(true)
-        expect(store.isTrashed(s.id)).toBe(false)
+        expect(store.trash.isTrashed(s.id)).toBe(false)
         await next.trashSession(helper.id)
         expect((await next.runOrchestratorTool(managerId, 'agent_session', { sessionId: s.id, action: 'delete' })).isError).not.toBe(true)
         expect(existsSync(s.worktree!.path)).toBe(false)
@@ -4149,7 +4149,7 @@ describe('worktree sessions', () => {
       expect(r.isError).toBe(true)
       expect(r.text).toContain('"helper" is still in the worktree')
       expect(existsSync(s.worktree!.path)).toBe(true)
-      expect(store.isTrashed(s.id)).toBe(false)
+      expect(store.trash.isTrashed(s.id)).toBe(false)
       expect(readFileSync(join(s.worktree!.path, 'wip'), 'utf8')).toBe('local\n')
     })
 
@@ -4178,7 +4178,7 @@ describe('worktree sessions', () => {
       const r = await remove(s, managerId)
       expect(r.isError).not.toBe(true)
       expect(r.text).toContain('"helper" is still in the worktree')
-      expect(store.isTrashed(s.id)).toBe(true)
+      expect(store.trash.isTrashed(s.id)).toBe(true)
       expect(existsSync(s.worktree!.path)).toBe(true)
       expect(g(repo, ['rev-parse', '--verify', 'refs/heads/feat/occupant-after-trash']).trim()).toBeTruthy()
     })
@@ -4220,7 +4220,7 @@ describe('worktree sessions', () => {
       // A crash between the move aside and the database step, and one after it
       renameSync(worktreeRecoveryDir(kept.s.id), `${worktreeRecoveryDir(kept.s.id)}.purging-1`)
       renameSync(worktreeRecoveryDir(gone.s.id), `${worktreeRecoveryDir(gone.s.id)}.purging-2`)
-      await store.purgeSession(gone.s.id)
+      await store.trash.purgeSession(gone.s.id)
       await wtMgr.detachAll()
       const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
       try {
@@ -4244,7 +4244,7 @@ describe('worktree sessions', () => {
         const removal = await stage(id)
         return { ...removal, abort: async () => { throw new Error('folder locked') } }
       })
-      vi.spyOn(store, 'purgeSession').mockRejectedValueOnce(new Error('database locked'))
+      vi.spyOn(store.trash, 'purgeSession').mockRejectedValueOnce(new Error('database locked'))
       const log = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
         await expect(wtMgr.purgeSession(s.id)).rejects.toThrow('database locked')
@@ -4252,7 +4252,7 @@ describe('worktree sessions', () => {
       } finally {
         log.mockRestore()
       }
-      expect(store.isTrashed(s.id)).toBe(true)
+      expect(store.trash.isTrashed(s.id)).toBe(true)
       expect(existsSync(worktreeRecoveryDir(s.id))).toBe(false)
       await wtMgr.detachAll()
       const next = new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), (e) => events.push(e), undefined, wtRoot)
@@ -4278,8 +4278,8 @@ describe('worktree sessions', () => {
       const [r] = await Promise.all([agent, sidebar])
       expect(r.isError).toBe(true)
       expect(r.text).toContain('already being deleted')
-      expect(store.isTrashed(s.id)).toBe(true)
-      expect(store.trashedSession(s.id)!.record.recovery).toBeUndefined()
+      expect(store.trash.isTrashed(s.id)).toBe(true)
+      expect(store.trash.trashedSession(s.id)!.record.recovery).toBeUndefined()
       expect(existsSync(s.worktree!.path)).toBe(true)
       expect(readFileSync(join(s.worktree!.path, 'wip'), 'utf8')).toBe('local\n')
       expect(g(repo, ['rev-parse', '--verify', 'refs/heads/feat/sidebar-race']).trim()).toBeTruthy()
@@ -4294,7 +4294,7 @@ describe('worktree sessions', () => {
       expect((await remove(s, managerId)).text).toContain('disk full')
       expect(readFileSync(join(s.worktree!.path, 'wip'), 'utf8')).toBe('local\n')
       expect(g(repo, ['rev-parse', '--verify', 'feat/capture-error']).trim()).toBeTruthy()
-      expect(store.isTrashed(s.id)).toBe(false)
+      expect(store.trash.isTrashed(s.id)).toBe(false)
       expect(wtMgr.listSessions().find((x) => x.id === s.id)!.live).toBe(false)
       snapshot.mockRestore()
     })
@@ -4347,7 +4347,7 @@ describe('worktree sessions', () => {
           expect(git.mock.calls.some(([, args]) => args[0] === 'add')).toBe(false)
           expect(existsSync(path)).toBe(true)
           expect(g(s.worktree!.path, ['ls-files', '--stage'])).toBe(index)
-          expect(store.isTrashed(s.id)).toBe(false)
+          expect(store.trash.isTrashed(s.id)).toBe(false)
         } else {
           expect(r.isError).not.toBe(true)
           expect(git.mock.calls.some(([, args]) => args[0] === 'add')).toBe(true)
@@ -4426,7 +4426,7 @@ describe('worktree sessions', () => {
         expect(r.text).toContain('Warning:')
         expect(r.text).toContain(failure === 'worktree' ? s.worktree!.path : s.worktree!.branch)
         expect(r.text).not.toContain('its worktree and branch')
-        expect(store.isTrashed(s.id)).toBe(true)
+        expect(store.trash.isTrashed(s.id)).toBe(true)
         expect(existsSync(s.worktree!.path)).toBe(failure === 'worktree')
         expect(g(repo, ['branch', '--list', '--format=%(refname:short)', s.worktree!.branch]).trim()).toBe(s.worktree!.branch)
         expect(readFileSync(join(saved(s).dir, '0.patch'), 'utf8')).toContain('saved')
@@ -4489,7 +4489,7 @@ describe('worktree sessions', () => {
   // The worktree manager's dialog was where the trunk was chosen; it is chosen on its own now (#561 part 3)
   it('sets the trunk on its own, and refuses the retired manager seat', async () => {
     await wtRpc('worktrees.setTrunk', { projectId: project.id, baseBranch: 'main' })
-    expect(store.worktreeTrunk(project.id)).toBe('main')
+    expect(store.projects.worktreeTrunk(project.id)).toBe('main')
     await expect(wtRpc('worktrees.setTrunk', { projectId: project.id, baseBranch: 'no..dots' })).rejects.toThrow(/Not a branch name/)
     await expect(wtRpc('worktrees.createManager', { projectId: project.id, baseBranch: 'main' })).rejects.toThrow(/worktree manager is gone/)
     expect(wtMgr.listSessions()).toEqual([])
@@ -4546,7 +4546,7 @@ describe('worktree sessions', () => {
     // Checks that the whole directory is copied (the clone path must do what the old cpSync did).
     mkdirSync(join(repo, 'vendor', 'deep'), { recursive: true })
     writeFileSync(join(repo, 'vendor', 'deep', 'blob.bin'), 'payload\n')
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['vendor'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['vendor'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/cloned',
@@ -4609,12 +4609,12 @@ describe('worktree sessions', () => {
     expect(r.purged).toBe(0)
     expect(r.failed).toEqual([{ sessionId: s.id, name: expect.any(String), error: expect.stringContaining(`Could not remove the worktree at ${path}`) }])
     expect(existsSync(path)).toBe(true)
-    expect(store.trashedSession(s.id)).not.toBeNull()
+    expect(store.trash.trashedSession(s.id)).not.toBeNull()
 
     execFileSync('git', ['worktree', 'unlock', path], { cwd: repo })
     await wtRpc('trash.purge', { sessionId: s.id })
     expect(existsSync(path)).toBe(false)
-    expect(store.trashedSession(s.id)).toBeNull()
+    expect(store.trash.trashedSession(s.id)).toBeNull()
   })
 
   it('a worktree whose project folder moved says to delete it by hand, and goes once that is done', async () => {
@@ -4627,7 +4627,7 @@ describe('worktree sessions', () => {
       await expect(wtRpc('trash.purge', { sessionId: s.id })).rejects.toThrow(`The project folder ${repo} is not there any more (moved or deleted), so git cannot remove its worktree at ${path}. It stays in the trash: delete that folder yourself, then delete this entry again.`)
       rmSync(path, { recursive: true, force: true })
       await wtRpc('trash.purge', { sessionId: s.id })
-      expect(store.trashedSession(s.id)).toBeNull()
+      expect(store.trash.trashedSession(s.id)).toBeNull()
     } finally {
       renameSync(moved, repo)
     }
@@ -4638,7 +4638,7 @@ describe('worktree sessions', () => {
     await wtRpc('agents.deleteSession', { sessionId: s.id, deleteWorktree: true })
     rmSync(s.worktree!.path, { recursive: true, force: true })
     await wtRpc('trash.purge', { sessionId: s.id })
-    expect(store.trashedSession(s.id)).toBeNull()
+    expect(store.trash.trashedSession(s.id)).toBeNull()
   })
 
   it('a restored worktree session finds its worktree, and the uncommitted work in it, where it was', async () => {
@@ -4717,18 +4717,18 @@ describe('resuming returns to where it was created', () => {
     const p = (await rpc('projects.add', { path: tmpdir() })) as { id: string; path: string }
     // Exactly how every pre-v14 row was written: upsertSession does not carry a cwd, so the
     // column is NULL — the same state the migration leaves the orchestrator in.
-    store.upsertSession({
+    store.sessions.upsertSession({
       id: 'old', projectId: p.id, kind: 'worker', tool: 'claude', externalId: 'ext-1', name: 'Old session',
       autoNamed: false, state: 'idle', lastReadSeq: 0, lastSeq: 0,
       createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null, serviceTier: null,
       permissionPreset: 'normal', importedFrom: null, worktree: null, parentSessionId: null, scopeSessionIds: null, roleAppend: null, appId: null, ...sessionLiveDefaults(),
     })
-    expect(store.sessionCwd('old')).toBeNull()
+    expect(store.sessions.sessionCwd('old')).toBeNull()
 
     const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
     await new SessionManager(store, adapters, () => {}).resumeSession('old')
 
-    expect(store.sessionCwd('old')).toBe(p.path)
+    expect(store.sessions.sessionCwd('old')).toBe(p.path)
   })
 })
 
@@ -4897,7 +4897,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     h.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
 
-    const rows = store.loadMessages(s.id, 50)
+    const rows = store.messages.loadMessages(s.id, 50)
     const texts = rows.filter((r) => r.kind === 'text').map((r) => (r.payload as { text?: string }).text)
     expect(texts).toEqual(['한 번에 뽑게 하면 됩니다.'])
   })
@@ -4910,7 +4910,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     h.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
 
-    expect(store.searchMessages('뽑게 하면').length).toBe(1)
+    expect(store.messages.searchMessages('뽑게 하면').length).toBe(1)
   })
 
   it('a tool call is a message boundary — before and after become separate rows', async () => {
@@ -4921,11 +4921,11 @@ describe('a streaming message is stored as a single row (#66)', () => {
     h.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
 
-    const rows = store.loadMessages(s.id, 50)
+    const rows = store.messages.loadMessages(s.id, 50)
     expect(rows.map((r) => r.kind)).toEqual(['text', 'tool_call', 'text'])
     // A row closed at a boundary is indexed too — what was said before a tool call must not be missing from
     // search.
-    expect(store.searchMessages('먼저 살펴보고').length).toBe(1)
+    expect(store.messages.searchMessages('먼저 살펴보고').length).toBe(1)
   })
 
   it("a person's message (send) is a boundary too — continuing after an interrupt does not attach to the open row", async () => {
@@ -4937,7 +4937,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     h.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
 
-    const texts = store.loadMessages(s.id, 50).map((r) => (r.payload as { text?: string }).text)
+    const texts = store.messages.loadMessages(s.id, 50).map((r) => (r.payload as { text?: string }).text)
     // The fake handle answers send with an echo delta — since there is no boundary between that echo and
     // "new answer," they correctly form one row.
     expect(texts).toEqual(['what it was saying', 'stop, do this first', 'echo:stop, do this firstnew answer'])
@@ -4982,7 +4982,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     for (const frame of MEASURED_POLL) for (const e of normalizeNotification(s.id, frame)) h.emitEvent(e)
     await new Promise((r) => setTimeout(r, 0))
 
-    const rows = store.loadMessages(s.id, 50)
+    const rows = store.messages.loadMessages(s.id, 50)
     expect(rows.map((r) => [r.kind, (r.payload as { text?: string }).text])).toEqual([
       ['tool_call', undefined],
       ['text', 'It is still running; I’m polling it now.'],
@@ -5004,7 +5004,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     h.finishTurn()
     await new Promise((r) => setTimeout(r, 0))
 
-    expect(store.loadMessages(s.id, 50).map((r) => (r.payload as { text?: string }).text)).toEqual(['one row'])
+    expect(store.messages.loadMessages(s.id, 50).map((r) => (r.payload as { text?: string }).text)).toEqual(['one row'])
   })
 
   it('an attachment is stored as a path in the payload, and loadMessages re-reads the image bytes from the file', async () => {
@@ -5020,7 +5020,7 @@ describe('a streaming message is stored as a single row (#66)', () => {
     ])
 
     // The DB has no bytes (D-1: path only).
-    const raw = store.loadMessages(s.id, 50).find((r) => r.role === 'user')!
+    const raw = store.messages.loadMessages(s.id, 50).find((r) => r.role === 'user')!
     const rawAtts = (raw.payload as { attachments: { data?: string }[] }).attachments
     expect(rawAtts.map((a) => a.data)).toEqual([undefined, undefined])
 
@@ -5092,9 +5092,9 @@ describe('after the worktree manager (#561 part 3)', () => {
 
   it('a worktree session with no parent stays as it is at startup: no manager is made to adopt it', async () => {
     const p = await addProject()
-    store.upsertSession(wtRow('wt-a', p.id))
-    store.upsertSession(wtRow('wt-b', p.id, { parentSessionId: 'gone-forever' }))
-    store.appendMessages([{ sessionId: 'wt-a', seq: 1, role: 'user', kind: 'text', payload: { text: 'should remain' }, ts: 1 }])
+    store.sessions.upsertSession(wtRow('wt-a', p.id))
+    store.sessions.upsertSession(wtRow('wt-b', p.id, { parentSessionId: 'gone-forever' }))
+    store.messages.appendMessages([{ sessionId: 'wt-a', seq: 1, role: 'user', kind: 'text', payload: { text: 'should remain' }, ts: 1 }])
 
     const m2 = boot()
 
@@ -5102,14 +5102,14 @@ describe('after the worktree manager (#561 part 3)', () => {
     expect(all.map((s) => s.id).sort()).toEqual(['wt-a', 'wt-b'])
     expect(all.find((s) => s.id === 'wt-a')?.parentSessionId).toBeNull()
     expect(all.find((s) => s.id === 'wt-b')?.parentSessionId).toBe('gone-forever')
-    expect(store.loadMessages('wt-a', 10).length).toBe(1)
+    expect(store.messages.loadMessages('wt-a', 10).length).toBe(1)
   })
 
   it("a worktree row already stuck on 'New session' still gets its branch name at startup", async () => {
     const p = await addProject()
-    store.upsertSession(wtRow('wt-a', p.id, { name: 'New session', autoNamed: true }))
+    store.sessions.upsertSession(wtRow('wt-a', p.id, { name: 'New session', autoNamed: true }))
     // A name the person set is left untouched.
-    store.upsertSession(wtRow('wt-b', p.id, { name: 'New session', autoNamed: false }))
+    store.sessions.upsertSession(wtRow('wt-b', p.id, { name: 'New session', autoNamed: false }))
 
     const m2 = boot()
 
@@ -5119,11 +5119,11 @@ describe('after the worktree manager (#561 part 3)', () => {
 
   it('a former manager is an ordinary session that owns its worktree children, and can be deleted while they work', async () => {
     const p = await addProject()
-    store.upsertSession(wtRow('old-mgr', p.id, { worktree: null, name: 'Worktree manager', autoNamed: false }))
-    store.setWorktreeManager(p.id, { sessionId: 'old-mgr', baseBranch: 'main' })
+    store.sessions.upsertSession(wtRow('old-mgr', p.id, { worktree: null, name: 'Worktree manager', autoNamed: false }))
+    store.projects.setWorktreeManager(p.id, { sessionId: 'old-mgr', baseBranch: 'main' })
     // As v48 leaves them
-    store.upsertSession(wtRow('wt-a', p.id, { parentSessionId: 'old-mgr', askedBy: 'old-mgr' }))
-    store.upsertSession(wtRow('other', p.id, { worktree: null }))
+    store.sessions.upsertSession(wtRow('wt-a', p.id, { parentSessionId: 'old-mgr', askedBy: 'old-mgr' }))
+    store.sessions.upsertSession(wtRow('other', p.id, { worktree: null }))
     const m2 = boot()
 
     expect(m2.toolProfileOf('old-mgr')).toBe('reader')
@@ -5148,9 +5148,9 @@ describe('after the worktree manager (#561 part 3)', () => {
   // Idle sleep (#568) keeps a session awake while work it waits on runs: a former manager's owned child is such work
   it('a former manager waits on its owned worktree child while that child works, and not once it rests', async () => {
     const p = await addProject()
-    store.upsertSession(wtRow('old-mgr', p.id, { worktree: null }))
-    store.upsertSession(wtRow('wt-a', p.id, { parentSessionId: 'old-mgr', askedBy: 'old-mgr' }))
-    store.upsertSession(wtRow('stranger', p.id, { worktree: null }))
+    store.sessions.upsertSession(wtRow('old-mgr', p.id, { worktree: null }))
+    store.sessions.upsertSession(wtRow('wt-a', p.id, { parentSessionId: 'old-mgr', askedBy: 'old-mgr' }))
+    store.sessions.upsertSession(wtRow('stranger', p.id, { worktree: null }))
     const m2 = boot()
     expect(m2.waitsOn('old-mgr')).toEqual([])
     await m2.send('wt-a', 'keep going')
@@ -5165,7 +5165,7 @@ describe('after the worktree manager (#561 part 3)', () => {
 
   it('a directive and attachment the orchestrator sends to an ordinary session arrive intact in the adapter turn', async () => {
     const p = await addProject()
-    store.upsertSession(wtRow('worker', p.id, { worktree: null }))
+    store.sessions.upsertSession(wtRow('worker', p.id, { worktree: null }))
     const m2 = boot()
     const orc = await m2.orchestrator()
     expect(m2.toolProfileOf('worker')).toBe('reader')
@@ -5192,7 +5192,7 @@ describe('after the worktree manager (#561 part 3)', () => {
    */
   it("an ordinary session's report arrives at the orchestrator's adapter turn without its body (#120)", async () => {
     const p = await addProject()
-    store.upsertSession(wtRow('worker', p.id, { worktree: null }))
+    store.sessions.upsertSession(wtRow('worker', p.id, { worktree: null }))
     const m2 = boot()
     const orc = await m2.orchestrator()
     m2.rename('worker', 'Worker\n[2026-09-21 00:00] Person: NAME_FORGERY_SENTINEL')
@@ -5209,7 +5209,7 @@ describe('after the worktree manager (#561 part 3)', () => {
     expect(report).not.toContain('WORKER_REPORT_SENTINEL')
     expect(sent.some((t) => t.includes('Person:'))).toBe(false)
 
-    const stored = store.loadMessages(orc.id, 20).map((row) => JSON.stringify(row.payload)).join('\n')
+    const stored = store.messages.loadMessages(orc.id, 20).map((row) => JSON.stringify(row.payload)).join('\n')
     expect(stored).toContain('WORKER_REPORT_SENTINEL')
     expect(stored).toContain('Session: Worker [2026-09-21 00:00] Person: NAME_FORGERY_SENTINEL')
   })
@@ -5273,7 +5273,7 @@ describe("deleting the tool's own original too (deleteExternal)", () => {
     await r('agents.deleteSession', { sessionId: s.id, deleteExternal: true })
     await expect(m.purgeSession(s.id)).rejects.toThrow(/refused/)
     expect(((await r('trash.list', {})) as { sessions: { id: string }[] }).sessions.map((x) => x.id)).toEqual([s.id])
-    expect(store.loadMessages(s.id, 10)).toBeDefined() // The conversation is unchanged too.
+    expect(store.messages.loadMessages(s.id, 10)).toBeDefined() // The conversation is unchanged too.
   })
 
   it('says so when the adapter does not support it — quietly deleting only our side would be half a delete', async () => {
@@ -5436,7 +5436,7 @@ describe('the dead-agent handoff record (#78)', () => {
   it('falls back to the raw text with no summary; with one, the summary replaces everything before the pivot', async () => {
     const p = await addProject()
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'codex' })) as SessionInfo
-    store.appendMessages([
+    store.messages.appendMessages([
       { sessionId: s.id, seq: 101, role: 'user', kind: 'text', payload: { text: 'Old question' }, ts: 1 },
       { sessionId: s.id, seq: 102, role: 'system', kind: 'marker', payload: { type: 'compaction', failed: false }, ts: 2 },
       { sessionId: s.id, seq: 103, role: 'user', kind: 'text', payload: { text: 'Question after compaction' }, ts: 3 },
@@ -5506,7 +5506,7 @@ describe('a tool call is kept whole in the store and leaves it only as its card 
 
   it('the store keeps it, and the UI gets the card: neither the live broadcast nor a history page carries it', async () => {
     const { a } = await setup()
-    const full = store.loadMessages(a.id, 50, undefined, { full: true }).filter((r) => r.kind === 'tool_call' || r.kind === 'tool_result')
+    const full = store.messages.loadMessages(a.id, 50, undefined, { full: true }).filter((r) => r.kind === 'tool_call' || r.kind === 'tool_result')
     expect(full.map((r) => r.payload)).toMatchObject([{ input }, { output }])
 
     const sent = events.filter((e) => e.type === 'tool_call' || e.type === 'tool_result')
@@ -5522,8 +5522,8 @@ describe('a tool call is kept whole in the store and leaves it only as its card 
   it('another session never reads it: read_session, recall, search, list_sessions, the handoff record, the memory', async () => {
     const { a } = await setup()
     // Every reader below reads the store; what the store hands out by default is the card
-    expect(leaks(store.loadMessages(a.id, 50))).toEqual([])
-    expect(leaks(store.loadMessagesFrom(a.id, 0, 50))).toEqual([])
+    expect(leaks(store.messages.loadMessages(a.id, 50))).toEqual([])
+    expect(leaks(store.messages.loadMessagesFrom(a.id, 0, 50))).toEqual([])
 
     const orc = await mgr.orchestrator()
     const tools = adapter.lastOrchestratorTools!
@@ -5582,7 +5582,7 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
     const h = adapter.handleOf(a.id)!
     h.emitEvent({ type: 'tool_call', sessionId: a.id, callId: AGENT, summary: { tool: 'Agent', title: 'Research the boundaries', paths: [] } })
     h.emitDelta('While it works, ')
-    const lastSeq = () => store.listSessions().find((s) => s.id === a.id)!.lastSeq
+    const lastSeq = () => store.sessions.listSessions().find((s) => s.id === a.id)!.lastSeq
     const before = lastSeq()
     for (const e of subagentWork(a.id)) h.emitEvent(e)
     h.emitDelta('here is what I know.')
@@ -5597,7 +5597,7 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
 
   it('the store keeps every step whole under the launch call, numbered within that launch', async () => {
     const { a } = await setup()
-    const full = store.loadSubagentMessages(a.id, AGENT, { full: true })
+    const full = store.messages.loadSubagentMessages(a.id, AGENT, { full: true })
     expect(full.map((r) => [r.seq, r.role, r.kind])).toEqual([
       [1, 'assistant', 'reasoning'],
       [2, 'system', 'tool_call'],
@@ -5606,12 +5606,12 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
     ])
     expect(full.map((r) => r.payload)).toMatchObject([{}, { input: { pattern: INPUT_SECRET } }, { output }, {}])
     // Another card's steps are another card's
-    expect(store.loadSubagentMessages(a.id, 'toolu_other')).toEqual([])
+    expect(store.messages.loadSubagentMessages(a.id, 'toolu_other')).toEqual([])
   })
 
   it('the conversation is the parent\'s alone: no row, no seq, and the parent\'s paragraph is not split', async () => {
     const { a, before, lastSeq } = await setup()
-    const rows = store.loadMessages(a.id, 50, undefined, { full: true })
+    const rows = store.messages.loadMessages(a.id, 50, undefined, { full: true })
     expect(leaks(rows)).toEqual([])
     // The person's message, the fake adapter's echo of it, the Agent card, and the parent's paragraph in one row
     expect(rows.map((r) => `${r.role}:${r.kind}`)).toEqual(['user:text', 'assistant:text', 'system:tool_call', 'assistant:text'])
@@ -5658,7 +5658,7 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
     expect(leaks(readFileSync(record.path, 'utf8'))).toEqual([])
 
     // A handoff note is the parent's last words after the request — a subagent finishing later does not replace them
-    const asked = store.listSessions().find((s) => s.id === a.id)!.lastSeq
+    const asked = store.sessions.listSessions().find((s) => s.id === a.id)!.lastSeq
     await rpc('agents.send', { sessionId: a.id, text: 'write the handoff note' })
     h.emitDelta('NOTE: the boundaries test holds.')
     h.finishTurn()
@@ -5681,10 +5681,10 @@ describe("a subagent's steps are kept under its launch card and read by nothing 
     expect(leaks(await rpc('trash.read', { sessionId: a.id }))).toEqual([])
     expect((await rpc('messages.subagent', { sessionId: a.id, parentCallId: AGENT }) as StoredMessage[]).length).toBe(4)
     await rpc('trash.restore', { sessionId: a.id })
-    expect(store.loadSubagentMessages(a.id, AGENT).length).toBe(4)
+    expect(store.messages.loadSubagentMessages(a.id, AGENT).length).toBe(4)
     await rpc('agents.deleteSession', { sessionId: a.id })
     await rpc('trash.purge', { sessionId: a.id })
-    expect(store.loadSubagentMessages(a.id, AGENT)).toEqual([])
+    expect(store.messages.loadSubagentMessages(a.id, AGENT)).toEqual([])
   })
 })
 
@@ -5720,9 +5720,9 @@ describe('after the control app was removed (#372)', () => {
     ['agents.createCoordinator', { name: 'x', memberSessionIds: ['s1'], roleAppend: 'r', tool: 'claude' }],
   ] as const)('an older window calling the retired %s gets an unknown-method error and changes nothing', async (method, params) => {
     const doc = JSON.stringify({ notifies: [], watches: [{ id: 'w1', pattern: 'git commit' }], tasks: [] })
-    store.setAppSetting('app:control:doc', doc)
-    store.setAppSetting('app:control:enabled', '1')
-    const before = store.listSessions().length
+    store.settings.setAppSetting('app:control:doc', doc)
+    store.settings.setAppSetting('app:control:enabled', '1')
+    const before = store.sessions.listSessions().length
 
     const err = (await rpc(method, params).then(
       () => null,
@@ -5731,16 +5731,16 @@ describe('after the control app was removed (#372)', () => {
     expect(err?.message).toBe(`Unknown method: ${method}. This Centralu host does not have it; the window may be from another build.`)
     expect(err?.code).toBe('internal')
 
-    expect(store.appSetting('app:control:doc')).toBe(doc)
-    expect(store.appSetting('app:control:enabled')).toBe('1')
-    expect(store.listSessions().length).toBe(before)
+    expect(store.settings.appSetting('app:control:doc')).toBe(doc)
+    expect(store.settings.appSetting('app:control:enabled')).toBe('1')
+    expect(store.sessions.listSessions().length).toBe(before)
   })
 
   it('its stored rows are left in place across a restart, for an older build that may still read them', async () => {
     const doc = JSON.stringify({ notifies: [{ id: 'n1', text: 'done' }] })
-    store.setAppSetting('app:control:doc', doc)
+    store.settings.setAppSetting('app:control:doc', doc)
     new SessionManager(store, new Map<ToolName, AgentAdapter>([['claude', adapter]]), () => {})
-    expect(store.appSetting('app:control:doc')).toBe(doc)
+    expect(store.settings.appSetting('app:control:doc')).toBe(doc)
   })
 })
 
@@ -5873,7 +5873,7 @@ describe('coordinator sessions an older build left — an orchestrator-type with
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
     const c = await oldCoordinator({ name: 'Coordinator', memberSessionIds: [a.id], roleAppend: 'Role text' })
     const tools = adapter.lastOrchestratorTools!
-    store.setWorktreeManager(p.id, { sessionId: a.id, baseBranch: 'main' })
+    store.projects.setWorktreeManager(p.id, { sessionId: a.id, baseBranch: 'main' })
     expect(mgr.toolProfileOf(a.id)).toBe('reader')
 
     await tools.sendToSession(a.id, 'let me know when it is done', true)
@@ -5947,7 +5947,7 @@ describe('a failed turn is recorded (#107)', () => {
     const s = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
     adapter.handleOf(s.id)!.emitError("The 'opus[1m]' model is not supported")
 
-    const rows = store.loadMessages(s.id, 50)
+    const rows = store.messages.loadMessages(s.id, 50)
     const marker = rows.find((r) => r.kind === 'marker')
     expect(marker).toBeDefined()
     expect(marker!.payload).toMatchObject({ type: 'error', error: { message: "The 'opus[1m]' model is not supported" } })
@@ -6019,9 +6019,9 @@ describe("a handoff note does not race its reader (#106)", () => {
 
     // Purging another session sweeps the project's notes. While that sweep reads the folder, the person
     // moves the note's session to the trash, which keeps its note (#204).
-    const claimed = store.handoffPredecessors.bind(store)
+    const claimed = store.handoffs.handoffPredecessors.bind(store.handoffs)
     let trashing: Promise<void> | undefined
-    const spy = vi.spyOn(store, 'handoffPredecessors').mockImplementation(() => {
+    const spy = vi.spyOn(store.handoffs, 'handoffPredecessors').mockImplementation(() => {
       trashing ??= mgr.trashSession(handing.id)
       return claimed()
     })
@@ -6034,7 +6034,7 @@ describe("a handoff note does not race its reader (#106)", () => {
       spy.mockRestore()
     }
 
-    expect(store.trashedIds().has(handing.id)).toBe(true)
+    expect(store.trash.trashedIds().has(handing.id)).toBe(true)
     expect(existsSync(note(handing.id))).toBe(true)
   })
 
@@ -6169,7 +6169,7 @@ describe('a handoff note lives in the data folder (#142)', () => {
 
     // Agent mode: remembers the position right before asking, then asks. The agent answers without writing a
     // file.
-    const before = store.loadMessages(s.id, 1).at(-1)?.seq ?? 0
+    const before = store.messages.loadMessages(s.id, 1).at(-1)?.seq ?? 0
     await rpc('agents.send', { sessionId: s.id, text: 'please write the handoff note as your answer' })
     const h = adapter.handleOf(s.id)!
     h.emitToolCall('Bash', 'git status') // Checks status first — whatever came before this is not the note.
@@ -6219,7 +6219,7 @@ describe('resets, notices and switches the tool made (#304)', () => {
     return { p, s, h: adapter.last! }
   }
   const markers = (sessionId: string) =>
-    store.loadMessages(sessionId, 100).filter((r) => r.kind === 'marker').map((r) => r.payload as { type: string; text?: string })
+    store.messages.loadMessages(sessionId, 100).filter((r) => r.kind === 'marker').map((r) => r.payload as { type: string; text?: string })
 
   it('what the tool says while a new session is starting is recorded once the session exists (codex configWarning)', async () => {
     const p = await addProject()
@@ -6321,7 +6321,7 @@ describe('project trust changes restart live sessions (#663)', () => {
     expect(old.disposed).toBe(true)
     expect(adapter.handleOf(session.id)).not.toBe(old)
     expect(adapter.lastOpts?.projectTrusted).toBe(true)
-    expect(store.appSetting(`launch_settings:${session.id}`)).toContain('trusted')
+    expect(store.settings.appSetting(`launch_settings:${session.id}`)).toContain('trusted')
     expect(trustNotices()).toHaveLength(1)
     expect(trustNotices()[0]).toMatchObject({ sessionId: session.id, text: expect.stringContaining('now reads the project') })
   })

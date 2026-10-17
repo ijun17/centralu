@@ -107,7 +107,7 @@ export class AskProjectFlow {
      * (`AppAccess.gate`): text in a repository the person has not trusted could be what is asking, and the consent card
      * alone would then be the only thing between a planted instruction and another project's session.
      */
-    if (this.host.store.listProjects().find((p) => p.id === caller.projectId)?.trusted !== true && !this.host.autoBoundaryOpen(callerId, 'delegate from an untrusted project')) {
+    if (this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)?.trusted !== true && !this.host.autoBoundaryOpen(callerId, 'delegate from an untrusted project')) {
       return "This session's project is not trusted, so it cannot ask another project — the person can trust it from the project menu."
     }
     return null
@@ -115,7 +115,7 @@ export class AskProjectFlow {
 
   /** The project asked is still registered: the person may remove it while its card stands */
   private projectGoneError(target: { id: string; name: string }): string | null {
-    if (this.host.store.listProjects().some((p) => p.id === target.id)) return null
+    if (this.host.store.projects.listProjects().some((p) => p.id === target.id)) return null
     return `${target.name} was removed from Centralu, so it was not reached.`
   }
 
@@ -144,7 +144,7 @@ export class AskProjectFlow {
     const caller = this.host.meta.get(callerId)
     const callerProjectId = caller?.projectId
     if (!caller || !callerProjectId) return { ok: false, error: 'This session belongs to no project, so it cannot ask another one' }
-    const projects = this.host.store.listProjects()
+    const projects = this.host.store.projects.listProjects()
     const wanted = opts.project.trim()
     /*
      * The projects on linked machines count too (#700): a unique bare name works, `<machine>/<name>` or a qualified id
@@ -194,7 +194,7 @@ export class AskProjectFlow {
       s.projectId === target.id && s.kind === 'worker' && !s.appId && !this.host.builderRefOf(s),
     )
     const list = () => candidates.map((s) => JSON.stringify({
-      id: s.id, name: s.name, state: s.state, lastActive: lastActiveOf(this.host.store, s.id) ?? null,
+      id: s.id, name: s.name, state: s.state, lastActive: lastActiveOf(this.host.store.messages, s.id) ?? null,
     })).join('\n')
     const wantedSession = opts.session?.trim()
     // A bounded call can keep waiting even when the person has since opened another session.
@@ -283,7 +283,7 @@ export class AskProjectFlow {
     const d = this.host.startDelegation(key, callerId, delegatedId, target, false, midTurn)
     const callerProject = projects.find((p) => p.id === caller.projectId)?.name ?? 'another project'
     try {
-      const from = { sessionId: callerId, name: labelOf(this.host.store, caller) }
+      const from = { sessionId: callerId, name: labelOf(this.host.store.messages, caller) }
       if (midTurn) {
         const releaseHold = d.wait.holdInput()
         const release = () => { releaseHold(); this.host.applyDeferredRestart(delegatedId) }
@@ -417,7 +417,7 @@ export class AskProjectFlow {
     // Registered before the send: the machine's first events can reach the hub before its answer does
     this.linkedAsks.set(chosen.id, ask)
     // The machine counts its session one level below the caller while it works on this (#838): the depth holds across machines
-    const sent = await reader.send(chosen.id, askFrame(callerProject, opts.task), labelOf(this.host.store, this.host.meta.get(callerId)!), { depth: depthOf(this.host, callerId) + 1 })
+    const sent = await reader.send(chosen.id, askFrame(callerProject, opts.task), labelOf(this.host.store.messages, this.host.meta.get(callerId)!), { depth: depthOf(this.host, callerId) + 1 })
     if (!sent.ok) {
       if (this.linkedAsks.get(chosen.id) === ask) this.linkedAsks.delete(chosen.id)
       return { ok: false, error: `Could not hand the task to ${label}: ${sent.error}` }

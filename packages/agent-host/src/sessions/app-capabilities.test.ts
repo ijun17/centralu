@@ -65,7 +65,7 @@ describe('a chain started from a session — that session\'s approval card', () 
     expect(w.events).toContainEqual(expect.objectContaining({ type: 'approval_resolved', sessionId: caller.id, requestId: card!.requestId, decision: 'allow' }))
 
     // The memory lives in the store (it survives even if the host restarts) — no card stands for the next request
-    expect(w.store.getAppPermission(`${w.projectId}/notes`, 'agent:claude')).toMatchObject({ decision: 'allow', text: 'run an agent (Claude Code) in a new session' })
+    expect(w.store.permissions.getAppPermission(`${w.projectId}/notes`, 'agent:claude')).toMatchObject({ decision: 'allow', text: 'run an agent (Claude Code) in a new session' })
     expect(RpcMethods['apps.permissions'].result.parse(await w.rpc('apps.permissions', { appId: 'notes', projectId: w.projectId })) as AppPermission[]).toMatchObject([
       { capability: 'agent:claude', decision: 'allow', current: true, text: 'run an agent (Claude Code) in a new session' },
     ])

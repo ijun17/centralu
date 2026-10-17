@@ -55,7 +55,7 @@ describe('one restore or delete at a time', () => {
 
 describe('the trash itself', () => {
   it('emptying goes on past a failure and says which', async () => {
-    const store = { listTrash: () => [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }, { id: 'c', name: 'C' }] } as unknown as Store
+    const store = { trash: { listTrash: () => [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }, { id: 'c', name: 'C' }] } } as unknown as Store
     const trash = trashWith({ store })
     trash.purgeSession = async (id: string) => {
       if (id === 'b') throw new Error('the folder is in use')
@@ -64,7 +64,7 @@ describe('the trash itself', () => {
   })
 
   it('reading a session that is not in the trash says so', async () => {
-    const trash = trashWith({ store: { isTrashed: () => false } as unknown as Store })
+    const trash = trashWith({ store: { trash: { isTrashed: () => false } } as unknown as Store })
     await expect(trash.readTrashed('s', 10)).rejects.toThrow('Not in the trash: s')
   })
 })

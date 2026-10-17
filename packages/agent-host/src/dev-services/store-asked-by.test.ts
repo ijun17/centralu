@@ -45,7 +45,7 @@ const message = (db: Database.Database, sessionId: string, payload: string) =>
 
 const askers = (file: string) => {
   const store = new Store(file)
-  const out = Object.fromEntries(store.listSessions().map((s) => [s.id, s.askedBy ?? null]))
+  const out = Object.fromEntries(store.sessions.listSessions().map((s) => [s.id, s.askedBy ?? null]))
   const ran = store.migrationsRun
   store.close()
   return { out, ran }

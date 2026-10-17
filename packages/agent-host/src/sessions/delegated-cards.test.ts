@@ -94,7 +94,7 @@ describe('cards in a delegated turn (#676)', () => {
     (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: preset })).id
   /** A parent with a child it started without waiting; the child is in the turn the parent gave it */
   const parentAndChild = async (preset: PermissionPreset = 'normal') => {
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const parent = await session(preset)
     const r = await w.mgr.startAgent(parent, { task: 'write the schema', wait: false })
     if (!r.ok) throw new Error(r.error)
@@ -102,7 +102,7 @@ describe('cards in a delegated turn (#676)', () => {
   }
   /** Notices in the parent's conversation that name the child as their source */
   const notices = (parent: string, child: string) =>
-    w.store.loadMessages(parent, 50).filter((m) => m.role === 'user' && (m.payload as { from?: { sessionId: string } }).from?.sessionId === child)
+    w.store.messages.loadMessages(parent, 50).filter((m) => m.role === 'user' && (m.payload as { from?: { sessionId: string } }).from?.sessionId === child)
   const toAgent = (parent: string, child: string) => handleOf(parent).sent.filter((t) => t.includes(child))
   /** The handle the caller reads a card by (agent_session status), which its answer names */
   const handleIn = async (caller: string, session: string, requestId: string) => {
@@ -197,7 +197,7 @@ describe('cards in a delegated turn (#676)', () => {
   it('routes an ask_project target\'s question to the asking project, which answers it across projects', async () => {
     const caller = await w.callerSession()
     const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const cards = answering(handleOf(target))
     const asking = w.mgr.askProject(caller, { project: w.target.name, session: target, task: 'migrate it' })
     await w.until(() => handleOf(target).sent.length === 1)
@@ -254,7 +254,7 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
 
   const handleOf = (id: string) => w.adapters.get('claude')!.handles.get(id)!
   const toldOf = (caller: string, session: string) =>
-    w.store.loadMessages(caller, 50).filter((m) => m.role === 'user' && (m.payload as { from?: { sessionId: string } }).from?.sessionId === session)
+    w.store.messages.loadMessages(caller, 50).filter((m) => m.role === 'user' && (m.payload as { from?: { sessionId: string } }).from?.sessionId === session)
   const cardsOf = async (caller: string, session: string) => {
     const r = await w.mgr.agentSession(caller, { sessionId: session, action: 'status' })
     return r.ok && r.state === 'asking' ? r.cards : []
@@ -308,7 +308,7 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
     })
 
     it('agent_session send to a child the person lowered to safe', async () => {
-      w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+      w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
       const parent = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'auto' })).id
       const started = await w.mgr.startAgent(parent, { task: 'first', wait: false })
       if (!started.ok) throw new Error(started.error)
@@ -336,7 +336,7 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
       // Joining a turn that is not its own is a note, the caller's choice under auto (#677)
       await w.mgr.updateSettings(caller, { permissionPreset: 'auto' })
       const target = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
-      w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+      w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
       const cards = answering(handleOf(target))
       await w.mgr.send(target, "the person's own work")
       let settled = false
@@ -353,11 +353,11 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
         expect(await w.mgr.agentSession(caller, { sessionId: target, action: 'answer', card, text: 'allow' })).toMatchObject({ ok: false })
       }
       expect(cards.answered).toEqual([])
-      expect(w.store.listDelegatedTurns()).toEqual([])
+      expect(w.store.children.listDelegatedTurns()).toEqual([])
     })
 
     it('an auto parent\'s note into the turn the person started in its child', async () => {
-      w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+      w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
       const parent = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'auto' })).id
       const started = await w.mgr.startAgent(parent, { task: 'first', wait: false })
       if (!started.ok) throw new Error(started.error)
@@ -378,7 +378,7 @@ describe('what a delegated turn\'s caller may answer (#679 review)', () => {
 
   describe('an answer meets only the card its caller read', () => {
     const parentAndChild = async () => {
-      w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+      w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
       const parent = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })).id
       const started = await w.mgr.startAgent(parent, { task: 'write the schema', wait: false })
       if (!started.ok) throw new Error(started.error)
@@ -443,7 +443,7 @@ describe('a delegated turn\'s link across a host swap (#676)', () => {
   })
 
   it('keeps routing the kept child\'s card to its parent under the next host, without telling it twice', async () => {
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const parent = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })).id
     const r = await w.mgr.startAgent(parent, { task: 'write the schema', wait: false })
     if (!r.ok) throw new Error(r.error)
@@ -451,10 +451,10 @@ describe('a delegated turn\'s link across a host swap (#676)', () => {
     // The parent has a conversation to resume under the next host, so a second notice would reach it
     w.adapters.get('claude')!.handles.get(parent)!.externalId = 'ext-parent'
     answering(w.adapters.get('claude')!.handles.get(child)!).ask('q-1')
-    const told = () => w.store.loadMessages(parent, 50).filter((m) => (m.payload as { from?: { sessionId: string } }).from?.sessionId === child)
+    const told = () => w.store.messages.loadMessages(parent, 50).filter((m) => (m.payload as { from?: { sessionId: string } }).from?.sessionId === child)
     await w.until(() => told().length === 1)
     await w.mgr.detachAll()
-    expect(w.store.listDelegatedTurns()).toEqual([{ sessionId: child, callerSessionId: parent, told: [expect.stringMatching(/^q-1\./)], turnId: expect.any(String) }])
+    expect(w.store.children.listDelegatedTurns()).toEqual([{ sessionId: child, callerSessionId: parent, told: [expect.stringMatching(/^q-1\./)], turnId: expect.any(String) }])
 
     const claude = new CrossAdapter('claude')
     const next = new SessionManager(w.store, new Map<ToolName, AgentAdapter>([['claude', claude], ['codex', new CrossAdapter('codex')]]), () => {}, undefined, undefined, { keptSessions: new Set([child]) })
@@ -476,17 +476,17 @@ describe('a delegated turn\'s link across a host swap (#676)', () => {
     // The turn ends under the new host, and the link with it
     claude.handles.get(child)!.answer('done')
     await new Promise((r) => setTimeout(r, 20))
-    expect(w.store.listDelegatedTurns()).toEqual([])
+    expect(w.store.children.listDelegatedTurns()).toEqual([])
   })
 
   it('is dropped by a host that finds no process for the session', async () => {
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const parent = (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'normal' })).id
     const r = await w.mgr.startAgent(parent, { task: 'write the schema', wait: false })
     if (!r.ok) throw new Error(r.error)
     await w.mgr.detachAll()
     const next = new SessionManager(w.store, new Map<ToolName, AgentAdapter>([['claude', new CrossAdapter('claude')]]), () => {}, undefined, undefined, {})
     hosts.push(next)
-    expect(w.store.listDelegatedTurns()).toEqual([])
+    expect(w.store.children.listDelegatedTurns()).toEqual([])
   })
 })

@@ -32,13 +32,13 @@ describe('child sessions and the machine (#686)', () => {
   const childrenOf = (id: string) => w.mgr.listSessions().filter((s) => s.askedBy === id)
   const session = async (preset: PermissionPreset = 'normal') =>
     (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: preset })).id
-  const allowProject = () => w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+  const allowProject = () => w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
   const gate = (maxWaitMs = 10_000) => {
     const g = new MemoryGate({ read: async () => free, recheckMs: 20, maxWaitMs })
     w.mgr.useMemoryGate(g)
     return g
   }
-  const said = (id: string, what: string) => w.store.loadMessages(id, 50).some((m) => JSON.stringify(m.payload).includes(what))
+  const said = (id: string, what: string) => w.store.messages.loadMessages(id, 50).some((m) => JSON.stringify(m.payload).includes(what))
 
   describe('code intelligence', () => {
     it("a start_agent child starts without it and keeps that through a wake; the person's session keeps their setting", async () => {
@@ -100,7 +100,7 @@ describe('child sessions and the machine (#686)', () => {
       expect(await w.mgr.agentSession(s, { sessionId: handle, action: 'status' })).toMatchObject({ state: 'pending', lowMemory: { floor: '2.0 GB' } })
       expect(await w.mgr.agentSession(s, { sessionId: handle, action: 'send', text: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('waiting for memory') })
       // Stored as allowed: a host that takes it over waits for memory, never asks the person again
-      expect(w.store.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId: handle, request: expect.objectContaining({ allowed: true, lsp: true }) })])
+      expect(w.store.children.listAgentStartRequests()).toEqual([expect.objectContaining({ requestId: handle, request: expect.objectContaining({ allowed: true, lsp: true }) })])
 
       await new Promise((r) => setTimeout(r, 100))
       expect(childrenOf(s)).toEqual([])
@@ -111,7 +111,7 @@ describe('child sessions and the machine (#686)', () => {
       expect(handleOf(child).sent[0]).toContain('refactor the parser')
       // The choice made at the call is the child's
       expect(handleOf(child).opts.noCodeIntelligence).toBeUndefined()
-      expect(w.store.listAgentStartRequests()).toEqual([])
+      expect(w.store.children.listAgentStartRequests()).toEqual([])
       // The handle now leads to the child, and the caller is told when its turn ends
       expect(await w.mgr.agentSession(s, { sessionId: handle, action: 'status' })).toMatchObject({ ok: true, sessionId: child })
       handleOf(child).answer('parser refactored')
@@ -138,7 +138,7 @@ describe('child sessions and the machine (#686)', () => {
       expect(handleOf(s).sent.at(-1)).toContain('Memory stayed below 2.0 GB')
       expect(said(s, 'memory stayed below 2.0 GB')).toBe(true)
       expect(childrenOf(s)).toEqual([])
-      expect(w.store.listAgentStartRequests()).toEqual([])
+      expect(w.store.children.listAgentStartRequests()).toEqual([])
     })
 
     it('a request withdrawn while it waits never starts', async () => {

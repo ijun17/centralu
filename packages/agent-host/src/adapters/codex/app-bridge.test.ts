@@ -116,7 +116,7 @@ beforeEach(async () => {
   const adapters = new Map<ToolName, AgentAdapter>([['codex', new NullAdapter()]])
   // The host's own wiring (main.ts): each session's bridge gets its own credential, not TOKEN
   mgr = new SessionManager(store, adapters, () => {}, (sessionId) => bridgeAddress(undefined, port, TOKEN, sessionId))
-  rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot, reservedIds: ['control'], runs: storeRunLedger(store) })
+  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], runs: storeRunLedger(store) })
   mgr.useExternalApps(rt)
   const rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
   call = (m, p) => rpc(m as never, p)

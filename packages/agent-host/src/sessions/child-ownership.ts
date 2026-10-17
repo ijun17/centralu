@@ -116,24 +116,7 @@ export type OwnerMove = {
   queued: boolean
 }
 
-type OwnershipStore = Pick<
-  Store,
-  | 'setReportMark'
-  | 'clearReportMark'
-  | 'setAppSetting'
-  | 'deleteAppSetting'
-  | 'setDelegatedTurn'
-  | 'clearDelegatedTurn'
-  | 'setDelegatedTurnTold'
-  | 'addQueuedRequest'
-  | 'removeQueuedRequest'
-  | 'markQueuedDelivering'
-  | 'markQueuedOpenedByAuto'
-  | 'listReportMarks'
-  | 'appSetting'
-  | 'listDelegatedTurns'
-  | 'listQueuedRequests'
->
+type OwnershipStore = Pick<Store, 'children' | 'settings'>
 
 /**
  * Who owns a child session's work (#428): the report a child owes and to whom, a report paused over the child's own
@@ -232,14 +215,14 @@ export class ChildOwnership {
   /** A new mark is new work: a pause of the work before it is not this work's, nor one an older build left stored */
   markReport(sessionId: string, callerId: string): void {
     this.unpauseReport(sessionId)
-    this.store.deleteAppSetting(pausedReportKey(sessionId))
+    this.store.settings.deleteAppSetting(pausedReportKey(sessionId))
     this.reports.set(sessionId, callerId)
-    this.store.setReportMark(sessionId, callerId)
+    this.store.children.setReportMark(sessionId, callerId)
   }
   clearReport(sessionId: string): void {
     this.unpauseReport(sessionId)
     if (!this.reports.delete(sessionId)) return
-    this.store.clearReportMark(sessionId)
+    this.store.children.clearReportMark(sessionId)
   }
   /** At startup (#646): the report marks of the sessions the keeper kept that still owe them, and nothing else */
   restoreReports(sessions: ReadonlyMap<string, SessionInfo>, keptSessions: ReadonlySet<string> | undefined): void {
@@ -252,10 +235,10 @@ export class ChildOwnership {
      * A kept session at rest whose report was paused over its own background work (#721) still owes it: that work runs
      * on in the kept process, and the turn its ending starts ends under this host.
      */
-    for (const mark of this.store.listReportMarks()) {
+    for (const mark of this.store.children.listReportMarks()) {
       const child = sessions.get(mark.sessionId)
       const kept = keptSessions?.has(mark.sessionId) && !!child && sessions.has(mark.callerSessionId)
-      const paused = readPausedTasks(this.store.appSetting(pausedReportKey(mark.sessionId)))
+      const paused = readPausedTasks(this.store.settings.appSetting(pausedReportKey(mark.sessionId)))
       if (kept && (inTurn(child.state) || paused)) {
         this.adoptReport(mark.sessionId, mark.callerSessionId, paused)
         continue
@@ -263,8 +246,8 @@ export class ChildOwnership {
       if (child && keptSessions?.has(mark.sessionId)) {
         console.error(`[agent-host] report mark dropped: ${mark.sessionId.slice(0, 8)} ended its turn during the swap`)
       }
-      this.store.clearReportMark(mark.sessionId)
-      this.store.deleteAppSetting(pausedReportKey(mark.sessionId))
+      this.store.children.clearReportMark(mark.sessionId)
+      this.store.settings.deleteAppSetting(pausedReportKey(mark.sessionId))
     }
   }
 
@@ -275,13 +258,13 @@ export class ChildOwnership {
      * a question its caller is to answer, and the kept CLI sends that card again to this host. With no delegation in
      * this host's memory, the link ends with the turn. Any other row is dropped: that turn is over.
      */
-    for (const row of this.store.listDelegatedTurns()) {
+    for (const row of this.store.children.listDelegatedTurns()) {
       const s = sessions.get(row.sessionId)
       if (keptSessions?.has(row.sessionId) && !!s && inTurn(s.state) && sessions.has(row.callerSessionId)) {
         this.adoptTurn(row.sessionId, { callerId: row.callerSessionId, untilTurnEnd: true, told: new Set(row.told), turnId: row.turnId })
         continue
       }
-      this.store.clearDelegatedTurn(row.sessionId)
+      this.store.children.clearDelegatedTurn(row.sessionId)
     }
   }
 
@@ -292,15 +275,15 @@ export class ChildOwnership {
      * start for a session already at rest. A kept session waits for its adoption (`adoptKept`), so its first input
      * does not start a second process. A request whose session or requester is gone is dropped.
      */
-    for (const r of this.store.listQueuedRequests()) {
+    for (const r of this.store.children.listQueuedRequests()) {
       if (!sessions.has(r.sessionId) || !sessions.has(r.callerSessionId)) {
-        this.store.removeQueuedRequest(r.id)
+        this.store.children.removeQueuedRequest(r.id)
         continue
       }
       // A delivery the old host began and never saw start is delivered again (#684 review)
       if (r.deliveringAt) {
         console.error(`[agent-host] queued request ${r.id} to ${r.sessionId.slice(0, 8)} was being delivered at the swap; delivering it again`)
-        this.store.markQueuedDelivering(r.id, null)
+        this.store.children.markQueuedDelivering(r.id, null)
       }
       // A row an older build wrote does not say whether only `auto` let it through: an ask with no consent for the pair is read as such
       const openedByAuto = r.openedByAuto ?? legacyOpenedByAuto(r)
@@ -320,12 +303,12 @@ export class ChildOwnership {
     if (!this.paused.has(sessionId) || added.length) {
       const next = [...held, ...added]
       this.paused.set(sessionId, next)
-      this.store.setAppSetting(pausedReportKey(sessionId), JSON.stringify(next))
+      this.store.settings.setAppSetting(pausedReportKey(sessionId), JSON.stringify(next))
     }
   }
   unpauseReport(sessionId: string): void {
     this.stopSettling(sessionId)
-    if (this.paused.delete(sessionId)) this.store.deleteAppSetting(pausedReportKey(sessionId))
+    if (this.paused.delete(sessionId)) this.store.settings.deleteAppSetting(pausedReportKey(sessionId))
   }
   /** Starts a paused report's settle timer (#721); the session manager decides when, and what it does */
   settleAfter(sessionId: string, timer: ReturnType<typeof setTimeout>): void {
@@ -346,14 +329,14 @@ export class ChildOwnership {
   ownTurn(sessionId: string, callerId: string, untilTurnEnd: boolean): void {
     const turnId = randomUUID()
     this.turns.set(sessionId, { callerId, untilTurnEnd, told: new Set(), turnId })
-    this.store.setDelegatedTurn(sessionId, callerId, turnId)
+    this.store.children.setDelegatedTurn(sessionId, callerId, turnId)
   }
   /** Ends the link; with `callerId`, only that caller's (a later delegation by someone else is not cut) */
   releaseTurn(sessionId: string, callerId?: string): void {
     const owner = this.turns.get(sessionId)
     if (!owner || (callerId && owner.callerId !== callerId)) return
     this.turns.delete(sessionId)
-    this.store.clearDelegatedTurn(sessionId)
+    this.store.children.clearDelegatedTurn(sessionId)
   }
   /** A link the previous host left, kept for a session the keeper kept still in its turn (the store already holds it) */
   adoptTurn(sessionId: string, owner: TurnOwner): void {
@@ -364,21 +347,21 @@ export class ChildOwnership {
     const owner = this.turns.get(sessionId)
     if (!owner) return
     owner.told.add(handle)
-    this.store.setDelegatedTurnTold(sessionId, [...owner.told])
+    this.store.children.setDelegatedTurnTold(sessionId, [...owner.told])
   }
 
   /** Holds a request for a busy session, last in its queue; returns its place */
   enqueue(r: QueuedRequest): number {
     const list = [...(this.queues.get(r.sessionId) ?? []), r]
     this.queues.set(r.sessionId, list)
-    this.store.addQueuedRequest(r)
+    this.store.children.addQueuedRequest(r)
     return list.length
   }
   /** Marks a queued ask as resting on its requester's `auto` alone, here and in the store (#838) */
   markOpenedByAuto(r: QueuedRequest): void {
     if (r.openedByAuto === true) return
     r.openedByAuto = true
-    this.store.markQueuedOpenedByAuto(r.id)
+    this.store.children.markQueuedOpenedByAuto(r.id)
   }
   /** A request the previous host left, read back at startup (the store already holds it) */
   adoptQueued(r: QueuedRequest): void {
@@ -390,7 +373,7 @@ export class ChildOwnership {
       const now = this.deliveries.get(id)
       if (now && list.some((r) => r.id === now && which(r))) this.deliveries.delete(id)
       const keep = list.filter((r) => !which(r))
-      for (const r of list) if (which(r)) { dropped.push(r); this.store.removeQueuedRequest(r.id) }
+      for (const r of list) if (which(r)) { dropped.push(r); this.store.children.removeQueuedRequest(r.id) }
       if (keep.length) this.queues.set(id, keep)
       else this.queues.delete(id)
     }
@@ -399,7 +382,7 @@ export class ChildOwnership {
   /** A queued request goes in now (#684 review): the session is busy with it until its turn starts */
   startDelivering(sessionId: string, requestId: string): void {
     this.deliveries.set(sessionId, requestId)
-    this.store.markQueuedDelivering(requestId, Date.now())
+    this.store.children.markQueuedDelivering(requestId, Date.now())
   }
   /** The session's turn started while a queued request was being delivered to it: that request is delivered (#684 review) */
   queuedTurnStarted(sessionId: string): void {

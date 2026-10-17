@@ -22,7 +22,7 @@ describe('a queued request whose turn never starts (#839)', () => {
   const session = async () => (await w.mgr.createSession({ projectId: w.caller.id, cwd: w.caller.path, tool: 'claude', permissionPreset: 'auto' })).id
   /** B with a child A it started, which the person is now using for a turn of their own */
   const busyChild = async () => {
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const b = await session()
     const started = await w.mgr.startAgent(b, { task: 'first job', wait: false })
     if (!started.ok) throw new Error(started.error)
@@ -35,7 +35,7 @@ describe('a queued request whose turn never starts (#839)', () => {
   }
   /** The reports of A's work that B was given */
   const told = (b: string, a: string) =>
-    w.store.loadMessages(b, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(a))
+    w.store.messages.loadMessages(b, 50).map((m) => JSON.stringify(m.payload)).filter((t) => t.includes('[Centralu] The assigned work') && t.includes(a))
   /** The tool answers an input that names `marker` with `refusal` instead of starting a turn */
   const refuses = (a: string, marker: string, refusal: NormalizedEvent) => {
     const h = handleOf(a)
@@ -60,7 +60,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     await w.until(() => handleOf(a).sent.some((t) => t.includes('first in line')))
     // An error is a rest of its own: the person's Continue, or the next request, starts the next turn
     await w.until(() => handleOf(a).sent.some((t) => t.includes('second in line')))
-    expect(w.store.listQueuedRequests()).toEqual([])
+    expect(w.store.children.listQueuedRequests()).toEqual([])
   })
 
   it("an ask queued into another project's busy session is reported as failed once, and the person's next turn is not", async () => {
@@ -68,7 +68,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     handleOf(t).externalId = 'ext-t'
     await w.mgr.send(t, "the person's own work")
     const s = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     refuses(t, 'export the sprites', { type: 'error', sessionId: t, error: { code: 'internal', message: 'the API refused the request', retryable: false } })
     expect(await w.mgr.askProject(s, { project: w.target.name, session: t, task: 'export the sprites', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
     handleOf(t).answer("the person's answer")
@@ -85,14 +85,14 @@ describe('a queued request whose turn never starts (#839)', () => {
     handleOf(t).externalId = 'ext-t'
     await w.mgr.send(t, "the person's own work")
     const s = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     expect(await w.mgr.askProject(s, { project: w.target.name, session: t, task: 'export the sprites', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
     // The process goes down with the person's turn, and the tool cannot start again for the delivery
     const adapter = w.adapters.get('claude')!
     const start = adapter.createSession.bind(adapter)
     adapter.createSession = async () => { throw new Error('the tool would not start') }
     handleOf(t).event({ type: 'error', sessionId: t, error: { code: 'adapter_crashed', message: 'the process exited', retryable: true } })
-    const notDelivered = () => w.store.loadMessages(s, 50).filter((m) => JSON.stringify(m.payload).includes('was not delivered'))
+    const notDelivered = () => w.store.messages.loadMessages(s, 50).filter((m) => JSON.stringify(m.payload).includes('was not delivered'))
     await w.until(() => notDelivered().length === 1)
     adapter.createSession = start
     await w.mgr.send(t, "the person's next thing")
@@ -109,7 +109,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     expect(await w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'add the index', ifBusy: 'queue' })).toMatchObject({ state: 'queued' })
     handleOf(a).answer("the person's answer")
     await w.until(() => handleOf(a).sent.some((t) => t.includes('add the index')))
-    await w.until(() => w.store.listQueuedRequests().length === 0)
+    await w.until(() => w.store.children.listQueuedRequests().length === 0)
     // Its requester is told once that the work failed, and only of that work
     await w.until(() => told(b, a).length === before + 1)
     expect(told(b, a).at(-1)).toContain('The assigned work failed')
@@ -145,7 +145,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     const { a, b, before, release } = await queuedThroughWake()
     // Codex reports an account-wide limit change at any moment
     handleOf(a).event({ type: 'limit_reached', sessionId: a })
-    expect(w.store.listQueuedRequests()).toHaveLength(1)
+    expect(w.store.children.listQueuedRequests()).toHaveLength(1)
     release()
     await w.until(() => handleOf(a).sent.some((t) => t.includes('add the index')))
     expect(told(b, a)).toHaveLength(before)
@@ -159,7 +159,7 @@ describe('a queued request whose turn never starts (#839)', () => {
     const { a, b, before, release } = await queuedThroughWake()
     handleOf(a).event({ type: 'error', sessionId: a, error: { code: 'adapter_crashed', message: 'the process exited again', retryable: true } })
     release()
-    const notDelivered = () => w.store.loadMessages(b, 50).filter((m) => JSON.stringify(m.payload).includes('was not delivered'))
+    const notDelivered = () => w.store.messages.loadMessages(b, 50).filter((m) => JSON.stringify(m.payload).includes('was not delivered'))
     await w.until(() => notDelivered().length === 1)
     await new Promise((r) => setImmediate(r))
     expect(told(b, a)).toHaveLength(before)

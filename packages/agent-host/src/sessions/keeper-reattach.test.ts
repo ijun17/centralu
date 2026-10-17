@@ -122,10 +122,10 @@ describe('a host restart under the keeper', () => {
     const session = await a.mgr.createSession({ projectId: project.id, cwd: tmpdir(), tool: 'claude', permissionPreset: preset })
     const key = `launch_settings:${session.id}`
     // Persist the released fingerprint, before normal acquired an explicit mode flag.
-    const legacy = JSON.parse(store.appSetting(key)!)
+    const legacy = JSON.parse(store.settings.appSetting(key)!)
     legacy.v = preset === 'auto' ? 2 : 1
     const oldFingerprint = JSON.stringify(legacy)
-    store.setAppSetting(key, oldFingerprint)
+    store.settings.setAppSetting(key, oldFingerprint)
     a.claude.last.pendingOutputOnDetach = working
     a.claude.last.emit({ type: 'state_change', sessionId: session.id, state: working ? 'working' : 'idle' })
     await a.mgr.detachAll()
@@ -137,7 +137,7 @@ describe('a host restart under the keeper', () => {
       const adopted = b.claude.last
       expect(adopted.opts.processSource?.adopt?.process).toBe(kept)
       expect(b.mgr.listSessions().find((s) => s.id === session.id)?.state).toBe(working ? 'working' : 'idle')
-      expect(store.appSetting(key)).toBe(oldFingerprint)
+      expect(store.settings.appSetting(key)).toBe(oldFingerprint)
       const restart = vi.spyOn(b.mgr, 'restartSession')
 
       await b.mgr.refreshToolDefinitions()
@@ -151,12 +151,12 @@ describe('a host restart under the keeper', () => {
         expect(b.claude.last).not.toBe(adopted)
         expect(b.claude.last.opts.processSource?.adopt).toBeUndefined()
         expect(b.claude.last.opts.resumeExternalId).toBe('ext-1')
-        expect(store.appSetting(key)).not.toBe(oldFingerprint)
+        expect(store.settings.appSetting(key)).not.toBe(oldFingerprint)
         expect(restart).toHaveBeenCalledWith(session.id, 'launch_settings')
       } else {
         expect(adopted.disposed).toBe(false)
         expect(b.claude.last).toBe(adopted)
-        expect(store.appSetting(key)).toBe(oldFingerprint)
+        expect(store.settings.appSetting(key)).toBe(oldFingerprint)
       }
       const current = b.claude.last
       await b.mgr.refreshToolDefinitions()
@@ -174,8 +174,8 @@ describe('a host restart under the keeper', () => {
     await a.mgr.detachAll()
     expect(a.claude.last.detached).toBe(true)
     expect(a.claude.last.disposed).toBe(false)
-    expect(store.listSessions().find((s) => s.id === id)!.state).toBe('working')
-    const texts = store.loadMessages(id, 50).map((r) => JSON.stringify(r.payload))
+    expect(store.sessions.listSessions().find((s) => s.id === id)!.state).toBe('working')
+    const texts = store.messages.loadMessages(id, 50).map((r) => JSON.stringify(r.payload))
     expect(texts.some((t) => t.includes('last words before the restart'))).toBe(true)
   })
 

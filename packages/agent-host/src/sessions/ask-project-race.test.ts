@@ -21,7 +21,7 @@ describe('two asks with a task into one session at once (#839)', () => {
     const t = (await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'normal' })).id
     handleOf(t).externalId = 'ext-t'
     const s = await w.callerSession()
-    w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+    w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     // Neither awaited before the other starts: both are past their first checks when the consent is read
     const first = w.mgr.askProject(s, { project: w.target.name, session: t, task: 'export the sprites' })
     const second = w.mgr.askProject(s, { project: w.target.name, session: t, task: 'export the sounds' })

@@ -41,13 +41,13 @@ export class LaunchRecords {
   }
 
   keptBackgroundTasks(sessionId: string): BackgroundTask[] | null {
-    const raw = this.host.store.appSetting(this.backgroundTasksKey(sessionId))
+    const raw = this.host.store.settings.appSetting(this.backgroundTasksKey(sessionId))
     if (raw === null) return null
     return readJsonObjects<BackgroundTask>(raw, (t) => typeof t.id === 'string' && t.status === 'running')
   }
 
   rememberBackgroundTasks(m: SessionInfo): void {
-    this.host.store.setAppSetting(this.backgroundTasksKey(m.id), JSON.stringify(m.backgroundTasks.filter((t) => t.status === 'running')))
+    this.host.store.settings.setAppSetting(this.backgroundTasksKey(m.id), JSON.stringify(m.backgroundTasks.filter((t) => t.status === 'running')))
   }
 
   /** The persisted prefix a process was started with. It is separate from SessionInfo: a screen never needs it. */
@@ -66,7 +66,7 @@ export class LaunchRecords {
 
   rememberToolPrefix(sessionId: string): void {
     const hash = this.toolPrefixHash(sessionId)
-    if (hash) this.host.store.setAppSetting(this.toolPrefixKey(sessionId), hash)
+    if (hash) this.host.store.settings.setAppSetting(this.toolPrefixKey(sessionId), hash)
   }
 
   /** The stable inputs an adapter may use for its keeper-swap launch fingerprint. */
@@ -87,7 +87,7 @@ export class LaunchRecords {
 
   /** Whether this session was created without code intelligence (#686, `codeIntelligenceKey`) */
   codeIntelligenceOffFor(sessionId: string): boolean {
-    return this.host.store.appSetting(codeIntelligenceKey(sessionId)) === 'off'
+    return this.host.store.settings.appSetting(codeIntelligenceKey(sessionId)) === 'off'
   }
 
   launchSettingsKey(sessionId: string): string {
@@ -101,7 +101,7 @@ export class LaunchRecords {
 
   rememberLaunchSettings(session: SessionInfo, cwd: string): void {
     const fingerprint = this.launchSettingsFingerprint(session, cwd)
-    if (fingerprint) this.host.store.setAppSetting(this.launchSettingsKey(session.id), fingerprint)
+    if (fingerprint) this.host.store.settings.setAppSetting(this.launchSettingsKey(session.id), fingerprint)
   }
 
   /**
@@ -130,7 +130,7 @@ export class LaunchRecords {
   async refreshLaunchSettings(projectId?: string, trustChange = false): Promise<void> {
     for (const session of [...this.host.meta.values()]) {
       if (projectId !== undefined && session.projectId !== projectId) continue
-      const cwd = this.host.store.sessionCwd(session.id)
+      const cwd = this.host.store.sessions.sessionCwd(session.id)
       if (!cwd) continue
       // Earlier builds did not record launch settings: a kept process's policy is unknown.
       // A safety change too, so the same rule as the definitions above
@@ -153,9 +153,9 @@ export class LaunchRecords {
     cause: RebuildCause,
     beforeRestart?: () => void,
   ): Promise<void> {
-    if (!next || this.host.store.appSetting(key) === next) return
+    if (!next || this.host.store.settings.appSetting(key) === next) return
     if (!this.host.handles.has(session.id)) {
-      this.host.store.setAppSetting(key, next)
+      this.host.store.settings.setAppSetting(key, next)
       return
     }
     beforeRestart?.()

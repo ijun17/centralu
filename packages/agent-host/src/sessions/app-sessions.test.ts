@@ -37,23 +37,23 @@ describe("an app's builder slot", () => {
     apps.setBuilder(notes, 'b1')
     apps.setBuilder(notes, 'b2')
     apps.setBuilder(notes, null, 'b1')
-    expect(JSON.parse(store.appSetting('apps.builders')!)).toEqual({ 'p1/notes': 'b2' })
+    expect(JSON.parse(store.settings.appSetting('apps.builders')!)).toEqual({ 'p1/notes': 'b2' })
     apps.setBuilder(notes, null, 'b2')
-    expect(JSON.parse(store.appSetting('apps.builders')!)).toEqual({})
+    expect(JSON.parse(store.settings.appSetting('apps.builders')!)).toEqual({})
   })
 
   it('a slot naming a session of another app, or none, gives no builder; an unreadable slot reads as empty', () => {
     meta.set('b1', at('b1', { appId: 'other' }))
     apps.setBuilder(notes, 'b1')
     expect(apps.builderOf(notes)).toBeNull()
-    store.setAppSetting('apps.builders', 'not json')
+    store.settings.setAppSetting('apps.builders', 'not json')
     expect(apps.builderOf(notes)).toBeNull()
     apps.setBuilder({ projectId: null, appId: 'todo' }, 'u1')
-    expect(JSON.parse(store.appSetting('apps.builders')!)).toEqual({ '_user/todo': 'u1' })
+    expect(JSON.parse(store.settings.appSetting('apps.builders')!)).toEqual({ '_user/todo': 'u1' })
     // JSON that is not a map (an older or broken write) reads as empty too, and the next write replaces it
-    store.setAppSetting('apps.builders', '"x"')
+    store.settings.setAppSetting('apps.builders', '"x"')
     apps.setBuilder(notes, 'b9')
-    expect(JSON.parse(store.appSetting('apps.builders')!)).toEqual({ 'p1/notes': 'b9' })
+    expect(JSON.parse(store.settings.appSetting('apps.builders')!)).toEqual({ 'p1/notes': 'b9' })
   })
 
   it('busy while its builder is in a turn', () => {

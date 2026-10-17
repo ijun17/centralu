@@ -45,10 +45,12 @@ type Record_ = {
 
 /** The part of the store this module uses — the generic settings table and part B's consent rows */
 export type AppAccessStore = {
-  appSetting(key: string): string | null
-  setAppSetting(key: string, value: string): void
-  deleteAppSetting(key: string): void
-  getProjectConsent(from: string, to: string, kind: 'apps'): unknown
+  settings: {
+    appSetting(key: string): string | null
+    setAppSetting(key: string, value: string): void
+    deleteAppSetting(key: string): void
+  }
+  permissions: { getProjectConsent(from: string, to: string, kind: 'apps'): unknown }
 }
 
 export type AppAccessDeps = {
@@ -102,11 +104,11 @@ const SHARED_KEY = (ref: { projectId: string; appId: string }) => `app_shared:${
 const UNUSABLE = new Set(['invalid', 'untrusted', 'unconfirmed', 'failed'])
 
 /** Whether the person shares this project app with their other projects (#371 part A) — the runtime's `shared` dep reads this */
-export function readShared(store: Pick<AppAccessStore, 'appSetting'>, ref: AppRef): boolean {
+export function readShared(store: Pick<AppAccessStore['settings'], 'appSetting'>, ref: AppRef): boolean {
   return ref.projectId !== null && store.appSetting(SHARED_KEY({ projectId: ref.projectId, appId: ref.appId })) === '1'
 }
 
-export function writeShared(store: Pick<AppAccessStore, 'setAppSetting' | 'deleteAppSetting'>, ref: { projectId: string; appId: string }, shared: boolean): void {
+export function writeShared(store: Pick<AppAccessStore['settings'], 'setAppSetting' | 'deleteAppSetting'>, ref: { projectId: string; appId: string }, shared: boolean): void {
   if (shared) store.setAppSetting(SHARED_KEY(ref), '1')
   else store.deleteAppSetting(SHARED_KEY(ref))
 }
@@ -135,7 +137,7 @@ export class AppAccess implements OnDemandApps {
     const r = this.records(session.id).find((x) => x.appId === app.appId && x.projectId === app.projectId)
     if (!r) return false
     // "Once" was this attachment's own answer; "always" holds only while the person keeps it (revoking detaches)
-    return !!this.deps.boundaryOpen?.(session.id) || r.consent === 'once' || !!this.deps.store.getProjectConsent(from, app.projectId, 'apps')
+    return !!this.deps.boundaryOpen?.(session.id) || r.consent === 'once' || !!this.deps.store.permissions.getProjectConsent(from, app.projectId, 'apps')
   }
 
   // ── The three tools ──
@@ -177,7 +179,7 @@ export class AppAccess implements OnDemandApps {
         signal,
       )
       if (!res.ok) return res
-      consent = this.deps.boundaryOpen?.(sessionId) ? 'auto' : this.deps.store.getProjectConsent(session.projectId!, app.projectId, 'apps') ? 'always' : 'once'
+      consent = this.deps.boundaryOpen?.(sessionId) ? 'auto' : this.deps.store.permissions.getProjectConsent(session.projectId!, app.projectId, 'apps') ? 'always' : 'once'
       // The person may have taken a while: the app could have stopped being shared, or this session gone, meanwhile
       const again = this.gate(sessionId)
       if (!again.ok) return again
@@ -336,7 +338,7 @@ export class AppAccess implements OnDemandApps {
   private records(sessionId: string): Record_[] {
     let r = this.cache.get(sessionId)
     if (!r) {
-      r = parse(this.deps.store.appSetting(KEY(sessionId)))
+      r = parse(this.deps.store.settings.appSetting(KEY(sessionId)))
       this.cache.set(sessionId, r)
     }
     return r
@@ -344,13 +346,13 @@ export class AppAccess implements OnDemandApps {
 
   private save(sessionId: string, list: Record_[]): void {
     this.cache.set(sessionId, list)
-    if (list.length === 0) this.deps.store.deleteAppSetting(KEY(sessionId))
-    else this.deps.store.setAppSetting(KEY(sessionId), JSON.stringify(list))
+    if (list.length === 0) this.deps.store.settings.deleteAppSetting(KEY(sessionId))
+    else this.deps.store.settings.setAppSetting(KEY(sessionId), JSON.stringify(list))
   }
 
   private forget(sessionId: string): void {
     this.cache.delete(sessionId)
-    this.deps.store.deleteAppSetting(KEY(sessionId))
+    this.deps.store.settings.deleteAppSetting(KEY(sessionId))
   }
 }
 

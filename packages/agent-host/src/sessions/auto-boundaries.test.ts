@@ -79,7 +79,7 @@ describe('auto Centralu boundaries (#603)', () => {
     // A child starts agents and asks projects only from an agent depth of 2 (#867)
     w.mgr.setUiPreferences({ agentDepth: 2 })
     const parent = await session()
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const first = await start(parent)
     expect(first.ok).toBe(true)
     if (!first.ok) return
@@ -109,7 +109,7 @@ describe('auto Centralu boundaries (#603)', () => {
     '%s: ask_project preserves the target preset',
     async (preset) => {
       const id = await session(preset)
-      w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
+      w.store.permissions.setProjectConsent(w.caller.id, w.target.id, 'delegate')
       const child = await w.mgr.createSession({ projectId: w.target.id, cwd: w.target.path, tool: 'claude', permissionPreset: 'auto' })
       const call = w.mgr.askProject(id, { project: w.target.id, task: 'check' }, AbortSignal.timeout(1000))
       expect(child.permissionPreset).toBe('auto')
@@ -188,7 +188,7 @@ describe('auto Centralu boundaries (#603)', () => {
      */
     it.each(['auto', 'safe'] as const)('%s: a caller at it is refused before the tool is detected, a model checked or a card raised', async (preset) => {
       const log = vi.spyOn(console, 'error').mockImplementation(() => {})
-      w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+      w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
       const parent = await session(preset)
       const child = await w.mgr.startAgent(parent, { task: 'check', wait: false }, AbortSignal.timeout(5000))
       if (!child.ok) throw new Error(child.error)
@@ -217,7 +217,7 @@ describe('auto Centralu boundaries (#603)', () => {
       expect(await start(s)).toMatchObject({ ok: false, error: expect.stringContaining(levelsBelow(1)) })
       expect(await w.mgr.askProject(s, { project: w.target.id, task: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining(levelsBelow(1)) })
       handle(s).answer('done')
-      await w.until(() => w.store.appSetting(`hub_ask_depth:${s}`) === null)
+      await w.until(() => w.store.settings.appSetting(`hub_ask_depth:${s}`) === null)
       expect(await start(s)).toMatchObject({ ok: true, state: 'working' })
     })
 
@@ -229,7 +229,7 @@ describe('auto Centralu boundaries (#603)', () => {
       handle(s).answer('an earlier turn', false)
       expect(await start(s)).toMatchObject({ ok: false, error: expect.stringContaining(levelsBelow(1)) })
       handle(s).answer('done')
-      await w.until(() => w.store.appSetting(`hub_ask_depth:${s}`) === null)
+      await w.until(() => w.store.settings.appSetting(`hub_ask_depth:${s}`) === null)
       expect(await start(s)).toMatchObject({ ok: true, state: 'working' })
     })
 
@@ -252,9 +252,9 @@ describe('auto Centralu boundaries (#603)', () => {
       expect(w.mgr.listSessions().find((s) => s.id === bottom.sessionId)?.askedBy).toBe(middle.sessionId)
       expect(await start(bottom.sessionId)).toMatchObject({ ok: false, error: expect.stringContaining('2 levels below') })
       // The record goes with the session when the trash is emptied of it, and only its own
-      expect(await w.store.purgeSession(middle.sessionId)).toBe(true)
-      expect(w.store.appSetting(`agent_depth:${middle.sessionId}`)).toBeNull()
-      expect(w.store.appSetting(`agent_depth:${bottom.sessionId}`)).toBe('2')
+      expect(await w.store.trash.purgeSession(middle.sessionId)).toBe(true)
+      expect(w.store.settings.appSetting(`agent_depth:${middle.sessionId}`)).toBeNull()
+      expect(w.store.settings.appSetting(`agent_depth:${bottom.sessionId}`)).toBe('2')
     })
 
     it('is read at each call: lowering it refuses the next start, raising it allows it again', async () => {
@@ -279,7 +279,7 @@ describe('auto Centralu boundaries (#603)', () => {
 
   it("opens ownership for every same-project action, including another parent's running child", async () => {
     const owner = await session()
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     const caller = await session()
     const child = await start(owner)
     if (!child.ok) throw new Error(child.error)
@@ -325,7 +325,7 @@ describe('auto Centralu boundaries (#603)', () => {
 
   it('defaults to unlimited for auto; configured ceilings apply at every count and survive saving', async () => {
     const id = await session()
-    w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+    w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
     // Sweep zero through twice the old ceiling, including its immediate neighbours.
     for (let n = 0; n < 9; n++) expect((await start(id)).ok).toBe(true)
     for (let ceiling = 1; ceiling <= 9; ceiling++) {
@@ -345,7 +345,7 @@ describe('auto Centralu boundaries (#603)', () => {
     '%s defaults to four and can use an explicit unlimited setting',
     async (preset) => {
       const id = await session(preset)
-      w.store.setProjectConsent(w.caller.id, w.caller.id, 'agents')
+      w.store.permissions.setProjectConsent(w.caller.id, w.caller.id, 'agents')
       for (let n = 0; n < 4; n++) expect((await start(id)).ok).toBe(true)
       expect((await start(id)).ok).toBe(false)
       w.mgr.setUiPreferences({ agentCeiling: 0 })
@@ -396,7 +396,7 @@ describe('auto Centralu boundaries (#603)', () => {
       changedFiles: state === 'dirty' ? 1 : 0,
       commits: state === 'unmerged' ? 1 : 0,
     } })
-    expect(w.store.trashedSession(child.id)?.record.recovery).toBeDefined()
+    expect(w.store.trash.trashedSession(child.id)?.record.recovery).toBeDefined()
     expect(existsSync(child.worktree!.path)).toBe(false)
     expect(git(w.caller.path, 'branch', '--list', child.worktree!.branch)).toBe('')
     expect(w.mgr.listSessions().some((s) => s.id === child.id)).toBe(false)

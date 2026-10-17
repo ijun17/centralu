@@ -172,7 +172,7 @@ describe('a host leaving (#839)', () => {
     await left()
     expect(claude.created).toHaveLength(2)
     expect(claude.last.disposed).toBe(true)
-    expect(store.listSessions().map((s) => s.id)).toEqual([live])
+    expect(store.sessions.listSessions().map((s) => s.id)).toEqual([live])
   })
 
   it('a turn that ends during a handover does not apply a deferred restart', async () => {

@@ -349,7 +349,7 @@ export class SessionManager {
     this.handoffChildren = new HandoffChildren(this.parts())
     this.cards = new RoutedCards(this.parts())
     this.queue = new QueuedRequests(this.parts())
-    this.cardRests = new CardRests(appSettingRests(store))
+    this.cardRests = new CardRests(appSettingRests(store.settings))
     this.delegationFlow = new DelegationFlow(this.parts())
     this.handoffFlow = new HandoffFlow(this.parts(), keeperOpts.handoffTimings)
     this.askProjectFlow = new AskProjectFlow(this.parts())
@@ -363,7 +363,7 @@ export class SessionManager {
     this.hostCards = new HostCards(this.parts())
     this.linkedReports = new LinkedReports(this.parts())
     this.proposals = new OrchestratorProposals(
-      this.store,
+      this.store.settings,
       () => this.apps.appsHub?.rt,
       // `this.emit` is wrapped just below; the callback looks it up when a list changes, not now
       () => this.emit({ type: 'orchestrator_proposals_changed' }),
@@ -394,7 +394,7 @@ export class SessionManager {
     const LIVE_ONLY: SessionState[] = ['working', 'waiting_approval']
     /** Sessions this start found mid-turn with no process (#698): whoever gave them the turn is told once */
     const stoppedByQuit: SessionInfo[] = []
-    for (const s of store.listSessions()) {
+    for (const s of store.sessions.listSessions()) {
       /*
        * Except where the process **does** still exist (#280 step 2): the keeper kept it through the
        * restart and `adoptKept` re-attaches it. That state is true; if the adoption fails, it is reset
@@ -408,7 +408,7 @@ export class SessionManager {
         console.error(`[agent-host] stale state reset: ${s.id.slice(0, 8)} ${s.state} -> idle`)
         // No window is attached yet: the marker and the interruption are read with the conversation and the list
         this.interruptions.markStoppedByQuit(fixed, false)
-        store.upsertSession(fixed)
+        store.sessions.upsertSession(fixed)
         stoppedByQuit.push(fixed)
       }
     }
@@ -420,8 +420,8 @@ export class SessionManager {
      *
      * A requester the same quit cut is skipped when the notice is given (`tellAskerOfInterruption`, its `quit`).
      */
-    const marks = new Map(store.listReportMarks().map((r) => [r.sessionId, r.callerSessionId]))
-    const turnGivers = new Map(store.listDelegatedTurns().map((r) => [r.sessionId, r.callerSessionId]))
+    const marks = new Map(store.children.listReportMarks().map((r) => [r.sessionId, r.callerSessionId]))
+    const turnGivers = new Map(store.children.listDelegatedTurns().map((r) => [r.sessionId, r.callerSessionId]))
     for (const s of stoppedByQuit) {
       const requester = [marks.get(s.id), turnGivers.get(s.id), s.askedBy].find((id): id is string => !!id && id !== s.id && this.meta.has(id))
       if (requester) this.quitNotices.push({ sessionId: s.id, requester })
@@ -447,10 +447,10 @@ export class SessionManager {
     void this.handoffNotes.sweepOrphanHandoffNotes().catch(() => {})
     // Recovery folders a purge moved aside and never finished with (#647): back for an entry still in the trash, gone otherwise
     // Not awaited here; a purge or restore waits for it, so neither reads the folder while it is still aside
-    this.recoveryRepair = repairWorktreeRecoveryRemovals((id) => store.isTrashed(id)).catch((e) => console.error(`[trash] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
+    this.recoveryRepair = repairWorktreeRecoveryRemovals((id) => store.trash.isTrashed(id)).catch((e) => console.error(`[trash] recovery folders left by an interrupted purge were not repaired: ${(e as Error).message}`))
     this.nameUnnamedWorktrees()
     // "Always allow" rules ending in `*` (#838): since #908 none allows anything, and an older build read them as prefixes
-    const wildcards = store.dropWildcardApprovalRules()
+    const wildcards = store.permissions.dropWildcardApprovalRules()
     if (wildcards > 0) console.error(`[permissions] removed ${wildcards} "always allow" rule(s) ending in * (#838): their commands are asked again`)
     /*
      * Merge detection also runs once at startup (#69) — a merge could have happened in a terminal
@@ -481,7 +481,7 @@ export class SessionManager {
       if (!s.worktree || !s.autoNamed || s.name !== 'New session') continue
       const renamed = { ...s, name: s.worktree.branch }
       this.meta.set(s.id, renamed)
-      this.store.upsertSession(renamed)
+      this.store.sessions.upsertSession(renamed)
     }
   }
 
@@ -560,7 +560,7 @@ export class SessionManager {
     )
     for (const s of leavesFirst) await this.trashSession(s.id).catch(() => {})
     const root = this.projectRow(projectId)?.path
-    this.store.deleteProject(projectId)
+    this.store.trash.deleteProject(projectId)
     // What was held for the project's folder goes with it (#392): its watchers and its `@` file index
     this.watchers.drop(projectId)
     if (root) invalidateFileIndex(root)
@@ -583,7 +583,7 @@ export class SessionManager {
    */
   setProjectTrusted(projectId: string, trusted: boolean): Promise<void> {
     const was = this.projectRow(projectId)?.trusted
-    if (!this.store.setProjectTrusted(projectId, trusted)) {
+    if (!this.store.projects.setProjectTrusted(projectId, trusted)) {
       throw rpcError(`Project not found: ${projectId}`)
     }
     // Every window re-reads the project: the trust mark, the ⋯ menu and the project's apps follow the host (#719)
@@ -618,7 +618,7 @@ export class SessionManager {
    */
   private projectTrusted(projectId: string | null): boolean {
     if (!projectId) return false
-    return this.store.projectRoots().some((p) => p.id === projectId && p.trusted)
+    return this.store.projects.projectRoots().some((p) => p.id === projectId && p.trusted)
   }
 
   /**
@@ -688,13 +688,13 @@ export class SessionManager {
       trusted: row?.trusted ?? false,
       // Default model/effort per tool (#107) — read separately since it is JSON, like commands and
       // worktreeSetup
-      defaultModels: this.store.projectToolDefaults(id),
+      defaultModels: this.store.projects.projectToolDefaults(id),
       // Saved shell commands ride along with the project so the Run menu never has a
       // "loading" state to distinguish from an empty one (issue #44)
-      commands: this.store.projectCommands(id),
+      commands: this.store.projects.projectCommands(id),
       // Worktree provisioning (#69) rides along too — a new session window prefills it without a separate
       // fetch
-      worktreeSetup: this.store.worktreeSetup(id),
+      worktreeSetup: this.store.projects.worktreeSetup(id),
       // Manager slot and trunk (#76). Treated as absent if the pointed-to session does not exist or
       // is archived — so the screen never navigates to a ghost slot, this side (which knows about
       // sessions) does the check
@@ -703,8 +703,8 @@ export class SessionManager {
        * manager was folded into ordinary sessions (#561 part 3), and the window reads only `baseBranch`
        */
       worktreeManager: (() => {
-        const trunk = this.store.worktreeTrunk(id)
-        return trunk ? { sessionId: this.store.worktreeManager(id)?.sessionId ?? '', baseBranch: trunk } : null
+        const trunk = this.store.projects.worktreeTrunk(id)
+        return trunk ? { sessionId: this.store.projects.worktreeManager(id)?.sessionId ?? '', baseBranch: trunk } : null
       })(),
       git: git.isRepo ? git : null,
     }
@@ -731,8 +731,8 @@ export class SessionManager {
       const label = c.label?.trim()
       return [{ command, ...(label ? { label } : {}) }]
     })
-    const was = JSON.stringify(this.store.projectCommands(projectId))
-    this.store.setProjectCommands(projectId, clean)
+    const was = JSON.stringify(this.store.projects.projectCommands(projectId))
+    this.store.projects.setProjectCommands(projectId, clean)
     // The Run menu of every other window reads the project's commands (#719)
     if (was !== JSON.stringify(clean)) this.emit({ type: 'projects_changed' })
     return clean
@@ -745,9 +745,9 @@ export class SessionManager {
       ? { command: setup.command.trim(), copyFiles: setup.copyFiles.map((f) => f.trim()).filter(Boolean) }
       : null
     const saved = clean && (clean.command || clean.copyFiles.length) ? clean : null
-    const was = JSON.stringify(this.store.worktreeSetup(projectId))
-    this.store.setWorktreeSetup(projectId, saved)
-    if (was !== JSON.stringify(this.store.worktreeSetup(projectId))) this.emit({ type: 'projects_changed' })
+    const was = JSON.stringify(this.store.projects.worktreeSetup(projectId))
+    this.store.projects.setWorktreeSetup(projectId, saved)
+    if (was !== JSON.stringify(this.store.projects.worktreeSetup(projectId))) this.emit({ type: 'projects_changed' })
   }
 
   /**
@@ -757,9 +757,9 @@ export class SessionManager {
    * screen should never jump to the front just because an order was saved once.
    */
   async reorderProjects(orderedIds: readonly string[]): Promise<ProjectInfo[]> {
-    const known = this.store.listProjects().map((p) => p.id)
+    const known = this.store.projects.listProjects().map((p) => p.id)
     const rest = known.filter((id) => !orderedIds.includes(id))
-    this.store.setProjectOrder([...orderedIds.filter((id) => known.includes(id)), ...rest])
+    this.store.projects.setProjectOrder([...orderedIds.filter((id) => known.includes(id)), ...rest])
     return this.listProjects()
   }
 
@@ -776,7 +776,7 @@ export class SessionManager {
     const replacement = [...orderedIds.filter((id) => mine.has(id)), ...rest]
     let k = 0
     const globalOrder = all.map((s) => (mine.has(s.id) ? replacement[k++]! : s.id))
-    this.store.setSessionOrder(globalOrder)
+    this.store.sessions.setSessionOrder(globalOrder)
     // Reorder the in-memory copy too — saving alone leaves it out of sync with the screen until the next
     // launch
     const rank = new Map(globalOrder.map((id, i) => [id, i]))
@@ -787,7 +787,7 @@ export class SessionManager {
 
   /** Grid layout — sessions and apps, in order (#288) */
   grid(): GridPanel[] {
-    return this.store.listGridView()
+    return this.store.grid.listGridView()
   }
 
   /**
@@ -802,7 +802,7 @@ export class SessionManager {
    */
   setGridView(panels: readonly GridPanel[]): GridPanel[] {
     const known = new Set(this.meta.keys())
-    const projects = new Set(this.store.listProjects().map((p) => p.id))
+    const projects = new Set(this.store.projects.listProjects().map((p) => p.id))
     // A linked machine's session (#82) is kept while the hub's mirror knows it (links/links.ts)
     const remote = (id: string) => !known.has(id) && this.linkedSession(id)
     /*
@@ -832,7 +832,7 @@ export class SessionManager {
       seen.add(key)
       clean.push(panel)
     }
-    this.store.setGridView(clean, remote, (p) => (projects.has(p.projectId ?? '') ? null : appMachine(p)))
+    this.store.grid.setGridView(clean, remote, (p) => (projects.has(p.projectId ?? '') ? null : appMachine(p)))
     return clean
   }
 
@@ -903,10 +903,10 @@ export class SessionManager {
      */
     if (!ask) return this.send(sessionId, text, undefined, { sessionId: HUB_SENDER, name })
     const key = hubAskDepthKey(sessionId)
-    this.store.setAppSetting(key, String(ask.depth))
+    this.store.settings.setAppSetting(key, String(ask.depth))
     const done = () => {
       this.hubAskTurns.delete(sessionId)
-      this.store.deleteAppSetting(key)
+      this.store.settings.deleteAppSetting(key)
     }
     try {
       await this.deliver(sessionId, text, undefined, { sessionId: HUB_SENDER, name }, false, undefined, 'inline', (h, t) => {
@@ -941,7 +941,7 @@ export class SessionManager {
   }
 
   async listProjects(): Promise<ProjectInfo[]> {
-    return Promise.all(this.store.listProjects().map((p) => this.projectInfo(p.id, p.path)))
+    return Promise.all(this.store.projects.listProjects().map((p) => this.projectInfo(p.id, p.path)))
   }
 
   /**
@@ -1187,11 +1187,11 @@ export class SessionManager {
     }
 
     this.meta.set(id, info)
-    this.store.upsertSession(info)
-    if (noCodeIntelligence) this.store.setAppSetting(codeIntelligenceKey(id), 'off')
+    this.store.sessions.upsertSession(info)
+    if (noCodeIntelligence) this.store.settings.setAppSetting(codeIntelligenceKey(id), 'off')
     this.launches.rememberToolPrefix(id)
     this.launches.rememberLaunchSettings(info, cwd)
-    this.store.setSessionCwd(id, cwd)
+    this.store.sessions.setSessionCwd(id, cwd)
     /*
      * Lets the UI learn about this session **through an event too** (#69).
      *
@@ -1217,7 +1217,7 @@ export class SessionManager {
     if (params.projectId && !params.appAgent) {
       const owner = this.projectRow(params.projectId)
       if (owner && owner.defaultTool !== params.tool) {
-        this.store.setProjectDefaultTool(params.projectId, params.tool)
+        this.store.projects.setProjectDefaultTool(params.projectId, params.tool)
         this.emit({ type: 'projects_changed' })
       }
     }
@@ -1265,7 +1265,7 @@ export class SessionManager {
     // that if the host died before the first response, the session could never be resumed again (FR-10).
     if (handle.externalId) {
       info.externalId = handle.externalId
-      this.store.upsertSession(info)
+      this.store.sessions.upsertSession(info)
     }
 
     // Fetches skills ahead of time while the session is still alive.
@@ -1307,8 +1307,8 @@ export class SessionManager {
           console.error(`[agent-host] handoff note not rewritten with the moved children: ${(e as Error).message}`)
         }
       }
-      const seq = this.store.nextSeq(id)
-      this.store.appendMessages([
+      const seq = this.store.messages.nextSeq(id)
+      this.store.messages.appendMessages([
         {
           sessionId: id,
           seq,
@@ -1324,14 +1324,14 @@ export class SessionManager {
       this.emit({ type: 'handoff', sessionId: id, seq, from })
     }
     if (params.initialPrompt) {
-      const seq = this.store.nextSeq(id)
+      const seq = this.store.messages.nextSeq(id)
       const from = params.initialFrom
-      this.store.appendMessages([
+      this.store.messages.appendMessages([
         { sessionId: id, seq, role: 'user', kind: 'text', payload: { text: params.initialPrompt, ...(from ? { from } : {}) }, ts: Date.now() },
       ])
       info.lastSeq = seq
       info.lastReadSeq = seq // Something we sent counts as read
-      this.store.upsertSession(info)
+      this.store.sessions.upsertSession(info)
       this.emit({ type: 'user_message', sessionId: id, seq, text: params.initialPrompt, ...(from ? { from } : {}) })
       this.cardRests.turnAsked(id)
       handle.send(params.initialPrompt)
@@ -1506,7 +1506,7 @@ export class SessionManager {
   /** Tool calls the store holds for this session with no result after them (the newest 200 rows) */
   private openToolCalls(sessionId: string): { callId: string; tool: string }[] {
     const open = new Map<string, string>()
-    for (const r of this.store.loadMessages(sessionId, 200)) {
+    for (const r of this.store.messages.loadMessages(sessionId, 200)) {
       const p = r.payload as { callId?: unknown; summary?: { tool?: unknown } }
       if (typeof p?.callId !== 'string') continue
       if (r.kind === 'tool_call' && typeof p.summary?.tool === 'string') open.set(p.callId, p.summary.tool)
@@ -1543,7 +1543,7 @@ export class SessionManager {
             const change = { type: 'state_change' as const, sessionId: m.id, state: 'idle' as const, reason: 'reattach_failed' }
             this.applyStateHint(change, m)
             this.interruptions.markStoppedByQuit(m, true)
-            this.store.upsertSession(m)
+            this.store.sessions.upsertSession(m)
             this.emit(change)
             // Its turn is over: the report it owed says so now, rather than naming a later turn (#698)
             if (this.children.awaitingReport.has(m.id)) void this.reports.reportBackIfAwaited(m.id, { type: 'state_change', sessionId: m.id, state: 'idle' })
@@ -1609,8 +1609,8 @@ export class SessionManager {
        * (If messages were exchanged after the boundary, that is the new tool's conversation, and it
        * does have an externalId.)
        */
-      const boundary = Number(this.store.appSetting(freshStartKey(m.id)) ?? '-1')
-      const newest = this.store.loadMessages(m.id, 1)[0]
+      const boundary = Number(this.store.settings.appSetting(freshStartKey(m.id)) ?? '-1')
+      const newest = this.store.messages.loadMessages(m.id, 1)[0]
       if (newest && newest.seq > boundary) {
         return {
           session: m,
@@ -1715,7 +1715,7 @@ export class SessionManager {
           // The goal survives in the tool's conversation, not in a new one (see CreateSessionOpts.knownGoal)
           ...(resumeId && m.goal ? { knownGoal: m.goal } : {}),
           noCodeIntelligence: this.launches.codeIntelligenceOffFor(sessionId),
-          inheritsHandoff: this.store.inheritsHandoff(sessionId),
+          inheritsHandoff: this.store.handoffs.inheritsHandoff(sessionId),
           choice: { profile, tools },
           apps,
           memory: !resumeId,
@@ -1794,7 +1794,7 @@ export class SessionManager {
          * running, and a waiting approval has been, or is about to be, re-delivered by the tool —
          * which sets the state itself. Forcing `idle` here would tear down that fresh card.
          */
-        this.store.upsertSession(m)
+        this.store.sessions.upsertSession(m)
         this.emit({ type: 'state_change', sessionId, state: m.state, reason: 'reattached' })
         /*
          * And it keeps its background work (#648): the shells the previous host saw running still run in it, and the
@@ -1900,7 +1900,7 @@ export class SessionManager {
       // Deleted or switched while the tool forked (#839): the copy read before is not written back
       if (this.meta.get(sessionId) !== m || m.tool !== tool) return { session: m, resumed: false, reason: 'The session was deleted or switched tools while its conversation was forked' }
       m.externalId = forked
-      this.store.upsertSession(m)
+      this.store.sessions.upsertSession(m)
     } catch (err) {
       return { session: m, resumed: false, reason: (err as Error).message }
     }
@@ -1969,7 +1969,7 @@ export class SessionManager {
     if (s.serviceTier !== undefined) m.serviceTier = s.serviceTier
     const wasAuto = m.permissionPreset === 'auto'
     if (s.permissionPreset) m.permissionPreset = s.permissionPreset
-    this.store.upsertSession(m)
+    this.store.sessions.upsertSession(m)
     if (wasAuto && m.permissionPreset !== 'auto') this.queue.dropOpenedByAuto(sessionId)
     /*
      * The model and effort chosen most recently become this project's default (#69, item 5). The
@@ -1985,8 +1985,8 @@ export class SessionManager {
      * choice lands only in its own slot.
      */
     if ((s.model !== undefined || s.effort !== undefined) && m.projectId) {
-      const before = this.store.projectToolDefaults(m.projectId)[m.tool]
-      this.store.setProjectToolDefaults(m.projectId, m.tool, { model: m.model, effort: m.effort })
+      const before = this.store.projects.projectToolDefaults(m.projectId)[m.tool]
+      this.store.projects.setProjectToolDefaults(m.projectId, m.tool, { model: m.model, effort: m.effort })
       // Another window starts its next session on what this one chose last (#719)
       if ((before?.model ?? null) !== (m.model || null) || (before?.effort ?? null) !== (m.effort || null)) this.emit({ type: 'projects_changed' })
     }
@@ -2130,7 +2130,7 @@ export class SessionManager {
       return
     }
     // Text the tool repeats on every start (#304): one stored line per session is enough
-    if (e.type === 'notice' && e.oncePerSession && e.sessionId && this.store.hasNotice(e.sessionId, e.text)) return
+    if (e.type === 'notice' && e.oncePerSession && e.sessionId && this.store.handoffs.hasNotice(e.sessionId, e.text)) return
     let seq: number | null = null
     /** This event ended the turn — how it ended (completed, error, canceled, limit) is stated by this event
      * itself */
@@ -2181,7 +2181,7 @@ export class SessionManager {
         if (e.type === 'message_image') void this.record.persistImage(e, m)
         // Commit attribution (#50) — caught in passing whenever a git commit tool call goes by
         if (e.type === 'tool_call' || e.type === 'tool_result') this.observeCommit(e, m)
-        this.store.upsertSession(m)
+        this.store.sessions.upsertSession(m)
       }
       /*
        * **A dead process's handle is removed right on the spot.**
@@ -2241,7 +2241,7 @@ export class SessionManager {
     if ((e.type === 'question_request' || e.type === 'approval_request') && e.sessionId) this.cards.routeCard(e.sessionId, e.requestId, e.type === 'question_request' ? 'question' : 'approval')
     if (endedTurn && e.sessionId && this.children.turnOwners.get(e.sessionId)?.untilTurnEnd) this.children.releaseTurn(e.sessionId)
     // A hub's ask_project task ends with its turn, and the depth it gave the session with it (#838)
-    if (endedTurn && e.sessionId && !this.hubAskTurns.has(e.sessionId) && this.store.appSetting(hubAskDepthKey(e.sessionId)) !== null) this.store.deleteAppSetting(hubAskDepthKey(e.sessionId))
+    if (endedTurn && e.sessionId && !this.hubAskTurns.has(e.sessionId) && this.store.settings.appSetting(hubAskDepthKey(e.sessionId)) !== null) this.store.settings.deleteAppSetting(hubAskDepthKey(e.sessionId))
     // The card slot is now empty — if a capability question was waiting, it is raised (D-4). Either the
     // adapter's card just closed, or a card that had been hiding ours just closed
     if (e.type === 'approval_resolved' && e.sessionId) this.hostCards.raiseHostAsks(e.sessionId)
@@ -2300,7 +2300,7 @@ export class SessionManager {
     // The host has said what the state is: no card rest or asked-for turn of before stands over it
     this.cardRests.forget(m.id)
     this.applyStateHint(change, m)
-    this.store.upsertSession(m)
+    this.store.sessions.upsertSession(m)
     this.emit(change)
     // At rest by a statement, not a turn's end that `onEvent` would see: a request queued for it goes in now (#677)
     if (!inTurn(m.state) && this.children.queued.has(m.id)) this.queue.scheduleDrain(m.id)
@@ -2386,11 +2386,11 @@ export class SessionManager {
     if (!e.ok || !projectId) return
     const sha = parseCommitSha(e.summary)
     if (sha) {
-      this.store.recordCommit(projectId, sha, sid)
+      this.store.sessions.recordCommit(projectId, sha, sid)
       return
     }
     void gitHeadSha(this.cwdOf(projectId))
-      .then((head) => head && this.store.recordCommit(projectId, head, sid))
+      .then((head) => head && this.store.sessions.recordCommit(projectId, head, sid))
       .catch(() => {})
   }
 
@@ -2475,8 +2475,8 @@ export class SessionManager {
     // A message from the person is always a message boundary — continuing after an interrupt means everything
     // before it is one chunk (#66)
     this.record.closeStream(sessionId)
-    const seq = this.store.nextSeq(sessionId)
-    this.store.appendMessages([
+    const seq = this.store.messages.nextSeq(sessionId)
+    this.store.messages.appendMessages([
       {
         sessionId,
         seq,
@@ -2496,7 +2496,7 @@ export class SessionManager {
       m.name = truncate(text)
       this.emit({ type: 'session_title', sessionId, title: m.name, auto: true })
     }
-    this.store.upsertSession(m)
+    this.store.sessions.upsertSession(m)
     /*
      * **Announces that a message was added.**
      *
@@ -2630,7 +2630,7 @@ export class SessionManager {
     // behind (there is a path where a row that came in as an event never passes through meta) — even
     // one row of drift would make the guard read it as "lost", and the session just switched would
     // fail to wake
-    this.store.setAppSetting(freshStartKey(m.id), String(this.store.loadMessages(m.id, 1)[0]?.seq ?? 0))
+    this.store.settings.setAppSetting(freshStartKey(m.id), String(this.store.messages.loadMessages(m.id, 1)[0]?.seq ?? 0))
     /*
      * The broadcast state is also written into meta (#163). It used to only broadcast idle while
      * saving meta as working, so a screen that reconnected and the orchestrator's list_sessions both
@@ -2710,7 +2710,7 @@ export class SessionManager {
     // restart (C-2)
     // Only the card's own key (`remembered` above): an edit with no path has none (#428), so "(no path)" is never a rule
     if (decision === 'always' && m && remembered) {
-      this.store.addApprovalRule({
+      this.store.permissions.addApprovalRule({
         scope: scope ?? 'session',
         sessionId: scope === 'project' ? undefined : sessionId,
         projectId: scope === 'project' ? (m.projectId ?? undefined) : undefined,
@@ -2791,10 +2791,10 @@ export class SessionManager {
    * theirs once, here, and write it down; from then on the next rename cannot move them either.
    */
   private cwdFor(m: SessionInfo): string {
-    const stored = this.store.sessionCwd(m.id)
+    const stored = this.store.sessions.sessionCwd(m.id)
     if (stored) return stored
     const derived = m.worktree?.path ?? this.cwdOf(m.projectId)
-    this.store.setSessionCwd(m.id, derived)
+    this.store.sessions.setSessionCwd(m.id, derived)
     return derived
   }
 
@@ -2806,7 +2806,7 @@ export class SessionManager {
    * definition our own business, and it can still exist even after the project is removed from the list.
    */
   folderRoots(): string[] {
-    return [...this.store.listProjects().map((p) => p.path), this.worktreeRoot]
+    return [...this.store.projects.listProjects().map((p) => p.path), this.worktreeRoot]
   }
 
   /** The material needed to decide whether a worktree can be deleted. null if this is not a worktree session
@@ -2894,8 +2894,8 @@ export class SessionManager {
     const commits = await gitLog(this.cwdOf(projectId), limit)
     // Tags which session created each commit (#50) — passes through untouched wherever there is no record
     // A commit link of a session in the trash is kept (#96, #204) — and says where the session is rather than "deleted"
-    const trashed = this.store.trashedIds()
-    return attachCommitSessions(commits, this.store.commitSessions(projectId), (sid) =>
+    const trashed = this.store.trash.trashedIds()
+    return attachCommitSessions(commits, this.store.sessions.commitSessions(projectId), (sid) =>
       this.meta.get(sid)?.name ?? (trashed.has(sid) ? '(in the trash)' : undefined),
     )
   }
@@ -2997,7 +2997,7 @@ export class SessionManager {
     sessionId: string | null
   }[] {
     return this.store
-      .listApprovalRules()
+      .permissions.listApprovalRules()
       .filter((r) => r.matcher)
       .map((r) => ({
         id: r.id,
@@ -3012,7 +3012,7 @@ export class SessionManager {
   }
 
   deleteApprovalRule(id: number): void {
-    this.store.deleteApprovalRule(id)
+    this.store.permissions.deleteApprovalRule(id)
   }
 
   /**
@@ -3022,14 +3022,14 @@ export class SessionManager {
    */
   searchMessages(query: string, limit?: number) {
     return this.store
-      .searchMessages(query, limit)
+      .messages.searchMessages(query, limit)
       .map((h) => ({ sessionId: h.sessionId, seq: h.seq, snippet: windowAround(h.body, query, 60) }))
   }
 
   /** Saved rules that apply to this session (session-scoped plus project-scoped) */
   private rulesFor(sessionId: string, projectId: string | null): string[] {
     return this.store
-      .listApprovalRules()
+      .permissions.listApprovalRules()
       .filter((r) => (r.sessionId ? r.sessionId === sessionId : r.projectId === projectId))
       .map((r) => r.matcher)
       .filter(Boolean)
@@ -3533,7 +3533,7 @@ export class SessionManager {
       const project = this.projectRow(projectId)
       return this.firstTool(project?.defaultTool)
     }
-    return this.firstTool(this.store.appSetting('orchestrator_tool'))
+    return this.firstTool(this.store.settings.appSetting('orchestrator_tool'))
   }
 
   /** `ProjectConsents.ensureProjectAccess` (project-consents.ts), kept on the manager for its callers */
@@ -3590,7 +3590,7 @@ export class SessionManager {
     const folder = canonicalPath(root)
     return [...this.meta.values()].filter((s) => {
       if (s.id === target.id) return false
-      const cwd = this.store.sessionCwd(s.id) ?? s.worktree?.path
+      const cwd = this.store.sessions.sessionCwd(s.id) ?? s.worktree?.path
       return !!cwd && isInside(folder, canonicalPath(cwd))
     })
   }
@@ -3777,7 +3777,7 @@ export class SessionManager {
   /** This project's trunk branch (#76): the one chosen for the former worktree manager's slot, still read from its row (#561
    * part 3). null if none was set — HEAD is then used as the baseline */
   private trunkOf(projectId: string): string | null {
-    return this.store.worktreeTrunk(projectId)
+    return this.store.projects.worktreeTrunk(projectId)
   }
 
   /** Sets the project's worktree trunk (`worktrees.setTrunk`, #76; the manager's dialog chose it before #561 part 3) */
@@ -3786,7 +3786,7 @@ export class SessionManager {
     const branch = baseBranch.trim()
     if (!branch) throw rpcError('Pick the branch worktrees should fork from')
     if (!(await gitValidBranchName(branch))) throw rpcError(`Not a branch name: ${branch}`)
-    this.store.setWorktreeTrunk(projectId, branch)
+    this.store.projects.setWorktreeTrunk(projectId, branch)
     this.emit({ type: 'projects_changed' })
   }
 
@@ -3805,7 +3805,7 @@ export class SessionManager {
 
   /** A summary of the orchestrator's past conversation for its next system prompt (transcript-view.ts) */
   private orchestratorMemory(sessionId: string): string {
-    return orchestratorMemory(this.store, sessionId)
+    return orchestratorMemory(this.store.messages, sessionId)
   }
 
   /**
@@ -3827,7 +3827,7 @@ export class SessionManager {
    * tool process on behalf of someone who never even asked for it.
    */
   orchestratorPeek(): SessionInfo | null {
-    const known = this.store.orchestratorId()
+    const known = this.store.sessions.orchestratorId()
     return known ? (this.meta.get(known) ?? null) : null
   }
 
@@ -3857,14 +3857,14 @@ export class SessionManager {
   }
 
   configureOrchestrator(tool: ToolName): void {
-    this.store.setAppSetting('orchestrator_tool', tool)
+    this.store.settings.setAppSetting('orchestrator_tool', tool)
   }
 
   /** The orchestrator being created (#839): a second ask while it is made waits on this one, never makes another */
   private orchestratorCreating: Promise<SessionInfo> | null = null
 
   async orchestrator(): Promise<SessionInfo> {
-    const known = this.store.orchestratorId()
+    const known = this.store.sessions.orchestratorId()
     if (known) {
       const m = this.meta.get(known)
       if (m) return m
@@ -3886,7 +3886,7 @@ export class SessionManager {
      * onboarding ("Codex is ready") and still be unable to open the orchestrator (#63). The wiring on
      * the Codex side (the stdio bridge) was already laid down and measured by the project orchestrator (#13).
      */
-    const configured = this.store.appSetting('orchestrator_tool')
+    const configured = this.store.settings.appSetting('orchestrator_tool')
     const info = await this.createSession({
       projectId: null,
       // The marker is born together with the session — stamping it separately would leave a window with no
@@ -3922,7 +3922,7 @@ export class SessionManager {
     if (!next) throw rpcError('Session name cannot be empty')
     m.name = next
     m.autoNamed = false
-    this.store.upsertSession(m)
+    this.store.sessions.upsertSession(m)
     // auto:false — the receiving side needs to know "the person set this" in order to block the next
     // auto-name
     this.emit({ type: 'session_title', sessionId, title: next, auto: false })
@@ -3932,7 +3932,7 @@ export class SessionManager {
     const m = this.meta.get(sessionId)
     if (!m) return
     m.lastReadSeq = Math.max(m.lastReadSeq, seq)
-    this.store.markRead(sessionId, seq)
+    this.store.sessions.markRead(sessionId, seq)
   }
 
   /** `SessionRecord.messageImage` (session-record.ts), kept on the manager for its callers */
@@ -4066,12 +4066,12 @@ export class SessionManager {
   }
 
   /** A registered project's row, read now (trust and paths change under a running host) */
-  private projectRow(projectId: string | null | undefined): ReturnType<Store['listProjects']>[number] | undefined {
-    return projectId ? this.store.listProjects().find((p) => p.id === projectId) : undefined
+  private projectRow(projectId: string | null | undefined): ReturnType<Store['projects']['listProjects']>[number] | undefined {
+    return projectId ? this.store.projects.listProjects().find((p) => p.id === projectId) : undefined
   }
 
   /** A registered project's row, or `Project not found` */
-  private requireProject(projectId: string): ReturnType<Store['listProjects']>[number] {
+  private requireProject(projectId: string): ReturnType<Store['projects']['listProjects']>[number] {
     const p = this.projectRow(projectId)
     if (!p) throw rpcError(`Project not found: ${projectId}`)
     return p

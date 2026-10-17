@@ -206,7 +206,7 @@ describe('the orchestrator name cannot be proposed (#93)', () => {
    * is covered by sessions/mcp-apps.test.ts).
    */
   it('an entry from the old registry (including centralu) is not loaded raw — the set contains only the in-process centralu', async () => {
-    store.setAppSetting(
+    store.settings.setAppSetting(
       'orchestrator_mcp_servers',
       JSON.stringify([
         { name: 'centralu', command: 'npx', args: ['-y', 'whatever'] },

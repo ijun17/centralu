@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import type { AgentUse, GridPanel, ProjectInfo, SavedCommand, SessionInfo, StoredMessage, ToolDefaults } from '@cc/protocol'
+import type { SessionInfo, StoredMessage } from '@cc/protocol'
 import { AppRunRecords, type AppRunRecord } from './store/app-runs.js'
 import { ChildOwnershipRecords, type QueuedRequest } from './store/child-ownership.js'
 import { GridRecords } from './store/grid.js'
@@ -65,17 +65,22 @@ const SCHEMA_PATH = resolveSchemaPath()
  */
 export class Store extends MigrationRunner {
   protected db: Database.Database
-  private readonly projects: ProjectRecords
-  private readonly sessions: SessionRecords
-  private readonly grid: GridRecords
-  private readonly messages: MessageRecords
-  private readonly handoffs: HandoffMarkers
-  private readonly trash: TrashRecords
-  private readonly settings: SettingsRecords
-  private readonly permissions: PermissionRecords
-  private readonly appRuns: AppRunRecords
-  private readonly children: ChildOwnershipRecords
-  private readonly machines: LinkedMachineRecords
+  /*
+   * The records, one module per concept in `store/`, each holding its queries and the comments that say what they do.
+   * Callers reach them through these fields (`store.projects.listProjects()`), so `Store` itself is only the
+   * connection, the migration runner and these fields.
+   */
+  readonly projects: ProjectRecords
+  readonly sessions: SessionRecords
+  readonly grid: GridRecords
+  readonly messages: MessageRecords
+  readonly handoffs: HandoffMarkers
+  readonly trash: TrashRecords
+  readonly settings: SettingsRecords
+  readonly permissions: PermissionRecords
+  readonly appRuns: AppRunRecords
+  readonly children: ChildOwnershipRecords
+  readonly machines: LinkedMachineRecords
 
   constructor(
     protected readonly dbPath = ':memory:',
@@ -183,134 +188,14 @@ export class Store extends MigrationRunner {
   }
 
   /*
-   * Everything below only passes the call on to the module named in its heading, which holds the code and the comment
-   * that says what it does. The methods stay here so that no caller names a module.
+   * Everything below only passes the call on to the module named in its heading. They are the last pass-throughs: open
+   * pull requests still call them on `Store` (#428), and they go once those land. New code names the module.
    */
-
-  // ── ProjectRecords (store/projects.ts) ──
-
-  addProject(p: { id: string; path: string; name: string; trusted?: boolean }): void {
-    return this.projects.addProject(p)
-  }
-
-  listProjects(): Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels'>[] {
-    return this.projects.listProjects()
-  }
-
-  projectCommands(projectId: string): SavedCommand[] {
-    return this.projects.projectCommands(projectId)
-  }
-
-  setProjectCommands(projectId: string, commands: readonly SavedCommand[]): void {
-    return this.projects.setProjectCommands(projectId, commands)
-  }
-
-  worktreeSetup(projectId: string): { command: string; copyFiles: string[] } | null {
-    return this.projects.worktreeSetup(projectId)
-  }
-
-  setWorktreeSetup(projectId: string, setup: { command: string; copyFiles: string[] } | null): void {
-    return this.projects.setWorktreeSetup(projectId, setup)
-  }
-
-  worktreeManager(projectId: string): { sessionId: string; baseBranch: string } | null {
-    return this.projects.worktreeManager(projectId)
-  }
-
-  worktreeTrunk(projectId: string): string | null {
-    return this.projects.worktreeTrunk(projectId)
-  }
-
-  setWorktreeTrunk(projectId: string, baseBranch: string): void {
-    return this.projects.setWorktreeTrunk(projectId, baseBranch)
-  }
-
-  setWorktreeManager(projectId: string, manager: { sessionId: string; baseBranch: string } | null): void {
-    return this.projects.setWorktreeManager(projectId, manager)
-  }
-
-  setProjectDefaultTool(projectId: string, tool: string): void {
-    return this.projects.setProjectDefaultTool(projectId, tool)
-  }
-
-  projectToolDefaults(projectId: string): Record<string, ToolDefaults> {
-    return this.projects.projectToolDefaults(projectId)
-  }
-
-  setProjectToolDefaults(projectId: string, tool: string, d: ToolDefaults): void {
-    return this.projects.setProjectToolDefaults(projectId, tool, d)
-  }
-
-  projectRoots(): { id: string; path: string; trusted: boolean }[] {
-    return this.projects.projectRoots()
-  }
-
-  setProjectTrusted(projectId: string, trusted: boolean): boolean {
-    return this.projects.setProjectTrusted(projectId, trusted)
-  }
-
-  findProjectByPath(path: string): { id: string } | undefined {
-    return this.projects.findProjectByPath(path)
-  }
-
-  setProjectOrder(orderedIds: readonly string[]): void {
-    return this.projects.setProjectOrder(orderedIds)
-  }
 
   // ── SessionRecords (store/sessions.ts) ──
 
   upsertSession(s: SessionInfo): void {
     return this.sessions.upsertSession(s)
-  }
-
-  setSessionOrder(orderedIds: readonly string[]): void {
-    return this.sessions.setSessionOrder(orderedIds)
-  }
-
-  orchestratorId(): string | null {
-    return this.sessions.orchestratorId()
-  }
-
-  listSessions(): SessionInfo[] {
-    return this.sessions.listSessions()
-  }
-
-  sessionCwd(sessionId: string): string | null {
-    return this.sessions.sessionCwd(sessionId)
-  }
-
-  setSessionCwd(sessionId: string, cwd: string): void {
-    return this.sessions.setSessionCwd(sessionId, cwd)
-  }
-
-  setTouchedPaths(sessionId: string, paths: string[]): void {
-    return this.sessions.setTouchedPaths(sessionId, paths)
-  }
-
-  getTouchedPaths(sessionId: string): string[] {
-    return this.sessions.getTouchedPaths(sessionId)
-  }
-
-  recordCommit(projectId: string, sha: string, sessionId: string): void {
-    return this.sessions.recordCommit(projectId, sha, sessionId)
-  }
-
-  commitSessions(projectId: string): { sha: string; sessionId: string }[] {
-    return this.sessions.commitSessions(projectId)
-  }
-
-  markRead(sessionId: string, seq: number): void {
-    return this.sessions.markRead(sessionId, seq)
-  }
-
-  // ── GridRecords (store/grid.ts) ──
-
-  listGridView(): GridPanel[] {
-    return this.grid.listGridView()
-  }
-
-  setGridView(panels: readonly GridPanel[], remote?: (sessionId: string) => boolean, appMachine?: (panel: Extract<GridPanel, { kind: 'app' }>) => string | null): void {
-    return this.grid.setGridView(panels, remote, appMachine)
   }
 
   // ── MessageRecords (store/messages.ts) ──
@@ -319,224 +204,32 @@ export class Store extends MigrationRunner {
     return this.messages.appendMessages(msgs)
   }
 
-  searchMessages(query: string, limit?: number): { sessionId: string; seq: number; body: string }[] {
-    return this.messages.searchMessages(query, limit)
-  }
-
   loadMessages(sessionId: string, limit?: number, beforeSeq?: number, opts?: ReadOpts): StoredMessage[] {
     return this.messages.loadMessages(sessionId, limit, beforeSeq, opts)
-  }
-
-  replyTextsContaining(sessionId: string, needle: string): string[] {
-    return this.messages.replyTextsContaining(sessionId, needle)
   }
 
   loadMessagesFrom(sessionId: string, afterSeq: number, limit?: number, opts?: ReadOpts): StoredMessage[] {
     return this.messages.loadMessagesFrom(sessionId, afterSeq, limit, opts)
   }
 
-  lastContextCut(sessionId: string): number | null {
-    return this.messages.lastContextCut(sessionId)
-  }
-
   upsertMessageNoIndex(m: StoredMessage): void {
     return this.messages.upsertMessageNoIndex(m)
-  }
-
-  appendSubagentMessage(sessionId: string, parentCallId: string, m: Pick<StoredMessage, 'role' | 'kind' | 'payload' | 'ts'>): number {
-    return this.messages.appendSubagentMessage(sessionId, parentCallId, m)
-  }
-
-  loadSubagentMessages(sessionId: string, parentCallId: string, opts?: ReadOpts & { afterSeq?: number; limit?: number }): StoredMessage[] {
-    return this.messages.loadSubagentMessages(sessionId, parentCallId, opts)
   }
 
   nextSeq(sessionId: string): number {
     return this.messages.nextSeq(sessionId)
   }
 
-  // ── HandoffMarkers (store/handoff-markers.ts) ──
-
-  handoffPredecessors(): Set<string> {
-    return this.handoffs.handoffPredecessors()
-  }
-
-  handoffHeirs(fromSessionId: string): { sessionId: string; trashed: boolean }[] {
-    return this.handoffs.handoffHeirs(fromSessionId)
-  }
-
-  hasNotice(sessionId: string, text: string): boolean {
-    return this.handoffs.hasNotice(sessionId, text)
-  }
-
-  inheritsHandoff(sessionId: string): boolean {
-    return this.handoffs.inheritsHandoff(sessionId)
-  }
-
-  // ── TrashRecords (store/trash.ts) ──
-
-  trashSession(sessionId: string, record: TrashRecord, chunk?: number): Promise<boolean> {
-    return this.trash.trashSession(sessionId, record, chunk)
-  }
-
-  restoreSession(sessionId: string, projectId: string | null, chunk?: number): Promise<SessionInfo | null> {
-    return this.trash.restoreSession(sessionId, projectId, chunk)
-  }
-
-  purgeSession(sessionId: string, chunk?: number): Promise<boolean> {
-    return this.trash.purgeSession(sessionId, chunk)
-  }
-
-  isTrashed(sessionId: string): boolean {
-    return this.trash.isTrashed(sessionId)
-  }
-
-  trashedIds(): Set<string> {
-    return this.trash.trashedIds()
-  }
-
-  trashedSession(sessionId: string): { session: SessionInfo; record: TrashRecord; deletedAt: number } | null {
-    return this.trash.trashedSession(sessionId)
-  }
-
-  listTrash(): TrashedRow[] {
-    return this.trash.listTrash()
-  }
-
-  deleteProject(projectId: string): void {
-    return this.trash.deleteProject(projectId)
-  }
-
   // ── SettingsRecords (store/settings.ts) ──
-
-  saveCommands(tool: string, cwd: string, commands: unknown): void {
-    return this.settings.saveCommands(tool, cwd, commands)
-  }
-
-  loadCommands<T>(tool: string, cwd: string): T | null {
-    return this.settings.loadCommands(tool, cwd)
-  }
-
-  saveWorkspace(layout: unknown): void {
-    return this.settings.saveWorkspace(layout)
-  }
-
-  loadWorkspace<T = unknown>(): T | null {
-    return this.settings.loadWorkspace()
-  }
 
   appSetting(key: string): string | null {
     return this.settings.appSetting(key)
   }
 
-  setAppSetting(key: string, value: string): void {
-    return this.settings.setAppSetting(key, value)
-  }
-
-  updateAppSetting(key: string, next: (current: string | null) => string): void {
-    return this.settings.updateAppSetting(key, next)
-  }
-
-  deleteAppSetting(key: string): void {
-    return this.settings.deleteAppSetting(key)
-  }
-
   // ── PermissionRecords (store/permissions.ts) ──
-
-  addApprovalRule(r: {
-    scope: string
-    projectId?: string
-    sessionId?: string
-    matcher: string
-    decision: string
-  }): void {
-    return this.permissions.addApprovalRule(r)
-  }
-
-  dropWildcardApprovalRules(): number {
-    return this.permissions.dropWildcardApprovalRules()
-  }
-
-  listApprovalRules(): {
-    id: number
-    scope: string
-    matcher: string
-    decision: string
-    projectId: string | null
-    sessionId: string | null
-    createdAt: number
-  }[] {
-    return this.permissions.listApprovalRules()
-  }
-
-  deleteApprovalRule(id: number): void {
-    return this.permissions.deleteApprovalRule(id)
-  }
-
-  getAppPermission(appKey: string, capability: string): AppPermissionRecord | null {
-    return this.permissions.getAppPermission(appKey, capability)
-  }
-
-  putAppPermission(appKey: string, projectId: string | null, r: AppPermissionRecord): void {
-    return this.permissions.putAppPermission(appKey, projectId, r)
-  }
-
-  forgetAppPermission(appKey: string, capability: string): void {
-    return this.permissions.forgetAppPermission(appKey, capability)
-  }
-
-  listAppPermissions(appKey: string): AppPermissionRecord[] {
-    return this.permissions.listAppPermissions(appKey)
-  }
-
-  getProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): ConsentRow | null {
-    return this.permissions.getProjectConsent(fromProjectId, toProjectId, kind)
-  }
 
   setProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): void {
     return this.permissions.setProjectConsent(fromProjectId, toProjectId, kind)
-  }
-
-  forgetProjectConsent(fromProjectId: string, toProjectId: string, kind: ProjectConsentKind): boolean {
-    return this.permissions.forgetProjectConsent(fromProjectId, toProjectId, kind)
-  }
-
-  listProjectConsents(): ConsentRow[] {
-    return this.permissions.listProjectConsents()
-  }
-
-  // ── AppRunRecords (store/app-runs.ts) ──
-
-  beginAppRun(r: AppRunRecord): void {
-    return this.appRuns.beginAppRun(r)
-  }
-
-  linkAppRunSession(id: string, sessionId: string): void {
-    return this.appRuns.linkAppRunSession(id, sessionId)
-  }
-
-  endAppRun(id: string, end: { status: string; durationMs: number; error: string | null; tokens?: { input: number; output: number } | null }): void {
-    return this.appRuns.endAppRun(id, end)
-  }
-
-  appAgentUse(projectId: string | null, appId: string, since: number): AgentUse {
-    return this.appRuns.appAgentUse(projectId, appId, since)
-  }
-
-  keepAppRunFailure(f: { runId: string; projectId: string | null; appId: string; args: string; result: string | null; createdAt: number }, keep: number): void {
-    return this.appRuns.keepAppRunFailure(f, keep)
-  }
-
-  listAppRuns(projectId: string | null, appId: string, limit: number): (AppRunRecord & { tokens: { input: number; output: number } | null; failure: { args: string; result: string | null } | null })[] {
-    return this.appRuns.listAppRuns(projectId, appId, limit)
-  }
-
-  pruneAppRuns(before: number): number {
-    return this.appRuns.pruneAppRuns(before)
-  }
-
-  settleUnfinishedAppRuns(error: string): number {
-    return this.appRuns.settleUnfinishedAppRuns(error)
   }
 
   // ── ChildOwnershipRecords (store/child-ownership.ts) ──
@@ -545,102 +238,16 @@ export class Store extends MigrationRunner {
     return this.children.listReportMarks()
   }
 
-  setReportMark(sessionId: string, callerSessionId: string): void {
-    return this.children.setReportMark(sessionId, callerSessionId)
-  }
-
-  clearReportMark(sessionId: string): void {
-    return this.children.clearReportMark(sessionId)
-  }
-
   listAgentStartRequests(): { requestId: string; callerSessionId: string; request: unknown; askedAt: number }[] {
     return this.children.listAgentStartRequests()
-  }
-
-  putAgentStartRequest(requestId: string, callerSessionId: string, request: unknown): void {
-    return this.children.putAgentStartRequest(requestId, callerSessionId, request)
-  }
-
-  deleteAgentStartRequest(requestId: string): void {
-    return this.children.deleteAgentStartRequest(requestId)
   }
 
   listDelegatedTurns(): { sessionId: string; callerSessionId: string; told: string[]; turnId: string }[] {
     return this.children.listDelegatedTurns()
   }
 
-  setDelegatedTurn(sessionId: string, callerSessionId: string, turnId: string): void {
-    return this.children.setDelegatedTurn(sessionId, callerSessionId, turnId)
-  }
-
-  setDelegatedTurnTold(sessionId: string, told: readonly string[]): void {
-    return this.children.setDelegatedTurnTold(sessionId, told)
-  }
-
   listQueuedRequests(): QueuedRequest[] {
     return this.children.listQueuedRequests()
-  }
-
-  addQueuedRequest(r: QueuedRequest): void {
-    return this.children.addQueuedRequest(r)
-  }
-
-  markQueuedDelivering(id: string, at: number | null): void {
-    return this.children.markQueuedDelivering(id, at)
-  }
-
-  markQueuedOpenedByAuto(id: string): void {
-    return this.children.markQueuedOpenedByAuto(id)
-  }
-
-  removeQueuedRequest(id: string): void {
-    return this.children.removeQueuedRequest(id)
-  }
-
-  clearDelegatedTurn(sessionId: string): void {
-    return this.children.clearDelegatedTurn(sessionId)
-  }
-
-  moveChildren(from: string, to: string, move: { sessions: readonly string[]; startRequests: readonly { requestId: string; request: unknown }[]; armReports?: readonly string[]; queued?: boolean }): void {
-    return this.children.moveChildren(from, to, move)
-  }
-
-  // ── LinkedMachineRecords (store/linked-machines.ts) ──
-
-  listLinkedMachines(): LinkedMachineRow[] {
-    return this.machines.listLinkedMachines()
-  }
-
-  addLinkedMachine(m: Omit<LinkedMachineRow, 'slot'>): LinkedMachineRow {
-    return this.machines.addLinkedMachine(m)
-  }
-
-  removeLinkedMachine(id: string): void {
-    return this.machines.removeLinkedMachine(id)
-  }
-
-  setLinkedMachineAcceptedVersions(id: string, key: string | null): void {
-    return this.machines.setLinkedMachineAcceptedVersions(id, key)
-  }
-
-  machineHeaders(machineId: string, kind: 'session' | 'project'): unknown[] | null {
-    return this.machines.machineHeaders(machineId, kind)
-  }
-
-  replaceMachineHeaders(machineId: string, kind: 'session' | 'project', items: readonly { id: string }[]): void {
-    return this.machines.replaceMachineHeaders(machineId, kind, items)
-  }
-
-  upsertMachineSession(machineId: string, item: { id: string }): void {
-    return this.machines.upsertMachineSession(machineId, item)
-  }
-
-  patchMachineSession(machineId: string, sessionId: string, patch: Record<string, unknown>): void {
-    return this.machines.patchMachineSession(machineId, sessionId, patch)
-  }
-
-  removeMachineSession(machineId: string, sessionId: string): void {
-    return this.machines.removeMachineSession(machineId, sessionId)
   }
 }
 

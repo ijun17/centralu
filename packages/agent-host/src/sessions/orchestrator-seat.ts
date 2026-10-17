@@ -113,7 +113,7 @@ export function orchestratorToolsFor(
   /** A hub's view of this host (`hostReader`, #82 phase 4): what its window shows, with no calling session */
   hubView?: boolean,
 ): OrchestratorTools {
-  const projects = () => new Map(host.store.listProjects().map((p) => [p.id, p.name]))
+  const projects = () => new Map(host.store.projects.listProjects().map((p) => [p.id, p.name]))
   /*
    * The central orchestrator alone acts on the linked machines (#82 phase 4); an ordinary session of a trusted project
    * reads them too (#984, `readLinks`), and a lead's view stays inside its members. Asked when the call runs, as the
@@ -132,7 +132,7 @@ export function orchestratorToolsFor(
    */
   const ownProjectId = () => host.meta.get(orchestratorId)?.projectId ?? null
   /** Where the calling session's context last lost what came before (#974), or null; a hub's view has no caller */
-  const ownCut = () => (orchestratorId && host.meta.has(orchestratorId) ? host.store.lastContextCut(orchestratorId) : null)
+  const ownCut = () => (orchestratorId && host.meta.has(orchestratorId) ? host.store.messages.lastContextCut(orchestratorId) : null)
   const inScope = (s: SessionInfo) =>
     // Coordinator session (#80, #81): the allow list is its entire view
     scopeIds !== undefined ? scopeIds.includes(s.id)
@@ -151,7 +151,7 @@ export function orchestratorToolsFor(
    * carry what an app was given and nobody else was (`readsOwnProject`, `projectSessions` on a machine). Acting stays
    * inside `inScope` and behind ask_project's consent; the reader object refuses it anyway.
    */
-  const trustedIds = () => new Set(host.store.listProjects().filter((p) => p.trusted === true).map((p) => p.id))
+  const trustedIds = () => new Set(host.store.projects.listProjects().filter((p) => p.trusted === true).map((p) => p.id))
   /** This reader's view reaches past its own project: only from a trusted one */
   const wide = () => {
     const own = ownProjectId()
@@ -201,7 +201,7 @@ export function orchestratorToolsFor(
         .filter((s) => s.id !== orchestratorId && readable(s) && inProject(s.projectId, s.projectId ? (byId.get(s.projectId) ?? '') : ''))
         .map((s) => ({
           sessionId: s.id,
-          name: labelOf(host.store, s),
+          name: labelOf(host.store.messages, s),
           project: projectLabel(s.projectId, byId, untrusted),
           state: s.state,
           ...(blockedOnQuestion(s) ? { waitingOn: 'question' as const } : {}),
@@ -210,8 +210,8 @@ export function orchestratorToolsFor(
           // in progress"
           ...(s.worktreePr ? { pr: { number: s.worktreePr.number, state: s.worktreePr.state } } : {}),
           tool: s.tool,
-          preview: previewOf(host.store, s.id),
-          lastActive: lastActiveOf(host.store, s.id),
+          preview: previewOf(host.store.messages, s.id),
+          lastActive: lastActiveOf(host.store.messages, s.id),
           ...(s.interruption ? { interruption: s.interruption } : {}),
         }))
       const reader = readLinks()
@@ -260,7 +260,7 @@ export function orchestratorToolsFor(
     },
 
     createSession: async (opts) => {
-      const all = host.store.listProjects()
+      const all = host.store.projects.listProjects()
       const local = all.filter((p) => p.id === opts.project || p.name === opts.project)
       // A linked machine's project, by its name or qualified id (#82 phase 4). Asked only when links exist
       const reader = linked()
@@ -319,7 +319,7 @@ export function orchestratorToolsFor(
       const untrusted = untrustedMark()
       // Fetches generously, dedupes overlapping hits, then trims — trimming before dedupe would let `limit`
       // get eaten by duplicates
-      const raw = host.store.searchMessages(query, limit * 12)
+      const raw = host.store.messages.searchMessages(query, limit * 12)
       const cut = ownCut()
       const mine = raw.filter((h) => {
         // Its own words only earlier than its last compaction (#974): the model's context lost those and our record
@@ -338,13 +338,13 @@ export function orchestratorToolsFor(
         const s = host.meta.get(h.sessionId)!
         out.push({
           sessionId: s.id,
-          session: s.id === orchestratorId ? `${labelOf(host.store, s)} (this session, before compaction)` : labelOf(host.store, s),
+          session: s.id === orchestratorId ? `${labelOf(host.store.messages, s)} (this session, before compaction)` : labelOf(host.store.messages, s),
           project: projectLabel(s.projectId, byId, untrusted),
           // Cut from **the surrounding conversation**, not a single delta chunk (a chunk alone says
           // nothing); its own hit stops at its compaction (#974)
           snippet: windowAround(contextAt(host.store, s.id, h.seq, s.id === orchestratorId && cut !== null ? cut : undefined) || h.body, query, 160),
           seq: h.seq, // Passed as `around` to read_session, it jumps straight to that spot
-          at: timeOf(host.store, h.sessionId, h.seq),
+          at: timeOf(host.store.messages, h.sessionId, h.seq),
         })
         if (out.length >= limit) break
       }
@@ -403,10 +403,10 @@ export function orchestratorToolsFor(
       const around = opts?.around
       const read = around
         ? [
-            ...host.store.loadMessages(sessionId, limit, around + 1),
-            ...host.store.loadMessagesFrom(sessionId, around, limit),
+            ...host.store.messages.loadMessages(sessionId, limit, around + 1),
+            ...host.store.messages.loadMessagesFrom(sessionId, around, limit),
           ]
-        : host.store.loadMessages(sessionId, limit * 2)
+        : host.store.messages.loadMessages(sessionId, limit * 2)
       const rows = cut === null ? read : read.filter((r) => r.seq < cut)
 
       const lines: string[] = []
@@ -656,7 +656,7 @@ export function orchestratorToolsFor(
     createApp: async (spec) => {
       let projectId: string | null = null
       if (spec.project) {
-        const project = host.store.listProjects().find((p) => p.id === spec.project || p.name === spec.project)
+        const project = host.store.projects.listProjects().find((p) => p.id === spec.project || p.name === spec.project)
         if (!project) return { ok: false, error: `No such project: ${spec.project}` }
         projectId = project.id
       }
