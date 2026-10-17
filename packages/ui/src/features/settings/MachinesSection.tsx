@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { HostActivity, MachineInfo } from '@cc/protocol'
-import { autostartRow, hostStartNote, installNote, machineProblem, operationNote, updateStops, versionPrompt } from '@cc/core'
+import { autostartRow, elevatedNote, hostStartNote, installNote, machineProblem, operationNote, updateStops, versionPrompt } from '@cc/core'
 import { useStore } from '../../store/store.js'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { MachineStatusMark } from '../machines/MachineTag.jsx'
@@ -59,6 +59,7 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
   const problem = machineProblem(m)
   const started = hostStartNote(m)
   const operation = operationNote(m)
+  const elevated = elevatedNote(m)
   const where = [m.sshTarget, SHELL_LABEL[m.shell], m.shell === 'wsl' ? m.wslDistro : null, m.command ? `runs ${m.command}` : null]
     .filter(Boolean)
     .join(' · ')
@@ -116,6 +117,12 @@ function MachineRow({ m, onOpenCategory }: { m: MachineInfo; onOpenCategory: (ca
         <p className="mt-1 text-xs leading-body text-ink" data-testid={`machine-operation-${m.id}`} data-step={m.operation?.step}>
           {operation}
         </p>
+      )}
+      {elevated && (
+        <div className="mt-1 text-xs leading-body" data-testid={`machine-elevated-${m.id}`}>
+          <p className="text-ink">{elevated.title}</p>
+          <p className="mt-0.5 text-ink-muted">{elevated.fix}</p>
+        </div>
       )}
       <InstalledRow m={m} />
       <AutostartSwitch m={m} />

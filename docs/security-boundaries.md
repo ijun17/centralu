@@ -844,6 +844,13 @@ A host started with `centralu serve` on another machine is reached by the app th
   the remote mode is for a machine the person trusts, and the spec says so (product-spec.md §1.5).
 - **Single trusted user.** One host per data folder (the ownership lock), one person's sign-ins. There is no
   account model and no sharing between people.
+- **An administrator's ssh on Windows runs everything elevated** (#702). Windows OpenSSH gives an account in the
+  Administrators group a full token for a network logon, with no UAC split, so a host the hub starts over ssh, every
+  agent it starts and every tool call they make run with administrator rights, where the same person at the desktop
+  would run them unelevated. Centralu does not refuse it (the person may want it); the host says so in its hello
+  (`hello_ok.elevated`, from the token's integrity level) and the machine's row in Settings → Machines says it in one
+  sentence with the way out: link the machine through a standard account with its own ssh key. A host running as root
+  on Linux or macOS is reported the same way.
 - **Headless.** The host starts without `DISPLAY` / `WAYLAND_DISPLAY`, so nothing it starts can raise a window or a
   keyring prompt on that machine.
 - **What the client must not do:** forward with a wildcard bind address (`-L 0.0.0.0:…`) or `GatewayPorts`, which

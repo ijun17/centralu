@@ -43,7 +43,7 @@ afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c()
 })
 
-async function remoteHost(port = 0, store = new Store(), o: { version?: string; activity?: () => HostActivity } = {}) {
+async function remoteHost(port = 0, store = new Store(), o: { version?: string; activity?: () => HostActivity; elevated?: () => boolean | null } = {}) {
     const adapters = scriptedAdapters()
   const mgr = new SessionManager(store, adapters, (e) => server.broadcast(e))
   const server: HostServer = new HostServer({
@@ -51,6 +51,7 @@ async function remoteHost(port = 0, store = new Store(), o: { version?: string; 
     token: TOKEN,
     onRpc: createRpcHandler(mgr, adapters, o.activity ? { activity: o.activity } : {}),
     build: { commit: 'abc1234', protocolVersion: PROTOCOL_VERSION, version: o.version ?? APP_VERSION },
+    ...(o.elevated ? { elevated: o.elevated } : {}),
   })
   const p = await server.listen()
   let closed = false
@@ -399,6 +400,26 @@ describe('a hub linked to another host (#82)', () => {
     expect(status(hub)).toBe('versions_differ')
     expect(hub.links.list()[0]!.error).toMatch(/protocol/)
     await expect(u.call('machines.acceptVersions', { machineId: 'm1' })).rejects.toThrow(/different protocols/)
+  })
+
+  it('says on the row when the machine’s host runs with administrator rights, as its hello said, and stops saying it once it does not (#702)', async () => {
+    let elevated: boolean | null = true
+    const remote = await remoteHost(0, new Store(), { elevated: () => elevated })
+    const hub = await hubHost(() => lineFor(remote.port, { install: undefined }))
+    const u = await ui(hub.port)
+    await until(() => status(hub) === 'connected')
+    expect(hub.links.list()[0]!.elevated).toBe(true)
+    // The window hears it with the row it gets on connect
+    await until(() => u.events().some((e) => e.type === 'machine_status' && e.machine.status === 'connected'))
+    expect(u.events().filter((e) => e.type === 'machine_status').at(-1)!.machine.elevated).toBe(true)
+    // The host restarted through a standard account: its next hello says so, and the row follows
+    elevated = false
+    await u.call('machines.reconnect', { machineId: 'm1' })
+    await until(() => hub.links.list()[0]!.elevated === false)
+    // A host that says nothing (one that predates it, or could not tell) is not reported either way
+    elevated = null
+    await u.call('machines.reconnect', { machineId: 'm1' })
+    await until(() => hub.links.list()[0]!.elevated === null)
   })
 
   it('tells a PowerShell machine’s person to type centralu.cmd and npm.cmd, never the bare names a default execution policy blocks (#688)', async () => {

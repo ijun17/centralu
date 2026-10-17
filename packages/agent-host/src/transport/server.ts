@@ -101,6 +101,8 @@ export type HostServerOptions = {
   closeGraceMs?: number
   /** Which build this host is, sent in every `hello_ok` (#280) */
   build?: HostBuild
+  /** Whether this host runs with administrator rights, read at every `hello_ok` (#702, elevation.ts); null: not known */
+  elevated?: () => boolean | null
   /** A connection that passed hello has ended (its `RpcContext.client`) */
   onClientGone?: (client: number) => void
   /**
@@ -152,6 +154,11 @@ const CLOSE_GOING_AWAY = 1001
 const CLOSE_AUTH = 4001
 
 /** The payload size of a received message, whichever shape `ws` hands it in */
+/** `hello_ok`'s `elevated`, only when it is known (#702) */
+function elevatedField(elevated: boolean | null | undefined): { elevated?: boolean } {
+  return typeof elevated === 'boolean' ? { elevated } : {}
+}
+
 function rawBytes(raw: RawData): number {
   if (Array.isArray(raw)) return raw.reduce((n, b) => n + b.length, 0)
   return raw.byteLength
@@ -596,6 +603,7 @@ export class HostServer {
       currentSeq: this.log.currentSeq,
       streamEpoch: this.log.streamEpoch,
       ...(this.opts.build ? { build: this.opts.build } : {}),
+      ...elevatedField(this.opts.elevated?.()),
     })
   }
 
