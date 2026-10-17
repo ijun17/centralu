@@ -1,6 +1,7 @@
 import { describe, expect, it, afterEach } from 'vitest'
 import {
   __setSessionApiForTest,
+  AGENT_REPORT_NOT_RECORDED,
   forkClaudeSession,
   listClaudeSessions,
   readClaudeHistory,
@@ -16,6 +17,7 @@ import {
 } from './codex/history.js'
 import { normalizeMessage } from './claude/normalize.js'
 import { normalizeNotification } from './codex/normalize.js'
+import { HISTORY_OUTPUT_CHARS, HISTORY_TOOL_ROWS } from './history-events.js'
 import { cleanTitle, stripInjectedBlocks } from './history-text.js'
 
 /**
@@ -144,6 +146,58 @@ describe('claude — SDK listSessions/getSessionMessages', () => {
     ])
   })
 
+  /*
+   * #843 review: getSessionMessages keeps no `tool_use_result`, so an agent's result read back is the text meant for
+   * the model (the launch notice of a background agent, the hand-back preamble of a foreground one; shapes from
+   * claude/subagent.test.ts). The card says the report is not in the record instead, keeping nothing as output.
+   */
+  it("does not put the text meant for the model on an agent's card", async () => {
+    const launch = 'Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)\nagentId: a19ec1fdf94e35cfc'
+    const handBack = "[Subagent hand-back] The text below is the final report of a subagent this session started.\n\nI'm done."
+    const result = (id: string, text: string) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text }] }] } })
+    __setSessionApiForTest({
+      listSessions: async () => [],
+      getSessionMessages: async () => [
+        { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'bg', name: 'Agent', input: { description: 'Review', run_in_background: true } }] } },
+        result('bg', launch),
+        { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'fg', name: 'Task', input: { description: 'Fix' } }] } },
+        result('fg', handBack),
+        // A call before the rows read: known by its text alone
+        result('early', launch),
+        { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'sh', name: 'Bash', input: { command: 'ls' } }] } },
+        result('sh', 'a.txt'),
+      ],
+    })
+    const results = (await readClaudeHistory('s', '/p', 100)).flatMap((h) => (h.role === 'system' && h.event.type === 'tool_result' ? [h.event] : []))
+    expect(results.map((e) => [e.callId, e.summary, e.output])).toEqual([
+      ['bg', `(${AGENT_REPORT_NOT_RECORDED})`, undefined],
+      ['fg', `(${AGENT_REPORT_NOT_RECORDED})`, undefined],
+      ['early', `(${AGENT_REPORT_NOT_RECORDED})`, undefined],
+      ['sh', 'a.txt', 'a.txt'],
+    ])
+  })
+
+  it('a row in a shape the reader does not expect costs that row, not the import (#843 review)', async () => {
+    __setSessionApiForTest({
+      listSessions: async () => [],
+      getSessionMessages: async () => [
+        { type: 'assistant', message: { content: 'a body as text' } },
+        { type: 'assistant', message: { content: { type: 'text', text: 'an object' } } },
+        { type: 'assistant', message: null },
+        { type: 'assistant', message: 'a message as text' },
+        { type: 'assistant', message: { content: [null, 5, 'x', { type: 'text', text: 'kept' }] } },
+        { type: 'user', message: { content: { type: 'tool_result' } } },
+        { type: 'user', message: { content: [null, { type: 'text', text: 'asked' }] } },
+      ],
+    })
+    expect(await readClaudeHistory('s', '/p', 100)).toEqual([
+      { role: 'assistant', text: 'a body as text' },
+      { role: 'assistant', text: 'a message as text' },
+      { role: 'assistant', text: 'kept' },
+      { role: 'user', text: 'asked' },
+    ])
+  })
+
   it('an older SDK (missing the function) leaves a reason instead of throwing', async () => {
     __setSessionApiForTest(null)
     await expect(listClaudeSessions('/p', 10)).rejects.toThrow(CLAUDE_UNSUPPORTED)
@@ -269,6 +323,21 @@ describe('codex — thread/list · thread/read', () => {
     expect(lines(4)).toEqual(['q1', 'tool_call:c1', 'tool_result:c1', 'a1', 'q2', 'tool_call:c2', 'tool_result:c2', 'a2'])
     expect(lines(0)).toEqual([])
     expect(lines(100)).toHaveLength(12)
+  })
+
+  it('keeps the newest calls up to the row cap, and cuts a long output, in one import (#843 review)', () => {
+    const calls = Array.from({ length: HISTORY_TOOL_ROWS }, (_, i) => ({ type: 'commandExecution', id: `c${i}`, command: 'ls', status: 'completed', aggregatedOutput: i === HISTORY_TOOL_ROWS - 1 ? 'x'.repeat(HISTORY_OUTPUT_CHARS * 3) : 'a' }))
+    const out = turnsToHistory([{ items: [{ type: 'userMessage', content: [{ type: 'text', text: 'go' }] }, ...calls, { type: 'agentMessage', text: 'done' }] }], 100)
+    const tools = out.flatMap((h) => (h.role === 'system' && h.event.type !== 'compaction' ? [h.event] : []))
+    expect(tools).toHaveLength(HISTORY_TOOL_ROWS)
+    // The newest half of the calls, each with its result
+    expect(tools[0]).toMatchObject({ type: 'tool_call', callId: `c${HISTORY_TOOL_ROWS / 2}` })
+    expect(out[0]).toEqual({ role: 'user', text: 'go' })
+    expect(out.at(-1)).toEqual({ role: 'assistant', text: 'done' })
+    const long = tools.at(-1) as { output: string; summary: string }
+    expect(long.output.length).toBeLessThan(HISTORY_OUTPUT_CHARS + 100)
+    expect(long.output).toMatch(/the rest was not read back: 60000 characters in all\)$/)
+    expect(long.summary).toHaveLength(2000)
   })
 
   it('gives an empty conversation when turns is missing or malformed', () => {

@@ -90,7 +90,8 @@ export async function readThreadHistory(
   threadId: string,
   limit: number,
 ): Promise<HistoryMessage[]> {
-  const newestFirst: unknown[] = []
+  /** Each page's lines, read once (oldest first within the page), newest page first */
+  const pages: HistoryMessage[][] = []
   let lines = 0
   let cursor: string | null = null
   try {
@@ -103,8 +104,9 @@ export async function readThreadHistory(
         ...(cursor ? { cursor } : {}),
       })) as { data?: unknown; nextCursor?: unknown } | undefined
       const turns = Array.isArray(page?.data) ? page.data : []
-      newestFirst.push(...turns)
-      lines += turnsToHistory(turns, Number.POSITIVE_INFINITY).filter(countsAsLine).length
+      const pageLines = turnLines([...turns].reverse())
+      pages.push(pageLines)
+      lines += pageLines.filter(countsAsLine).length
       cursor = typeof page?.nextCursor === 'string' && page.nextCursor && turns.length > 0 ? page.nextCursor : null
     } while (cursor && lines < limit)
   } catch (err) {
@@ -112,7 +114,7 @@ export async function readThreadHistory(
     if (!isUnknownMethod(err)) throw err
     return readWholeThread(request, threadId, limit)
   }
-  return turnsToHistory(newestFirst.reverse(), limit)
+  return lastLines(pages.reverse().flat(), limit)
 }
 
 /** The path for a Codex that predates `thread/turns/list`: the whole thread in one response */
@@ -170,6 +172,11 @@ export function threadListToSummaries(data: unknown, cwd: string): ExternalSessi
  * the limit (`lastLines`: the words and compactions; a turn's tool rows ride along)
  */
 export function turnsToHistory(turns: unknown, limit: number): HistoryMessage[] {
+  return lastLines(turnLines(turns), limit)
+}
+
+/** Turns, oldest first, into every line they leave */
+function turnLines(turns: unknown): HistoryMessage[] {
   const list = Array.isArray(turns) ? turns : []
   const out: HistoryMessage[] = []
   for (const t of list) {
@@ -178,7 +185,7 @@ export function turnsToHistory(turns: unknown, limit: number): HistoryMessage[] 
     const items = Array.isArray(turn.items) ? turn.items : []
     for (const i of items) out.push(...itemToMessages(i, at))
   }
-  return lastLines(out, limit)
+  return out
 }
 
 /**

@@ -298,24 +298,31 @@ export class ExternalConversations {
 
     /*
      * The events right after that message may already be ours (#303, #843): a compaction or a tool call that ran while
-     * this host was watching left its row live, and the tool's record has the same event at the same spot. Those are
-     * skipped, each as many times as our record holds it after its last message, so the row is stored once. An event
-     * that ran outside the app is not in our record and is attached like any other line.
+     * this host was watching left its row live, and the tool's record has the same event in the same stretch. Each one
+     * our record holds after its last message is skipped, as many times as it holds it, so the row is stored once; the
+     * rest of the stretch is attached. The two need not be in the same order or complete: parallel calls finish in
+     * another order live than the record lists them, a background agent's launch result is in the record but came
+     * later live (or never), and a row an older host did not store can come first. Stopping at the first event we lack
+     * stored every later one a second time. An event that ran outside the app is not in our record and is attached
+     * like any other line.
      */
     const known = new Map<string, number>()
     for (let i = ours.length - 1; i >= 0 && ours[i]!.kind !== 'text'; i--) {
       const key = eventKey(ours[i]!)
       if (key) known.set(key, (known.get(key) ?? 0) + 1)
     }
-    let skip = 0
-    while (history[start + skip]?.role === 'system') {
-      const key = eventKey(historyRow(info.id, 0, history[start + skip]!, 0))
-      const left = key ? (known.get(key) ?? 0) : 0
-      if (!key || left === 0) break
-      known.set(key, left - 1)
-      skip++
-    }
-    const fresh = history.slice(start + skip)
+    let end = start
+    while (history[end]?.role === 'system') end++
+    const fresh = [
+      ...history.slice(start, end).filter((h) => {
+        const key = eventKey(historyRow(info.id, 0, h, 0))
+        const left = key ? (known.get(key) ?? 0) : 0
+        if (!key || left === 0) return true
+        known.set(key, left - 1)
+        return false
+      }),
+      ...history.slice(end),
+    ]
     if (fresh.length === 0) {
       mark()
       return 0
