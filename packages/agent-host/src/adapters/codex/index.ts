@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { AdapterCapabilities, ToolDescriptor } from '@cc/protocol'
 import { whichTool } from '../../env-path.js'
-import { launchFor } from '../../tool-launch.js'
+import { launchFor, toolCommand } from '../../tool-launch.js'
 import { installedCliVersion } from '../../cli-version.js'
 import type { AgentAdapter, CreateSessionOpts, DetectResult, EventSink, SessionHandle } from '../contract.js'
 import { withCodexClient } from './short-lived.js'
@@ -96,7 +96,7 @@ export class CodexAdapter implements AgentAdapter {
   async detect(): Promise<DetectResult> {
     const path = whichTool('codex')
     try {
-      const launch = launchFor(path ?? 'codex')
+      const launch = launchFor(path ?? toolCommand('codex'))
       const { stdout } = await exec(launch.command, [...launch.args, '--version'], { timeout: 5000, windowsHide: true })
       const version = `${stdout.trim()} · ${path ?? 'PATH'}`
       // Login status is judged by whether the auth file exists (cheap — no need to start the CLI)
@@ -118,7 +118,7 @@ export class CodexAdapter implements AgentAdapter {
   }
 
   listExternalSessions(cwd: string, limit: number) {
-    return listCodexThreads(cwd, limit, whichTool('codex') ?? 'codex')
+    return listCodexThreads(cwd, limit, toolCommand('codex'))
   }
 
   /**
@@ -130,7 +130,7 @@ export class CodexAdapter implements AgentAdapter {
    * The original is left untouched. Codex leaves the provenance on the new thread as `forkedFromId`.
    */
   async forkConversation(externalId: string, cwd: string): Promise<string> {
-    return withCodexClient({ cwd, command: whichTool('codex') ?? 'codex' }, async (client) => {
+    return withCodexClient({ cwd, command: toolCommand('codex') }, async (client) => {
       // Only the new id is read: the forked history stays with Codex (#342, the same deprecation as resume's)
       const res = await client.request<Record<string, unknown>>('thread/fork', { threadId: externalId, excludeTurns: true })
       const forked = threadIdOf(res)
@@ -147,7 +147,7 @@ export class CodexAdapter implements AgentAdapter {
    * disappears here).
    */
   async deleteExternalConversation(externalId: string, cwd: string): Promise<void> {
-    await withCodexClient({ cwd, command: whichTool('codex') ?? 'codex' }, async (client) => {
+    await withCodexClient({ cwd, command: toolCommand('codex') }, async (client) => {
       try {
         await client.request('thread/delete', { threadId: externalId })
       } catch (e) {
@@ -183,15 +183,15 @@ export class CodexAdapter implements AgentAdapter {
    * pile the lookup onto a thread that is mid-conversation.
    */
   async listUsage() {
-    return readCodexUsage(whichTool('codex') ?? 'codex')
+    return readCodexUsage(toolCommand('codex'))
   }
 
   async listModels() {
-    return listCodexModels(whichTool('codex') ?? 'codex')
+    return listCodexModels(toolCommand('codex'))
   }
 
   readExternalHistory(externalId: string, cwd: string, limit: number) {
-    return readCodexHistory(externalId, cwd, limit, whichTool('codex') ?? 'codex')
+    return readCodexHistory(externalId, cwd, limit, toolCommand('codex'))
   }
 
   async createSession(opts: CreateSessionOpts, emit: EventSink): Promise<SessionHandle> {

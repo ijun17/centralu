@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { codexLaunch } from './native.js'
+import { toolCommand } from '../../tool-launch.js'
 import type { AgentProcess } from '../contract.js'
 import { spawnLocalAgent } from '../local-process.js'
 import { waitForExit } from '../../timing.js'
@@ -71,7 +72,7 @@ export class CodexClient {
        * The platform binary npm's package ships rather than its `node` wrapper (#568, native.ts); otherwise as found, a
        * Windows `.cmd` shim read for what it starts (tool-launch.ts)
        */
-      const launch = codexLaunch(opts.command ?? 'codex')
+      const launch = codexLaunch(opts.command ?? toolCommand('codex'))
       /*
        * In a process group of its own (Windows: a tree), so stopping it also ends what it started
        * and what it left running after it exited (`local-process.ts`). It no longer shares the host's
