@@ -932,9 +932,20 @@ describe('centralu serve --detach and --stop, end to end (a host from source, a 
         const deadline = Date.now() + 60_000
         while (!out.includes('"hostRunning":true') && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100))
         expect(out).toContain('"detach":{"ok":true')
+        /*
+         * What lets the launcher and the host outlive the session is being outside its process group (#845). The test
+         * used to kill the group, wait a fixed second and find the host answering, which a loaded machine could do
+         * before a kill that reached the host had landed. The groups are read first, so no wait decides it.
+         */
+        const { pid, hostPid } = JSON.parse(readFileSync(join(d, SERVE_PID_FILE), 'utf8')) as { pid: number; hostPid: number }
+        const groups = [pid, hostPid].map((p) => Number(spawnSync('ps', ['-o', 'pgid=', '-p', String(p)], { encoding: 'utf8' }).stdout.trim()))
+        expect(groups.every((g) => g > 0)).toBe(true)
+        expect(groups).not.toContain(session.pid)
         // The session ends the way sshd can end one: every process in its group, at once
+        const ended = new Promise((r) => session.once('exit', r))
         process.kill(-session.pid!, 'SIGKILL')
-        await new Promise((r) => setTimeout(r, 1000))
+        await ended
+        expect(alive(pid) && alive(hostPid)).toBe(true)
         expect((await connection(d)).hostRunning).toBe(true)
         expect((await cli(d, ['--stop'])).line.stop).toMatchObject({ ok: true, how: 'asked' })
       } finally {
