@@ -380,6 +380,10 @@ export class TauriSystemPort implements SystemPort {
    * with `take_app_links` (retrieving it clears it from the shell). Drains once as soon as
    * subscribed: if the app was launched by a link, a link that arrived before the webview came
    * up is already sitting in the queue.
+   *
+   * Taking clears the shell's queue, so a link taken for a listener that unsubscribed while the
+   * call was out is not dropped (#972 item 6): it is kept here and handed to the next listener, as
+   * the shell would have.
    */
   onAppLink(cb: (link: string) => void): () => void {
     let alive = true
@@ -387,15 +391,20 @@ export class TauriSystemPort implements SystemPort {
       void invoke<string[]>('take_app_links')
         .then((links) => {
           if (alive) for (const l of links) cb(l)
+          else this.heldLinks.push(...links)
         })
         .catch(() => {})
+    for (const l of this.heldLinks.splice(0)) cb(l)
     const un = listen('app-link', drain)
     drain()
     return () => {
       alive = false
-      void un.then((f) => f())
+      void un.then((f) => f()).catch(() => {})
     }
   }
+
+  /** Links taken from the shell after their listener had gone, kept for the next one */
+  private readonly heldLinks: string[] = []
 }
 
 /** Brings the window forward (a notification click, a global shortcut) */
