@@ -5,7 +5,8 @@ import { join, posix, win32 } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { IMAGE_PREVIEW_MAX_BYTES } from '@cc/protocol'
-import { localLinkTarget, mentions, readMessageImage, resolveWrittenPath, sniffImage } from './message-image.js'
+import { localLinkTarget } from './link-walk.js'
+import { mentions, readMessageImage, resolveWrittenPath, sniffImage } from './message-image.js'
 
 /** The smallest bytes each format's signature accepts, padded so the file is not empty past the signature */
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13])

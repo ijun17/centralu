@@ -1,6 +1,7 @@
 import { lstatSync, realpathSync, statSync, type BigIntStats, type Stats } from 'node:fs'
 import { lstat, realpath, stat } from 'node:fs/promises'
 import { basename, dirname, join, posix, resolve, sep, win32, type PlatformPath } from 'node:path'
+import { walkLinks, walkLinksSync, type LinkWalk } from './link-walk.js'
 
 /** This OS's path rules */
 const nativePath: PlatformPath = sep === '\\' ? win32 : posix
@@ -74,6 +75,7 @@ async function walkPath(root: string, rel: string, mode: WalkMode): Promise<Walk
     try {
       const linkStats = await lstat(candidate, { bigint: true })
       if (linkStats.isSymbolicLink()) {
+        if (windows) offMachine(await walkLinks(candidate))
         const target = await realpath(candidate).catch((error: NodeJS.ErrnoException) => {
           if (isMissingFsPath(error)) throw new MissingPathError(rel)
           throw error
@@ -117,6 +119,7 @@ function walkPathSync(root: string, rel: string, mode: WalkMode): WalkResult {
     try {
       const linkStats = lstatSync(candidate)
       if (linkStats.isSymbolicLink()) {
+        if (windows) offMachine(walkLinksSync(candidate))
         const target = realpathSync.native(candidate)
         assertInside(rootReal, target)
         stats = statSync(target)
@@ -224,6 +227,19 @@ function assertInside(rootReal: string, candidate: string): void {
 function realInside(rootReal: string, real: string): string {
   assertInside(rootReal, real)
   return real
+}
+
+/**
+ * Windows: refuses a link before anything follows it, when it or a link after it leads to another machine
+ * (`docs -> \\host\share`, or a chain of local links ending in one), or when where it leads cannot be checked
+ * (`link-walk.ts`). `realpath` followed it to see whether it stayed inside, and following it is already the
+ * connection: Windows opens the share over SMB and offers that machine the person's sign-in, so a repository could
+ * plant one for the file tree to open. Measured on Windows 11 (#849 follow-up): realpath answered the share's path,
+ * about a second later, before the guard refused it as outside the project.
+ */
+function offMachine(walk: LinkWalk): void {
+  if (walk.ok) return
+  throw new UnsafePathError(walk.reason === 'elsewhere' ? `Path leads off this machine (${walk.why})` : `Path cannot be checked: ${walk.why}`)
 }
 
 function isMissingFsPath(error: unknown): error is NodeJS.ErrnoException {

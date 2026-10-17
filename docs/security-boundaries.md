@@ -1572,7 +1572,7 @@ Since the file can be anywhere, the project root is not the boundary here. Three
   reach out to whichever machine a reply named, and Windows offers that machine the person's sign-in. This is decided
   on the resolved path, so a relative path in a session whose folder is a share is refused too. A local link that leads
   there (`shot.png -> \\host\share\x.png`, or a folder link earlier in the path) is refused as well, before `realpath`
-  follows it, since following it is already the connection. On Windows the path is walked from its drive (`walkLinks`,
+  follows it, since following it is already the connection. On Windows the path is walked from its drive (`link-walk.ts` `walkLinks`,
   #849): what each name is comes from its folder's listing (`lstat` follows a link whose target libuv cannot read),
   and a link is followed by hand only when its target is a drive path or relative to the link's folder
   (`localLinkTarget`). Any other target is refused, the NT spellings of a share (`\Device\Mup\…`, `\GLOBAL??\UNC\…`)
@@ -1626,7 +1626,11 @@ tests. What differs from macOS and Linux, and what holds it:
   because the command is the person's own text.
 - **Paths.** `path-guard.ts` refuses a path whose `relative()` from the root is absolute (another
   drive, a UNC share), instead of walking its segments inside the root (`path-guard.test.ts`, with
-  `path.win32`). Windows paths ignore case; containment uses `relative()`, which does too. Every
+  `path.win32`). A link along the path is not followed to see whether it stays inside before the walk of
+  `link-walk.ts` (the one a reply's image takes) has read where it leads: a symlink to a share (`docs -> \\host\share`),
+  or a chain of local links ending in one, is refused unread, since `realpath` following it is already the SMB
+  connection with the person's sign-in offered; the guard used to refuse it only afterwards, as outside the project
+  (`path-guard-share.test.ts`). Windows paths ignore case; containment uses `relative()`, which does too. Every
   "inside" test in the host is `isInside` in `path-guard.ts`, and every comparison that must see one
   place in two spellings canonicalizes with `canonicalPath` there (`realpathSync.native`: the long name
   for a short one, the case on disk, a link resolved, through the nearest folder that exists; #428). The
