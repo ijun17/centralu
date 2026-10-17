@@ -1,6 +1,5 @@
 import { repairWorktreeRecoveryRemovals } from '../dev-services/worktree-recovery.js'
 import { randomUUID } from 'node:crypto'
-import { residentCost } from './tool-cost.js'
 import { orchestratorHome, orchestratorRole } from './orchestrator-home.js'
 import { windowAround } from './snippet.js'
 import { notAToolText, profileAllows, runOrchestratorTool } from './orchestrator-tools.js'
@@ -13,6 +12,7 @@ import { RoutedCards, type RoutedCardsHost } from './routed-cards.js'
 import { HandoffChildren, movedChildrenNote, type HandoffChildrenHost } from './handoff-children.js'
 import { ChildReports, type ChildReportsHost } from './child-reports.js'
 import { InterruptionWatch, type InterruptionWatchHost } from './interruption-watch.js'
+import { LaunchRecords, type LaunchRecordsHost } from './launch-records.js'
 import { ChildOwnership, PAUSED_REPORT_SETTLE_MS } from './child-ownership.js'
 import { LinkedReports, type LinkedEvent, type LinkedReportsHost } from './linked-reports.js'
 import { OrchestratorProposals, type ProposalOutcome } from './orchestrator-proposals.js'
@@ -75,7 +75,6 @@ import {
   alwaysAllowKey,
 } from '@cc/protocol'
 import type { AgentAdapter, AgentProcess, AgentSpawnSpec, CreateSessionOpts, EventSink, LinkedSessions, OrchestratedSession, OrchestratorTools, ProcessSource, RecallHit, SessionApps, SessionHandle } from '../adapters/contract.js'
-import type { LaunchSettings } from '../adapters/contract.js'
 import { registeredTool } from '../adapters/registry.js'
 import { codeIntelligenceKey, codeIntelligenceOff, isAppAgent, toolBundleFor, toolProfileFor, type ToolProfileFacts } from './tool-profiles.js'
 import type { MemoryGate } from './memory-gate.js'
@@ -151,7 +150,7 @@ import { withTimeout } from './with-timeout.js'
 import { AppSessions, type AppSessionsHost } from './app-sessions.js'
 import { appMessageFrame, type AppMessageSource, type AppMessageVia, type AppViewPlace } from './app-messages.js'
 import { SessionTrash, type SessionTrashHost } from './session-trash.js'
-import { parseJson, readJsonObjects } from '../dev-services/store/json.js'
+import { parseJson } from '../dev-services/store/json.js'
 import { isObj } from '../json-value.js'
 import { foldsPathCase } from '../os.js'
 export { appMessageFrame } from './app-messages.js'
@@ -160,7 +159,7 @@ export { START_AGENT_CALL_MS, START_AGENT_MODEL_CHECK_MS, START_AGENT_SETUP_MS }
 
 /** What the modules moved out of the manager reach of it (`SessionManager.parts`): every module's host type at once */
 type ManagerParts = HandoffFlowHost & HostCardsHost & WorktreeHost & RestartHost & SessionTrashHost & AppSessionsHost & ToolQueriesHost &
-  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost
+  SessionRecordHost & ExternalConversationsHost & AskProjectHost & LinkedReportsHost & DelegationHost & QueuedRequestsHost & RoutedCardsHost & HandoffChildrenHost & ChildReportsHost & InterruptionWatchHost & LaunchRecordsHost
 
 /**
  * Where the marker "conversation up to here belongs to the old tool" is stored.
@@ -255,6 +254,8 @@ export class SessionManager {
   private readonly reports: ChildReports
   /** A session's `interruption` kept with its events, the reconnect clocks, and a quit's stop (interruption-watch.ts) */
   private readonly interruptions: InterruptionWatch
+  /** What a session's process was started with, kept for the next host, and the restart a change needs (launch-records.ts) */
+  private readonly launches: LaunchRecords
   /** ask_project, here or on a linked machine (ask-project-flow.ts) */
   private readonly askProjectFlow: AskProjectFlow
   /** The conversations a tool keeps on its own side: listing, holders, import and catch-up (external-conversations.ts) */
@@ -365,6 +366,7 @@ export class SessionManager {
     } = {},
   ) {
     this.children = new ChildOwnership(store)
+    this.launches = new LaunchRecords(this.parts())
     this.interruptions = new InterruptionWatch(this.parts())
     this.reports = new ChildReports(this.parts())
     this.handoffChildren = new HandoffChildren(this.parts())
@@ -792,7 +794,7 @@ export class SessionManager {
         true,
       )
     }
-    return this.refreshLaunchSettings(projectId, true)
+    return this.launches.refreshLaunchSettings(projectId, true)
   }
 
   /**
@@ -1370,8 +1372,8 @@ export class SessionManager {
     this.meta.set(id, info)
     this.store.upsertSession(info)
     if (noCodeIntelligence) this.store.setAppSetting(codeIntelligenceKey(id), 'off')
-    this.rememberToolPrefix(id)
-    this.rememberLaunchSettings(info, cwd)
+    this.launches.rememberToolPrefix(id)
+    this.launches.rememberLaunchSettings(info, cwd)
     this.store.setSessionCwd(id, cwd)
     /*
      * Lets the UI learn about this session **through an event too** (#69).
@@ -1404,7 +1406,7 @@ export class SessionManager {
     }
     this.handles.set(id, handle)
     // A new process holds no background work yet (#648)
-    this.rememberBackgroundTasks(info)
+    this.launches.rememberBackgroundTasks(info)
     // The cache's first request (§6.1): a new conversation, or one taken over from outside in a new process
     this.cacheLedger.note(id, params.resumeExternalId ? 'new_process' : 'cold_start')
     this.running.set(id, {
@@ -1657,26 +1659,6 @@ export class SessionManager {
     }
   }
 
-  /**
-   * The running background tasks of a session's process, kept in the store (#648) so the host that adopts the process
-   * after a swap knows what it holds: the tool lists its level only when it changes, and `close()` on a process kills
-   * its shells silently. Written on every change and when a process starts (empty). `null` when no host ever wrote it
-   * for this session, which an adopted process reads as "unknown".
-   */
-  private backgroundTasksKey(sessionId: string): string {
-    return `background_tasks:${sessionId}`
-  }
-
-  private keptBackgroundTasks(sessionId: string): BackgroundTask[] | null {
-    const raw = this.store.appSetting(this.backgroundTasksKey(sessionId))
-    if (raw === null) return null
-    return readJsonObjects<BackgroundTask>(raw, (t) => typeof t.id === 'string' && t.status === 'running')
-  }
-
-  private rememberBackgroundTasks(m: SessionInfo): void {
-    this.store.setAppSetting(this.backgroundTasksKey(m.id), JSON.stringify(m.backgroundTasks.filter((t) => t.status === 'running')))
-  }
-
   /** Says in the conversation that the restart in progress applies a change of the project's trust (#663) */
   private noticeTrustRestart(sessionId: string): void {
     if (!this.restartPolicy.trustRestartNotice.delete(sessionId)) return
@@ -1883,7 +1865,7 @@ export class SessionManager {
      */
     if (!adopt) m.agentVersion = this.versionHint?.(tool) ?? null
     // What the previous host saw running in the process this one adopts (#648); null when it kept no list
-    const kept = adopt ? this.keptBackgroundTasks(sessionId) : null
+    const kept = adopt ? this.launches.keptBackgroundTasks(sessionId) : null
     try {
       const creating = adapter.createSession(
         this.launchOptions(m, {
@@ -1899,7 +1881,7 @@ export class SessionManager {
           resumeExternalId: resumeId ?? undefined,
           // The goal survives in the tool's conversation, not in a new one (see CreateSessionOpts.knownGoal)
           ...(resumeId && m.goal ? { knownGoal: m.goal } : {}),
-          noCodeIntelligence: this.codeIntelligenceOffFor(sessionId),
+          noCodeIntelligence: this.launches.codeIntelligenceOffFor(sessionId),
           inheritsHandoff: this.store.inheritsHandoff(sessionId),
           choice: { profile, tools },
           apps,
@@ -1958,11 +1940,11 @@ export class SessionManager {
       }
       this.handles.set(sessionId, handle)
       if (!adopt) {
-        this.rememberToolPrefix(sessionId)
-        this.rememberLaunchSettings(m, cwd)
+        this.launches.rememberToolPrefix(sessionId)
+        this.launches.rememberLaunchSettings(m, cwd)
         // A new process holds no background work yet (#648); whatever an earlier adopted one left unknown is over
         this.restartPolicy.backgroundUnknown.delete(sessionId)
-        this.rememberBackgroundTasks(m)
+        this.launches.rememberBackgroundTasks(m)
       }
       // Every window learns it is awake, not only the one that asked (#568)
       this.emit({ type: 'session_live', sessionId, live: true })
@@ -2609,7 +2591,7 @@ export class SessionManager {
          * and recording it would hand the next host a list it takes as complete.
          */
         if (e.snapshot) this.restartPolicy.backgroundUnknown.delete(m.id)
-        if (!this.restartPolicy.backgroundUnknown.has(m.id)) this.rememberBackgroundTasks(m)
+        if (!this.restartPolicy.backgroundUnknown.has(m.id)) this.launches.rememberBackgroundTasks(m)
         break
       case 'agent_version':
         // What the process says it runs (#297) replaces what was assumed when it started
@@ -3581,121 +3563,12 @@ export class SessionManager {
     if (m && inTurn(m.state)) this.onEvent({ type: 'state_change', sessionId, state: 'waiting_input', reason: 'interrupted' })
   }
 
-  /** The persisted prefix a process was started with. It is separate from SessionInfo: a screen never needs it. */
-  private toolPrefixKey(sessionId: string): string {
-    return `tool_prefix:${sessionId}`
-  }
-
-  private toolPrefixHash(sessionId: string): string | null {
-    const profile = this.toolProfileOf(sessionId)
-    const m = this.meta.get(sessionId)
-    if (!profile || !m) return null
-    const adapter = this.adapters.get(m.tool)
-    if (!adapter) return null
-    return residentCost(profile, adapter.capabilities).prefixHash
-  }
-
-  private rememberToolPrefix(sessionId: string): void {
-    const hash = this.toolPrefixHash(sessionId)
-    if (hash) this.store.setAppSetting(this.toolPrefixKey(sessionId), hash)
-  }
-
-  /** The stable inputs an adapter may use for its keeper-swap launch fingerprint. */
-  private launchSettingsFor(session: Pick<SessionInfo, 'id' | 'kind' | 'projectId' | 'appId' | 'model' | 'effort' | 'verbosity' | 'serviceTier' | 'permissionPreset' | 'roleAppend'>, cwd: string): LaunchSettings {
-    return {
-      cwd,
-      model: session.model ?? undefined,
-      effort: session.effort ?? undefined,
-      verbosity: session.verbosity ?? undefined,
-      serviceTier: session.serviceTier ?? undefined,
-      permissionPreset: session.permissionPreset,
-      ...this.settingFilesFor(session),
-      toolProfile: this.toolProfileOf(session.id) ?? undefined,
-      systemPromptAppend: session.roleAppend ?? undefined,
-      ...(this.codeIntelligenceOffFor(session.id) ? { noCodeIntelligence: true } : {}),
-    }
-  }
-
-  /** Whether this session was created without code intelligence (#686, `codeIntelligenceKey`) */
-  private codeIntelligenceOffFor(sessionId: string): boolean {
-    return this.store.appSetting(codeIntelligenceKey(sessionId)) === 'off'
-  }
-
-  private launchSettingsKey(sessionId: string): string {
-    return `launch_settings:${sessionId}`
-  }
-
-  private launchSettingsFingerprint(session: SessionInfo, cwd: string): string | null {
-    const adapter = this.adapters.get(session.tool)
-    return adapter?.launchSettingsFingerprint?.(this.launchSettingsFor(session, cwd)) ?? null
-  }
-
-  private rememberLaunchSettings(session: SessionInfo, cwd: string): void {
-    const fingerprint = this.launchSettingsFingerprint(session, cwd)
-    if (fingerprint) this.store.setAppSetting(this.launchSettingsKey(session.id), fingerprint)
-  }
-
   /**
-   * A keeper preserves agent processes over a host swap. That also preserves the Centralu MCP
-   * definitions they started with, so compare the exact served prefix rather than assuming a new
-   * host means a new thread. Sleeping sessions have no process and therefore pick it up on wake;
-   * live idle sessions restart now, while a turn or card finishes before its restart.
+   * A keeper keeps a process's tool definitions over a host swap: `LaunchRecords.refreshToolDefinitions`
+   * (launch-records.ts), kept on the manager for its callers
    */
-  async refreshToolDefinitions(): Promise<void> {
-    // Apply unknown/changed launch policy first: the same restart also refreshes tool definitions.
-    await this.refreshLaunchSettings()
-    for (const session of [...this.meta.values()]) {
-      /*
-       * Only a turn holds this restart (#648): the definitions are what the process may call, so an idle session takes
-       * them now, background work or not, and the conversation says what stopped (`noticeBackgroundStopped`).
-       */
-      await this.applyWhenChanged(session, this.toolPrefixKey(session.id), this.toolPrefixHash(session.id), this.restartPolicy.definitionsRestartAfterTurn, 'instructions')
-    }
-  }
-
-  /**
-   * A kept CLI also retains settings derived at launch (sandbox roots, network policy, adapter
-   * environment). The adapter owns the fingerprint; the host only gives it the same safe
-   * boundary behaviour as changed tool definitions.
-   */
-  private async refreshLaunchSettings(projectId?: string, trustChange = false): Promise<void> {
-    for (const session of [...this.meta.values()]) {
-      if (projectId !== undefined && session.projectId !== projectId) continue
-      const cwd = this.store.sessionCwd(session.id)
-      if (!cwd) continue
-      // Earlier builds did not record launch settings: a kept process's policy is unknown.
-      // A safety change too, so the same rule as the definitions above
-      await this.applyWhenChanged(session, this.launchSettingsKey(session.id), this.launchSettingsFingerprint(session, cwd), this.restartPolicy.launchSettingsRestartAfterTurn, 'launch_settings', () => {
-        if (trustChange) this.restartPolicy.trustRestartNotice.add(session.id)
-      })
-    }
-  }
-
-  /**
-   * What a live process was started with, as stored under `key`, against what it would start with now (`next`): the
-   * same, nothing; a session with no process takes `next` on its next start, so it is only written down; a process in
-   * a turn restarts when the turn ends (`deferred` says why); an idle one restarts now. The rule both refreshes keep.
-   */
-  private async applyWhenChanged(
-    session: SessionInfo,
-    key: string,
-    next: string | null,
-    deferred: Set<string>,
-    cause: RebuildCause,
-    beforeRestart?: () => void,
-  ): Promise<void> {
-    if (!next || this.store.appSetting(key) === next) return
-    if (!this.handles.has(session.id)) {
-      this.store.setAppSetting(key, next)
-      return
-    }
-    beforeRestart?.()
-    if (inTurn(session.state)) {
-      this.restartPolicy.restartAfterTurn.add(session.id)
-      deferred.add(session.id)
-      return
-    }
-    await this.restartSession(session.id, cause).catch(() => {})
+  refreshToolDefinitions(): Promise<void> {
+    return this.launches.refreshToolDefinitions()
   }
 
   /**
@@ -3773,7 +3646,7 @@ export class SessionManager {
       },
       autoBoundaryOpen: (...a) => self.autoBoundaryOpen(...a),
       awaitTurn: (...a) => self.delegationFlow.awaitTurn(...a),
-      backgroundTasksKey: (...a) => self.backgroundTasksKey(...a),
+      backgroundTasksKey: (...a) => self.launches.backgroundTasksKey(...a),
       builderRefOf: (...a) => self.appSessions.builderRefOf(...a),
       busyAnswer: (...a) => self.queue.busyAnswer(...a),
       busyChoices: (...a) => self.queue.busyChoices(...a),
@@ -3870,7 +3743,7 @@ export class SessionManager {
       get recoveryRepair() {
         return self.recoveryRepair
       },
-      rememberBackgroundTasks: (...a) => self.rememberBackgroundTasks(...a),
+      rememberBackgroundTasks: (...a) => self.launches.rememberBackgroundTasks(...a),
       rename: (...a) => self.rename(...a),
       respondApproval: (...a) => self.respondApproval(...a),
       reportBackIfAwaited: (...a) => self.reports.reportBackIfAwaited(...a),
@@ -3888,6 +3761,7 @@ export class SessionManager {
       scheduleDrain: (...a) => self.queue.scheduleDrain(...a),
       send: (...a) => self.send(...a),
       sessionsInside: (...a) => self.sessionsInside(...a),
+      settingFilesFor: (...a) => self.settingFilesFor(...a),
       settleState: (...a) => self.settleState(...a),
       sleepSession: (...a) => self.sleepSession(...a),
       startDelegation: (...a) => self.delegationFlow.startDelegation(...a),
