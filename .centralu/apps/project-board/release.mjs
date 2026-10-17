@@ -172,6 +172,8 @@ async function releaseCi(s, cfg, gh, ci) {
 
   const tested = await ci(prHead, { pr })
   if (tested.verdict !== 'green') return refuse(`PR #${pr.number}'s head checks are not all green: ${tested.summary}.`)
+  // Two tiers: a quick run is green on every check it skipped, and proves nothing about them
+  if (tested.tier !== undefined && tested.tier !== 'full') return refuse(`PR #${pr.number}'s run did not run the full tier of CI (its full tier's check did not pass), so it is no evidence; main CI is required.`)
   return { problems: [], lines: [`CI: PR #${pr.number}'s run on the same tree (${short(prHead)}); ${s.main} at ${short(s.tip)} is ${main.verdict}.`] }
 }
 

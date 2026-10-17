@@ -15,6 +15,9 @@ for (const key of ['owner', 'number', 'repository', 'fields', 'decisionStatus'])
     process.exit(1)
   }
 }
+function fullTierOf(v) {
+  return typeof v === 'string' && v ? v : null
+}
 export const CACHE_MS = Math.max(0, Number(config.cacheSeconds ?? 30)) * 1000
 // CI (ci_status, merge_when_green): which workflows hold the required checks, the issue that lists
 // known intermittent failures, and how long merge_when_green may wait.
@@ -24,15 +27,21 @@ export const CI = {
   waitMinutes: Number(config.ci?.waitMinutes ?? 40),
   // PROJECT_BOARD_CI_POLL_MS: for the tests only, which cannot wait 30 s between polls
   pollMs: Number(process.env.PROJECT_BOARD_CI_POLL_MS) || Number(config.ci?.pollSeconds ?? 30) * 1000,
+  // Two tiers (2026-10-18): the name of the check that passes only on a full run (build.yml's `full
+  // tier` job). Set, nothing lands on a run where it did not pass: the merge queue lands such a pull
+  // request through a batch, merge_when_green refuses it, and a release bump's PR is no evidence.
+  // PROJECT_BOARD_CI_FULL_TIER: for the tests only, which run the queue without tiers too (empty: none)
+  fullTier: fullTierOf(process.env.PROJECT_BOARD_CI_FULL_TIER ?? config.ci?.fullTier),
 }
 
 // The merge queue's batches (#962, batch.mjs): off unless project.json has `queue.batch`. `min` items
-// waiting for CI that has not started make a batch (at least 2), `max` at most (default 6).
+// ready make a batch, `max` at most (default 6). `min` is at least 2, or 1 with two tiers
+// (`ci.fullTier`): there every pull request lands through a batch, a batch of one included.
 // PROJECT_BOARD_QUEUE_BATCH_MIN: for the tests only, which queue several pull requests one call at a time
 const batch = config.queue?.batch
 const batchMin = Number(process.env.PROJECT_BOARD_QUEUE_BATCH_MIN) || Number(batch?.min ?? 2) || 2
 export const QUEUE = {
-  batch: batch && batch.enabled !== false ? { min: Math.max(2, batchMin), max: Math.max(2, batchMin, Number(batch.max ?? 6) || 6) } : null,
+  batch: batch && batch.enabled !== false ? { min: Math.max(CI.fullTier ? 1 : 2, batchMin), max: Math.max(2, batchMin, Number(batch.max ?? 6) || 6) } : null,
 }
 
 // The checkout rebase_stack works from by default: the one this app is committed in

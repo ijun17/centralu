@@ -244,7 +244,7 @@ if (args[0] === 'api') {
   if (path === R) json({ default_branch: 'main', permissions: st.permissions })
   if (path === R + '/branches/main/protection/required_status_checks') {
     if (st.noProtection) fail('gh: Branch not protected (HTTP 404)\n', 1, '{"message":"Branch not protected"}')
-    json({ contexts: ['build'], checks: [] })
+    json({ contexts: st.requiredContexts || ['build'], checks: [] })
   }
   if (path === R + '/rules/branches/main') json([])
   if (/\/commits\/[0-9a-f]+\/check-runs$/.test(path)) {
@@ -254,7 +254,9 @@ if (args[0] === 'api') {
     const releaseChecks = collision ? [{ id: 99, name: 'build', status: 'completed', conclusion: 'success', started_at: '2026-10-13T12:00:00Z', check_suite: { id: 99 }, app: { slug: 'github-actions' } }] : []
     if (verdict === 'none') json({ check_runs: releaseChecks })
     const c = { green: ['completed', 'success'], failing: ['completed', 'failure'], pending: ['in_progress', null], cancelled: ['completed', 'cancelled'] }[verdict]
-    json({ check_runs: [{ id: 1, name: 'build', status: c[0], conclusion: c[1], html_url: 'https://github.com/ijun17/centralu/actions/runs/1/job/1', started_at: '2026-10-13T10:00:00Z', check_suite: { id: 11 }, app: { slug: st.ciApp || 'github-actions' } }, ...releaseChecks] })
+    // build.yml's full tier job, when a test names its conclusion on this commit (two tiers of CI)
+    const tier = st.fullTierBySha?.[sha] ? [{ id: 2, name: 'full tier', status: 'completed', conclusion: st.fullTierBySha[sha], html_url: 'https://github.com/ijun17/centralu/actions/runs/1/job/2', started_at: '2026-10-13T10:00:00Z', check_suite: { id: 11 }, app: { slug: 'github-actions' } }] : []
+    json({ check_runs: [{ id: 1, name: 'build', status: c[0], conclusion: c[1], html_url: 'https://github.com/ijun17/centralu/actions/runs/1/job/1', started_at: '2026-10-13T10:00:00Z', check_suite: { id: 11 }, app: { slug: st.ciApp || 'github-actions' } }, ...tier, ...releaseChecks] })
   }
   if (/\/commits\/[0-9a-f]+\/status$/.test(path)) json({ statuses: [] })
   if (path === R + '/actions/runs') json({ workflow_runs: (st.activeRuns || []).filter((r) => r.status === q.get('status')) })
@@ -290,6 +292,10 @@ type State = {
   seq?: Record<string, unknown[]>
   /** No branch protection: the required set comes from the workflow files */
   noProtection?: boolean
+  /** The required set branch protection names (default ['build']) */
+  requiredContexts?: string[]
+  /** The `full tier` check's conclusion per commit (none reported when absent) */
+  fullTierBySha?: Record<string, string>
   /** A file's text at one ref (the contents API's ?ref=), before `files` */
   filesAt?: Record<string, Record<string, string>>
   /** Every workflow's runs not completed, for how busy the runners are */
@@ -606,6 +612,29 @@ describe('release', { timeout: 60_000 * SLOW }, () => {
     const status = await call('release_status', { path: s.work })
     expect(status.data.lines.join(' ')).toContain(reason)
     expect(ghWrites()).toEqual([])
+  })
+
+  // Two tiers of CI (2026-10-18): a quick run skips every job but a few, and a skipped job reads as passed
+  it("takes the bump PR's run as evidence only when it ran the full tier", async () => {
+    const s = repo({ bumped: true })
+    write(s.work, '.github/workflows/build.yml', 'on:\n  push:\n    branches: [main]\n  pull_request:\njobs:\n  build:\n    runs-on: ubuntu-latest\n  full-tier:\n    name: full tier\n    runs-on: ubuntu-latest\n')
+    s.tip = commitAll(s.work, 'ci: two tiers')
+    g(s.work, 'push', '-q', 'origin', 'main')
+    patchState((st) => { st.dispatchSha = s.tip })
+    const prHead = bumpEvidence(s)
+    patchState((st) => {
+      st.requiredContexts = ['build', 'full tier']
+      st.fullTierBySha = { [prHead]: 'skipped' }
+    })
+    runtime()
+    const quick = await call('release', { step: 'tag', path: s.work, skipRehearsal: true, confirm: true })
+    expect(quick.isError, quick.text).toBe(true)
+    expect(quick.data.problems.join(' ')).toContain("PR #900's run did not run the full tier of CI")
+    expect(ghWrites()).toEqual([])
+    patchState((st) => { st.fullTierBySha = { [prHead]: 'success' } })
+    const full = await call('release', { step: 'tag', path: s.work, skipRehearsal: true, confirm: true })
+    expect(full.isError, full.text).toBe(false)
+    expect(full.data.lines.join(' ')).toContain("CI: PR #900's run on the same tree")
   })
 
   it('refuses checks from another app even when their suite id and name match CI', async () => {

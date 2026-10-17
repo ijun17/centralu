@@ -14,7 +14,7 @@
 import { readFileSync, renameSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { evaluateChecks, firstFailure, squashMessage, workflowCheckNames } from './ci.mjs'
-import { CI, config } from './config.mjs'
+import { CI, config, QUEUE } from './config.mjs'
 import {
   closePr,
   containsCommit,
@@ -334,6 +334,7 @@ async function pollItem(item, { now, ref, renew, save }) {
     const scoped = await readWorkflowChecks(repo, pr.headRefOid, { workflows: CI.workflows })
     const checks = evaluateChecks({ required: required.names, reported: scoped.reported, alsoReported: required.unresolved.length > 0 })
     const runs = latestRuns(scoped.runs, pr)
+    const canBatch = QUEUE.batch !== null && batchable(pr)
     // What a batch looks at (batch.mjs batchCandidates): its own CI on this head, and whether it has started
     base.ci = { head: pr.headRefOid, verdict: checks.verdict, runs: runs.map((r) => ({ id: r.id, status: r.status })), batchable: batchable(pr) }
     let lowerBranches = []
@@ -342,7 +343,9 @@ async function pollItem(item, { now, ref, renew, save }) {
     // UNSTABLE on a green head: is it only a cancelled duplicate, or an older run (#1015)? Every check on it says
     let supersededOnly = false
     if (checks.verdict === 'green' && pr.mergeStateStatus === 'UNSTABLE') supersededOnly = onlySupersededFailures(await readChecks(repo, pr.headRefOid), scoped.runs)
-    d = decideCi({ item: view, pr, checks, runs, defaultBranch, lowerBranches, supersededOnly, now, ref })
+    d = decideCi({ item: view, pr, checks, runs, defaultBranch, lowerBranches, supersededOnly, now, ref, fullTier: CI.fullTier, canBatch })
+    // Its quick tier passed: what a batch takes (two tiers, queue.mjs)
+    if (d.quick) base.ci.verdict = 'quick'
   }
 
   let wait = pollMs(d.state === 'attention' ? 'attention' : d.state === 'waiting' ? 'waiting' : 'ci')

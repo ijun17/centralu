@@ -12,6 +12,7 @@ import {
   firstFailure,
   failureLineIndex,
   matchKnownFailure,
+  ranTier,
   squashMessage,
   stripAttribution,
   summarizeDescription,
@@ -72,6 +73,7 @@ describe('which checks a workflow requires', () => {
       'e2e (webkit 4/5)',
       'e2e (webkit 5/5)',
       'e2e report',
+      'full tier',
       'host tests, remote Node (ubuntu-24.04)',
       'host tests, remote Node (windows-2022)',
       'keeper e2e',
@@ -190,6 +192,46 @@ describe('whether to merge', () => {
     expect(decideMerge({ permissions: maintainer, pr: openPr, checks: failing })).toMatchObject({ action: 'refuse', kind: 'failing' })
     expect(decideMerge({ permissions: maintainer, pr: { ...openPr, mergeable: 'CONFLICTING' }, checks: green() })).toMatchObject({ action: 'refuse', kind: 'conflict' })
     expect(decideMerge({ permissions: maintainer, pr: { ...openPr, mergeable: 'UNKNOWN' }, checks: green() })).toMatchObject({ action: 'wait', kind: 'mergeable' })
+  })
+})
+
+/*
+ * Two tiers of CI (2026-10-18): a pull request runs the quick tier, and a skipped job counts as passed, so a quick run
+ * is green on every check it reports. Nothing lands from it: only a run where the full tier's check passed counts.
+ */
+describe('which tier of CI ran on a commit', () => {
+  const TIER = 'full tier'
+  const of = (...reported: Check[]) => evaluateChecks({ required: [...REQUIRED, TIER], reported })
+
+  it("is full only when the full tier's check ran and passed, quick when it was skipped, and unknown until it reports", () => {
+    expect(ranTier(of(run(TIER, 'success'), ...allPassed()), TIER)).toBe('full')
+    expect(ranTier(of(run(TIER, 'skipped'), run('verify', 'success')), TIER)).toBe('quick')
+    expect(ranTier(of(run('verify', 'success')), TIER)).toBeNull()
+    expect(ranTier(of(run(TIER, null)), TIER)).toBeNull()
+    // A commit status of that name is not the job
+    expect(ranTier(of({ kind: 'status', name: TIER, state: 'success' }), TIER)).toBeNull()
+    // The newest report counts: a full run on the branch after its quick run
+    expect(ranTier(of(run(TIER, 'skipped', { at: '2026-10-18T01:00:00Z', id: 1 }), run(TIER, 'success', { at: '2026-10-18T02:00:00Z', id: 2 })), TIER)).toBe('full')
+    // Outside the required set (branch protection that does not name it) it still counts
+    expect(ranTier(evaluateChecks({ required: REQUIRED, reported: [run(TIER, 'skipped'), ...allPassed()] }), TIER)).toBe('quick')
+    // A repository without tiers runs everything every time
+    expect(ranTier(of(run('verify', 'success')), null)).toBe('full')
+  })
+
+  it('merges nothing that ran only the quick tier, though every check it reports passed', () => {
+    const quickRun = of(run(TIER, 'skipped'), ...allPassed())
+    expect(quickRun.verdict).toBe('green')
+    const d = decideMerge({ permissions: maintainer, pr: { ...openPr, headRefName: 'feat/x' }, checks: quickRun, fullTier: TIER })
+    expect(d).toMatchObject({ action: 'refuse', kind: 'quick-tier' })
+    expect(d.reason).toContain('gh workflow run build.yml --ref feat/x')
+    // Its full tier's jobs not reported yet: still refused, since a quick run never reports them
+    expect(decideMerge({ permissions: maintainer, pr: openPr, checks: of(run(TIER, 'skipped'), run('verify', 'success')), fullTier: TIER })).toMatchObject({ action: 'refuse', kind: 'quick-tier' })
+    // Green on a required set that does not name it, the check not reported: waits for it
+    const unnamed = evaluateChecks({ required: REQUIRED, reported: allPassed() })
+    expect(decideMerge({ permissions: maintainer, pr: openPr, checks: unnamed, fullTier: TIER })).toMatchObject({ action: 'wait' })
+    expect(decideMerge({ permissions: maintainer, pr: openPr, checks: of(run(TIER, 'success'), ...allPassed()), fullTier: TIER }).action).toBe('merge')
+    // Without tiers, as before
+    expect(decideMerge({ permissions: maintainer, pr: openPr, checks: unnamed }).action).toBe('merge')
   })
 })
 
@@ -399,7 +441,10 @@ const ghRun = (name: string, conclusion: string | null, id: number) => ({
   started_at: '2026-10-05T08:00:00Z',
   app: { slug: 'github-actions' },
 })
-const green = () => [ghRun('verify', 'success', 11), ghRun('windows tests', 'success', 12), ghRun('linux-x64', 'success', 13), ghRun('notify', 'success', 14)]
+// A full run: the full tier's check passed (project.json ci.fullTier, build.yml's `full tier` job)
+const green = () => [ghRun('full tier', 'success', 10), ghRun('verify', 'success', 11), ghRun('windows tests', 'success', 12), ghRun('linux-x64', 'success', 13), ghRun('notify', 'success', 14)]
+// A pull request's quick run: what it ran passed, the full tier's check skipped, the full tier's jobs not reported
+const quick = () => [ghRun('full tier', 'skipped', 10), ghRun('verify', 'success', 11)]
 const PR_BODY = '## Why\n\nBecause.\n\n## What changed\n\nThings.\n\n## Not exercised\n\nNothing.\n\n## Closes\n\nRefs #386\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>'
 
 function ghState(patch: Record<string, unknown> = {}) {
@@ -507,7 +552,7 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
     const full = await call('ci_status', { pr: 77, detail: 'full' })
     expect(full.text).toContain('Passed: verify, windows tests, linux-x64.')
     expect(full.text).toContain('Required: build.yml on main.')
-    expect(full.text).toContain('Not required: notify passed.')
+    expect(full.text).toContain('Not required: full tier passed, notify passed.')
   })
 
   it('finds the Windows Vitest failure and its diff beyond setup-node noise (#587)', async () => {
@@ -618,6 +663,17 @@ describe('the project board app: ci_status and merge_when_green', { timeout: 30_
     const r = await call('merge_when_green', { pr: 77 })
     expect(r.isError).toBe(true)
     expect(r.text.split('\n')[0]).toBe('Not merged: A required check failed.')
+    expect(merges()).toEqual([])
+  })
+
+  it('merges nothing whose own run was the quick tier, and says how it lands', async () => {
+    runtime(ghState({ checkRuns: [quick()] }))
+    const r = await call('merge_when_green', { pr: 77, wait: true })
+    expect(r.isError).toBe(true)
+    expect(r.data).toMatchObject({ outcome: 'refused', kind: 'quick-tier' })
+    const first = r.text.split('\n')[0]
+    expect(first).toContain('ran only the quick tier of CI')
+    expect(first).toContain('queue_merge')
     expect(merges()).toEqual([])
   })
 

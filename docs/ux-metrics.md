@@ -38,7 +38,7 @@ keys save someone who knows them.
 
 `pnpm ux` starts its own dev server (port 5196, `UX_PORT`) and runs in WebKit, the desktop app on
 macOS and Linux (`E2E_BROWSER=chromium` for the Windows engine). Locally, take the e2e lock like
-any Playwright run (AGENTS.md). CI runs it on every pull request in the `ux tasks` job
+any Playwright run (AGENTS.md). CI runs it on every full run (the merge queue's batches, main) in the `ux tasks` job
 (`.github/workflows/build.yml`): a task over its budget fails the job, the table and the comparison
 with `e2e/ux/baseline.json` go to the job's summary, and the JSON is kept as the `ux-report`
 artifact.

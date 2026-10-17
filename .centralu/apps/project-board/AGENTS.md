@@ -237,7 +237,7 @@ file and polls; `queue-tools.mjs` has the tools; `bin/merge-queue.mjs` is the wa
 The free plan runs about one CI build at a time, so pull requests queued together each waited for
 their own run in one line. `batch.mjs` holds the rules (pure), `queue-batch.mjs` does them on GitHub,
 and the tick drives the running batch before any item, under the same lease. On while `project.json`
-has `queue.batch` (`min` items to start one, at least 2; `max`, default 6).
+has `queue.batch` (`min` items to start one, at least 2, or 1 with two tiers of CI below; `max`, default 6).
 
 - **Which**: active items in CI whose own CI was read on their head and has not started (every run
   `queued`, `waiting`, `requested` or `pending`: cancelling it throws no work away), not sent back
@@ -290,6 +290,40 @@ has `queue.batch` (`min` items to start one, at least 2; `max`, default 6).
   news as ever ("Tested in batch …"). `PROJECT_BOARD_QUEUE_BATCH_MIN` changes `min` only for tests.
   Tests: `tooling/project-board-queue.test.ts` (the rules, and the app against the fake `gh`: green,
   red and split, the default branch moved, dispatch refused, a conflict).
+
+### Two tiers of CI (2026-10-18)
+
+GitHub Actions was the bottleneck: a full run of `build.yml` is about 24 jobs, the free plan runs 20
+at once, and every push of every pull request started one. The owner chose two tiers: a pull
+request's own run is the **quick tier** (`changes`, `verify`, the Windows unit tests); the **full
+tier** (every job) runs on main, on a manual run (a batch's dispatch, or a person's) and on a release
+bump's pull request (`.github/scripts/ci-changes.mjs`). A skipped job counts as passed, so a quick run
+alone is green on what it reports. **Invariant: nothing lands that has not passed the full tier on
+what lands.** On while `project.json` has `ci.fullTier`, the name of the check that passes on a full
+run only (build.yml's `full tier` job; `ranTier` reads it: `full` when it passed, `quick` when it
+finished otherwise, null while not reported).
+
+- **An item lands from a full run**: its own head's (`decideCi` merges only when `ranTier` is `full`:
+  a release bump, or a full run a person started on its branch), or a batch's. A head whose own run
+  finished, ran less than the full tier and passed what it ran (`quickGreen`) waits for a batch
+  (`ci.verdict` `quick`); one the queue cannot batch (a fork's, a release bump's quick run, batches
+  off) → attention `full-tier`, saying how to start the full tier on it.
+- **Every item lands through a batch** then, **a batch of one included**: `min` may be 1 (this
+  repository's), and the fewest left after a conflict or a change is `min(2, min)`. A batch also takes
+  items whose quick tier passed, oldest first; one sent back from a batch on its head (`batchless`)
+  is taken alone, when it is the oldest. The batch's run must have passed the full tier's check too,
+  or nothing lands from it (the batch is dropped).
+- **A batch of one that ended without landing its member** (red, refused, stopped, three errors, a
+  conflict alone) marks it `alone` with why: not batched again on that head, and its next poll tells
+  its session (`full-tier`, with the batch's reason). A new head, or queueing it again, clears it.
+  Without this a red batch of one was formed again every tick.
+- **`merge_when_green`** refuses a head whose own run was the quick tier (`quick-tier`, saying to use
+  `queue_merge` or to start the full tier), and waits while the full tier's check has not passed.
+- **The release** takes a bump PR's run as evidence only when the full tier's check passed on it,
+  when the required set names it (`ciForRelease` `tier`): a quick run skipped what main's runs test.
+- `PROJECT_BOARD_CI_FULL_TIER` sets the check's name for tests only (empty: no tiers, as a repository
+  without them); the queue's app tests run both ways. Tests: `tooling/project-board-queue.test.ts`,
+  `tooling/project-board-ci.test.ts`, `tooling/build-workflow.test.ts`.
 
 ## Which tool for which task (#957)
 

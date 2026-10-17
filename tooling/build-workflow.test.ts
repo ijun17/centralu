@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 // @ts-expect-error — plain .mjs of a Centralu app (no installs, no types, by the app rules)
 import { workflowCheckNames, workflowEventJobs } from '../.centralu/apps/project-board/ci.mjs'
 // @ts-expect-error — a plain .mjs script the workflow runs with the runner's own Node
-import { changedFiles, classify } from '../.github/scripts/ci-changes.mjs'
+import { changedFiles, classify, outputs, tierOf, VERSION_SOURCE } from '../.github/scripts/ci-changes.mjs'
 
 // Like release-workflow.test.ts, inspect the workflow without adding a YAML dependency.
 const workflow = readFileSync(new URL('../.github/workflows/build.yml', import.meta.url), 'utf8')
@@ -43,6 +43,9 @@ describe('CI proves the macOS app bundles without making an unused disk image', 
 /*
  * Which jobs a commit needs (2026-10-17): `changes` answers from the files it changes, and each job a commit cannot
  * affect is left out. A left-out job must still report the check a required set waits for.
+ *
+ * Two tiers (2026-10-18): a pull request runs the quick tier (`changes`, `verify`, the Windows unit tests), every
+ * other run the full one. Every other job waits on `changes`, and on a quick run neither it nor its stand-in runs.
  */
 describe('CI leaves out the jobs a commit cannot affect, and every check still reports', () => {
   const jobs = workflow.split(/^jobs:\n/m)[1]!.split(/(?=^ {2}[\w-]+:\n)/m).map((b) => ({ id: /^ {2}([\w-]+):/.exec(b)![1]!, body: b }))
@@ -50,21 +53,39 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
   const gate = (body: string) => /^ {4}if: needs\.changes\.outputs\.(\w+) == '(true|false)'$/m.exec(body)
   const names = (body: string) => workflowCheckNames(`jobs:\n${body}`).names.sort()
 
-  it('gates the slow jobs on an answer of `changes`, and leaves verify, windows tests and WebKit e2e to every commit', () => {
+  it('runs only changes, verify and the Windows unit tests on a quick run, and gates every other job on an answer of `changes`', () => {
     const gated = Object.fromEntries(jobs.filter((j) => gate(j.body)?.[2] === 'true').map((j) => [j.id, gate(j.body)![1]]))
     expect(gated).toEqual({
+      'full-tier': 'full',
       bundle: 'bundle',
       'content-verify': 'host',
+      'windows-tests': 'full',
+      // WebKit e2e on every full run, documents only included (owner decisions of 2026-10-11 and 2026-10-18)
+      e2e: 'full',
       'e2e-chromium': 'code',
       'ux-tasks': 'code',
       'host-tests-remote-node': 'host_tests',
       keeper: 'host',
       'keeper-linux': 'host',
     })
-    // WebKit e2e on every pull request, documents only included: the owner's decision of 2026-10-11
-    for (const id of ['verify', 'windows-tests', 'windows-tests-unit', 'e2e']) expect(job(id).body).not.toMatch(/^ {4}(needs|if):/m)
+    // The quick tier: what catches most problems cheaply (the Windows unit tests: build.yml's comment has the numbers)
+    for (const id of ['verify', 'windows-tests-unit']) expect(job(id).body).not.toMatch(/^ {4}(needs|if):/m)
     expect(jobs.some((j) => j.id === 'e2e-skipped')).toBe(false)
     for (const id of Object.keys(gated)) expect(job(id).body).toMatch(/^ {4}needs: changes$/m)
+    // Every job but those, `changes` and the report (which waits on the e2e jobs) has a gate: nothing else runs on a quick run
+    const ungated = jobs.filter((j) => !gate(j.body)).map((j) => j.id)
+    expect(ungated.sort()).toEqual(['changes', 'e2e-report', 'verify', 'windows-tests-unit'])
+    expect(job('e2e-report').body).toMatch(/^ {4}needs: \[e2e, e2e-chromium\]$/m)
+    expect(job('changes').body).toMatch(/^ {6}full: \$\{\{ steps\.classify\.outputs\.full \}\}$/m)
+  })
+
+  // What the merge queue and the release read to tell a full run from a quick one (project.json ci.fullTier)
+  it('has a job that passes on a full run only, under the check name the board reads', () => {
+    const board = JSON.parse(readFileSync(new URL('../.centralu/apps/project-board/project.json', import.meta.url), 'utf8')) as { ci: { fullTier: string } }
+    const marker = job('full-tier').body
+    expect(names(marker)).toEqual([board.ci.fullTier])
+    expect(gate(marker)?.slice(1)).toEqual(['full', 'true'])
+    expect(marker).not.toMatch(/continue-on-error|always\(\)/)
   })
 
   // #1035: the one Windows job was the longest of every run, 15 of its 16.5 minutes the unit tests
@@ -105,8 +126,9 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(workflow).toContain('pattern: e2e-blob-*')
   })
 
-  it('gives each gated matrix job a stand-in with the same checks, run on the other answer only', () => {
-    for (const j of jobs.filter((x) => gate(x.body)?.[2] === 'true' && /^ {4}strategy:/m.test(x.body))) {
+  it('gives each matrix job the files gate a stand-in with the same checks, run on the other answer only', () => {
+    // A job of every full run (`full`) has no other answer on a full run, and reports nothing either way on a quick one
+    for (const j of jobs.filter((x) => gate(x.body)?.[2] === 'true' && gate(x.body)?.[1] !== 'full' && /^ {4}strategy:/m.test(x.body))) {
       const stand = job(`${j.id}-skipped`)
       expect(stand, `${j.id} needs a stand-in`).toBeDefined()
       expect(gate(stand.body)?.slice(1)).toEqual([gate(j.body)![1], 'false'])
@@ -118,7 +140,7 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     for (const id of ['ux-tasks', 'keeper', 'keeper-linux']) expect(jobs.some((j) => j.id === `${id}-skipped`)).toBe(false)
   })
 
-  it('asks `changes` with the same rule on every event', () => {
+  it('asks `changes` with the same rule on every event, a manual run being the one with the `everything` input', () => {
     const changes = job('changes').body
     expect(changes).toContain('run: node .github/scripts/ci-changes.mjs')
     // main and the history back to the merge-base (see changedFiles below)
@@ -126,6 +148,8 @@ describe('CI leaves out the jobs a commit cannot affect, and every check still r
     expect(workflowEventJobs(`on:\n  push:\n  pull_request:\njobs:\n${changes}`)[0]!.reason).toBeNull()
     const script = readFileSync(new URL('../.github/scripts/ci-changes.mjs', import.meta.url), 'utf8')
     expect(script).not.toMatch(/GITHUB_(EVENT|REF|HEAD_REF|BASE_REF)|github\.event/)
+    expect(changes).toContain('EVERYTHING: ${{ inputs.everything }}')
+    expect(workflow).toMatch(/^ {2}workflow_dispatch:\n {4}inputs:\n {6}everything:\n/m)
   })
 })
 
@@ -177,6 +201,27 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
     for (const f of included) expect(classify([f]).host, f).toBe(true)
   })
 
+  it('runs the quick tier on a pull request, and the full tier on main, on a manual run and on a release bump', () => {
+    expect(tierOf({ files: ['packages/agent-host/src/rpc.ts'] }).tier).toBe('quick')
+    expect(tierOf({ files: ['docs/a.md'] }).tier).toBe('quick')
+    // A build or CI change is still the quick tier: the full one runs in the merge queue's batch
+    expect(tierOf({ files: ['.github/workflows/build.yml'] }).tier).toBe('quick')
+    expect(tierOf({ files: null, onMain: true }).tier).toBe('full')
+    expect(tierOf({ files: ['docs/a.md'], dispatch: true }).tier).toBe('full')
+    expect(tierOf({ files: null }).tier).toBe('full')
+    expect(tierOf({ files: ['docs/a.md', VERSION_SOURCE] })).toMatchObject({ tier: 'full', why: expect.stringContaining('release bump') })
+  })
+
+  it('answers off for every group on a quick run, so neither a job nor its stand-in runs', () => {
+    const host = classify(['packages/agent-host/src/rpc.ts'])
+    expect(outputs('quick', host)).toEqual({ full: 'off', bundle: 'off', host: 'off', host_tests: 'off', code: 'off' })
+    expect(outputs('full', host)).toEqual({ full: 'true', bundle: 'true', host: 'true', host_tests: 'true', code: 'true' })
+    expect(outputs('full', classify(['docs/a.md']))).toEqual({ full: 'true', bundle: 'false', host: 'false', host_tests: 'false', code: 'false' })
+    // Every answer a job's gate reads is one `changes` gives
+    const gates = new Set([...workflow.matchAll(/needs\.changes\.outputs\.(\w+) == '(true|false)'/g)].map((m) => m[1]))
+    expect([...gates].sort()).toEqual(Object.keys(outputs('full', host)).sort())
+  })
+
   it('runs everything when the changed files are not known', () => {
     expect(classify(null)).toEqual({ bundle: true, host: true, host_tests: true, code: true })
   })
@@ -184,7 +229,9 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
   // So a bump PR's run is main's run, which runs everything (the release script's reuse, docs/releasing.md)
   it('runs everything for a release bump, from the file that declares the version alone', () => {
     const release = (JSON.parse(readFileSync(new URL('../.centralu/apps/project-board/project.json', import.meta.url), 'utf8')) as { release: { source: { path: string } } }).release
+    expect(VERSION_SOURCE).toBe(release.source.path)
     expect(classify([release.source.path])).toEqual({ bundle: true, host: true, host_tests: true, code: true })
+    expect(outputs(tierOf({ files: [release.source.path] }).tier, classify([release.source.path]))).toEqual(outputs('full', classify(null)))
   })
 
   /*
@@ -217,8 +264,9 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
     try {
       f.commit({ 'docs/a.md': 'b' }, 'docs on main')
       // A documents commit pushed to main still runs everything
-      expect(changedFiles(f.dir, 'main').files).toBeNull()
+      expect(changedFiles(f.dir, 'main')).toMatchObject({ files: null, onMain: true })
       expect(changedFiles(f.dir, 'origin/main').files).toBeNull()
+      expect(changedFiles(f.dir, 'origin/main').onMain).toBeUndefined()
     } finally {
       f.done()
     }
@@ -240,6 +288,44 @@ describe('what a commit needs, from the files it changes (.github/scripts/ci-cha
       expect(f.git('diff', '--name-only', 'HEAD^1', 'HEAD')).toBe('docs/upper.md')
     } finally {
       f.done()
+    }
+  })
+
+  // The script as the `changes` job runs it: what it writes to $GITHUB_OUTPUT, by event
+  it('writes the quick tier for a pull request, and the full tier for a manual run, a release bump and main', () => {
+    const f = fixture()
+    const script = fileURLToPath(new URL('../.github/scripts/ci-changes.mjs', import.meta.url))
+    const answer = (everything = '') => {
+      const out = `${f.dir}-github-output.txt`
+      writeFileSync(out, '')
+      execFileSync(process.execPath, [script], { cwd: f.dir, env: { ...process.env, GITHUB_OUTPUT: out, EVERYTHING: everything }, stdio: 'pipe' })
+      return Object.fromEntries(readFileSync(out, 'utf8').trim().split('\n').map((l) => l.split('=')))
+    }
+    const off = { full: 'off', bundle: 'off', host: 'off', host_tests: 'off', code: 'off' }
+    const all = { full: 'true', bundle: 'true', host: 'true', host_tests: 'true', code: 'true' }
+    try {
+      f.git('update-ref', 'refs/remotes/origin/main', 'main')
+      f.git('checkout', '-q', '-b', 'docs')
+      f.commit({ 'docs/a.md': 'docs' }, 'docs only')
+      f.merge('docs', 'main')
+      // A pull request's merge commit: the quick tier, whatever it changes
+      expect(answer()).toEqual(off)
+      // A manual run on the same commit: everything, or what the files need when `everything` is unticked
+      expect(answer('true')).toEqual(all)
+      expect(answer('false')).toEqual({ full: 'true', bundle: 'false', host: 'false', host_tests: 'false', code: 'false' })
+      // A release bump's pull request
+      f.git('checkout', '-q', '-b', 'bump', 'main')
+      f.commit({ [VERSION_SOURCE]: "export const APP_VERSION = '9.9.9'\n" }, 'chore(release): 9.9.9')
+      f.merge('bump', 'main')
+      expect(answer()).toEqual(all)
+      // A commit on main
+      f.git('checkout', '-q', 'main')
+      f.commit({ 'docs/b.md': 'docs' }, 'docs on main')
+      f.git('update-ref', 'refs/remotes/origin/main', 'main')
+      expect(answer()).toEqual(all)
+    } finally {
+      f.done()
+      rmSync(`${f.dir}-github-output.txt`, { force: true })
     }
   })
 

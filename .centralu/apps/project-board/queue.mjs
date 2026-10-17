@@ -7,7 +7,13 @@
 // and are then closed with "Landed in #N". The rules it carries are merge_when_green's: maintain or
 // admin only, never a draft, never anything not green, squash with --match-head-commit, the subject
 // "Title (#N)" within 72 characters, no attribution lines, never force anything.
-import { canMerge, NO_PERMISSION, squashMessage } from './ci.mjs'
+//
+// Two tiers of CI (project.json `ci.fullTier`, 2026-10-18): a pull request's own run is the quick tier,
+// which lands nothing. An item lands from a full run on what lands: a batch (queue-batch.mjs), a batch
+// of one included, or its own head's full run (a release bump's, or one a person started on its
+// branch). An item whose quick tier passed waits for a batch; one that cannot be batched, or whose
+// batch of one ended without landing it, needs its session.
+import { canMerge, NO_PERMISSION, quickTierReason, ranTier, squashMessage } from './ci.mjs'
 import { short } from './util.mjs'
 
 /** What an item can be in. The first three are active (the driver polls them); the last two are done. */
@@ -111,6 +117,7 @@ export function enqueue(q, { repo, pr, lowers = [], owner = null, deleteBranch =
     // Out of any batch it was in (the batch sees it gone and carries on without it)
     delete mine.batch
     delete mine.batchless
+    delete mine.alone
     pushEvent(q, mine, { kind: 'queued', text: `${ref(repo, pr)} queued again${lowers.length ? ` with ${lowers.map((n) => ref(repo, n)).join(', ')}` : ''}.`, at })
     return { item: mine, replaced: true }
   }
@@ -266,12 +273,25 @@ export function decideRun({ subject, head, checks, runs = [], now, n }) {
  * (onlySupersededFailures). Answers `{ state, action?, reason?, patch? }`; action `rerun` (a run, all jobs or the failed ones),
  * `retarget` (onto the default branch) or `merge`.
  */
-export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBranches = [], supersededOnly = false, now, ref }) {
+export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBranches = [], supersededOnly = false, now, ref, fullTier = null, canBatch = false }) {
   const n = ref(item.repo, item.pr)
   const head = pr.headRefOid
   const at = new Date(now).toISOString()
+  if (quickGreen(checks, runs, fullTier)) {
+    const alone = item.alone?.head === head ? item.alone : null
+    if (alone)
+      return attention(
+        'full-tier',
+        `${n} passed the quick tier of CI, and lands only from a full run, but its batch of one ended without landing it: ${alone.text} Fix it and push (the queue takes the new head), or queue it again to try once more.`,
+      )
+    if (!canBatch) return attention('full-tier', `${quickTierReason(n, pr.headRefName)} The queue cannot batch it (${pr.isCrossRepository ? "a fork's pull request" : 'batches are off, or it is a release bump'}), and lands it once its own full run is green.`)
+    // Waits for a batch (batch.mjs batchCandidates), which runs the full tier on it
+    return { state: 'ci', quick: true, patch: { noCiSince: null, missingSince: null } }
+  }
   const run = decideRun({ subject: item, head, checks, runs, now, n })
   if (run.state !== 'green') return run
+  // Green on a required set that does not name the full tier's check, while its run goes on: not proven full yet
+  if (ranTier(checks, fullTier) !== 'full') return { state: 'ci', patch: { noCiSince: null, missingSince: null } }
 
   if (pr.baseRefName !== defaultBranch) {
     if (lowerBranches.includes(pr.baseRefName)) return { state: 'waiting', action: { type: 'retarget', base: defaultBranch }, event: `${n}: green; moved its base from ${pr.baseRefName} to ${defaultBranch} to land the stack through it.` }
@@ -298,6 +318,18 @@ export function decideCi({ item, pr, checks, runs = [], defaultBranch, lowerBran
     return { state: 'waiting', patch: { uncleanSince: since } }
   }
   return { state: 'ci', action: { type: 'merge' }, patch: { uncleanSince: null, missingSince: null } }
+}
+
+/**
+ * With two tiers (`fullTier`, the full tier's check name): whether a head's own CI is a finished run
+ * that did not run the full tier and passed what it ran. Every run on it completed, its full tier's
+ * check did not pass (skipped, or never reported by an older workflow), and no required check it
+ * reported failed or is still going; the checks a quick run leaves out are not reported at all.
+ */
+export function quickGreen(checks, runs, fullTier) {
+  if (!fullTier || ranTier(checks, fullTier) === 'full') return false
+  if (!runs?.length || runs.some((r) => r.status !== 'completed')) return false
+  return checks.verdict !== 'none' && !checks.rows.some((r) => r.state === 'failed' || r.state === 'pending')
 }
 
 /**
@@ -379,6 +411,8 @@ export function itemLine(item, ref = refIn(item.repo)) {
       ? `needs attention: ${item.reason?.kind ?? '?'} — ${item.reason?.text ?? ''}`
       : item.state === 'ci' && item.batch != null
         ? `CI in batch ${item.batch}${item.head ? ` at ${short(item.head)}` : ''}`
+        : item.state === 'ci' && item.ci?.verdict === 'quick' && item.ci.head === item.head
+          ? `quick tier passed at ${short(item.head)}; waiting for a batch to run the full tier`
         : item.state === 'ci'
           ? `CI${item.head ? ` at ${short(item.head)}` : ''}${item.lastError ? `; last poll failed: ${item.lastError}` : ''}`
         : item.state === 'waiting'

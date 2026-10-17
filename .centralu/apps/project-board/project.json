@@ -13,10 +13,11 @@
     "workflows": [".github/workflows/build.yml"],
     "knownFailuresIssue": 368,
     "waitMinutes": 40,
-    "pollSeconds": 30
+    "pollSeconds": 30,
+    "fullTier": "full tier"
   },
   "queue": {
-    "batch": { "min": 2, "max": 6 }
+    "batch": { "min": 1, "max": 6 }
   },
   "release": {
     "source": { "path": "packages/protocol/src/brand.ts", "pattern": "^export const APP_VERSION = '([^']+)'" },

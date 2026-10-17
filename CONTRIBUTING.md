@@ -162,12 +162,25 @@ pnpm verify      # lint + dependency rules + types + unit/integration tests
 pnpm e2e         # Playwright scenarios
 ```
 
-CI runs `pnpm verify` on every pull request; run it locally anyway, all of it, before you push.
-CI also runs the keeper's end-to-end scripts on macOS, the parts that need no model and no network
-(`scripts/keeper-*integration.mjs`, the `keeper e2e` job; [docs/agent-host.md](docs/agent-host.md) §4.1).
-Run `pnpm e2e` for anything the UI shows.
+CI runs in two tiers ([docs/releasing.md](docs/releasing.md#what-ci-does)). A pull request runs
+the **quick tier**: `pnpm verify` on Linux and the unit tests on Windows. Everything else (the UI
+scenarios in both engines, the bundles, the keeper, the host's tests on the remotes' Node) is the
+**full tier**, which runs on main, in the merge queue's batches and on a release bump. Nothing lands
+without a full run on what lands: the merge queue (`queue_merge`) lands a pull request through a
+batch built on main and run in full, a batch of one included, and `merge_when_green` refuses one
+whose own run was quick. So a green pull request has passed only the quick tier: run `pnpm verify`
+locally anyway, all of it, before you push, and `pnpm e2e` for anything the UI shows. To run the
+full tier on your branch before queueing it (UI work, a change to the keeper or the bundles):
 
-CI runs the whole Playwright suite **in both engines the desktop app is**: WebKit (WKWebView on
+```bash
+gh workflow run build.yml --ref <your-branch>   # every job, on the branch's head; its checks show on the PR
+```
+
+CI's full tier also runs the keeper's end-to-end scripts on macOS, the parts that need no model and
+no network (`scripts/keeper-*integration.mjs`, the `keeper e2e` job;
+[docs/agent-host.md](docs/agent-host.md) §4.1).
+
+CI's full tier runs the whole Playwright suite **in both engines the desktop app is**: WebKit (WKWebView on
 macOS, WebKitGTK on Linux) and Chromium (WebView2 on Windows), each split across parallel shards
 (the `e2e (webkit i/n)` and `e2e (chromium i/n)` jobs). Locally `pnpm e2e` runs in Chromium, plus
 the `-webkit.spec.ts` twins in WebKit; `E2E_BROWSER=webkit pnpm e2e` or `E2E_BROWSER=chromium pnpm

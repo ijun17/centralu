@@ -18,7 +18,7 @@ import {
   splitBatch,
   STATUS_CONTEXT,
 } from './batch.mjs'
-import { canMerge, evaluateChecks, squashMessage, workflowCheckNames } from './ci.mjs'
+import { canMerge, evaluateChecks, ranTier, squashMessage, workflowCheckNames } from './ci.mjs'
 import { CI, QUEUE } from './config.mjs'
 import {
   cancelWorkflowRun,
@@ -45,8 +45,12 @@ import { short } from './util.mjs'
 /** A dispatch GitHub refused (no workflow_dispatch trigger, a permission): no new batch for this long. */
 export const BATCH_OFF_MS = 60 * 60_000
 const RED = new Set(['failed', 'failing'])
-/** Fewer than this left after a conflict or a change, and there is no batch (QUEUE.batch.min is for starting one). */
-const KEEP_MIN = 2
+/**
+ * Fewer than this left after a conflict or a change, and there is no batch (QUEUE.batch.min is for
+ * starting one). With two tiers a batch of one is a batch: every pull request lands through one.
+ */
+const KEEP_MIN = QUEUE.batch ? Math.min(2, QUEUE.batch.min) : 2
+const TIERS = CI.fullTier !== null
 const workflowFile = (path) => path.split('/').pop()
 const list = (b, prs, ref) => prs.map((p) => ref(b.repo, p)).join(', ')
 
@@ -56,13 +60,13 @@ export function batchWork(q, now) {
   const b = activeBatch(q)
   if (b) return Date.parse(b.nextAt ?? 0) <= now ? { batch: b } : null
   if (q.batchOff && Date.parse(q.batchOff.until) > now) return null
-  return batchCandidates(q, { max: QUEUE.batch.max }).length >= QUEUE.batch.min ? { form: true } : null
+  return batchCandidates(q, { max: QUEUE.batch.max, tiers: TIERS }).length >= QUEUE.batch.min ? { form: true } : null
 }
 
 /** Forms the batch batchWork saw, on the queue as it is now (inside updateQueue). */
 export function formDue(q, now, ref) {
   if (activeBatch(q)) return
-  const items = batchCandidates(q, { max: QUEUE.batch.max })
+  const items = batchCandidates(q, { max: QUEUE.batch.max, tiers: TIERS })
   if (items.length >= QUEUE.batch.min) formBatch(q, items, { at: new Date(now).toISOString(), ref })
 }
 
@@ -104,7 +108,7 @@ export async function batchTick(dir, b, { q, holder, now, ref }) {
       // Not batched again on this head: their own runs may be cancelled (rerun on their own), and a
       // batch that failed three times would most likely fail again, batch after batch
       made = fb.branchMade === true
-      endBatch(fresh, fb, 'error', { at })
+      endBatch(fresh, fb, 'error', { at, why: `batch ${fb.branch} could not be read or acted on ${fb.errors} times in a row (${message}).` })
       ended = true
     })
     // Only a branch the queue made (written down when it was), and only while still the driver
@@ -116,13 +120,13 @@ export async function batchTick(dir, b, { q, holder, now, ref }) {
 }
 
 /** Ends the batch on GitHub's side (its branch, once made) and in the queue, with an event. */
-async function drop(b, { save, at, renew }, text, { batchless = true, state = 'dropped', then, made = true } = {}) {
+async function drop(b, { save, at, renew }, text, { batchless = true, state = 'dropped', then, made = true, why = null } = {}) {
   // Not the driver any more: the one that is ends it
   if (!renew()) return { yielded: true }
   if (made) await deleteBranch(b.repo, b.branch)
   save((q, fb) => {
     batchEvent(q, fb, `Batch ${fb.branch}: ${text}`, at)
-    endBatch(q, fb, state, { at, batchless })
+    endBatch(q, fb, state, { at, batchless, why: why ?? `batch ${fb.branch}: ${text}` })
     then?.(q, fb)
   })
   return { state }
@@ -195,7 +199,8 @@ async function build(b, ctx) {
   const left = [...conflicts, ...refused]
   const back = (fq, fb) => {
     releaseMembers(fq, fb, [...left, ...gone], { at, batchless: false })
-    markBatchless(fq, fb.repo, left)
+    // Alone in it, it would conflict again in a batch of its own
+    markBatchless(fq, fb.repo, left, fb.members.length === 1 ? `${conflicts.length ? 'it conflicts with' : 'GitHub would not merge it into a batch on'} ${defaultBranch}.` : null)
   }
   if (steps.length < KEEP_MIN)
     return drop(b, ctx, `${conflicts.length ? `${list(b, conflicts, ref)} conflict${conflicts.length === 1 ? 's' : ''} with the others, and ` : ''}${refused.length ? `GitHub would not merge ${list(b, refused, ref)} into it, and ` : ''}fewer than ${KEEP_MIN} merged cleanly; no batch.`, {
@@ -316,6 +321,14 @@ async function runCi(b, ctx) {
     save((fq, fb) => Object.assign(fb, { required, ...(d.patch ?? {}), lastError: null, errors: 0, updatedAt: at, nextAt: new Date(now + pollMs('ci')).toISOString() }))
     return { state: 'ci' }
   }
+  if (d.state === 'green' && TIERS && ranTier(checks, CI.fullTier) !== 'full') {
+    // Green without the full tier: nothing lands from less (two tiers). A check still to come waits
+    if (ranTier(checks, CI.fullTier) === null && runs.some((r) => r.status !== 'completed')) {
+      save((fq, fb) => Object.assign(fb, { required, lastError: null, errors: 0, updatedAt: at, nextAt: new Date(now + pollMs('ci')).toISOString() }))
+      return { state: 'ci' }
+    }
+    return drop(b, ctx, `its run passed without running the full tier (the "${CI.fullTier}" check did not pass), and nothing lands from less. Look at the changes job of its run (.github/scripts/ci-changes.mjs).`)
+  }
   if (d.state === 'green') {
     const run = runs[0] ?? null
     save((fq, fb) => {
@@ -336,7 +349,7 @@ async function runCi(b, ctx) {
     })
     return { state: 'failed' }
   }
-  return drop(b, ctx, `${d.reason.text} Its pull requests go back to their own CI.`)
+  return drop(b, ctx, `${d.reason.text} Its pull requests go back to their own CI.`, { why: d.reason.text })
 }
 
 /** Cancels the batch's own runs still going (it changed, or ended). Best effort. */
@@ -414,7 +427,7 @@ async function landNext(b, ctx) {
     await postStatus(repo, step.head, {
       state: 'success',
       context: STATUS_CONTEXT,
-      description: `Passed CI in ${b.branch} with ${list(b, prs.filter((p) => p !== step.pr), ref)}`,
+      description: `Passed CI in ${b.branch}${prs.length > 1 ? ` with ${list(b, prs.filter((p) => p !== step.pr), ref)}` : ''}`,
       targetUrl: b.run?.url ?? null,
     }).catch((e) => {
       if (e instanceof GitHubError && FATAL.has(e.kind)) throw e

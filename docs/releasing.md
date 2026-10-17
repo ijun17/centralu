@@ -66,24 +66,42 @@ script rehearses by default and why nothing publishes automatically.
 
 ## What CI does
 
-- `.github/workflows/build.yml` — builds every platform on every push and PR and uploads
+- `.github/workflows/build.yml` — builds every platform on every push to main and every full run (below) and uploads
   the bundles as artifacts. Since nobody on the project owns a Linux machine, this is the
   only place a Linux build is ever exercised. Download the artifact to try it; GitHub
   artifacts are zips and drop the exec bit, so `chmod +x` the AppImage after unzipping.
-- Its first job, `changes` (`.github/scripts/ci-changes.mjs`), leaves out of a pull request
-  what it cannot affect, by the files it adds to main (compared with its merge-base with main,
-  whatever its base branch, so a stacked pull request is judged by the whole stack; renames count
-  as both paths): documents alone run `verify`, the `windows tests` jobs and the WebKit UI scenarios only
-  (WebKit runs on every pull request, owner decision 2026-10-11); tests alone skip the bundles,
-  the keeper end to end and the content verifier; the window alone (`packages/ui`, `core`,
-  `platform`, `apps/web`) skips the keeper, the content verifier and the host's tests on the
-  remotes' Node; a build or CI config (`tsconfig*.json`, `package.json`, the lockfile, a vite
-  config, `.github/`) runs everything. **A commit already on main runs everything**, so main's own
-  runs never skip. A left-out check still reports under its name (`skipped`, or a `…-skipped`
-  stand-in for a matrix job), so a required set sees it. If branch protection or a ruleset ever
-  names the required checks, it must include `changes`: the gated jobs and their stand-ins wait
-  on it, and without it a failed `changes` leaves both skipped. A manual run
-  (`workflow_dispatch`) runs everything unless `everything` is unticked.
+- **Two tiers** (owner decision, 2026-10-18): a full run is about 24 jobs and the free plan runs 20
+  at once, so every push of every pull request used to queue a whole run behind the others. A pull
+  request now runs the **quick tier**: `changes`, `verify` and the Windows unit tests
+  (`windows tests (vitest i/n)`, the job that caught the most failures `verify` did not: 53 of the
+  94 failed pull request runs from 2026-10-11 to 2026-10-18 that passed `verify`). Every other job
+  is left out and reports nothing. The **full tier**, every job, runs on a push to main, on a manual
+  run (`workflow_dispatch`: the merge queue's batches, or a person) and on a release bump's pull
+  request (one that changes `packages/protocol/src/brand.ts`, where the version is declared). Its
+  `full tier` job passes on a full run only and is skipped on a quick one: that is how the board
+  tells the two apart, since a skipped job counts as passed and a quick run alone looks green.
+  **Nothing lands that has not passed the full tier on what lands**: the merge queue lands a pull
+  request through a batch built on main and run in full (a batch of one included) or from a full run
+  on its own head, and `merge_when_green` refuses one whose own run was quick. To run the full tier
+  on a pull request yourself (before queueing UI work, say):
+  `gh workflow run build.yml --ref <branch>`. It runs on the branch's head, and its checks show on
+  the pull request.
+- Its first job, `changes` (`.github/scripts/ci-changes.mjs`), decides the tier and, inside the full
+  tier, leaves out what a run cannot affect, by the files it adds to main (compared with its
+  merge-base with main, whatever its base branch, so a stacked pull request is judged by the whole
+  stack; renames count as both paths): documents alone run `verify`, the `windows tests` jobs and the
+  WebKit UI scenarios only; tests alone skip the bundles, the keeper end to end and the content
+  verifier; the window alone (`packages/ui`, `core`, `platform`, `apps/web`) skips the keeper, the
+  content verifier and the host's tests on the remotes' Node; a build or CI config (`tsconfig*.json`,
+  `package.json`, the lockfile, a vite config, `.github/`) runs everything. **A commit already on
+  main runs everything**, so main's own runs never skip. On a full run a left-out check still reports
+  under its name (`skipped`, or a `…-skipped` stand-in for a matrix job), so a required set sees it;
+  on a quick run neither runs. If branch protection or a ruleset ever names the required checks, it
+  must include `changes` (the gated jobs and their stand-ins wait on it, and without it a failed
+  `changes` leaves both skipped) and `full tier`, and since a quick run never reports the full tier's
+  matrix jobs, such a set could only name what every pull request runs; the board's own rule is what
+  keeps a quick run from landing. A manual run (`workflow_dispatch`) runs everything unless
+  `everything` is unticked, then what its files need, still the full tier.
 - On macOS, CI passes `--bundles app` and uploads `Centralu-app.tar.gz`, preserving the app's
   executable bits and signature. It no longer creates or uploads a DMG (#628): intermittent
   `bundle_dmg.sh` failures blocked otherwise valid builds, and no workflow consumes that image.
@@ -133,7 +151,9 @@ main's checks are pending or absent. The PR must be merged into main from
 squash merge commit, and `git rev-parse <sha>^{tree}` must match for main and the PR head.
 Even a later commit with an unchanged tree invalidates this evidence. Every required
 check on that exact PR head must be reported and green; missing, pending or failed
-checks refuse it. `bump` still requires main's own green CI.
+checks refuse it, and so does a run that did not pass the `full tier` check, when the required
+set names it: a quick run skips every job but `changes`, `verify` and the Windows unit tests, and a
+skipped job reads as passed. `bump` still requires main's own green CI.
 
 Main's green checks are used directly. A failing main check blocks reuse, including a
 run that was pending at rehearsal and fails before tagging: every call reads CI again.
@@ -171,7 +191,7 @@ Workflow event audit (2026-10-13):
 
 | Workflow and jobs | Event-dependent behavior | Required for this CI gate? |
 | --- | --- | --- |
-| `build.yml`: `changes`, `bundle`, `verify`, `content-verify`, `windows-tests`, `windows-tests-unit`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux`, and the `…-skipped` stand-ins | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps without changing test behavior. `changes` (2026-10-17, `.github/scripts/ci-changes.mjs`, reviewed by hand: it reads no event) runs everything for a commit already on main and leaves out of a pull request the jobs its files cannot affect. A bump PR changes the product's version files, which run everything, so its run is the same set of jobs as main's (`tooling/build-workflow.test.ts` checks the version's source file). | Yes: the configured CI workflow, unless branch protection specifies the set. |
+| `build.yml`: `changes`, `bundle`, `verify`, `content-verify`, `windows-tests`, `windows-tests-unit`, `e2e`, `e2e-chromium`, `e2e-report`, `ux-tasks`, `host-tests-remote-node`, `keeper`, `keeper-linux`, and the `…-skipped` stand-ins | No job or step branches on push-to-main versus PR. OS, cancellation and earlier-job outcomes select some steps; concurrency isolates release bumps without changing test behavior. `changes` (2026-10-17, `.github/scripts/ci-changes.mjs`, reviewed by hand: it reads no event) runs everything for a commit already on main and leaves out of a pull request the jobs its files cannot affect. Tiers (2026-10-18): a pull request runs the quick tier, from the history alone (not on main) and the `everything` input (empty unless a manual run); a pull request that changes the version's source file is a release bump and runs the full tier, every job, so a bump PR's run is the same set of jobs as main's (`tooling/build-workflow.test.ts` checks the version's source file, and runs the script as the job does). The board takes a bump PR's run only when its `full tier` check passed. | Yes: the configured CI workflow, unless branch protection specifies the set. |
 | `release.yml`: `guard`, `platform`, `shim` | Tag push or manual dispatch; `guard` validates the tag on push and dry-run controls publishing. Neither main push nor PR runs it. | No; rehearsal remains a separate tag prerequisite. |
 | `shell-release.yml`: `guard`, `build`, `publish` | Manual dispatch only. | No. |
 | `local-content-sign.yml`: `validate`, `sign` | Manual dispatch only; real signing requires main. | No. |

@@ -262,6 +262,27 @@ export function evaluateChecks({ required, reported, alsoReported = false }) {
   }
 }
 
+/**
+ * Which tier of CI ran on a commit (#1066's companion, 2026-10-18): `full` when the full tier's check
+ * (project.json `ci.fullTier`, build.yml's `full tier` job) is reported, finished and passed; `quick`
+ * when it finished otherwise (skipped: a pull request's quick run); null while it is not reported or
+ * still running. A repository without tiers (no `name`) runs everything every time: always `full`.
+ * Only a check run counts, not a commit status of that name. `checks` is evaluateChecks' answer.
+ *
+ * Why: a skipped job counts as passed, so a quick run alone is green on every check it reports, and
+ * a missing one is only "not reported yet". This is what keeps such a run from landing anything.
+ */
+export function ranTier(checks, name) {
+  if (!name) return 'full'
+  const c = [...(checks?.rows ?? []), ...(checks?.others ?? [])].find((r) => r.name === name)?.check
+  if (!c || c.kind !== 'run' || c.status !== 'completed') return null
+  return c.conclusion === 'success' ? 'full' : 'quick'
+}
+
+/** The refusal for a head whose own CI ran only the quick tier: what lands needs a full run. */
+export const quickTierReason = (n, branch) =>
+  `${n} ran only the quick tier of CI, and nothing lands without a full run on what lands. Queue it with queue_merge, which lands it through a batch built on main and run in full, or start the full tier on its branch (gh workflow run build.yml --ref ${branch ?? '<branch>'}) and try again once that run is green.`
+
 // --- Whether to merge -----------------------------------------------------------------------------
 
 /** Merging is the maintainer's act (#386): maintain or admin on the repository, as GitHub reports it. */
@@ -279,11 +300,13 @@ export const NO_PERMISSION = Object.freeze({
  * can merge it. `action` is `merge`, `wait` (try again later, or keep polling with `wait: true`) or
  * `refuse` (stop; `reason` says why).
  */
-export function decideMerge({ permissions, pr, checks }) {
+export function decideMerge({ permissions, pr, checks, fullTier = null }) {
   if (!canMerge(permissions)) return NO_PERMISSION
   if (pr.state !== 'OPEN') return { action: 'refuse', kind: 'state', reason: `PR #${pr.number} is ${String(pr.state).toLowerCase()}, not open.` }
   if (pr.isDraft) return { action: 'refuse', kind: 'draft', reason: `PR #${pr.number} is a draft. Mark it ready for review first.` }
   if (checks.verdict === 'failing') return { action: 'refuse', kind: 'failing', reason: 'A required check failed.' }
+  // Two tiers: a quick run is green on what it reports, and waiting brings nothing more
+  if (ranTier(checks, fullTier) === 'quick') return { action: 'refuse', kind: 'quick-tier', reason: quickTierReason(`PR #${pr.number}`, pr.headRefName) }
   if (checks.verdict === 'none') return { action: 'wait', kind: 'none', reason: 'No checks are reported for its head commit yet, and no checks is not green.' }
   if (checks.verdict === 'pending') {
     const waiting = checks.rows.filter((r) => r.state === 'pending' || r.state === 'missing')
@@ -291,6 +314,8 @@ export function decideMerge({ permissions, pr, checks }) {
     return { action: 'wait', kind: 'pending', reason: `Required checks still to pass: ${named}.` }
   }
   if (checks.verdict !== 'green') return { action: 'refuse', kind: 'internal', reason: `Unknown CI verdict ${checks.verdict}.` }
+  // Green on a required set that does not name the full tier's check (branch protection): it must still have run
+  if (ranTier(checks, fullTier) !== 'full') return { action: 'wait', kind: 'pending', reason: `The full tier's check "${fullTier}" has not passed yet.` }
   if (pr.mergeable === 'CONFLICTING') return { action: 'refuse', kind: 'conflict', reason: `PR #${pr.number} has conflicts with ${pr.baseRefName}. Rebase it first.` }
   if (pr.mergeable !== 'MERGEABLE') return { action: 'wait', kind: 'mergeable', reason: 'GitHub has not worked out yet whether it can be merged.' }
   return { action: 'merge', kind: 'green', reason: 'Every required check is reported and passed, and GitHub can merge it.' }
