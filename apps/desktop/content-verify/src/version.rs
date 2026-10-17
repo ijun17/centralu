@@ -149,8 +149,15 @@ pub fn read_highest_seen(path: &Path) -> Result<Option<String>> {
 /// it to the version rolled back to: otherwise the next start after a reboot would refuse the
 /// version the person chose. Written to a temporary file and renamed, so a crash leaves the old
 /// floor or the new one, never half of one.
+///
+/// The read, the comparison and the write happen under an exclusive lock on the floor's folder
+/// (unix), with a temporary file of this call's own (#840 item 14). The shell and a keeper, or two
+/// threads of one keeper, record at once: without the lock one could read the floor, the other
+/// raise it, and the first write back a lower version over it; with one temporary name per
+/// process, two threads wrote the same file and a rename failed or published a mix.
 pub fn record_started(path: &Path, version: &str, rollback: Rollback) -> Result<()> {
     let v = Version::parse(version)?;
+    let _held = lock_folder_of(path).map_err(|e| Error::io(format!("lock the folder of {}", path.display()), e))?;
     if rollback == Rollback::Refuse {
         if let Some(h) = read_highest_seen(path)? {
             if Version::parse(&h)? >= v {
@@ -158,9 +165,11 @@ pub fn record_started(path: &Path, version: &str, rollback: Rollback) -> Result<
             }
         }
     }
-    let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("tmp-{}-{n}", std::process::id()));
     let write = || -> io::Result<()> {
-        let mut f = fs::File::create(&tmp)?;
+        let mut f = fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         f.write_all(format!("{version}\n").as_bytes())?;
         f.sync_all()?;
         fs::rename(&tmp, path)
@@ -169,4 +178,33 @@ pub fn record_started(path: &Path, version: &str, rollback: Rollback) -> Result<
         let _ = fs::remove_file(&tmp);
         Error::io(format!("write {}", path.display()), e)
     })
+}
+
+/// An exclusive `flock` on the folder `path` is in, held until the returned file is dropped. The
+/// folder, not a lock file beside the floor, so nothing is left behind; the floor itself is replaced
+/// by each rename, so a lock on it would not exclude the next writer.
+#[cfg(unix)]
+fn lock_folder_of(path: &Path) -> io::Result<fs::File> {
+    use std::os::unix::io::AsRawFd;
+    let dir = match path.parent() {
+        Some(d) if !d.as_os_str().is_empty() => d,
+        _ => Path::new("."),
+    };
+    let f = fs::File::open(dir)?;
+    loop {
+        // SAFETY: a plain syscall on a descriptor this File owns.
+        if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } == 0 {
+            return Ok(f);
+        }
+        let e = io::Error::last_os_error();
+        if e.kind() != io::ErrorKind::Interrupted {
+            return Err(e);
+        }
+    }
+}
+
+/// Windows runs no keeper beside the shell: one writer only.
+#[cfg(not(unix))]
+fn lock_folder_of(_path: &Path) -> io::Result<()> {
+    Ok(())
 }

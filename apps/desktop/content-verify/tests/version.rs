@@ -121,3 +121,34 @@ fn a_corrupt_floor_is_an_error_not_a_reset() {
     assert!(read_highest_seen(&f).is_err());
     assert!(record_started(&f, "9.9.9", Rollback::Refuse).is_err());
 }
+
+/// #840 item 14: writers recording at once (the shell and a keeper, two threads of a keeper) leave
+/// the highest version they recorded, and every write succeeds. Without a lock one could read the
+/// floor, another raise it, and the first write a lower version back over it; with one temporary
+/// name per process, threads wrote the same file and renames failed.
+#[test]
+fn writers_at_once_leave_the_highest_floor() {
+    let t = Temp::new("floor-race");
+    let f = t.join("highest-version");
+    let failures = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let threads: Vec<_> = (0..8u64)
+        .map(|i| {
+            let (f, failures) = (f.clone(), failures.clone());
+            std::thread::spawn(move || {
+                for round in 0..40u64 {
+                    let v = format!("0.{}.{}", round, i);
+                    if record_started(&f, &v, Rollback::Refuse).is_err() {
+                        failures.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+            })
+        })
+        .collect();
+    for th in threads {
+        th.join().unwrap();
+    }
+    assert_eq!(failures.load(std::sync::atomic::Ordering::SeqCst), 0, "records failed");
+    assert_eq!(read_highest_seen(&f).unwrap().as_deref(), Some("0.39.7"));
+    let left: Vec<_> = std::fs::read_dir(t.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(left.len(), 1, "temporary files were left: {left:?}");
+}
