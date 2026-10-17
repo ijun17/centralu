@@ -91,7 +91,13 @@ app wrote there while running would reach the whole team.
   `<data folder>/app-secrets.json` (mode 0600, written through a temporary file of its own created
   0600). A file that does not parse is moved aside as `app-secrets.json.unreadable-<ms>`, never
   written over, and apps start without secrets until they are entered again; one that cannot be read
-  at all is left in place and not written until it can be (`private-json-file.ts`). An
+  at all is left in place and not written until it can be (`private-json-file.ts`). Either is said on
+  screen (#944): the app list carries `secretsUnreadable` (the copy's file name, or null while the file
+  is stuck in place) on every app that declares secrets, and the Secrets section shows one line above
+  the fields; while the file is stuck, Save is disabled and says why. The line goes for an app once
+  that app has a value again (one file holds every app's values), or once a stuck file reads again;
+  a moved-aside copy is found in the data folder, so a restart says it again until the copy is
+  removed or each app's values are back. An
   app receives only the names it declares, as environment variables. Values of 4 characters or more
   are replaced by `[redacted:NAME]` in the app's log, run records and error bundles, also where JSON
   escapes them (a multi-line key in an argument, #838). The app's log is masked a line at a time, so each line of a

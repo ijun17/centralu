@@ -97,6 +97,7 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
    * person is the one who chooses.
    */
   const [strays, setStrays] = useState<{ pid: number; command: string; cwd: string }[]>([])
+  const [straysError, setStraysError] = useState<string | null>(null)
   const [alsoStop, setAlsoStop] = useState(false)
   /*
    * Background mode (#280), read each time the dialog opens: with it on, plain Quit leaves the
@@ -132,10 +133,14 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
         ?.get()
         .then(setBackground)
         .catch(() => setBackground(null))
+      setStraysError(null)
       void platform.processes
         .strays()
         .then(setStrays)
-        .catch(() => setStrays([]))
+        .catch((e: Error) => {
+          setStrays([])
+          setStraysError(e.message)
+        })
       // ⌘Q while minimized would leave the modal unseen, looking like "an app that will not
       // quit" — show the window whenever there is a question to ask.
       void focusWindow()
@@ -371,6 +376,7 @@ function DesktopRoot({ platform }: { platform: TauriPlatform }) {
         <QuitDialog
           background={background}
           strays={strays}
+          straysError={straysError}
           alsoStop={alsoStop}
           error={quitError}
           dialogRef={dialogRef}

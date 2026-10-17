@@ -3,6 +3,8 @@ import type { ChildOwnership } from './child-ownership.js'
 import type { SessionAppsHub } from './session-apps.js'
 import type { AgentRunWait } from './app-agents.js'
 import { basename } from 'node:path'
+import { rm } from 'node:fs/promises'
+import { isOrchestratorAgentFolder } from './orchestrator-home.js'
 import { existsSync, statSync } from 'node:fs'
 import {
   isInTurn,
@@ -15,9 +17,7 @@ import {
 } from '@cc/protocol'
 import type { AgentAdapter, SessionHandle } from '../adapters/contract.js'
 import type { Store } from '../dev-services/store.js'
-import {
-  gitWorktreeRemove,
-} from '../dev-services/git.js'
+import { gitWorktreeRemove } from '../dev-services/git-worktree.js'
 import { attachmentBytes, clearAttachments } from '../dev-services/attachments.js'
 import { handoffNoteBytes } from '../dev-services/handoff-notes.js'
 import { codeIntelligenceKey } from './tool-profiles.js'
@@ -405,7 +405,21 @@ export class SessionTrash {
          * changes" and answered delete anyway. Without force, git would refuse and nothing would ever
          * get removed at all.
          */
-        await gitWorktreeRemove(record.projectPath, s.worktree.path, true).catch(() => {})
+        /*
+         * A removal that fails stops the purge, and the entry stays to be tried again (#841 item 6): swallowed, the
+         * record went and the folder stayed, with nothing left in Centralu that knew of it. A folder already gone is
+         * what was asked for.
+         */
+        const path = s.worktree.path
+        const repo = record.projectPath
+        await gitWorktreeRemove(repo, path, true).catch((e: Error) => {
+          if (!existsSync(path)) return
+          // The project folder moved or went (#990 review): git has no repository to remove it from, and only the person can
+          if (!existsSync(repo)) {
+            throw rpcError(`The project folder ${repo} is not there any more (moved or deleted), so git cannot remove its worktree at ${path}. It stays in the trash: delete that folder yourself, then delete this entry again.`)
+          }
+          throw rpcError(`Could not remove the worktree at ${path}: ${e.message.trim()}. It stays in the trash; remove the folder or fix the cause, then delete it again.`)
+        })
       }
       /*
        * The recovery files go only once the rows are gone (#647): cleared first, a failed database step would leave
@@ -424,6 +438,10 @@ export class SessionTrash {
       }
       await recoveryRemoval.commit().catch(() => {})
       await clearAttachments(sessionId).catch(() => {})
+      // An orchestrator's child worked in a folder of its own (#853, #994 review), which goes with it
+      if (cwd && isOrchestratorAgentFolder(cwd)) {
+        await rm(cwd, { recursive: true, force: true }).catch((e: Error) => console.error(`[trash] the folder of ${sessionId.slice(0, 8)} could not be removed: ${e.message}`))
+      }
       /*
        * Sweeps up the handoff note that lost its purpose along with this session (#106). It matters
        * that this runs **after** the row is gone — the session that was just deleted must not still

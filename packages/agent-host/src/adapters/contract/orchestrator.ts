@@ -265,6 +265,8 @@ export type StartAgentOpts = {
   worktree?: boolean
   branch?: string
   lsp?: boolean
+  /** A short name for the new session (#861), shown in the sidebar; a new worktree's branch is made from it */
+  name?: string
 }
 
 /**

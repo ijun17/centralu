@@ -170,6 +170,7 @@ function Quit() {
     <QuitDialog
       background={params.get('background') === 'on'}
       strays={[]}
+      straysError={params.get('strays') === 'unknown' ? 'The keeper could not say which processes it holds for this host, so leftover processes cannot be told apart; try again' : null}
       alsoStop={false}
       error={null}
       onAlsoStop={() => {}}

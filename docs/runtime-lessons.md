@@ -175,8 +175,11 @@ child it starts pops a visible window (e84cf872, #14); `code.cmd` through `cmd.e
 Rule: the release window is `windows_subsystem = "windows"`; the host is created with `CREATE_NO_WINDOW`; every child
 the host starts has `windowsHide: true`; agent CLIs and app processes are not `detached` on Windows (they are elsewhere,
 for their own process group).
-Guard: **UNGUARDED** (the Windows tests inject the OS and check only the kill paths).
-Platforms: Windows.
+Guard: `tooling/hidden-children.test.ts` "no call in the host starts a process without windowsHide" (every
+`child_process` call under `host/`, #983, which found seventeen without it). The host's `CREATE_NO_WINDOW` and the
+agent CLIs and app processes not being `detached` on Windows are **UNGUARDED** (the Windows tests inject the OS and
+check only the kill paths).
+Platforms: Windows. *Changed by #983: `windowsHide` was unguarded.*
 
 **ST14. Windows has no keeper, and the bundle says so.**
 Happened: the keeper is built on unix sockets, descriptor passing, process groups and `flock`; Tauri would inherit the
@@ -1827,7 +1830,7 @@ rule broken (CONTRIBUTING.md: disable the fix, watch the test fail). "Plan step"
 | 1 | ST3: the dev flag becomes `CC_DEV` in the host's environment | `window/sidecar/launch.rs` | all | 7 |
 | 2 | ST4: the legacy folder move runs before `create_dir_all` in the window | `window/sidecar/link.rs` | all | 7 |
 | 4 | ST11: `leave_app_folder()` runs before anything is started | `window/lib.rs` | Windows | 7 |
-| 5 | ST13: no console window (CREATE_NO_WINDOW, `windowsHide`, not `detached`) | `keeper/host_proc.rs`, `host/adapters/local-process.ts`, `host/apps/external/app-process.ts` | Windows | 2 |
+| 5 | ST13: no console window (CREATE_NO_WINDOW, not `detached`; `windowsHide` is guarded) | `keeper/host_proc.rs`, `host/adapters/local-process.ts`, `host/apps/external/app-process.ts` | Windows | 2 |
 | 10 | PA11: `taskkill` and PowerShell by System32 path | `host/dev-services/kill-tree.ts` | Windows | 8 |
 | 13 | PA14: a keeper-started codex goes through command resolution | `host/adapters/codex/index.ts` | Windows | 9 |
 | 14 | PA15: a child's environment keeps `SystemRoot` | `host/` spawn sites | Windows | 9 |

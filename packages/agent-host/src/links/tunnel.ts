@@ -676,7 +676,7 @@ export class SshTunnel implements Tunnel {
       '--', this.opts.target,
       ...(keepAlive ? [keepAlive] : []),
     ]
-    const child = spawn(this.opts.ssh ?? 'ssh', args, { env: this.opts.env ?? process.env, stdio: ['ignore', 'ignore', 'pipe'] })
+    const child = spawn(this.opts.ssh ?? 'ssh', args, { env: this.opts.env ?? process.env, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true })
     this.child = child
     /*
      * Only the end is kept: this ssh lives as long as the link, and in link-bound mode the remote host's

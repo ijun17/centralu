@@ -74,7 +74,7 @@ export async function readAvailableMemory(deps: MemoryReadDeps = {}): Promise<nu
   try {
     const value =
       source.kind === 'command'
-        ? parseVmStat((await (deps.exec ?? ((f, a) => run(f, a, { timeout: 5_000 })))(source.file, source.args)).stdout)
+        ? parseVmStat((await (deps.exec ?? ((f, a) => run(f, a, { timeout: 5_000, windowsHide: true })))(source.file, source.args)).stdout)
         : parseMemInfo(await (deps.readText ?? ((p) => readFile(p, 'utf8')))(source.path))
     if (value !== null) return value
     console.error(`[memory-gate] could not parse ${what}; letting agent starts through`)

@@ -298,6 +298,8 @@ function AgentStartCard({
   showProjectKey: boolean
   onAnswer: (decision: 'allow' | 'deny' | 'always', scope?: 'session' | 'project') => void
 }) {
+  // The orchestrator's child (#853) works in no project: there is no project to always allow it for
+  const inProject = detail.project.id !== ''
   return (
     <div
       className="overflow-hidden rounded-md border border-line border-l-2 border-l-ink-signal bg-surface-raised"
@@ -313,29 +315,32 @@ function AgentStartCard({
         {agentStartQuestion(detail)}
       </p>
       <p className="mt-1 px-3 text-xs leading-body text-ink-faint">
-        It opens as its own session in this project, linked to this one, with its own approvals and Stop; its answer
-        comes back here. Always for the project is remembered; revoke it in Settings.
+        {inProject
+          ? 'It opens as its own session in this project, linked to this one, with its own approvals and Stop; its answer comes back here. Always for the project is remembered; revoke it in Settings.'
+          : 'It opens as its own session under this one, in a folder of its own outside any project, with its own approvals and Stop; its answer comes back here. Always for this session lasts until Centralu restarts.'}
       </p>
       <div className="mt-3 flex items-center gap-1.5 border-t border-line bg-surface-floor/40 px-3 py-2">
         <ActionKey k={keys.allow} label="Allow once" onClick={() => onAnswer('allow')} testId="approve-allow" disabled={busy} />
         <ActionKey
           k={keys.always}
           label="Always for this session"
-          title={`Hold ${projectHint} and click for the whole project`}
-          onClick={(alt) => onAnswer('always', alt ? 'project' : 'session')}
+          title={inProject ? `Hold ${projectHint} and click for the whole project` : undefined}
+          onClick={(alt) => onAnswer('always', alt && inProject ? 'project' : 'session')}
           testId="approve-always"
           disabled={busy}
         />
-        <button
-          className="rounded-md px-1.5 py-1 text-sm text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-50"
-          onClick={() => onAnswer('always', 'project')}
-          disabled={busy}
-          data-testid="approve-always-project"
-        >
-          Always for this project
-        </button>
+        {inProject && (
+          <button
+            className="rounded-md px-1.5 py-1 text-sm text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-50"
+            onClick={() => onAnswer('always', 'project')}
+            disabled={busy}
+            data-testid="approve-always-project"
+          >
+            Always for this project
+          </button>
+        )}
         <ActionKey k={keys.deny} label="Deny" onClick={() => onAnswer('deny')} testId="approve-deny" disabled={busy} />
-        {showProjectKey && (
+        {showProjectKey && inProject && (
           <span className="ml-auto text-2xs text-ink-faint">
             <Kbd alt /> <Kbd>a</Kbd> whole project
           </span>

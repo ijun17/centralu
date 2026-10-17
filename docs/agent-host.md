@@ -537,8 +537,8 @@ below retained for `safe` and `normal`:
 **In a new worktree** (part 2). `worktree: true`, or a `branch`, opens the child in a new git worktree of the
 project's repository instead of the caller's folder, through the same path as the new-session window's worktree
 option (`createSession`'s `worktree`, `worktreeBranch`, `worktreeBase`: the copy-and-setup step;
-`auto` delegation may also create a worktree in an untrusted project). The branch is the one asked for (git's own rule checks it) or one named from the job (`agentBranch`:
-`centralu/write-the-parser-1a2b`), settled before the card, which names it. It forks from the caller's own branch
+`auto` delegation may also create a worktree in an untrusted project). The branch is the one asked for (git's own rule checks it) or one named from the job or from the caller's `name` (`agentBranch`:
+`centralu/write-the-parser-1a2b`, at most 40 characters after the prefix, cut at a word, #861), settled before the card, which names it. It forks from the caller's own branch
 when the caller is itself a worktree session, so the child starts from the caller's work; otherwise from the
 project's trunk. A project that is no git repository is refused before the card. The child shows as every worktree
 session does (its branch is its name; merged and pull-request state, #69/#76), and paths its answer names in the
@@ -564,6 +564,10 @@ to the project's dependencies would let it change the original checkout. Interna
 links escaping the new worktree are removed after all package copies finish. No install or lifecycle script
 runs automatically. If dependencies are absent in the project, differ from the child's lockfile/manifests,
 or cannot be copied, the configured setup command or the child must install them; creation still continues.
+What provisioning could not do (a copy skipped or refused, a link dropped, dependencies or the setup command
+failing) is a warning notice at the top of the new session, and a `start_agent` child also gets it in its task,
+since an agent does not read notices (#841). A step after `git worktree add` that throws before a session owns
+the worktree removes the folder and its branch again (#774); what could not be removed is named in the error.
 
 **Codex sandbox** (#582). Every Codex session whose cwd is a linked git worktree (including a cwd below its
 root) adds the canonical `git rev-parse --git-common-dir` to the workspace-write roots, retaining configured
@@ -743,10 +747,12 @@ must use `purgeSession` if added. Gitlinks found only in older merged superproje
 follow-up ([#623](https://github.com/ijun17/centralu/issues/623)); a superproject merge does not prove
 that module commits were pushed. Writes by other programs during capture are outside this session's lock.
 
-**Size.** The two definitions are 1,332 characters (`AGENT_BUDGET_CHARS` 1,350; 1,085 before #729's `difficulty` and the words on it and on `worktree`, +247 characters and +68 tokens, measured, in every ordinary Claude request, whose resident Centralu part goes from 2,313 to 2,560 characters; 1,060 before #686's `lsp`, which carries no description; 990 before #677's `ifBusy`, 956 before #676's `answer` action and `card`, 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
+**Size.** The two definitions are 1,357 characters (`AGENT_BUDGET_CHARS` 1,375; 1,332 before #861's `name`, a bare string; 1,085 before #729's `difficulty` and the words on it and on `worktree`, +247 characters and +68 tokens, measured, in every ordinary Claude request, whose resident Centralu part goes from 2,313 to 2,560 characters; 1,060 before #686's `lsp`, which carries no description; 990 before #677's `ifBusy`, 956 before #676's `answer` action and `card`, 992 before the registry-name schema, 918 before the worktree arguments, 974 before `delete`). Claude loads `start_agent` (a request
 made in words, like ask_project's, which deferred was not found) and defers `agent_session`, which every
-`start_agent` answer names; Codex reaches both through its `exec` tool. Measured in tool-cost.md §10: +170 tokens per ordinary Claude request (412 → 582); "Have Codex …" reached `start_agent` 3 of 3 on Claude, "another agent" went to each CLI's own sub-agents. No `name` argument: the child
-is named from its task and the person renames it.
+`start_agent` answer names; Codex reaches both through its `exec` tool. Measured in tool-cost.md §10: +170 tokens per ordinary Claude request (412 → 582); "Have Codex …" reached `start_agent` 3 of 3 on Claude, "another agent" went to each CLI's own sub-agents. `name` (#861) is a short name
+the caller gives: the child's name in the sidebar, and what its new worktree's branch is made from. Without one, the
+child is named from its task (a worktree child by its branch), skipping the leading words the task shares with a
+sibling's name (`distinguishingText`, at least two of them), and the person renames it.
 
 **stdout is reserved.** `main.ts` prints exactly one line to it: the handshake the Tauri
 supervisor parses for the port and auth token. Everything else goes to stderr, because that
@@ -1056,6 +1062,40 @@ the session to write it (`mode: "agent"`) stays an option in both.
   is writing its note drops the handoff (the request and the note stay in that session's conversation; call again).
   The card waits like `create_project`'s, so on Codex a card left standing past the bridge's bound ends the call there
   while the card stays.
+
+### 1.2.7 The orchestrator starts sessions outside any project (#853)
+
+Handing off light work unrelated to any project (a web search, a lookup), the orchestrator reached for its CLI's own
+subagent, which never appears in Centralu: the person could neither watch it nor step in. It now has `start_agent` and
+`agent_session` too, as commands of the `commands` tier (`RARE_COMMANDS`, reached through `centralu_run`; a direct
+tool in the other tiers), and one line of its instructions says to use them rather than its Agent tool. The flow is
+§1.2.1's (`AgentStartFlow`) with the orchestrator as the caller and no project as the place
+(`ORCHESTRATOR_PLACE`, an empty id):
+
+- **The child** has no project (`projectId: null`), is marked `askedBy` the orchestrator, and works in a folder of its
+  own, `<data>/orchestrator-agents/<uuid>` (`newOrchestratorAgentFolder`), never the orchestrator's: a file a child
+  left in the orchestrator's folder (Codex loads `.agents/skills` from it whatever the trust) would reach the session
+  that directs every other one, and children sharing one folder wrote over each other (#994 review). The folder goes
+  when the child is deleted for good (`purgeSession`), and with a start that fails. It runs under the orchestrator's
+  preset and gets no Centralu tools and only the person's own settings (no project to trust). There is no worktree,
+  and a busy child is not forked: there is no repository to fork from. In the sidebar it hangs under the
+  orchestrator's row (`orchestratorChildren`), with a ⋯ menu to stop or delete it; a child whose orchestrator was
+  replaced stays there under "Started by an earlier orchestrator".
+- **The consent**: a card under `safe` and `normal` (no project's trust stands in for it), naming no project
+  ("Start Codex in a folder of its own, outside any project, …") and offering no "Always for this project"; ⌥a, or that
+  answer from an older window, is kept as always for the orchestrator while this host serves it, which the card says
+  ("lasts until Centralu restarts"). `auto` opens it. The depth binds as for any caller; the orchestrator is at 0, so
+  its child starts none.
+- **The rest is the same**: the per-place ceiling (`agentCeilingError`, counted over the orchestrator's children that
+  are still here, and worded as "agents you started"), the
+  finish notice through the report path, a request kept across a swap (its `projectId` is the empty place id), and
+  `agent_session` status, send, wait, stop and delete, on a child whose `askedBy` is the orchestrator and no other
+  session in any preset. Its answers name `centralu_run(command="agent_session", …)` for the orchestrator.
+
+Characters: the orchestrator's instructions grow by the one line (Claude 8,744 → 8,893 resident, Codex 8,796 →
+8,945, under its 9,500); the two tools' definitions ride in no request in the default tier. Not measured live:
+whether the orchestrator then reaches for `start_agent` rather than its Agent tool. Not done: a read-only research
+preset for such a child (the issue's suggestion); it runs under the orchestrator's preset as any child does.
 
 ### 1.3 Making a new project (`projects.create`, `create_project`, #515)
 

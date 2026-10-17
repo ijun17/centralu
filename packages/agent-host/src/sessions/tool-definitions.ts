@@ -338,8 +338,9 @@ export const DELEGATE_BUDGET_CHARS = 450
  *
  * Two tools, as the issue proposed: starting is the request a person makes in words ("have Codex write it"), so it is
  * loaded; working with a child already started is reached from start_agent's own answer, which names agent_session,
- * so on Claude it waits behind tool search (the attach_app pattern, #522). No `name` argument: the child is named from
- * its task, and the person renames it; each argument rides in every request.
+ * so on Claude it waits behind tool search (the attach_app pattern, #522). `name` (#861): six children named from their
+ * tasks' first words read alike in the sidebar; a short name the caller gives is the name and the branch, and without
+ * one the name skips the words the task shares with its siblings. No description: each word rides in every request.
  */
 export const AGENT_TOOLS = [
   {
@@ -371,6 +372,7 @@ export const AGENT_TOOLS = [
        * caller's call per task (refactors and wide cross-file changes)
        */
       lsp: z.boolean().optional(),
+      name: z.string().optional(),
     }),
   },
   {
@@ -401,8 +403,9 @@ export const AGENT_TOOLS = [
  * 1,085 → 1,332), loaded on Claude, so every ordinary Claude request carries the 247: 68 tokens, measured live
  * (docs/tool-cost.md §10). Guidance a caller needs before
  * its first call has no answer to ride in. #690's `list` made the set 1,333 (agent_session 534 → 535, deferred on Claude).
+ * 1,350 until #861's `name` (a bare string, 25 characters: the set 1,333 → 1,358).
  */
-export const AGENT_BUDGET_CHARS = 1350
+export const AGENT_BUDGET_CHARS = 1375
 
 /**
  * Another project's app tools, on demand (#371 part A) — rides with the reader set, so a project's
@@ -441,6 +444,9 @@ export const APP_ACCESS_TOOLS = [
 
 export type AppAccessToolName = (typeof APP_ACCESS_TOOLS)[number]['name']
 
+/** start_agent and agent_session (#561), which the orchestrator reaches as commands too (#853) */
+export type AgentToolName = (typeof AGENT_TOOLS)[number]['name']
+
 /**
  * The ceiling for the app-access set, counted like READER_BUDGET_CHARS (full name, description and
  * schema; the deferred ones included, since Codex loads them). The set is 874 today, of which about
@@ -449,6 +455,19 @@ export type AppAccessToolName = (typeof APP_ACCESS_TOOLS)[number]['name']
  * two, which cost their names in tool search only.
  */
 export const APP_ACCESS_BUDGET_CHARS = 900
+
+/**
+ * Repository work by hand (#957 follow-up, owner decision 2026-10-17): an attached app such as the project board serves
+ * its task-to-tool table on demand from its own guide (its `help` tool), never in these instructions, which sit in
+ * the prompt's cached prefix and must not change when an app is added or changed (#512). This one line, the same
+ * whichever apps they are, sends an agent to that guide before it reaches for `gh` or `git` by hand.
+ *
+ * Only in an ordinary session that has an app attached when it starts (#992 review): without one there is no help to
+ * read, and the 88 characters would ride in every request for nothing. Decided once, at the start, so the session's
+ * prefix never changes under it; an app attached later is found through its tools. Not the orchestrator's: it does
+ * no repository work itself ("You have no hands").
+ */
+export const REPO_WORK_FIRST = "an attached app's help tool before repository work by hand (PRs, CI, merges, releases)"
 
 /**
  * What an ordinary session reaches for first, one need per entry (#564). A tool that joins the reader seat and
@@ -476,6 +495,9 @@ export const READER_FIRST: readonly string[] = [
  */
 export const READER_INSTRUCTIONS = `You are running inside Centralu. Unless the person says otherwise, use its tools before other ways of doing the same: ${READER_FIRST.join('; ')}.`
 
+/** The same with REPO_WORK_FIRST, for an ordinary session that starts with an app attached (#957, #992 review) */
+export const READER_INSTRUCTIONS_WITH_APPS = `You are running inside Centralu. Unless the person says otherwise, use its tools before other ways of doing the same: ${[...READER_FIRST, REPO_WORK_FIRST].join('; ')}.`
+
 /**
  * The ceiling for the reader set, in characters of what the model is sent: each tool's full name,
  * description and JSON schema, plus the instructions, including the deferred guide and update
@@ -484,7 +506,8 @@ export const READER_INSTRUCTIONS = `You are running inside Centralu. Unless the 
  * The ceiling rises from 1,400 to 1,750 for that addition. On Claude the update definition is
  * deferred: only the pointer rides in every request. The tokens measured for the earlier
  * instructions remain in docs/tool-cost.md §11; these new figures count characters, not tokens.
- * Raising it is a decision about every session's context: a line added to READER_FIRST counts here.
+ * Raising it is a decision about every session's context: a line added to READER_FIRST counts here. #957's
+ * REPO_WORK_FIRST is not counted: it rides only where an app is attached, whose own tools cost more than it.
  */
 export const READER_BUDGET_CHARS = 1750
 
@@ -535,6 +558,8 @@ export const ORCHESTRATOR_INSTRUCTIONS = [
   'If the person is waiting for the result, turn on reportBack — it notifies you here when that session finishes.',
   'If a report is not enough, read that session\'s conversation directly with read_session.',
   'If there is no suitable session to assign work to, make one with create_session — deleting it is the person\'s job.',
+  // #853: the orchestrator's light work outside any project went to its CLI's own subagent, which Centralu never shows
+  'For light work outside any project (a web search, a lookup), start a session the person can watch with the start_agent command, not your Agent tool.',
   'Make a new project with create_project; to add an existing folder, point the person to Add project in the sidebar.',
   'When the person says "make me a tool/screen that does…", make the app with create_app — a screen the person clicks and the tools an agent calls are one app.',
   'If a new capability like browser automation is needed, **propose** it with propose_mcp_server — if the person approves, the app installs it and restarts you. The conversation continues after the restart.',

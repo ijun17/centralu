@@ -17,8 +17,10 @@ export type OwnAgentsHost = Pick<DelegationHost, 'children' | 'meta' | 'trashing
  * (#637). A row that has only that link is the person's to clean up.
  */
 export function ownAgents(host: OwnAgentsHost, callerId: string): SessionInfo[] {
-  const projectId = host.meta.get(callerId)?.projectId
-  if (!projectId) return []
+  const caller = host.meta.get(callerId)
+  // The orchestrator's children have no project (#853): its own place is none
+  const projectId = caller?.kind === 'orchestrator' ? null : caller?.projectId
+  if (projectId === undefined || (projectId === null && caller?.kind !== 'orchestrator')) return []
   return [...host.meta.values()]
     .filter((s) => s.id !== callerId && s.askedBy === callerId && s.projectId === projectId && !host.trashing.has(s.id))
     .sort((a, b) => a.createdAt - b.createdAt)

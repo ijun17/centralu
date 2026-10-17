@@ -27,6 +27,8 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
   const touched = useGitRefreshKey(projectId)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  /** The person asked to end the running write (#1007); held until that write answers, so Cancel is pressed once */
+  const [cancelling, setCancelling] = useState(false)
 
   /*
    * A response arriving late while switching projects must not draw another project's list (`useLoad`). Re-reads
@@ -50,6 +52,22 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
       setToast((e as Error).message)
     } finally {
       setBusy(false)
+      setCancelling(false)
+    }
+  }
+
+  /*
+   * A commit or push waits up to ten minutes on a hook or a credential helper (#980); this ends it sooner (#1007). The
+   * write itself answers that it was cancelled, and its toast says so.
+   */
+  const cancel = async () => {
+    setCancelling(true)
+    try {
+      await platform.git.cancel(projectId)
+    } catch (e) {
+      // A host from before #1007 has no such call: the write goes on, and Cancel can be pressed again
+      setCancelling(false)
+      setToast((e as Error).message)
     }
   }
 
@@ -154,7 +172,7 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
               onClick={() =>
                 void run(async () => {
                   const r = await gitCommit(projectId, message.trim())
-                  setToast(r.ok ? 'Committed' : (r.message ?? 'Commit failed'))
+                  setToast(r.ok ? 'Committed' : r.cancelled ? 'Commit cancelled' : (r.message ?? 'Commit failed'))
                   if (r.ok) setMessage('')
                 })
               }
@@ -168,12 +186,22 @@ export function GitChanges({ projectId, denied }: { projectId: string; denied?: 
               onClick={() =>
                 void run(async () => {
                   const r = await platform.git.push(projectId)
-                  setToast(r.ok ? 'Pushed' : (r.message ?? 'Push failed'))
+                  setToast(r.ok ? 'Pushed' : r.cancelled ? 'Push cancelled' : (r.message ?? 'Push failed'))
                 })
               }
             >
               Push
             </button>
+            {busy && (
+              <button
+                className="rounded-md border border-line px-2 py-1 text-xs text-ink-muted transition-colors hover:border-line-strong hover:text-ink disabled:opacity-40"
+                disabled={cancelling}
+                data-testid="evidence-git-cancel"
+                onClick={() => void cancel()}
+              >
+                Cancel
+              </button>
+            )}
           </div>
         </div>
       )}

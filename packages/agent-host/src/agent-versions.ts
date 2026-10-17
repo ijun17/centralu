@@ -27,6 +27,8 @@ export type VersionSessions = {
   restartSession(sessionId: string): Promise<{ resumed: boolean; reason?: string }>
   /** Writes one line into the conversation saying the session moved, so a restart is never silent */
   noteAgentMoved?(sessionId: string, from: string, to: string): void
+  /** Writes one line saying the move to `to` did not happen, and why (#841): logged only, it looked like nothing was tried */
+  noteAgentMoveFailed?(sessionId: string, to: string, why: string): void
 }
 
 /** A tool as this service reads it: its adapter's `installedVersion` */
@@ -129,6 +131,8 @@ export class AgentVersionService {
   private looks = new Map<string, ReturnType<typeof setTimeout>>()
   /** Sessions being restarted by this service right now */
   private restarting = new Set<string>()
+  /** `<session> <version>` of each failed move already said, so a session tried again on each quiet spell says it once */
+  private failedSaid = new Set<string>()
   /**
    * When this host started hearing. A session it has not heard from since counts as quiet from here, not from the
    * beginning of time: a host that just replaced another (a restart, a switched build) does not know what the person
@@ -309,6 +313,14 @@ export class AgentVersionService {
     else if (d.why === 'recent') this.lookSoon(sessionId)
   }
 
+  private moveFailed(s: SessionInfo, to: string | null | undefined, why: string): void {
+    console.error(`[agent-versions] could not move ${s.id.slice(0, 8)} to ${s.tool} ${to}: ${why}`)
+    const key = `${s.id} ${to}`
+    if (!to || this.failedSaid.has(key)) return
+    this.failedSaid.add(key)
+    this.deps.sessions.noteAgentMoveFailed?.(s.id, to, why)
+  }
+
   private async restart(s: SessionInfo): Promise<boolean> {
     const from = s.agentVersion
     const to = this.status.installed[s.tool]
@@ -316,13 +328,13 @@ export class AgentVersionService {
     try {
       const r = await this.deps.sessions.restartSession(s.id)
       if (!r.resumed) {
-        console.error(`[agent-versions] could not move ${s.id.slice(0, 8)} to ${s.tool} ${to}: ${r.reason ?? 'unknown'}`)
+        this.moveFailed(s, to, r.reason ?? 'unknown')
         return false
       }
       if (from && to) this.deps.sessions.noteAgentMoved?.(s.id, from, to)
       return true
     } catch (err) {
-      console.error(`[agent-versions] could not move ${s.id.slice(0, 8)} to ${s.tool} ${to}: ${(err as Error).message}`)
+      this.moveFailed(s, to, (err as Error).message)
       return false
     } finally {
       this.restarting.delete(s.id)

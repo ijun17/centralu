@@ -1,4 +1,5 @@
-import { gitBranchMerged, type BranchPr } from '../dev-services/git.js'
+import { gitBranchMerged } from '../dev-services/git-worktree.js'
+import type { BranchPr } from '../dev-services/git-pr.js'
 import type { DelegationHost } from './delegation-flow.js'
 import type { WorktreeHost } from './worktree-sessions.js'
 

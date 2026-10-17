@@ -175,7 +175,9 @@ export function networkAccessOf(res: Record<string, unknown>): boolean | undefin
  * keeps its tools' new rules from the tool descriptions alone until it starts a new thread.
  */
 export function developerInstructions(opts: CreateSessionOpts): { developerInstructions?: string } {
-  const tools = opts.orchestratorTools && opts.orchestratorBridge ? codexToolInstructionsFor(opts.toolProfile ?? 'orchestrator') : undefined
+  // An app attached as the thread starts adds the line on repository work (#957, #992 review)
+  const apps = (opts.apps?.current().length ?? 0) > 0
+  const tools = opts.orchestratorTools && opts.orchestratorBridge ? codexToolInstructionsFor(opts.toolProfile ?? 'orchestrator', undefined, apps) : undefined
   const text = [opts.systemPromptAppend, tools].filter(Boolean).join('\n\n')
   return text ? { developerInstructions: text } : {}
 }

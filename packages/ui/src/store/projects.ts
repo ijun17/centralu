@@ -427,9 +427,14 @@ export const projectActions = (set: StoreSet, get: StoreGet): ProjectActions => 
   },
 
   async stopCommand(projectId, command) {
-    await get()
-      .platform?.commands.stop(projectId, command)
-      .catch(() => {})
+    const platform = get().platform
+    if (!platform) return
+    try {
+      await platform.commands.stop(projectId, command)
+    } catch (e) {
+      // As `runCommand` (#841 item 11): a stop that failed left the badge lit with no word, read as "it is stopping"
+      set({ toast: `Could not stop: ${(e as Error).message}` })
+    }
   },
 
   /**

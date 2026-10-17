@@ -65,6 +65,10 @@ class FakeSessions implements VersionSessions {
   noteAgentMoved(id: string, from: string, to: string) {
     this.moved.push([id, from, to])
   }
+  failed: [string, string, string][] = []
+  noteAgentMoveFailed(id: string, to: string, why: string) {
+    this.failed.push([id, to, why])
+  }
 }
 
 describe('the agent version service (#297)', () => {
@@ -127,6 +131,30 @@ describe('the agent version service (#297)', () => {
     await advance(1_000)
     expect(sessions.restarted).toEqual(['a'])
     expect(sessions.moved).toEqual([['a', '2.1.282', '2.1.290']])
+  })
+
+  // #841: a move that failed was logged only, so the session looked like it was never tried
+  it('says once in the conversation when a move did not happen, and why', async () => {
+    sessions.sessions.set('a', session('a'))
+    sessions.restartSession = async (id: string) => {
+      sessions.restarted.push(id)
+      return { resumed: false, reason: 'the conversation file is locked' }
+    }
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const svc = make()
+      svc.observe({ type: 'turn_complete', sessionId: 'a' })
+      await svc.check(true)
+      await advance(60_000)
+      expect(sessions.failed).toEqual([['a', '2.1.290', 'the conversation file is locked']])
+      // Tried again after the next quiet spell: not said again
+      svc.observe({ type: 'turn_complete', sessionId: 'a' })
+      await advance(60_000)
+      expect(sessions.restarted).toEqual(['a', 'a'])
+      expect(sessions.failed).toHaveLength(1)
+    } finally {
+      quiet.mockRestore()
+    }
   })
 
   it('never restarts a session that is working, waiting on the person or running background work', async () => {

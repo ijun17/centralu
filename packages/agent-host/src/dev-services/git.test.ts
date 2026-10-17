@@ -4,7 +4,9 @@ import { chmodSync, copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, 
 import { tmpdir } from 'node:os'
 import { changedFileCount } from '@cc/protocol'
 import { join } from 'node:path'
-import { GIT_DIFF_MAX_CHARS, gitWorktreeDirty, gitBranches, gitCheckout, gitCommit, gitCommitDetail, gitDiff, gitIgnoredEntries, gitStage, gitStatusFiles, gitSummary, treeBytes } from './git.js'
+import { GIT_DIFF_MAX_CHARS, gitBranches, gitCommitDetail, gitDiff, gitIgnoredEntries, gitStatusFiles, gitSummary } from './git.js'
+import { gitCheckout, gitCommit, gitStage } from './git-write.js'
+import { gitWorktreeDirty } from './git-worktree.js'
 import { SLOW } from '../../../../tooling/test-timing.js'
 
 /**
@@ -183,9 +185,9 @@ describe('the change summary on a large or slow tree (#850 review of item 10)', 
   it.skipIf(!posix)('reads git in English: a translated "not a git repository" is still no repository', async () => {
     const d = mkdtempSync(join(tmpdir(), 'cc-not-git-'))
     dirs.push(d)
-    // What git prints under a Korean locale, and the English it prints under C
+    // What git prints under a Korean locale, and the English it prints under C or C.UTF-8
     const restore = fakeStatus(
-      `if [ "$LC_ALL" = C ]; then echo 'fatal: not a git repository (or any of the parent directories): .git' >&2; else echo 'fatal: 깃 저장소가 아닙니다' >&2; fi; exit 128`,
+      `if [ "\${LC_ALL%%.*}" = C ]; then echo 'fatal: not a git repository (or any of the parent directories): .git' >&2; else echo 'fatal: 깃 저장소가 아닙니다' >&2; fi; exit 128`,
     )
     const previous = process.env.LC_ALL
     process.env.LC_ALL = 'ko_KR.UTF-8'
@@ -615,20 +617,5 @@ describe('the sizes of ignored entries', () => {
     }
     // du counts blocks on disk, the file system walk bytes: either way at least what was written
     expect(entries.find((e) => e.path === 'build/')?.bytes).toBeGreaterThanOrEqual(1500)
-  })
-})
-
-/*
- * #849 review: one folder of a million files queued a million lstat calls at once. The walk measures in batches,
- * checks its deadline between them, and gives up past a number of entries, leaving that entry without a size.
- */
-describe('the file system walk that sizes an ignored entry', () => {
-  it('adds up the bytes, and has no size past its entry cap or its deadline', async () => {
-    const { d } = repo()
-    mkdirSync(join(d, 'many'))
-    for (let i = 0; i < 600; i++) writeFileSync(join(d, 'many', `${i}.bin`), Buffer.alloc(10))
-    expect(await treeBytes(join(d, 'many'), Date.now() + 60_000)).toBe(6000)
-    expect(await treeBytes(join(d, 'many'), Date.now() + 60_000, 500)).toBeNull()
-    expect(await treeBytes(join(d, 'many'), Date.now() - 1)).toBeNull()
   })
 })

@@ -373,6 +373,7 @@ export class Router {
   /** The other merges: every reachable machine, each answer in the hub's terms, combined by kind */
   private async mergeSimple(method: RpcMethodName, machines: RoutedMachine[], params: unknown): Promise<unknown> {
     const local = await this.opts.local(method, params)
+    const missed: RoutedMachine[] = machines.filter((m) => !m.reachable)
     const answers = await Promise.all(
       machines
         .filter((m) => m.reachable)
@@ -381,6 +382,7 @@ export class Router {
             return { m, r: await m.call(method, params) }
           } catch {
             // One machine failing does not fail the list; it is simply not in it this time
+            missed.push(m)
             return null
           }
         }),
@@ -390,6 +392,14 @@ export class Router {
       if (!a) continue
       const { m, r } = a
       out = combine(method, out, r, m.q)
+    }
+    /*
+     * Emptying is an act, not a list (#841 item 4): a machine left out made "the trash is empty" true of the hub alone.
+     * Each one not reached is a failure of its own, named, so the report says what stayed.
+     */
+    if (method === 'trash.empty' && missed.length && isObj(out)) {
+      const failed = Array.isArray(out.failed) ? out.failed : []
+      out = { ...out, failed: [...failed, ...missed.map((m) => ({ sessionId: m.id, name: m.name, error: 'this machine could not be reached, so its trash was not emptied' }))] }
     }
     return out
   }

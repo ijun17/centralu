@@ -1,9 +1,12 @@
-import { execFile, spawn } from 'node:child_process'
+import { execFile, type ChildProcess, type StdioOptions } from 'node:child_process'
 import { open } from 'node:fs/promises'
 import { devNull } from 'node:os'
+import type { Readable } from 'node:stream'
 import { promisify } from 'node:util'
 import { programPath } from '../tool-launch.js'
-import { killTree } from './kill-tree.js'
+import { stopTree } from './kill-tree.js'
+import { raceTimeout } from '../timing.js'
+import { killHandle, spawnGrouped } from './grouped-child.js'
 import { rpcError } from '../rpc-error.js'
 
 const exec = promisify(execFile)
@@ -70,6 +73,12 @@ export type RunGitOptions = {
    * reads (`GIT_DIR`, `GIT_CONFIG_*`, `GIT_CONFIG_GLOBAL`, `HOME`) must not share one. `GIT_INDEX_FILE` does not.
    */
   filters?: GitFilterListings
+  /**
+   * Ends git as a timeout does (`endGit`: SIGTERM so git takes its `index.lock` away, SIGKILL after a grace) when it
+   * fires, and rejects with `aborted` (code `ABORT_ERR`): the person cancelling a commit or push still running (#1007).
+   * Already fired, git is not started.
+   */
+  signal?: AbortSignal
 }
 
 /**
@@ -149,6 +158,7 @@ async function filterOverrides(cwd: string): Promise<string[]> {
     ;({ stdout } = await exec(programPath('git'), [...BASE, ...LOCKED, 'config', '-z', '--name-only', '--get-regexp', '^filter\\.'], {
       cwd,
       ...DEFAULTS,
+      windowsHide: true,
     }))
   } catch (e) {
     // 1 = no key matched. Anything else (a broken config, a denied folder) fails the read itself
@@ -180,66 +190,170 @@ export async function gitArgv(cwd: string, args: string[], allowRepoPrograms = f
 }
 
 /**
- * Runs git and returns its stdout, or streams it to outputFile. Buffered calls retain
- * execFile errors; streamed calls also report the exit code and bounded stderr.
+ * **The environment every git call gets** (#982): the host's, then the call's own (`env`), then these.
+ *
+ * - `LC_ALL=C.UTF-8`: git's own messages untranslated. Callers read them (`cloneFailure` matches "Remote branch …
+ *   not found", a summary tells "not a repository" from a failure), and Git for Windows, WSL and a git built with
+ *   gettext (Homebrew's) follow the locale. Not `C`: the person's hooks run under this environment too, and under `C`
+ *   Ruby reads every file as US-ASCII and Java as ASCII. Where `C.UTF-8` is not installed, git falls back to `C`,
+ *   which is still untranslated.
+ * - `LANGUAGE=C`: gettext reads `LANGUAGE` before the locale wherever the locale is not `C` itself, which an older
+ *   gettext thinks `C.UTF-8` is not.
+ */
+function gitEnv(own?: Record<string, string>): NodeJS.ProcessEnv {
+  return { ...process.env, ...own, LC_ALL: 'C.UTF-8', LANGUAGE: 'C' }
+}
+
+/** The git processes running now, each until it exits: what the host's shutdown ends (`stopGitChildren`) */
+const live = new Set<ChildProcess>()
+
+/**
+ * Starts git as the root of a tree this host can end (`spawnGrouped`): on macOS and Linux in a process group of its
+ * own, on Windows hidden. Off Windows git would otherwise share the host's group, which `killTree` never fires at, so
+ * a hook's child outlived the call (#982).
+ *
+ * Its own group also takes git out of what ends the host's group (the keeper's stop, a Ctrl+C under `pnpm host` or
+ * `centralu serve`). **No git outlives the host that started it**, so every one is kept in `live` until it exits, and
+ * the shutdown ends what is left (`stopGitChildren`, lifecycle/shutdown.ts).
+ */
+function startGit(cwd: string, argv: string[], stdio: StdioOptions, env?: Record<string, string>): ChildProcess {
+  const { child } = spawnGrouped(programPath('git'), argv, { cwd, stdio, env: gitEnv(env) })
+  live.add(child)
+  child.once('exit', () => live.delete(child))
+  child.once('error', () => live.delete(child))
+  return child
+}
+
+/** How long git has, after SIGTERM, to take its lock files away before SIGKILL */
+export const GIT_STOP_GRACE_MS = 2000
+
+const running = (child: ChildProcess) => child.exitCode === null && child.signalCode === null
+
+/**
+ * Ends git with everything it started: a hook, a filter, a credential helper. **SIGTERM first**: git removes its lock
+ * files on it (`index.lock`, a half-made `.git/worktrees/<name>`), which SIGKILL would leave behind for the next
+ * write to refuse on. SIGKILL follows after `GIT_STOP_GRACE_MS` for whatever is still there (`stopTree`). Windows has
+ * no SIGTERM: `taskkill /T /F` at once, which leaves a lock as SIGKILL does.
+ */
+function endGit(child: ChildProcess, graceMs = GIT_STOP_GRACE_MS): void {
+  stopTree(killHandle(child), graceMs, () => running(child))
+}
+
+/**
+ * Ends every git still running, as a timeout would (`endGit`), and settles once each has exited or the grace has
+ * passed with a margin. For the host's shutdown, in both of its modes: the keeper does not hold git, so a git left
+ * running would outlive the host with the repository's locks.
+ */
+export async function stopGitChildren(graceMs = GIT_STOP_GRACE_MS): Promise<void> {
+  const children = [...live].filter(running)
+  if (children.length === 0) return
+  const exited = Promise.all(children.map((child) => new Promise<void>((done) => (running(child) ? child.once('exit', () => done()) : done()))))
+  for (const child of children) endGit(child, graceMs)
+  await raceTimeout(exited, graceMs + 1000, undefined)
+}
+
+/** How long a call waits, once git has exited, for a process git started to let go of its output */
+const CLOSE_GRACE_MS = 1000
+
+/**
+ * Runs git and returns its stdout, or streams it to outputFile.
+ *
+ * Rejects with git's exit `code` (or the spawn's, `ENOENT` when git is missing), `signal`, `stdout` and `stderr`, as
+ * `execFile` did; with `timedOut` (and `killed`) when git ran past `timeout`. **It ends when git ends** (#982): on a
+ * timeout, or an output past `maxBuffer`, git's whole tree is ended, and once git has exited the call waits at most
+ * `CLOSE_GRACE_MS` for its output to close: a process git started (a hook that left something running) can hold it
+ * for as long as it runs.
  */
 export async function runGit(cwd: string, args: string[], opts: RunGitOptions = {}): Promise<string> {
   const argv = await gitArgv(cwd, args, opts.allowRepoPrograms, opts.filters)
-  if (opts.outputFile) {
-    const output = await open(opts.outputFile, 'w', 0o600)
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn(programPath('git'), argv, {
-          cwd, stdio: ['pipe', output.fd, 'pipe'], timeout: opts.timeout ?? DEFAULTS.timeout,
-          ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
+  const output = opts.outputFile ? await open(opts.outputFile, 'w', 0o600) : undefined
+  try {
+    return await new Promise<string>((resolve, reject) => {
+      if (opts.signal?.aborted) return reject(gitCancelled())
+      const child = startGit(cwd, argv, ['pipe', output ? output.fd : 'pipe', 'pipe'], opts.env)
+      const max = opts.maxBuffer ?? DEFAULTS.maxBuffer
+      const timeout = opts.timeout ?? DEFAULTS.timeout
+      let ended: 'timedOut' | 'overflow' | 'aborted' | null = null
+      let settled = false
+      const end = (why: 'timedOut' | 'overflow' | 'aborted') => {
+        if (ended) return
+        ended = why
+        endGit(child)
+      }
+      const timer = setTimeout(() => end('timedOut'), timeout)
+      // Not once git has exited: what it did then is done, and the answer is git's own
+      const onAbort = () => {
+        if (running(child)) end('aborted')
+      }
+      opts.signal?.addEventListener('abort', onAbort, { once: true })
+      const collect = (stream: Readable | null) => {
+        const chunks: Buffer[] = []
+        let bytes = 0
+        stream?.on('data', (chunk: Buffer) => {
+          if (ended) return
+          bytes += chunk.length
+          if (bytes > max) return end('overflow')
+          chunks.push(chunk)
         })
-        let stderr = ''
-        let overflow = false
-        child.stderr!.on('data', (chunk: Buffer) => {
-          if (overflow) return
-          stderr += chunk.toString()
-          if (Buffer.byteLength(stderr) > (opts.maxBuffer ?? DEFAULTS.maxBuffer)) {
-            overflow = true
-            child.kill()
-          }
-        })
-        child.on('error', reject)
-        child.on('close', (code, signal) => {
-          if (code === 0 && !overflow) resolve()
-          else reject(Object.assign(new Error(overflow ? 'Git stderr exceeded maxBuffer' : stderr || `Git exited with ${code ?? signal}`), { code, stderr }))
-        })
-        child.stdin!.on('error', () => {})
-        child.stdin!.end(opts.input)
+        return () => Buffer.concat(chunks).toString('utf8')
+      }
+      const stdout = collect(child.stdout)
+      const stderr = collect(child.stderr)
+      const settle = (code: number | null, signal: NodeJS.Signals | null) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        opts.signal?.removeEventListener('abort', onAbort)
+        child.stdout?.destroy()
+        child.stderr?.destroy()
+        const out = stdout()
+        const err = stderr()
+        // A git that finished before the cancel reached it did the write: that is the answer, not "cancelled"
+        if ((!ended || ended === 'aborted') && code === 0) return resolve(out)
+        if (ended === 'aborted') return reject(Object.assign(gitCancelled(), { signal, stdout: out, stderr: err }))
+        const message =
+          ended === 'timedOut' ? `git did not answer within ${timeout} ms` : ended === 'overflow' ? 'Git output exceeded maxBuffer' : err || `Git exited with ${code ?? signal}`
+        reject(Object.assign(new Error(message), { code, signal, stdout: out, stderr: err, ...(ended === 'timedOut' ? { timedOut: true, killed: true } : {}) }))
+      }
+      child.on('error', (e) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        opts.signal?.removeEventListener('abort', onAbort)
+        reject(e)
       })
-      return ''
-    } finally {
-      await output.close()
-    }
+      // `close` once every holder of git's output has let go; after git's `exit`, a short grace for that
+      child.on('close', (code, signal) => settle(code, signal))
+      child.on('exit', (code, signal) => {
+        const grace = setTimeout(() => settle(code, signal), CLOSE_GRACE_MS)
+        grace.unref?.()
+      })
+      /*
+       * git can exit before reading what it was given (not a repository: `fatal` comes first), and
+       * the write then lands on a closed pipe. A stream 'error' with no listener is an uncaught
+       * exception inside the host, so it is swallowed here; the exit is what the caller reads.
+       */
+      child.stdin?.on('error', () => {})
+      child.stdin?.end(opts.input)
+    })
+  } finally {
+    await output?.close()
   }
-  const run = exec(programPath('git'), argv, {
-    cwd,
-    timeout: opts.timeout ?? DEFAULTS.timeout,
-    maxBuffer: opts.maxBuffer ?? DEFAULTS.maxBuffer,
-    ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
-  })
-  if (opts.input !== undefined) {
-    /*
-     * git can exit before reading what it was given (not a repository: `fatal` comes first), and
-     * the write then lands on a closed pipe. A stream 'error' with no listener is an uncaught
-     * exception inside the host, so it is swallowed here; the exit is what the caller reads.
-     */
-    run.child.stdin?.on('error', () => {})
-    run.child.stdin?.end(opts.input)
-  }
-  const { stdout } = await run
-  return stdout
+}
+
+/** What `runGit` rejects with when its `signal` fires: git was ended, or never started */
+export function gitCancelled(): Error & { code: 'ABORT_ERR'; aborted: true } {
+  return Object.assign(new Error('Cancelled'), { code: 'ABORT_ERR' as const, aborted: true as const })
+}
+
+/** Whether a call failed because its `signal` fired (`gitCancelled`) */
+export function isGitCancelled(e: unknown): boolean {
+  return (e as { aborted?: unknown } | null)?.aborted === true
 }
 
 /** Why a streamed read ended without git's own answer: it ran past its time, or the caller stopped it */
 export type StreamGitEnd = 'done' | 'stopped'
 
-/** How long a streamed read waits, once git has exited, for a process git started to let go of its output */
-const STREAM_CLOSE_GRACE_MS = 1000
 
 /**
  * Runs git and hands its stdout over as it arrives, holding none of it (#850 review of item 10). `onEntry` receives
@@ -248,14 +362,13 @@ const STREAM_CLOSE_GRACE_MS = 1000
  * unknown size read once in `-z` form, such as a status count, where a buffered read (`runGit`) would overflow its
  * `maxBuffer` on a large tree. A last entry without its NUL is handed over at the end.
  *
- * - **In English, without optional locks.** `LC_ALL=C` (and `LANGUAGE`) so git's own messages, which the caller
- *   reads to tell "not a repository" from a failure, are not translated (Git for Windows and WSL follow the locale);
- *   `GIT_OPTIONAL_LOCKS=0`, the environment form of `--no-optional-locks`, so a read after every turn does not hold
+ * - **In English, without optional locks.** The environment of every call (`gitEnv`), so git's own messages, which
+ *   the caller reads to tell "not a repository" from a failure, are not translated; and `GIT_OPTIONAL_LOCKS=0`, the environment form of `--no-optional-locks`, so a read after every turn does not hold
  *   `index.lock` against the agent's own `git add`. (The flag itself would stand before the subcommand, where
  *   `gitArgv` reads the subcommand.)
- * - **It ends when git ends.** A stop or a timeout ends git's whole tree (`killTree`: a hook or filter git started
+ * - **It ends when git ends.** A stop or a timeout ends git's whole tree (`endGit`: a hook or filter git started
  *   holds the same stdout, and on Windows `kill()` reaches git.exe alone). After git exits, the read waits at most
- *   `STREAM_CLOSE_GRACE_MS` for its output to close, then lets go of the pipes: a process git started can keep them
+ *   `CLOSE_GRACE_MS` for its output to close, then lets go of the pipes: a process git started can keep them
  *   open for as long as it runs.
  *
  * Rejects with git's stderr (bounded, decoded once at the end) and exit code when git fails, and with
@@ -269,19 +382,13 @@ export async function streamGit(
 ): Promise<StreamGitEnd> {
   const argv = await gitArgv(cwd, args, opts.allowRepoPrograms, opts.filters)
   return new Promise<StreamGitEnd>((resolve, reject) => {
-    const child = spawn(programPath('git'), argv, {
-      cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, LC_ALL: 'C', LANGUAGE: 'C', GIT_OPTIONAL_LOCKS: '0' },
-    })
+    const child = startGit(cwd, argv, ['ignore', 'pipe', 'pipe'], { GIT_OPTIONAL_LOCKS: '0' })
     let ended: StreamGitEnd | 'timedOut' | null = null
     let settled = false
     const end = (why: StreamGitEnd | 'timedOut') => {
       if (ended) return
       ended = why
-      killTree({ pid: child.pid, kill: (signal) => void child.kill(signal as NodeJS.Signals | undefined) }, 'SIGKILL')
-      // git itself as well: off Windows it shares the host's process group, which the tree kill spares
-      child.kill('SIGKILL')
+      endGit(child)
     }
     const timer = setTimeout(() => end('timedOut'), opts.timeout ?? DEFAULTS.timeout)
     const stderr: Buffer[] = []
@@ -326,7 +433,7 @@ export async function streamGit(
     // `close` once every holder of git's output has let go; after git's `exit`, a short grace for that
     child.on('close', (code, signal) => settle(code, signal))
     child.on('exit', (code, signal) => {
-      const grace = setTimeout(() => settle(code, signal), STREAM_CLOSE_GRACE_MS)
+      const grace = setTimeout(() => settle(code, signal), CLOSE_GRACE_MS)
       grace.unref?.()
     })
   })

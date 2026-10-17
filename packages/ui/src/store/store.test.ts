@@ -1,3 +1,4 @@
+import { SLOW } from '../../../../tooling/test-timing.js'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExternalAppInfo, MachineInfo, NormalizedEvent, SessionInfo } from '@cc/protocol'
 import { NO_PATH, sessionLiveDefaults } from '@cc/protocol'
@@ -842,6 +843,50 @@ function holdList(mock: MockPlatform): { asked: Promise<void>; release: () => vo
 
 /** Lets every pending promise and zero-delay timer run */
 const settle = () => new Promise((r) => setTimeout(r, 0))
+
+// #841 items 9 and 10: what the window could not read was dropped with no word
+describe('what the window could not read is said', () => {
+  it('a reconnect that cannot read the session list after its retries says so', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    await settle()
+    mock.agents.listSessions = async () => {
+      throw new Error('RPC timed out')
+    }
+    useStore.setState({ toast: null })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const done = useStore.getState().recoverAfterReconnect()
+      await vi.advanceTimersByTimeAsync(1_000 + 5_000 + 30_000)
+      await done
+      expect(useStore.getState().toast).toBe('Could not catch up after reconnecting: the session list may be out of date until the next reconnect')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('startup reads that came up empty are named in one toast', async () => {
+    const mock = new MockPlatform()
+    mock.agents.grid = async () => {
+      throw new Error('no')
+    }
+    mock.apps.list = async () => {
+      throw new Error('no')
+    }
+    useStore.setState({ toast: null })
+    await useStore.getState().attach(mock)
+    const toast = useStore.getState().toast ?? ''
+    expect(toast).toMatch(/^Could not read .*; shown empty or as defaults until read again$/)
+    expect(toast).toContain('the grid layout')
+    expect(toast).toContain('the app list')
+  })
+
+  it('a startup that read everything says nothing', async () => {
+    useStore.setState({ toast: null })
+    await useStore.getState().attach(new MockPlatform())
+    expect(useStore.getState().toast).toBeNull()
+  })
+})
 
 describe('reconnect recovery against live events', () => {
   it('a relaunched window keeps re-attachment events when recovery overtakes its initial list (#640)', async () => {
@@ -3242,6 +3287,29 @@ describe('handing off and starting fresh', () => {
     expect(useStore.getState().focusedSessionId).toBe(heir!.id)
   })
 
+  // #841 item 5: a note the host could not write read as "no note yet" and was polled for ten minutes
+  it('stops at once and says why when the host cannot save the note', async () => {
+    const mock = new MockPlatform()
+    const proj = await mock.projects.add('/tmp/ho-fail')
+    mock.sessions.set('ho-f1', sessionInfo('ho-f1', { projectId: proj.id, name: 'Mea' }))
+    mock.agents.exportHandoffNote = async () => {
+      throw new Error('EACCES: permission denied')
+    }
+    await useStore.getState().attach(mock)
+    const before = mock.sessions.size
+
+    const done = useStore.getState().handoffSession('ho-f1', { mode: 'agent' })
+    await vi.waitFor(() => {
+      expect((useStore.getState().chat['ho-f1'] ?? []).some((i) => i.kind === 'user')).toBe(true)
+    })
+    mock.emit({ type: 'turn_complete', sessionId: 'ho-f1' } as NormalizedEvent)
+    mock.emit({ type: 'state_change', sessionId: 'ho-f1', state: 'waiting_input' } as NormalizedEvent)
+    await vi.waitFor(() => expect(useStore.getState().toast).toContain('could not save the handoff note: EACCES: permission denied'), { timeout: 5_000 * SLOW })
+    await done
+    expect(mock.sessions.size).toBe(before)
+    expect(mock.sessions.has('ho-f1')).toBe(true)
+  })
+
   it('inherits the grid slot — the successor stands at the same index, and the order does not shift', async () => {
     const mock = new MockPlatform()
     const proj = await mock.projects.add('/tmp/ho7')
@@ -3998,6 +4066,18 @@ describe('the command run ledger (#60, moved into the terminal panel)', () => {
     expect(useStore.getState().commandRuns[p0.id]).toBeUndefined()
     await useStore.getState().loadCommandRuns(p0.id)
     expect(useStore.getState().commandRuns[p0.id]!['pnpm dev']!.running).toBe(true)
+  })
+
+  // #841 item 11: runCommand toasted a failure and stopCommand swallowed it
+  it('a stop that fails says so, as a run that fails does', async () => {
+    const mock = new MockPlatform()
+    await useStore.getState().attach(mock)
+    const p = await useStore.getState().addProject('/tmp/cmd-stop-fail')
+    mock.commands.stop = async () => {
+      throw new Error('the process is gone')
+    }
+    await useStore.getState().stopCommand(p.id, 'pnpm dev')
+    expect(useStore.getState().toast).toBe('Could not stop: the process is gone')
   })
 
   it('stopCommand\'s outcome also comes back as an exit event (130 = the SIGINT convention)', async () => {
@@ -4885,6 +4965,23 @@ describe('a workspace save that fails is sent again', () => {
 
       await vi.advanceTimersByTimeAsync(1_000)
       expect(storedFolds(mock)).toEqual(['retry-p2'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // #841 item 9: past the last retry a save stopped trying with no word, and the layout was found lost after a restart
+  it('says so once the retries while connected run out', async () => {
+    const mock = await attached()
+    failSaves(mock, 100)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      useStore.setState({ toast: null })
+      useStore.getState().toggleProjectFold('retry-out')
+      await vi.advanceTimersByTimeAsync(1_000 + 5_000)
+      expect(useStore.getState().toast).toBeNull()
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(useStore.getState().toast).toBe('Could not save the window layout; it is tried again on the next change or reconnect')
     } finally {
       vi.useRealTimers()
     }

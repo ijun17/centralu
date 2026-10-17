@@ -294,6 +294,27 @@ describe('RpcClient — budget for a call ending in a revival (#164)', () => {
 })
 
 /*
+ * #982 review: a commit or push runs the repository's hooks and may wait on a sign-in; the host gives it 10 minutes.
+ * Cut at 30 s, the screen unlocked its buttons while git still held the index lock.
+ */
+describe('RpcClient — budget for a git write', () => {
+  it.each(['git.stage', 'git.commit', 'git.checkout', 'git.push'])('%s waits past the host\'s 10 minutes, and is cut at 11', async (method) => {
+    const rpc = makeClient()
+    rpc.connect()
+    FakeWebSocket.last.ready()
+    let settled = false
+    const call = (rpc.call as (m: string, p: unknown) => Promise<unknown>)(method, {})
+    const assertion = expect(call.finally(() => (settled = true))).rejects.toMatchObject({ code: 'timeout' })
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000 + 1)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(60_000)
+    await assertion
+    rpc.close()
+  })
+})
+
+/*
  * #173: the starting point for replay. A first-met host replays its whole buffer, and that is
  * all stuff that finished before the screen was attached (a "done" card stood for every
  * finished turn). Attaching to a host that came back up on the same address while still

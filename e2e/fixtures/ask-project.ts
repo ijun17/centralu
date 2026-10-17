@@ -214,6 +214,57 @@ export function askProjectTests(): void {
       expect(await page.evaluate(() => (window as any).__mock.approvalScopes)).toEqual(['session', 'project', 'project'])
     })
 
+    /*
+     * #853: the orchestrator starts sessions outside any project. Its card names no project and offers no project-wide
+     * always, and the session it started hangs under its row, the one place a session with no project and no app has.
+     */
+    test("the orchestrator's card names no project, and its child hangs under its row", async ({ page }) => {
+      await setup(page, ['/tmp/consumer'])
+      const orc = await page.evaluate(async () => (await (window as any).__mock.agents.orchestrator()) as Record<string, unknown>)
+      await page.getByTestId('orchestrator-button').click()
+      await expect.poll(() => page.evaluate(() => (window as any).__store.getState().orchestratorId)).toBe(orc.id)
+      await emit(page, orc.id as string, {
+        type: 'approval_request',
+        requestId: 'ag-orc',
+        detail: { kind: 'agent_start', project: { id: '', name: 'a folder of its own, outside any project' }, tool: 'Codex', preset: 'normal', text: 'look up the release notes' },
+      })
+      const card = page.locator('[data-testid="approval-card"][data-kind="agent_start"]')
+      await expect(card.getByTestId('approval-detail')).toHaveText('Start Codex in a folder of its own, outside any project, with normal permissions, to look up the release notes?')
+      // "Always for this session" lives while the host does: the card says so (#994 review)
+      await expect(card).toContainText('Always for this session lasts until Centralu restarts.')
+      await expect(card.getByTestId('approve-always')).toContainText('Always for this session')
+      await expect(card.getByTestId('approve-always-project')).toHaveCount(0)
+      await card.getByTestId('approve-allow').click()
+      await expect(card).toHaveCount(0)
+
+      await page.evaluate((o) => {
+        const child = { ...o, id: 'orc-child-1', kind: 'worker', name: 'Look up the release notes', askedBy: o.id }
+        ;(window as any).__mock.emit({ type: 'session_created', sessionId: child.id, session: child })
+      }, orc)
+      const row = page.getByTestId('orchestrator-children').getByTestId('orchestrator-child-row-orc-child-1')
+      await expect(row).toContainText('Look up the release notes')
+      await row.click()
+      await expect.poll(() => page.evaluate(() => (window as any).__store.getState().focusedSessionId)).toBe('orc-child-1')
+
+      // Its ⋯ menu deletes it, through the same dialog as a project's session (#994 review)
+      await row.hover()
+      await page.getByTestId('session-menu-orc-child-1').click()
+      await page.getByTestId('delete-session-orc-child-1').click()
+      await expect(page.getByTestId('confirm-delete')).toBeVisible()
+    })
+
+    // #994 review: a child whose orchestrator was replaced kept no row
+    test('a child whose orchestrator is gone keeps a row, among the earlier ones', async ({ page }) => {
+      await setup(page, ['/tmp/consumer'])
+      const orc = await page.evaluate(async () => (await (window as any).__mock.agents.orchestrator()) as Record<string, unknown>)
+      await page.evaluate((o) => {
+        const child = { ...o, id: 'orc-child-2', kind: 'worker', name: 'An older lookup', askedBy: 'orc-gone' }
+        ;(window as any).__mock.emit({ type: 'session_created', sessionId: child.id, session: child })
+      }, orc)
+      await expect(page.getByTestId('orchestrator-children-earlier')).toHaveText('Started by an earlier orchestrator')
+      await expect(page.getByTestId('orchestrator-child-row-orc-child-2')).toContainText('An older lookup')
+    })
+
     // #673: the person was looking at another session and never saw the card, so the session worked alone
     test('a card raised in a session off screen leaves a card in the top right that opens it', async ({ page }) => {
       const { caller, consumer } = await start(page)

@@ -73,6 +73,9 @@ export class QueuedRequests {
             : undefined
     const forkWhy = from === 'ask_project'
       ? 'ask_project never creates a session in another project'
+      // Said first, whatever its CLI can do (#994 review): a session with no project (the orchestrator's child) has no repository to fork from
+      : !target.projectId
+        ? 'it works outside any project, so there is nothing to fork it from; send to it once its turn ends, or start a new session'
       : !adapter?.forkConversation
         ? `${adapter?.descriptor.label ?? target.tool} cannot fork a conversation`
         : !(target.externalId ?? target.importedFrom)

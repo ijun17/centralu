@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { MAX_AGENT_DEPTH, agentDepthOf, type SessionInfo, type ToolName, type ToolStatus } from '@cc/protocol'
 import { DEFAULT_NOTIFY_POLICY, appKeyOf, explainGridSpan, type NotifyPolicy } from '@cc/core'
 import { useStore } from '../../store/store.js'
@@ -8,6 +8,7 @@ import { useNavShortcut, useShortcut } from '../../app/shortcut.js'
 import { isPlainEscape } from '../../app/keys.js'
 import { Kbd } from '../../components/primitives.jsx'
 import { useLoad } from '../../app/useLoad.js'
+import { LoadFailed } from '../../components/LoadFailed.jsx'
 import { InlineConfirm } from '../../components/InlineConfirm.jsx'
 import { Modal } from '../../components/Modal.jsx'
 import { useFocusReturn } from '../../components/focusReturn.js'
@@ -638,22 +639,22 @@ function SecretsLine({ app }: { app: ExternalCatalogApp }) {
  * the card next to the conversation, management happens in Settings. Deleting one restarts the
  * orchestrator through the host, so it drops out of the prompt immediately too.
  */
-function OrchestratorSkills() {
+export function OrchestratorSkills() {
   const platform = usePlatform()
   const setToast = useStore((s) => s.setToast)
-  const [skills, setSkills] = useState<{ name: string; content: string }[]>([])
-  const load = useCallback(() => {
-    void platform.agents
-      .orchestratorSkills()
-      .then((r) => setSkills(r.skills))
-      .catch(() => {})
-  }, [platform])
-  useEffect(load, [load])
+  const loaded = useLoad(() => platform.agents.orchestratorSkills(), [platform])
+  const skills = loaded.data?.skills ?? []
+  const load = () => void loaded.reload()
 
-  if (skills.length === 0) return null
+  // A list that could not be read is said, not hidden (#841): hidden, it read as "no skills approved", and one approved
+  // could no longer be found to delete
+  if (skills.length === 0 && loaded.error === null) return null
   return (
     <div className="mt-5 border-t border-line pt-3" data-testid="orchestrator-skills">
       <p className="readout text-2xs uppercase text-ink-faint">Approved skills</p>
+      {loaded.error !== null && (
+        <LoadFailed what="the approved skills" error={loaded.error} onRetry={load} className="mt-2" testId="orchestrator-skills-failed" />
+      )}
       <ul className="mt-2 space-y-2">
         {skills.map((s) => (
           <li key={s.name} className="rounded-md border border-line p-2.5" data-testid={`orchestrator-skill-${s.name}`}>
