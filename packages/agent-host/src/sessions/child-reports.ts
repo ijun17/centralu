@@ -13,6 +13,7 @@ import type { QueuedRequestsHost } from './queued-requests.js'
 import type { RestartHost } from './restart-policy.js'
 import { labelOf, previewOf } from './transcript-view.js'
 import { clipPreview } from './turn-answer.js'
+import { cleanUpLine } from './tool-answers.js'
 
 /** The first line of a report held over the session's own background work (#721) */
 function pausedReportLine(running: readonly BackgroundTask[], stoppable: boolean): string {
@@ -255,11 +256,28 @@ export class ChildReports {
         failure +
         resume +
         `Last response:\n${preview || '(no content)'}\n\n` +
-        `If you need more, you can read that session's recent conversation with read_session.`,
+        `If you need more, you can read that session's recent conversation with read_session.` +
+        (!work && !stop && ending.type === 'turn_complete' ? this.cleanUpWords(orchestratorId, sessionId) : ''),
       // A report is not the person's own words either (FR-11) — the reporting session is tagged as its
       // source
       { sessionId, name },
       true,
+    )
+  }
+
+  /**
+   * A finished child's report to the session that started it (#690): the line that names deleting it once its answer is
+   * used, and how many of its other children have finished too. Asked why fourteen finished children were left, a parent
+   * said it had forgotten the last step. Only for its own start_agent child: a report on another session (a
+   * send_to_session, an ask_project) is of a session it does not delete.
+   */
+  private cleanUpWords(parentId: string, childId: string): string {
+    if (this.host.meta.get(childId)?.askedBy !== parentId) return ''
+    const others = [...this.host.meta.values()].filter((s) =>
+      s.id !== childId && s.id !== parentId && s.askedBy === parentId && !inTurn(s.state) && !s.pendingApproval && s.pendingQuestions.length === 0).length
+    return (
+      `\n${cleanUpLine(childId)}` +
+      (others ? `\n${others} other finished session${others === 1 ? '' : 's'} you started remain${others === 1 ? 's' : ''}: agent_session(action="list") shows them.` : '')
     )
   }
 

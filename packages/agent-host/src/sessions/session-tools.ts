@@ -19,6 +19,7 @@ export type SessionToolsHost = Pick<DelegationHost, 'builderRefOf' | 'meta' | 'u
   askProject: AskProjectFlow['askProject']
   startAgent: AgentStartFlow['startAgent']
   agentSession: DelegationFlow['agentSession']
+  listAgents: DelegationFlow['listAgents']
   requireAppAccess: SessionAppWiring['requireAppAccess']
 }
 
@@ -114,6 +115,7 @@ export class SessionTools {
       // Other agents in its own project (#561) — behind the person's consent, never above this session's preset
       startAgent: async (opts, signal) => (off() ? { ok: false, error: offError } : this.host.startAgent(sessionId, opts, signal)),
       agentSession: async (opts, signal) => (off() ? { ok: false, error: offError } : this.host.agentSession(sessionId, opts, signal)),
+      listAgents: async () => (off() ? [] : this.host.listAgents(sessionId)),
       // An ordinary session answers through agent_session (#676)
       answerQuestion: async () => ({ ok: false, error: 'Answer it with agent_session, action "answer"' }),
       sendToSession: refuse,

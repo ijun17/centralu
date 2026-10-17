@@ -4,7 +4,7 @@ import { AgentRunWait } from './app-agents.js'
 import { turnAnswer } from './turn-answer.js'
 import { ASK_WAIT_MS, clipAnswer, pathsIn, readableGrants, taskLine } from './ask-project.js'
 import { agentFrame, agentNoteFrame, presetWithin } from './start-agent.js'
-import { labelOf } from './transcript-view.js'
+import { labelOf, lastActiveOf } from './transcript-view.js'
 import { agentDepthRefusal, recordAgentDepth } from './agent-depth.js'
 import type {
   BackgroundTask,
@@ -18,7 +18,7 @@ import {
   liveBackgroundTasks,
 } from '@cc/protocol'
 import { inTurn } from '../idle.js'
-import type { BusyAnswer, ChildRunResult, AgentSessionOpts, RoutedCard } from '../adapters/contract.js'
+import type { AgentListRow, BusyAnswer, ChildRunResult, AgentSessionOpts, RoutedCard } from '../adapters/contract.js'
 import { raceBound } from './with-timeout.js'
 import type { DelegationHost } from './delegation-host.js'
 import { AgentStartFlow, agentStartPending, agentStartPersonText } from './start-agent-flow.js'
@@ -185,6 +185,38 @@ export class DelegationFlow {
         if (readers?.size === 0) this.host.turnObservers.delete(child.id)
       },
     }
+  }
+
+  /**
+   * agent_session list (#690): the sessions this caller started that are still here, oldest first. On 2026-10-14 a
+   * parent used fourteen children's answers and deleted none of them until the person said it could: deleting was a
+   * call away, but nothing showed it what was left. Only its own children (`askedBy`), in its own project, as the
+   * other actions take them; a session another started is not its to delete.
+   */
+  listAgents(callerId: string): AgentListRow[] {
+    const caller = this.host.meta.get(callerId)
+    if (!caller?.projectId) return []
+    return [...this.host.meta.values()]
+      .filter((s) => s.id !== callerId && s.askedBy === callerId && s.projectId === caller.projectId && !this.host.trashing.has(s.id))
+      .sort((a, b) => a.createdAt - b.createdAt)
+      .map((s) => {
+        const running = [...this.host.children.delegations.values()].some((d) => d.sessionId === s.id && !d.settled)
+        const state: AgentListRow['state'] =
+          s.pendingApproval || s.pendingQuestions.length ? 'waiting'
+          : inTurn(s.state) || running ? 'working'
+          : s.state === 'error' || s.state === 'limited' || s.interruption ? 'stopped'
+          : 'finished'
+        const lastActive = lastActiveOf(this.host.store, s.id)
+        return {
+          sessionId: s.id,
+          name: labelOf(this.host.store, s),
+          tool: s.tool,
+          state,
+          asleep: !s.live,
+          ...(lastActive ? { lastActive } : {}),
+          ...(s.worktree ? { worktree: { branch: s.worktree.branch, unmerged: !s.worktreeMerged } } : {}),
+        }
+      })
   }
 
   /**
