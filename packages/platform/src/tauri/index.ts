@@ -192,6 +192,11 @@ export type ShellHostBuild = {
   background?: boolean
   /** The current or last blue-green swap (#280 step 3) */
   swap?: SwapView
+  /**
+   * Whether that swap went to this window's build, by the keeper's rule (`SwapView::is_to`: a clean commit is one
+   * build whatever its build time). Absent without a swap, and from a window older than the field.
+   */
+  swapToThisBuild?: boolean
   /** Whether the running host hands agents over in a swap (step 2) or stops them */
   keepsAgents?: boolean
   /** A session working or waiting, a terminal or a command running: what a switch could cost */

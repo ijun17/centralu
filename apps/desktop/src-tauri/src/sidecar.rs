@@ -57,6 +57,10 @@ pub struct HostBuild {
     #[cfg(unix)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub swap: Option<crate::keeper::swap::SwapView>,
+    /// Whether that swap went to this window's build, by the keeper's rule (`SwapView::is_to`). Absent
+    /// without a swap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub swap_to_this_build: Option<bool>,
     /// Whether a swap hands agents over (step 2) or stops them, as the running host says.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keeps_agents: Option<bool>,
@@ -516,6 +520,7 @@ mod link {
                 keeper_same_build: st.view.as_ref().map(|v| keeper_same_build(v.keeper.build.as_ref(), &self.app_build)),
                 background: st.view.as_ref().map(|v| v.background),
                 swap: st.view.as_ref().and_then(|v| v.swap.clone()),
+                swap_to_this_build: st.view.as_ref().and_then(|v| v.swap.as_ref()).map(|s| s.is_to(&self.app_build)),
                 keeps_agents: st.view.as_ref().and_then(|v| v.keeps_agents),
                 busy: st.view.as_ref().map(|v| v.busy),
                 relaunched: st.relaunched,
