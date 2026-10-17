@@ -478,6 +478,7 @@ export function orchestratorToolsFor(
     // The same for starting agents (#561): these seats create and direct sessions with their own tools
     startAgent: async () => ({ ok: false, error: 'Only an ordinary project session can start agents this way' }),
     agentSession: async () => ({ ok: false, error: 'Only an ordinary project session can start agents this way' }),
+    listAgents: async () => ({ ok: false, error: 'Only an ordinary project session can start agents this way' }),
 
     sendToSession: async (sessionId, text, reportBack, ifBusy) => {
       /*

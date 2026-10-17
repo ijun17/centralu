@@ -30,3 +30,13 @@ export const trimmed = (v: unknown): string | undefined => (typeof v === 'string
 
 /** A finite number; undefined for anything else */
 export const finite = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+
+/** The value if it is a JSON object, or the object JSON text of one holds; empty for anything else (a tool call's arguments) */
+export const jsonObject = (v: unknown): Obj => {
+  if (typeof v !== 'string') return asObj(v)
+  try {
+    return jsonObject(JSON.parse(v) as unknown)
+  } catch {
+    return {}
+  }
+}
