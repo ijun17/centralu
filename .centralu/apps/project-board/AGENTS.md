@@ -115,6 +115,9 @@ intermittent failures (#368), and how long a merge may wait.
   any, else from the jobs of the `ci.workflows` files read from the base branch (so a PR cannot make
   its own checks optional), with `${{ matrix.x }}` names filled in. A job whose check name cannot be
   worked out makes every reported check count. With no set at all, every reported check counts.
+  This repository's build.yml leaves jobs out of a pull request by its files (`changes`); a left-out
+  job reports `skipped` or a stand-in under the same name, and a set written into branch protection
+  must name `changes` too (docs/releasing.md, "What CI does").
 - **`ci_status`** (`pr`, or `ref` and optional `repo`; read-only): short by default: the verdict,
   `passed/total`, and only failed or pending checks. `detail: "full"` also lists passed and
   non-required checks. Compact output still says when the PR adds required jobs (#445).

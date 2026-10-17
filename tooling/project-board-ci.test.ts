@@ -53,8 +53,10 @@ describe('which checks a workflow requires', () => {
     const w = workflowCheckNames(text)
     // The names `gh pr checks` showed for #415, without the discord-notify job, plus the content
     // verifier's two rows (#440), the keeper's Linux job (#350) and the host's tests on the remote's pinned Node
-    // (remote-hub.md §10.9), and the e2e suite's WebKit and Chromium shards with the report that merges them
+    // (remote-hub.md §10.9), and the e2e suite's WebKit and Chromium shards with the report that merges them, and the
+    // job that says which of them a commit needs (their stand-ins report the same names)
     expect([...w.names].sort()).toEqual([
+      'changes',
       'content verify (macos-14)',
       'content verify (ubuntu-24.04)',
       'darwin-arm64',
