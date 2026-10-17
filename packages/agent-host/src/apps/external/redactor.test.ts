@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeArgs } from './runs.js'
+import { describeArgs, RunRow, type RunLedger } from './runs.js'
 import { redactor } from './secrets.js'
 
 /*
@@ -26,6 +26,26 @@ describe('a secret is masked in a run record however JSON spells it', () => {
 
   it('a value JSON spells as it is has one form, masked once', () => {
     expect(redactor({ T: 'plain-token' })(JSON.stringify({ t: 'plain-token' }))).toBe('{"t":"[redacted:T]"}')
+  })
+
+  /*
+   * #838 item 13, checked again: a value holding the secret already JSON-escaped (JSON passed as text, an app answering
+   * with JSON) was escaped a second time when the record was written, a spelling neither masked form matched.
+   */
+  it('a secret already JSON-escaped inside a value is masked, in the arguments and in a failed result', () => {
+    const secret = 'qu"ote\\Secret-7781'
+    const redact = redactor({ PASS: secret })
+    const asText = JSON.stringify({ token: secret })
+    const kept = describeArgs({ body: asText }, redact)
+    expect(kept.json).not.toContain('Secret-7781')
+    expect(kept.json).toContain('[redacted:PASS]')
+    let failure: { result: string | null } | null = null
+    const ledger = { begin: () => {}, end: () => {}, link: () => {}, keepFailure: (f: { result: string | null }) => void (failure = f) } as unknown as RunLedger
+    const head = { id: 'r1', projectId: null, appId: 'a', kind: 'tool', tool: 't', callerKind: 'agent', callerSessionId: null, parentRunId: null, createdAt: 0 }
+    const row = new RunRow(ledger, head as ConstructorParameters<typeof RunRow>[1], {}, redact)
+    row.close('error', 'failed', { content: [{ type: 'text', text: asText }], isError: true })
+    expect(failure!.result).not.toContain('Secret-7781')
+    expect(failure!.result).toContain('[redacted:PASS]')
   })
 })
 

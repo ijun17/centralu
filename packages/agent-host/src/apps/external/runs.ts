@@ -190,7 +190,7 @@ export class RunRow {
           projectId: this.head.projectId,
           appId: this.head.appId,
           args: this.described!.json,
-          result: result ? this.redact(JSON.stringify(result)) : null,
+          result: result ? maskedJson(result, this.redact) : null,
           createdAt: t0,
         },
         FAILURES_KEPT,
@@ -205,6 +205,27 @@ export class RunRow {
  */
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(sortKeys(value)) ?? 'null'
+}
+
+/**
+ * `value` as JSON with secrets masked: every string in it first (keys too), then the JSON text as a whole (#838).
+ * Masking the text alone missed a secret the value already held JSON-escaped, an app answering with JSON as its text
+ * (`{"token":"pa\"ss"}`) or an agent passing it as an argument: JSON.stringify escaped it a second time, and that
+ * spelling matched neither the raw value nor the escaped form the redactor knows.
+ */
+export function maskedJson(value: unknown, redact: (t: string) => string): string {
+  return redact(JSON.stringify(maskStrings(value, redact)) ?? 'null')
+}
+
+function maskStrings(v: unknown, redact: (t: string) => string): unknown {
+  if (typeof v === 'string') return redact(v)
+  if (Array.isArray(v)) return v.map((x) => maskStrings(x, redact))
+  if (v && typeof v === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, x] of Object.entries(v)) out[redact(k)] = maskStrings(x, redact)
+    return out
+  }
+  return v
 }
 
 function sortKeys(v: unknown): unknown {
@@ -223,7 +244,7 @@ function sortKeys(v: unknown): unknown {
  * brute-force lookup.
  */
 export function describeArgs(args: unknown, redact: (t: string) => string): { json: string; digest: string; summary: string } {
-  const json = redact(canonicalJson(args))
+  const json = maskedJson(sortKeys(args), redact)
   const digest = createHash('sha256').update(json).digest('hex')
   const summary = json.length > SUMMARY_CHARS ? `${json.slice(0, SUMMARY_CHARS)}…` : json
   return { json, digest, summary }
