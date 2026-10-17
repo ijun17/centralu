@@ -210,7 +210,7 @@ export class SessionTrash {
      */
     this.host.record.closeStream(sessionId)
     let project: { name: string; path: string } | undefined
-    if (m.projectId) project = this.host.store.listProjects().find((p) => p.id === m.projectId)
+    if (m.projectId) project = this.host.store.projects.listProjects().find((p) => p.id === m.projectId)
     this.host.running.delete(sessionId)
     this.host.restartPolicy.restartAfterTurn.delete(sessionId)
     this.host.restartPolicy.trustRestartNotice.delete(sessionId)
@@ -264,7 +264,7 @@ export class SessionTrash {
 
   /** The trash as Settings lists it (#204), with the total it takes on this machine */
   async listTrash(): Promise<{ sessions: TrashedSession[]; bytes: number }> {
-    const projects = new Map(this.host.store.listProjects().map((p) => [p.id, p]))
+    const projects = new Map(this.host.store.projects.listProjects().map((p) => [p.id, p]))
     const sessions = await Promise.all(
       this.host.store.listTrash().map(async (r): Promise<TrashedSession> => {
         const { record } = r
@@ -327,14 +327,14 @@ export class SessionTrash {
       let projectId: string | null = null
       let registered: ProjectInfo | null = null
       if (record.projectId) {
-        const projects = this.host.store.listProjects()
+        const projects = this.host.store.projects.listProjects()
         const home =
           projects.find((p) => p.id === record.projectId) ??
           (record.projectPath ? projects.find((p) => p.path === record.projectPath) : undefined)
         if (home) {
           projectId = home.id
         } else if (record.projectPath && existsSync(record.projectPath) && statSync(record.projectPath).isDirectory()) {
-          this.host.store.addProject({
+          this.host.store.projects.addProject({
             id: record.projectId,
             path: record.projectPath,
             name: record.projectName ?? basename(record.projectPath),
@@ -350,7 +350,7 @@ export class SessionTrash {
       }
       let recovered: { branch: string; notice: string } | undefined
       if (record.recovery && t.session.worktree && projectId) {
-        const repo = this.host.store.listProjects().find((p) => p.id === projectId)!.path
+        const repo = this.host.store.projects.listProjects().find((p) => p.id === projectId)!.path
         recovered = await restoreWorktreeRecovery(sessionId, repo, t.session.worktree.path, t.session.worktree.branch, record.recovery, this.host.gitTrust(projectId))
       }
       const back = await this.host.store.restoreSession(sessionId, projectId)

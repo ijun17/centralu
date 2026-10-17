@@ -157,7 +157,7 @@ function folder(): string {
 function seeded(sessions: [id: string, kind: SessionInfo['kind'], inProject: boolean][]): { store: Store; projectId: string } {
   const store = new Store()
   const projectId = 'p-remote'
-  store.addProject({ id: projectId, path: folder(), name: 'remote-project' })
+  store.projects.addProject({ id: projectId, path: folder(), name: 'remote-project' })
   for (const [id, kind, inProject] of sessions) seedSession(store, inProject ? projectId : null, id, kind)
   return { store, projectId }
 }
@@ -1101,7 +1101,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
 
     const hubStore = new Store()
     const hubProject = 'p-hub'
-    hubStore.addProject({ id: hubProject, path: folder(), name: 'hub-project' })
+    hubStore.projects.addProject({ id: hubProject, path: folder(), name: 'hub-project' })
     seedSession(hubStore, null, 'hub-orch', 'orchestrator', 'ext-hub-orch')
     seedSession(hubStore, hubProject, 'h1', 'worker')
     talk(hubStore, 'h1', [['where is the backup', 'zebracrossing lives on the server']])
@@ -1199,7 +1199,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     // By name: the machine's project is found by the name its window shows; one name on two machines is not guessed
     const name = (await remote.mgr.listProjects()).find((p) => p.id === 'p-remote')!.name
     expect((await tool('create_session', { project: name })).text).toMatch(/^Created: .+ \[m1\./)
-    hub.store.addProject({ id: 'p-dup', path: folder(), name })
+    hub.store.projects.addProject({ id: 'p-dup', path: folder(), name })
     const both = await tool('create_session', { project: name })
     expect(both).toMatchObject({ isError: true })
     expect(both.text).toContain(`${name} [p-dup] on this computer`)
@@ -1219,7 +1219,7 @@ describe("the hub's orchestrator reads the linked machines (#82 phase 4)", () =>
     const r = await pending
     expect(r.text).toMatch(/^Made the project "fresh" \[m1\.[^\]]+\], an empty folder at ".+" on Remote box\./)
     expect((await remote.mgr.listProjects()).some((p) => p.path === join(parent, 'fresh'))).toBe(true)
-    expect(hub.store.listProjects().some((p) => p.path === join(parent, 'fresh'))).toBe(false)
+    expect(hub.store.projects.listProjects().some((p) => p.path === join(parent, 'fresh'))).toBe(false)
 
     expect(await tool('create_project', { name: 'x', machine: 'Nowhere' })).toMatchObject({
       isError: true,
@@ -1266,7 +1266,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     seedSession(remoteStore, 'p-remote', 'w1', 'worker', 'ext-w1')
     const remote = await remoteHost(0, remoteStore)
     const hubStore = new Store()
-    hubStore.addProject({ id: 'p-hub', path: folder(), name: 'hub-project' })
+    hubStore.projects.addProject({ id: 'p-hub', path: folder(), name: 'hub-project' })
     seedSession(hubStore, 'p-hub', 'h1', 'worker', 'ext-h1')
     const hub = await hubHost(() => lineFor(remote.port), hubStore)
     hub.mgr.setProjectTrusted('p-hub', true)
@@ -1330,7 +1330,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
 
   it('refuses a name that is on two machines with both choices, and a machine-qualified name settles it', async () => {
     const { name, ask, hub, answer } = await rig()
-    hub.store.addProject({ id: 'p-dup', path: folder(), name })
+    hub.store.projects.addProject({ id: 'p-dup', path: folder(), name })
     const refused = await ask({ project: name, task: 'x' })
     expect(refused).toMatchObject({ ok: false, error: expect.stringContaining('More than one project is called') })
     const text = (refused as { error: string }).error
@@ -1404,7 +1404,7 @@ describe('ask_project reaches the projects of linked machines (#700)', () => {
     const call = ask({ project: name, task: 'say hello' })
     await until(() => !!card())
     // Taken away at the store, so only the read after the answer can see it
-    hub.store.setProjectTrusted('p-hub', false)
+    hub.store.projects.setProjectTrusted('p-hub', false)
     await answer('allow')
     expect(await call).toMatchObject({ ok: false, error: expect.stringContaining("This session's project is not trusted") })
     expect(remote.store.loadMessages('w1', 20).some((m) => (m.payload as { text?: string }).text?.includes('say hello'))).toBe(false)

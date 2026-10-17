@@ -38,7 +38,7 @@ function newestStore(file: string): Store {
 
 function seeded() {
   const s = new Store()
-  s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+  s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
   s.upsertSession({
     id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'New session',
     autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
@@ -154,14 +154,14 @@ describe('Store (dev sqlite)', () => {
     const first = new Store(file)
     expect(first.migrationsRun).toBeGreaterThan(0)
     expect(first.schemaVersion).toBe(LATEST_SCHEMA)
-    first.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    first.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     first.close()
 
     const again = new Store(file)
     expect(again.migrationsRun).toBe(0)
     expect(again.schemaVersion).toBe(LATEST_SCHEMA)
     // And the data is intact — "did not run" must not mean "cannot be read"
-    expect(again.listProjects().map((p) => p.id)).toEqual(['p1'])
+    expect(again.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
     again.close()
 
     rmSync(dir, { recursive: true, force: true })
@@ -169,8 +169,8 @@ describe('Store (dev sqlite)', () => {
 
   it('registers and lists projects; a duplicate path is treated as an update', () => {
     const s = seeded()
-    s.addProject({ id: 'p1b', path: '/tmp/p1', name: 'Renamed' })
-    const list = s.listProjects()
+    s.projects.addProject({ id: 'p1b', path: '/tmp/p1', name: 'Renamed' })
+    const list = s.projects.listProjects()
     expect(list).toHaveLength(1)
     expect(list[0]!.name).toBe('Renamed')
   })
@@ -398,7 +398,7 @@ describe('migrations (E-0)', () => {
 describe('migration v5 — the original conversation an import inherited', () => {
   it('the imported_from column exists and round-trips', () => {
     const store = new Store()
-    store.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    store.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     const base = {
       id: 's-import', projectId: 'p1', kind: 'worker' as const, tool: 'claude' as const, externalId: 'ext-new',
       name: 'Imported conversation', autoNamed: true, state: 'idle' as const,
@@ -524,9 +524,9 @@ describe('migration v8 — sidebar order', () => {
 
   it('project order is saved too', () => {
     const s = seeded()
-    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
-    s.setProjectOrder(['p2', 'p1'])
-    expect(s.listProjects().map((p) => p.id)).toEqual(['p2', 'p1'])
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.projects.setProjectOrder(['p2', 'p1'])
+    expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p2', 'p1'])
     s.close()
   })
 })
@@ -592,7 +592,7 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
     const file = join(dir, 'store.db')
     try {
       const fresh = newestStore(file)
-      fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      fresh.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       for (const id of ['s1', 's2', 's3']) gridSession(fresh, id, 'p1')
       fresh.close()
       // Take the grid back to v41: one row per session id
@@ -629,7 +629,7 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
     const file = join(dir, 'store.db')
     try {
       const s = newestStore(file)
-      s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       for (const id of ['s1', 's2']) gridSession(s, id, 'p1')
       s.grid.setGridView([ap('p1', 'slider'), sp('s1')])
       s.close()
@@ -671,7 +671,7 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
 
   it('two projects’ apps with the same id are two panels', () => {
     const s = seeded()
-    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
     s.grid.setGridView([ap('p1', 'slider'), ap('p2', 'slider')])
     expect(s.grid.listGridView()).toEqual([ap('p1', 'slider'), ap('p2', 'slider')])
     s.close()
@@ -679,7 +679,7 @@ describe('migration v42 — the grid holds apps as well as sessions', () => {
 
   it('deleting a project takes its apps off the grid and leaves the rest where they were', () => {
     const s = seeded()
-    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
     s.grid.setGridView([ap('p2', 'slider'), sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
     s.deleteProject('p2')
     expect(s.grid.listGridView()).toEqual([sp('s1'), ap(null, 'notes'), ap('p1', 'slider')])
@@ -714,7 +714,7 @@ describe('migration v43 — an app panel keeps its span', () => {
     const file = join(dir, 'store.db')
     try {
       const fresh = newestStore(file)
-      fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      fresh.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       gridSession(fresh, 's1', 'p1')
       fresh.close()
       // Take the table back to v42's shape, with an app and a session on it
@@ -776,7 +776,7 @@ describe('migration v43 — an app panel keeps its span', () => {
 describe('remembered consents between projects across builds (#384)', () => {
   it('a kind a newer build added stays in the store but is not listed here', () => {
     const s = seeded()
-    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
     s.setProjectConsent('p1', 'p2', 'delegate')
     const db = (s as unknown as { db: Database.Database }).db
     db.prepare(`INSERT INTO project_consents (from_project_id, to_project_id, kind, decided_at) VALUES ('p1', 'p2', 'files', 1)`).run()
@@ -829,7 +829,7 @@ describe('the orchestrator marker (kind)', () => {
 
     // Build a v25 state: one project orchestrator plus one central orchestrator
     const before = newestStore(file)
-    before.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    before.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     mk(before, 'proj-orc', 'p1', 'orchestrator')
     mk(before, 'central', null, 'orchestrator')
     before.close()
@@ -1029,12 +1029,12 @@ describe('v15 migration — remembers the shell commands a project registered', 
     const first = new Store(file)
     expect(first.schemaVersion).toBe(LATEST_SCHEMA)
     // A project that never existed correctly has none — an empty list is exactly 'never registered any'
-    expect(first.projectCommands('p1')).toEqual([])
-    first.setProjectCommands('p1', [{ command: 'pnpm test', label: 'Test' }, { command: 'pnpm e2e' }])
+    expect(first.projects.projectCommands('p1')).toEqual([])
+    first.projects.setProjectCommands('p1', [{ command: 'pnpm test', label: 'Test' }, { command: 'pnpm e2e' }])
     first.close()
 
     const second = new Store(file)
-    expect(second.projectCommands('p1')).toEqual([
+    expect(second.projects.projectCommands('p1')).toEqual([
       { command: 'pnpm test', label: 'Test' },
       { command: 'pnpm e2e' },
     ])
@@ -1044,10 +1044,10 @@ describe('v15 migration — remembers the shell commands a project registered', 
     raw2.prepare(`UPDATE projects SET commands = ? WHERE id = 'p1'`).run('["pnpm dev","pnpm lint"]')
     raw2.close()
     const third = new Store(file)
-    expect(third.projectCommands('p1')).toEqual([{ command: 'pnpm dev' }, { command: 'pnpm lint' }])
+    expect(third.projects.projectCommands('p1')).toEqual([{ command: 'pnpm dev' }, { command: 'pnpm lint' }])
     // schema.sql resets user_version to 1, so steps replay on every open —
     // a second open must not recreate the column and wipe the list
-    expect(third.listProjects().map((p) => p.id)).toEqual(['p1'])
+    expect(third.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
     third.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1063,7 +1063,7 @@ describe('v15 migration — remembers the shell commands a project registered', 
     const file = join(dir, 'store.db')
 
     const first = newestStore(file)
-    first.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    first.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     first.close()
 
     const poke = new Database(file)
@@ -1071,8 +1071,8 @@ describe('v15 migration — remembers the shell commands a project registered', 
     poke.close()
 
     const second = new Store(file)
-    expect(second.projectCommands('p1')).toEqual([])
-    expect(second.listProjects().map((p) => p.name)).toEqual(['p1'])
+    expect(second.projects.projectCommands('p1')).toEqual([])
+    expect(second.projects.listProjects().map((p) => p.name)).toEqual(['p1'])
     second.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1248,7 +1248,7 @@ describe('WAL checkpoint', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-wal-'))
     const path = join(dir, 'store.db')
     const s = new Store(path)
-    s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     s.upsertSession({
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'New session',
       autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
@@ -1338,7 +1338,7 @@ describe('v21 migration — merges delta rows into messages', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cc-v21-'))
     const file = join(dir, 'store.db')
     const s = newestStore(file)
-    s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     s.upsertSession({
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'codex', externalId: null, name: 'New session',
       autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
@@ -1450,7 +1450,7 @@ describe('v29 migration — narrows a trampled timestamp using its neighbor', ()
     const dir = mkdtempSync(join(tmpdir(), 'cc-v29-'))
     const file = join(dir, 'store.db')
     const s0 = newestStore(file)
-    s0.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    s0.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     s0.upsertSession({
       id: 's1', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'Session',
       autoNamed: true, state: 'idle', lastReadSeq: 0, lastSeq: 0,
@@ -1494,14 +1494,14 @@ describe('parent_session_id round-trip (#69)', () => {
 describe('worktree_setup round-trip (#69)', () => {
   it('saves, reads back, and an empty setup lies down as null', () => {
     const s = seeded()
-    expect(s.worktreeSetup('p1')).toBeNull()
+    expect(s.projects.worktreeSetup('p1')).toBeNull()
 
-    s.setWorktreeSetup('p1', { command: 'pnpm install', copyFiles: ['.env.local'] })
-    expect(s.worktreeSetup('p1')).toEqual({ command: 'pnpm install', copyFiles: ['.env.local'] })
+    s.projects.setWorktreeSetup('p1', { command: 'pnpm install', copyFiles: ['.env.local'] })
+    expect(s.projects.worktreeSetup('p1')).toEqual({ command: 'pnpm install', copyFiles: ['.env.local'] })
 
     // Saving an empty setup means "no setup" — an empty string command must never be exec'd
-    s.setWorktreeSetup('p1', { command: '', copyFiles: [] })
-    expect(s.worktreeSetup('p1')).toBeNull()
+    s.projects.setWorktreeSetup('p1', { command: '', copyFiles: [] })
+    expect(s.projects.worktreeSetup('p1')).toBeNull()
   })
 })
 
@@ -1509,24 +1509,24 @@ describe('worktree_setup round-trip (#69)', () => {
 describe('worktree_manager round-trip (#76)', () => {
   it('saves, reads back, and clears', () => {
     const s = seeded()
-    expect(s.worktreeManager('p1')).toBeNull()
+    expect(s.projects.worktreeManager('p1')).toBeNull()
 
-    s.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'main' })
-    expect(s.worktreeManager('p1')).toEqual({ sessionId: 'mgr-1', baseBranch: 'main' })
+    s.projects.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'main' })
+    expect(s.projects.worktreeManager('p1')).toEqual({ sessionId: 'mgr-1', baseBranch: 'main' })
 
     // A path that changes only the trunk — the slot stays put and only the baseline changes
-    s.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'develop' })
-    expect(s.worktreeManager('p1')?.baseBranch).toBe('develop')
+    s.projects.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'develop' })
+    expect(s.projects.worktreeManager('p1')?.baseBranch).toBe('develop')
 
-    s.setWorktreeManager('p1', null)
-    expect(s.worktreeManager('p1')).toBeNull()
+    s.projects.setWorktreeManager('p1', null)
+    expect(s.projects.worktreeManager('p1')).toBeNull()
   })
 
   it('one per project — there cannot be two, since there is only one column', () => {
     const s = seeded()
-    s.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'main' })
-    s.setWorktreeManager('p1', { sessionId: 'mgr-2', baseBranch: 'main' })
-    expect(s.worktreeManager('p1')?.sessionId).toBe('mgr-2')
+    s.projects.setWorktreeManager('p1', { sessionId: 'mgr-1', baseBranch: 'main' })
+    s.projects.setWorktreeManager('p1', { sessionId: 'mgr-2', baseBranch: 'main' })
+    expect(s.projects.worktreeManager('p1')?.sessionId).toBe('mgr-2')
   })
 })
 
@@ -1554,7 +1554,7 @@ describe('v32 migration — the default model is per tool (#107)', () => {
     v31Db(file)
 
     const s = new Store(file)
-    expect(s.projectToolDefaults('p1')).toEqual({})
+    expect(s.projects.projectToolDefaults('p1')).toEqual({})
     const cols = (s as unknown as { db: Database.Database }).db
       .prepare(`PRAGMA table_info(projects)`)
       .all() as { name: string }[]
@@ -1562,12 +1562,12 @@ describe('v32 migration — the default model is per tool (#107)', () => {
     expect(cols.map((c) => c.name)).not.toContain('default_effort')
 
     // Each tool sits in its own slot, and neither overwrites the other
-    s.setProjectToolDefaults('p1', 'codex', { model: 'gpt-5.6-terra', effort: 'high' })
-    s.setProjectToolDefaults('p1', 'claude', { model: 'opus', effort: null })
+    s.projects.setProjectToolDefaults('p1', 'codex', { model: 'gpt-5.6-terra', effort: 'high' })
+    s.projects.setProjectToolDefaults('p1', 'claude', { model: 'opus', effort: null })
     s.close()
 
     const reopened = new Store(file)
-    expect(reopened.projectToolDefaults('p1')).toEqual({
+    expect(reopened.projects.projectToolDefaults('p1')).toEqual({
       codex: { model: 'gpt-5.6-terra', effort: 'high' },
       claude: { model: 'opus', effort: null },
     })
@@ -1587,14 +1587,14 @@ describe('v32 migration — the default model is per tool (#107)', () => {
 describe('addProject trust (#655)', () => {
   it('starts untrusted unless asked, and a second registration of the path keeps whatever trust the row has', () => {
     const s = new Store()
-    s.addProject({ id: 'a', path: '/tmp/a', name: 'a' })
-    s.addProject({ id: 'b', path: '/tmp/b', name: 'b', trusted: true })
-    expect(s.projectRoots().map((p) => [p.id, p.trusted])).toEqual([['a', false], ['b', true]])
+    s.projects.addProject({ id: 'a', path: '/tmp/a', name: 'a' })
+    s.projects.addProject({ id: 'b', path: '/tmp/b', name: 'b', trusted: true })
+    expect(s.projects.projectRoots().map((p) => [p.id, p.trusted])).toEqual([['a', false], ['b', true]])
     // Neither direction flips: a second call renames the row and leaves trust alone
-    s.addProject({ id: 'a2', path: '/tmp/a', name: 'a-renamed', trusted: true })
-    s.addProject({ id: 'b2', path: '/tmp/b', name: 'b-renamed' })
-    expect(s.projectRoots().map((p) => [p.id, p.trusted])).toEqual([['a', false], ['b', true]])
-    expect(s.listProjects().map((p) => p.name)).toEqual(['a-renamed', 'b-renamed'])
+    s.projects.addProject({ id: 'a2', path: '/tmp/a', name: 'a-renamed', trusted: true })
+    s.projects.addProject({ id: 'b2', path: '/tmp/b', name: 'b-renamed' })
+    expect(s.projects.projectRoots().map((p) => [p.id, p.trusted])).toEqual([['a', false], ['b', true]])
+    expect(s.projects.listProjects().map((p) => p.name)).toEqual(['a-renamed', 'b-renamed'])
     s.close()
   })
 })
@@ -1616,14 +1616,14 @@ describe('v33/v35 migration — the trust column, and only projects that existed
     oldProjects(file, 32)
 
     const s = new Store(file)
-    expect(s.projectRoots()).toEqual([{ id: 'p1', path: '/tmp/p1', trusted: true }])
-    expect(s.setProjectTrusted('p1', false)).toBe(true)
+    expect(s.projects.projectRoots()).toEqual([{ id: 'p1', path: '/tmp/p1', trusted: true }])
+    expect(s.projects.setProjectTrusted('p1', false)).toBe(true)
     // This does not silently succeed on a project that does not exist
-    expect(s.setProjectTrusted('nope', true)).toBe(false)
+    expect(s.projects.setProjectTrusted('nope', true)).toBe(false)
     s.close()
 
     const reopened = new Store(file)
-    expect(reopened.projectRoots()).toEqual([{ id: 'p1', path: '/tmp/p1', trusted: false }])
+    expect(reopened.projects.projectRoots()).toEqual([{ id: 'p1', path: '/tmp/p1', trusted: false }])
     reopened.close()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1635,22 +1635,22 @@ describe('v33/v35 migration — the trust column, and only projects that existed
 
     const s = new Store(file)
     expect(s.schemaVersion).toBe(LATEST_SCHEMA)
-    expect(s.projectRoots().map((p) => [p.id, p.trusted])).toEqual([
+    expect(s.projects.projectRoots().map((p) => [p.id, p.trusted])).toEqual([
       ['p1', true],
       ['p2', true],
     ])
     // This is also carried in the shape sent to the screen — the trust toggle shows this value
-    expect(s.listProjects().map((p) => [p.id, p.trusted])).toEqual([
+    expect(s.projects.listProjects().map((p) => [p.id, p.trusted])).toEqual([
       ['p1', true],
       ['p2', true],
     ])
-    s.addProject({ id: 'p3', path: '/tmp/p3', name: 'p3' })
-    s.setProjectTrusted('p2', false)
+    s.projects.addProject({ id: 'p3', path: '/tmp/p3', name: 'p3' })
+    s.projects.setProjectTrusted('p2', false)
     s.close()
 
     // Reopening does not replay the migration — the trust a person turned off, and the new project's "no," both survive
     const reopened = new Store(file)
-    expect(reopened.projectRoots().map((p) => [p.id, p.trusted])).toEqual([
+    expect(reopened.projects.projectRoots().map((p) => [p.id, p.trusted])).toEqual([
       ['p1', true],
       ['p2', false],
       ['p3', false],
@@ -1661,9 +1661,9 @@ describe('v33/v35 migration — the trust column, and only projects that existed
 
   it('a project registered on a new database starts out untrusted', () => {
     const s = new Store()
-    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
-    expect(s.projectRoots()).toEqual([{ id: 'p2', path: '/tmp/p2', trusted: false }])
-    expect(s.listProjects()[0]?.trusted).toBe(false)
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    expect(s.projects.projectRoots()).toEqual([{ id: 'p2', path: '/tmp/p2', trusted: false }])
+    expect(s.projects.listProjects()[0]?.trusted).toBe(false)
   })
 })
 
@@ -1687,7 +1687,7 @@ describe('the person\'s answers to an app\'s capability requests (M4 D-4)', () =
 
   it('deleting a project clears the answers for that project\'s apps too — a user-folder app\'s answer survives', () => {
     const s = new Store()
-    s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+    s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
     s.putAppPermission('p1/notes', 'p1', allow('agent:claude', 1))
     s.putAppPermission('_user/timer', null, allow('agent:claude', 2))
     s.deleteProject('p1')
@@ -1993,7 +1993,7 @@ describe('the trash (#204)', () => {
 
     s.deleteProject('p1')
 
-    expect(s.listProjects()).toEqual([])
+    expect(s.projects.listProjects()).toEqual([])
     expect(s.listSessions()).toEqual([])
     const trash = s.listTrash()
     expect(trash.map((r) => [r.id, r.messages])).toEqual(expect.arrayContaining([['s1', 3], ['s2', 2]]))
@@ -2013,7 +2013,7 @@ describe('the trash (#204)', () => {
     const file = join(dir, 'store.db')
     try {
       const fresh = newestStore(file)
-      fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      fresh.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       fresh.close()
       // Take the store back to v38: no trash columns
       const raw = new Database(file)
@@ -2043,7 +2043,7 @@ describe('the trash (#204)', () => {
 describe('migration v44 — consent from one project to another', () => {
   it('remembers a pair per direction and kind, lists it, and forgets it on revoke', () => {
     const s = seeded()
-    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
     expect(s.getProjectConsent('p1', 'p2', 'delegate')).toBeNull()
     s.setProjectConsent('p1', 'p2', 'delegate')
     expect(s.getProjectConsent('p1', 'p2', 'delegate')).toMatchObject({ fromProjectId: 'p1', toProjectId: 'p2', kind: 'delegate' })
@@ -2060,8 +2060,8 @@ describe('migration v44 — consent from one project to another', () => {
 
   it('a deleted project takes the consents to and from it', () => {
     const s = seeded()
-    s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
-    s.addProject({ id: 'p3', path: '/tmp/p3', name: 'p3' })
+    s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+    s.projects.addProject({ id: 'p3', path: '/tmp/p3', name: 'p3' })
     s.setProjectConsent('p1', 'p2', 'delegate')
     s.setProjectConsent('p2', 'p3', 'apps')
     s.setProjectConsent('p1', 'p3', 'delegate')
@@ -2090,7 +2090,7 @@ describe('migration v48 — worktree sessions become their former manager\'s sta
     const file = join(dir, 'store.db')
     try {
       const fresh = newestStore(file)
-      fresh.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+      fresh.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
       const base = { ...seeded().listSessions()[0]!, projectId: 'p1' }
       const wt = (branch: string) => ({ path: `/tmp/wt/${branch}`, branch, base: 'abc' })
       fresh.upsertSession({ ...base, id: 'mgr' })
@@ -2126,7 +2126,7 @@ describe('usage_facts is no longer touched', () => {
     const s = seeded()
     ;(s as unknown as { db: Database.Database }).db.exec(`DROP TABLE usage_facts`)
     s.deleteProject('p1')
-    expect(s.listProjects()).toEqual([])
+    expect(s.projects.listProjects()).toEqual([])
     s.close()
   })
 })

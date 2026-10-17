@@ -95,9 +95,9 @@ export async function startPair(opts: { link?: boolean; hubVersion?: string; app
     const store = new Store(s.db)
     try {
       store.settings.setAppSetting('updates.auto', 'false')
-      store.addProject({ id, path: s.project, name })
+      store.projects.addProject({ id, path: s.project, name })
       // An app only runs in a trusted project
-      if (opts.apps) store.setProjectTrusted(id, true)
+      if (opts.apps) store.projects.setProjectTrusted(id, true)
     } finally {
       store.close()
     }

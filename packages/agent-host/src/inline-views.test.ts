@@ -94,7 +94,7 @@ async function start(idleMs = 60_000, limits: Partial<InlineLimits> = {}, maxFai
   mgr = new SessionManager(store, adapters, (e) => events.push(e), () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
   rt = new ExternalApps({
-    projects: () => store.projectRoots(),
+    projects: () => store.projects.projectRoots(),
     dataRoot,
     reservedIds: ['control'],
     // The run record (A-6) — checks "reopening does not call the tool again" by the number of

@@ -136,7 +136,7 @@ export class HandoffChildren {
       .map((d) => d.sessionId)
     const moved: MovedChild[] = []
     const sessions: string[] = []
-    const projects = new Map(this.host.store.listProjects().map((p) => [p.id, p.name]))
+    const projects = new Map(this.host.store.projects.listProjects().map((p) => [p.id, p.name]))
     for (const id of linked) {
       const s = this.host.meta.get(id)
       const state = s && id !== to ? stateOf(s) : null

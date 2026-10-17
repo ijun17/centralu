@@ -42,7 +42,7 @@ describe.each([20, 39, 47])('a store the v%i build wrote', (version) => {
       expect(store.schemaVersion).toBe(LATEST)
       expect(store.migrationsRun).toBe(LATEST - version)
 
-      expect(store.listProjects()).toEqual([expect.objectContaining({ id: 'p1', path: '/tmp/p1', name: 'alpha' })])
+      expect(store.projects.listProjects()).toEqual([expect.objectContaining({ id: 'p1', path: '/tmp/p1', name: 'alpha' })])
       const sessions = store.listSessions()
       expect(sessions.map((s) => s.id).sort()).toEqual(['s1', 's2'])
       expect(sessions.find((s) => s.id === 's1')).toMatchObject({

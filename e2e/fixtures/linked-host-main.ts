@@ -115,7 +115,7 @@ const allowedOrigins = (process.env.CC_HOST_ALLOWED_ORIGINS ?? '').split(',').fi
  * hub, a linked machine's views served from here through `linkedViews`. Discovery only scans until an app is needed.
  */
 const externalApps = new ExternalApps({
-  projects: () => store.projectRoots(),
+  projects: () => store.projects.projectRoots(),
   dataRoot: process.env.CC_DATA_DIR!,
   reservedIds: [],
   runs: storeRunLedger(store),

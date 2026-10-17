@@ -108,7 +108,7 @@ export class ExternalConversations {
     tool: ToolName,
     limit: number,
   ): Promise<{ supported: boolean; reason?: string; sessions: ExternalSession[] }> {
-    const project = this.host.store.listProjects().find((p) => p.id === projectId)
+    const project = this.host.store.projects.listProjects().find((p) => p.id === projectId)
     if (!project) return { supported: false, reason: 'Project not found', sessions: [] }
 
     const adapter = this.host.adapters.get(tool)

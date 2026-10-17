@@ -113,7 +113,7 @@ export function orchestratorToolsFor(
   /** A hub's view of this host (`hostReader`, #82 phase 4): what its window shows, with no calling session */
   hubView?: boolean,
 ): OrchestratorTools {
-  const projects = () => new Map(host.store.listProjects().map((p) => [p.id, p.name]))
+  const projects = () => new Map(host.store.projects.listProjects().map((p) => [p.id, p.name]))
   /*
    * The central orchestrator alone acts on the linked machines (#82 phase 4); an ordinary session of a trusted project
    * reads them too (#984, `readLinks`), and a lead's view stays inside its members. Asked when the call runs, as the
@@ -151,7 +151,7 @@ export function orchestratorToolsFor(
    * carry what an app was given and nobody else was (`readsOwnProject`, `projectSessions` on a machine). Acting stays
    * inside `inScope` and behind ask_project's consent; the reader object refuses it anyway.
    */
-  const trustedIds = () => new Set(host.store.listProjects().filter((p) => p.trusted === true).map((p) => p.id))
+  const trustedIds = () => new Set(host.store.projects.listProjects().filter((p) => p.trusted === true).map((p) => p.id))
   /** This reader's view reaches past its own project: only from a trusted one */
   const wide = () => {
     const own = ownProjectId()
@@ -260,7 +260,7 @@ export function orchestratorToolsFor(
     },
 
     createSession: async (opts) => {
-      const all = host.store.listProjects()
+      const all = host.store.projects.listProjects()
       const local = all.filter((p) => p.id === opts.project || p.name === opts.project)
       // A linked machine's project, by its name or qualified id (#82 phase 4). Asked only when links exist
       const reader = linked()
@@ -656,7 +656,7 @@ export function orchestratorToolsFor(
     createApp: async (spec) => {
       let projectId: string | null = null
       if (spec.project) {
-        const project = host.store.listProjects().find((p) => p.id === spec.project || p.name === spec.project)
+        const project = host.store.projects.listProjects().find((p) => p.id === spec.project || p.name === spec.project)
         if (!project) return { ok: false, error: `No such project: ${spec.project}` }
         projectId = project.id
       }

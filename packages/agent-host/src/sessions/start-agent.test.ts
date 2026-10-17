@@ -438,7 +438,7 @@ describe('starting another agent in the same project', () => {
 
     it('trust taken away elsewhere (another host): an approval starts nothing, and the session is told', async () => {
       const { s, requestId } = await pendingCard()
-      w.store.setProjectTrusted(w.caller.id, false)
+      w.store.projects.setProjectTrusted(w.caller.id, false)
       w.mgr.respondApproval(s, requestId, 'allow')
       await w.until(() => !!told(s, requestId))
       expect(told(s, requestId)).toContain('no longer trusted')
@@ -458,7 +458,7 @@ describe('starting another agent in the same project', () => {
       })
       const starting = w.mgr.startAgent(s, { task: 'write the parser', wait: false })
       await w.until(() => making)
-      w.store.setProjectTrusted(w.caller.id, false)
+      w.store.projects.setProjectTrusted(w.caller.id, false)
       release()
       expect(await starting).toMatchObject({ ok: false, error: expect.stringContaining('no longer trusted') })
       expect(childrenOf(s)).toEqual([])
@@ -481,7 +481,7 @@ describe('starting another agent in the same project', () => {
       vi.spyOn(w.mgr, 'trashSession').mockRejectedValue(new Error('the folder is locked'))
       const starting = w.mgr.startAgent(s, { task: 'write the parser', wait: false })
       await w.until(() => vi.mocked(w.mgr.createSession).mock.calls.length > 0)
-      w.store.setProjectTrusted(w.caller.id, false)
+      w.store.projects.setProjectTrusted(w.caller.id, false)
       release()
       const r = await starting
       expect(!r.ok && r.error).toContain('could not be moved to the trash (the folder is locked)')

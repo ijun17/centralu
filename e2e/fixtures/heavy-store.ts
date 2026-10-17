@@ -591,7 +591,7 @@ export function seedHeavyStore(dataDir: string, profile: StoreProfile = 'owner',
       const path = join(dataDir, 'projects', name)
       mkdirSync(path, { recursive: true })
       const p = { id: `p${i + 1}`, name, path }
-      store.addProject(p)
+      store.projects.addProject(p)
       return p
     })
 

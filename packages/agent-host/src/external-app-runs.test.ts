@@ -205,9 +205,9 @@ describe('RPC and project deletion', () => {
     const adapters = new Map<ToolName, AgentAdapter>()
     const mgr = new SessionManager(store, adapters, () => {})
     const { id } = await mgr.addProject(projRoot)
-    store.setProjectTrusted(id, true)
+    store.projects.setProjectTrusted(id, true)
     rt = new ExternalApps({
-      projects: () => store.projectRoots(),
+      projects: () => store.projects.projectRoots(),
       dataRoot,
       reservedIds: [],
       timing: { probeTimeoutMs: 3_000 },

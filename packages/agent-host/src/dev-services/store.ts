@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import type { ProjectInfo, SavedCommand, SessionInfo, StoredMessage, ToolDefaults } from '@cc/protocol'
+import type { ProjectInfo, SessionInfo, StoredMessage, ToolDefaults } from '@cc/protocol'
 import { AppRunRecords, type AppRunRecord } from './store/app-runs.js'
 import { ChildOwnershipRecords, type QueuedRequest } from './store/child-ownership.js'
 import { GridRecords } from './store/grid.js'
@@ -65,7 +65,7 @@ const SCHEMA_PATH = resolveSchemaPath()
  */
 export class Store extends MigrationRunner {
   protected db: Database.Database
-  private readonly projects: ProjectRecords
+  readonly projects: ProjectRecords
   private readonly sessions: SessionRecords
   readonly grid: GridRecords
   private readonly messages: MessageRecords
@@ -189,20 +189,8 @@ export class Store extends MigrationRunner {
 
   // ── ProjectRecords (store/projects.ts) ──
 
-  addProject(p: { id: string; path: string; name: string; trusted?: boolean }): void {
-    return this.projects.addProject(p)
-  }
-
   listProjects(): Omit<ProjectInfo, 'git' | 'commands' | 'defaultModels'>[] {
     return this.projects.listProjects()
-  }
-
-  projectCommands(projectId: string): SavedCommand[] {
-    return this.projects.projectCommands(projectId)
-  }
-
-  setProjectCommands(projectId: string, commands: readonly SavedCommand[]): void {
-    return this.projects.setProjectCommands(projectId, commands)
   }
 
   worktreeSetup(projectId: string): { command: string; copyFiles: string[] } | null {
@@ -213,48 +201,8 @@ export class Store extends MigrationRunner {
     return this.projects.setWorktreeSetup(projectId, setup)
   }
 
-  worktreeManager(projectId: string): { sessionId: string; baseBranch: string } | null {
-    return this.projects.worktreeManager(projectId)
-  }
-
-  worktreeTrunk(projectId: string): string | null {
-    return this.projects.worktreeTrunk(projectId)
-  }
-
-  setWorktreeTrunk(projectId: string, baseBranch: string): void {
-    return this.projects.setWorktreeTrunk(projectId, baseBranch)
-  }
-
-  setWorktreeManager(projectId: string, manager: { sessionId: string; baseBranch: string } | null): void {
-    return this.projects.setWorktreeManager(projectId, manager)
-  }
-
-  setProjectDefaultTool(projectId: string, tool: string): void {
-    return this.projects.setProjectDefaultTool(projectId, tool)
-  }
-
   projectToolDefaults(projectId: string): Record<string, ToolDefaults> {
     return this.projects.projectToolDefaults(projectId)
-  }
-
-  setProjectToolDefaults(projectId: string, tool: string, d: ToolDefaults): void {
-    return this.projects.setProjectToolDefaults(projectId, tool, d)
-  }
-
-  projectRoots(): { id: string; path: string; trusted: boolean }[] {
-    return this.projects.projectRoots()
-  }
-
-  setProjectTrusted(projectId: string, trusted: boolean): boolean {
-    return this.projects.setProjectTrusted(projectId, trusted)
-  }
-
-  findProjectByPath(path: string): { id: string } | undefined {
-    return this.projects.findProjectByPath(path)
-  }
-
-  setProjectOrder(orderedIds: readonly string[]): void {
-    return this.projects.setProjectOrder(orderedIds)
   }
 
   // ── SessionRecords (store/sessions.ts) ──

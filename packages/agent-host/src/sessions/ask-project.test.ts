@@ -390,8 +390,8 @@ describe('asking another project', () => {
   })
 
   it('delivers to the only existing ordinary session and preserves its name, CLI, settings and provenance', async () => {
-    w.store.setProjectDefaultTool(w.target.id, 'codex')
-    w.store.setProjectToolDefaults(w.target.id, 'codex', { model: 'gpt-5.6-luna', effort: 'low' })
+    w.store.projects.setProjectDefaultTool(w.target.id, 'codex')
+    w.store.projects.setProjectToolDefaults(w.target.id, 'codex', { model: 'gpt-5.6-luna', effort: 'low' })
     const s = await w.callerSession()
     w.store.setProjectConsent(w.caller.id, w.target.id, 'delegate')
     const p = w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
@@ -676,7 +676,7 @@ describe('asking another project', () => {
       const p = w.mgr.askProject(s, { project: w.target.name, task: 'export the sprites' })
       await w.until(() => !!w.card(s))
       // Trust taken away at the store, so only the read after the answer can see it
-      w.store.setProjectTrusted(w.caller.id, false)
+      w.store.projects.setProjectTrusted(w.caller.id, false)
       w.mgr.respondApproval(s, w.card(s)!.requestId, 'allow')
       // Either the call settles or the task reaches the target, whichever comes first
       let settled = false

@@ -43,7 +43,7 @@ export class ProjectConsents {
     const fromId = caller.projectId
     if (!fromId) return { ok: false, error: 'This session belongs to no project, so it cannot reach another project' }
     if (fromId === toProjectId) return { ok: true }
-    const projects = this.host.store.listProjects()
+    const projects = this.host.store.projects.listProjects()
     const from = projects.find((p) => p.id === fromId)
     const to = projects.find((p) => p.id === toProjectId)
     if (!from || !to) return { ok: false, error: 'That project is no longer registered' }
@@ -63,7 +63,7 @@ export class ProjectConsents {
       signal,
     )
     // Either project may have been removed while the card stood: nothing is remembered for a pair that no longer exists
-    const both = this.host.store.listProjects()
+    const both = this.host.store.projects.listProjects()
     if (decision !== null && (!both.some((p) => p.id === fromId) || !both.some((p) => p.id === toProjectId))) {
       return { ok: false, error: 'That project is no longer registered' }
     }
@@ -81,7 +81,7 @@ export class ProjectConsents {
 
   /** Every remembered cross-project consent, with the projects' names as they are now (#371, Settings) */
   projectConsents(): ProjectConsent[] {
-    const names = new Map(this.host.store.listProjects().map((p) => [p.id, p.name]))
+    const names = new Map(this.host.store.projects.listProjects().map((p) => [p.id, p.name]))
     return this.host.store.listProjectConsents().map((c) => ({
       ...c,
       fromName: names.get(c.fromProjectId) ?? '(project no longer exists)',

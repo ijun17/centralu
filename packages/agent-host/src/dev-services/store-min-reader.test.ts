@@ -35,7 +35,7 @@ const FLOOR = 32
 function currentStore(): string {
   const file = storeFile()
   const s = new Store(file)
-  s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+  s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
   s.close()
   return file
 }
@@ -69,7 +69,7 @@ describe('which builds can still read the store (#292)', () => {
     expect(s.migrationsRun).toBe(0)
     expect(s.schemaVersion).toBe(KNOWN)
     expect(s.minReaderVersion).toBe(FLOOR)
-    expect(s.listProjects().map((p) => p.id)).toEqual(['p1'])
+    expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
     s.close()
   })
 
@@ -118,7 +118,7 @@ describe('which builds can still read the store (#292)', () => {
     expect(s.migrationsRun).toBe(0)
     expect(s.schemaVersion).toBe(KNOWN + 2)
     expect(s.minReaderVersion).toBe(floor)
-    expect(s.listProjects().map((p) => p.id)).toEqual(['p1'])
+    expect(s.projects.listProjects().map((p) => p.id)).toEqual(['p1'])
     s.close()
   })
 

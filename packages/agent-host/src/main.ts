@@ -306,7 +306,7 @@ const appChanges = broadcastAppChanges(events.push)
 // The run panel's signal is collected separately — a chain started by a read-only tool is reported too, but never wakes a view (app-change-events.ts)
 const appRunChanges = broadcastAppRuns(events.push)
 const externalApps = new ExternalApps({
-  projects: () => store.projectRoots(),
+  projects: () => store.projects.projectRoots(),
   dataRoot: dataRoot(),
   reservedIds: RESERVED_APP_IDS,
   // The run record (A-6) — the store fills in the shape the runtime declared. The runtime does not know Store

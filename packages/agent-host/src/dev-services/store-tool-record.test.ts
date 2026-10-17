@@ -23,7 +23,7 @@ const session = (s: Store, id: string) =>
 
 const seeded = (file = ':memory:') => {
   const s = new Store(file)
-  s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+  s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
   session(s, 's1')
   return s
 }

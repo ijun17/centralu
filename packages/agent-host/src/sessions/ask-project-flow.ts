@@ -107,7 +107,7 @@ export class AskProjectFlow {
      * (`AppAccess.gate`): text in a repository the person has not trusted could be what is asking, and the consent card
      * alone would then be the only thing between a planted instruction and another project's session.
      */
-    if (this.host.store.listProjects().find((p) => p.id === caller.projectId)?.trusted !== true && !this.host.autoBoundaryOpen(callerId, 'delegate from an untrusted project')) {
+    if (this.host.store.projects.listProjects().find((p) => p.id === caller.projectId)?.trusted !== true && !this.host.autoBoundaryOpen(callerId, 'delegate from an untrusted project')) {
       return "This session's project is not trusted, so it cannot ask another project — the person can trust it from the project menu."
     }
     return null
@@ -115,7 +115,7 @@ export class AskProjectFlow {
 
   /** The project asked is still registered: the person may remove it while its card stands */
   private projectGoneError(target: { id: string; name: string }): string | null {
-    if (this.host.store.listProjects().some((p) => p.id === target.id)) return null
+    if (this.host.store.projects.listProjects().some((p) => p.id === target.id)) return null
     return `${target.name} was removed from Centralu, so it was not reached.`
   }
 
@@ -144,7 +144,7 @@ export class AskProjectFlow {
     const caller = this.host.meta.get(callerId)
     const callerProjectId = caller?.projectId
     if (!caller || !callerProjectId) return { ok: false, error: 'This session belongs to no project, so it cannot ask another one' }
-    const projects = this.host.store.listProjects()
+    const projects = this.host.store.projects.listProjects()
     const wanted = opts.project.trim()
     /*
      * The projects on linked machines count too (#700): a unique bare name works, `<machine>/<name>` or a qualified id

@@ -583,7 +583,7 @@ export class SessionManager {
    */
   setProjectTrusted(projectId: string, trusted: boolean): Promise<void> {
     const was = this.projectRow(projectId)?.trusted
-    if (!this.store.setProjectTrusted(projectId, trusted)) {
+    if (!this.store.projects.setProjectTrusted(projectId, trusted)) {
       throw rpcError(`Project not found: ${projectId}`)
     }
     // Every window re-reads the project: the trust mark, the ⋯ menu and the project's apps follow the host (#719)
@@ -618,7 +618,7 @@ export class SessionManager {
    */
   private projectTrusted(projectId: string | null): boolean {
     if (!projectId) return false
-    return this.store.projectRoots().some((p) => p.id === projectId && p.trusted)
+    return this.store.projects.projectRoots().some((p) => p.id === projectId && p.trusted)
   }
 
   /**
@@ -688,13 +688,13 @@ export class SessionManager {
       trusted: row?.trusted ?? false,
       // Default model/effort per tool (#107) — read separately since it is JSON, like commands and
       // worktreeSetup
-      defaultModels: this.store.projectToolDefaults(id),
+      defaultModels: this.store.projects.projectToolDefaults(id),
       // Saved shell commands ride along with the project so the Run menu never has a
       // "loading" state to distinguish from an empty one (issue #44)
-      commands: this.store.projectCommands(id),
+      commands: this.store.projects.projectCommands(id),
       // Worktree provisioning (#69) rides along too — a new session window prefills it without a separate
       // fetch
-      worktreeSetup: this.store.worktreeSetup(id),
+      worktreeSetup: this.store.projects.worktreeSetup(id),
       // Manager slot and trunk (#76). Treated as absent if the pointed-to session does not exist or
       // is archived — so the screen never navigates to a ghost slot, this side (which knows about
       // sessions) does the check
@@ -703,8 +703,8 @@ export class SessionManager {
        * manager was folded into ordinary sessions (#561 part 3), and the window reads only `baseBranch`
        */
       worktreeManager: (() => {
-        const trunk = this.store.worktreeTrunk(id)
-        return trunk ? { sessionId: this.store.worktreeManager(id)?.sessionId ?? '', baseBranch: trunk } : null
+        const trunk = this.store.projects.worktreeTrunk(id)
+        return trunk ? { sessionId: this.store.projects.worktreeManager(id)?.sessionId ?? '', baseBranch: trunk } : null
       })(),
       git: git.isRepo ? git : null,
     }
@@ -731,8 +731,8 @@ export class SessionManager {
       const label = c.label?.trim()
       return [{ command, ...(label ? { label } : {}) }]
     })
-    const was = JSON.stringify(this.store.projectCommands(projectId))
-    this.store.setProjectCommands(projectId, clean)
+    const was = JSON.stringify(this.store.projects.projectCommands(projectId))
+    this.store.projects.setProjectCommands(projectId, clean)
     // The Run menu of every other window reads the project's commands (#719)
     if (was !== JSON.stringify(clean)) this.emit({ type: 'projects_changed' })
     return clean
@@ -745,9 +745,9 @@ export class SessionManager {
       ? { command: setup.command.trim(), copyFiles: setup.copyFiles.map((f) => f.trim()).filter(Boolean) }
       : null
     const saved = clean && (clean.command || clean.copyFiles.length) ? clean : null
-    const was = JSON.stringify(this.store.worktreeSetup(projectId))
-    this.store.setWorktreeSetup(projectId, saved)
-    if (was !== JSON.stringify(this.store.worktreeSetup(projectId))) this.emit({ type: 'projects_changed' })
+    const was = JSON.stringify(this.store.projects.worktreeSetup(projectId))
+    this.store.projects.setWorktreeSetup(projectId, saved)
+    if (was !== JSON.stringify(this.store.projects.worktreeSetup(projectId))) this.emit({ type: 'projects_changed' })
   }
 
   /**
@@ -757,9 +757,9 @@ export class SessionManager {
    * screen should never jump to the front just because an order was saved once.
    */
   async reorderProjects(orderedIds: readonly string[]): Promise<ProjectInfo[]> {
-    const known = this.store.listProjects().map((p) => p.id)
+    const known = this.store.projects.listProjects().map((p) => p.id)
     const rest = known.filter((id) => !orderedIds.includes(id))
-    this.store.setProjectOrder([...orderedIds.filter((id) => known.includes(id)), ...rest])
+    this.store.projects.setProjectOrder([...orderedIds.filter((id) => known.includes(id)), ...rest])
     return this.listProjects()
   }
 
@@ -802,7 +802,7 @@ export class SessionManager {
    */
   setGridView(panels: readonly GridPanel[]): GridPanel[] {
     const known = new Set(this.meta.keys())
-    const projects = new Set(this.store.listProjects().map((p) => p.id))
+    const projects = new Set(this.store.projects.listProjects().map((p) => p.id))
     // A linked machine's session (#82) is kept while the hub's mirror knows it (links/links.ts)
     const remote = (id: string) => !known.has(id) && this.linkedSession(id)
     /*
@@ -941,7 +941,7 @@ export class SessionManager {
   }
 
   async listProjects(): Promise<ProjectInfo[]> {
-    return Promise.all(this.store.listProjects().map((p) => this.projectInfo(p.id, p.path)))
+    return Promise.all(this.store.projects.listProjects().map((p) => this.projectInfo(p.id, p.path)))
   }
 
   /**
@@ -1217,7 +1217,7 @@ export class SessionManager {
     if (params.projectId && !params.appAgent) {
       const owner = this.projectRow(params.projectId)
       if (owner && owner.defaultTool !== params.tool) {
-        this.store.setProjectDefaultTool(params.projectId, params.tool)
+        this.store.projects.setProjectDefaultTool(params.projectId, params.tool)
         this.emit({ type: 'projects_changed' })
       }
     }
@@ -1985,8 +1985,8 @@ export class SessionManager {
      * choice lands only in its own slot.
      */
     if ((s.model !== undefined || s.effort !== undefined) && m.projectId) {
-      const before = this.store.projectToolDefaults(m.projectId)[m.tool]
-      this.store.setProjectToolDefaults(m.projectId, m.tool, { model: m.model, effort: m.effort })
+      const before = this.store.projects.projectToolDefaults(m.projectId)[m.tool]
+      this.store.projects.setProjectToolDefaults(m.projectId, m.tool, { model: m.model, effort: m.effort })
       // Another window starts its next session on what this one chose last (#719)
       if ((before?.model ?? null) !== (m.model || null) || (before?.effort ?? null) !== (m.effort || null)) this.emit({ type: 'projects_changed' })
     }
@@ -2806,7 +2806,7 @@ export class SessionManager {
    * definition our own business, and it can still exist even after the project is removed from the list.
    */
   folderRoots(): string[] {
-    return [...this.store.listProjects().map((p) => p.path), this.worktreeRoot]
+    return [...this.store.projects.listProjects().map((p) => p.path), this.worktreeRoot]
   }
 
   /** The material needed to decide whether a worktree can be deleted. null if this is not a worktree session
@@ -3777,7 +3777,7 @@ export class SessionManager {
   /** This project's trunk branch (#76): the one chosen for the former worktree manager's slot, still read from its row (#561
    * part 3). null if none was set — HEAD is then used as the baseline */
   private trunkOf(projectId: string): string | null {
-    return this.store.worktreeTrunk(projectId)
+    return this.store.projects.worktreeTrunk(projectId)
   }
 
   /** Sets the project's worktree trunk (`worktrees.setTrunk`, #76; the manager's dialog chose it before #561 part 3) */
@@ -3786,7 +3786,7 @@ export class SessionManager {
     const branch = baseBranch.trim()
     if (!branch) throw rpcError('Pick the branch worktrees should fork from')
     if (!(await gitValidBranchName(branch))) throw rpcError(`Not a branch name: ${branch}`)
-    this.store.setWorktreeTrunk(projectId, branch)
+    this.store.projects.setWorktreeTrunk(projectId, branch)
     this.emit({ type: 'projects_changed' })
   }
 
@@ -4067,7 +4067,7 @@ export class SessionManager {
 
   /** A registered project's row, read now (trust and paths change under a running host) */
   private projectRow(projectId: string | null | undefined): ReturnType<Store['listProjects']>[number] | undefined {
-    return projectId ? this.store.listProjects().find((p) => p.id === projectId) : undefined
+    return projectId ? this.store.projects.listProjects().find((p) => p.id === projectId) : undefined
   }
 
   /** A registered project's row, or `Project not found` */

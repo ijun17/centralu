@@ -75,7 +75,7 @@ describe('projects.create', () => {
   it('registers an empty folder as trusted, so its first session reads the project settings (#655)', async () => {
     const info = (await rpc('projects.create', { name: 'game' })) as { id: string; path: string; trusted: boolean }
     expect(info.trusted).toBe(true)
-    expect(store.projectRoots().find((p) => p.id === info.id)?.trusted).toBe(true)
+    expect(store.projects.projectRoots().find((p) => p.id === info.id)?.trusted).toBe(true)
     const s = (await rpc('agents.createSession', { projectId: info.id, cwd: info.path, tool: 'claude' })) as { id: string }
     // `projectTrusted: true` is what makes the Claude adapter leave `settingSources` unset (project and local files read)
     expect(claude.handles.get(s.id)?.opts.projectTrusted).toBe(true)

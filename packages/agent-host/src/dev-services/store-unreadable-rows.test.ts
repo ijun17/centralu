@@ -21,7 +21,7 @@ function session(id: string, over: Partial<SessionInfo> = {}): SessionInfo {
 
 function seeded(): Store {
   const s = new Store()
-  s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+  s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
   s.upsertSession(session('s1'))
   return s
 }

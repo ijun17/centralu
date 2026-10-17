@@ -182,7 +182,7 @@ export class AppSessions {
     let cwd = app.dir
     const fallback = this.host.defaultToolFor(ref.projectId)
     if (ref.projectId !== null) {
-      const project = this.host.store.listProjects().find((p) => p.id === ref.projectId)
+      const project = this.host.store.projects.listProjects().find((p) => p.id === ref.projectId)
       if (!project) throw rpcError(`Project not found: ${ref.projectId}`)
       cwd = project.path
     }
@@ -240,7 +240,7 @@ export class AppSessions {
   async appHostData(name: HostCapability, app: AppRef): Promise<Record<string, unknown>> {
     switch (name) {
       case 'sessions.list': {
-        const projects = new Map(this.host.store.listProjects().map((p) => [p.id, p.name]))
+        const projects = new Map(this.host.store.projects.listProjects().map((p) => [p.id, p.name]))
         // A project app only sees that project's sessions; a user-folder app sees all of them (a user-folder
         // app is the orchestrator's own — decision 4)
         const sessions = this.host.listSessions()
@@ -264,7 +264,7 @@ export class AppSessions {
         if (app.projectId === null) {
           throw new Error('git.status needs a project — this app lives in your user folder, so there is no project to read')
         }
-        const project = this.host.store.listProjects().find((p) => p.id === app.projectId)
+        const project = this.host.store.projects.listProjects().find((p) => p.id === app.projectId)
         if (!project) throw new Error('the project of this app is gone')
         const trust = { trusted: project.trusted }
         return gitStatusForApp(await gitSummary(project.path, trust), () => gitStatusFiles(project.path, trust))
@@ -322,7 +322,7 @@ export class AppSessions {
     }
     let cwd: string
     if (req.app.projectId !== null) {
-      const p = this.host.store.listProjects().find((x) => x.id === req.app.projectId)
+      const p = this.host.store.projects.listProjects().find((x) => x.id === req.app.projectId)
       if (!p) throw new Error(`the project of ${req.appName} is gone`)
       cwd = p.path
     } else {

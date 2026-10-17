@@ -19,7 +19,7 @@ function storeFile(): string {
   dirs.push(d)
   const file = join(d, 'store.db')
   const s = new Store(file)
-  s.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
+  s.projects.addProject({ id: 'p1', path: '/tmp/p1', name: 'p1' })
   s.close()
   return file
 }
@@ -188,7 +188,7 @@ describe('the WAL', () => {
     const s = new Store(file)
     const reader = new Database(file, { readonly: true })
     try {
-      s.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
+      s.projects.addProject({ id: 'p2', path: '/tmp/p2', name: 'p2' })
       const db = (s as unknown as { db: Database.Database }).db
       db.pragma(`busy_timeout = ${BUSY_MS}`)
       reader.exec('BEGIN')

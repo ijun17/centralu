@@ -157,7 +157,7 @@ export class DelegationFlow {
     const wait = shared ?? new AgentRunWait(() => {}, () => child.name, undefined, own
       ? this.answerReader(child.id)
       : () => turnAnswer(this.host.store.loadMessages(child.id, 50)))
-    const project = this.host.store.listProjects().find((p) => p.id === child.projectId)
+    const project = this.host.store.projects.listProjects().find((p) => p.id === child.projectId)
     const target = { id: child.projectId ?? '', name: project?.name ?? '', path: this.host.store.sessionCwd(child.id) ?? project?.path ?? '' }
     if (!shared && subscribe) {
       const readers = this.host.turnObservers.get(child.id) ?? new Set<AgentRunWait>()
@@ -421,7 +421,7 @@ export class DelegationFlow {
           if (d) this.host.children.dropDelegation(key)
           const full = this.starts.agentCeilingError(callerId, child.projectId ?? '')
           if (full) return { ok: false, error: full }
-          const project = this.host.store.listProjects().find((p) => p.id === child.projectId)
+          const project = this.host.store.projects.listProjects().find((p) => p.id === child.projectId)
           const cwd = this.host.store.sessionCwd(child.id) ?? child.worktree?.path ?? project?.path ?? ''
           const next = this.startDelegation(key, callerId, child.id, { id: child.projectId ?? '', name: project?.name ?? '', path: cwd }, true)
           try {
@@ -586,7 +586,7 @@ export class DelegationFlow {
     if (!fork.available) return { ok: false, error: `No fork of "${target.name}": ${fork.why}.` }
     const caller = this.host.meta.get(callerId)!
     const adapter = this.host.adapters.get(target.tool)!
-    const project = this.host.store.listProjects().find((p) => p.id === target.projectId)!
+    const project = this.host.store.projects.listProjects().find((p) => p.id === target.projectId)!
     const PRESETS: PermissionPreset[] = ['safe', 'normal', 'auto']
     const lowest = (...ps: PermissionPreset[]) => PRESETS[Math.min(...ps.map((p) => PRESETS.indexOf(p)))]!
     const preset = lowest(caller.permissionPreset, target.permissionPreset, ...(readOnly ? ['safe' as const] : []))

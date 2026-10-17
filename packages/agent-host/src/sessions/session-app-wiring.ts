@@ -91,7 +91,7 @@ export class SessionAppWiring {
         if (!m || this.isAppAgentSession(m)) return null
         return { id: m.id, kind: m.kind, projectId: m.projectId, builderOf: this.host.builderRefOf(m) }
       },
-      projects: () => this.host.store.listProjects().map((p) => ({ id: p.id, name: p.name, trusted: p.trusted })),
+      projects: () => this.host.store.projects.listProjects().map((p) => ({ id: p.id, name: p.name, trusted: p.trusted })),
       ensureAccess: (id, to, what, signal) => this.host.ensureProjectAccess(id, to, 'apps', what, signal),
       attachedChanged: (id) => this.sessionAppsChanged(id),
       ...(opts?.toolListWaitMs !== undefined ? { toolListWaitMs: opts.toolListWaitMs } : {}),

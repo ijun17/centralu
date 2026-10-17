@@ -232,7 +232,7 @@ describe('requests to a busy session (#677)', () => {
     it('is not delivered when the trust is gone by the time the turn ends', async () => {
       const { target, asker } = await queuedAsk()
       // Taken away at the store (as another host would), so only the read at delivery can see it
-      w.store.setProjectTrusted(w.caller.id, false)
+      w.store.projects.setProjectTrusted(w.caller.id, false)
       await turnEnds(target)
       expect(handleOf(target).sent).toEqual(["the person's own work"])
       expect(w.store.listQueuedRequests()).toEqual([])
@@ -513,7 +513,7 @@ describe('requests to a busy session (#677)', () => {
       const forking = w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'x', ifBusy: 'fork_read' })
       await w.until(() => info(b).pendingApproval?.detail.kind === 'agent_start')
       // Taken away at the store, so only the read after the answer can see it
-      w.store.setProjectTrusted(w.caller.id, false)
+      w.store.projects.setProjectTrusted(w.caller.id, false)
       w.mgr.respondApproval(b, info(b).pendingApproval!.requestId, 'allow')
       expect(await forking).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
       expect(forks).toEqual([])
@@ -581,7 +581,7 @@ describe('requests to a busy session (#677)', () => {
       const copy = slowCopy()
       const forking = w.mgr.agentSession(b, { sessionId: a, action: 'send', text: 'read it', ifBusy: 'fork_read' })
       await w.until(() => copy.started)
-      w.store.setProjectTrusted(w.caller.id, false)
+      w.store.projects.setProjectTrusted(w.caller.id, false)
       copy.release()
       expect(await forking).toMatchObject({ ok: false, error: expect.stringContaining('not trusted') })
       expect(w.mgr.listSessions().filter((s) => s.forkedFrom)).toEqual([])

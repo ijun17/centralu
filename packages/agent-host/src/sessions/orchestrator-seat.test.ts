@@ -82,8 +82,8 @@ describe('the scope of a seat', () => {
 
   /** p1 trusted ("shop"), p2 not ("clone"), and a linked machine with a session of each kind a reader may meet there */
   const wideWorld = () => {
-    store.addProject({ id: 'p1', path: join(tmpdir(), 'p1'), name: 'shop', trusted: true })
-    store.addProject({ id: 'p2', path: join(tmpdir(), 'p2'), name: 'clone' })
+    store.projects.addProject({ id: 'p1', path: join(tmpdir(), 'p1'), name: 'shop', trusted: true })
+    store.projects.addProject({ id: 'p2', path: join(tmpdir(), 'p2'), name: 'clone' })
     meta.set('a2', session('a2'))
     meta.set('coord', session('coord', { kind: 'coordinator', projectId: 'p2' }))
     meta.set('agent', session('agent', { projectId: 'p2', appId: 'notes' }))
@@ -197,7 +197,7 @@ describe('a session recalls its own conversation from before its compaction (#97
   /** One session's conversation, seq from 1 */
   const put = (sessionId: string, rows: Row[]) => {
     const s = meta.get(sessionId)!
-    if (s.projectId && !store.listProjects().some((p) => p.id === s.projectId)) store.addProject({ id: s.projectId, path: join(tmpdir(), s.projectId), name: s.projectId, trusted: s.projectId === 'p1' })
+    if (s.projectId && !store.projects.listProjects().some((p) => p.id === s.projectId)) store.projects.addProject({ id: s.projectId, path: join(tmpdir(), s.projectId), name: s.projectId, trusted: s.projectId === 'p1' })
     store.upsertSession({
       id: sessionId, projectId: s.projectId, kind: s.kind, tool: 'claude', externalId: null, name: s.name, autoNamed: false, state: 'idle',
       lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,
@@ -435,7 +435,7 @@ describe('a session the orchestrator creates', () => {
   const created = (id: string) => ({ ...session(id), permissionPreset: 'safe' }) as SessionInfo
 
   beforeEach(() => {
-    store.addProject({ id: 'p1', path: tmpdir(), name: 'site' })
+    store.projects.addProject({ id: 'p1', path: tmpdir(), name: 'site' })
     host.createSession = vi.fn(async () => created('new'))
     host.firstTool = vi.fn(() => 'claude' as ToolName)
   })
@@ -469,7 +469,7 @@ describe('a session the orchestrator creates', () => {
 // read_session said only role "user" for every message in, so a child's report or an app's text read as the person's (#838)
 describe('what read_session says of who wrote a line', () => {
   it('a line another session or an app sent carries its name; the person’s carries none', async () => {
-    store.addProject({ id: 'p1', path: tmpdir(), name: 'site' })
+    store.projects.addProject({ id: 'p1', path: tmpdir(), name: 'site' })
     store.upsertSession({
       id: 'a', projectId: 'p1', kind: 'worker', tool: 'claude', externalId: null, name: 'a', autoNamed: false, state: 'idle',
       lastReadSeq: 0, lastSeq: 0, createdAt: 1, waitingSince: null, live: false, model: null, effort: null, verbosity: null,

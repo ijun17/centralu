@@ -85,7 +85,7 @@ beforeEach(async () => {
   const adapters = new Map<ToolName, AgentAdapter>([['claude', adapter]])
   mgr = new SessionManager(store, adapters, () => {}, () => ({ url: 'ws://127.0.0.1:5999', token: 'tok' }), join(root, 'worktrees'))
   mgr.prLookup = async () => null
-  rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot, reservedIds: ['control'] })
+  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'] })
   mgr.useExternalApps(rt)
   rpc = createRpcHandler(mgr, adapters, { externalApps: rt })
   projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id

@@ -127,7 +127,7 @@ beforeEach(async () => {
     ['claude', offline(new ClaudeAdapter({ startGapMs: 0 }))],
     ['codex', offline(new CodexAdapter())],
   ])
-  rt = new ExternalApps({ projects: () => store.projectRoots(), dataRoot, reservedIds: ['control'], builderBusy: (ref) => mgr.builderBusy(ref) })
+  rt = new ExternalApps({ projects: () => store.projects.projectRoots(), dataRoot, reservedIds: ['control'], builderBusy: (ref) => mgr.builderBusy(ref) })
   rt.refresh()
   openManager()
   projectId = ((await rpc('projects.add', { path: repo })) as { id: string }).id
@@ -243,7 +243,7 @@ const CODEX_PERMISSION: Record<PermissionPreset, string> = { safe: 'untrusted/wo
 const CODEX_FILES: Record<Files, string> = { none: 'repo-off', user: 'repo-off', all: 'all' }
 
 const settle = () => new Promise((r) => setTimeout(r, 5))
-const trustedNow = () => store.projectRoots().find((p) => p.id === projectId)!.trusted
+const trustedNow = () => store.projects.projectRoots().find((p) => p.id === projectId)!.trusted
 
 /** One line summarizing what the tool that just launched received — which path (new or resumed), which setting files, which permission */
 function launched(tool: ToolName, sessionId: string, preset: PermissionPreset): string {

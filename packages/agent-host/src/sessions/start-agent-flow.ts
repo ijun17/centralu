@@ -714,7 +714,7 @@ export class AgentStartFlow {
   /** A `normal` caller in a trusted project needs no card to start agents (#673): the project's trust, read now */
   private trustIsAgentConsent(callerId: string, projectId: string): boolean {
     if (this.host.meta.get(callerId)?.permissionPreset !== 'normal') return false
-    return this.host.store.listProjects().find((p) => p.id === projectId)?.trusted === true
+    return this.host.store.projects.listProjects().find((p) => p.id === projectId)?.trusted === true
   }
 
   /** The person's answer on a start_agent card, as consent (remembered where they chose "always") or a refusal */

@@ -322,7 +322,7 @@ describe('registry defaults', () => {
     const project = (await emptyRpc('projects.add', { path: tmpdir() })) as { id: string; path: string }
 
     // A stale saved choice cannot turn an empty registry into a usable agent.
-    store.setProjectDefaultTool(project.id, 'claude')
+    store.projects.setProjectDefaultTool(project.id, 'claude')
     expect(await emptyRpc('projects.list', {})).toEqual([expect.objectContaining({ id: project.id, defaultTool: null })])
     expect(await emptyRpc('agents.detect', {})).toEqual([])
     await expect(emptyRpc('orchestrator.get', {})).rejects.toMatchObject({
@@ -2774,7 +2774,7 @@ describe("an ordinary session's reader set (#320)", () => {
     // From an untrusted project it reads its own project only, as before (#984, the #382 rule)
     expect((await a1.tools.listSessions()).map((s) => s.sessionId)).toEqual([a2.id])
     expect((await a1.tools.recall('zanzibar')).hits).toEqual([])
-    store.setProjectTrusted(shop.id, true)
+    store.projects.setProjectTrusted(shop.id, true)
     const listed = (await a1.tools.listSessions()).map((s) => s.sessionId)
     expect(listed).toEqual([a2.id, b.id])
     expect(listed).not.toContain(orc.id)
@@ -3485,7 +3485,7 @@ describe('worktree sessions', () => {
     const locked = process.platform === 'win32' ? openSync(join(nm, 'zzz', 'secret'), fsConstants.O_RDONLY | 0x10000000) : null
     if (locked === null) chmodSync(join(nm, 'zzz', 'secret'), 0o000)
     writeFileSync(join(repo, '.gitignore'), 'node_modules\n')
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['node_modules'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['node_modules'] })
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     try {
@@ -3583,7 +3583,7 @@ describe('worktree sessions', () => {
   it('provisioning (#69): files get copied, and setup runs inside the worktree with deterministic variables', async () => {
     // A gitignored file — the kind that git worktree add never brings along.
     writeFileSync(join(repo, '.env.local'), 'SECRET=1\n')
-    store.setWorktreeSetup(project.id, {
+    store.projects.setWorktreeSetup(project.id, {
       // The setup command runs in the platform's shell: cmd.exe on Windows, where a variable is %NAME% (agent-host.md)
       command:
         process.platform === 'win32'
@@ -3603,7 +3603,7 @@ describe('worktree sessions', () => {
   })
 
   it('a provisioning failure does not block session creation — a half-set workbench beats nothing at all', async () => {
-    store.setWorktreeSetup(project.id, { command: 'exit 7', copyFiles: ['does-not-exist.env'] })
+    store.projects.setWorktreeSetup(project.id, { command: 'exit 7', copyFiles: ['does-not-exist.env'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true,
@@ -3616,7 +3616,7 @@ describe('worktree sessions', () => {
   it('a path escaping the copy list is refused — only paths relative to the project are meant', async () => {
     const outside = join(root, 'outside-secret.txt')
     writeFileSync(outside, 'leak\n')
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['../outside-secret.txt'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['../outside-secret.txt'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true,
@@ -3636,7 +3636,7 @@ describe('worktree sessions', () => {
     const secret = join(root, 'id_rsa')
     writeFileSync(secret, 'ssh-private-key\n')
     symlinkSync(secret, join(repo, '.env'))
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['.env'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['.env'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/planted',
@@ -3654,7 +3654,7 @@ describe('worktree sessions', () => {
     mkdirSync(join(repo, 'vendor', 'deep'), { recursive: true })
     writeFileSync(join(repo, 'vendor', 'deep', 'blob.bin'), 'payload\n')
     symlinkSync(outside, join(repo, 'vendor', 'leak'))
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['vendor'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['vendor'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/planted-deep',
@@ -3670,7 +3670,7 @@ describe('worktree sessions', () => {
     mkdirSync(join(repo, 'secrets'))
     writeFileSync(join(repo, 'secrets', 'real.env'), 'SECRET=1\n')
     symlinkSync(join(repo, 'secrets', 'real.env'), join(repo, '.env'))
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['.env'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['.env'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/deref',
@@ -3689,7 +3689,7 @@ describe('worktree sessions', () => {
     mkdirSync(inner, { recursive: true })
     writeFileSync(join(inner, 'index.js'), 'module.exports = 1\n')
     symlinkSync(join('.pnpm', 'pkg@1.0.0', 'node_modules', 'pkg'), join(repo, 'node_modules', 'pkg'))
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['node_modules'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['node_modules'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/pnpm',
@@ -3713,7 +3713,7 @@ describe('worktree sessions', () => {
     rmSync(join(repo, 'out'))
     mkdirSync(join(repo, 'out'))
     writeFileSync(join(repo, 'out', 'app.env'), 'SECRET=1\n')
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['out/app.env'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['out/app.env'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/dst-link',
@@ -3963,7 +3963,7 @@ describe('worktree sessions', () => {
       g(s.worktree!.path, ['add', '.'])
       g(s.worktree!.path, ['commit', '-qm', 'work'])
       wtMgr.prLookup = async () => ({ number: 9, state: 'merged', url: 'https://github.com/x/y/pull/9', headOid: 'earlier-tip' })
-      store.setWorktreeTrunk(project.id, 'missing-trunk')
+      store.projects.setWorktreeTrunk(project.id, 'missing-trunk')
       expect((await remove(s, managerId)).isError).not.toBe(true)
       expect(saved(s).recovery.commits).toBe(2)
       expect(existsSync(join(saved(s).dir, '0.bundle'))).toBe(true)
@@ -4488,7 +4488,7 @@ describe('worktree sessions', () => {
   // The worktree manager's dialog was where the trunk was chosen; it is chosen on its own now (#561 part 3)
   it('sets the trunk on its own, and refuses the retired manager seat', async () => {
     await wtRpc('worktrees.setTrunk', { projectId: project.id, baseBranch: 'main' })
-    expect(store.worktreeTrunk(project.id)).toBe('main')
+    expect(store.projects.worktreeTrunk(project.id)).toBe('main')
     await expect(wtRpc('worktrees.setTrunk', { projectId: project.id, baseBranch: 'no..dots' })).rejects.toThrow(/Not a branch name/)
     await expect(wtRpc('worktrees.createManager', { projectId: project.id, baseBranch: 'main' })).rejects.toThrow(/worktree manager is gone/)
     expect(wtMgr.listSessions()).toEqual([])
@@ -4545,7 +4545,7 @@ describe('worktree sessions', () => {
     // Checks that the whole directory is copied (the clone path must do what the old cpSync did).
     mkdirSync(join(repo, 'vendor', 'deep'), { recursive: true })
     writeFileSync(join(repo, 'vendor', 'deep', 'blob.bin'), 'payload\n')
-    store.setWorktreeSetup(project.id, { command: '', copyFiles: ['vendor'] })
+    store.projects.setWorktreeSetup(project.id, { command: '', copyFiles: ['vendor'] })
 
     const s = (await wtRpc('agents.createSession', {
       projectId: project.id, cwd: repo, tool: 'claude', worktree: true, worktreeBranch: 'feat/cloned',
@@ -5119,7 +5119,7 @@ describe('after the worktree manager (#561 part 3)', () => {
   it('a former manager is an ordinary session that owns its worktree children, and can be deleted while they work', async () => {
     const p = await addProject()
     store.upsertSession(wtRow('old-mgr', p.id, { worktree: null, name: 'Worktree manager', autoNamed: false }))
-    store.setWorktreeManager(p.id, { sessionId: 'old-mgr', baseBranch: 'main' })
+    store.projects.setWorktreeManager(p.id, { sessionId: 'old-mgr', baseBranch: 'main' })
     // As v48 leaves them
     store.upsertSession(wtRow('wt-a', p.id, { parentSessionId: 'old-mgr', askedBy: 'old-mgr' }))
     store.upsertSession(wtRow('other', p.id, { worktree: null }))
@@ -5872,7 +5872,7 @@ describe('coordinator sessions an older build left — an orchestrator-type with
     const a = (await rpc('agents.createSession', { projectId: p.id, cwd: p.path, tool: 'claude' })) as SessionInfo
     const c = await oldCoordinator({ name: 'Coordinator', memberSessionIds: [a.id], roleAppend: 'Role text' })
     const tools = adapter.lastOrchestratorTools!
-    store.setWorktreeManager(p.id, { sessionId: a.id, baseBranch: 'main' })
+    store.projects.setWorktreeManager(p.id, { sessionId: a.id, baseBranch: 'main' })
     expect(mgr.toolProfileOf(a.id)).toBe('reader')
 
     await tools.sendToSession(a.id, 'let me know when it is done', true)
